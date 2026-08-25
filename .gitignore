@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/target/
+
+# Node / frontend (apps/dashboard)
+node_modules/
+dist/
+
+# Tauri build output
+apps/dashboard/src-tauri/target/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
