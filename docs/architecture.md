@@ -7,8 +7,10 @@ top of it. If you have never seen this repo before, this is the place to start a
 
 ## 1. Vision
 
-Axiomata-OS is a personal "Agentic OS": a single, always-on desktop application that acts as
-a command centre / second brain for one user. It is organized around the **ARMS framework**
+Axiomata-OS is a personal "Agentic OS": a single desktop application that acts as
+a command centre / second brain for one user. (The long-term goal is an always-on
+application; the MVP milestones below run it as an ordinary app the user starts and quits —
+see §7, M4.) It is organized around the **ARMS framework**
 (**A**pplications, **R**outines, **M**emory, **S**kills), the model described in
 [`ARMS-Agentic-OS-Guide.pdf`](../ARMS-Agentic-OS-Guide.pdf) at the repository root. The core
 idea: instead of scattering AI-agent usage across ad-hoc scripts and chat sessions, give it a
@@ -34,9 +36,10 @@ for this codebase.
   - Tauri uses the OS's native WebView instead of a bundled browser engine, which keeps the
     resource footprint far closer to a native app while still rendering the dashboard with
     ordinary web technology (HTML/CSS/Canvas, later D3.js or three.js). That matters because
-    the planned dashboard UI is a particle-graph-style visualization (see `Screenshots/` for
-    the target look) that would be substantially harder to build in SwiftUI than with
-    web-native graphics libraries.
+    the planned dashboard UI is a free-form canvas of user-arranged widget modules with a
+    particle-graph visualization at its centre (see `Screenshots/` for the target look) —
+    something substantially harder to build in SwiftUI than with web-native graphics
+    libraries. See §6 for the module-canvas design.
   - Rust remains the implementation language for the actual "OS kernel" logic (skill
     execution, memory router, scheduler) either way, so Tauri lets that logic live in the
     same language as the shell without a second runtime.
@@ -314,15 +317,32 @@ enum AgentBackend {
   that has already passed at startup deliberately does **not** trigger a catch-up run — only
   a recalculation and a "missed" log entry.
 
-### Dashboard UI — planned, phase TBD
+### Dashboard UI — module canvas, phase TBD
 
-The current window is the unmodified Tauri template. The planned MVP UI (Vite + vanilla
-TypeScript, no framework) is a plain list/table interface — a Skills panel (list + run
-button + run history), a Routines panel (table + enable/disable + an add-routine form), and
-a Memory panel (workspace root, last sync time, stale/fresh indicator, "Sync Now" button).
-The more elaborate particle-graph dashboard visible in `Screenshots/` (interactive graph
-rendered with something like D3-force or three.js, fed by the memory router) is explicitly
-**phase 2+**, out of scope for the milestones below.
+The current window is the unmodified Tauri template.
+
+The intended UI is **not** a fixed layout but a free-form canvas (a "board"). The user
+places **modules** onto it — self-contained widget tiles, each with its own frontend and
+its own backend logic — and freely positions and resizes them; the layout is persisted.
+The same module type can be placed **multiple times**, each instance carrying its own
+configuration (e.g. two ToDo tiles bound to different files). Each tile works like a card:
+the front shows content and interaction, the back shows that instance's settings, toggled
+via a corner control (iOS-widget style). Modules integrate agents both actively ("have an
+agent do this item") and passively (an agent infers from user activity whether an item can
+be marked done). The particle-graph "Second Brain" visualization from `Screenshots/`
+(D3-force or three.js, fed by the memory router) is one such module type, occupying the
+centre.
+
+Foundational ordering: the **module platform** is built first — the canvas with
+drag/resize, layout persistence, and a clear module contract (what a module must provide,
+how front/back and per-instance config work). Individual modules (ToDo, Email, Calendar,
+Skills, Routines, Memory, a file viewer/editor, the particle graph, …) are then
+interchangeable building blocks on top, each designed and implemented separately, step by
+step.
+
+All of this is **phase 2+**, out of scope for the milestones below: M1–M4 deliver backend
+capability with only minimal placeholder UI. This module-canvas design supersedes the
+earlier "three fixed panels, plain list/table" sketch.
 
 ### `axiomata-macos` — planned, phase TBD
 
@@ -346,9 +366,13 @@ implementation exists yet beyond the empty crate scaffold.
   `CLAUDE.md` router renderer, `sync_memory`/`get_memory_status`, and the stale-flag watcher.
 - **M3 — Routines scheduler: not started.** Will land the routine store, cron scheduling, the
   poll loop, the corresponding Tauri commands, and a minimal routines UI.
-- **M4 — Autostart and persistence polish: not started.** Will add
-  `tauri-plugin-autostart` and `tauri-plugin-single-instance`, close-to-hide window behaviour,
-  and verify the scheduler survives the window being hidden.
+- **M4 — Always-on behaviour: deferred, not part of the current milestones.** The MVP runs
+  as an ordinary desktop app: the user starts and quits it manually, and closing the window
+  ends the process — which also stops the scheduler, so routines (M3) only fire while the
+  app is running. Autostart (`tauri-plugin-autostart`), single-instance guarding
+  (`tauri-plugin-single-instance`), close-to-hide window behaviour, and a background /
+  always-on scheduler are a later phase. `tauri-plugin-single-instance` may be pulled in
+  early as a trivial safeguard against a second process double-firing the scheduler.
 
 Each milestone from M1 onward is broken down into a detailed, step-by-step implementation
 plan shortly before it is actually started, rather than all at once up front, so the detailed
