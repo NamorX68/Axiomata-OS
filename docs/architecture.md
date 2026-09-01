@@ -77,8 +77,8 @@ on another platform later. Its modules, as declared in `crates/axiomata-core/src
 - `config` — loads/saves `~/.axiomata/config.toml`. **Implemented.**
 - `db` — SQLite connection setup and schema migrations. **Implemented.**
 - `error` — the crate-wide `AxiomataError` type (`thiserror`-based). **Implemented.**
-- `agents` — agent backend dispatch (Claude Code / Ollama). **Module stub, planned for M1.**
-- `skills` — skill discovery and headless execution. **Module stub, planned for M1.**
+- `agents` — agent backend dispatch (Claude Code / Ollama). **Implemented (M1).**
+- `skills` — skill discovery, headless execution, and run logging. **Implemented (M1).**
 - `memory` — `CLAUDE.md` router file generation and staleness tracking.
   **Module stub, planned for M2.**
 - `routines` — cron-like scheduled skill/prompt execution.
@@ -221,27 +221,78 @@ anything yet; its purpose in M0 is to prove the migration runner applies arbitra
 just the bookkeeping table) and to give later milestones a place to persist small app-level
 facts without a schema change.
 
+### Agent backends (`agents/`)
+
+Skill execution dispatches through a small `enum`, `AgentBackend { ClaudeCode, Ollama {
+model: String } }` — deliberately not a trait/registry (see §6 for the rationale). Supporting
+types: `AgentRequest { prompt, cwd, timeout, env }` and `AgentRunResult { stdout, stderr,
+exit_code, duration_ms }`.
+
+- `AgentBackend::resolve(backend_str, model_override, config)` maps the plain string a skill
+  stores (`"claude-code"` / `"ollama"`) onto a variant, filling the Ollama model from the
+  frontmatter override or `config.agents.ollama_model`. An unknown string is
+  `AxiomataError::UnknownAgentBackend`.
+- `agents/claude_code.rs` spawns `claude -p "<prompt>"` via `tokio::process::Command` in
+  `request.cwd`, with `request.env` applied and stdin closed. stdout/stderr are drained
+  concurrently with the process wait; on timeout the child is signalled **and reaped** before
+  `AxiomataError::AgentTimeout` returns. A completed process (even non-zero exit) is `Ok`.
+- `agents/ollama.rs` makes one non-streaming `POST /api/generate` call to the local daemon
+  (`ollama-rs`, `default-features = false` — no TLS stack, localhost only) via a shared
+  `LazyLock<Ollama>` client. An Ollama-side failure is `Err` (`AgentApi` / `AgentTimeout`),
+  not a result with a non-zero exit code.
+
+### Skills runner (`skills/`)
+
+- `registry.rs` scans **both** locations from §4 —
+  `~/.axiomata/skills/*/SKILL.md` (global) and `<workspace_root>/.claude/skills/*/SKILL.md`
+  (workspace-local) — parses each file's YAML frontmatter with `gray_matter` into
+  `Skill { name, description, model, effort, trigger, backend, source, path, body }`, and
+  merges by name with the workspace-local copy winning. `SkillSource` records which location
+  a skill came from. A missing directory is empty, not an error; an unreadable or
+  malformed `SKILL.md` is `AxiomataError::InvalidSkill`. The filesystem is the only source of
+  truth — skills are never written to the database.
+- `runner.rs` has two entry points. `execute_skill(name, config)` resolves the skill, builds
+  the prompt (`/<name>` for Claude Code so its own skill machinery runs; the `SKILL.md` body
+  for Ollama), runs the backend, and returns an **unpersisted** `RunRecord` (`id: None`) —
+  it touches no database, so a caller holding a `std::sync::Mutex` can drop the lock before
+  the `await`. `run_skill(name, config, db)` is `execute_skill` followed by
+  `runlog::record_run`. Only skill-resolution failure is `Err`; every run outcome (success,
+  non-zero exit, unknown backend, spawn failure, timeout, API error) is a `RunRecord` whose
+  `status` says which.
+- `runlog.rs` persists each `RunRecord` to the SQLite `runs` table (parameterised inserts)
+  **and** appends it as one JSON line to `~/.axiomata/logs/runs.log`. `list_runs(db, limit)`
+  reads them back newest-first for the UI/CLI.
+- `skills/mod.rs::seed_example_skill()` writes the bundled example skill
+  (`crates/axiomata-core/resources/example-skill/SKILL.md`, embedded via `include_str!`,
+  `backend: claude-code`) into `~/.axiomata/skills/` on first run, and never overwrites an
+  existing copy. `AxiomataCore::init()` calls it.
+
 ### Errors (`error.rs`)
 
 `AxiomataError` (via `thiserror`) covers every failure mode the above surfaces: `Io` (with
 the offending path), `ConfigParse`, `ConfigSerialize`, `Database` (wraps `rusqlite::Error` via
-`#[from]`), and `Migration` (tags the failing migration's version).
+`#[from]`), `Migration` (tags the failing migration's version), and the M1 additions
+`UnknownAgentBackend`, `AgentSpawn`, `AgentTimeout`, `AgentApi`, `InvalidSkill`, and
+`SkillNotFound`.
 
 ### `axiomata-cli`
 
-Calls `AxiomataCore::init()` and prints the resolved workspace root, config file, database,
-logs directory, and global skills directory paths on success; prints the error and exits 1 on
-failure. This is the primary way to verify the core works without launching the GUI.
+A `clap` CLI over the core. Subcommands: `status` (the default — prints resolved paths),
+`list-skills` (name, source, backend, description per skill), `run-skill <name>` (runs it,
+prints the outcome, exits non-zero on a failed run), and `list-runs [--limit N]` (recent run
+history from the database). This is the primary way to exercise the runner without the GUI.
 
 ### The Tauri shell
 
-`apps/dashboard/src-tauri/src/lib.rs`'s `run()` function builds the Tauri app, registers the
-`tauri-plugin-opener` plugin and the scaffolded `greet` command, and in `.setup()` calls
-`AxiomataCore::init()` (panicking via `.expect()` on failure — there is currently no
-in-app error UI for a failed core initialization) and stores it as `app.manage(Mutex::new(core))`.
-Beyond that, the app is the unmodified Tauri Vanilla-TypeScript template: the window,
-`greet` command, and frontend are all template boilerplate, not yet replaced with any
-Axiomata-specific dashboard UI.
+`apps/dashboard/src-tauri/src/lib.rs`'s `run()` builds the app, registers the
+`tauri-plugin-opener` plugin and the M1 commands (`list_skills`, `list_runs`, `run_skill` —
+in `src-tauri/src/commands.rs`), and in `.setup()` calls `AxiomataCore::init()` (panicking
+via `.expect()` — there is still no in-app error UI for a failed init) and stores it as
+`app.manage(Mutex::new(core))`. `run_skill` clones the config, releases the lock, awaits the
+agent, then re-takes the lock only to persist — so a `MutexGuard` is never held across an
+`.await`. The frontend (`apps/dashboard/src/`) is a minimal placeholder: a skills table with
+a Run button per row and a run-history table, both polled every 3 s. It is not the planned
+module-canvas UI (see §6).
 
 ## 6. What is designed but not yet implemented
 
@@ -249,45 +300,16 @@ The following is **planned design**, captured here because the rationale lives o
 repository (in the owner's local planning notes) and should not be lost. None of it exists in
 running code yet — every item below is a module stub with only a doc comment stating which
 milestone will implement it. Do not mistake anything in this section for shipped behaviour.
+(Agent backends and the skills runner were in this section through M0; they are now
+implemented — see §5.)
 
-### Agent backends (`agents/`) — planned for M1
+### Why the agent backend is an `enum`, not a trait
 
-Skill and routine execution will dispatch through a small Rust `enum`, not a plugin registry
-or trait-object abstraction — a deliberate choice, since only two backends are needed today
-and a generic multi-CLI abstraction would be premature generalization:
-
-```rust
-enum AgentBackend {
-    ClaudeCode,
-    Ollama { model: String },
-}
-```
-
-- `AgentBackend::ClaudeCode` (`agents/claude_code.rs`) will spawn the headless Claude Code CLI
-  (`claude -p "<prompt>"`) via `tokio::process::Command`, with the working directory set to
-  the target skill's `cwd` (typically `workspace_root`) and a timeout, capturing stdout,
-  stderr, exit code, and duration.
-- `AgentBackend::Ollama { model }` (`agents/ollama.rs`) will talk to a local Ollama daemon's
-  HTTP API directly (via the `ollama-rs` crate, default `http://localhost:11434`) — no
-  subprocess, lower latency, intended for simple tasks like appending a to-do item.
-- Skills and routines will each store only a plain string (`"claude-code"` or `"ollama"`);
-  a `resolve()` function in `agents/mod.rs` will map that string (plus a configured Ollama
-  model name) onto the concrete enum variant. If a further backend is ever needed (e.g.
-  `opencode`, or a custom `rig`-based agent), the enum can gain a variant later without
-  reworking the runner or scheduler — but no such backend is currently planned.
-
-### Skills (`skills/`) — planned for M1
-
-- `registry.rs` will scan **both** data locations described in §4 —
-  `~/.axiomata/skills/*/SKILL.md` (global) and `<workspace_root>/.claude/skills/*/SKILL.md`
-  (workspace-local) — and merge them into one list, with workspace-local skills winning on
-  name collisions. Skill metadata (`name`, `description`, `model`, `effort`, `trigger`,
-  `backend`) will be read from each `SKILL.md`'s frontmatter. The filesystem stays the single
-  source of truth; skills are not planned to be duplicated into the database.
-- `runner.rs` will resolve a skill's `backend` field via `agents::resolve()` and call
-  `AgentBackend::run(...)`, with a timeout, capturing stdout/stderr/exit code/duration.
-- `runlog.rs` will record every run both as a JSONL line in `~/.axiomata/logs/runs.log` (for
-  `tail -f`-style inspection) and as a row in a SQLite `runs` table (for UI queries).
+Skill and routine execution dispatches through `AgentBackend` (a two-variant `enum`), not a
+plugin registry or trait-object abstraction — a deliberate choice, since only two backends
+are needed and a generic multi-CLI abstraction would be premature generalization. If a
+further backend is ever needed (e.g. `opencode`, or a custom `rig`-based agent), the enum can
+gain a variant without reworking the runner or scheduler — but no such backend is planned.
 
 ### Memory router (`memory/`) — planned for M2
 
@@ -319,7 +341,8 @@ enum AgentBackend {
 
 ### Dashboard UI — module canvas, phase TBD
 
-The current window is the unmodified Tauri template.
+The current window is a minimal M1 placeholder (a skills table + a run-history table,
+polled every 3 s), not the design below.
 
 The intended UI is **not** a fixed layout but a free-form canvas (a "board"). The user
 places **modules** onto it — self-contained widget tiles, each with its own frontend and
@@ -358,10 +381,15 @@ implementation exists yet beyond the empty crate scaffold.
   are clean; `cargo tauri dev` opens a window; the first run of either the CLI or the Tauri
   app creates `~/.axiomata/{config.toml, axiomata.db, logs/, skills/}` with migrations
   applied and a default `workspace_root` created.
-- **M1 — Skills runner, end to end (including agent backends and the two skill locations):
-  not started.** Will land the `agents` enum and `resolve()`, the merged skills registry, the
-  runner and run log, the corresponding Tauri commands, a minimal skills UI, and example
-  skills for both backends.
+- **M1 — Skills runner, end to end: done.** The `agents` enum and `resolve()`, the merged
+  two-location skills registry, the runner (`execute_skill` / `run_skill`), the run log
+  (`runs` table + `runs.log` JSONL), the `list_skills` / `list_runs` / `run_skill` Tauri
+  commands, the placeholder skills UI, and a bundled `example-skill` (seeded on first run)
+  are all in place. Verified end to end via `axiomata-cli`: skill discovery with
+  global-vs-workspace source, workspace-local winning a name collision, a green Ollama run,
+  a failed Ollama run (model missing) recorded as `status: failed` without a crash, and an
+  unknown skill name returning a clean error. Live `claude-code`-backend verification (needs
+  `claude` on `PATH`) and the GUI Run button (`cargo tauri dev`) are manual checks.
 - **M2 — Memory router: not started.** Will land the workspace walker, the deterministic
   `CLAUDE.md` router renderer, `sync_memory`/`get_memory_status`, and the stale-flag watcher.
 - **M3 — Routines scheduler: not started.** Will land the routine store, cron scheduling, the

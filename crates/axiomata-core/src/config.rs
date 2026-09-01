@@ -3,6 +3,7 @@
 //! Holds the user-configurable Second-Brain workspace root and agent backend
 //! defaults (e.g. the default Ollama model).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -27,18 +28,40 @@ fn default_ollama_model() -> String {
     "llama3.2".to_string()
 }
 
+/// Default hard wall-clock limit for a single skill run.
+fn default_skill_timeout_secs() -> u64 {
+    300
+}
+
 /// Defaults for the built-in agent backends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentDefaults {
     /// Ollama model used when a skill or routine doesn't specify one.
     #[serde(default = "default_ollama_model")]
     pub ollama_model: String,
+
+    /// Hard wall-clock limit for a single skill run, in seconds.
+    #[serde(default = "default_skill_timeout_secs")]
+    pub skill_timeout_secs: u64,
+
+    /// Extra environment variables passed to the `claude` process for provider
+    /// routing (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
+    /// `CLAUDE_CODE_USE_BEDROCK`, …). Empty means the real Anthropic API.
+    ///
+    /// Only keys matching an allow-list of prefixes (`ANTHROPIC_`,
+    /// `CLAUDE_CODE_`, `AWS_`, the proxy variables) are actually forwarded;
+    /// loader / `PATH` variables are dropped. Values are stored in plaintext in
+    /// `config.toml`, so treat a token here as a plaintext secret.
+    #[serde(default)]
+    pub claude_env: BTreeMap<String, String>,
 }
 
 impl Default for AgentDefaults {
     fn default() -> Self {
         Self {
             ollama_model: default_ollama_model(),
+            skill_timeout_secs: default_skill_timeout_secs(),
+            claude_env: BTreeMap::new(),
         }
     }
 }
@@ -96,7 +119,19 @@ impl Config {
         let raw = toml::to_string_pretty(self)
             .map_err(|source| AxiomataError::ConfigSerialize { source })?;
 
-        fs::write(&path, raw).map_err(|source| AxiomataError::Io { path, source })
+        fs::write(&path, raw).map_err(|source| AxiomataError::Io {
+            path: path.clone(),
+            source,
+        })?;
+
+        // May hold a plaintext token in `agents.claude_env`; keep it owner-only
+        // on Unix. Best-effort — a permissions failure is not a save failure.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+        Ok(())
     }
 }
 
@@ -120,9 +155,14 @@ mod tests {
         let loaded = Config::load().expect("load should succeed with no file present");
         assert_eq!(loaded, Config::default());
 
-        let mut custom = Config::default();
-        custom.workspace_root = temp_home.join("MyBrain");
-        custom.agents.ollama_model = "llama3.2:latest".to_string();
+        let custom = Config {
+            workspace_root: temp_home.join("MyBrain"),
+            agents: AgentDefaults {
+                ollama_model: "llama3.2:latest".to_string(),
+                skill_timeout_secs: 120,
+                ..AgentDefaults::default()
+            },
+        };
         custom.save().expect("save should succeed");
 
         let reloaded = Config::load().expect("load should succeed after save");

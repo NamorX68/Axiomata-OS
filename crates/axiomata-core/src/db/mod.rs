@@ -11,7 +11,10 @@ use crate::paths;
 /// Ordered list of schema migrations as `(version, sql)`. `version` must be
 /// unique and strictly increasing. Once released, a migration is never
 /// edited or reordered — only new ones are appended.
-const MIGRATIONS: &[(u32, &str)] = &[(1, include_str!("migrations/0001_init.sql"))];
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, include_str!("migrations/0001_init.sql")),
+    (2, include_str!("migrations/0002_runs.sql")),
+];
 
 /// Opens (creating if necessary) the SQLite database at
 /// `~/.axiomata/axiomata.db` and applies any migrations that haven't run yet.
@@ -75,7 +78,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 1);
+            assert_eq!(version, 2);
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -83,15 +86,26 @@ mod tests {
                 [],
             )
             .expect("app_meta table should exist");
+
+            // Migration 0002's DDL ran too.
+            conn.execute(
+                "INSERT INTO runs \
+                 (skill_name, skill_source, backend, status, exit_code, duration_ms, \
+                  started_at, finished_at) \
+                 VALUES ('probe', 'global', 'ollama', 'success', 0, 12, \
+                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("runs table should exist");
         }
 
         {
-            // Re-opening must not re-apply migration 0001 or error out.
+            // Re-opening must not re-apply any migration or error out.
             let conn = open_and_migrate_at(&temp_db).expect("second open should succeed");
-            let version_count: u32 = conn
+            let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(version_count, 1);
+            assert_eq!(applied_count, 2);
 
             let probe_value: String = conn
                 .query_row(

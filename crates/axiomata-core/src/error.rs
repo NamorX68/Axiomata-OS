@@ -1,6 +1,7 @@
 //! Shared error type for the Axiomata-OS core engine.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -41,4 +42,41 @@ pub enum AxiomataError {
         #[source]
         source: rusqlite::Error,
     },
+
+    /// A skill's frontmatter or a routine referenced an agent backend
+    /// identifier that is neither `"claude-code"` nor `"ollama"`.
+    #[error("unknown agent backend {backend:?} (expected \"claude-code\" or \"ollama\")")]
+    UnknownAgentBackend { backend: String },
+
+    /// The agent child process could not be spawned or waited on.
+    #[error("failed to run the {backend} agent ({program}): {source}")]
+    AgentSpawn {
+        backend: &'static str,
+        program: &'static str,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The agent did not finish within its configured timeout.
+    #[error("the {backend} agent timed out after {timeout:?}")]
+    AgentTimeout {
+        backend: &'static str,
+        timeout: Duration,
+    },
+
+    /// A backend that talks to an HTTP API (Ollama) returned an error.
+    #[error("the {backend} agent API returned an error: {message}")]
+    AgentApi {
+        backend: &'static str,
+        message: String,
+    },
+
+    /// A `SKILL.md` file could not be read, or its frontmatter was missing or
+    /// malformed.
+    #[error("invalid skill at {path}: {reason}")]
+    InvalidSkill { path: PathBuf, reason: String },
+
+    /// A skill was requested by name but not found in either skill directory.
+    #[error("no skill named {name:?} found")]
+    SkillNotFound { name: String },
 }

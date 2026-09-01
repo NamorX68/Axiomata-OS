@@ -38,6 +38,8 @@ impl AxiomataCore {
     ///   on first run so the file exists for the user to inspect/edit,
     /// - creates `~/.axiomata/logs/`, `~/.axiomata/skills/`, and the
     ///   Second-Brain workspace root if any of them don't exist yet,
+    /// - seeds the built-in example skill into `~/.axiomata/skills/` if it
+    ///   isn't there (user edits to it are preserved),
     /// - opens `~/.axiomata/axiomata.db` and applies pending migrations.
     ///
     /// Safe to call on every app start: every step here is idempotent.
@@ -56,11 +58,34 @@ impl AxiomataCore {
             fs::create_dir_all(&dir).map_err(|source| AxiomataError::Io { path: dir, source })?;
         }
 
+        // The app-data directory can hold a plaintext API token (config's
+        // `claude_env`) and captured agent output (the run log, the database).
+        // Keep it owner-only on Unix; best-effort, never fatal.
+        restrict_to_owner(&paths::axiomata_home(), 0o700);
+        restrict_to_owner(&paths::logs_dir(), 0o700);
+        restrict_to_owner(&paths::config_path(), 0o600);
+
+        skills::seed_example_skill()?;
+
         let db = db::open_and_migrate()?;
+        restrict_to_owner(&paths::db_path(), 0o600);
 
         Ok(Self { config, db })
     }
 }
+
+/// Best-effort `chmod` to the given mode on Unix; a no-op elsewhere and on
+/// error (the path may not exist yet, or the filesystem may not support it).
+#[cfg(unix)]
+fn restrict_to_owner(path: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    if path.exists() {
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &std::path::Path, _mode: u32) {}
 
 #[cfg(test)]
 pub(crate) mod test_support {

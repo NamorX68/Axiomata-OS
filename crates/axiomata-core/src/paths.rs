@@ -49,6 +49,12 @@ pub fn logs_dir() -> PathBuf {
     axiomata_home().join("logs")
 }
 
+/// Path to the JSONL skill-run log (`~/.axiomata/logs/runs.log`), a
+/// human-tailable mirror of the `runs` database table.
+pub fn runs_log_path() -> PathBuf {
+    logs_dir().join("runs.log")
+}
+
 /// Directory for global, app-managed skills (`~/.axiomata/skills/`).
 pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")
@@ -75,6 +81,7 @@ mod tests {
         assert_eq!(config_path(), expected_home.join("config.toml"));
         assert_eq!(db_path(), expected_home.join("axiomata.db"));
         assert_eq!(logs_dir(), expected_home.join("logs"));
+        assert_eq!(runs_log_path(), expected_home.join("logs").join("runs.log"));
         assert_eq!(global_skills_dir(), expected_home.join("skills"));
 
         unsafe {

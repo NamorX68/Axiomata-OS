@@ -8,10 +8,12 @@ before starting new work. `AGENTS.md` is the compact, high-signal summary.
 ## What this is
 
 Early-stage Rust + Tauri desktop app: a personal "Agentic OS" / second brain around the
-**ARMS framework** (Applications, Routines, Memory, Skills). Milestone **M0 (workspace
-scaffold) is done**. Agent backends, skills, memory router, routines, and the real dashboard
-UI are **module stubs only** — their doc comments state which milestone implements them.
-Do not assume anything in those stubs works.
+**ARMS framework** (Applications, Routines, Memory, Skills). Milestones **M0 (workspace
+scaffold)** and **M1 (skills runner)** are done: `agents` (the `AgentBackend` enum),
+`skills` (registry + runner + run log), the `list_skills` / `list_runs` / `run_skill` Tauri
+commands, and a placeholder skills UI. The `memory` router (M2), `routines` scheduler (M3),
+and the real module-canvas dashboard UI are **module stubs only** — their doc comments state
+which milestone implements them. Do not assume anything in those stubs works.
 
 ## Commands
 
@@ -22,6 +24,7 @@ cargo fmt --check                          # format check
 cargo test --workspace                     # all tests
 cargo test -p axiomata-core                # just the core engine
 cargo run -p axiomata-cli                  # headless: init core, print status, exit
+cargo run -p axiomata-cli -- list-skills   # discovered skills; also: run-skill <name>, list-runs
 cd apps/dashboard && cargo tauri dev       # desktop app (hot-reload)
 ```
 
@@ -36,12 +39,15 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
 `crates/axiomata-cli`, and the Tauri shell `apps/dashboard/src-tauri` (package `dashboard`).
 
 - `axiomata-core` is the real engine, with **no Tauri or macOS dependency**. Implemented
-  modules: `paths`, `config`, `db`, `error`. `agents`, `skills`, `memory`, `routines` are
-  stubs.
+  modules: `paths`, `config`, `db`, `error`, `agents`, `skills`. `memory` (M2) and
+  `routines` (M3) are stubs.
 - `AxiomataCore::init()` (`crates/axiomata-core/src/lib.rs`) is the **single** entry point,
-  called by both `axiomata-cli` and the Tauri `.setup()` hook. Fully idempotent.
-- The Tauri `.setup()` hook stores `Mutex<AxiomataCore>` as managed state for future
-  `#[tauri::command]` handlers. Only the template `greet` command exists today.
+  called by both `axiomata-cli` and the Tauri `.setup()` hook. Fully idempotent. Also seeds
+  the bundled `example-skill` (never overwrites an existing copy).
+- The Tauri `.setup()` hook stores `Mutex<AxiomataCore>` as managed state. Commands live in
+  `apps/dashboard/src-tauri/src/commands.rs`: `list_skills`, `list_runs`, `run_skill`.
+  `run_skill` clones the config, drops the lock, awaits the agent, re-locks only to persist
+  — never hold a `MutexGuard` across `.await`.
 
 ## Data lives in TWO places (easy to get wrong)
 
@@ -49,10 +55,10 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
    (global skills). Overridable via the `AXIOMATA_HOME` env var.
 2. **`workspace_root`** — the user's Second-Brain folder (`config.workspace_root`, defaults
    to `~/Axiomata-Workspace`). Holds memory `CLAUDE.md` indexes (M2) and workspace-local
-   skills at `<workspace_root>/.claude/skills/` (M1).
+   skills at `<workspace_root>/.claude/skills/`.
 
-When skills land (M1), they merge **both** `skills/` locations, with workspace-local winning
-on name collision.
+`skills::registry::list_skills` merges **both** `skills/` locations, with workspace-local
+winning on name collision.
 
 ## Conventions
 
@@ -61,7 +67,8 @@ on name collision.
 - SQLite via `rusqlite` (bundled, statically linked). DB migrations are append-only SQL in
   `crates/axiomata-core/src/db/migrations/*.sql`, listed in `db::MIGRATIONS` — never edit or
   reorder a released migration.
-- DB schema is minimal today (`app_meta` table only); heavier tables are planned for M1–M3.
+- DB tables: `app_meta` (0001), `runs` (0002 — skill run history, mirrored to
+  `logs/runs.log`). `routines` / `routine_runs` are planned for M3.
 
 ## Test conventions
 

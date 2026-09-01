@@ -9,9 +9,11 @@ centre / second brain, built around the **ARMS framework** (Applications, Routin
 Memory, Skills — see `ARMS-Agentic-OS-Guide.pdf` for the original inspiration, though the
 actual design has since diverged from it in several places).
 
-Milestone **M0 (workspace scaffold) is complete**. Everything past that — agent backends,
-skills, memory router, routines, and the real dashboard UI — is still unimplemented
-(module stubs only), to be built milestone by milestone. The full architecture rationale
+Milestones **M0 (workspace scaffold)** and **M1 (skills runner, end to end)** are complete:
+the `agents` enum, the two-location skills registry, the runner + run log, the `list_skills`
+/ `list_runs` / `run_skill` Tauri commands, a placeholder skills UI, and a bundled
+`example-skill`. Still unimplemented (module stubs only): the memory router (M2), routines
+scheduler (M3), and the real module-canvas dashboard UI. The full architecture rationale
 and the milestone-by-milestone plan live in
 `~/.claude/plans/ich-m-chte-ein-agentic-shimmering-gadget.md` (outside this repo, on the
 owner's machine) — read it before starting new work here if it's available; this file
@@ -27,7 +29,10 @@ cargo fmt --check                          # verify formatting in CI-style check
 cargo test --workspace                     # run all tests
 cargo test -p axiomata-core                # run just the core engine's tests
 
-cargo run -p axiomata-cli                  # headless run: init the core, print status, exit
+cargo run -p axiomata-cli                  # headless: init the core, print status, exit
+cargo run -p axiomata-cli -- list-skills   # discovered skills (global + workspace-local)
+cargo run -p axiomata-cli -- run-skill <name>   # run a skill, print outcome, exit 1 if it failed
+cargo run -p axiomata-cli -- list-runs --limit 20   # recent run history from the DB
 
 cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
 ```
@@ -39,9 +44,9 @@ One-time setup for the Tauri app: `cargo install tauri-cli --version "^2" --lock
 
 Cargo workspace (edition 2024), members:
 - `crates/axiomata-core` — the actual "OS" engine. No Tauri or macOS dependency, so it can
-  in principle run headless elsewhere later. Modules: `paths`, `config`, `db`, `error`
-  (all implemented), `agents`, `skills`, `memory`, `routines` (module stubs only so far —
-  each file's doc comment says which milestone implements it).
+  in principle run headless elsewhere later. Modules: `paths`, `config`, `db`, `error`,
+  `agents`, `skills` (all implemented); `memory` (M2) and `routines` (M3) are still module
+  stubs — each file's doc comment says which milestone implements it.
 - `crates/axiomata-macos` — boundary for future macOS-specific integration (e.g. Mail/
   Calendar access). Untouched stub.
 - `crates/axiomata-cli` — thin binary that calls `axiomata_core::AxiomataCore::init()` and
@@ -64,18 +69,22 @@ Second-Brain workspace folder (`config.workspace_root`, defaults to
 
 `AxiomataCore::init()` (`crates/axiomata-core/src/lib.rs`) is the single entry point both
 `axiomata-cli` and the Tauri `.setup()` hook call: loads-or-creates `config.toml`, creates
-`logs/`, `skills/`, and the workspace root if missing, opens the SQLite DB and applies
+`logs/`, `skills/`, and the workspace root if missing, seeds the bundled `example-skill`
+into `~/.axiomata/skills/` if absent (never overwrites), opens the SQLite DB and applies
 pending migrations (`crates/axiomata-core/src/db/migrations/*.sql`, listed in
 `db::MIGRATIONS`). Fully idempotent — safe to call on every app start.
 
-Two designed-but-not-yet-implemented pieces worth knowing before touching `skills/` or
-`agents/`:
-- Skills will be read from **two** locations and merged: global skills under
+Two things worth knowing before touching `skills/` or `agents/`:
+- Skills are read from **two** locations and merged: global skills under
   `~/.axiomata/skills/`, and workspace-local skills under
-  `<workspace_root>/.claude/skills/`, which win on name collisions.
+  `<workspace_root>/.claude/skills/`, which win on name collisions
+  (`skills::registry::list_skills`). Each skill's frontmatter is parsed with `gray_matter`;
+  the filesystem is the only source of truth (skills are never written to the DB).
 - Agent execution goes through a small enum, not a plugin registry:
   `AgentBackend::ClaudeCode | AgentBackend::Ollama { model }` — deliberately not a
-  generic multi-CLI abstraction (see the plan for why).
+  generic multi-CLI abstraction (see the plan for why). `skills::runner::execute_skill`
+  runs a skill without touching the DB (returns an unpersisted `RunRecord`);
+  `run_skill` = `execute_skill` + `runlog::record_run` (DB row + `logs/runs.log` JSONL).
 
 **Test convention:** any test that mutates the `AXIOMATA_HOME` env var must lock
 `crate::test_support::ENV_MUTEX` first (`crates/axiomata-core/src/lib.rs`) — `cargo test`
