@@ -77,7 +77,7 @@ fn list_skills() -> Result<()> {
 
 /// Runs `name`, prints a summary, and exits non-zero if the run failed.
 async fn run_skill(core: &AxiomataCore, name: &str) -> Result<()> {
-    let record = skills::run_skill(name, &core.config, &core.db)
+    let record = skills::execute_and_record_skill(name, &core.config, &core.db)
         .await
         .with_context(|| format!("failed to run skill {name:?}"))?;
 

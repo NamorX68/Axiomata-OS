@@ -85,7 +85,9 @@ Two things worth knowing before touching `skills/` or `agents/`:
   `AgentBackend::ClaudeCode | AgentBackend::Ollama { model }` — deliberately not a
   generic multi-CLI abstraction (see the plan for why). `skills::runner::execute_skill`
   runs a skill without touching the DB (returns an unpersisted `RunRecord`);
-  `run_skill` = `execute_skill` + `runlog::record_run` (DB row + `logs/runs.log` JSONL).
+  `execute_and_record_skill` = `execute_skill` + `runlog::record_run` (DB row +
+  `logs/runs.log` JSONL). The Tauri `run_skill` *command* is the no-DB path plus a
+  narrow re-lock to persist.
 
 **Test convention:** any test that mutates the `AXIOMATA_HOME` env var must lock
 `crate::test_support::ENV_MUTEX` first (`crates/axiomata-core/src/lib.rs`) — `cargo test`

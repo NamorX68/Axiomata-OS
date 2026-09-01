@@ -6,8 +6,9 @@
 //!   [`RunRecord`] (`id: None`). Touches no database, so a caller that only
 //!   holds a `std::sync::Mutex` around its state can drop the lock before the
 //!   `await` and re-take it just to persist.
-//! - [`run_skill`] — the convenience wrapper: `execute_skill` followed by
-//!   [`runlog::record_run`]. Used by the CLI, which owns its `Connection`.
+//! - [`execute_and_record_skill`] — the convenience wrapper: `execute_skill`
+//!   followed by [`runlog::record_run`]. Used by the CLI, which owns its
+//!   `Connection`.
 //!
 //! It ties together the registry ([`crate::skills::registry`]), the agent
 //! backends ([`crate::agents`]), and the run log ([`crate::skills::runlog`]).
@@ -105,7 +106,7 @@ fn record_from_result(
 /// Errors:
 ///     Everything [`execute_skill`] can return, plus [`AxiomataError::Database`]
 ///     / [`AxiomataError::Io`] if recording the result fails.
-pub async fn run_skill(
+pub async fn execute_and_record_skill(
     name: &str,
     config: &Config,
     db: &Connection,
@@ -354,7 +355,9 @@ mod tests {
     #[tokio::test]
     async fn unknown_skill_is_an_error_and_records_nothing() {
         let fx = Fixture::new("unknown");
-        let err = run_skill("ghost", &fx.config, &fx.db).await.unwrap_err();
+        let err = execute_and_record_skill("ghost", &fx.config, &fx.db)
+            .await
+            .unwrap_err();
         assert!(matches!(err, AxiomataError::SkillNotFound { .. }));
         assert!(runlog::list_runs(&fx.db, 10).unwrap().is_empty());
     }
@@ -367,7 +370,9 @@ mod tests {
             "---\nname: weird\ndescription: bad backend\nbackend: opencode\n---\nbody\n",
         );
 
-        let record = run_skill("weird", &fx.config, &fx.db).await.unwrap();
+        let record = execute_and_record_skill("weird", &fx.config, &fx.db)
+            .await
+            .unwrap();
         assert_eq!(record.status, RunStatus::Failed);
         assert_eq!(record.exit_code, None);
         assert!(record.error.unwrap().contains("opencode"));
@@ -385,7 +390,9 @@ mod tests {
             "---\nname: note\ndescription: append a note\nbackend: ollama\n---\nWrite a short note.\n",
         );
 
-        let record = run_skill("note", &fx.config, &fx.db).await.unwrap();
+        let record = execute_and_record_skill("note", &fx.config, &fx.db)
+            .await
+            .unwrap();
         // Either the daemon is absent (Failed with an error message) or, on a
         // dev machine that happens to run Ollama, it succeeds — both are valid,
         // but the run must always be persisted.
@@ -411,7 +418,9 @@ mod tests {
             "---\nname: summarize\ndescription: summary\nbackend: claude-code\n---\nSummarize.\n",
         );
 
-        let record = run_skill("summarize", &fx.config, &fx.db).await.unwrap();
+        let record = execute_and_record_skill("summarize", &fx.config, &fx.db)
+            .await
+            .unwrap();
         assert_eq!(record.status, RunStatus::Failed);
         assert_eq!(record.exit_code, None);
         assert!(record.error.is_some());

@@ -263,7 +263,7 @@ exit_code, duration_ms }`.
   the prompt (`/<name>` for Claude Code so its own skill machinery runs; the `SKILL.md` body
   for Ollama), runs the backend, and returns an **unpersisted** `RunRecord` (`id: None`) —
   it touches no database, so a caller holding a `std::sync::Mutex` can drop the lock before
-  the `await`. `run_skill(name, config, db)` is `execute_skill` followed by
+  the `await`. `execute_and_record_skill(name, config, db)` is `execute_skill` followed by
   `runlog::record_run`. Only skill-resolution failure is `Err`; every run outcome (success,
   non-zero exit, unknown backend, spawn failure, timeout, API error) is a `RunRecord` whose
   `status` says which.

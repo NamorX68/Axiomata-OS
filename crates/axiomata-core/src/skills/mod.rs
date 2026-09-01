@@ -20,7 +20,7 @@ pub mod runner;
 // module layout of `skills`.
 pub use registry::{Skill, find_skill, list_skills};
 pub use runlog::{RunRecord, RunStatus, RunSummary, get_run, list_runs};
-pub use runner::{execute_skill, run_skill};
+pub use runner::{execute_and_record_skill, execute_skill};
 
 /// Name of the built-in example skill, seeded into the global skills directory
 /// on first run.
