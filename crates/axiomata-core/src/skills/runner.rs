@@ -35,14 +35,15 @@ use crate::skills::runlog::{self, RunRecord, RunStatus};
 ///
 /// Args:
 ///     name: Skill name to run.
-///     config: Supplies `workspace_root`, the Ollama default model, the run
-///         timeout, and the `claude` provider environment.
+///     config: Supplies the working directory (`workspace_root`), the Ollama
+///         default model, the run timeout, and the `claude` provider
+///         environment.
 ///
 /// Errors:
 ///     [`AxiomataError::SkillNotFound`] / [`AxiomataError::InvalidSkill`] if the
 ///     skill cannot be resolved.
 pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, AxiomataError> {
-    let skill = registry::find_skill(name, config)?;
+    let skill = registry::find_skill(name)?;
     let timeout = Duration::from_secs(config.agents.skill_timeout_secs);
     let started_at = Utc::now();
 
@@ -83,7 +84,6 @@ fn record_from_result(
     RunRecord {
         id: None,
         skill_name: skill.name.clone(),
-        skill_source: skill.source.as_str().to_owned(),
         backend: backend.id().to_owned(),
         status: if result.is_success() {
             RunStatus::Success
@@ -173,7 +173,6 @@ fn failure_record(
     RunRecord {
         id: None,
         skill_name: skill.name.clone(),
-        skill_source: skill.source.as_str().to_owned(),
         backend: skill.backend.clone(),
         status: RunStatus::Failed,
         exit_code: None,
@@ -195,10 +194,11 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    /// Isolated `AXIOMATA_HOME` + scratch workspace + migrated database.
+    /// Isolated `AXIOMATA_HOME` + a scratch working directory + migrated database.
     struct Fixture {
         _guard: std::sync::MutexGuard<'static, ()>,
         home: PathBuf,
+        cwd: PathBuf,
         config: Config,
         db: Connection,
     }
@@ -207,16 +207,16 @@ mod tests {
         fn new(tag: &str) -> Self {
             let guard = ENV_MUTEX.lock().unwrap();
             let home = unique_temp_dir(&format!("axiomata-test-runner-{tag}-home"));
-            let workspace = unique_temp_dir(&format!("axiomata-test-runner-{tag}-ws"));
+            let cwd = unique_temp_dir(&format!("axiomata-test-runner-{tag}-cwd"));
             fs::create_dir_all(home.join("logs")).unwrap();
-            fs::create_dir_all(&workspace).unwrap();
+            fs::create_dir_all(&cwd).unwrap();
             // SAFETY: serialized by `guard`, see `paths::tests`.
             unsafe {
                 env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
             }
             let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
             let mut config = Config {
-                workspace_root: workspace,
+                workspace_root: cwd.clone(),
                 ..Config::default()
             };
             // Keep tests fast even if a real agent happens to be reachable.
@@ -224,13 +224,14 @@ mod tests {
             Self {
                 _guard: guard,
                 home,
+                cwd,
                 config,
                 db,
             }
         }
 
-        fn write_workspace_skill(&self, name: &str, contents: &str) {
-            let dir = registry::workspace_skills_dir(&self.config).join(name);
+        fn write_skill(&self, name: &str, contents: &str) {
+            let dir = crate::paths::global_skills_dir().join(name);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("SKILL.md"), contents).unwrap();
         }
@@ -243,7 +244,7 @@ mod tests {
                 env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
             }
             let _ = fs::remove_dir_all(&self.home);
-            let _ = fs::remove_dir_all(&self.config.workspace_root);
+            let _ = fs::remove_dir_all(&self.cwd);
         }
     }
 
@@ -263,7 +264,6 @@ mod tests {
             effort: None,
             trigger: None,
             backend: backend.to_owned(),
-            source: crate::skills::registry::SkillSource::Workspace,
             path: PathBuf::from("/tmp/none/SKILL.md"),
             body: String::new(),
         }
@@ -291,7 +291,6 @@ mod tests {
         assert_eq!(ok.status, RunStatus::Success);
         assert_eq!(ok.exit_code, Some(0));
         assert_eq!(ok.duration_ms, 12);
-        assert_eq!(ok.skill_source, "workspace");
         assert_eq!(ok.backend, "ollama");
         assert!(ok.error.is_none());
 
@@ -363,7 +362,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_backend_in_frontmatter_records_a_failed_run() {
         let fx = Fixture::new("bad-backend");
-        fx.write_workspace_skill(
+        fx.write_skill(
             "weird",
             "---\nname: weird\ndescription: bad backend\nbackend: opencode\n---\nbody\n",
         );
@@ -381,10 +380,7 @@ mod tests {
     #[tokio::test]
     async fn ollama_backend_records_failed_run_when_daemon_unreachable() {
         let fx = Fixture::new("ollama-down");
-        // Point the (shared) client at a port nothing listens on by relying on
-        // the daemon simply not running in CI; the call fails fast with a
-        // connection error and must be recorded, not panic.
-        fx.write_workspace_skill(
+        fx.write_skill(
             "note",
             "---\nname: note\ndescription: append a note\nbackend: ollama\n---\nWrite a short note.\n",
         );
@@ -410,7 +406,7 @@ mod tests {
             return;
         }
         let fx = Fixture::new("no-claude");
-        fx.write_workspace_skill(
+        fx.write_skill(
             "summarize",
             "---\nname: summarize\ndescription: summary\nbackend: claude-code\n---\nSummarize.\n",
         );

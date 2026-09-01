@@ -59,8 +59,6 @@ pub struct RunRecord {
     pub id: Option<i64>,
     /// Skill name as resolved at run time.
     pub skill_name: String,
-    /// `"global"` or `"workspace"` — which location the skill came from.
-    pub skill_source: String,
     /// `"claude-code"` or `"ollama"`.
     pub backend: String,
     /// Overall outcome.
@@ -103,12 +101,11 @@ pub fn record_run(db: &Connection, mut record: RunRecord) -> Result<RunRecord, A
 fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError> {
     db.execute(
         "INSERT INTO runs \
-         (skill_name, skill_source, backend, status, exit_code, duration_ms, \
+         (skill_name, backend, status, exit_code, duration_ms, \
           stdout, stderr, error, started_at, finished_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         rusqlite::params![
             record.skill_name,
-            record.skill_source,
             record.backend,
             record.status.as_str(),
             record.exit_code,
@@ -152,7 +149,7 @@ fn append_jsonl(record: &RunRecord) -> Result<(), AxiomataError> {
 ///     [`AxiomataError::Database`] if the query fails.
 pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunRecord>, AxiomataError> {
     let mut stmt = db.prepare(
-        "SELECT id, skill_name, skill_source, backend, status, exit_code, \
+        "SELECT id, skill_name, backend, status, exit_code, \
          duration_ms, stdout, stderr, error, started_at, finished_at \
          FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1",
     )?;
@@ -167,23 +164,22 @@ pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunRecord>, Axioma
 
 /// Maps one `runs` row onto a [`RunRecord`].
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
-    let status: String = row.get(4)?;
-    let started_at: String = row.get(10)?;
-    let finished_at: String = row.get(11)?;
+    let status: String = row.get(3)?;
+    let started_at: String = row.get(9)?;
+    let finished_at: String = row.get(10)?;
 
     Ok(RunRecord {
         id: Some(row.get(0)?),
         skill_name: row.get(1)?,
-        skill_source: row.get(2)?,
-        backend: row.get(3)?,
-        status: RunStatus::from_db_str(&status, 4)?,
-        exit_code: row.get(5)?,
-        duration_ms: row.get::<_, i64>(6)? as u64,
-        stdout: row.get(7)?,
-        stderr: row.get(8)?,
-        error: row.get(9)?,
-        started_at: parse_timestamp(row, 10, &started_at)?,
-        finished_at: parse_timestamp(row, 11, &finished_at)?,
+        backend: row.get(2)?,
+        status: RunStatus::from_db_str(&status, 3)?,
+        exit_code: row.get(4)?,
+        duration_ms: row.get::<_, i64>(5)? as u64,
+        stdout: row.get(6)?,
+        stderr: row.get(7)?,
+        error: row.get(8)?,
+        started_at: parse_timestamp(row, 9, &started_at)?,
+        finished_at: parse_timestamp(row, 10, &finished_at)?,
     })
 }
 
@@ -218,7 +214,6 @@ mod tests {
         RunRecord {
             id: None,
             skill_name: skill.to_owned(),
-            skill_source: "global".to_owned(),
             backend: "ollama".to_owned(),
             status: RunStatus::Success,
             exit_code: Some(0),

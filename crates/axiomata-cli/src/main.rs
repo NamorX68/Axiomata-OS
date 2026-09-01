@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Command::Status) {
         Command::Status => print_status(&core),
-        Command::ListSkills => list_skills(&core)?,
+        Command::ListSkills => list_skills()?,
         Command::RunSkill { name } => return run_skill(&core, &name).await,
         Command::ListRuns { limit } => list_runs(&core, limit)?,
     }
@@ -57,18 +57,17 @@ fn print_status(core: &AxiomataCore) {
     println!("  global skills:  {}", paths::global_skills_dir().display());
 }
 
-/// Prints one line per discovered skill: `name  [source]  backend  — description`.
-fn list_skills(core: &AxiomataCore) -> Result<()> {
-    let skills = skills::list_skills(&core.config).context("failed to scan skills")?;
+/// Prints one line per discovered skill: `name  backend  — description`.
+fn list_skills() -> Result<()> {
+    let skills = skills::list_skills().context("failed to scan skills")?;
     if skills.is_empty() {
         println!("No skills found.");
         return Ok(());
     }
     for skill in skills {
         println!(
-            "{name}  [{source}]  {backend}  — {description}",
+            "{name}  {backend}  — {description}",
             name = skill.name,
-            source = skill.source.as_str(),
             backend = skill.backend,
             description = skill.description,
         );

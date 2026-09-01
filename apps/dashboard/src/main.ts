@@ -5,7 +5,6 @@ interface Skill {
   name: string;
   description: string;
   backend: string;
-  source: "global" | "workspace";
 }
 
 /** One row of run history as returned by `list_runs` / `run_skill`. */
@@ -58,7 +57,6 @@ async function refreshSkills(): Promise<void> {
 function skillRow(skill: Skill): HTMLTableRowElement {
   const row = document.createElement("tr");
   row.appendChild(cell(skill.name));
-  row.appendChild(cell(skill.source));
   row.appendChild(cell(skill.backend));
   row.appendChild(cell(skill.description));
 

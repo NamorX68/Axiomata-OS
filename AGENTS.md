@@ -52,13 +52,13 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
 ## Data lives in TWO places (easy to get wrong)
 
 1. **`~/.axiomata/`** — app-owned: `config.toml`, `axiomata.db` (SQLite), `logs/`, `skills/`
-   (global skills). Overridable via the `AXIOMATA_HOME` env var.
+   (**all** skills — application-level, one location). Overridable via `AXIOMATA_HOME`.
 2. **`workspace_root`** — the user's Second-Brain folder (`config.workspace_root`, defaults
-   to `~/Axiomata-Workspace`). Holds memory `CLAUDE.md` indexes (M2) and workspace-local
-   skills at `<workspace_root>/.claude/skills/`.
+   to `~/Axiomata-Workspace`). Holds only memory `CLAUDE.md` indexes (M2). No skills here —
+   a workspace-local skill location was considered and dropped (untrusted-content path;
+   see `docs/architecture.md` §4).
 
-`skills::registry::list_skills` merges **both** `skills/` locations, with workspace-local
-winning on name collision.
+`skills::registry::list_skills()` / `find_skill()` read only `~/.axiomata/skills/`.
 
 ## Conventions
 

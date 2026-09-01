@@ -127,9 +127,9 @@ workspace the user currently has configured:
 - `config.toml` — the app config (see §5)
 - `axiomata.db` — the SQLite database
 - `logs/` — JSONL run/routine logs (planned; empty today)
-- `skills/` — **global** skills, i.e. built-in, always-available skills regardless of which
-  workspace is active (e.g. a generic "clean up" SOP) — planned for M1, directory created but
-  unused today
+- `skills/` — **all** skills. Skills are application-level: always available regardless of
+  which Second Brain is active, and managed only by the user (no sync process writes here).
+  There is no second, workspace-local skill location — see "Why one skill location" below.
 
 This directory is resolved by `crates/axiomata-core/src/paths.rs::axiomata_home()`. It
 defaults to `~/.axiomata` and is deliberately a visible dotfolder (mirroring `~/.claude`)
@@ -147,20 +147,28 @@ defaulting to `~/Axiomata-Workspace`) that holds the user's actual "Second Brain
   — these must live inside the workspace, not inside the app's own data directory, because
   they only function as usable context when a Claude Code session is actually run with this
   folder as its working directory.
-- **Workspace-local** skills under `<workspace_root>/.claude/skills/` (planned for M1) —
-  skills that are specific to this particular Second Brain rather than globally useful.
 
-### Why the split, and how they interact
+The workspace holds the user's *content* (M2 router files); it holds no Axiomata-managed
+skills.
 
-The rationale: application bookkeeping (config, logs, the SQLite database, globally reusable
-skills) should exist and stay stable independent of which Second Brain is currently open,
-while the Second-Brain content itself needs to live where Claude Code's own context-loading
-conventions expect it — inside the workspace directory being worked in. Axiomata-OS
-deliberately does not invent a parallel file format for skills; it reuses Claude Code's own
-project-vs-user-level skill convention (`~/.claude/skills/` vs. `.claude/skills/`) mapped onto
-its own two locations. Once the skills registry is implemented (M1), it will scan **both**
-directories and merge the results, with the workspace-local skill winning on a name
-collision.
+### Why the split
+
+Application bookkeeping (config, logs, the SQLite database, skills) should exist and stay
+stable independent of which Second Brain is currently open. The Second-Brain content itself
+(M2 router `CLAUDE.md` files) needs to live where Claude Code's own context-loading
+conventions expect it — inside the workspace directory being worked in.
+
+### Why one skill location
+
+An earlier design also read workspace-local skills from `<workspace_root>/.claude/skills/`
+and let them override global ones. That was dropped: skills in Axiomata-OS are
+application-level tasks, not per-vault content, and `<workspace_root>/.claude/skills/` is
+exactly the kind of directory that receives synced / cloned / shared / agent-written files
+— an untrusted-content path feeding a full agent run. Keeping skills solely in
+`~/.axiomata/skills/`, a directory only the user manages, removes that exposure and the
+merge/precedence machinery with it. (When the `claude-code` backend runs with
+`cwd = workspace_root`, Claude Code still scans that folder's `.claude/skills/` on its own —
+Axiomata's registry simply does not.)
 
 ## 5. What is actually implemented today
 
@@ -243,14 +251,14 @@ exit_code, duration_ms }`.
 
 ### Skills runner (`skills/`)
 
-- `registry.rs` scans **both** locations from §4 —
-  `~/.axiomata/skills/*/SKILL.md` (global) and `<workspace_root>/.claude/skills/*/SKILL.md`
-  (workspace-local) — parses each file's YAML frontmatter with `gray_matter` into
-  `Skill { name, description, model, effort, trigger, backend, source, path, body }`, and
-  merges by name with the workspace-local copy winning. `SkillSource` records which location
-  a skill came from. A missing directory is empty, not an error; an unreadable or
-  malformed `SKILL.md` is `AxiomataError::InvalidSkill`. The filesystem is the only source of
-  truth — skills are never written to the database.
+- `registry.rs` scans one location — `~/.axiomata/skills/*/SKILL.md` — and parses each
+  file's YAML frontmatter with `gray_matter` into
+  `Skill { name, description, model, effort, trigger, backend, path, body }`. A missing
+  directory is empty, not an error. `list_skills()` **skips** any entry that is a symlink,
+  oversized (>256 KiB), unreadable, or has malformed frontmatter, so one bad file never
+  breaks the listing; `find_skill(name)` reads only that one skill's `SKILL.md` and returns
+  its specific `AxiomataError::InvalidSkill` / `SkillNotFound`. The filesystem is the only
+  source of truth — skills are never written to the database.
 - `runner.rs` has two entry points. `execute_skill(name, config)` resolves the skill, builds
   the prompt (`/<name>` for Claude Code so its own skill machinery runs; the `SKILL.md` body
   for Ollama), runs the backend, and returns an **unpersisted** `RunRecord` (`id: None`) —
@@ -381,15 +389,16 @@ implementation exists yet beyond the empty crate scaffold.
   are clean; `cargo tauri dev` opens a window; the first run of either the CLI or the Tauri
   app creates `~/.axiomata/{config.toml, axiomata.db, logs/, skills/}` with migrations
   applied and a default `workspace_root` created.
-- **M1 — Skills runner, end to end: done.** The `agents` enum and `resolve()`, the merged
-  two-location skills registry, the runner (`execute_skill` / `run_skill`), the run log
-  (`runs` table + `runs.log` JSONL), the `list_skills` / `list_runs` / `run_skill` Tauri
-  commands, the placeholder skills UI, and a bundled `example-skill` (seeded on first run)
-  are all in place. Verified end to end via `axiomata-cli`: skill discovery with
-  global-vs-workspace source, workspace-local winning a name collision, a green Ollama run,
-  a failed Ollama run (model missing) recorded as `status: failed` without a crash, and an
-  unknown skill name returning a clean error. Live `claude-code`-backend verification (needs
-  `claude` on `PATH`) and the GUI Run button (`cargo tauri dev`) are manual checks.
+- **M1 — Skills runner, end to end: done.** The `agents` enum and `resolve()`, the
+  single-location skills registry (`~/.axiomata/skills/`), the runner (`execute_skill` /
+  `run_skill`), the run log (`runs` table + `runs.log` JSONL), the `list_skills` /
+  `list_runs` / `run_skill` Tauri commands, the placeholder skills UI, and a bundled
+  `example-skill` (seeded on first run) are all in place. Verified end to end via
+  `axiomata-cli`: skill discovery from `~/.axiomata/skills/`, a green Ollama run, a failed
+  Ollama run (model missing) recorded as `status: failed` without a crash, an unknown skill
+  name returning a clean error, and a malformed `SKILL.md` skipped from the listing. Live
+  `claude-code`-backend verification (needs `claude` on `PATH`) and the GUI Run button
+  (`cargo tauri dev`) are manual checks.
 - **M2 — Memory router: not started.** Will land the workspace walker, the deterministic
   `CLAUDE.md` router renderer, `sync_memory`/`get_memory_status`, and the stale-flag watcher.
 - **M3 — Routines scheduler: not started.** Will land the routine store, cron scheduling, the

@@ -8,8 +8,6 @@ CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     -- Skill identity as resolved at run time.
     skill_name   TEXT    NOT NULL,
-    -- Which directory the skill was loaded from: 'global' or 'workspace'.
-    skill_source TEXT    NOT NULL,
     -- Agent backend used: 'claude-code' or 'ollama'.
     backend      TEXT    NOT NULL,
     -- Outcome: 'success' or 'failed'.

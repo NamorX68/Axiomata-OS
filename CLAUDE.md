@@ -30,7 +30,7 @@ cargo test --workspace                     # run all tests
 cargo test -p axiomata-core                # run just the core engine's tests
 
 cargo run -p axiomata-cli                  # headless: init the core, print status, exit
-cargo run -p axiomata-cli -- list-skills   # discovered skills (global + workspace-local)
+cargo run -p axiomata-cli -- list-skills   # discovered skills (~/.axiomata/skills/)
 cargo run -p axiomata-cli -- run-skill <name>   # run a skill, print outcome, exit 1 if it failed
 cargo run -p axiomata-cli -- list-runs --limit 20   # recent run history from the DB
 
@@ -62,10 +62,10 @@ referenced per-crate as `some_crate.workspace = true` — don't pin versions ad 
 individual crate's `Cargo.toml`.
 
 **Runtime data lives outside the repo**, at `~/.axiomata/` (`config.toml`, `axiomata.db`
-SQLite, `logs/`, `skills/` — global skills), separate from the user's freely-chosen
-Second-Brain workspace folder (`config.workspace_root`, defaults to
-`~/Axiomata-Workspace`). Override the app-data location with the `AXIOMATA_HOME` env var
-(tests do this to avoid touching the real directory).
+SQLite, `logs/`, `skills/` — all skills live here), separate from the user's freely-chosen
+Second-Brain workspace folder (`config.workspace_root`, defaults to `~/Axiomata-Workspace`),
+which holds only M2 memory content. Override the app-data location with the `AXIOMATA_HOME`
+env var (tests do this to avoid touching the real directory).
 
 `AxiomataCore::init()` (`crates/axiomata-core/src/lib.rs`) is the single entry point both
 `axiomata-cli` and the Tauri `.setup()` hook call: loads-or-creates `config.toml`, creates
@@ -75,11 +75,12 @@ pending migrations (`crates/axiomata-core/src/db/migrations/*.sql`, listed in
 `db::MIGRATIONS`). Fully idempotent — safe to call on every app start.
 
 Two things worth knowing before touching `skills/` or `agents/`:
-- Skills are read from **two** locations and merged: global skills under
-  `~/.axiomata/skills/`, and workspace-local skills under
-  `<workspace_root>/.claude/skills/`, which win on name collisions
-  (`skills::registry::list_skills`). Each skill's frontmatter is parsed with `gray_matter`;
-  the filesystem is the only source of truth (skills are never written to the DB).
+- Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
+  (`skills::registry::list_skills` / `find_skill`). They are application-level, not per-vault;
+  there is no workspace-local skill location (dropped deliberately — see `docs/architecture.md`
+  §4 "Why one skill location"). Frontmatter is parsed with `gray_matter`; the filesystem is
+  the only source of truth (skills are never written to the DB). `list_skills` skips a bad
+  `SKILL.md`; `find_skill` surfaces its error.
 - Agent execution goes through a small enum, not a plugin registry:
   `AgentBackend::ClaudeCode | AgentBackend::Ollama { model }` — deliberately not a
   generic multi-CLI abstraction (see the plan for why). `skills::runner::execute_skill`

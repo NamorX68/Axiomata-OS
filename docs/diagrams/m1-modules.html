@@ -5090,15 +5090,15 @@
         <text data-detail="context" x="648" y="164" class="t-muted" font-size="8.4" text-anchor="middle">AgentBackend + resolve</text>
         </g>
 
-        <g id="node-registry" data-node-id="registry" data-node-label="skills::registry" tabindex="0" role="button" aria-label="Focus skills::registry, merge 2 skill dirs, crate: axiomata-core  (no Tauri / macOS dependency)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="merge 2 skill dirs" data-node-context="crate: axiomata-core  (no Tauri / macOS dependency)">
-          <title>skills::registry · merge 2 skill dirs · crate: axiomata-core  (no Tauri / macOS dependency)</title>
+        <g id="node-registry" data-node-id="registry" data-node-label="skills::registry" tabindex="0" role="button" aria-label="Focus skills::registry, ~/.axiomata/skills/, crate: axiomata-core  (no Tauri / macOS dependency)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="~/.axiomata/skills/" data-node-context="crate: axiomata-core  (no Tauri / macOS dependency)">
+          <title>skills::registry · ~/.axiomata/skills/ · crate: axiomata-core  (no Tauri / macOS dependency)</title>
           <rect x="324" y="264" width="120" height="60" rx="6" class="c-mask"/>
           <rect x="324" y="264" width="120" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(330 270) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="384" y="292" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">skills::registry</text>
-        <text data-detail="context" x="384" y="308" class="t-muted" font-size="9" text-anchor="middle">merge 2 skill dirs</text>
+        <text data-detail="context" x="384" y="308" class="t-muted" font-size="9" text-anchor="middle">~/.axiomata/skills/</text>
         </g>
 
         <g id="node-runlog" data-node-id="runlog" data-node-label="skills::runlog" tabindex="0" role="button" aria-label="Focus skills::runlog, RunRecord + persist, crate: axiomata-core  (no Tauri / macOS dependency)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="RunRecord + persist" data-node-context="crate: axiomata-core  (no Tauri / macOS dependency)">
@@ -5171,8 +5171,8 @@
         <text data-detail="context" x="912" y="308" class="t-muted" font-size="9" text-anchor="middle">127.0.0.1:11434</text>
         </g>
 
-        <g id="node-data" data-node-id="data" data-node-label="Runtime data (outside the repo)" tabindex="0" role="button" aria-label="Focus Runtime data (outside the repo), ~/.axiomata/  (config.toml, axiomata.db, logs/runs.log, skills/)   +   &lt;workspace&gt;/.claude/skills/, Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="~/.axiomata/  (config.toml, axiomata.db, logs/runs.log, skills/)   +   &lt;workspace&gt;/.claude/skills/" data-node-context="Architecture component">
-          <title>Runtime data (outside the repo) · ~/.axiomata/  (config.toml, axiomata.db, logs/runs.log, skills/)   +   &lt;workspace&gt;/.claude/skills/ · Architecture component</title>
+        <g id="node-data" data-node-id="data" data-node-label="Runtime data (outside the repo)" tabindex="0" role="button" aria-label="Focus Runtime data (outside the repo), ~/.axiomata/  —  config.toml, axiomata.db, logs/runs.log, skills/ (all skills), Architecture component" aria-pressed="false" data-node-kind="database" data-node-sublabel="~/.axiomata/  —  config.toml, axiomata.db, logs/runs.log, skills/ (all skills)" data-node-context="Architecture component">
+          <title>Runtime data (outside the repo) · ~/.axiomata/  —  config.toml, axiomata.db, logs/runs.log, skills/ (all skills) · Architecture component</title>
           <rect x="330" y="630" width="730" height="80" rx="6" class="c-mask"/>
           <rect x="330" y="630" width="730" height="80" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(336 636) scale(0.6875)">
@@ -5180,7 +5180,7 @@
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="695" y="668" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Runtime data (outside the repo)</text>
-        <text data-detail="context" x="695" y="684" class="t-muted" font-size="9" text-anchor="middle">~/.axiomata/  (config.toml, axiomata.db, logs/runs.log, skills/)   +   &lt;workspace&gt;/.claude/skills/</text>
+        <text data-detail="context" x="695" y="684" class="t-muted" font-size="9" text-anchor="middle">~/.axiomata/  —  config.toml, axiomata.db, logs/runs.log, skills/ (all skills)</text>
         </g>
 
         <!-- Connection labels -->
@@ -5449,7 +5449,7 @@
         <ul>
           <li>&bull; skills -&gt; agents -&gt; config; nothing points back at Tauri or macOS</li>
           <li>&bull; The filesystem is the source of truth for skills; the DB only records run events</li>
-          <li>&bull; registry reads SKILL.md from both dirs; runlog writes the DB row and mirrors it to runs.log</li>
+          <li>&bull; registry reads ~/.axiomata/skills/; runlog writes the DB row and mirrors it to runs.log</li>
         </ul>
       </div>
 

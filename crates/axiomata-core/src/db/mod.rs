@@ -90,9 +90,9 @@ mod tests {
             // Migration 0002's DDL ran too.
             conn.execute(
                 "INSERT INTO runs \
-                 (skill_name, skill_source, backend, status, exit_code, duration_ms, \
+                 (skill_name, backend, status, exit_code, duration_ms, \
                   started_at, finished_at) \
-                 VALUES ('probe', 'global', 'ollama', 'success', 0, 12, \
+                 VALUES ('probe', 'ollama', 'success', 0, 12, \
                          '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 [],
             )

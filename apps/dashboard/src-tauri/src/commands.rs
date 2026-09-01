@@ -15,11 +15,10 @@ use tauri::State;
 /// Core engine wrapped for Tauri-managed state.
 pub type CoreState = Mutex<AxiomataCore>;
 
-/// Lists every discovered skill (global + workspace-local, merged).
+/// Lists every discovered skill (`~/.axiomata/skills/`).
 #[tauri::command]
-pub fn list_skills(state: State<'_, CoreState>) -> Result<Vec<Skill>, String> {
-    let core = state.lock().map_err(|err| err.to_string())?;
-    skills::list_skills(&core.config).map_err(|err| err.to_string())
+pub fn list_skills() -> Result<Vec<Skill>, String> {
+    skills::list_skills().map_err(|err| err.to_string())
 }
 
 /// Returns the most recent skill runs, newest first, capped at `limit`.
