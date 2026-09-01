@@ -12,6 +12,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_skills,
             commands::list_runs,
+            commands::get_run,
             commands::run_skill,
         ])
         .setup(|app| {

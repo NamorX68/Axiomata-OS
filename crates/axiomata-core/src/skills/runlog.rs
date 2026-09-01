@@ -81,6 +81,30 @@ pub struct RunRecord {
     pub finished_at: DateTime<Utc>,
 }
 
+/// The slim projection of a [`RunRecord`] for history-list views (the dashboard
+/// card, `axiomata-cli list-runs`). Deliberately omits the potentially large
+/// captured `stdout` / `stderr` — fetch the full record with [`get_run`] to
+/// show a single run's output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunSummary {
+    /// Database row id.
+    pub id: i64,
+    /// Skill name as resolved at run time.
+    pub skill_name: String,
+    /// `"claude-code"` or `"ollama"`.
+    pub backend: String,
+    /// Overall outcome.
+    pub status: RunStatus,
+    /// Process/synthetic exit code, or `None` when no agent result was produced.
+    pub exit_code: Option<i32>,
+    /// Wall-clock duration of the run, in milliseconds.
+    pub duration_ms: u64,
+    /// Short failure message when no agent result was produced; `None` otherwise.
+    pub error: Option<String>,
+    /// When the run started.
+    pub started_at: DateTime<Utc>,
+}
+
 /// Persists `record` to both the database and the JSONL log.
 ///
 /// The database row is written first; on success the JSONL line is appended.
@@ -143,23 +167,62 @@ fn append_jsonl(record: &RunRecord) -> Result<(), AxiomataError> {
     writeln!(file, "{line}").map_err(|source| AxiomataError::Io { path, source })
 }
 
-/// Returns the most recent runs, newest first, capped at `limit`.
+/// Hard upper bound on how many rows [`list_runs`] will return, whatever
+/// `limit` the caller asks for — a history list never needs more, and it keeps
+/// an unbounded request from pulling the whole table.
+pub const MAX_RUN_LIMIT: usize = 500;
+
+/// Returns the most recent runs as [`RunSummary`] values, newest first, capped
+/// at `min(limit, MAX_RUN_LIMIT)`.
 ///
 /// Errors:
 ///     [`AxiomataError::Database`] if the query fails.
-pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunRecord>, AxiomataError> {
+pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunSummary>, AxiomataError> {
+    let limit = limit.min(MAX_RUN_LIMIT);
+    let mut stmt = db.prepare(
+        "SELECT id, skill_name, backend, status, exit_code, duration_ms, error, started_at \
+         FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit as i64], row_to_summary)?;
+
+    let mut summaries = Vec::new();
+    for row in rows {
+        summaries.push(row?);
+    }
+    Ok(summaries)
+}
+
+/// Fetches one full [`RunRecord`] by id, or `None` if there is no such row.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the query fails.
+pub fn get_run(db: &Connection, id: i64) -> Result<Option<RunRecord>, AxiomataError> {
     let mut stmt = db.prepare(
         "SELECT id, skill_name, backend, status, exit_code, \
          duration_ms, stdout, stderr, error, started_at, finished_at \
-         FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1",
+         FROM runs WHERE id = ?1",
     )?;
-    let rows = stmt.query_map([limit as i64], row_to_record)?;
-
-    let mut records = Vec::new();
-    for row in rows {
-        records.push(row?);
+    match stmt.query_row([id], row_to_record) {
+        Ok(record) => Ok(Some(record)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err.into()),
     }
-    Ok(records)
+}
+
+/// Maps one summary-projection row onto a [`RunSummary`].
+fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunSummary> {
+    let status: String = row.get(3)?;
+    let started_at: String = row.get(7)?;
+    Ok(RunSummary {
+        id: row.get(0)?,
+        skill_name: row.get(1)?,
+        backend: row.get(2)?,
+        status: RunStatus::from_db_str(&status, 3)?,
+        exit_code: row.get(4)?,
+        duration_ms: row.get::<_, i64>(5)? as u64,
+        error: row.get(6)?,
+        started_at: parse_timestamp(row, 7, &started_at)?,
+    })
 }
 
 /// Maps one `runs` row onto a [`RunRecord`].
@@ -250,16 +313,26 @@ mod tests {
         let parsed: RunRecord = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(parsed.skill_name, "triage");
 
-        // DB: newest first, limit respected.
+        // DB list: summaries, newest first, limit respected.
         let recent = list_runs(&db, 10).unwrap();
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].skill_name, "triage");
         assert_eq!(recent[1].skill_name, "cleanup");
         assert_eq!(recent[0].status, RunStatus::Success);
+        assert_eq!(recent[0].id, 2);
 
         let capped = list_runs(&db, 1).unwrap();
         assert_eq!(capped.len(), 1);
         assert_eq!(capped[0].skill_name, "triage");
+
+        // A too-large `limit` is clamped, not honoured literally.
+        assert!(list_runs(&db, usize::MAX).unwrap().len() <= MAX_RUN_LIMIT);
+
+        // The full record (with captured output) comes back via get_run.
+        let full = get_run(&db, 2).unwrap().unwrap();
+        assert_eq!(full.skill_name, "triage");
+        assert_eq!(full.stdout, "done");
+        assert!(get_run(&db, 999).unwrap().is_none());
 
         unsafe {
             env::remove_var(crate::paths::AXIOMATA_HOME_ENV);

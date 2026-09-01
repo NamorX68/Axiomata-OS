@@ -45,7 +45,7 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
   called by both `axiomata-cli` and the Tauri `.setup()` hook. Fully idempotent. Also seeds
   the bundled `example-skill` (never overwrites an existing copy).
 - The Tauri `.setup()` hook stores `Mutex<AxiomataCore>` as managed state. Commands live in
-  `apps/dashboard/src-tauri/src/commands.rs`: `list_skills`, `list_runs`, `run_skill`.
+  `apps/dashboard/src-tauri/src/commands.rs`: `list_skills`, `list_runs`, `get_run`, `run_skill`.
   `run_skill` clones the config, drops the lock, awaits the agent, re-locks only to persist
   — never hold a `MutexGuard` across `.await`.
 

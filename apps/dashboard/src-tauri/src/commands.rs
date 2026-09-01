@@ -9,7 +9,7 @@
 use std::sync::Mutex;
 
 use axiomata_core::AxiomataCore;
-use axiomata_core::skills::{self, RunRecord, Skill};
+use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
 use tauri::State;
 
 /// Core engine wrapped for Tauri-managed state.
@@ -21,11 +21,19 @@ pub fn list_skills() -> Result<Vec<Skill>, String> {
     skills::list_skills().map_err(|err| err.to_string())
 }
 
-/// Returns the most recent skill runs, newest first, capped at `limit`.
+/// Returns the most recent skill runs as slim summaries, newest first. `limit`
+/// is clamped to `skills::MAX_RUN_LIMIT` in the core.
 #[tauri::command]
-pub fn list_runs(state: State<'_, CoreState>, limit: usize) -> Result<Vec<RunRecord>, String> {
+pub fn list_runs(state: State<'_, CoreState>, limit: usize) -> Result<Vec<RunSummary>, String> {
     let core = state.lock().map_err(|err| err.to_string())?;
     skills::list_runs(&core.db, limit).map_err(|err| err.to_string())
+}
+
+/// Returns one full run (with captured output) by id, or `null` if unknown.
+#[tauri::command]
+pub fn get_run(state: State<'_, CoreState>, id: i64) -> Result<Option<RunRecord>, String> {
+    let core = state.lock().map_err(|err| err.to_string())?;
+    skills::get_run(&core.db, id).map_err(|err| err.to_string())
 }
 
 /// Runs a skill by name and returns the persisted run record.

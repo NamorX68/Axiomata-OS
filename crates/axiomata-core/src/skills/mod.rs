@@ -19,7 +19,7 @@ pub mod runner;
 // Curated facade so consumers (CLI, Tauri commands) don't bind to the internal
 // module layout of `skills`.
 pub use registry::{Skill, find_skill, list_skills};
-pub use runlog::{RunRecord, RunStatus, list_runs};
+pub use runlog::{RunRecord, RunStatus, RunSummary, get_run, list_runs};
 pub use runner::{execute_skill, run_skill};
 
 /// Name of the built-in example skill, seeded into the global skills directory

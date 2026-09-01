@@ -268,8 +268,10 @@ exit_code, duration_ms }`.
   non-zero exit, unknown backend, spawn failure, timeout, API error) is a `RunRecord` whose
   `status` says which.
 - `runlog.rs` persists each `RunRecord` to the SQLite `runs` table (parameterised inserts)
-  **and** appends it as one JSON line to `~/.axiomata/logs/runs.log`. `list_runs(db, limit)`
-  reads them back newest-first for the UI/CLI.
+  **and** appends it as one JSON line to `~/.axiomata/logs/runs.log`. Reads back:
+  `list_runs(db, limit)` returns slim `RunSummary` values (no captured `stdout`/`stderr`)
+  newest-first for the history list, with `limit` clamped to `MAX_RUN_LIMIT` (500);
+  `get_run(db, id)` returns one full `RunRecord` for a single-run detail view.
 - `skills/mod.rs::seed_example_skill()` writes the bundled example skill
   (`crates/axiomata-core/resources/example-skill/SKILL.md`, embedded via `include_str!`,
   `backend: claude-code`) into `~/.axiomata/skills/` on first run, and never overwrites an
@@ -293,7 +295,7 @@ history from the database). This is the primary way to exercise the runner witho
 ### The Tauri shell
 
 `apps/dashboard/src-tauri/src/lib.rs`'s `run()` builds the app, registers the
-`tauri-plugin-opener` plugin and the M1 commands (`list_skills`, `list_runs`, `run_skill` —
+`tauri-plugin-opener` plugin and the M1 commands (`list_skills`, `list_runs`, `get_run`, `run_skill` —
 in `src-tauri/src/commands.rs`), and in `.setup()` calls `AxiomataCore::init()` (panicking
 via `.expect()` — there is still no in-app error UI for a failed init) and stores it as
 `app.manage(Mutex::new(core))`. `run_skill` clones the config, releases the lock, awaits the

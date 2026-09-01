@@ -117,7 +117,7 @@ fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
     for run in runs {
         println!(
             "#{id:<4} {started}  {status:<7} {skill} ({backend}, {ms} ms)",
-            id = run.id.unwrap_or_default(),
+            id = run.id,
             started = run.started_at.to_rfc3339(),
             status = run.status.as_str(),
             skill = run.skill_name,

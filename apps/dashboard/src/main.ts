@@ -7,9 +7,11 @@ interface Skill {
   backend: string;
 }
 
-/** One row of run history as returned by `list_runs` / `run_skill`. */
-interface RunRecord {
-  id: number | null;
+/** One row of run history, as returned by `list_runs` (a `RunSummary`). The
+ *  `run_skill` command returns the fuller `RunRecord`, but this UI only reads
+ *  these fields, so the slim shape covers both. */
+interface RunSummary {
+  id: number;
   skill_name: string;
   backend: string;
   status: "success" | "failed";
@@ -74,7 +76,7 @@ async function runSkill(name: string): Promise<void> {
   running.add(name);
   await refreshSkills();
   try {
-    await invoke<RunRecord>("run_skill", { name });
+    await invoke<RunSummary>("run_skill", { name });
   } catch (err) {
     // A hard failure (skill not found) — surface it in the runs status line.
     el<HTMLParagraphElement>("runs-status").textContent =
@@ -90,7 +92,7 @@ async function refreshRuns(): Promise<void> {
   const table = el<HTMLTableElement>("runs-table");
   const body = el<HTMLTableSectionElement>("runs-body");
   try {
-    const runs = await invoke<RunRecord[]>("list_runs", { limit: RUN_LIMIT });
+    const runs = await invoke<RunSummary[]>("list_runs", { limit: RUN_LIMIT });
     body.replaceChildren();
     if (runs.length === 0) {
       status.textContent = "No runs recorded yet.";
@@ -108,10 +110,10 @@ async function refreshRuns(): Promise<void> {
   }
 }
 
-function runRow(run: RunRecord): HTMLTableRowElement {
+function runRow(run: RunSummary): HTMLTableRowElement {
   const row = document.createElement("tr");
   row.className = run.status === "failed" ? "failed" : "success";
-  row.appendChild(cell(run.id === null ? "—" : String(run.id)));
+  row.appendChild(cell(String(run.id)));
   row.appendChild(cell(run.started_at));
   row.appendChild(cell(run.status));
   row.appendChild(cell(run.skill_name));
