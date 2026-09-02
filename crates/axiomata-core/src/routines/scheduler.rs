@@ -235,15 +235,30 @@ async fn reconcile_missed(
     Ok(rolled)
 }
 
-/// A running scheduler loop. Dropping it, or calling [`SchedulerHandle::shutdown`],
-/// stops the loop after its current tick.
+/// Stops a running scheduler loop. Sending the signal — explicitly via
+/// [`SchedulerHandle::shutdown`], or implicitly on `Drop` — makes the loop
+/// break after its current tick.
+///
+/// Holds a [`tokio::task::JoinHandle`] only when the loop was started by
+/// [`spawn`]; when the caller ran [`serve`] on its own runtime (the Tauri
+/// shell does this), there is nothing to join and shutdown is best-effort.
 pub struct SchedulerHandle {
     stop: tokio::sync::watch::Sender<bool>,
     join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl SchedulerHandle {
-    /// Signals the loop to stop and waits for the task to finish.
+    /// Creates just the stop channel: keep the [`SchedulerHandle`], hand the
+    /// [`tokio::sync::watch::Receiver`] to [`serve`] on whatever runtime you
+    /// have. Used by the Tauri shell, whose `.setup()` is not itself inside a
+    /// Tokio runtime and spawns via `tauri::async_runtime`.
+    pub fn channel() -> (Self, tokio::sync::watch::Receiver<bool>) {
+        let (stop, stop_rx) = tokio::sync::watch::channel(false);
+        (Self { stop, join: None }, stop_rx)
+    }
+
+    /// Signals the loop to stop and, if this handle owns the task, waits for
+    /// it to finish.
     pub async fn shutdown(mut self) {
         let _ = self.stop.send(true);
         if let Some(join) = self.join.take() {
@@ -256,16 +271,18 @@ impl Drop for SchedulerHandle {
     fn drop(&mut self) {
         // Best-effort: tell the loop to stop. If the caller used `shutdown`
         // the join already happened; otherwise the task ends on its own at the
-        // next tick boundary.
+        // next tick boundary (or when the process exits).
         let _ = self.stop.send(true);
     }
 }
 
-/// Starts the routine scheduler on the current Tokio runtime.
+/// Starts the routine scheduler on the current Tokio runtime and returns a
+/// handle that owns the task.
 ///
-/// Takes owned copies of the config and a shared handle to the database so the
-/// task outlives the caller. The returned [`SchedulerHandle`] must be kept
-/// alive for the loop to keep running.
+/// # Panics
+///
+/// Panics if called outside a Tokio runtime. The Tauri shell, whose `.setup()`
+/// has no runtime, uses [`SchedulerHandle::channel`] + [`serve`] instead.
 pub fn spawn(config: Config, db: Arc<Mutex<Connection>>) -> SchedulerHandle {
     spawn_with_interval(config, db, POLL_INTERVAL)
 }
@@ -277,46 +294,63 @@ pub(crate) fn spawn_with_interval(
     db: Arc<Mutex<Connection>>,
     interval: Duration,
 ) -> SchedulerHandle {
-    let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
-
-    let join = tokio::spawn(async move {
-        match reconcile_missed(&config, &db).await {
-            Ok(0) => {}
-            Ok(n) => tracing::info!(rolled_forward = n, "routine scheduler skipped missed fires"),
-            Err(err) => tracing::warn!(%err, "routine scheduler startup reconciliation failed"),
-        }
-
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-        loop {
-            tokio::select! {
-                _ = ticker.tick() => match tick(&config, &db).await {
-                    Ok(report) if report.fired > 0 || !report.errors.is_empty() => {
-                        tracing::info!(
-                            fired = report.fired,
-                            succeeded = report.succeeded,
-                            failed = report.failed,
-                            errors = ?report.errors,
-                            "routine tick",
-                        );
-                    }
-                    Ok(_) => {}
-                    Err(err) => tracing::warn!(%err, "routine scheduler tick failed"),
-                },
-                result = stop_rx.changed() => {
-                    // Sender dropped or told us to stop.
-                    if result.is_err() || *stop_rx.borrow() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-
+    let (stop, stop_rx) = tokio::sync::watch::channel(false);
+    let join = tokio::spawn(serve_with_interval(config, db, stop_rx, interval));
     SchedulerHandle {
         stop,
         join: Some(join),
+    }
+}
+
+/// Runs the scheduler loop until the stop signal flips to `true` or its sender
+/// drops. This is the whole loop as a future; run it with `tokio::spawn`,
+/// `tauri::async_runtime::spawn`, or by awaiting it directly.
+pub async fn serve(
+    config: Config,
+    db: Arc<Mutex<Connection>>,
+    stop_rx: tokio::sync::watch::Receiver<bool>,
+) {
+    serve_with_interval(config, db, stop_rx, POLL_INTERVAL).await
+}
+
+/// [`serve`] with an explicit poll interval.
+async fn serve_with_interval(
+    config: Config,
+    db: Arc<Mutex<Connection>>,
+    mut stop_rx: tokio::sync::watch::Receiver<bool>,
+    interval: Duration,
+) {
+    match reconcile_missed(&config, &db).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(rolled_forward = n, "routine scheduler skipped missed fires"),
+        Err(err) => tracing::warn!(%err, "routine scheduler startup reconciliation failed"),
+    }
+
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => match tick(&config, &db).await {
+                Ok(report) if report.fired > 0 || !report.errors.is_empty() => {
+                    tracing::info!(
+                        fired = report.fired,
+                        succeeded = report.succeeded,
+                        failed = report.failed,
+                        errors = ?report.errors,
+                        "routine tick",
+                    );
+                }
+                Ok(_) => {}
+                Err(err) => tracing::warn!(%err, "routine scheduler tick failed"),
+            },
+            result = stop_rx.changed() => {
+                // Sender dropped or told us to stop.
+                if result.is_err() || *stop_rx.borrow() {
+                    break;
+                }
+            }
+        }
     }
 }
 

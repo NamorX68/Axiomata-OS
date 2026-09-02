@@ -37,8 +37,31 @@ interface SyncReport {
   tracked_files: number;
 }
 
+/** What a routine runs when it fires — tagged to match the Rust enum. */
+type RoutineTarget =
+  | { type: "skill"; value: string }
+  | { type: "prompt"; value: string };
+
+/** A scheduled routine, as returned by `list_routines`. */
+interface Routine {
+  id: number;
+  name: string;
+  cron_expr: string;
+  target: RoutineTarget;
+  backend: string | null;
+  enabled: boolean;
+  next_fire_at: string | null;
+  last_fired_at: string | null;
+}
+
 const RUN_LIMIT = 25;
 const POLL_MS = 3000;
+
+/** Ids of routines whose enable/disable toggle is currently in flight. */
+const routineToggling = new Set<number>();
+
+/** True while an "Add routine" call is in flight. */
+let routineAdding = false;
 
 /** True while a "Sync now" call is in flight. */
 let memorySyncing = false;
@@ -196,16 +219,110 @@ async function syncMemory(): Promise<void> {
   }
 }
 
+async function refreshRoutines(): Promise<void> {
+  const status = el<HTMLParagraphElement>("routines-status");
+  const table = el<HTMLTableElement>("routines-table");
+  const body = el<HTMLTableSectionElement>("routines-body");
+  try {
+    const routines = await invoke<Routine[]>("list_routines");
+    body.replaceChildren();
+    if (routines.length === 0) {
+      status.textContent = "No routines defined.";
+      table.hidden = true;
+      return;
+    }
+    for (const routine of routines) {
+      body.appendChild(routineRow(routine));
+    }
+    status.textContent = "";
+    table.hidden = false;
+  } catch (err) {
+    status.textContent = `Failed to load routines: ${String(err)}`;
+    table.hidden = true;
+  }
+}
+
+function routineRow(routine: Routine): HTMLTableRowElement {
+  const row = document.createElement("tr");
+  row.className = routine.enabled ? "success" : "failed";
+  row.appendChild(cell(String(routine.id)));
+  row.appendChild(cell(routine.name));
+  row.appendChild(cell(routine.cron_expr));
+  row.appendChild(cell(`${routine.target.type}: ${routine.target.value}`));
+  row.appendChild(cell(routine.next_fire_at ?? "—"));
+  row.appendChild(cell(routine.last_fired_at ?? "never"));
+
+  const actionCell = document.createElement("td");
+  const button = document.createElement("button");
+  const busy = routineToggling.has(routine.id);
+  button.textContent = busy ? "…" : routine.enabled ? "Disable" : "Enable";
+  button.disabled = busy;
+  button.addEventListener("click", () => toggleRoutine(routine.id, !routine.enabled));
+  actionCell.appendChild(button);
+  row.appendChild(actionCell);
+  return row;
+}
+
+async function toggleRoutine(id: number, enabled: boolean): Promise<void> {
+  routineToggling.add(id);
+  await refreshRoutines();
+  try {
+    await invoke<boolean>("set_routine_enabled", { id, enabled });
+  } catch (err) {
+    el<HTMLParagraphElement>("routines-status").textContent =
+      `set_routine_enabled(#${id}) failed: ${String(err)}`;
+  } finally {
+    routineToggling.delete(id);
+    await refreshRoutines();
+  }
+}
+
+async function addRoutine(event: SubmitEvent): Promise<void> {
+  event.preventDefault();
+  if (routineAdding) return;
+  routineAdding = true;
+  const button = el<HTMLButtonElement>("routine-add-btn");
+  const result = el<HTMLParagraphElement>("routine-form-result");
+  button.disabled = true;
+
+  const type = el<HTMLSelectElement>("routine-target-type").value as RoutineTarget["type"];
+  const backend = el<HTMLSelectElement>("routine-backend").value;
+  const newRoutine = {
+    name: el<HTMLInputElement>("routine-name").value.trim(),
+    cron_expr: el<HTMLInputElement>("routine-cron").value.trim(),
+    target: { type, value: el<HTMLInputElement>("routine-target-value").value.trim() },
+    backend: backend === "" ? null : backend,
+    enabled: true,
+  };
+
+  try {
+    const created = await invoke<Routine>("add_routine", { new: newRoutine });
+    result.textContent = `Created routine #${created.id}; next fire ${created.next_fire_at ?? "never"}.`;
+    el<HTMLFormElement>("routine-form").reset();
+  } catch (err) {
+    result.textContent = `Add failed: ${String(err)}`;
+  } finally {
+    routineAdding = false;
+    button.disabled = false;
+    await refreshRoutines();
+  }
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   el<HTMLButtonElement>("memory-sync-btn").addEventListener("click", () => {
     void syncMemory();
   });
+  el<HTMLFormElement>("routine-form").addEventListener("submit", (event) => {
+    void addRoutine(event as SubmitEvent);
+  });
   void refreshMemory();
   void refreshSkills();
   void refreshRuns();
+  void refreshRoutines();
   setInterval(() => {
     void refreshMemory();
     void refreshSkills();
     void refreshRuns();
+    void refreshRoutines();
   }, POLL_MS);
 });

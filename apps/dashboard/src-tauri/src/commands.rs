@@ -8,6 +8,7 @@
 
 use axiomata_core::AxiomataCore;
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
+use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
 use tauri::State;
 
@@ -53,4 +54,43 @@ pub fn sync_memory(state: State<'_, CoreState>) -> Result<SyncReport, String> {
 #[tauri::command]
 pub fn get_memory_status(state: State<'_, CoreState>) -> Result<MemoryStatus, String> {
     memory::status(&state.config).map_err(|err| err.to_string())
+}
+
+/// Lists every routine, soonest next-fire first.
+#[tauri::command]
+pub fn list_routines(state: State<'_, CoreState>) -> Result<Vec<Routine>, String> {
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    routines::store::list(&db).map_err(|err| err.to_string())
+}
+
+/// Creates a routine. `new.target` arrives as `{ "type": "skill" | "prompt",
+/// "value": "..." }`. Returns the stored routine (with its computed next fire).
+#[tauri::command]
+pub fn add_routine(state: State<'_, CoreState>, new: NewRoutine) -> Result<Routine, String> {
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    routines::store::add(&db, new).map_err(|err| err.to_string())
+}
+
+/// Enables or disables a routine by id. Returns `false` if there is no such
+/// routine. Re-enabling recomputes the next fire from now.
+#[tauri::command]
+pub fn set_routine_enabled(
+    state: State<'_, CoreState>,
+    id: i64,
+    enabled: bool,
+) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    routines::store::set_enabled(&db, id, enabled).map_err(|err| err.to_string())
+}
+
+/// Returns a routine's firing history, newest first. `limit` is clamped in the
+/// core to `routines::store::MAX_ROUTINE_RUN_LIMIT`.
+#[tauri::command]
+pub fn routine_history(
+    state: State<'_, CoreState>,
+    id: i64,
+    limit: usize,
+) -> Result<Vec<RoutineRun>, String> {
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    routines::store::list_runs(&db, id, limit).map_err(|err| err.to_string())
 }

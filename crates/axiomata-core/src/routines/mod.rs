@@ -25,4 +25,4 @@ pub mod store;
 // Curated facade so the CLI and Tauri commands don't bind to the internal
 // module layout.
 pub use model::{NewRoutine, Routine, RoutineRun, RoutineRunStatus, RoutineState, RoutineTarget};
-pub use scheduler::{SchedulerHandle, spawn, tick};
+pub use scheduler::{SchedulerHandle, serve, spawn, tick};

@@ -136,6 +136,35 @@ dd {
   word-break: break-all;
 }
 
+.routine-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.routine-form input,
+.routine-form select {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #d2d2d7;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.routine-form input#routine-cron {
+  flex: 1 1 20rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .routine-form input,
+  .routine-form select {
+    background: #2c2c2e;
+    border-color: #3a3a3c;
+  }
+}
+
 .badge {
   display: inline-block;
   padding: 0.1rem 0.5rem;

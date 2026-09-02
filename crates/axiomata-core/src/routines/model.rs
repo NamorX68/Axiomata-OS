@@ -60,7 +60,7 @@ impl RoutineTarget {
 /// The fields a caller supplies to create a routine. [`crate::routines::store::add`]
 /// validates the cron expression, computes the initial `next_fire_at`, stamps
 /// the timestamps, and returns a full [`Routine`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct NewRoutine {
     pub name: String,
     pub cron_expr: String,
