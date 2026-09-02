@@ -4,10 +4,10 @@
 //! SQL for them; [`crate::routines::scheduler`] and the CLI/Tauri layers go
 //! through these functions rather than issuing queries directly.
 //!
-//! `next_fire_at` is treated as authoritative state here: [`add`] computes the
-//! first one, [`mark_fired`] advances it after a real firing, and
-//! [`roll_forward`] advances it without firing (the startup catch-up path). It
-//! is never recomputed implicitly on read.
+//! `next_fire_at` is authoritative state and it moves forward in exactly one
+//! place: [`advance`], which reads the routine's own `cron_expr` and computes
+//! the next occurrence itself. [`add`] sets the first value; nothing recomputes
+//! it implicitly on read.
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
@@ -20,6 +20,14 @@ use crate::routines::schedule;
 /// Hard upper bound on how many rows [`list_runs`] returns, mirroring
 /// [`crate::skills::runlog::MAX_RUN_LIMIT`].
 pub const MAX_ROUTINE_RUN_LIMIT: usize = 500;
+
+/// Max length of a routine `name` (also its UNIQUE key).
+const MAX_NAME_LEN: usize = 128;
+/// Max byte length of a `prompt` target stored in the `routines` row.
+const MAX_TARGET_LEN: usize = 64 * 1024;
+/// `routine_runs.detail` is free text from lower layers; cap it before storing
+/// so a pathological error message can't bloat the table.
+const MAX_DETAIL_LEN: usize = 2000;
 
 /// The fields needed to record one firing attempt in `routine_runs`.
 #[derive(Debug, Clone)]
@@ -42,10 +50,11 @@ pub struct NewRoutineRun {
 ///
 /// # Errors
 ///
-/// - [`AxiomataError::InvalidRoutine`] if the cron expression is malformed or
-///   the name is already taken.
+/// - [`AxiomataError::InvalidRoutine`] if the name / target / backend fail
+///   validation, the cron expression is malformed, or the name is already taken.
 /// - [`AxiomataError::Database`] on any other SQL failure.
 pub fn add(db: &Connection, new: NewRoutine) -> Result<Routine, AxiomataError> {
+    validate_new(&new)?;
     schedule::validate(&new.cron_expr)?;
 
     let now = Utc::now();
@@ -69,10 +78,13 @@ pub fn add(db: &Connection, new: NewRoutine) -> Result<Routine, AxiomataError> {
         ],
     );
 
+    // 2067 == SQLITE_CONSTRAINT_UNIQUE — the only constraint `add` can hit
+    // (the `name` UNIQUE index), since every other column is validated above.
+    const SQLITE_CONSTRAINT_UNIQUE: i32 = 2067;
     match result {
         Ok(_) => {}
         Err(rusqlite::Error::SqliteFailure(err, _))
-            if err.code == rusqlite::ErrorCode::ConstraintViolation =>
+            if err.extended_code == SQLITE_CONSTRAINT_UNIQUE =>
         {
             return Err(AxiomataError::InvalidRoutine {
                 reason: format!("a routine named {:?} already exists", new.name),
@@ -85,6 +97,58 @@ pub fn add(db: &Connection, new: NewRoutine) -> Result<Routine, AxiomataError> {
     get(db, id)?.ok_or_else(|| AxiomataError::InvalidRoutine {
         reason: "routine vanished immediately after insert".to_owned(),
     })
+}
+
+/// Rejects a routine whose name, target, or backend is malformed — enforced
+/// here so both the CLI and the Tauri command are covered.
+///
+/// - `name`: 1–[`MAX_NAME_LEN`] chars of `[A-Za-z0-9 _-]` (also its UNIQUE key).
+/// - `RoutineTarget::Skill`: a non-empty `[A-Za-z0-9_-]` slug, so it cannot
+///   traverse out of `~/.axiomata/skills/`.
+/// - `RoutineTarget::Prompt`: 1–[`MAX_TARGET_LEN`] bytes.
+/// - `backend`: `None`, `"claude-code"`, or `"ollama"`.
+fn validate_new(new: &NewRoutine) -> Result<(), AxiomataError> {
+    let bad = |reason: String| Err(AxiomataError::InvalidRoutine { reason });
+
+    let name_ok = (1..=MAX_NAME_LEN).contains(&new.name.chars().count())
+        && new
+            .name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-'));
+    if !name_ok {
+        return bad(format!(
+            "routine name must be 1–{MAX_NAME_LEN} characters of [A-Za-z0-9 _-]"
+        ));
+    }
+
+    match &new.target {
+        RoutineTarget::Skill(skill) => {
+            let slug_ok = !skill.is_empty()
+                && skill
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
+            if !slug_ok {
+                return bad(format!(
+                    "skill target {skill:?} must be a non-empty [A-Za-z0-9_-] name"
+                ));
+            }
+        }
+        RoutineTarget::Prompt(prompt) => {
+            if prompt.is_empty() || prompt.len() > MAX_TARGET_LEN {
+                return bad(format!(
+                    "prompt target must be 1–{MAX_TARGET_LEN} bytes (got {})",
+                    prompt.len()
+                ));
+            }
+        }
+    }
+
+    match new.backend.as_deref() {
+        None | Some("claude-code") | Some("ollama") => Ok(()),
+        Some(other) => bad(format!(
+            "backend must be \"claude-code\" or \"ollama\", got {other:?}"
+        )),
+    }
 }
 
 /// Returns every routine, soonest `next_fire_at` first, routines with no next
@@ -149,26 +213,59 @@ pub fn set_enabled(db: &Connection, id: i64, enabled: bool) -> Result<bool, Axio
     Ok(changed > 0)
 }
 
-/// Records that a routine fired: sets `last_fired_at` and advances
-/// `next_fire_at` to `next`. Does not touch `updated_at` (that tracks
-/// user-facing config changes, not firings).
-pub fn mark_fired(
-    db: &Connection,
-    id: i64,
-    fired_at: DateTime<Utc>,
-    next: Option<DateTime<Utc>>,
-) -> Result<(), AxiomataError> {
-    db.execute(
-        "UPDATE routines SET last_fired_at = ?1, next_fire_at = ?2 WHERE id = ?3",
-        rusqlite::params![fired_at.to_rfc3339(), next.map(|dt| dt.to_rfc3339()), id],
-    )?;
-    Ok(())
+/// Why [`advance`] is moving a routine's `next_fire_at` forward.
+#[derive(Debug, Clone, Copy)]
+pub enum Advance {
+    /// The routine just fired at this instant; also stamps `last_fired_at`.
+    Fired(DateTime<Utc>),
+    /// The routine was past-due at startup and is being skipped forward
+    /// without firing (the catch-up path). `last_fired_at` is left as-is.
+    Skipped,
 }
 
-/// Advances `next_fire_at` to `next` without recording a firing — the startup
-/// catch-up path for a routine whose scheduled time passed while the app was
-/// not running.
-pub fn roll_forward(
+/// Moves a routine's `next_fire_at` to the next occurrence of its **own**
+/// stored `cron_expr`, strictly after now. This is the single place
+/// `next_fire_at` advances after creation — the scheduler never computes it.
+///
+/// Returns the new `next_fire_at` (`None` if the cron has no further
+/// occurrence). A no-op — returning `Ok(None)` — if there is no such routine.
+/// Does not touch `updated_at` (that tracks user config changes, not firings).
+///
+/// # Errors
+///
+/// [`AxiomataError::InvalidRoutine`] if the stored `cron_expr` no longer parses
+/// (a corrupted or externally-edited row); the row is left untouched so the
+/// caller can decide what to do with a routine that can't be scheduled.
+/// [`AxiomataError::Database`] on a write failure.
+pub fn advance(
+    db: &Connection,
+    id: i64,
+    how: Advance,
+) -> Result<Option<DateTime<Utc>>, AxiomataError> {
+    let Some(routine) = get(db, id)? else {
+        return Ok(None);
+    };
+    let next = schedule::next_after(&routine.cron_expr, Utc::now())?;
+    let next_str = next.map(|dt| dt.to_rfc3339());
+
+    match how {
+        Advance::Fired(at) => db.execute(
+            "UPDATE routines SET last_fired_at = ?1, next_fire_at = ?2 WHERE id = ?3",
+            rusqlite::params![at.to_rfc3339(), next_str, id],
+        )?,
+        Advance::Skipped => db.execute(
+            "UPDATE routines SET next_fire_at = ?1 WHERE id = ?2",
+            rusqlite::params![next_str, id],
+        )?,
+    };
+    Ok(next)
+}
+
+/// Sets a routine's `next_fire_at` to an explicit value, bypassing cron
+/// computation. This is a low-level override — normal forward advancement goes
+/// through [`advance`]. Used by tests to force a routine due, and available for
+/// a future "edit schedule" path.
+pub fn set_next_fire_at(
     db: &Connection,
     id: i64,
     next: Option<DateTime<Utc>>,
@@ -181,11 +278,13 @@ pub fn roll_forward(
 }
 
 /// Appends one row to `routine_runs` and returns it with its assigned id.
+/// `run.detail` is truncated to [`MAX_DETAIL_LEN`] before storage.
 pub fn record_run(
     db: &Connection,
     routine_id: i64,
     run: NewRoutineRun,
 ) -> Result<RoutineRun, AxiomataError> {
+    let detail = clamp_detail(run.detail);
     db.execute(
         "INSERT INTO routine_runs \
          (routine_id, run_id, scheduled_for, fired_at, status, detail) \
@@ -196,7 +295,7 @@ pub fn record_run(
             run.scheduled_for.to_rfc3339(),
             run.fired_at.to_rfc3339(),
             run.status.as_str(),
-            run.detail,
+            detail,
         ],
     )?;
     Ok(RoutineRun {
@@ -206,7 +305,19 @@ pub fn record_run(
         scheduled_for: run.scheduled_for,
         fired_at: run.fired_at,
         status: run.status,
-        detail: run.detail,
+        detail,
+    })
+}
+
+/// Truncates `raw` to [`MAX_DETAIL_LEN`] characters on a char boundary.
+fn clamp_detail(raw: Option<String>) -> Option<String> {
+    raw.map(|text| match text.char_indices().nth(MAX_DETAIL_LEN) {
+        Some((cut, _)) => {
+            let mut short = text[..cut].to_owned();
+            short.push('…');
+            short
+        }
+        None => text,
     })
 }
 
@@ -358,6 +469,69 @@ mod tests {
     }
 
     #[test]
+    fn add_rejects_malformed_name_target_and_backend() {
+        let (path, db) = temp_db();
+
+        let cases: Vec<NewRoutine> = vec![
+            NewRoutine {
+                name: "bad/name".to_owned(),
+                ..new_routine("_")
+            },
+            NewRoutine {
+                name: "x".repeat(200),
+                ..new_routine("_")
+            },
+            NewRoutine {
+                target: RoutineTarget::Skill("../etc/passwd".to_owned()),
+                ..new_routine("trav")
+            },
+            NewRoutine {
+                target: RoutineTarget::Prompt(String::new()),
+                ..new_routine("empty-prompt")
+            },
+            NewRoutine {
+                backend: Some("opencode".to_owned()),
+                ..new_routine("weird-backend")
+            },
+        ];
+        for case in cases {
+            assert!(
+                matches!(
+                    add(&db, case.clone()).unwrap_err(),
+                    AxiomataError::InvalidRoutine { .. }
+                ),
+                "expected {case:?} to be rejected"
+            );
+        }
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn record_run_truncates_an_oversized_detail() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("verbose")).unwrap();
+        let huge = "e".repeat(MAX_DETAIL_LEN * 3);
+        record_run(
+            &db,
+            r.id,
+            NewRoutineRun {
+                run_id: None,
+                scheduled_for: Utc::now(),
+                fired_at: Utc::now(),
+                status: RoutineRunStatus::Failed,
+                detail: Some(huge),
+            },
+        )
+        .unwrap();
+        let stored = list_runs(&db, r.id, 1).unwrap()[0].detail.clone().unwrap();
+        assert!(stored.chars().count() <= MAX_DETAIL_LEN + 1);
+        assert!(stored.ends_with('…'));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
     fn due_routines_selects_only_enabled_past_due_rows() {
         let (path, db) = temp_db();
 
@@ -367,10 +541,10 @@ mod tests {
 
         let past = Utc::now() - chrono::Duration::minutes(5);
         let future = Utc::now() + chrono::Duration::hours(1);
-        roll_forward(&db, a.id, Some(past)).unwrap();
-        roll_forward(&db, b.id, Some(past)).unwrap();
+        set_next_fire_at(&db, a.id, Some(past)).unwrap();
+        set_next_fire_at(&db, b.id, Some(past)).unwrap();
         set_enabled(&db, b.id, false).unwrap();
-        roll_forward(&db, c.id, Some(future)).unwrap();
+        set_next_fire_at(&db, c.id, Some(future)).unwrap();
 
         let due = due_routines(&db, Utc::now()).unwrap();
         assert_eq!(due.len(), 1);
@@ -386,7 +560,7 @@ mod tests {
 
         // Force a stale past next-fire, then disable.
         let stale = Utc::now() - chrono::Duration::days(3);
-        roll_forward(&db, r.id, Some(stale)).unwrap();
+        set_next_fire_at(&db, r.id, Some(stale)).unwrap();
         assert!(set_enabled(&db, r.id, false).unwrap());
         assert!(!get(&db, r.id).unwrap().unwrap().enabled);
 
@@ -402,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_fired_and_record_run_build_history_and_state() {
+    fn advance_and_record_run_build_history_and_state() {
         let (path, db) = temp_db();
         let r = add(&db, new_routine("history")).unwrap();
 
@@ -424,7 +598,6 @@ mod tests {
         );
 
         let fired_at = Utc::now();
-        let next = Utc::now() + chrono::Duration::minutes(2);
         record_run(
             &db,
             r.id,
@@ -437,7 +610,11 @@ mod tests {
             },
         )
         .unwrap();
-        mark_fired(&db, r.id, fired_at, Some(next)).unwrap();
+        let next = advance(&db, r.id, Advance::Fired(fired_at)).unwrap();
+        assert!(
+            next.unwrap() > Utc::now(),
+            "advance recomputes from the cron"
+        );
 
         let after = get(&db, r.id).unwrap().unwrap();
         assert_eq!(after.last_fired_at.unwrap(), fired_at.with_timezone(&Utc));
@@ -452,7 +629,7 @@ mod tests {
             r.id,
             NewRoutineRun {
                 run_id: None,
-                scheduled_for: next,
+                scheduled_for: next.unwrap(),
                 fired_at: Utc::now(),
                 status: RoutineRunStatus::Failed,
                 detail: Some("skill vanished".to_owned()),
@@ -479,14 +656,14 @@ mod tests {
         let later = add(&db, new_routine("later")).unwrap();
         let never = add(&db, new_routine("never")).unwrap();
 
-        roll_forward(
+        set_next_fire_at(
             &db,
             soon.id,
             Some(Utc::now() + chrono::Duration::minutes(1)),
         )
         .unwrap();
-        roll_forward(&db, later.id, Some(Utc::now() + chrono::Duration::hours(1))).unwrap();
-        roll_forward(&db, never.id, None).unwrap();
+        set_next_fire_at(&db, later.id, Some(Utc::now() + chrono::Duration::hours(1))).unwrap();
+        set_next_fire_at(&db, never.id, None).unwrap();
 
         let ordered: Vec<String> = list(&db).unwrap().into_iter().map(|r| r.name).collect();
         assert_eq!(ordered, vec!["soon", "later", "never"]);

@@ -11,9 +11,11 @@
 //!   30 seconds and fires whatever is due.
 //!
 //! `next_fire_at` is persisted and authoritative: it survives restarts and is
-//! never recomputed from the cron expression on load, so restarting can
-//! neither double-fire nor drop a routine. A fire time that passed while the
-//! app was down is rolled forward without firing.
+//! never recomputed from the cron expression on load, and it moves forward in
+//! exactly one place — [`store::advance`]. The scheduler advances a routine
+//! past its slot *before* running the target, so firings are **at-most-once**:
+//! a crash mid-fire drops that one firing rather than repeating it. A fire time
+//! that passed while the app was down is rolled forward without firing.
 //!
 //! Implemented in M3.
 
@@ -22,7 +24,7 @@ pub mod schedule;
 pub mod scheduler;
 pub mod store;
 
-// Curated facade so the CLI and Tauri commands don't bind to the internal
-// module layout.
+// Re-exports of the commonly used types and the scheduler entry points. The
+// operation surface (create / list / enable / history) is `store::*`.
 pub use model::{NewRoutine, Routine, RoutineRun, RoutineRunStatus, RoutineState, RoutineTarget};
 pub use scheduler::{SchedulerHandle, serve, spawn, tick};

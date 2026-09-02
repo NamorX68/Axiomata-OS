@@ -35,9 +35,12 @@ pub fn open_and_migrate_at(path: &Path) -> Result<Connection, AxiomataError> {
 
     let conn = Connection::open(path)?;
 
-    // SQLite ignores `REFERENCES` clauses unless this is switched on per
-    // connection. `routine_runs` relies on it for its cascade on routine
-    // deletion (migration 0003).
+    // SQLite ignores every `REFERENCES` clause unless this is switched on per
+    // connection. Enabling it is process-wide for this one shared connection;
+    // today only `routine_runs` (migration 0003) declares foreign keys — it
+    // relies on this for the cascade on routine deletion and the SET NULL on
+    // `run_id`. Set before any migration transaction (a pragma inside a
+    // transaction is silently ignored).
     conn.pragma_update(None, "foreign_keys", true)?;
 
     // Bookkeeping table for applied migration versions. Created

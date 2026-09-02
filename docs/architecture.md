@@ -241,9 +241,11 @@ exit_code, duration_ms }`.
   stores (`"claude-code"` / `"ollama"`) onto a variant, filling the Ollama model from the
   frontmatter override or `config.agents.ollama_model`. An unknown string is
   `AxiomataError::UnknownAgentBackend`.
-- `agents/claude_code.rs` spawns `claude -p "<prompt>"` via `tokio::process::Command` in
-  `request.cwd`, with `request.env` applied and stdin closed. stdout/stderr are drained
-  concurrently with the process wait; on timeout the child is signalled **and reaped** before
+- `agents/claude_code.rs` spawns `claude -p` via `tokio::process::Command` in `request.cwd`,
+  with `request.env` applied. The prompt is written to the child's **stdin**, never passed
+  as an argv token, so a prompt beginning with `-` can't be parsed as a `claude` flag (the
+  routine scheduler fires this unattended). stdin/stdout/stderr are pumped concurrently with
+  the process wait; on timeout the child is signalled **and reaped** before
   `AxiomataError::AgentTimeout` returns. A completed process (even non-zero exit) is `Ok`.
 - `agents/ollama.rs` makes one non-streaming `POST /api/generate` call to the local daemon
   (`ollama-rs`, `default-features = false` — no TLS stack, localhost only) via a shared
@@ -350,21 +352,24 @@ Layout mirrors `skills/`: `model` (types), `schedule` (cron), `store` (SQL), `sc
   a slot it slept through). A routine firing is also recorded as a normal row in the `runs`
   table; `routine_runs.run_id` links to it.
 - `scheduler.rs` — one Tokio task. `tick(config, db)` is one poll pass: fetch due routines,
-  fire each **exactly once** (`next_fire_at` jumps to the next occurrence *after now* — no
-  replaying a backlog of missed slots), record a `runs` row + a `routine_runs` row, advance
-  `next_fire_at`. The agent call holds no database lock; the connection is locked only
-  afterwards to write the three rows. A per-routine failure is collected into `TickReport`,
-  not propagated, so one bad routine can't stall the others. `tick` is `pub` so
-  `axiomata-cli routines tick` and tests drive it without the timer. `serve(config, db,
-  stop_rx)` is the whole loop as a future (`POLL_INTERVAL` = 30 s, `MissedTickBehavior::
-  Delay`); `spawn` wraps it for a Tokio context, while the Tauri shell — whose `.setup()`
-  has no runtime — uses `SchedulerHandle::channel()` + `tauri::async_runtime::spawn(serve
-  …)`. Dropping the managed `SchedulerHandle` on app exit stops the loop.
+  and for each `fire_one` — **advance it past its slot first** (`store::advance` recomputes
+  `next_fire_at` from the routine's own cron; no replaying a backlog of missed slots), then
+  run the target with no lock held, then lock the connection to write a `runs` row and a
+  `routine_runs` row. Advancing before executing makes firings **at-most-once**: a crash
+  mid-fire drops that firing rather than repeating it. A routine whose stored cron no longer
+  parses is disabled with a `Failed` history row, not retried forever. A per-routine failure
+  is collected into `TickReport`, not propagated. `tick` is `pub` so `axiomata-cli routines
+  tick` and tests drive it without the timer. `serve(config, db, stop_rx)` is the whole loop
+  as a future (`POLL_INTERVAL` = 30 s, `MissedTickBehavior::Delay`); `spawn` wraps it for a
+  Tokio context, while the Tauri shell — whose `.setup()` has no runtime — uses
+  `SchedulerHandle::channel()` + `tauri::async_runtime::spawn(serve …)`. Dropping the managed
+  `SchedulerHandle` on app exit stops the loop.
 - **Restart safety.** `next_fire_at` is read from the database and never recomputed from the
   cron expression on load. Before the loop starts, `reconcile_missed` runs once: any routine
   already past due (the app was off when it was due) is rolled forward and gets a `Missed`
-  history row — it does **not** fire to catch up. So a restart can neither double-fire a
-  routine nor drop one.
+  history row — it does **not** fire to catch up. Combined with the advance-before-execute
+  ordering, a restart can neither double-fire a routine nor leave one stuck in the past; the
+  cost is that a firing interrupted by a crash is lost, not repeated.
 
 Routines only fire while the app (or `axiomata-cli routines tick`) is running — a
 background / always-on scheduler is M4 (deferred).

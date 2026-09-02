@@ -52,7 +52,10 @@ CREATE TABLE IF NOT EXISTS routine_runs (
     -- The `runs.id` produced by executing the target. NULL when no execution
     -- happened: a 'missed' catch-up row, or a fire that failed before the
     -- runner produced a record (e.g. the target skill no longer exists).
-    run_id        INTEGER REFERENCES runs (id),
+    -- ON DELETE SET NULL so a future `runs` retention/prune job can delete an
+    -- old execution row without being blocked by, or having to touch, its
+    -- routine_runs history entry.
+    run_id        INTEGER REFERENCES runs (id) ON DELETE SET NULL,
     -- RFC 3339. The `next_fire_at` value this attempt was satisfying.
     scheduled_for TEXT    NOT NULL,
     -- RFC 3339. When the scheduler actually acted on it.
@@ -66,3 +69,7 @@ CREATE TABLE IF NOT EXISTS routine_runs (
 -- The common query is "recent firings of routine X".
 CREATE INDEX IF NOT EXISTS idx_routine_runs_routine
     ON routine_runs (routine_id, fired_at DESC);
+
+-- Covers the run_id foreign-key check (SQLite scans the child table on a
+-- parent delete without this).
+CREATE INDEX IF NOT EXISTS idx_routine_runs_run_id ON routine_runs (run_id);

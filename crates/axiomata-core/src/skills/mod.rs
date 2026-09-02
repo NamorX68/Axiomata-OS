@@ -22,7 +22,7 @@ pub mod runner;
 pub use model::{RunRecord, RunStatus, RunSummary};
 pub use registry::{Skill, find_skill, list_skills};
 pub use runlog::{get_run, list_runs};
-pub use runner::{execute_and_record_skill, execute_skill};
+pub use runner::{execute_and_record_skill, execute_prompt, execute_skill};
 
 /// Name of the built-in example skill, seeded into the global skills directory
 /// on first run.

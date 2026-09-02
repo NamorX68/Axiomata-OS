@@ -11,12 +11,15 @@
 //!
 //! ## Restart safety
 //!
-//! `next_fire_at` is read from the database, never recomputed from the cron
-//! expression on startup. Before the loop starts, [`spawn`] runs one
-//! reconciliation pass: any routine whose `next_fire_at` is already in the
-//! past (the app was off when it was due) is rolled forward to its next
-//! occurrence and gets a `missed` history row — it does **not** fire to catch
-//! up. So restarting can neither double-fire a routine nor lose one.
+//! `next_fire_at` is read from the database and never recomputed from the cron
+//! expression on load. [`fire_one`] advances a routine past its slot **before**
+//! it runs the target, so a crash or kill mid-fire drops that one firing
+//! rather than repeating it — firings are **at-most-once**, consistent with the
+//! stance that missed fires do not catch up. Before the loop starts,
+//! [`serve`] runs one reconciliation pass: any routine already past due (the
+//! app was off when it was due) is rolled forward and gets a `Missed` history
+//! row — it does **not** fire. So a restart can neither double-fire a routine
+//! nor leave one stuck in the past.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -25,12 +28,10 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::agents::AgentBackend;
 use crate::config::Config;
 use crate::error::AxiomataError;
 use crate::routines::model::{Routine, RoutineRunStatus, RoutineTarget};
-use crate::routines::store::NewRoutineRun;
-use crate::routines::{schedule, store};
+use crate::routines::store::{self, Advance, NewRoutineRun};
 use crate::skills::model::{RunRecord, RunStatus};
 use crate::skills::{runlog, runner};
 
@@ -58,12 +59,13 @@ pub struct TickReport {
     pub errors: Vec<String>,
 }
 
-/// Runs one poll pass: fire every enabled routine whose `next_fire_at` is at
-/// or before now, then advance each one to its next occurrence.
+/// Runs one poll pass: for every enabled routine whose `next_fire_at` is at or
+/// before now, advance it to its next occurrence and then fire it (see
+/// [`fire_one`]).
 ///
-/// A routine that fires exactly once here even if several of its scheduled
-/// slots have elapsed — `next_fire_at` jumps to the next occurrence strictly
-/// after now, never replaying the backlog.
+/// Each due routine fires at most once per pass even if several of its
+/// scheduled slots have elapsed — `next_fire_at` jumps to the next occurrence
+/// strictly after now, never replaying the backlog.
 ///
 /// # Errors
 ///
@@ -98,12 +100,14 @@ pub async fn tick(
     Ok(report)
 }
 
-/// Executes one routine's target, records the outcome in `runs` (when an agent
-/// ran) and `routine_runs`, and advances `next_fire_at`.
+/// Fires one routine: advance it past its slot first (at-most-once), then run
+/// the target, then record the outcome in `runs` (when an agent ran) and
+/// `routine_runs`.
 ///
-/// Returns the recorded [`RoutineRunStatus`]. Returns `Err` only if a database
-/// write fails; in that case `next_fire_at` is deliberately left as-is so the
-/// routine is retried on the next tick.
+/// A routine whose stored cron expression no longer parses is **disabled** and
+/// given a `Failed` history row, rather than being retried every tick forever.
+/// Returns `Err` only on a database write failure before the agent runs — the
+/// routine stays due and the next tick retries it, with nothing executed yet.
 async fn fire_one(
     routine: &Routine,
     config: &Config,
@@ -112,24 +116,50 @@ async fn fire_one(
 ) -> Result<RoutineRunStatus, AxiomataError> {
     let scheduled_for = routine.next_fire_at.unwrap_or(fired_at);
 
+    // Advance out of the due set BEFORE executing, so a crash mid-fire loses
+    // this firing rather than repeating it. A cron that no longer parses can't
+    // be scheduled at all — disable the routine and record why.
+    let advanced = {
+        let conn = lock(db);
+        store::advance(&conn, routine.id, Advance::Fired(fired_at))
+    };
+    if let Err(err) = advanced {
+        return match err {
+            AxiomataError::InvalidRoutine { reason } => {
+                let conn = lock(db);
+                store::set_enabled(&conn, routine.id, false)?;
+                store::record_run(
+                    &conn,
+                    routine.id,
+                    NewRoutineRun {
+                        run_id: None,
+                        scheduled_for,
+                        fired_at,
+                        status: RoutineRunStatus::Failed,
+                        detail: Some(format!("routine disabled — {reason}")),
+                    },
+                )?;
+                Ok(RoutineRunStatus::Failed)
+            }
+            other => Err(other),
+        };
+    }
+
     // The agent call: no lock held (it awaits, possibly for the whole timeout).
     let outcome = execute_target(routine, config).await;
 
-    // Next occurrence strictly after now — computed once, before taking the
-    // lock. `validate` ran at creation time, so a parse error here means the
-    // stored row was corrupted; surface it rather than firing forever.
-    let next_fire_at = schedule::next_after(&routine.cron_expr, Utc::now())?;
-
     let conn = lock(db);
-    let (status, detail, run_id) = match &outcome {
+    let (status, detail, run_id) = match outcome {
         Ok(record) => {
-            let stored = runlog::record_run(&conn, record.clone())?;
             let status = if record.status == RunStatus::Success {
                 RoutineRunStatus::Success
             } else {
                 RoutineRunStatus::Failed
             };
-            (status, record.error.clone(), stored.id)
+            let detail = record.error.clone();
+            // Move the record in — it can carry up to ~2 MiB of captured output.
+            let stored = runlog::record_run(&conn, record)?;
+            (status, detail, stored.id)
         }
         Err(err) => (RoutineRunStatus::Failed, Some(err.to_string()), None),
     };
@@ -145,67 +175,34 @@ async fn fire_one(
             detail,
         },
     )?;
-    store::mark_fired(&conn, routine.id, fired_at, next_fire_at)?;
     Ok(status)
 }
 
-/// Dispatches to the skill runner or the raw-prompt path.
+/// Dispatches to the skill runner or the raw-prompt runner.
 ///
 /// `Err` here means the target could not be executed at all (a skill routine
 /// whose skill no longer exists); every other outcome, including a non-zero
-/// exit, is an `Ok(RunRecord)`.
+/// exit or an unresolvable prompt backend, is an `Ok(RunRecord)`.
 async fn execute_target(routine: &Routine, config: &Config) -> Result<RunRecord, AxiomataError> {
     match &routine.target {
         RoutineTarget::Skill(name) => runner::execute_skill(name, config).await,
-        RoutineTarget::Prompt(text) => Ok(run_prompt(routine, text, config).await),
-    }
-}
-
-/// Runs a raw prompt against the routine's backend (or [`DEFAULT_PROMPT_BACKEND`]),
-/// always returning a [`RunRecord`] — an unresolvable backend string becomes a
-/// `Failed` record rather than an error.
-async fn run_prompt(routine: &Routine, prompt: &str, config: &Config) -> RunRecord {
-    let started_at = Utc::now();
-    let backend_id = routine.backend.as_deref().unwrap_or(DEFAULT_PROMPT_BACKEND);
-
-    let backend = match AgentBackend::resolve(backend_id, None, config) {
-        Ok(backend) => backend,
-        Err(err) => {
-            return runner::failure_record(
-                &routine.name,
-                backend_id,
-                started_at,
-                0,
-                err.to_string(),
-            );
-        }
-    };
-
-    let request = runner::agent_request(prompt.to_owned(), &backend, config);
-    match backend.run(request).await {
-        Ok(result) => runner::record_from_result(&routine.name, backend.id(), started_at, result),
-        Err(err) => {
-            let elapsed = (Utc::now() - started_at).num_milliseconds().max(0) as u64;
-            runner::failure_record(
-                &routine.name,
-                backend.id(),
-                started_at,
-                elapsed,
-                err.to_string(),
-            )
-        }
+        RoutineTarget::Prompt(text) => Ok(runner::execute_prompt(
+            &routine.name,
+            text.clone(),
+            routine.backend.as_deref().unwrap_or(DEFAULT_PROMPT_BACKEND),
+            config,
+        )
+        .await),
     }
 }
 
 /// Rolls every already-past routine forward without firing it, recording a
-/// `missed` history row for each. Run once at startup, before the loop.
+/// `Missed` history row for each. Run once at startup, before the loop.
 ///
-/// Returns how many routines were rolled forward.
-async fn reconcile_missed(
-    config: &Config,
-    db: &Arc<Mutex<Connection>>,
-) -> Result<usize, AxiomataError> {
-    let _ = config;
+/// Returns how many routines were rolled forward. A per-routine failure is
+/// logged and skipped — it does not abort the sweep (the next tick will pick
+/// that routine up and, if its cron is broken, disable it).
+async fn reconcile_missed(db: &Arc<Mutex<Connection>>) -> Result<usize, AxiomataError> {
     let now = Utc::now();
     let stale = {
         let conn = lock(db);
@@ -214,25 +211,37 @@ async fn reconcile_missed(
 
     let mut rolled = 0;
     for routine in stale {
-        let scheduled_for = routine.next_fire_at.unwrap_or(now);
-        let next_fire_at = schedule::next_after(&routine.cron_expr, now)?;
-
-        let conn = lock(db);
-        store::record_run(
-            &conn,
-            routine.id,
-            NewRoutineRun {
-                run_id: None,
-                scheduled_for,
-                fired_at: now,
-                status: RoutineRunStatus::Missed,
-                detail: Some("app was not running at the scheduled time".to_owned()),
-            },
-        )?;
-        store::roll_forward(&conn, routine.id, next_fire_at)?;
-        rolled += 1;
+        match reconcile_one(db, &routine, now) {
+            Ok(()) => rolled += 1,
+            Err(err) => {
+                tracing::warn!(routine = %routine.name, %err, "could not reconcile a missed routine");
+            }
+        }
     }
     Ok(rolled)
+}
+
+/// Writes one `Missed` row and rolls one routine forward, under a single lock.
+fn reconcile_one(
+    db: &Arc<Mutex<Connection>>,
+    routine: &Routine,
+    now: DateTime<Utc>,
+) -> Result<(), AxiomataError> {
+    let scheduled_for = routine.next_fire_at.unwrap_or(now);
+    let conn = lock(db);
+    store::record_run(
+        &conn,
+        routine.id,
+        NewRoutineRun {
+            run_id: None,
+            scheduled_for,
+            fired_at: now,
+            status: RoutineRunStatus::Missed,
+            detail: Some("app was not running at the scheduled time".to_owned()),
+        },
+    )?;
+    store::advance(&conn, routine.id, Advance::Skipped)?;
+    Ok(())
 }
 
 /// Stops a running scheduler loop. Sending the signal — explicitly via
@@ -320,7 +329,7 @@ async fn serve_with_interval(
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
     interval: Duration,
 ) {
-    match reconcile_missed(&config, &db).await {
+    match reconcile_missed(&db).await {
         Ok(0) => {}
         Ok(n) => tracing::info!(rolled_forward = n, "routine scheduler skipped missed fires"),
         Err(err) => tracing::warn!(%err, "routine scheduler startup reconciliation failed"),
@@ -440,7 +449,7 @@ mod tests {
 
         // Force it due.
         let past = Utc::now() - chrono::Duration::seconds(5);
-        store::roll_forward(&fx.conn(), routine.id, Some(past)).unwrap();
+        store::set_next_fire_at(&fx.conn(), routine.id, Some(past)).unwrap();
 
         let report = tick(&fx.config, &fx.db).await.unwrap();
         assert_eq!(report.fired, 1);
@@ -472,7 +481,7 @@ mod tests {
             store::add(&fx.conn(), prompt_routine("every-second", "*/1 * * * * *")).unwrap();
         // Due since an hour ago — thousands of elapsed slots.
         let long_ago = Utc::now() - chrono::Duration::hours(1);
-        store::roll_forward(&fx.conn(), routine.id, Some(long_ago)).unwrap();
+        store::set_next_fire_at(&fx.conn(), routine.id, Some(long_ago)).unwrap();
 
         let report = tick(&fx.config, &fx.db).await.unwrap();
         assert_eq!(report.fired, 1);
@@ -488,7 +497,7 @@ mod tests {
         let mut new = prompt_routine("sleeper", "*/1 * * * * *");
         new.enabled = false;
         let routine = store::add(&fx.conn(), new).unwrap();
-        store::roll_forward(
+        store::set_next_fire_at(
             &fx.conn(),
             routine.id,
             Some(Utc::now() - chrono::Duration::seconds(10)),
@@ -515,7 +524,7 @@ mod tests {
             enabled: true,
         };
         let routine = store::add(&fx.conn(), new).unwrap();
-        store::roll_forward(
+        store::set_next_fire_at(
             &fx.conn(),
             routine.id,
             Some(Utc::now() - chrono::Duration::seconds(5)),
@@ -542,14 +551,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_routine_with_an_unparseable_stored_cron_is_disabled_not_looped() {
+        let fx = Fixture::new("corrupt-cron");
+        let routine = store::add(&fx.conn(), prompt_routine("broken", "*/1 * * * * *")).unwrap();
+        // Corrupt the stored expression the way only a hand-edit or a future
+        // parser change could, then make it due.
+        fx.conn()
+            .execute(
+                "UPDATE routines SET cron_expr = 'not a cron' WHERE id = ?1",
+                [routine.id],
+            )
+            .unwrap();
+        store::set_next_fire_at(
+            &fx.conn(),
+            routine.id,
+            Some(Utc::now() - chrono::Duration::seconds(5)),
+        )
+        .unwrap();
+
+        let report = tick(&fx.config, &fx.db).await.unwrap();
+        assert_eq!(report.failed, 1);
+        assert!(report.errors.is_empty());
+
+        let after = store::get(&fx.conn(), routine.id).unwrap().unwrap();
+        assert!(
+            !after.enabled,
+            "a routine that can't be scheduled is disabled"
+        );
+
+        let history = store::list_runs(&fx.conn(), routine.id, 10).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].status, RoutineRunStatus::Failed);
+        assert!(history[0].detail.as_deref().unwrap().contains("disabled"));
+        // Nothing executed.
+        assert!(runlog::list_runs(&fx.conn(), 10).unwrap().is_empty());
+
+        // It stays put on the next tick.
+        assert_eq!(tick(&fx.config, &fx.db).await.unwrap().fired, 0);
+    }
+
+    #[tokio::test]
     async fn reconcile_rolls_past_routine_forward_without_firing() {
         let fx = Fixture::new("reconcile");
         let routine =
             store::add(&fx.conn(), prompt_routine("was-offline", "*/1 * * * * *")).unwrap();
         let missed_slot = Utc::now() - chrono::Duration::minutes(10);
-        store::roll_forward(&fx.conn(), routine.id, Some(missed_slot)).unwrap();
+        store::set_next_fire_at(&fx.conn(), routine.id, Some(missed_slot)).unwrap();
 
-        let rolled = reconcile_missed(&fx.config, &fx.db).await.unwrap();
+        let rolled = reconcile_missed(&fx.db).await.unwrap();
         assert_eq!(rolled, 1);
 
         let after = store::get(&fx.conn(), routine.id).unwrap().unwrap();
@@ -571,7 +620,7 @@ mod tests {
     async fn spawned_loop_fires_a_due_routine_then_stops_on_shutdown() {
         let fx = Fixture::new("loop");
         let routine = store::add(&fx.conn(), prompt_routine("looped", "*/1 * * * * *")).unwrap();
-        store::roll_forward(
+        store::set_next_fire_at(
             &fx.conn(),
             routine.id,
             Some(Utc::now() - chrono::Duration::seconds(2)),
