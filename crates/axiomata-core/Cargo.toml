@@ -15,3 +15,5 @@ tokio.workspace = true
 chrono.workspace = true
 gray_matter.workspace = true
 ollama-rs.workspace = true
+ignore.workspace = true
+notify.workspace = true

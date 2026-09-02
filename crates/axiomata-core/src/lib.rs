@@ -103,6 +103,7 @@ pub(crate) mod test_support {
     //! consistently instead of re-deriving this logic per module.
     use std::path::PathBuf;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Serializes tests that mutate process-wide environment variables (e.g.
@@ -110,15 +111,20 @@ pub(crate) mod test_support {
     /// and `cargo test` runs tests in parallel by default.
     pub static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
+    /// Monotonic counter so two calls within the same clock tick still differ.
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
     /// Returns a fresh, unique path under the OS temp directory, suitable as
-    /// an isolated scratch home/workspace for a single test run. Callers are
-    /// responsible for cleaning it up (`fs::remove_dir_all`) when done.
+    /// an isolated scratch home/workspace for a single test run. Unique even
+    /// across parallel calls. Callers are responsible for cleaning it up
+    /// (`fs::remove_dir_all`) when done.
     pub fn unique_temp_dir(prefix: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after the Unix epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("{prefix}-{}-{}", std::process::id(), nanos))
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{seq}", std::process::id()))
     }
 }
 

@@ -79,4 +79,9 @@ pub enum AxiomataError {
     /// A skill was requested by name but not found in either skill directory.
     #[error("no skill named {name:?} found")]
     SkillNotFound { name: String },
+
+    /// A `CLAUDE.md` file has a start router marker but no matching end marker,
+    /// so its generated block cannot be replaced unambiguously.
+    #[error("malformed router block in {path}: {reason}")]
+    InvalidRouter { path: PathBuf, reason: String },
 }

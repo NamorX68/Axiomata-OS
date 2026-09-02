@@ -20,6 +20,8 @@ chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 gray_matter = "0.3"
+ignore = "0.4"
+notify = "8"
 # Only ever talks to a local Ollama daemon over plain HTTP, so the default
 # native-tls stack (and, on macOS, the Security.framework link) is dead weight.
 # Add `features = ["rustls"]` if a remote HTTPS endpoint is ever needed.
