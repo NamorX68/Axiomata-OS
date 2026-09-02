@@ -9,11 +9,14 @@ before starting new work. `AGENTS.md` is the compact, high-signal summary.
 
 Early-stage Rust + Tauri desktop app: a personal "Agentic OS" / second brain around the
 **ARMS framework** (Applications, Routines, Memory, Skills). Milestones **M0**, **M1 (skills
-runner)** and **M2 (memory router)** are done: `agents` (the `AgentBackend` enum), `skills`
-(registry + runner + run log), `memory` (walker / renderer / `sync` / `status`, poll-only
-staleness), the `list_skills` / `list_runs` / `run_skill` / `sync_memory` /
-`get_memory_status` Tauri commands, and a placeholder UI. The `routines` scheduler (M3) and
-the real module-canvas dashboard UI are **module stubs only** — do not assume those work.
+runner)**, **M2 (memory router)** and **M3 (routines scheduler)** are done: `agents` (the
+`AgentBackend` enum), `skills` (registry + runner + run log), `memory` (walker / renderer /
+`sync` / `status`, poll-only staleness), `routines` (cron `schedule` / `store` / a 30 s
+Tokio poll loop in `scheduler`), the `list_skills` / `list_runs` / `run_skill` /
+`sync_memory` / `get_memory_status` / `list_routines` / `add_routine` /
+`set_routine_enabled` / `routine_history` Tauri commands, and a placeholder UI. Not yet
+built: always-on/background scheduling (M4) and the real module-canvas dashboard UI — do
+not assume those work.
 
 ## Commands
 
@@ -25,6 +28,7 @@ cargo test --workspace                     # all tests
 cargo test -p axiomata-core                # just the core engine
 cargo run -p axiomata-cli                  # headless: init core, print status, exit
 cargo run -p axiomata-cli -- list-skills   # also: run-skill <name>, list-runs, memory sync|status
+cargo run -p axiomata-cli -- routines tick # also: routines list|add|enable|disable|history
 cd apps/dashboard && cargo tauri dev       # desktop app (hot-reload)
 ```
 
@@ -39,22 +43,32 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
 `crates/axiomata-cli`, and the Tauri shell `apps/dashboard/src-tauri` (package `dashboard`).
 
 - `axiomata-core` is the real engine, with **no Tauri or macOS dependency**. Implemented
-  modules: `paths`, `config`, `db`, `error`, `agents`, `skills`, `memory`. `routines` (M3)
-  is a stub.
+  modules: `paths`, `config`, `db`, `error`, `agents`, `skills`, `memory`, `routines`.
 - `AxiomataCore::init()` (`crates/axiomata-core/src/lib.rs`) is the **single** entry point,
   called by both `axiomata-cli` and the Tauri `.setup()` hook. Fully idempotent. Also seeds
-  the bundled `example-skill` (never overwrites an existing copy).
+  the bundled `example-skill` (never overwrites an existing copy). `AxiomataCore.db` is
+  `Arc<Mutex<Connection>>` (the `Arc` lets the routine scheduler task hold its own handle);
+  `config` is unlocked.
+- `routines`: a routine is a cron schedule (`cron` crate, **6–7 field**, seconds first:
+  `0 */2 * * * *`) bound to a skill name or a raw prompt. `routines::scheduler::tick` fires
+  everything due **once** (no missed-slot backlog); `serve` is the 30 s loop, started from
+  the Tauri `.setup()` via `tauri::async_runtime::spawn`. `next_fire_at` is persisted and
+  never recomputed on load; a past-due routine at startup is rolled forward with a `Missed`
+  row, **not** fired. A firing writes a normal `runs` row + a linking `routine_runs` row.
+  Routines fire only while the app or `axiomata-cli routines tick` runs (always-on = M4).
 - `memory`: `memory::sync(config)` regenerates the `<!-- AXIOMATA-ROUTER:START/END -->`
   block in the workspace's `CLAUDE.md` files (deterministic, atomic write, line-wise markers,
   sanitised titles, symlink-refusing, per-file `SyncReport.failed`; refuses a home/`/` root)
   and stamps `~/.axiomata/memory-last-sync.json`; `memory::status(config)` = walk + compare
   against that marker. No file watcher. Startup sync runs on a background thread.
 - The Tauri `.setup()` hook stores `AxiomataCore` as managed state — `config` is read
-  directly, only `core.db` is behind a `Mutex`. Commands in
+  directly, only `core.db` is behind a `Mutex` — and also starts the routine scheduler
+  (managed `SchedulerHandle`; dropping it on exit stops the loop). Commands in
   `apps/dashboard/src-tauri/src/commands.rs`: `list_skills`, `list_runs`, `get_run`,
-  `run_skill`, `sync_memory`, `get_memory_status`. `run_skill` calls
-  `skills::execute_and_record_skill`, which runs the agent
-  with no lock held and locks `db` only to write — never hold a lock across `.await`.
+  `run_skill`, `sync_memory`, `get_memory_status`, `list_routines`, `add_routine`,
+  `set_routine_enabled`, `routine_history`. `run_skill` (and the scheduler) call into
+  `skills::runner`, which runs the agent with no lock held and locks `db` only to write —
+  never hold a lock across `.await`.
 
 ## Data lives in TWO places (easy to get wrong)
 
@@ -74,8 +88,9 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
 - SQLite via `rusqlite` (bundled, statically linked). DB migrations are append-only SQL in
   `crates/axiomata-core/src/db/migrations/*.sql`, listed in `db::MIGRATIONS` — never edit or
   reorder a released migration.
-- DB tables: `app_meta` (0001), `runs` (0002 — skill run history, mirrored to
-  `logs/runs.log`). `routines` / `routine_runs` are planned for M3.
+- DB tables: `app_meta` (0001), `runs` (0002 — every execution, mirrored to
+  `logs/runs.log`), `routines` + `routine_runs` (0003 — schedules and firing history;
+  `routine_runs.run_id` links to a `runs` row). `PRAGMA foreign_keys` is ON per connection.
 
 ## Test conventions
 

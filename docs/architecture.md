@@ -83,8 +83,8 @@ declared in `crates/axiomata-core/src/lib.rs`:
 - `skills` — skill discovery, headless execution, and run logging. **Implemented (M1).**
 - `memory` — `CLAUDE.md` router file generation and staleness tracking.
   **Implemented (M2).**
-- `routines` — cron-like scheduled skill/prompt execution.
-  **Module stub, planned for M3.**
+- `routines` — cron-scheduled skill/prompt execution via a background poll loop.
+  **Implemented (M3).**
 
 The crate exposes a single top-level type, `AxiomataCore` (see §5), constructed via
 `AxiomataCore::init()`.
@@ -268,11 +268,17 @@ exit_code, duration_ms }`.
   `runlog::record_run`. Only skill-resolution failure is `Err`; every run outcome (success,
   non-zero exit, unknown backend, spawn failure, timeout, API error) is a `RunRecord` whose
   `status` says which.
+- `model.rs` holds the data shapes — `RunStatus`, `RunRecord`, `RunSummary` — separate from
+  the code that reads/writes them (mirrors `routines/{model,store}`). The `skills` facade
+  re-exports them, so consumers are unaffected.
 - `runlog.rs` persists each `RunRecord` to the SQLite `runs` table (parameterised inserts)
   **and** appends it as one JSON line to `~/.axiomata/logs/runs.log`. Reads back:
   `list_runs(db, limit)` returns slim `RunSummary` values (no captured `stdout`/`stderr`)
   newest-first for the history list, with `limit` clamped to `MAX_RUN_LIMIT` (500);
   `get_run(db, id)` returns one full `RunRecord` for a single-run detail view.
+- `runner.rs` also exposes `agent_request` / `record_from_result` / `failure_record` as
+  `pub(crate)` (name-based, not `Skill`-based) so the routine scheduler's raw-prompt path
+  reuses the exact request-building and outcome-mapping logic instead of copying it.
 - `skills/mod.rs::seed_example_skill()` writes the bundled example skill
   (`crates/axiomata-core/resources/example-skill/SKILL.md`, embedded via `include_str!`,
   `backend: claude-code`) into `~/.axiomata/skills/` on first run, and never overwrites an
@@ -318,6 +324,51 @@ Sync is always **explicit**: `axiomata-cli memory sync`, the "Sync now" button, 
 Tauri startup (best-effort, on a background thread). Nothing rewrites the user's files on a
 timer, and there is no filesystem watcher — the 3-second status poll re-walks and compares.
 
+### Routines scheduler (`routines/`)
+
+A routine is a cron schedule bound to a target: a named skill, or a raw prompt sent
+straight to an agent backend. A single background task fires whatever is due, unattended.
+Layout mirrors `skills/`: `model` (types), `schedule` (cron), `store` (SQL), `scheduler`
+(the loop).
+
+- `model.rs` — `Routine { id, name, cron_expr, target, backend, enabled, next_fire_at,
+  last_fired_at, … }` with `RoutineTarget::{Skill(name), Prompt(text)}` (serialises tagged
+  as `{ "type": …, "value": … }`), `RoutineRun` (one firing attempt), and
+  `RoutineRunStatus::{Success, Failed, Missed}`. `RoutineState` (`Disabled` / `Scheduled` /
+  `Fired` / `Failed`) is **derived** from a routine plus its latest run — never stored.
+- `schedule.rs` — thin wrapper over the `cron` crate. Native format is **6–7 fields,
+  seconds first** (`sec min hour dom mon dow [year]`), so "every two minutes" is
+  `0 */2 * * * *`. `validate(expr)` rejects a bad expression up front (including a 5-field
+  crontab line); `next_after(expr, from)` returns the next instant strictly after `from`.
+  The `cron::Schedule` type stays an implementation detail.
+- `store.rs` — all SQL for the `routines` and `routine_runs` tables (migration 0003),
+  parameterised. `add` validates the cron, computes the first `next_fire_at`, and enforces
+  a unique name. `due_routines(now)` is the poll query (`enabled = 1 AND next_fire_at <=
+  now`, indexed). `next_fire_at` is authoritative persisted state: `mark_fired` advances it
+  after a real firing, `roll_forward` advances it without firing (the catch-up path), and
+  re-enabling a routine recomputes it from now (so a long-disabled routine doesn't fire for
+  a slot it slept through). A routine firing is also recorded as a normal row in the `runs`
+  table; `routine_runs.run_id` links to it.
+- `scheduler.rs` — one Tokio task. `tick(config, db)` is one poll pass: fetch due routines,
+  fire each **exactly once** (`next_fire_at` jumps to the next occurrence *after now* — no
+  replaying a backlog of missed slots), record a `runs` row + a `routine_runs` row, advance
+  `next_fire_at`. The agent call holds no database lock; the connection is locked only
+  afterwards to write the three rows. A per-routine failure is collected into `TickReport`,
+  not propagated, so one bad routine can't stall the others. `tick` is `pub` so
+  `axiomata-cli routines tick` and tests drive it without the timer. `serve(config, db,
+  stop_rx)` is the whole loop as a future (`POLL_INTERVAL` = 30 s, `MissedTickBehavior::
+  Delay`); `spawn` wraps it for a Tokio context, while the Tauri shell — whose `.setup()`
+  has no runtime — uses `SchedulerHandle::channel()` + `tauri::async_runtime::spawn(serve
+  …)`. Dropping the managed `SchedulerHandle` on app exit stops the loop.
+- **Restart safety.** `next_fire_at` is read from the database and never recomputed from the
+  cron expression on load. Before the loop starts, `reconcile_missed` runs once: any routine
+  already past due (the app was off when it was due) is rolled forward and gets a `Missed`
+  history row — it does **not** fire to catch up. So a restart can neither double-fire a
+  routine nor drop one.
+
+Routines only fire while the app (or `axiomata-cli routines tick`) is running — a
+background / always-on scheduler is M4 (deferred).
+
 ### Errors (`error.rs`)
 
 `AxiomataError` (via `thiserror`) covers every failure mode the above surfaces: `Io` (with
@@ -355,8 +406,8 @@ The following is **planned design**, captured here because the rationale lives o
 repository (in the owner's local planning notes) and should not be lost. None of it exists in
 running code yet — every item below is a module stub with only a doc comment stating which
 milestone will implement it. Do not mistake anything in this section for shipped behaviour.
-(Agent backends and the skills runner were in this section through M0; they are now
-implemented — see §5.)
+(Agent backends and the skills runner were in this section through M0, the memory router
+through M1, and the routines scheduler through M2; they are now implemented — see §5.)
 
 ### Why the agent backend is an `enum`, not a trait
 
@@ -365,22 +416,6 @@ plugin registry or trait-object abstraction — a deliberate choice, since only 
 are needed and a generic multi-CLI abstraction would be premature generalization. If a
 further backend is ever needed (e.g. `opencode`, or a custom `rig`-based agent), the enum can
 gain a variant without reworking the runner or scheduler — but no such backend is planned.
-
-### Routines scheduler (`routines/`) — planned for M3
-
-- `model.rs` will define the `Routine` and run-status data types.
-- `store.rs` will provide SQLite CRUD for a planned `routines` table
-  (`id, name, cron_expr, target_type, target, backend, enabled, next_fire_at, ...`) and a
-  `routine_runs` table.
-- `schedule.rs` will handle cron expression parsing and next-fire-time calculation (via the
-  `cron` crate).
-- `scheduler.rs` will run a single Tokio background task that polls every ~30 seconds,
-  executes due routines through the same skill-runner path (or a raw prompt against the
-  configured backend), logs the result, and recomputes `next_fire_at`. Planned restart
-  behaviour: `next_fire_at` is always loaded from the database, never recomputed from
-  scratch on startup, so a restart cannot cause a routine to double-fire; a `next_fire_at`
-  that has already passed at startup deliberately does **not** trigger a catch-up run — only
-  a recalculation and a "missed" log entry.
 
 ### Dashboard UI — module canvas, phase TBD
 
@@ -447,8 +482,19 @@ implementation exists yet beyond the empty crate scaffold.
   per-area `CLAUDE.md` with extracted titles, preserving hand-written content outside the
   block; a repeated sync writes nothing and the root `CLAUDE.md` is byte-identical across
   runs.
-- **M3 — Routines scheduler: not started.** Will land the routine store, cron scheduling, the
-  poll loop, the corresponding Tauri commands, and a minimal routines UI.
+- **M3 — Routines scheduler: done.** `routines/{model,schedule,store,scheduler}`, migration
+  0003 (`routines` + `routine_runs`), the `list_routines` / `add_routine` /
+  `set_routine_enabled` / `routine_history` Tauri commands, `axiomata-cli routines
+  list|add|enable|disable|history|tick`, the scheduler started from the Tauri `.setup()`
+  via `tauri::async_runtime::spawn`, and a Routines section (table + enable/disable + add
+  form) in the placeholder UI are all in place. `AxiomataCore.db` became
+  `Arc<Mutex<Connection>>` so the loop can hold its own handle, and `RunRecord` &c moved to
+  `skills/model.rs`. Verified via `axiomata-cli` against an isolated `AXIOMATA_HOME`: a
+  `*/1 * * * * *` routine against `example-skill` fired once per elapsed slot (not once per
+  missed second), each firing linked to a `runs` row in `routines history`; a second
+  `routines tick` in a fresh process did **not** re-fire (persisted `next_fire_at`); and a
+  disabled routine stopped firing. The 30-second background loop itself is smoke-tested
+  (40 ms interval) in `scheduler.rs`; the GUI is a manual check (`cargo tauri dev`).
 - **M4 — Always-on behaviour: deferred, not part of the current milestones.** The MVP runs
   as an ordinary desktop app: the user starts and quits it manually, and closing the window
   ends the process — which also stops the scheduler, so routines (M3) only fire while the
