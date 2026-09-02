@@ -12,6 +12,8 @@ pub fn run() {
             commands::list_runs,
             commands::get_run,
             commands::run_skill,
+            commands::sync_memory,
+            commands::get_memory_status,
         ])
         .setup(|app| {
             // Initializes `~/.axiomata` (config, database, logs, global
@@ -21,6 +23,11 @@ pub fn run() {
             // only its `db` field internally, so no outer `Mutex` is needed.
             let core =
                 AxiomataCore::init().expect("failed to initialize the Axiomata-OS core engine");
+            // Best-effort: bring the memory router up to date on launch. A
+            // failure here (e.g. a hand-mangled CLAUDE.md) must not block start.
+            if let Err(err) = axiomata_core::memory::sync(&core.config) {
+                eprintln!("startup memory sync failed: {err}");
+            }
             app.manage(core);
             Ok(())
         })

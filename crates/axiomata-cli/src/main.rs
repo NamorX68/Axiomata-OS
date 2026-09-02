@@ -1,9 +1,10 @@
 //! Minimal CLI for exercising the Axiomata-OS core engine end-to-end without
-//! the Tauri GUI: initialize the core, list and run skills, inspect run history.
+//! the Tauri GUI: initialize the core, list and run skills, inspect run history,
+//! sync the memory router.
 
 use anyhow::{Context, Result};
 use axiomata_core::skills::{self, RunStatus};
-use axiomata_core::{AxiomataCore, paths};
+use axiomata_core::{AxiomataCore, memory, paths};
 use clap::{Parser, Subcommand};
 
 /// Axiomata-OS headless control CLI.
@@ -31,6 +32,19 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Memory router: regenerate or inspect the workspace `CLAUDE.md` blocks.
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MemoryAction {
+    /// Regenerate every router block from the current workspace contents.
+    Sync,
+    /// Report whether the router is stale (a tracked file changed since sync).
+    Status,
 }
 
 #[tokio::main]
@@ -43,6 +57,10 @@ async fn main() -> Result<()> {
         Command::ListSkills => list_skills()?,
         Command::RunSkill { name } => return run_skill(&core, &name).await,
         Command::ListRuns { limit } => list_runs(&core, limit)?,
+        Command::Memory { action } => match action {
+            MemoryAction::Sync => memory_sync(&core)?,
+            MemoryAction::Status => memory_status(&core)?,
+        },
     }
     Ok(())
 }
@@ -126,5 +144,49 @@ fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
             ms = run.duration_ms,
         );
     }
+    Ok(())
+}
+
+/// Regenerates the workspace router `CLAUDE.md` blocks and reports what changed.
+fn memory_sync(core: &AxiomataCore) -> Result<()> {
+    let report = memory::sync(&core.config).context("memory sync failed")?;
+    if report.written.is_empty() {
+        println!(
+            "Router already in sync — {} tracked files, {} CLAUDE.md file(s) unchanged.",
+            report.tracked_files, report.unchanged,
+        );
+    } else {
+        println!("Wrote {} CLAUDE.md file(s):", report.written.len());
+        for path in &report.written {
+            println!("  {}", path.display());
+        }
+        if report.unchanged > 0 {
+            println!("  ({} already current)", report.unchanged);
+        }
+        println!("{} tracked files.", report.tracked_files);
+    }
+    Ok(())
+}
+
+/// Prints the memory-router freshness status.
+fn memory_status(core: &AxiomataCore) -> Result<()> {
+    let status = memory::status(&core.config).context("memory status failed")?;
+    println!("workspace:     {}", status.workspace_root.display());
+    println!("tracked files: {}", status.tracked_files);
+    println!(
+        "last sync:     {}",
+        status
+            .last_sync
+            .map(|t| t.to_rfc3339())
+            .unwrap_or_else(|| "never".to_owned()),
+    );
+    println!(
+        "state:         {}",
+        if status.stale {
+            "STALE — run `axiomata-cli memory sync`"
+        } else {
+            "fresh"
+        },
+    );
     Ok(())
 }
