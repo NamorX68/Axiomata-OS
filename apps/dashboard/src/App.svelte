@@ -3,6 +3,9 @@
   import { SvelteSet } from "svelte/reactivity";
   import { invoke } from "@tauri-apps/api/core";
 
+  import { addInstance } from "./core/stores";
+  import { invokeAction, manifest } from "./core/registry";
+
   /* ---- shapes mirrored from the Rust command layer ---- */
 
   interface Skill {
@@ -201,6 +204,21 @@
     void refreshRuns();
   }
 
+  // Step-2 scaffolding: prove the registry/store/context pipeline end to end.
+  // Removed once the module picker (step 7) exists.
+  async function devProbe() {
+    const inst = addInstance({
+      type: "dummy",
+      x: 40,
+      y: 40,
+      w: 260,
+      h: 160,
+      config: {},
+    });
+    console.log("registry.manifest() →", manifest());
+    console.log("invokeAction(ping) →", await invokeAction(inst.id, "ping", {}));
+  }
+
   onMount(() => {
     refreshAll();
     const id = setInterval(refreshAll, POLL_MS);
@@ -216,6 +234,9 @@
       Theming now runs through <code>--ax-*</code> tokens; the four panels below
       become canvas modules in later steps.
     </p>
+    {#if import.meta.env.DEV}
+      <button type="button" onclick={devProbe}>dev: add dummy + log manifest</button>
+    {/if}
   </header>
 
   <section>
