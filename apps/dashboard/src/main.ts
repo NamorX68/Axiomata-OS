@@ -33,6 +33,7 @@ interface MemoryStatus {
 interface SyncReport {
   written: string[];
   unchanged: number;
+  failed: [string, string][];
   tracked_files: number;
 }
 
@@ -175,10 +176,16 @@ async function syncMemory(): Promise<void> {
   button.textContent = "Syncing…";
   try {
     const r = await invoke<SyncReport>("sync_memory");
-    result.textContent =
+    const base =
       r.written.length === 0
         ? `Already in sync (${r.tracked_files} tracked files).`
         : `Wrote ${r.written.length} CLAUDE.md file(s); ${r.unchanged} unchanged.`;
+    result.textContent =
+      r.failed.length === 0
+        ? base
+        : `${base} ${r.failed.length} file(s) failed: ${r.failed
+            .map(([p, why]) => `${p} (${why})`)
+            .join("; ")}`;
   } catch (err) {
     result.textContent = `Sync failed: ${String(err)}`;
   } finally {

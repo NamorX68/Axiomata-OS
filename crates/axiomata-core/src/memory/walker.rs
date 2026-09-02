@@ -40,12 +40,10 @@ pub struct WorkspaceTree {
     pub areas: BTreeMap<String, Vec<FileEntry>>,
 }
 
-/// A full scan: the grouped tree plus the aggregates `status` needs.
+/// A full scan: the grouped tree plus the total file count.
 #[derive(Debug)]
 pub struct WorkspaceScan {
     pub tree: WorkspaceTree,
-    /// Newest modification time across all tracked files.
-    pub newest_mtime: Option<SystemTime>,
     /// Total number of tracked files.
     pub file_count: usize,
 }
@@ -65,13 +63,10 @@ pub struct Freshness {
 pub fn scan(config: &Config) -> Result<WorkspaceScan, AxiomataError> {
     let root = &config.workspace_root;
     let mut tree = WorkspaceTree::default();
-    let mut newest_mtime: Option<SystemTime> = None;
     let mut file_count = 0usize;
 
     for tracked in tracked_files(root)? {
         file_count += 1;
-        newest_mtime = newest_mtime.max(tracked.mtime);
-
         let entry = FileEntry {
             title: markdown_title(&root.join(&tracked.rel_path)),
             rel_path: tracked.rel_path.clone(),
@@ -87,11 +82,7 @@ pub fn scan(config: &Config) -> Result<WorkspaceScan, AxiomataError> {
         sort_entries(entries);
     }
 
-    Ok(WorkspaceScan {
-        tree,
-        newest_mtime,
-        file_count,
-    })
+    Ok(WorkspaceScan { tree, file_count })
 }
 
 /// Like [`scan`] but reads no file contents — just walks and stats. Used by the
@@ -146,8 +137,12 @@ fn tracked_files(root: &Path) -> Result<Vec<Tracked>, AxiomataError> {
             continue;
         }
         let path = dir_entry.path();
-        if path.file_name().and_then(|n| n.to_str()) == Some("CLAUDE.md") {
-            continue; // generated output, not content
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case("CLAUDE.md"))
+        {
+            continue; // generated output, not content (case-insensitive FS)
         }
         let Ok(rel) = path.strip_prefix(root) else {
             continue;

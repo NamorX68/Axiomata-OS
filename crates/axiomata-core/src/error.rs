@@ -84,4 +84,9 @@ pub enum AxiomataError {
     /// so its generated block cannot be replaced unambiguously.
     #[error("malformed router block in {path}: {reason}")]
     InvalidRouter { path: PathBuf, reason: String },
+
+    /// `workspace_root` resolves to a location the memory router refuses to
+    /// write into (the filesystem root, the home directory).
+    #[error("refusing to run the memory router on {path} — set a dedicated workspace folder")]
+    UnsafeWorkspaceRoot { path: PathBuf },
 }

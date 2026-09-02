@@ -165,6 +165,13 @@ fn memory_sync(core: &AxiomataCore) -> Result<()> {
         }
         println!("{} tracked files.", report.tracked_files);
     }
+    if !report.failed.is_empty() {
+        eprintln!("\n{} file(s) could not be written:", report.failed.len());
+        for (path, why) in &report.failed {
+            eprintln!("  {} — {why}", path.display());
+        }
+        std::process::exit(1);
+    }
     Ok(())
 }
 

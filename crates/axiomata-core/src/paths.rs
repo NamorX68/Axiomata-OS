@@ -55,6 +55,14 @@ pub fn runs_log_path() -> PathBuf {
     logs_dir().join("runs.log")
 }
 
+/// Path to the memory-router sync marker (`~/.axiomata/memory-last-sync.json`),
+/// a small `{ "<canonical workspace path>": "<rfc3339>" }` map recording when
+/// each workspace was last synced. Kept in app-data, not in the workspace, so
+/// the router never adds a file to the user's vault for its own bookkeeping.
+pub fn memory_last_sync_path() -> PathBuf {
+    axiomata_home().join("memory-last-sync.json")
+}
+
 /// Directory for global, app-managed skills (`~/.axiomata/skills/`).
 pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")

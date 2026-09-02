@@ -23,19 +23,19 @@ pub fn run() {
             // only its `db` field internally, so no outer `Mutex` is needed.
             let core =
                 AxiomataCore::init().expect("failed to initialize the Axiomata-OS core engine");
-            // Best-effort: bring the memory router up to date on launch. A
-            // failure here (e.g. a hand-mangled CLAUDE.md) must not block start.
-            if let Err(err) = axiomata_core::memory::sync(&core.config) {
-                eprintln!("startup memory sync failed: {err}");
-            }
-            // Reactive stale hint for the memory panel. Degrades to the
-            // status()-based mtime check if the OS watcher can't start.
-            let watcher = axiomata_core::memory::MemoryWatcher::start(&core.config.workspace_root);
-            if !watcher.is_active() {
-                eprintln!("memory watcher could not start; falling back to poll-based staleness");
-            }
+
+            // Best-effort router sync on launch, off the setup thread so a
+            // large vault or a slow disk doesn't stall window creation. A
+            // failure surfaces as a "stale" badge the user can act on with
+            // "Sync now".
+            let sync_config = core.config.clone();
+            std::thread::spawn(move || {
+                if let Err(err) = axiomata_core::memory::sync(&sync_config) {
+                    eprintln!("startup memory sync failed: {err}");
+                }
+            });
+
             app.manage(core);
-            app.manage(watcher);
             Ok(())
         })
         .run(tauri::generate_context!())
