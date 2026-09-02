@@ -18,7 +18,7 @@ pub mod skills;
 pub use error::AxiomataError;
 
 use std::fs;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use config::Config;
 
@@ -30,11 +30,15 @@ use config::Config;
 /// sits behind a [`Mutex`]. Async callers therefore never have to hold a lock
 /// across an agent call just to reach the config.
 ///
+/// The connection is wrapped in an [`Arc`] as well so the routine scheduler's
+/// background task can hold its own handle to the same database without
+/// borrowing from `AxiomataCore` (see [`routines::scheduler::spawn`]).
+///
 /// Construct via [`AxiomataCore::init`], which is idempotent and safe to call
 /// on every app start.
 pub struct AxiomataCore {
     pub config: Config,
-    pub db: Mutex<rusqlite::Connection>,
+    pub db: Arc<Mutex<rusqlite::Connection>>,
 }
 
 impl AxiomataCore {
@@ -78,7 +82,7 @@ impl AxiomataCore {
 
         Ok(Self {
             config,
-            db: Mutex::new(db),
+            db: Arc::new(Mutex::new(db)),
         })
     }
 }

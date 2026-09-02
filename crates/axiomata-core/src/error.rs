@@ -89,4 +89,10 @@ pub enum AxiomataError {
     /// write into (the filesystem root, the home directory).
     #[error("refusing to run the memory router on {path} — set a dedicated workspace folder")]
     UnsafeWorkspaceRoot { path: PathBuf },
+
+    /// A routine's cron expression could not be parsed, or a stored routine
+    /// row held a value the routines module does not understand (e.g. an
+    /// unknown `target_type`).
+    #[error("invalid routine: {reason}")]
+    InvalidRoutine { reason: String },
 }

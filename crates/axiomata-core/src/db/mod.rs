@@ -14,6 +14,7 @@ use crate::paths;
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("migrations/0001_init.sql")),
     (2, include_str!("migrations/0002_runs.sql")),
+    (3, include_str!("migrations/0003_routines.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -33,6 +34,11 @@ pub fn open_and_migrate_at(path: &Path) -> Result<Connection, AxiomataError> {
     }
 
     let conn = Connection::open(path)?;
+
+    // SQLite ignores `REFERENCES` clauses unless this is switched on per
+    // connection. `routine_runs` relies on it for its cascade on routine
+    // deletion (migration 0003).
+    conn.pragma_update(None, "foreign_keys", true)?;
 
     // Bookkeeping table for applied migration versions. Created
     // unconditionally (idempotent) rather than as migration 0001 itself,
@@ -78,7 +84,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 2);
+            assert_eq!(version, 3);
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -97,6 +103,26 @@ mod tests {
                 [],
             )
             .expect("runs table should exist");
+
+            // Migration 0003's DDL ran too.
+            conn.execute(
+                "INSERT INTO routines \
+                 (name, cron_expr, target_type, target, enabled, \
+                  next_fire_at, created_at, updated_at) \
+                 VALUES ('probe', '0 */2 * * * *', 'skill', 'example-skill', 1, \
+                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', \
+                         '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("routines table should exist");
+            conn.execute(
+                "INSERT INTO routine_runs \
+                 (routine_id, run_id, scheduled_for, fired_at, status) \
+                 VALUES (1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', \
+                         'success')",
+                [],
+            )
+            .expect("routine_runs table should exist");
         }
 
         {
@@ -105,7 +131,7 @@ mod tests {
             let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(applied_count, 2);
+            assert_eq!(applied_count, 3);
 
             let probe_value: String = conn
                 .query_row(
