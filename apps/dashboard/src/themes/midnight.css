@@ -1,0 +1,32 @@
+/*
+ * midnight — deep blue-black surfaces, indigo/cyan accent. Cooler than graphite.
+ */
+
+:root[data-theme="midnight"] {
+  --ax-bg: #080b14;
+  --ax-surface-1: #0e1220;
+  --ax-surface-2: #141a2c;
+  --ax-surface-3: #1c2438;
+  --ax-overlay: rgba(2, 4, 10, 0.68);
+
+  --ax-text: #eef1f8;
+  --ax-text-muted: #8b93ad;
+  --ax-text-invert: #080b14;
+
+  --ax-accent: #6ea8ff;
+  --ax-accent-hover: #8fbcff;
+  --ax-accent-muted: rgba(110, 168, 255, 0.16);
+  --ax-success: #58d0a0;
+  --ax-warning: #e0b968;
+  --ax-danger: #f07a7a;
+
+  --ax-border: #232c44;
+  --ax-border-strong: #35406b;
+  --ax-focus-ring: rgba(110, 168, 255, 0.5);
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 22px rgba(0, 0, 0, 0.42);
+  --ax-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --ax-shadow-drag: 0 20px 56px rgba(0, 0, 0, 0.64);
+
+  --ax-texture-url: none;
+}

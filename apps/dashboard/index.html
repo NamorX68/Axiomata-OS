@@ -2,110 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Axiomata-OS</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <script type="module" src="/src/main.ts"></script>
   </head>
 
   <body>
-    <main class="container">
-      <h1>Axiomata-OS</h1>
-      <p class="hint">
-        Minimal placeholder UI. The real dashboard (module canvas) comes later.
-      </p>
-
-      <section>
-        <h2>Memory router</h2>
-        <p id="memory-status" class="status"></p>
-        <dl id="memory-detail" hidden>
-          <dt>Workspace</dt>
-          <dd id="memory-workspace"></dd>
-          <dt>Tracked files</dt>
-          <dd id="memory-tracked"></dd>
-          <dt>Last sync</dt>
-          <dd id="memory-last-sync"></dd>
-          <dt>State</dt>
-          <dd><span id="memory-badge" class="badge"></span></dd>
-        </dl>
-        <button id="memory-sync-btn" type="button">Sync now</button>
-        <p id="memory-sync-result" class="status"></p>
-      </section>
-
-      <section>
-        <h2>Skills</h2>
-        <p id="skills-status" class="status"></p>
-        <table id="skills-table" hidden>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Backend</th>
-              <th>Description</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="skills-body"></tbody>
-        </table>
-      </section>
-
-      <section>
-        <h2>Routines</h2>
-        <p id="routines-status" class="status"></p>
-        <table id="routines-table" hidden>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Name</th>
-              <th>Schedule</th>
-              <th>Target</th>
-              <th>Next fire</th>
-              <th>Last fired</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="routines-body"></tbody>
-        </table>
-
-        <form id="routine-form" class="routine-form">
-          <input id="routine-name" type="text" placeholder="name" required />
-          <input
-            id="routine-cron"
-            type="text"
-            placeholder="0 */2 * * * *  (sec min hour dom mon dow)"
-            required
-          />
-          <select id="routine-target-type">
-            <option value="skill">skill</option>
-            <option value="prompt">prompt</option>
-          </select>
-          <input id="routine-target-value" type="text" placeholder="skill name / prompt text" required />
-          <select id="routine-backend">
-            <option value="">default backend</option>
-            <option value="claude-code">claude-code</option>
-            <option value="ollama">ollama</option>
-          </select>
-          <button id="routine-add-btn" type="submit">Add routine</button>
-        </form>
-        <p id="routine-form-result" class="status"></p>
-      </section>
-
-      <section>
-        <h2>Recent runs</h2>
-        <p id="runs-status" class="status"></p>
-        <table id="runs-table" hidden>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Started</th>
-              <th>Status</th>
-              <th>Skill</th>
-              <th>Backend</th>
-              <th>ms</th>
-            </tr>
-          </thead>
-          <tbody id="runs-body"></tbody>
-        </table>
-      </section>
-    </main>
+    <div id="ax-shell"></div>
   </body>
 </html>

@@ -1,200 +1,89 @@
-:root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 14px;
-  color: #1c1c1e;
-  background-color: #f5f5f7;
+/*
+ * Global, structural styles only. Every value comes from a `--ax-*` token
+ * (see themes/tokens.css). No colour or size literals for anything themeable.
+ * Component-specific styling lives in each `.svelte` file's scoped <style>.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
-* {
-  box-sizing: border-box;
+html {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 body {
   margin: 0;
+  font-family: var(--ax-font-sans);
+  font-size: var(--ax-font-size-base);
+  line-height: var(--ax-line-height);
+  color: var(--ax-text);
+  background-color: var(--ax-bg);
+  background-image: var(--ax-texture-url);
+  background-repeat: repeat;
+  -webkit-font-smoothing: antialiased;
 }
 
-.container {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 1.5rem;
+/* App root: fills the window, owns the vertical stack (topbar / canvas / bar). */
+#ax-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
-h1 {
-  font-size: 1.4rem;
-  margin: 0 0 0.25rem;
-}
-
-h2 {
-  font-size: 1.1rem;
-  margin: 1.5rem 0 0.5rem;
-}
-
-.hint {
-  color: #6e6e73;
-  margin-top: 0;
-}
-
-.status {
-  color: #6e6e73;
-  font-style: italic;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: #fff;
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-th,
-td {
-  text-align: left;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #ececec;
-  vertical-align: top;
-}
-
-th {
-  background: #fafafa;
+h1,
+h2,
+h3 {
+  margin: 0;
   font-weight: 600;
+  line-height: 1.25;
 }
 
-tr:last-child td {
-  border-bottom: none;
+a {
+  color: var(--ax-accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--ax-accent-hover);
 }
 
 button {
-  padding: 0.25rem 0.75rem;
-  border: 1px solid #d2d2d7;
-  border-radius: 6px;
-  background: #fff;
+  font: inherit;
+  color: var(--ax-text);
+  background: var(--ax-surface-3);
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-radius-md);
+  padding: var(--ax-space-1) var(--ax-space-3);
   cursor: pointer;
+  transition: background var(--ax-dur-fast) var(--ax-ease),
+    border-color var(--ax-dur-fast) var(--ax-ease);
 }
-
+button:hover:not(:disabled) {
+  border-color: var(--ax-border-strong);
+}
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 
-tr.failed td:nth-child(3) {
-  color: #c0392b;
-  font-weight: 600;
-}
-
-tr.success td:nth-child(3) {
-  color: #1e7e34;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f5f5f7;
-    background-color: #1c1c1e;
-  }
-
-  table {
-    background: #2c2c2e;
-    border-color: #3a3a3c;
-  }
-
-  th {
-    background: #333336;
-  }
-
-  th,
-  td {
-    border-bottom-color: #3a3a3c;
-  }
-
-  button {
-    background: #2c2c2e;
-    border-color: #3a3a3c;
-    color: inherit;
-  }
-
-  .hint,
-  .status {
-    color: #98989d;
-  }
-}
-
-dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-  margin: 0.5rem 0;
-}
-
-dt {
-  font-weight: 600;
-  color: #6e6e73;
-}
-
-dd {
-  margin: 0;
-  word-break: break-all;
-}
-
-.routine-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.routine-form input,
-.routine-form select {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid #d2d2d7;
-  border-radius: 6px;
-  background: #fff;
-  color: inherit;
+input,
+select,
+textarea {
   font: inherit;
+  color: var(--ax-text);
+  background: var(--ax-surface-3);
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-radius-md);
+  padding: var(--ax-space-1) var(--ax-space-2);
 }
 
-.routine-form input#routine-cron {
-  flex: 1 1 20rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .routine-form input,
-  .routine-form select {
-    background: #2c2c2e;
-    border-color: #3a3a3c;
-  }
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.85em;
-  font-weight: 600;
-}
-
-.badge.fresh {
-  background: #d6f0dd;
-  color: #1e7e34;
-}
-
-.badge.stale {
-  background: #fde7c9;
-  color: #8a5a00;
-}
-
-@media (prefers-color-scheme: dark) {
-  dt {
-    color: #98989d;
-  }
-
-  .badge.fresh {
-    background: #16351f;
-    color: #5fd67f;
-  }
-
-  .badge.stale {
-    background: #3a2e12;
-    color: #e6b45f;
-  }
+:where(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--ax-focus-ring);
+  outline-offset: 1px;
 }
