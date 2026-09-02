@@ -118,3 +118,54 @@ tr.success td:nth-child(3) {
     color: #98989d;
   }
 }
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0;
+}
+
+dt {
+  font-weight: 600;
+  color: #6e6e73;
+}
+
+dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.badge.fresh {
+  background: #d6f0dd;
+  color: #1e7e34;
+}
+
+.badge.stale {
+  background: #fde7c9;
+  color: #8a5a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  dt {
+    color: #98989d;
+  }
+
+  .badge.fresh {
+    background: #16351f;
+    color: #5fd67f;
+  }
+
+  .badge.stale {
+    background: #3a2e12;
+    color: #e6b45f;
+  }
+}

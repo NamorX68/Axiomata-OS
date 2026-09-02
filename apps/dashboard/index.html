@@ -10,11 +10,27 @@
 
   <body>
     <main class="container">
-      <h1>Axiomata-OS — Skills</h1>
+      <h1>Axiomata-OS</h1>
       <p class="hint">
-        Minimal M1 placeholder UI. The real dashboard (module canvas) comes
-        later.
+        Minimal placeholder UI. The real dashboard (module canvas) comes later.
       </p>
+
+      <section>
+        <h2>Memory router</h2>
+        <p id="memory-status" class="status"></p>
+        <dl id="memory-detail" hidden>
+          <dt>Workspace</dt>
+          <dd id="memory-workspace"></dd>
+          <dt>Tracked files</dt>
+          <dd id="memory-tracked"></dd>
+          <dt>Last sync</dt>
+          <dd id="memory-last-sync"></dd>
+          <dt>State</dt>
+          <dd><span id="memory-badge" class="badge"></span></dd>
+        </dl>
+        <button id="memory-sync-btn" type="button">Sync now</button>
+        <p id="memory-sync-result" class="status"></p>
+      </section>
 
       <section>
         <h2>Skills</h2>

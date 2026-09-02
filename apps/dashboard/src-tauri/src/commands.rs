@@ -7,7 +7,7 @@
 //! a `MutexGuard` is never held across an `.await`.
 
 use axiomata_core::AxiomataCore;
-use axiomata_core::memory::{self, MemoryStatus, SyncReport};
+use axiomata_core::memory::{self, MemoryStatus, MemoryWatcher, SyncReport};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
 use tauri::State;
 
@@ -45,12 +45,25 @@ pub async fn run_skill(state: State<'_, CoreState>, name: String) -> Result<RunR
 
 /// Regenerates the workspace router `CLAUDE.md` blocks. Reads no database.
 #[tauri::command]
-pub fn sync_memory(state: State<'_, CoreState>) -> Result<SyncReport, String> {
-    memory::sync(&state.config).map_err(|err| err.to_string())
+pub fn sync_memory(
+    state: State<'_, CoreState>,
+    watcher: State<'_, MemoryWatcher>,
+) -> Result<SyncReport, String> {
+    let report = memory::sync(&state.config).map_err(|err| err.to_string())?;
+    watcher.mark_synced();
+    Ok(report)
 }
 
-/// Reports whether the memory router is stale.
+/// Reports whether the memory router is stale. Combines the authoritative
+/// mtime check with the watcher's reactive hint.
 #[tauri::command]
-pub fn get_memory_status(state: State<'_, CoreState>) -> Result<MemoryStatus, String> {
-    memory::status(&state.config).map_err(|err| err.to_string())
+pub fn get_memory_status(
+    state: State<'_, CoreState>,
+    watcher: State<'_, MemoryWatcher>,
+) -> Result<MemoryStatus, String> {
+    let mut status = memory::status(&state.config).map_err(|err| err.to_string())?;
+    if watcher.observed_change() {
+        status.stale = true;
+    }
+    Ok(status)
 }

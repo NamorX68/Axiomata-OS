@@ -21,8 +21,26 @@ interface RunSummary {
   started_at: string;
 }
 
+/** Memory-router freshness, as returned by `get_memory_status`. */
+interface MemoryStatus {
+  workspace_root: string;
+  last_sync: string | null;
+  stale: boolean;
+  tracked_files: number;
+}
+
+/** What a `sync_memory` call did. */
+interface SyncReport {
+  written: string[];
+  unchanged: number;
+  tracked_files: number;
+}
+
 const RUN_LIMIT = 25;
 const POLL_MS = 3000;
+
+/** True while a "Sync now" call is in flight. */
+let memorySyncing = false;
 
 /** Names of skills whose Run button is currently disabled (a run in flight). */
 const running = new Set<string>();
@@ -129,10 +147,57 @@ function cell(text: string): HTMLTableCellElement {
   return td;
 }
 
+async function refreshMemory(): Promise<void> {
+  const status = el<HTMLParagraphElement>("memory-status");
+  const detail = el<HTMLElement>("memory-detail");
+  try {
+    const m = await invoke<MemoryStatus>("get_memory_status");
+    el<HTMLElement>("memory-workspace").textContent = m.workspace_root;
+    el<HTMLElement>("memory-tracked").textContent = String(m.tracked_files);
+    el<HTMLElement>("memory-last-sync").textContent = m.last_sync ?? "never";
+    const badge = el<HTMLSpanElement>("memory-badge");
+    badge.textContent = m.stale ? "stale" : "fresh";
+    badge.className = `badge ${m.stale ? "stale" : "fresh"}`;
+    status.textContent = "";
+    detail.hidden = false;
+  } catch (err) {
+    status.textContent = `Failed to load memory status: ${String(err)}`;
+    detail.hidden = true;
+  }
+}
+
+async function syncMemory(): Promise<void> {
+  if (memorySyncing) return;
+  memorySyncing = true;
+  const button = el<HTMLButtonElement>("memory-sync-btn");
+  const result = el<HTMLParagraphElement>("memory-sync-result");
+  button.disabled = true;
+  button.textContent = "Syncing…";
+  try {
+    const r = await invoke<SyncReport>("sync_memory");
+    result.textContent =
+      r.written.length === 0
+        ? `Already in sync (${r.tracked_files} tracked files).`
+        : `Wrote ${r.written.length} CLAUDE.md file(s); ${r.unchanged} unchanged.`;
+  } catch (err) {
+    result.textContent = `Sync failed: ${String(err)}`;
+  } finally {
+    memorySyncing = false;
+    button.disabled = false;
+    button.textContent = "Sync now";
+    await refreshMemory();
+  }
+}
+
 window.addEventListener("DOMContentLoaded", () => {
+  el<HTMLButtonElement>("memory-sync-btn").addEventListener("click", () => {
+    void syncMemory();
+  });
+  void refreshMemory();
   void refreshSkills();
   void refreshRuns();
   setInterval(() => {
+    void refreshMemory();
     void refreshSkills();
     void refreshRuns();
   }, POLL_MS);

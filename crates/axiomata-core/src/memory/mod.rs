@@ -26,6 +26,8 @@ pub mod router;
 pub mod walker;
 pub mod watcher;
 
+pub use watcher::MemoryWatcher;
+
 /// Name of the router file Claude Code auto-loads from a directory.
 const CLAUDE_MD: &str = "CLAUDE.md";
 

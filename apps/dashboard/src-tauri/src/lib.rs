@@ -28,7 +28,14 @@ pub fn run() {
             if let Err(err) = axiomata_core::memory::sync(&core.config) {
                 eprintln!("startup memory sync failed: {err}");
             }
+            // Reactive stale hint for the memory panel. Degrades to the
+            // status()-based mtime check if the OS watcher can't start.
+            let watcher = axiomata_core::memory::MemoryWatcher::start(&core.config.workspace_root);
+            if !watcher.is_active() {
+                eprintln!("memory watcher could not start; falling back to poll-based staleness");
+            }
             app.manage(core);
+            app.manage(watcher);
             Ok(())
         })
         .run(tauri::generate_context!())
