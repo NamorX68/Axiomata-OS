@@ -49,6 +49,47 @@
       </section>
 
       <section>
+        <h2>Routines</h2>
+        <p id="routines-status" class="status"></p>
+        <table id="routines-table" hidden>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Schedule</th>
+              <th>Target</th>
+              <th>Next fire</th>
+              <th>Last fired</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="routines-body"></tbody>
+        </table>
+
+        <form id="routine-form" class="routine-form">
+          <input id="routine-name" type="text" placeholder="name" required />
+          <input
+            id="routine-cron"
+            type="text"
+            placeholder="0 */2 * * * *  (sec min hour dom mon dow)"
+            required
+          />
+          <select id="routine-target-type">
+            <option value="skill">skill</option>
+            <option value="prompt">prompt</option>
+          </select>
+          <input id="routine-target-value" type="text" placeholder="skill name / prompt text" required />
+          <select id="routine-backend">
+            <option value="">default backend</option>
+            <option value="claude-code">claude-code</option>
+            <option value="ollama">ollama</option>
+          </select>
+          <button id="routine-add-btn" type="submit">Add routine</button>
+        </form>
+        <p id="routine-form-result" class="status"></p>
+      </section>
+
+      <section>
         <h2>Recent runs</h2>
         <p id="runs-status" class="status"></p>
         <table id="runs-table" hidden>

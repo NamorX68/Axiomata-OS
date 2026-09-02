@@ -5,7 +5,7 @@
 use std::process::Stdio;
 use std::time::Instant;
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::time::timeout;
 
@@ -20,16 +20,20 @@ const CLAUDE_BIN: &str = "claude";
 /// this within the timeout window; output beyond it is discarded.
 const MAX_CAPTURE_BYTES: u64 = 1024 * 1024;
 
-/// Spawns `claude -p "<prompt>"` in `request.cwd`, applying `request.env` and
-/// enforcing `request.timeout`.
+/// Spawns `claude -p` in `request.cwd`, applying `request.env` and enforcing
+/// `request.timeout`.
 ///
-/// stdin is closed so the CLI never blocks on interactive input; stdout and
-/// stderr are drained concurrently with the process wait, so a chatty child
-/// cannot deadlock on a full pipe buffer. On timeout the child is signalled and
-/// reaped before [`AxiomataError::AgentTimeout`] is returned, so the process is
-/// gone (not merely detached) by the time the caller sees the error. A process
-/// that runs to completion — even with a non-zero exit code — yields `Ok`, with
-/// the exit code recorded in the result.
+/// The prompt is written to the child's **stdin**, not passed as a command-line
+/// argument: `claude` reads its prompt from stdin in print mode when given no
+/// positional prompt, and this keeps a prompt that begins with `-` from being
+/// parsed as a `claude` flag (the routine scheduler fires this path unattended).
+/// stdin is closed right after the prompt so the CLI never blocks on further
+/// input; stdout and stderr are drained concurrently with the process wait and
+/// the stdin write, so nothing can deadlock on a full pipe buffer. On timeout
+/// the child is signalled and reaped before [`AxiomataError::AgentTimeout`] is
+/// returned, so the process is gone (not merely detached) by the time the
+/// caller sees the error. A process that runs to completion — even with a
+/// non-zero exit code — yields `Ok`, with the exit code recorded in the result.
 ///
 /// Args:
 ///     request: Prompt, working directory, timeout, and extra environment.
@@ -46,9 +50,8 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
     let mut command = Command::new(CLAUDE_BIN);
     command
         .arg("-p")
-        .arg(&request.prompt)
         .current_dir(&request.cwd)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -63,6 +66,7 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
     };
 
     let mut child = command.spawn().map_err(spawn_err)?;
+    let mut stdin_pipe = child.stdin.take().expect("stdin was configured as a pipe");
     let mut stdout_pipe = child
         .stdout
         .take()
@@ -74,11 +78,20 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         .expect("stderr was configured as a pipe")
         .take(MAX_CAPTURE_BYTES);
 
+    let prompt_bytes = request.prompt.clone().into_bytes();
+    let feed_stdin = async move {
+        stdin_pipe.write_all(&prompt_bytes).await?;
+        // Close stdin so `claude` sees EOF and stops waiting for more input.
+        stdin_pipe.shutdown().await?;
+        Ok::<(), std::io::Error>(())
+    };
+
     let collect = async {
         let mut stdout_buf = Vec::new();
         let mut stderr_buf = Vec::new();
-        let (status, _, _) = tokio::try_join!(
+        let (status, _, _, _) = tokio::try_join!(
             child.wait(),
+            feed_stdin,
             stdout_pipe.read_to_end(&mut stdout_buf),
             stderr_pipe.read_to_end(&mut stderr_buf),
         )?;

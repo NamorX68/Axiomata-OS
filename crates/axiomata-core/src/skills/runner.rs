@@ -1,9 +1,11 @@
 //! Resolves a skill's agent backend and executes it, recording the result.
 //!
-//! Two entry points:
+//! Entry points:
 //!
-//! - [`execute_skill`] — runs the skill and returns an **unpersisted**
-//!   [`RunRecord`] (`id: None`). Touches no database at all.
+//! - [`execute_skill`] — resolves a skill by name and runs it, returning an
+//!   **unpersisted** [`RunRecord`] (`id: None`). Touches no database.
+//! - [`execute_prompt`] — runs a raw prompt string on a named backend, with no
+//!   `SKILL.md` involved. The routine scheduler's `prompt` target uses this.
 //! - [`execute_and_record_skill`] — `execute_skill`, then take the database
 //!   `Mutex` just long enough to write the row via [`runlog::record_run`]. The
 //!   agent call happens before any lock is taken, so this is safe to call from
@@ -23,8 +25,9 @@ use rusqlite::Connection;
 use crate::agents::{AgentBackend, AgentRequest, AgentRunResult};
 use crate::config::Config;
 use crate::error::AxiomataError;
+use crate::skills::model::{RunRecord, RunStatus};
 use crate::skills::registry::{self, Skill};
-use crate::skills::runlog::{self, RunRecord, RunStatus};
+use crate::skills::runlog;
 
 /// Runs the skill named `name`, returning an unpersisted [`RunRecord`].
 ///
@@ -45,47 +48,90 @@ use crate::skills::runlog::{self, RunRecord, RunStatus};
 ///     skill cannot be resolved.
 pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, AxiomataError> {
     let skill = registry::find_skill(name)?;
-    let timeout = Duration::from_secs(config.agents.skill_timeout_secs);
-    let started_at = Utc::now();
 
     // An unknown backend string in the frontmatter is a recordable failure: the
     // skill exists and someone tried to run it.
     let backend = match AgentBackend::resolve(&skill.backend, skill.model.as_deref(), config) {
         Ok(backend) => backend,
-        Err(err) => return Ok(failure_record(&skill, started_at, 0, err.to_string())),
-    };
-
-    let request = AgentRequest {
-        prompt: prompt_for(&skill, &backend),
-        cwd: config.workspace_root.clone(),
-        timeout,
-        env: claude_env(config, &backend),
-    };
-
-    let record = match backend.run(request).await {
-        Ok(result) => record_from_result(&skill, &backend, started_at, result),
         Err(err) => {
-            let elapsed = (Utc::now() - started_at).num_milliseconds().max(0) as u64;
-            failure_record(&skill, started_at, elapsed, err.to_string())
+            return Ok(failure_record(
+                &skill.name,
+                &skill.backend,
+                Utc::now(),
+                0,
+                err.to_string(),
+            ));
         }
     };
-    Ok(record)
+
+    Ok(run_on_backend(&skill.name, prompt_for(&skill, &backend), &backend, config).await)
 }
 
-/// Maps a successful backend invocation onto an unpersisted [`RunRecord`].
-///
-/// Pure and synchronous — separated from [`execute_skill`] so the
-/// status/exit-code/duration mapping can be unit-tested without a real agent.
-fn record_from_result(
-    skill: &Skill,
+/// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`),
+/// attributing the resulting [`RunRecord`] to `name`. The counterpart to
+/// [`execute_skill`] for callers that have a prompt but no `SKILL.md` — the
+/// routine scheduler's `prompt` target. An unresolvable `backend_id` yields a
+/// `Failed` record, not an `Err`.
+pub async fn execute_prompt(
+    name: &str,
+    prompt: String,
+    backend_id: &str,
+    config: &Config,
+) -> RunRecord {
+    let backend = match AgentBackend::resolve(backend_id, None, config) {
+        Ok(backend) => backend,
+        Err(err) => return failure_record(name, backend_id, Utc::now(), 0, err.to_string()),
+    };
+    run_on_backend(name, prompt, &backend, config).await
+}
+
+/// Shared tail of [`execute_skill`] / [`execute_prompt`]: build the request,
+/// run the backend, and map the outcome onto an unpersisted [`RunRecord`]
+/// attributed to `name`.
+async fn run_on_backend(
+    name: &str,
+    prompt: String,
     backend: &AgentBackend,
+    config: &Config,
+) -> RunRecord {
+    let started_at = Utc::now();
+    let request = agent_request(prompt, backend, config);
+    match backend.run(request).await {
+        Ok(result) => record_from_result(name, backend.id(), started_at, result),
+        Err(err) => {
+            let elapsed = (Utc::now() - started_at).num_milliseconds().max(0) as u64;
+            failure_record(name, backend.id(), started_at, elapsed, err.to_string())
+        }
+    }
+}
+
+/// Builds the [`AgentRequest`] for a prompt on `backend`: the caller-supplied
+/// prompt, the workspace as the working directory, the configured run timeout,
+/// and (for Claude Code only) the filtered provider environment.
+fn agent_request(prompt: String, backend: &AgentBackend, config: &Config) -> AgentRequest {
+    AgentRequest {
+        prompt,
+        cwd: config.workspace_root.clone(),
+        timeout: Duration::from_secs(config.agents.skill_timeout_secs),
+        env: claude_env(config, backend),
+    }
+}
+
+/// Maps a successful backend invocation onto an unpersisted [`RunRecord`]
+/// attributed to `name` (a skill or routine name).
+///
+/// Pure and synchronous — separated out so the status/exit-code/duration
+/// mapping can be unit-tested without a real agent.
+fn record_from_result(
+    skill_name: &str,
+    backend_id: &str,
     started_at: chrono::DateTime<Utc>,
     result: AgentRunResult,
 ) -> RunRecord {
     RunRecord {
         id: None,
-        skill_name: skill.name.clone(),
-        backend: backend.id().to_owned(),
+        skill_name: skill_name.to_owned(),
+        backend: backend_id.to_owned(),
         status: if result.is_success() {
             RunStatus::Success
         } else {
@@ -172,15 +218,16 @@ fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String, String)> 
 /// Builds an unpersisted `Failed` [`RunRecord`] for a run that produced no
 /// agent result (unknown backend, spawn failure, timeout, API error).
 fn failure_record(
-    skill: &Skill,
+    skill_name: &str,
+    backend_id: &str,
     started_at: chrono::DateTime<Utc>,
     duration_ms: u64,
     message: String,
 ) -> RunRecord {
     RunRecord {
         id: None,
-        skill_name: skill.name.clone(),
-        backend: skill.backend.clone(),
+        skill_name: skill_name.to_owned(),
+        backend: backend_id.to_owned(),
         status: RunStatus::Failed,
         exit_code: None,
         duration_ms,
@@ -268,30 +315,13 @@ mod tests {
             .unwrap_or(false)
     }
 
-    fn skill_for(name: &str, backend: &str) -> Skill {
-        Skill {
-            name: name.to_owned(),
-            description: String::new(),
-            model: None,
-            effort: None,
-            trigger: None,
-            backend: backend.to_owned(),
-            path: PathBuf::from("/tmp/none/SKILL.md"),
-            body: String::new(),
-        }
-    }
-
     #[test]
     fn record_from_result_maps_status_exit_code_and_duration() {
-        let skill = skill_for("s", "ollama");
-        let backend = AgentBackend::Ollama {
-            model: "m".to_owned(),
-        };
         let now = Utc::now();
 
         let ok = record_from_result(
-            &skill,
-            &backend,
+            "s",
+            "ollama",
             now,
             AgentRunResult {
                 stdout: "hi".to_owned(),
@@ -307,8 +337,8 @@ mod tests {
         assert!(ok.error.is_none());
 
         let bad = record_from_result(
-            &skill,
-            &backend,
+            "s",
+            "ollama",
             now,
             AgentRunResult {
                 stdout: String::new(),

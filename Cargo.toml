@@ -7,7 +7,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "process", "time", "fs", "io-util", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "process", "time", "fs", "io-util", "macros", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -21,6 +21,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 gray_matter = "0.3"
 ignore = "0.4"
+# Cron expression parser. Native format is 6-7 fields (seconds required),
+# not the 5-field crontab format. Deliberately not `tokio-cron-scheduler`:
+# routine firing state has to survive restarts, so Axiomata owns the poll
+# loop and persists `next_fire_at` itself (see `routines::scheduler`).
+cron = "0.17"
 # Only ever talks to a local Ollama daemon over plain HTTP, so the default
 # native-tls stack (and, on macOS, the Security.framework link) is dead weight.
 # Add `features = ["rustls"]` if a remote HTTPS endpoint is ever needed.

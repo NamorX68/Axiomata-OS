@@ -1,8 +1,8 @@
 //! Skill discovery and headless execution.
 //!
-//! Skills are read from two locations and merged: global skills under
-//! `~/.axiomata/skills/`, and workspace-local skills under
-//! `<workspace_root>/.claude/skills/`, which take priority on name collisions.
+//! Skills are application-level: each lives in its own directory under
+//! `~/.axiomata/skills/<name>/` with a `SKILL.md` manifest. There is no
+//! workspace-local skill location.
 //!
 //! Implemented starting in M1.
 
@@ -12,15 +12,17 @@ use std::io::{ErrorKind, Write};
 use crate::error::AxiomataError;
 use crate::paths;
 
+pub mod model;
 pub mod registry;
 pub mod runlog;
 pub mod runner;
 
 // Curated facade so consumers (CLI, Tauri commands) don't bind to the internal
 // module layout of `skills`.
+pub use model::{RunRecord, RunStatus, RunSummary};
 pub use registry::{Skill, find_skill, list_skills};
-pub use runlog::{RunRecord, RunStatus, RunSummary, get_run, list_runs};
-pub use runner::{execute_and_record_skill, execute_skill};
+pub use runlog::{get_run, list_runs};
+pub use runner::{execute_and_record_skill, execute_prompt, execute_skill};
 
 /// Name of the built-in example skill, seeded into the global skills directory
 /// on first run.

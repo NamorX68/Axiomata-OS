@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use axiomata_core::AxiomataCore;
+use axiomata_core::routines::{self, SchedulerHandle};
 use tauri::Manager;
 
 mod commands;
@@ -14,6 +17,10 @@ pub fn run() {
             commands::run_skill,
             commands::sync_memory,
             commands::get_memory_status,
+            commands::list_routines,
+            commands::add_routine,
+            commands::set_routine_enabled,
+            commands::routine_history,
         ])
         .setup(|app| {
             // Initializes `~/.axiomata` (config, database, logs, global
@@ -35,7 +42,18 @@ pub fn run() {
                 }
             });
 
+            // Start the routine scheduler. `.setup()` is not inside a Tokio
+            // runtime, so we hand the loop to `tauri::async_runtime` and keep
+            // only the stop handle here; dropping it on app exit ends the loop.
+            let (scheduler, stop_rx) = SchedulerHandle::channel();
+            tauri::async_runtime::spawn(routines::serve(
+                core.config.clone(),
+                Arc::clone(&core.db),
+                stop_rx,
+            ));
+
             app.manage(core);
+            app.manage(scheduler);
             Ok(())
         })
         .run(tauri::generate_context!())

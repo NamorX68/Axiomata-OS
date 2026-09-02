@@ -9,12 +9,14 @@ centre / second brain, built around the **ARMS framework** (Applications, Routin
 Memory, Skills — see `ARMS-Agentic-OS-Guide.pdf` for the original inspiration, though the
 actual design has since diverged from it in several places).
 
-Milestones **M0 (scaffold)**, **M1 (skills runner)** and **M2 (memory router)** are complete:
-the `agents` enum, the single-location skills registry + runner + run log, the `memory`
-router (walker / renderer / `sync` / `status`), the `list_skills` /
-`list_runs` / `run_skill` / `sync_memory` / `get_memory_status` Tauri commands, and a
-placeholder UI. Still unimplemented (module stub): the routines scheduler (M3), and the real
-module-canvas dashboard UI. The full architecture rationale
+Milestones **M0 (scaffold)**, **M1 (skills runner)**, **M2 (memory router)** and
+**M3 (routines scheduler)** are complete: the `agents` enum, the single-location skills
+registry + runner + run log, the `memory` router (walker / renderer / `sync` / `status`),
+the `routines` module (cron `schedule` / `store` / a 30 s Tokio poll loop in `scheduler`),
+the `list_skills` / `list_runs` / `run_skill` / `sync_memory` / `get_memory_status` /
+`list_routines` / `add_routine` / `set_routine_enabled` / `routine_history` Tauri commands,
+and a placeholder UI. Still unimplemented: always-on/background scheduling (M4), and the
+real module-canvas dashboard UI. The full architecture rationale
 and the milestone-by-milestone plan live in
 `~/.claude/plans/ich-m-chte-ein-agentic-shimmering-gadget.md` (outside this repo, on the
 owner's machine) — read it before starting new work here if it's available; this file
@@ -36,6 +38,9 @@ cargo run -p axiomata-cli -- run-skill <name>   # run a skill, print outcome, ex
 cargo run -p axiomata-cli -- list-runs --limit 20   # recent run history from the DB
 cargo run -p axiomata-cli -- memory sync    # regenerate the workspace CLAUDE.md router blocks
 cargo run -p axiomata-cli -- memory status  # is the router stale?
+cargo run -p axiomata-cli -- routines list  # scheduled routines, soonest next-fire first
+cargo run -p axiomata-cli -- routines add --name daily --cron '0 0 9 * * *' --skill <name>
+cargo run -p axiomata-cli -- routines tick  # run one scheduler poll pass now (no 30s wait)
 
 cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
 ```
@@ -48,7 +53,7 @@ One-time setup for the Tauri app: `cargo install tauri-cli --version "^2" --lock
 Cargo workspace (edition 2024), members:
 - `crates/axiomata-core` — the actual "OS" engine. No Tauri or macOS dependency, so it can
   in principle run headless elsewhere later. Modules: `paths`, `config`, `db`, `error`,
-  `agents`, `skills`, `memory` (all implemented); `routines` (M3) is still a module stub.
+  `agents`, `skills`, `memory`, `routines` — all implemented.
 - `crates/axiomata-macos` — boundary for future macOS-specific integration (e.g. Mail/
   Calendar access). Untouched stub.
 - `crates/axiomata-cli` — thin binary that calls `axiomata_core::AxiomataCore::init()` and
@@ -56,8 +61,11 @@ Cargo workspace (edition 2024), members:
   going through the GUI.
 - `apps/dashboard/src-tauri` — the Tauri shell (package name `dashboard`), depends on
   `axiomata-core` via a path dependency. Its `.setup()` hook (`src/lib.rs`) calls
-  `AxiomataCore::init()` and stores the `AxiomataCore` as managed state for the Tauri
-  commands. `AxiomataCore` holds `config` unlocked and only `db` behind a `Mutex`.
+  `AxiomataCore::init()`, kicks off a best-effort memory sync, starts the routine scheduler
+  (`tauri::async_runtime::spawn(routines::serve(…))`, stop handle managed), and stores the
+  `AxiomataCore` as managed state for the Tauri commands. `AxiomataCore` holds `config`
+  unlocked and only `db` behind a `Mutex`, wrapped in an `Arc` so the scheduler task can
+  hold its own handle.
 
 New shared dependencies go in root `Cargo.toml` under `[workspace.dependencies]` and are
 referenced per-crate as `some_crate.workspace = true` — don't pin versions ad hoc in an
@@ -85,6 +93,17 @@ marker. `upsert_block` never touches bytes outside the line-wise markers, writes
 and refuses a symlinked target. `sync` refuses a home/`/` workspace root and reports per-file
 failures in `SyncReport.failed` instead of aborting. Startup sync runs on a background
 thread; no file watcher — the 3 s status poll re-walks.
+
+The `routines` module (M3) fires cron-scheduled routines — a named skill or a raw prompt —
+unattended. `routines::store` owns the `routines` / `routine_runs` tables (migration 0003);
+`next_fire_at` is persisted and authoritative (never recomputed from the cron on load).
+`routines::schedule` wraps the `cron` crate (**6–7 field**, seconds first: `0 */2 * * * *`).
+`routines::scheduler::tick` is one poll pass (fire due routines exactly once, no backlog
+replay); `serve` is the 30 s loop; `spawn` is the Tokio-context wrapper. A firing is
+recorded as a normal `runs` row plus a `routine_runs` row linking to it. On startup
+`reconcile_missed` rolls past-due routines forward with a `Missed` history row — **no**
+catch-up fire. Routines fire only while the app or `axiomata-cli routines tick` runs
+(always-on is M4). `RunRecord` / `RunStatus` / `RunSummary` now live in `skills::model`.
 
 Things worth knowing before touching `skills/` or `agents/`:
 - Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
