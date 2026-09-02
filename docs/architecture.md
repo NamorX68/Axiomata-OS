@@ -69,9 +69,11 @@ Axiomata-OS/
 
 ### `axiomata-core`
 
-The platform-independent engine. It depends only on `home`, `serde`, `toml`, `thiserror`, and
-`rusqlite` — no Tauri, no macOS APIs — so it can in principle be embedded in a headless binary
-on another platform later. Its modules, as declared in `crates/axiomata-core/src/lib.rs`:
+The platform-independent engine. Its dependencies are all cross-platform library crates
+(`home`, `serde`/`serde_json`, `toml`, `thiserror`, `chrono`, `rusqlite`, `tokio`,
+`gray_matter`, `ollama-rs`, `ignore`, `notify`) — no Tauri, no macOS APIs — so it can in
+principle be embedded in a headless binary on another platform later. Its modules, as
+declared in `crates/axiomata-core/src/lib.rs`:
 
 - `paths` — resolves Axiomata-OS's own runtime data directory. **Implemented.**
 - `config` — loads/saves `~/.axiomata/config.toml`. **Implemented.**
@@ -80,7 +82,7 @@ on another platform later. Its modules, as declared in `crates/axiomata-core/src
 - `agents` — agent backend dispatch (Claude Code / Ollama). **Implemented (M1).**
 - `skills` — skill discovery, headless execution, and run logging. **Implemented (M1).**
 - `memory` — `CLAUDE.md` router file generation and staleness tracking.
-  **Module stub, planned for M2.**
+  **Implemented (M2).**
 - `routines` — cron-like scheduled skill/prompt execution.
   **Module stub, planned for M3.**
 
@@ -125,7 +127,7 @@ workspace the user currently has configured:
 
 - `config.toml` — the app config (see §5)
 - `axiomata.db` — the SQLite database
-- `logs/` — JSONL run/routine logs (planned; empty today)
+- `logs/` — `runs.log` (JSONL skill-run mirror, 0600); routine logs later
 - `skills/` — **all** skills. Skills are application-level: always available regardless of
   which Second Brain is active, and managed only by the user (no sync process writes here).
   There is no second, workspace-local skill location — see "Why one skill location" below.
@@ -142,7 +144,7 @@ environment variable, which both the test suite (to avoid touching a developer's
 A freely chosen, freely relocatable folder (`config.workspace_root` in `config.toml`,
 defaulting to `~/Axiomata-Workspace`) that holds the user's actual "Second Brain" content:
 
-- The memory router's root `CLAUDE.md` and per-area `CLAUDE.md` index files (planned for M2)
+- The memory router's root `CLAUDE.md` and per-area `CLAUDE.md` index files
   — these must live inside the workspace, not inside the app's own data directory, because
   they only function as usable context when a Claude Code session is actually run with this
   folder as its working directory.
@@ -276,13 +278,46 @@ exit_code, duration_ms }`.
   `backend: claude-code`) into `~/.axiomata/skills/` on first run, and never overwrites an
   existing copy. `AxiomataCore::init()` calls it.
 
+### Memory router (`memory/`)
+
+Keeps a generated, clearly delimited block in the workspace's `CLAUDE.md` files listing the
+folders and files, so a Claude Code session run in the workspace gets a map for free. The
+block is a pure function of the file tree — no timestamps — so a sync with no changes
+produces byte-for-byte identical output.
+
+- `walker.rs` — `scan(config)` walks `workspace_root` with the `ignore` crate (respects
+  `.gitignore`, skips `.git/`, `.claude/`, dotfiles, and the generated `CLAUDE.md` files),
+  groups files by top-level subdirectory ("area"), and for each `.md` file reads the first
+  8 KiB to pull a title (frontmatter `title:` or first `# ` heading). Deterministic,
+  case-insensitively path-sorted. `freshness(config)` is the read-nothing variant (walk +
+  stat only) used on every status poll.
+- `router.rs` — `render_root_block` (areas + loose files) and `render_area_block` (one
+  area's files, paths relative to the area) between `<!-- AXIOMATA-ROUTER:START -->` /
+  `<!-- AXIOMATA-ROUTER:END -->`. `upsert_block(path, block)` splices the block into a
+  `CLAUDE.md` — replacing the marked region, appending if there's no block yet, creating the
+  file if absent — and leaves every other byte alone; it only `fs::write`s when the content
+  actually changed. A start marker with no end marker is `AxiomataError::InvalidRouter`.
+- `mod.rs` — `sync(config)` walks, then upserts one `<area>/CLAUDE.md` per area and the root
+  `<workspace_root>/CLAUDE.md` (written last). `SyncReport { written, unchanged,
+  tracked_files }`. `status(config)` reports `MemoryStatus { workspace_root, last_sync,
+  stale, tracked_files }`, where **stale** = a tracked file's mtime is newer than the root
+  `CLAUDE.md`'s (that file's own mtime is the sync marker — no stored state).
+- `watcher.rs` — `MemoryWatcher` wraps a `notify` recursive watch on `workspace_root` and
+  flips an in-memory `AtomicBool` on any create/modify/remove (ignoring `CLAUDE.md` and
+  hidden dirs). Reactivity only — `status()` is authoritative; the watcher just lets the GUI
+  flip its badge without waiting for the next poll. The constructor is infallible; if the
+  OS watch can't attach it degrades to poll-only staleness (`is_active()` reports that).
+
+Sync is always **explicit**: `axiomata-cli memory sync`, the "Sync now" button, or once at
+Tauri startup (best-effort). Nothing rewrites the user's files on a timer.
+
 ### Errors (`error.rs`)
 
 `AxiomataError` (via `thiserror`) covers every failure mode the above surfaces: `Io` (with
 the offending path), `ConfigParse`, `ConfigSerialize`, `Database` (wraps `rusqlite::Error` via
-`#[from]`), `Migration` (tags the failing migration's version), and the M1 additions
-`UnknownAgentBackend`, `AgentSpawn`, `AgentTimeout`, `AgentApi`, `InvalidSkill`, and
-`SkillNotFound`.
+`#[from]`), `Migration` (tags the failing migration's version), the M1 additions
+`UnknownAgentBackend`, `AgentSpawn`, `AgentTimeout`, `AgentApi`, `InvalidSkill`,
+`SkillNotFound`, and the M2 addition `InvalidRouter`.
 
 ### `axiomata-cli`
 
@@ -294,11 +329,13 @@ history from the database). This is the primary way to exercise the runner witho
 ### The Tauri shell
 
 `apps/dashboard/src-tauri/src/lib.rs`'s `run()` builds the app, registers the
-`tauri-plugin-opener` plugin and the M1 commands (`list_skills`, `list_runs`, `get_run`, `run_skill` —
-in `src-tauri/src/commands.rs`), and in `.setup()` calls `AxiomataCore::init()` (panicking
-via `.expect()` — there is still no in-app error UI for a failed init) and stores the
-`AxiomataCore` with `app.manage(core)`. The `run_skill` command is a one-liner over
-`skills::execute_and_record_skill`, which runs the agent with no lock held and takes
+`tauri-plugin-opener` plugin and the commands (`list_skills`, `list_runs`, `get_run`,
+`run_skill`, `sync_memory`, `get_memory_status` — in `src-tauri/src/commands.rs`), and in
+`.setup()` calls `AxiomataCore::init()` (panicking via `.expect()` — there is still no
+in-app error UI for a failed init), runs `memory::sync` once (best-effort), starts a
+`MemoryWatcher`, and manages both with `app.manage(...)`. The `run_skill` command is a
+one-liner over `skills::execute_and_record_skill`, which runs the agent with no lock held
+and takes
 `core.db`'s `Mutex` only to write the row — so a lock is never held across an `.await`, and
 the run-then-record sequence lives in exactly one place (shared with the CLI). The frontend
 (`apps/dashboard/src/`) is a minimal placeholder: a skills table with
@@ -321,18 +358,6 @@ plugin registry or trait-object abstraction — a deliberate choice, since only 
 are needed and a generic multi-CLI abstraction would be premature generalization. If a
 further backend is ever needed (e.g. `opencode`, or a custom `rig`-based agent), the enum can
 gain a variant without reworking the runner or scheduler — but no such backend is planned.
-
-### Memory router (`memory/`) — planned for M2
-
-- `walker.rs` will walk `workspace_root` using the `ignore` crate (respecting `.gitignore`)
-  and group files by top-level area.
-- `router.rs` will deterministically render router content into a clearly delimited block
-  (`<!-- AXIOMATA-ROUTER:START/END -->`) inside the root `CLAUDE.md` and each area's
-  `CLAUDE.md`, leaving the rest of each file untouched. Sync is planned to be **explicit**
-  (a CLI command or a "Sync Now" UI action, or once at app start) rather than automatic on
-  every file change, to avoid constant diff noise.
-- `watcher.rs` will use the `notify` crate to flag the workspace as "stale" when a tracked
-  file changes after the last sync, without triggering an automatic re-sync itself.
 
 ### Routines scheduler (`routines/`) — planned for M3
 
@@ -402,8 +427,15 @@ implementation exists yet beyond the empty crate scaffold.
   name returning a clean error, and a malformed `SKILL.md` skipped from the listing. Live
   `claude-code`-backend verification (needs `claude` on `PATH`) and the GUI Run button
   (`cargo tauri dev`) are manual checks.
-- **M2 — Memory router: not started.** Will land the workspace walker, the deterministic
-  `CLAUDE.md` router renderer, `sync_memory`/`get_memory_status`, and the stale-flag watcher.
+- **M2 — Memory router: done.** The `ignore`-based workspace walker (`scan` / `freshness`),
+  the deterministic router renderer (`render_root_block` / `render_area_block` /
+  `upsert_block`), `memory::sync` / `memory::status`, the `notify` stale-flag watcher, the
+  `sync_memory` / `get_memory_status` Tauri commands, `axiomata-cli memory sync|status`, and
+  a Memory panel in the placeholder UI are all in place. Verified via the CLI against an
+  isolated workspace: status STALE before / fresh after a sync; sync writes the root and
+  per-area `CLAUDE.md` with extracted titles, preserving hand-written content outside the
+  block; a repeated sync writes nothing and the root `CLAUDE.md` is byte-identical across
+  runs.
 - **M3 — Routines scheduler: not started.** Will land the routine store, cron scheduling, the
   poll loop, the corresponding Tauri commands, and a minimal routines UI.
 - **M4 — Always-on behaviour: deferred, not part of the current milestones.** The MVP runs

@@ -9,11 +9,12 @@ centre / second brain, built around the **ARMS framework** (Applications, Routin
 Memory, Skills — see `ARMS-Agentic-OS-Guide.pdf` for the original inspiration, though the
 actual design has since diverged from it in several places).
 
-Milestones **M0 (workspace scaffold)** and **M1 (skills runner, end to end)** are complete:
-the `agents` enum, the two-location skills registry, the runner + run log, the `list_skills`
-/ `list_runs` / `run_skill` Tauri commands, a placeholder skills UI, and a bundled
-`example-skill`. Still unimplemented (module stubs only): the memory router (M2), routines
-scheduler (M3), and the real module-canvas dashboard UI. The full architecture rationale
+Milestones **M0 (scaffold)**, **M1 (skills runner)** and **M2 (memory router)** are complete:
+the `agents` enum, the single-location skills registry + runner + run log, the `memory`
+router (walker / renderer / `sync` / `status` / `notify` watcher), the `list_skills` /
+`list_runs` / `run_skill` / `sync_memory` / `get_memory_status` Tauri commands, and a
+placeholder UI. Still unimplemented (module stub): the routines scheduler (M3), and the real
+module-canvas dashboard UI. The full architecture rationale
 and the milestone-by-milestone plan live in
 `~/.claude/plans/ich-m-chte-ein-agentic-shimmering-gadget.md` (outside this repo, on the
 owner's machine) — read it before starting new work here if it's available; this file
@@ -33,6 +34,8 @@ cargo run -p axiomata-cli                  # headless: init the core, print stat
 cargo run -p axiomata-cli -- list-skills   # discovered skills (~/.axiomata/skills/)
 cargo run -p axiomata-cli -- run-skill <name>   # run a skill, print outcome, exit 1 if it failed
 cargo run -p axiomata-cli -- list-runs --limit 20   # recent run history from the DB
+cargo run -p axiomata-cli -- memory sync    # regenerate the workspace CLAUDE.md router blocks
+cargo run -p axiomata-cli -- memory status  # is the router stale?
 
 cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
 ```
@@ -45,8 +48,7 @@ One-time setup for the Tauri app: `cargo install tauri-cli --version "^2" --lock
 Cargo workspace (edition 2024), members:
 - `crates/axiomata-core` — the actual "OS" engine. No Tauri or macOS dependency, so it can
   in principle run headless elsewhere later. Modules: `paths`, `config`, `db`, `error`,
-  `agents`, `skills` (all implemented); `memory` (M2) and `routines` (M3) are still module
-  stubs — each file's doc comment says which milestone implements it.
+  `agents`, `skills`, `memory` (all implemented); `routines` (M3) is still a module stub.
 - `crates/axiomata-macos` — boundary for future macOS-specific integration (e.g. Mail/
   Calendar access). Untouched stub.
 - `crates/axiomata-cli` — thin binary that calls `axiomata_core::AxiomataCore::init()` and
@@ -74,7 +76,15 @@ into `~/.axiomata/skills/` if absent (never overwrites), opens the SQLite DB and
 pending migrations (`crates/axiomata-core/src/db/migrations/*.sql`, listed in
 `db::MIGRATIONS`). Fully idempotent — safe to call on every app start.
 
-Two things worth knowing before touching `skills/` or `agents/`:
+The `memory` router keeps a generated block between `<!-- AXIOMATA-ROUTER:START/END -->` in
+the workspace's `CLAUDE.md` files (root + one per top-level "area"), listing folders and
+files with an extracted title. `memory::sync` regenerates them (deterministic — a no-op sync
+is byte-identical), `memory::status` reports staleness (a tracked file newer than the root
+`CLAUDE.md`, whose mtime *is* the sync marker). `upsert_block` never touches bytes outside
+the markers. The Tauri app syncs once at startup and runs a `notify` `MemoryWatcher` (a
+reactive stale hint only).
+
+Things worth knowing before touching `skills/` or `agents/`:
 - Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
   (`skills::registry::list_skills` / `find_skill`). They are application-level, not per-vault;
   there is no workspace-local skill location (dropped deliberately — see `docs/architecture.md`
