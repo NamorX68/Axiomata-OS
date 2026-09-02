@@ -109,7 +109,8 @@ async fn run_skill(core: &AxiomataCore, name: &str) -> Result<()> {
 
 /// Prints recent runs from the database, newest first.
 fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
-    let runs = skills::list_runs(&core.db, limit).context("failed to read run history")?;
+    let db = core.db.lock().expect("database mutex is poisoned");
+    let runs = skills::list_runs(&db, limit).context("failed to read run history")?;
     if runs.is_empty() {
         println!("No runs recorded yet.");
         return Ok(());

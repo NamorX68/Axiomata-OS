@@ -44,10 +44,11 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
 - `AxiomataCore::init()` (`crates/axiomata-core/src/lib.rs`) is the **single** entry point,
   called by both `axiomata-cli` and the Tauri `.setup()` hook. Fully idempotent. Also seeds
   the bundled `example-skill` (never overwrites an existing copy).
-- The Tauri `.setup()` hook stores `Mutex<AxiomataCore>` as managed state. Commands live in
-  `apps/dashboard/src-tauri/src/commands.rs`: `list_skills`, `list_runs`, `get_run`, `run_skill`.
-  `run_skill` clones the config, drops the lock, awaits the agent, re-locks only to persist
-  — never hold a `MutexGuard` across `.await`.
+- The Tauri `.setup()` hook stores `AxiomataCore` as managed state — `config` is read
+  directly, only `core.db` is behind a `Mutex`. Commands in
+  `apps/dashboard/src-tauri/src/commands.rs`: `list_skills`, `list_runs`, `get_run`,
+  `run_skill`. `run_skill` calls `skills::execute_and_record_skill`, which runs the agent
+  with no lock held and locks `db` only to write — never hold a lock across `.await`.
 
 ## Data lives in TWO places (easy to get wrong)
 

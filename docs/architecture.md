@@ -108,11 +108,10 @@ The Tauri shell, Cargo package name `dashboard` (crate name `dashboard_lib`, sin
 and library names must differ on some platforms). Depends on `axiomata-core` via a path
 dependency (`crates/axiomata-core`, referenced as `../../../crates/axiomata-core`). Its
 `.setup()` hook, in `src/lib.rs`, calls `AxiomataCore::init()` once at startup and stores the
-result as Tauri-managed state (`Mutex<AxiomataCore>`), so that future `#[tauri::command]`
-handlers (M1+) can reach the same live config and database connection instead of
-re-initializing. Today the only registered command is the scaffolded `greet` example from
-the Tauri Vanilla-TypeScript template — no Axiomata-specific commands exist yet, and the
-window itself is the unmodified template UI, not the planned dashboard.
+`AxiomataCore` as Tauri-managed state, so the `#[tauri::command]` handlers reach the same
+live config and database without re-initializing. `AxiomataCore` locks only its `db` field
+internally (`Mutex<Connection>`); `config` is shared without a lock. See §5 for the M1
+commands and the placeholder UI.
 
 ## 4. Two separate data locations
 
@@ -297,10 +296,12 @@ history from the database). This is the primary way to exercise the runner witho
 `apps/dashboard/src-tauri/src/lib.rs`'s `run()` builds the app, registers the
 `tauri-plugin-opener` plugin and the M1 commands (`list_skills`, `list_runs`, `get_run`, `run_skill` —
 in `src-tauri/src/commands.rs`), and in `.setup()` calls `AxiomataCore::init()` (panicking
-via `.expect()` — there is still no in-app error UI for a failed init) and stores it as
-`app.manage(Mutex::new(core))`. `run_skill` clones the config, releases the lock, awaits the
-agent, then re-takes the lock only to persist — so a `MutexGuard` is never held across an
-`.await`. The frontend (`apps/dashboard/src/`) is a minimal placeholder: a skills table with
+via `.expect()` — there is still no in-app error UI for a failed init) and stores the
+`AxiomataCore` with `app.manage(core)`. The `run_skill` command is a one-liner over
+`skills::execute_and_record_skill`, which runs the agent with no lock held and takes
+`core.db`'s `Mutex` only to write the row — so a lock is never held across an `.await`, and
+the run-then-record sequence lives in exactly one place (shared with the CLI). The frontend
+(`apps/dashboard/src/`) is a minimal placeholder: a skills table with
 a Run button per row and a run-history table, both polled every 3 s. It is not the planned
 module-canvas UI (see §6).
 

@@ -3,18 +3,18 @@
 //! Two entry points:
 //!
 //! - [`execute_skill`] — runs the skill and returns an **unpersisted**
-//!   [`RunRecord`] (`id: None`). Touches no database, so a caller that only
-//!   holds a `std::sync::Mutex` around its state can drop the lock before the
-//!   `await` and re-take it just to persist.
-//! - [`execute_and_record_skill`] — the convenience wrapper: `execute_skill`
-//!   followed by [`runlog::record_run`]. Used by the CLI, which owns its
-//!   `Connection`.
+//!   [`RunRecord`] (`id: None`). Touches no database at all.
+//! - [`execute_and_record_skill`] — `execute_skill`, then take the database
+//!   `Mutex` just long enough to write the row via [`runlog::record_run`]. The
+//!   agent call happens before any lock is taken, so this is safe to call from
+//!   an async task. Both the CLI and the Tauri command use it.
 //!
 //! It ties together the registry ([`crate::skills::registry`]), the agent
 //! backends ([`crate::agents`]), and the run log ([`crate::skills::runlog`]).
 //!
 //! Implemented in M1.
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -101,7 +101,12 @@ fn record_from_result(
     }
 }
 
-/// [`execute_skill`] followed by persisting the result to `db`.
+/// [`execute_skill`] followed by persisting the result.
+///
+/// The agent call in `execute_skill` runs with no lock held; the database
+/// `Mutex` is taken only afterwards, just long enough to write the row. This
+/// is the one place the "run, then record" sequence lives — the CLI and the
+/// Tauri command both call it.
 ///
 /// Errors:
 ///     Everything [`execute_skill`] can return, plus [`AxiomataError::Database`]
@@ -109,10 +114,11 @@ fn record_from_result(
 pub async fn execute_and_record_skill(
     name: &str,
     config: &Config,
-    db: &Connection,
+    db: &Mutex<Connection>,
 ) -> Result<RunRecord, AxiomataError> {
     let record = execute_skill(name, config).await?;
-    runlog::record_run(db, record)
+    let db = db.lock().expect("run-log database mutex is poisoned");
+    runlog::record_run(&db, record)
 }
 
 /// Builds the prompt handed to the agent for `skill` on `backend`.
@@ -201,7 +207,7 @@ mod tests {
         home: PathBuf,
         cwd: PathBuf,
         config: Config,
-        db: Connection,
+        db: Mutex<Connection>,
     }
 
     impl Fixture {
@@ -227,7 +233,7 @@ mod tests {
                 home,
                 cwd,
                 config,
-                db,
+                db: Mutex::new(db),
             }
         }
 
@@ -235,6 +241,11 @@ mod tests {
             let dir = crate::paths::global_skills_dir().join(name);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("SKILL.md"), contents).unwrap();
+        }
+
+        /// A locked handle to the test database, for direct `runlog` calls.
+        fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+            self.db.lock().unwrap()
         }
     }
 
@@ -359,7 +370,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AxiomataError::SkillNotFound { .. }));
-        assert!(runlog::list_runs(&fx.db, 10).unwrap().is_empty());
+        assert!(runlog::list_runs(&fx.conn(), 10).unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -377,7 +388,7 @@ mod tests {
         assert_eq!(record.exit_code, None);
         assert!(record.error.unwrap().contains("opencode"));
 
-        let recent = runlog::list_runs(&fx.db, 10).unwrap();
+        let recent = runlog::list_runs(&fx.conn(), 10).unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].skill_name, "weird");
     }
@@ -396,7 +407,7 @@ mod tests {
         // Either the daemon is absent (Failed with an error message) or, on a
         // dev machine that happens to run Ollama, it succeeds — both are valid,
         // but the run must always be persisted.
-        let recent = runlog::list_runs(&fx.db, 10).unwrap();
+        let recent = runlog::list_runs(&fx.conn(), 10).unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].skill_name, "note");
         assert_eq!(recent[0].backend, "ollama");
@@ -425,7 +436,7 @@ mod tests {
         assert_eq!(record.exit_code, None);
         assert!(record.error.is_some());
 
-        let recent = runlog::list_runs(&fx.db, 10).unwrap();
+        let recent = runlog::list_runs(&fx.conn(), 10).unwrap();
         assert_eq!(recent.len(), 1);
     }
 }

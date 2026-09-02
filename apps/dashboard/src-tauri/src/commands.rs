@@ -1,19 +1,17 @@
 //! Tauri command handlers exposed to the dashboard frontend.
 //!
-//! All state lives behind a single `Mutex<AxiomataCore>` managed in
-//! `lib.rs::run`. The lock is only ever held for synchronous work; `run_skill`
-//! deliberately clones the config, releases the lock, runs the agent, and
-//! re-takes the lock just to persist — so a `std::sync::MutexGuard` is never
-//! held across an `.await`.
-
-use std::sync::Mutex;
+//! The managed state is the `AxiomataCore` itself: `config` is read directly
+//! (no lock — it is never mutated at runtime), and only `core.db` sits behind a
+//! `Mutex`. `run_skill` calls `execute_and_record_skill`, which runs the agent
+//! with no lock held and takes the database lock only to write the result — so
+//! a `MutexGuard` is never held across an `.await`.
 
 use axiomata_core::AxiomataCore;
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
 use tauri::State;
 
-/// Core engine wrapped for Tauri-managed state.
-pub type CoreState = Mutex<AxiomataCore>;
+/// The Tauri-managed core engine.
+pub type CoreState = AxiomataCore;
 
 /// Lists every discovered skill (`~/.axiomata/skills/`).
 #[tauri::command]
@@ -25,33 +23,21 @@ pub fn list_skills() -> Result<Vec<Skill>, String> {
 /// is clamped to `skills::MAX_RUN_LIMIT` in the core.
 #[tauri::command]
 pub fn list_runs(state: State<'_, CoreState>, limit: usize) -> Result<Vec<RunSummary>, String> {
-    let core = state.lock().map_err(|err| err.to_string())?;
-    skills::list_runs(&core.db, limit).map_err(|err| err.to_string())
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    skills::list_runs(&db, limit).map_err(|err| err.to_string())
 }
 
 /// Returns one full run (with captured output) by id, or `null` if unknown.
 #[tauri::command]
 pub fn get_run(state: State<'_, CoreState>, id: i64) -> Result<Option<RunRecord>, String> {
-    let core = state.lock().map_err(|err| err.to_string())?;
-    skills::get_run(&core.db, id).map_err(|err| err.to_string())
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    skills::get_run(&db, id).map_err(|err| err.to_string())
 }
 
 /// Runs a skill by name and returns the persisted run record.
-///
-/// The run itself (which awaits an agent process or HTTP call) happens with no
-/// lock held; the lock is taken only to read the config up front and to write
-/// the result at the end.
 #[tauri::command]
 pub async fn run_skill(state: State<'_, CoreState>, name: String) -> Result<RunRecord, String> {
-    let config = {
-        let core = state.lock().map_err(|err| err.to_string())?;
-        core.config.clone()
-    };
-
-    let record = skills::execute_skill(&name, &config)
+    skills::execute_and_record_skill(&name, &state.config, &state.db)
         .await
-        .map_err(|err| err.to_string())?;
-
-    let core = state.lock().map_err(|err| err.to_string())?;
-    skills::runlog::record_run(&core.db, record).map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())
 }

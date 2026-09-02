@@ -54,8 +54,8 @@ Cargo workspace (edition 2024), members:
   going through the GUI.
 - `apps/dashboard/src-tauri` — the Tauri shell (package name `dashboard`), depends on
   `axiomata-core` via a path dependency. Its `.setup()` hook (`src/lib.rs`) calls
-  `AxiomataCore::init()` and stores the result as managed state
-  (`Mutex<AxiomataCore>`) for future Tauri commands to reach.
+  `AxiomataCore::init()` and stores the `AxiomataCore` as managed state for the Tauri
+  commands. `AxiomataCore` holds `config` unlocked and only `db` behind a `Mutex`.
 
 New shared dependencies go in root `Cargo.toml` under `[workspace.dependencies]` and are
 referenced per-crate as `some_crate.workspace = true` — don't pin versions ad hoc in an

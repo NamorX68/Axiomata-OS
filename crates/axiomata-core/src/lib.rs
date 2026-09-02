@@ -18,17 +18,23 @@ pub mod skills;
 pub use error::AxiomataError;
 
 use std::fs;
+use std::sync::Mutex;
 
 use config::Config;
 
-/// The initialized Axiomata-OS core engine: loaded config and an open,
-/// migrated database connection.
+/// The initialized Axiomata-OS core engine.
+///
+/// The two pieces are held separately on purpose: `config` is read constantly
+/// and effectively never mutated at runtime, so it needs no lock; the database
+/// connection can only be used by one caller at a time, so it — and only it —
+/// sits behind a [`Mutex`]. Async callers therefore never have to hold a lock
+/// across an agent call just to reach the config.
 ///
 /// Construct via [`AxiomataCore::init`], which is idempotent and safe to call
 /// on every app start.
 pub struct AxiomataCore {
     pub config: Config,
-    pub db: rusqlite::Connection,
+    pub db: Mutex<rusqlite::Connection>,
 }
 
 impl AxiomataCore {
@@ -70,7 +76,10 @@ impl AxiomataCore {
         let db = db::open_and_migrate()?;
         restrict_to_owner(&paths::db_path(), 0o600);
 
-        Ok(Self { config, db })
+        Ok(Self {
+            config,
+            db: Mutex::new(db),
+        })
     }
 }
 

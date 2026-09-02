@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use axiomata_core::AxiomataCore;
 use tauri::Manager;
 
@@ -19,10 +17,11 @@ pub fn run() {
             // Initializes `~/.axiomata` (config, database, logs, global
             // skills) and the Second-Brain workspace root on every start.
             // Managed as app state so the command handlers reach the same
-            // config/database without re-initializing.
+            // config/database without re-initializing. `AxiomataCore` locks
+            // only its `db` field internally, so no outer `Mutex` is needed.
             let core =
                 AxiomataCore::init().expect("failed to initialize the Axiomata-OS core engine");
-            app.manage(Mutex::new(core));
+            app.manage(core);
             Ok(())
         })
         .run(tauri::generate_context!())
