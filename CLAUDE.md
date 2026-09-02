@@ -11,7 +11,7 @@ actual design has since diverged from it in several places).
 
 Milestones **M0 (scaffold)**, **M1 (skills runner)** and **M2 (memory router)** are complete:
 the `agents` enum, the single-location skills registry + runner + run log, the `memory`
-router (walker / renderer / `sync` / `status` / `notify` watcher), the `list_skills` /
+router (walker / renderer / `sync` / `status`), the `list_skills` /
 `list_runs` / `run_skill` / `sync_memory` / `get_memory_status` Tauri commands, and a
 placeholder UI. Still unimplemented (module stub): the routines scheduler (M3), and the real
 module-canvas dashboard UI. The full architecture rationale
@@ -78,11 +78,13 @@ pending migrations (`crates/axiomata-core/src/db/migrations/*.sql`, listed in
 
 The `memory` router keeps a generated block between `<!-- AXIOMATA-ROUTER:START/END -->` in
 the workspace's `CLAUDE.md` files (root + one per top-level "area"), listing folders and
-files with an extracted title. `memory::sync` regenerates them (deterministic — a no-op sync
-is byte-identical), `memory::status` reports staleness (a tracked file newer than the root
-`CLAUDE.md`, whose mtime *is* the sync marker). `upsert_block` never touches bytes outside
-the markers. The Tauri app syncs once at startup and runs a `notify` `MemoryWatcher` (a
-reactive stale hint only).
+files with an extracted (and sanitised) title. `memory::sync` regenerates them (deterministic
+— a no-op sync is byte-identical), stamping `~/.axiomata/memory-last-sync.json` (per-workspace
+timestamp map). `memory::status` reports staleness = a tracked file changed after that
+marker. `upsert_block` never touches bytes outside the line-wise markers, writes atomically,
+and refuses a symlinked target. `sync` refuses a home/`/` workspace root and reports per-file
+failures in `SyncReport.failed` instead of aborting. Startup sync runs on a background
+thread; no file watcher — the 3 s status poll re-walks.
 
 Things worth knowing before touching `skills/` or `agents/`:
 - Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`

@@ -10,10 +10,10 @@ before starting new work. `AGENTS.md` is the compact, high-signal summary.
 Early-stage Rust + Tauri desktop app: a personal "Agentic OS" / second brain around the
 **ARMS framework** (Applications, Routines, Memory, Skills). Milestones **M0**, **M1 (skills
 runner)** and **M2 (memory router)** are done: `agents` (the `AgentBackend` enum), `skills`
-(registry + runner + run log), `memory` (walker / renderer / `sync` / `status` / `notify`
-watcher), the `list_skills` / `list_runs` / `run_skill` / `sync_memory` / `get_memory_status`
-Tauri commands, and a placeholder UI. The `routines` scheduler (M3) and the real
-module-canvas dashboard UI are **module stubs only** — do not assume anything in those works.
+(registry + runner + run log), `memory` (walker / renderer / `sync` / `status`, poll-only
+staleness), the `list_skills` / `list_runs` / `run_skill` / `sync_memory` /
+`get_memory_status` Tauri commands, and a placeholder UI. The `routines` scheduler (M3) and
+the real module-canvas dashboard UI are **module stubs only** — do not assume those work.
 
 ## Commands
 
@@ -45,11 +45,12 @@ Cargo workspace (edition 2024); members are `crates/axiomata-core`, `crates/axio
   called by both `axiomata-cli` and the Tauri `.setup()` hook. Fully idempotent. Also seeds
   the bundled `example-skill` (never overwrites an existing copy).
 - `memory`: `memory::sync(config)` regenerates the `<!-- AXIOMATA-ROUTER:START/END -->`
-  block in the workspace's `CLAUDE.md` files (deterministic — a no-op sync is byte-identical,
-  content outside the markers is untouched); `memory::status(config)` reports staleness. The
-  Tauri app syncs once at startup and runs a `notify` `MemoryWatcher` (reactive hint only).
-- The Tauri `.setup()` hook stores `AxiomataCore` + `MemoryWatcher` as managed state —
-  `config` is read directly, only `core.db` is behind a `Mutex`. Commands in
+  block in the workspace's `CLAUDE.md` files (deterministic, atomic write, line-wise markers,
+  sanitised titles, symlink-refusing, per-file `SyncReport.failed`; refuses a home/`/` root)
+  and stamps `~/.axiomata/memory-last-sync.json`; `memory::status(config)` = walk + compare
+  against that marker. No file watcher. Startup sync runs on a background thread.
+- The Tauri `.setup()` hook stores `AxiomataCore` as managed state — `config` is read
+  directly, only `core.db` is behind a `Mutex`. Commands in
   `apps/dashboard/src-tauri/src/commands.rs`: `list_skills`, `list_runs`, `get_run`,
   `run_skill`, `sync_memory`, `get_memory_status`. `run_skill` calls
   `skills::execute_and_record_skill`, which runs the agent

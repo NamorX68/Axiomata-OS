@@ -71,7 +71,7 @@ Axiomata-OS/
 
 The platform-independent engine. Its dependencies are all cross-platform library crates
 (`home`, `serde`/`serde_json`, `toml`, `thiserror`, `chrono`, `rusqlite`, `tokio`,
-`gray_matter`, `ollama-rs`, `ignore`, `notify`) — no Tauri, no macOS APIs — so it can in
+`gray_matter`, `ollama-rs`, `ignore`) — no Tauri, no macOS APIs — so it can in
 principle be embedded in a headless binary on another platform later. Its modules, as
 declared in `crates/axiomata-core/src/lib.rs`:
 
@@ -285,31 +285,38 @@ folders and files, so a Claude Code session run in the workspace gets a map for 
 block is a pure function of the file tree — no timestamps — so a sync with no changes
 produces byte-for-byte identical output.
 
-- `walker.rs` — `scan(config)` walks `workspace_root` with the `ignore` crate (respects
-  `.gitignore`, skips `.git/`, `.claude/`, dotfiles, and the generated `CLAUDE.md` files),
-  groups files by top-level subdirectory ("area"), and for each `.md` file reads the first
-  8 KiB to pull a title (frontmatter `title:` or first `# ` heading). Deterministic,
-  case-insensitively path-sorted. `freshness(config)` is the read-nothing variant (walk +
-  stat only) used on every status poll.
-- `router.rs` — `render_root_block` (areas + loose files) and `render_area_block` (one
-  area's files, paths relative to the area) between `<!-- AXIOMATA-ROUTER:START -->` /
-  `<!-- AXIOMATA-ROUTER:END -->`. `upsert_block(path, block)` splices the block into a
-  `CLAUDE.md` — replacing the marked region, appending if there's no block yet, creating the
-  file if absent — and leaves every other byte alone; it only `fs::write`s when the content
-  actually changed. A start marker with no end marker is `AxiomataError::InvalidRouter`.
-- `mod.rs` — `sync(config)` walks, then upserts one `<area>/CLAUDE.md` per area and the root
-  `<workspace_root>/CLAUDE.md` (written last). `SyncReport { written, unchanged,
-  tracked_files }`. `status(config)` reports `MemoryStatus { workspace_root, last_sync,
-  stale, tracked_files }`, where **stale** = a tracked file's mtime is newer than the root
-  `CLAUDE.md`'s (that file's own mtime is the sync marker — no stored state).
-- `watcher.rs` — `MemoryWatcher` wraps a `notify` recursive watch on `workspace_root` and
-  flips an in-memory `AtomicBool` on any create/modify/remove (ignoring `CLAUDE.md` and
-  hidden dirs). Reactivity only — `status()` is authoritative; the watcher just lets the GUI
-  flip its badge without waiting for the next poll. The constructor is infallible; if the
-  OS watch can't attach it degrades to poll-only staleness (`is_active()` reports that).
+- `walker.rs` (`pub(crate)`) — `scan(config)` walks `workspace_root` with the `ignore` crate
+  (respects `.gitignore`, skips `.git/`, `.claude/`, dotfiles, and any `CLAUDE.md`
+  case-insensitively), groups files by top-level subdirectory ("area"), and for each `.md`
+  file reads the first 8 KiB to pull a title (frontmatter `title:` or first `# ` heading).
+  Deterministic, case-insensitively path-sorted. `freshness(config)` is the read-nothing
+  variant (walk + stat only) used on every status poll.
+- `router.rs` (`pub(crate)`) — `render_root_block` (areas + loose files) and
+  `render_area_block` (one area's files, paths relative to the area) between
+  `<!-- AXIOMATA-ROUTER:START -->` / `<!-- AXIOMATA-ROUTER:END -->`. Titles and area
+  display names are run through a sanitiser (control chars collapsed, `<!--`/`-->`/the
+  marker token defanged, length-capped) so vault content can't break out of the block; an
+  area name that isn't link-safe is listed without the `[index](…)` link; a block caps at
+  400 entries with a `…and N more` line. `upsert_block(path, block)` splices the block into a
+  `CLAUDE.md` — replacing the marked region (markers matched **line-wise**), appending if
+  there's no block, creating the file if absent — leaving every other byte alone, writing
+  only on a real change, and **atomically** (temp file + rename). It refuses a symlinked or
+  over-1 MiB target (`AxiomataError::InvalidRouter`), so it never follows a link out of the
+  workspace.
+- `mod.rs` — `sync(config)` canonicalises `workspace_root` (rejecting `/` or the home
+  directory as `AxiomataError::UnsafeWorkspaceRoot`), walks, then upserts one
+  `<area>/CLAUDE.md` per area and the root `<workspace_root>/CLAUDE.md`, checking each target
+  stays inside the root. A per-file write failure goes to `SyncReport { written, unchanged,
+  failed, tracked_files }` instead of aborting the run. It then stamps
+  `~/.axiomata/memory-last-sync.json` — a `{ canonical workspace path: RFC3339 }` map — as
+  the sync marker (kept in app-data, not the vault). `status(config)` reports
+  `MemoryStatus { workspace_root, last_sync, stale, tracked_files }`, where **stale** = a
+  tracked file's mtime is after this workspace's marker entry (or it was never synced). A
+  no-op sync still stamps the marker, so "stale" always clears.
 
 Sync is always **explicit**: `axiomata-cli memory sync`, the "Sync now" button, or once at
-Tauri startup (best-effort). Nothing rewrites the user's files on a timer.
+Tauri startup (best-effort, on a background thread). Nothing rewrites the user's files on a
+timer, and there is no filesystem watcher — the 3-second status poll re-walks and compares.
 
 ### Errors (`error.rs`)
 
@@ -317,7 +324,7 @@ Tauri startup (best-effort). Nothing rewrites the user's files on a timer.
 the offending path), `ConfigParse`, `ConfigSerialize`, `Database` (wraps `rusqlite::Error` via
 `#[from]`), `Migration` (tags the failing migration's version), the M1 additions
 `UnknownAgentBackend`, `AgentSpawn`, `AgentTimeout`, `AgentApi`, `InvalidSkill`,
-`SkillNotFound`, and the M2 addition `InvalidRouter`.
+`SkillNotFound`, and the M2 additions `InvalidRouter` and `UnsafeWorkspaceRoot`.
 
 ### `axiomata-cli`
 
@@ -332,10 +339,10 @@ history from the database). This is the primary way to exercise the runner witho
 `tauri-plugin-opener` plugin and the commands (`list_skills`, `list_runs`, `get_run`,
 `run_skill`, `sync_memory`, `get_memory_status` — in `src-tauri/src/commands.rs`), and in
 `.setup()` calls `AxiomataCore::init()` (panicking via `.expect()` — there is still no
-in-app error UI for a failed init), runs `memory::sync` once (best-effort), starts a
-`MemoryWatcher`, and manages both with `app.manage(...)`. The `run_skill` command is a
-one-liner over `skills::execute_and_record_skill`, which runs the agent with no lock held
-and takes
+in-app error UI for a failed init), spawns a background thread that runs `memory::sync` once
+(best-effort, so a large vault doesn't stall window creation), and manages the
+`AxiomataCore`. The `run_skill` command is a one-liner over
+`skills::execute_and_record_skill`, which runs the agent with no lock held and takes
 `core.db`'s `Mutex` only to write the row — so a lock is never held across an `.await`, and
 the run-then-record sequence lives in exactly one place (shared with the CLI). The frontend
 (`apps/dashboard/src/`) is a minimal placeholder: a skills table with
@@ -429,10 +436,14 @@ implementation exists yet beyond the empty crate scaffold.
   (`cargo tauri dev`) are manual checks.
 - **M2 — Memory router: done.** The `ignore`-based workspace walker (`scan` / `freshness`),
   the deterministic router renderer (`render_root_block` / `render_area_block` /
-  `upsert_block`), `memory::sync` / `memory::status`, the `notify` stale-flag watcher, the
+  `upsert_block` — sanitised, line-wise markers, atomic write, symlink-refusing),
+  `memory::sync` / `memory::status` with a `~/.axiomata/memory-last-sync.json` marker, the
   `sync_memory` / `get_memory_status` Tauri commands, `axiomata-cli memory sync|status`, and
-  a Memory panel in the placeholder UI are all in place. Verified via the CLI against an
-  isolated workspace: status STALE before / fresh after a sync; sync writes the root and
+  a Memory panel in the placeholder UI are all in place. Staleness is poll-only (no file
+  watcher). Verified via the CLI against an isolated workspace: status STALE before / fresh
+  after a sync, and **still clears after a no-op sync** when only a note body changed; a
+  symlinked `CLAUDE.md` is refused (victim file untouched) and a home/`/` workspace root is
+  rejected; sync writes the root and
   per-area `CLAUDE.md` with extracted titles, preserving hand-written content outside the
   block; a repeated sync writes nothing and the root `CLAUDE.md` is byte-identical across
   runs.
