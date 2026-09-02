@@ -18,7 +18,7 @@ struct Cli {
 enum Command {
     /// Initialize the core and print resolved paths (the default action).
     Status,
-    /// List every discovered skill and where it came from.
+    /// List every discovered skill.
     ListSkills,
     /// Run a skill by name and print its outcome.
     RunSkill {
@@ -54,7 +54,7 @@ fn print_status(core: &AxiomataCore) {
     println!("  config file:    {}", paths::config_path().display());
     println!("  database:       {}", paths::db_path().display());
     println!("  logs directory: {}", paths::logs_dir().display());
-    println!("  global skills:  {}", paths::global_skills_dir().display());
+    println!("  skills:         {}", paths::global_skills_dir().display());
 }
 
 /// Prints one line per discovered skill: `name  backend  — description`.
