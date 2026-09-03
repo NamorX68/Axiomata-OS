@@ -57,7 +57,20 @@ export interface ModuleDefinition {
   actions?: ModuleAction[];
 }
 
-/** One placed module on the canvas. Persisted in `dashboard.json`. */
+/** Which canvas edges a tile follows when the window is resized, and the
+ *  canvas size its `x`/`y` were committed at. Missing = left/top. */
+export interface TileAnchor {
+  x: "left" | "right";
+  y: "top" | "bottom";
+  /** Canvas size at commit time — the reference for the edge offsets. */
+  w: number;
+  h: number;
+}
+
+/** One placed module on the canvas. Persisted in `dashboard.json`. `x`/`y`
+ *  are the desired position for the anchor's reference size; the displayed
+ *  position follows the anchored edge and is clamped into the current canvas
+ *  (see `canvas/snap.ts` `displayRect`). */
 export interface CanvasInstance {
   id: string;
   type: string;
@@ -68,4 +81,5 @@ export interface CanvasInstance {
   z: number;
   flipped: boolean;
   config: Record<string, unknown>;
+  anchor?: TileAnchor;
 }

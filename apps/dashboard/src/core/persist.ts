@@ -15,7 +15,7 @@ import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } fro
 import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
 import { toast } from "./toast";
-import type { CanvasInstance } from "./types";
+import type { CanvasInstance, TileAnchor } from "./types";
 
 export const STATE_VERSION = 1;
 export const SAVE_DEBOUNCE_MS = 400;
@@ -55,6 +55,11 @@ export function sanitizeInstances(raw: unknown): CanvasInstance[] {
     if (!isStr(r.id) || !isStr(r.type) || seen.has(r.id)) continue;
     if (!isNum(r.x) || !isNum(r.y) || !isNum(r.w) || !isNum(r.h)) continue;
     seen.add(r.id);
+    const a = r.anchor as Record<string, unknown> | undefined;
+    const anchor: TileAnchor | undefined =
+      a && (a.x === "left" || a.x === "right") && (a.y === "top" || a.y === "bottom") && isNum(a.w) && isNum(a.h)
+        ? { x: a.x, y: a.y, w: a.w, h: a.h }
+        : undefined;
     out.push({
       id: r.id,
       type: r.type,
@@ -68,6 +73,7 @@ export function sanitizeInstances(raw: unknown): CanvasInstance[] {
         typeof r.config === "object" && r.config !== null && !Array.isArray(r.config)
           ? (r.config as Record<string, unknown>)
           : {},
+      ...(anchor ? { anchor } : {}),
     });
   }
   return out;

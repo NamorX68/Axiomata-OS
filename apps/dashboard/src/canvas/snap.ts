@@ -204,37 +204,35 @@ export function clampToBounds(rect: Rect, bounds: Size, min: Size): Rect {
   return { x, y, w, h };
 }
 
-export interface Placed extends Rect {
-  id: string;
-  z: number;
+export interface Anchor {
+  x: "left" | "right";
+  y: "top" | "bottom";
+  w: number;
+  h: number;
 }
 
-/** Patches (only for tiles that changed) so every tile fits `bounds` without
- *  overlapping; lower `z` yields first, the top-most tile keeps its spot. */
-export function relayoutForViewport(
-  tiles: Placed[],
-  bounds: Size,
-  minOf: (id: string) => Size,
-): { id: string; patch: Partial<Rect> }[] {
-  if (bounds.w <= 0 || bounds.h <= 0) return [];
-  const byZDesc = [...tiles].sort((a, b) => b.z - a.z);
-  const placed: Rect[] = [];
-  const result = new Map<string, Rect>();
-  for (const t of byZDesc) {
-    const clamped = clampToBounds(t, bounds, minOf(t.id));
-    const free = resolveOverlap(clamped, placed, bounds);
-    placed.push(free);
-    result.set(t.id, free);
+/** The edges a tile should follow: whichever is nearer to its centre. */
+export function anchorFor(rect: Rect, bounds: Size): Anchor {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  return {
+    x: bounds.w > 0 && cx > bounds.w / 2 ? "right" : "left",
+    y: bounds.h > 0 && cy > bounds.h / 2 ? "bottom" : "top",
+    w: bounds.w,
+    h: bounds.h,
+  };
+}
+
+/** Where a tile is drawn for the current canvas size: its committed
+ *  position shifted with the anchored edge (right/bottom tiles track the
+ *  edge), then clamped into view. Never persisted — growing the window
+ *  brings every tile back to its committed spot. */
+export function displayRect(rect: Rect, anchor: Anchor | undefined, bounds: Size, min: Size): Rect {
+  if (bounds.w <= 0 || bounds.h <= 0) return rect;
+  let { x, y } = rect;
+  if (anchor) {
+    if (anchor.x === "right" && anchor.w > 0) x += bounds.w - anchor.w;
+    if (anchor.y === "bottom" && anchor.h > 0) y += bounds.h - anchor.h;
   }
-  const patches: { id: string; patch: Partial<Rect> }[] = [];
-  for (const t of tiles) {
-    const r = result.get(t.id)!;
-    const patch: Partial<Rect> = {};
-    if (r.x !== t.x) patch.x = r.x;
-    if (r.y !== t.y) patch.y = r.y;
-    if (r.w !== t.w) patch.w = r.w;
-    if (r.h !== t.h) patch.h = r.h;
-    if (Object.keys(patch).length > 0) patches.push({ id: t.id, patch });
-  }
-  return patches;
+  return clampToBounds({ x, y, w: rect.w, h: rect.h }, bounds, min);
 }

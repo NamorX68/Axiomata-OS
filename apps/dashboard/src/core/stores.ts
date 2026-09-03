@@ -14,6 +14,8 @@ export const activeTheme: Writable<string> = writable("graphite");
 export const showGrid: Writable<boolean> = writable(false);
 /** Magnetic edge snapping between tiles. */
 export const snapEdges: Writable<boolean> = writable(true);
+/** Current canvas box in CSS px (set by Canvas.svelte's ResizeObserver). */
+export const canvasSize: Writable<{ w: number; h: number }> = writable({ w: 0, h: 0 });
 /** Snap guide lines while a tile is dragged / resized (canvas coordinates). */
 export const guides: Writable<{ axis: "x" | "y"; at: number }[]> = writable([]);
 
@@ -59,14 +61,6 @@ export function updateInstance(id: string, patch: Partial<CanvasInstance>): void
   instances.update((list) =>
     list.map((i) => (i.id === id ? { ...i, ...patch } : i)),
   );
-  markDirty();
-}
-
-/** Applies several patches with one dirty mark (viewport relayout). */
-export function updateInstances(patches: { id: string; patch: Partial<CanvasInstance> }[]): void {
-  if (patches.length === 0) return;
-  const byId = new Map(patches.map((p) => [p.id, p.patch]));
-  instances.update((list) => list.map((i) => (byId.has(i.id) ? { ...i, ...byId.get(i.id) } : i)));
   markDirty();
 }
 

@@ -184,8 +184,11 @@ size goes through a `--ax-*` token; no literals in components.
 - **Canvas physics** (`canvas/snap.ts`, pure + tested): tiles snap to `--ax-grid` (16 px) and
   magnetically to neighbour edges within 8 px (touch beats align, neighbour beats grid;
   `settings.snapEdges`), never overlap after a drop / resize (only the moved tile yields,
-  bounded push-out then grid spiral), and are clamped back into view on window resize
-  (`relayoutForViewport`, persisted). The dot grid is hidden unless `settings.showGrid`.
+  bounded push-out then grid spiral). Each tile carries an `anchor` (nearer edges + the
+  canvas size at commit); the displayed position follows the anchored edge and is clamped
+  into view (`displayRect`, never persisted) — so shrinking pulls tiles in, growing
+  restores them, right/bottom tiles track their edge. Dot grid hidden unless
+  `settings.showGrid`.
   The assistant bar is a centred pill (`--ax-assistant-width`), the chat panel
   `--ax-chat-width`; slide-ins use `--ax-dur-slow`. The owner works on a 21:9 monitor —
   never span the full width.
