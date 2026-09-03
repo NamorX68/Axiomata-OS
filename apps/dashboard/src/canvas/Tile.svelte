@@ -15,23 +15,28 @@
   import { get } from "svelte/store";
 
   import { getModule, makeContext } from "../core/registry";
-  import { bringToFront, guides, instances, removeInstance, snapEdges, updateInstance } from "../core/stores";
+  import { bringToFront, canvasSize, guides, instances, removeInstance, snapEdges, updateInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
   import { draggable, type DragDelta } from "./drag";
   import { resizable, type ResizeDelta, type ResizeDir } from "./resize";
-  import { magnetMove, magnetResize, resolveOverlap, type Rect } from "./snap";
+  import { anchorFor, displayRect, magnetMove, magnetResize, resolveOverlap, type Rect } from "./snap";
 
   const FALLBACK_MIN = { w: 160, h: 100 };
 
+  function bounds() {
+    const b = get(canvasSize);
+    return b.w > 0 && b.h > 0 ? b : undefined;
+  }
+  /** Displayed rect of any instance for the current canvas size. */
+  function shown(i: CanvasInstance): Rect {
+    const b = get(canvasSize);
+    return displayRect({ x: i.x, y: i.y, w: i.w, h: i.h }, i.anchor, b, getModule(i.type)?.minSize ?? FALLBACK_MIN);
+  }
   /** The other tiles on the canvas (no background modules, not this one). */
   function others(): Rect[] {
     return get(instances)
       .filter((i) => i.id !== inst.id && getModule(i.type)?.background !== true)
-      .map(({ x, y, w, h }) => ({ x, y, w, h }));
-  }
-  function bounds() {
-    const el = document.querySelector<HTMLElement>("#particle-slot")?.parentElement;
-    return el ? { w: el.clientWidth, h: el.clientHeight } : undefined;
+      .map(shown);
   }
   const HANDLES: ResizeDir[] = ["e", "s", "se"];
 
@@ -51,40 +56,56 @@
 
   /** Snapped drag offset: the tile "sticks" to grid / neighbour edges live. */
   function snappedDrag(d: DragDelta): DragDelta {
-    const r = magnetMove({ x: inst.x + d.dx, y: inst.y + d.dy, w: inst.w, h: inst.h }, others(), {
+    const base = shown(inst);
+    const r = magnetMove({ x: base.x + d.dx, y: base.y + d.dy, w: base.w, h: base.h }, others(), {
       edges: get(snapEdges),
     });
     guides.set(r.guides);
-    return { dx: r.x - inst.x, dy: r.y - inst.y };
+    return { dx: r.x - base.x, dy: r.y - base.y };
   }
   function snappedResize(d: ResizeDelta, dir: ResizeDir): ResizeDelta {
-    const r = magnetResize({ x: inst.x, y: inst.y, w: inst.w + d.dw, h: inst.h + d.dh }, others(), dir, min, {
+    const base = shown(inst);
+    const r = magnetResize({ x: base.x, y: base.y, w: base.w + d.dw, h: base.h + d.dh }, others(), dir, min, {
       edges: get(snapEdges),
     });
     guides.set(r.guides);
-    return { dw: r.w - inst.w, dh: r.h - inst.h };
+    return { dw: r.w - base.w, dh: r.h - base.h };
+  }
+
+  /** Persist a displayed rect as the new committed position + anchor. */
+  function commit(rect: Rect) {
+    const b = bounds();
+    updateInstance(inst.id, {
+      x: rect.x,
+      y: rect.y,
+      w: rect.w,
+      h: rect.h,
+      anchor: b ? anchorFor(rect, b) : undefined,
+    });
   }
   // Once true the settings component stays mounted across flips.
   let backMounted = $state(false);
 
-  const liveW = $derived(Math.max(min.w, inst.w + (resize?.dw ?? 0)));
-  const liveH = $derived(Math.max(min.h, inst.h + (resize?.dh ?? 0)));
+  /** Where this tile sits right now (anchor-shifted, clamped). */
+  const disp = $derived(displayRect({ x: inst.x, y: inst.y, w: inst.w, h: inst.h }, inst.anchor, $canvasSize, min));
+  const liveW = $derived(Math.max(min.w, disp.w + (resize?.dw ?? 0)));
+  const liveH = $derived(Math.max(min.h, disp.h + (resize?.dh ?? 0)));
 
   function onDragEnd(d: DragDelta) {
+    const base = shown(inst);
     const sd = snappedDrag(d);
     drag = null;
     guides.set([]);
-    const placed = resolveOverlap({ x: inst.x + sd.dx, y: inst.y + sd.dy, w: inst.w, h: inst.h }, others(), bounds());
-    updateInstance(inst.id, { x: placed.x, y: placed.y });
+    commit(resolveOverlap({ x: base.x + sd.dx, y: base.y + sd.dy, w: base.w, h: base.h }, others(), bounds()));
   }
 
   let resizeDir: ResizeDir = "se";
   function onResizeEnd() {
+    const base = shown(inst);
     const sr = snappedResize(resize ?? { dw: 0, dh: 0 }, resizeDir);
     resize = null;
     guides.set([]);
-    const placed = resolveOverlap({ x: inst.x, y: inst.y, w: inst.w + sr.dw, h: inst.h + sr.dh }, others(), bounds());
-    updateInstance(inst.id, { x: placed.x, y: placed.y, w: placed.w, h: placed.h });
+    commit(resolveOverlap({ x: base.x, y: base.y, w: base.w + sr.dw, h: base.h + sr.dh }, others(), bounds()));
   }
 
   function flip() {
@@ -103,8 +124,8 @@
   class:dragging={drag !== null}
   class:resizing={resize !== null}
   data-instance={inst.id}
-  style:left="{inst.x}px"
-  style:top="{inst.y}px"
+  style:left="{disp.x}px"
+  style:top="{disp.y}px"
   style:width="{liveW}px"
   style:height="{liveH}px"
   style:z-index={drag ? "var(--ax-z-tile-drag)" : `calc(var(--ax-z-tile-base) + ${inst.z})`}

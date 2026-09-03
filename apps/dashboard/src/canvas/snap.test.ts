@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampToBounds, magnetMove, magnetResize, relayoutForViewport, resolveOverlap, snapToGrid } from "./snap";
+import { anchorFor, clampToBounds, displayRect, magnetMove, magnetResize, resolveOverlap, snapToGrid } from "./snap";
 
 const A = { x: 100, y: 100, w: 200, h: 100 };
 
@@ -78,28 +78,29 @@ describe("resolveOverlap", () => {
   });
 });
 
-describe("clampToBounds / relayoutForViewport", () => {
+describe("clampToBounds / anchors / displayRect", () => {
   it("clamps into the canvas and shrinks only oversized tiles", () => {
     expect(clampToBounds({ x: 900, y: 700, w: 200, h: 100 }, { w: 1000, h: 800 }, { w: 100, h: 50 })).toEqual({ x: 800, y: 700, w: 200, h: 100 });
     expect(clampToBounds({ x: 0, y: 0, w: 1200, h: 100 }, { w: 1000, h: 800 }, { w: 100, h: 50 })).toEqual({ x: 0, y: 0, w: 1000, h: 100 });
   });
 
-  it("emits patches only for tiles that move, top-most first keeps its place", () => {
-    const tiles = [
-      { id: "a", x: 0, y: 0, w: 200, h: 100, z: 1 },
-      { id: "b", x: 900, y: 0, w: 200, h: 100, z: 2 },
-    ];
-    const patches = relayoutForViewport(tiles, { w: 1000, h: 600 }, () => ({ w: 100, h: 50 }));
-    expect(patches).toEqual([{ id: "b", patch: { x: 800 } }]);
-    const crowded = relayoutForViewport(
-      [
-        { id: "a", x: 0, y: 0, w: 200, h: 100, z: 1 },
-        { id: "b", x: 100, y: 0, w: 200, h: 100, z: 2 },
-      ],
-      { w: 1000, h: 600 },
-      () => ({ w: 100, h: 50 }),
-    );
-    expect(crowded.map((p) => p.id)).toEqual(["a"]); // b (top) stays, a moves
-    expect(relayoutForViewport(tiles, { w: 0, h: 0 }, () => ({ w: 1, h: 1 }))).toEqual([]);
+  it("anchors to the nearer edges", () => {
+    expect(anchorFor({ x: 48, y: 48, w: 200, h: 100 }, { w: 1000, h: 800 })).toEqual({ x: "left", y: "top", w: 1000, h: 800 });
+    expect(anchorFor({ x: 700, y: 600, w: 200, h: 100 }, { w: 1000, h: 800 })).toEqual({ x: "right", y: "bottom", w: 1000, h: 800 });
+  });
+
+  it("right-anchored tiles track the edge; left ones stay; all stay visible; growing restores", () => {
+    const min = { w: 100, h: 50 };
+    const right = { x: 700, y: 48, w: 200, h: 100 };
+    const anchor = anchorFor(right, { w: 1000, h: 800 });
+    expect(displayRect(right, anchor, { w: 1000, h: 800 }, min)).toEqual(right);
+    expect(displayRect(right, anchor, { w: 1400, h: 800 }, min).x).toBe(1100); // +400 with the edge
+    expect(displayRect(right, anchor, { w: 800, h: 800 }, min).x).toBe(500); // −200 with the edge
+    const left = { x: 48, y: 48, w: 360, h: 150 };
+    const la = anchorFor(left, { w: 1000, h: 800 });
+    expect(displayRect(left, la, { w: 1400, h: 800 }, min)).toEqual(left);
+    expect(displayRect(left, la, { w: 300, h: 800 }, min)).toEqual({ x: 0, y: 48, w: 300, h: 150 }); // clamped, shrunk
+    expect(displayRect(left, la, { w: 1000, h: 800 }, min)).toEqual(left); // back to normal
+    expect(displayRect(left, undefined, { w: 0, h: 0 }, min)).toEqual(left);
   });
 });

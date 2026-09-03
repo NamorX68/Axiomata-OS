@@ -5,15 +5,11 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { get } from "svelte/store";
 
   import { getModule } from "../core/registry";
-  import { guides, instances, showGrid, updateInstances } from "../core/stores";
+  import { canvasSize, guides, instances, showGrid } from "../core/stores";
   import BackgroundHost from "./BackgroundHost.svelte";
-  import { relayoutForViewport } from "./snap";
   import Tile from "./Tile.svelte";
-
-  const RELAYOUT_DEBOUNCE_MS = 150;
 
   const isBackground = (type: string) => getModule(type)?.background === true;
   const backgrounds = $derived($instances.filter((i) => isBackground(i.type)));
@@ -21,29 +17,16 @@
 
   let section = $state<HTMLElement | null>(null);
 
-  // Keep every tile visible when the window (and so the canvas) shrinks.
+  // Publish the canvas box; every Tile derives its displayed position from
+  // it (anchored edge + clamp), so nothing is persisted on resize and growing
+  // the window brings tiles back to their committed spots.
   onMount(() => {
     if (!section) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const ro = new ResizeObserver(() => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const el = section!;
-        const placed = get(instances)
-          .filter((i) => !isBackground(i.type))
-          .map(({ id, x, y, w, h, z }) => ({ id, x, y, w, h, z }));
-        const minOf = (id: string) => {
-          const inst = get(instances).find((i) => i.id === id);
-          return (inst && getModule(inst.type)?.minSize) ?? { w: 160, h: 100 };
-        };
-        updateInstances(relayoutForViewport(placed, { w: el.clientWidth, h: el.clientHeight }, minOf));
-      }, RELAYOUT_DEBOUNCE_MS);
-    });
+    const publish = () => canvasSize.set({ w: section!.clientWidth, h: section!.clientHeight });
+    publish();
+    const ro = new ResizeObserver(publish);
     ro.observe(section);
-    return () => {
-      ro.disconnect();
-      if (timer) clearTimeout(timer);
-    };
+    return () => ro.disconnect();
   });
 </script>
 
