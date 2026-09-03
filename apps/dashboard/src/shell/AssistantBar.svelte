@@ -52,6 +52,7 @@
   onMount(() => on("shell:search", () => field?.focus()));
 </script>
 
+<div class="dock">
 <form class="bar" onsubmit={submit}>
   <span class="prompt" aria-hidden="true">›</span>
   <input
@@ -72,17 +73,30 @@
     </button>
   {/if}
 </form>
+</div>
 
 <style>
-  .bar {
+  /* Centred pill — never the full width of an ultra-wide monitor. */
+  .dock {
     flex: 0 0 auto;
+    display: flex;
+    justify-content: center;
+    padding: var(--ax-space-2) var(--ax-space-4) var(--ax-space-3);
+  }
+  .bar {
+    width: min(var(--ax-assistant-width), 100%);
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    padding: var(--ax-space-2) var(--ax-space-4);
-    border-top: 1px solid var(--ax-border);
+    padding: var(--ax-space-1) var(--ax-space-3) var(--ax-space-1) var(--ax-space-4);
+    border: 1px solid var(--ax-border-strong);
+    border-radius: var(--ax-radius-pill);
     background: var(--ax-surface-1);
+    box-shadow: var(--ax-shadow-tile);
     z-index: var(--ax-z-assistant);
+  }
+  .bar:focus-within {
+    border-color: var(--ax-accent);
   }
   .prompt {
     color: var(--ax-accent);
@@ -97,8 +111,7 @@
   }
   input:focus-visible {
     outline: none;
-    border-color: var(--ax-border-strong);
-    background: var(--ax-surface-2);
+    border-color: transparent;
   }
   .chip {
     display: inline-flex;
@@ -122,6 +135,7 @@
   }
   .toggle {
     font-size: var(--ax-font-size-sm);
-    padding: 1px var(--ax-space-2);
+    padding: 1px var(--ax-space-3);
+    border-radius: var(--ax-radius-pill);
   }
 </style>

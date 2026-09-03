@@ -19,6 +19,9 @@
   import { resizable, type ResizeDelta, type ResizeDir } from "./resize";
 
   const FALLBACK_MIN = { w: 160, h: 100 };
+  /** Drag / resize commit to this grid (matches `--ax-grid`). */
+  const GRID = 16;
+  const snap = (v: number) => Math.round(v / GRID) * GRID;
   const HANDLES: ResizeDir[] = ["e", "s", "se"];
 
   let { inst }: { inst: CanvasInstance } = $props();
@@ -43,14 +46,14 @@
   function onDragEnd(d: DragDelta) {
     drag = null;
     updateInstance(inst.id, {
-      x: Math.max(0, Math.round(inst.x + d.dx)),
-      y: Math.max(0, Math.round(inst.y + d.dy)),
+      x: Math.max(0, snap(inst.x + d.dx)),
+      y: Math.max(0, snap(inst.y + d.dy)),
     });
   }
 
   function onResizeEnd() {
-    const w = Math.round(liveW);
-    const h = Math.round(liveH);
+    const w = Math.max(min.w, snap(liveW));
+    const h = Math.max(min.h, snap(liveH));
     resize = null;
     updateInstance(inst.id, { w, h });
   }

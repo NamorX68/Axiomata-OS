@@ -8,8 +8,9 @@
 import type { GraphModel, GraphNode } from "./model";
 
 export const RING = {
-  skills: 0.2,
-  filesInner: 0.36,
+  skills: 0.17,
+  areas: 0.3,
+  filesInner: 0.4,
   filesOuter: 0.84,
   routines: 0.95,
 } as const;
@@ -69,6 +70,14 @@ export function layoutRings(model: GraphModel): void {
     RING.routines,
     -Math.PI / 2 + 0.15,
   );
+  // Area nodes sit at the middle angle of their own segment.
+  for (const seg of model.areas) {
+    const node = model.byId.get(`area:${seg.name}`);
+    if (!node) continue;
+    const a = (seg.start + seg.end) / 2;
+    node.x = Math.cos(a) * RING.areas;
+    node.y = Math.sin(a) * RING.areas;
+  }
 
   // Files: per area, fill successive arcs from the inner radius outwards.
   const files = model.nodes.filter((n) => n.kind === "file");

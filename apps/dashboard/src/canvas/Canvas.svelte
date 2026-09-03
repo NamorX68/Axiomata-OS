@@ -31,6 +31,14 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
+    /* The tile grid, as faint dots (tiles snap to --ax-grid). */
+    background-image: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--ax-text-muted) 22%, transparent) 1px,
+      transparent 1.2px
+    );
+    background-size: var(--ax-grid) var(--ax-grid);
+    background-position: 0 0;
   }
 
   #particle-slot {

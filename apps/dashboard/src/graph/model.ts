@@ -6,7 +6,7 @@
 
 import type { WorkspaceGraph } from "../core/backend";
 
-export type NodeKind = "hub" | "file" | "skill" | "routine";
+export type NodeKind = "hub" | "area" | "file" | "skill" | "routine";
 
 export interface GraphNode {
   id: string;
@@ -59,6 +59,8 @@ export interface Palette {
   warning: string;
   success: string;
   border: string;
+  /** Contrast colour for glyphs on coloured nodes (`--ax-text-invert`). */
+  invert: string;
   light: boolean;
 }
 
@@ -73,6 +75,7 @@ export function readPalette(): Palette {
     warning: v("--ax-warning", "#e6b45f"),
     success: v("--ax-success", "#4fd67f"),
     border: v("--ax-border-strong", "#3b3b43"),
+    invert: v("--ax-text-invert", "#0b0b0d"),
     light: v("--ax-color-scheme", "dark") === "light",
   };
 }
@@ -155,7 +158,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     bytes: 0,
     x: 0,
     y: 0,
-    r: 9,
+    r: 13,
     color: palette.text,
     phase: 0,
     degree: 0,
@@ -170,7 +173,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       bytes: 0,
       x: 0,
       y: 0,
-      r: 5,
+      r: 9,
       color: palette.accent,
       phase: phase(s.name),
       degree: 0,
@@ -189,6 +192,24 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     return seg;
   });
   const colorOf = new Map(areas.map((a) => [a.name, a.color]));
+
+  // One node per area (the folder level under CLAUDE.md), named like the
+  // folder; files hang off it, it hangs off the hub.
+  for (const a of areas) {
+    add({
+      id: `area:${a.name}`,
+      kind: "area",
+      label: a.name.includes("/") ? a.name.slice(a.name.lastIndexOf("/") + 1) : a.name,
+      area: a.name,
+      bytes: a.count,
+      x: 0,
+      y: 0,
+      r: 8,
+      color: a.color,
+      phase: phase(a.name),
+      degree: 0,
+    });
+  }
 
   for (const f of g.files) {
     add({
@@ -217,7 +238,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       enabled: r.enabled,
       x: 0,
       y: 0,
-      r: 4,
+      r: 8,
       color: palette.warning,
       phase: phase(r.name),
       degree: 0,
@@ -235,9 +256,11 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     a.degree++;
     b.degree++;
   }
-  // Hub spokes: every skill and routine hangs off the hub.
+  // Hub spokes: skills, routines and areas hang off the hub; files off
+  // their area node (drawn very faintly).
   for (const n of nodes) {
-    if (n.kind === "skill" || n.kind === "routine") edges.push({ from: "hub", to: n.id });
+    if (n.kind === "skill" || n.kind === "routine" || n.kind === "area") edges.push({ from: "hub", to: n.id });
+    if (n.kind === "file" && n.area) edges.push({ from: `area:${n.area}`, to: n.id });
   }
 
   return { nodes, edges, areas, byId, totalFiles: g.total_files, truncated: g.truncated };

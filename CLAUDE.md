@@ -172,6 +172,12 @@ size goes through a `--ax-*` token; no literals in components.
   is appended to **every** Claude Code run — chat turns, skill runs and cron-fired
   routines alike (`AgentRequest.system_prompt_file`) — whenever the file exists, i.e.
   whenever the dashboard has run at least once; delete `module-context.md` to opt out.
+- **Model**: every `claude -p` run passes `--model` from `config.agents.claude_model`
+  (default `claude-sonnet-5`; a skill's frontmatter `model:` wins; empty = CLI default).
+  Model names are validated against a flag-safe alphabet before reaching the command line.
+- **Canvas grid**: tiles snap to `--ax-grid` (16 px) on drag / resize; the assistant bar is a
+  centred pill (`--ax-assistant-width`), the chat panel `--ax-chat-width`; slide-ins use
+  `--ax-dur-slow`. The owner works on a 21:9 monitor — never span the full width.
 - **Themes**: `<html data-theme="…">`; a user `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection; template via Settings → Copy template.
 
@@ -187,6 +193,9 @@ size goes through a `--ax-*` token; no literals in components.
   Circle), `render.ts` (Canvas 2D, DPR-aware, spin, hover hit-test, view transform,
   highlight). No graph library on purpose; `d3-force` would only be added for a force
   layout.
+- **Nodes**: hub, **area** (one per folder, labelled like the folder, on its own ring
+  between skills and files), file, skill, routine — each non-file kind carries a glyph
+  (hexagon / folder / bolt / clock, `graph/Legend.svelte` explains them).
 - **Module `second-brain`**: `singleton` + `background` — mounted full-size in
   `#particle-slot` behind the tiles by `canvas/BackgroundHost.svelte` (corner ⚙ / ×).
   Click → `open-second-brain` bus event → `shell/SecondBrainView.svelte` (full screen:

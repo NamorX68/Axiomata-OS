@@ -4,7 +4,10 @@
   and closes via its × or Escape.
 -->
 <script lang="ts">
+  import { cubicOut } from "svelte/easing";
   import { fly } from "svelte/transition";
+
+  const SLIDE_MS = 560;
 
   import { getModule, createContext } from "../core/registry";
   import { closeStaged, staged, type StagedPanel } from "../core/staging";
@@ -35,7 +38,9 @@
   });
 
   function flyParams(panel: StagedPanel) {
-    return panel.from === "bottom" ? { y: 600, duration: 260 } : { x: 600, duration: 260 };
+    return panel.from === "bottom"
+      ? { y: 600, duration: SLIDE_MS, easing: cubicOut }
+      : { x: 600, duration: SLIDE_MS, easing: cubicOut };
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -83,19 +88,18 @@
   .panel.right {
     top: var(--ax-space-4);
     right: 0;
-    bottom: var(--ax-space-4);
+    bottom: 64px;
     width: min(560px, 60vw);
     border-right: none;
     border-radius: var(--ax-radius-lg) 0 0 var(--ax-radius-lg);
   }
   .panel.bottom {
     left: 50%;
-    bottom: 0;
+    bottom: 64px;
     transform: translateX(-50%);
     width: min(860px, calc(100vw - 2 * var(--ax-space-5)));
     height: min(70vh, 640px);
-    border-bottom: none;
-    border-radius: var(--ax-radius-lg) var(--ax-radius-lg) 0 0;
+    border-radius: var(--ax-radius-lg);
   }
 
   header {

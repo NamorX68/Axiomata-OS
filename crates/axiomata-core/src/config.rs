@@ -28,6 +28,12 @@ fn default_ollama_model() -> String {
     "llama3.2".to_string()
 }
 
+/// Default Claude model passed as `claude --model` for chat, skills, routines
+/// and imports. A skill's frontmatter `model:` overrides it per skill.
+fn default_claude_model() -> String {
+    "claude-sonnet-5".to_string()
+}
+
 /// Default hard wall-clock limit for a single skill run.
 fn default_skill_timeout_secs() -> u64 {
     300
@@ -36,6 +42,11 @@ fn default_skill_timeout_secs() -> u64 {
 /// Defaults for the built-in agent backends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentDefaults {
+    /// Claude model for every `claude -p` run (`--model`), unless a skill
+    /// pins its own. Empty string = let `claude` pick its default.
+    #[serde(default = "default_claude_model")]
+    pub claude_model: String,
+
     /// Ollama model used when a skill or routine doesn't specify one.
     #[serde(default = "default_ollama_model")]
     pub ollama_model: String,
@@ -59,6 +70,7 @@ pub struct AgentDefaults {
 impl Default for AgentDefaults {
     fn default() -> Self {
         Self {
+            claude_model: default_claude_model(),
             ollama_model: default_ollama_model(),
             skill_timeout_secs: default_skill_timeout_secs(),
             claude_env: BTreeMap::new(),

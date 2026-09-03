@@ -37,7 +37,7 @@
     const palette = readPalette();
     const model = buildModel(graph, palette);
     layoutRings(model);
-    renderer.setColors(palette.text, palette.muted, palette.border);
+    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert);
     renderer.model = model;
     summary = `${graph.files.length} files · ${graph.areas.length} areas · ${graph.links.length} links${graph.truncated ? " · truncated" : ""}`;
   }

@@ -115,6 +115,7 @@ pub async fn chat(
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
         env: crate::skills::runner::claude_env(config, &AgentBackend::ClaudeCode),
         system_prompt_file: module_context_if_present(),
+        model: default_claude_model(config),
     })
     .await
 }
@@ -139,6 +140,15 @@ pub struct AgentRequest {
     /// Appended to Claude Code's system prompt (`--append-system-prompt-file`);
     /// the dashboard's module manifest when it exists. Ignored by Ollama.
     pub system_prompt_file: Option<PathBuf>,
+    /// `claude --model`; `None` lets the CLI choose. Ignored by Ollama (its
+    /// model lives in the backend enum).
+    pub model: Option<String>,
+}
+
+/// `config.agents.claude_model` unless empty.
+pub fn default_claude_model(config: &Config) -> Option<String> {
+    let m = config.agents.claude_model.trim();
+    (!m.is_empty()).then(|| m.to_string())
 }
 
 /// `paths::module_context_path()` if the dashboard has written it.

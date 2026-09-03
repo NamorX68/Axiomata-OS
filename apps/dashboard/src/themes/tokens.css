@@ -45,6 +45,15 @@
   --ax-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --ax-dur-fast: 120ms;
   --ax-dur-med: 260ms;
+  /* Slide-ins (chat, staged panels) — deliberately unhurried. */
+  --ax-dur-slow: 560ms;
+
+  /* Assistant bar / chat panel widths; the bar never spans an ultra-wide screen. */
+  --ax-assistant-width: 820px;
+  --ax-chat-width: 900px;
+
+  /* Canvas tile grid (drag / resize snap to it). */
+  --ax-grid: 16px;
 
   --ax-font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
