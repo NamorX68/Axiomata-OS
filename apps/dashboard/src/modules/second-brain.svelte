@@ -23,7 +23,7 @@
   const config = ctx.config;
 
   let canvas = $state<HTMLCanvasElement | null>(null);
-  let renderer: GraphRenderer | null = null;
+  let renderer = $state.raw<GraphRenderer | null>(null);
   let graph: WorkspaceGraph | null = null;
   let hover = $state<GraphNode | null>(null);
   let error = $state("");
@@ -69,9 +69,10 @@
   }
 
   $effect(() => {
-    if (renderer) {
-      renderer.options = { ...renderer.options, spin: spin ? 0.02 : 0, labels };
-    }
+    // Read the reactive inputs first — an early return on a missing renderer
+    // would otherwise leave the effect without dependencies.
+    const next = { spin: spin ? 0.02 : 0, labels };
+    if (renderer) renderer.options = { ...renderer.options, ...next };
   });
 
   onMount(() => {

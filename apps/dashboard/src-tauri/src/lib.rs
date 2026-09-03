@@ -23,6 +23,7 @@ pub fn run() {
             commands::load_custom_css,
             commands::get_workspace_graph,
             commands::open_workspace_html,
+            commands::search_workspace,
             commands::list_skills,
             commands::list_runs,
             commands::get_run,

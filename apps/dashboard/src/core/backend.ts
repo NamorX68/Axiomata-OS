@@ -71,6 +71,13 @@ export interface NewRoutine {
   enabled: boolean;
 }
 
+export interface SearchHit {
+  path: string;
+  line: number;
+  snippet: string;
+  matches: number;
+}
+
 export interface WorkspaceFile {
   path: string;
   content: string;
