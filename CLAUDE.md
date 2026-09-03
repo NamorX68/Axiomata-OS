@@ -9,18 +9,18 @@ centre / second brain, built around the **ARMS framework** (Applications, Routin
 Memory, Skills — see `ARMS-Agentic-OS-Guide.pdf` for the original inspiration, though the
 actual design has since diverged from it in several places).
 
-Milestones **M0 (scaffold)**, **M1 (skills runner)**, **M2 (memory router)** and
-**M3 (routines scheduler)** are complete: the `agents` enum, the single-location skills
-registry + runner + run log, the `memory` router (walker / renderer / `sync` / `status`),
-the `routines` module (cron `schedule` / `store` / a 30 s Tokio poll loop in `scheduler`),
-the `list_skills` / `list_runs` / `run_skill` / `sync_memory` / `get_memory_status` /
-`list_routines` / `add_routine` / `set_routine_enabled` / `routine_history` Tauri commands,
-and a placeholder UI. Still unimplemented: always-on/background scheduling (M4), and the
-real module-canvas dashboard UI. The full architecture rationale
-and the milestone-by-milestone plan live in
-`~/.claude/plans/ich-m-chte-ein-agentic-shimmering-gadget.md` (outside this repo, on the
-owner's machine) — read it before starting new work here if it's available; this file
-covers what's needed to just build/run/navigate the repo as it stands.
+Milestones **M0 (scaffold)**, **M1 (skills runner)**, **M2 (memory router)**,
+**M3 (routines scheduler)** and **M5 (module-canvas dashboard)** are complete: the
+`agents` enum, the single-location skills registry + runner + run log, the `memory` router
+(walker / renderer / `sync` / `status`), the `routines` module (cron `schedule` / `store` /
+a 30 s Tokio poll loop in `scheduler`), and the Svelte module canvas (free-form tiles with
+drag / resize / flip, layout persistence, four modules, an agentic chat bar, an
+agent-callable module bridge, themes + custom CSS — see "Dashboard (M5)" below). Still
+unimplemented: always-on/background scheduling (M4). The full architecture rationale and
+the milestone plans live in `~/.claude/plans/ich-m-chte-ein-agentic-shimmering-gadget.md`
+(M0–M4) and `~/.claude/plans/toasty-inventing-crayon.md` (M5), outside this repo on the
+owner's machine — read them before starting new work here if available; this file covers
+what's needed to just build/run/navigate the repo as it stands.
 
 ## Commands
 
@@ -41,9 +41,19 @@ cargo run -p axiomata-cli -- memory status  # is the router stale?
 cargo run -p axiomata-cli -- routines list  # scheduled routines, soonest next-fire first
 cargo run -p axiomata-cli -- routines add --name daily --cron '0 0 9 * * *' --skill <name>
 cargo run -p axiomata-cli -- routines tick  # run one scheduler poll pass now (no 30s wait)
+cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct]  # one chat turn
+cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
+cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard
 
 cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
+cd apps/dashboard && npm run check         # svelte-check + tsc (must be clean)
+cd apps/dashboard && npx vite --port 1420  # frontend alone in a browser: Tauri commands are
+                                           # served by src/core/devmock.ts fixtures (DEV only)
 ```
+
+For browser-level checks (`agent-browser` against `vite --port 1420`) the mock backend
+returns fixture data; anything that needs the real Rust side (persistence, file commands,
+the agent) is verified by launching `cargo tauri dev` under a scratch `AXIOMATA_HOME`.
 
 One-time setup for the Tauri app: `cargo install tauri-cli --version "^2" --locked`, and
 `cd apps/dashboard && npm install`.
@@ -119,6 +129,43 @@ Things worth knowing before touching `skills/` or `agents/`:
   `execute_and_record_skill` = `execute_skill` + `runlog::record_run` (DB row +
   `logs/runs.log` JSONL). The Tauri `run_skill` *command* is the no-DB path plus a
   narrow re-lock to persist.
+
+## Dashboard (M5)
+
+Frontend: Svelte 5 + Vite + TS under `apps/dashboard/src/` — `core/` (stores, registry,
+lifecycle, persist, commands, chat, staging, agent-bridge, backend types + `devmock`),
+`canvas/` (Canvas, Tile, drag/resize actions), `shell/` (TopBar, IconBar, ModulePicker,
+Settings, AssistantBar, ChatPanel, StagingLayer, Toasts), `modules/` (memory-status,
+skills-deck, routines-board, md-file, each `.svelte` + settings face, registered in
+`modules/index.ts`), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
+theme: graphite, paper, steampunk, forest, ocean), `theme/validator.ts`. Every colour /
+size goes through a `--ax-*` token; no literals in components.
+
+- A module = `ModuleDefinition` (`core/types.ts`): type, title, inline-SVG icon, front
+  component, optional settings component (flip side), default/min size, `singleton`,
+  `stageable`, `actions[]`. Instances are mounted with a `ModuleContext` (`invoke`,
+  reactive per-instance `config`, `emit`, `requestResize`).
+- **Persistence**: one hand-editable JSON file `~/.axiomata/dashboard.json` (layout +
+  theme + per-instance config); the frontend owns the schema, Rust
+  (`axiomata_core::dashboard`) only checks "object with numeric `version`", writes
+  atomically (0600), and moves a corrupt file to `.bak`. Debounced 400 ms save on every
+  store mutation.
+- **Workspace files** (`axiomata_core::workspace`, commands `read/write_workspace_file`):
+  relative to `config.workspace_root`, no `..`, must canonicalise inside the root,
+  symlinks and hard links refused, ≤ 1 MiB, atomic O_EXCL temp + rename.
+- **Chat**: the bottom bar routes input — registered `/command` runs locally
+  (`core/commands.ts`), other `/text` is a one-shot `instruct` turn, plain text a `chat`
+  turn. `agents::claude_code::chat` = `claude -p --output-format json --permission-mode
+  dontAsk|acceptEdits [--resume <id>]`, cwd = workspace root, the module manifest appended
+  via `--append-system-prompt-file`. Markdown replies go through `core/markdown.ts`
+  (marked + DOMPurify allow-list; no `data:` hrefs, raster-only `data:` images).
+- **Agent → module bridge** (`axiomata_core::bridge`): the dashboard writes
+  `~/.axiomata/module-context.md` (mounted instances + actions + how to call the CLI);
+  the agent calls `axiomata-cli module-action <instance> <action> --json …`, which drops
+  `~/.axiomata/module-actions/inbox/<id>.json`; the dashboard polls every 3 s, runs the
+  action in the frontend, answers in `outbox/`; the CLI exits 2 on timeout.
+- **Themes**: `<html data-theme="…">`; a user `~/.axiomata/theme.css` is validated
+  (`:root { --ax-*: … }` only) before injection; template via Settings → Copy template.
 
 **Test convention:** any test that mutates the `AXIOMATA_HOME` env var must lock
 `crate::test_support::ENV_MUTEX` first (`crates/axiomata-core/src/lib.rs`) — `cargo test`
