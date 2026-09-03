@@ -7,7 +7,7 @@
  *   /open <path> [right|bottom] stage a workspace Markdown file
  *   /newfile <path>             create an empty workspace file and stage it
  *   /skill run <name>           run a skill
- *   /brain [file path]          open the Second Brain view (optionally on a file)
+ *   /brain [file path | ? query] open the Second Brain view (on a file, or searching)
  *   /<type> <action> [json]     call a module action on its first instance
  *   /help                       list the above
  *
@@ -63,7 +63,7 @@ export const HELP = `**Commands**
 - \`/open <path> [right|bottom]\` — stage a workspace file
 - \`/newfile <path>\` — create an empty workspace file and open it
 - \`/skill run <name>\` — run a skill
-- \`/brain [path]\` — open the Second Brain graph
+- \`/brain [path | ? query]\` — open the Second Brain graph (on a file, or searching)
 - \`/<type> <action> [json]\` — call a module action, e.g. \`/memory-status sync\`
 - anything else after \`/\` — one-shot agent instruction
 - no slash — chat with the agent`;
@@ -123,8 +123,12 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
     }
 
     case "brain": {
-      const path = args.join(" ").trim();
-      emit("open-second-brain", { focus: path ? `file:${path}` : null });
+      const text = args.join(" ").trim();
+      if (text.startsWith("?")) {
+        emit("open-second-brain", { focus: null, query: text.slice(1).trim() });
+      } else {
+        emit("open-second-brain", { focus: text ? `file:${text}` : null });
+      }
       return { ok: true, message: "Second Brain opened." };
     }
 

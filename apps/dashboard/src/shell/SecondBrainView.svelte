@@ -11,6 +11,7 @@
 
   import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
   import { relativeTime, untilTime } from "../core/format";
+  import { getSetting, setSetting } from "../core/persist";
   import { openStaged } from "../core/staging";
   import { toast } from "../core/toast";
   import { applyLayout, type LayoutKind } from "../graph/layout";
@@ -26,7 +27,19 @@
   } from "../graph/model";
   import { GraphRenderer } from "../graph/render";
 
-  let { open = $bindable(false), focus = null }: { open?: boolean; focus?: string | null } = $props();
+  let {
+    open = $bindable(false),
+    focus = null,
+    initialQuery = "",
+  }: { open?: boolean; focus?: string | null; initialQuery?: string } = $props();
+
+  interface Prefs {
+    layout?: LayoutKind;
+    grouping?: Grouping;
+    spin?: number;
+    fileNames?: boolean;
+  }
+  const prefs = getSetting<Prefs>("secondBrain") ?? {};
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let renderer: GraphRenderer | null = null;
@@ -34,11 +47,12 @@
   let model = $state<GraphModel | null>(null);
   let selected = $state<GraphNode | null>(null);
   let hover = $state<GraphNode | null>(null);
-  let query = $state("");
-  let layout = $state<LayoutKind>("rings");
-  let grouping = $state<Grouping>("areas");
-  let spin = $state(0.02);
-  let fileNames = $state(false);
+  // svelte-ignore state_referenced_locally
+  let query = $state(initialQuery);
+  let layout = $state<LayoutKind>(prefs.layout === "circle" ? "circle" : "rings");
+  let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
+  let spin = $state(typeof prefs.spin === "number" ? prefs.spin : 0.02);
+  let fileNames = $state(prefs.fileNames === true);
   let busy = $state(false);
   let error = $state("");
   let drag: { x: number; y: number; vx: number; vy: number } | null = null;
@@ -179,6 +193,13 @@
   $effect(() => {
     if (renderer) renderer.options = { ...renderer.options, spin, fileLabels: fileNames };
   });
+  // Remember the view preferences in dashboard.json (settings.secondBrain).
+  let prefsReady = false;
+  $effect(() => {
+    const next: Prefs = { layout, grouping, spin, fileNames };
+    if (prefsReady) setSetting("secondBrain", next);
+    prefsReady = true;
+  });
   $effect(() => {
     if (renderer) renderer.highlight = hits;
   });
@@ -186,6 +207,10 @@
     void layout;
     void grouping;
     untrack(rebuild);
+  });
+  // A new query from `/brain ? …` or the module's search action while open.
+  $effect(() => {
+    if (initialQuery) query = initialQuery;
   });
   // `/brain <path>` while the view is already open re-targets the focus —
   // once per focus value, not on every model rebuild.

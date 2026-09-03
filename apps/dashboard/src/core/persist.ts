@@ -114,6 +114,17 @@ export function getCustomCssPath(): string | null {
   return customCssPath;
 }
 
+/** Any extra `settings.<key>` from dashboard.json (e.g. Second Brain view
+ *  preferences). Unknown keys round-trip untouched. */
+export function getSetting<T>(key: string): T | undefined {
+  return extraSettings[key] as T | undefined;
+}
+
+export function setSetting(key: string, value: unknown): void {
+  extraSettings = { ...extraSettings, [key]: value };
+  scheduleSave();
+}
+
 export async function initPersistence(): Promise<void> {
   if (started) return;
   started = true;

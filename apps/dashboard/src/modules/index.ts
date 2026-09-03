@@ -143,6 +143,26 @@ export function registerBuiltins(): void {
         params: { type: "object", properties: {} },
         run: (_params, ctx) => ctx.invoke("get_workspace_graph").then((g) => ({ files: (g as { files: unknown[] }).files.length })),
       },
+      {
+        name: "open",
+        description: "Open the full-screen Second Brain, optionally focused on a workspace-relative file path.",
+        params: { type: "object", properties: { path: { type: "string" } } },
+        run: async (params, ctx) => {
+          const path = (params as { path?: string }).path;
+          ctx.emit("open-second-brain", { focus: path ? `file:${path}` : null });
+          return { opened: true, focus: path ?? null };
+        },
+      },
+      {
+        name: "search",
+        description: "Open the Second Brain with a search query highlighting matching notes, skills and routines.",
+        params: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+        run: async (params, ctx) => {
+          const q = String((params as { q: string }).q);
+          ctx.emit("open-second-brain", { focus: null, query: q });
+          return { opened: true, query: q };
+        },
+      },
     ],
   });
 
