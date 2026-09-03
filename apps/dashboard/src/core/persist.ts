@@ -73,7 +73,7 @@ export function sanitizeInstances(raw: unknown): CanvasInstance[] {
   return out;
 }
 
-function parseState(text: string): DashboardState | null {
+export function parseState(text: string): DashboardState | null {
   try {
     const v = JSON.parse(text) as unknown;
     if (typeof v !== "object" || v === null || Array.isArray(v)) return null;

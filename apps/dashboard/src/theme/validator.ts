@@ -6,8 +6,9 @@
  * declaration is one of the allow-listed `--ax-*` palette tokens. Rejected:
  * any at-rule (`@import`, `@font-face`, …), any other selector, any
  * non-`--ax-` property, `url(` that isn't a `data:` URI, and anything that
- * smells like script. The CSS is parsed by the webview's own engine in a
- * detached document, so what we inspect is what would apply.
+ * smells like script. The CSS is parsed by the webview's own engine through a
+ * temporary `<style media="not all">` (parsed, never applied), so what we
+ * inspect is what would apply.
  */
 
 export interface CssError {
@@ -62,17 +63,24 @@ export function validateCustomCss(text: string): ValidationResult {
   }
   if (errors.length > 0) return { ok: false, errors };
 
-  const doc = document.implementation.createHTMLDocument("theme-check");
-  const style = doc.createElement("style");
+  const style = document.createElement("style");
+  style.media = "not all"; // parsed by the engine, applied nowhere
   style.textContent = text;
-  doc.head.appendChild(style);
-  const sheet = style.sheet;
-  if (!sheet) return { ok: false, errors: [{ rule: "(file)", property: "", message: "could not parse the stylesheet" }] };
+  document.head.appendChild(style);
+  let rules: CSSRule[] = [];
+  try {
+    rules = style.sheet ? Array.from(style.sheet.cssRules) : [];
+  } finally {
+    style.remove();
+  }
+  if (rules.length === 0 && text.trim().length > 0) {
+    return { ok: false, errors: [{ rule: "(file)", property: "", message: "could not parse the stylesheet" }] };
+  }
 
   const out: string[] = [];
-  for (const rule of Array.from(sheet.cssRules)) {
-    // A detached document has no `defaultView`, so no realm-specific
-    // `instanceof`; `CSSRule.STYLE_RULE` (1) is the plain-rule discriminator.
+  for (const rule of rules) {
+    // `CSSRule.STYLE_RULE` (1) is the plain-rule discriminator (works across
+    // engines and in jsdom, unlike a realm-bound `instanceof`).
     if (rule.type !== CSSRule.STYLE_RULE || !("selectorText" in rule)) {
       errors.push({ rule: rule.cssText.slice(0, 60), property: "", message: "only plain style rules are allowed (no at-rules)" });
       continue;
