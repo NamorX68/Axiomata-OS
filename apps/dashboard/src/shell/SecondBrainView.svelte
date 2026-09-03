@@ -194,7 +194,7 @@
     const palette = readPalette();
     const m = buildModel(regroup(graph, grouping), palette);
     applyLayout(m, layout);
-    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert, palette.surface, palette.accent);
+    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert, palette.surface, palette.accent, palette.light);
     renderer.model = m;
     model = m;
     // Re-point the selection at the new model's node without making the

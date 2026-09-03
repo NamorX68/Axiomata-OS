@@ -118,6 +118,7 @@ export class GraphRenderer {
   private hubGlyphColor = "#000";
   private surfaceColor = "#121216";
   private accentColor = "#ff7a1a";
+  private lightScheme = false;
   /** Ring captions (rings mode). */
   captions = { skills: "SKILLS", memory: "MEMORY", routines: "ROUTINES" };
 
@@ -127,7 +128,7 @@ export class GraphRenderer {
     this.ctx = ctx;
   }
 
-  setColors(text: string, muted: string, line: string, glyph = "#000", hubGlyph = "#000", surface = "#121216", accent = "#ff7a1a"): void {
+  setColors(text: string, muted: string, line: string, glyph = "#000", hubGlyph = "#000", surface = "#121216", accent = "#ff7a1a", light = false): void {
     this.textColor = text;
     this.mutedColor = muted;
     this.lineColor = line;
@@ -135,6 +136,7 @@ export class GraphRenderer {
     this.hubGlyphColor = hubGlyph;
     this.surfaceColor = surface;
     this.accentColor = accent;
+    this.lightScheme = light;
   }
 
   resize(): void {
@@ -345,11 +347,17 @@ export class GraphRenderer {
     const cx = width / 2 + this.view.x;
     const cy = height / 2 + this.view.y;
 
-    // Disc + vignette.
+    // Disc + vignette: deepens the dark themes, a whisper on light ones.
     const disc = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R);
-    disc.addColorStop(0, "rgba(0,0,0,0.55)");
-    disc.addColorStop(0.75, "rgba(0,0,0,0.35)");
-    disc.addColorStop(1, "rgba(0,0,0,0.05)");
+    if (this.lightScheme) {
+      disc.addColorStop(0, "rgba(0,0,0,0.07)");
+      disc.addColorStop(0.75, "rgba(0,0,0,0.04)");
+      disc.addColorStop(1, "rgba(0,0,0,0)");
+    } else {
+      disc.addColorStop(0, "rgba(0,0,0,0.55)");
+      disc.addColorStop(0.75, "rgba(0,0,0,0.35)");
+      disc.addColorStop(1, "rgba(0,0,0,0.05)");
+    }
     ctx.fillStyle = disc;
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, TWO_PI);
