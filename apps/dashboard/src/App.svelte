@@ -1,14 +1,17 @@
 <!--
-  Shell composition: TopBar → IconBar → canvas area → (assistant bar, step 11).
-  The canvas area hosts `Canvas.svelte` from step 4; until the canvas modules
-  replace them, the pre-M5 panels render inside it so the app stays useful.
+  Shell composition: TopBar → IconBar → Canvas → (assistant bar, step 11).
+  Until the canvas modules replace them, the pre-M5 panels sit collapsed
+  below the canvas so the app stays useful.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import { get } from "svelte/store";
+
+  import Canvas from "./canvas/Canvas.svelte";
   import { on } from "./core/bus";
   import { invokeAction, manifest } from "./core/registry";
-  import { addInstance } from "./core/stores";
+  import { addInstance, instances } from "./core/stores";
   import IconBar from "./shell/IconBar.svelte";
   import LegacyPanels from "./shell/LegacyPanels.svelte";
   import TopBar from "./shell/TopBar.svelte";
@@ -16,10 +19,11 @@
   // Step-2 scaffolding: prove the registry/store/context pipeline end to end.
   // Removed once the module picker (step 7) exists.
   async function devProbe() {
+    const offset = 40 + get(instances).length * 32;
     const inst = addInstance({
       type: "dummy",
-      x: 40,
-      y: 40,
+      x: offset,
+      y: offset,
       w: 260,
       h: 160,
       config: {},
@@ -41,33 +45,45 @@
 <TopBar />
 <IconBar />
 
-<div class="canvas-area">
-  <div id="particle-slot" aria-hidden="true"></div>
-  {#if import.meta.env.DEV}
-    <div class="dev-tools">
-      <button type="button" onclick={devProbe}>dev: add dummy + log manifest</button>
-    </div>
-  {/if}
-  <LegacyPanels />
+{#if import.meta.env.DEV}
+  <div class="dev-tools">
+    <button type="button" onclick={devProbe}>dev: add dummy + log manifest</button>
+  </div>
+{/if}
+
+<div class="board">
+  <Canvas />
+  <details class="legacy">
+    <summary>Legacy panels (pre-M5)</summary>
+    <LegacyPanels />
+  </details>
 </div>
 
 <style>
-  .canvas-area {
-    position: relative;
+  .board {
+    display: flex;
+    flex-direction: column;
     flex: 1 1 auto;
+    min-height: 0;
     overflow: auto;
-  }
-
-  #particle-slot {
-    position: absolute;
-    inset: 0;
-    z-index: var(--ax-z-particle);
-    pointer-events: none;
   }
 
   .dev-tools {
     display: flex;
     justify-content: center;
     margin-bottom: var(--ax-space-2);
+  }
+
+  .legacy {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--ax-border);
+  }
+  .legacy > summary {
+    padding: var(--ax-space-2) var(--ax-space-5);
+    font-size: var(--ax-font-size-sm);
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
+    color: var(--ax-text-muted);
+    cursor: pointer;
   }
 </style>
