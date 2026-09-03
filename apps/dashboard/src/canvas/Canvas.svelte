@@ -6,9 +6,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import { get } from "svelte/store";
+
   import { getModule } from "../core/registry";
-  import { canvasSize, guides, instances, showGrid } from "../core/stores";
+  import { canvasSize, guides, instances, showGrid, updateInstance } from "../core/stores";
   import BackgroundHost from "./BackgroundHost.svelte";
+  import { anchorFor } from "./snap";
   import Tile from "./Tile.svelte";
 
   const isBackground = (type: string) => getModule(type)?.background === true;
@@ -22,11 +25,33 @@
   // the window brings tiles back to their committed spots.
   onMount(() => {
     if (!section) return;
-    const publish = () => canvasSize.set({ w: section!.clientWidth, h: section!.clientHeight });
+    const publish = () => {
+      const size = { w: section!.clientWidth, h: section!.clientHeight };
+      canvasSize.set(size);
+      backfillAnchors(size);
+    };
     publish();
     const ro = new ResizeObserver(publish);
     ro.observe(section);
     return () => ro.disconnect();
+  });
+
+  // Layouts saved before anchors existed (or hand-edited ones) get theirs
+  // from the first real canvas size they are shown at — otherwise they would
+  // only ever be clamped, never follow their edge.
+  function backfillAnchors(size: { w: number; h: number }) {
+    if (size.w <= 0 || size.h <= 0) return;
+    for (const i of get(instances)) {
+      if (i.anchor || isBackground(i.type)) continue;
+      updateInstance(i.id, { anchor: anchorFor({ x: i.x, y: i.y, w: i.w, h: i.h }, size) });
+    }
+  }
+
+  // Instances that arrive later (persistence finishing after mount, picker,
+  // /add, the agent) get an anchor as soon as they show up.
+  $effect(() => {
+    void $instances;
+    backfillAnchors($canvasSize);
   });
 </script>
 

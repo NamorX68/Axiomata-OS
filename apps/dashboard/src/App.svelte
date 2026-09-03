@@ -5,6 +5,7 @@
   import Canvas from "./canvas/Canvas.svelte";
   import { emit, on } from "./core/bus";
   import { openStaged } from "./core/staging";
+  import { loadInstances } from "./core/stores";
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
   import IconBar from "./shell/IconBar.svelte";
@@ -45,6 +46,7 @@
         (window as unknown as { __ax: unknown }).__ax = {
           emit,
           openStaged,
+          loadInstances,
           setMockCustomCss: m.setMockCustomCss,
         };
       });
