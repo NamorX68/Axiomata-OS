@@ -1,8 +1,9 @@
 //! Minimal CLI for exercising the Axiomata-OS core engine end-to-end without
 //! the Tauri GUI: initialize the core, list and run skills, inspect run history,
-//! sync the memory router.
+//! sync the memory router, send an assistant turn.
 
 use anyhow::{Context, Result};
+use axiomata_core::agents::{self, ChatMode};
 use axiomata_core::routines::{self, NewRoutine, RoutineTarget};
 use axiomata_core::skills::{self, RunStatus};
 use axiomata_core::{AxiomataCore, memory, paths};
@@ -42,6 +43,18 @@ enum Command {
     Routines {
         #[command(subcommand)]
         action: RoutineAction,
+    },
+    /// Send one turn to the dashboard assistant (Claude Code) and print the
+    /// Markdown reply plus the session id to continue with `--resume`.
+    Assistant {
+        /// The message.
+        message: String,
+        /// Continue an earlier session (id printed by a previous turn).
+        #[arg(long)]
+        resume: Option<String>,
+        /// Allow the agent to edit workspace files (one-shot instruction).
+        #[arg(long)]
+        instruct: bool,
     },
 }
 
@@ -125,6 +138,44 @@ async fn main() -> Result<()> {
             MemoryAction::Status => memory_status(&core)?,
         },
         Command::Routines { action } => return routines_cmd(&core, action).await,
+        Command::Assistant {
+            message,
+            resume,
+            instruct,
+        } => return assistant(&core, message, resume, instruct).await,
+    }
+    Ok(())
+}
+
+/// One assistant turn; prints the reply and the session id.
+async fn assistant(
+    core: &AxiomataCore,
+    message: String,
+    resume: Option<String>,
+    instruct: bool,
+) -> Result<()> {
+    let mode = if instruct {
+        ChatMode::Instruct
+    } else {
+        ChatMode::Chat
+    };
+    let reply = agents::chat(&core.config, message, resume, mode)
+        .await
+        .context("assistant turn failed")?;
+    println!("{}", reply.reply_markdown.trim_end());
+    println!();
+    println!(
+        "session: {}  ({} ms{}{})",
+        reply.session_id,
+        reply.duration_ms,
+        reply
+            .cost_usd
+            .map(|c| format!(", ${c:.4}"))
+            .unwrap_or_default(),
+        if reply.is_error { ", is_error" } else { "" },
+    );
+    if reply.is_error {
+        std::process::exit(1);
     }
     Ok(())
 }
