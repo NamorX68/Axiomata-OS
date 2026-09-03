@@ -7,6 +7,7 @@
 //! a `MutexGuard` is never held across an `.await`.
 
 use axiomata_core::AxiomataCore;
+use axiomata_core::agents::{self, ChatMode, ChatReply};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
@@ -58,6 +59,28 @@ pub fn get_dashboard_state() -> Result<LoadedState, String> {
 #[tauri::command]
 pub fn save_dashboard_state(json: String) -> Result<(), String> {
     dashboard::save_state(&json).map_err(|err| err.to_string())
+}
+
+/// One assistant turn. `mode` is `"chat"` (never asks, read-mostly) or
+/// `"instruct"` (may edit workspace files). Pass the `session_id` from the
+/// previous reply to continue that conversation. Runs the agent with no lock
+/// held; the reply is not recorded in the run log.
+#[tauri::command]
+pub async fn assistant_send(
+    state: State<'_, CoreState>,
+    message: String,
+    session_id: Option<String>,
+    mode: String,
+) -> Result<ChatReply, String> {
+    let mode = match mode.as_str() {
+        "chat" => ChatMode::Chat,
+        "instruct" => ChatMode::Instruct,
+        other => return Err(format!("unknown assistant mode {other:?}")),
+    };
+    let config = state.config.clone();
+    agents::chat(&config, message, session_id, mode)
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Reads a UTF-8 file by workspace-relative path (≤ 1 MiB, no `..`, no

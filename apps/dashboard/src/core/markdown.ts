@@ -17,13 +17,26 @@ const ALLOWED_TAGS = [
 ];
 const ALLOWED_ATTR = ["href", "title", "alt", "src", "align", "start", "type", "checked", "disabled", "class"];
 
+/** Inline raster images only — never SVG (it can carry script) and never
+ *  as a link target (a top-level `data:` navigation would run it). */
+const DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i;
+
 const purify = DOMPurify();
 purify.setConfig({
   ALLOWED_TAGS,
   ALLOWED_ATTR,
   ALLOW_DATA_ATTR: false,
   FORBID_ATTR: ["style"],
-  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|data:image\/|#|\/|\.)/i,
+  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#|\/|\.|data:image\/(?:png|jpe?g|gif|webp);base64,)/i,
+});
+purify.addHook("uponSanitizeAttribute", (node, data) => {
+  const value = data.attrValue.trim();
+  if (data.attrName === "href" && /^data:/i.test(value)) {
+    data.keepAttr = false; // no data: link targets at all
+  }
+  if (data.attrName === "src" && /^data:/i.test(value) && !(node.tagName === "IMG" && DATA_IMAGE_RE.test(value))) {
+    data.keepAttr = false;
+  }
 });
 // External links open via the OS browser later (tauri-plugin-opener); for now
 // make every anchor safe if the webview ever navigates.

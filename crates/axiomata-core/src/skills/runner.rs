@@ -198,7 +198,7 @@ const CLAUDE_ENV_ALLOWED_PREFIXES: &[&str] = &[
 
 /// The provider environment for the `claude` process, filtered through
 /// [`CLAUDE_ENV_ALLOWED_PREFIXES`]; empty for Ollama.
-fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String, String)> {
+pub(crate) fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String, String)> {
     match backend {
         AgentBackend::ClaudeCode => config
             .agents

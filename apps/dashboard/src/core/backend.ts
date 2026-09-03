@@ -77,6 +77,17 @@ export interface WorkspaceFile {
   modified: string | null;
 }
 
+export type ChatMode = "chat" | "instruct";
+
+export interface ChatReply {
+  session_id: string;
+  reply_markdown: string;
+  is_error: boolean;
+  cost_usd: number | null;
+  usage: unknown;
+  duration_ms: number;
+}
+
 export interface LoadedDashboardState {
   json: string;
   recovered_backup: string | null;

@@ -246,7 +246,14 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), AxiomataError> {
         let p = p.to_path_buf();
         move |source| AxiomataError::Io { path: p, source }
     };
-    fs::write(&tmp, content).map_err(io_err(&tmp))?;
+    // `create_new` (O_EXCL): a symlink planted at the predictable temp path
+    // is never followed; a leftover from a crashed sync fails loudly instead.
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, content.as_bytes()))
+        .map_err(io_err(&tmp))?;
     fs::rename(&tmp, path).map_err(|source| {
         let _ = fs::remove_file(&tmp);
         AxiomataError::Io {

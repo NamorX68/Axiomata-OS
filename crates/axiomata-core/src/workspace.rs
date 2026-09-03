@@ -4,12 +4,14 @@
 //! Every path is *relative to* `config.workspace_root` and is resolved through
 //! one guard: no absolute paths, no `..`, the resolved location must stay
 //! under the canonicalised root (so a symlinked directory can't redirect it),
-//! the file itself must not be a symlink, and content is capped at
-//! [`MAX_FILE_BYTES`]. Writes are atomic (temp file + rename) and never create
-//! directories — only files inside directories that already exist.
+//! the file itself must be neither a symlink nor a hard link (a hard link
+//! shares its content with a file that may live anywhere), and content is
+//! capped at [`MAX_FILE_BYTES`]. Writes are atomic through a temp file that is
+//! created with `O_EXCL` (a planted symlink at the temp path is never
+//! followed) and renamed into place; they never create directories.
 
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -80,6 +82,9 @@ pub fn resolve(config: &Config, rel: &str) -> Result<PathBuf, AxiomataError> {
     match fs::symlink_metadata(&full) {
         Ok(meta) if meta.file_type().is_symlink() => Err(invalid(rel_path, "symlinks are refused")),
         Ok(meta) if meta.is_dir() => Err(invalid(rel_path, "is a directory")),
+        Ok(meta) if is_hard_linked(&meta) => {
+            Err(invalid(rel_path, "hard-linked files are refused"))
+        }
         Ok(_) => {
             let canon = full.canonicalize().map_err(io(&full))?;
             if canon.starts_with(&root) {
@@ -96,6 +101,19 @@ pub fn resolve(config: &Config, rel: &str) -> Result<PathBuf, AxiomataError> {
     }
 }
 
+/// A regular file with more than one directory entry shares its content with
+/// a path that may be outside the workspace; refuse it like a symlink.
+#[cfg(unix)]
+fn is_hard_linked(meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    meta.nlink() > 1
+}
+
+#[cfg(not(unix))]
+fn is_hard_linked(_meta: &fs::Metadata) -> bool {
+    false
+}
+
 /// Reads a UTF-8 text file from the workspace.
 pub fn read_file(config: &Config, rel: &str) -> Result<WorkspaceFile, AxiomataError> {
     let full = resolve(config, rel)?;
@@ -108,7 +126,7 @@ pub fn read_file(config: &Config, rel: &str) -> Result<WorkspaceFile, AxiomataEr
     }
     let mut bytes = Vec::with_capacity(meta.len() as usize);
     fs::File::open(&full)
-        .and_then(|mut f| f.by_ref().take(MAX_FILE_BYTES).read_to_end(&mut bytes))
+        .and_then(|f| f.take(MAX_FILE_BYTES).read_to_end(&mut bytes))
         .map_err(io(&full))?;
     let content =
         String::from_utf8(bytes).map_err(|_| invalid(Path::new(rel), "not valid UTF-8"))?;
@@ -134,7 +152,14 @@ pub fn write_file(config: &Config, rel: &str, content: &str) -> Result<(), Axiom
         .and_then(|n| n.to_str())
         .ok_or_else(|| invalid(Path::new(rel), "missing file name"))?;
     let tmp = full.with_file_name(format!(".{file_name}.axiomata-tmp"));
-    fs::write(&tmp, content).map_err(io(&tmp))?;
+    // `create_new` = O_CREAT|O_EXCL: a pre-planted symlink (or leftover) at
+    // the temp path fails the open instead of being followed and overwritten.
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(content.as_bytes()))
+        .map_err(io(&tmp))?;
     fs::rename(&tmp, &full).map_err(|source| {
         let _ = fs::remove_file(&tmp);
         AxiomataError::Io {
@@ -239,6 +264,42 @@ mod tests {
             fs::read_to_string(outside.join("secret.md")).unwrap(),
             "secret"
         );
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_hard_links_and_a_planted_temp_symlink() {
+        let (root, config) = workspace();
+        let outside = unique_temp_dir("axiomata-test-workspace-hardlink");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.md"), "secret").unwrap();
+
+        // Hard link: same inode as a file outside the workspace.
+        fs::hard_link(outside.join("secret.md"), root.join("notes/linked.md")).unwrap();
+        let err = read_file(&config, "notes/linked.md").unwrap_err();
+        assert!(
+            matches!(err, AxiomataError::InvalidWorkspacePath { .. }),
+            "{err}"
+        );
+
+        // A symlink planted at the predictable temp path must not be followed.
+        std::os::unix::fs::symlink(
+            outside.join("secret.md"),
+            root.join("notes/.inbox.md.axiomata-tmp"),
+        )
+        .unwrap();
+        assert!(write_file(&config, "notes/inbox.md", "clobber").is_err());
+        assert_eq!(
+            fs::read_to_string(outside.join("secret.md")).unwrap(),
+            "secret"
+        );
+        assert_eq!(
+            read_file(&config, "notes/inbox.md").unwrap().content,
+            "# Inbox\n\n- one\n"
+        );
+
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(outside);
     }

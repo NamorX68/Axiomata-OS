@@ -19,7 +19,7 @@
   .canvas {
     position: relative;
     flex: 1 1 auto;
-    min-height: 480px;
+    min-height: 0;
     overflow: hidden;
   }
 

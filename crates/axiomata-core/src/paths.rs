@@ -70,6 +70,13 @@ pub fn dashboard_state_path() -> PathBuf {
     axiomata_home().join("dashboard.json")
 }
 
+/// Path to the module manifest the dashboard writes for the agent
+/// (`~/.axiomata/module-context.md`): the mounted modules and their callable
+/// actions, appended to the assistant's system prompt when present.
+pub fn module_context_path() -> PathBuf {
+    axiomata_home().join("module-context.md")
+}
+
 /// Directory for global, app-managed skills (`~/.axiomata/skills/`).
 pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")

@@ -8,6 +8,7 @@
 //! defaults, so a bad edit never bricks the app.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -119,13 +120,20 @@ fn backup_path(path: &Path) -> PathBuf {
     path.with_extension("json.bak")
 }
 
-/// Temp file beside the target, then `rename`, then best-effort `0600`.
+/// Temp file beside the target (created `O_EXCL`, so a planted symlink is
+/// never followed), then `rename`, then best-effort `0600`.
 fn atomic_write(path: &Path, content: &str) -> Result<(), AxiomataError> {
     let tmp = path.with_extension("json.axiomata-tmp");
-    fs::write(&tmp, content).map_err(|source| AxiomataError::Io {
-        path: tmp.clone(),
-        source,
-    })?;
+    let _ = fs::remove_file(&tmp); // a stale leftover from a crashed save
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(content.as_bytes()))
+        .map_err(|source| AxiomataError::Io {
+            path: tmp.clone(),
+            source,
+        })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

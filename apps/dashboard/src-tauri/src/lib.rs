@@ -16,6 +16,7 @@ pub fn run() {
             commands::save_dashboard_state,
             commands::read_workspace_file,
             commands::write_workspace_file,
+            commands::assistant_send,
             commands::list_skills,
             commands::list_runs,
             commands::get_run,

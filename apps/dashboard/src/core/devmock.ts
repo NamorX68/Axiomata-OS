@@ -7,6 +7,7 @@
 
 import type {
   AppInfo,
+  ChatReply,
   LoadedDashboardState,
   MemoryStatus,
   NewRoutine,
@@ -155,6 +156,24 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         return { ...r, enabled, next_fire_at: enabled ? new Date(Date.now() + 3_600_000).toISOString() : null };
       });
       return found as T;
+    }
+    case "assistant_send": {
+      await new Promise((r) => setTimeout(r, 900));
+      const message = String(args.message);
+      const mode = String(args.mode);
+      const session_id = typeof args.sessionId === "string" ? args.sessionId : `mock-${Date.now()}`;
+      const reply =
+        mode === "instruct"
+          ? `Done (mock). I would have carried out:\n\n> ${message}\n\n_No files were touched in the browser mock._`
+          : `You said: **${message}**\n\nThis is a mocked reply in session \`${session_id}\`.\n\n- markdown renders\n- \`code\` too`;
+      return {
+        session_id,
+        reply_markdown: reply,
+        is_error: false,
+        cost_usd: 0.0012,
+        usage: { input_tokens: 12, output_tokens: 40 },
+        duration_ms: 900,
+      } satisfies ChatReply as T;
     }
     case "read_workspace_file": {
       const rel = String(args.rel);
