@@ -90,6 +90,11 @@ pub enum AxiomataError {
     #[error("refusing to run the memory router on {path} — set a dedicated workspace folder")]
     UnsafeWorkspaceRoot { path: PathBuf },
 
+    /// A module-action request or response in the file queue could not be
+    /// parsed, or the dashboard did not answer within the timeout.
+    #[error("module action {id}: {reason}")]
+    ModuleAction { id: String, reason: String },
+
     /// A workspace-relative path handed to `crate::workspace` is absolute,
     /// climbs out of the workspace (`..`, symlink), is a directory, a symlink,
     /// too large, or not UTF-8.

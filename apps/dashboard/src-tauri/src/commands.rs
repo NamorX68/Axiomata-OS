@@ -8,6 +8,7 @@
 
 use axiomata_core::AxiomataCore;
 use axiomata_core::agents::{self, ChatMode, ChatReply};
+use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
@@ -59,6 +60,27 @@ pub fn get_dashboard_state() -> Result<LoadedState, String> {
 #[tauri::command]
 pub fn save_dashboard_state(json: String) -> Result<(), String> {
     dashboard::save_state(&json).map_err(|err| err.to_string())
+}
+
+/// Renders the mounted-module manifest into `~/.axiomata/module-context.md`
+/// for the agent. Returns `true` if the file changed.
+#[tauri::command]
+pub fn write_module_manifest(entries: Vec<ManifestEntry>) -> Result<bool, String> {
+    bridge::write_manifest(&entries).map_err(|err| err.to_string())
+}
+
+/// Takes every pending agent → module action request out of the inbox queue
+/// (each is returned exactly once). The frontend dispatches them and answers
+/// with `complete_module_action`.
+#[tauri::command]
+pub fn poll_module_actions() -> Result<Vec<ActionRequest>, String> {
+    bridge::drain_inbox().map_err(|err| err.to_string())
+}
+
+/// Writes the frontend's answer to a polled request into the outbox queue.
+#[tauri::command]
+pub fn complete_module_action(response: ActionResponse) -> Result<(), String> {
+    bridge::complete(&response).map_err(|err| err.to_string())
 }
 
 /// One assistant turn. `mode` is `"chat"` (never asks, read-mostly) or

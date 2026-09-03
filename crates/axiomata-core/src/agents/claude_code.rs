@@ -128,6 +128,7 @@ pub async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataError> {
             cwd: request.cwd,
             timeout: request.timeout,
             env: request.env,
+            system_prompt_file: request.system_prompt_file,
         },
         &args,
     )
@@ -163,10 +164,6 @@ fn chat_args(request: &ChatRequest) -> Result<Vec<String>, AxiomataError> {
         }
         args.push("--resume".to_string());
         args.push(id.clone());
-    }
-    if let Some(file) = &request.system_prompt_file {
-        args.push("--append-system-prompt-file".to_string());
-        args.push(file.to_string_lossy().into_owned());
     }
     Ok(args)
 }
@@ -232,9 +229,11 @@ async fn spawn_and_collect(
     let started = Instant::now();
 
     let mut command = Command::new(CLAUDE_BIN);
+    command.arg("-p").args(extra_args);
+    if let Some(file) = &request.system_prompt_file {
+        command.arg("--append-system-prompt-file").arg(file);
+    }
     command
-        .arg("-p")
-        .args(extra_args)
         .current_dir(&request.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -352,9 +351,8 @@ mod tests {
     }
 
     #[test]
-    fn follow_up_resumes_and_instruct_accepts_edits_and_appends_prompt_file() {
-        let mut req = request(Some("abc-123_X"), ChatMode::Instruct);
-        req.system_prompt_file = Some(PathBuf::from("/tmp/ctx.md"));
+    fn follow_up_resumes_and_instruct_accepts_edits() {
+        let req = request(Some("abc-123_X"), ChatMode::Instruct);
         let args = chat_args(&req).unwrap();
         assert_eq!(
             args,
@@ -365,8 +363,6 @@ mod tests {
                 "acceptEdits",
                 "--resume",
                 "abc-123_X",
-                "--append-system-prompt-file",
-                "/tmp/ctx.md"
             ]
         );
     }

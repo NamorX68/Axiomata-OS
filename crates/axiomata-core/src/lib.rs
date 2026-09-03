@@ -7,6 +7,7 @@
 //! `axiomata-macos` crate for the platform integration boundary.
 
 pub mod agents;
+pub mod bridge;
 pub mod config;
 pub mod dashboard;
 pub mod db;

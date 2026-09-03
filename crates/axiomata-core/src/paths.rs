@@ -77,6 +77,13 @@ pub fn module_context_path() -> PathBuf {
     axiomata_home().join("module-context.md")
 }
 
+/// Root of the agent → module action queue (`~/.axiomata/module-actions/`),
+/// with `inbox/` (requests written by the CLI) and `outbox/` (responses
+/// written by the running dashboard). See `crate::bridge`.
+pub fn module_actions_dir() -> PathBuf {
+    axiomata_home().join("module-actions")
+}
+
 /// Directory for global, app-managed skills (`~/.axiomata/skills/`).
 pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")

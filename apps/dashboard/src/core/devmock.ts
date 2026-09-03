@@ -175,6 +175,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         duration_ms: 900,
       } satisfies ChatReply as T;
     }
+    case "write_module_manifest":
+      return true as T;
+    case "poll_module_actions":
+      return [] as T;
+    case "complete_module_action":
+      return undefined as T;
     case "read_workspace_file": {
       const rel = String(args.rel);
       if (rel.startsWith("/") || rel.split("/").includes("..")) {

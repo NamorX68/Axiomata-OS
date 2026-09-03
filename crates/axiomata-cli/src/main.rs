@@ -1,9 +1,11 @@
 //! Minimal CLI for exercising the Axiomata-OS core engine end-to-end without
 //! the Tauri GUI: initialize the core, list and run skills, inspect run history,
-//! sync the memory router, send an assistant turn.
+//! sync the memory router, send an assistant turn, call a dashboard module
+//! action through the file queue.
 
 use anyhow::{Context, Result};
 use axiomata_core::agents::{self, ChatMode};
+use axiomata_core::bridge::{self, ActionRequest};
 use axiomata_core::routines::{self, NewRoutine, RoutineTarget};
 use axiomata_core::skills::{self, RunStatus};
 use axiomata_core::{AxiomataCore, memory, paths};
@@ -55,6 +57,22 @@ enum Command {
         /// Allow the agent to edit workspace files (one-shot instruction).
         #[arg(long)]
         instruct: bool,
+    },
+    /// Print the module manifest the dashboard wrote for the agent.
+    Modules,
+    /// Call an action on a mounted dashboard module (the running dashboard
+    /// answers through `~/.axiomata/module-actions/`). Exits 2 on timeout.
+    ModuleAction {
+        /// Instance id, as listed by `modules`.
+        instance: String,
+        /// Action name.
+        action: String,
+        /// Parameters as a JSON object.
+        #[arg(long, default_value = "{}")]
+        json: String,
+        /// How long to wait for the dashboard.
+        #[arg(long, default_value_t = 30)]
+        timeout_secs: u64,
     },
 }
 
@@ -143,8 +161,68 @@ async fn main() -> Result<()> {
             resume,
             instruct,
         } => return assistant(&core, message, resume, instruct).await,
+        Command::Modules => modules()?,
+        Command::ModuleAction {
+            instance,
+            action,
+            json,
+            timeout_secs,
+        } => return module_action(instance, action, json, timeout_secs),
     }
     Ok(())
+}
+
+/// Prints `~/.axiomata/module-context.md`, or a hint if it doesn't exist.
+fn modules() -> Result<()> {
+    let path = paths::module_context_path();
+    match std::fs::read_to_string(&path) {
+        Ok(text) => print!("{text}"),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            println!(
+                "no manifest at {} — start the dashboard first",
+                path.display()
+            );
+        }
+        Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
+    }
+    Ok(())
+}
+
+/// Enqueues one action request and waits for the dashboard's response.
+fn module_action(instance: String, action: String, json: String, timeout_secs: u64) -> Result<()> {
+    let params: serde_json::Value =
+        serde_json::from_str(&json).context("--json must be a JSON value")?;
+    let request = ActionRequest {
+        id: bridge::new_action_id(),
+        instance_id: instance,
+        action,
+        params,
+        created_at: chrono::Utc::now(),
+    };
+    bridge::enqueue(&request).context("could not write the request")?;
+    let response = match bridge::wait_for_response(
+        &request.id,
+        std::time::Duration::from_secs(timeout_secs),
+    ) {
+        Ok(response) => response,
+        Err(err) => {
+            eprintln!("error: {err}");
+            std::process::exit(2);
+        }
+    };
+    if response.ok {
+        let result = response.result.unwrap_or(serde_json::Value::Null);
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        Ok(())
+    } else {
+        eprintln!(
+            "error: {}",
+            response
+                .error
+                .unwrap_or_else(|| "action failed".to_string())
+        );
+        std::process::exit(1);
+    }
 }
 
 /// One assistant turn; prints the reply and the session id.

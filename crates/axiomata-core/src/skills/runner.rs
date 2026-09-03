@@ -114,6 +114,7 @@ fn agent_request(prompt: String, backend: &AgentBackend, config: &Config) -> Age
         cwd: config.workspace_root.clone(),
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
         env: claude_env(config, backend),
+        system_prompt_file: super::super::agents::module_context_if_present(),
     }
 }
 

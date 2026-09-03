@@ -9,6 +9,7 @@ import "./themes/ocean.css";
 import "./styles.css";
 
 import App from "./App.svelte";
+import { startAgentBridge } from "./core/agent-bridge";
 import { initPersistence } from "./core/persist";
 import { DEFAULT_THEME, applyTheme } from "./core/themes";
 import { registerBuiltins } from "./modules";
@@ -25,6 +26,6 @@ if (!target) {
 }
 
 const app = mount(App, { target });
-void initPersistence();
+void initPersistence().then(() => startAgentBridge());
 
 export default app;

@@ -107,7 +107,6 @@ pub async fn chat(
     session_id: Option<String>,
     mode: ChatMode,
 ) -> Result<ChatReply, AxiomataError> {
-    let manifest = crate::paths::module_context_path();
     claude_code::chat(claude_code::ChatRequest {
         message,
         session_id,
@@ -115,7 +114,7 @@ pub async fn chat(
         cwd: config.workspace_root.clone(),
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
         env: crate::skills::runner::claude_env(config, &AgentBackend::ClaudeCode),
-        system_prompt_file: manifest.is_file().then_some(manifest),
+        system_prompt_file: module_context_if_present(),
     })
     .await
 }
@@ -137,6 +136,15 @@ pub struct AgentRequest {
     /// provider routing (`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, …).
     /// Ignored by Ollama.
     pub env: Vec<(String, String)>,
+    /// Appended to Claude Code's system prompt (`--append-system-prompt-file`);
+    /// the dashboard's module manifest when it exists. Ignored by Ollama.
+    pub system_prompt_file: Option<PathBuf>,
+}
+
+/// `paths::module_context_path()` if the dashboard has written it.
+pub fn module_context_if_present() -> Option<PathBuf> {
+    let path = crate::paths::module_context_path();
+    path.is_file().then_some(path)
 }
 
 /// The outcome of an [`AgentRequest`] that actually ran.
