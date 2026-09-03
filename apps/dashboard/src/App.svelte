@@ -6,39 +6,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import { get } from "svelte/store";
-
   import Canvas from "./canvas/Canvas.svelte";
   import { on } from "./core/bus";
-  import { invokeAction, manifest } from "./core/registry";
-  import { addInstance, instances } from "./core/stores";
   import IconBar from "./shell/IconBar.svelte";
   import LegacyPanels from "./shell/LegacyPanels.svelte";
+  import ModulePicker from "./shell/ModulePicker.svelte";
   import Toasts from "./shell/Toasts.svelte";
   import TopBar from "./shell/TopBar.svelte";
 
-  // Step-2 scaffolding: prove the registry/store/context pipeline end to end.
-  // Removed once the module picker (step 7) exists.
-  async function devProbe() {
-    const offset = 40 + get(instances).length * 32;
-    const inst = addInstance({
-      type: "dummy",
-      x: offset,
-      y: offset,
-      w: 260,
-      h: 160,
-      config: {},
-    });
-    console.log("registry.manifest() →", manifest());
-    console.log("invokeAction(ping) →", await invokeAction(inst.id, "ping", {}));
-  }
+  let pickerOpen = $state(false);
 
   // Stub handlers for the icon-bar events until their dialogs exist
-  // (settings: step 13, add-module: step 7, search: step 11).
+  // (settings: step 13, search: step 11).
   onMount(() => {
-    const offs = ["shell:settings", "shell:add-module", "shell:search"].map((ev) =>
-      on(ev, () => console.info(`${ev} — not wired yet`)),
-    );
+    const offs = [
+      on("shell:add-module", () => (pickerOpen = true)),
+      ...["shell:settings", "shell:search"].map((ev) =>
+        on(ev, () => console.info(`${ev} — not wired yet`)),
+      ),
+    ];
     return () => offs.forEach((off) => off());
   });
 </script>
@@ -46,12 +32,7 @@
 <TopBar />
 <IconBar />
 <Toasts />
-
-{#if import.meta.env.DEV}
-  <div class="dev-tools">
-    <button type="button" onclick={devProbe}>dev: add dummy + log manifest</button>
-  </div>
-{/if}
+<ModulePicker bind:open={pickerOpen} />
 
 <div class="board">
   <Canvas />
@@ -68,12 +49,6 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
-  }
-
-  .dev-tools {
-    display: flex;
-    justify-content: center;
-    margin-bottom: var(--ax-space-2);
   }
 
   .legacy {
