@@ -19,6 +19,16 @@ export interface StagedPanel {
 
 export const staged = writable<StagedPanel[]>([]);
 
+/**
+ * Opens a staged panel. Every side (`right` / `bottom`) holds at most one —
+ * they are all rendered at the same fixed position, so more than one per
+ * side would silently stack on top of each other. Opening the same `type` +
+ * `config.path` again (e.g. clicking "Open" repeatedly) is a no-op: the
+ * existing panel is left exactly as it is, since a mounted module's context
+ * only ever pushes config *out* to the store (see `registry.createContext`),
+ * so there is nothing to usefully overwrite. Opening something else on an
+ * occupied side replaces it with a freshly mounted panel.
+ */
 export function openStaged(
   type: string,
   config: Record<string, unknown> = {},
@@ -26,9 +36,19 @@ export function openStaged(
 ): StagedPanel | null {
   const def = getModule(type);
   if (!def?.stageable) return null;
+
+  const existing = get(staged).find((p) => p.from === from);
+  if (existing && existing.type === type && samePath(existing.config, config)) {
+    return existing;
+  }
+
   const panel: StagedPanel = { id: crypto.randomUUID(), type, config, from };
-  staged.update((list) => [...list, panel]);
+  staged.update((list) => [...list.filter((p) => p.from !== from), panel]);
   return panel;
+}
+
+function samePath(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return typeof a.path === "string" && a.path === b.path;
 }
 
 export function closeStaged(id: string): void {

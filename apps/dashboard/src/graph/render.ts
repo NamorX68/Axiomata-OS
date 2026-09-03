@@ -491,12 +491,14 @@ export class GraphRenderer {
       ctx.beginPath();
       ctx.arc(x, y, nodeR, 0, TWO_PI);
       ctx.fill();
-      ctx.strokeStyle = hot ? this.accentColor : n.kind === "file" ? this.lineColor : n.color;
+      // File nodes keep their area colour on the ring, same as everywhere
+      // else in the graph — the reference "New" badge is not a category.
+      ctx.strokeStyle = hot ? this.accentColor : n.color;
       ctx.lineWidth = hot ? 1.6 : 1;
       ctx.globalAlpha = hot ? 1 : 0.8;
       ctx.stroke();
       ctx.globalAlpha = 1;
-      drawGlyph(ctx, n.kind === "hub" ? "hub" : n.kind, x, y, nodeR * 0.62, hot ? this.accentColor : n.kind === "file" ? this.textColor : n.color);
+      drawGlyph(ctx, n.kind === "hub" ? "hub" : n.kind, x, y, nodeR * 0.62, hot ? this.accentColor : n.color);
       // Age / schedule badge under the node.
       const badge = this.badgeFor(n, t);
       if (badge) {
