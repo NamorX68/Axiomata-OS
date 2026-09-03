@@ -6,14 +6,8 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
 
-  interface AppInfo {
-    owner: string;
-    workspace_name: string;
-    workspace_root: string;
-    version: string;
-  }
+  import { type AppInfo, invokeBackend as invoke } from "../core/backend";
 
   let info = $state<AppInfo | null>(null);
 

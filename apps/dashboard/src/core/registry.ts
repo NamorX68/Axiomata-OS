@@ -4,10 +4,9 @@
  * mount tiles; the agent bridge (step 12) uses `manifest()` and `invokeAction()`.
  */
 
-import { get } from "svelte/store";
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 
+import { invokeBackend } from "./backend";
 import type { ModuleContext, ModuleDefinition, CanvasInstance } from "./types";
 import { instances, updateInstance } from "./stores";
 import { emit } from "./bus";
@@ -71,8 +70,7 @@ export function makeContext(inst: CanvasInstance): ModuleContext {
   return {
     instanceId: inst.id,
     config,
-    invoke: <T>(cmd: string, args?: Record<string, unknown>) =>
-      tauriInvoke<T>(cmd, args),
+    invoke: invokeBackend,
     emit,
     requestResize: (size) => updateInstance(inst.id, { w: size.w, h: size.h }),
   };

@@ -10,8 +10,8 @@
  */
 
 import { get } from "svelte/store";
-import { invoke } from "@tauri-apps/api/core";
 
+import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { activeTheme, instances, loadInstances, onDirty } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
 import { toast } from "./toast";
@@ -19,11 +19,6 @@ import type { CanvasInstance } from "./types";
 
 export const STATE_VERSION = 1;
 export const SAVE_DEBOUNCE_MS = 400;
-
-interface LoadedState {
-  json: string;
-  recovered_backup: string | null;
-}
 
 interface DashboardSettings extends Record<string, unknown> {
   theme: string;
