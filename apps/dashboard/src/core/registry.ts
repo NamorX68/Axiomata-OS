@@ -57,23 +57,35 @@ export function manifest(): ManifestEntry[] {
   });
 }
 
-/** Builds the context a module instance is mounted with. Config persistence is
- *  wired in step 6; for now the config store is seeded from the instance and
- *  written straight back into it on change. */
-export function makeContext(inst: CanvasInstance): ModuleContext {
-  const config = writable<Record<string, unknown>>({ ...inst.config });
+/** Builds a module context. `onConfig` receives every config change after
+ *  the initial value; `onResize` a requested tile size. */
+export function createContext(
+  instanceId: string,
+  initialConfig: Record<string, unknown>,
+  onConfig: (config: Record<string, unknown>) => void,
+  onResize: (size: { w: number; h: number }) => void = () => {},
+): ModuleContext {
+  const config = writable<Record<string, unknown>>({ ...initialConfig });
+  let first = true;
   config.subscribe((value) => {
-    if (value !== inst.config) {
-      updateInstance(inst.id, { config: value });
+    if (first) {
+      first = false;
+      return;
     }
+    onConfig(value);
   });
-  return {
-    instanceId: inst.id,
-    config,
-    invoke: invokeBackend,
-    emit,
-    requestResize: (size) => updateInstance(inst.id, { w: size.w, h: size.h }),
-  };
+  return { instanceId, config, invoke: invokeBackend, emit, requestResize: onResize };
+}
+
+/** The context a canvas instance is mounted with: config changes and resize
+ *  requests flow back into the store (and from there to dashboard.json). */
+export function makeContext(inst: CanvasInstance): ModuleContext {
+  return createContext(
+    inst.id,
+    inst.config,
+    (config) => updateInstance(inst.id, { config }),
+    (size) => updateInstance(inst.id, { w: size.w, h: size.h }),
+  );
 }
 
 /** Dispatch one declared action on one mounted instance (frontend → frontend).

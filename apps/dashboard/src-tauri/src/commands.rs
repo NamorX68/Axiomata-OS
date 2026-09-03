@@ -11,6 +11,7 @@ use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
+use axiomata_core::workspace::{self, WorkspaceFile};
 use serde::Serialize;
 use tauri::State;
 
@@ -57,6 +58,27 @@ pub fn get_dashboard_state() -> Result<LoadedState, String> {
 #[tauri::command]
 pub fn save_dashboard_state(json: String) -> Result<(), String> {
     dashboard::save_state(&json).map_err(|err| err.to_string())
+}
+
+/// Reads a UTF-8 file by workspace-relative path (≤ 1 MiB, no `..`, no
+/// symlinks, must resolve inside `config.workspace_root`).
+#[tauri::command]
+pub fn read_workspace_file(
+    state: State<'_, CoreState>,
+    rel: String,
+) -> Result<WorkspaceFile, String> {
+    workspace::read_file(&state.config, &rel).map_err(|err| err.to_string())
+}
+
+/// Atomically writes a workspace file under the same guard as
+/// `read_workspace_file`. Creates the file, never directories.
+#[tauri::command]
+pub fn write_workspace_file(
+    state: State<'_, CoreState>,
+    rel: String,
+    content: String,
+) -> Result<(), String> {
+    workspace::write_file(&state.config, &rel, &content).map_err(|err| err.to_string())
 }
 
 /// Lists every discovered skill (`~/.axiomata/skills/`).

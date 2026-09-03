@@ -90,6 +90,12 @@ pub enum AxiomataError {
     #[error("refusing to run the memory router on {path} — set a dedicated workspace folder")]
     UnsafeWorkspaceRoot { path: PathBuf },
 
+    /// A workspace-relative path handed to `crate::workspace` is absolute,
+    /// climbs out of the workspace (`..`, symlink), is a directory, a symlink,
+    /// too large, or not UTF-8.
+    #[error("invalid workspace file {path}: {reason}")]
+    InvalidWorkspacePath { path: PathBuf, reason: String },
+
     /// `~/.axiomata/dashboard.json` (or the state handed in to save) is not a
     /// JSON object with a numeric `version`, or the file is a symlink.
     #[error("invalid dashboard state at {path}: {reason}")]

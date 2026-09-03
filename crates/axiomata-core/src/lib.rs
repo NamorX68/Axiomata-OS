@@ -15,6 +15,7 @@ pub mod memory;
 pub mod paths;
 pub mod routines;
 pub mod skills;
+pub mod workspace;
 
 pub use error::AxiomataError;
 

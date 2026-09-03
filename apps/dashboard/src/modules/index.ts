@@ -9,6 +9,8 @@
 import { registerModule } from "../core/registry";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
+import MdFile from "./md-file.svelte";
+import MdFileSettings from "./md-file-settings.svelte";
 import MemoryStatus from "./memory-status.svelte";
 import MemoryStatusSettings from "./memory-status-settings.svelte";
 import RoutinesBoard from "./routines-board.svelte";
@@ -119,6 +121,49 @@ export function registerBuiltins(): void {
         description: "List routines with their next fire time.",
         params: { type: "object", properties: {} },
         run: (_params, ctx) => ctx.invoke("list_routines"),
+      },
+    ],
+  });
+
+  registerModule({
+    type: "md-file",
+    title: "Markdown",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><rect x='1.5' y='3.5' width='13' height='9' rx='1.5'/><path d='M4 10V6l2 2 2-2v4M11 6v4m-1.5-1.5L11 10l1.5-1.5'/></svg>",
+    component: MdFile,
+    settings: MdFileSettings,
+    defaultSize: { w: 480, h: 420 },
+    minSize: { w: 260, h: 160 },
+    stageable: true,
+    actions: [
+      {
+        name: "open",
+        description: "Open a workspace-relative Markdown file in this instance (read mode).",
+        params: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        run: async (params, ctx) => {
+          const path = String((params as { path: string }).path);
+          ctx.config.update((c) => ({ ...c, path, mode: "read" }));
+          return { path };
+        },
+      },
+      {
+        name: "setMode",
+        description: 'Switch between "read" and "edit".',
+        params: { type: "object", properties: { mode: { type: "string", enum: ["read", "edit"] } }, required: ["mode"] },
+        run: async (params, ctx) => {
+          const mode = (params as { mode: string }).mode === "edit" ? "edit" : "read";
+          ctx.config.update((c) => ({ ...c, mode }));
+          return { mode };
+        },
+      },
+      {
+        name: "getContent",
+        description: "Return the file's current on-disk content.",
+        params: { type: "object", properties: {} },
+        run: (_params, ctx) => {
+          let path = "";
+          ctx.config.subscribe((c) => (path = typeof c.path === "string" ? c.path : ""))();
+          return ctx.invoke("read_workspace_file", { rel: path });
+        },
       },
     ],
   });

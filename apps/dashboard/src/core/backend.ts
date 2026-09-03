@@ -71,6 +71,12 @@ export interface NewRoutine {
   enabled: boolean;
 }
 
+export interface WorkspaceFile {
+  path: string;
+  content: string;
+  modified: string | null;
+}
+
 export interface LoadedDashboardState {
   json: string;
   recovered_backup: string | null;

@@ -20,6 +20,13 @@ const LATENCY_MS = 120;
 const delay = () => new Promise((r) => setTimeout(r, LATENCY_MS));
 
 let dashboardJson: string | null = null;
+const files = new Map<string, string>([
+  [
+    "notes/inbox.md",
+    "# Inbox\n\nA scratch note in the *dev* workspace.\n\n- [x] wire md-file\n- [ ] ship M5\n\n| col | val |\n|-----|-----|\n| a | 1 |\n\n```ts\nconst x = 1;\n```\n",
+  ],
+  ["README.md", "# Axiomata-Workspace\n\nSecond-brain root.\n"],
+]);
 let memory: MemoryStatus = {
   workspace_root: "/Users/dev/Axiomata-Workspace",
   last_sync: new Date(Date.now() - 5 * 60_000).toISOString(),
@@ -149,6 +156,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       });
       return found as T;
     }
+    case "read_workspace_file": {
+      const rel = String(args.rel);
+      if (rel.startsWith("/") || rel.split("/").includes("..")) {
+        throw new Error(`invalid workspace file ${rel}: resolves outside the workspace`);
+      }
+      const content = files.get(rel);
+      if (content === undefined) throw new Error(`I/O error at ${rel}: No such file or directory`);
+      return { path: rel, content, modified: new Date().toISOString() } as T;
+    }
+    case "write_workspace_file":
+      files.set(String(args.rel), String(args.content));
+      return undefined as T;
     default:
       throw new Error(`devmock: no fixture for "${cmd}"`);
   }
