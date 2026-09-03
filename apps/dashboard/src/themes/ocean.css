@@ -1,0 +1,36 @@
+/*
+ * ocean — deep-sea navy and teal surfaces, a coral accent, a slow wave
+ * texture. Cooler than graphite, warmer than midnight.
+ */
+
+:root[data-theme="ocean"] {
+  --ax-color-scheme: dark;
+
+  --ax-bg: #07131c;
+  --ax-surface-1: #0c1c28;
+  --ax-surface-2: #112635;
+  --ax-surface-3: #173142;
+  --ax-overlay: rgba(2, 8, 14, 0.7);
+
+  --ax-text: #e9f3f7;
+  --ax-text-muted: #85a3b3;
+  --ax-text-invert: #07131c;
+
+  --ax-accent: #ff8a5b;
+  --ax-accent-hover: #ffa47f;
+  --ax-accent-muted: rgba(255, 138, 91, 0.16);
+  --ax-success: #4fd6b8;
+  --ax-warning: #e8c46a;
+  --ax-danger: #f2716f;
+
+  --ax-border: #1f3a4c;
+  --ax-border-strong: #2f5670;
+  --ax-focus-ring: rgba(255, 138, 91, 0.5);
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 22px rgba(0, 0, 0, 0.4);
+  --ax-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.58);
+  --ax-shadow-drag: 0 20px 56px rgba(0, 0, 0, 0.62);
+
+  /* low-contrast wave crests in teal */
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='40' viewBox='0 0 120 40'%3E%3Cpath fill='none' stroke='%234fd6b8' stroke-opacity='0.06' stroke-width='1' d='M0 20c15-12 30-12 45 0s30 12 45 0 30-12 45 0'/%3E%3C/svg%3E");
+}

@@ -10,10 +10,39 @@ use axiomata_core::AxiomataCore;
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
+use serde::Serialize;
 use tauri::State;
 
 /// The Tauri-managed core engine.
 pub type CoreState = AxiomataCore;
+
+/// Static facts the shell shows in its top bar. Read once at startup.
+#[derive(Debug, Clone, Serialize)]
+pub struct AppInfo {
+    /// `config.owner`; empty when the user hasn't set one.
+    pub owner: String,
+    /// Last path component of `config.workspace_root` (e.g. "Axiomata-Workspace").
+    pub workspace_name: String,
+    /// Absolute workspace root, for tooltips / settings.
+    pub workspace_root: String,
+    /// The dashboard crate version.
+    pub version: String,
+}
+
+/// Returns the owner line and workspace facts for the top bar.
+#[tauri::command]
+pub fn get_app_info(state: State<'_, CoreState>) -> AppInfo {
+    let root = &state.config.workspace_root;
+    AppInfo {
+        owner: state.config.owner.clone(),
+        workspace_name: root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        workspace_root: root.to_string_lossy().into_owned(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
 
 /// Lists every discovered skill (`~/.axiomata/skills/`).
 #[tauri::command]

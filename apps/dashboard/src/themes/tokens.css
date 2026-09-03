@@ -11,8 +11,9 @@
  *   2. a neutral fallback palette — only used if no `data-theme` is set on
  *      <html> (which shouldn't happen; `main.ts` always sets one).
  *
- * The palette tokens are overridden per theme in `graphite.css`, `light.css`,
- * `midnight.css` (each a single `:root[data-theme="…"] { … }` block). A user's
+ * The palette tokens are overridden per theme in `graphite.css`, `paper.css`,
+ * `steampunk.css`, `forest.css`, `ocean.css` (each a single
+ * `:root[data-theme="…"] { … }` block; the list lives in `core/themes.ts`). A user's
  * `~/.axiomata/theme.css` may override the palette tokens too, but ONLY these
  * exact `--ax-*` names and ONLY under `:root` / `[data-theme="custom"]` — the
  * validator (src/theme/validator.ts) rejects anything else.
@@ -50,6 +51,10 @@
     sans-serif;
   --ax-font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* Display face for the logo line and panel headings; themes may swap it. */
+  --ax-font-display: var(--ax-font-sans);
+  /* Letter-spacing for the uppercase panel headings ("SKILLS DECK"). */
+  --ax-tracking-wide: 0.14em;
   --ax-font-size-sm: 12px;
   --ax-font-size-base: 14px;
   --ax-font-size-lg: 16px;
@@ -57,6 +62,9 @@
   --ax-line-height: 1.5;
 
   /* ---------- neutral fallback palette (themes override) ---------- */
+
+  /* `light` or `dark`: drives native form controls and scrollbars. */
+  --ax-color-scheme: dark;
 
   --ax-bg: #101014;
   --ax-surface-1: #17171c;

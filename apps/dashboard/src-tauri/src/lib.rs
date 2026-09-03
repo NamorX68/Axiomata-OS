@@ -11,6 +11,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            commands::get_app_info,
             commands::list_skills,
             commands::list_runs,
             commands::get_run,

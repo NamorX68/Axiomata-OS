@@ -135,7 +135,6 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AgentDefaults;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
     use std::env;
 
@@ -157,7 +156,7 @@ mod tests {
         fs::create_dir_all(&temp_home).unwrap();
         let seed_config = Config {
             workspace_root: temp_workspace.clone(),
-            agents: AgentDefaults::default(),
+            ..Config::default()
         };
         seed_config.save().expect("seeding config should succeed");
 
