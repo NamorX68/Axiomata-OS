@@ -13,7 +13,7 @@ import { addInstance, instances, removeInstance } from "./stores";
 import type { CanvasInstance } from "./types";
 
 /** Where the first tile lands; each further tile cascades by CASCADE_PX. */
-export const ORIGIN = { x: 40, y: 40 };
+export const ORIGIN = { x: 48, y: 48 };
 export const CASCADE_PX = 32;
 export const CASCADE_WRAP = 10;
 

@@ -85,6 +85,8 @@ pub struct ChatRequest {
     /// Appended to the system prompt (`--append-system-prompt-file`) — the
     /// module manifest written by the dashboard, when it exists.
     pub system_prompt_file: Option<PathBuf>,
+    /// `claude --model`; `None` lets the CLI choose.
+    pub model: Option<String>,
 }
 
 /// The parsed `--output-format json` result of a chat turn.
@@ -129,11 +131,26 @@ pub async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataError> {
             timeout: request.timeout,
             env: request.env,
             system_prompt_file: request.system_prompt_file,
+            model: request.model,
         },
         &args,
     )
     .await?;
     parse_chat_output(&result)
+}
+
+/// Model names come from config / skill frontmatter; keep them to the alias
+/// and id alphabet so they can never read as another flag.
+pub fn valid_model_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 80
+        && name
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
+        && name.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':' | b'[' | b']')
+        })
 }
 
 /// A session id is only ever something `claude` printed earlier; refuse
@@ -230,6 +247,9 @@ async fn spawn_and_collect(
 
     let mut command = Command::new(CLAUDE_BIN);
     command.arg("-p").args(extra_args);
+    if let Some(model) = request.model.as_deref().filter(|m| valid_model_name(m)) {
+        command.arg("--model").arg(model);
+    }
     if let Some(file) = &request.system_prompt_file {
         command.arg("--append-system-prompt-file").arg(file);
     }
@@ -329,6 +349,7 @@ mod tests {
             timeout: Duration::from_secs(1),
             env: Vec::new(),
             system_prompt_file: None,
+            model: None,
         }
     }
 
@@ -399,6 +420,21 @@ mod tests {
         let err =
             parse_chat_output(&output(r#"{"result":"x","session_id":"bad id"}"#, 0)).unwrap_err();
         assert!(err.to_string().contains("session id"), "{err}");
+    }
+
+    #[test]
+    fn model_names_are_validated() {
+        for ok in [
+            "claude-sonnet-5",
+            "sonnet",
+            "claude-opus-4-1[1m]",
+            "us.anthropic.claude-x:0",
+        ] {
+            assert!(valid_model_name(ok), "{ok}");
+        }
+        for bad in ["", "--model", "a b", "x;rm", &"a".repeat(81)] {
+            assert!(!valid_model_name(bad), "{bad:?}");
+        }
     }
 
     #[test]

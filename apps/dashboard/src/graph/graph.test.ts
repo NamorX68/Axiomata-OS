@@ -11,6 +11,7 @@ const palette: Palette = {
   warning: "#fc0",
   success: "#0f0",
   border: "#444",
+  invert: "#000",
   light: false,
 };
 
@@ -51,10 +52,11 @@ describe("buildModel", () => {
     expect(m.nodes.filter((n) => n.kind === "hub")).toHaveLength(1);
     expect(m.nodes.filter((n) => n.kind === "skill")).toHaveLength(1);
     expect(m.nodes.filter((n) => n.kind === "file")).toHaveLength(41);
+    expect(m.nodes.filter((n) => n.kind === "area").map((n) => n.label)).toEqual(["Dev", "Work"]);
     const [dev, work] = m.areas;
     expect(dev.end - dev.start).toBeCloseTo((work.end - work.start) * 3, 5);
-    // edges: one resolvable link + the hub spoke to the skill
-    expect(m.edges).toHaveLength(2);
+    // edges: one resolvable link + hub spokes (skill, 2 areas) + 40 area→file
+    expect(m.edges).toHaveLength(1 + 3 + 40);
     expect(m.byId.get("file:Dev/sub0/n0.md")?.degree).toBe(1);
     expect(m.byId.get("skill:a")?.color).toBe(palette.accent);
   });
@@ -68,6 +70,8 @@ describe("layouts", () => {
     expect([hub.x, hub.y]).toEqual([0, 0]);
     const skill = m.byId.get("skill:a")!;
     expect(Math.hypot(skill.x, skill.y)).toBeCloseTo(RING.skills, 5);
+    const area = m.byId.get("area:Dev")!;
+    expect(Math.hypot(area.x, area.y)).toBeCloseTo(RING.areas, 5);
     for (const n of m.nodes.filter((n) => n.kind === "file" && n.area)) {
       const r = Math.hypot(n.x, n.y);
       expect(r).toBeGreaterThanOrEqual(RING.filesInner - 1e-9);
@@ -105,7 +109,10 @@ describe("regroup / search / neighbours", () => {
   it("neighbours report direction", () => {
     const m = buildModel(fixture(), palette);
     const out = neighbours(m, "file:Dev/sub0/n0.md");
-    expect(out).toEqual([{ node: m.byId.get("file:Work/sub1/n1.md"), out: true }]);
+    expect(out).toEqual([
+      { node: m.byId.get("file:Work/sub1/n1.md"), out: true },
+      { node: m.byId.get("area:Dev"), out: false },
+    ]);
     const back = neighbours(m, "file:Work/sub1/n1.md");
     expect(back[0].out).toBe(false);
   });

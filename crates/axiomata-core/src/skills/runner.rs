@@ -64,7 +64,21 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
         }
     };
 
-    Ok(run_on_backend(&skill.name, prompt_for(&skill, &backend), &backend, config).await)
+    let model = match backend {
+        AgentBackend::ClaudeCode => skill
+            .model
+            .clone()
+            .or_else(|| crate::agents::default_claude_model(config)),
+        AgentBackend::Ollama { .. } => None,
+    };
+    Ok(run_on_backend(
+        &skill.name,
+        prompt_for(&skill, &backend),
+        &backend,
+        config,
+        model,
+    )
+    .await)
 }
 
 /// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`),
@@ -82,7 +96,14 @@ pub async fn execute_prompt(
         Ok(backend) => backend,
         Err(err) => return failure_record(name, backend_id, Utc::now(), 0, err.to_string()),
     };
-    run_on_backend(name, prompt, &backend, config).await
+    run_on_backend(
+        name,
+        prompt,
+        &backend,
+        config,
+        crate::agents::default_claude_model(config),
+    )
+    .await
 }
 
 /// Shared tail of [`execute_skill`] / [`execute_prompt`]: build the request,
@@ -93,9 +114,10 @@ async fn run_on_backend(
     prompt: String,
     backend: &AgentBackend,
     config: &Config,
+    model: Option<String>,
 ) -> RunRecord {
     let started_at = Utc::now();
-    let request = agent_request(prompt, backend, config);
+    let request = agent_request(prompt, backend, config, model);
     match backend.run(request).await {
         Ok(result) => record_from_result(name, backend.id(), started_at, result),
         Err(err) => {
@@ -108,7 +130,12 @@ async fn run_on_backend(
 /// Builds the [`AgentRequest`] for a prompt on `backend`: the caller-supplied
 /// prompt, the workspace as the working directory, the configured run timeout,
 /// and (for Claude Code only) the filtered provider environment.
-fn agent_request(prompt: String, backend: &AgentBackend, config: &Config) -> AgentRequest {
+fn agent_request(
+    prompt: String,
+    backend: &AgentBackend,
+    config: &Config,
+    model: Option<String>,
+) -> AgentRequest {
     AgentRequest {
         prompt,
         cwd: config.workspace_root.clone(),
@@ -117,6 +144,7 @@ fn agent_request(prompt: String, backend: &AgentBackend, config: &Config) -> Age
         // Skills and routines get the dashboard's module manifest too, so an
         // unattended run can call mounted modules; None when the GUI never ran.
         system_prompt_file: crate::agents::module_context_if_present(),
+        model,
     }
 }
 
@@ -364,10 +392,10 @@ mod tests {
             std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
         }
         let config = Config::default();
-        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config);
+        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config, None);
         assert_eq!(req.system_prompt_file, None);
         std::fs::write(home.join("module-context.md"), "# modules").unwrap();
-        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config);
+        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config, None);
         assert_eq!(req.system_prompt_file, Some(home.join("module-context.md")));
         unsafe {
             std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);

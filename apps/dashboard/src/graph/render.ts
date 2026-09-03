@@ -5,7 +5,7 @@
  * the device pixel ratio; call `resize()` when the canvas box changes.
  */
 
-import type { GraphModel, GraphNode } from "./model";
+import type { GraphModel, GraphNode, NodeKind } from "./model";
 
 export interface RenderOptions {
   /** Radians per second of ring rotation. */
@@ -28,6 +28,71 @@ export interface View {
 
 const TWO_PI = Math.PI * 2;
 
+/** Small vector glyph inside a non-file node: hub = hexagon, area = folder,
+ *  skill = bolt, routine = clock. Drawn in the node's contrast colour. */
+export function drawGlyph(
+  ctx: CanvasRenderingContext2D,
+  kind: NodeKind,
+  x: number,
+  y: number,
+  r: number,
+  color: string,
+): void {
+  const s = r * 0.62;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(1, r * 0.16);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.globalAlpha = 0.95;
+  ctx.beginPath();
+  switch (kind) {
+    case "hub":
+      for (let i = 0; i < 6; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 3;
+        const px = Math.cos(a) * s;
+        const py = Math.sin(a) * s;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      break;
+    case "area":
+      ctx.moveTo(-s, -s * 0.55);
+      ctx.lineTo(-s * 0.3, -s * 0.55);
+      ctx.lineTo(-s * 0.05, -s * 0.25);
+      ctx.lineTo(s, -s * 0.25);
+      ctx.lineTo(s, s * 0.6);
+      ctx.lineTo(-s, s * 0.6);
+      ctx.closePath();
+      ctx.stroke();
+      break;
+    case "skill":
+      ctx.moveTo(s * 0.25, -s);
+      ctx.lineTo(-s * 0.55, s * 0.1);
+      ctx.lineTo(s * 0.05, s * 0.1);
+      ctx.lineTo(-s * 0.25, s);
+      ctx.lineTo(s * 0.55, -s * 0.1);
+      ctx.lineTo(-s * 0.05, -s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case "routine":
+      ctx.arc(0, 0, s, 0, TWO_PI);
+      ctx.moveTo(0, -s * 0.55);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(s * 0.45, s * 0.25);
+      ctx.stroke();
+      break;
+    default:
+      break;
+  }
+  ctx.restore();
+}
+
 export class GraphRenderer {
   private ctx: CanvasRenderingContext2D;
   private width = 0;
@@ -45,6 +110,8 @@ export class GraphRenderer {
   private textColor = "#fff";
   private mutedColor = "#888";
   private lineColor = "#fff";
+  private glyphColor = "#000";
+  private hubGlyphColor = "#000";
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -52,10 +119,12 @@ export class GraphRenderer {
     this.ctx = ctx;
   }
 
-  setColors(text: string, muted: string, line: string): void {
+  setColors(text: string, muted: string, line: string, glyph = "#000", hubGlyph = "#000"): void {
     this.textColor = text;
     this.mutedColor = muted;
     this.lineColor = line;
+    this.glyphColor = glyph;
+    this.hubGlyphColor = hubGlyph;
   }
 
   resize(): void {
@@ -165,8 +234,8 @@ export class GraphRenderer {
       const pa = this.toScreen(a);
       const pb = this.toScreen(b);
       const hot = this.hover === a || this.hover === b || this.selected === a || this.selected === b;
-      ctx.strokeStyle = hot ? a.color : this.lineColor;
-      ctx.globalAlpha = hot ? 0.9 : a.kind === "hub" ? 0.12 : 0.18;
+      ctx.strokeStyle = hot ? a.color : a.kind === "area" ? a.color : this.lineColor;
+      ctx.globalAlpha = hot ? 0.9 : a.kind === "hub" ? 0.14 : a.kind === "area" ? 0.07 : 0.2;
       ctx.beginPath();
       ctx.moveTo(pa.x, pa.y);
       ctx.lineTo(pb.x, pb.y);
@@ -196,13 +265,15 @@ export class GraphRenderer {
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TWO_PI);
       ctx.fill();
-      if (n.kind === "hub" || n.kind === "skill" || n.kind === "routine") {
-        ctx.globalAlpha = 0.9;
+      if (n.kind !== "file") {
+        // Ring + a glyph so the kinds read at a glance (see legend).
+        ctx.globalAlpha = dimmed ? 0.2 : 0.9;
         ctx.strokeStyle = n.color;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, r + 4, 0, TWO_PI);
+        ctx.arc(p.x, p.y, r + 5, 0, TWO_PI);
         ctx.stroke();
+        drawGlyph(ctx, n.kind, p.x, p.y, r, n.kind === "hub" ? this.hubGlyphColor : this.glyphColor);
       }
     }
     ctx.globalAlpha = 1;
@@ -219,7 +290,7 @@ export class GraphRenderer {
         if (n.kind === "file" && !showFile) continue;
         if (hl !== null && !lit && n !== this.selected && n !== this.hover) continue;
         const p = this.toScreen(n);
-        ctx.fillStyle = n.kind === "file" ? this.textColor : n.kind === "hub" ? this.textColor : this.mutedColor;
+        ctx.fillStyle = n.kind === "file" || n.kind === "hub" ? this.textColor : n.kind === "area" ? n.color : this.mutedColor;
         ctx.globalAlpha = n === this.hover || n === this.selected ? 1 : 0.8;
         ctx.fillText(n.label, p.x, p.y + n.r * this.view.zoom + 6);
       }

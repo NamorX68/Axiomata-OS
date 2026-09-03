@@ -25,6 +25,7 @@
     type GraphNode,
     type Grouping,
   } from "../graph/model";
+  import Legend from "../graph/Legend.svelte";
   import { GraphRenderer } from "../graph/render";
 
   let {
@@ -57,7 +58,16 @@
   let error = $state("");
   let drag: { x: number; y: number; vx: number; vy: number } | null = null;
 
-  const links = $derived(model && selected ? neighbours(model, selected.id) : []);
+  const links = $derived(
+    model && selected
+      ? neighbours(model, selected.id).filter((l) => !(selected!.kind === "area" && l.node.kind === "file"))
+      : [],
+  );
+  const areaFiles = $derived(
+    model && selected?.kind === "area"
+      ? model.nodes.filter((n) => n.kind === "file" && n.area === selected!.area).sort((a, b) => a.label.localeCompare(b.label))
+      : [],
+  );
   const hits = $derived(model && query.trim() ? searchNodes(model, query) : null);
 
   function rebuild() {
@@ -65,7 +75,7 @@
     const palette = readPalette();
     const m = buildModel(regroup(graph, grouping), palette);
     applyLayout(m, layout);
-    renderer.setColors(palette.text, palette.muted, palette.border);
+    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert);
     renderer.model = m;
     model = m;
     // Re-point the selection at the new model's node without making the
@@ -308,6 +318,8 @@
     {/if}
   </aside>
 
+  <div class="legend-slot"><Legend /></div>
+
   {#if selected}
     <aside class="detail" transition:fade={{ duration: 120 }}>
       <header>
@@ -327,6 +339,22 @@
           <button type="button" onclick={() => copyPath(selected!.path!)}>Copy path</button>
           <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
         </div>
+      {:else if selected.kind === "area"}
+        <p class="muted">{areaFiles.length} Notizen in diesem Bereich</p>
+        <div class="actions">
+          <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
+        </div>
+        <h3>Notizen</h3>
+        <ul class="links">
+          {#each areaFiles as f (f.id)}
+            <li>
+              <button type="button" class="link" onclick={() => select(f, true)}>
+                <span class="dot" style:background={f.color}></span>
+                {f.label}
+              </button>
+            </li>
+          {/each}
+        </ul>
       {:else if selected.kind === "skill"}
         <p class="muted">{graph?.skills.find((s) => `/${s.name}` === selected!.label)?.description ?? ""}</p>
         <div class="actions">
@@ -496,6 +524,13 @@
   .stats {
     margin: 0;
     color: var(--ax-text-muted);
+  }
+
+  .legend-slot {
+    position: absolute;
+    z-index: 2;
+    left: var(--ax-space-5);
+    bottom: 80px;
   }
 
   .detail {

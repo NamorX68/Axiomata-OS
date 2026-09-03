@@ -4,7 +4,10 @@
   turns as text. Auto-scrolls to the newest turn.
 -->
 <script lang="ts">
+  import { cubicOut } from "svelte/easing";
   import { fly } from "svelte/transition";
+
+  const SLIDE_MS = 560;
 
   import { busy, newSession, panelOpen, sessionId, turns } from "../core/chat";
   import { renderMarkdown } from "../core/markdown";
@@ -30,7 +33,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#if $panelOpen}
-  <section class="chat" transition:fly={{ y: 400, duration: 260 }} aria-label="Chat">
+  <section class="chat" transition:fly={{ y: 420, duration: SLIDE_MS, easing: cubicOut }} aria-label="Chat">
     <header>
       <h2>Agent</h2>
       <span class="session">{$sessionId ? `session ${$sessionId.slice(0, 8)}…` : "new session"}</span>
@@ -59,17 +62,16 @@
   .chat {
     position: fixed;
     left: 50%;
-    bottom: 52px;
+    bottom: 64px;
     transform: translateX(-50%);
-    width: min(760px, calc(100vw - 2 * var(--ax-space-5)));
+    width: min(var(--ax-chat-width), calc(100vw - 2 * var(--ax-space-5)));
     height: min(60vh, 560px);
     z-index: var(--ax-z-assistant);
     display: flex;
     flex-direction: column;
     background: var(--ax-surface-1);
     border: 1px solid var(--ax-border-strong);
-    border-bottom: none;
-    border-radius: var(--ax-radius-lg) var(--ax-radius-lg) 0 0;
+    border-radius: var(--ax-radius-lg);
     box-shadow: var(--ax-shadow-pop);
   }
 
