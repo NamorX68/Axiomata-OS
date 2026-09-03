@@ -40,7 +40,9 @@
         ctx.beginPath();
         ctx.arc(11, 11, r + 3, 0, Math.PI * 2);
         ctx.stroke();
-        drawGlyph(ctx, kind, 11, 11, r, kind === "hub" ? p.invert : p.invert);
+        // The legend shows the generic default; each area actually picks
+        // its own icon from `glyphForArea` (see graph/model.ts).
+        drawGlyph(ctx, kind === "area" ? "folder" : kind, 11, 11, r, p.invert);
       }
     });
   }

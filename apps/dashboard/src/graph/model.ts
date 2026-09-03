@@ -29,6 +29,9 @@ export interface GraphNode {
   degree: number;
   modified?: string | null;
   isMarkdown?: boolean;
+  /** Area nodes only: which icon to draw (see `glyphForArea`); other kinds
+   *  are keyed by `kind` itself ("hub" / "skill" / "routine"). */
+  glyph?: string;
   /** Orbit mode: 3-D point of the particle cloud (graph units). */
   p3?: [number, number, number];
   /** Orbit mode: node sits on the icon ring. */
@@ -90,6 +93,35 @@ export function readPalette(): Palette {
     surface: v("--ax-surface-1", "#121216"),
     light: v("--ax-color-scheme", "dark") === "light",
   };
+}
+
+/**
+ * Which icon an area (folder) node draws, guessed from its own name — the
+ * same idea as the lightning bolt on a skill, but per-folder instead of one
+ * shape for every area. Checked in order, first match wins, against the
+ * lower-cased full path (so a nested folder like "Learning/Rust/lessons"
+ * still matches "learning" even though its short label is "Rust/lessons");
+ * falls back to a plain folder glyph for anything unmatched. Deliberately a
+ * short curated list, not a giant keyword dictionary — new areas just get
+ * the folder default until a rule is worth adding.
+ */
+const AREA_GLYPH_RULES: [RegExp, string][] = [
+  [/\brust\b|\bblockos\b|entwicklung|\bdev\b|programm(ier)?/i, "code"],
+  [/\bki\b|\bai\b|intelligenz|machine.?learning/i, "chip"],
+  [/lernen|learning|\bkurs(e)?\b|\bcourse/i, "book"],
+  [/arbeit|\bwork\b|\bjob\b/i, "briefcase"],
+  [/foto|photo|kamera|camera/i, "camera"],
+  [/gesellschaft|society|politik|kultur/i, "people"],
+  [/pers[oö]nlich|personal|privat/i, "user"],
+  [/system|werkzeug|\btools?\b/i, "wrench"],
+  [/inbox|eingang/i, "tray"],
+];
+
+export function glyphForArea(path: string): string {
+  for (const [pattern, glyph] of AREA_GLYPH_RULES) {
+    if (pattern.test(path)) return glyph;
+  }
+  return "folder";
 }
 
 /** Stable per-area hue from the name; saturation/lightness by scheme. */
@@ -223,6 +255,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       color: a.color,
       phase: phase(a.name),
       degree: 0,
+      glyph: glyphForArea(a.name),
     });
   }
 
