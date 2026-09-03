@@ -11,6 +11,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            commands::get_app_info,
+            commands::get_dashboard_state,
+            commands::save_dashboard_state,
+            commands::read_workspace_file,
+            commands::write_workspace_file,
+            commands::assistant_send,
+            commands::write_module_manifest,
+            commands::poll_module_actions,
+            commands::complete_module_action,
+            commands::load_custom_css,
             commands::list_skills,
             commands::list_runs,
             commands::get_run,

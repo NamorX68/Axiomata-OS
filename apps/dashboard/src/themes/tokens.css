@@ -1,0 +1,95 @@
+/*
+ * Axiomata-OS design tokens — THE TEMPLATE.
+ *
+ * Every colour, size, and motion value in the UI resolves through one of the
+ * `--ax-*` custom properties below. Modules and shell components must never use
+ * a literal colour or px value for anything themeable.
+ *
+ * This `:root` block defines:
+ *   1. structural tokens (radius / spacing / z-index / motion / type) — these
+ *      do NOT change per theme;
+ *   2. a neutral fallback palette — only used if no `data-theme` is set on
+ *      <html> (which shouldn't happen; `main.ts` always sets one).
+ *
+ * The palette tokens are overridden per theme in `graphite.css`, `paper.css`,
+ * `steampunk.css`, `forest.css`, `ocean.css` (each a single
+ * `:root[data-theme="…"] { … }` block; the list lives in `core/themes.ts`). A user's
+ * `~/.axiomata/theme.css` may override the palette tokens too, but ONLY these
+ * exact `--ax-*` names and ONLY under `:root` / `[data-theme="custom"]` — the
+ * validator (src/theme/validator.ts) rejects anything else.
+ */
+
+:root {
+  /* ---------- structural (theme-independent) ---------- */
+
+  --ax-radius-sm: 4px;
+  --ax-radius-md: 8px;
+  --ax-radius-lg: 14px;
+  --ax-radius-pill: 999px;
+
+  --ax-space-1: 4px;
+  --ax-space-2: 8px;
+  --ax-space-3: 12px;
+  --ax-space-4: 16px;
+  --ax-space-5: 24px;
+  --ax-space-6: 32px;
+
+  --ax-z-particle: 1;
+  --ax-z-tile-base: 10;
+  --ax-z-tile-drag: 9000;
+  --ax-z-staging: 9500;
+  --ax-z-assistant: 9600;
+  --ax-z-dialog: 10000;
+  --ax-z-toast: 10500;
+
+  --ax-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ax-dur-fast: 120ms;
+  --ax-dur-med: 260ms;
+
+  --ax-font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --ax-font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* Display face for the logo line and panel headings; themes may swap it. */
+  --ax-font-display: var(--ax-font-sans);
+  /* Letter-spacing for the uppercase panel headings ("SKILLS DECK"). */
+  --ax-tracking-wide: 0.14em;
+  --ax-font-size-sm: 12px;
+  --ax-font-size-base: 14px;
+  --ax-font-size-lg: 16px;
+  --ax-font-size-xl: 20px;
+  --ax-line-height: 1.5;
+
+  /* ---------- neutral fallback palette (themes override) ---------- */
+
+  /* `light` or `dark`: drives native form controls and scrollbars. */
+  --ax-color-scheme: dark;
+
+  --ax-bg: #101014;
+  --ax-surface-1: #17171c;
+  --ax-surface-2: #1e1e24;
+  --ax-surface-3: #26262d;
+  --ax-overlay: rgba(0, 0, 0, 0.6);
+
+  --ax-text: #f2f2f5;
+  --ax-text-muted: #9a9aa2;
+  --ax-text-invert: #101014;
+
+  --ax-accent: #ff7a1a;
+  --ax-accent-hover: #ff9147;
+  --ax-accent-muted: rgba(255, 122, 26, 0.16);
+  --ax-success: #4fd67f;
+  --ax-warning: #e6b45f;
+  --ax-danger: #f26d6d;
+
+  --ax-border: #2c2c32;
+  --ax-border-strong: #3d3d45;
+  --ax-focus-ring: rgba(255, 122, 26, 0.5);
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.32);
+  --ax-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --ax-shadow-drag: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+  --ax-texture-url: none;
+}

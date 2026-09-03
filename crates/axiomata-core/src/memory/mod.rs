@@ -128,8 +128,10 @@ pub fn status(config: &Config) -> Result<MemoryStatus, AxiomataError> {
     })
 }
 
-/// Canonicalizes `workspace_root` and rejects obviously wrong targets.
-fn guarded_root(config: &Config) -> Result<PathBuf, AxiomataError> {
+/// Canonicalizes `workspace_root` and rejects obviously wrong targets (the
+/// filesystem root, the home directory). Shared with `crate::workspace`, which
+/// scopes the dashboard's file reads/writes to the same root.
+pub fn guarded_root(config: &Config) -> Result<PathBuf, AxiomataError> {
     let root = config
         .workspace_root
         .canonicalize()

@@ -69,6 +69,11 @@ impl Default for AgentDefaults {
 /// Axiomata-OS's own configuration (`~/.axiomata/config.toml`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
+    /// Display name of the person this OS belongs to, shown in the dashboard
+    /// top bar ("<owner> | <workspace>"). Purely cosmetic; empty hides it.
+    #[serde(default)]
+    pub owner: String,
+
     /// Root folder of the user's Second-Brain workspace. Freely
     /// choosable and changeable; defaults to `~/Axiomata-Workspace`.
     #[serde(default = "default_workspace_root")]
@@ -82,6 +87,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            owner: String::new(),
             workspace_root: default_workspace_root(),
             agents: AgentDefaults::default(),
         }
@@ -156,6 +162,7 @@ mod tests {
         assert_eq!(loaded, Config::default());
 
         let custom = Config {
+            owner: "Ada".to_string(),
             workspace_root: temp_home.join("MyBrain"),
             agents: AgentDefaults {
                 ollama_model: "llama3.2:latest".to_string(),

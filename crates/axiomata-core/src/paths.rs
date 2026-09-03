@@ -63,6 +63,33 @@ pub fn memory_last_sync_path() -> PathBuf {
     axiomata_home().join("memory-last-sync.json")
 }
 
+/// Path to the dashboard layout file (`~/.axiomata/dashboard.json`): module
+/// instances, their positions/sizes/config and UI settings such as the theme.
+/// Hand-editable; see `crate::dashboard`.
+pub fn dashboard_state_path() -> PathBuf {
+    axiomata_home().join("dashboard.json")
+}
+
+/// Path to the module manifest the dashboard writes for the agent
+/// (`~/.axiomata/module-context.md`): the mounted modules and their callable
+/// actions, appended to the assistant's system prompt when present.
+pub fn module_context_path() -> PathBuf {
+    axiomata_home().join("module-context.md")
+}
+
+/// Path to the user's optional custom theme (`~/.axiomata/theme.css`): only
+/// `--ax-*` token overrides, validated by the dashboard before injection.
+pub fn custom_theme_path() -> PathBuf {
+    axiomata_home().join("theme.css")
+}
+
+/// Root of the agent → module action queue (`~/.axiomata/module-actions/`),
+/// with `inbox/` (requests written by the CLI) and `outbox/` (responses
+/// written by the running dashboard). See `crate::bridge`.
+pub fn module_actions_dir() -> PathBuf {
+    axiomata_home().join("module-actions")
+}
+
 /// Directory for global, app-managed skills (`~/.axiomata/skills/`).
 pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")

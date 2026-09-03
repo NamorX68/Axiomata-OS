@@ -1,0 +1,38 @@
+/*
+ * steampunk — oxidised bronze and dark leather surfaces, a polished-brass
+ * accent, serif display type and a riveted-plate texture.
+ */
+
+:root[data-theme="steampunk"] {
+  --ax-color-scheme: dark;
+
+  --ax-bg: #1b1410;
+  --ax-surface-1: #261c16;
+  --ax-surface-2: #30241c;
+  --ax-surface-3: #3b2d23;
+  --ax-overlay: rgba(14, 9, 6, 0.7);
+
+  --ax-text: #f1e4cf;
+  --ax-text-muted: #a8927a;
+  --ax-text-invert: #1b1410;
+
+  --ax-accent: #d9932e;
+  --ax-accent-hover: #f0ac47;
+  --ax-accent-muted: rgba(217, 147, 46, 0.18);
+  --ax-success: #8fb85a;
+  --ax-warning: #e0a83c;
+  --ax-danger: #d4573f;
+
+  --ax-border: #4a382b;
+  --ax-border-strong: #6b5139;
+  --ax-focus-ring: rgba(217, 147, 46, 0.55);
+
+  --ax-font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 22px rgba(0, 0, 0, 0.42);
+  --ax-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --ax-shadow-drag: 0 20px 56px rgba(0, 0, 0, 0.64);
+
+  /* riveted plate: a faint grid of brass-coloured rivet heads */
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'%3E%3Cpath fill='none' stroke='%23d9932e' stroke-opacity='0.06' d='M0 .5h72M.5 0v72'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%23d9932e' fill-opacity='0.12'/%3E%3Ccircle cx='64' cy='64' r='2' fill='%23d9932e' fill-opacity='0.12'/%3E%3C/svg%3E");
+}

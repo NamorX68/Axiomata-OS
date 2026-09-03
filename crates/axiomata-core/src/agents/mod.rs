@@ -95,6 +95,30 @@ impl AgentBackend {
     }
 }
 
+pub use claude_code::{ChatMode, ChatReply};
+
+/// One dashboard-assistant turn on the Claude Code backend, built from the
+/// config: cwd = workspace root (so its `CLAUDE.md` loads), the skill timeout,
+/// the filtered provider env, and the module manifest
+/// (`paths::module_context_path()`) as an appended system prompt if present.
+pub async fn chat(
+    config: &Config,
+    message: String,
+    session_id: Option<String>,
+    mode: ChatMode,
+) -> Result<ChatReply, AxiomataError> {
+    claude_code::chat(claude_code::ChatRequest {
+        message,
+        session_id,
+        mode,
+        cwd: config.workspace_root.clone(),
+        timeout: Duration::from_secs(config.agents.skill_timeout_secs),
+        env: crate::skills::runner::claude_env(config, &AgentBackend::ClaudeCode),
+        system_prompt_file: module_context_if_present(),
+    })
+    .await
+}
+
 /// A single headless agent invocation.
 #[derive(Debug, Clone)]
 pub struct AgentRequest {
@@ -112,6 +136,15 @@ pub struct AgentRequest {
     /// provider routing (`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, …).
     /// Ignored by Ollama.
     pub env: Vec<(String, String)>,
+    /// Appended to Claude Code's system prompt (`--append-system-prompt-file`);
+    /// the dashboard's module manifest when it exists. Ignored by Ollama.
+    pub system_prompt_file: Option<PathBuf>,
+}
+
+/// `paths::module_context_path()` if the dashboard has written it.
+pub fn module_context_if_present() -> Option<PathBuf> {
+    let path = crate::paths::module_context_path();
+    path.is_file().then_some(path)
 }
 
 /// The outcome of an [`AgentRequest`] that actually ran.

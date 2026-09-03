@@ -1,0 +1,36 @@
+/*
+ * forest — deep pine and moss surfaces, an autumn-amber accent, a faint
+ * leaf-vein texture. Green is the ground colour, orange the warmth.
+ */
+
+:root[data-theme="forest"] {
+  --ax-color-scheme: dark;
+
+  --ax-bg: #0d1a12;
+  --ax-surface-1: #13241a;
+  --ax-surface-2: #1a2f22;
+  --ax-surface-3: #223b2b;
+  --ax-overlay: rgba(4, 12, 7, 0.68);
+
+  --ax-text: #edf3e6;
+  --ax-text-muted: #8fa892;
+  --ax-text-invert: #0d1a12;
+
+  --ax-accent: #e8842c;
+  --ax-accent-hover: #f79c48;
+  --ax-accent-muted: rgba(232, 132, 44, 0.16);
+  --ax-success: #7fd07a;
+  --ax-warning: #e3c05a;
+  --ax-danger: #ee6f5c;
+
+  --ax-border: #2c4a36;
+  --ax-border-strong: #3f6a4c;
+  --ax-focus-ring: rgba(232, 132, 44, 0.5);
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 22px rgba(0, 0, 0, 0.38);
+  --ax-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.56);
+  --ax-shadow-drag: 0 20px 56px rgba(0, 0, 0, 0.6);
+
+  /* faint leaf veins: sparse diagonal strokes in moss green */
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cpath fill='none' stroke='%237fd07a' stroke-opacity='0.05' stroke-width='1' d='M0 48C24 40 40 24 48 0M48 96c8-24 24-40 48-48M0 96L96 0'/%3E%3C/svg%3E");
+}

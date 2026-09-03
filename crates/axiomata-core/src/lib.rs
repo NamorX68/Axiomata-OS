@@ -7,13 +7,16 @@
 //! `axiomata-macos` crate for the platform integration boundary.
 
 pub mod agents;
+pub mod bridge;
 pub mod config;
+pub mod dashboard;
 pub mod db;
 pub mod error;
 pub mod memory;
 pub mod paths;
 pub mod routines;
 pub mod skills;
+pub mod workspace;
 
 pub use error::AxiomataError;
 
@@ -135,7 +138,6 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AgentDefaults;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
     use std::env;
 
@@ -157,7 +159,7 @@ mod tests {
         fs::create_dir_all(&temp_home).unwrap();
         let seed_config = Config {
             workspace_root: temp_workspace.clone(),
-            agents: AgentDefaults::default(),
+            ..Config::default()
         };
         seed_config.save().expect("seeding config should succeed");
 

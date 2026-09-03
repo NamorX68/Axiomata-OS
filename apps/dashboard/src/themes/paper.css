@@ -1,0 +1,38 @@
+/*
+ * paper — warm off-white "printed page" look: cream surfaces, ink-black text,
+ * a clay/terracotta accent and a faint paper grain. For daylight use.
+ */
+
+:root[data-theme="paper"] {
+  --ax-color-scheme: light;
+
+  --ax-bg: #f3efe6;
+  --ax-surface-1: #faf7f0;
+  --ax-surface-2: #fffdf8;
+  --ax-surface-3: #efe9dc;
+  --ax-overlay: rgba(46, 40, 32, 0.35);
+
+  --ax-text: #1f1b17;
+  --ax-text-muted: #75695c;
+  --ax-text-invert: #fffdf8;
+
+  --ax-accent: #d0642c;
+  --ax-accent-hover: #b8511c;
+  --ax-accent-muted: rgba(208, 100, 44, 0.14);
+  --ax-success: #3f7d4e;
+  --ax-warning: #9a6a12;
+  --ax-danger: #b23a3a;
+
+  --ax-border: #e0d8c8;
+  --ax-border-strong: #c8bda8;
+  --ax-focus-ring: rgba(208, 100, 44, 0.45);
+
+  --ax-font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+
+  --ax-shadow-tile: 0 1px 1px rgba(46, 40, 32, 0.06), 0 6px 18px rgba(46, 40, 32, 0.1);
+  --ax-shadow-pop: 0 16px 44px rgba(46, 40, 32, 0.18);
+  --ax-shadow-drag: 0 20px 52px rgba(46, 40, 32, 0.22);
+
+  /* fine paper grain: a low-contrast turbulence noise tile */
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.15 0 0 0 0 0.1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}

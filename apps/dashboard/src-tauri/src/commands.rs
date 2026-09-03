@@ -7,13 +7,133 @@
 //! a `MutexGuard` is never held across an `.await`.
 
 use axiomata_core::AxiomataCore;
+use axiomata_core::agents::{self, ChatMode, ChatReply};
+use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
+use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
+use axiomata_core::workspace::{self, WorkspaceFile};
+use serde::Serialize;
 use tauri::State;
 
 /// The Tauri-managed core engine.
 pub type CoreState = AxiomataCore;
+
+/// Static facts the shell shows in its top bar. Read once at startup.
+#[derive(Debug, Clone, Serialize)]
+pub struct AppInfo {
+    /// `config.owner`; empty when the user hasn't set one.
+    pub owner: String,
+    /// Last path component of `config.workspace_root` (e.g. "Axiomata-Workspace").
+    pub workspace_name: String,
+    /// Absolute workspace root, for tooltips / settings.
+    pub workspace_root: String,
+    /// The dashboard crate version.
+    pub version: String,
+}
+
+/// Returns the owner line and workspace facts for the top bar.
+#[tauri::command]
+pub fn get_app_info(state: State<'_, CoreState>) -> AppInfo {
+    let root = &state.config.workspace_root;
+    AppInfo {
+        owner: state.config.owner.clone(),
+        workspace_name: root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        workspace_root: root.to_string_lossy().into_owned(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+/// Reads `~/.axiomata/dashboard.json` (raw text) or the defaults; a corrupt
+/// file is moved to `.bak` and reported in `recovered_backup`.
+#[tauri::command]
+pub fn get_dashboard_state() -> Result<LoadedState, String> {
+    dashboard::load_state().map_err(|err| err.to_string())
+}
+
+/// Validates and atomically writes the dashboard state handed in by the
+/// frontend. The core only checks "object with numeric `version`".
+#[tauri::command]
+pub fn save_dashboard_state(json: String) -> Result<(), String> {
+    dashboard::save_state(&json).map_err(|err| err.to_string())
+}
+
+/// Renders the mounted-module manifest into `~/.axiomata/module-context.md`
+/// for the agent. Returns `true` if the file changed.
+#[tauri::command]
+pub fn write_module_manifest(entries: Vec<ManifestEntry>) -> Result<bool, String> {
+    bridge::write_manifest(&entries).map_err(|err| err.to_string())
+}
+
+/// Takes every pending agent → module action request out of the inbox queue
+/// (each is returned exactly once). The frontend dispatches them and answers
+/// with `complete_module_action`.
+#[tauri::command]
+pub fn poll_module_actions() -> Result<Vec<ActionRequest>, String> {
+    bridge::drain_inbox().map_err(|err| err.to_string())
+}
+
+/// Writes the frontend's answer to a polled request into the outbox queue.
+#[tauri::command]
+pub fn complete_module_action(response: ActionResponse) -> Result<(), String> {
+    bridge::complete(&response).map_err(|err| err.to_string())
+}
+
+/// One assistant turn. `mode` is `"chat"` (never asks, read-mostly) or
+/// `"instruct"` (may edit workspace files). Pass the `session_id` from the
+/// previous reply to continue that conversation. Runs the agent with no lock
+/// held; the reply is not recorded in the run log.
+#[tauri::command]
+pub async fn assistant_send(
+    state: State<'_, CoreState>,
+    message: String,
+    session_id: Option<String>,
+    mode: String,
+) -> Result<ChatReply, String> {
+    let mode = match mode.as_str() {
+        "chat" => ChatMode::Chat,
+        "instruct" => ChatMode::Instruct,
+        other => return Err(format!("unknown assistant mode {other:?}")),
+    };
+    let config = state.config.clone();
+    agents::chat(&config, message, session_id, mode)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Reads the user's custom theme CSS (`~/.axiomata/theme.css`, or the
+/// absolute `.css` path from the dashboard settings). `None` if absent. The
+/// frontend validates it before injecting.
+#[tauri::command]
+pub fn load_custom_css(path: Option<String>) -> Result<Option<String>, String> {
+    dashboard::load_custom_css(path.as_deref().map(std::path::Path::new))
+        .map_err(|err| err.to_string())
+}
+
+/// Reads a UTF-8 file by workspace-relative path (≤ 1 MiB, no `..`, no
+/// symlinks, must resolve inside `config.workspace_root`).
+#[tauri::command]
+pub fn read_workspace_file(
+    state: State<'_, CoreState>,
+    rel: String,
+) -> Result<WorkspaceFile, String> {
+    workspace::read_file(&state.config, &rel).map_err(|err| err.to_string())
+}
+
+/// Atomically writes a workspace file under the same guard as
+/// `read_workspace_file`. Creates the file, never directories.
+#[tauri::command]
+pub fn write_workspace_file(
+    state: State<'_, CoreState>,
+    rel: String,
+    content: String,
+) -> Result<(), String> {
+    workspace::write_file(&state.config, &rel, &content).map_err(|err| err.to_string())
+}
 
 /// Lists every discovered skill (`~/.axiomata/skills/`).
 #[tauri::command]

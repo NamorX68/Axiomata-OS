@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+serde_json.workspace = true
+chrono.workspace = true
 axiomata-core = { path = "../axiomata-core" }
 anyhow.workspace = true
 clap.workspace = true
