@@ -4,18 +4,18 @@
     mode is a textarea, Save writes via `write_workspace_file`.
   - `.html` / `.htm` (courses): shown read-only in a sandboxed iframe whose src
     is an asset-protocol URL from `open_workspace_html` (which allows the
-    page's folder in the asset scope, so same-folder links keep working).
+    page's folder in the asset scope, so same-folder links keep working) —
+    built with `core/backend.assetFileUrl`, not the SDK's `convertFileSrc`
+    (see its doc comment: that one breaks relative links inside the page).
     `sandbox="allow-scripts"` only: inline quiz scripts run, the page has an
-    opaque origin and no access to the app. Known limits: navigation inside
+    opaque origin and no access to the app. Known limits: navigating inside
     the frame does not update the path in the bar; external links are blocked
     by the app's frame-src and show a blank frame. In the browser dev mock
     the page is loaded via `srcdoc` instead.
   Config: `path` (workspace-relative), `mode` ("read" | "edit"), `stageFrom`.
 -->
 <script lang="ts">
-  import { convertFileSrc } from "@tauri-apps/api/core";
-
-  import { insideTauri, type WorkspaceFile } from "../core/backend";
+  import { assetFileUrl, insideTauri, type WorkspaceFile } from "../core/backend";
   import { relativeTime } from "../core/format";
   import { renderMarkdown } from "../core/markdown";
   import type { ModuleContext } from "../core/types";
@@ -66,7 +66,7 @@
     try {
       if (insideTauri()) {
         const abs = await ctx.invoke<string>("open_workspace_html", { rel });
-        frameSrc = convertFileSrc(abs);
+        frameSrc = assetFileUrl(abs);
         frameDoc = null;
       } else {
         // Browser dev mock: no asset protocol — inline the fixture page.

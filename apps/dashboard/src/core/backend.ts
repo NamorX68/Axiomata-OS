@@ -146,6 +146,32 @@ export function insideTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/**
+ * Builds an `asset://` URL for an absolute file path, preserving `/` as
+ * literal path separators — unlike `@tauri-apps/api/core`'s
+ * `convertFileSrc`, which runs `encodeURIComponent` over the *whole* path
+ * and so turns every `/` into `%2F`, collapsing it into one opaque URL
+ * segment with no directory structure left for the browser to see.
+ *
+ * That breaks *relative* links inside anything framed through it: resolving
+ * `href="0003-funktionen.html"` against a base URL with no literal slash to
+ * drop the last segment from lands back at `asset://localhost/0003-...html`
+ * (i.e. the lesson's own folder is lost), which Tauri's asset handler then
+ * can't resolve. Tauri's handler percent-decodes the whole request path as
+ * one string regardless of which form arrives (`tauri::protocol::asset`),
+ * so a URL built with real `/` separators between individually-encoded
+ * segments decodes to the exact same absolute path and is served
+ * identically — it just also lets a multi-page course navigate between its
+ * own lessons.
+ *
+ * macOS only for now (Tauri serves `http://asset.localhost/<path>` instead
+ * on Windows/Android) — this app has no other target yet, see CLAUDE.md.
+ */
+export function assetFileUrl(absPath: string): string {
+  const encoded = absPath.split("/").map(encodeURIComponent).join("/");
+  return `asset://localhost${encoded}`;
+}
+
 let devMock: InvokeFn | null = null;
 
 /** `invoke` with the DEV browser fallback. */
