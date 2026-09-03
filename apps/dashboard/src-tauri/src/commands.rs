@@ -14,7 +14,7 @@ use axiomata_core::graph::{self, WorkspaceGraph};
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
-use axiomata_core::workspace::{self, WorkspaceFile};
+use axiomata_core::workspace::{self, SearchHit, WorkspaceFile};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -123,6 +123,17 @@ pub async fn assistant_send(
 pub fn load_custom_css(path: Option<String>) -> Result<Option<String>, String> {
     dashboard::load_custom_css(path.as_deref().map(std::path::Path::new))
         .map_err(|err| err.to_string())
+}
+
+/// Case-insensitive full-text search over the workspace's text files; every
+/// word must occur on one line. At most `limit` files, most hits first.
+#[tauri::command]
+pub fn search_workspace(
+    state: State<'_, CoreState>,
+    query: String,
+    limit: usize,
+) -> Result<Vec<SearchHit>, String> {
+    workspace::search(&state.config, &query, limit.clamp(1, 200)).map_err(|err| err.to_string())
 }
 
 /// Prepares a workspace `.html` / `.htm` file for display in a sandboxed

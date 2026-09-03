@@ -303,6 +303,30 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "write_workspace_file":
       files.set(String(args.rel), String(args.content));
       return undefined as T;
+    case "search_workspace": {
+      const words = String(args.query).toLowerCase().split(/\s+/).filter(Boolean);
+      const out: { path: string; line: number; snippet: string; matches: number }[] = [];
+      if (words.length === 0) return out as T;
+      for (const [path, content] of files) {
+        let line = 0;
+        let snippet = "";
+        let matches = 0;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const text = lines[i].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&");
+          if (words.every((w) => text.toLowerCase().includes(w))) {
+            matches++;
+            if (line === 0) {
+              line = i + 1;
+              snippet = text.trim().slice(0, 160);
+            }
+          }
+        }
+        if (matches > 0) out.push({ path, line, snippet, matches });
+      }
+      out.sort((a, b) => b.matches - a.matches || a.path.localeCompare(b.path));
+      return out.slice(0, Number(args.limit ?? 40)) as T;
+    }
     case "open_workspace_html": {
       const rel = String(args.rel);
       if (!/\.html?$/i.test(rel)) throw new Error(`${rel}: only .html / .htm files are framed`);

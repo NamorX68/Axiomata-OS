@@ -220,7 +220,11 @@ size goes through a `--ax-*` token; no literals in components.
   `core/markdown.ts` `excerpt`/`excerptHtml`, links split into out / in, area notes
   grouped by subfolder; a `?` help block explains Rings / Circle, Areas / Folders,
   Rotation). Also `/brain [path | ? query]` and the module actions `open`, `search`,
-  `refresh`. View preferences live in `dashboard.json` → `settings.secondBrain`.
+  `refresh`. **Search**: the box matches titles / paths / areas locally and, debounced,
+  note **contents** through `search_workspace` (`workspace::search`: case-insensitive,
+  all words on one line, tags stripped, most hits first); a results list with snippets
+  sits under the box (↑↓ / Enter jump to the node), non-matches are dimmed. View
+  preferences live in `dashboard.json` → `settings.secondBrain`.
 - **Import**: `axiomata_core::importer` + `axiomata-cli import obsidian` — notes
   normalised to "# Title + content" (frontmatter / tag lines dropped, tags only as hints),
   the agent proposes the areas and assigns every note in one JSON turn, files are written

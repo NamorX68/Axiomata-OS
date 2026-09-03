@@ -114,6 +114,115 @@ fn is_hard_linked(_meta: &fs::Metadata) -> bool {
     false
 }
 
+/// One full-text hit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchHit {
+    /// Workspace-relative path.
+    pub path: String,
+    /// 1-based line number of the first matching line.
+    pub line: usize,
+    /// The matching line, trimmed and capped.
+    pub snippet: String,
+    /// Total matching lines in the file.
+    pub matches: usize,
+}
+
+/// Longest snippet returned per hit.
+pub const SNIPPET_CHARS: usize = 160;
+/// Files larger than this are skipped by the search.
+pub const SEARCH_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Case-insensitive full-text search over the tracked `.md` / `.html` / `.txt`
+/// files (the memory walker's file set, so hidden and ignored paths are
+/// skipped). Every whitespace-separated word must occur on the same line.
+/// Returns at most `limit` files, best (most matching lines) first.
+pub fn search(config: &Config, query: &str, limit: usize) -> Result<Vec<SearchHit>, AxiomataError> {
+    let words: Vec<String> = query.split_whitespace().map(|w| w.to_lowercase()).collect();
+    if words.is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = guarded_root(config)?;
+    let scan = crate::memory::walker::scan(config)?;
+    let mut entries: Vec<String> = scan.tree.loose.iter().map(|e| e.rel_path.clone()).collect();
+    for files in scan.tree.areas.values() {
+        entries.extend(files.iter().map(|e| e.rel_path.clone()));
+    }
+    let mut hits = Vec::new();
+    for rel in entries {
+        let lower = rel.to_lowercase();
+        if !(lower.ends_with(".md")
+            || lower.ends_with(".html")
+            || lower.ends_with(".htm")
+            || lower.ends_with(".txt"))
+        {
+            continue;
+        }
+        let full = root.join(&rel);
+        let Ok(meta) = fs::metadata(&full) else {
+            continue;
+        };
+        if meta.len() > SEARCH_MAX_FILE_BYTES {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&full) else {
+            continue;
+        };
+        let is_html = lower.ends_with(".html") || lower.ends_with(".htm");
+        let mut first: Option<(usize, String)> = None;
+        let mut count = 0;
+        for (i, raw) in text.lines().enumerate() {
+            let line = if is_html {
+                strip_tags(raw)
+            } else {
+                raw.to_string()
+            };
+            let hay = line.to_lowercase();
+            if words.iter().all(|w| hay.contains(w.as_str())) {
+                count += 1;
+                if first.is_none() {
+                    first = Some((i + 1, snippet(&line)));
+                }
+            }
+        }
+        if let Some((line, snippet)) = first {
+            hits.push(SearchHit {
+                path: rel,
+                line,
+                snippet,
+                matches: count,
+            });
+        }
+    }
+    hits.sort_by(|a, b| b.matches.cmp(&a.matches).then_with(|| a.path.cmp(&b.path)));
+    hits.truncate(limit);
+    Ok(hits)
+}
+
+fn strip_tags(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut in_tag = false;
+    for c in line.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    crate::memory::walker::decode_entities(&out)
+}
+
+fn snippet(line: &str) -> String {
+    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= SNIPPET_CHARS {
+        collapsed
+    } else {
+        let mut s: String = collapsed.chars().take(SNIPPET_CHARS).collect();
+        s.push('…');
+        s
+    }
+}
+
 /// Like [`resolve`], but the file must already exist as a regular file; the
 /// returned path is canonical (no symlinked components, no `..`) — what the
 /// dashboard hands to the webview's asset protocol.
@@ -329,6 +438,35 @@ mod tests {
             resolve_existing(&config, "notes").unwrap_err(),
             AxiomataError::InvalidWorkspacePath { .. }
         ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn full_text_search_matches_all_words_case_insensitively_and_ranks_by_count() {
+        let (root, config) = workspace();
+        fs::write(
+            root.join("notes/rust.md"),
+            "# Rust lernen\n\nOwnership und Borrowing.\nOwnership again.\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("Learning")).unwrap();
+        fs::write(
+            root.join("Learning/l1.html"),
+            "<h1>Lektion 1</h1><p>Ownership &amp; <b>erkl\u{e4}rt</b></p>",
+        )
+        .unwrap();
+        fs::write(root.join("notes/skip.png"), "ownership").unwrap();
+        let hits = search(&config, "OWNERSHIP", 10).unwrap();
+        assert_eq!(
+            hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(),
+            vec!["notes/rust.md", "Learning/l1.html"]
+        );
+        assert_eq!(hits[0].matches, 2);
+        assert_eq!(hits[0].line, 3);
+        assert_eq!(hits[1].snippet, "Lektion 1Ownership & erkl\u{e4}rt");
+        assert!(search(&config, "ownership again", 10).unwrap().len() == 1);
+        assert!(search(&config, "   ", 10).unwrap().is_empty());
+        assert_eq!(search(&config, "ownership", 1).unwrap().len(), 1);
         let _ = fs::remove_dir_all(root);
     }
 

@@ -9,7 +9,7 @@
   import { onMount, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
-  import { invokeBackend, type RunSummary, type WorkspaceFile, type WorkspaceGraph } from "../core/backend";
+  import { invokeBackend, type RunSummary, type SearchHit, type WorkspaceFile, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime, untilTime } from "../core/format";
   import { excerpt, excerptHtml } from "../core/markdown";
   import { getSetting, setSetting } from "../core/persist";
@@ -45,7 +45,7 @@
   const prefs = getSetting<Prefs>("secondBrain") ?? {};
 
   let canvas = $state<HTMLCanvasElement | null>(null);
-  let renderer: GraphRenderer | null = null;
+  let renderer = $state.raw<GraphRenderer | null>(null);
   let graph = $state<WorkspaceGraph | null>(null);
   let model = $state<GraphModel | null>(null);
   let selected = $state<GraphNode | null>(null);
@@ -61,6 +61,90 @@
   let preview = $state<{ path: string; text: string } | null>(null);
   let previewState = $state<"idle" | "loading" | "none" | "error">("idle");
   const previewCache = new Map<string, string>();
+
+  /** Full-text hits from the workspace for the current query (debounced). */
+  let contentHits = $state<SearchHit[]>([]);
+  let searchBusy = $state(false);
+  let resultsOpen = $state(false);
+  let activeResult = $state(0);
+  const RESULT_LIMIT = 25;
+
+  interface Result {
+    node: GraphNode;
+    snippet: string | null;
+    line: number | null;
+  }
+  /** Title/path matches first, then content-only matches, each once. */
+  const results = $derived.by((): Result[] => {
+    if (!model || !query.trim()) return [];
+    const out: Result[] = [];
+    const seen = new Set<string>();
+    const byPath = new Map(contentHits.map((h) => [h.path, h]));
+    const titleHits = model.nodes.filter((n) => hits?.has(n.id)).sort((a, b) => (a.kind === "file" ? 1 : 0) - (b.kind === "file" ? 1 : 0) || a.label.localeCompare(b.label));
+    for (const n of titleHits) {
+      const h = n.path ? byPath.get(n.path) : undefined;
+      out.push({ node: n, snippet: h?.snippet ?? null, line: h?.line ?? null });
+      seen.add(n.id);
+    }
+    for (const h of contentHits) {
+      const n = model.byId.get(`file:${h.path}`);
+      if (n && !seen.has(n.id)) {
+        out.push({ node: n, snippet: h.snippet, line: h.line });
+        seen.add(n.id);
+      }
+    }
+    return out.slice(0, RESULT_LIMIT);
+  });
+  /** Everything that should stay lit: title hits plus content hits. */
+  const lit = $derived.by(() => {
+    if (!query.trim()) return null;
+    const set = new Set(hits ?? []);
+    for (const h of contentHits) set.add(`file:${h.path}`);
+    return set;
+  });
+
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const q = query.trim();
+    if (searchTimer) clearTimeout(searchTimer);
+    if (!q) {
+      contentHits = [];
+      return;
+    }
+    searchTimer = setTimeout(async () => {
+      searchBusy = true;
+      try {
+        const found = await invokeBackend<SearchHit[]>("search_workspace", { query: q, limit: 40 });
+        if (query.trim() === q) contentHits = found;
+      } catch {
+        if (query.trim() === q) contentHits = [];
+      } finally {
+        searchBusy = false;
+      }
+    }, 250);
+  });
+
+  function pickResult(r: Result) {
+    select(r.node, true);
+    resultsOpen = false;
+  }
+  function onSearchKey(e: KeyboardEvent) {
+    if (results.length === 0) return;
+    if (e.key === "ArrowDown") {
+      activeResult = (activeResult + 1) % results.length;
+      e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      activeResult = (activeResult - 1 + results.length) % results.length;
+      e.preventDefault();
+    } else if (e.key === "Enter") {
+      pickResult(results[Math.min(activeResult, results.length - 1)]);
+      e.preventDefault();
+    } else if (e.key === "Escape" && query) {
+      query = "";
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
 
   const rotationLabel = $derived(spin === 0 ? "off" : spin < 0.03 ? "slow" : spin < 0.07 ? "medium" : "fast");
 
@@ -293,7 +377,8 @@
     });
   }
   $effect(() => {
-    if (renderer) renderer.highlight = hits;
+    const h = lit;
+    if (renderer) renderer.highlight = h;
   });
   $effect(() => {
     void layout;
@@ -372,13 +457,46 @@
     <div class="controls-head">
       <input
         type="search"
-        placeholder={model ? `Search ${model.nodes.length} nodes…` : "Search…"}
+        placeholder={model ? `Search ${model.totalFiles} notes…` : "Search…"}
         aria-label="Search nodes"
-        title="Titel, Pfad oder Bereich; Treffer bleiben hell, der Rest wird gedimmt"
+        title="Titel, Pfad, Bereich und Inhalt; Treffer bleiben hell, der Rest wird gedimmt. ↑↓ wählen, Enter springt hin"
         bind:value={query}
+        onfocus={() => (resultsOpen = true)}
+        oninput={() => (resultsOpen = true)}
+        onkeydown={onSearchKey}
       />
       <button type="button" class="help-btn" class:on={helpOpen} title="Was bedeuten die Optionen?" aria-label="Help" onclick={() => (helpOpen = !helpOpen)}>?</button>
     </div>
+    {#if query.trim()}
+      <div class="results" role="listbox" aria-label="Search results">
+        <p class="results-head">
+          {results.length}{results.length === RESULT_LIMIT ? "+" : ""} {results.length === 1 ? "match" : "matches"}
+          {#if searchBusy}<span class="dim"> · searching…</span>{/if}
+        </p>
+        {#if results.length === 0 && !searchBusy}
+          <p class="dim small">Nothing found.</p>
+        {/if}
+        {#if resultsOpen}
+          <ul>
+            {#each results as r, i (r.node.id)}
+              <li>
+                <button type="button" class="result" class:active={i === activeResult} role="option" aria-selected={i === activeResult} onclick={() => pickResult(r)} onmouseenter={() => (activeResult = i)}>
+                  <span class="dot" style:background={r.node.color}></span>
+                  <span class="result-text">
+                    <span class="result-title">{r.node.label}</span>
+                    {#if r.snippet}
+                      <span class="result-snippet">{r.line ? `L${r.line} · ` : ""}{r.snippet}</span>
+                    {:else if r.node.path}
+                      <span class="result-snippet mono">{r.node.path}</span>
+                    {/if}
+                  </span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
     <div class="group">
       <span class="label">Layout</span>
       <div class="seg">
@@ -624,6 +742,66 @@
   .controls-head input {
     flex: 1 1 auto;
     min-width: 0;
+  }
+  .results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+    max-height: 40vh;
+    overflow: auto;
+    padding-bottom: var(--ax-space-2);
+    border-bottom: 1px solid var(--ax-border);
+  }
+  .results-head {
+    margin: 0;
+    font-size: var(--ax-font-size-xs);
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
+    color: var(--ax-text-muted);
+  }
+  .results ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .result {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    text-align: left;
+    background: transparent;
+    border-color: transparent;
+    border-radius: var(--ax-radius-sm);
+  }
+  .result.active,
+  .result:hover {
+    background: var(--ax-surface-3);
+    border-color: var(--ax-border);
+  }
+  .result .dot {
+    margin-top: 6px;
+  }
+  .result-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .result-title {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .result-snippet {
+    font-size: var(--ax-font-size-xs);
+    color: var(--ax-text-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .help-btn {
     width: 30px;
