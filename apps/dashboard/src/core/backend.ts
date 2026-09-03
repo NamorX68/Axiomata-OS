@@ -135,7 +135,7 @@ export interface LoadedDashboardState {
 
 export type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
-function insideTauri(): boolean {
+export function insideTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 

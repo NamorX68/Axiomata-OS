@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { relativeTime, shortPath, untilTime } from "./format";
+import { absoluteTime, formatBytes, relativeTime, shortPath, untilTime } from "./format";
 
 const NOW = Date.parse("2026-09-03T12:00:00Z");
 const at = (ms: number) => new Date(NOW + ms).toISOString();
@@ -33,5 +33,19 @@ describe("shortPath", () => {
     expect(shortPath("/a/b/c/d")).toBe("…/c/d");
     expect(shortPath("/a/b/c/d", 3)).toBe("…/b/c/d");
     expect(shortPath("a/b")).toBe("a/b");
+  });
+});
+
+describe("formatBytes / absoluteTime", () => {
+  it("formats sizes", () => {
+    expect(formatBytes(340)).toBe("340 B");
+    expect(formatBytes(1300)).toBe("1.3 KB");
+    expect(formatBytes(3.4 * 1024 * 1024)).toBe("3.4 MB");
+    expect(formatBytes(-1)).toBe("—");
+  });
+  it("formats absolute times", () => {
+    expect(absoluteTime(null)).toBe("—");
+    expect(absoluteTime("garbage")).toBe("garbage");
+    expect(absoluteTime("2026-09-03T12:00:00Z")).toMatch(/2026/);
   });
 });

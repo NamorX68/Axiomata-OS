@@ -26,8 +26,9 @@ const TITLE_SCAN_BYTES: usize = 8 * 1024;
 pub struct FileEntry {
     /// Path relative to the workspace root, always forward-slashed.
     pub rel_path: String,
-    /// Title for a Markdown file — its frontmatter `title:` or first `# `
-    /// heading. `None` for non-Markdown files, or Markdown without either.
+    /// Title for a Markdown file (frontmatter `title:` or first `# ` heading)
+    /// or an HTML file (its `<title>`). `None` for other files or when neither
+    /// is present.
     pub title: Option<String>,
 }
 
@@ -68,7 +69,7 @@ pub fn scan(config: &Config) -> Result<WorkspaceScan, AxiomataError> {
     for tracked in tracked_files(root)? {
         file_count += 1;
         let entry = FileEntry {
-            title: markdown_title(&root.join(&tracked.rel_path)),
+            title: file_title(&root.join(&tracked.rel_path)),
             rel_path: tracked.rel_path.clone(),
         };
         match tracked.area {
@@ -192,12 +193,75 @@ struct TitleFrontmatter {
 }
 
 /// Extracts a title from a Markdown file: the frontmatter `title:` if present,
-/// otherwise the first `# ` heading. Only `.md` files are considered, and only
-/// the first [`TITLE_SCAN_BYTES`] of the file are read.
-fn markdown_title(path: &Path) -> Option<String> {
-    if path.extension().and_then(|e| e.to_str())?.to_lowercase() != "md" {
-        return None;
+/// otherwise the first `# ` heading; for `.html` / `.htm` the `<title>`. Other
+/// extensions yield `None`. Only the first [`TITLE_SCAN_BYTES`] are read.
+pub(crate) fn file_title(path: &Path) -> Option<String> {
+    let ext = path.extension().and_then(|e| e.to_str())?.to_lowercase();
+    match ext.as_str() {
+        "md" => markdown_title(path),
+        "html" | "htm" => html_title(&read_head(path, TITLE_SCAN_BYTES)?),
+        _ => None,
     }
+}
+
+/// `<title>…</title>` (case-insensitive, attributes allowed), entities decoded,
+/// whitespace collapsed. `None` when missing or empty.
+pub(crate) fn html_title(head: &str) -> Option<String> {
+    let lower = head.to_lowercase();
+    let open = lower.find("<title")?;
+    let after_tag = open + lower[open..].find('>')? + 1;
+    let close = after_tag + lower[after_tag..].find("</title")?;
+    let raw = &head[after_tag..close];
+    let title = normalize_title(&decode_entities(raw));
+    (!title.is_empty()).then_some(title)
+}
+
+/// Decodes the named entities that show up in titles plus numeric ones.
+pub(crate) fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let tail = &rest[amp..];
+        let Some(semi) = tail.find(';').filter(|&i| i <= 10) else {
+            out.push('&');
+            rest = &tail[1..];
+            continue;
+        };
+        let entity = &tail[1..semi];
+        let decoded = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" | "#39" => Some('\''),
+            "nbsp" => Some(' '),
+            _ => entity
+                .strip_prefix('#')
+                .and_then(|n| {
+                    n.strip_prefix(['x', 'X'])
+                        .map(|h| u32::from_str_radix(h, 16).ok())
+                        .unwrap_or_else(|| n.parse::<u32>().ok())
+                })
+                .and_then(char::from_u32),
+        };
+        match decoded {
+            Some(c) => {
+                out.push(c);
+                rest = &tail[semi + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Frontmatter `title:` or first `# ` heading of a Markdown file.
+fn markdown_title(path: &Path) -> Option<String> {
     let head = read_head(path, TITLE_SCAN_BYTES)?;
 
     let matter: Matter<YAML> = Matter::new();
@@ -297,6 +361,26 @@ mod tests {
             ["projects/a.md", "projects/nested/deep.md"]
         );
         assert_eq!(scan.file_count, 4);
+    }
+
+    #[test]
+    fn html_titles_are_extracted_and_decoded() {
+        assert_eq!(
+            html_title(
+                "<html><head><TITLE lang=\"de\">Lektion 2 &middot; Variablen &amp;amp; Datentypen</TITLE>"
+            ),
+            Some("Lektion 2 &middot; Variablen &amp; Datentypen".to_string())
+        );
+        assert_eq!(
+            html_title("<title>  A &#39;quoted&#39;\n  title&#x21; </title>"),
+            Some("A 'quoted' title!".into())
+        );
+        assert_eq!(html_title("<title></title>"), None);
+        assert_eq!(html_title("<p>no title</p>"), None);
+        assert_eq!(
+            decode_entities("a &lt;b&gt; &unknown; &"),
+            "a <b> &unknown; &"
+        );
     }
 
     #[test]

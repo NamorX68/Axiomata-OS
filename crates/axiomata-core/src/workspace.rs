@@ -114,6 +114,18 @@ fn is_hard_linked(_meta: &fs::Metadata) -> bool {
     false
 }
 
+/// Like [`resolve`], but the file must already exist as a regular file; the
+/// returned path is canonical (no symlinked components, no `..`) — what the
+/// dashboard hands to the webview's asset protocol.
+pub fn resolve_existing(config: &Config, rel: &str) -> Result<PathBuf, AxiomataError> {
+    let full = resolve(config, rel)?;
+    let meta = fs::metadata(&full).map_err(io(&full))?;
+    if !meta.is_file() {
+        return Err(invalid(Path::new(rel), "not a regular file"));
+    }
+    full.canonicalize().map_err(io(&full))
+}
+
 /// Reads a UTF-8 text file from the workspace.
 pub fn read_file(config: &Config, rel: &str) -> Result<WorkspaceFile, AxiomataError> {
     let full = resolve(config, rel)?;
@@ -302,6 +314,22 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn resolve_existing_requires_a_regular_file_and_returns_a_canonical_path() {
+        let (root, config) = workspace();
+        let path = resolve_existing(&config, "notes/inbox.md").unwrap();
+        assert!(path.is_absolute() && path.ends_with("notes/inbox.md"));
+        assert!(matches!(
+            resolve_existing(&config, "notes/missing.md").unwrap_err(),
+            AxiomataError::Io { .. }
+        ));
+        assert!(matches!(
+            resolve_existing(&config, "notes").unwrap_err(),
+            AxiomataError::InvalidWorkspacePath { .. }
+        ));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

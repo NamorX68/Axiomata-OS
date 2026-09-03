@@ -64,6 +64,7 @@
   --ax-font-display: var(--ax-font-sans);
   /* Letter-spacing for the uppercase panel headings ("SKILLS DECK"). */
   --ax-tracking-wide: 0.14em;
+  --ax-font-size-xs: 11px;
   --ax-font-size-sm: 12px;
   --ax-font-size-base: 14px;
   --ax-font-size-lg: 16px;

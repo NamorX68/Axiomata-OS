@@ -60,7 +60,7 @@ export const HELP = `**Commands**
 - \`/add <type>\` — place a module (${listTypes()})
 - \`/remove <type|id>\` — remove the first matching tile
 - \`/theme <id>\` — ${THEMES.map((t) => t.id).join(" · ")}
-- \`/open <path> [right|bottom]\` — stage a workspace file
+- \`/open <path> [right|bottom]\` — stage a workspace file (.md or .html)
 - \`/newfile <path>\` — create an empty workspace file and open it
 - \`/skill run <name>\` — run a skill
 - \`/brain [path | ? query]\` — open the Second Brain graph (on a file, or searching)

@@ -168,7 +168,7 @@ export function registerBuiltins(): void {
 
   registerModule({
     type: "md-file",
-    title: "Markdown",
+    title: "Document",
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><rect x='1.5' y='3.5' width='13' height='9' rx='1.5'/><path d='M4 10V6l2 2 2-2v4M11 6v4m-1.5-1.5L11 10l1.5-1.5'/></svg>",
     component: MdFile,
     settings: MdFileSettings,
@@ -178,7 +178,7 @@ export function registerBuiltins(): void {
     actions: [
       {
         name: "open",
-        description: "Open a workspace-relative Markdown file in this instance (read mode).",
+        description: "Open a workspace-relative Markdown or HTML file in this instance (read mode).",
         params: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
         run: async (params, ctx) => {
           const path = String((params as { path: string }).path);

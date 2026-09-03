@@ -12,7 +12,7 @@
 import { get } from "svelte/store";
 
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
-import { activeTheme, instances, loadInstances, onDirty } from "./stores";
+import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
 import { toast } from "./toast";
 import type { CanvasInstance } from "./types";
@@ -156,12 +156,24 @@ export async function initPersistence(): Promise<void> {
     toast("dashboard.json could not be parsed; starting with an empty canvas.", "warning");
   }
 
+  loading = true;
+  showGrid.set(getSetting<boolean>("showGrid") === true);
+  snapEdges.set(getSetting<boolean>("snapEdges") !== false);
+  loading = false;
   onDirty(scheduleSave);
   // Svelte stores call the subscriber once immediately, so this also
   // materialises dashboard.json on the very first boot — handy for hand-edits.
   activeTheme.subscribe(() => {
     if (!loading) scheduleSave();
   });
+  let first = true;
+  showGrid.subscribe((v) => {
+    if (!first) setSetting("showGrid", v);
+  });
+  snapEdges.subscribe((v) => {
+    if (!first) setSetting("snapEdges", v);
+  });
+  first = false;
   window.addEventListener("pagehide", () => void flush());
 }
 

@@ -12,16 +12,27 @@
     `def.settings` lazily on the first flip and keeps it mounted after.
 -->
 <script lang="ts">
+  import { get } from "svelte/store";
+
   import { getModule, makeContext } from "../core/registry";
-  import { bringToFront, removeInstance, updateInstance } from "../core/stores";
+  import { bringToFront, guides, instances, removeInstance, snapEdges, updateInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
   import { draggable, type DragDelta } from "./drag";
   import { resizable, type ResizeDelta, type ResizeDir } from "./resize";
+  import { magnetMove, magnetResize, resolveOverlap, type Rect } from "./snap";
 
   const FALLBACK_MIN = { w: 160, h: 100 };
-  /** Drag / resize commit to this grid (matches `--ax-grid`). */
-  const GRID = 16;
-  const snap = (v: number) => Math.round(v / GRID) * GRID;
+
+  /** The other tiles on the canvas (no background modules, not this one). */
+  function others(): Rect[] {
+    return get(instances)
+      .filter((i) => i.id !== inst.id && getModule(i.type)?.background !== true)
+      .map(({ x, y, w, h }) => ({ x, y, w, h }));
+  }
+  function bounds() {
+    const el = document.querySelector<HTMLElement>("#particle-slot")?.parentElement;
+    return el ? { w: el.clientWidth, h: el.clientHeight } : undefined;
+  }
   const HANDLES: ResizeDir[] = ["e", "s", "se"];
 
   let { inst }: { inst: CanvasInstance } = $props();
@@ -37,6 +48,22 @@
 
   let drag = $state<DragDelta | null>(null);
   let resize = $state<ResizeDelta | null>(null);
+
+  /** Snapped drag offset: the tile "sticks" to grid / neighbour edges live. */
+  function snappedDrag(d: DragDelta): DragDelta {
+    const r = magnetMove({ x: inst.x + d.dx, y: inst.y + d.dy, w: inst.w, h: inst.h }, others(), {
+      edges: get(snapEdges),
+    });
+    guides.set(r.guides);
+    return { dx: r.x - inst.x, dy: r.y - inst.y };
+  }
+  function snappedResize(d: ResizeDelta, dir: ResizeDir): ResizeDelta {
+    const r = magnetResize({ x: inst.x, y: inst.y, w: inst.w + d.dw, h: inst.h + d.dh }, others(), dir, min, {
+      edges: get(snapEdges),
+    });
+    guides.set(r.guides);
+    return { dw: r.w - inst.w, dh: r.h - inst.h };
+  }
   // Once true the settings component stays mounted across flips.
   let backMounted = $state(false);
 
@@ -44,18 +71,20 @@
   const liveH = $derived(Math.max(min.h, inst.h + (resize?.dh ?? 0)));
 
   function onDragEnd(d: DragDelta) {
+    const sd = snappedDrag(d);
     drag = null;
-    updateInstance(inst.id, {
-      x: Math.max(0, snap(inst.x + d.dx)),
-      y: Math.max(0, snap(inst.y + d.dy)),
-    });
+    guides.set([]);
+    const placed = resolveOverlap({ x: inst.x + sd.dx, y: inst.y + sd.dy, w: inst.w, h: inst.h }, others(), bounds());
+    updateInstance(inst.id, { x: placed.x, y: placed.y });
   }
 
+  let resizeDir: ResizeDir = "se";
   function onResizeEnd() {
-    const w = Math.max(min.w, snap(liveW));
-    const h = Math.max(min.h, snap(liveH));
+    const sr = snappedResize(resize ?? { dw: 0, dh: 0 }, resizeDir);
     resize = null;
-    updateInstance(inst.id, { w, h });
+    guides.set([]);
+    const placed = resolveOverlap({ x: inst.x, y: inst.y, w: inst.w + sr.dw, h: inst.h + sr.dh }, others(), bounds());
+    updateInstance(inst.id, { x: placed.x, y: placed.y, w: placed.w, h: placed.h });
   }
 
   function flip() {
@@ -83,7 +112,7 @@
   onpointerdowncapture={() => bringToFront(inst.id)}
   use:draggable={{
     onStart: () => (drag = { dx: 0, dy: 0 }),
-    onMove: (d) => (drag = d),
+    onMove: (d) => (drag = snappedDrag(d)),
     onEnd: onDragEnd,
   }}
 >
@@ -157,8 +186,11 @@
       class="resize resize-{dir}"
       use:resizable={{
         dir,
-        onStart: () => (resize = { dw: 0, dh: 0 }),
-        onMove: (d) => (resize = d),
+        onStart: () => {
+          resizeDir = dir;
+          resize = { dw: 0, dh: 0 };
+        },
+        onMove: (d) => (resize = snappedResize(d, dir)),
         onEnd: onResizeEnd,
       }}
     ></div>

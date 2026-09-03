@@ -9,7 +9,7 @@
   const KINDS: { kind: NodeKind; label: string }[] = [
     { kind: "hub", label: "CLAUDE.md (hub)" },
     { kind: "area", label: "Bereich (Ordner)" },
-    { kind: "file", label: "Notiz" },
+    { kind: "file", label: "Notiz / Seite" },
     { kind: "skill", label: "Skill" },
     { kind: "routine", label: "Routine" },
   ];
