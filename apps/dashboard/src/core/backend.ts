@@ -77,6 +77,46 @@ export interface WorkspaceFile {
   modified: string | null;
 }
 
+export interface GraphFile {
+  path: string;
+  area: string | null;
+  title: string;
+  bytes: number;
+  modified: string | null;
+  is_markdown: boolean;
+}
+
+export interface GraphArea {
+  name: string;
+  files: number;
+}
+
+export interface GraphLink {
+  from: string;
+  to: string;
+}
+
+export interface GraphSkill {
+  name: string;
+  description: string;
+  backend: string;
+  model: string | null;
+  effort: string | null;
+}
+
+export interface WorkspaceGraph {
+  workspace_root: string;
+  hub: string | null;
+  areas: GraphArea[];
+  files: GraphFile[];
+  links: GraphLink[];
+  skills: GraphSkill[];
+  routines: Routine[];
+  total_files: number;
+  truncated: boolean;
+  generated_at: string;
+}
+
 export type ChatMode = "chat" | "instruct";
 
 export interface ChatReply {

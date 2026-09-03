@@ -8,6 +8,9 @@
 import type {
   AppInfo,
   ChatReply,
+  GraphFile,
+  GraphLink,
+  WorkspaceGraph,
   LoadedDashboardState,
   MemoryStatus,
   NewRoutine,
@@ -88,6 +91,55 @@ let routines: Routine[] = [
     last_fired_at: null,
   },
 ];
+
+/** Deterministic pseudo-random vault: 8 areas, ~260 notes, ~70 links. */
+function mockGraph(): WorkspaceGraph {
+  const areas: [string, number][] = [
+    ["Entwicklung", 62],
+    ["Arbeit", 38],
+    ["KI", 44],
+    ["System und Werkzeuge", 25],
+    ["Fotografie", 18],
+    ["Gesellschaft", 9],
+    ["Persönlich", 31],
+    ["Inbox", 12],
+  ];
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const files: GraphFile[] = [];
+  for (const [area, n] of areas) {
+    for (let i = 0; i < n; i++) {
+      const title = `${area.split(" ")[0]} Notiz ${i + 1}`;
+      files.push({
+        path: `${area}/${title}.md`,
+        area,
+        title,
+        bytes: Math.floor(200 + rnd() * 9000),
+        modified: new Date(Date.now() - rnd() * 90 * 86_400_000).toISOString(),
+        is_markdown: true,
+      });
+    }
+  }
+  files.push({ path: "README.md", area: null, title: "Vault", bytes: 300, modified: null, is_markdown: true });
+  const links: GraphLink[] = [];
+  for (let i = 0; i < 70; i++) {
+    const a = files[Math.floor(rnd() * files.length)];
+    const b = files[Math.floor(rnd() * files.length)];
+    if (a !== b) links.push({ from: a.path, to: b.path });
+  }
+  return {
+    workspace_root: memory.workspace_root,
+    hub: "CLAUDE.md",
+    areas: areas.map(([name, n]) => ({ name, files: n })),
+    files,
+    links,
+    skills: skills.map((s) => ({ name: s.name, description: s.description, backend: s.backend, model: null, effort: null })),
+    routines,
+    total_files: files.length,
+    truncated: false,
+    generated_at: new Date().toISOString(),
+  };
+}
 
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   await delay();
@@ -180,6 +232,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         duration_ms: 900,
       } satisfies ChatReply as T;
     }
+    case "get_workspace_graph":
+      return mockGraph() as T;
     case "load_custom_css":
       return (mockCustomCss ?? null) as T;
     case "write_module_manifest":

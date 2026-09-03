@@ -38,6 +38,10 @@ export function createInstance(
   if (isPlacedSingleton(type)) {
     return { ok: false, reason: `"${def.title}" allows only one instance` };
   }
+  if (def.background) {
+    const instance = addInstance({ type, x: 0, y: 0, w: 0, h: 0, config: overrides.config ?? {} });
+    return { ok: true, instance };
+  }
   const step = get(instances).length % CASCADE_WRAP;
   const instance = addInstance({
     type,

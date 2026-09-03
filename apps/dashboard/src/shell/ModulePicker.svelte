@@ -67,7 +67,7 @@
                 <span class="text">
                   <span class="title">{m.title}</span>
                   <span class="meta">
-                    {m.defaultSize.w}×{m.defaultSize.h}
+                    {m.background ? "background" : `${m.defaultSize.w}×${m.defaultSize.h}`}
                     {#if m.singleton}· single{placed.has(m.type) ? " · placed" : ""}{/if}
                   </span>
                 </span>
