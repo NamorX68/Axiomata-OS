@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkspaceGraph } from "../core/backend";
 import { applyLayout, RING } from "./layout";
-import { buildModel, neighbours, regroup, searchNodes, type Palette } from "./model";
+import { buildModel, glyphForArea, neighbours, regroup, searchNodes, type Palette } from "./model";
 
 const palette: Palette = {
   text: "#fff",
@@ -116,5 +116,32 @@ describe("regroup / search / neighbours", () => {
     ]);
     const back = neighbours(m, "file:Work/sub1/n1.md");
     expect(back[0].out).toBe(false);
+  });
+});
+
+describe("glyphForArea", () => {
+  it("matches the owner's real top-level areas", () => {
+    expect(glyphForArea("Arbeit")).toBe("briefcase");
+    expect(glyphForArea("Entwicklung")).toBe("code");
+    expect(glyphForArea("Fotografie")).toBe("camera");
+    expect(glyphForArea("Gesellschaft")).toBe("people");
+    expect(glyphForArea("KI")).toBe("chip");
+    expect(glyphForArea("Persönlich")).toBe("user");
+    expect(glyphForArea("System und Werkzeuge")).toBe("wrench");
+    expect(glyphForArea("Learning")).toBe("book");
+    expect(glyphForArea("Inbox")).toBe("tray");
+  });
+
+  it("prefers the more specific course-content match for nested Learning folders", () => {
+    // Folders view: these are code-lesson folders, not just "something to
+    // read", so the dev/code icon wins over the generic Learning book.
+    expect(glyphForArea("Learning/Rust/lessons")).toBe("code");
+    expect(glyphForArea("Learning/BlockOS")).toBe("code");
+  });
+
+  it("is case-insensitive and falls back to a plain folder for anything unmatched", () => {
+    expect(glyphForArea("arbeit")).toBe("briefcase");
+    expect(glyphForArea("Random Project")).toBe("folder");
+    expect(glyphForArea("")).toBe("folder");
   });
 });

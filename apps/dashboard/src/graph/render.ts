@@ -5,7 +5,7 @@
  * the device pixel ratio; call `resize()` when the canvas box changes.
  */
 
-import type { GraphModel, GraphNode, NodeKind } from "./model";
+import type { GraphModel, GraphNode } from "./model";
 
 export type RenderMode = "rings" | "orbit";
 
@@ -32,11 +32,16 @@ export interface View {
 
 const TWO_PI = Math.PI * 2;
 
-/** Small vector glyph inside a non-file node: hub = hexagon, area = folder,
- *  skill = bolt, routine = clock. Drawn in the node's contrast colour. */
+/**
+ * Small vector glyph inside a non-file node, drawn in the node's contrast
+ * colour. `glyph` is either a structural id — "hub" (hexagon), "skill"
+ * (bolt), "routine" (clock), "folder" (the generic area default) — or one
+ * of the per-area icons from `model.glyphForArea` (e.g. "book", "code",
+ * "briefcase"). Unknown ids fall back to nothing drawn (just the ring).
+ */
 export function drawGlyph(
   ctx: CanvasRenderingContext2D,
-  kind: NodeKind,
+  glyph: string,
   x: number,
   y: number,
   r: number,
@@ -52,7 +57,7 @@ export function drawGlyph(
   ctx.lineJoin = "round";
   ctx.globalAlpha = 0.95;
   ctx.beginPath();
-  switch (kind) {
+  switch (glyph) {
     case "hub":
       for (let i = 0; i < 6; i++) {
         const a = -Math.PI / 2 + (i * Math.PI) / 3;
@@ -64,7 +69,7 @@ export function drawGlyph(
       ctx.closePath();
       ctx.stroke();
       break;
-    case "area":
+    case "folder":
       ctx.moveTo(-s, -s * 0.55);
       ctx.lineTo(-s * 0.3, -s * 0.55);
       ctx.lineTo(-s * 0.05, -s * 0.25);
@@ -91,10 +96,98 @@ export function drawGlyph(
       ctx.lineTo(s * 0.45, s * 0.25);
       ctx.stroke();
       break;
+    case "code": // </> — Entwicklung / Rust / BlockOS
+      ctx.moveTo(-s * 0.15, -s * 0.55);
+      ctx.lineTo(-s * 0.8, 0);
+      ctx.lineTo(-s * 0.15, s * 0.55);
+      ctx.moveTo(s * 0.15, -s * 0.55);
+      ctx.lineTo(s * 0.8, 0);
+      ctx.lineTo(s * 0.15, s * 0.55);
+      ctx.stroke();
+      break;
+    case "chip": // KI
+      ctx.roundRect(-s * 0.5, -s * 0.5, s, s, s * 0.12);
+      ctx.stroke();
+      for (const o of [-0.55, 0.55]) {
+        ctx.beginPath();
+        ctx.moveTo(o * s * 0.6, -s * 0.5);
+        ctx.lineTo(o * s * 0.6, -s * 0.75);
+        ctx.moveTo(o * s * 0.6, s * 0.5);
+        ctx.lineTo(o * s * 0.6, s * 0.75);
+        ctx.stroke();
+      }
+      break;
+    case "book": // Learning
+      ctx.moveTo(0, -s * 0.5);
+      ctx.quadraticCurveTo(-s * 0.95, -s * 0.7, -s * 0.95, s * 0.05);
+      ctx.quadraticCurveTo(-s * 0.95, s * 0.6, 0, s * 0.4);
+      ctx.moveTo(0, -s * 0.5);
+      ctx.quadraticCurveTo(s * 0.95, -s * 0.7, s * 0.95, s * 0.05);
+      ctx.quadraticCurveTo(s * 0.95, s * 0.6, 0, s * 0.4);
+      ctx.moveTo(0, -s * 0.5);
+      ctx.lineTo(0, s * 0.4);
+      ctx.stroke();
+      break;
+    case "briefcase": // Arbeit
+      ctx.roundRect(-s * 0.9, -s * 0.25, s * 1.8, s * 0.95, s * 0.15);
+      ctx.moveTo(-s * 0.35, -s * 0.25);
+      ctx.lineTo(-s * 0.35, -s * 0.55);
+      ctx.lineTo(s * 0.35, -s * 0.55);
+      ctx.lineTo(s * 0.35, -s * 0.25);
+      ctx.stroke();
+      break;
+    case "camera": // Fotografie
+      ctx.roundRect(-s * 0.9, -s * 0.35, s * 1.8, s * 0.95, s * 0.15);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, s * 0.12, s * 0.32, 0, TWO_PI);
+      ctx.stroke();
+      break;
+    case "people": // Gesellschaft
+      ctx.arc(-s * 0.28, -s * 0.05, s * 0.32, 0, TWO_PI);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(s * 0.28, -s * 0.05, s * 0.32, 0, TWO_PI);
+      ctx.stroke();
+      break;
+    case "user": // Persönlich
+      ctx.arc(0, -s * 0.32, s * 0.32, 0, TWO_PI);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, s * 0.85, s * 0.6, Math.PI * 1.18, Math.PI * 1.82);
+      ctx.stroke();
+      break;
+    case "wrench": // System und Werkzeuge
+      ctx.moveTo(-s * 0.55, s * 0.55);
+      ctx.lineTo(s * 0.25, -s * 0.25);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(-s * 0.6, s * 0.6, s * 0.26, 0, TWO_PI);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(s * 0.6, -s * 0.6, s * 0.26, 0, TWO_PI);
+      ctx.stroke();
+      break;
+    case "tray": // Inbox
+      ctx.moveTo(-s * 0.8, -s * 0.25);
+      ctx.lineTo(-s * 0.35, s * 0.5);
+      ctx.lineTo(s * 0.35, s * 0.5);
+      ctx.lineTo(s * 0.8, -s * 0.25);
+      ctx.moveTo(-s * 0.8, -s * 0.25);
+      ctx.lineTo(s * 0.8, -s * 0.25);
+      ctx.stroke();
+      break;
     default:
       break;
   }
   ctx.restore();
+}
+
+/** The glyph id for a node: structural for hub/skill/routine, per-area icon
+ *  (falling back to "folder") for area, nothing for a file. */
+function glyphOf(n: GraphNode): string {
+  if (n.kind === "area") return n.glyph ?? "folder";
+  return n.kind;
 }
 
 export class GraphRenderer {
@@ -313,7 +406,7 @@ export class GraphRenderer {
         ctx.beginPath();
         ctx.arc(p.x, p.y, r + 5, 0, TWO_PI);
         ctx.stroke();
-        drawGlyph(ctx, n.kind, p.x, p.y, r, n.kind === "hub" ? this.hubGlyphColor : this.glyphColor);
+        drawGlyph(ctx, glyphOf(n), p.x, p.y, r, n.kind === "hub" ? this.hubGlyphColor : this.glyphColor);
       }
     }
     ctx.globalAlpha = 1;
@@ -498,7 +591,7 @@ export class GraphRenderer {
       ctx.globalAlpha = hot ? 1 : 0.8;
       ctx.stroke();
       ctx.globalAlpha = 1;
-      drawGlyph(ctx, n.kind === "hub" ? "hub" : n.kind, x, y, nodeR * 0.62, hot ? this.accentColor : n.color);
+      drawGlyph(ctx, glyphOf(n), x, y, nodeR * 0.62, hot ? this.accentColor : n.color);
       // Age / schedule badge under the node.
       const badge = this.badgeFor(n, t);
       if (badge) {
