@@ -89,7 +89,9 @@
     top: var(--ax-space-4);
     right: 0;
     bottom: 64px;
-    width: min(560px, 60vw);
+    /* ~40% of the window, with floor and ceiling so it stays usable on a
+       narrow window and sane on an ultra-wide one. */
+    width: clamp(480px, 40vw, 900px);
     border-right: none;
     border-radius: var(--ax-radius-lg) 0 0 var(--ax-radius-lg);
   }
