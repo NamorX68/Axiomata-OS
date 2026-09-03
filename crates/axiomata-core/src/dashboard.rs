@@ -19,6 +19,9 @@ use crate::paths;
 /// Current on-disk schema version written by the frontend.
 pub const STATE_VERSION: u64 = 1;
 
+/// Largest custom theme file read (it goes into the webview as text).
+pub const MAX_CUSTOM_CSS_BYTES: u64 = 64 * 1024;
+
 /// Hard cap on the state file — anything larger is treated as corrupt.
 pub const MAX_STATE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -85,6 +88,45 @@ pub fn load_state() -> Result<LoadedState, AxiomataError> {
             })
         }
     }
+}
+
+/// Reads the user's custom theme CSS: `override_path` if given (absolute,
+/// `.css`), else `~/.axiomata/theme.css`. `Ok(None)` when the file doesn't
+/// exist. A symlink or an oversized file is refused; the CSS itself is *not*
+/// validated here — the dashboard's validator decides what gets injected.
+pub fn load_custom_css(override_path: Option<&Path>) -> Result<Option<String>, AxiomataError> {
+    let path = match override_path {
+        Some(p) => {
+            if !p.is_absolute() || p.extension().is_none_or(|e| e != "css") {
+                return Err(AxiomataError::InvalidDashboardState {
+                    path: p.to_path_buf(),
+                    reason: "customCssPath must be an absolute path to a .css file".to_string(),
+                });
+            }
+            p.to_path_buf()
+        }
+        None => paths::custom_theme_path(),
+    };
+    let meta = match fs::symlink_metadata(&path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(AxiomataError::Io { path, source }),
+    };
+    if meta.file_type().is_symlink() {
+        return Err(AxiomataError::InvalidDashboardState {
+            path,
+            reason: "refusing to follow a symlinked theme file".to_string(),
+        });
+    }
+    if meta.len() > MAX_CUSTOM_CSS_BYTES {
+        return Err(AxiomataError::InvalidDashboardState {
+            path,
+            reason: format!("theme file exceeds {MAX_CUSTOM_CSS_BYTES} bytes"),
+        });
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|source| AxiomataError::Io { path, source })
 }
 
 /// Validates and atomically writes `json` to `dashboard.json` (mode 0600).
@@ -244,6 +286,29 @@ mod tests {
                 fs::read_to_string(home.join("dashboard.json")).unwrap(),
                 "{\"version\":1,\"a\":1}"
             );
+        });
+    }
+
+    #[test]
+    fn custom_css_absent_then_present_then_override_rules() {
+        with_temp_home(|home| {
+            assert_eq!(load_custom_css(None).unwrap(), None);
+            fs::write(home.join("theme.css"), ":root { --ax-accent: red }").unwrap();
+            assert_eq!(
+                load_custom_css(None).unwrap().as_deref(),
+                Some(":root { --ax-accent: red }")
+            );
+            let other = home.join("other.css");
+            fs::write(&other, "x").unwrap();
+            assert_eq!(load_custom_css(Some(&other)).unwrap().as_deref(), Some("x"));
+            assert!(load_custom_css(Some(Path::new("relative.css"))).is_err());
+            assert!(load_custom_css(Some(&home.join("theme.txt"))).is_err());
+            fs::write(
+                home.join("big.css"),
+                "x".repeat(MAX_CUSTOM_CSS_BYTES as usize + 1),
+            )
+            .unwrap();
+            assert!(load_custom_css(Some(&home.join("big.css"))).is_err());
         });
     }
 

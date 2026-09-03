@@ -21,6 +21,11 @@ const LATENCY_MS = 120;
 const delay = () => new Promise((r) => setTimeout(r, LATENCY_MS));
 
 let dashboardJson: string | null = null;
+/** Set from the console (`window.__ax.mockCss = "..."`) to exercise the validator. */
+let mockCustomCss: string | null = null;
+export function setMockCustomCss(css: string | null): void {
+  mockCustomCss = css;
+}
 const files = new Map<string, string>([
   [
     "notes/inbox.md",
@@ -175,6 +180,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         duration_ms: 900,
       } satisfies ChatReply as T;
     }
+    case "load_custom_css":
+      return (mockCustomCss ?? null) as T;
     case "write_module_manifest":
       return true as T;
     case "poll_module_actions":

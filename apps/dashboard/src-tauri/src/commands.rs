@@ -105,6 +105,15 @@ pub async fn assistant_send(
         .map_err(|err| err.to_string())
 }
 
+/// Reads the user's custom theme CSS (`~/.axiomata/theme.css`, or the
+/// absolute `.css` path from the dashboard settings). `None` if absent. The
+/// frontend validates it before injecting.
+#[tauri::command]
+pub fn load_custom_css(path: Option<String>) -> Result<Option<String>, String> {
+    dashboard::load_custom_css(path.as_deref().map(std::path::Path::new))
+        .map_err(|err| err.to_string())
+}
+
 /// Reads a UTF-8 file by workspace-relative path (≤ 1 MiB, no `..`, no
 /// symlinks, must resolve inside `config.workspace_root`).
 #[tauri::command]

@@ -20,6 +20,7 @@ pub fn run() {
             commands::write_module_manifest,
             commands::poll_module_actions,
             commands::complete_module_action,
+            commands::load_custom_css,
             commands::list_skills,
             commands::list_runs,
             commands::get_run,

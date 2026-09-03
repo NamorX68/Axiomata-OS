@@ -9,13 +9,14 @@
   import ChatPanel from "./shell/ChatPanel.svelte";
   import IconBar from "./shell/IconBar.svelte";
   import ModulePicker from "./shell/ModulePicker.svelte";
+  import Settings from "./shell/Settings.svelte";
   import StagingLayer from "./shell/StagingLayer.svelte";
   import Toasts from "./shell/Toasts.svelte";
   import TopBar from "./shell/TopBar.svelte";
 
   let pickerOpen = $state(false);
+  let settingsOpen = $state(false);
 
-  // Settings (step 13) is still a stub; "search" focuses the assistant bar.
   onMount(() => {
     const offs = [
       on("shell:add-module", () => (pickerOpen = true)),
@@ -25,11 +26,17 @@
         if (typeof d.path !== "string") return;
         openStaged("md-file", { path: d.path, mode: d.mode === "edit" ? "edit" : "read" }, d.from ?? "right");
       }),
-      on("shell:settings", () => console.info("shell:settings — not wired yet")),
+      on("shell:settings", () => (settingsOpen = true)),
     ];
     if (import.meta.env.DEV) {
       // Browser-console handle for driving the shell without Tauri.
-      (window as unknown as { __ax: unknown }).__ax = { emit, openStaged };
+      void import("./core/devmock").then((m) => {
+        (window as unknown as { __ax: unknown }).__ax = {
+          emit,
+          openStaged,
+          setMockCustomCss: m.setMockCustomCss,
+        };
+      });
     }
     return () => offs.forEach((off) => off());
   });
@@ -39,6 +46,7 @@
 <IconBar />
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />
+<Settings bind:open={settingsOpen} />
 <StagingLayer />
 <ChatPanel />
 

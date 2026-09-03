@@ -77,6 +77,12 @@ pub fn module_context_path() -> PathBuf {
     axiomata_home().join("module-context.md")
 }
 
+/// Path to the user's optional custom theme (`~/.axiomata/theme.css`): only
+/// `--ax-*` token overrides, validated by the dashboard before injection.
+pub fn custom_theme_path() -> PathBuf {
+    axiomata_home().join("theme.css")
+}
+
 /// Root of the agent → module action queue (`~/.axiomata/module-actions/`),
 /// with `inbox/` (requests written by the CLI) and `outbox/` (responses
 /// written by the running dashboard). See `crate::bridge`.
