@@ -158,6 +158,12 @@ size goes through a `--ax-*` token; no literals in components.
 - **Workspace files** (`axiomata_core::workspace`, commands `read/write_workspace_file`):
   relative to `config.workspace_root`, no `..`, must canonicalise inside the root,
   symlinks and hard links refused, ≤ 1 MiB, atomic O_EXCL temp + rename.
+- **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` in a
+  `<iframe sandbox="allow-scripts">` whose src is an asset-protocol URL. `open_workspace_html`
+  resolves the file through the workspace guard and allows **only its folder** (non-recursive)
+  in the runtime asset scope (`asset_protocol_scope().allow_directory`); the static scope in
+  `tauri.conf.json` is empty and the CSP carries `frame-src asset: http://asset.localhost`.
+  Notes elsewhere in the vault are never served by the asset protocol.
 - **Chat**: the bottom bar routes input — registered `/command` runs locally
   (`core/commands.ts`), other `/text` is a one-shot `instruct` turn, plain text a `chat`
   turn. `agents::claude_code::chat` = `claude -p --output-format json --permission-mode
@@ -175,18 +181,25 @@ size goes through a `--ax-*` token; no literals in components.
 - **Model**: every `claude -p` run passes `--model` from `config.agents.claude_model`
   (default `claude-sonnet-5`; a skill's frontmatter `model:` wins; empty = CLI default).
   Model names are validated against a flag-safe alphabet before reaching the command line.
-- **Canvas grid**: tiles snap to `--ax-grid` (16 px) on drag / resize; the assistant bar is a
-  centred pill (`--ax-assistant-width`), the chat panel `--ax-chat-width`; slide-ins use
-  `--ax-dur-slow`. The owner works on a 21:9 monitor — never span the full width.
+- **Canvas physics** (`canvas/snap.ts`, pure + tested): tiles snap to `--ax-grid` (16 px) and
+  magnetically to neighbour edges within 8 px (touch beats align, neighbour beats grid;
+  `settings.snapEdges`), never overlap after a drop / resize (only the moved tile yields,
+  bounded push-out then grid spiral), and are clamped back into view on window resize
+  (`relayoutForViewport`, persisted). The dot grid is hidden unless `settings.showGrid`.
+  The assistant bar is a centred pill (`--ax-assistant-width`), the chat panel
+  `--ax-chat-width`; slide-ins use `--ax-dur-slow`. The owner works on a 21:9 monitor —
+  never span the full width.
 - **Themes**: `<html data-theme="…">`; a user `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection; template via Settings → Copy template.
 
 ## Second Brain (M6)
 
 - **Data**: `axiomata_core::graph::build` (command `get_workspace_graph`) — every tracked
-  file (memory walker) with area / title / bytes / mtime, `[[wiki]]` and relative Markdown
-  links resolved to file paths, skills and routines as node kinds, the root `CLAUDE.md` as
-  hub; capped at 5000 files (`truncated`).
+  file (memory walker) with area / title / bytes / mtime (`.md` titles from frontmatter /
+  heading, `.html` from `<title>`), `[[wiki]]`, relative Markdown links and relative HTML
+  `href`s resolved to file paths, skills and routines as node kinds, the root `CLAUDE.md` as
+  hub; capped at 5000 files (`truncated`). The owner's courses live in `vault/Learning/…`
+  (a `.ignore` there hides tooling from the walker).
 - **Frontend** `apps/dashboard/src/graph/`: `model.ts` (nodes / edges / area segments,
   theme-derived colours, `regroup` by folders, `searchNodes`, `neighbours`), `layout.ts`
   (Rings: skills inner ring, files on arcs inside their area segment, routines outer ring;
@@ -200,9 +213,11 @@ size goes through a `--ax-*` token; no literals in components.
   `#particle-slot` behind the tiles by `canvas/BackgroundHost.svelte` (corner ⚙ / ×).
   Click → `open-second-brain` bus event → `shell/SecondBrainView.svelte` (full screen:
   pan / zoom, search, Rings / Circle, Areas / Folders, detail panel with View here /
-  Copy path / Fly to / Run skill / toggle routine, Connections). Also `/brain [path | ?
-  query]` and the module actions `open`, `search`, `refresh`. View preferences live in
-  `dashboard.json` → `settings.secondBrain`.
+  Copy path / Fly to / Run skill / toggle routine, content preview via
+  `core/markdown.ts` `excerpt`/`excerptHtml`, links split into out / in, area notes
+  grouped by subfolder; a `?` help block explains Rings / Circle, Areas / Folders,
+  Rotation). Also `/brain [path | ? query]` and the module actions `open`, `search`,
+  `refresh`. View preferences live in `dashboard.json` → `settings.secondBrain`.
 - **Import**: `axiomata_core::importer` + `axiomata-cli import obsidian` — notes
   normalised to "# Title + content" (frontmatter / tag lines dropped, tags only as hints),
   the agent proposes the areas and assigns every note in one JSON turn, files are written

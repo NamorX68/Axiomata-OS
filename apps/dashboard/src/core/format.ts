@@ -35,3 +35,19 @@ export function shortPath(path: string, keep = 2): string {
   const parts = path.split("/").filter(Boolean);
   return parts.length <= keep ? path : `…/${parts.slice(-keep).join("/")}`;
 }
+
+/** "340 B", "1.2 KB", "3.4 MB". */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Locale date + time, or "—". */
+export function absoluteTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}

@@ -27,6 +27,8 @@ export interface GraphNode {
   phase: number;
   /** Number of links touching the node. */
   degree: number;
+  modified?: string | null;
+  isMarkdown?: boolean;
 }
 
 export interface GraphEdge {
@@ -199,7 +201,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     add({
       id: `area:${a.name}`,
       kind: "area",
-      label: a.name.includes("/") ? a.name.slice(a.name.lastIndexOf("/") + 1) : a.name,
+      label: a.name.split("/").slice(-2).join("/"),
       area: a.name,
       bytes: a.count,
       x: 0,
@@ -225,6 +227,8 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       color: f.area ? (colorOf.get(f.area) ?? palette.muted) : palette.muted,
       phase: phase(f.path),
       degree: 0,
+      modified: f.modified,
+      isMarkdown: f.is_markdown,
     });
   }
 

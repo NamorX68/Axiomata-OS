@@ -8,7 +8,7 @@
 
   import { type AppInfo, invokeBackend } from "../core/backend";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
-  import { activeTheme } from "../core/stores";
+  import { activeTheme, showGrid, snapEdges } from "../core/stores";
   import { THEMES, applyTheme } from "../core/themes";
   import { toast } from "../core/toast";
   import { TEMPLATE } from "../theme/validator";
@@ -88,6 +88,12 @@
               </li>
             {/each}
           </ul>
+        </section>
+
+        <section>
+          <h3>Canvas</h3>
+          <label class="opt"><input type="checkbox" bind:checked={$showGrid} /> Show dot grid <span class="hint">(tiles snap to it either way)</span></label>
+          <label class="opt"><input type="checkbox" bind:checked={$snapEdges} /> Magnetic edges <span class="hint">(tiles stick to their neighbours within 8 px)</span></label>
         </section>
 
         <section>
@@ -237,6 +243,17 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .opt {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    font-size: var(--ax-font-size-sm);
+    margin-bottom: var(--ax-space-1);
+  }
+  .hint {
+    color: var(--ax-text-muted);
   }
 
   .status {

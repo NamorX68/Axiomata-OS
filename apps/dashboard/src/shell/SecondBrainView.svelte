@@ -9,8 +9,9 @@
   import { onMount, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
-  import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
-  import { relativeTime, untilTime } from "../core/format";
+  import { invokeBackend, type RunSummary, type WorkspaceFile, type WorkspaceGraph } from "../core/backend";
+  import { absoluteTime, formatBytes, relativeTime, untilTime } from "../core/format";
+  import { excerpt, excerptHtml } from "../core/markdown";
   import { getSetting, setSetting } from "../core/persist";
   import { openStaged } from "../core/staging";
   import { toast } from "../core/toast";
@@ -39,6 +40,7 @@
     grouping?: Grouping;
     spin?: number;
     fileNames?: boolean;
+    help?: boolean;
   }
   const prefs = getSetting<Prefs>("secondBrain") ?? {};
 
@@ -54,20 +56,53 @@
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let spin = $state(typeof prefs.spin === "number" ? prefs.spin : 0.02);
   let fileNames = $state(prefs.fileNames === true);
+  let helpOpen = $state(prefs.help !== false);
+  let areaFilter = $state("");
+  let preview = $state<{ path: string; text: string } | null>(null);
+  let previewState = $state<"idle" | "loading" | "none" | "error">("idle");
+  const previewCache = new Map<string, string>();
+
+  const rotationLabel = $derived(spin === 0 ? "off" : spin < 0.03 ? "slow" : spin < 0.07 ? "medium" : "fast");
+
+  const HELP = [
+    ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring, Routinen außen. Zeigt die Größe je Bereich."],
+    ["Circle", "Alle Notizen auf einem Ring, nach Bereich sortiert. Flacher, am besten um Verbindungen zwischen Bereichen zu sehen."],
+    ["Areas", "Ein Segment je oberstem Vault-Ordner."],
+    ["Folders", "Ein Segment je tiefstem Ordner, z. B. Learning/Rust/lessons. Feinere Aufteilung großer Bereiche."],
+    ["Rotation", "Drehgeschwindigkeit des ganzen Graphen; greift sofort, ganz links steht er still. Bei kleinen Werten sieht man die Drehung erst über Sekunden."],
+    ["File names", "Zeigt jeden Notiztitel dauerhaft; sonst erscheinen Titel bei Hover, Suche und Auswahl."],
+  ] as const;
   let busy = $state(false);
   let error = $state("");
   let drag: { x: number; y: number; vx: number; vy: number } | null = null;
 
+  // Real links only — hub / area spokes are structure, shown in the meta rows.
   const links = $derived(
     model && selected
-      ? neighbours(model, selected.id).filter((l) => !(selected!.kind === "area" && l.node.kind === "file"))
+      ? neighbours(model, selected.id).filter((l) => l.node.kind !== "hub" && l.node.kind !== "area" && selected!.kind !== "area")
       : [],
   );
+  const linksOut = $derived(links.filter((l) => l.out));
+  const linksIn = $derived(links.filter((l) => !l.out));
   const areaFiles = $derived(
     model && selected?.kind === "area"
-      ? model.nodes.filter((n) => n.kind === "file" && n.area === selected!.area).sort((a, b) => a.label.localeCompare(b.label))
+      ? model.nodes.filter((n) => n.kind === "file" && n.area === selected!.area).sort((a, b) => (a.path ?? "").localeCompare(b.path ?? ""))
       : [],
   );
+  /** Area files grouped by their immediate subfolder (relative to the area). */
+  const areaGroups = $derived.by(() => {
+    const q = areaFilter.trim().toLowerCase();
+    const groups = new Map<string, GraphNode[]>();
+    for (const n of areaFiles) {
+      if (q && !`${n.label} ${n.path}`.toLowerCase().includes(q)) continue;
+      const rel = (n.path ?? "").slice((selected?.area?.length ?? 0) + 1);
+      const sub = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+      groups.set(sub, [...(groups.get(sub) ?? []), n]);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  });
+  const areaNode = $derived(model && selected?.area ? (model.byId.get(`area:${selected.area}`) ?? null) : null);
+  const folderOf = $derived(selected?.path?.includes("/") ? selected.path.slice(0, selected.path.lastIndexOf("/")) : "");
   const hits = $derived(model && query.trim() ? searchNodes(model, query) : null);
 
   function rebuild() {
@@ -206,10 +241,57 @@
   // Remember the view preferences in dashboard.json (settings.secondBrain).
   let prefsReady = false;
   $effect(() => {
-    const next: Prefs = { layout, grouping, spin, fileNames };
+    const next: Prefs = { layout, grouping, spin, fileNames, help: helpOpen };
     if (prefsReady) setSetting("secondBrain", next);
     prefsReady = true;
   });
+
+  // Content preview for the selected file / hub.
+  $effect(() => {
+    const node = selected;
+    const path = node && (node.kind === "file" || node.kind === "hub") ? node.path : undefined;
+    if (!path) {
+      preview = null;
+      previewState = "idle";
+      return;
+    }
+    const isHtml = /\.html?$/i.test(path);
+    if (!(node?.isMarkdown ?? node?.kind === "hub") && !isHtml) {
+      preview = null;
+      previewState = "none";
+      return;
+    }
+    const cached = previewCache.get(path);
+    if (cached !== undefined) {
+      preview = { path, text: cached };
+      previewState = "idle";
+      return;
+    }
+    previewState = "loading";
+    void invokeBackend<WorkspaceFile>("read_workspace_file", { rel: path })
+      .then((f) => {
+        const text = isHtml ? excerptHtml(f.content) : excerpt(f.content);
+        previewCache.set(path, text);
+        if (previewCache.size > 50) previewCache.delete(previewCache.keys().next().value!);
+        if (selected?.path === path) {
+          preview = { path, text };
+          previewState = "idle";
+        }
+      })
+      .catch(() => {
+        if (selected?.path === path) previewState = "error";
+      });
+  });
+
+  function openFolder() {
+    if (!folderOf) return;
+    grouping = "folders";
+    // The regroup happens in the layout effect; select the folder node after it.
+    queueMicrotask(() => {
+      const n = model?.byId.get(`area:${folderOf}`);
+      if (n) select(n, true);
+    });
+  }
   $effect(() => {
     if (renderer) renderer.highlight = hits;
   });
@@ -287,34 +369,50 @@
   </div>
 
   <aside class="controls">
-    <input
-      type="search"
-      placeholder={model ? `Search ${model.nodes.length} nodes…` : "Search…"}
-      aria-label="Search nodes"
-      bind:value={query}
-    />
+    <div class="controls-head">
+      <input
+        type="search"
+        placeholder={model ? `Search ${model.nodes.length} nodes…` : "Search…"}
+        aria-label="Search nodes"
+        title="Titel, Pfad oder Bereich; Treffer bleiben hell, der Rest wird gedimmt"
+        bind:value={query}
+      />
+      <button type="button" class="help-btn" class:on={helpOpen} title="Was bedeuten die Optionen?" aria-label="Help" onclick={() => (helpOpen = !helpOpen)}>?</button>
+    </div>
     <div class="group">
       <span class="label">Layout</span>
       <div class="seg">
-        <button type="button" class:on={layout === "rings"} onclick={() => (layout = "rings")}>Rings</button>
-        <button type="button" class:on={layout === "circle"} onclick={() => (layout = "circle")}>Circle</button>
+        <button type="button" class:on={layout === "rings"} title={HELP[0][1]} aria-describedby="help-rings" onclick={() => (layout = "rings")}>Rings</button>
+        <button type="button" class:on={layout === "circle"} title={HELP[1][1]} aria-describedby="help-circle" onclick={() => (layout = "circle")}>Circle</button>
       </div>
     </div>
     <div class="group">
-      <span class="label">View</span>
+      <span class="label">Group by</span>
       <div class="seg">
-        <button type="button" class:on={grouping === "areas"} onclick={() => (grouping = "areas")}>Areas</button>
-        <button type="button" class:on={grouping === "folders"} onclick={() => (grouping = "folders")}>Folders</button>
+        <button type="button" class:on={grouping === "areas"} title={HELP[2][1]} aria-describedby="help-areas" onclick={() => (grouping = "areas")}>Areas</button>
+        <button type="button" class:on={grouping === "folders"} title={HELP[3][1]} aria-describedby="help-folders" onclick={() => (grouping = "folders")}>Folders</button>
       </div>
     </div>
-    <label class="row"><span class="label">Ring spin</span><input type="range" min="0" max="0.12" step="0.005" bind:value={spin} /></label>
-    <label class="row check"><input type="checkbox" bind:checked={fileNames} /> File names</label>
+    <label class="row" title={HELP[4][1]}>
+      <span class="label">Rotation</span>
+      <input type="range" min="0" max="0.12" step="0.005" bind:value={spin} aria-describedby="help-rotation" />
+      <span class="readout">{rotationLabel}</span>
+    </label>
+    <label class="row check" title={HELP[5][1]}><input type="checkbox" bind:checked={fileNames} aria-describedby="help-file-names" /> File names</label>
     <div class="row">
-      <button type="button" onclick={resetView}>Reset view</button>
-      <button type="button" onclick={() => void load()}>Reload</button>
+      <button type="button" title="Zoom und Verschiebung zurücksetzen" onclick={resetView}>Reset view</button>
+      <button type="button" title="Graph neu aus dem Workspace laden" onclick={() => void load()}>Reload</button>
     </div>
     {#if model}
-      <p class="stats">{model.totalFiles} files · {model.areas.length} {grouping} · {model.edges.length} edges{model.truncated ? " · truncated" : ""}</p>
+      <p class="stats">{model.totalFiles} notes · {model.areas.length} {grouping} · {model.edges.length} links{model.truncated ? " · truncated" : ""}</p>
+    {/if}
+    {#if helpOpen}
+      <dl class="help">
+        {#each HELP as [term, text] (term)}
+          <dt id="help-{term.toLowerCase().replace(' ', '-')}">{term}</dt>
+          <dd>{text}</dd>
+        {/each}
+      </dl>
     {/if}
   </aside>
 
@@ -323,67 +421,104 @@
   {#if selected}
     <aside class="detail" transition:fade={{ duration: 120 }}>
       <header>
+        <div class="eyebrow">
+          <span class="tag kind">{selected.kind}</span>
+          {#if selected.area && selected.kind !== "area"}
+            <button type="button" class="tag area" style:--chip={selected.color} onclick={() => areaNode && select(areaNode, true)}>{selected.area}</button>
+          {/if}
+        </div>
         <h2>{selected.label}</h2>
         <button type="button" class="close" aria-label="Deselect" onclick={() => select(null)}>×</button>
       </header>
-      <div class="tags">
-        <span class="tag kind">{selected.kind}</span>
-        {#if selected.area}<span class="tag">{selected.area}</span>{/if}
-        {#if selected.kind === "file"}<span class="tag muted">{(selected.bytes / 1024).toFixed(1)} KB</span>{/if}
-      </div>
-      {#if selected.path}<p class="path">{selected.path}</p>{/if}
 
       {#if selected.kind === "file" || selected.kind === "hub"}
+        <dl class="meta">
+          {#if folderOf && folderOf !== selected.area}
+            <dt>Folder</dt><dd><button type="button" class="linkish" onclick={openFolder}>{folderOf}</button></dd>
+          {/if}
+          <dt>Size</dt><dd>{formatBytes(selected.bytes)}</dd>
+          <dt>Modified</dt><dd>{relativeTime(selected.modified)} <span class="dim">· {absoluteTime(selected.modified)}</span></dd>
+          <dt>Path</dt><dd class="mono">{selected.path}</dd>
+          <dt>Links</dt><dd>{linksOut.length} out · {linksIn.length} in</dd>
+        </dl>
+        <div class="preview" class:empty={previewState !== "idle" || !preview}>
+          {#if previewState === "loading"}
+            <span class="dim">Loading preview…</span>
+          {:else if previewState === "none"}
+            <span class="dim">No preview for this file type.</span>
+          {:else if previewState === "error"}
+            <span class="dim">Preview unavailable.</span>
+          {:else if preview}
+            {preview.text || "(empty file)"}
+          {/if}
+        </div>
         <div class="actions">
-          <button type="button" onclick={() => viewFile(selected!.path!)}>View here</button>
+          <button type="button" class="primary" onclick={() => viewFile(selected!.path!)}>Open</button>
           <button type="button" onclick={() => copyPath(selected!.path!)}>Copy path</button>
           <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
         </div>
       {:else if selected.kind === "area"}
-        <p class="muted">{areaFiles.length} Notizen in diesem Bereich</p>
+        <dl class="meta">
+          <dt>Notes</dt><dd>{areaFiles.length}</dd>
+          <dt>Folders</dt><dd>{areaGroups.length}</dd>
+        </dl>
         <div class="actions">
-          <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
+          <button type="button" class="primary" onclick={() => flyTo(selected!)}>Fly to</button>
         </div>
-        <h3>Notizen</h3>
-        <ul class="links">
-          {#each areaFiles as f (f.id)}
-            <li>
-              <button type="button" class="link" onclick={() => select(f, true)}>
-                <span class="dot" style:background={f.color}></span>
-                {f.label}
-              </button>
-            </li>
+        <h3>Notes in this area ({areaFiles.length})</h3>
+        {#if areaFiles.length > 30}
+          <input type="search" class="filter" placeholder="Filter…" aria-label="Filter notes" bind:value={areaFilter} />
+        {/if}
+        <div class="area-list">
+          {#each areaGroups as [sub, nodes] (sub)}
+            {#if sub}<h4>{sub} <span class="dim">({nodes.length})</span></h4>{/if}
+            <ul class="links">
+              {#each nodes as f (f.id)}
+                <li>
+                  <button type="button" class="link" onclick={() => select(f, true)}>
+                    <span class="dot" style:background={f.color}></span>
+                    <span class="txt">{f.label}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
           {/each}
-        </ul>
+        </div>
       {:else if selected.kind === "skill"}
-        <p class="muted">{graph?.skills.find((s) => `/${s.name}` === selected!.label)?.description ?? ""}</p>
+        <p class="body">{graph?.skills.find((s) => `/${s.name}` === selected!.label)?.description ?? ""}</p>
         <div class="actions">
-          <button type="button" disabled={busy} onclick={() => runSkill(selected!.label.slice(1))}>▶ Run</button>
+          <button type="button" class="primary" disabled={busy} onclick={() => runSkill(selected!.label.slice(1))}>▶ Run</button>
           <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
         </div>
       {:else if selected.kind === "routine"}
         {@const r = graph?.routines.find((x) => `routine:${x.id}` === selected!.id)}
         {#if r}
-          <p class="muted"><code>{r.cron_expr}</code> · {r.target.type}: {r.target.value}</p>
-          <p class="muted">next {r.enabled ? untilTime(r.next_fire_at) : "—"} · last {relativeTime(r.last_fired_at)}</p>
+          <dl class="meta">
+            <dt>Cron</dt><dd class="mono">{r.cron_expr}</dd>
+            <dt>Target</dt><dd>{r.target.type}: {r.target.value}</dd>
+            <dt>Next</dt><dd>{r.enabled ? untilTime(r.next_fire_at) : "—"}</dd>
+            <dt>Last</dt><dd>{relativeTime(r.last_fired_at)}</dd>
+          </dl>
         {/if}
         <div class="actions">
-          <button type="button" disabled={busy} onclick={() => toggleRoutine(selected!)}>{selected.enabled ? "Disable" : "Enable"}</button>
+          <button type="button" class="primary" disabled={busy} onclick={() => toggleRoutine(selected!)}>{selected.enabled ? "Disable" : "Enable"}</button>
           <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
         </div>
       {/if}
 
-      {#if links.length > 0}
-        <h3>Connections</h3>
+      {#if selected.kind !== "area"}
+        <h3>Links to ({linksOut.length})</h3>
+        {#if linksOut.length === 0}<p class="dim small">No links yet.</p>{/if}
         <ul class="links">
-          {#each links as l (l.node.id + (l.out ? ">" : "<"))}
-            <li>
-              <button type="button" class="link" onclick={() => select(l.node, true)}>
-                <span class="dot" style:background={l.node.color}></span>
-                {l.node.label}
-                <span class="dir">{l.out ? "→" : "←"}</span>
-              </button>
-            </li>
+          {#each linksOut as l (l.node.id)}
+            <li><button type="button" class="link" onclick={() => select(l.node, true)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>
+          {/each}
+        </ul>
+        <h3>Linked from ({linksIn.length})</h3>
+        {#if linksIn.length === 0}<p class="dim small">No links yet.</p>{/if}
+        <ul class="links">
+          {#each linksIn as l (l.node.id)}
+            <li><button type="button" class="link" onclick={() => select(l.node, true)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>
           {/each}
         </ul>
       {/if}
@@ -469,19 +604,36 @@
     z-index: 2;
     top: 72px;
     right: var(--ax-space-5);
-    width: 250px;
+    width: 270px;
+    max-height: calc(100vh - 100px);
+    overflow: auto;
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-3);
     padding: var(--ax-space-3);
-    background: color-mix(in srgb, var(--ax-surface-1) 88%, transparent);
+    background: var(--ax-surface-1);
     border: 1px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-lg);
     box-shadow: var(--ax-shadow-pop);
     font-size: var(--ax-font-size-sm);
   }
-  .controls input[type="search"] {
-    width: 100%;
+  .controls-head {
+    display: flex;
+    gap: var(--ax-space-2);
+  }
+  .controls-head input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .help-btn {
+    width: 30px;
+    padding: 0;
+    border-radius: var(--ax-radius-pill);
+    color: var(--ax-text-muted);
+  }
+  .help-btn.on {
+    color: var(--ax-accent);
+    border-color: var(--ax-accent);
   }
   .group {
     display: flex;
@@ -489,7 +641,7 @@
     gap: var(--ax-space-1);
   }
   .label {
-    font-size: 10px;
+    font-size: var(--ax-font-size-xs);
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
     color: var(--ax-text-muted);
@@ -517,11 +669,35 @@
     flex: 1 1 auto;
     accent-color: var(--ax-accent);
   }
+  .readout {
+    min-width: 44px;
+    text-align: right;
+    font-size: var(--ax-font-size-xs);
+    color: var(--ax-text-muted);
+  }
   .row button {
     flex: 1 1 0;
     font-size: var(--ax-font-size-sm);
   }
   .stats {
+    margin: 0;
+    color: var(--ax-text-muted);
+  }
+  .help {
+    margin: 0;
+    padding-top: var(--ax-space-2);
+    border-top: 1px solid var(--ax-border);
+    display: grid;
+    grid-template-columns: 5.5em 1fr;
+    gap: var(--ax-space-1) var(--ax-space-2);
+    font-size: var(--ax-font-size-xs);
+    line-height: 1.5;
+  }
+  .help dt {
+    color: var(--ax-accent);
+    font-weight: 600;
+  }
+  .help dd {
     margin: 0;
     color: var(--ax-text-muted);
   }
@@ -533,89 +709,180 @@
     bottom: 80px;
   }
 
+  /* ---- detail panel ---- */
   .detail {
     position: absolute;
     z-index: 2;
     top: 72px;
     left: var(--ax-space-5);
-    width: 300px;
+    width: 360px;
     max-height: calc(100vh - 100px);
     overflow: auto;
-    padding: var(--ax-space-3) var(--ax-space-4);
-    background: color-mix(in srgb, var(--ax-surface-1) 92%, transparent);
+    padding: var(--ax-space-4) var(--ax-space-5) var(--ax-space-5);
+    background: var(--ax-surface-1);
     border: 1px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-lg);
     box-shadow: var(--ax-shadow-pop);
-    font-size: var(--ax-font-size-sm);
+    font-size: var(--ax-font-size-base);
+    line-height: 1.6;
   }
   .detail header {
+    position: relative;
+    padding-right: var(--ax-space-6);
+    margin-bottom: var(--ax-space-3);
+  }
+  .eyebrow {
     display: flex;
-    align-items: flex-start;
-    gap: var(--ax-space-2);
+    flex-wrap: wrap;
+    gap: var(--ax-space-1);
+    margin-bottom: var(--ax-space-2);
   }
   .detail h2 {
-    flex: 1 1 auto;
-    font-size: var(--ax-font-size-lg);
+    font-size: var(--ax-font-size-xl);
+    font-family: var(--ax-font-display);
+    line-height: 1.25;
     word-break: break-word;
   }
   .close {
-    width: 22px;
-    height: 22px;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 26px;
+    height: 26px;
     padding: 0;
     background: transparent;
     border-color: transparent;
     color: var(--ax-text-muted);
-  }
-  .tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ax-space-1);
-    margin: var(--ax-space-2) 0;
+    font-size: var(--ax-font-size-lg);
   }
   .tag {
     padding: 1px var(--ax-space-2);
     border-radius: var(--ax-radius-pill);
     border: 1px solid var(--ax-accent);
     color: var(--ax-accent);
-    font-size: 11px;
+    font-size: var(--ax-font-size-xs);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
   .tag.kind {
     background: var(--ax-accent);
     color: var(--ax-text-invert);
   }
-  .tag.muted {
-    border-color: var(--ax-border-strong);
-    color: var(--ax-text-muted);
+  .tag.area {
+    --chip: var(--ax-accent);
+    border-color: var(--chip);
+    color: var(--chip);
+    background: color-mix(in srgb, var(--chip) 18%, transparent);
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
   }
-  .path {
-    margin: 0 0 var(--ax-space-2);
+
+  .meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--ax-space-2) var(--ax-space-4);
+    margin: 0 0 var(--ax-space-4);
+    font-size: var(--ax-font-size-sm);
+  }
+  .meta dt {
+    color: var(--ax-text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: var(--ax-font-size-xs);
+    padding-top: 2px;
+  }
+  .meta dd {
+    margin: 0;
+    min-width: 0;
+    word-break: break-word;
+  }
+  .mono {
     font-family: var(--ax-font-mono);
-    color: var(--ax-text-muted);
-    word-break: break-all;
+    font-size: var(--ax-font-size-sm);
   }
-  .muted {
+  .dim {
+    color: var(--ax-text-muted);
+  }
+  .small {
+    font-size: var(--ax-font-size-sm);
     margin: 0 0 var(--ax-space-2);
+  }
+  .linkish {
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--ax-accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .preview {
+    max-height: 190px;
+    overflow: hidden;
+    margin: 0 0 var(--ax-space-4);
+    padding: var(--ax-space-3) var(--ax-space-4);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    font-size: var(--ax-font-size-sm);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    mask-image: linear-gradient(to bottom, #000 78%, transparent);
+  }
+  .preview.empty {
+    mask-image: none;
     color: var(--ax-text-muted);
   }
+  .body {
+    margin: 0 0 var(--ax-space-3);
+  }
+
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--ax-space-1);
+    gap: var(--ax-space-2);
+    margin-bottom: var(--ax-space-4);
   }
   .actions button {
-    font-size: var(--ax-font-size-sm);
-    padding: 2px var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-3);
+    border-radius: var(--ax-radius-pill);
   }
-  h3 {
-    margin-top: var(--ax-space-3);
-    font-size: 10px;
+  .actions .primary {
+    background: var(--ax-accent);
+    border-color: var(--ax-accent);
+    color: var(--ax-text-invert);
+    font-weight: 600;
+  }
+  .actions .primary:hover:not(:disabled) {
+    background: var(--ax-accent-hover);
+  }
+
+  .detail h3 {
+    margin: var(--ax-space-3) 0 var(--ax-space-1);
+    font-size: var(--ax-font-size-xs);
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
     color: var(--ax-text-muted);
   }
+  .detail h4 {
+    margin: var(--ax-space-2) 0 var(--ax-space-1);
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
+    color: var(--ax-text);
+  }
+  .filter {
+    width: 100%;
+    margin-bottom: var(--ax-space-2);
+  }
+  .area-list {
+    max-height: 40vh;
+    overflow: auto;
+  }
   .links {
     list-style: none;
-    margin: var(--ax-space-1) 0 0;
+    margin: 0;
     padding: 0;
   }
   .link {
@@ -626,19 +893,23 @@
     text-align: left;
     background: transparent;
     border-color: transparent;
-    padding: 2px var(--ax-space-1);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border-radius: var(--ax-radius-sm);
   }
   .link:hover {
     background: var(--ax-surface-3);
+  }
+  .link .txt {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
     flex: 0 0 auto;
-  }
-  .dir {
-    margin-left: auto;
-    color: var(--ax-text-muted);
   }
 </style>

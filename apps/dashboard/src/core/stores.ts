@@ -10,6 +10,12 @@ import type { CanvasInstance } from "./types";
 
 export const instances: Writable<CanvasInstance[]> = writable([]);
 export const activeTheme: Writable<string> = writable("graphite");
+/** Draw the dot grid on the canvas (tiles snap to it either way). */
+export const showGrid: Writable<boolean> = writable(false);
+/** Magnetic edge snapping between tiles. */
+export const snapEdges: Writable<boolean> = writable(true);
+/** Snap guide lines while a tile is dragged / resized (canvas coordinates). */
+export const guides: Writable<{ axis: "x" | "y"; at: number }[]> = writable([]);
 
 /** Set by persist.ts on boot. Until then, a no-op. */
 let dirtyHook: () => void = () => {};
@@ -53,6 +59,14 @@ export function updateInstance(id: string, patch: Partial<CanvasInstance>): void
   instances.update((list) =>
     list.map((i) => (i.id === id ? { ...i, ...patch } : i)),
   );
+  markDirty();
+}
+
+/** Applies several patches with one dirty mark (viewport relayout). */
+export function updateInstances(patches: { id: string; patch: Partial<CanvasInstance> }[]): void {
+  if (patches.length === 0) return;
+  const byId = new Map(patches.map((p) => [p.id, p.patch]));
+  instances.update((list) => list.map((i) => (byId.has(i.id) ? { ...i, ...byId.get(i.id) } : i)));
   markDirty();
 }
 
