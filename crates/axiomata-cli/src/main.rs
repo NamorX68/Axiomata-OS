@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use axiomata_core::agents::{self, ChatMode};
 use axiomata_core::bridge::{self, ActionRequest};
+use axiomata_core::importer;
 use axiomata_core::routines::{self, NewRoutine, RoutineTarget};
 use axiomata_core::skills::{self, RunStatus};
 use axiomata_core::{AxiomataCore, memory, paths};
@@ -58,6 +59,11 @@ enum Command {
         #[arg(long)]
         instruct: bool,
     },
+    /// Import notes into the workspace; the agent proposes the areas.
+    Import {
+        #[command(subcommand)]
+        source: ImportSource,
+    },
     /// Print the module manifest the dashboard wrote for the agent.
     Modules,
     /// Call an action on a mounted dashboard module (the running dashboard
@@ -73,6 +79,21 @@ enum Command {
         /// How long to wait for the dashboard.
         #[arg(long, default_value_t = 30)]
         timeout_secs: u64,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ImportSource {
+    /// An Obsidian vault folder (every `*.md` below it).
+    Obsidian {
+        /// Folder to import from.
+        path: std::path::PathBuf,
+        /// Show the agent's plan without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip notes that look like they hold API keys / secrets.
+        #[arg(long)]
+        skip_secrets: bool,
     },
 }
 
@@ -161,6 +182,14 @@ async fn main() -> Result<()> {
             resume,
             instruct,
         } => return assistant(&core, message, resume, instruct).await,
+        Command::Import {
+            source:
+                ImportSource::Obsidian {
+                    path,
+                    dry_run,
+                    skip_secrets,
+                },
+        } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
         Command::Modules => modules()?,
         Command::ModuleAction {
             instance,
@@ -168,6 +197,88 @@ async fn main() -> Result<()> {
             json,
             timeout_secs,
         } => return module_action(instance, action, json, timeout_secs),
+    }
+    Ok(())
+}
+
+/// Scans an Obsidian folder, lets the agent sort the notes into areas, writes
+/// them into the workspace and re-syncs the memory router.
+async fn import_obsidian(
+    core: &AxiomataCore,
+    path: &std::path::Path,
+    dry_run: bool,
+    include_secrets: bool,
+) -> Result<()> {
+    let notes = importer::scan_obsidian(path).context("scanning the Obsidian folder")?;
+    if notes.is_empty() {
+        println!("no Markdown notes found under {}", path.display());
+        return Ok(());
+    }
+    let secrets = notes.iter().filter(|n| n.secret_like).count();
+    println!(
+        "{} notes found ({} look like secrets — {})",
+        notes.len(),
+        secrets,
+        if include_secrets {
+            "included"
+        } else {
+            "skipped"
+        }
+    );
+    let root = &core.config.workspace_root;
+    let existing = importer::existing_areas(root);
+    println!("asking the agent to propose areas…");
+    let reply = agents::chat(
+        &core.config,
+        importer::assignment_prompt(&notes, &existing),
+        None,
+        ChatMode::Chat,
+    )
+    .await
+    .context("the sorting turn failed")?;
+    let plan = importer::parse_plan(&reply.reply_markdown)?;
+    println!("areas proposed:");
+    for area in &plan.areas {
+        println!(
+            "  {:<24} {}",
+            importer::sanitize_area(&area.name),
+            area.description
+        );
+    }
+    let report = importer::apply(&notes, &plan, root, include_secrets, dry_run)?;
+    println!();
+    println!("{}:", if dry_run { "would write" } else { "written" });
+    for (area, file) in &report.written {
+        println!("  {area}/{file}");
+    }
+    if !report.skipped_existing.is_empty() {
+        println!(
+            "skipped (already exist): {}",
+            report.skipped_existing.join(", ")
+        );
+    }
+    if !report.skipped_secret.is_empty() {
+        println!(
+            "skipped (secret-like): {}",
+            report.skipped_secret.join(", ")
+        );
+    }
+    if !report.fell_back.is_empty() {
+        println!(
+            "sent to {}: {}",
+            importer::FALLBACK_AREA,
+            report.fell_back.join(", ")
+        );
+    }
+    if !dry_run {
+        let sync = memory::sync(&core.config).context("memory sync after import")?;
+        println!(
+            "memory router synced: {} CLAUDE.md written, {} tracked files (session {}, ${:.2})",
+            sync.written.len(),
+            sync.tracked_files,
+            reply.session_id,
+            reply.cost_usd.unwrap_or_default()
+        );
     }
     Ok(())
 }
