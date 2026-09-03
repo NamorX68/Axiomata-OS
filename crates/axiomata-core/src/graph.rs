@@ -204,11 +204,16 @@ pub fn extract_links(root: &Path, files: &[GraphFile]) -> Vec<GraphLink> {
 
     let mut seen = std::collections::HashSet::new();
     let mut links = Vec::new();
-    for f in files.iter().filter(|f| f.is_markdown) {
+    for f in files.iter().filter(|f| f.is_markdown || is_html(&f.path)) {
         let Some(text) = read_head(&root.join(&f.path), MAX_LINK_SCAN_BYTES) else {
             continue;
         };
-        for target in link_targets(&text) {
+        let targets = if f.is_markdown {
+            link_targets(&text)
+        } else {
+            html_link_targets(&text)
+        };
+        for target in targets {
             if let Some(to) = resolve(&f.path, &target)
                 && to != f.path
             {
@@ -243,6 +248,50 @@ fn normalise_rel(folder: &str, candidate: &str) -> String {
         }
     }
     parts.join("/")
+}
+
+fn is_html(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.ends_with(".html") || lower.ends_with(".htm")
+}
+
+/// Relative `href` targets in an HTML text: `.html` / `.htm` / `.md` files
+/// only; anchors, external URLs, `mailto:` / `javascript:` / `data:` and query
+/// strings / fragments are dropped.
+pub fn html_link_targets(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(pos) = lower[from..].find("href") {
+        let mut i = from + pos + 4;
+        let bytes = lower.as_bytes();
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'=') {
+            i += 1;
+        }
+        from = i;
+        let Some(&quote) = bytes.get(i) else { break };
+        if quote != b'"' && quote != b'\'' {
+            continue;
+        }
+        let Some(end) = lower[i + 1..].find(quote as char) else {
+            break;
+        };
+        let raw = &text[i + 1..i + 1 + end];
+        from = i + 1 + end;
+        let target = raw.split(['#', '?']).next().unwrap_or("").trim();
+        let tl = target.to_lowercase();
+        if target.is_empty()
+            || tl.contains("://")
+            || tl.starts_with("mailto:")
+            || tl.starts_with("javascript:")
+            || tl.starts_with("data:")
+            || !(tl.ends_with(".html") || tl.ends_with(".htm") || tl.ends_with(".md"))
+        {
+            continue;
+        }
+        out.push(target.to_string());
+    }
+    out
 }
 
 /// The raw link targets in a Markdown text.
@@ -356,6 +405,67 @@ mod tests {
                 (
                     "Entwicklung/Cargo Cheat Sheet.md",
                     "Entwicklung/Rust lernen.md"
+                ),
+            ]
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_html_href_targets() {
+        let t = html_link_targets(
+            "<a href=\"0001-hallo-rust.html\">n</a> <a HREF='../BlockOS/0000-roadmap.html#top'>r</a> \
+             <a href=\"https://os.phil-opp.com/x.html\">e</a> <a href=\"#quiz\">q</a> \
+             <link href=\"assets/rust-course.css\"> <a href=\"NOTES.md?x=1\">m</a> <a href=\"mailto:a@b.de\">",
+        );
+        assert_eq!(
+            t,
+            vec![
+                "0001-hallo-rust.html",
+                "../BlockOS/0000-roadmap.html",
+                "NOTES.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn html_pages_link_each_other_in_the_graph() {
+        let root = unique_temp_dir("axiomata-test-graph-html");
+        let files = [
+            (
+                "Learning/Rust/lessons/0000-roadmap.html",
+                "<title>Roadmap</title><a href=\"0001-hallo-rust.html\">go</a>",
+            ),
+            (
+                "Learning/Rust/lessons/0001-hallo-rust.html",
+                "<title>Hallo</title><a href=\"0000-roadmap.html\">back</a><a href=\"../GLOSSARY.md\">g</a>",
+            ),
+            ("Learning/Rust/GLOSSARY.md", "# Glossar"),
+        ];
+        for (p, c) in &files {
+            let full = root.join(p);
+            fs::create_dir_all(full.parent().unwrap()).unwrap();
+            fs::write(full, c).unwrap();
+        }
+        let links = extract_links(&root, &make(&files));
+        let pairs: Vec<(&str, &str)> = links
+            .iter()
+            .map(|l| (l.from.as_str(), l.to.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                (
+                    "Learning/Rust/lessons/0000-roadmap.html",
+                    "Learning/Rust/lessons/0001-hallo-rust.html"
+                ),
+                (
+                    "Learning/Rust/lessons/0001-hallo-rust.html",
+                    "Learning/Rust/lessons/0000-roadmap.html"
+                ),
+                (
+                    "Learning/Rust/lessons/0001-hallo-rust.html",
+                    "Learning/Rust/GLOSSARY.md"
                 ),
             ]
         );

@@ -35,7 +35,37 @@ const files = new Map<string, string>([
     "# Inbox\n\nA scratch note in the *dev* workspace.\n\n- [x] wire md-file\n- [ ] ship M5\n\n| col | val |\n|-----|-----|\n| a | 1 |\n\n```ts\nconst x = 1;\n```\n",
   ],
   ["README.md", "# Axiomata-Workspace\n\nSecond-brain root.\n"],
+  ["Learning/Rust/GLOSSARY.md", "# Glossar\n\n- **Ownership** — wer den Wert besitzt.\n"],
+  [
+    "Learning/Rust/lessons/0000-roadmap.html",
+    lessonPage("Roadmap", "Der Kurs in Etappen.", "0001-hallo-rust.html", "Hallo Rust"),
+  ],
+  [
+    "Learning/Rust/lessons/0001-hallo-rust.html",
+    lessonPage("Lektion 1 · Hallo Rust", "Erstes Programm mit <code>cargo run</code>.", "0002-variablen.html", "Variablen"),
+  ],
+  [
+    "Learning/Rust/lessons/0002-variablen.html",
+    lessonPage("Lektion 2 · Variablen &amp; Datentypen", "let, mut und Shadowing.", "0000-roadmap.html", "Roadmap"),
+  ],
+  ["Learning/BlockOS/0000-roadmap.html", lessonPage("BlockOS Roadmap", "Ein OS in Rust.", "0001-freestanding-binary.html", "Weiter")],
 ]);
+
+/** A self-contained course page like the owner's: inline style, quiz script, relative link. */
+function lessonPage(title: string, intro: string, nextHref: string, nextLabel: string): string {
+  return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>${title}</title>
+<style>body{font-family:Georgia,serif;background:#141219;color:#f4efe6;padding:2rem;max-width:720px;margin:auto}
+h1{color:#ff6b1a}.quiz{background:#1e1b26;padding:1rem;border-radius:8px}button{background:#ff6b1a;border:0;padding:.5rem 1rem;border-radius:6px}
+#result{margin-top:.5rem;color:#7bd88f}</style></head><body>
+<h1>${title}</h1><p>${intro}</p>
+<div class="quiz"><p>Quiz: Was gibt <code>let x = 5;</code> zurück?</p>
+<label><input type="radio" name="q" value="a"> Nichts, es bindet x</label><br>
+<label><input type="radio" name="q" value="b"> 5</label><br>
+<button onclick="gradeQuiz()">Prüfen</button><div id="result"></div></div>
+<p><a href="${nextHref}">${nextLabel} →</a> · <a href="https://doc.rust-lang.org/book/">Rust Book</a></p>
+<script>function gradeQuiz(){const v=document.querySelector('input[name=q]:checked');document.getElementById('result').textContent=v&&v.value==='a'?'Richtig!':'Nochmal.';}</script>
+</body></html>`;
+}
 let memory: MemoryStatus = {
   workspace_root: "/Users/dev/Axiomata-Workspace",
   last_sync: new Date(Date.now() - 5 * 60_000).toISOString(),
@@ -121,7 +151,26 @@ function mockGraph(): WorkspaceGraph {
     }
   }
   files.push({ path: "README.md", area: null, title: "Vault", bytes: 300, modified: null, is_markdown: true });
-  const links: GraphLink[] = [];
+  for (const [rel, title] of [
+    ["Rust/GLOSSARY.md", "Glossar"],
+    ["Rust/NOTES.md", "Notizen"],
+    ["Rust/lessons/0000-roadmap.html", "Roadmap"],
+    ["Rust/lessons/0001-hallo-rust.html", "Lektion 1 · Hallo Rust"],
+    ["Rust/lessons/0002-variablen.html", "Lektion 2 · Variablen & Datentypen"],
+    ["Rust/lessons/0003-funktionen.html", "Lektion 3 · Funktionen"],
+    ["Rust/lessons/0004-kontrollfluss.html", "Lektion 4 · Kontrollfluss"],
+    ["BlockOS/0000-roadmap.html", "BlockOS Roadmap"],
+    ["BlockOS/0001-freestanding-binary.html", "Freestanding Binary"],
+    ["BlockOS/0002-minimal-kernel.html", "Minimal Kernel"],
+  ] as const) {
+    files.push({ path: `Learning/${rel}`, area: "Learning", title, bytes: 24_000, modified: new Date().toISOString(), is_markdown: rel.endsWith(".md") });
+  }
+  const links: GraphLink[] = [
+    { from: "Learning/Rust/lessons/0000-roadmap.html", to: "Learning/Rust/lessons/0001-hallo-rust.html" },
+    { from: "Learning/Rust/lessons/0001-hallo-rust.html", to: "Learning/Rust/lessons/0002-variablen.html" },
+    { from: "Learning/Rust/lessons/0002-variablen.html", to: "Learning/Rust/lessons/0003-funktionen.html" },
+    { from: "Learning/BlockOS/0000-roadmap.html", to: "Learning/BlockOS/0001-freestanding-binary.html" },
+  ];
   for (let i = 0; i < 70; i++) {
     const a = files[Math.floor(rnd() * files.length)];
     const b = files[Math.floor(rnd() * files.length)];
@@ -130,7 +179,7 @@ function mockGraph(): WorkspaceGraph {
   return {
     workspace_root: memory.workspace_root,
     hub: "CLAUDE.md",
-    areas: areas.map(([name, n]) => ({ name, files: n })),
+    areas: [...areas.map(([name, n]) => ({ name, files: n })), { name: "Learning", files: 10 }],
     files,
     links,
     skills: skills.map((s) => ({ name: s.name, description: s.description, backend: s.backend, model: null, effort: null })),
@@ -254,6 +303,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "write_workspace_file":
       files.set(String(args.rel), String(args.content));
       return undefined as T;
+    case "open_workspace_html": {
+      const rel = String(args.rel);
+      if (!/\.html?$/i.test(rel)) throw new Error(`${rel}: only .html / .htm files are framed`);
+      if (!files.has(rel)) throw new Error(`I/O error at ${rel}: No such file or directory`);
+      return `/Users/dev/Axiomata-Workspace/${rel}` as T;
+    }
     default:
       throw new Error(`devmock: no fixture for "${cmd}"`);
   }

@@ -1,12 +1,21 @@
 <!--
-  md-file — a Markdown viewer/editor for one workspace file. Read mode
-  renders through core/markdown (marked + DOMPurify); Edit mode is a
-  textarea; Save writes via `write_workspace_file`. Config: `path`
-  (workspace-relative), `mode` ("read" | "edit"), `stageFrom`. With no path
-  the tile asks for one (also settable on the flip side).
+  md-file ("Document") — the viewer for one workspace file.
+  - `.md`: read mode renders through core/markdown (marked + DOMPurify), edit
+    mode is a textarea, Save writes via `write_workspace_file`.
+  - `.html` / `.htm` (courses): shown read-only in a sandboxed iframe whose src
+    is an asset-protocol URL from `open_workspace_html` (which allows the
+    page's folder in the asset scope, so same-folder links keep working).
+    `sandbox="allow-scripts"` only: inline quiz scripts run, the page has an
+    opaque origin and no access to the app. Known limits: navigation inside
+    the frame does not update the path in the bar; external links are blocked
+    by the app's frame-src and show a blank frame. In the browser dev mock
+    the page is loaded via `srcdoc` instead.
+  Config: `path` (workspace-relative), `mode` ("read" | "edit"), `stageFrom`.
 -->
 <script lang="ts">
-  import type { WorkspaceFile } from "../core/backend";
+  import { convertFileSrc } from "@tauri-apps/api/core";
+
+  import { insideTauri, type WorkspaceFile } from "../core/backend";
   import { relativeTime } from "../core/format";
   import { renderMarkdown } from "../core/markdown";
   import type { ModuleContext } from "../core/types";
@@ -23,13 +32,23 @@
   let pathInput = $state("");
 
   const path = $derived(typeof $config.path === "string" ? $config.path : "");
-  const mode = $derived($config.mode === "edit" ? "edit" : "read");
+  const kind = $derived(/\.html?$/i.test(path) ? "html" : "markdown");
+  const mode = $derived($config.mode === "edit" && kind === "markdown" ? "edit" : "read");
+  let frameSrc = $state<string | null>(null);
+  let frameDoc = $state<string | null>(null);
+  let reloadTick = $state(0);
   const dirty = $derived(file !== null && draft !== file.content);
   const html = $derived(file ? renderMarkdown(mode === "edit" ? draft : file.content) : "");
 
   async function load(rel: string) {
     if (!rel) {
       file = null;
+      frameSrc = null;
+      frameDoc = null;
+      return;
+    }
+    if (/\.html?$/i.test(rel)) {
+      await loadHtml(rel);
       return;
     }
     try {
@@ -38,6 +57,28 @@
       error = "";
     } catch (err) {
       file = null;
+      error = String(err);
+    }
+  }
+
+  async function loadHtml(rel: string) {
+    file = null;
+    try {
+      if (insideTauri()) {
+        const abs = await ctx.invoke<string>("open_workspace_html", { rel });
+        frameSrc = convertFileSrc(abs);
+        frameDoc = null;
+      } else {
+        // Browser dev mock: no asset protocol — inline the fixture page.
+        const f = await ctx.invoke<WorkspaceFile>("read_workspace_file", { rel });
+        frameDoc = f.content;
+        frameSrc = null;
+      }
+      reloadTick++;
+      error = "";
+    } catch (err) {
+      frameSrc = null;
+      frameDoc = null;
       error = String(err);
     }
   }
@@ -86,7 +127,9 @@
       <span class="path" title={path}>{path}</span>
       {#if file?.modified}<span class="muted">· {relativeTime(file.modified)}</span>{/if}
       <span class="spacer"></span>
-      {#if mode === "read"}
+      {#if kind === "html"}
+        <button type="button" onclick={() => ctx.emit("open-second-brain", { focus: `file:${path}` })}>In Second Brain</button>
+      {:else if mode === "read"}
         <button type="button" onclick={() => setMode("edit")} disabled={!file}>Edit</button>
       {:else}
         <button type="button" onclick={() => setMode("read")}>Read</button>
@@ -98,6 +141,21 @@
     </div>
     {#if error}
       <p class="error">{error}</p>
+    {:else if kind === "html"}
+      {#if frameSrc || frameDoc}
+        {#key reloadTick}
+          <iframe
+            class="page"
+            title={path}
+            sandbox="allow-scripts"
+            referrerpolicy="no-referrer"
+            src={frameSrc ?? undefined}
+            srcdoc={frameDoc ?? undefined}
+          ></iframe>
+        {/key}
+      {:else}
+        <p class="muted">Loading…</p>
+      {/if}
     {:else if !file}
       <p class="muted">Loading…</p>
     {:else if mode === "edit"}
@@ -168,6 +226,14 @@
     font-size: var(--ax-font-size-sm);
     line-height: 1.55;
     padding: var(--ax-space-3);
+  }
+
+  .page {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+    background: var(--ax-surface-1);
   }
 
   .rendered {
