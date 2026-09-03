@@ -23,6 +23,8 @@
   const config = ctx.config;
 
   let canvas = $state<HTMLCanvasElement | null>(null);
+  /** Outer disc radius in px (0.42 × the shorter side) — positions the hint. */
+  let discR = $state(200);
   let renderer = $state.raw<GraphRenderer | null>(null);
   let graph: WorkspaceGraph | null = null;
   let hover = $state<GraphNode | null>(null);
@@ -37,7 +39,7 @@
     const palette = readPalette();
     const model = buildModel(graph, palette);
     layoutOrbit(model);
-    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert, palette.surface, palette.accent);
+    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert, palette.surface, palette.accent, palette.light);
     renderer.model = model;
     summary = `${graph.files.length} files · ${graph.areas.length} areas · ${graph.links.length} links${graph.truncated ? " · truncated" : ""}`;
   }
@@ -80,7 +82,11 @@
     renderer = new GraphRenderer(canvas);
     renderer.options = { mode: "orbit", spin: spin ? 0.02 : 0, labels, fileLabels: false, fit: 0.42 };
     renderer.resize();
-    const ro = new ResizeObserver(() => renderer?.resize());
+    const ro = new ResizeObserver(() => {
+      renderer?.resize();
+      const r = canvas!.getBoundingClientRect();
+      discR = Math.min(r.width, r.height) * 0.42;
+    });
     ro.observe(canvas);
     const mo = new MutationObserver(() => rebuild());
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -113,8 +119,8 @@
   {#if error}
     <p class="error">{error}</p>
   {:else}
-    <p class="hint">{hover ? hover.label : "CLICK TO OPEN SECOND BRAIN"}</p>
-    <p class="summary">{summary}</p>
+    <p class="hint" style:top="calc(50% + {discR * 0.72}px)">{hover ? hover.label : "CLICK TO OPEN SECOND BRAIN"}</p>
+    <p class="summary" style:top="calc(50% + {discR * 0.72 + 20}px)">{summary}</p>
   {/if}
 </div>
 
@@ -146,10 +152,10 @@
     white-space: nowrap;
   }
   .hint {
-    bottom: 28px;
+    top: 50%;
   }
   .summary {
-    bottom: 8px;
+    top: 50%;
     text-transform: none;
     letter-spacing: 0.04em;
     color: var(--ax-text-muted);
