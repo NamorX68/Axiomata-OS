@@ -251,7 +251,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<section class="brain" transition:fade={{ duration: 200 }} aria-label="Second Brain">
+<section class="brain" aria-label="Second Brain">
   <header>
     <h1>
       <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
