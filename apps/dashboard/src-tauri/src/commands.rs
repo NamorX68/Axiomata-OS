@@ -10,6 +10,7 @@ use axiomata_core::AxiomataCore;
 use axiomata_core::agents::{self, ChatMode, ChatReply};
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
 use axiomata_core::dashboard::{self, LoadedState};
+use axiomata_core::graph::{self, WorkspaceGraph};
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
@@ -60,6 +61,16 @@ pub fn get_dashboard_state() -> Result<LoadedState, String> {
 #[tauri::command]
 pub fn save_dashboard_state(json: String) -> Result<(), String> {
     dashboard::save_state(&json).map_err(|err| err.to_string())
+}
+
+/// The workspace as a graph for the particle view: files (with area, title,
+/// size, mtime), wiki/relative links, skills, routines, the CLAUDE.md hub.
+/// Walks the workspace and reads Markdown heads; takes the DB lock only for
+/// the routine list.
+#[tauri::command]
+pub fn get_workspace_graph(state: State<'_, CoreState>) -> Result<WorkspaceGraph, String> {
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    graph::build(&state.config, &db).map_err(|err| err.to_string())
 }
 
 /// Renders the mounted-module manifest into `~/.axiomata/module-context.md`

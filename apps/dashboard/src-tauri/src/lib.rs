@@ -21,6 +21,7 @@ pub fn run() {
             commands::poll_module_actions,
             commands::complete_module_action,
             commands::load_custom_css,
+            commands::get_workspace_graph,
             commands::list_skills,
             commands::list_runs,
             commands::get_run,
