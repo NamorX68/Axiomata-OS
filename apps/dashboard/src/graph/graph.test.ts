@@ -12,6 +12,7 @@ const palette: Palette = {
   success: "#0f0",
   border: "#444",
   invert: "#000",
+  surface: "#111",
   light: false,
 };
 

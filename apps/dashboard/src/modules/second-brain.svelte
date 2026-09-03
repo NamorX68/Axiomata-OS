@@ -11,7 +11,7 @@
 
   import type { WorkspaceGraph } from "../core/backend";
   import type { ModuleContext } from "../core/types";
-  import { layoutRings } from "../graph/layout";
+  import { layoutOrbit } from "../graph/layout";
   import { buildModel, readPalette, type GraphNode } from "../graph/model";
   import { GraphRenderer } from "../graph/render";
 
@@ -36,8 +36,8 @@
     if (!renderer || !graph) return;
     const palette = readPalette();
     const model = buildModel(graph, palette);
-    layoutRings(model);
-    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert);
+    layoutOrbit(model);
+    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert, palette.surface, palette.accent);
     renderer.model = model;
     summary = `${graph.files.length} files · ${graph.areas.length} areas · ${graph.links.length} links${graph.truncated ? " · truncated" : ""}`;
   }
@@ -71,14 +71,14 @@
   $effect(() => {
     // Read the reactive inputs first — an early return on a missing renderer
     // would otherwise leave the effect without dependencies.
-    const next = { spin: spin ? 0.02 : 0, labels };
+    const next = { mode: "orbit" as const, spin: spin ? 0.02 : 0, labels };
     if (renderer) renderer.options = { ...renderer.options, ...next };
   });
 
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { spin: spin ? 0.02 : 0, labels, fileLabels: false, fit: 0.42 };
+    renderer.options = { mode: "orbit", spin: spin ? 0.02 : 0, labels, fileLabels: false, fit: 0.42 };
     renderer.resize();
     const ro = new ResizeObserver(() => renderer?.resize());
     ro.observe(canvas);

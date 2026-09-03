@@ -31,6 +31,56 @@ function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2
 
 export type LayoutKind = "rings" | "circle";
 
+/** Most icon nodes on the dashboard orbit ring. */
+export const ORBIT_MAX = 36;
+
+/** Dashboard-centre layout (the reference look): skills, routines and the
+ *  most recently changed notes as icon nodes on the outer ring; every file
+ *  as a point of a 3-D cloud (fibonacci sphere, denser towards the centre)
+ *  that the renderer spins and projects. */
+export function layoutOrbit(model: GraphModel): void {
+  const hub = model.byId.get("hub");
+  if (hub) {
+    hub.x = 0;
+    hub.y = 0;
+  }
+  const files = model.nodes.filter((n) => n.kind === "file");
+  const recent = [...files]
+    .filter((n) => n.modified)
+    .sort((a, b) => Date.parse(b.modified!) - Date.parse(a.modified!));
+  const ring = [
+    ...model.nodes.filter((n) => n.kind === "skill"),
+    ...model.nodes.filter((n) => n.kind === "routine"),
+  ];
+  for (const n of recent) {
+    if (ring.length >= ORBIT_MAX) break;
+    ring.push(n);
+  }
+  for (const n of model.nodes) n.onOrbit = false;
+  ring.forEach((n, i) => {
+    n.onOrbit = true;
+    const a = -Math.PI / 2 + (i / ring.length) * Math.PI * 2;
+    n.x = Math.cos(a);
+    n.y = Math.sin(a);
+  });
+  // Areas are not drawn in orbit mode; park them at the centre.
+  for (const n of model.nodes.filter((n) => n.kind === "area")) {
+    n.x = 0;
+    n.y = 0;
+  }
+  // Cloud: fibonacci sphere, radius by cube-root so the blob is solid.
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const total = files.length || 1;
+  files.forEach((n, i) => {
+    const t = (i + 0.5) / total;
+    const yUnit = 1 - 2 * t;
+    const rUnit = Math.sqrt(Math.max(0, 1 - yUnit * yUnit));
+    const theta = golden * i;
+    const radius = 0.62 * Math.cbrt(0.25 + 0.75 * ((n.phase + 0.5) % 1));
+    n.p3 = [Math.cos(theta) * rUnit * radius, yUnit * radius, Math.sin(theta) * rUnit * radius];
+  });
+}
+
 export function applyLayout(model: GraphModel, kind: LayoutKind): void {
   if (kind === "circle") layoutCircle(model);
   else layoutRings(model);
@@ -64,11 +114,12 @@ export function layoutRings(model: GraphModel): void {
   placeRing(
     model.nodes.filter((n) => n.kind === "skill"),
     RING.skills,
+    -Math.PI / 2 + 0.6,
   );
   placeRing(
     model.nodes.filter((n) => n.kind === "routine"),
     RING.routines,
-    -Math.PI / 2 + 0.15,
+    -Math.PI / 2 + 0.45,
   );
   // Area nodes sit at the middle angle of their own segment.
   for (const seg of model.areas) {

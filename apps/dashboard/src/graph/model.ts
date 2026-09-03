@@ -29,6 +29,13 @@ export interface GraphNode {
   degree: number;
   modified?: string | null;
   isMarkdown?: boolean;
+  /** Orbit mode: 3-D point of the particle cloud (graph units). */
+  p3?: [number, number, number];
+  /** Orbit mode: node sits on the icon ring. */
+  onOrbit?: boolean;
+  /** Orbit mode: last projected screen position (for hit-testing). */
+  sx?: number;
+  sy?: number;
 }
 
 export interface GraphEdge {
@@ -63,6 +70,8 @@ export interface Palette {
   border: string;
   /** Contrast colour for glyphs on coloured nodes (`--ax-text-invert`). */
   invert: string;
+  /** Tile surface (`--ax-surface-1`), used for orbit-node fills. */
+  surface: string;
   light: boolean;
 }
 
@@ -78,6 +87,7 @@ export function readPalette(): Palette {
     success: v("--ax-success", "#4fd67f"),
     border: v("--ax-border-strong", "#3b3b43"),
     invert: v("--ax-text-invert", "#0b0b0d"),
+    surface: v("--ax-surface-1", "#121216"),
     light: v("--ax-color-scheme", "dark") === "light",
   };
 }
@@ -91,6 +101,8 @@ export function areaColor(name: string, light: boolean): string {
 }
 
 const AREA_GAP = 0.06; // radians between segments
+/** Free angle around 12 o'clock for the ring captions. */
+export const CAPTION_GAP = 0.26;
 
 export type Grouping = "areas" | "folders";
 
@@ -186,7 +198,8 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
   const counted = g.areas.filter((a) => a.files > 0);
   const total = counted.reduce((n, a) => n + a.files, 0) || 1;
   const usable = Math.PI * 2 - AREA_GAP * counted.length;
-  let angle = -Math.PI / 2;
+  // Start a little past 12 o'clock so the ring captions up there stay clear.
+  let angle = -Math.PI / 2 + CAPTION_GAP;
   const areas: AreaSegment[] = counted.map((a) => {
     const span = (a.files / total) * usable;
     const seg = { name: a.name, color: areaColor(a.name, palette.light), count: a.files, start: angle, end: angle + span };
