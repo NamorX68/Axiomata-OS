@@ -28,6 +28,32 @@ function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2
   });
 }
 
+export type LayoutKind = "rings" | "circle";
+
+export function applyLayout(model: GraphModel, kind: LayoutKind): void {
+  if (kind === "circle") layoutCircle(model);
+  else layoutRings(model);
+}
+
+/** All files on one ring, grouped by area segment; skills / routines as in
+ *  the ring layout. Good for spotting links. */
+export function layoutCircle(model: GraphModel): void {
+  layoutRings(model);
+  const files = model.nodes.filter((n) => n.kind === "file");
+  const radius = (RING.filesInner + RING.filesOuter) / 2 + 0.1;
+  for (const seg of model.areas) {
+    const mine = files
+      .filter((n) => n.area === seg.name)
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const span = seg.end - seg.start;
+    mine.forEach((node, i) => {
+      const a = mine.length > 1 ? seg.start + (i / (mine.length - 1)) * span : (seg.start + seg.end) / 2;
+      node.x = Math.cos(a) * radius;
+      node.y = Math.sin(a) * radius;
+    });
+  }
+}
+
 export function layoutRings(model: GraphModel): void {
   const hub = model.byId.get("hub");
   if (hub) {

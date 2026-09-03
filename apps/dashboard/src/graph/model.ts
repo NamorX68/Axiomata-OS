@@ -87,6 +87,52 @@ export function areaColor(name: string, light: boolean): string {
 
 const AREA_GAP = 0.06; // radians between segments
 
+export type Grouping = "areas" | "folders";
+
+/** Re-keys every file's area to its full parent folder (for the "folders"
+ *  view); the root stays `null`. Areas are recomputed from the files. */
+export function regroup(g: WorkspaceGraph, grouping: Grouping): WorkspaceGraph {
+  if (grouping === "areas") return g;
+  const counts = new Map<string, number>();
+  const files = g.files.map((f) => {
+    const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : null;
+    if (dir) counts.set(dir, (counts.get(dir) ?? 0) + 1);
+    return { ...f, area: dir };
+  });
+  return {
+    ...g,
+    files,
+    areas: [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, n]) => ({ name, files: n })),
+  };
+}
+
+/** Node ids whose label / path / area contain every word of `query`. */
+export function searchNodes(model: GraphModel, query: string): Set<string> {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = new Set<string>();
+  if (words.length === 0) return hits;
+  for (const n of model.nodes) {
+    const hay = `${n.label} ${n.path ?? ""} ${n.area ?? ""}`.toLowerCase();
+    if (words.every((w) => hay.includes(w))) hits.add(n.id);
+  }
+  return hits;
+}
+
+/** Neighbours of a node via the edge list, as `{ id, direction }`. */
+export function neighbours(model: GraphModel, id: string): { node: GraphNode; out: boolean }[] {
+  const out: { node: GraphNode; out: boolean }[] = [];
+  for (const e of model.edges) {
+    if (e.from === id) {
+      const n = model.byId.get(e.to);
+      if (n) out.push({ node: n, out: true });
+    } else if (e.to === id) {
+      const n = model.byId.get(e.from);
+      if (n) out.push({ node: n, out: false });
+    }
+  }
+  return out;
+}
+
 export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
   const nodes: GraphNode[] = [];
   const byId = new Map<string, GraphNode>();

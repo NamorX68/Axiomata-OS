@@ -38,6 +38,8 @@ export class GraphRenderer {
   view: View = { x: 0, y: 0, zoom: 1 };
   hover: GraphNode | null = null;
   selected: GraphNode | null = null;
+  /** When set, only these ids draw at full strength (search results). */
+  highlight: Set<string> | null = null;
   private angle = 0;
   private last = 0;
   private textColor = "#fff";
@@ -79,6 +81,15 @@ export class GraphRenderer {
       x: this.width / 2 + this.view.x + (n.x * cos - n.y * sin) * R,
       y: this.height / 2 + this.view.y + (n.x * sin + n.y * cos) * R,
     };
+  }
+
+  /** Pans so `node` sits at the canvas centre (at the current zoom). */
+  centerOn(node: GraphNode): void {
+    const R = this.radius();
+    const cos = Math.cos(this.angle);
+    const sin = Math.sin(this.angle);
+    this.view.x = -(node.x * cos - node.y * sin) * R;
+    this.view.y = -(node.x * sin + node.y * cos) * R;
   }
 
   /** Nearest node within `slop` px of a CSS-px point, or null. */
@@ -164,8 +175,10 @@ export class GraphRenderer {
     ctx.globalAlpha = 1;
 
     // Nodes.
+    const hl = this.highlight;
     for (const n of model.nodes) {
       const p = this.toScreen(n);
+      const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
       const twinkle = n.kind === "file" ? 0.75 + 0.25 * Math.sin(t * 1.7 + n.phase * TWO_PI) : 1;
       const r = Math.max(1.2, n.r * Math.sqrt(this.view.zoom)) * (n === this.hover || n === this.selected ? 1.8 : 1);
       if (n.kind !== "file") {
@@ -178,7 +191,7 @@ export class GraphRenderer {
         ctx.arc(p.x, p.y, r * 3.2, 0, TWO_PI);
         ctx.fill();
       }
-      ctx.globalAlpha = n.kind === "routine" && n.enabled === false ? 0.35 : twinkle;
+      ctx.globalAlpha = dimmed ? 0.12 : n.kind === "routine" && n.enabled === false ? 0.35 : twinkle;
       ctx.fillStyle = n.color;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TWO_PI);
@@ -200,8 +213,11 @@ export class GraphRenderer {
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       for (const n of model.nodes) {
-        const showFile = n.kind === "file" && (this.options.fileLabels || n === this.hover || n === this.selected);
+        const lit = hl !== null && hl.has(n.id);
+        const showFile =
+          n.kind === "file" && (this.options.fileLabels || lit || n === this.hover || n === this.selected);
         if (n.kind === "file" && !showFile) continue;
+        if (hl !== null && !lit && n !== this.selected && n !== this.hover) continue;
         const p = this.toScreen(n);
         ctx.fillStyle = n.kind === "file" ? this.textColor : n.kind === "hub" ? this.textColor : this.mutedColor;
         ctx.globalAlpha = n === this.hover || n === this.selected ? 1 : 0.8;
