@@ -163,7 +163,13 @@ size goes through a `--ax-*` token; no literals in components.
   resolves the file through the workspace guard and allows **only its folder** (non-recursive)
   in the runtime asset scope (`asset_protocol_scope().allow_directory`); the static scope in
   `tauri.conf.json` is empty and the CSP carries `frame-src asset: http://asset.localhost`.
-  Notes elsewhere in the vault are never served by the asset protocol.
+  Notes elsewhere in the vault are never served by the asset protocol. The URL itself is built
+  by `core/backend.assetFileUrl`, **not** the SDK's `convertFileSrc` — that one runs
+  `encodeURIComponent` over the *whole* path, turning every `/` into `%2F` and leaving the
+  browser no literal path to resolve a relative link against, so a lesson's "next page" link
+  silently failed. `assetFileUrl` encodes each segment but keeps `/` literal; Tauri's asset
+  handler percent-decodes the whole request path as one string either way, so it serves the
+  identical file — this form just also supports in-page relative navigation.
 - **Chat**: the bottom bar routes input — registered `/command` runs locally
   (`core/commands.ts`), other `/text` is a one-shot `instruct` turn, plain text a `chat`
   turn. `agents::claude_code::chat` = `claude -p --output-format json --permission-mode
