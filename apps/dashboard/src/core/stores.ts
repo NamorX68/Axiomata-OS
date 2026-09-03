@@ -1,7 +1,7 @@
 /**
  * Canvas state: the list of placed module instances plus the active theme.
- * Persistence to `~/.axiomata/dashboard.json` is wired in step 6; the mutation
- * helpers here already call `markDirty()` so that hook is a one-liner.
+ * Every mutation helper calls `markDirty()`; `persist.ts` registers the
+ * debounced writer to `~/.axiomata/dashboard.json` via `onDirty`.
  */
 
 import { get, writable, type Writable } from "svelte/store";
@@ -11,7 +11,7 @@ import type { CanvasInstance } from "./types";
 export const instances: Writable<CanvasInstance[]> = writable([]);
 export const activeTheme: Writable<string> = writable("graphite");
 
-/** Set by persist.ts (step 6). Until then, a no-op. */
+/** Set by persist.ts on boot. Until then, a no-op. */
 let dirtyHook: () => void = () => {};
 export function onDirty(fn: () => void): void {
   dirtyHook = fn;

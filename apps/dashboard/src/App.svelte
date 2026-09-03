@@ -14,6 +14,7 @@
   import { addInstance, instances } from "./core/stores";
   import IconBar from "./shell/IconBar.svelte";
   import LegacyPanels from "./shell/LegacyPanels.svelte";
+  import Toasts from "./shell/Toasts.svelte";
   import TopBar from "./shell/TopBar.svelte";
 
   // Step-2 scaffolding: prove the registry/store/context pipeline end to end.
@@ -44,6 +45,7 @@
 
 <TopBar />
 <IconBar />
+<Toasts />
 
 {#if import.meta.env.DEV}
   <div class="dev-tools">

@@ -12,6 +12,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_app_info,
+            commands::get_dashboard_state,
+            commands::save_dashboard_state,
             commands::list_skills,
             commands::list_runs,
             commands::get_run,

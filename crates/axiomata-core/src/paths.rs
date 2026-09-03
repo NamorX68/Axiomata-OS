@@ -63,6 +63,13 @@ pub fn memory_last_sync_path() -> PathBuf {
     axiomata_home().join("memory-last-sync.json")
 }
 
+/// Path to the dashboard layout file (`~/.axiomata/dashboard.json`): module
+/// instances, their positions/sizes/config and UI settings such as the theme.
+/// Hand-editable; see `crate::dashboard`.
+pub fn dashboard_state_path() -> PathBuf {
+    axiomata_home().join("dashboard.json")
+}
+
 /// Directory for global, app-managed skills (`~/.axiomata/skills/`).
 pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")

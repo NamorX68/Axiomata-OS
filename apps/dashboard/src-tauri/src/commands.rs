@@ -7,6 +7,7 @@
 //! a `MutexGuard` is never held across an `.await`.
 
 use axiomata_core::AxiomataCore;
+use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
@@ -42,6 +43,20 @@ pub fn get_app_info(state: State<'_, CoreState>) -> AppInfo {
         workspace_root: root.to_string_lossy().into_owned(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+/// Reads `~/.axiomata/dashboard.json` (raw text) or the defaults; a corrupt
+/// file is moved to `.bak` and reported in `recovered_backup`.
+#[tauri::command]
+pub fn get_dashboard_state() -> Result<LoadedState, String> {
+    dashboard::load_state().map_err(|err| err.to_string())
+}
+
+/// Validates and atomically writes the dashboard state handed in by the
+/// frontend. The core only checks "object with numeric `version`".
+#[tauri::command]
+pub fn save_dashboard_state(json: String) -> Result<(), String> {
+    dashboard::save_state(&json).map_err(|err| err.to_string())
 }
 
 /// Lists every discovered skill (`~/.axiomata/skills/`).

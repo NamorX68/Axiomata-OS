@@ -9,11 +9,12 @@ import "./themes/ocean.css";
 import "./styles.css";
 
 import App from "./App.svelte";
+import { initPersistence } from "./core/persist";
 import { DEFAULT_THEME, applyTheme } from "./core/themes";
 import { registerBuiltins } from "./modules";
 
-// Theme selection is persisted in ~/.axiomata/dashboard.json from step 6 on;
-// until then, boot into the default.
+// Paint the default theme immediately; `initPersistence` swaps in the saved
+// one (and the saved layout) as soon as ~/.axiomata/dashboard.json is read.
 applyTheme(DEFAULT_THEME);
 
 registerBuiltins();
@@ -23,4 +24,7 @@ if (!target) {
   throw new Error("missing #ax-shell mount point");
 }
 
-export default mount(App, { target });
+const app = mount(App, { target });
+void initPersistence();
+
+export default app;
