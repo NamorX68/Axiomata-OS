@@ -10,15 +10,18 @@ Memory, Skills — see `ARMS-Agentic-OS-Guide.pdf` for the original inspiration,
 actual design has since diverged from it in several places).
 
 Milestones **M0 (scaffold)**, **M1 (skills runner)**, **M2 (memory router)**,
-**M3 (routines scheduler)** and **M5 (module-canvas dashboard)** are complete: the
+**M3 (routines scheduler)**, **M5 (module-canvas dashboard)** and **M6 (particle graph /
+Second Brain)** are complete: the
 `agents` enum, the single-location skills registry + runner + run log, the `memory` router
 (walker / renderer / `sync` / `status`), the `routines` module (cron `schedule` / `store` /
 a 30 s Tokio poll loop in `scheduler`), and the Svelte module canvas (free-form tiles with
 drag / resize / flip, layout persistence, four modules, an agentic chat bar, an
-agent-callable module bridge, themes + custom CSS — see "Dashboard (M5)" below). Still
-unimplemented: always-on/background scheduling (M4). The full architecture rationale and
+agent-callable module bridge, themes + custom CSS — see "Dashboard (M5)" below), plus the
+workspace graph behind the tiles and its full-screen Second Brain view (see "Second Brain
+(M6)"). Still unimplemented: always-on/background scheduling (M4). The full architecture rationale and
 the milestone plans live in `~/.claude/plans/ich-m-chte-ein-agentic-shimmering-gadget.md`
-(M0–M4) and `~/.claude/plans/toasty-inventing-crayon.md` (M5), outside this repo on the
+(M0–M4) and `~/.claude/plans/toasty-inventing-crayon.md` (M5; M6 was planned in
+conversation, see the owner's memory notes), outside this repo on the
 owner's machine — read them before starting new work here if available; this file covers
 what's needed to just build/run/navigate the repo as it stands.
 
@@ -44,6 +47,8 @@ cargo run -p axiomata-cli -- routines tick  # run one scheduler poll pass now (n
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct]  # one chat turn
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard
+cargo run -p axiomata-cli -- graph          # workspace graph summary (areas, links, skills, routines)
+cargo run -p axiomata-cli -- import obsidian <folder> [--dry-run] [--skip-secrets]  # agent-sorted import
 
 cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
 cd apps/dashboard && npm run check         # svelte-check + tsc (must be clean)
@@ -169,6 +174,33 @@ size goes through a `--ax-*` token; no literals in components.
   whenever the dashboard has run at least once; delete `module-context.md` to opt out.
 - **Themes**: `<html data-theme="…">`; a user `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection; template via Settings → Copy template.
+
+## Second Brain (M6)
+
+- **Data**: `axiomata_core::graph::build` (command `get_workspace_graph`) — every tracked
+  file (memory walker) with area / title / bytes / mtime, `[[wiki]]` and relative Markdown
+  links resolved to file paths, skills and routines as node kinds, the root `CLAUDE.md` as
+  hub; capped at 5000 files (`truncated`).
+- **Frontend** `apps/dashboard/src/graph/`: `model.ts` (nodes / edges / area segments,
+  theme-derived colours, `regroup` by folders, `searchNodes`, `neighbours`), `layout.ts`
+  (Rings: skills inner ring, files on arcs inside their area segment, routines outer ring;
+  Circle), `render.ts` (Canvas 2D, DPR-aware, spin, hover hit-test, view transform,
+  highlight). No graph library on purpose; `d3-force` would only be added for a force
+  layout.
+- **Module `second-brain`**: `singleton` + `background` — mounted full-size in
+  `#particle-slot` behind the tiles by `canvas/BackgroundHost.svelte` (corner ⚙ / ×).
+  Click → `open-second-brain` bus event → `shell/SecondBrainView.svelte` (full screen:
+  pan / zoom, search, Rings / Circle, Areas / Folders, detail panel with View here /
+  Copy path / Fly to / Run skill / toggle routine, Connections). Also `/brain [path | ?
+  query]` and the module actions `open`, `search`, `refresh`. View preferences live in
+  `dashboard.json` → `settings.secondBrain`.
+- **Import**: `axiomata_core::importer` + `axiomata-cli import obsidian` — notes
+  normalised to "# Title + content" (frontmatter / tag lines dropped, tags only as hints),
+  the agent proposes the areas and assigns every note in one JSON turn, files are written
+  under `<workspace>/<Area>/`, never overwriting; secret-looking notes are flagged, not
+  skipped, unless `--skip-secrets`.
+- Escape across overlays: the first handler that acts calls `preventDefault()`; later ones
+  (Second Brain, chat) check `defaultPrevented` — never the DOM (outro transitions linger).
 
 **Test convention:** any test that mutates the `AXIOMATA_HOME` env var must lock
 `crate::test_support::ENV_MUTEX` first (`crates/axiomata-core/src/lib.rs`) — `cargo test`

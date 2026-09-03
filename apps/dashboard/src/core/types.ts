@@ -51,6 +51,9 @@ export interface ModuleDefinition {
   singleton?: boolean;
   /** May be opened as a slide-in staged panel, not just a canvas tile. */
   stageable?: boolean;
+  /** Renders full-size behind the tiles (in `#particle-slot`) instead of as
+   *  a tile — the particle graph. Implies one instance at a time. */
+  background?: boolean;
   actions?: ModuleAction[];
 }
 

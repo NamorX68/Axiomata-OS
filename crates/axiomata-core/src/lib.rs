@@ -12,6 +12,7 @@ pub mod config;
 pub mod dashboard;
 pub mod db;
 pub mod error;
+pub mod graph;
 pub mod importer;
 pub mod memory;
 pub mod paths;

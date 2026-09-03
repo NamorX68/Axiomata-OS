@@ -71,3 +71,13 @@ describe("parseState", () => {
     expect(s.settings.customCssPath).toBeNull();
   });
 });
+
+describe("settings accessors", () => {
+  it("round-trip extra settings through buildState", async () => {
+    const { buildState, getSetting, setSetting } = await import("./persist");
+    expect(getSetting("secondBrain")).toBeUndefined();
+    setSetting("secondBrain", { layout: "circle" });
+    expect(getSetting<{ layout: string }>("secondBrain")?.layout).toBe("circle");
+    expect(buildState().settings.secondBrain).toEqual({ layout: "circle" });
+  });
+});

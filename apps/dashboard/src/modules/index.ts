@@ -14,6 +14,8 @@ import MdFileSettings from "./md-file-settings.svelte";
 import MemoryStatus from "./memory-status.svelte";
 import MemoryStatusSettings from "./memory-status-settings.svelte";
 import RoutinesBoard from "./routines-board.svelte";
+import SecondBrain from "./second-brain.svelte";
+import SecondBrainSettings from "./second-brain-settings.svelte";
 import RoutinesBoardSettings from "./routines-board-settings.svelte";
 import SkillsDeck from "./skills-deck.svelte";
 import SkillsDeckSettings from "./skills-deck-settings.svelte";
@@ -121,6 +123,45 @@ export function registerBuiltins(): void {
         description: "List routines with their next fire time.",
         params: { type: "object", properties: {} },
         run: (_params, ctx) => ctx.invoke("list_routines"),
+      },
+    ],
+  });
+
+  registerModule({
+    type: "second-brain",
+    title: "Second Brain",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.3'><circle cx='8' cy='8' r='6.2'/><circle cx='8' cy='8' r='3'/><circle cx='8' cy='8' r='0.9' fill='currentColor'/></svg>",
+    component: SecondBrain,
+    settings: SecondBrainSettings,
+    defaultSize: { w: 0, h: 0 },
+    singleton: true,
+    background: true,
+    actions: [
+      {
+        name: "refresh",
+        description: "Rebuild the workspace graph now.",
+        params: { type: "object", properties: {} },
+        run: (_params, ctx) => ctx.invoke("get_workspace_graph").then((g) => ({ files: (g as { files: unknown[] }).files.length })),
+      },
+      {
+        name: "open",
+        description: "Open the full-screen Second Brain, optionally focused on a workspace-relative file path.",
+        params: { type: "object", properties: { path: { type: "string" } } },
+        run: async (params, ctx) => {
+          const path = (params as { path?: string }).path;
+          ctx.emit("open-second-brain", { focus: path ? `file:${path}` : null });
+          return { opened: true, focus: path ?? null };
+        },
+      },
+      {
+        name: "search",
+        description: "Open the Second Brain with a search query highlighting matching notes, skills and routines.",
+        params: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+        run: async (params, ctx) => {
+          const q = String((params as { q: string }).q);
+          ctx.emit("open-second-brain", { focus: null, query: q });
+          return { opened: true, query: q };
+        },
       },
     ],
   });

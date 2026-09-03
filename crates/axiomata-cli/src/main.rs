@@ -64,6 +64,8 @@ enum Command {
         #[command(subcommand)]
         source: ImportSource,
     },
+    /// Summarise the workspace graph (areas, files, links, skills, routines).
+    Graph,
     /// Print the module manifest the dashboard wrote for the agent.
     Modules,
     /// Call an action on a mounted dashboard module (the running dashboard
@@ -190,6 +192,7 @@ async fn main() -> Result<()> {
                     skip_secrets,
                 },
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
+        Command::Graph => graph_summary(&core)?,
         Command::Modules => modules()?,
         Command::ModuleAction {
             instance,
@@ -279,6 +282,36 @@ async fn import_obsidian(
             reply.session_id,
             reply.cost_usd.unwrap_or_default()
         );
+    }
+    Ok(())
+}
+
+/// Prints a summary of the workspace graph.
+fn graph_summary(core: &AxiomataCore) -> Result<()> {
+    let db = core
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("database lock poisoned"))?;
+    let g = axiomata_core::graph::build(&core.config, &db).context("building the graph")?;
+    println!(
+        "workspace: {}  hub: {}",
+        g.workspace_root,
+        g.hub.as_deref().unwrap_or("-")
+    );
+    println!(
+        "{} files ({} total{}), {} links, {} skills, {} routines",
+        g.files.len(),
+        g.total_files,
+        if g.truncated { ", truncated" } else { "" },
+        g.links.len(),
+        g.skills.len(),
+        g.routines.len()
+    );
+    for area in &g.areas {
+        println!("  {:<28} {:>4} files", area.name, area.files);
+    }
+    for link in g.links.iter().take(10) {
+        println!("  link: {} -> {}", link.from, link.to);
     }
     Ok(())
 }

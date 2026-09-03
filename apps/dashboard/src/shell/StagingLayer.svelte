@@ -39,7 +39,9 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && $staged.length > 0) {
+    if (e.key === "Escape" && !e.defaultPrevented && $staged.length > 0) {
+      // Consumed: later Escape handlers (chat, Second Brain) leave it alone.
+      e.preventDefault();
       closeStaged($staged[$staged.length - 1].id);
     }
   }

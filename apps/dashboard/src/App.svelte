@@ -9,6 +9,7 @@
   import ChatPanel from "./shell/ChatPanel.svelte";
   import IconBar from "./shell/IconBar.svelte";
   import ModulePicker from "./shell/ModulePicker.svelte";
+  import SecondBrainView from "./shell/SecondBrainView.svelte";
   import Settings from "./shell/Settings.svelte";
   import StagingLayer from "./shell/StagingLayer.svelte";
   import Toasts from "./shell/Toasts.svelte";
@@ -16,6 +17,9 @@
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
+  let brainOpen = $state(false);
+  let brainFocus = $state<string | null>(null);
+  let brainQuery = $state("");
 
   onMount(() => {
     const offs = [
@@ -27,6 +31,13 @@
         openStaged("md-file", { path: d.path, mode: d.mode === "edit" ? "edit" : "read" }, d.from ?? "right");
       }),
       on("shell:settings", () => (settingsOpen = true)),
+      // The background graph (or /brain) → full-screen Second Brain.
+      on("open-second-brain", (detail) => {
+        const d = (detail ?? {}) as { focus?: string | null; query?: string };
+        brainFocus = typeof d.focus === "string" ? d.focus : null;
+        brainQuery = typeof d.query === "string" ? d.query : "";
+        brainOpen = true;
+      }),
     ];
     if (import.meta.env.DEV) {
       // Browser-console handle for driving the shell without Tauri.
@@ -47,6 +58,9 @@
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />
 <Settings bind:open={settingsOpen} />
+{#if brainOpen}
+  <SecondBrainView bind:open={brainOpen} focus={brainFocus} initialQuery={brainQuery} />
+{/if}
 <StagingLayer />
 <ChatPanel />
 

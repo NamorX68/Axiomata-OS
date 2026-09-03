@@ -8,13 +8,16 @@
 
   import { busy, newSession, panelOpen, sessionId, turns } from "../core/chat";
   import { renderMarkdown } from "../core/markdown";
-  import { staged } from "../core/staging";
 
   let list = $state<HTMLDivElement | null>(null);
 
-  // Escape closes the chat — unless a staged panel is on top (it goes first).
+  // Escape closes the chat — unless a staged panel / the Second Brain
+  // already consumed it (they mark the event).
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && $panelOpen && $staged.length === 0) panelOpen.set(false);
+    if (e.key === "Escape" && !e.defaultPrevented && $panelOpen) {
+      e.preventDefault();
+      panelOpen.set(false);
+    }
   }
 
   $effect(() => {

@@ -7,6 +7,7 @@
  *   /open <path> [right|bottom] stage a workspace Markdown file
  *   /newfile <path>             create an empty workspace file and stage it
  *   /skill run <name>           run a skill
+ *   /brain [file path | ? query] open the Second Brain view (on a file, or searching)
  *   /<type> <action> [json]     call a module action on its first instance
  *   /help                       list the above
  *
@@ -16,6 +17,7 @@
 
 import { get } from "svelte/store";
 
+import { emit } from "./bus";
 import { createInstance, destroyInstance } from "./lifecycle";
 import { getModule, invokeAction, listModules } from "./registry";
 import { openStaged, type StageFrom } from "./staging";
@@ -47,7 +49,7 @@ export function route(input: string): Routed | null {
   return { kind: "instruct", message: text.slice(1).trim() };
 }
 
-const SHELL_COMMANDS = ["add", "remove", "theme", "open", "newfile", "skill", "help"];
+const SHELL_COMMANDS = ["add", "remove", "theme", "open", "newfile", "skill", "brain", "help"];
 
 export function isCommand(name: string): boolean {
   return SHELL_COMMANDS.includes(name) || getModule(name) !== undefined;
@@ -61,6 +63,7 @@ export const HELP = `**Commands**
 - \`/open <path> [right|bottom]\` — stage a workspace file
 - \`/newfile <path>\` — create an empty workspace file and open it
 - \`/skill run <name>\` — run a skill
+- \`/brain [path | ? query]\` — open the Second Brain graph (on a file, or searching)
 - \`/<type> <action> [json]\` — call a module action, e.g. \`/memory-status sync\`
 - anything else after \`/\` — one-shot agent instruction
 - no slash — chat with the agent`;
@@ -117,6 +120,16 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
       }
       openStaged("md-file", { path, mode: "edit" }, "right");
       return { ok: true, message: `Created ${path}.` };
+    }
+
+    case "brain": {
+      const text = args.join(" ").trim();
+      if (text.startsWith("?")) {
+        emit("open-second-brain", { focus: null, query: text.slice(1).trim() });
+      } else {
+        emit("open-second-brain", { focus: text ? `file:${text}` : null });
+      }
+      return { ok: true, message: "Second Brain opened." };
     }
 
     case "skill": {
