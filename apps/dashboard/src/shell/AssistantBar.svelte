@@ -7,7 +7,7 @@
   import { onMount } from "svelte";
 
   import { on } from "../core/bus";
-  import { busy, panelOpen, send, turns } from "../core/chat";
+  import { busy, panelOpen, pushInstruction, send, turns } from "../core/chat";
   import { route, runCommand } from "../core/commands";
   import { toast } from "../core/toast";
 
@@ -31,13 +31,7 @@
     if (routed.kind === "command") {
       const result = await runCommand(routed.name, routed.args);
       toast(result.message, result.ok ? "info" : "warning");
-      if (result.detail) {
-        turns.update((list) => [
-          ...list,
-          { id: Date.now(), role: "instruction", text: result.detail!, at: Date.now() },
-        ]);
-        panelOpen.set(true);
-      }
+      if (result.detail) pushInstruction(result.detail);
       return;
     }
     await send(routed.message, routed.kind);

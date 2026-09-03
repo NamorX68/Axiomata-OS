@@ -8,12 +8,31 @@
 
   import { getModule, createContext } from "../core/registry";
   import { closeStaged, staged, type StagedPanel } from "../core/staging";
+  import type { ModuleContext } from "../core/types";
 
-  function contextFor(panel: StagedPanel) {
-    return createContext(panel.id, panel.config, (config) => {
-      panel.config = config;
-    });
+  // One context per panel for its whole lifetime — modules capture
+  // `ctx.config` once at mount (same invariant as Tile.svelte). Re-creating
+  // it on every template re-evaluation would detach the mounted module.
+  const contexts = new Map<string, ModuleContext>();
+
+  function contextFor(panel: StagedPanel): ModuleContext {
+    let ctx = contexts.get(panel.id);
+    if (!ctx) {
+      ctx = createContext(panel.id, panel.config, (config) => {
+        panel.config = config;
+      });
+      contexts.set(panel.id, ctx);
+    }
+    return ctx;
   }
+
+  // Drop contexts of closed panels.
+  $effect(() => {
+    const live = new Set($staged.map((p) => p.id));
+    for (const id of [...contexts.keys()]) {
+      if (!live.has(id)) contexts.delete(id);
+    }
+  });
 
   function flyParams(panel: StagedPanel) {
     return panel.from === "bottom" ? { y: 600, duration: 260 } : { x: 600, duration: 260 };

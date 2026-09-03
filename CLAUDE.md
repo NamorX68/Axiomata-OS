@@ -163,7 +163,10 @@ size goes through a `--ax-*` token; no literals in components.
   `~/.axiomata/module-context.md` (mounted instances + actions + how to call the CLI);
   the agent calls `axiomata-cli module-action <instance> <action> --json …`, which drops
   `~/.axiomata/module-actions/inbox/<id>.json`; the dashboard polls every 3 s, runs the
-  action in the frontend, answers in `outbox/`; the CLI exits 2 on timeout.
+  action in the frontend, answers in `outbox/`; the CLI exits 2 on timeout. The manifest
+  is appended to **every** Claude Code run — chat turns, skill runs and cron-fired
+  routines alike (`AgentRequest.system_prompt_file`) — whenever the file exists, i.e.
+  whenever the dashboard has run at least once; delete `module-context.md` to opt out.
 - **Themes**: `<html data-theme="…">`; a user `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection; template via Settings → Copy template.
 

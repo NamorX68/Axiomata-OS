@@ -32,6 +32,12 @@ function push(role: TurnRole, text: string, costUsd?: number | null): ChatTurn {
   return turn;
 }
 
+/** A local command's Markdown output, shown as an instruction-style turn. */
+export function pushInstruction(markdown: string): void {
+  push("instruction", markdown);
+  panelOpen.set(true);
+}
+
 export function newSession(): void {
   turns.set([]);
   sessionId.set(null);

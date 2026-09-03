@@ -114,7 +114,9 @@ fn agent_request(prompt: String, backend: &AgentBackend, config: &Config) -> Age
         cwd: config.workspace_root.clone(),
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
         env: claude_env(config, backend),
-        system_prompt_file: super::super::agents::module_context_if_present(),
+        // Skills and routines get the dashboard's module manifest too, so an
+        // unattended run can call mounted modules; None when the GUI never ran.
+        system_prompt_file: crate::agents::module_context_if_present(),
     }
 }
 
@@ -350,6 +352,27 @@ mod tests {
         );
         assert_eq!(bad.status, RunStatus::Failed);
         assert_eq!(bad.exit_code, Some(3));
+    }
+
+    #[test]
+    fn agent_request_picks_up_the_module_manifest_only_when_present() {
+        let _guard = crate::test_support::ENV_MUTEX.lock().unwrap();
+        let home = crate::test_support::unique_temp_dir("axiomata-test-runner-manifest");
+        std::fs::create_dir_all(&home).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+        let config = Config::default();
+        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config);
+        assert_eq!(req.system_prompt_file, None);
+        std::fs::write(home.join("module-context.md"), "# modules").unwrap();
+        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config);
+        assert_eq!(req.system_prompt_file, Some(home.join("module-context.md")));
+        unsafe {
+            std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
