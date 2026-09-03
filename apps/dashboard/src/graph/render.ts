@@ -7,7 +7,11 @@
 
 import type { GraphModel, GraphNode, NodeKind } from "./model";
 
+export type RenderMode = "rings" | "orbit";
+
 export interface RenderOptions {
+  /** `rings` = the Second Brain view; `orbit` = the dashboard centre. */
+  mode?: RenderMode;
   /** Radians per second of ring rotation. */
   spin: number;
   /** Draw skill / routine / area labels. */
@@ -112,6 +116,10 @@ export class GraphRenderer {
   private lineColor = "#fff";
   private glyphColor = "#000";
   private hubGlyphColor = "#000";
+  private surfaceColor = "#121216";
+  private accentColor = "#ff7a1a";
+  /** Ring captions (rings mode). */
+  captions = { skills: "SKILLS", memory: "MEMORY", routines: "ROUTINES" };
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -119,12 +127,14 @@ export class GraphRenderer {
     this.ctx = ctx;
   }
 
-  setColors(text: string, muted: string, line: string, glyph = "#000", hubGlyph = "#000"): void {
+  setColors(text: string, muted: string, line: string, glyph = "#000", hubGlyph = "#000", surface = "#121216", accent = "#ff7a1a"): void {
     this.textColor = text;
     this.mutedColor = muted;
     this.lineColor = line;
     this.glyphColor = glyph;
     this.hubGlyphColor = hubGlyph;
+    this.surfaceColor = surface;
+    this.accentColor = accent;
   }
 
   resize(): void {
@@ -166,8 +176,10 @@ export class GraphRenderer {
     if (!this.model) return null;
     let best: GraphNode | null = null;
     let bestD = Infinity;
+    const orbit = this.options.mode === "orbit";
     for (const n of this.model.nodes) {
-      const s = this.toScreen(n);
+      if (orbit && n.kind === "area") continue;
+      const s = orbit && n.sx !== undefined && n.sy !== undefined ? { x: n.sx, y: n.sy } : this.toScreen(n);
       const d = Math.hypot(s.x - px, s.y - py);
       const reach = Math.max(n.r * this.view.zoom, 3) + slop;
       if (d < reach && d < bestD) {
@@ -185,44 +197,70 @@ export class GraphRenderer {
     this.draw(now / 1000);
   }
 
+  private font(px: number, weight = 600): string {
+    return `${weight} ${px}px ${getComputedStyle(this.canvas).fontFamily}`;
+  }
+
   private draw(t: number): void {
     const { ctx, dpr, width, height } = this;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
     const model = this.model;
     if (!model) return;
+    if (this.options.mode === "orbit") {
+      this.drawOrbit(t);
+      return;
+    }
     const R = this.radius();
     const cx = width / 2 + this.view.x;
     const cy = height / 2 + this.view.y;
 
-    // Area segments: a faint band plus a label on the outside.
+    // Area segments: a faint band on the outer rim; the name sits at the
+    // area node (inside), counts at the band's start.
     for (const seg of model.areas) {
       const s = seg.start + this.angle;
       const e = seg.end + this.angle;
       ctx.beginPath();
-      ctx.arc(cx, cy, R * 0.9, s, e);
+      ctx.arc(cx, cy, R * 0.88, s + 0.01, e - 0.01);
       ctx.strokeStyle = seg.color;
-      ctx.globalAlpha = 0.28;
+      ctx.globalAlpha = 0.22;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.globalAlpha = 1;
-      if (this.options.labels && e - s > 0.12) {
-        const mid = (s + e) / 2;
-        const lx = cx + Math.cos(mid) * R * 1.02;
-        const ly = cy + Math.sin(mid) * R * 1.02;
-        ctx.save();
-        ctx.translate(lx, ly);
-        const flip = Math.cos(mid) < 0;
-        ctx.rotate(mid + (flip ? Math.PI : 0));
-        ctx.font = `600 ${Math.max(9, Math.min(12, R * 0.045))}px ${getComputedStyle(this.canvas).fontFamily}`;
+      if (this.options.labels && e - s > 0.08) {
+        const a = s + 0.02;
+        ctx.font = this.font(Math.max(8, Math.min(10, R * 0.035)), 500);
         ctx.fillStyle = seg.color;
-        ctx.globalAlpha = 0.85;
-        ctx.textAlign = flip ? "right" : "left";
+        ctx.globalAlpha = 0.7;
+        ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(seg.name.toUpperCase(), 0, 0);
-        ctx.restore();
+        ctx.fillText(String(seg.count), cx + Math.cos(a) * R * 0.92, cy + Math.sin(a) * R * 0.92);
         ctx.globalAlpha = 1;
       }
+    }
+
+    // Ring captions at 12 o'clock (they don't spin — they name the rings).
+    if (this.options.labels) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      const cap = (text: string, radius: number, color: string, size: number) => {
+        ctx.font = this.font(size, 700);
+        const label = text.split("").join("\u2009");
+        const w = ctx.measureText(label).width;
+        // Backdrop so the caption stays legible over dots and edges.
+        ctx.fillStyle = this.surfaceColor;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.roundRect(cx - w / 2 - 8, cy - radius - size - 10, w + 16, size + 8, 6);
+        ctx.fill();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.9;
+        ctx.fillText(label, cx, cy - radius - 6);
+      };
+      cap(this.captions.skills, R * 0.17 + 10, this.accentColor, Math.max(10, Math.min(15, R * 0.05)));
+      cap(this.captions.memory, R * 0.84 + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
+      cap(this.captions.routines, R * 0.95 + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
+      ctx.globalAlpha = 1;
     }
 
     // Edges.
@@ -297,4 +335,239 @@ export class GraphRenderer {
       ctx.globalAlpha = 1;
     }
   }
+
+  /** Dashboard centre: dark disc with hex texture and rim, spinning 3-D
+   *  particle cloud inside a wireframe geodesic, icon nodes on the rim. */
+  private drawOrbit(t: number): void {
+    const { ctx, width, height } = this;
+    const model = this.model!;
+    const R = this.radius();
+    const cx = width / 2 + this.view.x;
+    const cy = height / 2 + this.view.y;
+
+    // Disc + vignette.
+    const disc = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R);
+    disc.addColorStop(0, "rgba(0,0,0,0.55)");
+    disc.addColorStop(0.75, "rgba(0,0,0,0.35)");
+    disc.addColorStop(1, "rgba(0,0,0,0.05)");
+    ctx.fillStyle = disc;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, TWO_PI);
+    ctx.fill();
+    // Hex texture clipped to the disc.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, TWO_PI);
+    ctx.clip();
+    ctx.strokeStyle = this.lineColor;
+    ctx.globalAlpha = 0.12;
+    ctx.lineWidth = 0.6;
+    const hexR = Math.max(14, R * 0.055);
+    const hexH = Math.sqrt(3) * hexR;
+    for (let row = -Math.ceil(R / hexH) - 1; row <= Math.ceil(R / hexH) + 1; row++) {
+      for (let col = -Math.ceil(R / (1.5 * hexR)) - 1; col <= Math.ceil(R / (1.5 * hexR)) + 1; col++) {
+        const hx = cx + col * 1.5 * hexR;
+        const hy = cy + row * hexH + (col % 2 ? hexH / 2 : 0);
+        if (Math.hypot(hx - cx, hy - cy) > R + hexR) continue;
+        ctx.beginPath();
+        for (let k = 0; k < 6; k++) {
+          const a = (Math.PI / 3) * k;
+          const px = hx + Math.cos(a) * hexR;
+          const py = hy + Math.sin(a) * hexR;
+          if (k === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    // Rim.
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, TWO_PI);
+    ctx.strokeStyle = this.lineColor;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // 3-D rotation shared by wireframe and cloud.
+    const ay = this.angle * 3;
+    const ax = 0.35 + Math.sin(t * 0.15) * 0.08;
+    const cosY = Math.cos(ay);
+    const sinY = Math.sin(ay);
+    const cosX = Math.cos(ax);
+    const sinX = Math.sin(ax);
+    const project = ([x, y, z]: [number, number, number]) => {
+      const x1 = x * cosY - z * sinY;
+      const z1 = x * sinY + z * cosY;
+      const y1 = y * cosX - z1 * sinX;
+      const z2 = y * sinX + z1 * cosX;
+      return { x: cx + x1 * R, y: cy + y1 * R, z: z2 };
+    };
+
+    // Wireframe geodesic (icosahedron, one subdivision).
+    ctx.strokeStyle = this.lineColor;
+    ctx.lineWidth = 0.6;
+    for (const [a, b] of GEODESIC_EDGES) {
+      const pa = project(scale(GEODESIC_VERTS[a], 0.66));
+      const pb = project(scale(GEODESIC_VERTS[b], 0.66));
+      ctx.globalAlpha = 0.08 + 0.1 * ((pa.z + pb.z) / 2 + 1);
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Particle cloud, back to front.
+    const cloud = model.nodes.filter((n) => n.kind === "file" && n.p3).map((n) => ({ n, p: project(n.p3!) }));
+    cloud.sort((a, b) => a.p.z - b.p.z);
+    for (const { n, p } of cloud) {
+      const depth = (p.z + 1) / 2; // 0 back … 1 front
+      const r = 0.9 + depth * 1.7 + (n === this.hover ? 2 : 0);
+      ctx.globalAlpha = 0.25 + depth * 0.65;
+      ctx.fillStyle = n.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, TWO_PI);
+      ctx.fill();
+      n.sx = p.x;
+      n.sy = p.y;
+    }
+    ctx.globalAlpha = 1;
+
+    // Hub.
+    const hub = model.byId.get("hub");
+    if (hub) {
+      hub.sx = cx;
+      hub.sy = cy;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18);
+      g.addColorStop(0, this.accentColor);
+      g.addColorStop(1, "transparent");
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 18, 0, TWO_PI);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = this.accentColor;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3.5, 0, TWO_PI);
+      ctx.fill();
+    }
+
+    // Icon nodes on the rim.
+    const nodeR = Math.max(12, Math.min(19, R * 0.062));
+    ctx.font = this.font(Math.max(8, nodeR * 0.55), 600);
+    for (const n of model.nodes) {
+      if (!n.onOrbit) continue;
+      const a = Math.atan2(n.y, n.x) + this.angle;
+      const x = cx + Math.cos(a) * R;
+      const y = cy + Math.sin(a) * R;
+      n.sx = x;
+      n.sy = y;
+      const hot = n === this.hover || n === this.selected;
+      if (hot) {
+        const g = ctx.createRadialGradient(x, y, nodeR * 0.6, x, y, nodeR * 2.2);
+        g.addColorStop(0, this.accentColor);
+        g.addColorStop(1, "transparent");
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, nodeR * 2.2, 0, TWO_PI);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = this.surfaceColor;
+      ctx.beginPath();
+      ctx.arc(x, y, nodeR, 0, TWO_PI);
+      ctx.fill();
+      ctx.strokeStyle = hot ? this.accentColor : n.kind === "file" ? this.lineColor : n.color;
+      ctx.lineWidth = hot ? 1.6 : 1;
+      ctx.globalAlpha = hot ? 1 : 0.8;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      drawGlyph(ctx, n.kind === "hub" ? "hub" : n.kind, x, y, nodeR * 0.62, hot ? this.accentColor : n.kind === "file" ? this.textColor : n.color);
+      // Age / schedule badge under the node.
+      const badge = this.badgeFor(n, t);
+      if (badge) {
+        ctx.fillStyle = this.mutedColor;
+        ctx.globalAlpha = 0.9;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(badge, x, y + nodeR + 3);
+        ctx.globalAlpha = 1;
+      }
+      if (hot) {
+        ctx.fillStyle = this.textColor;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.font = this.font(Math.max(10, nodeR * 0.7), 600);
+        ctx.fillText(n.label, x, y - nodeR - 6);
+        ctx.font = this.font(Math.max(8, nodeR * 0.55), 600);
+      }
+    }
+  }
+
+  private badgeFor(n: GraphNode, _t: number): string | null {
+    if (n.kind === "file" && n.modified) {
+      const days = Math.floor((Date.now() - Date.parse(n.modified)) / 86_400_000);
+      if (days < 1) return "NEW";
+      return days < 30 ? `${days}D` : days < 365 ? `${Math.floor(days / 30)}M` : `${Math.floor(days / 365)}Y`;
+    }
+    if (n.kind === "routine") return n.enabled === false ? "OFF" : "ON";
+    return null;
+  }
 }
+
+function scale(v: [number, number, number], k: number): [number, number, number] {
+  return [v[0] * k, v[1] * k, v[2] * k];
+}
+
+/** Icosahedron subdivided once and normalised — the geodesic wireframe. */
+const [GEODESIC_VERTS, GEODESIC_EDGES] = (() => {
+  const phi = (1 + Math.sqrt(5)) / 2;
+  const base: [number, number, number][] = [
+    [-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0],
+    [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
+    [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1],
+  ];
+  const faces: [number, number, number][] = [
+    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+  ];
+  const verts = base.map((v) => norm(v));
+  const midCache = new Map<string, number>();
+  const mid = (a: number, b: number) => {
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    let i = midCache.get(key);
+    if (i === undefined) {
+      i = verts.length;
+      verts.push(norm([(verts[a][0] + verts[b][0]) / 2, (verts[a][1] + verts[b][1]) / 2, (verts[a][2] + verts[b][2]) / 2]));
+      midCache.set(key, i);
+    }
+    return i;
+  };
+  const edges = new Set<string>();
+  const add = (a: number, b: number) => edges.add(a < b ? `${a}-${b}` : `${b}-${a}`);
+  for (const [a, b, c] of faces) {
+    const ab = mid(a, b);
+    const bc = mid(b, c);
+    const ca = mid(c, a);
+    for (const [x, y, z] of [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]] as [number, number, number][]) {
+      add(x, y);
+      add(y, z);
+      add(z, x);
+    }
+  }
+  return [verts, [...edges].map((e) => e.split("-").map(Number) as [number, number])] as const;
+})();
+
+function norm(v: [number, number, number]): [number, number, number] {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+

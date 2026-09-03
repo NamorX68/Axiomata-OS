@@ -206,9 +206,13 @@ size goes through a `--ax-*` token; no literals in components.
 - **Frontend** `apps/dashboard/src/graph/`: `model.ts` (nodes / edges / area segments,
   theme-derived colours, `regroup` by folders, `searchNodes`, `neighbours`), `layout.ts`
   (Rings: skills inner ring, files on arcs inside their area segment, routines outer ring;
-  Circle), `render.ts` (Canvas 2D, DPR-aware, spin, hover hit-test, view transform,
-  highlight). No graph library on purpose; `d3-force` would only be added for a force
-  layout.
+  Circle; **Orbit** for the dashboard centre: skills, routines and the newest notes as icon
+  nodes on the rim, every file as a point of a 3-D fibonacci-sphere cloud), `render.ts`
+  (Canvas 2D, DPR-aware, spin, hover hit-test, view transform, highlight; `mode: "rings"`
+  draws ring captions SKILLS / MEMORY / ROUTINES at 12 o'clock and per-segment counts
+  instead of outer area names, `mode: "orbit"` draws the dark disc with hex texture and
+  rim, a geodesic wireframe, the spinning cloud and the icon ring with age badges). No
+  graph library on purpose; `d3-force` would only be added for a force layout.
 - **Nodes**: hub, **area** (one per folder, labelled like the folder, on its own ring
   between skills and files), file, skill, routine — each non-file kind carries a glyph
   (hexagon / folder / bolt / clock, `graph/Legend.svelte` explains them).
