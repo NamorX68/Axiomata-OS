@@ -145,8 +145,8 @@ Frontend: Svelte 5 + Vite + TS under `apps/dashboard/src/` — `core/` (stores, 
 lifecycle, persist, commands, chat, staging, agent-bridge, backend types + `devmock`),
 `canvas/` (Canvas, Tile, drag/resize actions), `shell/` (TopBar, IconBar, ModulePicker,
 Settings, AssistantBar, ChatPanel, StagingLayer, Toasts), `modules/` (memory-status,
-skills-deck, routines-board, md-file, each `.svelte` + settings face, registered in
-`modules/index.ts`), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
+skills-deck, routines-board, md-file, todo, each `.svelte` + settings face, registered in
+`modules/index.ts`; the graph's `second-brain` too), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
 theme: graphite, paper, steampunk, forest, ocean), `theme/validator.ts`. Every colour /
 size goes through a `--ax-*` token; no literals in components.
 
@@ -162,6 +162,19 @@ size goes through a `--ax-*` token; no literals in components.
 - **Workspace files** (`axiomata_core::workspace`, commands `read/write_workspace_file`):
   relative to `config.workspace_root`, no `..`, must canonicalise inside the root,
   symlinks and hard links refused, ≤ 1 MiB, atomic O_EXCL temp + rename.
+- **ToDo** (`todo` module, `singleton`): simple date-free tasks in one fixed file
+  `ToDo.md` at the workspace root — **not** the (separate, future) Apple-Reminders
+  module. All list logic is pure TS in `core/todo.ts` (+ `todo.test.ts`); the
+  `.svelte` shell just loads / renders / writes back via `read/write_workspace_file`.
+  Format is standard GFM task lists: open items under `# ToDo`, completed ones under a
+  `## Done` heading stamped `- [x] … (done: YYYY-MM-DD)` (the date is for a later
+  cleanup skill). The open/done split is that heading, regardless of each line's
+  checkbox state, so hand-editing never moves an item. 5 s poll + reload; a write is
+  skipped when byte-identical to the last read (same no-clobber trade-off as
+  `md-file`, no deeper conflict detection). No new Rust, no migration. Bridge / `/todo`
+  actions `add` · `complete` (first open item containing the given text) · `list` work
+  statelessly on the file. `ToDo.md` shows up in the Second-Brain graph as an ordinary
+  vault file, no special-casing.
 - **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
   a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
   (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`
