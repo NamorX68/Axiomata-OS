@@ -7,6 +7,17 @@
  */
 
 import { registerModule } from "../core/registry";
+import type { WorkspaceFile } from "../core/backend";
+import type { ModuleContext } from "../core/types";
+import {
+  addTodo,
+  completeTodo,
+  parseTodoDoc,
+  serializeTodoDoc,
+  TODO_PATH,
+  todayIso,
+  type TodoDoc,
+} from "../core/todo";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
 import MdFile from "./md-file.svelte";
@@ -19,6 +30,8 @@ import SecondBrainSettings from "./second-brain-settings.svelte";
 import RoutinesBoardSettings from "./routines-board-settings.svelte";
 import SkillsDeck from "./skills-deck.svelte";
 import SkillsDeckSettings from "./skills-deck-settings.svelte";
+import Todo from "./todo.svelte";
+import TodoSettings from "./todo-settings.svelte";
 
 const DUMMY_ICON =
   "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor'><rect x='2.5' y='2.5' width='11' height='11' rx='2'/></svg>";
@@ -207,6 +220,77 @@ export function registerBuiltins(): void {
         },
       },
     ],
+  });
+
+  registerModule({
+    type: "todo",
+    title: "ToDo",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='2.5' width='11' height='11' rx='2'/><path d='m5 8 2.2 2.2L11 6'/></svg>",
+    component: Todo,
+    settings: TodoSettings,
+    defaultSize: { w: 340, h: 360 },
+    minSize: { w: 240, h: 140 },
+    singleton: true,
+    actions: (() => {
+      // The actions work statelessly on ToDo.md itself (not the mounted
+      // tile's state), so the agent bridge and `/todo` still work when no
+      // instance is placed. `loadDoc` treats a missing file as an empty list.
+      const loadDoc = async (ctx: ModuleContext): Promise<{ doc: TodoDoc; raw: string | null }> => {
+        try {
+          const file = await ctx.invoke<WorkspaceFile>("read_workspace_file", { rel: TODO_PATH });
+          return { doc: parseTodoDoc(file.content), raw: file.content };
+        } catch (err) {
+          if (/no such file|not found|does not exist/i.test(String(err))) {
+            return { doc: { open: [], done: [] }, raw: null };
+          }
+          throw err;
+        }
+      };
+      const saveDoc = async (ctx: ModuleContext, next: TodoDoc, raw: string | null): Promise<void> => {
+        const serialized = serializeTodoDoc(next);
+        if (serialized !== raw) await ctx.invoke("write_workspace_file", { rel: TODO_PATH, content: serialized });
+      };
+      return [
+        {
+          name: "add",
+          description: "Append an open task to ToDo.md.",
+          params: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+          run: async (params, ctx) => {
+            const text = String((params as { text: string }).text);
+            const { doc, raw } = await loadDoc(ctx);
+            const next = addTodo(doc, text);
+            await saveDoc(ctx, next, raw);
+            return { open: next.open.length };
+          },
+        },
+        {
+          name: "complete",
+          description: "Mark the first open task whose text contains `text` as done (moved to the Done section, dated today).",
+          params: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+          run: async (params, ctx) => {
+            const needle = String((params as { text: string }).text).trim().toLowerCase();
+            const { doc, raw } = await loadDoc(ctx);
+            const index = doc.open.findIndex((it) => it.text.toLowerCase().includes(needle));
+            if (index === -1) return { completed: false };
+            const next = completeTodo(doc, index, todayIso());
+            await saveDoc(ctx, next, raw);
+            return { completed: true, text: doc.open[index].text };
+          },
+        },
+        {
+          name: "list",
+          description: "Return the open and done tasks from ToDo.md.",
+          params: { type: "object", properties: {} },
+          run: async (_params, ctx) => {
+            const { doc } = await loadDoc(ctx);
+            return {
+              open: doc.open.map((it) => it.text),
+              done: doc.done.map((it) => ({ text: it.text, doneOn: it.doneOn })),
+            };
+          },
+        },
+      ];
+    })(),
   });
 
   if (import.meta.env.DEV) {

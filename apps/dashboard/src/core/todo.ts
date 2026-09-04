@@ -23,6 +23,9 @@
  * `doneOn: null` and the item is kept.
  */
 
+/** The single backing file, relative to the workspace root. */
+export const TODO_PATH = "ToDo.md";
+
 /** One task line. `doneOn` is only ever set for items in the done list. */
 export interface TodoItem {
   text: string;
