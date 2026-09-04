@@ -274,51 +274,72 @@ fn reconcile_one(
 /// [`SchedulerHandle::shutdown`], or implicitly on `Drop` — makes the loop
 /// break after its current tick.
 ///
-/// Holds a [`tokio::task::JoinHandle`] only when the loop was started by
-/// [`spawn`]; when the caller ran [`serve`] on its own runtime (the Tauri
-/// shell does this), there is nothing to join and shutdown is best-effort.
+/// Holds only the stop signal, never the loop's [`tokio::task::JoinHandle`] —
+/// a caller that needs to *wait* for the loop to actually finish (rather than
+/// just requesting the stop) keeps the `JoinHandle` [`spawn`] returns
+/// alongside this handle and awaits it directly.
 pub struct SchedulerHandle {
     stop: tokio::sync::watch::Sender<bool>,
-    join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl SchedulerHandle {
-    /// Creates just the stop channel: keep the [`SchedulerHandle`], hand the
-    /// [`tokio::sync::watch::Receiver`] to [`serve`] on whatever runtime you
-    /// have. Used by the Tauri shell, whose `.setup()` is not itself inside a
-    /// Tokio runtime and spawns via `tauri::async_runtime`.
-    pub fn channel() -> (Self, tokio::sync::watch::Receiver<bool>) {
-        let (stop, stop_rx) = tokio::sync::watch::channel(false);
-        (Self { stop, join: None }, stop_rx)
+    /// Creates a handle with no loop attached yet — call [`subscribe`](Self::subscribe)
+    /// for a receiver to hand to [`serve`] on whatever runtime you have (the
+    /// Tauri shell does this: its `.setup()` is not itself inside a Tokio
+    /// runtime, so it spawns `serve` via `tauri::async_runtime` separately).
+    pub fn new() -> Self {
+        let (stop, _unused_rx) = tokio::sync::watch::channel(false);
+        Self { stop }
     }
 
-    /// Signals the loop to stop and, if this handle owns the task, waits for
-    /// it to finish.
-    pub async fn shutdown(mut self) {
+    /// Vends a receiver watching this handle's stop signal. A `watch`
+    /// channel supports any number of readers, so this may be called more
+    /// than once — though today only one loop per handle ever subscribes.
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.stop.subscribe()
+    }
+
+    /// Signals every subscribed loop to stop after its current tick. Does
+    /// not itself wait for that to happen — see the struct docs. Takes `&self`
+    /// (sending on the underlying `watch` channel never needs ownership), so
+    /// this can be called through a shared reference — e.g. Tauri's managed
+    /// `State<'_, SchedulerHandle>` — without taking the handle out first.
+    pub fn shutdown(&self) {
         let _ = self.stop.send(true);
-        if let Some(join) = self.join.take() {
-            let _ = join.await;
-        }
+    }
+}
+
+impl Default for SchedulerHandle {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl Drop for SchedulerHandle {
     fn drop(&mut self) {
-        // Best-effort: tell the loop to stop. If the caller used `shutdown`
-        // the join already happened; otherwise the task ends on its own at the
-        // next tick boundary (or when the process exits).
+        // Best-effort: tell the loop to stop, the same signal `shutdown`
+        // sends. The task ends on its own at the next tick boundary (or when
+        // the process exits, whichever comes first).
         let _ = self.stop.send(true);
     }
 }
 
-/// Starts the routine scheduler on the current Tokio runtime and returns a
-/// handle that owns the task.
+/// Starts the routine scheduler on the current Tokio runtime.
+///
+/// Returns the [`SchedulerHandle`] to request a stop with, and the loop's own
+/// [`tokio::task::JoinHandle`] for a caller that wants to await its actual
+/// completion after requesting one (rather than just firing the request and
+/// moving on).
 ///
 /// # Panics
 ///
 /// Panics if called outside a Tokio runtime. The Tauri shell, whose `.setup()`
-/// has no runtime, uses [`SchedulerHandle::channel`] + [`serve`] instead.
-pub fn spawn(config: Config, db: Arc<Mutex<Connection>>) -> SchedulerHandle {
+/// has no runtime, uses [`SchedulerHandle::new`] + [`SchedulerHandle::subscribe`]
+/// + [`serve`] instead.
+pub fn spawn(
+    config: Config,
+    db: Arc<Mutex<Connection>>,
+) -> (SchedulerHandle, tokio::task::JoinHandle<()>) {
     spawn_with_interval(config, db, POLL_INTERVAL)
 }
 
@@ -328,13 +349,11 @@ pub(crate) fn spawn_with_interval(
     config: Config,
     db: Arc<Mutex<Connection>>,
     interval: Duration,
-) -> SchedulerHandle {
-    let (stop, stop_rx) = tokio::sync::watch::channel(false);
+) -> (SchedulerHandle, tokio::task::JoinHandle<()>) {
+    let handle = SchedulerHandle::new();
+    let stop_rx = handle.subscribe();
     let join = tokio::spawn(serve_with_interval(config, db, stop_rx, interval));
-    SchedulerHandle {
-        stop,
-        join: Some(join),
-    }
+    (handle, join)
 }
 
 /// Runs the scheduler loop until the stop signal flips to `true` or its sender
@@ -670,7 +689,7 @@ mod tests {
         )
         .unwrap();
 
-        let handle = spawn_with_interval(
+        let (handle, join) = spawn_with_interval(
             fx.config.clone(),
             Arc::clone(&fx.db),
             Duration::from_millis(40),
@@ -688,7 +707,11 @@ mod tests {
         }
         assert!(fired, "spawned loop should have fired the due routine");
 
-        handle.shutdown().await;
+        // `shutdown` only requests the stop; awaiting the loop's own
+        // `JoinHandle` is what proves it actually ended, deterministically
+        // rather than via a fixed sleep-and-hope.
+        handle.shutdown();
+        join.await.unwrap();
 
         // After shutdown, no further firings.
         let count_after_stop = store::list_runs(&fx.conn(), routine.id, 100).unwrap().len();

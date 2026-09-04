@@ -170,8 +170,20 @@ struct AddRoutine {
     disabled: bool,
 }
 
+/// Initializes `tracing`'s output so `axiomata_core`'s `tracing::info!`/
+/// `warn!` calls (the routine scheduler's tick/reconcile summaries, in
+/// particular) actually go somewhere — `tracing-subscriber` was a declared
+/// workspace dependency that nothing ever called `.init()` on. Defaults to
+/// `info`; override with `RUST_LOG` (e.g. `RUST_LOG=debug`).
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_tracing();
     let cli = Cli::parse();
     let core = AxiomataCore::init().context("failed to initialize the Axiomata-OS core engine")?;
 
