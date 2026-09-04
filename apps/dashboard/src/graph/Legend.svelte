@@ -6,6 +6,10 @@
   import { readPalette, type NodeKind } from "./model";
   import { drawGlyph } from "./render";
 
+  /** In Hex mode the "file" swatch matches the honeycomb cell it stands
+   *  for instead of the dot every other layout uses. */
+  let { hex = false }: { hex?: boolean } = $props();
+
   const KINDS: { kind: NodeKind; label: string }[] = [
     { kind: "hub", label: "CLAUDE.md (hub)" },
     { kind: "area", label: "Bereich (Ordner)" },
@@ -32,7 +36,19 @@
       const r = kind === "file" ? 3 : 7;
       ctx.fillStyle = colors[kind];
       ctx.beginPath();
-      ctx.arc(11, 11, r, 0, Math.PI * 2);
+      if (kind === "file" && hex) {
+        const hr = 6;
+        for (let k = 0; k < 6; k++) {
+          const a = (Math.PI / 3) * k;
+          const px = 11 + Math.cos(a) * hr;
+          const py = 11 + Math.sin(a) * hr;
+          if (k === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+      } else {
+        ctx.arc(11, 11, r, 0, Math.PI * 2);
+      }
       ctx.fill();
       if (kind !== "file") {
         ctx.strokeStyle = colors[kind];
@@ -48,10 +64,15 @@
   }
 
   onMount(() => {
-    paint();
     const mo = new MutationObserver(paint);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => mo.disconnect();
+  });
+
+  // Repaint whenever the canvases mount or `hex` flips (layout switch).
+  $effect(() => {
+    hex;
+    paint();
   });
 </script>
 

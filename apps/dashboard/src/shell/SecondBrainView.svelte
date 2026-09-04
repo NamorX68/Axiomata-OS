@@ -1,11 +1,12 @@
 <!--
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
-  labels, search (dims non-matches), layout Rings / Circle / Orbit, grouping
+  labels, search (dims non-matches), layout Rings / Circle / Hex, grouping
   by areas or folders, spin + file-name toggles, and a detail panel for the
   selected node (file → view in md-file / copy path / fly to / connections;
   skill → run; routine → toggle; hub → open). "Back to the OS" closes.
-  Orbit reuses the dashboard-centre widget's 3-D cloud + icon rim; search
-  highlighting and "Fly to" are approximate there (see the `?` help text).
+  Hex tiles every note into its own honeycomb cell, same area wedges as
+  Rings/Circle. Orbit (the dashboard-centre widget's 3-D cloud) lives only
+  there now, not as a full-view option here.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -60,7 +61,7 @@
   let hover = $state.raw<GraphNode | null>(null);
   // svelte-ignore state_referenced_locally
   let query = $state(initialQuery);
-  let layout = $state<LayoutKind>(prefs.layout === "circle" || prefs.layout === "orbit" ? prefs.layout : "rings");
+  let layout = $state<LayoutKind>(prefs.layout === "circle" || prefs.layout === "hex" ? prefs.layout : "rings");
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let spin = $state(typeof prefs.spin === "number" ? prefs.spin : 0.02);
   let fileNames = $state(prefs.fileNames === true);
@@ -160,13 +161,13 @@
     ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring, Routinen außen. Zeigt die Größe je Bereich."],
     ["Circle", "Alle Notizen auf einem Ring, nach Bereich sortiert. Flacher, am besten um Verbindungen zwischen Bereichen zu sehen."],
     [
-      "Orbit",
-      "Wie das Hintergrund-Widget: eine rotierende 3-D-Punktwolke aus allen Notizen um eine Hex-Textur-Scheibe, Skills/Routinen/neueste Notizen als Icons am Rand. Eher zum Anschauen als zum gezielten Navigieren — Suche dimmt hier (noch) nicht, „Fly to“ zentriert nur ungefähr.",
+      "Hex",
+      "Honeycomb statt Bögen: jede Notiz eine eigene Hex-Zelle, dicht an dicht, im selben Bereichs-Segment wie bei Rings/Circle. Skills/Bereiche/Routinen bleiben wie in Rings.",
     ],
     ["Areas", "Ein Segment je oberstem Vault-Ordner."],
     ["Folders", "Ein Segment je tiefstem Ordner, z. B. Learning/Rust/lessons. Feinere Aufteilung großer Bereiche."],
     ["Rotation", "Drehgeschwindigkeit des ganzen Graphen; greift sofort, ganz links steht er still. Bei kleinen Werten sieht man die Drehung erst über Sekunden."],
-    ["File names", "Zeigt jeden Notiztitel dauerhaft; sonst erscheinen Titel bei Hover, Suche und Auswahl. In Orbit ohne Wirkung — dort erscheinen Namen nur bei Hover/Auswahl."],
+    ["File names", "Zeigt jeden Notiztitel dauerhaft; sonst erscheinen Titel bei Hover, Suche und Auswahl."],
   ] as const;
   /** Looks up a HELP entry's text by its term, so the buttons below reference
    *  entries by name instead of a fragile array index. */
@@ -337,7 +338,7 @@
   }
 
   $effect(() => {
-    const mode = layout === "orbit" ? "orbit" : "rings";
+    const mode = layout === "hex" ? "hex" : "rings";
     if (renderer) renderer.options = { ...renderer.options, spin, fileLabels: fileNames, mode };
   });
   // Remember the view preferences in dashboard.json (settings.secondBrain).
@@ -423,7 +424,7 @@
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { spin, labels: true, fileLabels: fileNames, fit: 0.44, mode: layout === "orbit" ? "orbit" : "rings" };
+    renderer.options = { spin, labels: true, fileLabels: fileNames, fit: 0.44, mode: layout === "hex" ? "hex" : "rings" };
     renderer.resize();
     const ro = new ResizeObserver(() => renderer?.resize());
     ro.observe(canvas);
@@ -520,7 +521,7 @@
       <div class="seg">
         <button type="button" class:on={layout === "rings"} title={helpText("Rings")} aria-describedby="help-rings" onclick={() => (layout = "rings")}>Rings</button>
         <button type="button" class:on={layout === "circle"} title={helpText("Circle")} aria-describedby="help-circle" onclick={() => (layout = "circle")}>Circle</button>
-        <button type="button" class:on={layout === "orbit"} title={helpText("Orbit")} aria-describedby="help-orbit" onclick={() => (layout = "orbit")}>Orbit</button>
+        <button type="button" class:on={layout === "hex"} title={helpText("Hex")} aria-describedby="help-hex" onclick={() => (layout = "hex")}>Hex</button>
       </div>
     </div>
     <div class="group">
@@ -553,7 +554,7 @@
     {/if}
   </aside>
 
-  <div class="legend-slot"><Legend /></div>
+  <div class="legend-slot"><Legend hex={layout === "hex"} /></div>
 
   {#if selected}
     <aside class="detail" transition:fade={{ duration: 120 }}>

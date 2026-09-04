@@ -7,10 +7,11 @@
 
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 
-export type RenderMode = "rings" | "orbit";
+export type RenderMode = "rings" | "orbit" | "hex";
 
 export interface RenderOptions {
-  /** `rings` = the Second Brain view; `orbit` = the dashboard centre. */
+  /** `rings`/`hex` = the Second Brain view (dots vs. honeycomb cells for
+   *  files); `orbit` = the dashboard centre. */
   mode?: RenderMode;
   /** Radians per second of ring rotation. */
   spin: number;
@@ -280,11 +281,13 @@ export class GraphRenderer {
     let best: GraphNode | null = null;
     let bestD = Infinity;
     const orbit = this.options.mode === "orbit";
+    const hex = this.options.mode === "hex";
+    const hexPx = hex && this.model.hexUnit ? this.model.hexUnit * this.radius() : 0;
     for (const n of this.model.nodes) {
       if (orbit && n.kind === "area") continue;
       const s = orbit && n.sx !== undefined && n.sy !== undefined ? { x: n.sx, y: n.sy } : this.toScreen(n);
       const d = Math.hypot(s.x - px, s.y - py);
-      const reach = Math.max(n.r * this.view.zoom, 3) + slop;
+      const reach = hex && n.kind === "file" ? Math.max(hexPx, 3) + slop : Math.max(n.r * this.view.zoom, 3) + slop;
       if (d < reach && d < bestD) {
         best = n;
         bestD = d;
@@ -386,10 +389,17 @@ export class GraphRenderer {
 
     // Nodes.
     const hl = this.highlight;
+    const hex = this.options.mode === "hex";
+    const hexR = hex && model.hexUnit ? model.hexUnit * R : 0;
     for (const n of model.nodes) {
       const p = this.toScreen(n);
       const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
       const twinkle = n.kind === "file" ? 0.75 + 0.25 * Math.sin(t * 1.7 + n.phase * TWO_PI) : 1;
+      if (hex && n.kind === "file") {
+        const alpha = dimmed ? 0.12 : twinkle;
+        this.drawHexCell(p.x, p.y, hexR, n.color, alpha, n === this.hover || n === this.selected);
+        continue;
+      }
       const r = Math.max(1.2, n.r * Math.sqrt(this.view.zoom)) * (n === this.hover || n === this.selected ? 1.8 : 1);
       if (n.kind !== "file") {
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
@@ -433,7 +443,8 @@ export class GraphRenderer {
         const p = this.toScreen(n);
         ctx.fillStyle = n.kind === "file" || n.kind === "hub" ? this.textColor : n.kind === "area" ? n.color : this.mutedColor;
         ctx.globalAlpha = n === this.hover || n === this.selected ? 1 : 0.8;
-        ctx.fillText(n.label, p.x, p.y + n.r * this.view.zoom + 6);
+        const below = hex && n.kind === "file" ? hexR : n.r * this.view.zoom;
+        ctx.fillText(n.label, p.x, p.y + below + 6);
       }
       ctx.globalAlpha = 1;
     }
@@ -619,6 +630,30 @@ export class GraphRenderer {
         ctx.font = this.font(Math.max(8, nodeR * 0.55), 600);
       }
     }
+  }
+
+  /** One honeycomb cell: a filled flat-top hexagon (matches `layoutHex`'s
+   *  axial→pixel orientation) with a thin separating stroke, brightened to
+   *  the accent colour when hovered/selected. */
+  private drawHexCell(x: number, y: number, r: number, color: string, alpha: number, hot: boolean): void {
+    const { ctx } = this;
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = (Math.PI / 3) * k;
+      const px = x + Math.cos(a) * r;
+      const py = y + Math.sin(a) * r;
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = hot ? 1 : Math.min(1, alpha + 0.3);
+    ctx.strokeStyle = hot ? this.accentColor : this.surfaceColor;
+    ctx.lineWidth = hot ? 1.8 : 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 
   private badgeFor(n: GraphNode, _t: number): string | null {
