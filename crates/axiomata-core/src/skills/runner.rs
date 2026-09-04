@@ -26,7 +26,7 @@ use crate::agents::{AgentBackend, AgentRequest, AgentRunResult};
 use crate::config::Config;
 use crate::error::AxiomataError;
 use crate::skills::model::{RunRecord, RunStatus};
-use crate::skills::registry::{self, Skill};
+use crate::skills::registry;
 use crate::skills::runlog;
 
 /// Runs the skill named `name`, returning an unpersisted [`RunRecord`].
@@ -71,14 +71,15 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
             .or_else(|| crate::agents::default_claude_model(config)),
         AgentBackend::Ollama { .. } => None,
     };
-    Ok(run_on_backend(
-        &skill.name,
-        prompt_for(&skill, &backend),
-        &backend,
-        config,
-        model,
-    )
-    .await)
+    // The skill's own instruction body is the prompt on every backend. Claude
+    // Code used to be sent `/<name>` instead, on the assumption that its own
+    // slash-command skill machinery would resolve it — it doesn't: that
+    // machinery looks under `.claude/skills/` (project) or `~/.claude/skills/`
+    // (global), never Axiomata's own `~/.axiomata/skills/` registry, so every
+    // run got back a plain "Unknown command: /<name>" chat reply and — since
+    // `claude -p` still exits 0 for an ordinary reply — was logged as a
+    // success despite the SOP never reaching the model.
+    Ok(run_on_backend(&skill.name, skill.body.clone(), &backend, config, model).await)
 }
 
 /// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`),
@@ -196,18 +197,6 @@ pub async fn execute_and_record_skill(
     let record = execute_skill(name, config).await?;
     let db = db.lock().expect("run-log database mutex is poisoned");
     runlog::record_run(&db, record)
-}
-
-/// Builds the prompt handed to the agent for `skill` on `backend`.
-///
-/// Claude Code is invoked with the skill as a slash command (`/<name>`) so its
-/// own skill machinery runs; Ollama, which has no skill system, is fed the
-/// skill's instruction body directly.
-fn prompt_for(skill: &Skill, backend: &AgentBackend) -> String {
-    match backend {
-        AgentBackend::ClaudeCode => format!("/{}", skill.name),
-        AgentBackend::Ollama { .. } => skill.body.clone(),
-    }
 }
 
 /// Environment-variable name prefixes that `config.agents.claude_env` is
