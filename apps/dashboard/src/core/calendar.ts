@@ -13,7 +13,7 @@
  */
 
 import type { RunSummary } from "./backend";
-import { loadLatestSkillRun, type Invoke } from "./skillRun";
+import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 
 /** One event from the digest, already whatever the skill's SOP promises:
  *  `start`/`end` are `YYYY-MM-DD` for an all-day event, full ISO 8601
@@ -82,14 +82,6 @@ function isCalendarEvent(e: unknown): e is CalendarEvent {
     (o.location === null || typeof o.location === "string") &&
     typeof o.allDay === "boolean"
   );
-}
-
-/** Strips one leading/trailing ` ``` ` or ` ```json ` fence, if present;
- *  returns the input trimmed and unchanged otherwise. */
-function stripCodeFence(text: string): string {
-  const trimmed = text.trim();
-  const m = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(trimmed);
-  return m ? m[1].trim() : trimmed;
 }
 
 /** Every event whose `calendar` is `name`, or every event when `name` is

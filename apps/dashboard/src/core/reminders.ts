@@ -13,7 +13,7 @@
  */
 
 import type { RunSummary } from "./backend";
-import { loadLatestSkillRun, type Invoke } from "./skillRun";
+import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 
 /** One reminders priority, normalised by the skill's SOP onto exactly one
  *  of these four (whatever the underlying tool actually returns). */
@@ -83,14 +83,6 @@ function isReminderTask(t: unknown): t is ReminderTask {
     typeof o.priority === "string" &&
     PRIORITIES.includes(o.priority as ReminderPriority)
   );
-}
-
-/** Strips one leading/trailing ` ``` ` or ` ```json ` fence, if present;
- *  returns the input trimmed and unchanged otherwise. */
-function stripCodeFence(text: string): string {
-  const trimmed = text.trim();
-  const m = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(trimmed);
-  return m ? m[1].trim() : trimmed;
 }
 
 /** Every open task on `list` — there is no "all lists" option, `list` is

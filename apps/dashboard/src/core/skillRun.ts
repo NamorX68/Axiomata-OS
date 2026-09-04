@@ -56,3 +56,19 @@ export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Pro
   if (!full) return { run, stdout: null, error: "Run record not found." };
   return { run, stdout: full.stdout, error: null };
 }
+
+/**
+ * Strips one leading/trailing ` ``` ` or ` ```json ` fence from a skill's
+ * stdout, if present; returns the input trimmed and unchanged otherwise.
+ *
+ * Every digest-producing skill's SOP asks for exactly one JSON object and
+ * nothing else, but a model reply wrapping it in a code fence despite that
+ * instruction is common enough in practice (seen live building both
+ * `calendar-digest` and `reminders-digest`) that defensively stripping one
+ * is worth it rather than failing a well-formed run over formatting.
+ */
+export function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const m = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(trimmed);
+  return m ? m[1].trim() : trimmed;
+}

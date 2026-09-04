@@ -223,9 +223,10 @@ size goes through a `--ax-*` token; no literals in components.
   **New in `agents`/`skills` for this**: `SKILL.md` frontmatter `allowed_tools:` (see
   above) — without it the skill's MCP tool call was silently denied in every headless run.
   The "find the most recent run of skill X" round trip (`list_runs` → `get_run`) is shared
-  connector-module infrastructure, `core/skillRun.ts`'s `loadLatestSkillRun` — pulled out
-  once `reminders` needed the exact same thing calendar's own module and bridge action
-  already did independently.
+  connector-module infrastructure, `core/skillRun.ts`'s `loadLatestSkillRun` (plus that
+  same file's `stripCodeFence`, the ` ```json ` defence every digest parser needs) —
+  pulled out once `reminders` needed the exact same things calendar's own module, bridge
+  action, and parser already did independently.
 - **Reminders** (`reminders` module, `singleton`) — the second connector module, same
   no-live-poll shape as Calendar (a `reminders-digest` skill reads Apple Reminders via
   the `apple-reminders` MCP server's `reminders_lists`/`reminders_tasks` tools, replies
@@ -238,9 +239,11 @@ size goes through a `--ax-*` token; no literals in components.
   is remembered in `settings.<instance>.list`. Parsing / list-filtering is pure TS in
   `core/reminders.ts` (+ `reminders.test.ts`), same defensive-parsing shape as
   `calendar.ts` (fence-stripping, drops malformed entries, surfaces the skill's own
-  `{"error": …}`). Bridge / `/reminders` actions `refresh` · `list` (`list` omitted →
-  the available list names; `list` given → that list's open tasks — there is no "all"
-  parameter to ask for instead).
+  `{"error": …}`). Bridge / `/reminders` actions `refresh` · `lists` (the available list
+  names, one predictable `{lists}` shape) · `list` (one named list's open tasks, `list`
+  required, one predictable `{tasks}` shape) — split into two actions rather than one
+  action whose response shape depended on whether a parameter was given, after an
+  architecture review flagged that as hard for a caller to predict.
 - **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
   a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
   (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`

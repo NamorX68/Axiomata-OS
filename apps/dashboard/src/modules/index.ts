@@ -357,16 +357,25 @@ export function registerBuiltins(): void {
         },
       },
       {
-        name: "list",
+        name: "lists",
         description:
-          'Returns the open tasks on one reminder list from the last reminders-digest run (does not trigger a new run). Omit "list" to get the available list names instead — there is no "all lists" view.',
-        params: { type: "object", properties: { list: { type: "string" } } },
-        run: async (params, ctx) => {
+          'Returns the reminder list names from the last reminders-digest run (does not trigger a new run). There is no "all lists" task view — call this first, then "list" with one of these names.',
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
           const result = await loadLatestReminderDigest(ctx.invoke);
-          if (!result.run) return { lists: [], tasks: [], note: "no run yet" };
-          if (result.error) return { lists: [], tasks: [], error: result.error };
+          if (result.error) return { lists: [], error: result.error };
+          return { lists: result.digest.lists };
+        },
+      },
+      {
+        name: "list",
+        description: 'Returns the open tasks on one reminder list (an exact name from the "lists" action) from the last reminders-digest run — does not trigger a new run.',
+        params: { type: "object", properties: { list: { type: "string" } }, required: ["list"] },
+        run: async (params, ctx) => {
           const list = typeof (params as { list?: unknown }).list === "string" ? (params as { list: string }).list : "";
-          if (!list) return { lists: result.digest.lists, note: 'specify "list" (one of the names above) to see its tasks' };
+          if (!list) return { tasks: [], error: 'missing required "list" param — call the "lists" action first' };
+          const result = await loadLatestReminderDigest(ctx.invoke);
+          if (result.error) return { tasks: [], error: result.error };
           return { tasks: tasksForList(result.digest.tasks, list) };
         },
       },
