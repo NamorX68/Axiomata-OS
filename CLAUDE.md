@@ -212,8 +212,10 @@ size goes through a `--ax-*` token; no literals in components.
 - **Frontend** `apps/dashboard/src/graph/`: `model.ts` (nodes / edges / area segments,
   theme-derived colours, `regroup` by folders, `searchNodes`, `neighbours`), `layout.ts`
   (Rings: skills inner ring, files on arcs inside their area segment, routines outer ring;
-  Circle; **Orbit** for the dashboard centre: skills, routines and the newest notes as icon
-  nodes on the rim, every file as a point of a 3-D fibonacci-sphere cloud), `render.ts`
+  Circle; **Orbit**: skills, routines and the newest notes as icon nodes on the rim, every
+  file as a point of a 3-D fibonacci-sphere cloud — built for the dashboard centre, also
+  selectable as a third full-view layout, though search-highlight and "Fly to" centring
+  still only work properly in Rings/Circle), `render.ts`
   (Canvas 2D, DPR-aware, spin, hover hit-test, view transform, highlight; `mode: "rings"`
   draws ring captions SKILLS / MEMORY / ROUTINES at 12 o'clock and per-segment counts
   instead of outer area names, `mode: "orbit"` draws the dark disc with hex texture and
@@ -225,10 +227,10 @@ size goes through a `--ax-*` token; no literals in components.
 - **Module `second-brain`**: `singleton` + `background` — mounted full-size in
   `#particle-slot` behind the tiles by `canvas/BackgroundHost.svelte` (corner ⚙ / ×).
   Click → `open-second-brain` bus event → `shell/SecondBrainView.svelte` (full screen:
-  pan / zoom, search, Rings / Circle, Areas / Folders, detail panel with View here /
+  pan / zoom, search, Rings / Circle / Orbit, Areas / Folders, detail panel with View here /
   Copy path / Fly to / Run skill / toggle routine, content preview via
   `core/markdown.ts` `excerpt`/`excerptHtml`, links split into out / in, area notes
-  grouped by subfolder; a `?` help block explains Rings / Circle, Areas / Folders,
+  grouped by subfolder; a `?` help block explains Rings / Circle / Orbit, Areas / Folders,
   Rotation). Also `/brain [path | ? query]` and the module actions `open`, `search`,
   `refresh`. **Search**: the box matches titles / paths / areas locally and, debounced,
   note **contents** through `search_workspace` (`workspace::search`: case-insensitive,
