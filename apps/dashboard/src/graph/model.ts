@@ -62,6 +62,9 @@ export interface GraphModel {
   byId: Map<string, GraphNode>;
   totalFiles: number;
   truncated: boolean;
+  /** Hex layout only: circumradius of one file's cell, in graph units — the
+   *  renderer multiplies by its own px radius to draw matching-size cells. */
+  hexUnit?: number;
 }
 
 export interface Palette {

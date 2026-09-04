@@ -271,25 +271,36 @@ size goes through a `--ax-*` token; no literals in components.
 - **Frontend** `apps/dashboard/src/graph/`: `model.ts` (nodes / edges / area segments,
   theme-derived colours, `regroup` by folders, `searchNodes`, `neighbours`), `layout.ts`
   (Rings: skills inner ring, files on arcs inside their area segment, routines outer ring;
-  Circle; **Orbit**: skills, routines and the newest notes as icon nodes on the rim, every
-  file as a point of a 3-D fibonacci-sphere cloud — built for the dashboard centre, also
-  selectable as a third full-view layout, though search-highlight and "Fly to" centring
-  still only work properly in Rings/Circle), `render.ts`
+  Circle; **Hex**: hub/skills/routines/area markers placed exactly as in Rings, but every
+  file gets its own flat-top hex cell instead of a dot — a hex-ring spiral out from the
+  origin (`hexRing`/`hexToPixel`, standard axial-coordinate hex-grid math), cells handed
+  out per area in that area's existing angular wedge so the mosaic still reads as "areas
+  around a hub", one shared cell size (`GraphModel.hexUnit`, graph units) solved from the
+  file count and rescaled to land exactly on Rings' file band. `layoutOrbit` (skills,
+  routines and the newest notes as icon nodes on the rim, every file as a point of a 3-D
+  fibonacci-sphere cloud) is a separate export used only by the dashboard-centre background
+  widget directly (not part of `LayoutKind`/`applyLayout` any more — Second Brain's
+  full-view switcher dropped Orbit as an option 2026-09-04, kept only as the home-screen
+  background), `render.ts`
   (Canvas 2D, DPR-aware, spin, hover hit-test, view transform, highlight; `mode: "rings"`
   draws ring captions SKILLS / MEMORY / ROUTINES at 12 o'clock and per-segment counts
-  instead of outer area names, `mode: "orbit"` draws the dark disc with hex texture and
-  rim, a geodesic wireframe, the spinning cloud and the icon ring with age badges). No
-  graph library on purpose; `d3-force` would only be added for a force layout.
+  instead of outer area names, `mode: "hex"` is the same draw pass with file nodes drawn as
+  hexagons (`drawHexCell`, sized from `hexUnit`) instead of circles, `mode: "orbit"` draws
+  the dark disc with hex texture and rim, a geodesic wireframe, the spinning cloud and the
+  icon ring with age badges). No graph library on purpose; `d3-force` would only be added
+  for a force layout.
 - **Nodes**: hub, **area** (one per folder, labelled like the folder, on its own ring
   between skills and files), file, skill, routine — each non-file kind carries a glyph
-  (hexagon / folder / bolt / clock, `graph/Legend.svelte` explains them).
+  (hexagon / folder / bolt / clock, `graph/Legend.svelte` explains them; the file swatch
+  itself switches from a dot to a small hexagon when the Hex layout is active).
 - **Module `second-brain`**: `singleton` + `background` — mounted full-size in
-  `#particle-slot` behind the tiles by `canvas/BackgroundHost.svelte` (corner ⚙ / ×).
-  Click → `open-second-brain` bus event → `shell/SecondBrainView.svelte` (full screen:
-  pan / zoom, search, Rings / Circle / Orbit, Areas / Folders, detail panel with View here /
+  `#particle-slot` behind the tiles by `canvas/BackgroundHost.svelte` (corner ⚙ / ×; always
+  Orbit, not user-switchable there). Click → `open-second-brain` bus event →
+  `shell/SecondBrainView.svelte` (full screen:
+  pan / zoom, search, Rings / Circle / Hex, Areas / Folders, detail panel with View here /
   Copy path / Fly to / Run skill / toggle routine, content preview via
   `core/markdown.ts` `excerpt`/`excerptHtml`, links split into out / in, area notes
-  grouped by subfolder; a `?` help block explains Rings / Circle / Orbit, Areas / Folders,
+  grouped by subfolder; a `?` help block explains Rings / Circle / Hex, Areas / Folders,
   Rotation). Also `/brain [path | ? query]` and the module actions `open`, `search`,
   `refresh`. **Search**: the box matches titles / paths / areas locally and, debounced,
   note **contents** through `search_workspace` (`workspace::search`: case-insensitive,

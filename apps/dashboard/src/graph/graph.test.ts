@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceGraph } from "../core/backend";
-import { applyLayout, RING } from "./layout";
+import { applyLayout, layoutOrbit, RING } from "./layout";
 import { buildModel, glyphForArea, neighbours, regroup, searchNodes, type Palette } from "./model";
 
 const palette: Palette = {
@@ -91,7 +91,7 @@ describe("layouts", () => {
 
   it("orbit puts the hub at the centre, gives every file a 3-D cloud point, and marks the rim", () => {
     const m = buildModel(fixture(), palette);
-    applyLayout(m, "orbit");
+    layoutOrbit(m);
     const hub = m.byId.get("hub")!;
     expect([hub.x, hub.y]).toEqual([0, 0]);
     const skill = m.byId.get("skill:a")!;
@@ -100,6 +100,30 @@ describe("layouts", () => {
     expect(files.every((n) => n.p3 && n.p3.length === 3)).toBe(true);
     // Areas are parked, never shown, in orbit mode.
     expect(m.byId.get("area:Dev")!.onOrbit).toBeFalsy();
+  });
+
+  it("hex gives every file its own cell, tiled in its area's wedge, hub/skills as in rings", () => {
+    const m = buildModel(fixture(), palette);
+    applyLayout(m, "hex");
+    const hub = m.byId.get("hub")!;
+    expect([hub.x, hub.y]).toEqual([0, 0]);
+    const skill = m.byId.get("skill:a")!;
+    expect(Math.hypot(skill.x, skill.y)).toBeCloseTo(RING.skills, 5);
+    expect(m.hexUnit).toBeGreaterThan(0);
+    const files = m.nodes.filter((n) => n.kind === "file");
+    // Every file lands on a distinct cell — no two share a position.
+    const seen = new Set(files.map((n) => `${n.x.toFixed(6)},${n.y.toFixed(6)}`));
+    expect(seen.size).toBe(files.length);
+    // Neighbouring cells in the same axial hex grid sit exactly `hexUnit *
+    // √3` apart (row height) or a multiple of it — never closer, which
+    // would mean two notes overlapping.
+    const minGap = Math.sqrt(3) * m.hexUnit! - 1e-6;
+    for (let i = 0; i < files.length; i++) {
+      for (let j = i + 1; j < files.length; j++) {
+        const d = Math.hypot(files[i].x - files[j].x, files[i].y - files[j].y);
+        expect(d).toBeGreaterThanOrEqual(minGap);
+      }
+    }
   });
 });
 

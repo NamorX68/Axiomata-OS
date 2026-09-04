@@ -7,10 +7,11 @@
 
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 
-export type RenderMode = "rings" | "orbit";
+export type RenderMode = "rings" | "orbit" | "hex";
 
 export interface RenderOptions {
-  /** `rings` = the Second Brain view; `orbit` = the dashboard centre. */
+  /** `rings`/`hex` = the Second Brain view (dots vs. honeycomb cells for
+   *  files); `orbit` = the dashboard centre. */
   mode?: RenderMode;
   /** Radians per second of ring rotation. */
   spin: number;
@@ -222,6 +223,12 @@ export class GraphRenderer {
   private lightScheme = false;
   /** Ring captions (rings mode). */
   captions = { skills: "SKILLS", memory: "MEMORY", routines: "ROUTINES" };
+  /** In-flight `flyTo` pan/zoom tween, consumed by `frame`. */
+  private flyAnim: { fromX: number; fromY: number; fromZoom: number; toX: number; toY: number; toZoom: number; start: number; duration: number } | null = null;
+  /** The node `flyTo` last landed on, pulsed for a moment so it's easy to
+   *  spot even once the view has stopped moving. */
+  private pulse: { node: GraphNode; start: number } | null = null;
+  private static readonly PULSE_DURATION = 1100; // ms
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -254,6 +261,15 @@ export class GraphRenderer {
     return Math.min(this.width, this.height) * this.options.fit * this.view.zoom;
   }
 
+  /** A file cell's px radius in Hex mode — 0 outside Hex mode, or before
+   *  `model.hexUnit` is known. The one place `model.hexUnit` (graph units)
+   *  becomes a screen size, so hit-testing, drawing and the pulse effect
+   *  can't drift out of sync with each other. */
+  private hexCellRadius(): number {
+    if (this.options.mode !== "hex" || !this.model?.hexUnit) return 0;
+    return this.model.hexUnit * this.radius();
+  }
+
   /** Graph units → canvas CSS px (includes spin, pan, zoom). */
   toScreen(n: { x: number; y: number }): { x: number; y: number } {
     const R = this.radius();
@@ -265,13 +281,41 @@ export class GraphRenderer {
     };
   }
 
-  /** Pans so `node` sits at the canvas centre (at the current zoom). */
-  centerOn(node: GraphNode): void {
-    const R = this.radius();
+  /** The pan offset that puts `node` at the canvas centre at a given zoom
+   *  (zoom is a parameter, not read from `this.view`, so `flyTo` can target
+   *  a zoom level the view hasn't reached yet). */
+  private centerFor(node: GraphNode, zoom: number): { x: number; y: number } {
+    const R = Math.min(this.width, this.height) * this.options.fit * zoom;
     const cos = Math.cos(this.angle);
     const sin = Math.sin(this.angle);
-    this.view.x = -(node.x * cos - node.y * sin) * R;
-    this.view.y = -(node.x * sin + node.y * cos) * R;
+    return { x: -(node.x * cos - node.y * sin) * R, y: -(node.x * sin + node.y * cos) * R };
+  }
+
+  /** Pans so `node` sits at the canvas centre (at the current zoom), no
+   *  animation — used for the initial focus on open/navigate. */
+  centerOn(node: GraphNode): void {
+    const dest = this.centerFor(node, this.view.zoom);
+    this.view.x = dest.x;
+    this.view.y = dest.y;
+  }
+
+  /** The "Fly to" action: eases the pan/zoom to `node` over a beat instead
+   *  of snapping, and marks it with a brief glow pulse so it's easy to spot
+   *  the moment the view settles. */
+  flyTo(node: GraphNode, targetZoom = Math.max(this.view.zoom, 1.6)): void {
+    const dest = this.centerFor(node, targetZoom);
+    const now = performance.now();
+    this.flyAnim = {
+      fromX: this.view.x,
+      fromY: this.view.y,
+      fromZoom: this.view.zoom,
+      toX: dest.x,
+      toY: dest.y,
+      toZoom: targetZoom,
+      start: now,
+      duration: 550,
+    };
+    this.pulse = { node, start: now };
   }
 
   /** Nearest node within `slop` px of a CSS-px point, or null. */
@@ -280,11 +324,13 @@ export class GraphRenderer {
     let best: GraphNode | null = null;
     let bestD = Infinity;
     const orbit = this.options.mode === "orbit";
+    const hex = this.options.mode === "hex";
+    const hexPx = this.hexCellRadius();
     for (const n of this.model.nodes) {
       if (orbit && n.kind === "area") continue;
       const s = orbit && n.sx !== undefined && n.sy !== undefined ? { x: n.sx, y: n.sy } : this.toScreen(n);
       const d = Math.hypot(s.x - px, s.y - py);
-      const reach = Math.max(n.r * this.view.zoom, 3) + slop;
+      const reach = hex && n.kind === "file" ? Math.max(hexPx, 3) + slop : Math.max(n.r * this.view.zoom, 3) + slop;
       if (d < reach && d < bestD) {
         best = n;
         bestD = d;
@@ -297,6 +343,15 @@ export class GraphRenderer {
     const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
     this.last = now;
     this.angle = (this.angle + this.options.spin * dt) % TWO_PI;
+    if (this.flyAnim) {
+      const a = this.flyAnim;
+      const raw = Math.min(1, (now - a.start) / a.duration);
+      const eased = 1 - (1 - raw) ** 3; // ease-out cubic — quick start, gentle landing
+      this.view.x = a.fromX + (a.toX - a.fromX) * eased;
+      this.view.y = a.fromY + (a.toY - a.fromY) * eased;
+      this.view.zoom = a.fromZoom + (a.toZoom - a.fromZoom) * eased;
+      if (raw >= 1) this.flyAnim = null;
+    }
     this.draw(now / 1000);
   }
 
@@ -386,10 +441,17 @@ export class GraphRenderer {
 
     // Nodes.
     const hl = this.highlight;
+    const hex = this.options.mode === "hex";
+    const hexR = this.hexCellRadius();
     for (const n of model.nodes) {
       const p = this.toScreen(n);
       const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
       const twinkle = n.kind === "file" ? 0.75 + 0.25 * Math.sin(t * 1.7 + n.phase * TWO_PI) : 1;
+      if (hex && n.kind === "file") {
+        const alpha = dimmed ? 0.12 : twinkle;
+        this.drawHexCell(p.x, p.y, hexR, n.color, alpha, n === this.hover || n === this.selected);
+        continue;
+      }
       const r = Math.max(1.2, n.r * Math.sqrt(this.view.zoom)) * (n === this.hover || n === this.selected ? 1.8 : 1);
       if (n.kind !== "file") {
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
@@ -433,10 +495,56 @@ export class GraphRenderer {
         const p = this.toScreen(n);
         ctx.fillStyle = n.kind === "file" || n.kind === "hub" ? this.textColor : n.kind === "area" ? n.color : this.mutedColor;
         ctx.globalAlpha = n === this.hover || n === this.selected ? 1 : 0.8;
-        ctx.fillText(n.label, p.x, p.y + n.r * this.view.zoom + 6);
+        const below = hex && n.kind === "file" ? hexR : n.r * this.view.zoom;
+        ctx.fillText(n.label, p.x, p.y + below + 6);
       }
       ctx.globalAlpha = 1;
     }
+
+    this.drawPulse();
+  }
+
+  /** "Fly to" lands instantly once the tween finishes; this is what makes
+   *  the target actually easy to find — a couple of expanding rings plus a
+   *  soft breathing glow, all fading out over `PULSE_DURATION`. */
+  private drawPulse(): void {
+    if (!this.pulse) return;
+    const elapsedMs = performance.now() - this.pulse.start;
+    if (elapsedMs > GraphRenderer.PULSE_DURATION) {
+      this.pulse = null;
+      return;
+    }
+    const { ctx } = this;
+    const n = this.pulse.node;
+    const p = this.toScreen(n);
+    const elapsed = elapsedMs / 1000;
+    const life = elapsedMs / GraphRenderer.PULSE_DURATION; // 0 → 1 over the whole pulse
+    const hexPx = this.hexCellRadius();
+    const baseR = hexPx > 0 && n.kind === "file" ? hexPx : Math.max(4, n.r * Math.sqrt(this.view.zoom));
+
+    // Two expanding, fading rings, staggered like a double heartbeat.
+    for (const phase of [0, 0.35]) {
+      const local = elapsed - phase;
+      if (local < 0 || local > 0.75) continue;
+      const p01 = local / 0.75;
+      ctx.globalAlpha = (1 - p01) * 0.7;
+      ctx.strokeStyle = this.accentColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, baseR + p01 * baseR * 4.5, 0, TWO_PI);
+      ctx.stroke();
+    }
+    // A gently breathing glow underneath, fading out with the pulse overall.
+    const breathe = 0.3 + 0.2 * Math.sin(elapsed * Math.PI * 4);
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, baseR * 3.5);
+    g.addColorStop(0, this.accentColor);
+    g.addColorStop(1, "transparent");
+    ctx.globalAlpha = Math.max(0, breathe * (1 - life));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, baseR * 3.5, 0, TWO_PI);
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   /** Dashboard centre: dark disc with hex texture and rim, spinning 3-D
@@ -619,6 +727,30 @@ export class GraphRenderer {
         ctx.font = this.font(Math.max(8, nodeR * 0.55), 600);
       }
     }
+  }
+
+  /** One honeycomb cell: a filled flat-top hexagon (matches `layoutHex`'s
+   *  axial→pixel orientation) with a thin separating stroke, brightened to
+   *  the accent colour when hovered/selected. */
+  private drawHexCell(x: number, y: number, r: number, color: string, alpha: number, hot: boolean): void {
+    const { ctx } = this;
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = (Math.PI / 3) * k;
+      const px = x + Math.cos(a) * r;
+      const py = y + Math.sin(a) * r;
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = hot ? 1 : Math.min(1, alpha + 0.3);
+    ctx.strokeStyle = hot ? this.accentColor : this.surfaceColor;
+    ctx.lineWidth = hot ? 1.8 : 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 
   private badgeFor(n: GraphNode, _t: number): string | null {

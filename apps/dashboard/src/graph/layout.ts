@@ -5,7 +5,7 @@
  * outer radius; the renderer scales to the canvas.
  */
 
-import type { GraphModel, GraphNode } from "./model";
+import type { AreaSegment, GraphModel, GraphNode } from "./model";
 
 export const RING = {
   skills: 0.17,
@@ -29,7 +29,7 @@ function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2
   });
 }
 
-export type LayoutKind = "rings" | "circle" | "orbit";
+export type LayoutKind = "rings" | "circle" | "hex";
 
 /** Most icon nodes on the dashboard orbit ring. */
 export const ORBIT_MAX = 36;
@@ -82,7 +82,7 @@ export function layoutOrbit(model: GraphModel): void {
 }
 
 export function applyLayout(model: GraphModel, kind: LayoutKind): void {
-  if (kind === "orbit") layoutOrbit(model);
+  if (kind === "hex") layoutHex(model);
   else if (kind === "circle") layoutCircle(model);
   else layoutRings(model);
 }
@@ -167,4 +167,188 @@ export function layoutRings(model: GraphModel): void {
   }
   // Loose root files sit on a small ring between skills and the areas.
   placeRing(loose, (RING.skills + RING.filesInner) / 2, Math.PI / 2);
+}
+
+/** The 6 axial unit directions, in ring-walking order — convention-
+ *  independent of flat- vs pointy-top; only `hexToPixel` cares about that. */
+const AXIAL_DIRS: [number, number][] = [
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
+];
+
+/** Flat-top axial → pixel, hex circumradius `u` (graph units). */
+function hexToPixel(q: number, r: number, u: number): [number, number] {
+  return [u * 1.5 * q, u * Math.sqrt(3) * (r + q / 2)];
+}
+
+/** Every axial cell on hex ring `k` (k ≥ 1) around the origin, walked side
+ *  by side — the standard "spiral ring" traversal. */
+function hexRing(k: number): [number, number][] {
+  const cells: [number, number][] = [];
+  let q = AXIAL_DIRS[4][0] * k;
+  let r = AXIAL_DIRS[4][1] * k;
+  for (const [dq, dr] of AXIAL_DIRS) {
+    for (let step = 0; step < k; step++) {
+      cells.push([q, r]);
+      q += dq;
+      r += dr;
+    }
+  }
+  return cells;
+}
+
+/** Is `angle` inside `[start, end)`, both possibly outside ±π (area
+ *  segments are laid out as a running sum, not wrapped)? */
+function angleInSegment(angle: number, start: number, end: number): boolean {
+  const twoPi = Math.PI * 2;
+  let a = angle;
+  while (a < start) a += twoPi;
+  while (a >= start + twoPi) a -= twoPi;
+  return a >= start && a < end;
+}
+
+/** One candidate hex cell in the ring-spiral, in pixel (graph-unit) space —
+ *  `ring`/`angle` are kept alongside `x`/`y` because `assignFilesToCells`
+ *  picks cells innermost-first, angle-sorted within a ring. */
+interface HexCell {
+  x: number;
+  y: number;
+  ring: number;
+  angle: number;
+}
+
+/** Solves one hex circumradius `u` (graph units) so `fileCount` hexes, each
+ *  of area (3√3/2)u², cover roughly the annulus Rings uses for files (with
+ *  a little slack so the outermost ring isn't razor-tight against
+ *  neighbours) — plus the ring-spiral index `kStart` to start generating
+ *  cells from. The mosaic starts a bit further out than Rings' dots do
+ *  (`RING.filesInner + 0.32`, not `RING.filesInner`) — otherwise the
+ *  innermost cells crowd right up against the skill/routine/area icons and
+ *  make them hard to pick out. */
+function solveHexUnit(fileCount: number): { u: number; kStart: number } {
+  const innerR = RING.filesInner + 0.32;
+  const outerR = RING.filesOuter;
+  const slack = 1.15;
+  const fieldArea = Math.PI * (outerR * outerR - innerR * innerR);
+  const hexArea = (3 * Math.sqrt(3)) / 2;
+  const u = Math.sqrt((fieldArea * slack) / (fileCount * hexArea));
+  const ringHeight = Math.sqrt(3) * u;
+  const kStart = Math.max(1, Math.ceil(innerR / ringHeight));
+  return { u, kStart };
+}
+
+/** Every hex cell from ring `kStart` outward, spiralling ring by ring
+ *  (`hexRing`), until there are comfortably more candidates than
+ *  `targetCount` files (30% slack) or the spiral has clearly run away —
+ *  the slack absorbs `assignFilesToCells`'s per-wedge discretisation (an
+ *  area's own cells can run out a little short even when the whole field
+ *  has room to spare). */
+function generateHexCells(unit: number, kStart: number, targetCount: number): HexCell[] {
+  const cells: HexCell[] = [];
+  let k = kStart;
+  while (cells.length < targetCount * 1.3 && k < kStart + 200) {
+    for (const [q, r] of hexRing(k)) {
+      const [x, y] = hexToPixel(q, r, unit);
+      cells.push({ x, y, ring: k, angle: Math.atan2(y, x) });
+    }
+    k++;
+  }
+  return cells;
+}
+
+/** Hands each area's files the nearest free cells inside its own angular
+ *  wedge (innermost ring first, alphabetically within a ring so the
+ *  layout is stable), then spills any leftovers — a wedge that ran short
+ *  because of the discretisation above, not a real area imbalance — onto
+ *  whatever cells are still free, nearest first. Mutates each file node's
+ *  `x`/`y` in place. */
+function assignFilesToCells(files: GraphNode[], areas: AreaSegment[], cells: HexCell[]): void {
+  // Loose (no-area) files don't get a proper wedge in Rings either — give
+  // them a narrow slice pointing at the same spot Rings parks their ring.
+  const wedges = [
+    ...areas.map((s) => ({ area: s.name, start: s.start, end: s.end })),
+    { area: null, start: Math.PI / 2 - 0.15, end: Math.PI / 2 + 0.15 },
+  ];
+  const byArea = new Map<string | null, GraphNode[]>();
+  for (const n of files) {
+    const key = n.area;
+    if (!byArea.has(key)) byArea.set(key, []);
+    byArea.get(key)!.push(n);
+  }
+
+  const used = new Set<number>();
+  const assigned = new Set<GraphNode>();
+  for (const w of wedges) {
+    const mine = (byArea.get(w.area) ?? []).slice().sort((a, b) => a.label.localeCompare(b.label));
+    if (mine.length === 0) continue;
+    const candidates = cells
+      .map((c, i) => ({ c, i }))
+      .filter(({ i, c }) => !used.has(i) && angleInSegment(c.angle, w.start, w.end))
+      .sort((a, b) => a.c.ring - b.c.ring || a.c.angle - b.c.angle);
+    mine.forEach((node, j) => {
+      const pick = candidates[j];
+      if (!pick) return;
+      used.add(pick.i);
+      node.x = pick.c.x;
+      node.y = pick.c.y;
+      assigned.add(node);
+    });
+  }
+  // Spillover: a wedge that ran short (discretisation, not a real area
+  // imbalance) — hand its leftover files the nearest still-free cells.
+  const leftover = files.filter((n) => !assigned.has(n));
+  if (leftover.length > 0) {
+    const free = cells
+      .map((c, i) => ({ c, i }))
+      .filter(({ i }) => !used.has(i))
+      .sort((a, b) => a.c.ring - b.c.ring || a.c.angle - b.c.angle);
+    leftover.forEach((node, j) => {
+      const pick = free[j];
+      if (!pick) return;
+      node.x = pick.c.x;
+      node.y = pick.c.y;
+      assigned.add(node);
+    });
+  }
+}
+
+/** Honeycomb layout: hub / skills / routines / area markers exactly as in
+ *  Rings (so the centre still reads the same way); every file gets its own
+ *  hex cell instead of a dot, tiled as a true flat-top hex grid (a spiral
+ *  of rings out from the origin, per `hexRing`) so neighbouring notes touch
+ *  edge-to-edge like a honeycomb. Cells are handed out per area, in the
+ *  same angular wedge each area already owns in Rings/Circle, so the
+ *  overall shape still reads as "areas around a hub" — just made of hex
+ *  tiles instead of arcs of dots. One shared cell size (`model.hexUnit`,
+ *  graph units) is solved from the file count so the mosaic fills roughly
+ *  the same band Rings uses for files, then everything is rescaled to
+ *  land exactly on that band's outer edge; the renderer reads `hexUnit`
+ *  back to draw each cell at the matching pixel size. */
+export function layoutHex(model: GraphModel): void {
+  layoutRings(model);
+  const files = model.nodes.filter((n) => n.kind === "file");
+  if (files.length === 0) {
+    model.hexUnit = undefined;
+    return;
+  }
+  let { u, kStart } = solveHexUnit(files.length);
+  const cells = generateHexCells(u, kStart, files.length);
+  assignFilesToCells(files, model.areas, cells);
+
+  // Rescale so the outermost placed cell lands on `RING.filesOuter` — fills
+  // the same band regardless of how the ring-spiral vs. annulus area
+  // estimates happened to compare, and keeps `hexUnit` in step with the
+  // final layout.
+  const maxR = Math.max(...files.map((n) => Math.hypot(n.x, n.y)), 1e-6);
+  const scale = RING.filesOuter / maxR;
+  u *= scale;
+  for (const n of files) {
+    n.x *= scale;
+    n.y *= scale;
+  }
+  model.hexUnit = u;
 }
