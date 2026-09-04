@@ -207,7 +207,7 @@ size goes through a `--ax-*` token; no literals in components.
   ([[axiomata-os-next-roadmap]]): a `calendar-digest` skill (`~/.axiomata/skills/`, not in
   this repo) reads Apple Calendar via the `apple-reminders` MCP server's
   `calendar_calendars`/`calendar_events` tools and replies with one JSON object —
-  `{"calendars": [...], "events": [{"title","start","end","calendar","location","allDay"}]}`
+  `{"calendars": [...], "events": [{"id","title","start","end","calendar","location","allDay"}]}`
   — sorted by `start`. Unlike `todo`, there is **no live poll**: calendar data sits behind
   an MCP tool only an agent can reach, so every refresh is a real agent turn. The tile
   reads back whichever run happened most recently (`list_runs` → `get_run` for the
@@ -219,7 +219,8 @@ size goes through a `--ax-*` token; no literals in components.
   filtering / day-grouping is pure TS in `core/calendar.ts` (+ `calendar.test.ts`);
   `parseCalendarDigest` defensively strips a ` ```json ` fence the model adds despite the
   SOP saying not to. Bridge / `/calendar` actions `refresh` (runs the skill now) ·
-  `list` (reads back the last run, optionally filtered to one calendar, no new run).
+  `list` (reads back the last run, optionally filtered to one calendar, no new run) ·
+  `create` · `delete` (see "Connector writes" below).
   **New in `agents`/`skills` for this**: `SKILL.md` frontmatter `allowed_tools:` (see
   above) — without it the skill's MCP tool call was silently denied in every headless run.
   The "find the most recent run of skill X" round trip (`list_runs` → `get_run`) is shared
@@ -227,10 +228,32 @@ size goes through a `--ax-*` token; no literals in components.
   same file's `stripCodeFence`, the ` ```json ` defence every digest parser needs) —
   pulled out once `reminders` needed the exact same things calendar's own module, bridge
   action, and parser already did independently.
+- **Connector writes** (create / complete / delete, both Calendar and Reminders): a skill's
+  SOP is fixed at authoring time, so it has no way to take a form's runtime parameters — a
+  write instead goes through a fresh, silent one-shot **instruct turn**
+  (`core/instruct.ts`'s `runInstructWrite`, wrapping `assistant_send`), not through
+  `core/chat.ts`'s visible chat-panel path. `buildToolCallInstruction` spells out the exact
+  MCP tool call (`action="create"`, quoted parameters via `quoteForInstruction`, …) in the
+  instruction text itself, leaving nothing for the agent to interpret; the turn ends by
+  replying either `OK` (delete, complete) or the written item's own id (create), which the
+  caller inserts into (or removes from) its already-loaded digest **locally** — no full
+  digest re-run, which for Reminders' ~60-task read (~130 s) would be far too slow for a
+  single checkbox click. This means a write is only as fresh as the last read: an edit made
+  outside the app (or from another device) won't show until the next ↻. **New in
+  `agents` for this**: `ChatRequest`/`agents::chat`/`assistant_send` all gained the same
+  `allowed_tools` an instruct turn needs to reach an MCP tool at all (same root cause as the
+  skills-side fix above — an MCP call is silently denied regardless of `--permission-mode`);
+  `axiomata-cli assistant` gained `--allowed-tools` to test an instruction here first, same
+  way the digest skills were tested via `run-skill` before being wired into the app.
+  Calendar: `core/calendar.ts`'s `createCalendarEvent`/`deleteCalendarEvent`, the tile's "+"
+  form and hover ✕ per event, bridge actions `create`/`delete`. Reminders:
+  `core/reminders.ts`'s `createReminderTask`/`completeReminderTask`/`deleteReminderTask`,
+  the tile's "+" form, a checkbox per task (completing removes it from view — the digest
+  only ever holds open tasks) and hover ✕, bridge actions `create`/`complete`/`delete`.
 - **Reminders** (`reminders` module, `singleton`) — the second connector module, same
   no-live-poll shape as Calendar (a `reminders-digest` skill reads Apple Reminders via
   the `apple-reminders` MCP server's `reminders_lists`/`reminders_tasks` tools, replies
-  `{"lists": [...], "tasks": [{"title","list","notes","dueDate","priority"}]}`, only ever
+  `{"lists": [...], "tasks": [{"id","title","list","notes","dueDate","priority"}]}`, only ever
   open/incomplete tasks). The one real difference from Calendar: **no "all lists" view** —
   the owner's ~12 Apple Reminders lists share no theme (shopping lists, house-project
   costs, gift ideas, a theatre-season list, …), so a combined feed would just be noise.
@@ -243,7 +266,8 @@ size goes through a `--ax-*` token; no literals in components.
   names, one predictable `{lists}` shape) · `list` (one named list's open tasks, `list`
   required, one predictable `{tasks}` shape) — split into two actions rather than one
   action whose response shape depended on whether a parameter was given, after an
-  architecture review flagged that as hard for a caller to predict.
+  architecture review flagged that as hard for a caller to predict — plus `create` ·
+  `complete` · `delete` (see "Connector writes" above).
 - **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
   a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
   (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`

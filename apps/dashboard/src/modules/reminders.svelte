@@ -11,6 +11,15 @@
   ideas, …), so the picker always shows exactly one real list, defaulting
   to the alphabetically first one until something else is chosen. Config
   (flip side): `list` — the last-selected list, so it survives reload.
+
+  Create / complete / delete go through a one-shot instruct turn
+  (`core/instruct.ts`), not the digest skill — a write needs per-call
+  parameters a skill can't take. Create asks the agent to report the new
+  task's id back and inserts it into the local digest directly (no full
+  re-run, which for a list this size can be slow); complete/delete remove
+  the affected id from the local digest the same way. All three are
+  therefore only as fresh as the last read — a stray edit made outside the
+  app (or by another device) won't show until the next ↻.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -18,13 +27,17 @@
   import type { RunRecord, RunSummary } from "../core/backend";
   import { relativeTime } from "../core/format";
   import {
+    completeReminderTask,
+    createReminderTask,
     defaultList,
+    deleteReminderTask,
     EMPTY_REMINDER_DIGEST,
     loadLatestReminderDigest,
     parseReminderDigest,
     REMINDERS_SKILL_NAME,
     tasksForList,
     type ReminderDigest,
+    type ReminderTask,
   } from "../core/reminders";
   import type { ModuleContext } from "../core/types";
 
@@ -45,6 +58,74 @@
   function selectList(e: Event) {
     selectedList = (e.currentTarget as HTMLSelectElement).value;
     config.update((c) => ({ ...c, list: selectedList }));
+  }
+
+  // --- Create ---
+  let showCreate = $state(false);
+  let creating = $state(false);
+  let createError = $state("");
+  let newTitle = $state("");
+  let newList = $state("");
+  let newDueDate = $state("");
+  let newNotes = $state("");
+
+  function openCreate() {
+    newList = selectedList || digest.lists[0] || "";
+    newDueDate = "";
+    newNotes = "";
+    newTitle = "";
+    createError = "";
+    showCreate = true;
+  }
+
+  async function submitCreate() {
+    const title = newTitle.trim();
+    if (!title || !newList || creating) return;
+    creating = true;
+    createError = "";
+    try {
+      const task = await createReminderTask(ctx.invoke, {
+        title,
+        list: newList,
+        dueDate: newDueDate || null,
+        notes: newNotes.trim() || null,
+      });
+      digest = { ...digest, tasks: [...digest.tasks, task] };
+      showCreate = false;
+    } catch (err) {
+      createError = String(err instanceof Error ? err.message : err);
+    } finally {
+      creating = false;
+    }
+  }
+
+  // --- Complete / delete ---
+  let busyId = $state<string | null>(null);
+
+  async function completeTask(t: ReminderTask) {
+    if (busyId) return;
+    busyId = t.id;
+    try {
+      await completeReminderTask(ctx.invoke, t.id);
+      digest = { ...digest, tasks: digest.tasks.filter((x) => x.id !== t.id) };
+    } catch (err) {
+      error = String(err instanceof Error ? err.message : err);
+    } finally {
+      busyId = null;
+    }
+  }
+
+  async function removeTask(t: ReminderTask) {
+    if (busyId) return;
+    busyId = t.id;
+    try {
+      await deleteReminderTask(ctx.invoke, t.id);
+      digest = { ...digest, tasks: digest.tasks.filter((x) => x.id !== t.id) };
+    } catch (err) {
+      error = String(err instanceof Error ? err.message : err);
+    } finally {
+      busyId = null;
+    }
   }
 
   /** Keeps the current selection if it still exists in a freshly loaded
@@ -120,10 +201,33 @@
     <span class="muted last-run" title={lastRun ? `Last run: ${lastRun.started_at}` : "No run yet"}>
       {lastRun ? relativeTime(lastRun.started_at) : "never run"}
     </span>
+    <button type="button" class="add" title="New reminder" aria-label="New reminder" onclick={openCreate}>+</button>
     <button type="button" class="refresh" title="Run reminders-digest now" aria-label="Refresh" disabled={running} onclick={() => void refreshNow()}>
       {running ? "…" : "↻"}
     </button>
   </div>
+
+  {#if showCreate}
+    <form class="create" onsubmit={(e) => (e.preventDefault(), submitCreate())}>
+      <input type="text" placeholder="Title…" bind:value={newTitle} disabled={creating} />
+      <div class="row">
+        <select bind:value={newList} disabled={creating} aria-label="List">
+          {#each digest.lists as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
+        <input type="date" bind:value={newDueDate} disabled={creating} aria-label="Due date (optional)" />
+      </div>
+      <input type="text" placeholder="Notes (optional)…" bind:value={newNotes} disabled={creating} />
+      {#if createError}<p class="error">{createError}</p>{/if}
+      <div class="row">
+        <button type="button" onclick={() => (showCreate = false)} disabled={creating}>Cancel</button>
+        <button type="submit" class="primary" disabled={creating || !newTitle.trim() || !newList}>
+          {creating ? "Creating…" : "Create"}
+        </button>
+      </div>
+    </form>
+  {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
 
@@ -140,13 +244,23 @@
     <p class="muted empty">Nothing open in &quot;{selectedList}&quot;.</p>
   {:else}
     <ul class="tasks">
-      {#each tasks as t, i (i + t.title + t.list)}
+      {#each tasks as t (t.id)}
         <li class="task">
+          <input
+            type="checkbox"
+            checked={false}
+            aria-label={`Mark "${t.title}" done`}
+            disabled={busyId === t.id}
+            onchange={() => void completeTask(t)}
+          />
           {#if t.priority !== "none"}
             <span class="prio prio-{t.priority}" title={`Priority: ${t.priority}`} aria-hidden="true"></span>
           {/if}
           <span class="title">{t.title}</span>
           {#if t.dueDate}<span class="due muted">{t.dueDate.slice(0, 10)}</span>{/if}
+          <button type="button" class="del" aria-label={`Delete "${t.title}"`} disabled={busyId === t.id} onclick={() => void removeTask(t)}>
+            {busyId === t.id ? "…" : "✕"}
+          </button>
         </li>
         {#if t.notes}<li class="notes muted">{t.notes}</li>{/if}
       {/each}
@@ -181,9 +295,43 @@
   .last-run {
     white-space: nowrap;
   }
+  .add,
   .refresh {
     padding: 1px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
+  }
+
+  .create {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    flex: 0 0 auto;
+    padding: var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+  }
+  .create .row {
+    display: flex;
+    gap: var(--ax-space-2);
+  }
+  .create .row > * {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .create input[type="text"] {
+    width: 100%;
+  }
+  .create .row:last-child {
+    justify-content: flex-end;
+  }
+  .primary {
+    background: var(--ax-accent);
+    border-color: var(--ax-accent);
+    color: var(--ax-text-invert);
+    font-weight: 600;
+  }
+  .primary:hover:not(:disabled) {
+    background: var(--ax-accent-hover);
   }
 
   .tasks {
@@ -234,6 +382,21 @@
     padding: 0 0 var(--ax-space-1) var(--ax-space-4);
     font-size: var(--ax-font-size-sm);
     overflow-wrap: anywhere;
+  }
+  input[type="checkbox"] {
+    accent-color: var(--ax-accent);
+    flex: 0 0 auto;
+  }
+  .del {
+    flex: 0 0 auto;
+    padding: 0 var(--ax-space-1);
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text-muted);
+    opacity: 0;
+  }
+  .task:hover .del,
+  .del:focus-visible {
+    opacity: 1;
   }
 
   .muted {

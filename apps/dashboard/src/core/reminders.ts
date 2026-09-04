@@ -13,15 +13,19 @@
  */
 
 import type { RunSummary } from "./backend";
+import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
 import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 
 /** One reminders priority, normalised by the skill's SOP onto exactly one
  *  of these four (whatever the underlying tool actually returns). */
 export type ReminderPriority = "none" | "low" | "medium" | "high";
 
-/** One open (incomplete) reminder — the skill's SOP only ever reports
- *  open tasks, so there is no `completed` field to check. */
+/** One open (incomplete) reminder — the skill's SOP only ever reports open
+ *  tasks, so there is no `completed` field to check; completing one is what
+ *  removes it from view. `id` is the reminders_tasks tool's own identifier,
+ *  needed to target this exact task for complete/delete. */
 export interface ReminderTask {
+  id: string;
   title: string;
   list: string;
   notes: string | null;
@@ -76,6 +80,7 @@ function isReminderTask(t: unknown): t is ReminderTask {
   if (!t || typeof t !== "object") return false;
   const o = t as Record<string, unknown>;
   return (
+    typeof o.id === "string" &&
     typeof o.title === "string" &&
     typeof o.list === "string" &&
     (o.notes === null || typeof o.notes === "string") &&
@@ -125,4 +130,72 @@ export async function loadLatestReminderDigest(invoke: Invoke): Promise<LatestRe
   } catch (err) {
     return { run, digest: EMPTY_REMINDER_DIGEST, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** The MCP tool a reminders write instruction needs `allowedTools` scoped
+ *  to — the same tool `reminders-digest` reads with, but write actions
+ *  never need `reminders_lists`, so this is narrower. */
+export const REMINDERS_WRITE_TOOL = "mcp__apple-reminders__reminders_tasks";
+
+/** Form input for creating one task — the module's create form maps onto
+ *  this directly. */
+export interface NewReminderTask {
+  title: string;
+  list: string;
+  /** `YYYY-MM-DD` or `YYYY-MM-DD HH:mm:ss`; `null` for no due date. */
+  dueDate: string | null;
+  notes: string | null;
+}
+
+/** A reply that doesn't look like a single plausible id (whitespace, or
+ *  implausibly long) — the create call may well have succeeded even so
+ *  (the agent just didn't answer cleanly), so this is reported as a softer
+ *  "couldn't confirm" failure rather than assumed to mean the write itself
+ *  failed. */
+function looksLikeId(reply: string): boolean {
+  return reply.length > 0 && reply.length <= 300 && !/\s/.test(reply);
+}
+
+/**
+ * Creates one reminder via a one-shot instruct turn (the `reminders_tasks`
+ * MCP tool's `create` action) and returns the new `ReminderTask` — built
+ * from `input` plus the id the agent reports back, so the caller can
+ * insert it into its own state without waiting on a full (and, for a list
+ * this size, possibly very slow) digest re-run.
+ *
+ * Errors:
+ *   Throws on an agent-reported failure, or when the reply doesn't look
+ *   like a plausible id (the task may still have been created — the
+ *   caller's error message should say to check with ↻).
+ */
+export async function createReminderTask(invoke: Invoke, input: NewReminderTask): Promise<ReminderTask> {
+  const params = [`action="create"`, `title=${quoteForInstruction(input.title)}`, `targetList=${quoteForInstruction(input.list)}`];
+  if (input.dueDate) params.push(`dueDate=${quoteForInstruction(input.dueDate)}`);
+  if (input.notes) params.push(`note=${quoteForInstruction(input.notes)}`);
+  const message = buildToolCallInstruction("reminders_tasks", REMINDERS_WRITE_TOOL, params, "the created item's id");
+  const id = await runInstructWrite(invoke, message, REMINDERS_WRITE_TOOL);
+  if (!looksLikeId(id)) {
+    throw new Error("The reminder may have been created, but its id could not be confirmed — hit ↻ to check.");
+  }
+  return { id, title: input.title, list: input.list, notes: input.notes, dueDate: input.dueDate, priority: "none" };
+}
+
+/** Marks one reminder complete (removing it from every future digest, the
+ *  same way finishing it in Reminders.app would) via a one-shot instruct
+ *  turn. Throws on an agent-reported failure. */
+export async function completeReminderTask(invoke: Invoke, id: string): Promise<void> {
+  const message = buildToolCallInstruction(
+    "reminders_tasks",
+    REMINDERS_WRITE_TOOL,
+    [`action="update"`, `id=${quoteForInstruction(id)}`, `completed=true`],
+    "OK",
+  );
+  await runInstructWrite(invoke, message, REMINDERS_WRITE_TOOL);
+}
+
+/** Deletes one reminder by id via a one-shot instruct turn. Throws on an
+ *  agent-reported failure. */
+export async function deleteReminderTask(invoke: Invoke, id: string): Promise<void> {
+  const message = buildToolCallInstruction("reminders_tasks", REMINDERS_WRITE_TOOL, [`action="delete"`, `id=${quoteForInstruction(id)}`], "OK");
+  await runInstructWrite(invoke, message, REMINDERS_WRITE_TOOL);
 }

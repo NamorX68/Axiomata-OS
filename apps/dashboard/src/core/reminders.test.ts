@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { RunRecord, RunSummary } from "./backend";
-import { defaultList, loadLatestReminderDigest, parseReminderDigest, tasksForList } from "./reminders";
+import { completeReminderTask, createReminderTask, defaultList, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, tasksForList } from "./reminders";
 
 const DIGEST_JSON = JSON.stringify({
   lists: ["Einkaufen", "Arbeit", "Baumarkt"],
   tasks: [
-    { title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
-    { title: "Bericht abgeben", list: "Arbeit", notes: "bis Freitag", dueDate: "2026-09-11", priority: "high" },
-    { title: "Schrauben besorgen", list: "Baumarkt", notes: null, dueDate: null, priority: "low" },
+    { id: "t-1", title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+    { id: "t-2", title: "Bericht abgeben", list: "Arbeit", notes: "bis Freitag", dueDate: "2026-09-11", priority: "high" },
+    { id: "t-3", title: "Schrauben besorgen", list: "Baumarkt", notes: null, dueDate: null, priority: "low" },
   ],
 });
 
@@ -17,7 +17,7 @@ describe("parseReminderDigest", () => {
     const d = parseReminderDigest(DIGEST_JSON);
     expect(d.lists).toEqual(["Einkaufen", "Arbeit", "Baumarkt"]);
     expect(d.tasks).toHaveLength(3);
-    expect(d.tasks[1]).toEqual({ title: "Bericht abgeben", list: "Arbeit", notes: "bis Freitag", dueDate: "2026-09-11", priority: "high" });
+    expect(d.tasks[1]).toEqual({ id: "t-2", title: "Bericht abgeben", list: "Arbeit", notes: "bis Freitag", dueDate: "2026-09-11", priority: "high" });
   });
 
   it("strips a ```json fence the model added despite being told not to", () => {
@@ -38,9 +38,9 @@ describe("parseReminderDigest", () => {
     const mixed = JSON.stringify({
       lists: ["Einkaufen"],
       tasks: [
-        { title: "ok", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
-        { title: "bad priority", list: "Einkaufen", notes: null, dueDate: null, priority: "urgent!!" },
-        { title: "missing list" },
+        { id: "t-1", title: "ok", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+        { id: "t-2", title: "bad priority", list: "Einkaufen", notes: null, dueDate: null, priority: "urgent!!" },
+        { title: "missing id and list" },
       ],
     });
     const d = parseReminderDigest(mixed);
@@ -108,5 +108,69 @@ describe("loadLatestReminderDigest", () => {
     const runs = [summary({ status: "failed", error: "agent timed out" })];
     const result = await loadLatestReminderDigest(fakeInvoke(runs, {}));
     expect(result.error).toBe("agent timed out");
+  });
+});
+
+describe("createReminderTask / completeReminderTask / deleteReminderTask", () => {
+  /** A fake `invoke` that answers `assistant_send` with a fixed reply,
+   *  and records the exact instruct message it was sent. */
+  function fakeAssistant(reply: { reply_markdown: string; is_error?: boolean }) {
+    const calls: Record<string, unknown>[] = [];
+    const invoke = (async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      if (cmd !== "assistant_send") throw new Error(`unexpected cmd ${cmd}`);
+      calls.push(args ?? {});
+      return { session_id: "s", is_error: false, cost_usd: null, usage: null, duration_ms: 1, ...reply } as unknown as T;
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    return { invoke, calls };
+  }
+
+  it("creates a task with no due date/notes and returns it with the reported id, priority none", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-TASK-1" });
+    const task = await createReminderTask(invoke, { title: "Milch kaufen", list: "Einkaufen", dueDate: null, notes: null });
+    expect(task).toEqual({ id: "NEW-TASK-1", title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" });
+    const message = String(calls[0].message);
+    expect(message).toContain('action="create"');
+    expect(message).toContain('title="Milch kaufen"');
+    expect(message).toContain('targetList="Einkaufen"');
+    expect(message).not.toContain("dueDate=");
+    expect(message).not.toContain("note=");
+    expect(calls[0].allowedTools).toBe("mcp__apple-reminders__reminders_tasks");
+  });
+
+  it("includes dueDate/note only when given", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-TASK-2" });
+    const task = await createReminderTask(invoke, { title: "Bericht", list: "Arbeit", dueDate: "2026-09-11", notes: "bis Freitag" });
+    expect(task.dueDate).toBe("2026-09-11");
+    const message = String(calls[0].message);
+    expect(message).toContain('dueDate="2026-09-11"');
+    expect(message).toContain('note="bis Freitag"');
+  });
+
+  it("throws a soft error when the create reply doesn't look like a plausible id", async () => {
+    const { invoke } = fakeAssistant({ reply_markdown: "Done! I added it." });
+    await expect(createReminderTask(invoke, { title: "x", list: "Einkaufen", dueDate: null, notes: null })).rejects.toThrow(/could not be confirmed/);
+  });
+
+  it("marks a task complete by id, scoped to the write tool", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "OK" });
+    await completeReminderTask(invoke, "t-2");
+    const message = String(calls[0].message);
+    expect(message).toContain('action="update"');
+    expect(message).toContain('id="t-2"');
+    expect(message).toContain("completed=true");
+    expect(calls[0].allowedTools).toBe("mcp__apple-reminders__reminders_tasks");
+  });
+
+  it("deletes a task by id", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "OK" });
+    await deleteReminderTask(invoke, "t-3");
+    const message = String(calls[0].message);
+    expect(message).toContain('action="delete"');
+    expect(message).toContain('id="t-3"');
+  });
+
+  it("throws the agent's own error text on a failed write", async () => {
+    const { invoke } = fakeAssistant({ reply_markdown: "list not found", is_error: true });
+    await expect(deleteReminderTask(invoke, "nope")).rejects.toThrow("list not found");
   });
 });

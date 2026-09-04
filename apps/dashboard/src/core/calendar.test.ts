@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { RunRecord, RunSummary } from "./backend";
-import { eventTimeLabel, filterByCalendar, groupByDay, loadLatestCalendarDigest, parseCalendarDigest, type CalendarEvent } from "./calendar";
+import { createCalendarEvent, deleteCalendarEvent, eventTimeLabel, filterByCalendar, groupByDay, loadLatestCalendarDigest, parseCalendarDigest, type CalendarEvent } from "./calendar";
 
 const DIGEST_JSON = JSON.stringify({
   calendars: ["Arbeit", "Privat", "Familie"],
   events: [
-    { title: "Team-Sync", start: "2026-09-05T09:00:00", end: "2026-09-05T09:30:00", calendar: "Arbeit", location: null, allDay: false },
-    { title: "Zahnarzt", start: "2026-09-06", end: "2026-09-06", calendar: "Privat", location: "Praxis Beispiel", allDay: true },
-    { title: "Kino", start: "2026-09-06T19:00:00", end: "2026-09-06T21:30:00", calendar: "Familie", location: "Cineplex", allDay: false },
+    { id: "evt-1", title: "Team-Sync", start: "2026-09-05T09:00:00", end: "2026-09-05T09:30:00", calendar: "Arbeit", location: null, allDay: false },
+    { id: "evt-2", title: "Zahnarzt", start: "2026-09-06", end: "2026-09-06", calendar: "Privat", location: "Praxis Beispiel", allDay: true },
+    { id: "evt-3", title: "Kino", start: "2026-09-06T19:00:00", end: "2026-09-06T21:30:00", calendar: "Familie", location: "Cineplex", allDay: false },
   ],
 });
 
@@ -47,8 +47,8 @@ describe("parseCalendarDigest", () => {
     const mixed = JSON.stringify({
       calendars: ["Arbeit", 42, null],
       events: [
-        { title: "ok", start: "2026-09-05", end: "2026-09-05", calendar: "Arbeit", location: null, allDay: true },
-        { title: "missing calendar field" },
+        { id: "evt-1", title: "ok", start: "2026-09-05", end: "2026-09-05", calendar: "Arbeit", location: null, allDay: true },
+        { title: "missing id and calendar field" },
         "not even an object",
       ],
     });
@@ -91,7 +91,7 @@ describe("groupByDay", () => {
 });
 
 describe("eventTimeLabel", () => {
-  const base: CalendarEvent = { title: "x", start: "2026-09-05T09:00:00", end: "2026-09-05T09:30:00", calendar: "c", location: null, allDay: false };
+  const base: CalendarEvent = { id: "evt-x", title: "x", start: "2026-09-05T09:00:00", end: "2026-09-05T09:30:00", calendar: "c", location: null, allDay: false };
 
   it("shows a start–end range for a timed event", () => {
     expect(eventTimeLabel(base)).toBe("09:00–09:30");
@@ -154,5 +154,82 @@ describe("loadLatestCalendarDigest", () => {
     const records = { 1: { ...summary({}), stdout: "not json", stderr: "", finished_at: "" } };
     const result = await loadLatestCalendarDigest(fakeInvoke([summary({})], records));
     expect(result.error).toMatch(/not valid JSON/);
+  });
+});
+
+describe("createCalendarEvent / deleteCalendarEvent", () => {
+  /** A fake `invoke` that answers `assistant_send` with a fixed reply,
+   *  and records the exact instruct message it was sent. */
+  function fakeAssistant(reply: { reply_markdown: string; is_error?: boolean }) {
+    const calls: Record<string, unknown>[] = [];
+    const invoke = (async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      if (cmd !== "assistant_send") throw new Error(`unexpected cmd ${cmd}`);
+      calls.push(args ?? {});
+      return { session_id: "s", is_error: false, cost_usd: null, usage: null, duration_ms: 1, ...reply } as unknown as T;
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    return { invoke, calls };
+  }
+
+  it("creates an all-day event and returns it with the reported id", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-EVT-1" });
+    const event = await createCalendarEvent(invoke, {
+      title: "Zahnarzt",
+      calendar: "Privat",
+      date: "2026-09-10",
+      startTime: null,
+      endTime: null,
+      location: null,
+    });
+    expect(event).toEqual({ id: "NEW-EVT-1", title: "Zahnarzt", start: "2026-09-10", end: "2026-09-10", calendar: "Privat", location: null, allDay: true });
+    const message = String(calls[0].message);
+    expect(message).toContain('action="create"');
+    expect(message).toContain('title="Zahnarzt"');
+    expect(message).toContain('targetCalendar="Privat"');
+    expect(message).toContain('startDate="2026-09-10"');
+    expect(calls[0].allowedTools).toBe("mcp__apple-reminders__calendar_events");
+  });
+
+  it("creates a timed event with start/end combined into the tool's datetime format", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-EVT-2" });
+    const event = await createCalendarEvent(invoke, {
+      title: "Team-Sync",
+      calendar: "Arbeit",
+      date: "2026-09-10",
+      startTime: "09:00",
+      endTime: "09:30",
+      location: "Büro",
+    });
+    expect(event.start).toBe("2026-09-10 09:00:00");
+    expect(event.end).toBe("2026-09-10 09:30:00");
+    expect(event.allDay).toBe(false);
+    expect(String(calls[0].message)).toContain('location="Büro"');
+  });
+
+  it("escapes a quote in the title so it can't break out of the instruction", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "id" });
+    await createCalendarEvent(invoke, { title: 'Say "hi"', calendar: "Arbeit", date: "2026-09-10", startTime: null, endTime: null, location: null });
+    expect(String(calls[0].message)).toContain('title="Say \\"hi\\""');
+  });
+
+  it("throws a soft error when the reply doesn't look like a plausible id", async () => {
+    const { invoke } = fakeAssistant({ reply_markdown: "Sure, I created the event for you!" });
+    await expect(
+      createCalendarEvent(invoke, { title: "x", calendar: "Arbeit", date: "2026-09-10", startTime: null, endTime: null, location: null }),
+    ).rejects.toThrow(/could not be confirmed/);
+  });
+
+  it("throws the agent's own error text on a failed create", async () => {
+    const { invoke } = fakeAssistant({ reply_markdown: "calendar not found", is_error: true });
+    await expect(
+      createCalendarEvent(invoke, { title: "x", calendar: "Nope", date: "2026-09-10", startTime: null, endTime: null, location: null }),
+    ).rejects.toThrow("calendar not found");
+  });
+
+  it("deletes an event by id, scoped to the same write tool", async () => {
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "OK" });
+    await deleteCalendarEvent(invoke, "evt-3");
+    expect(String(calls[0].message)).toContain('action="delete"');
+    expect(String(calls[0].message)).toContain('id="evt-3"');
+    expect(calls[0].allowedTools).toBe("mcp__apple-reminders__calendar_events");
   });
 });

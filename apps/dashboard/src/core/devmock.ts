@@ -90,9 +90,9 @@ const skills: Skill[] = [
 const CALENDAR_DIGEST_JSON = JSON.stringify({
   calendars: ["Arbeit", "Privat", "Familie"],
   events: [
-    { title: "Team-Sync", start: new Date(Date.now() + 20 * 3_600_000).toISOString().slice(0, 16), end: new Date(Date.now() + 21 * 3_600_000).toISOString().slice(0, 16), calendar: "Arbeit", location: null, allDay: false },
-    { title: "Zahnarzt", start: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), calendar: "Privat", location: "Praxis Dr. Beispiel", allDay: true },
-    { title: "Geburtstag Mira", start: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), calendar: "Familie", location: null, allDay: true },
+    { id: "mock-evt-1", title: "Team-Sync", start: new Date(Date.now() + 20 * 3_600_000).toISOString().slice(0, 16), end: new Date(Date.now() + 21 * 3_600_000).toISOString().slice(0, 16), calendar: "Arbeit", location: null, allDay: false },
+    { id: "mock-evt-2", title: "Zahnarzt", start: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), calendar: "Privat", location: "Praxis Dr. Beispiel", allDay: true },
+    { id: "mock-evt-3", title: "Geburtstag Mira", start: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), calendar: "Familie", location: null, allDay: true },
   ],
 });
 
@@ -101,10 +101,10 @@ const CALENDAR_DIGEST_JSON = JSON.stringify({
 const REMINDERS_DIGEST_JSON = JSON.stringify({
   lists: ["Einkaufen", "Werkstatt", "Geschenkideen"],
   tasks: [
-    { title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
-    { title: "Eier kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
-    { title: "Rücklicht reparieren", list: "Werkstatt", notes: "Ersatzteil liegt in der Schublade", dueDate: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10), priority: "medium" },
-    { title: "Buch für Papa", list: "Geschenkideen", notes: null, dueDate: null, priority: "low" },
+    { id: "mock-task-1", title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+    { id: "mock-task-2", title: "Eier kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+    { id: "mock-task-3", title: "Rücklicht reparieren", list: "Werkstatt", notes: "Ersatzteil liegt in der Schublade", dueDate: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10), priority: "medium" },
+    { id: "mock-task-4", title: "Buch für Papa", list: "Geschenkideen", notes: null, dueDate: null, priority: "low" },
   ],
 });
 
@@ -344,10 +344,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const message = String(args.message);
       const mode = String(args.mode);
       const session_id = typeof args.sessionId === "string" ? args.sessionId : `mock-${Date.now()}`;
+      // A connector module's write instruction (core/instruct.ts's
+      // buildToolCallInstruction) always ends in one of these two exact
+      // phrases — answer them the way the real agent would, so the browser
+      // mock can exercise a whole create/complete/delete round trip.
       const reply =
-        mode === "instruct"
-          ? `Done (mock). I would have carried out:\n\n> ${message}\n\n_No files were touched in the browser mock._`
-          : `You said: **${message}**\n\nThis is a mocked reply in session \`${session_id}\`.\n\n- markdown renders\n- \`code\` too`;
+        mode !== "instruct"
+          ? `You said: **${message}**\n\nThis is a mocked reply in session \`${session_id}\`.\n\n- markdown renders\n- \`code\` too`
+          : message.endsWith("reply with exactly the created item's id and nothing else.")
+            ? `mock-${Date.now()}`
+            : message.endsWith("reply with exactly OK and nothing else.")
+              ? "OK"
+              : `Done (mock). I would have carried out:\n\n> ${message}\n\n_No files were touched in the browser mock._`;
       return {
         session_id,
         reply_markdown: reply,

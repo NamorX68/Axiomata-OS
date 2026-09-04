@@ -13,12 +13,15 @@
  */
 
 import type { RunSummary } from "./backend";
+import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
 import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 
 /** One event from the digest, already whatever the skill's SOP promises:
  *  `start`/`end` are `YYYY-MM-DD` for an all-day event, full ISO 8601
- *  otherwise. */
+ *  otherwise. `id` is the calendar_events tool's own identifier, needed to
+ *  target this exact event for delete (never shown, never editable). */
 export interface CalendarEvent {
+  id: string;
   title: string;
   start: string;
   end: string;
@@ -75,6 +78,7 @@ function isCalendarEvent(e: unknown): e is CalendarEvent {
   if (!e || typeof e !== "object") return false;
   const o = e as Record<string, unknown>;
   return (
+    typeof o.id === "string" &&
     typeof o.title === "string" &&
     typeof o.start === "string" &&
     typeof o.end === "string" &&
@@ -141,4 +145,82 @@ export async function loadLatestCalendarDigest(invoke: Invoke): Promise<LatestDi
   } catch (err) {
     return { run, digest: EMPTY_DIGEST, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** The MCP tool a calendar write instruction needs `allowedTools` scoped
+ *  to — read and write go through different tools (`calendar_calendars` +
+ *  `calendar_events` to read, just `calendar_events` to write), so this is
+ *  narrower than `calendar-digest`'s own `allowed_tools`. */
+export const CALENDAR_WRITE_TOOL = "mcp__apple-reminders__calendar_events";
+
+/** Form input for creating one event — the module's create form maps onto
+ *  this directly. `startTime`/`endTime` are `HH:mm`, or `null` on both for
+ *  an all-day event; a timed event with no `endTime` is treated as ending
+ *  when it starts (the tool requires an end). */
+export interface NewCalendarEvent {
+  title: string;
+  calendar: string;
+  /** `YYYY-MM-DD`. */
+  date: string;
+  startTime: string | null;
+  endTime: string | null;
+  location: string | null;
+}
+
+/** Resolves `NewCalendarEvent`'s date/time fields onto the `start`/`end`/
+ *  `allDay` a `CalendarEvent` actually stores, in the calendar_events
+ *  tool's own recommended `startDate`/`endDate` format. */
+function resolveEventTimes(input: NewCalendarEvent): { start: string; end: string; allDay: boolean } {
+  if (input.startTime === null) return { start: input.date, end: input.date, allDay: true };
+  return {
+    start: `${input.date} ${input.startTime}:00`,
+    end: `${input.date} ${input.endTime ?? input.startTime}:00`,
+    allDay: false,
+  };
+}
+
+/** A reply that doesn't look like a single plausible id (whitespace, or
+ *  implausibly long) — the create call may well have succeeded even so
+ *  (the agent just didn't answer cleanly), so this is reported as a softer
+ *  "couldn't confirm" failure rather than assumed to mean the write itself
+ *  failed. */
+function looksLikeId(reply: string): boolean {
+  return reply.length > 0 && reply.length <= 300 && !/\s/.test(reply);
+}
+
+/**
+ * Creates one calendar event via a one-shot instruct turn (the
+ * `calendar_events` MCP tool's `create` action) and returns the new
+ * `CalendarEvent` — built from `input` plus the id the agent reports back,
+ * so the caller can insert it into its own state without waiting on a full
+ * (and, for a busy calendar, slow) digest re-run.
+ *
+ * Errors:
+ *   Throws on an agent-reported failure, or when the reply doesn't look
+ *   like a plausible id (the event may still have been created — the
+ *   caller's error message should say to check with ↻).
+ */
+export async function createCalendarEvent(invoke: Invoke, input: NewCalendarEvent): Promise<CalendarEvent> {
+  const { start, end, allDay } = resolveEventTimes(input);
+  const params = [
+    `action="create"`,
+    `title=${quoteForInstruction(input.title)}`,
+    `targetCalendar=${quoteForInstruction(input.calendar)}`,
+    `startDate=${quoteForInstruction(start)}`,
+    `endDate=${quoteForInstruction(end)}`,
+  ];
+  if (input.location) params.push(`location=${quoteForInstruction(input.location)}`);
+  const message = buildToolCallInstruction("calendar_events", CALENDAR_WRITE_TOOL, params, "the created item's id");
+  const id = await runInstructWrite(invoke, message, CALENDAR_WRITE_TOOL);
+  if (!looksLikeId(id)) {
+    throw new Error("The event may have been created, but its id could not be confirmed — hit ↻ to check.");
+  }
+  return { id, title: input.title, start, end, calendar: input.calendar, location: input.location, allDay };
+}
+
+/** Deletes one calendar event by id via a one-shot instruct turn. Throws
+ *  on an agent-reported failure. */
+export async function deleteCalendarEvent(invoke: Invoke, id: string): Promise<void> {
+  const message = buildToolCallInstruction("calendar_events", CALENDAR_WRITE_TOOL, [`action="delete"`, `id=${quoteForInstruction(id)}`], "OK");
+  await runInstructWrite(invoke, message, CALENDAR_WRITE_TOOL);
 }

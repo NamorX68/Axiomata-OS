@@ -11,12 +11,32 @@
   even ones with no upcoming events) is a pure client-side filter over the
   last fetched digest — picking a calendar never re-runs the skill. Config
   (flip side): `calendar` — the last-selected filter, so it survives reload.
+
+  Create / delete go through a one-shot instruct turn (`core/instruct.ts`),
+  not the digest skill — a write needs per-call parameters a skill can't
+  take. Create asks the agent to report the new event's id back and inserts
+  it into the local digest directly (no full re-run); delete removes the
+  deleted id from the local digest the same way. Both are therefore only as
+  fresh as the last read — a stray edit made outside the app (or by another
+  device) won't show until the next ↻.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
 
   import type { RunRecord, RunSummary } from "../core/backend";
-  import { CALENDAR_SKILL_NAME, EMPTY_DIGEST, eventTimeLabel, filterByCalendar, groupByDay, loadLatestCalendarDigest, parseCalendarDigest, type CalendarDigest } from "../core/calendar";
+  import {
+    CALENDAR_SKILL_NAME,
+    createCalendarEvent,
+    deleteCalendarEvent,
+    EMPTY_DIGEST,
+    eventTimeLabel,
+    filterByCalendar,
+    groupByDay,
+    loadLatestCalendarDigest,
+    parseCalendarDigest,
+    type CalendarDigest,
+    type CalendarEvent,
+  } from "../core/calendar";
   import { dayLabel, relativeTime } from "../core/format";
   import type { ModuleContext } from "../core/types";
 
@@ -38,6 +58,69 @@
   function selectCalendar(e: Event) {
     selectedCalendar = (e.currentTarget as HTMLSelectElement).value;
     config.update((c) => ({ ...c, calendar: selectedCalendar }));
+  }
+
+  // --- Create ---
+  let showCreate = $state(false);
+  let creating = $state(false);
+  let createError = $state("");
+  let newTitle = $state("");
+  let newCalendar = $state("");
+  let newDate = $state("");
+  let newAllDay = $state(false);
+  let newStartTime = $state("");
+  let newEndTime = $state("");
+  let newLocation = $state("");
+
+  function openCreate() {
+    newCalendar = selectedCalendar || digest.calendars[0] || "";
+    newDate = new Date().toISOString().slice(0, 10);
+    newAllDay = false;
+    newStartTime = "";
+    newEndTime = "";
+    newLocation = "";
+    newTitle = "";
+    createError = "";
+    showCreate = true;
+  }
+
+  async function submitCreate() {
+    const title = newTitle.trim();
+    if (!title || !newCalendar || !newDate || creating) return;
+    creating = true;
+    createError = "";
+    try {
+      const event = await createCalendarEvent(ctx.invoke, {
+        title,
+        calendar: newCalendar,
+        date: newDate,
+        startTime: newAllDay ? null : newStartTime || null,
+        endTime: newAllDay ? null : newEndTime || null,
+        location: newLocation.trim() || null,
+      });
+      digest = { ...digest, events: [...digest.events, event].sort((a, b) => a.start.localeCompare(b.start)) };
+      showCreate = false;
+    } catch (err) {
+      createError = String(err instanceof Error ? err.message : err);
+    } finally {
+      creating = false;
+    }
+  }
+
+  // --- Delete ---
+  let deletingId = $state<string | null>(null);
+
+  async function removeEvent(ev: CalendarEvent) {
+    if (deletingId) return;
+    deletingId = ev.id;
+    try {
+      await deleteCalendarEvent(ctx.invoke, ev.id);
+      digest = { ...digest, events: digest.events.filter((e) => e.id !== ev.id) };
+    } catch (err) {
+      error = String(err instanceof Error ? err.message : err);
+    } finally {
+      deletingId = null;
+    }
   }
 
   /** Applies a just-finished `run_skill` result (`refreshNow` only —
@@ -102,10 +185,40 @@
     <span class="muted last-run" title={lastRun ? `Last run: ${lastRun.started_at}` : "No run yet"}>
       {lastRun ? relativeTime(lastRun.started_at) : "never run"}
     </span>
+    <button type="button" class="add" title="New event" aria-label="New event" onclick={openCreate}>+</button>
     <button type="button" class="refresh" title="Run calendar-digest now" aria-label="Refresh" disabled={running} onclick={() => void refreshNow()}>
       {running ? "…" : "↻"}
     </button>
   </div>
+
+  {#if showCreate}
+    <form class="create" onsubmit={(e) => (e.preventDefault(), submitCreate())}>
+      <input type="text" placeholder="Title…" bind:value={newTitle} disabled={creating} />
+      <div class="row">
+        <select bind:value={newCalendar} disabled={creating} aria-label="Calendar">
+          {#each digest.calendars as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
+        <input type="date" bind:value={newDate} disabled={creating} />
+      </div>
+      <label class="row check"><input type="checkbox" bind:checked={newAllDay} disabled={creating} /> All day</label>
+      {#if !newAllDay}
+        <div class="row">
+          <input type="time" bind:value={newStartTime} disabled={creating} aria-label="Start time" />
+          <input type="time" bind:value={newEndTime} disabled={creating} aria-label="End time" />
+        </div>
+      {/if}
+      <input type="text" placeholder="Location (optional)…" bind:value={newLocation} disabled={creating} />
+      {#if createError}<p class="error">{createError}</p>{/if}
+      <div class="row">
+        <button type="button" onclick={() => (showCreate = false)} disabled={creating}>Cancel</button>
+        <button type="submit" class="primary" disabled={creating || !newTitle.trim() || !newCalendar || !newDate}>
+          {creating ? "Creating…" : "Create"}
+        </button>
+      </div>
+    </form>
+  {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
 
@@ -124,11 +237,20 @@
         <li class="day-group">
           <div class="day-head">{dayLabel(group.day)}</div>
           <ul class="events">
-            {#each group.events as ev, i (i + ev.title + ev.start)}
+            {#each group.events as ev (ev.id)}
               <li class="event">
                 <span class="time muted">{eventTimeLabel(ev)}</span>
                 <span class="title">{ev.title}</span>
                 {#if ev.location}<span class="location muted">{ev.location}</span>{/if}
+                <button
+                  type="button"
+                  class="del"
+                  aria-label={`Delete "${ev.title}"`}
+                  disabled={deletingId === ev.id}
+                  onclick={() => void removeEvent(ev)}
+                >
+                  {deletingId === ev.id ? "…" : "✕"}
+                </button>
               </li>
             {/each}
           </ul>
@@ -165,9 +287,52 @@
   .last-run {
     white-space: nowrap;
   }
+  .add,
   .refresh {
     padding: 1px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
+  }
+
+  .create {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    flex: 0 0 auto;
+    padding: var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+  }
+  .create .row {
+    display: flex;
+    gap: var(--ax-space-2);
+  }
+  .create .row > * {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .create .row.check {
+    flex: 0 0 auto;
+    align-items: center;
+    font-size: var(--ax-font-size-sm);
+  }
+  .create .row.check input {
+    flex: 0 0 auto;
+    accent-color: var(--ax-accent);
+  }
+  .create input[type="text"] {
+    width: 100%;
+  }
+  .create .row:last-child {
+    justify-content: flex-end;
+  }
+  .primary {
+    background: var(--ax-accent);
+    border-color: var(--ax-accent);
+    color: var(--ax-text-invert);
+    font-weight: 600;
+  }
+  .primary:hover:not(:disabled) {
+    background: var(--ax-accent-hover);
   }
 
   .agenda {
@@ -223,6 +388,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .del {
+    flex: 0 0 auto;
+    padding: 0 var(--ax-space-1);
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text-muted);
+    opacity: 0;
+  }
+  .event:hover .del,
+  .del:focus-visible {
+    opacity: 1;
   }
 
   .muted {
