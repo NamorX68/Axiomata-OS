@@ -89,9 +89,10 @@
     top: var(--ax-space-4);
     right: 0;
     bottom: 64px;
-    /* ~40% of the window, with floor and ceiling so it stays usable on a
-       narrow window and sane on an ultra-wide one. */
-    width: clamp(480px, 40vw, 900px);
+    /* Always 40% of the window, with a floor so it stays usable when the
+       window itself is narrow — no ceiling: on an ultra-wide monitor 40%
+       is genuinely wider than 900px, and that's the point. */
+    width: max(480px, 40vw);
     border-right: none;
     border-radius: var(--ax-radius-lg) 0 0 var(--ax-radius-lg);
   }
