@@ -9,6 +9,7 @@
 import { registerModule } from "../core/registry";
 import type { RunRecord, WorkspaceFile } from "../core/backend";
 import { CALENDAR_SKILL_NAME, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
+import { loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
 import type { ModuleContext } from "../core/types";
 import {
   addTodo,
@@ -27,6 +28,8 @@ import MdFile from "./md-file.svelte";
 import MdFileSettings from "./md-file-settings.svelte";
 import MemoryStatus from "./memory-status.svelte";
 import MemoryStatusSettings from "./memory-status-settings.svelte";
+import Reminders from "./reminders.svelte";
+import RemindersSettings from "./reminders-settings.svelte";
 import RoutinesBoard from "./routines-board.svelte";
 import SecondBrain from "./second-brain.svelte";
 import SecondBrainSettings from "./second-brain-settings.svelte";
@@ -327,6 +330,44 @@ export function registerBuiltins(): void {
           if (result.error) return { events: [], error: result.error };
           const calendar = typeof (params as { calendar?: unknown }).calendar === "string" ? ((params as { calendar: string }).calendar || null) : null;
           return { events: filterByCalendar(result.digest.events, calendar) };
+        },
+      },
+    ],
+  });
+
+  registerModule({
+    type: "reminders",
+    title: "Reminders",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2.5' y='2' width='11' height='12' rx='1.5'/><path d='M5.5 5.5h5M5.5 8h5M5.5 10.5h3'/></svg>",
+    component: Reminders,
+    settings: RemindersSettings,
+    defaultSize: { w: 340, h: 360 },
+    minSize: { w: 240, h: 160 },
+    singleton: true,
+    actions: [
+      {
+        name: "refresh",
+        description: "Runs the reminders-digest skill now and returns a summary of what it found.",
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: REMINDERS_SKILL_NAME });
+          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          const digest = parseReminderDigest(run.stdout);
+          return { ok: true, lists: digest.lists, tasks: digest.tasks.length };
+        },
+      },
+      {
+        name: "list",
+        description:
+          'Returns the open tasks on one reminder list from the last reminders-digest run (does not trigger a new run). Omit "list" to get the available list names instead — there is no "all lists" view.',
+        params: { type: "object", properties: { list: { type: "string" } } },
+        run: async (params, ctx) => {
+          const result = await loadLatestReminderDigest(ctx.invoke);
+          if (!result.run) return { lists: [], tasks: [], note: "no run yet" };
+          if (result.error) return { lists: [], tasks: [], error: result.error };
+          const list = typeof (params as { list?: unknown }).list === "string" ? (params as { list: string }).list : "";
+          if (!list) return { lists: result.digest.lists, note: 'specify "list" (one of the names above) to see its tasks' };
+          return { tasks: tasksForList(result.digest.tasks, list) };
         },
       },
     ],

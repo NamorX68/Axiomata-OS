@@ -82,6 +82,7 @@ const skills: Skill[] = [
   { name: "sprint-planning", description: "Draft the next sprint plan.", backend: "claude-code" },
   { name: "newsletter", description: "Summarise the week into a newsletter.", backend: "ollama" },
   { name: "calendar-digest", description: "Reads upcoming calendar events via whichever calendar MCP tool is available.", backend: "claude-code" },
+  { name: "reminders-digest", description: "Reads Apple Reminders lists and open tasks via whichever reminders MCP tool is available.", backend: "claude-code" },
 ];
 
 /** Fixture digest, same shape `calendar-digest`'s SOP produces — invented
@@ -95,7 +96,32 @@ const CALENDAR_DIGEST_JSON = JSON.stringify({
   ],
 });
 
+/** Fixture digest, same shape `reminders-digest`'s SOP produces — invented
+ *  lists/tasks, not the owner's real reminders. */
+const REMINDERS_DIGEST_JSON = JSON.stringify({
+  lists: ["Einkaufen", "Werkstatt", "Geschenkideen"],
+  tasks: [
+    { title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+    { title: "Eier kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+    { title: "Rücklicht reparieren", list: "Werkstatt", notes: "Ersatzteil liegt in der Schublade", dueDate: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10), priority: "medium" },
+    { title: "Buch für Papa", list: "Geschenkideen", notes: null, dueDate: null, priority: "low" },
+  ],
+});
+
 let runs: RunRecord[] = [
+  {
+    id: 5,
+    skill_name: "reminders-digest",
+    backend: "claude-code",
+    status: "success",
+    exit_code: 0,
+    duration_ms: 15800,
+    stdout: REMINDERS_DIGEST_JSON,
+    stderr: "",
+    error: null,
+    started_at: new Date(Date.now() - 6 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 6 * 60_000 + 15800).toISOString(),
+  },
   {
     id: 4,
     skill_name: "calendar-digest",
@@ -270,7 +296,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         status: "success",
         exit_code: 0,
         duration_ms: durationMs,
-        stdout: name === "calendar-digest" ? CALENDAR_DIGEST_JSON : `Ran ${name}.`,
+        stdout: name === "calendar-digest" ? CALENDAR_DIGEST_JSON : name === "reminders-digest" ? REMINDERS_DIGEST_JSON : `Ran ${name}.`,
         stderr: "",
         error: null,
         started_at: startedAt.toISOString(),

@@ -157,7 +157,7 @@ Frontend: Svelte 5 + Vite + TS under `apps/dashboard/src/` — `core/` (stores, 
 lifecycle, persist, commands, chat, staging, agent-bridge, backend types + `devmock`),
 `canvas/` (Canvas, Tile, drag/resize actions), `shell/` (TopBar, IconBar, ModulePicker,
 Settings, AssistantBar, ChatPanel, StagingLayer, Toasts), `modules/` (memory-status,
-skills-deck, routines-board, md-file, todo, calendar, each `.svelte` + settings face,
+skills-deck, routines-board, md-file, todo, calendar, reminders, each `.svelte` + settings face,
 registered in `modules/index.ts`; the graph's `second-brain` too), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
 theme: graphite, paper, steampunk, forest, ocean), `theme/validator.ts`. Every colour /
 size goes through a `--ax-*` token; no literals in components.
@@ -222,6 +222,25 @@ size goes through a `--ax-*` token; no literals in components.
   `list` (reads back the last run, optionally filtered to one calendar, no new run).
   **New in `agents`/`skills` for this**: `SKILL.md` frontmatter `allowed_tools:` (see
   above) — without it the skill's MCP tool call was silently denied in every headless run.
+  The "find the most recent run of skill X" round trip (`list_runs` → `get_run`) is shared
+  connector-module infrastructure, `core/skillRun.ts`'s `loadLatestSkillRun` — pulled out
+  once `reminders` needed the exact same thing calendar's own module and bridge action
+  already did independently.
+- **Reminders** (`reminders` module, `singleton`) — the second connector module, same
+  no-live-poll shape as Calendar (a `reminders-digest` skill reads Apple Reminders via
+  the `apple-reminders` MCP server's `reminders_lists`/`reminders_tasks` tools, replies
+  `{"lists": [...], "tasks": [{"title","list","notes","dueDate","priority"}]}`, only ever
+  open/incomplete tasks). The one real difference from Calendar: **no "all lists" view** —
+  the owner's ~12 Apple Reminders lists share no theme (shopping lists, house-project
+  costs, gift ideas, a theatre-season list, …), so a combined feed would just be noise.
+  The picker always shows exactly one real list name, defaulting to the alphabetically
+  first (`core/reminders.ts`'s `defaultList`) until the owner picks another; that choice
+  is remembered in `settings.<instance>.list`. Parsing / list-filtering is pure TS in
+  `core/reminders.ts` (+ `reminders.test.ts`), same defensive-parsing shape as
+  `calendar.ts` (fence-stripping, drops malformed entries, surfaces the skill's own
+  `{"error": …}`). Bridge / `/reminders` actions `refresh` · `list` (`list` omitted →
+  the available list names; `list` given → that list's open tasks — there is no "all"
+  parameter to ask for instead).
 - **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
   a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
   (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`
