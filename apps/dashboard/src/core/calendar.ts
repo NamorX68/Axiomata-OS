@@ -179,15 +179,6 @@ function resolveEventTimes(input: NewCalendarEvent): { start: string; end: strin
   };
 }
 
-/** A reply that doesn't look like a single plausible id (whitespace, or
- *  implausibly long) — the create call may well have succeeded even so
- *  (the agent just didn't answer cleanly), so this is reported as a softer
- *  "couldn't confirm" failure rather than assumed to mean the write itself
- *  failed. */
-function looksLikeId(reply: string): boolean {
-  return reply.length > 0 && reply.length <= 300 && !/\s/.test(reply);
-}
-
 /**
  * Creates one calendar event via a one-shot instruct turn (the
  * `calendar_events` MCP tool's `create` action) and returns the new
@@ -197,8 +188,9 @@ function looksLikeId(reply: string): boolean {
  *
  * Errors:
  *   Throws on an agent-reported failure, or when the reply doesn't look
- *   like a plausible id (the event may still have been created — the
- *   caller's error message should say to check with ↻).
+ *   like a plausible id (`runInstructWrite`'s `looksLikePlausibleId`) —
+ *   the event may still have been created even so, the caller's error
+ *   message should say to check with ↻.
  */
 export async function createCalendarEvent(invoke: Invoke, input: NewCalendarEvent): Promise<CalendarEvent> {
   const { start, end, allDay } = resolveEventTimes(input);
@@ -210,17 +202,25 @@ export async function createCalendarEvent(invoke: Invoke, input: NewCalendarEven
     `endDate=${quoteForInstruction(end)}`,
   ];
   if (input.location) params.push(`location=${quoteForInstruction(input.location)}`);
-  const message = buildToolCallInstruction("calendar_events", CALENDAR_WRITE_TOOL, params, "the created item's id");
-  const id = await runInstructWrite(invoke, message, CALENDAR_WRITE_TOOL);
-  if (!looksLikeId(id)) {
-    throw new Error("The event may have been created, but its id could not be confirmed — hit ↻ to check.");
-  }
+  const instruction = buildToolCallInstruction("calendar_events", CALENDAR_WRITE_TOOL, params, { kind: "id" });
+  const id = await runInstructWrite(invoke, instruction, CALENDAR_WRITE_TOOL);
   return { id, title: input.title, start, end, calendar: input.calendar, location: input.location, allDay };
 }
 
-/** Deletes one calendar event by id via a one-shot instruct turn. Throws
- *  on an agent-reported failure. */
+/** Deletes one calendar event by id via a one-shot instruct turn.
+ *
+ * Errors:
+ *   Throws on an agent-reported failure, or when the reply isn't exactly
+ *   `"OK"` — `runInstructWrite` verifies the reply itself, not just that
+ *   the turn didn't error, since neither `calendar` nor `reminders` polls
+ *   to self-correct a stale local-state patch from a write that silently
+ *   didn't happen. */
 export async function deleteCalendarEvent(invoke: Invoke, id: string): Promise<void> {
-  const message = buildToolCallInstruction("calendar_events", CALENDAR_WRITE_TOOL, [`action="delete"`, `id=${quoteForInstruction(id)}`], "OK");
-  await runInstructWrite(invoke, message, CALENDAR_WRITE_TOOL);
+  const instruction = buildToolCallInstruction(
+    "calendar_events",
+    CALENDAR_WRITE_TOOL,
+    [`action="delete"`, `id=${quoteForInstruction(id)}`],
+    { kind: "literal", value: "OK" },
+  );
+  await runInstructWrite(invoke, instruction, CALENDAR_WRITE_TOOL);
 }

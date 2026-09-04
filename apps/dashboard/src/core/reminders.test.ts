@@ -125,9 +125,9 @@ describe("createReminderTask / completeReminderTask / deleteReminderTask", () =>
   }
 
   it("creates a task with no due date/notes and returns it with the reported id, priority none", async () => {
-    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-TASK-1" });
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-TASK-1234567890AB" });
     const task = await createReminderTask(invoke, { title: "Milch kaufen", list: "Einkaufen", dueDate: null, notes: null });
-    expect(task).toEqual({ id: "NEW-TASK-1", title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" });
+    expect(task).toEqual({ id: "NEW-TASK-1234567890AB", title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" });
     const message = String(calls[0].message);
     expect(message).toContain('action="create"');
     expect(message).toContain('title="Milch kaufen"');
@@ -138,7 +138,7 @@ describe("createReminderTask / completeReminderTask / deleteReminderTask", () =>
   });
 
   it("includes dueDate/note only when given", async () => {
-    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-TASK-2" });
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-TASK-9876543210CD" });
     const task = await createReminderTask(invoke, { title: "Bericht", list: "Arbeit", dueDate: "2026-09-11", notes: "bis Freitag" });
     expect(task.dueDate).toBe("2026-09-11");
     const message = String(calls[0].message);
@@ -159,6 +159,11 @@ describe("createReminderTask / completeReminderTask / deleteReminderTask", () =>
     expect(message).toContain('id="t-2"');
     expect(message).toContain("completed=true");
     expect(calls[0].allowedTools).toBe("mcp__apple-reminders__reminders_tasks");
+  });
+
+  it("rejects a complete whose turn 'succeeded' but whose reply doesn't actually confirm it — a non-erroring turn isn't the same as a successful write", async () => {
+    const { invoke } = fakeAssistant({ reply_markdown: "I couldn't find a reminder with that id." });
+    await expect(completeReminderTask(invoke, "t-2")).rejects.toThrow(/didn't confirm the write/);
   });
 
   it("deletes a task by id", async () => {

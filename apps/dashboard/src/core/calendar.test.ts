@@ -171,7 +171,7 @@ describe("createCalendarEvent / deleteCalendarEvent", () => {
   }
 
   it("creates an all-day event and returns it with the reported id", async () => {
-    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-EVT-1" });
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-EVT-1234567890AB" });
     const event = await createCalendarEvent(invoke, {
       title: "Zahnarzt",
       calendar: "Privat",
@@ -180,7 +180,7 @@ describe("createCalendarEvent / deleteCalendarEvent", () => {
       endTime: null,
       location: null,
     });
-    expect(event).toEqual({ id: "NEW-EVT-1", title: "Zahnarzt", start: "2026-09-10", end: "2026-09-10", calendar: "Privat", location: null, allDay: true });
+    expect(event).toEqual({ id: "NEW-EVT-1234567890AB", title: "Zahnarzt", start: "2026-09-10", end: "2026-09-10", calendar: "Privat", location: null, allDay: true });
     const message = String(calls[0].message);
     expect(message).toContain('action="create"');
     expect(message).toContain('title="Zahnarzt"');
@@ -190,7 +190,7 @@ describe("createCalendarEvent / deleteCalendarEvent", () => {
   });
 
   it("creates a timed event with start/end combined into the tool's datetime format", async () => {
-    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-EVT-2" });
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-EVT-9876543210CD" });
     const event = await createCalendarEvent(invoke, {
       title: "Team-Sync",
       calendar: "Arbeit",
@@ -206,7 +206,7 @@ describe("createCalendarEvent / deleteCalendarEvent", () => {
   });
 
   it("escapes a quote in the title so it can't break out of the instruction", async () => {
-    const { invoke, calls } = fakeAssistant({ reply_markdown: "id" });
+    const { invoke, calls } = fakeAssistant({ reply_markdown: "NEW-EVT-1234567890AB" });
     await createCalendarEvent(invoke, { title: 'Say "hi"', calendar: "Arbeit", date: "2026-09-10", startTime: null, endTime: null, location: null });
     expect(String(calls[0].message)).toContain('title="Say \\"hi\\""');
   });
@@ -231,5 +231,10 @@ describe("createCalendarEvent / deleteCalendarEvent", () => {
     expect(String(calls[0].message)).toContain('action="delete"');
     expect(String(calls[0].message)).toContain('id="evt-3"');
     expect(calls[0].allowedTools).toBe("mcp__apple-reminders__calendar_events");
+  });
+
+  it("rejects a delete whose turn 'succeeded' but whose reply doesn't actually confirm it — a non-erroring turn isn't the same as a successful write", async () => {
+    const { invoke } = fakeAssistant({ reply_markdown: "I couldn't find an event with that id." });
+    await expect(deleteCalendarEvent(invoke, "evt-3")).rejects.toThrow(/didn't confirm the write/);
   });
 });

@@ -147,15 +147,6 @@ export interface NewReminderTask {
   notes: string | null;
 }
 
-/** A reply that doesn't look like a single plausible id (whitespace, or
- *  implausibly long) — the create call may well have succeeded even so
- *  (the agent just didn't answer cleanly), so this is reported as a softer
- *  "couldn't confirm" failure rather than assumed to mean the write itself
- *  failed. */
-function looksLikeId(reply: string): boolean {
-  return reply.length > 0 && reply.length <= 300 && !/\s/.test(reply);
-}
-
 /**
  * Creates one reminder via a one-shot instruct turn (the `reminders_tasks`
  * MCP tool's `create` action) and returns the new `ReminderTask` — built
@@ -165,37 +156,51 @@ function looksLikeId(reply: string): boolean {
  *
  * Errors:
  *   Throws on an agent-reported failure, or when the reply doesn't look
- *   like a plausible id (the task may still have been created — the
- *   caller's error message should say to check with ↻).
+ *   like a plausible id (`runInstructWrite`'s `looksLikePlausibleId`) —
+ *   the task may still have been created even so, the caller's error
+ *   message should say to check with ↻.
  */
 export async function createReminderTask(invoke: Invoke, input: NewReminderTask): Promise<ReminderTask> {
   const params = [`action="create"`, `title=${quoteForInstruction(input.title)}`, `targetList=${quoteForInstruction(input.list)}`];
   if (input.dueDate) params.push(`dueDate=${quoteForInstruction(input.dueDate)}`);
   if (input.notes) params.push(`note=${quoteForInstruction(input.notes)}`);
-  const message = buildToolCallInstruction("reminders_tasks", REMINDERS_WRITE_TOOL, params, "the created item's id");
-  const id = await runInstructWrite(invoke, message, REMINDERS_WRITE_TOOL);
-  if (!looksLikeId(id)) {
-    throw new Error("The reminder may have been created, but its id could not be confirmed — hit ↻ to check.");
-  }
+  const instruction = buildToolCallInstruction("reminders_tasks", REMINDERS_WRITE_TOOL, params, { kind: "id" });
+  const id = await runInstructWrite(invoke, instruction, REMINDERS_WRITE_TOOL);
   return { id, title: input.title, list: input.list, notes: input.notes, dueDate: input.dueDate, priority: "none" };
 }
 
 /** Marks one reminder complete (removing it from every future digest, the
  *  same way finishing it in Reminders.app would) via a one-shot instruct
- *  turn. Throws on an agent-reported failure. */
+ *  turn.
+ *
+ * Errors:
+ *   Throws on an agent-reported failure, or when the reply isn't exactly
+ *   `"OK"` — see `deleteReminderTask`'s doc for why that check matters
+ *   here specifically (no poll to self-correct a silently-failed write). */
 export async function completeReminderTask(invoke: Invoke, id: string): Promise<void> {
-  const message = buildToolCallInstruction(
+  const instruction = buildToolCallInstruction(
     "reminders_tasks",
     REMINDERS_WRITE_TOOL,
     [`action="update"`, `id=${quoteForInstruction(id)}`, `completed=true`],
-    "OK",
+    { kind: "literal", value: "OK" },
   );
-  await runInstructWrite(invoke, message, REMINDERS_WRITE_TOOL);
+  await runInstructWrite(invoke, instruction, REMINDERS_WRITE_TOOL);
 }
 
-/** Deletes one reminder by id via a one-shot instruct turn. Throws on an
- *  agent-reported failure. */
+/** Deletes one reminder by id via a one-shot instruct turn.
+ *
+ * Errors:
+ *   Throws on an agent-reported failure, or when the reply isn't exactly
+ *   `"OK"` — `runInstructWrite` verifies the reply itself, not just that
+ *   the turn didn't error, since neither `calendar` nor `reminders` polls
+ *   to self-correct a stale local-state patch from a write that silently
+ *   didn't happen. */
 export async function deleteReminderTask(invoke: Invoke, id: string): Promise<void> {
-  const message = buildToolCallInstruction("reminders_tasks", REMINDERS_WRITE_TOOL, [`action="delete"`, `id=${quoteForInstruction(id)}`], "OK");
-  await runInstructWrite(invoke, message, REMINDERS_WRITE_TOOL);
+  const instruction = buildToolCallInstruction(
+    "reminders_tasks",
+    REMINDERS_WRITE_TOOL,
+    [`action="delete"`, `id=${quoteForInstruction(id)}`],
+    { kind: "literal", value: "OK" },
+  );
+  await runInstructWrite(invoke, instruction, REMINDERS_WRITE_TOOL);
 }
