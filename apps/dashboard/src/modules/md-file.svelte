@@ -8,11 +8,21 @@
     page's folder in the asset scope, so same-folder links keep working) —
     built with `core/backend.assetFileUrl`, not the SDK's `convertFileSrc`
     (see its doc comment: that one breaks relative links inside the page).
-    `sandbox="allow-scripts"` only: inline quiz scripts run, the page has an
-    opaque origin and no access to the app. Known limits: navigating inside
-    the frame does not update the path in the bar; external links are blocked
-    by the app's frame-src and show a blank frame. In the browser dev mock
-    the page is loaded via `srcdoc` instead.
+    `sandbox="allow-scripts allow-same-origin"`: WebKit's custom-scheme
+    protocol handler (asset://) appears to refuse to serve into a frame that
+    sandboxing has forced to an opaque origin — with `allow-scripts` alone
+    the whole frame rendered blank (owner-reported, 2026-09-04; matches
+    reports against Tauri's asset/custom-protocol handling in sandboxed
+    iframes, e.g. tauri-apps/tauri#12767). `allow-same-origin` here does NOT
+    hand the page the app's own origin — it only lets it keep its *real*
+    origin (`asset://localhost`), which is still a different origin from the
+    app shell (served over `tauri://`/`http://tauri.localhost`), so it still
+    cannot reach `parent.document` or the IPC bridge. Known limits:
+    navigating inside the frame does not update the path in the bar; external
+    links are blocked by the app's frame-src and show a blank frame. In the
+    browser dev mock the page is loaded via `srcdoc` instead (no asset
+    protocol there, and the mock frame never needs the same-origin fix since
+    dev-mock content is trusted fixture data, not the sandboxed real path).
   - `isNew` + no `path` yet: a bare textarea, no title field — either the
     note starts with its own `# Heading`, or the agent proposes one, exactly
     like `axiomata_core::notes`. Save calls `create_note`, then re-points
@@ -187,7 +197,7 @@
           <iframe
             class="page"
             title={path}
-            sandbox="allow-scripts"
+            sandbox="allow-scripts allow-same-origin"
             referrerpolicy="no-referrer"
             src={frameSrc ?? undefined}
             srcdoc={frameDoc ?? undefined}

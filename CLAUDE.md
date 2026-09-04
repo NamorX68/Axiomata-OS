@@ -159,17 +159,27 @@ size goes through a `--ax-*` token; no literals in components.
   relative to `config.workspace_root`, no `..`, must canonicalise inside the root,
   symlinks and hard links refused, ≤ 1 MiB, atomic O_EXCL temp + rename.
 - **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` in a
-  `<iframe sandbox="allow-scripts">` whose src is an asset-protocol URL. `open_workspace_html`
-  resolves the file through the workspace guard and allows **only its folder** (non-recursive)
-  in the runtime asset scope (`asset_protocol_scope().allow_directory`); the static scope in
-  `tauri.conf.json` is empty and the CSP carries `frame-src asset: http://asset.localhost`.
-  Notes elsewhere in the vault are never served by the asset protocol. The URL itself is built
-  by `core/backend.assetFileUrl`, **not** the SDK's `convertFileSrc` — that one runs
-  `encodeURIComponent` over the *whole* path, turning every `/` into `%2F` and leaving the
-  browser no literal path to resolve a relative link against, so a lesson's "next page" link
-  silently failed. `assetFileUrl` encodes each segment but keeps `/` literal; Tauri's asset
-  handler percent-decodes the whole request path as one string either way, so it serves the
-  identical file — this form just also supports in-page relative navigation.
+  `<iframe sandbox="allow-scripts allow-same-origin">` whose src is an asset-protocol URL.
+  `open_workspace_html` resolves the file through the workspace guard and allows **only its
+  folder** (non-recursive) in the runtime asset scope (`asset_protocol_scope().allow_directory`);
+  the static scope in `tauri.conf.json` is empty and the CSP carries
+  `frame-src asset: http://asset.localhost`. Notes elsewhere in the vault are never served by
+  the asset protocol. The URL itself is built by `core/backend.assetFileUrl`, **not** the SDK's
+  `convertFileSrc` — that one runs `encodeURIComponent` over the *whole* path, turning every `/`
+  into `%2F` and leaving the browser no literal path to resolve a relative link against, so a
+  lesson's "next page" link silently failed. `assetFileUrl` encodes each segment but keeps `/`
+  literal; Tauri's asset handler percent-decodes the whole request path as one string either
+  way, so it serves the identical file — this form just also supports in-page relative
+  navigation. `allow-same-origin` was added 2026-09-04 after the owner reported a lesson
+  rendering as a blank white frame: with `allow-scripts` alone the iframe's origin is forced
+  opaque, and WebKit's asset:// handler appears to refuse serving into an opaque-origin frame
+  (matches reports against Tauri's custom-protocol/iframe handling, e.g.
+  tauri-apps/tauri#12767) — silently, no console error surfaced to the app. Safe to add: it
+  restores the page's *real* `asset://localhost` origin, still a different origin from the app
+  shell, so `parent.document`/the IPC bridge stay unreachable regardless. Not yet re-verified by
+  actually clicking a lesson in `cargo tauri dev` — no Accessibility permission for UI scripting
+  in this environment, so it has to be a manual click-test — do that before treating this fix
+  as confirmed working, not just plausible.
 - **Chat**: the bottom bar routes input — registered `/command` runs locally
   (`core/commands.ts`), other `/text` is a one-shot `instruct` turn, plain text a `chat`
   turn. `agents::claude_code::chat` = `claude -p --output-format json --permission-mode
