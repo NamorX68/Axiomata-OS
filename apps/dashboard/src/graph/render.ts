@@ -5,7 +5,7 @@
  * the device pixel ratio; call `resize()` when the canvas box changes.
  */
 
-import type { GraphModel, GraphNode } from "./model";
+import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 
 export type RenderMode = "rings" | "orbit";
 
@@ -183,10 +183,18 @@ export function drawGlyph(
   ctx.restore();
 }
 
-/** The glyph id for a node: structural for hub/skill/routine, per-area icon
- *  (falling back to "folder") for area, nothing for a file. */
+/**
+ * The glyph id for a node: structural for hub/skill/routine; for an area,
+ * its own icon (falling back to "folder"); for a file, the icon of the
+ * area it belongs to — same lookup, so a note's ring icon always matches
+ * its area node's icon. Only meaningful where a file is actually big
+ * enough to carry one (the orbit ring's "recent notes" icons); the tiny
+ * dots elsewhere skip glyph drawing entirely (see the `n.kind !== "file"`
+ * guard around the other call site).
+ */
 function glyphOf(n: GraphNode): string {
   if (n.kind === "area") return n.glyph ?? "folder";
+  if (n.kind === "file") return glyphForArea(n.area ?? "");
   return n.kind;
 }
 
