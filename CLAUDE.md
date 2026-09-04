@@ -84,7 +84,11 @@ Cargo workspace (edition 2024), members:
   (`tauri::async_runtime::spawn(routines::serve(…))`, stop handle managed), and stores the
   `AxiomataCore` as managed state for the Tauri commands. `AxiomataCore` holds `config`
   unlocked and only `db` behind a `Mutex`, wrapped in an `Arc` so the scheduler task can
-  hold its own handle.
+  hold its own handle. Plugins: `tauri-plugin-opener` and `tauri-plugin-window-state`
+  (`StateFlags::SIZE | POSITION | MAXIMIZED` — the window remembers its geometry across
+  restarts in `window-state.json` in the OS app-config dir, *not* `~/.axiomata/`; the
+  `tauri.conf.json` `width`/`height` are only the first-run defaults). Both plugins'
+  `*:default` permission sets are in `capabilities/default.json`.
 
 New shared dependencies go in root `Cargo.toml` under `[workspace.dependencies]` and are
 referenced per-crate as `some_crate.workspace = true` — don't pin versions ad hoc in an
