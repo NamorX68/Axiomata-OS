@@ -35,6 +35,10 @@ const files = new Map<string, string>([
     "# Inbox\n\nA scratch note in the *dev* workspace.\n\n- [x] wire md-file\n- [ ] ship M5\n\n| col | val |\n|-----|-----|\n| a | 1 |\n\n```ts\nconst x = 1;\n```\n",
   ],
   ["README.md", "# Axiomata-Workspace\n\nSecond-brain root.\n"],
+  [
+    "ToDo.md",
+    "# ToDo\n\n- [ ] Steuerunterlagen sortieren\n- [ ] Rückruf Werkstatt\n\n## Done\n\n- [x] Reifen wechseln lassen (done: 2026-09-04)\n",
+  ],
   ["Learning/Rust/GLOSSARY.md", "# Glossar\n\n- **Ownership** — wer den Wert besitzt.\n"],
   [
     "Learning/Rust/lessons/0000-roadmap.html",

@@ -87,12 +87,16 @@
     background-size: var(--ax-grid) var(--ax-grid);
     background-position: 0 0;
   }
+  /* Snap alignment guides: a thin accent line, drawn ABOVE the dragged tile
+     (+1) so the whole line reads across the canvas — discreet, just a faint
+     halo so a 1px line stays visible. */
   .guide {
     position: absolute;
-    z-index: var(--ax-z-tile-drag);
+    z-index: calc(var(--ax-z-tile-drag) + 1);
     pointer-events: none;
     background: var(--ax-accent);
-    opacity: 0.7;
+    opacity: 0.65;
+    box-shadow: 0 0 3px color-mix(in srgb, var(--ax-accent) 40%, transparent);
   }
   .guide.x {
     top: 0;

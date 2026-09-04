@@ -31,6 +31,10 @@ export interface Guide {
 
 export const GRID = 16;
 export const MAGNET_PX = 8;
+/** Tolerance for the "edges line up" visual guides — independent of, and
+ *  wider-reaching than, the 8px magnet (which only fires between adjacent
+ *  tiles). */
+export const ALIGN_PX = 3;
 const MAX_PUSH_PASSES = 8;
 const SPIRAL_STEPS = 400;
 
@@ -159,6 +163,29 @@ export function magnetResize(
     }
   }
   return { w: Math.max(min.w, w), h: Math.max(min.h, h), guides };
+}
+
+/** Figma-style alignment hints: a guide wherever the moved rect shares an
+ *  edge or centre line with another tile (within `tol`), regardless of how
+ *  far apart they are. Purely visual — it does not move anything. */
+export function alignmentGuides(moved: Rect, others: Rect[], tol = ALIGN_PX): Guide[] {
+  const out: Guide[] = [];
+  const seen = new Set<string>();
+  const add = (axis: "x" | "y", at: number) => {
+    const key = `${axis}:${Math.round(at)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ axis, at: Math.round(at) });
+  };
+  const mx = [moved.x, moved.x + moved.w / 2, moved.x + moved.w];
+  const my = [moved.y, moved.y + moved.h / 2, moved.y + moved.h];
+  for (const o of others) {
+    const ox = [o.x, o.x + o.w / 2, o.x + o.w];
+    const oy = [o.y, o.y + o.h / 2, o.y + o.h];
+    for (const a of mx) for (const b of ox) if (Math.abs(a - b) <= tol) add("x", b);
+    for (const a of my) for (const b of oy) if (Math.abs(a - b) <= tol) add("y", b);
+  }
+  return out;
 }
 
 /** Moves `rect` (never the others) until it overlaps nobody. */

@@ -19,7 +19,15 @@
   import type { CanvasInstance } from "../core/types";
   import { draggable, type DragDelta } from "./drag";
   import { resizable, type ResizeDelta, type ResizeDir } from "./resize";
-  import { anchorFor, displayRect, magnetMove, magnetResize, resolveOverlap, type Rect } from "./snap";
+  import {
+    alignmentGuides,
+    anchorFor,
+    displayRect,
+    magnetMove,
+    magnetResize,
+    resolveOverlap,
+    type Rect,
+  } from "./snap";
 
   const FALLBACK_MIN = { w: 160, h: 100 };
 
@@ -54,13 +62,26 @@
   let drag = $state<DragDelta | null>(null);
   let resize = $state<ResizeDelta | null>(null);
 
+  /** Merge the magnet's own guides with the wider-reaching alignment hints,
+   *  deduped by axis + rounded position. */
+  function showGuides(rect: Rect, magnetGuides: { axis: "x" | "y"; at: number }[]) {
+    const seen = new Set<string>();
+    const merged = [...magnetGuides, ...alignmentGuides(rect, others())].filter((g) => {
+      const key = `${g.axis}:${Math.round(g.at)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    guides.set(merged);
+  }
+
   /** Snapped drag offset: the tile "sticks" to grid / neighbour edges live. */
   function snappedDrag(d: DragDelta): DragDelta {
     const base = shown(inst);
     const r = magnetMove({ x: base.x + d.dx, y: base.y + d.dy, w: base.w, h: base.h }, others(), {
       edges: get(snapEdges),
     });
-    guides.set(r.guides);
+    showGuides({ x: r.x, y: r.y, w: base.w, h: base.h }, r.guides);
     return { dx: r.x - base.x, dy: r.y - base.y };
   }
   function snappedResize(d: ResizeDelta, dir: ResizeDir): ResizeDelta {
@@ -68,7 +89,7 @@
     const r = magnetResize({ x: base.x, y: base.y, w: base.w + d.dw, h: base.h + d.dh }, others(), dir, min, {
       edges: get(snapEdges),
     });
-    guides.set(r.guides);
+    showGuides({ x: base.x, y: base.y, w: r.w, h: r.h }, r.guides);
     return { dw: r.w - base.w, dh: r.h - base.h };
   }
 
@@ -132,6 +153,7 @@
   style:transform={drag ? `translate3d(${drag.dx}px, ${drag.dy}px, 0)` : undefined}
   onpointerdowncapture={() => bringToFront(inst.id)}
   use:draggable={{
+    handle: ".tile-drag",
     onStart: () => (drag = { dx: 0, dy: 0 }),
     onMove: (d) => (drag = snappedDrag(d)),
     onEnd: onDragEnd,
@@ -139,9 +161,10 @@
 >
   <div class="tile-inner" class:flipped={inst.flipped}>
     <div class="face front">
-      <header class="tile-head">
+      <header class="tile-head front-head tile-drag">
         <span class="tile-icon" aria-hidden="true">{@html def?.icon ?? ""}</span>
         <h2 class="tile-title">{def?.title ?? inst.type}</h2>
+        <span class="tile-grip" aria-hidden="true">⠿</span>
         {#if def?.settings}
           <button
             type="button"
@@ -182,7 +205,7 @@
     </div>
 
     <div class="face back" aria-hidden={!inst.flipped}>
-      <header class="tile-head">
+      <header class="tile-head tile-drag">
         <h2 class="tile-title">{def?.title ?? inst.type} · Settings</h2>
         <button
           type="button"
@@ -251,19 +274,45 @@
     flex-direction: column;
     overflow: hidden;
     backface-visibility: hidden;
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-lg);
-    box-shadow: var(--ax-shadow-tile);
-    transition: box-shadow var(--ax-dur-fast) var(--ax-ease);
+    transition:
+      box-shadow var(--ax-dur-fast) var(--ax-ease),
+      background var(--ax-dur-fast) var(--ax-ease);
   }
+  /* Front: almost no chrome at rest — the module's content sits straight on
+     the canvas, like the reference dashboard's edge panels. The only mark is
+     a faint hairline along the top and bottom edge (a discreet delimiter, no
+     side borders, no fill, no shadow). A faint fill appears on hover so you
+     can see what you are about to grab / resize, and the tile "materialises"
+     fully while it is being moved. */
+  .face.front {
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
+    border-top: 2px solid var(--ax-border-strong);
+    border-bottom: 2px solid var(--ax-border-strong);
+  }
+  .tile:hover .face.front {
+    background: color-mix(in srgb, var(--ax-tile-glass-bg) 45%, transparent);
+  }
+  .tile.dragging .face.front,
+  .tile.resizing .face.front {
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    box-shadow: var(--ax-shadow-drag);
+  }
+  /* Back: the settings side keeps the solid framed-window look, so it reads
+     as a distinct surface you are configuring. */
   .face.back {
     transform: rotateY(180deg);
     background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    box-shadow: var(--ax-shadow-tile);
   }
-  .tile.dragging .face {
-    box-shadow: var(--ax-shadow-drag);
+  .tile.dragging .face.back {
     border-color: var(--ax-border-strong);
+    box-shadow: var(--ax-shadow-drag);
   }
 
   .tile-head {
@@ -274,6 +323,43 @@
     border-bottom: 1px solid var(--ax-border);
     cursor: grab;
     flex: 0 0 auto;
+  }
+  .tile.dragging .tile-head {
+    cursor: grabbing;
+  }
+
+  /* The front header is just a section label + hover chrome — no bar, no
+     divider, no background. It is the only drag handle now (`.tile-drag`);
+     the body no longer initiates a drag. */
+  .front-head {
+    /* Horizontal padding matches the module content's own (`--ax-space-3`),
+       so the title/icon line up with the content's left edge. */
+    padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-1);
+    border-bottom: none;
+  }
+  .front-head .tile-title {
+    font-size: var(--ax-font-size-lg);
+    color: var(--ax-text-muted);
+  }
+  .front-head .tile-btn {
+    opacity: 0;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+  .tile:hover .front-head .tile-btn,
+  .front-head:focus-within .tile-btn {
+    opacity: 1;
+  }
+
+  .tile-grip {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+    line-height: 1;
+    opacity: 0;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+  .tile:hover .tile-grip,
+  .tile.dragging .tile-grip {
+    opacity: 0.5;
   }
 
   .tile-icon {

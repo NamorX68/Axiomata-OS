@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { anchorFor, clampToBounds, displayRect, magnetMove, magnetResize, resolveOverlap, snapToGrid } from "./snap";
+import {
+  alignmentGuides,
+  anchorFor,
+  clampToBounds,
+  displayRect,
+  magnetMove,
+  magnetResize,
+  resolveOverlap,
+  snapToGrid,
+} from "./snap";
 
 const A = { x: 100, y: 100, w: 200, h: 100 };
 
@@ -50,6 +59,30 @@ describe("magnetResize", () => {
     expect(r.w).toBe(100);
     const tiny = magnetResize({ x: 0, y: 100, w: 10, h: 50 }, [], "se", { w: 40, h: 40 });
     expect(tiny).toMatchObject({ w: 40, h: 48 });
+  });
+});
+
+describe("alignmentGuides", () => {
+  // A = { x: 100, y: 100, w: 200, h: 100 } → x-edges 100 / 200 / 300.
+  it("emits an edge guide when a far-away tile's left edges line up", () => {
+    const g = alignmentGuides({ x: 100, y: 900, w: 300, h: 200 }, [A]);
+    expect(g).toContainEqual({ axis: "x", at: 100 });
+  });
+
+  it("emits a centre guide when centres align, within tolerance", () => {
+    // A centre x = 200; moved centre x = 200 (x 160 + w/2 80). No edge match.
+    const g = alignmentGuides({ x: 160, y: 0, w: 80, h: 40 }, [A]);
+    expect(g).toEqual([{ axis: "x", at: 200 }]);
+  });
+
+  it("stays silent when nothing lines up", () => {
+    expect(alignmentGuides({ x: 217, y: 913, w: 111, h: 77 }, [A])).toEqual([]);
+  });
+
+  it("dedupes a coincident guide contributed by several tiles", () => {
+    const B = { x: 100, y: 500, w: 60, h: 60 };
+    const g = alignmentGuides({ x: 100, y: 900, w: 40, h: 40 }, [A, B]);
+    expect(g).toEqual([{ axis: "x", at: 100 }]);
   });
 });
 
