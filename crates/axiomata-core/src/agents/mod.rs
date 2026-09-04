@@ -101,11 +101,17 @@ pub use claude_code::{ChatMode, ChatReply};
 /// config: cwd = workspace root (so its `CLAUDE.md` loads), the skill timeout,
 /// the filtered provider env, and the module manifest
 /// (`paths::module_context_path()`) as an appended system prompt if present.
+///
+/// `allowed_tools` is `None` for a plain assistant-bar turn; a module that
+/// needs an instruct turn to reach an MCP tool (e.g. a connector module's
+/// write actions) sets it to exactly the tool it needs — see
+/// [`AgentRequest::allowed_tools`] for why that's required at all.
 pub async fn chat(
     config: &Config,
     message: String,
     session_id: Option<String>,
     mode: ChatMode,
+    allowed_tools: Option<String>,
 ) -> Result<ChatReply, AxiomataError> {
     claude_code::chat(claude_code::ChatRequest {
         message,
@@ -115,6 +121,7 @@ pub async fn chat(
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
         env: crate::skills::runner::claude_env(config, &AgentBackend::ClaudeCode),
         system_prompt_file: module_context_if_present(),
+        allowed_tools,
         model: default_claude_model(config),
     })
     .await
@@ -143,6 +150,16 @@ pub struct AgentRequest {
     /// `claude --model`; `None` lets the CLI choose. Ignored by Ollama (its
     /// model lives in the backend enum).
     pub model: Option<String>,
+    /// `claude --allowedTools` — a space/comma-separated tool allow-list
+    /// (Claude Code's own syntax, passed through verbatim), e.g.
+    /// `"mcp__apple-reminders__calendar_events"`. Needed because MCP tool
+    /// calls are not covered by `--permission-mode`: a `-p` run with no
+    /// interactive approver denies them outright otherwise, silently, no
+    /// matter the permission mode (found live while building the calendar
+    /// skill — the run "succeeds" but the tool call is refused). `None`
+    /// passes no flag, i.e. no MCP tools beyond whatever the permission mode
+    /// already allows. Ignored by Ollama (no tool use at all).
+    pub allowed_tools: Option<String>,
 }
 
 /// `config.agents.claude_model` unless empty.

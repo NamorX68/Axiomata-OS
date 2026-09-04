@@ -134,7 +134,15 @@ Things worth knowing before touching `skills/` or `agents/`:
   there is no workspace-local skill location (dropped deliberately — see `docs/architecture.md`
   §4 "Why one skill location"). Frontmatter is parsed with `gray_matter`; the filesystem is
   the only source of truth (skills are never written to the DB). `list_skills` skips a bad
-  `SKILL.md`; `find_skill` surfaces its error.
+  `SKILL.md`; `find_skill` surfaces its error. A skill whose SOP needs an MCP tool (a
+  "connector" skill — see `calendar-digest` below) must also set frontmatter
+  `allowed_tools:` (space/comma-separated tool names, passed verbatim to `claude
+  --allowedTools`) — an MCP tool call is **not** covered by `--permission-mode` at all, so
+  a headless `-p` run with no interactive approver denies it outright, silently (found
+  live while building the Calendar module: the run still exits 0 and "succeeds", the tool
+  call is just refused). Threaded through `Skill.allowed_tools` →
+  `skills::runner::execute_skill` → `AgentRequest.allowed_tools`; `execute_prompt`
+  (routines' raw-`prompt` targets, no `SKILL.md`) has no equivalent yet.
 - Agent execution goes through a small enum, not a plugin registry:
   `AgentBackend::ClaudeCode | AgentBackend::Ollama { model }` — deliberately not a
   generic multi-CLI abstraction (see the plan for why). `skills::runner::execute_skill`
@@ -149,8 +157,8 @@ Frontend: Svelte 5 + Vite + TS under `apps/dashboard/src/` — `core/` (stores, 
 lifecycle, persist, commands, chat, staging, agent-bridge, backend types + `devmock`),
 `canvas/` (Canvas, Tile, drag/resize actions), `shell/` (TopBar, IconBar, ModulePicker,
 Settings, AssistantBar, ChatPanel, StagingLayer, Toasts), `modules/` (memory-status,
-skills-deck, routines-board, md-file, todo, each `.svelte` + settings face, registered in
-`modules/index.ts`; the graph's `second-brain` too), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
+skills-deck, routines-board, md-file, todo, calendar, reminders, each `.svelte` + settings face,
+registered in `modules/index.ts`; the graph's `second-brain` too), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
 theme: graphite, paper, steampunk, forest, ocean), `theme/validator.ts`. Every colour /
 size goes through a `--ax-*` token; no literals in components.
 
@@ -194,6 +202,72 @@ size goes through a `--ax-*` token; no literals in components.
   actions `add` · `complete` (first open item containing the given text) · `list` work
   statelessly on the file. `ToDo.md` shows up in the Second-Brain graph as an ordinary
   vault file, no special-casing.
+- **Calendar** (`calendar` module, `singleton`) — the first "connector" module, and the
+  first real use of the "provider = skill, not code" decision
+  ([[axiomata-os-next-roadmap]]): a `calendar-digest` skill (`~/.axiomata/skills/`, not in
+  this repo) reads Apple Calendar via the `apple-reminders` MCP server's
+  `calendar_calendars`/`calendar_events` tools and replies with one JSON object —
+  `{"calendars": [...], "events": [{"id","title","start","end","calendar","location","allDay"}]}`
+  — sorted by `start`. Unlike `todo`, there is **no live poll**: calendar data sits behind
+  an MCP tool only an agent can reach, so every refresh is a real agent turn. The tile
+  reads back whichever run happened most recently (`list_runs` → `get_run` for the
+  captured `stdout`), however that run happened — by hand from the Skills Deck, on a
+  schedule via a Routine, or the tile's own ↻ (a plain `run_skill` call, same mechanism,
+  just a convenience). The calendar-filter dropdown ("All calendars" + one entry per
+  calendar the skill saw, even ones with no upcoming events) is a pure client-side filter
+  over the already-fetched digest — picking a calendar never re-runs the skill. Parsing /
+  filtering / day-grouping is pure TS in `core/calendar.ts` (+ `calendar.test.ts`);
+  `parseCalendarDigest` defensively strips a ` ```json ` fence the model adds despite the
+  SOP saying not to. Bridge / `/calendar` actions `refresh` (runs the skill now) ·
+  `list` (reads back the last run, optionally filtered to one calendar, no new run) ·
+  `create` · `delete` (see "Connector writes" below).
+  **New in `agents`/`skills` for this**: `SKILL.md` frontmatter `allowed_tools:` (see
+  above) — without it the skill's MCP tool call was silently denied in every headless run.
+  The "find the most recent run of skill X" round trip (`list_runs` → `get_run`) is shared
+  connector-module infrastructure, `core/skillRun.ts`'s `loadLatestSkillRun` (plus that
+  same file's `stripCodeFence`, the ` ```json ` defence every digest parser needs) —
+  pulled out once `reminders` needed the exact same things calendar's own module, bridge
+  action, and parser already did independently.
+- **Connector writes** (create / complete / delete, both Calendar and Reminders): a skill's
+  SOP is fixed at authoring time, so it has no way to take a form's runtime parameters — a
+  write instead goes through a fresh, silent one-shot **instruct turn**
+  (`core/instruct.ts`'s `runInstructWrite`, wrapping `assistant_send`), not through
+  `core/chat.ts`'s visible chat-panel path. `buildToolCallInstruction` spells out the exact
+  MCP tool call (`action="create"`, quoted parameters via `quoteForInstruction`, …) in the
+  instruction text itself, leaving nothing for the agent to interpret; the turn ends by
+  replying either `OK` (delete, complete) or the written item's own id (create), which the
+  caller inserts into (or removes from) its already-loaded digest **locally** — no full
+  digest re-run, which for Reminders' ~60-task read (~130 s) would be far too slow for a
+  single checkbox click. This means a write is only as fresh as the last read: an edit made
+  outside the app (or from another device) won't show until the next ↻. **New in
+  `agents` for this**: `ChatRequest`/`agents::chat`/`assistant_send` all gained the same
+  `allowed_tools` an instruct turn needs to reach an MCP tool at all (same root cause as the
+  skills-side fix above — an MCP call is silently denied regardless of `--permission-mode`);
+  `axiomata-cli assistant` gained `--allowed-tools` to test an instruction here first, same
+  way the digest skills were tested via `run-skill` before being wired into the app.
+  Calendar: `core/calendar.ts`'s `createCalendarEvent`/`deleteCalendarEvent`, the tile's "+"
+  form and hover ✕ per event, bridge actions `create`/`delete`. Reminders:
+  `core/reminders.ts`'s `createReminderTask`/`completeReminderTask`/`deleteReminderTask`,
+  the tile's "+" form, a checkbox per task (completing removes it from view — the digest
+  only ever holds open tasks) and hover ✕, bridge actions `create`/`complete`/`delete`.
+- **Reminders** (`reminders` module, `singleton`) — the second connector module, same
+  no-live-poll shape as Calendar (a `reminders-digest` skill reads Apple Reminders via
+  the `apple-reminders` MCP server's `reminders_lists`/`reminders_tasks` tools, replies
+  `{"lists": [...], "tasks": [{"id","title","list","notes","dueDate","priority"}]}`, only ever
+  open/incomplete tasks). The one real difference from Calendar: **no "all lists" view** —
+  the owner's ~12 Apple Reminders lists share no theme (shopping lists, house-project
+  costs, gift ideas, a theatre-season list, …), so a combined feed would just be noise.
+  The picker always shows exactly one real list name, defaulting to the alphabetically
+  first (`core/reminders.ts`'s `defaultList`) until the owner picks another; that choice
+  is remembered in `settings.<instance>.list`. Parsing / list-filtering is pure TS in
+  `core/reminders.ts` (+ `reminders.test.ts`), same defensive-parsing shape as
+  `calendar.ts` (fence-stripping, drops malformed entries, surfaces the skill's own
+  `{"error": …}`). Bridge / `/reminders` actions `refresh` · `lists` (the available list
+  names, one predictable `{lists}` shape) · `list` (one named list's open tasks, `list`
+  required, one predictable `{tasks}` shape) — split into two actions rather than one
+  action whose response shape depended on whether a parameter was given, after an
+  architecture review flagged that as hard for a caller to predict — plus `create` ·
+  `complete` · `delete` (see "Connector writes" above).
 - **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
   a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
   (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`

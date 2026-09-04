@@ -58,6 +58,12 @@ enum Command {
         /// Allow the agent to edit workspace files (one-shot instruction).
         #[arg(long)]
         instruct: bool,
+        /// `--allowedTools` value to pass through — needed for the turn to
+        /// reach an MCP tool at all (see `AgentRequest::allowed_tools`);
+        /// mainly for testing a connector module's write instruction here
+        /// before wiring it into the dashboard.
+        #[arg(long = "allowed-tools")]
+        allowed_tools: Option<String>,
     },
     /// Import notes into the workspace; the agent proposes the areas.
     Import {
@@ -183,7 +189,8 @@ async fn main() -> Result<()> {
             message,
             resume,
             instruct,
-        } => return assistant(&core, message, resume, instruct).await,
+            allowed_tools,
+        } => return assistant(&core, message, resume, instruct, allowed_tools).await,
         Command::Import {
             source:
                 ImportSource::Obsidian {
@@ -236,6 +243,7 @@ async fn import_obsidian(
         importer::assignment_prompt(&notes, &existing),
         None,
         ChatMode::Chat,
+        None,
     )
     .await
     .context("the sorting turn failed")?;
@@ -375,13 +383,14 @@ async fn assistant(
     message: String,
     resume: Option<String>,
     instruct: bool,
+    allowed_tools: Option<String>,
 ) -> Result<()> {
     let mode = if instruct {
         ChatMode::Instruct
     } else {
         ChatMode::Chat
     };
-    let reply = agents::chat(&core.config, message, resume, mode)
+    let reply = agents::chat(&core.config, message, resume, mode, allowed_tools)
         .await
         .context("assistant turn failed")?;
     println!("{}", reply.reply_markdown.trim_end());

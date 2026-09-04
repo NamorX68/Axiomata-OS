@@ -33,6 +33,8 @@ struct SkillFrontmatter {
     trigger: Option<String>,
     #[serde(default = "default_backend")]
     backend: String,
+    #[serde(default)]
+    allowed_tools: Option<String>,
 }
 
 /// Default agent backend for a skill that doesn't name one.
@@ -57,6 +59,13 @@ pub struct Skill {
     /// Agent backend identifier (`"claude-code"` or `"ollama"`). Not validated
     /// here — [`crate::agents::AgentBackend::resolve`] checks it at run time.
     pub backend: String,
+    /// Optional Claude Code `--allowedTools` value (space/comma-separated
+    /// tool names, e.g. an MCP tool the skill's SOP calls) — see
+    /// [`crate::agents::AgentRequest::allowed_tools`] for why a skill that
+    /// uses an MCP tool needs this spelled out explicitly. `None` for a
+    /// skill that only needs its default tool access (or targets Ollama,
+    /// which ignores this either way).
+    pub allowed_tools: Option<String>,
     /// Absolute path to the skill's `SKILL.md`.
     pub path: PathBuf,
     /// The Markdown body after the frontmatter — the skill's actual
@@ -210,6 +219,7 @@ fn load_skill(manifest: &Path) -> Result<Skill, AxiomataError> {
         effort: frontmatter.effort,
         trigger: frontmatter.trigger,
         backend: frontmatter.backend,
+        allowed_tools: frontmatter.allowed_tools,
         path: manifest.to_path_buf(),
         body: parsed.content,
     })
@@ -356,6 +366,27 @@ mod tests {
 
         let names: Vec<_> = list_skills().unwrap().into_iter().map(|s| s.name).collect();
         assert_eq!(names, ["real"]);
+    }
+
+    #[test]
+    fn allowed_tools_frontmatter_parses_when_present_and_absent() {
+        let h = TestHome::new("allowed-tools");
+        write_skill(
+            &h.skills_dir(),
+            "with-tools",
+            "---\nname: with-tools\ndescription: uses an MCP tool\nbackend: claude-code\nallowed_tools: mcp__apple-reminders__calendar_events\n---\nbody\n",
+        );
+        write_skill(
+            &h.skills_dir(),
+            "without-tools",
+            &skill_md("without-tools", "claude-code"),
+        );
+
+        assert_eq!(
+            find_skill("with-tools").unwrap().allowed_tools,
+            Some("mcp__apple-reminders__calendar_events".to_string())
+        );
+        assert_eq!(find_skill("without-tools").unwrap().allowed_tools, None);
     }
 
     #[test]

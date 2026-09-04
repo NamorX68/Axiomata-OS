@@ -15,6 +15,7 @@ import type {
   MemoryStatus,
   NewRoutine,
   Routine,
+  RunRecord,
   RunSummary,
   Skill,
   SyncReport,
@@ -80,8 +81,60 @@ const skills: Skill[] = [
   { name: "example-skill", description: "Bundled example skill.", backend: "claude-code" },
   { name: "sprint-planning", description: "Draft the next sprint plan.", backend: "claude-code" },
   { name: "newsletter", description: "Summarise the week into a newsletter.", backend: "ollama" },
+  { name: "calendar-digest", description: "Reads upcoming calendar events via whichever calendar MCP tool is available.", backend: "claude-code" },
+  { name: "reminders-digest", description: "Reads Apple Reminders lists and open tasks via whichever reminders MCP tool is available.", backend: "claude-code" },
 ];
-let runs: RunSummary[] = [
+
+/** Fixture digest, same shape `calendar-digest`'s SOP produces — invented
+ *  events, not the owner's real calendar. */
+const CALENDAR_DIGEST_JSON = JSON.stringify({
+  calendars: ["Arbeit", "Privat", "Familie"],
+  events: [
+    { id: "mock-evt-1", title: "Team-Sync", start: new Date(Date.now() + 20 * 3_600_000).toISOString().slice(0, 16), end: new Date(Date.now() + 21 * 3_600_000).toISOString().slice(0, 16), calendar: "Arbeit", location: null, allDay: false },
+    { id: "mock-evt-2", title: "Zahnarzt", start: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), calendar: "Privat", location: "Praxis Dr. Beispiel", allDay: true },
+    { id: "mock-evt-3", title: "Geburtstag Mira", start: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), calendar: "Familie", location: null, allDay: true },
+  ],
+});
+
+/** Fixture digest, same shape `reminders-digest`'s SOP produces — invented
+ *  lists/tasks, not the owner's real reminders. */
+const REMINDERS_DIGEST_JSON = JSON.stringify({
+  lists: ["Einkaufen", "Werkstatt", "Geschenkideen"],
+  tasks: [
+    { id: "mock-task-1", title: "Milch kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+    { id: "mock-task-2", title: "Eier kaufen", list: "Einkaufen", notes: null, dueDate: null, priority: "none" },
+    { id: "mock-task-3", title: "Rücklicht reparieren", list: "Werkstatt", notes: "Ersatzteil liegt in der Schublade", dueDate: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10), priority: "medium" },
+    { id: "mock-task-4", title: "Buch für Papa", list: "Geschenkideen", notes: null, dueDate: null, priority: "low" },
+  ],
+});
+
+let runs: RunRecord[] = [
+  {
+    id: 5,
+    skill_name: "reminders-digest",
+    backend: "claude-code",
+    status: "success",
+    exit_code: 0,
+    duration_ms: 15800,
+    stdout: REMINDERS_DIGEST_JSON,
+    stderr: "",
+    error: null,
+    started_at: new Date(Date.now() - 6 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 6 * 60_000 + 15800).toISOString(),
+  },
+  {
+    id: 4,
+    skill_name: "calendar-digest",
+    backend: "claude-code",
+    status: "success",
+    exit_code: 0,
+    duration_ms: 9200,
+    stdout: CALENDAR_DIGEST_JSON,
+    stderr: "",
+    error: null,
+    started_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 10 * 60_000 + 9200).toISOString(),
+  },
   {
     id: 3,
     skill_name: "example-skill",
@@ -89,8 +142,11 @@ let runs: RunSummary[] = [
     status: "success",
     exit_code: 0,
     duration_ms: 2310,
+    stdout: "Working directory: /Users/dev/Axiomata-Workspace\nCLAUDE.md\nInbox\nLearning",
+    stderr: "",
     error: null,
     started_at: new Date(Date.now() - 40 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 40 * 60_000 + 2310).toISOString(),
   },
   {
     id: 2,
@@ -99,8 +155,11 @@ let runs: RunSummary[] = [
     status: "failed",
     exit_code: 1,
     duration_ms: 810,
+    stdout: "",
+    stderr: "Error: model not found",
     error: "model not found",
     started_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    finished_at: new Date(Date.now() - 3 * 3_600_000 + 810).toISOString(),
   },
 ];
 let routines: Routine[] = [
@@ -228,21 +287,34 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return [...skills] as T;
     case "run_skill": {
       const name = String(args.name);
-      const run: RunSummary = {
+      const startedAt = new Date();
+      const durationMs = 1500;
+      const run: RunRecord = {
         id: (runs[0]?.id ?? 0) + 1,
         skill_name: name,
         backend: skills.find((s) => s.name === name)?.backend ?? "claude-code",
         status: "success",
         exit_code: 0,
-        duration_ms: 1500,
+        duration_ms: durationMs,
+        stdout: name === "calendar-digest" ? CALENDAR_DIGEST_JSON : name === "reminders-digest" ? REMINDERS_DIGEST_JSON : `Ran ${name}.`,
+        stderr: "",
         error: null,
-        started_at: new Date().toISOString(),
+        started_at: startedAt.toISOString(),
+        finished_at: new Date(startedAt.getTime() + durationMs).toISOString(),
       };
       runs = [run, ...runs];
       return run as T;
     }
     case "list_runs":
-      return runs.slice(0, Number(args.limit ?? 25)) as T;
+      // `RunSummary` deliberately omits `stdout`/`stderr`/`finished_at` — same
+      // trim the real `list_runs` command does over the full `RunRecord` rows.
+      return runs.slice(0, Number(args.limit ?? 25)).map(
+        ({ stdout: _stdout, stderr: _stderr, finished_at: _finished_at, ...summary }): RunSummary => summary,
+      ) as T;
+    case "get_run": {
+      const id = Number(args.id);
+      return (runs.find((r) => r.id === id) ?? null) as T;
+    }
     case "list_routines":
       return [...routines] as T;
     case "add_routine": {
@@ -272,10 +344,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const message = String(args.message);
       const mode = String(args.mode);
       const session_id = typeof args.sessionId === "string" ? args.sessionId : `mock-${Date.now()}`;
+      // A connector module's write instruction (core/instruct.ts's
+      // buildToolCallInstruction) always ends in one of these two exact
+      // phrases — answer them the way the real agent would, so the browser
+      // mock can exercise a whole create/complete/delete round trip.
       const reply =
-        mode === "instruct"
-          ? `Done (mock). I would have carried out:\n\n> ${message}\n\n_No files were touched in the browser mock._`
-          : `You said: **${message}**\n\nThis is a mocked reply in session \`${session_id}\`.\n\n- markdown renders\n- \`code\` too`;
+        mode !== "instruct"
+          ? `You said: **${message}**\n\nThis is a mocked reply in session \`${session_id}\`.\n\n- markdown renders\n- \`code\` too`
+          : message.endsWith("reply with exactly the created item's id and nothing else.")
+            ? `mock-${Date.now()}`
+            : message.endsWith("reply with exactly OK and nothing else.")
+              ? "OK"
+              : `Done (mock). I would have carried out:\n\n> ${message}\n\n_No files were touched in the browser mock._`;
       return {
         session_id,
         reply_markdown: reply,

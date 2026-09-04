@@ -7,7 +7,9 @@
  */
 
 import { registerModule } from "../core/registry";
-import type { WorkspaceFile } from "../core/backend";
+import type { RunRecord, WorkspaceFile } from "../core/backend";
+import { CALENDAR_SKILL_NAME, createCalendarEvent, deleteCalendarEvent, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
+import { completeReminderTask, createReminderTask, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
 import type { ModuleContext } from "../core/types";
 import {
   addTodo,
@@ -18,12 +20,16 @@ import {
   todayIso,
   type TodoDoc,
 } from "../core/todo";
+import Calendar from "./calendar.svelte";
+import CalendarSettings from "./calendar-settings.svelte";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
 import MdFile from "./md-file.svelte";
 import MdFileSettings from "./md-file-settings.svelte";
 import MemoryStatus from "./memory-status.svelte";
 import MemoryStatusSettings from "./memory-status-settings.svelte";
+import Reminders from "./reminders.svelte";
+import RemindersSettings from "./reminders-settings.svelte";
 import RoutinesBoard from "./routines-board.svelte";
 import SecondBrain from "./second-brain.svelte";
 import SecondBrainSettings from "./second-brain-settings.svelte";
@@ -291,6 +297,169 @@ export function registerBuiltins(): void {
         },
       ];
     })(),
+  });
+
+  registerModule({
+    type: "calendar",
+    title: "Calendar",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='3' width='12' height='11' rx='1.5'/><path d='M2 6.5h12M5 1.5v3M11 1.5v3'/></svg>",
+    component: Calendar,
+    settings: CalendarSettings,
+    defaultSize: { w: 340, h: 360 },
+    minSize: { w: 240, h: 160 },
+    singleton: true,
+    actions: [
+      {
+        name: "refresh",
+        description: "Runs the calendar-digest skill now and returns a summary of what it found.",
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: CALENDAR_SKILL_NAME });
+          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          const digest = parseCalendarDigest(run.stdout);
+          return { ok: true, calendars: digest.calendars, events: digest.events.length };
+        },
+      },
+      {
+        name: "list",
+        description: "Returns the events from the last calendar-digest run, optionally filtered to one calendar (does not trigger a new run).",
+        params: { type: "object", properties: { calendar: { type: "string" } } },
+        run: async (params, ctx) => {
+          const result = await loadLatestCalendarDigest(ctx.invoke);
+          if (!result.run) return { events: [], note: "no run yet" };
+          if (result.error) return { events: [], error: result.error };
+          const calendar = typeof (params as { calendar?: unknown }).calendar === "string" ? ((params as { calendar: string }).calendar || null) : null;
+          return { events: filterByCalendar(result.digest.events, calendar) };
+        },
+      },
+      {
+        name: "create",
+        description: "Creates a calendar event via a one-shot instruct turn and returns it. All-day when startTime/endTime are omitted.",
+        params: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            calendar: { type: "string" },
+            date: { type: "string", description: "YYYY-MM-DD" },
+            startTime: { type: "string", description: "HH:mm, omit for an all-day event" },
+            endTime: { type: "string", description: "HH:mm, defaults to startTime" },
+            location: { type: "string" },
+          },
+          required: ["title", "calendar", "date"],
+        },
+        run: async (params, ctx) => {
+          const p = params as { title: string; calendar: string; date: string; startTime?: string; endTime?: string; location?: string };
+          const event = await createCalendarEvent(ctx.invoke, {
+            title: p.title,
+            calendar: p.calendar,
+            date: p.date,
+            startTime: p.startTime ?? null,
+            endTime: p.endTime ?? null,
+            location: p.location ?? null,
+          });
+          return { event };
+        },
+      },
+      {
+        name: "delete",
+        description: "Deletes a calendar event by id (from the last calendar-digest run's events) via a one-shot instruct turn.",
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        run: async (params, ctx) => {
+          const id = (params as { id?: unknown }).id;
+          if (typeof id !== "string" || !id) return { ok: false, error: 'missing required "id" param' };
+          await deleteCalendarEvent(ctx.invoke, id);
+          return { ok: true };
+        },
+      },
+    ],
+  });
+
+  registerModule({
+    type: "reminders",
+    title: "Reminders",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2.5' y='2' width='11' height='12' rx='1.5'/><path d='M5.5 5.5h5M5.5 8h5M5.5 10.5h3'/></svg>",
+    component: Reminders,
+    settings: RemindersSettings,
+    defaultSize: { w: 340, h: 360 },
+    minSize: { w: 240, h: 160 },
+    singleton: true,
+    actions: [
+      {
+        name: "refresh",
+        description: "Runs the reminders-digest skill now and returns a summary of what it found.",
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: REMINDERS_SKILL_NAME });
+          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          const digest = parseReminderDigest(run.stdout);
+          return { ok: true, lists: digest.lists, tasks: digest.tasks.length };
+        },
+      },
+      {
+        name: "lists",
+        description:
+          'Returns the reminder list names from the last reminders-digest run (does not trigger a new run). There is no "all lists" task view — call this first, then "list" with one of these names.',
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
+          const result = await loadLatestReminderDigest(ctx.invoke);
+          if (result.error) return { lists: [], error: result.error };
+          return { lists: result.digest.lists };
+        },
+      },
+      {
+        name: "list",
+        description: 'Returns the open tasks on one reminder list (an exact name from the "lists" action) from the last reminders-digest run — does not trigger a new run.',
+        params: { type: "object", properties: { list: { type: "string" } }, required: ["list"] },
+        run: async (params, ctx) => {
+          const list = typeof (params as { list?: unknown }).list === "string" ? (params as { list: string }).list : "";
+          if (!list) return { tasks: [], error: 'missing required "list" param — call the "lists" action first' };
+          const result = await loadLatestReminderDigest(ctx.invoke);
+          if (result.error) return { tasks: [], error: result.error };
+          return { tasks: tasksForList(result.digest.tasks, list) };
+        },
+      },
+      {
+        name: "create",
+        description: "Creates a reminder via a one-shot instruct turn and returns it, priority \"none\".",
+        params: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            list: { type: "string" },
+            dueDate: { type: "string", description: "YYYY-MM-DD or YYYY-MM-DD HH:mm:ss, omit for none" },
+            notes: { type: "string" },
+          },
+          required: ["title", "list"],
+        },
+        run: async (params, ctx) => {
+          const p = params as { title: string; list: string; dueDate?: string; notes?: string };
+          const task = await createReminderTask(ctx.invoke, { title: p.title, list: p.list, dueDate: p.dueDate ?? null, notes: p.notes ?? null });
+          return { task };
+        },
+      },
+      {
+        name: "complete",
+        description: "Marks a reminder complete by id (from the last reminders-digest run's tasks) via a one-shot instruct turn.",
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        run: async (params, ctx) => {
+          const id = (params as { id?: unknown }).id;
+          if (typeof id !== "string" || !id) return { ok: false, error: 'missing required "id" param' };
+          await completeReminderTask(ctx.invoke, id);
+          return { ok: true };
+        },
+      },
+      {
+        name: "delete",
+        description: "Deletes a reminder by id (from the last reminders-digest run's tasks) via a one-shot instruct turn.",
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        run: async (params, ctx) => {
+          const id = (params as { id?: unknown }).id;
+          if (typeof id !== "string" || !id) return { ok: false, error: 'missing required "id" param' };
+          await deleteReminderTask(ctx.invoke, id);
+          return { ok: true };
+        },
+      },
+    ],
   });
 
   if (import.meta.env.DEV) {

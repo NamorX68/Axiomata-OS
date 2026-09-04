@@ -79,7 +79,15 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
     // run got back a plain "Unknown command: /<name>" chat reply and — since
     // `claude -p` still exits 0 for an ordinary reply — was logged as a
     // success despite the SOP never reaching the model.
-    Ok(run_on_backend(&skill.name, skill.body.clone(), &backend, config, model).await)
+    Ok(run_on_backend(
+        &skill.name,
+        skill.body.clone(),
+        &backend,
+        config,
+        model,
+        skill.allowed_tools.clone(),
+    )
+    .await)
 }
 
 /// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`),
@@ -103,6 +111,10 @@ pub async fn execute_prompt(
         &backend,
         config,
         crate::agents::default_claude_model(config),
+        // Raw prompt targets (no `SKILL.md`) have nowhere to declare a tool
+        // allow-list yet — same limitation `execute_prompt`'s doc already
+        // implies by only taking a bare string.
+        None,
     )
     .await
 }
@@ -116,9 +128,10 @@ async fn run_on_backend(
     backend: &AgentBackend,
     config: &Config,
     model: Option<String>,
+    allowed_tools: Option<String>,
 ) -> RunRecord {
     let started_at = Utc::now();
-    let request = agent_request(prompt, backend, config, model);
+    let request = agent_request(prompt, backend, config, model, allowed_tools);
     match backend.run(request).await {
         Ok(result) => record_from_result(name, backend.id(), started_at, result),
         Err(err) => {
@@ -136,6 +149,7 @@ fn agent_request(
     backend: &AgentBackend,
     config: &Config,
     model: Option<String>,
+    allowed_tools: Option<String>,
 ) -> AgentRequest {
     AgentRequest {
         prompt,
@@ -146,6 +160,7 @@ fn agent_request(
         // unattended run can call mounted modules; None when the GUI never ran.
         system_prompt_file: crate::agents::module_context_if_present(),
         model,
+        allowed_tools,
     }
 }
 
@@ -381,11 +396,61 @@ mod tests {
             std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
         }
         let config = Config::default();
-        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config, None);
+        let req = agent_request(
+            "p".to_string(),
+            &AgentBackend::ClaudeCode,
+            &config,
+            None,
+            None,
+        );
         assert_eq!(req.system_prompt_file, None);
         std::fs::write(home.join("module-context.md"), "# modules").unwrap();
-        let req = agent_request("p".to_string(), &AgentBackend::ClaudeCode, &config, None);
+        let req = agent_request(
+            "p".to_string(),
+            &AgentBackend::ClaudeCode,
+            &config,
+            None,
+            None,
+        );
         assert_eq!(req.system_prompt_file, Some(home.join("module-context.md")));
+        unsafe {
+            std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn agent_request_passes_allowed_tools_through_unchanged() {
+        let _guard = crate::test_support::ENV_MUTEX.lock().unwrap();
+        let home = crate::test_support::unique_temp_dir("axiomata-test-runner-allowed-tools");
+        std::fs::create_dir_all(&home).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+        let config = Config::default();
+
+        let req = agent_request(
+            "p".to_string(),
+            &AgentBackend::ClaudeCode,
+            &config,
+            None,
+            Some("mcp__apple-reminders__calendar_events".to_string()),
+        );
+        assert_eq!(
+            req.allowed_tools,
+            Some("mcp__apple-reminders__calendar_events".to_string())
+        );
+
+        let req = agent_request(
+            "p".to_string(),
+            &AgentBackend::ClaudeCode,
+            &config,
+            None,
+            None,
+        );
+        assert_eq!(req.allowed_tools, None);
+
         unsafe {
             std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
         }

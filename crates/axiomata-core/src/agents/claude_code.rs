@@ -87,6 +87,12 @@ pub struct ChatRequest {
     pub system_prompt_file: Option<PathBuf>,
     /// `claude --model`; `None` lets the CLI choose.
     pub model: Option<String>,
+    /// `claude --allowedTools` — see [`super::AgentRequest::allowed_tools`].
+    /// A module that needs an instruct turn to reach an MCP tool (e.g. a
+    /// connector module's "create"/"delete" write action) sets this to
+    /// exactly the tool it needs; plain chat/instruct turns from the
+    /// assistant bar leave it `None`.
+    pub allowed_tools: Option<String>,
 }
 
 /// The parsed `--output-format json` result of a chat turn.
@@ -132,6 +138,7 @@ pub async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataError> {
             env: request.env,
             system_prompt_file: request.system_prompt_file,
             model: request.model,
+            allowed_tools: request.allowed_tools,
         },
         &args,
     )
@@ -150,6 +157,28 @@ pub fn valid_model_name(name: &str) -> bool {
             .is_some_and(|b| b.is_ascii_alphanumeric())
         && name.bytes().all(|b| {
             b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':' | b'[' | b']')
+        })
+}
+
+/// `--allowedTools` values come from `SKILL.md` frontmatter, same trust
+/// boundary as `valid_model_name` — not shell-parsed (no injection risk
+/// either way), but a value that could read as another `claude` flag would
+/// still misbehave silently, so it gets the same narrow-alphabet treatment.
+/// Wide enough for real tool specs: MCP's `mcp__server__tool` naming, plain
+/// tool names, and scoped specs like `Bash(git *)`, space/comma-separated.
+pub fn valid_allowed_tools(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 4000
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
+        && value.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'-' | b'_' | b',' | b' ' | b'(' | b')' | b'*' | b'/' | b':' | b'.'
+                )
         })
 }
 
@@ -253,6 +282,13 @@ async fn spawn_and_collect(
     if let Some(file) = &request.system_prompt_file {
         command.arg("--append-system-prompt-file").arg(file);
     }
+    if let Some(tools) = request
+        .allowed_tools
+        .as_deref()
+        .filter(|t| valid_allowed_tools(t))
+    {
+        command.arg("--allowedTools").arg(tools);
+    }
     command
         .current_dir(&request.cwd)
         .stdin(Stdio::piped())
@@ -350,6 +386,7 @@ mod tests {
             env: Vec::new(),
             system_prompt_file: None,
             model: None,
+            allowed_tools: None,
         }
     }
 
@@ -434,6 +471,21 @@ mod tests {
         }
         for bad in ["", "--model", "a b", "x;rm", &"a".repeat(81)] {
             assert!(!valid_model_name(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn allowed_tools_values_are_validated() {
+        for ok in [
+            "mcp__apple-reminders__calendar_events",
+            "mcp__apple-reminders__calendar_calendars mcp__apple-reminders__calendar_events",
+            "Bash(git *) Edit",
+            "a,b,c",
+        ] {
+            assert!(valid_allowed_tools(ok), "{ok}");
+        }
+        for bad in ["", "--allowedTools", ";rm -rf", &"a".repeat(4001)] {
+            assert!(!valid_allowed_tools(bad), "{bad:?}");
         }
     }
 
