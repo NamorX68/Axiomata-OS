@@ -15,6 +15,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("migrations/0001_init.sql")),
     (2, include_str!("migrations/0002_runs.sql")),
     (3, include_str!("migrations/0003_routines.sql")),
+    (4, include_str!("migrations/0004_runs_source.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -87,7 +88,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 3);
+            assert_eq!(version, 4);
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -126,6 +127,17 @@ mod tests {
                 [],
             )
             .expect("routine_runs table should exist");
+
+            // Migration 0004's DDL ran too, and backfills existing rows to
+            // 'manual' rather than leaving them NULL.
+            let source: String = conn
+                .query_row(
+                    "SELECT source FROM runs WHERE skill_name = 'probe'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("runs.source column should exist");
+            assert_eq!(source, "manual");
         }
 
         {
@@ -134,7 +146,7 @@ mod tests {
             let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(applied_count, 3);
+            assert_eq!(applied_count, 4);
 
             let probe_value: String = conn
                 .query_row(

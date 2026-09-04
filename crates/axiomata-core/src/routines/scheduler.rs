@@ -32,7 +32,7 @@ use crate::config::Config;
 use crate::error::AxiomataError;
 use crate::routines::model::{Routine, RoutineRunStatus, RoutineTarget};
 use crate::routines::store::{self, Advance, NewRoutineRun};
-use crate::skills::model::{RunRecord, RunStatus};
+use crate::skills::model::{RunRecord, RunSource, RunStatus};
 use crate::skills::{runlog, runner};
 
 /// How often the loop wakes to check for due routines. A routine fires within
@@ -176,13 +176,17 @@ async fn fire_one(
 
     let conn = lock(db);
     let (status, detail, run_id) = match outcome {
-        Ok(record) => {
+        Ok(mut record) => {
             let status = if record.status == RunStatus::Success {
                 RoutineRunStatus::Success
             } else {
                 RoutineRunStatus::Failed
             };
             let detail = record.error.clone();
+            // `execute_target` (and everything it calls) has no notion of
+            // "fired by a routine" — it's the same runner path a manual run
+            // uses. Stamp it here, the one place that does know.
+            record.source = RunSource::Routine;
             // Move the record in — it can carry up to ~2 MiB of captured output.
             let stored = runlog::record_run(&conn, record)?;
             (status, detail, stored.id)
@@ -528,8 +532,11 @@ mod tests {
         let state = RoutineState::derive(&after, history.first());
         assert!(matches!(state, RoutineState::Fired | RoutineState::Failed));
 
-        // A run row exists (the Ollama failure is still a recorded run).
-        assert_eq!(runlog::list_runs(&fx.conn(), 10).unwrap().len(), 1);
+        // A run row exists (the Ollama failure is still a recorded run),
+        // attributed to the routine rather than a manual trigger.
+        let runs = runlog::list_runs(&fx.conn(), 10).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].source, RunSource::Routine);
 
         // Second immediate tick does nothing: no longer due.
         let again = tick(&fx.config, &fx.db).await.unwrap();

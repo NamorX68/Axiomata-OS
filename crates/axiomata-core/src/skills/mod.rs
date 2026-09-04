@@ -19,7 +19,7 @@ pub mod runner;
 
 // Curated facade so consumers (CLI, Tauri commands) don't bind to the internal
 // module layout of `skills`.
-pub use model::{RunRecord, RunStatus, RunSummary};
+pub use model::{RunRecord, RunSource, RunStatus, RunSummary};
 pub use registry::{Skill, SkippedSkill, find_skill, list_skills, list_skipped_skills};
 pub use runlog::{get_run, list_runs};
 pub use runner::{execute_and_record_skill, execute_prompt, execute_skill};

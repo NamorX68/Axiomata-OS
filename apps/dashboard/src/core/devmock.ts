@@ -121,6 +121,7 @@ let runs: RunRecord[] = [
     error: null,
     started_at: new Date(Date.now() - 6 * 60_000).toISOString(),
     finished_at: new Date(Date.now() - 6 * 60_000 + 15800).toISOString(),
+    source: "manual",
   },
   {
     id: 4,
@@ -134,6 +135,7 @@ let runs: RunRecord[] = [
     error: null,
     started_at: new Date(Date.now() - 10 * 60_000).toISOString(),
     finished_at: new Date(Date.now() - 10 * 60_000 + 9200).toISOString(),
+    source: "manual",
   },
   {
     id: 3,
@@ -147,6 +149,7 @@ let runs: RunRecord[] = [
     error: null,
     started_at: new Date(Date.now() - 40 * 60_000).toISOString(),
     finished_at: new Date(Date.now() - 40 * 60_000 + 2310).toISOString(),
+    source: "manual",
   },
   {
     id: 2,
@@ -160,6 +163,7 @@ let runs: RunRecord[] = [
     error: "model not found",
     started_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
     finished_at: new Date(Date.now() - 3 * 3_600_000 + 810).toISOString(),
+    source: "routine",
   },
 ];
 let routines: Routine[] = [
@@ -306,6 +310,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         error: null,
         started_at: startedAt.toISOString(),
         finished_at: new Date(startedAt.getTime() + durationMs).toISOString(),
+        source: "manual",
       };
       runs = [run, ...runs];
       return run as T;

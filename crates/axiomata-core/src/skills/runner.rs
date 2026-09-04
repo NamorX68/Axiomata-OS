@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use crate::agents::{AgentBackend, AgentRequest, AgentRunResult};
 use crate::config::Config;
 use crate::error::AxiomataError;
-use crate::skills::model::{RunRecord, RunStatus};
+use crate::skills::model::{RunRecord, RunSource, RunStatus};
 use crate::skills::registry;
 use crate::skills::runlog;
 
@@ -191,6 +191,10 @@ fn record_from_result(
         error: None,
         started_at,
         finished_at: Utc::now(),
+        // Neither this function nor its caller here knows whether a
+        // routine fired it — routines::scheduler::fire_one overrides this
+        // to `Routine` itself, right before recording it.
+        source: RunSource::default(),
     }
 }
 
@@ -271,6 +275,8 @@ fn failure_record(
         error: Some(message),
         started_at,
         finished_at: Utc::now(),
+        // See the matching comment in `record_from_result`.
+        source: RunSource::default(),
     }
 }
 
@@ -370,6 +376,9 @@ mod tests {
         assert_eq!(ok.duration_ms, 12);
         assert_eq!(ok.backend, "ollama");
         assert!(ok.error.is_none());
+        // Defaults to Manual — routines::scheduler::fire_one is the one
+        // caller that overrides this, after the fact.
+        assert_eq!(ok.source, RunSource::Manual);
 
         let bad = record_from_result(
             "s",
