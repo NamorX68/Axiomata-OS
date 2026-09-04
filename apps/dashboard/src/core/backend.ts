@@ -23,6 +23,13 @@ export interface Skill {
   backend: string;
 }
 
+/** A skill directory `list_skills` could not turn into a `Skill` — a broken
+ *  `SKILL.md`, a symlink, … — surfaced instead of just vanishing. */
+export interface SkippedSkill {
+  name: string;
+  reason: string;
+}
+
 export type RunStatus = "success" | "failed";
 
 export interface RunSummary {

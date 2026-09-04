@@ -15,7 +15,7 @@ use axiomata_core::importer;
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::notes;
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
-use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
+use axiomata_core::skills::{self, RunRecord, RunSummary, Skill, SkippedSkill};
 use axiomata_core::workspace::{self, SearchHit, WorkspaceFile};
 use serde::Serialize;
 use tauri::State;
@@ -195,6 +195,14 @@ pub async fn create_note(state: State<'_, CoreState>, content: String) -> Result
 #[tauri::command]
 pub fn list_skills() -> Result<Vec<Skill>, String> {
     skills::list_skills().map_err(|err| err.to_string())
+}
+
+/// Lists every skill directory that was skipped during discovery, and why
+/// (a broken `SKILL.md`, a symlink, …) — the Skills Deck shows these as a
+/// warning instead of a broken skill just quietly not being there.
+#[tauri::command]
+pub fn list_skipped_skills() -> Result<Vec<SkippedSkill>, String> {
+    skills::list_skipped_skills().map_err(|err| err.to_string())
 }
 
 /// Returns the most recent skill runs as slim summaries, newest first. `limit`

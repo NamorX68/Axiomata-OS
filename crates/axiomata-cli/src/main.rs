@@ -421,12 +421,15 @@ fn print_status(core: &AxiomataCore) {
     println!("  skills:         {}", paths::global_skills_dir().display());
 }
 
-/// Prints one line per discovered skill: `name  backend  — description`.
+/// Prints one line per discovered skill: `name  backend  — description`,
+/// followed by a warning line for each skill directory that was skipped
+/// (broken `SKILL.md`, symlink, …) rather than letting it vanish silently.
 fn list_skills() -> Result<()> {
     let skills = skills::list_skills().context("failed to scan skills")?;
+    let skipped = skills::list_skipped_skills().context("failed to scan skills")?;
+
     if skills.is_empty() {
         println!("No skills found.");
-        return Ok(());
     }
     for skill in skills {
         println!(
@@ -434,6 +437,13 @@ fn list_skills() -> Result<()> {
             name = skill.name,
             backend = skill.backend,
             description = skill.description,
+        );
+    }
+    for skill in skipped {
+        println!(
+            "⚠ skipped {name}: {reason}",
+            name = skill.name,
+            reason = skill.reason
         );
     }
     Ok(())

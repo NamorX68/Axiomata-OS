@@ -285,6 +285,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "list_skills":
       return [...skills] as T;
+    case "list_skipped_skills":
+      // The mock fixture never has a broken skill; keeps the Skills Deck's
+      // warning row untriggered in dev-mock runs the same way it is in a
+      // real, healthy `~/.axiomata/skills/`.
+      return [] as T;
     case "run_skill": {
       const name = String(args.name);
       const startedAt = new Date();

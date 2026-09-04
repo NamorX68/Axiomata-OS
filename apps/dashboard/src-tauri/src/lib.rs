@@ -37,6 +37,7 @@ pub fn run() {
             commands::get_workspace_graph,
             commands::search_workspace,
             commands::list_skills,
+            commands::list_skipped_skills,
             commands::list_runs,
             commands::get_run,
             commands::run_skill,
