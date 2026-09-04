@@ -87,27 +87,26 @@
     background-size: var(--ax-grid) var(--ax-grid);
     background-position: 0 0;
   }
-  /* Snap alignment guides: an unmistakable accent line, drawn ABOVE the tile
-     being dragged (+1) so the whole line reads across the canvas, with a
-     soft glow so a clean alignment is obvious. */
+  /* Snap alignment guides: a thin accent line, drawn ABOVE the dragged tile
+     (+1) so the whole line reads across the canvas — discreet, just a faint
+     halo so a 1px line stays visible. */
   .guide {
     position: absolute;
     z-index: calc(var(--ax-z-tile-drag) + 1);
     pointer-events: none;
     background: var(--ax-accent);
-    box-shadow:
-      0 0 0 0.5px color-mix(in srgb, var(--ax-accent) 40%, transparent),
-      0 0 8px 1px color-mix(in srgb, var(--ax-accent) 55%, transparent);
+    opacity: 0.65;
+    box-shadow: 0 0 3px color-mix(in srgb, var(--ax-accent) 40%, transparent);
   }
   .guide.x {
     top: 0;
     bottom: 0;
-    width: 2px;
+    width: 1px;
   }
   .guide.y {
     left: 0;
     right: 0;
-    height: 2px;
+    height: 1px;
   }
 
   #particle-slot {
