@@ -157,7 +157,7 @@ size goes through a `--ax-*` token; no literals in components.
 - **Tile chrome** (`canvas/Tile.svelte`): the **front** face has **no chrome at
   rest** — no fill, no border, no shadow, no header divider — the module's
   content sits straight on the canvas, like the reference dashboard's edge
-  panels. Only a caps section-label (icon + muted title) shows; the grip glyph
+  panels. A caps section-label (icon + slightly-larger muted title) and faint top/bottom edge hairlines show; the grip glyph
   and ⚙/× buttons fade in on hover (`:focus-within` too). A faint fill
   (`color-mix` of `--ax-tile-glass-bg`) appears on hover so you can see what
   you're about to grab/resize, and the tile "materialises" fully

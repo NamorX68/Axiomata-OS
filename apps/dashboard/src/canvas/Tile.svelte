@@ -258,14 +258,18 @@
       box-shadow var(--ax-dur-fast) var(--ax-ease),
       background var(--ax-dur-fast) var(--ax-ease);
   }
-  /* Front: no chrome at rest — the module's content sits straight on the
-     canvas, like the reference dashboard's edge panels (no fill, no border,
-     no shadow, no header divider). A faint fill appears on hover so you can
-     see what you are about to grab / resize, and the tile "materialises"
+  /* Front: almost no chrome at rest — the module's content sits straight on
+     the canvas, like the reference dashboard's edge panels. The only mark is
+     a faint hairline along the top and bottom edge (a discreet delimiter, no
+     side borders, no fill, no shadow). A faint fill appears on hover so you
+     can see what you are about to grab / resize, and the tile "materialises"
      fully while it is being moved. */
   .face.front {
     background: transparent;
     box-shadow: none;
+    border-radius: 0;
+    border-top: 1px solid color-mix(in srgb, var(--ax-border) 70%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--ax-border) 70%, transparent);
   }
   .tile:hover .face.front {
     background: color-mix(in srgb, var(--ax-tile-glass-bg) 45%, transparent);
@@ -311,7 +315,7 @@
     border-bottom: none;
   }
   .front-head .tile-title {
-    font-size: var(--ax-font-size-xs);
+    font-size: var(--ax-font-size-sm);
     color: var(--ax-text-muted);
   }
   .front-head .tile-btn {
