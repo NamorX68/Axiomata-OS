@@ -242,6 +242,12 @@ size goes through a `--ax-*` token; no literals in components.
   the agent proposes the areas and assigns every note in one JSON turn, files are written
   under `<workspace>/<Area>/`, never overwriting; secret-looking notes are flagged, not
   skipped, unless `--skip-secrets`.
+- **New note**: `axiomata_core::notes` + the top bar's "New note" icon (`NewNotePanel.svelte`,
+  command `create_note`) — a scaled-down `importer`: one note instead of a batch, and
+  `placement_prompt` only ever offers the vault's *existing* top-level areas (or `Inbox`),
+  never a new one. Agent decides area + file name in one JSON turn; the Rust side does the
+  actual write, deduping on a name collision (`-2`, `-3`, …) rather than skipping like
+  `importer::apply` does. Saved note opens immediately in the right-hand staged viewer.
 - Escape across overlays: the first handler that acts calls `preventDefault()`; later ones
   (Second Brain, chat) check `defaultPrevented` — never the DOM (outro transitions linger).
 
