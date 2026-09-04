@@ -278,8 +278,10 @@ fn markdown_title(path: &Path) -> Option<String> {
     first_heading(&head)
 }
 
-/// Returns the text of the first ATX `# ` heading in `text`, if any.
-fn first_heading(text: &str) -> Option<String> {
+/// Returns the text of the first ATX `# ` heading in `text`, if any. Also
+/// reused by [`crate::notes`] to tell whether a freshly typed note already
+/// supplies its own title.
+pub(crate) fn first_heading(text: &str) -> Option<String> {
     text.lines()
         .map(str::trim)
         .find_map(|line| line.strip_prefix("# "))
