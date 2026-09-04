@@ -132,6 +132,10 @@ pub async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataError> {
             env: request.env,
             system_prompt_file: request.system_prompt_file,
             model: request.model,
+            // Chat/instruct turns don't carry a tool allow-list yet — only
+            // skills do, via their frontmatter. Extend `ChatRequest` the same
+            // way if a module ever needs an instruct turn to reach an MCP tool.
+            allowed_tools: None,
         },
         &args,
     )
@@ -252,6 +256,13 @@ async fn spawn_and_collect(
     }
     if let Some(file) = &request.system_prompt_file {
         command.arg("--append-system-prompt-file").arg(file);
+    }
+    if let Some(tools) = request
+        .allowed_tools
+        .as_deref()
+        .filter(|t| !t.trim().is_empty())
+    {
+        command.arg("--allowedTools").arg(tools);
     }
     command
         .current_dir(&request.cwd)

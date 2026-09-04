@@ -143,6 +143,16 @@ pub struct AgentRequest {
     /// `claude --model`; `None` lets the CLI choose. Ignored by Ollama (its
     /// model lives in the backend enum).
     pub model: Option<String>,
+    /// `claude --allowedTools` — a space/comma-separated tool allow-list
+    /// (Claude Code's own syntax, passed through verbatim), e.g.
+    /// `"mcp__apple-reminders__calendar_events"`. Needed because MCP tool
+    /// calls are not covered by `--permission-mode`: a `-p` run with no
+    /// interactive approver denies them outright otherwise, silently, no
+    /// matter the permission mode (found live while building the calendar
+    /// skill — the run "succeeds" but the tool call is refused). `None`
+    /// passes no flag, i.e. no MCP tools beyond whatever the permission mode
+    /// already allows. Ignored by Ollama (no tool use at all).
+    pub allowed_tools: Option<String>,
 }
 
 /// `config.agents.claude_model` unless empty.
