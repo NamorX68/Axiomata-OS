@@ -158,28 +158,36 @@ size goes through a `--ax-*` token; no literals in components.
 - **Workspace files** (`axiomata_core::workspace`, commands `read/write_workspace_file`):
   relative to `config.workspace_root`, no `..`, must canonicalise inside the root,
   symlinks and hard links refused, ≤ 1 MiB, atomic O_EXCL temp + rename.
-- **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` in a
-  `<iframe sandbox="allow-scripts allow-same-origin">` whose src is an asset-protocol URL.
-  `open_workspace_html` resolves the file through the workspace guard and allows **only its
-  folder** (non-recursive) in the runtime asset scope (`asset_protocol_scope().allow_directory`);
-  the static scope in `tauri.conf.json` is empty and the CSP carries
-  `frame-src asset: http://asset.localhost`. Notes elsewhere in the vault are never served by
-  the asset protocol. The URL itself is built by `core/backend.assetFileUrl`, **not** the SDK's
-  `convertFileSrc` — that one runs `encodeURIComponent` over the *whole* path, turning every `/`
-  into `%2F` and leaving the browser no literal path to resolve a relative link against, so a
-  lesson's "next page" link silently failed. `assetFileUrl` encodes each segment but keeps `/`
-  literal; Tauri's asset handler percent-decodes the whole request path as one string either
-  way, so it serves the identical file — this form just also supports in-page relative
-  navigation. `allow-same-origin` was added 2026-09-04 after the owner reported a lesson
-  rendering as a blank white frame: with `allow-scripts` alone the iframe's origin is forced
-  opaque, and WebKit's asset:// handler appears to refuse serving into an opaque-origin frame
-  (matches reports against Tauri's custom-protocol/iframe handling, e.g.
-  tauri-apps/tauri#12767) — silently, no console error surfaced to the app. Safe to add: it
-  restores the page's *real* `asset://localhost` origin, still a different origin from the app
-  shell, so `parent.document`/the IPC bridge stay unreachable regardless. Not yet re-verified by
-  actually clicking a lesson in `cargo tauri dev` — no Accessibility permission for UI scripting
-  in this environment, so it has to be a manual click-test — do that before treating this fix
-  as confirmed working, not just plausible.
+- **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
+  a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
+  (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`
+  before being assigned. There is **no asset protocol** involved (removed 2026-09-04): the
+  original design served lessons via `asset://` + `<iframe src=…>` (`open_workspace_html` +
+  `core/backend.assetFileUrl`, granting the file's folder in the runtime asset scope), which
+  looked correct on paper and even reported `is_allowed == true` on the Rust side — real fix
+  attempts (`allow-same-origin`, a static `tauri.conf.json` scope entry) changed nothing — but
+  every lesson rendered a reproducible blank white frame with "403 (Forbidden)" / "Not allowed
+  to download due to sandboxing" in the WebKit console, jointly diagnosed with the owner via
+  Safari's Web Inspector attached to the running app (matches reports against Tauri's
+  asset/custom-protocol handling inside sandboxed iframes, e.g. tauri-apps/tauri#12767). `srcdoc`
+  sidesteps the whole asset-protocol question — at the cost of two nuances `withNavIntercept`'s
+  injected script handles by hand, since the browser's native behaviour gets both wrong for a
+  `srcdoc` document (whose own URL is `about:srcdoc`, but whose *base URL* — what a relative
+  `href` resolves against — is inherited from the **embedding app**, per the HTML living
+  standard): (1) a same-folder link (`href="0003-next.html"`) has nothing of the lesson's real
+  location to resolve against, so it's intercepted and posted to the parent via `postMessage`,
+  which resolves it with `core/htmllink.resolveRelativeLink` (the WHATWG `URL` algorithm, the
+  same approach validated for `assetFileUrl`) and re-opens the module on that path; (2) a
+  same-page anchor (`href="#etappe-a"`) is worse than merely unresolvable — WebKit resolves it
+  against the *app's* base URL and actually navigates the iframe to
+  `http://localhost:1420/#etappe-a` (the dashboard shell itself), which then fails on CORS
+  (opaque `null` origin) and renders blank — so anchors are intercepted too, handled with a
+  plain `getElementById` + `scrollIntoView`, never letting the browser's own anchor-navigation
+  run. `assetFileUrl` (in `core/backend.ts`) is unused now but left in place — general-purpose,
+  tested, documented — in case a future feature needs a real `asset://` URL for something an
+  iframe isn't involved in. Known limits: external links and anything with a URL scheme
+  (`http:`, `mailto:`, `javascript:`, …) are left alone and simply do nothing, since the frame
+  has no `allow-top-navigation` and no live network access beyond what `srcdoc` inlines.
 - **Chat**: the bottom bar routes input — registered `/command` runs locally
   (`core/commands.ts`), other `/text` is a one-shot `instruct` turn, plain text a `chat`
   turn. `agents::claude_code::chat` = `claude -p --output-format json --permission-mode

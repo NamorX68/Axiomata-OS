@@ -3,26 +3,32 @@
   the compose UI for a brand new one.
   - `.md`: read mode renders through core/markdown (marked + DOMPurify), edit
     mode is a textarea, Save writes via `write_workspace_file`.
-  - `.html` / `.htm` (courses): shown read-only in a sandboxed iframe whose src
-    is an asset-protocol URL from `open_workspace_html` (which allows the
-    page's folder in the asset scope, so same-folder links keep working) —
-    built with `core/backend.assetFileUrl`, not the SDK's `convertFileSrc`
-    (see its doc comment: that one breaks relative links inside the page).
-    `sandbox="allow-scripts allow-same-origin"`: WebKit's custom-scheme
-    protocol handler (asset://) appears to refuse to serve into a frame that
-    sandboxing has forced to an opaque origin — with `allow-scripts` alone
-    the whole frame rendered blank (owner-reported, 2026-09-04; matches
-    reports against Tauri's asset/custom-protocol handling in sandboxed
-    iframes, e.g. tauri-apps/tauri#12767). `allow-same-origin` here does NOT
-    hand the page the app's own origin — it only lets it keep its *real*
-    origin (`asset://localhost`), which is still a different origin from the
-    app shell (served over `tauri://`/`http://tauri.localhost`), so it still
-    cannot reach `parent.document` or the IPC bridge. Known limits:
-    navigating inside the frame does not update the path in the bar; external
-    links are blocked by the app's frame-src and show a blank frame. In the
-    browser dev mock the page is loaded via `srcdoc` instead (no asset
-    protocol there, and the mock frame never needs the same-origin fix since
-    dev-mock content is trusted fixture data, not the sandboxed real path).
+  - `.html` / `.htm` (courses): shown read-only in a `sandbox="allow-scripts"`
+    iframe via `srcdoc` — **not** the asset protocol (`asset://` + `src=`),
+    which was the original design (see git history) but proved unreliable:
+    every lesson rendered a blank white frame with "Failed to load resource:
+    403 (Forbidden)" / "Not allowed to download due to sandboxing" in the
+    WebKit console, reproducibly, across a fresh app relaunch, a dynamic
+    `asset_protocol_scope().allow_directory()` grant confirmed `is_allowed ==
+    true` on the Rust side, *and* a static `tauri.conf.json` scope entry —
+    none of it made a difference (owner-reported and jointly diagnosed via
+    Safari's Web Inspector, 2026-09-04; matches reports against Tauri's
+    asset/custom-protocol handling inside sandboxed iframes, e.g.
+    tauri-apps/tauri#12767). `read_workspace_file` (already proven reliable —
+    it powers the Second Brain's content preview) reads the raw HTML;
+    `core/htmllink.withNavIntercept` appends a small script that intercepts
+    clicks on same-page-relative links (a `srcdoc` iframe has no URL of its
+    own for the browser to resolve `href="0003-next.html"` against) and
+    posts `{source: "ax-md-file", href}` to the parent via `postMessage`;
+    `onMessage` below checks `event.source` against this instance's own
+    iframe (`iframeEl.contentWindow`) before resolving the link with
+    `core/htmllink.resolveRelativeLink` and calling `open()` on it — reusing
+    the exact same `load()`/`open()` plumbing as opening any other file.
+    Known limits: navigating inside the frame updates the path in the bar
+    now (an improvement over the asset-protocol version), but external
+    links and anything with a URL scheme (`http:`, `mailto:`, …) are left
+    alone and simply do nothing inside a frame with no `allow-top-navigation`
+    and no network access of its own beyond what `srcdoc` inlines.
   - `isNew` + no `path` yet: a bare textarea, no title field — either the
     note starts with its own `# Heading`, or the agent proposes one, exactly
     like `axiomata_core::notes`. Save calls `create_note`, then re-points
@@ -32,8 +38,9 @@
   `stageFrom`.
 -->
 <script lang="ts">
-  import { assetFileUrl, insideTauri, type WorkspaceFile } from "../core/backend";
+  import { type WorkspaceFile } from "../core/backend";
   import { relativeTime } from "../core/format";
+  import { resolveRelativeLink, withNavIntercept } from "../core/htmllink";
   import { renderMarkdown } from "../core/markdown";
   import type { ModuleContext } from "../core/types";
 
@@ -47,12 +54,12 @@
   let error = $state("");
   let saving = $state(false);
   let pathInput = $state("");
+  let iframeEl = $state<HTMLIFrameElement | null>(null);
 
   const path = $derived(typeof $config.path === "string" ? $config.path : "");
   const isNew = $derived($config.isNew === true && !path);
   const kind = $derived(/\.html?$/i.test(path) ? "html" : "markdown");
   const mode = $derived($config.mode === "edit" && kind === "markdown" ? "edit" : "read");
-  let frameSrc = $state<string | null>(null);
   let frameDoc = $state<string | null>(null);
   let reloadTick = $state(0);
   const dirty = $derived(file !== null && draft !== file.content);
@@ -61,7 +68,6 @@
   async function load(rel: string) {
     if (!rel) {
       file = null;
-      frameSrc = null;
       frameDoc = null;
       return;
     }
@@ -82,23 +88,25 @@
   async function loadHtml(rel: string) {
     file = null;
     try {
-      if (insideTauri()) {
-        const abs = await ctx.invoke<string>("open_workspace_html", { rel });
-        frameSrc = assetFileUrl(abs);
-        frameDoc = null;
-      } else {
-        // Browser dev mock: no asset protocol — inline the fixture page.
-        const f = await ctx.invoke<WorkspaceFile>("read_workspace_file", { rel });
-        frameDoc = f.content;
-        frameSrc = null;
-      }
+      const f = await ctx.invoke<WorkspaceFile>("read_workspace_file", { rel });
+      frameDoc = withNavIntercept(f.content);
       reloadTick++;
       error = "";
     } catch (err) {
-      frameSrc = null;
       frameDoc = null;
       error = String(err);
     }
+  }
+
+  // A click on a same-page-relative link inside the srcdoc'd page (see the
+  // header comment) — only from *this* instance's own iframe, since
+  // `postMessage` targets the whole window and several Document instances
+  // could be mounted at once.
+  function onFrameMessage(e: MessageEvent) {
+    if (!iframeEl || e.source !== iframeEl.contentWindow) return;
+    const data = e.data as { source?: string; href?: string } | null;
+    if (!data || data.source !== "ax-md-file" || typeof data.href !== "string") return;
+    open(resolveRelativeLink(path, data.href));
   }
 
   function setMode(next: "read" | "edit") {
@@ -149,6 +157,8 @@
   });
 </script>
 
+<svelte:window onmessage={kind === "html" ? onFrameMessage : undefined} />
+
 <div class="md">
   {#if isNew}
     <div class="bar">
@@ -192,15 +202,15 @@
     {#if error}
       <p class="error">{error}</p>
     {:else if kind === "html"}
-      {#if frameSrc || frameDoc}
+      {#if frameDoc}
         {#key reloadTick}
           <iframe
             class="page"
             title={path}
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts"
             referrerpolicy="no-referrer"
-            src={frameSrc ?? undefined}
-            srcdoc={frameDoc ?? undefined}
+            srcdoc={frameDoc}
+            bind:this={iframeEl}
           ></iframe>
         {/key}
       {:else}
