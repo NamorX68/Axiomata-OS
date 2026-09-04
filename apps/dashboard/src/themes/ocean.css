@@ -1,9 +1,13 @@
 /*
  * ocean — deep-sea navy and teal surfaces, a coral accent, a slow wave
  * texture. Cooler than graphite, warmer than midnight.
+ *
+ * Scoped to `[data-theme="ocean"]`, not `:root[…]` — see `graphite.css` for
+ * why (lets a non-root element, like a Settings theme-swatch, preview these
+ * tokens locally).
  */
 
-:root[data-theme="ocean"] {
+[data-theme="ocean"] {
   --ax-color-scheme: dark;
 
   --ax-bg: #07131c;

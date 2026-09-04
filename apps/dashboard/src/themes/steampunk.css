@@ -1,9 +1,13 @@
 /*
  * steampunk — oxidised bronze and dark leather surfaces, a polished-brass
  * accent, serif display type and a riveted-plate texture.
+ *
+ * Scoped to `[data-theme="steampunk"]`, not `:root[…]` — see `graphite.css`
+ * for why (lets a non-root element, like a Settings theme-swatch, preview
+ * these tokens locally).
  */
 
-:root[data-theme="steampunk"] {
+[data-theme="steampunk"] {
   --ax-color-scheme: dark;
 
   --ax-bg: #1b1410;
