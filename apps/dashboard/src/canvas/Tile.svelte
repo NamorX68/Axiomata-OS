@@ -268,8 +268,8 @@
     background: transparent;
     box-shadow: none;
     border-radius: 0;
-    border-top: 1.5px solid color-mix(in srgb, var(--ax-border) 82%, transparent);
-    border-bottom: 1.5px solid color-mix(in srgb, var(--ax-border) 82%, transparent);
+    border-top: 2px solid var(--ax-border-strong);
+    border-bottom: 2px solid var(--ax-border-strong);
   }
   .tile:hover .face.front {
     background: color-mix(in srgb, var(--ax-tile-glass-bg) 45%, transparent);
@@ -315,7 +315,7 @@
     border-bottom: none;
   }
   .front-head .tile-title {
-    font-size: var(--ax-font-size-base);
+    font-size: var(--ax-font-size-lg);
     color: var(--ax-text-muted);
   }
   .front-head .tile-btn {
