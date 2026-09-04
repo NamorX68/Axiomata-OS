@@ -233,7 +233,10 @@ export function layoutHex(model: GraphModel): void {
   // Solve one hex circumradius `u` so `files.length` hexes, each of area
   // (3√3/2)u², cover roughly the annulus Rings uses for files (with a
   // little slack so the outermost ring isn't razor-tight against neighbours).
-  const innerR = RING.filesInner;
+  // The mosaic starts a bit further out than Rings' dots do — otherwise the
+  // innermost cells crowd right up against the skill/routine/area icons and
+  // make them hard to pick out.
+  const innerR = RING.filesInner + 0.32;
   const outerR = RING.filesOuter;
   const slack = 1.15;
   const fieldArea = Math.PI * (outerR * outerR - innerR * innerR);
