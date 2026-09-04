@@ -154,6 +154,17 @@ size goes through a `--ax-*` token; no literals in components.
   component, optional settings component (flip side), default/min size, `singleton`,
   `stageable`, `actions[]`. Instances are mounted with a `ModuleContext` (`invoke`,
   reactive per-instance `config`, `emit`, `requestResize`).
+- **Tile chrome** (`canvas/Tile.svelte`): the **front** face is frameless "glass" —
+  a translucent fill (`--ax-tile-glass-bg`, one per theme) with `backdrop-filter`
+  blur (`--ax-tile-glass-blur`), a soft shadow, **no border and no header
+  divider**; the icon + a small muted title sit in a slim top strip, and the
+  grip glyph + ⚙/× buttons only fade in on hover (`:focus-within` too). The
+  **back** (settings) face deliberately keeps the solid framed-window look
+  (`--ax-surface-2` + 1px border + a bordered header bar) so it reads as a
+  distinct surface. A tile is **dragged only from that top strip** — both
+  headers carry `.tile-drag` and `use:draggable` gets `handle: ".tile-drag"`
+  (`canvas/drag.ts` `DragOptions.handle`); the body no longer initiates a drag.
+  `--ax-tile-glass-bg` is in the custom-theme allow-list (`theme/validator.ts`).
 - **Persistence**: one hand-editable JSON file `~/.axiomata/dashboard.json` (layout +
   theme + per-instance config); the frontend owns the schema, Rust
   (`axiomata_core::dashboard`) only checks "object with numeric `version`", writes

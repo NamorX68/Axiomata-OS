@@ -132,6 +132,7 @@
   style:transform={drag ? `translate3d(${drag.dx}px, ${drag.dy}px, 0)` : undefined}
   onpointerdowncapture={() => bringToFront(inst.id)}
   use:draggable={{
+    handle: ".tile-drag",
     onStart: () => (drag = { dx: 0, dy: 0 }),
     onMove: (d) => (drag = snappedDrag(d)),
     onEnd: onDragEnd,
@@ -139,9 +140,10 @@
 >
   <div class="tile-inner" class:flipped={inst.flipped}>
     <div class="face front">
-      <header class="tile-head">
+      <header class="tile-head front-head tile-drag">
         <span class="tile-icon" aria-hidden="true">{@html def?.icon ?? ""}</span>
         <h2 class="tile-title">{def?.title ?? inst.type}</h2>
+        <span class="tile-grip" aria-hidden="true">⠿</span>
         {#if def?.settings}
           <button
             type="button"
@@ -182,7 +184,7 @@
     </div>
 
     <div class="face back" aria-hidden={!inst.flipped}>
-      <header class="tile-head">
+      <header class="tile-head tile-drag">
         <h2 class="tile-title">{def?.title ?? inst.type} · Settings</h2>
         <button
           type="button"
@@ -251,18 +253,28 @@
     flex-direction: column;
     overflow: hidden;
     backface-visibility: hidden;
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-lg);
     box-shadow: var(--ax-shadow-tile);
     transition: box-shadow var(--ax-dur-fast) var(--ax-ease);
   }
+  /* Front: frameless "glass" — a translucent fill floating over the canvas /
+     particle graph, no border, no header divider; chrome fades in on hover. */
+  .face.front {
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+  }
+  /* Back: the settings side keeps the solid window frame, so it reads as a
+     distinct surface you are configuring. */
   .face.back {
     transform: rotateY(180deg);
     background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
   }
   .tile.dragging .face {
     box-shadow: var(--ax-shadow-drag);
+  }
+  .tile.dragging .face.back {
     border-color: var(--ax-border-strong);
   }
 
@@ -274,6 +286,44 @@
     border-bottom: 1px solid var(--ax-border);
     cursor: grab;
     flex: 0 0 auto;
+  }
+  .tile.dragging .tile-head {
+    cursor: grabbing;
+  }
+
+  /* The front header is a slim, quiet strip: no divider, a small muted
+     title, and grip + buttons that only appear on hover. It is the only
+     drag handle now (`.tile-drag`) — the body no longer initiates a drag. */
+  .front-head {
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border-bottom: none;
+  }
+  .front-head .tile-title {
+    font-size: var(--ax-font-size-xs);
+    font-weight: 500;
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--ax-text-muted);
+  }
+  .front-head .tile-btn {
+    opacity: 0;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+  .tile:hover .front-head .tile-btn,
+  .front-head:focus-within .tile-btn {
+    opacity: 1;
+  }
+
+  .tile-grip {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+    line-height: 1;
+    opacity: 0;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+  .tile:hover .tile-grip,
+  .tile.dragging .tile-grip {
+    opacity: 0.5;
   }
 
   .tile-icon {

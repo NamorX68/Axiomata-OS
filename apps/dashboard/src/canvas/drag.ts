@@ -4,8 +4,9 @@
  * Nothing moves until the pointer travels `threshold` px, so plain clicks on
  * a module's buttons and inputs still register as clicks. Elements matching
  * `ignore` (form controls, links, resize handles, `[data-no-drag]`) never
- * start a drag. Pointer capture is taken only once the threshold is crossed,
- * so the drag survives the pointer leaving the tile.
+ * start a drag; if `handle` is set, a drag only starts from inside a matching
+ * descendant (the tile's slim top strip). Pointer capture is taken only once
+ * the threshold is crossed, so the drag survives the pointer leaving the tile.
  */
 
 import type { Action } from "svelte/action";
@@ -26,6 +27,8 @@ export interface DragOptions {
   threshold?: number;
   /** Selector for descendants that must not start a drag. */
   ignore?: string;
+  /** If set, a drag only starts from a press inside a matching descendant. */
+  handle?: string;
 }
 
 export const DEFAULT_THRESHOLD_PX = 4;
@@ -46,6 +49,7 @@ export const draggable: Action<HTMLElement, DragOptions> = (node, options) => {
     if (e.button !== 0 || pointerId !== null) return;
     const ignore = opts.ignore ?? DEFAULT_IGNORE;
     if (e.target instanceof Element && e.target.closest(ignore)) return;
+    if (opts.handle && !(e.target instanceof Element && e.target.closest(opts.handle))) return;
     pointerId = e.pointerId;
     startX = e.clientX;
     startY = e.clientY;
