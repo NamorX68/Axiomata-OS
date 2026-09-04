@@ -51,3 +51,14 @@ export function absoluteTime(iso: string | null | undefined): string {
   if (Number.isNaN(t)) return iso;
   return new Date(t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
+/** "Today", "Tomorrow", or a short locale weekday + date — for a
+ *  `YYYY-MM-DD` day (the `calendar` module's agenda-list day headers). */
+export function dayLabel(day: string, now = Date.now()): string {
+  const base = new Date(now);
+  const todayIso = base.toISOString().slice(0, 10);
+  const tomorrowIso = new Date(base.getTime() + DAY).toISOString().slice(0, 10);
+  if (day === todayIso) return "Today";
+  if (day === tomorrowIso) return "Tomorrow";
+  return new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}

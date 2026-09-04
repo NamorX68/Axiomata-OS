@@ -134,7 +134,15 @@ Things worth knowing before touching `skills/` or `agents/`:
   there is no workspace-local skill location (dropped deliberately — see `docs/architecture.md`
   §4 "Why one skill location"). Frontmatter is parsed with `gray_matter`; the filesystem is
   the only source of truth (skills are never written to the DB). `list_skills` skips a bad
-  `SKILL.md`; `find_skill` surfaces its error.
+  `SKILL.md`; `find_skill` surfaces its error. A skill whose SOP needs an MCP tool (a
+  "connector" skill — see `calendar-digest` below) must also set frontmatter
+  `allowed_tools:` (space/comma-separated tool names, passed verbatim to `claude
+  --allowedTools`) — an MCP tool call is **not** covered by `--permission-mode` at all, so
+  a headless `-p` run with no interactive approver denies it outright, silently (found
+  live while building the Calendar module: the run still exits 0 and "succeeds", the tool
+  call is just refused). Threaded through `Skill.allowed_tools` →
+  `skills::runner::execute_skill` → `AgentRequest.allowed_tools`; `execute_prompt`
+  (routines' raw-`prompt` targets, no `SKILL.md`) has no equivalent yet.
 - Agent execution goes through a small enum, not a plugin registry:
   `AgentBackend::ClaudeCode | AgentBackend::Ollama { model }` — deliberately not a
   generic multi-CLI abstraction (see the plan for why). `skills::runner::execute_skill`
@@ -149,8 +157,8 @@ Frontend: Svelte 5 + Vite + TS under `apps/dashboard/src/` — `core/` (stores, 
 lifecycle, persist, commands, chat, staging, agent-bridge, backend types + `devmock`),
 `canvas/` (Canvas, Tile, drag/resize actions), `shell/` (TopBar, IconBar, ModulePicker,
 Settings, AssistantBar, ChatPanel, StagingLayer, Toasts), `modules/` (memory-status,
-skills-deck, routines-board, md-file, todo, each `.svelte` + settings face, registered in
-`modules/index.ts`; the graph's `second-brain` too), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
+skills-deck, routines-board, md-file, todo, calendar, each `.svelte` + settings face,
+registered in `modules/index.ts`; the graph's `second-brain` too), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
 theme: graphite, paper, steampunk, forest, ocean), `theme/validator.ts`. Every colour /
 size goes through a `--ax-*` token; no literals in components.
 
@@ -194,6 +202,26 @@ size goes through a `--ax-*` token; no literals in components.
   actions `add` · `complete` (first open item containing the given text) · `list` work
   statelessly on the file. `ToDo.md` shows up in the Second-Brain graph as an ordinary
   vault file, no special-casing.
+- **Calendar** (`calendar` module, `singleton`) — the first "connector" module, and the
+  first real use of the "provider = skill, not code" decision
+  ([[axiomata-os-next-roadmap]]): a `calendar-digest` skill (`~/.axiomata/skills/`, not in
+  this repo) reads Apple Calendar via the `apple-reminders` MCP server's
+  `calendar_calendars`/`calendar_events` tools and replies with one JSON object —
+  `{"calendars": [...], "events": [{"title","start","end","calendar","location","allDay"}]}`
+  — sorted by `start`. Unlike `todo`, there is **no live poll**: calendar data sits behind
+  an MCP tool only an agent can reach, so every refresh is a real agent turn. The tile
+  reads back whichever run happened most recently (`list_runs` → `get_run` for the
+  captured `stdout`), however that run happened — by hand from the Skills Deck, on a
+  schedule via a Routine, or the tile's own ↻ (a plain `run_skill` call, same mechanism,
+  just a convenience). The calendar-filter dropdown ("All calendars" + one entry per
+  calendar the skill saw, even ones with no upcoming events) is a pure client-side filter
+  over the already-fetched digest — picking a calendar never re-runs the skill. Parsing /
+  filtering / day-grouping is pure TS in `core/calendar.ts` (+ `calendar.test.ts`);
+  `parseCalendarDigest` defensively strips a ` ```json ` fence the model adds despite the
+  SOP saying not to. Bridge / `/calendar` actions `refresh` (runs the skill now) ·
+  `list` (reads back the last run, optionally filtered to one calendar, no new run).
+  **New in `agents`/`skills` for this**: `SKILL.md` frontmatter `allowed_tools:` (see
+  above) — without it the skill's MCP tool call was silently denied in every headless run.
 - **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
   a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
   (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`

@@ -36,6 +36,14 @@ export interface RunSummary {
   started_at: string;
 }
 
+/** The full record `run_skill` / `get_run` return — `RunSummary` plus the
+ *  captured output `list_runs` deliberately omits. */
+export interface RunRecord extends RunSummary {
+  stdout: string;
+  stderr: string;
+  finished_at: string;
+}
+
 export interface MemoryStatus {
   workspace_root: string;
   last_sync: string | null;

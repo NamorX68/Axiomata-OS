@@ -7,7 +7,8 @@
  */
 
 import { registerModule } from "../core/registry";
-import type { WorkspaceFile } from "../core/backend";
+import type { RunRecord, RunSummary, WorkspaceFile } from "../core/backend";
+import { CALENDAR_SKILL_NAME, filterByCalendar, parseCalendarDigest } from "../core/calendar";
 import type { ModuleContext } from "../core/types";
 import {
   addTodo,
@@ -18,6 +19,8 @@ import {
   todayIso,
   type TodoDoc,
 } from "../core/todo";
+import Calendar from "./calendar.svelte";
+import CalendarSettings from "./calendar-settings.svelte";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
 import MdFile from "./md-file.svelte";
@@ -291,6 +294,46 @@ export function registerBuiltins(): void {
         },
       ];
     })(),
+  });
+
+  registerModule({
+    type: "calendar",
+    title: "Calendar",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='3' width='12' height='11' rx='1.5'/><path d='M2 6.5h12M5 1.5v3M11 1.5v3'/></svg>",
+    component: Calendar,
+    settings: CalendarSettings,
+    defaultSize: { w: 340, h: 360 },
+    minSize: { w: 240, h: 160 },
+    singleton: true,
+    actions: [
+      {
+        name: "refresh",
+        description: "Runs the calendar-digest skill now and returns a summary of what it found.",
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: CALENDAR_SKILL_NAME });
+          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          const digest = parseCalendarDigest(run.stdout);
+          return { ok: true, calendars: digest.calendars, events: digest.events.length };
+        },
+      },
+      {
+        name: "list",
+        description: "Returns the events from the last calendar-digest run, optionally filtered to one calendar (does not trigger a new run).",
+        params: { type: "object", properties: { calendar: { type: "string" } } },
+        run: async (params, ctx) => {
+          const runs = await ctx.invoke<RunSummary[]>("list_runs", { limit: 50 });
+          const latest = runs.find((r) => r.skill_name === CALENDAR_SKILL_NAME);
+          if (!latest) return { events: [], note: "no run yet" };
+          if (latest.status === "failed") return { events: [], error: latest.error ?? "last run failed" };
+          const full = await ctx.invoke<RunRecord | null>("get_run", { id: latest.id });
+          if (!full) return { events: [], note: "run record not found" };
+          const digest = parseCalendarDigest(full.stdout);
+          const calendar = typeof (params as { calendar?: unknown }).calendar === "string" ? ((params as { calendar: string }).calendar || null) : null;
+          return { events: filterByCalendar(digest.events, calendar) };
+        },
+      },
+    ],
   });
 
   if (import.meta.env.DEV) {

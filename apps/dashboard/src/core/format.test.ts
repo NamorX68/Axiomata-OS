@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { absoluteTime, formatBytes, relativeTime, shortPath, untilTime } from "./format";
+import { absoluteTime, dayLabel, formatBytes, relativeTime, shortPath, untilTime } from "./format";
 
 const NOW = Date.parse("2026-09-03T12:00:00Z");
 const at = (ms: number) => new Date(NOW + ms).toISOString();
@@ -47,5 +47,15 @@ describe("formatBytes / absoluteTime", () => {
     expect(absoluteTime(null)).toBe("—");
     expect(absoluteTime("garbage")).toBe("garbage");
     expect(absoluteTime("2026-09-03T12:00:00Z")).toMatch(/2026/);
+  });
+});
+
+describe("dayLabel", () => {
+  it("names today and tomorrow specially, everything else as a weekday + date", () => {
+    expect(dayLabel("2026-09-03", NOW)).toBe("Today");
+    expect(dayLabel("2026-09-04", NOW)).toBe("Tomorrow");
+    expect(dayLabel("2026-09-10", NOW)).toMatch(/\d/);
+    expect(dayLabel("2026-09-10", NOW)).not.toBe("Today");
+    expect(dayLabel("2026-09-10", NOW)).not.toBe("Tomorrow");
   });
 });

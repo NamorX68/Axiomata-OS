@@ -15,6 +15,7 @@ import type {
   MemoryStatus,
   NewRoutine,
   Routine,
+  RunRecord,
   RunSummary,
   Skill,
   SyncReport,
@@ -80,8 +81,34 @@ const skills: Skill[] = [
   { name: "example-skill", description: "Bundled example skill.", backend: "claude-code" },
   { name: "sprint-planning", description: "Draft the next sprint plan.", backend: "claude-code" },
   { name: "newsletter", description: "Summarise the week into a newsletter.", backend: "ollama" },
+  { name: "calendar-digest", description: "Reads upcoming calendar events via whichever calendar MCP tool is available.", backend: "claude-code" },
 ];
-let runs: RunSummary[] = [
+
+/** Fixture digest, same shape `calendar-digest`'s SOP produces — invented
+ *  events, not the owner's real calendar. */
+const CALENDAR_DIGEST_JSON = JSON.stringify({
+  calendars: ["Arbeit", "Privat", "Familie"],
+  events: [
+    { title: "Team-Sync", start: new Date(Date.now() + 20 * 3_600_000).toISOString().slice(0, 16), end: new Date(Date.now() + 21 * 3_600_000).toISOString().slice(0, 16), calendar: "Arbeit", location: null, allDay: false },
+    { title: "Zahnarzt", start: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), calendar: "Privat", location: "Praxis Dr. Beispiel", allDay: true },
+    { title: "Geburtstag Mira", start: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), calendar: "Familie", location: null, allDay: true },
+  ],
+});
+
+let runs: RunRecord[] = [
+  {
+    id: 4,
+    skill_name: "calendar-digest",
+    backend: "claude-code",
+    status: "success",
+    exit_code: 0,
+    duration_ms: 9200,
+    stdout: CALENDAR_DIGEST_JSON,
+    stderr: "",
+    error: null,
+    started_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 10 * 60_000 + 9200).toISOString(),
+  },
   {
     id: 3,
     skill_name: "example-skill",
@@ -89,8 +116,11 @@ let runs: RunSummary[] = [
     status: "success",
     exit_code: 0,
     duration_ms: 2310,
+    stdout: "Working directory: /Users/dev/Axiomata-Workspace\nCLAUDE.md\nInbox\nLearning",
+    stderr: "",
     error: null,
     started_at: new Date(Date.now() - 40 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 40 * 60_000 + 2310).toISOString(),
   },
   {
     id: 2,
@@ -99,8 +129,11 @@ let runs: RunSummary[] = [
     status: "failed",
     exit_code: 1,
     duration_ms: 810,
+    stdout: "",
+    stderr: "Error: model not found",
     error: "model not found",
     started_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    finished_at: new Date(Date.now() - 3 * 3_600_000 + 810).toISOString(),
   },
 ];
 let routines: Routine[] = [
@@ -228,21 +261,34 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return [...skills] as T;
     case "run_skill": {
       const name = String(args.name);
-      const run: RunSummary = {
+      const startedAt = new Date();
+      const durationMs = 1500;
+      const run: RunRecord = {
         id: (runs[0]?.id ?? 0) + 1,
         skill_name: name,
         backend: skills.find((s) => s.name === name)?.backend ?? "claude-code",
         status: "success",
         exit_code: 0,
-        duration_ms: 1500,
+        duration_ms: durationMs,
+        stdout: name === "calendar-digest" ? CALENDAR_DIGEST_JSON : `Ran ${name}.`,
+        stderr: "",
         error: null,
-        started_at: new Date().toISOString(),
+        started_at: startedAt.toISOString(),
+        finished_at: new Date(startedAt.getTime() + durationMs).toISOString(),
       };
       runs = [run, ...runs];
       return run as T;
     }
     case "list_runs":
-      return runs.slice(0, Number(args.limit ?? 25)) as T;
+      // `RunSummary` deliberately omits `stdout`/`stderr`/`finished_at` — same
+      // trim the real `list_runs` command does over the full `RunRecord` rows.
+      return runs.slice(0, Number(args.limit ?? 25)).map(
+        ({ stdout: _stdout, stderr: _stderr, finished_at: _finished_at, ...summary }): RunSummary => summary,
+      ) as T;
+    case "get_run": {
+      const id = Number(args.id);
+      return (runs.find((r) => r.id === id) ?? null) as T;
+    }
     case "list_routines":
       return [...routines] as T;
     case "add_routine": {
