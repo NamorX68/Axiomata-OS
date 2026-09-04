@@ -1,0 +1,32 @@
+# cargo-audit configuration.
+#
+# `cargo install cargo-audit --locked && cargo audit` from the workspace
+# root. As of 2026-09-04 this reports zero actual vulnerabilities — only the
+# "unmaintained"/"unsound" advisories below, all several transitive hops deep
+# under `tauri`/`tauri-utils` (its optional Linux GTK3 webview bindings and an
+# `urlpattern` -> `unic-*` chain), never reachable from our own code and not
+# fixable by bumping anything we declare directly in this workspace's
+# `Cargo.toml`s. Ignored here so a genuinely new advisory stands out instead
+# of being buried in this known, upstream-only noise. Re-run without this
+# file (or `cargo audit --ignore ""`) occasionally to see the raw report, and
+# drop an entry once the upstream crate resolves it.
+[advisories]
+ignore = [
+    "RUSTSEC-2024-0370", # proc-macro-error unmaintained (transitive)
+    "RUSTSEC-2024-0411", # gdkwayland-sys — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0412", # gdk — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0413", # atk — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0414", # gtk — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0415", # gtk-sys — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0416", # atk-sys — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0417", # gdkx11 — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0418", # gdk-sys — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0419", # gtk3-macros — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0420", # gtk-sys — tauri's Linux GTK3 bindings, unmaintained
+    "RUSTSEC-2024-0429", # glib unsound Iterator impl — tauri's Linux GTK3 bindings
+    "RUSTSEC-2025-0075", # unic-char-range unmaintained — tauri-utils -> urlpattern
+    "RUSTSEC-2025-0080", # unic-common unmaintained — tauri-utils -> urlpattern
+    "RUSTSEC-2025-0081", # unic-char-property unmaintained — tauri-utils -> urlpattern
+    "RUSTSEC-2025-0098", # unic-ucd-version unmaintained — tauri-utils -> urlpattern
+    "RUSTSEC-2025-0100", # unic-ucd-ident unmaintained — tauri-utils -> urlpattern
+]
