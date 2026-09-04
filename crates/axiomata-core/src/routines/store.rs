@@ -51,7 +51,8 @@ pub struct NewRoutineRun {
 /// # Errors
 ///
 /// - [`AxiomataError::InvalidRoutine`] if the name / target / backend fail
-///   validation, the cron expression is malformed, or the name is already taken.
+///   validation, or the name is already taken.
+/// - [`AxiomataError::InvalidCron`] if the cron expression is malformed.
 /// - [`AxiomataError::Database`] on any other SQL failure.
 pub fn add(db: &Connection, new: NewRoutine) -> Result<Routine, AxiomataError> {
     validate_new(&new)?;
@@ -158,15 +159,18 @@ pub fn list(db: &Connection) -> Result<Vec<Routine>, AxiomataError> {
         "SELECT {COLUMNS} FROM routines \
          ORDER BY next_fire_at IS NULL, next_fire_at ASC, name ASC"
     ))?;
-    let rows = stmt.query_map([], row_to_routine)?;
-    collect(rows)
+    let rows = stmt.query_map([], row_to_raw_routine)?;
+    collect(rows)?
+        .into_iter()
+        .map(RawRoutine::into_routine)
+        .collect()
 }
 
 /// Fetches one routine by id, or `None` if there is no such row.
 pub fn get(db: &Connection, id: i64) -> Result<Option<Routine>, AxiomataError> {
     let mut stmt = db.prepare(&format!("SELECT {COLUMNS} FROM routines WHERE id = ?1"))?;
-    match stmt.query_row([id], row_to_routine) {
-        Ok(routine) => Ok(Some(routine)),
+    match stmt.query_row([id], row_to_raw_routine) {
+        Ok(raw) => raw.into_routine().map(Some),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(err) => Err(err.into()),
     }
@@ -183,8 +187,11 @@ pub fn due_routines(db: &Connection, now: DateTime<Utc>) -> Result<Vec<Routine>,
          WHERE enabled = 1 AND next_fire_at IS NOT NULL AND next_fire_at <= ?1 \
          ORDER BY next_fire_at ASC"
     ))?;
-    let rows = stmt.query_map([now.to_rfc3339()], row_to_routine)?;
-    collect(rows)
+    let rows = stmt.query_map([now.to_rfc3339()], row_to_raw_routine)?;
+    collect(rows)?
+        .into_iter()
+        .map(RawRoutine::into_routine)
+        .collect()
 }
 
 /// Enables or disables a routine.
@@ -233,10 +240,11 @@ pub enum Advance {
 ///
 /// # Errors
 ///
-/// [`AxiomataError::InvalidRoutine`] if the stored `cron_expr` no longer parses
-/// (a corrupted or externally-edited row); the row is left untouched so the
-/// caller can decide what to do with a routine that can't be scheduled.
-/// [`AxiomataError::Database`] on a write failure.
+/// [`AxiomataError::CorruptRoutineRow`] if the stored `cron_expr` no longer
+/// parses (a corrupted or externally-edited row — [`add`] only ever stores a
+/// validated one); the row is left untouched so the caller can decide what to
+/// do with a routine that can't be scheduled. [`AxiomataError::Database`] on
+/// a write failure.
 pub fn advance(
     db: &Connection,
     id: i64,
@@ -245,7 +253,18 @@ pub fn advance(
     let Some(routine) = get(db, id)? else {
         return Ok(None);
     };
-    let next = schedule::next_after(&routine.cron_expr, Utc::now())?;
+    // A stored, previously-valid expression that no longer parses is a
+    // data-integrity problem, not a fresh user mistake — translate
+    // `next_after`'s `InvalidCron` (its only ever meaning: "this string
+    // doesn't parse") into `CorruptRoutineRow` here, where the routine's id
+    // is available to attach to it.
+    let next = schedule::next_after(&routine.cron_expr, Utc::now()).map_err(|err| match err {
+        AxiomataError::InvalidCron { expr, reason } => AxiomataError::CorruptRoutineRow {
+            id,
+            reason: format!("stored cron expression {expr:?} no longer parses: {reason}"),
+        },
+        other => other,
+    })?;
     let next_str = next.map(|dt| dt.to_rfc3339());
 
     match how {
@@ -335,7 +354,10 @@ pub fn list_runs(
          ORDER BY fired_at DESC, id DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(rusqlite::params![routine_id, limit as i64], row_to_run)?;
-    collect(rows)
+    collect(rows)?
+        .into_iter()
+        .map(RawRoutineRun::into_routine_run)
+        .collect()
 }
 
 /// Returns the most recent firing of one routine, or `None` if it has never
@@ -358,19 +380,68 @@ fn collect<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>,
     Ok(out)
 }
 
-/// Maps a `routines` row (selected as [`COLUMNS`]) onto a [`Routine`].
-fn row_to_routine(row: &rusqlite::Row<'_>) -> rusqlite::Result<Routine> {
-    let target_type: String = row.get(3)?;
-    let target_value: String = row.get(4)?;
-    let target = RoutineTarget::from_columns(&target_type, target_value).map_err(|err| {
-        rusqlite::Error::FromSqlConversionFailure(3, Type::Text, err.to_string().into())
-    })?;
+/// [`Routine`] with its target still the two raw stored columns, not yet
+/// reconstructed into a [`RoutineTarget`].
+///
+/// A row-mapping closure passed to `query_map`/`query_row` is constrained to
+/// return `rusqlite::Result<T>`, so it has no way to produce
+/// [`AxiomataError::CorruptRoutineRow`] (which needs the row's `id` and isn't
+/// a `rusqlite::Error` at all) if the stored `target_type` turns out to be
+/// unrecognised. [`row_to_raw_routine`] does only the parts that are
+/// genuinely rusqlite's business (column types, timestamp format);
+/// [`RawRoutine::into_routine`] does the domain-level reconstruction
+/// afterwards, as ordinary Rust code free to return whatever error fits.
+struct RawRoutine {
+    id: i64,
+    name: String,
+    cron_expr: String,
+    target_type: String,
+    target_value: String,
+    backend: Option<String>,
+    enabled: bool,
+    next_fire_at: Option<DateTime<Utc>>,
+    last_fired_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
 
-    Ok(Routine {
+impl RawRoutine {
+    /// Reconstructs the [`RoutineTarget`], turning an unrecognised
+    /// `target_type` into [`AxiomataError::CorruptRoutineRow`] rather than a
+    /// generic `rusqlite`/`Database` error — only a hand-edited or otherwise
+    /// corrupted row should ever hit this, since [`add`] validates the
+    /// target before it is ever stored.
+    fn into_routine(self) -> Result<Routine, AxiomataError> {
+        let target = RoutineTarget::from_columns(&self.target_type, self.target_value).map_err(
+            |reason| AxiomataError::CorruptRoutineRow {
+                id: self.id,
+                reason,
+            },
+        )?;
+        Ok(Routine {
+            id: self.id,
+            name: self.name,
+            cron_expr: self.cron_expr,
+            target,
+            backend: self.backend,
+            enabled: self.enabled,
+            next_fire_at: self.next_fire_at,
+            last_fired_at: self.last_fired_at,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        })
+    }
+}
+
+/// Maps a `routines` row (selected as [`COLUMNS`]) onto a [`RawRoutine`] —
+/// see its docs for why the target isn't reconstructed here.
+fn row_to_raw_routine(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawRoutine> {
+    Ok(RawRoutine {
         id: row.get(0)?,
         name: row.get(1)?,
         cron_expr: row.get(2)?,
-        target,
+        target_type: row.get(3)?,
+        target_value: row.get(4)?,
         backend: row.get(5)?,
         enabled: row.get::<_, i64>(6)? != 0,
         next_fire_at: opt_timestamp(row.get::<_, Option<String>>(7)?, 7)?,
@@ -380,16 +451,48 @@ fn row_to_routine(row: &rusqlite::Row<'_>) -> rusqlite::Result<Routine> {
     })
 }
 
-/// Maps a `routine_runs` row onto a [`RoutineRun`].
-fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RoutineRun> {
-    let status: String = row.get(5)?;
-    Ok(RoutineRun {
+/// [`RoutineRun`] with its `status` still the raw stored token — the same
+/// "a row-mapping closure can't produce `CorruptRoutineRow`" reason as
+/// [`RawRoutine`].
+struct RawRoutineRun {
+    id: i64,
+    routine_id: i64,
+    run_id: Option<i64>,
+    scheduled_for: DateTime<Utc>,
+    fired_at: DateTime<Utc>,
+    status: String,
+    detail: Option<String>,
+}
+
+impl RawRoutineRun {
+    fn into_routine_run(self) -> Result<RoutineRun, AxiomataError> {
+        let status = RoutineRunStatus::from_db_str(&self.status, "status").map_err(|reason| {
+            AxiomataError::CorruptRoutineRow {
+                id: self.id,
+                reason,
+            }
+        })?;
+        Ok(RoutineRun {
+            id: self.id,
+            routine_id: self.routine_id,
+            run_id: self.run_id,
+            scheduled_for: self.scheduled_for,
+            fired_at: self.fired_at,
+            status,
+            detail: self.detail,
+        })
+    }
+}
+
+/// Maps a `routine_runs` row onto a [`RawRoutineRun`].
+fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawRoutineRun> {
+    Ok(RawRoutineRun {
         id: row.get(0)?,
         routine_id: row.get(1)?,
         run_id: row.get(2)?,
         scheduled_for: timestamp(&row.get::<_, String>(3)?, 3)?,
         fired_at: timestamp(&row.get::<_, String>(4)?, 4)?,
-        status: RoutineRunStatus::from_db_str(&status, "status")?,
+        status: row.get(5)?,
         detail: row.get(6)?,
     })
 }
@@ -456,7 +559,7 @@ mod tests {
         bad.cron_expr = "*/2 * * * *".to_owned(); // 5-field crontab, unsupported
         assert!(matches!(
             add(&db, bad).unwrap_err(),
-            AxiomataError::InvalidRoutine { .. }
+            AxiomataError::InvalidCron { .. }
         ));
 
         add(&db, new_routine("dup")).unwrap();
@@ -645,6 +748,55 @@ mod tests {
             RoutineState::derive(&after, latest_run(&db, r.id).unwrap().as_ref()),
             RoutineState::Failed
         );
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn advance_reports_a_corrupted_stored_cron_as_corrupt_row_not_invalid_cron() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("was-fine")).unwrap();
+
+        // Only a hand-edit (or a future format change) could put an
+        // unparseable value in an already-stored `cron_expr` — `add` only
+        // ever stores one that already passed `schedule::validate`.
+        db.execute(
+            "UPDATE routines SET cron_expr = 'not a cron' WHERE id = ?1",
+            [r.id],
+        )
+        .unwrap();
+
+        let err = advance(&db, r.id, Advance::Fired(Utc::now())).unwrap_err();
+        match err {
+            AxiomataError::CorruptRoutineRow { id, reason } => {
+                assert_eq!(id, r.id);
+                assert!(reason.contains("not a cron"));
+            }
+            other => panic!("expected CorruptRoutineRow, got {other:?}"),
+        }
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn get_reports_a_corrupted_target_type_as_corrupt_row() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("gets-corrupted")).unwrap();
+
+        db.execute(
+            "UPDATE routines SET target_type = 'webhook' WHERE id = ?1",
+            [r.id],
+        )
+        .unwrap();
+
+        let err = get(&db, r.id).unwrap_err();
+        match err {
+            AxiomataError::CorruptRoutineRow { id, reason } => {
+                assert_eq!(id, r.id);
+                assert!(reason.contains("webhook"));
+            }
+            other => panic!("expected CorruptRoutineRow, got {other:?}"),
+        }
 
         let _ = fs::remove_file(&path);
     }

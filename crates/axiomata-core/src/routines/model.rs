@@ -12,8 +12,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::error::AxiomataError;
-
 /// What a routine runs when it fires.
 ///
 /// Serializes tagged, e.g. `{ "type": "skill", "value": "example-skill" }`,
@@ -42,17 +40,23 @@ impl RoutineTarget {
 
     /// Reconstructs a target from its two stored columns.
     ///
+    /// Returns a plain `String` reason rather than a
+    /// [`crate::error::AxiomataError`] variant: this function has no routine
+    /// id to attach to one, and its only caller
+    /// ([`crate::routines::store::row_to_routine`]) does — it wraps a
+    /// failure here into
+    /// [`CorruptRoutineRow`](crate::error::AxiomataError::CorruptRoutineRow)
+    /// itself.
+    ///
     /// # Errors
     ///
-    /// Returns [`AxiomataError::InvalidRoutine`] if `target_type` is neither
-    /// `"skill"` nor `"prompt"` (a corrupted or hand-edited row).
-    pub fn from_columns(target_type: &str, target: String) -> Result<Self, AxiomataError> {
+    /// `Err` if `target_type` is neither `"skill"` nor `"prompt"` (a
+    /// corrupted or hand-edited row).
+    pub fn from_columns(target_type: &str, target: String) -> Result<Self, String> {
         match target_type {
             "skill" => Ok(RoutineTarget::Skill(target)),
             "prompt" => Ok(RoutineTarget::Prompt(target)),
-            other => Err(AxiomataError::InvalidRoutine {
-                reason: format!("unknown routine target_type {other:?}"),
-            }),
+            other => Err(format!("unknown routine target_type {other:?}")),
         }
     }
 }
@@ -121,19 +125,24 @@ impl RoutineRunStatus {
 
     /// Parses the token stored in `routine_runs.status`.
     ///
+    /// Returns a plain `String` reason rather than a
+    /// [`crate::error::AxiomataError`] variant, for the same reason
+    /// [`RoutineTarget::from_columns`] does: this function has no
+    /// `routine_runs` row id to attach to
+    /// [`CorruptRoutineRow`](crate::error::AxiomataError::CorruptRoutineRow),
+    /// and its only caller (`crate::routines::store::row_to_run`) does.
+    ///
     /// # Errors
     ///
-    /// Returns a [`rusqlite::Error::FromSqlConversionFailure`] for any value
-    /// this enum does not define, rather than silently coercing it.
-    pub fn from_db_str(raw: &str, column: &str) -> rusqlite::Result<Self> {
+    /// `Err` for any value this enum does not define, rather than silently
+    /// coercing it.
+    pub fn from_db_str(raw: &str, column: &str) -> Result<Self, String> {
         match raw {
             "success" => Ok(RoutineRunStatus::Success),
             "failed" => Ok(RoutineRunStatus::Failed),
             "missed" => Ok(RoutineRunStatus::Missed),
-            other => Err(rusqlite::Error::FromSqlConversionFailure(
-                0,
-                rusqlite::types::Type::Text,
-                format!("unexpected {column} value {other:?} in routine_runs").into(),
+            other => Err(format!(
+                "unexpected {column} value {other:?} in routine_runs"
             )),
         }
     }
@@ -236,7 +245,7 @@ mod tests {
     #[test]
     fn unknown_target_type_is_rejected() {
         let err = RoutineTarget::from_columns("webhook", "x".into()).unwrap_err();
-        assert!(matches!(err, AxiomataError::InvalidRoutine { .. }));
+        assert!(err.contains("webhook"));
     }
 
     #[test]

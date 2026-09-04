@@ -151,7 +151,7 @@ async fn fire_one(
     };
     if let Err(err) = advanced {
         return match err {
-            AxiomataError::InvalidRoutine { reason } => {
+            AxiomataError::CorruptRoutineRow { reason, .. } => {
                 let conn = lock(db);
                 store::set_enabled(&conn, routine.id, false)?;
                 store::record_run(
