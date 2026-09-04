@@ -27,7 +27,11 @@
   let discR = $state(200);
   let renderer = $state.raw<GraphRenderer | null>(null);
   let graph: WorkspaceGraph | null = null;
-  let hover = $state<GraphNode | null>(null);
+  // `$state.raw`, not `$state`: this must stay the exact same object
+  // reference that lives in `renderer.model.nodes`, since the renderer
+  // decides its hover glow with `n === this.hover` — a plain `$state` would
+  // proxy-wrap the assigned node, breaking that comparison silently.
+  let hover = $state.raw<GraphNode | null>(null);
   let error = $state("");
   let summary = $state("");
 

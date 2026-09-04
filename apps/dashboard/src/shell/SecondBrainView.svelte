@@ -48,8 +48,14 @@
   let renderer = $state.raw<GraphRenderer | null>(null);
   let graph = $state<WorkspaceGraph | null>(null);
   let model = $state<GraphModel | null>(null);
-  let selected = $state<GraphNode | null>(null);
-  let hover = $state<GraphNode | null>(null);
+  // `$state.raw`, not `$state`: these must stay the exact same object
+  // references that live in `renderer.model.nodes` — the renderer decides
+  // its hover/selection glow with `n === this.hover` / `n === this.selected`,
+  // and a plain `$state` would proxy-wrap whatever is assigned, breaking
+  // that comparison silently (property reads like `selected.label` still
+  // work fine through a proxy, which is why this went unnoticed).
+  let selected = $state.raw<GraphNode | null>(null);
+  let hover = $state.raw<GraphNode | null>(null);
   // svelte-ignore state_referenced_locally
   let query = $state(initialQuery);
   let layout = $state<LayoutKind>(prefs.layout === "circle" ? "circle" : "rings");
