@@ -1,7 +1,8 @@
 <!--
-  Four icon buttons directly under the top bar: Settings, Add module, Search,
-  Theme. Settings / Add / Search only fire a shell-bus event for now — their
-  dialogs land in steps 7, 11 and 13. Theme cycles the built-in themes.
+  Icon buttons directly under the top bar: Settings, Add module, New note,
+  Search, Theme. Settings / Add / New note / Search only fire a shell-bus
+  event — their dialogs land elsewhere (steps 7, 11, 13; New note in
+  `App.svelte`'s `NewNotePanel`). Theme cycles the built-in themes.
 -->
 <script lang="ts">
   import { emit } from "../core/bus";
@@ -30,6 +31,12 @@
       label: "Add module",
       path: "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M17 14v6 M14 17h6",
       onClick: () => emit("shell:add-module"),
+    },
+    {
+      id: "new-note",
+      label: "New note",
+      path: "M6 3h8l5 5v12a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z M14 3v5h5 M9 15h6 M12 12v6",
+      onClick: () => emit("shell:new-note"),
     },
     {
       id: "search",

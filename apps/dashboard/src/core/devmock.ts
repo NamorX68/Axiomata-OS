@@ -303,6 +303,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "write_workspace_file":
       files.set(String(args.rel), String(args.content));
       return undefined as T;
+    case "create_note": {
+      // No agent to ask in the browser mock — always files into "Inbox",
+      // mirroring `notes::write_placed_note`'s dedup-on-collision rule.
+      const title = String(args.title);
+      const content = String(args.content);
+      const slug = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "note";
+      let rel = `Inbox/${slug}.md`;
+      for (let n = 2; files.has(rel); n++) rel = `Inbox/${slug}-${n}.md`;
+      const markdown = content.trim().startsWith("#") ? `${content.trim()}\n` : `# ${title}\n\n${content.trim()}\n`;
+      files.set(rel, markdown);
+      return rel as T;
+    }
     case "search_workspace": {
       const words = String(args.query).toLowerCase().split(/\s+/).filter(Boolean);
       const out: { path: string; line: number; snippet: string; matches: number }[] = [];
