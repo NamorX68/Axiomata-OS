@@ -246,9 +246,7 @@
   }
 
   function flyTo(node: GraphNode) {
-    if (!renderer) return;
-    renderer.view.zoom = Math.max(renderer.view.zoom, 1.6);
-    renderer.centerOn(node);
+    renderer?.flyTo(node);
   }
 
   function resetView() {

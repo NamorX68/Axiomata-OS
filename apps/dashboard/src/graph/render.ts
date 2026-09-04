@@ -223,6 +223,12 @@ export class GraphRenderer {
   private lightScheme = false;
   /** Ring captions (rings mode). */
   captions = { skills: "SKILLS", memory: "MEMORY", routines: "ROUTINES" };
+  /** In-flight `flyTo` pan/zoom tween, consumed by `frame`. */
+  private flyAnim: { fromX: number; fromY: number; fromZoom: number; toX: number; toY: number; toZoom: number; start: number; duration: number } | null = null;
+  /** The node `flyTo` last landed on, pulsed for a moment so it's easy to
+   *  spot even once the view has stopped moving. */
+  private pulse: { node: GraphNode; start: number } | null = null;
+  private static readonly PULSE_DURATION = 1100; // ms
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -266,13 +272,41 @@ export class GraphRenderer {
     };
   }
 
-  /** Pans so `node` sits at the canvas centre (at the current zoom). */
-  centerOn(node: GraphNode): void {
-    const R = this.radius();
+  /** The pan offset that puts `node` at the canvas centre at a given zoom
+   *  (zoom is a parameter, not read from `this.view`, so `flyTo` can target
+   *  a zoom level the view hasn't reached yet). */
+  private centerFor(node: GraphNode, zoom: number): { x: number; y: number } {
+    const R = Math.min(this.width, this.height) * this.options.fit * zoom;
     const cos = Math.cos(this.angle);
     const sin = Math.sin(this.angle);
-    this.view.x = -(node.x * cos - node.y * sin) * R;
-    this.view.y = -(node.x * sin + node.y * cos) * R;
+    return { x: -(node.x * cos - node.y * sin) * R, y: -(node.x * sin + node.y * cos) * R };
+  }
+
+  /** Pans so `node` sits at the canvas centre (at the current zoom), no
+   *  animation — used for the initial focus on open/navigate. */
+  centerOn(node: GraphNode): void {
+    const dest = this.centerFor(node, this.view.zoom);
+    this.view.x = dest.x;
+    this.view.y = dest.y;
+  }
+
+  /** The "Fly to" action: eases the pan/zoom to `node` over a beat instead
+   *  of snapping, and marks it with a brief glow pulse so it's easy to spot
+   *  the moment the view settles. */
+  flyTo(node: GraphNode, targetZoom = Math.max(this.view.zoom, 1.6)): void {
+    const dest = this.centerFor(node, targetZoom);
+    const now = performance.now();
+    this.flyAnim = {
+      fromX: this.view.x,
+      fromY: this.view.y,
+      fromZoom: this.view.zoom,
+      toX: dest.x,
+      toY: dest.y,
+      toZoom: targetZoom,
+      start: now,
+      duration: 550,
+    };
+    this.pulse = { node, start: now };
   }
 
   /** Nearest node within `slop` px of a CSS-px point, or null. */
@@ -300,6 +334,15 @@ export class GraphRenderer {
     const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
     this.last = now;
     this.angle = (this.angle + this.options.spin * dt) % TWO_PI;
+    if (this.flyAnim) {
+      const a = this.flyAnim;
+      const raw = Math.min(1, (now - a.start) / a.duration);
+      const eased = 1 - (1 - raw) ** 3; // ease-out cubic — quick start, gentle landing
+      this.view.x = a.fromX + (a.toX - a.fromX) * eased;
+      this.view.y = a.fromY + (a.toY - a.fromY) * eased;
+      this.view.zoom = a.fromZoom + (a.toZoom - a.fromZoom) * eased;
+      if (raw >= 1) this.flyAnim = null;
+    }
     this.draw(now / 1000);
   }
 
@@ -448,6 +491,51 @@ export class GraphRenderer {
       }
       ctx.globalAlpha = 1;
     }
+
+    this.drawPulse();
+  }
+
+  /** "Fly to" lands instantly once the tween finishes; this is what makes
+   *  the target actually easy to find — a couple of expanding rings plus a
+   *  soft breathing glow, all fading out over `PULSE_DURATION`. */
+  private drawPulse(): void {
+    if (!this.pulse) return;
+    const elapsedMs = performance.now() - this.pulse.start;
+    if (elapsedMs > GraphRenderer.PULSE_DURATION) {
+      this.pulse = null;
+      return;
+    }
+    const { ctx } = this;
+    const n = this.pulse.node;
+    const p = this.toScreen(n);
+    const elapsed = elapsedMs / 1000;
+    const life = elapsedMs / GraphRenderer.PULSE_DURATION; // 0 → 1 over the whole pulse
+    const hex = this.options.mode === "hex" && this.model?.hexUnit;
+    const baseR = hex && n.kind === "file" ? this.model!.hexUnit! * this.radius() : Math.max(4, n.r * Math.sqrt(this.view.zoom));
+
+    // Two expanding, fading rings, staggered like a double heartbeat.
+    for (const phase of [0, 0.35]) {
+      const local = elapsed - phase;
+      if (local < 0 || local > 0.75) continue;
+      const p01 = local / 0.75;
+      ctx.globalAlpha = (1 - p01) * 0.7;
+      ctx.strokeStyle = this.accentColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, baseR + p01 * baseR * 4.5, 0, TWO_PI);
+      ctx.stroke();
+    }
+    // A gently breathing glow underneath, fading out with the pulse overall.
+    const breathe = 0.3 + 0.2 * Math.sin(elapsed * Math.PI * 4);
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, baseR * 3.5);
+    g.addColorStop(0, this.accentColor);
+    g.addColorStop(1, "transparent");
+    ctx.globalAlpha = Math.max(0, breathe * (1 - life));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, baseR * 3.5, 0, TWO_PI);
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   /** Dashboard centre: dark disc with hex texture and rim, spinning 3-D
