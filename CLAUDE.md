@@ -74,7 +74,11 @@ Cargo workspace (edition 2024), members:
 - `crates/axiomata-cli` — thin binary that calls `axiomata_core::AxiomataCore::init()` and
   prints status. Exists specifically so the core can be exercised end-to-end without
   going through the GUI.
-- `apps/dashboard/src-tauri` — the Tauri shell (package name `dashboard`), depends on
+- `apps/dashboard/src-tauri` — the Tauri shell (package name `Axiomata-OS` — chosen to
+  match exactly what shows in the macOS menu bar during `cargo tauri dev`, since a dev
+  run has no bundled `.app`/`Info.plist` for `productName` to apply to and the OS just
+  shows the compiled binary's own name; the `[lib]` target stays `dashboard_lib`,
+  independent of the package name), depends on
   `axiomata-core` via a path dependency. Its `.setup()` hook (`src/lib.rs`) calls
   `AxiomataCore::init()`, kicks off a best-effort memory sync, starts the routine scheduler
   (`tauri::async_runtime::spawn(routines::serve(…))`, stop handle managed), and stores the

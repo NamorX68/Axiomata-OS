@@ -1,5 +1,5 @@
 [package]
-name = "dashboard"
+name = "Axiomata-OS"
 version = "0.1.0"
 description = "Axiomata-OS dashboard shell"
 authors = ["Roman Thimian"]
