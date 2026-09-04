@@ -106,9 +106,26 @@ pub enum AxiomataError {
     #[error("invalid dashboard state at {path}: {reason}")]
     InvalidDashboardState { path: PathBuf, reason: String },
 
-    /// A routine's cron expression could not be parsed, or a stored routine
-    /// row held a value the routines module does not understand (e.g. an
-    /// unknown `target_type`).
+    /// A new (or edited) routine's `name`, `target`, or `backend` failed
+    /// field validation, or its `name` is already taken — user input, always
+    /// fixable by supplying different values. Not for a cron expression
+    /// specifically (see [`Self::InvalidCron`]) or a value that came back
+    /// corrupted from storage (see [`Self::CorruptRoutineRow`]).
     #[error("invalid routine: {reason}")]
     InvalidRoutine { reason: String },
+
+    /// A cron expression could not be parsed. Raised for a *freshly supplied*
+    /// expression (creating or editing a routine) — user input, distinct from
+    /// [`Self::CorruptRoutineRow`], which is for a *previously valid, already
+    /// stored* expression that no longer parses.
+    #[error("invalid cron expression {expr:?}: {reason}")]
+    InvalidCron { expr: String, reason: String },
+
+    /// A row read back from the `routines` or `routine_runs` table holds a
+    /// value the routines module does not understand (an unknown
+    /// `target_type` or run `status`, or a stored cron expression that no
+    /// longer parses) — a data-integrity problem, not user input; only a
+    /// hand-edited row or a schema/format change should ever produce this.
+    #[error("routine row {id} is corrupt: {reason}")]
+    CorruptRoutineRow { id: i64, reason: String },
 }

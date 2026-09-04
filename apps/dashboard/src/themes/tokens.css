@@ -13,7 +13,9 @@
  *
  * The palette tokens are overridden per theme in `graphite.css`, `paper.css`,
  * `steampunk.css`, `forest.css`, `ocean.css` (each a single
- * `:root[data-theme="…"] { … }` block; the list lives in `core/themes.ts`). A user's
+ * `[data-theme="…"] { … }` block — deliberately not `:root[data-theme="…"]`,
+ * so a non-root element, like a Settings theme-swatch, can also carry a
+ * theme's tokens locally to preview it; the list lives in `core/themes.ts`). A user's
  * `~/.axiomata/theme.css` may override the palette tokens too, but ONLY these
  * exact `--ax-*` names and ONLY under `:root` / `[data-theme="custom"]` — the
  * validator (src/theme/validator.ts) rejects anything else.

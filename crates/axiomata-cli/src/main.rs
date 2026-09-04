@@ -170,8 +170,20 @@ struct AddRoutine {
     disabled: bool,
 }
 
+/// Initializes `tracing`'s output so `axiomata_core`'s `tracing::info!`/
+/// `warn!` calls (the routine scheduler's tick/reconcile summaries, in
+/// particular) actually go somewhere — `tracing-subscriber` was a declared
+/// workspace dependency that nothing ever called `.init()` on. Defaults to
+/// `info`; override with `RUST_LOG` (e.g. `RUST_LOG=debug`).
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_tracing();
     let cli = Cli::parse();
     let core = AxiomataCore::init().context("failed to initialize the Axiomata-OS core engine")?;
 
@@ -421,12 +433,15 @@ fn print_status(core: &AxiomataCore) {
     println!("  skills:         {}", paths::global_skills_dir().display());
 }
 
-/// Prints one line per discovered skill: `name  backend  — description`.
+/// Prints one line per discovered skill: `name  backend  — description`,
+/// followed by a warning line for each skill directory that was skipped
+/// (broken `SKILL.md`, symlink, …) rather than letting it vanish silently.
 fn list_skills() -> Result<()> {
     let skills = skills::list_skills().context("failed to scan skills")?;
+    let skipped = skills::list_skipped_skills().context("failed to scan skills")?;
+
     if skills.is_empty() {
         println!("No skills found.");
-        return Ok(());
     }
     for skill in skills {
         println!(
@@ -434,6 +449,13 @@ fn list_skills() -> Result<()> {
             name = skill.name,
             backend = skill.backend,
             description = skill.description,
+        );
+    }
+    for skill in skipped {
+        println!(
+            "⚠ skipped {name}: {reason}",
+            name = skill.name,
+            reason = skill.reason
         );
     }
     Ok(())
@@ -556,13 +578,16 @@ async fn routines_cmd(core: &AxiomataCore, action: RoutineAction) -> Result<()> 
     }
 }
 
-/// Prints one line per routine, soonest next-fire first.
+/// Prints one line per routine, soonest next-fire first, followed by a
+/// warning line for each row that's too corrupted to list normally (see
+/// `routines::store::list_corrupted`) rather than letting it vanish silently.
 fn routines_list(core: &AxiomataCore) -> Result<()> {
     let db = core.db.lock().expect("database mutex is poisoned");
     let routines = routines::store::list(&db).context("failed to read routines")?;
+    let corrupted = routines::store::list_corrupted(&db).context("failed to read routines")?;
+
     if routines.is_empty() {
         println!("No routines defined.");
-        return Ok(());
     }
     for routine in routines {
         let (kind, value) = routine.target.to_columns();
@@ -576,6 +601,13 @@ fn routines_list(core: &AxiomataCore) -> Result<()> {
                 .unwrap_or_else(|| "—".to_owned()),
             name = routine.name,
             cron = routine.cron_expr,
+        );
+    }
+    for routine in corrupted {
+        println!(
+            "⚠ #{id} is corrupted: {reason}",
+            id = routine.id,
+            reason = routine.reason
         );
     }
     Ok(())

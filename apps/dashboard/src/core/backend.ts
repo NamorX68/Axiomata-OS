@@ -23,7 +23,17 @@ export interface Skill {
   backend: string;
 }
 
+/** A skill directory `list_skills` could not turn into a `Skill` — a broken
+ *  `SKILL.md`, a symlink, … — surfaced instead of just vanishing. */
+export interface SkippedSkill {
+  name: string;
+  reason: string;
+}
+
 export type RunStatus = "success" | "failed";
+
+/** Who/what triggered a run — a person, or a routine firing unattended. */
+export type RunSource = "manual" | "routine";
 
 export interface RunSummary {
   id: number;
@@ -34,6 +44,7 @@ export interface RunSummary {
   duration_ms: number;
   error: string | null;
   started_at: string;
+  source: RunSource;
 }
 
 /** The full record `run_skill` / `get_run` return — `RunSummary` plus the

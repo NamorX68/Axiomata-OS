@@ -1,9 +1,15 @@
 /*
  * graphite — the default theme. Near-black surfaces, orange accent, a faint
  * hex-mesh texture. Matches the reference command-centre screenshots.
+ *
+ * Scoped to `[data-theme="graphite"]`, not `:root[data-theme="graphite"]`, so
+ * a *non-root* element can also carry this theme's tokens locally — the
+ * Settings dialog's theme-picker swatches do exactly that, each scoping one
+ * of these blocks to itself, to preview a theme's colours without switching
+ * the whole app to it.
  */
 
-:root[data-theme="graphite"] {
+[data-theme="graphite"] {
   --ax-bg: #0b0b0d;
   --ax-surface-1: #121216;
   --ax-surface-2: #1a1a1f;

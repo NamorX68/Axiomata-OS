@@ -15,22 +15,63 @@ use rusqlite::Connection;
 
 use crate::error::AxiomataError;
 use crate::paths;
-use crate::skills::model::{RunRecord, RunStatus, RunSummary};
+use crate::skills::model::{RunRecord, RunSource, RunStatus, RunSummary};
 
-/// Persists `record` to both the database and the JSONL log.
+/// Hard cap on how many rows the `runs` table is allowed to accumulate.
+/// [`MAX_RUN_LIMIT`] only bounds one *query*'s result — nothing previously
+/// stopped the table itself from growing without limit (e.g. a `*/1 * * * *`
+/// routine with an always-failing target). [`record_run`] prunes down to this
+/// many rows, keeping the most recent, every time it writes one.
+///
+/// Several times [`MAX_RUN_LIMIT`] so pruning is never in tension with a
+/// legitimate "show me the last `MAX_RUN_LIMIT`" query.
+const RUNS_RETENTION_LIMIT: usize = MAX_RUN_LIMIT * 4;
+
+/// Persists `record` to both the database and the JSONL log, then prunes
+/// `runs` back down to [`RUNS_RETENTION_LIMIT`] rows if this write pushed it
+/// over (see [`RUNS_RETENTION_LIMIT`]'s docs).
 ///
 /// The database row is written first; on success the JSONL line is appended.
-/// Returns the record with its assigned [`RunRecord::id`] set.
+/// Returns the record with its assigned [`RunRecord::id`] set. The JSONL log
+/// itself is intentionally never pruned — it is an append-only audit trail,
+/// not something the app queries back.
 ///
 /// Errors:
-///     [`AxiomataError::Database`] if the row insert fails; [`AxiomataError::Io`]
-///     if the log file cannot be appended to (the database row is already
-///     committed in that case).
-pub fn record_run(db: &Connection, mut record: RunRecord) -> Result<RunRecord, AxiomataError> {
+///     [`AxiomataError::Database`] if the row insert or the prune fails;
+///     [`AxiomataError::Io`] if the log file cannot be appended to (the
+///     database row is already committed in that case).
+pub fn record_run(db: &Connection, record: RunRecord) -> Result<RunRecord, AxiomataError> {
+    record_run_with_retention(db, record, RUNS_RETENTION_LIMIT)
+}
+
+/// [`record_run`] with a caller-chosen retention limit — used by tests to
+/// exercise the auto-prune behaviour without needing
+/// [`RUNS_RETENTION_LIMIT`] (2000) real rows.
+fn record_run_with_retention(
+    db: &Connection,
+    mut record: RunRecord,
+    retention_limit: usize,
+) -> Result<RunRecord, AxiomataError> {
     let id = insert_row(db, &record)?;
     record.id = Some(id);
+    prune_runs(db, retention_limit)?;
     append_jsonl(&record)?;
     Ok(record)
+}
+
+/// Deletes every `runs` row except the `keep` most recent (by `started_at`,
+/// ties broken by `id`). A no-op once the table is at or under `keep` rows —
+/// the common case once retention has kicked in once.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the delete fails.
+fn prune_runs(db: &Connection, keep: usize) -> Result<(), AxiomataError> {
+    db.execute(
+        "DELETE FROM runs WHERE id NOT IN \
+         (SELECT id FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1)",
+        [keep as i64],
+    )?;
+    Ok(())
 }
 
 /// Inserts one row into `runs` and returns its id.
@@ -38,8 +79,8 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
     db.execute(
         "INSERT INTO runs \
          (skill_name, backend, status, exit_code, duration_ms, \
-          stdout, stderr, error, started_at, finished_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+          stdout, stderr, error, started_at, finished_at, source) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         rusqlite::params![
             record.skill_name,
             record.backend,
@@ -51,6 +92,7 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
             record.error,
             record.started_at.to_rfc3339(),
             record.finished_at.to_rfc3339(),
+            record.source.as_str(),
         ],
     )?;
     Ok(db.last_insert_rowid())
@@ -92,7 +134,7 @@ pub const MAX_RUN_LIMIT: usize = 500;
 pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunSummary>, AxiomataError> {
     let limit = limit.min(MAX_RUN_LIMIT);
     let mut stmt = db.prepare(
-        "SELECT id, skill_name, backend, status, exit_code, duration_ms, error, started_at \
+        "SELECT id, skill_name, backend, status, exit_code, duration_ms, error, started_at, source \
          FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit as i64], row_to_summary)?;
@@ -111,7 +153,7 @@ pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunSummary>, Axiom
 pub fn get_run(db: &Connection, id: i64) -> Result<Option<RunRecord>, AxiomataError> {
     let mut stmt = db.prepare(
         "SELECT id, skill_name, backend, status, exit_code, \
-         duration_ms, stdout, stderr, error, started_at, finished_at \
+         duration_ms, stdout, stderr, error, started_at, finished_at, source \
          FROM runs WHERE id = ?1",
     )?;
     match stmt.query_row([id], row_to_record) {
@@ -125,6 +167,7 @@ pub fn get_run(db: &Connection, id: i64) -> Result<Option<RunRecord>, AxiomataEr
 fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunSummary> {
     let status: String = row.get(3)?;
     let started_at: String = row.get(7)?;
+    let source: String = row.get(8)?;
     Ok(RunSummary {
         id: row.get(0)?,
         skill_name: row.get(1)?,
@@ -134,6 +177,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunSummary> {
         duration_ms: row.get::<_, i64>(5)? as u64,
         error: row.get(6)?,
         started_at: parse_timestamp(row, 7, &started_at)?,
+        source: RunSource::from_db_str(&source, 8)?,
     })
 }
 
@@ -142,6 +186,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
     let status: String = row.get(3)?;
     let started_at: String = row.get(9)?;
     let finished_at: String = row.get(10)?;
+    let source: String = row.get(11)?;
 
     Ok(RunRecord {
         id: Some(row.get(0)?),
@@ -155,6 +200,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         error: row.get(8)?,
         started_at: parse_timestamp(row, 9, &started_at)?,
         finished_at: parse_timestamp(row, 10, &finished_at)?,
+        source: RunSource::from_db_str(&source, 11)?,
     })
 }
 
@@ -198,6 +244,7 @@ mod tests {
             error: None,
             started_at: now,
             finished_at: now,
+            source: RunSource::Manual,
         }
     }
 
@@ -253,6 +300,108 @@ mod tests {
     }
 
     #[test]
+    fn source_round_trips_through_both_list_runs_and_get_run() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-source-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+
+        let manual = sample_record("by-hand");
+        record_run(&db, manual).unwrap();
+        let mut routine_fired = sample_record("by-routine");
+        routine_fired.source = RunSource::Routine;
+        record_run(&db, routine_fired).unwrap();
+
+        let summaries = list_runs(&db, 10).unwrap();
+        let by_name = |name: &str| summaries.iter().find(|s| s.skill_name == name).unwrap();
+        assert_eq!(by_name("by-hand").source, RunSource::Manual);
+        assert_eq!(by_name("by-routine").source, RunSource::Routine);
+
+        assert_eq!(get_run(&db, 1).unwrap().unwrap().source, RunSource::Manual);
+        assert_eq!(get_run(&db, 2).unwrap().unwrap().source, RunSource::Routine);
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn prune_runs_keeps_only_the_most_recent_rows() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-prune-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+        for i in 0..10 {
+            insert_row(&db, &sample_record(&format!("run-{i}"))).unwrap();
+        }
+
+        // A `keep` at or above the row count is a no-op.
+        prune_runs(&db, 10).unwrap();
+        assert_eq!(list_runs(&db, 100).unwrap().len(), 10);
+
+        // Pruning to 3 keeps the 3 most recently inserted (highest ids, since
+        // `sample_record` gives them all the same `started_at`).
+        prune_runs(&db, 3).unwrap();
+        let remaining = list_runs(&db, 100).unwrap();
+        assert_eq!(remaining.len(), 3);
+        assert_eq!(
+            remaining
+                .iter()
+                .map(|r| r.skill_name.as_str())
+                .collect::<Vec<_>>(),
+            ["run-9", "run-8", "run-7"]
+        );
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn record_run_prunes_automatically_once_over_the_retention_limit() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-auto-prune-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+        // A tiny retention limit so the test doesn't need
+        // `RUNS_RETENTION_LIMIT` (2000) real rows to see it kick in.
+        for i in 0..5 {
+            record_run_with_retention(&db, sample_record(&format!("run-{i}")), 3).unwrap();
+        }
+        let remaining = list_runs(&db, 100).unwrap();
+        assert_eq!(remaining.len(), 3, "record_run should prune on every write");
+        assert_eq!(
+            remaining
+                .iter()
+                .map(|r| r.skill_name.as_str())
+                .collect::<Vec<_>>(),
+            ["run-4", "run-3", "run-2"]
+        );
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn failed_record_round_trips_error_and_null_exit_code() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let home = unique_temp_dir("axiomata-test-runlog-fail-home");
@@ -297,5 +446,52 @@ mod tests {
         );
         assert!(RunStatus::from_db_str("pending", 4).is_err());
         assert!(RunStatus::from_db_str("", 4).is_err());
+    }
+
+    #[test]
+    fn run_source_from_db_str_rejects_unknown_values() {
+        assert_eq!(
+            RunSource::from_db_str("manual", 8).unwrap(),
+            RunSource::Manual
+        );
+        assert_eq!(
+            RunSource::from_db_str("routine", 8).unwrap(),
+            RunSource::Routine
+        );
+        assert!(RunSource::from_db_str("scheduled", 8).is_err());
+        assert!(RunSource::from_db_str("", 8).is_err());
+    }
+
+    #[test]
+    fn a_corrupted_source_column_surfaces_as_an_error_not_a_panic_or_silent_default() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-corrupt-source-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+        // Only a hand-edit (or a future format change) could put an
+        // unrecognised value in this column — `record_run` only ever stores
+        // `RunSource::as_str()`'s own tokens.
+        db.execute(
+            "INSERT INTO runs \
+             (skill_name, backend, status, exit_code, duration_ms, \
+              started_at, finished_at, source) \
+             VALUES ('probe', 'ollama', 'success', 0, 5, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'scheduled')",
+            [],
+        )
+        .unwrap();
+
+        assert!(list_runs(&db, 10).is_err());
+        assert!(get_run(&db, 1).is_err());
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
     }
 }

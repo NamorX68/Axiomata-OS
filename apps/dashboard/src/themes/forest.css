@@ -1,9 +1,13 @@
 /*
  * forest — deep pine and moss surfaces, an autumn-amber accent, a faint
  * leaf-vein texture. Green is the ground colour, orange the warmth.
+ *
+ * Scoped to `[data-theme="forest"]`, not `:root[…]` — see `graphite.css` for
+ * why (lets a non-root element, like a Settings theme-swatch, preview these
+ * tokens locally).
  */
 
-:root[data-theme="forest"] {
+[data-theme="forest"] {
   --ax-color-scheme: dark;
 
   --ax-bg: #0d1a12;

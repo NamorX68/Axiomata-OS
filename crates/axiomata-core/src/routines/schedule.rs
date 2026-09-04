@@ -23,9 +23,14 @@ use crate::error::AxiomataError;
 ///
 /// # Errors
 ///
-/// Returns [`AxiomataError::InvalidRoutine`] with the parser's message if the
+/// Returns [`AxiomataError::InvalidCron`] with the parser's message if the
 /// expression is malformed (including a 5-field crontab expression — this
-/// crate needs the leading seconds field).
+/// crate needs the leading seconds field). This function only ever sees a
+/// freshly supplied expression, so it's always the user-input variant — a
+/// caller re-parsing an already-stored, previously-valid expression (see
+/// [`crate::routines::store::advance`]) translates a failure here into
+/// [`AxiomataError::CorruptRoutineRow`] instead, since at that point it can
+/// only mean the stored row was corrupted after the fact.
 pub fn validate(expr: &str) -> Result<(), AxiomataError> {
     parse(expr).map(|_| ())
 }
@@ -36,7 +41,8 @@ pub fn validate(expr: &str) -> Result<(), AxiomataError> {
 ///
 /// # Errors
 ///
-/// Returns [`AxiomataError::InvalidRoutine`] if `expr` does not parse.
+/// Returns [`AxiomataError::InvalidCron`] if `expr` does not parse — see
+/// [`validate`] for the user-input-vs-corrupt-row distinction.
 pub fn next_after(
     expr: &str,
     after: DateTime<Utc>,
@@ -47,8 +53,9 @@ pub fn next_after(
 /// Parses `expr` into a [`Schedule`], mapping the crate's error into ours.
 fn parse(expr: &str) -> Result<Schedule, AxiomataError> {
     let trimmed = expr.trim();
-    Schedule::from_str(trimmed).map_err(|source| AxiomataError::InvalidRoutine {
-        reason: format!("cron expression {trimmed:?}: {source}"),
+    Schedule::from_str(trimmed).map_err(|source| AxiomataError::InvalidCron {
+        expr: trimmed.to_owned(),
+        reason: source.to_string(),
     })
 }
 
@@ -67,7 +74,7 @@ mod tests {
     #[test]
     fn rejects_a_five_field_crontab_expression() {
         let err = validate("*/2 * * * *").unwrap_err();
-        assert!(matches!(err, AxiomataError::InvalidRoutine { .. }));
+        assert!(matches!(err, AxiomataError::InvalidCron { .. }));
     }
 
     #[test]

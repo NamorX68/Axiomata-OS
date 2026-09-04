@@ -20,6 +20,17 @@
 //! app was off when it was due) is rolled forward and gets a `Missed` history
 //! row — it does **not** fire. So a restart can neither double-fire a routine
 //! nor leave one stuck in the past.
+//!
+//! A *graceful* shutdown ([`SchedulerHandle::shutdown`]) can now also drop a
+//! firing mid-flight, not just a crash or kill: `serve_with_interval` races
+//! the stop signal against an in-flight [`tick`] itself (not just the wait
+//! between ticks), so a stop requested while routines are firing ends the
+//! loop right away rather than waiting for the whole pass to finish. That's
+//! still safe for the at-most-once guarantee above (the routine already
+//! advanced past its slot before its target ran), but it does mean an
+//! ordinary app quit can now — same as a crash always could — leave a
+//! `routine_runs` history row silently missing for whichever firing was still
+//! in flight, rather than that only being possible on a hard kill.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -32,7 +43,7 @@ use crate::config::Config;
 use crate::error::AxiomataError;
 use crate::routines::model::{Routine, RoutineRunStatus, RoutineTarget};
 use crate::routines::store::{self, Advance, NewRoutineRun};
-use crate::skills::model::{RunRecord, RunStatus};
+use crate::skills::model::{RunRecord, RunSource, RunStatus};
 use crate::skills::{runlog, runner};
 
 /// How often the loop wakes to check for due routines. A routine fires within
@@ -67,6 +78,16 @@ pub struct TickReport {
 /// scheduled slots have elapsed — `next_fire_at` jumps to the next occurrence
 /// strictly after now, never replaying the backlog.
 ///
+/// Due routines fire **concurrently** (one [`tokio::task::JoinSet`] task
+/// each), not sequentially — with several routines due in the same pass, a
+/// slow agent no longer holds up the others' firing behind it for up to its
+/// own timeout. No separate cap is applied here: the real resource to bound
+/// is concurrently-running `claude` child processes, which
+/// [`crate::agents::claude_code`] already caps process-wide across every
+/// caller (routines, manual "run now", chat alike) — an Ollama-backed prompt
+/// routine is the one target this pass doesn't gate, since it is an HTTP call
+/// rather than a spawned process.
+///
 /// # Errors
 ///
 /// Returns [`AxiomataError::Database`] only if the initial "what is due" query
@@ -83,18 +104,34 @@ pub async fn tick(
         store::due_routines(&conn, now)?
     };
 
-    let mut report = TickReport::default();
+    let mut in_flight = tokio::task::JoinSet::new();
     for routine in due {
-        match fire_one(&routine, config, db, now).await {
-            Ok(RoutineRunStatus::Success) => {
+        let config = config.clone();
+        let db = Arc::clone(db);
+        in_flight.spawn(async move {
+            let outcome = fire_one(&routine, &config, &db, now).await;
+            (routine.name, outcome)
+        });
+    }
+
+    let mut report = TickReport::default();
+    while let Some(joined) = in_flight.join_next().await {
+        match joined {
+            Ok((_, Ok(RoutineRunStatus::Success))) => {
                 report.fired += 1;
                 report.succeeded += 1;
             }
-            Ok(_) => {
+            Ok((_, Ok(_))) => {
                 report.fired += 1;
                 report.failed += 1;
             }
-            Err(err) => report.errors.push(format!("{}: {err}", routine.name)),
+            Ok((name, Err(err))) => report.errors.push(format!("{name}: {err}")),
+            // A `fire_one` task itself panicked — treat like any other
+            // per-routine failure rather than propagating, consistent with
+            // "one bad routine cannot stop the others" above.
+            Err(join_err) => report
+                .errors
+                .push(format!("routine task panicked: {join_err}")),
         }
     }
     Ok(report)
@@ -125,7 +162,7 @@ async fn fire_one(
     };
     if let Err(err) = advanced {
         return match err {
-            AxiomataError::InvalidRoutine { reason } => {
+            AxiomataError::CorruptRoutineRow { reason, .. } => {
                 let conn = lock(db);
                 store::set_enabled(&conn, routine.id, false)?;
                 store::record_run(
@@ -150,13 +187,17 @@ async fn fire_one(
 
     let conn = lock(db);
     let (status, detail, run_id) = match outcome {
-        Ok(record) => {
+        Ok(mut record) => {
             let status = if record.status == RunStatus::Success {
                 RoutineRunStatus::Success
             } else {
                 RoutineRunStatus::Failed
             };
             let detail = record.error.clone();
+            // `execute_target` (and everything it calls) has no notion of
+            // "fired by a routine" — it's the same runner path a manual run
+            // uses. Stamp it here, the one place that does know.
+            record.source = RunSource::Routine;
             // Move the record in — it can carry up to ~2 MiB of captured output.
             let stored = runlog::record_run(&conn, record)?;
             (status, detail, stored.id)
@@ -248,51 +289,80 @@ fn reconcile_one(
 /// [`SchedulerHandle::shutdown`], or implicitly on `Drop` — makes the loop
 /// break after its current tick.
 ///
-/// Holds a [`tokio::task::JoinHandle`] only when the loop was started by
-/// [`spawn`]; when the caller ran [`serve`] on its own runtime (the Tauri
-/// shell does this), there is nothing to join and shutdown is best-effort.
+/// Holds only the stop signal, never the loop's [`tokio::task::JoinHandle`] —
+/// a caller that needs to *wait* for the loop to actually finish (rather than
+/// just requesting the stop) keeps the `JoinHandle` [`spawn`] returns
+/// alongside this handle and awaits it directly.
 pub struct SchedulerHandle {
     stop: tokio::sync::watch::Sender<bool>,
-    join: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl SchedulerHandle {
-    /// Creates just the stop channel: keep the [`SchedulerHandle`], hand the
-    /// [`tokio::sync::watch::Receiver`] to [`serve`] on whatever runtime you
-    /// have. Used by the Tauri shell, whose `.setup()` is not itself inside a
-    /// Tokio runtime and spawns via `tauri::async_runtime`.
-    pub fn channel() -> (Self, tokio::sync::watch::Receiver<bool>) {
-        let (stop, stop_rx) = tokio::sync::watch::channel(false);
-        (Self { stop, join: None }, stop_rx)
+    /// Creates a handle with no loop attached yet — call [`subscribe`](Self::subscribe)
+    /// for a receiver to hand to [`serve`] on whatever runtime you have (the
+    /// Tauri shell does this: its `.setup()` is not itself inside a Tokio
+    /// runtime, so it spawns `serve` via `tauri::async_runtime` separately).
+    pub fn new() -> Self {
+        let (stop, _unused_rx) = tokio::sync::watch::channel(false);
+        Self { stop }
     }
 
-    /// Signals the loop to stop and, if this handle owns the task, waits for
-    /// it to finish.
-    pub async fn shutdown(mut self) {
+    /// Vends a receiver watching this handle's stop signal. A `watch`
+    /// channel supports any number of readers, so this may be called more
+    /// than once — though today only one loop per handle ever subscribes.
+    ///
+    /// Must be called *before* [`shutdown`](Self::shutdown) for the returned
+    /// receiver to ever see it: a `watch::Receiver`'s `changed()` only fires
+    /// on a transition *after* it starts watching, not on the value it was
+    /// already at when created. Every real caller here satisfies this by
+    /// construction (`subscribe` always runs before the loop it feeds is
+    /// even spawned), but it's a sequencing contract worth stating rather
+    /// than leaving implicit.
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.stop.subscribe()
+    }
+
+    /// Signals every subscribed loop to stop after its current tick. Does
+    /// not itself wait for that to happen — see the struct docs. Takes `&self`
+    /// (sending on the underlying `watch` channel never needs ownership), so
+    /// this can be called through a shared reference — e.g. Tauri's managed
+    /// `State<'_, SchedulerHandle>` — without taking the handle out first.
+    pub fn shutdown(&self) {
         let _ = self.stop.send(true);
-        if let Some(join) = self.join.take() {
-            let _ = join.await;
-        }
+    }
+}
+
+impl Default for SchedulerHandle {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl Drop for SchedulerHandle {
     fn drop(&mut self) {
-        // Best-effort: tell the loop to stop. If the caller used `shutdown`
-        // the join already happened; otherwise the task ends on its own at the
-        // next tick boundary (or when the process exits).
+        // Best-effort: tell the loop to stop, the same signal `shutdown`
+        // sends. The task ends on its own at the next tick boundary (or when
+        // the process exits, whichever comes first).
         let _ = self.stop.send(true);
     }
 }
 
-/// Starts the routine scheduler on the current Tokio runtime and returns a
-/// handle that owns the task.
+/// Starts the routine scheduler on the current Tokio runtime.
+///
+/// Returns the [`SchedulerHandle`] to request a stop with, and the loop's own
+/// [`tokio::task::JoinHandle`] for a caller that wants to await its actual
+/// completion after requesting one (rather than just firing the request and
+/// moving on).
 ///
 /// # Panics
 ///
 /// Panics if called outside a Tokio runtime. The Tauri shell, whose `.setup()`
-/// has no runtime, uses [`SchedulerHandle::channel`] + [`serve`] instead.
-pub fn spawn(config: Config, db: Arc<Mutex<Connection>>) -> SchedulerHandle {
+/// has no runtime, uses [`SchedulerHandle::new`] + [`SchedulerHandle::subscribe`]
+/// + [`serve`] instead.
+pub fn spawn(
+    config: Config,
+    db: Arc<Mutex<Connection>>,
+) -> (SchedulerHandle, tokio::task::JoinHandle<()>) {
     spawn_with_interval(config, db, POLL_INTERVAL)
 }
 
@@ -302,13 +372,11 @@ pub(crate) fn spawn_with_interval(
     config: Config,
     db: Arc<Mutex<Connection>>,
     interval: Duration,
-) -> SchedulerHandle {
-    let (stop, stop_rx) = tokio::sync::watch::channel(false);
+) -> (SchedulerHandle, tokio::task::JoinHandle<()>) {
+    let handle = SchedulerHandle::new();
+    let stop_rx = handle.subscribe();
     let join = tokio::spawn(serve_with_interval(config, db, stop_rx, interval));
-    SchedulerHandle {
-        stop,
-        join: Some(join),
-    }
+    (handle, join)
 }
 
 /// Runs the scheduler loop until the stop signal flips to `true` or its sender
@@ -340,19 +408,36 @@ async fn serve_with_interval(
 
     loop {
         tokio::select! {
-            _ = ticker.tick() => match tick(&config, &db).await {
-                Ok(report) if report.fired > 0 || !report.errors.is_empty() => {
-                    tracing::info!(
-                        fired = report.fired,
-                        succeeded = report.succeeded,
-                        failed = report.failed,
-                        errors = ?report.errors,
-                        "routine tick",
-                    );
+            _ = ticker.tick() => {
+                // Race the tick itself against the stop signal too — not
+                // just the wait *between* ticks — so a stop requested while
+                // several due routines are firing concurrently ends the loop
+                // right away instead of waiting for the whole pass to finish.
+                // Dropping the `tick` future here aborts any of its
+                // `fire_one` tasks still in flight; that is no worse than the
+                // process being killed outright, which the at-most-once
+                // firing design already tolerates (see the module doc).
+                tokio::select! {
+                    outcome = tick(&config, &db) => match outcome {
+                        Ok(report) if report.fired > 0 || !report.errors.is_empty() => {
+                            tracing::info!(
+                                fired = report.fired,
+                                succeeded = report.succeeded,
+                                failed = report.failed,
+                                errors = ?report.errors,
+                                "routine tick",
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(err) => tracing::warn!(%err, "routine scheduler tick failed"),
+                    },
+                    result = stop_rx.changed() => {
+                        if result.is_err() || *stop_rx.borrow() {
+                            break;
+                        }
+                    }
                 }
-                Ok(_) => {}
-                Err(err) => tracing::warn!(%err, "routine scheduler tick failed"),
-            },
+            }
             result = stop_rx.changed() => {
                 // Sender dropped or told us to stop.
                 if result.is_err() || *stop_rx.borrow() {
@@ -466,8 +551,11 @@ mod tests {
         let state = RoutineState::derive(&after, history.first());
         assert!(matches!(state, RoutineState::Fired | RoutineState::Failed));
 
-        // A run row exists (the Ollama failure is still a recorded run).
-        assert_eq!(runlog::list_runs(&fx.conn(), 10).unwrap().len(), 1);
+        // A run row exists (the Ollama failure is still a recorded run),
+        // attributed to the routine rather than a manual trigger.
+        let runs = runlog::list_runs(&fx.conn(), 10).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].source, RunSource::Routine);
 
         // Second immediate tick does nothing: no longer due.
         let again = tick(&fx.config, &fx.db).await.unwrap();
@@ -617,6 +705,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscribe_may_be_called_more_than_once_with_each_reader_seeing_the_stop() {
+        // Exercises `SchedulerHandle::subscribe`'s doc claim directly: a
+        // `watch` channel supports any number of independent readers, so two
+        // subscribers taken before a single `shutdown()` must each observe
+        // it on their own, without one reader's `changed()` consuming the
+        // signal for the other.
+        let handle = SchedulerHandle::new();
+        let mut first = handle.subscribe();
+        let mut second = handle.subscribe();
+        assert!(!*first.borrow());
+        assert!(!*second.borrow());
+
+        handle.shutdown();
+
+        first.changed().await.unwrap();
+        assert!(*first.borrow());
+        second.changed().await.unwrap();
+        assert!(*second.borrow());
+    }
+
+    #[tokio::test]
     async fn spawned_loop_fires_a_due_routine_then_stops_on_shutdown() {
         let fx = Fixture::new("loop");
         let routine = store::add(&fx.conn(), prompt_routine("looped", "*/1 * * * * *")).unwrap();
@@ -627,7 +736,7 @@ mod tests {
         )
         .unwrap();
 
-        let handle = spawn_with_interval(
+        let (handle, join) = spawn_with_interval(
             fx.config.clone(),
             Arc::clone(&fx.db),
             Duration::from_millis(40),
@@ -645,7 +754,11 @@ mod tests {
         }
         assert!(fired, "spawned loop should have fired the due routine");
 
-        handle.shutdown().await;
+        // `shutdown` only requests the stop; awaiting the loop's own
+        // `JoinHandle` is what proves it actually ended, deterministically
+        // rather than via a fixed sleep-and-hope.
+        handle.shutdown();
+        join.await.unwrap();
 
         // After shutdown, no further firings.
         let count_after_stop = store::list_runs(&fx.conn(), routine.id, 100).unwrap().len();

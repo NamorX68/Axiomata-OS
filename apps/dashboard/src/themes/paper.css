@@ -1,9 +1,13 @@
 /*
  * paper — warm off-white "printed page" look: cream surfaces, ink-black text,
  * a clay/terracotta accent and a faint paper grain. For daylight use.
+ *
+ * Scoped to `[data-theme="paper"]`, not `:root[…]` — see `graphite.css` for
+ * why (lets a non-root element, like a Settings theme-swatch, preview these
+ * tokens locally).
  */
 
-:root[data-theme="paper"] {
+[data-theme="paper"] {
   --ax-color-scheme: light;
 
   --ax-bg: #f3efe6;

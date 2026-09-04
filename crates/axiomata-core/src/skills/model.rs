@@ -30,6 +30,17 @@ impl RunStatus {
     /// Parses the database string form, erroring on any unexpected value rather
     /// than silently coercing it (schema drift / a future third status should
     /// surface, not be swallowed).
+    ///
+    /// Returns a plain `rusqlite::Result` rather than an id-aware
+    /// `AxiomataError` variant (contrast `routines::model::RoutineTarget::
+    /// from_columns` / `RoutineRunStatus::from_db_str`, which return
+    /// `Result<_, String>` so their caller can build
+    /// `AxiomataError::CorruptRoutineRow { id, .. }`): a `routines` row with
+    /// no valid schedule or target is unfireable and worth disabling or
+    /// flagging by id, so that machinery earns its keep there. A `runs` row
+    /// with a bad `status` has no equivalent recovery action — it's already
+    /// a finished, immutable history entry — so a generic decode error here
+    /// is sufficient and there is no id-aware variant to build.
     pub fn from_db_str(raw: &str, column: usize) -> rusqlite::Result<Self> {
         match raw {
             "success" => Ok(Self::Success),
@@ -38,6 +49,42 @@ impl RunStatus {
                 column,
                 rusqlite::types::Type::Text,
                 format!("unknown run status {other:?}").into(),
+            )),
+        }
+    }
+}
+
+/// What triggered a run: a person, or a routine firing unattended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunSource {
+    /// The CLI's `run-skill`, the Tauri dashboard's "run now", or a
+    /// chat/instruct turn — someone asked for it directly, right now.
+    #[default]
+    Manual,
+    /// `routines::scheduler` fired it unattended, on its own schedule.
+    Routine,
+}
+
+impl RunSource {
+    /// The lowercase string form stored in the database.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Routine => "routine",
+        }
+    }
+
+    /// Parses the database string form, erroring on any unexpected value
+    /// rather than silently coercing it — mirrors [`RunStatus::from_db_str`].
+    pub fn from_db_str(raw: &str, column: usize) -> rusqlite::Result<Self> {
+        match raw {
+            "manual" => Ok(Self::Manual),
+            "routine" => Ok(Self::Routine),
+            other => Err(rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                format!("unknown run source {other:?}").into(),
             )),
         }
     }
@@ -70,6 +117,13 @@ pub struct RunRecord {
     pub started_at: DateTime<Utc>,
     /// When the run finished (or failed).
     pub finished_at: DateTime<Utc>,
+    /// Who/what triggered this run. `runner::record_from_result` and
+    /// `runner::failure_record` (the only two places a `RunRecord` is built)
+    /// have no way to know this themselves — they default to
+    /// [`RunSource::Manual`], and `routines::scheduler::fire_one` overrides it
+    /// to [`RunSource::Routine`] right before recording a routine's firing.
+    #[serde(default)]
+    pub source: RunSource,
 }
 
 /// The slim projection of a [`RunRecord`] for history-list views (the dashboard
@@ -94,4 +148,6 @@ pub struct RunSummary {
     pub error: Option<String>,
     /// When the run started.
     pub started_at: DateTime<Utc>,
+    /// Who/what triggered this run — see [`RunRecord::source`].
+    pub source: RunSource,
 }

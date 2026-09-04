@@ -81,6 +81,7 @@ describe("loadLatestReminderDigest", () => {
     duration_ms: 100,
     error: null,
     started_at: "2026-09-05T09:00:00Z",
+    source: "manual",
     ...over,
   });
 

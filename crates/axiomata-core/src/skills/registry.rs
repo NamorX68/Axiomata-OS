@@ -78,12 +78,26 @@ pub struct Skill {
 /// in the frontmatter). 256 KiB is far more than any real skill needs.
 const MAX_SKILL_MD_BYTES: u64 = 256 * 1024;
 
+/// Why a skill directory under `~/.axiomata/skills/` was skipped during a
+/// [`list_skipped_skills`] scan — the same failures [`list_skills`] itself
+/// swallows silently.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkippedSkill {
+    /// The skill *directory's* name — not necessarily the same as any
+    /// `name:` inside its `SKILL.md`, which may not even have parsed.
+    pub name: String,
+    /// Human-readable reason it was skipped.
+    pub reason: String,
+}
+
 /// Lists every skill under `~/.axiomata/skills/`, sorted by name.
 ///
 /// An individual skill directory that is a symlink, or whose `SKILL.md` is
 /// missing, a symlink, oversized, unreadable, or has malformed/missing
 /// frontmatter, is **skipped** — one bad file never breaks discovery of the
-/// rest. (Use [`find_skill`] to get the specific error for a named skill.)
+/// rest. (Use [`find_skill`] to get the specific error for a named skill, or
+/// [`list_skipped_skills`] to see every skipped one and why, rather than
+/// having it vanish from this list with no trace.)
 ///
 /// Errors:
 ///     [`AxiomataError::Io`] only for a failure listing the skills directory
@@ -94,6 +108,19 @@ pub fn list_skills() -> Result<Vec<Skill>, AxiomataError> {
         by_name.insert(skill.name.clone(), skill);
     }
     Ok(by_name.into_values().collect())
+}
+
+/// The [`SkippedSkill`] counterpart to [`list_skills`] — every skill
+/// directory this scan could not turn into a [`Skill`], and why, sorted by
+/// directory name. The CLI's `list-skills` and the dashboard's Skills Deck
+/// use this (alongside [`list_skills`]) so a broken skill shows up as a
+/// visible warning instead of just quietly not being there.
+///
+/// Errors:
+///     [`AxiomataError::Io`] only for a failure listing the skills directory
+///     itself. A missing directory is treated as empty (no skips).
+pub fn list_skipped_skills() -> Result<Vec<SkippedSkill>, AxiomataError> {
+    scan_dir_verbose(&crate::paths::global_skills_dir()).map(|(_, skipped)| skipped)
 }
 
 /// Finds a single skill by name.
@@ -132,13 +159,22 @@ fn is_regular_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Scans the skills directory for `<dir>/<name>/SKILL.md` entries. A missing
-/// directory yields an empty list; symlinked entries and entries that fail to
-/// load are skipped (see [`list_skills`]).
+/// [`scan_dir_verbose`], keeping only the skills that loaded — the shape
+/// [`list_skills`] has always returned.
 fn scan_dir(dir: &Path) -> Result<Vec<Skill>, AxiomataError> {
+    scan_dir_verbose(dir).map(|(skills, _)| skills)
+}
+
+/// Scans the skills directory for `<dir>/<name>/SKILL.md` entries, sorted by
+/// name. A missing directory yields two empty lists. An entry that is not a
+/// usable skill — a symlinked skill directory, a missing/symlinked
+/// `SKILL.md`, or one [`load_skill`] rejects — is left out of `skills` and
+/// recorded in `skipped` instead of just vanishing (see [`list_skills`] /
+/// [`list_skipped_skills`]).
+fn scan_dir_verbose(dir: &Path) -> Result<(Vec<Skill>, Vec<SkippedSkill>), AxiomataError> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok((Vec::new(), Vec::new())),
         Err(err) => {
             return Err(AxiomataError::Io {
                 path: dir.to_path_buf(),
@@ -148,29 +184,53 @@ fn scan_dir(dir: &Path) -> Result<Vec<Skill>, AxiomataError> {
     };
 
     let mut skills = Vec::new();
+    let mut skipped = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| AxiomataError::Io {
             path: dir.to_path_buf(),
             source,
         })?;
-        // Skip symlinked skill directories outright.
+        let dir_name = entry.file_name().to_string_lossy().into_owned();
+
         match entry.file_type() {
-            Ok(ft) if ft.is_dir() && !ft.is_symlink() => {}
+            // `DirEntry::file_type` does not follow symlinks — a symlink is
+            // reported as a symlink regardless of what it points to, so this
+            // must be checked before `is_dir()` (which is false for it).
+            Ok(ft) if ft.is_symlink() => {
+                skipped.push(SkippedSkill {
+                    name: dir_name,
+                    reason: "the skill directory itself is a symlink".to_owned(),
+                });
+                continue;
+            }
+            // The common case: a real directory — keep going.
+            Ok(ft) if ft.is_dir() => {}
+            // Not a directory at all (a stray file next to the skill
+            // directories) — not a skill, nothing to report.
             _ => continue,
         }
+
         let manifest = entry.path().join("SKILL.md");
         if !is_regular_file(&manifest) {
+            skipped.push(SkippedSkill {
+                name: dir_name,
+                reason: "no SKILL.md (or it is itself a symlink)".to_owned(),
+            });
             continue;
         }
         match load_skill(&manifest) {
             Ok(skill) => skills.push(skill),
             // One bad SKILL.md must not break discovery of the others.
-            Err(_) => continue,
+            Err(err) => skipped.push(SkippedSkill {
+                name: dir_name,
+                reason: err.to_string(),
+            }),
         }
     }
 
     skills.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(skills)
+    skipped.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok((skills, skipped))
 }
 
 /// Reads and parses a single `SKILL.md`.
@@ -341,6 +401,26 @@ mod tests {
     }
 
     #[test]
+    fn skipped_skills_are_reported_with_a_reason_instead_of_vanishing() {
+        let h = TestHome::new("skipped-visible");
+        write_skill(&h.skills_dir(), "broken", "---\nname: broken\n---\nbody\n");
+        write_skill(&h.skills_dir(), "bare", "no frontmatter at all\n");
+        write_skill(&h.skills_dir(), "good", &skill_md("good", "ollama"));
+
+        let skipped = list_skipped_skills().unwrap();
+        let names: Vec<_> = skipped.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["bare", "broken"]);
+        assert!(skipped.iter().all(|s| !s.reason.is_empty()));
+    }
+
+    #[test]
+    fn no_skipped_skills_when_everything_loads() {
+        let h = TestHome::new("skipped-empty");
+        write_skill(&h.skills_dir(), "good", &skill_md("good", "ollama"));
+        assert!(list_skipped_skills().unwrap().is_empty());
+    }
+
+    #[test]
     fn oversized_skill_md_is_rejected() {
         let h = TestHome::new("oversized");
         let huge = format!(
@@ -366,6 +446,29 @@ mod tests {
 
         let names: Vec<_> = list_skills().unwrap().into_iter().map(|s| s.name).collect();
         assert_eq!(names, ["real"]);
+        let skipped: Vec<_> = list_skipped_skills()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(skipped, ["linked"]);
+    }
+
+    #[test]
+    fn a_symlinked_skill_directory_itself_is_skipped_and_reported() {
+        let h = TestHome::new("symlinked-dir");
+        write_skill(&h.skills_dir(), "real", &skill_md("real", "ollama"));
+        std::os::unix::fs::symlink(h.skills_dir().join("real"), h.skills_dir().join("linked"))
+            .unwrap();
+
+        let names: Vec<_> = list_skills().unwrap().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["real"]);
+        let skipped: Vec<_> = list_skipped_skills()
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(skipped, ["linked"]);
     }
 
     #[test]

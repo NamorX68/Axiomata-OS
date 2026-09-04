@@ -7,7 +7,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { RunSummary, Skill } from "../core/backend";
+  import type { RunSummary, Skill, SkippedSkill } from "../core/backend";
   import { relativeTime } from "../core/format";
   import type { ModuleContext } from "../core/types";
 
@@ -21,6 +21,7 @@
 
   let skills = $state<Skill[]>([]);
   let runs = $state<RunSummary[]>([]);
+  let skipped = $state<SkippedSkill[]>([]);
   let error = $state("");
   let running = $state<string[]>([]);
 
@@ -45,9 +46,10 @@
 
   async function refresh() {
     try {
-      [skills, runs] = await Promise.all([
+      [skills, runs, skipped] = await Promise.all([
         ctx.invoke<Skill[]>("list_skills"),
         ctx.invoke<RunSummary[]>("list_runs", { limit: RUN_LIMIT }),
+        ctx.invoke<SkippedSkill[]>("list_skipped_skills"),
       ]);
       error = "";
     } catch (err) {
@@ -78,6 +80,13 @@
 <div class="deck">
   {#if error}
     <p class="error">{error}</p>
+  {/if}
+  {#if skipped.length > 0}
+    <ul class="skipped" title="A skill directory with a broken or missing SKILL.md — see ~/.axiomata/skills/">
+      {#each skipped as s (s.name)}
+        <li>⚠ skipped <strong>{s.name}</strong>: {s.reason}</li>
+      {/each}
+    </ul>
   {/if}
   {#if visible.length === 0 && !error}
     <p class="muted">{skills.length === 0 ? "No skills in ~/.axiomata/skills/." : "No skills match the filter."}</p>
@@ -243,5 +252,12 @@
     color: var(--ax-danger);
     font-size: var(--ax-font-size-sm);
     margin-bottom: var(--ax-space-2);
+  }
+  .skipped {
+    list-style: none;
+    margin: 0 0 var(--ax-space-2);
+    padding: 0;
+    color: var(--ax-warning);
+    font-size: var(--ax-font-size-sm);
   }
 </style>
