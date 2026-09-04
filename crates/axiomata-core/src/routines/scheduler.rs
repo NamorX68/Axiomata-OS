@@ -67,6 +67,16 @@ pub struct TickReport {
 /// scheduled slots have elapsed — `next_fire_at` jumps to the next occurrence
 /// strictly after now, never replaying the backlog.
 ///
+/// Due routines fire **concurrently** (one [`tokio::task::JoinSet`] task
+/// each), not sequentially — with several routines due in the same pass, a
+/// slow agent no longer holds up the others' firing behind it for up to its
+/// own timeout. No separate cap is applied here: the real resource to bound
+/// is concurrently-running `claude` child processes, which
+/// [`crate::agents::claude_code`] already caps process-wide across every
+/// caller (routines, manual "run now", chat alike) — an Ollama-backed prompt
+/// routine is the one target this pass doesn't gate, since it is an HTTP call
+/// rather than a spawned process.
+///
 /// # Errors
 ///
 /// Returns [`AxiomataError::Database`] only if the initial "what is due" query
@@ -83,18 +93,34 @@ pub async fn tick(
         store::due_routines(&conn, now)?
     };
 
-    let mut report = TickReport::default();
+    let mut in_flight = tokio::task::JoinSet::new();
     for routine in due {
-        match fire_one(&routine, config, db, now).await {
-            Ok(RoutineRunStatus::Success) => {
+        let config = config.clone();
+        let db = Arc::clone(db);
+        in_flight.spawn(async move {
+            let outcome = fire_one(&routine, &config, &db, now).await;
+            (routine.name, outcome)
+        });
+    }
+
+    let mut report = TickReport::default();
+    while let Some(joined) = in_flight.join_next().await {
+        match joined {
+            Ok((_, Ok(RoutineRunStatus::Success))) => {
                 report.fired += 1;
                 report.succeeded += 1;
             }
-            Ok(_) => {
+            Ok((_, Ok(_))) => {
                 report.fired += 1;
                 report.failed += 1;
             }
-            Err(err) => report.errors.push(format!("{}: {err}", routine.name)),
+            Ok((name, Err(err))) => report.errors.push(format!("{name}: {err}")),
+            // A `fire_one` task itself panicked — treat like any other
+            // per-routine failure rather than propagating, consistent with
+            // "one bad routine cannot stop the others" above.
+            Err(join_err) => report
+                .errors
+                .push(format!("routine task panicked: {join_err}")),
         }
     }
     Ok(report)
@@ -340,19 +366,36 @@ async fn serve_with_interval(
 
     loop {
         tokio::select! {
-            _ = ticker.tick() => match tick(&config, &db).await {
-                Ok(report) if report.fired > 0 || !report.errors.is_empty() => {
-                    tracing::info!(
-                        fired = report.fired,
-                        succeeded = report.succeeded,
-                        failed = report.failed,
-                        errors = ?report.errors,
-                        "routine tick",
-                    );
+            _ = ticker.tick() => {
+                // Race the tick itself against the stop signal too — not
+                // just the wait *between* ticks — so a stop requested while
+                // several due routines are firing concurrently ends the loop
+                // right away instead of waiting for the whole pass to finish.
+                // Dropping the `tick` future here aborts any of its
+                // `fire_one` tasks still in flight; that is no worse than the
+                // process being killed outright, which the at-most-once
+                // firing design already tolerates (see the module doc).
+                tokio::select! {
+                    outcome = tick(&config, &db) => match outcome {
+                        Ok(report) if report.fired > 0 || !report.errors.is_empty() => {
+                            tracing::info!(
+                                fired = report.fired,
+                                succeeded = report.succeeded,
+                                failed = report.failed,
+                                errors = ?report.errors,
+                                "routine tick",
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(err) => tracing::warn!(%err, "routine scheduler tick failed"),
+                    },
+                    result = stop_rx.changed() => {
+                        if result.is_err() || *stop_rx.borrow() {
+                            break;
+                        }
+                    }
                 }
-                Ok(_) => {}
-                Err(err) => tracing::warn!(%err, "routine scheduler tick failed"),
-            },
+            }
             result = stop_rx.changed() => {
                 // Sender dropped or told us to stop.
                 if result.is_err() || *stop_rx.borrow() {
