@@ -7,8 +7,8 @@
  */
 
 import { registerModule } from "../core/registry";
-import type { RunRecord, RunSummary, WorkspaceFile } from "../core/backend";
-import { CALENDAR_SKILL_NAME, filterByCalendar, parseCalendarDigest } from "../core/calendar";
+import type { RunRecord, WorkspaceFile } from "../core/backend";
+import { CALENDAR_SKILL_NAME, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
 import type { ModuleContext } from "../core/types";
 import {
   addTodo,
@@ -322,15 +322,11 @@ export function registerBuiltins(): void {
         description: "Returns the events from the last calendar-digest run, optionally filtered to one calendar (does not trigger a new run).",
         params: { type: "object", properties: { calendar: { type: "string" } } },
         run: async (params, ctx) => {
-          const runs = await ctx.invoke<RunSummary[]>("list_runs", { limit: 50 });
-          const latest = runs.find((r) => r.skill_name === CALENDAR_SKILL_NAME);
-          if (!latest) return { events: [], note: "no run yet" };
-          if (latest.status === "failed") return { events: [], error: latest.error ?? "last run failed" };
-          const full = await ctx.invoke<RunRecord | null>("get_run", { id: latest.id });
-          if (!full) return { events: [], note: "run record not found" };
-          const digest = parseCalendarDigest(full.stdout);
+          const result = await loadLatestCalendarDigest(ctx.invoke);
+          if (!result.run) return { events: [], note: "no run yet" };
+          if (result.error) return { events: [], error: result.error };
           const calendar = typeof (params as { calendar?: unknown }).calendar === "string" ? ((params as { calendar: string }).calendar || null) : null;
-          return { events: filterByCalendar(digest.events, calendar) };
+          return { events: filterByCalendar(result.digest.events, calendar) };
         },
       },
     ],

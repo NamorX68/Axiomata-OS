@@ -157,6 +157,28 @@ pub fn valid_model_name(name: &str) -> bool {
         })
 }
 
+/// `--allowedTools` values come from `SKILL.md` frontmatter, same trust
+/// boundary as `valid_model_name` — not shell-parsed (no injection risk
+/// either way), but a value that could read as another `claude` flag would
+/// still misbehave silently, so it gets the same narrow-alphabet treatment.
+/// Wide enough for real tool specs: MCP's `mcp__server__tool` naming, plain
+/// tool names, and scoped specs like `Bash(git *)`, space/comma-separated.
+pub fn valid_allowed_tools(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 4000
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
+        && value.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'-' | b'_' | b',' | b' ' | b'(' | b')' | b'*' | b'/' | b':' | b'.'
+                )
+        })
+}
+
 /// A session id is only ever something `claude` printed earlier; refuse
 /// anything that could read as a flag or shell noise.
 fn valid_session_id(id: &str) -> bool {
@@ -260,7 +282,7 @@ async fn spawn_and_collect(
     if let Some(tools) = request
         .allowed_tools
         .as_deref()
-        .filter(|t| !t.trim().is_empty())
+        .filter(|t| valid_allowed_tools(t))
     {
         command.arg("--allowedTools").arg(tools);
     }
@@ -445,6 +467,21 @@ mod tests {
         }
         for bad in ["", "--model", "a b", "x;rm", &"a".repeat(81)] {
             assert!(!valid_model_name(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn allowed_tools_values_are_validated() {
+        for ok in [
+            "mcp__apple-reminders__calendar_events",
+            "mcp__apple-reminders__calendar_calendars mcp__apple-reminders__calendar_events",
+            "Bash(git *) Edit",
+            "a,b,c",
+        ] {
+            assert!(valid_allowed_tools(ok), "{ok}");
+        }
+        for bad in ["", "--allowedTools", ";rm -rf", &"a".repeat(4001)] {
+            assert!(!valid_allowed_tools(bad), "{bad:?}");
         }
     }
 

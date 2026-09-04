@@ -16,11 +16,9 @@
   import { onMount } from "svelte";
 
   import type { RunRecord, RunSummary } from "../core/backend";
-  import { CALENDAR_SKILL_NAME, EMPTY_DIGEST, eventTimeLabel, filterByCalendar, groupByDay, parseCalendarDigest, type CalendarDigest } from "../core/calendar";
+  import { CALENDAR_SKILL_NAME, EMPTY_DIGEST, eventTimeLabel, filterByCalendar, groupByDay, loadLatestCalendarDigest, parseCalendarDigest, type CalendarDigest } from "../core/calendar";
   import { dayLabel, relativeTime } from "../core/format";
   import type { ModuleContext } from "../core/types";
-
-  const RUN_LIMIT = 50;
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -42,18 +40,19 @@
     config.update((c) => ({ ...c, calendar: selectedCalendar }));
   }
 
-  /** Applies a finished run (from either `loadLatest` or `refreshNow`) to
-   *  the displayed digest, surfacing the skill's own failure/error text
-   *  rather than a raw JSON-parse error where possible. */
-  function applyRun(run: RunSummary, stdout: string | null) {
+  /** Applies a just-finished `run_skill` result (`refreshNow` only —
+   *  `loadLatest` goes through `loadLatestCalendarDigest` instead, which
+   *  already does this same success/failure/parse-error mapping for the
+   *  "find the latest run" path). */
+  function applyFreshRun(run: RunRecord) {
     lastRun = run;
-    if (run.status === "failed" || stdout === null) {
+    if (run.status === "failed") {
       digest = EMPTY_DIGEST;
       error = run.error ?? "Last run failed.";
       return;
     }
     try {
-      digest = parseCalendarDigest(stdout);
+      digest = parseCalendarDigest(run.stdout);
       error = "";
     } catch (err) {
       digest = EMPTY_DIGEST;
@@ -64,16 +63,10 @@
   async function loadLatest() {
     loading = true;
     try {
-      const runs = await ctx.invoke<RunSummary[]>("list_runs", { limit: RUN_LIMIT });
-      const latest = runs.find((r) => r.skill_name === CALENDAR_SKILL_NAME) ?? null;
-      if (!latest) {
-        lastRun = null;
-        digest = EMPTY_DIGEST;
-        error = "";
-        return;
-      }
-      const full = await ctx.invoke<RunRecord | null>("get_run", { id: latest.id });
-      applyRun(latest, full?.stdout ?? null);
+      const result = await loadLatestCalendarDigest(ctx.invoke);
+      lastRun = result.run;
+      digest = result.digest;
+      error = result.error ?? "";
     } catch (err) {
       error = String(err);
     } finally {
@@ -86,7 +79,7 @@
     running = true;
     try {
       const full = await ctx.invoke<RunRecord>("run_skill", { name: CALENDAR_SKILL_NAME });
-      applyRun(full, full.stdout);
+      applyFreshRun(full);
     } catch (err) {
       error = String(err);
     } finally {

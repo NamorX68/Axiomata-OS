@@ -12,6 +12,8 @@
  * button), it never triggers one on a timer.
  */
 
+import type { RunRecord, RunSummary } from "./backend";
+
 /** One event from the digest, already whatever the skill's SOP promises:
  *  `start`/`end` are `YYYY-MM-DD` for an all-day event, full ISO 8601
  *  otherwise. */
@@ -117,4 +119,49 @@ export function eventTimeLabel(e: CalendarEvent): string {
   const start = e.start.slice(11, 16);
   const end = e.end.slice(11, 16);
   return end ? `${start}–${end}` : start;
+}
+
+/** How far back `loadLatestCalendarDigest` looks (in `list_runs`'s newest-
+ *  first order) for the most recent `calendar-digest` run. */
+export const RUN_LOOKUP_LIMIT = 50;
+
+/** The subset of `ModuleContext["invoke"]` the loader needs — spelled out
+ *  by hand instead of importing `core/types` so this file stays Svelte-
+ *  agnostic, same as the rest of this module. */
+type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+
+export interface LatestDigest {
+  /** The run this digest came from, or `null` if `calendar-digest` has
+   *  never run at all. */
+  run: RunSummary | null;
+  digest: CalendarDigest;
+  /** The failed run's own error, or a parse failure's message; `null` on
+   *  a clean success (including the "never run yet" case). */
+  error: string | null;
+}
+
+/**
+ * Finds the most recent `calendar-digest` run — however it was triggered
+ * (Skills Deck, a scheduled Routine, or a tile's own refresh) — and parses
+ * its output.
+ *
+ * Shared by the `calendar` module's own load and its `list` bridge action
+ * (`modules/index.ts`) so the "how do we find the latest run" round trip
+ * (`list_runs` → `get_run`) lives in exactly one place instead of being
+ * reimplemented at both call sites.
+ */
+export async function loadLatestCalendarDigest(invoke: Invoke): Promise<LatestDigest> {
+  const runs = await invoke<RunSummary[]>("list_runs", { limit: RUN_LOOKUP_LIMIT });
+  const run = runs.find((r) => r.skill_name === CALENDAR_SKILL_NAME) ?? null;
+  if (!run) return { run: null, digest: EMPTY_DIGEST, error: null };
+  if (run.status === "failed") {
+    return { run, digest: EMPTY_DIGEST, error: run.error ?? "Last run failed." };
+  }
+  const full = await invoke<RunRecord | null>("get_run", { id: run.id });
+  if (!full) return { run, digest: EMPTY_DIGEST, error: "Run record not found." };
+  try {
+    return { run, digest: parseCalendarDigest(full.stdout), error: null };
+  } catch (err) {
+    return { run, digest: EMPTY_DIGEST, error: err instanceof Error ? err.message : String(err) };
+  }
 }

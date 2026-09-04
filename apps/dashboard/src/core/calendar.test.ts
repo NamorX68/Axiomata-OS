@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { eventTimeLabel, filterByCalendar, groupByDay, parseCalendarDigest, type CalendarEvent } from "./calendar";
+import type { RunRecord, RunSummary } from "./backend";
+import { eventTimeLabel, filterByCalendar, groupByDay, loadLatestCalendarDigest, parseCalendarDigest, type CalendarEvent } from "./calendar";
 
 const DIGEST_JSON = JSON.stringify({
   calendars: ["Arbeit", "Privat", "Familie"],
@@ -98,5 +99,60 @@ describe("eventTimeLabel", () => {
 
   it("shows \"All day\" for an all-day event regardless of the date-only start/end", () => {
     expect(eventTimeLabel({ ...base, start: "2026-09-05", end: "2026-09-05", allDay: true })).toBe("All day");
+  });
+});
+
+describe("loadLatestCalendarDigest", () => {
+  const summary = (over: Partial<RunSummary>): RunSummary => ({
+    id: 1,
+    skill_name: "calendar-digest",
+    backend: "claude-code",
+    status: "success",
+    exit_code: 0,
+    duration_ms: 100,
+    error: null,
+    started_at: "2026-09-05T09:00:00Z",
+    ...over,
+  });
+
+  /** A fake `invoke` serving `list_runs` from `runs` and `get_run` from
+   *  `records`, matching the two calls the loader actually makes. */
+  function fakeInvoke(runs: RunSummary[], records: Record<number, RunRecord>) {
+    return (async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      if (cmd === "list_runs") return runs as unknown as T;
+      if (cmd === "get_run") return (records[(args as { id: number }).id] ?? null) as unknown as T;
+      throw new Error(`unexpected cmd ${cmd}`);
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  }
+
+  it("returns an empty digest with no error when the skill has never run", async () => {
+    const result = await loadLatestCalendarDigest(fakeInvoke([], {}));
+    expect(result).toEqual({ run: null, digest: { calendars: [], events: [] }, error: null });
+  });
+
+  it("ignores other skills' runs and picks the newest calendar-digest one", async () => {
+    const runs = [summary({ id: 2, skill_name: "newsletter" }), summary({ id: 1 })];
+    const records = { 1: { ...summary({ id: 1 }), stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(1);
+    expect(result.digest.events).toHaveLength(3);
+  });
+
+  it("surfaces a failed run's own error without fetching the full record", async () => {
+    const runs = [summary({ status: "failed", error: "agent timed out" })];
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, {}));
+    expect(result.error).toBe("agent timed out");
+    expect(result.digest).toEqual({ calendars: [], events: [] });
+  });
+
+  it("reports a clear error when the run record is missing", async () => {
+    const result = await loadLatestCalendarDigest(fakeInvoke([summary({})], {}));
+    expect(result.error).toBe("Run record not found.");
+  });
+
+  it("surfaces a parse error from a malformed successful run", async () => {
+    const records = { 1: { ...summary({}), stdout: "not json", stderr: "", finished_at: "" } };
+    const result = await loadLatestCalendarDigest(fakeInvoke([summary({})], records));
+    expect(result.error).toMatch(/not valid JSON/);
   });
 });
