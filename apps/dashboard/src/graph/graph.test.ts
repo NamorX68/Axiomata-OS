@@ -88,6 +88,19 @@ describe("layouts", () => {
     );
     expect(radii.size).toBe(1);
   });
+
+  it("orbit puts the hub at the centre, gives every file a 3-D cloud point, and marks the rim", () => {
+    const m = buildModel(fixture(), palette);
+    applyLayout(m, "orbit");
+    const hub = m.byId.get("hub")!;
+    expect([hub.x, hub.y]).toEqual([0, 0]);
+    const skill = m.byId.get("skill:a")!;
+    expect(skill.onOrbit).toBe(true);
+    const files = m.nodes.filter((n) => n.kind === "file");
+    expect(files.every((n) => n.p3 && n.p3.length === 3)).toBe(true);
+    // Areas are parked, never shown, in orbit mode.
+    expect(m.byId.get("area:Dev")!.onOrbit).toBeFalsy();
+  });
 });
 
 describe("regroup / search / neighbours", () => {
