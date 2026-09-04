@@ -5,8 +5,9 @@
 //! dashboard's assistant bar, `--output-format json`, multi-turn via
 //! `--resume <session_id>`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -20,10 +21,79 @@ use crate::error::AxiomataError;
 /// Name of the Claude Code binary; expected on `PATH`.
 const CLAUDE_BIN: &str = "claude";
 
+/// [`resolve_claude_binary`]'s result, cached for the life of the process —
+/// resolved once, reused by every skill run, routine fire, and chat turn.
+static CLAUDE_PATH: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+
+/// Resolves [`CLAUDE_BIN`] to an absolute path by walking `PATH` ourselves,
+/// rather than handing the bare name to [`Command::new`] and letting the OS
+/// loader search `PATH` implicitly on every single spawn. Two benefits: the
+/// resolved path is pinned for the process's lifetime (no ambiguity from a
+/// `PATH` that some other process mutates between calls), and a missing
+/// binary becomes one clear error the moment it's first needed instead of a
+/// generic spawn failure surfacing on whatever skill or routine happens to
+/// fire first.
+///
+/// Errors:
+///     [`AxiomataError::AgentSpawn`] if no executable named [`CLAUDE_BIN`]
+///     exists on any `PATH` entry.
+fn resolve_claude_binary() -> Result<&'static Path, AxiomataError> {
+    let cached = CLAUDE_PATH.get_or_init(|| {
+        std::env::var_os("PATH")
+            .and_then(|path_var| {
+                std::env::split_paths(&path_var).find_map(|dir| {
+                    let candidate = dir.join(CLAUDE_BIN);
+                    is_executable_file(&candidate).then_some(candidate)
+                })
+            })
+            .ok_or_else(|| format!("{CLAUDE_BIN} not found on PATH"))
+    });
+    cached
+        .as_deref()
+        .map_err(|message| AxiomataError::AgentSpawn {
+            backend: BACKEND_CLAUDE_CODE,
+            program: CLAUDE_BIN,
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, message.clone()),
+        })
+}
+
+/// Whether `path` is a regular file with at least one executable bit set
+/// (Unix) — on other platforms, existence as a file is all we can cheaply
+/// check, so any regular file counts.
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
 /// Upper bound on how many bytes of the child's stdout (and, separately,
 /// stderr) are captured. A runaway or hostile child cannot balloon memory past
 /// this within the timeout window; output beyond it is discarded.
 const MAX_CAPTURE_BYTES: u64 = 1024 * 1024;
+
+/// Caps how many `claude` child processes may be running at once, across
+/// *every* caller — a manual "run now" click, a routine firing, and a chat
+/// turn all funnel through [`spawn_and_collect`]. Without this, several due
+/// routines firing in the same tick (see [`crate::routines::scheduler::tick`],
+/// which fires them concurrently) plus a stray UI click could start
+/// unboundedly many `claude` processes at once. A modest, fixed cap rather
+/// than a config knob: this is a resource-safety floor, not a tuning surface.
+const MAX_CONCURRENT_AGENT_RUNS: usize = 4;
+
+/// The semaphore [`MAX_CONCURRENT_AGENT_RUNS`] is enforced through, created
+/// once and shared for the life of the process.
+static AGENT_SLOTS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+
+fn agent_slots() -> &'static tokio::sync::Semaphore {
+    AGENT_SLOTS.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_AGENT_RUNS))
+}
 
 /// Spawns `claude -p` in `request.cwd`, applying `request.env` and enforcing
 /// `request.timeout`.
@@ -272,9 +342,18 @@ async fn spawn_and_collect(
     request: AgentRequest,
     extra_args: &[String],
 ) -> Result<AgentRunResult, AxiomataError> {
+    // Held until this call returns, so at most `MAX_CONCURRENT_AGENT_RUNS`
+    // `claude` processes are ever running at once; queued callers simply wait
+    // here rather than piling up spawned processes. Acquired before the
+    // timer starts, so queueing time isn't counted as this run's duration.
+    let _permit = agent_slots()
+        .acquire()
+        .await
+        .expect("agent_slots semaphore is never closed");
+
     let started = Instant::now();
 
-    let mut command = Command::new(CLAUDE_BIN);
+    let mut command = Command::new(resolve_claude_binary()?);
     command.arg("-p").args(extra_args);
     if let Some(model) = request.model.as_deref().filter(|m| valid_model_name(m)) {
         command.arg("--model").arg(model);
@@ -355,8 +434,8 @@ async fn spawn_and_collect(
     };
 
     Ok(AgentRunResult {
-        stdout: into_string_lossy(stdout_buf),
-        stderr: into_string_lossy(stderr_buf),
+        stdout: strip_ansi(&into_string_lossy(stdout_buf)),
+        stderr: strip_ansi(&into_string_lossy(stderr_buf)),
         exit_code: status.code().unwrap_or(-1),
         duration_ms: started.elapsed().as_millis() as u64,
     })
@@ -372,9 +451,121 @@ fn into_string_lossy(bytes: Vec<u8>) -> String {
     }
 }
 
+/// Strips ANSI/VT100 escape sequences (colour, cursor movement, terminal
+/// title-setting, …) from captured child output. `claude -p`'s plain-text
+/// mode is not guaranteed to detect a non-terminal target and suppress them,
+/// and once output is stored in a run record or shown in a non-terminal UI
+/// panel (the Skills Deck tile, `axiomata-cli get-run --json`) a raw escape
+/// code is just noise. Recognises CSI sequences (`ESC '[' … <letter>`, e.g.
+/// colour codes) and OSC sequences (`ESC ']' … (BEL | ESC '\')`, e.g. a
+/// terminal title); any other escape is dropped on its own so one stray
+/// `ESC` byte can't swallow the rest of the output.
+///
+/// Args:
+///     input: Text as captured from the child's stdout or stderr.
+///
+/// Returns:
+///     The same text with every recognised escape sequence removed.
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('[') => {
+                chars.next(); // consume '['
+                // CSI: parameter/intermediate bytes, terminated by a byte
+                // in the 0x40..=0x7E range (here, any ASCII letter or one
+                // of the less common terminator symbols).
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() || "@{|}~".contains(c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next(); // consume ']'
+                // OSC: runs until BEL, or ESC '\' (String Terminator).
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' {
+                        break;
+                    }
+                    if c == '\u{1b}' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {
+                // Unrecognised or truncated escape — drop just the ESC byte.
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_ansi_removes_csi_colour_codes() {
+        assert_eq!(strip_ansi("\u{1b}[31mred\u{1b}[0m"), "red");
+        assert_eq!(
+            strip_ansi("\u{1b}[1;32mbold green\u{1b}[0m normal"),
+            "bold green normal"
+        );
+    }
+
+    #[test]
+    fn strip_ansi_removes_osc_sequences_terminated_by_bel_or_st() {
+        assert_eq!(strip_ansi("\u{1b}]0;title\u{7}rest"), "rest");
+        assert_eq!(strip_ansi("\u{1b}]0;title\u{1b}\\rest"), "rest");
+    }
+
+    #[test]
+    fn strip_ansi_drops_a_trailing_truncated_escape() {
+        assert_eq!(strip_ansi("trailing\u{1b}"), "trailing");
+    }
+
+    #[test]
+    fn strip_ansi_leaves_plain_text_untouched() {
+        assert_eq!(
+            strip_ansi("no escapes here\nsecond line"),
+            "no escapes here\nsecond line"
+        );
+    }
+
+    #[test]
+    fn agent_slots_caps_concurrent_permits() {
+        // No test in this module spawns a real `claude` process (they all
+        // exercise arg-building/parsing/path-resolution), so the shared
+        // process-wide semaphore is otherwise untouched here.
+        let sem = agent_slots();
+        let starting = sem.available_permits();
+        assert!(starting <= MAX_CONCURRENT_AGENT_RUNS);
+        let permit = sem.try_acquire().expect("a permit should be available");
+        assert_eq!(sem.available_permits(), starting - 1);
+        drop(permit);
+        assert_eq!(sem.available_permits(), starting);
+    }
+
+    #[test]
+    fn resolve_claude_binary_finds_something_on_this_machines_path() {
+        // Not a mock: this environment does have a real `claude` on PATH
+        // (every other integration test in this crate that hits the real
+        // CLI depends on it too). Asserts the resolved path is absolute and
+        // actually named `claude`, and that the result is cached (same path
+        // on a second call).
+        let first = resolve_claude_binary().expect("claude should be on PATH in this environment");
+        assert!(first.is_absolute());
+        assert_eq!(first.file_name().and_then(|n| n.to_str()), Some(CLAUDE_BIN));
+        let second = resolve_claude_binary().expect("cached result should still resolve");
+        assert_eq!(first, second);
+    }
 
     fn request(session: Option<&str>, mode: ChatMode) -> ChatRequest {
         ChatRequest {
