@@ -332,7 +332,9 @@
      divider, no background. It is the only drag handle now (`.tile-drag`);
      the body no longer initiates a drag. */
   .front-head {
-    padding: var(--ax-space-2) var(--ax-space-2) var(--ax-space-1);
+    /* Horizontal padding matches the module content's own (`--ax-space-3`),
+       so the title/icon line up with the content's left edge. */
+    padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-1);
     border-bottom: none;
   }
   .front-head .tile-title {
