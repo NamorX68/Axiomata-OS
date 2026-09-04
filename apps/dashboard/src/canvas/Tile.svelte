@@ -254,28 +254,40 @@
     overflow: hidden;
     backface-visibility: hidden;
     border-radius: var(--ax-radius-lg);
-    box-shadow: var(--ax-shadow-tile);
-    transition: box-shadow var(--ax-dur-fast) var(--ax-ease);
+    transition:
+      box-shadow var(--ax-dur-fast) var(--ax-ease),
+      background var(--ax-dur-fast) var(--ax-ease);
   }
-  /* Front: frameless "glass" — a translucent fill floating over the canvas /
-     particle graph, no border, no header divider; chrome fades in on hover. */
+  /* Front: no chrome at rest — the module's content sits straight on the
+     canvas, like the reference dashboard's edge panels (no fill, no border,
+     no shadow, no header divider). A faint fill appears on hover so you can
+     see what you are about to grab / resize, and the tile "materialises"
+     fully while it is being moved. */
   .face.front {
+    background: transparent;
+    box-shadow: none;
+  }
+  .tile:hover .face.front {
+    background: color-mix(in srgb, var(--ax-tile-glass-bg) 45%, transparent);
+  }
+  .tile.dragging .face.front,
+  .tile.resizing .face.front {
     background: var(--ax-tile-glass-bg);
     -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
     backdrop-filter: blur(var(--ax-tile-glass-blur));
+    box-shadow: var(--ax-shadow-drag);
   }
-  /* Back: the settings side keeps the solid window frame, so it reads as a
-     distinct surface you are configuring. */
+  /* Back: the settings side keeps the solid framed-window look, so it reads
+     as a distinct surface you are configuring. */
   .face.back {
     transform: rotateY(180deg);
     background: var(--ax-surface-2);
     border: 1px solid var(--ax-border);
-  }
-  .tile.dragging .face {
-    box-shadow: var(--ax-shadow-drag);
+    box-shadow: var(--ax-shadow-tile);
   }
   .tile.dragging .face.back {
     border-color: var(--ax-border-strong);
+    box-shadow: var(--ax-shadow-drag);
   }
 
   .tile-head {
@@ -291,18 +303,15 @@
     cursor: grabbing;
   }
 
-  /* The front header is a slim, quiet strip: no divider, a small muted
-     title, and grip + buttons that only appear on hover. It is the only
-     drag handle now (`.tile-drag`) — the body no longer initiates a drag. */
+  /* The front header is just a section label + hover chrome — no bar, no
+     divider, no background. It is the only drag handle now (`.tile-drag`);
+     the body no longer initiates a drag. */
   .front-head {
-    padding: var(--ax-space-1) var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-2) var(--ax-space-1);
     border-bottom: none;
   }
   .front-head .tile-title {
     font-size: var(--ax-font-size-xs);
-    font-weight: 500;
-    letter-spacing: normal;
-    text-transform: none;
     color: var(--ax-text-muted);
   }
   .front-head .tile-btn {

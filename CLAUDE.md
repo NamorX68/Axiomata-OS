@@ -154,16 +154,20 @@ size goes through a `--ax-*` token; no literals in components.
   component, optional settings component (flip side), default/min size, `singleton`,
   `stageable`, `actions[]`. Instances are mounted with a `ModuleContext` (`invoke`,
   reactive per-instance `config`, `emit`, `requestResize`).
-- **Tile chrome** (`canvas/Tile.svelte`): the **front** face is frameless "glass" —
-  a translucent fill (`--ax-tile-glass-bg`, one per theme) with `backdrop-filter`
-  blur (`--ax-tile-glass-blur`), a soft shadow, **no border and no header
-  divider**; the icon + a small muted title sit in a slim top strip, and the
-  grip glyph + ⚙/× buttons only fade in on hover (`:focus-within` too). The
-  **back** (settings) face deliberately keeps the solid framed-window look
-  (`--ax-surface-2` + 1px border + a bordered header bar) so it reads as a
-  distinct surface. A tile is **dragged only from that top strip** — both
-  headers carry `.tile-drag` and `use:draggable` gets `handle: ".tile-drag"`
-  (`canvas/drag.ts` `DragOptions.handle`); the body no longer initiates a drag.
+- **Tile chrome** (`canvas/Tile.svelte`): the **front** face has **no chrome at
+  rest** — no fill, no border, no shadow, no header divider — the module's
+  content sits straight on the canvas, like the reference dashboard's edge
+  panels. Only a caps section-label (icon + muted title) shows; the grip glyph
+  and ⚙/× buttons fade in on hover (`:focus-within` too). A faint fill
+  (`color-mix` of `--ax-tile-glass-bg`) appears on hover so you can see what
+  you're about to grab/resize, and the tile "materialises" fully
+  (`--ax-tile-glass-bg` + `backdrop-filter` blur `--ax-tile-glass-blur` +
+  drag shadow) while it is being moved/resized. The **back** (settings) face
+  deliberately keeps the solid framed-window look (`--ax-surface-2` + 1px
+  border + a bordered header bar + shadow) so it reads as a distinct surface.
+  A tile is **dragged only from that top strip** — both headers carry
+  `.tile-drag` and `use:draggable` gets `handle: ".tile-drag"` (`canvas/drag.ts`
+  `DragOptions.handle`); the body no longer initiates a drag.
   `--ax-tile-glass-bg` is in the custom-theme allow-list (`theme/validator.ts`).
 - **Persistence**: one hand-editable JSON file `~/.axiomata/dashboard.json` (layout +
   theme + per-instance config); the frontend owns the schema, Rust
