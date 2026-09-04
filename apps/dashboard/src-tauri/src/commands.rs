@@ -18,7 +18,7 @@ use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill};
 use axiomata_core::workspace::{self, SearchHit, WorkspaceFile};
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::State;
 
 /// The Tauri-managed core engine.
 pub type CoreState = AxiomataCore;
@@ -136,31 +136,6 @@ pub fn search_workspace(
     limit: usize,
 ) -> Result<Vec<SearchHit>, String> {
     workspace::search(&state.config, &query, limit.clamp(1, 200)).map_err(|err| err.to_string())
-}
-
-/// Prepares a workspace `.html` / `.htm` file for display in a sandboxed
-/// iframe: resolves it through the workspace guard and allows **its folder**
-/// (not recursive, never the workspace root) in the asset protocol scope for
-/// the rest of the session, so the page and its same-folder links load via
-/// `convertFileSrc`. Returns the canonical absolute path.
-#[tauri::command]
-pub fn open_workspace_html(
-    app: AppHandle,
-    state: State<'_, CoreState>,
-    rel: String,
-) -> Result<String, String> {
-    let lower = rel.to_lowercase();
-    if !(lower.ends_with(".html") || lower.ends_with(".htm")) {
-        return Err(format!("{rel}: only .html / .htm files are framed"));
-    }
-    let path = workspace::resolve_existing(&state.config, &rel).map_err(|err| err.to_string())?;
-    let folder = path
-        .parent()
-        .ok_or_else(|| format!("{rel}: no parent folder"))?;
-    app.asset_protocol_scope()
-        .allow_directory(folder, false)
-        .map_err(|err| format!("asset scope: {err}"))?;
-    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Reads a UTF-8 file by workspace-relative path (≤ 1 MiB, no `..`, no
