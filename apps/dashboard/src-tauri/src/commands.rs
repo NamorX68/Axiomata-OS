@@ -98,14 +98,18 @@ pub fn complete_module_action(response: ActionResponse) -> Result<(), String> {
 
 /// One assistant turn. `mode` is `"chat"` (never asks, read-mostly) or
 /// `"instruct"` (may edit workspace files). Pass the `session_id` from the
-/// previous reply to continue that conversation. Runs the agent with no lock
-/// held; the reply is not recorded in the run log.
+/// previous reply to continue that conversation. `allowed_tools` is the
+/// `--allowedTools` value a connector module's write action needs to reach
+/// its MCP tool at all (see `AgentRequest::allowed_tools`) — `None` for a
+/// plain assistant-bar turn. Runs the agent with no lock held; the reply is
+/// not recorded in the run log.
 #[tauri::command]
 pub async fn assistant_send(
     state: State<'_, CoreState>,
     message: String,
     session_id: Option<String>,
     mode: String,
+    allowed_tools: Option<String>,
 ) -> Result<ChatReply, String> {
     let mode = match mode.as_str() {
         "chat" => ChatMode::Chat,
@@ -113,7 +117,7 @@ pub async fn assistant_send(
         other => return Err(format!("unknown assistant mode {other:?}")),
     };
     let config = state.config.clone();
-    agents::chat(&config, message, session_id, mode)
+    agents::chat(&config, message, session_id, mode, allowed_tools)
         .await
         .map_err(|err| err.to_string())
 }
@@ -173,7 +177,7 @@ pub async fn create_note(state: State<'_, CoreState>, content: String) -> Result
     let config = state.config.clone();
     let existing = importer::existing_areas(&config.workspace_root);
     let prompt = notes::placement_prompt(&content, &existing);
-    let reply = agents::chat(&config, prompt, None, ChatMode::Instruct)
+    let reply = agents::chat(&config, prompt, None, ChatMode::Instruct, None)
         .await
         .map_err(|err| err.to_string())?;
     let placement = notes::parse_placement(&reply.reply_markdown).map_err(|err| err.to_string())?;

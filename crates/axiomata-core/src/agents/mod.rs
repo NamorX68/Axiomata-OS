@@ -101,11 +101,17 @@ pub use claude_code::{ChatMode, ChatReply};
 /// config: cwd = workspace root (so its `CLAUDE.md` loads), the skill timeout,
 /// the filtered provider env, and the module manifest
 /// (`paths::module_context_path()`) as an appended system prompt if present.
+///
+/// `allowed_tools` is `None` for a plain assistant-bar turn; a module that
+/// needs an instruct turn to reach an MCP tool (e.g. a connector module's
+/// write actions) sets it to exactly the tool it needs — see
+/// [`AgentRequest::allowed_tools`] for why that's required at all.
 pub async fn chat(
     config: &Config,
     message: String,
     session_id: Option<String>,
     mode: ChatMode,
+    allowed_tools: Option<String>,
 ) -> Result<ChatReply, AxiomataError> {
     claude_code::chat(claude_code::ChatRequest {
         message,
@@ -115,6 +121,7 @@ pub async fn chat(
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
         env: crate::skills::runner::claude_env(config, &AgentBackend::ClaudeCode),
         system_prompt_file: module_context_if_present(),
+        allowed_tools,
         model: default_claude_model(config),
     })
     .await

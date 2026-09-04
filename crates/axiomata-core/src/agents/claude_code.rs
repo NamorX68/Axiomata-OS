@@ -87,6 +87,12 @@ pub struct ChatRequest {
     pub system_prompt_file: Option<PathBuf>,
     /// `claude --model`; `None` lets the CLI choose.
     pub model: Option<String>,
+    /// `claude --allowedTools` — see [`super::AgentRequest::allowed_tools`].
+    /// A module that needs an instruct turn to reach an MCP tool (e.g. a
+    /// connector module's "create"/"delete" write action) sets this to
+    /// exactly the tool it needs; plain chat/instruct turns from the
+    /// assistant bar leave it `None`.
+    pub allowed_tools: Option<String>,
 }
 
 /// The parsed `--output-format json` result of a chat turn.
@@ -132,10 +138,7 @@ pub async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataError> {
             env: request.env,
             system_prompt_file: request.system_prompt_file,
             model: request.model,
-            // Chat/instruct turns don't carry a tool allow-list yet — only
-            // skills do, via their frontmatter. Extend `ChatRequest` the same
-            // way if a module ever needs an instruct turn to reach an MCP tool.
-            allowed_tools: None,
+            allowed_tools: request.allowed_tools,
         },
         &args,
     )
@@ -383,6 +386,7 @@ mod tests {
             env: Vec::new(),
             system_prompt_file: None,
             model: None,
+            allowed_tools: None,
         }
     }
 
