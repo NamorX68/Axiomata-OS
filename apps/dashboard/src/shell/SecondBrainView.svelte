@@ -1,9 +1,11 @@
 <!--
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
-  labels, search (dims non-matches), layout Rings / Circle, grouping by
-  areas or folders, spin + file-name toggles, and a detail panel for the
+  labels, search (dims non-matches), layout Rings / Circle / Orbit, grouping
+  by areas or folders, spin + file-name toggles, and a detail panel for the
   selected node (file → view in md-file / copy path / fly to / connections;
   skill → run; routine → toggle; hub → open). "Back to the OS" closes.
+  Orbit reuses the dashboard-centre widget's 3-D cloud + icon rim; search
+  highlighting and "Fly to" are approximate there (see the `?` help text).
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -58,7 +60,7 @@
   let hover = $state.raw<GraphNode | null>(null);
   // svelte-ignore state_referenced_locally
   let query = $state(initialQuery);
-  let layout = $state<LayoutKind>(prefs.layout === "circle" ? "circle" : "rings");
+  let layout = $state<LayoutKind>(prefs.layout === "circle" || prefs.layout === "orbit" ? prefs.layout : "rings");
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let spin = $state(typeof prefs.spin === "number" ? prefs.spin : 0.02);
   let fileNames = $state(prefs.fileNames === true);
@@ -157,11 +159,20 @@
   const HELP = [
     ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring, Routinen außen. Zeigt die Größe je Bereich."],
     ["Circle", "Alle Notizen auf einem Ring, nach Bereich sortiert. Flacher, am besten um Verbindungen zwischen Bereichen zu sehen."],
+    [
+      "Orbit",
+      "Wie das Hintergrund-Widget: eine rotierende 3-D-Punktwolke aus allen Notizen um eine Hex-Textur-Scheibe, Skills/Routinen/neueste Notizen als Icons am Rand. Eher zum Anschauen als zum gezielten Navigieren — Suche dimmt hier (noch) nicht, „Fly to“ zentriert nur ungefähr.",
+    ],
     ["Areas", "Ein Segment je oberstem Vault-Ordner."],
     ["Folders", "Ein Segment je tiefstem Ordner, z. B. Learning/Rust/lessons. Feinere Aufteilung großer Bereiche."],
     ["Rotation", "Drehgeschwindigkeit des ganzen Graphen; greift sofort, ganz links steht er still. Bei kleinen Werten sieht man die Drehung erst über Sekunden."],
-    ["File names", "Zeigt jeden Notiztitel dauerhaft; sonst erscheinen Titel bei Hover, Suche und Auswahl."],
+    ["File names", "Zeigt jeden Notiztitel dauerhaft; sonst erscheinen Titel bei Hover, Suche und Auswahl. In Orbit ohne Wirkung — dort erscheinen Namen nur bei Hover/Auswahl."],
   ] as const;
+  /** Looks up a HELP entry's text by its term, so the buttons below reference
+   *  entries by name instead of a fragile array index. */
+  function helpText(term: string): string {
+    return HELP.find(([t]) => t === term)?.[1] ?? "";
+  }
   let busy = $state(false);
   let error = $state("");
   let drag: { x: number; y: number; vx: number; vy: number } | null = null;
@@ -326,7 +337,8 @@
   }
 
   $effect(() => {
-    if (renderer) renderer.options = { ...renderer.options, spin, fileLabels: fileNames };
+    const mode = layout === "orbit" ? "orbit" : "rings";
+    if (renderer) renderer.options = { ...renderer.options, spin, fileLabels: fileNames, mode };
   });
   // Remember the view preferences in dashboard.json (settings.secondBrain).
   let prefsReady = false;
@@ -411,7 +423,7 @@
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { spin, labels: true, fileLabels: fileNames, fit: 0.44 };
+    renderer.options = { spin, labels: true, fileLabels: fileNames, fit: 0.44, mode: layout === "orbit" ? "orbit" : "rings" };
     renderer.resize();
     const ro = new ResizeObserver(() => renderer?.resize());
     ro.observe(canvas);
@@ -506,23 +518,24 @@
     <div class="group">
       <span class="label">Layout</span>
       <div class="seg">
-        <button type="button" class:on={layout === "rings"} title={HELP[0][1]} aria-describedby="help-rings" onclick={() => (layout = "rings")}>Rings</button>
-        <button type="button" class:on={layout === "circle"} title={HELP[1][1]} aria-describedby="help-circle" onclick={() => (layout = "circle")}>Circle</button>
+        <button type="button" class:on={layout === "rings"} title={helpText("Rings")} aria-describedby="help-rings" onclick={() => (layout = "rings")}>Rings</button>
+        <button type="button" class:on={layout === "circle"} title={helpText("Circle")} aria-describedby="help-circle" onclick={() => (layout = "circle")}>Circle</button>
+        <button type="button" class:on={layout === "orbit"} title={helpText("Orbit")} aria-describedby="help-orbit" onclick={() => (layout = "orbit")}>Orbit</button>
       </div>
     </div>
     <div class="group">
       <span class="label">Group by</span>
       <div class="seg">
-        <button type="button" class:on={grouping === "areas"} title={HELP[2][1]} aria-describedby="help-areas" onclick={() => (grouping = "areas")}>Areas</button>
-        <button type="button" class:on={grouping === "folders"} title={HELP[3][1]} aria-describedby="help-folders" onclick={() => (grouping = "folders")}>Folders</button>
+        <button type="button" class:on={grouping === "areas"} title={helpText("Areas")} aria-describedby="help-areas" onclick={() => (grouping = "areas")}>Areas</button>
+        <button type="button" class:on={grouping === "folders"} title={helpText("Folders")} aria-describedby="help-folders" onclick={() => (grouping = "folders")}>Folders</button>
       </div>
     </div>
-    <label class="row" title={HELP[4][1]}>
+    <label class="row" title={helpText("Rotation")}>
       <span class="label">Rotation</span>
       <input type="range" min="0" max="0.12" step="0.005" bind:value={spin} aria-describedby="help-rotation" />
       <span class="readout">{rotationLabel}</span>
     </label>
-    <label class="row check" title={HELP[5][1]}><input type="checkbox" bind:checked={fileNames} aria-describedby="help-file-names" /> File names</label>
+    <label class="row check" title={helpText("File names")}><input type="checkbox" bind:checked={fileNames} aria-describedby="help-file-names" /> File names</label>
     <div class="row">
       <button type="button" title="Zoom und Verschiebung zurücksetzen" onclick={resetView}>Reset view</button>
       <button type="button" title="Graph neu aus dem Workspace laden" onclick={() => void load()}>Reload</button>

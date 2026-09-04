@@ -29,7 +29,7 @@ function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2
   });
 }
 
-export type LayoutKind = "rings" | "circle";
+export type LayoutKind = "rings" | "circle" | "orbit";
 
 /** Most icon nodes on the dashboard orbit ring. */
 export const ORBIT_MAX = 36;
@@ -82,7 +82,8 @@ export function layoutOrbit(model: GraphModel): void {
 }
 
 export function applyLayout(model: GraphModel, kind: LayoutKind): void {
-  if (kind === "circle") layoutCircle(model);
+  if (kind === "orbit") layoutOrbit(model);
+  else if (kind === "circle") layoutCircle(model);
   else layoutRings(model);
 }
 
