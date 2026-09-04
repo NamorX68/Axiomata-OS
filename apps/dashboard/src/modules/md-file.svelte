@@ -1,5 +1,6 @@
 <!--
-  md-file ("Document") — the viewer for one workspace file.
+  md-file ("Document") — the viewer for one workspace file, and (via `isNew`)
+  the compose UI for a brand new one.
   - `.md`: read mode renders through core/markdown (marked + DOMPurify), edit
     mode is a textarea, Save writes via `write_workspace_file`.
   - `.html` / `.htm` (courses): shown read-only in a sandboxed iframe whose src
@@ -12,7 +13,13 @@
     the frame does not update the path in the bar; external links are blocked
     by the app's frame-src and show a blank frame. In the browser dev mock
     the page is loaded via `srcdoc` instead.
-  Config: `path` (workspace-relative), `mode` ("read" | "edit"), `stageFrom`.
+  - `isNew` + no `path` yet: a bare textarea, no title field — either the
+    note starts with its own `# Heading`, or the agent proposes one, exactly
+    like `axiomata_core::notes`. Save calls `create_note`, then re-points
+    `config.path` at the file it wrote, which falls straight through into
+    the normal read-mode viewer above.
+  Config: `path` (workspace-relative), `mode` ("read" | "edit"), `isNew`,
+  `stageFrom`.
 -->
 <script lang="ts">
   import { assetFileUrl, insideTauri, type WorkspaceFile } from "../core/backend";
@@ -32,6 +39,7 @@
   let pathInput = $state("");
 
   const path = $derived(typeof $config.path === "string" ? $config.path : "");
+  const isNew = $derived($config.isNew === true && !path);
   const kind = $derived(/\.html?$/i.test(path) ? "html" : "markdown");
   const mode = $derived($config.mode === "edit" && kind === "markdown" ? "edit" : "read");
   let frameSrc = $state<string | null>(null);
@@ -107,6 +115,24 @@
     }
   }
 
+  // Compose mode (`isNew`): the agent decides where the note lands
+  // (`axiomata_core::notes`) — re-pointing `config.path` at the result hands
+  // this same module straight over to the normal read-mode viewer above.
+  async function saveNew() {
+    if (saving || !draft.trim()) return;
+    saving = true;
+    try {
+      const rel = await ctx.invoke<string>("create_note", { content: draft });
+      config.update((c) => ({ ...c, path: rel, mode: "read", isNew: false }));
+      draft = "";
+      error = "";
+    } catch (err) {
+      error = String(err);
+    } finally {
+      saving = false;
+    }
+  }
+
   // Reload whenever the configured path changes (flip side, action, open()).
   $effect(() => {
     void load(path);
@@ -114,7 +140,21 @@
 </script>
 
 <div class="md">
-  {#if !path}
+  {#if isNew}
+    <div class="bar">
+      <span class="path muted">New note</span>
+      <span class="spacer"></span>
+      <button type="button" class="save" onclick={saveNew} disabled={!draft.trim() || saving}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </div>
+    {#if error}<p class="error">{error}</p>{/if}
+    <textarea
+      bind:value={draft}
+      spellcheck="false"
+      placeholder={"# Title (optional)\n\nWrite your note in Markdown. Give it a heading yourself, or leave it out and the agent will name it. Either way, it decides where in the vault this lands when you save."}
+    ></textarea>
+  {:else if !path}
     <form class="ask" onsubmit={(e) => (e.preventDefault(), open(pathInput))}>
       <p class="muted">Open a Markdown file from the workspace:</p>
       <div class="pair">

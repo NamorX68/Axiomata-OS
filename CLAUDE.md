@@ -242,12 +242,19 @@ size goes through a `--ax-*` token; no literals in components.
   the agent proposes the areas and assigns every note in one JSON turn, files are written
   under `<workspace>/<Area>/`, never overwriting; secret-looking notes are flagged, not
   skipped, unless `--skip-secrets`.
-- **New note**: `axiomata_core::notes` + the top bar's "New note" icon (`NewNotePanel.svelte`,
-  command `create_note`) — a scaled-down `importer`: one note instead of a batch, and
-  `placement_prompt` only ever offers the vault's *existing* top-level areas (or `Inbox`),
-  never a new one. Agent decides area + file name in one JSON turn; the Rust side does the
-  actual write, deduping on a name collision (`-2`, `-3`, …) rather than skipping like
-  `importer::apply` does. Saved note opens immediately in the right-hand staged viewer.
+- **New note**: `axiomata_core::notes` + the top bar's "New note" icon — no separate dialog;
+  opens the `md-file` module itself in compose mode (`isNew` config, no `path` yet: a bare
+  textarea, Save calls the new `create_note` command instead of `write_workspace_file`, then
+  re-points `config.path` at the written file, which falls straight into the module's normal
+  read-mode viewer). No title field either: a note either starts with its own `# Heading`
+  (kept verbatim), or `axiomata_core::notes::placement_prompt` also asks the agent to propose
+  one, via `memory::walker::first_heading` telling which case applies. A scaled-down
+  `importer`: one note instead of a batch, and like `importer::assignment_prompt`,
+  `placement_prompt` lets the agent propose a brand new top-level area when none of the
+  vault's existing ones genuinely fit (that judgment call is the point of asking the agent at
+  all), nudging toward reuse and broad/durable names first; `Inbox` is the last resort, not
+  the only alternative to an existing area. The Rust side does the actual write, deduping on
+  a name collision (`-2`, `-3`, …) rather than skipping like `importer::apply` does.
 - Escape across overlays: the first handler that acts calls `preventDefault()`; later ones
   (Second Brain, chat) check `defaultPrevented` — never the DOM (outro transitions linger).
 

@@ -1,8 +1,9 @@
 <!--
   Icon buttons directly under the top bar: Settings, Add module, New note,
   Search, Theme. Settings / Add / New note / Search only fire a shell-bus
-  event — their dialogs land elsewhere (steps 7, 11, 13; New note in
-  `App.svelte`'s `NewNotePanel`). Theme cycles the built-in themes.
+  event — their dialogs land elsewhere (steps 7, 11, 13; New note opens the
+  Document module in compose mode, see `App.svelte`). Theme cycles the
+  built-in themes.
 -->
 <script lang="ts">
   import { emit } from "../core/bus";

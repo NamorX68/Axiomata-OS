@@ -184,32 +184,30 @@ pub fn write_workspace_file(
     workspace::write_file(&state.config, &rel, &content).map_err(|err| err.to_string())
 }
 
-/// Creates a new Markdown note from `title` + `content`: the agent picks
-/// which existing workspace area it belongs in (or `Inbox`, never a brand
-/// new area — see `notes::placement_prompt`) and a file name; this command
-/// then does the actual write (sanitized, never overwriting), the same
-/// "agent decides, code writes" split `axiomata-cli import obsidian` uses.
-/// Returns the workspace-relative path written.
+/// Creates a new Markdown note from `content` alone — no separate title:
+/// if `content` starts with its own `#` heading that wins, otherwise the
+/// agent proposes one as part of the same turn. The agent also picks which
+/// workspace area it belongs in — reusing an existing one, proposing a new
+/// one, or `Inbox` as a last resort (see `notes::placement_prompt`) — and a
+/// file name; this command then does the actual write (sanitized, never
+/// overwriting), the same "agent decides, code writes" split
+/// `axiomata-cli import obsidian` uses. Returns the workspace-relative path
+/// written.
 #[tauri::command]
-pub async fn create_note(
-    state: State<'_, CoreState>,
-    title: String,
-    content: String,
-) -> Result<String, String> {
+pub async fn create_note(state: State<'_, CoreState>, content: String) -> Result<String, String> {
     let config = state.config.clone();
     let existing = importer::existing_areas(&config.workspace_root);
-    let prompt = notes::placement_prompt(&title, &content, &existing);
+    let prompt = notes::placement_prompt(&content, &existing);
     let reply = agents::chat(&config, prompt, None, ChatMode::Instruct)
         .await
         .map_err(|err| err.to_string())?;
     let placement = notes::parse_placement(&reply.reply_markdown).map_err(|err| err.to_string())?;
-    let area = notes::resolved_area(&placement, &existing);
     notes::write_placed_note(
         &config.workspace_root,
-        &title,
         &content,
-        &area,
+        &placement.area,
         &placement.file_name,
+        placement.title.as_deref(),
     )
     .map_err(|err| err.to_string())
 }

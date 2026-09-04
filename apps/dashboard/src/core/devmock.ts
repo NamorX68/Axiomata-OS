@@ -305,13 +305,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return undefined as T;
     case "create_note": {
       // No agent to ask in the browser mock — always files into "Inbox",
-      // mirroring `notes::write_placed_note`'s dedup-on-collision rule.
-      const title = String(args.title);
-      const content = String(args.content);
-      const slug = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "note";
+      // mirroring `notes::write_placed_note`'s dedup-on-collision rule. No
+      // separate title argument either: use the content's own heading if it
+      // has one, else a placeholder standing in for the agent's guess.
+      const content = String(args.content).trim();
+      const heading = /^#\s+(.+)/.exec(content)?.[1]?.trim();
+      const title = heading || "Untitled";
+      const markdown = heading ? `${content}\n` : `# ${title}\n\n${content}\n`;
+      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "note";
       let rel = `Inbox/${slug}.md`;
       for (let n = 2; files.has(rel); n++) rel = `Inbox/${slug}-${n}.md`;
-      const markdown = content.trim().startsWith("#") ? `${content.trim()}\n` : `# ${title}\n\n${content.trim()}\n`;
       files.set(rel, markdown);
       return rel as T;
     }
