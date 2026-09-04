@@ -296,12 +296,31 @@ pub fn set_next_fire_at(
     Ok(())
 }
 
-/// Appends one row to `routine_runs` and returns it with its assigned id.
-/// `run.detail` is truncated to [`MAX_DETAIL_LEN`] before storage.
+/// Appends one row to `routine_runs`, returns it with its assigned id, and
+/// prunes that routine's history back down to [`MAX_ROUTINE_RUN_LIMIT`] rows
+/// if this write pushed it over. `run.detail` is truncated to
+/// [`MAX_DETAIL_LEN`] before storage.
+///
+/// Without this, a fast-firing routine with an always-failing target (e.g.
+/// `*/1 * * * * *` against a missing skill) would grow its history
+/// unboundedly — [`MAX_ROUTINE_RUN_LIMIT`] previously only capped how many
+/// rows [`list_runs`] would *return*, not how many actually accumulated.
 pub fn record_run(
     db: &Connection,
     routine_id: i64,
     run: NewRoutineRun,
+) -> Result<RoutineRun, AxiomataError> {
+    record_run_with_retention(db, routine_id, run, MAX_ROUTINE_RUN_LIMIT)
+}
+
+/// [`record_run`] with a caller-chosen retention limit — used by tests to
+/// exercise the auto-prune behaviour without needing
+/// [`MAX_ROUTINE_RUN_LIMIT`] (500) real rows for one routine.
+fn record_run_with_retention(
+    db: &Connection,
+    routine_id: i64,
+    run: NewRoutineRun,
+    retention_limit: usize,
 ) -> Result<RoutineRun, AxiomataError> {
     let detail = clamp_detail(run.detail);
     db.execute(
@@ -317,7 +336,7 @@ pub fn record_run(
             detail,
         ],
     )?;
-    Ok(RoutineRun {
+    let stored = RoutineRun {
         id: db.last_insert_rowid(),
         routine_id,
         run_id: run.run_id,
@@ -325,7 +344,25 @@ pub fn record_run(
         fired_at: run.fired_at,
         status: run.status,
         detail,
-    })
+    };
+    prune_routine_runs(db, routine_id, retention_limit)?;
+    Ok(stored)
+}
+
+/// Deletes every `routine_runs` row for `routine_id` except the `keep` most
+/// recent (by `fired_at`, ties broken by `id`). A no-op once that routine is
+/// at or under `keep` rows.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the delete fails.
+fn prune_routine_runs(db: &Connection, routine_id: i64, keep: usize) -> Result<(), AxiomataError> {
+    db.execute(
+        "DELETE FROM routine_runs WHERE routine_id = ?1 AND id NOT IN \
+         (SELECT id FROM routine_runs WHERE routine_id = ?1 \
+          ORDER BY fired_at DESC, id DESC LIMIT ?2)",
+        rusqlite::params![routine_id, keep as i64],
+    )?;
+    Ok(())
 }
 
 /// Truncates `raw` to [`MAX_DETAIL_LEN`] characters on a char boundary.
@@ -630,6 +667,41 @@ mod tests {
         let stored = list_runs(&db, r.id, 1).unwrap()[0].detail.clone().unwrap();
         assert!(stored.chars().count() <= MAX_DETAIL_LEN + 1);
         assert!(stored.ends_with('…'));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn record_run_prunes_a_routines_history_automatically() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("noisy")).unwrap();
+
+        fn a_run() -> NewRoutineRun {
+            NewRoutineRun {
+                run_id: None,
+                scheduled_for: Utc::now(),
+                fired_at: Utc::now(),
+                status: RoutineRunStatus::Failed,
+                detail: None,
+            }
+        }
+
+        // A tiny retention limit so the test doesn't need
+        // MAX_ROUTINE_RUN_LIMIT (500) real rows to see it kick in.
+        for _ in 0..5 {
+            record_run_with_retention(&db, r.id, a_run(), 3).unwrap();
+        }
+        assert_eq!(
+            list_runs(&db, r.id, 100).unwrap().len(),
+            3,
+            "record_run should prune this routine's history on every write"
+        );
+
+        // Pruning is per-routine — a second routine's history is untouched.
+        let other = add(&db, new_routine("quiet")).unwrap();
+        record_run_with_retention(&db, other.id, a_run(), 3).unwrap();
+        assert_eq!(list_runs(&db, other.id, 100).unwrap().len(), 1);
+        assert_eq!(list_runs(&db, r.id, 100).unwrap().len(), 3);
 
         let _ = fs::remove_file(&path);
     }

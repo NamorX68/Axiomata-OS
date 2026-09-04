@@ -17,20 +17,61 @@ use crate::error::AxiomataError;
 use crate::paths;
 use crate::skills::model::{RunRecord, RunStatus, RunSummary};
 
-/// Persists `record` to both the database and the JSONL log.
+/// Hard cap on how many rows the `runs` table is allowed to accumulate.
+/// [`MAX_RUN_LIMIT`] only bounds one *query*'s result — nothing previously
+/// stopped the table itself from growing without limit (e.g. a `*/1 * * * *`
+/// routine with an always-failing target). [`record_run`] prunes down to this
+/// many rows, keeping the most recent, every time it writes one.
+///
+/// Several times [`MAX_RUN_LIMIT`] so pruning is never in tension with a
+/// legitimate "show me the last `MAX_RUN_LIMIT`" query.
+const RUNS_RETENTION_LIMIT: usize = MAX_RUN_LIMIT * 4;
+
+/// Persists `record` to both the database and the JSONL log, then prunes
+/// `runs` back down to [`RUNS_RETENTION_LIMIT`] rows if this write pushed it
+/// over (see [`RUNS_RETENTION_LIMIT`]'s docs).
 ///
 /// The database row is written first; on success the JSONL line is appended.
-/// Returns the record with its assigned [`RunRecord::id`] set.
+/// Returns the record with its assigned [`RunRecord::id`] set. The JSONL log
+/// itself is intentionally never pruned — it is an append-only audit trail,
+/// not something the app queries back.
 ///
 /// Errors:
-///     [`AxiomataError::Database`] if the row insert fails; [`AxiomataError::Io`]
-///     if the log file cannot be appended to (the database row is already
-///     committed in that case).
-pub fn record_run(db: &Connection, mut record: RunRecord) -> Result<RunRecord, AxiomataError> {
+///     [`AxiomataError::Database`] if the row insert or the prune fails;
+///     [`AxiomataError::Io`] if the log file cannot be appended to (the
+///     database row is already committed in that case).
+pub fn record_run(db: &Connection, record: RunRecord) -> Result<RunRecord, AxiomataError> {
+    record_run_with_retention(db, record, RUNS_RETENTION_LIMIT)
+}
+
+/// [`record_run`] with a caller-chosen retention limit — used by tests to
+/// exercise the auto-prune behaviour without needing
+/// [`RUNS_RETENTION_LIMIT`] (2000) real rows.
+fn record_run_with_retention(
+    db: &Connection,
+    mut record: RunRecord,
+    retention_limit: usize,
+) -> Result<RunRecord, AxiomataError> {
     let id = insert_row(db, &record)?;
     record.id = Some(id);
+    prune_runs(db, retention_limit)?;
     append_jsonl(&record)?;
     Ok(record)
+}
+
+/// Deletes every `runs` row except the `keep` most recent (by `started_at`,
+/// ties broken by `id`). A no-op once the table is at or under `keep` rows —
+/// the common case once retention has kicked in once.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the delete fails.
+fn prune_runs(db: &Connection, keep: usize) -> Result<(), AxiomataError> {
+    db.execute(
+        "DELETE FROM runs WHERE id NOT IN \
+         (SELECT id FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1)",
+        [keep as i64],
+    )?;
+    Ok(())
 }
 
 /// Inserts one row into `runs` and returns its id.
@@ -245,6 +286,76 @@ mod tests {
         assert_eq!(full.skill_name, "triage");
         assert_eq!(full.stdout, "done");
         assert!(get_run(&db, 999).unwrap().is_none());
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn prune_runs_keeps_only_the_most_recent_rows() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-prune-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+        for i in 0..10 {
+            insert_row(&db, &sample_record(&format!("run-{i}"))).unwrap();
+        }
+
+        // A `keep` at or above the row count is a no-op.
+        prune_runs(&db, 10).unwrap();
+        assert_eq!(list_runs(&db, 100).unwrap().len(), 10);
+
+        // Pruning to 3 keeps the 3 most recently inserted (highest ids, since
+        // `sample_record` gives them all the same `started_at`).
+        prune_runs(&db, 3).unwrap();
+        let remaining = list_runs(&db, 100).unwrap();
+        assert_eq!(remaining.len(), 3);
+        assert_eq!(
+            remaining
+                .iter()
+                .map(|r| r.skill_name.as_str())
+                .collect::<Vec<_>>(),
+            ["run-9", "run-8", "run-7"]
+        );
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn record_run_prunes_automatically_once_over_the_retention_limit() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-auto-prune-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+        // A tiny retention limit so the test doesn't need
+        // `RUNS_RETENTION_LIMIT` (2000) real rows to see it kick in.
+        for i in 0..5 {
+            record_run_with_retention(&db, sample_record(&format!("run-{i}")), 3).unwrap();
+        }
+        let remaining = list_runs(&db, 100).unwrap();
+        assert_eq!(remaining.len(), 3, "record_run should prune on every write");
+        assert_eq!(
+            remaining
+                .iter()
+                .map(|r| r.skill_name.as_str())
+                .collect::<Vec<_>>(),
+            ["run-4", "run-3", "run-2"]
+        );
 
         unsafe {
             env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
