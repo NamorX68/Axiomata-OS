@@ -30,7 +30,7 @@
     type Grouping,
   } from "../graph/model";
   import Legend from "../graph/Legend.svelte";
-  import { GraphRenderer } from "../graph/render";
+  import { GraphRenderer, type RenderMode } from "../graph/render";
 
   let {
     open = $bindable(false),
@@ -62,6 +62,10 @@
   // svelte-ignore state_referenced_locally
   let query = $state(initialQuery);
   let layout = $state<LayoutKind>(prefs.layout === "circle" || prefs.layout === "hex" ? prefs.layout : "rings");
+  // "circle" collapses onto the "rings" renderer (same dots, different
+  // coordinates) — the one place that mapping is written, so the mount-time
+  // renderer options and the reactive `$effect` below can't drift apart.
+  const renderMode = $derived<RenderMode>(layout === "hex" ? "hex" : "rings");
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let spin = $state(typeof prefs.spin === "number" ? prefs.spin : 0.02);
   let fileNames = $state(prefs.fileNames === true);
@@ -336,8 +340,7 @@
   }
 
   $effect(() => {
-    const mode = layout === "hex" ? "hex" : "rings";
-    if (renderer) renderer.options = { ...renderer.options, spin, fileLabels: fileNames, mode };
+    if (renderer) renderer.options = { ...renderer.options, spin, fileLabels: fileNames, mode: renderMode };
   });
   // Remember the view preferences in dashboard.json (settings.secondBrain).
   let prefsReady = false;
@@ -422,7 +425,7 @@
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { spin, labels: true, fileLabels: fileNames, fit: 0.44, mode: layout === "hex" ? "hex" : "rings" };
+    renderer.options = { spin, labels: true, fileLabels: fileNames, fit: 0.44, mode: renderMode };
     renderer.resize();
     const ro = new ResizeObserver(() => renderer?.resize());
     ro.observe(canvas);

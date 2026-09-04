@@ -261,6 +261,15 @@ export class GraphRenderer {
     return Math.min(this.width, this.height) * this.options.fit * this.view.zoom;
   }
 
+  /** A file cell's px radius in Hex mode — 0 outside Hex mode, or before
+   *  `model.hexUnit` is known. The one place `model.hexUnit` (graph units)
+   *  becomes a screen size, so hit-testing, drawing and the pulse effect
+   *  can't drift out of sync with each other. */
+  private hexCellRadius(): number {
+    if (this.options.mode !== "hex" || !this.model?.hexUnit) return 0;
+    return this.model.hexUnit * this.radius();
+  }
+
   /** Graph units → canvas CSS px (includes spin, pan, zoom). */
   toScreen(n: { x: number; y: number }): { x: number; y: number } {
     const R = this.radius();
@@ -316,7 +325,7 @@ export class GraphRenderer {
     let bestD = Infinity;
     const orbit = this.options.mode === "orbit";
     const hex = this.options.mode === "hex";
-    const hexPx = hex && this.model.hexUnit ? this.model.hexUnit * this.radius() : 0;
+    const hexPx = this.hexCellRadius();
     for (const n of this.model.nodes) {
       if (orbit && n.kind === "area") continue;
       const s = orbit && n.sx !== undefined && n.sy !== undefined ? { x: n.sx, y: n.sy } : this.toScreen(n);
@@ -433,7 +442,7 @@ export class GraphRenderer {
     // Nodes.
     const hl = this.highlight;
     const hex = this.options.mode === "hex";
-    const hexR = hex && model.hexUnit ? model.hexUnit * R : 0;
+    const hexR = this.hexCellRadius();
     for (const n of model.nodes) {
       const p = this.toScreen(n);
       const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
@@ -510,8 +519,8 @@ export class GraphRenderer {
     const p = this.toScreen(n);
     const elapsed = elapsedMs / 1000;
     const life = elapsedMs / GraphRenderer.PULSE_DURATION; // 0 → 1 over the whole pulse
-    const hex = this.options.mode === "hex" && this.model?.hexUnit;
-    const baseR = hex && n.kind === "file" ? this.model!.hexUnit! * this.radius() : Math.max(4, n.r * Math.sqrt(this.view.zoom));
+    const hexPx = this.hexCellRadius();
+    const baseR = hexPx > 0 && n.kind === "file" ? hexPx : Math.max(4, n.r * Math.sqrt(this.view.zoom));
 
     // Two expanding, fading rings, staggered like a double heartbeat.
     for (const phase of [0, 0.35]) {
