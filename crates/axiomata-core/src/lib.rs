@@ -15,6 +15,7 @@ pub mod error;
 pub mod graph;
 pub mod importer;
 pub mod memory;
+pub mod notes;
 pub mod paths;
 pub mod routines;
 pub mod skills;

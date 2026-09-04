@@ -59,7 +59,8 @@ impl SourceNote {
     }
 }
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> AxiomataError {
+/// Shared with [`crate::notes`].
+pub(crate) fn io(path: &Path) -> impl FnOnce(std::io::Error) -> AxiomataError {
     let path = path.to_path_buf();
     move |source| AxiomataError::Io { path, source }
 }
@@ -356,8 +357,9 @@ pub fn sanitize_area(name: &str) -> String {
     }
 }
 
-/// File-safe note name (keeps umlauts and spaces, strips separators).
-fn sanitize_file_name(name: &str) -> String {
+/// File-safe note name (keeps umlauts and spaces, strips separators). Shared
+/// with [`crate::notes`], which creates one note at a time instead of a batch.
+pub(crate) fn sanitize_file_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .filter(|c| !matches!(c, '/' | '\\' | ':' | '\0'))

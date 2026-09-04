@@ -16,6 +16,7 @@ pub fn run() {
             commands::save_dashboard_state,
             commands::read_workspace_file,
             commands::write_workspace_file,
+            commands::create_note,
             commands::assistant_send,
             commands::write_module_manifest,
             commands::poll_module_actions,
