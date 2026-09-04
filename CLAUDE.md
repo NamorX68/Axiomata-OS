@@ -244,7 +244,12 @@ size goes through a `--ax-*` token; no literals in components.
 - **Canvas physics** (`canvas/snap.ts`, pure + tested): tiles snap to `--ax-grid` (16 px) and
   magnetically to neighbour edges within 8 px (touch beats align, neighbour beats grid;
   `settings.snapEdges`), never overlap after a drop / resize (only the moved tile yields,
-  bounded push-out then grid spiral). Each tile carries an `anchor` (nearer edges + the
+  bounded push-out then grid spiral). While dragging / resizing, `alignmentGuides` also
+  emits a guide line wherever the moved tile shares an edge **or centre** with any other
+  tile within `ALIGN_PX` (3 px) — Figma-style, at any distance, purely visual (separate
+  from the 8 px magnet, which barely ever fires between far-apart tiles). `Tile.svelte`
+  `showGuides` merges the two sets; `Canvas.svelte` draws each as a full-span accent line
+  with a glow, above the dragged tile. Each tile carries an `anchor` (nearer edges + the
   canvas size at commit); the displayed position follows the anchored edge and is clamped
   into view (`displayRect`, never persisted) — so shrinking pulls tiles in, growing
   restores them, right/bottom tiles track their edge. Dot grid hidden unless

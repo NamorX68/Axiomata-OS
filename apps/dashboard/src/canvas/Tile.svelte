@@ -19,7 +19,15 @@
   import type { CanvasInstance } from "../core/types";
   import { draggable, type DragDelta } from "./drag";
   import { resizable, type ResizeDelta, type ResizeDir } from "./resize";
-  import { anchorFor, displayRect, magnetMove, magnetResize, resolveOverlap, type Rect } from "./snap";
+  import {
+    alignmentGuides,
+    anchorFor,
+    displayRect,
+    magnetMove,
+    magnetResize,
+    resolveOverlap,
+    type Rect,
+  } from "./snap";
 
   const FALLBACK_MIN = { w: 160, h: 100 };
 
@@ -54,13 +62,26 @@
   let drag = $state<DragDelta | null>(null);
   let resize = $state<ResizeDelta | null>(null);
 
+  /** Merge the magnet's own guides with the wider-reaching alignment hints,
+   *  deduped by axis + rounded position. */
+  function showGuides(rect: Rect, magnetGuides: { axis: "x" | "y"; at: number }[]) {
+    const seen = new Set<string>();
+    const merged = [...magnetGuides, ...alignmentGuides(rect, others())].filter((g) => {
+      const key = `${g.axis}:${Math.round(g.at)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    guides.set(merged);
+  }
+
   /** Snapped drag offset: the tile "sticks" to grid / neighbour edges live. */
   function snappedDrag(d: DragDelta): DragDelta {
     const base = shown(inst);
     const r = magnetMove({ x: base.x + d.dx, y: base.y + d.dy, w: base.w, h: base.h }, others(), {
       edges: get(snapEdges),
     });
-    guides.set(r.guides);
+    showGuides({ x: r.x, y: r.y, w: base.w, h: base.h }, r.guides);
     return { dx: r.x - base.x, dy: r.y - base.y };
   }
   function snappedResize(d: ResizeDelta, dir: ResizeDir): ResizeDelta {
@@ -68,7 +89,7 @@
     const r = magnetResize({ x: base.x, y: base.y, w: base.w + d.dw, h: base.h + d.dh }, others(), dir, min, {
       edges: get(snapEdges),
     });
-    guides.set(r.guides);
+    showGuides({ x: base.x, y: base.y, w: r.w, h: r.h }, r.guides);
     return { dw: r.w - base.w, dh: r.h - base.h };
   }
 
