@@ -578,13 +578,16 @@ async fn routines_cmd(core: &AxiomataCore, action: RoutineAction) -> Result<()> 
     }
 }
 
-/// Prints one line per routine, soonest next-fire first.
+/// Prints one line per routine, soonest next-fire first, followed by a
+/// warning line for each row that's too corrupted to list normally (see
+/// `routines::store::list_corrupted`) rather than letting it vanish silently.
 fn routines_list(core: &AxiomataCore) -> Result<()> {
     let db = core.db.lock().expect("database mutex is poisoned");
     let routines = routines::store::list(&db).context("failed to read routines")?;
+    let corrupted = routines::store::list_corrupted(&db).context("failed to read routines")?;
+
     if routines.is_empty() {
         println!("No routines defined.");
-        return Ok(());
     }
     for routine in routines {
         let (kind, value) = routine.target.to_columns();
@@ -598,6 +601,13 @@ fn routines_list(core: &AxiomataCore) -> Result<()> {
                 .unwrap_or_else(|| "—".to_owned()),
             name = routine.name,
             cron = routine.cron_expr,
+        );
+    }
+    for routine in corrupted {
+        println!(
+            "⚠ #{id} is corrupted: {reason}",
+            id = routine.id,
+            reason = routine.reason
         );
     }
     Ok(())

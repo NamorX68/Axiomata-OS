@@ -154,19 +154,42 @@ fn validate_new(new: &NewRoutine) -> Result<(), AxiomataError> {
 
 /// Returns every routine, soonest `next_fire_at` first, routines with no next
 /// fire (disabled-and-stale, or a past pinned year) last, ties broken by name.
+///
+/// A row that fails to reconstruct (see [`CorruptRoutine`]) is skipped, not
+/// surfaced as an `Err` for the whole call — one corrupted row must not hide
+/// every other routine from `axiomata-cli routines list` / the Tauri
+/// `list_routines` command. Use [`list_corrupted`] to see what was skipped
+/// and why.
 pub fn list(db: &Connection) -> Result<Vec<Routine>, AxiomataError> {
-    let mut stmt = db.prepare(&format!(
-        "SELECT {COLUMNS} FROM routines \
-         ORDER BY next_fire_at IS NULL, next_fire_at ASC, name ASC"
-    ))?;
-    let rows = stmt.query_map([], row_to_raw_routine)?;
-    collect(rows)?
-        .into_iter()
-        .map(RawRoutine::into_routine)
-        .collect()
+    let raw = collect(
+        db.prepare(&format!(
+            "SELECT {COLUMNS} FROM routines \
+             ORDER BY next_fire_at IS NULL, next_fire_at ASC, name ASC"
+        ))?
+        .query_map([], row_to_raw_routine)?,
+    )?;
+    Ok(split_into_routines_and_corrupted(raw).0)
+}
+
+/// The [`list`] counterpart to [`crate::skills::registry::list_skipped_skills`]:
+/// every `routines` row that failed to reconstruct into a [`Routine`], and
+/// why. A row only ends up here via a hand-edit or a future schema/format
+/// change — there is no repair path yet beyond fixing or deleting the row
+/// directly in the database.
+pub fn list_corrupted(db: &Connection) -> Result<Vec<CorruptRoutine>, AxiomataError> {
+    let raw = collect(
+        db.prepare(&format!("SELECT {COLUMNS} FROM routines ORDER BY id"))?
+            .query_map([], row_to_raw_routine)?,
+    )?;
+    Ok(split_into_routines_and_corrupted(raw).1)
 }
 
 /// Fetches one routine by id, or `None` if there is no such row.
+///
+/// Unlike [`list`], a corrupted row *is* surfaced as `Err` here: the caller
+/// asked for this one specific routine by id, so silently returning `None`
+/// (indistinguishable from "no such routine") or an empty success would be
+/// actively misleading.
 pub fn get(db: &Connection, id: i64) -> Result<Option<Routine>, AxiomataError> {
     let mut stmt = db.prepare(&format!("SELECT {COLUMNS} FROM routines WHERE id = ?1"))?;
     match stmt.query_row([id], row_to_raw_routine) {
@@ -180,18 +203,22 @@ pub fn get(db: &Connection, id: i64) -> Result<Option<Routine>, AxiomataError> {
 /// soonest first.
 ///
 /// This is the scheduler's hot query: both the per-tick "what is due" check
-/// and the startup catch-up sweep use it.
+/// and the startup catch-up sweep use it. Like [`list`], a corrupted row is
+/// skipped rather than failing the call — the whole reason [`CorruptRoutine`]
+/// carries the row's own id rather than being a generic decode error is so
+/// this can happen without one bad row stalling every other due routine's
+/// scheduler tick forever (see the module doc's "at-most-once" guarantee,
+/// which is about firing, not discovery — this is what protects discovery).
 pub fn due_routines(db: &Connection, now: DateTime<Utc>) -> Result<Vec<Routine>, AxiomataError> {
-    let mut stmt = db.prepare(&format!(
-        "SELECT {COLUMNS} FROM routines \
-         WHERE enabled = 1 AND next_fire_at IS NOT NULL AND next_fire_at <= ?1 \
-         ORDER BY next_fire_at ASC"
-    ))?;
-    let rows = stmt.query_map([now.to_rfc3339()], row_to_raw_routine)?;
-    collect(rows)?
-        .into_iter()
-        .map(RawRoutine::into_routine)
-        .collect()
+    let raw = collect(
+        db.prepare(&format!(
+            "SELECT {COLUMNS} FROM routines \
+             WHERE enabled = 1 AND next_fire_at IS NOT NULL AND next_fire_at <= ?1 \
+             ORDER BY next_fire_at ASC"
+        ))?
+        .query_map([now.to_rfc3339()], row_to_raw_routine)?,
+    )?;
+    Ok(split_into_routines_and_corrupted(raw).0)
 }
 
 /// Enables or disables a routine.
@@ -468,6 +495,43 @@ impl RawRoutine {
             updated_at: self.updated_at,
         })
     }
+}
+
+/// A `routines` row [`list`] / [`due_routines`] could not reconstruct into a
+/// [`Routine`] — see [`AxiomataError::CorruptRoutineRow`]. Exposed via
+/// [`list_corrupted`] so a corrupted row stays discoverable and repairable
+/// instead of silently never being listed or scheduled again.
+#[derive(Debug, Clone)]
+pub struct CorruptRoutine {
+    pub id: i64,
+    pub reason: String,
+}
+
+/// Splits a batch of raw rows into the ones that reconstructed cleanly and
+/// the ones that didn't (logging each one), so [`list`] / [`due_routines`] /
+/// [`list_corrupted`] can share one pass over the query results instead of
+/// each re-deriving this split.
+fn split_into_routines_and_corrupted(raw: Vec<RawRoutine>) -> (Vec<Routine>, Vec<CorruptRoutine>) {
+    let mut routines = Vec::with_capacity(raw.len());
+    let mut corrupted = Vec::new();
+    for row in raw {
+        let id = row.id;
+        match row.into_routine() {
+            Ok(routine) => routines.push(routine),
+            Err(err) => {
+                // `into_routine` only ever returns `CorruptRoutineRow`, but
+                // match structurally rather than assume — a future variant
+                // it might grow into should still be reported, not panic.
+                let reason = match err {
+                    AxiomataError::CorruptRoutineRow { reason, .. } => reason,
+                    other => other.to_string(),
+                };
+                tracing::warn!(id, %reason, "skipping a corrupted routines row");
+                corrupted.push(CorruptRoutine { id, reason });
+            }
+        }
+    }
+    (routines, corrupted)
 }
 
 /// Maps a `routines` row (selected as [`COLUMNS`]) onto a [`RawRoutine`] —
@@ -869,6 +933,117 @@ mod tests {
             }
             other => panic!("expected CorruptRoutineRow, got {other:?}"),
         }
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn list_skips_a_corrupted_row_but_still_returns_the_healthy_ones() {
+        let (path, db) = temp_db();
+        let healthy = add(&db, new_routine("healthy")).unwrap();
+        let corrupted = add(&db, new_routine("gets-corrupted")).unwrap();
+        db.execute(
+            "UPDATE routines SET target_type = 'webhook' WHERE id = ?1",
+            [corrupted.id],
+        )
+        .unwrap();
+
+        // One corrupted row must not hide every other routine — `list`
+        // silently skips it (see `list_corrupted` for visibility into it)
+        // rather than failing the whole call or panicking.
+        let names: Vec<_> = list(&db).unwrap().into_iter().map(|r| r.name).collect();
+        assert_eq!(names, ["healthy"]);
+        assert!(get(&db, healthy.id).unwrap().is_some());
+
+        let skipped = list_corrupted(&db).unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].id, corrupted.id);
+        assert!(skipped[0].reason.contains("webhook"));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn due_routines_skips_a_corrupted_row_but_still_fires_the_healthy_ones() {
+        let (path, db) = temp_db();
+        let corrupted = add(&db, new_routine("due-but-corrupted")).unwrap();
+        let healthy = add(&db, new_routine("due-and-healthy")).unwrap();
+        let past = Utc::now() - chrono::Duration::minutes(5);
+        set_next_fire_at(&db, corrupted.id, Some(past)).unwrap();
+        set_next_fire_at(&db, healthy.id, Some(past)).unwrap();
+        db.execute(
+            "UPDATE routines SET target_type = 'webhook' WHERE id = ?1",
+            [corrupted.id],
+        )
+        .unwrap();
+
+        // The corrupted routine is due too, but must not stop the healthy
+        // one next to it from being returned — this is what protects
+        // `routines::scheduler::tick` from a single bad row stalling every
+        // other due routine forever.
+        let names: Vec<_> = due_routines(&db, Utc::now())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        assert_eq!(names, ["due-and-healthy"]);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn deleting_a_runs_row_nulls_the_routine_run_link_without_deleting_the_history_row() {
+        // Regression test for the retention design split across two tables:
+        // `prune_runs` (the global `runs` table) and `prune_routine_runs`
+        // (one routine's `routine_runs` history) each prune purely by count,
+        // with no awareness of the other table. That's only safe because the
+        // schema's `run_id INTEGER REFERENCES runs (id) ON DELETE SET NULL`
+        // (migration 0003) makes deleting a still-referenced `runs` row safe
+        // by construction: SQLite nulls the link rather than erroring or
+        // cascading the delete into `routine_runs`. This exercises that FK
+        // behaviour directly, independent of either prune function's own
+        // retention limit.
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("linked")).unwrap();
+
+        db.execute(
+            "INSERT INTO runs \
+             (skill_name, backend, status, exit_code, duration_ms, started_at, finished_at) \
+             VALUES ('example-skill', 'ollama', 'success', 0, 5, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let run_id = db.last_insert_rowid();
+
+        let fired_at = Utc::now();
+        record_run(
+            &db,
+            r.id,
+            NewRoutineRun {
+                run_id: Some(run_id),
+                scheduled_for: fired_at,
+                fired_at,
+                status: RoutineRunStatus::Success,
+                detail: None,
+            },
+        )
+        .unwrap();
+
+        // Simulate `skills::runlog::prune_runs` reclaiming this now-old row.
+        db.execute("DELETE FROM runs WHERE id = ?1", [run_id])
+            .unwrap();
+
+        let history = list_runs(&db, r.id, 10).unwrap();
+        assert_eq!(
+            history.len(),
+            1,
+            "the routine_runs row itself must survive the runs-table prune"
+        );
+        assert_eq!(
+            history[0].run_id, None,
+            "its link is nulled out, not left dangling"
+        );
 
         let _ = fs::remove_file(&path);
     }

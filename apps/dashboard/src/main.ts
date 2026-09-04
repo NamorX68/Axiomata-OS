@@ -1,5 +1,10 @@
 import { mount } from "svelte";
 
+// `tokens.css` must load before the per-theme files: its neutral `:root`
+// fallback and each theme's `[data-theme="…"]` block share the same
+// specificity (0,1,0) on purpose (see `themes/tokens.css`), so a tie between
+// them resolves by CSS source order, not selector strength. Reordering these
+// imports would make the fallback palette win over every theme.
 import "./themes/tokens.css";
 import "./themes/graphite.css";
 import "./themes/paper.css";

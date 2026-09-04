@@ -447,4 +447,51 @@ mod tests {
         assert!(RunStatus::from_db_str("pending", 4).is_err());
         assert!(RunStatus::from_db_str("", 4).is_err());
     }
+
+    #[test]
+    fn run_source_from_db_str_rejects_unknown_values() {
+        assert_eq!(
+            RunSource::from_db_str("manual", 8).unwrap(),
+            RunSource::Manual
+        );
+        assert_eq!(
+            RunSource::from_db_str("routine", 8).unwrap(),
+            RunSource::Routine
+        );
+        assert!(RunSource::from_db_str("scheduled", 8).is_err());
+        assert!(RunSource::from_db_str("", 8).is_err());
+    }
+
+    #[test]
+    fn a_corrupted_source_column_surfaces_as_an_error_not_a_panic_or_silent_default() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-corrupt-source-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+        // Only a hand-edit (or a future format change) could put an
+        // unrecognised value in this column — `record_run` only ever stores
+        // `RunSource::as_str()`'s own tokens.
+        db.execute(
+            "INSERT INTO runs \
+             (skill_name, backend, status, exit_code, duration_ms, \
+              started_at, finished_at, source) \
+             VALUES ('probe', 'ollama', 'success', 0, 5, \
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'scheduled')",
+            [],
+        )
+        .unwrap();
+
+        assert!(list_runs(&db, 10).is_err());
+        assert!(get_run(&db, 1).is_err());
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
 }

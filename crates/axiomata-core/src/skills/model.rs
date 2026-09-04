@@ -30,6 +30,17 @@ impl RunStatus {
     /// Parses the database string form, erroring on any unexpected value rather
     /// than silently coercing it (schema drift / a future third status should
     /// surface, not be swallowed).
+    ///
+    /// Returns a plain `rusqlite::Result` rather than an id-aware
+    /// `AxiomataError` variant (contrast `routines::model::RoutineTarget::
+    /// from_columns` / `RoutineRunStatus::from_db_str`, which return
+    /// `Result<_, String>` so their caller can build
+    /// `AxiomataError::CorruptRoutineRow { id, .. }`): a `routines` row with
+    /// no valid schedule or target is unfireable and worth disabling or
+    /// flagging by id, so that machinery earns its keep there. A `runs` row
+    /// with a bad `status` has no equivalent recovery action — it's already
+    /// a finished, immutable history entry — so a generic decode error here
+    /// is sufficient and there is no id-aware variant to build.
     pub fn from_db_str(raw: &str, column: usize) -> rusqlite::Result<Self> {
         match raw {
             "success" => Ok(Self::Success),

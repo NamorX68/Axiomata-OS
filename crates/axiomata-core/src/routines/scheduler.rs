@@ -20,6 +20,17 @@
 //! app was off when it was due) is rolled forward and gets a `Missed` history
 //! row — it does **not** fire. So a restart can neither double-fire a routine
 //! nor leave one stuck in the past.
+//!
+//! A *graceful* shutdown ([`SchedulerHandle::shutdown`]) can now also drop a
+//! firing mid-flight, not just a crash or kill: `serve_with_interval` races
+//! the stop signal against an in-flight [`tick`] itself (not just the wait
+//! between ticks), so a stop requested while routines are firing ends the
+//! loop right away rather than waiting for the whole pass to finish. That's
+//! still safe for the at-most-once guarantee above (the routine already
+//! advanced past its slot before its target ran), but it does mean an
+//! ordinary app quit can now — same as a crash always could — leave a
+//! `routine_runs` history row silently missing for whichever firing was still
+//! in flight, rather than that only being possible on a hard kill.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -299,6 +310,14 @@ impl SchedulerHandle {
     /// Vends a receiver watching this handle's stop signal. A `watch`
     /// channel supports any number of readers, so this may be called more
     /// than once — though today only one loop per handle ever subscribes.
+    ///
+    /// Must be called *before* [`shutdown`](Self::shutdown) for the returned
+    /// receiver to ever see it: a `watch::Receiver`'s `changed()` only fires
+    /// on a transition *after* it starts watching, not on the value it was
+    /// already at when created. Every real caller here satisfies this by
+    /// construction (`subscribe` always runs before the loop it feeds is
+    /// even spawned), but it's a sequencing contract worth stating rather
+    /// than leaving implicit.
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
         self.stop.subscribe()
     }
@@ -683,6 +702,27 @@ mod tests {
         assert!(history[0].run_id.is_none());
         // Nothing executed.
         assert!(runlog::list_runs(&fx.conn(), 10).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn subscribe_may_be_called_more_than_once_with_each_reader_seeing_the_stop() {
+        // Exercises `SchedulerHandle::subscribe`'s doc claim directly: a
+        // `watch` channel supports any number of independent readers, so two
+        // subscribers taken before a single `shutdown()` must each observe
+        // it on their own, without one reader's `changed()` consuming the
+        // signal for the other.
+        let handle = SchedulerHandle::new();
+        let mut first = handle.subscribe();
+        let mut second = handle.subscribe();
+        assert!(!*first.borrow());
+        assert!(!*second.borrow());
+
+        handle.shutdown();
+
+        first.changed().await.unwrap();
+        assert!(*first.borrow());
+        second.changed().await.unwrap();
+        assert!(*second.borrow());
     }
 
     #[tokio::test]

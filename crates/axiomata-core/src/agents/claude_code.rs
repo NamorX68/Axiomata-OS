@@ -89,6 +89,21 @@ const MAX_CONCURRENT_AGENT_RUNS: usize = 4;
 
 /// The semaphore [`MAX_CONCURRENT_AGENT_RUNS`] is enforced through, created
 /// once and shared for the life of the process.
+///
+/// A process-wide `static` rather than a field on `AxiomataCore` — unlike
+/// `CLAUDE_PATH` above (also process-wide, but caching an immutable fact:
+/// where the binary lives), this one holds contended, mutable-in-effect
+/// state. It's sound only because exactly one `AxiomataCore` is ever
+/// constructed per process today (the CLI is one-shot; the Tauri app is a
+/// single instance) — every real `spawn_and_collect` caller in the running
+/// app shares this one instance either way. The place this would bite: any
+/// test that spawns a *real* `claude` process shares this same 4-slot budget
+/// with every other test in the same binary running concurrently (`cargo
+/// test`'s default), and a hypothetical second `AxiomataCore` in one process
+/// (headless multi-tenant, say) would silently share it too. No current test
+/// does the former (see `agent_slots_caps_concurrent_permits`'s comment) and
+/// nothing in this codebase does the latter, but if either changes, this is
+/// the thing to revisit.
 static AGENT_SLOTS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
 
 fn agent_slots() -> &'static tokio::sync::Semaphore {
@@ -540,10 +555,13 @@ mod tests {
     }
 
     #[test]
-    fn agent_slots_caps_concurrent_permits() {
+    fn agent_slots_caps_concurrent_permits_and_blocks_once_exhausted() {
         // No test in this module spawns a real `claude` process (they all
         // exercise arg-building/parsing/path-resolution), so the shared
-        // process-wide semaphore is otherwise untouched here.
+        // process-wide semaphore is otherwise untouched here. Kept as one
+        // test (rather than split across two `#[test]` functions) so nothing
+        // else running in parallel can touch this same static in between the
+        // steps below.
         let sem = agent_slots();
         let starting = sem.available_permits();
         assert!(starting <= MAX_CONCURRENT_AGENT_RUNS);
@@ -551,6 +569,26 @@ mod tests {
         assert_eq!(sem.available_permits(), starting - 1);
         drop(permit);
         assert_eq!(sem.available_permits(), starting);
+
+        // Drain every permit currently available (not necessarily `starting`
+        // — a concurrently-running test elsewhere in this binary could have
+        // one checked out right now) so this part is self-contained: once
+        // exhausted, a further acquire must be refused outright, not queued
+        // and silently granted anyway.
+        let mut held = Vec::new();
+        while let Ok(permit) = sem.try_acquire() {
+            held.push(permit);
+        }
+        assert_eq!(sem.available_permits(), 0);
+        assert!(matches!(
+            sem.try_acquire(),
+            Err(tokio::sync::TryAcquireError::NoPermits)
+        ));
+
+        // Releasing exactly one permit is what actually unblocks the next
+        // caller — not merely a bookkeeping decrement.
+        held.pop();
+        assert!(sem.try_acquire().is_ok());
     }
 
     #[test]
