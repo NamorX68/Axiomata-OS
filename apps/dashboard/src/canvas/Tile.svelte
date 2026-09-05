@@ -413,6 +413,13 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
+    /* `.tile`'s `touch-action: none` (needed so drag/resize don't fight
+       native touch/trackpad gestures) otherwise also disables scroll
+       gestures for this whole subtree — a descendant has to explicitly
+       re-enable them for its own region. `pan-y` restores vertical
+       trackpad/wheel scrolling here without reopening the drag conflict
+       (no tile body scrolls horizontally). */
+    touch-action: pan-y;
   }
 
   .tile-unknown {
