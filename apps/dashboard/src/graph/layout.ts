@@ -10,7 +10,7 @@ import type { AreaSegment, GraphModel, GraphNode } from "./model";
 export const RING = {
   skills: 0.17,
   areas: 0.3,
-  filesInner: 0.36,
+  filesInner: 0.39,
   filesOuter: 0.84,
   routines: 0.95,
 } as const;
