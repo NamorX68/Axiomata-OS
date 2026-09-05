@@ -477,7 +477,7 @@ export function registerBuiltins(): void {
     actions: [
       {
         name: "refresh",
-        description: "Runs the mail-digest skill now and returns a summary of what it found. This is a real agent turn (not a skill parameter), so it costs real API time same as calendar/reminders' own refresh.",
+        description: "Runs the mail-digest skill now and returns a summary of what it found.",
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
           const run = await ctx.invoke<RunRecord>("run_skill", { name: MAIL_SKILL_NAME });

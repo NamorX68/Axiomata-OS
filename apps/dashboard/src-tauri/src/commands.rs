@@ -153,7 +153,9 @@ pub fn read_workspace_file(
 }
 
 /// Atomically writes a workspace file under the same guard as
-/// `read_workspace_file`. Creates the file, never directories.
+/// `read_workspace_file`. May create at most one new top-level directory as
+/// `rel`'s immediate parent (see `workspace::ensure_immediate_parent_dir`);
+/// never creates anything deeper.
 #[tauri::command]
 pub fn write_workspace_file(
     state: State<'_, CoreState>,

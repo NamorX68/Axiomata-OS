@@ -13,6 +13,7 @@
  */
 
 import type { RunSummary } from "./backend";
+import { cut } from "./markdown";
 import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 import { openStaged } from "./staging";
 
@@ -174,19 +175,13 @@ export async function saveTopics(invoke: Invoke, topics: string[]): Promise<void
 
 /** Word-boundary truncation for the tile's one-line summary preview — the
  *  full `summary` only shows after `openMailSummary` opens it in the file
- *  viewer. Same shape as `core/markdown.ts`'s private `cut`, duplicated
- *  rather than exported for this one extra caller. */
+ *  viewer. Reuses `core/markdown.ts`'s `cut` (an architecture review flagged
+ *  the two as duplicate logic that should be extracted, same as
+ *  `skillRun.ts`'s "second use" convention). */
 export function summaryPreview(text: string, max = 90): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= max) return trimmed;
-  const slice = trimmed.slice(0, max);
-  const at = slice.lastIndexOf(" ");
-  return `${slice.slice(0, at > max * 0.6 ? at : max).trimEnd()}…`;
+  return cut(text.trim(), max);
 }
 
-/** A filesystem-safe slug from a subject line: lowercased, non-alphanumeric
- *  runs collapsed to one `-`, trimmed, capped so the whole filename stays
- *  reasonable even for a very long subject. */
 /** German umlauts/ß transliterated before the ASCII-only collapse below —
  *  otherwise "Rückmeldung" turns into the much less readable "r-ckmeldung"
  *  instead of "rueckmeldung". Subjects in this app are routinely German. */
@@ -197,6 +192,9 @@ const GERMAN_TRANSLITERATIONS: readonly [RegExp, string][] = [
   [/ß/g, "ss"],
 ];
 
+/** A filesystem-safe slug from a subject line: lowercased, non-alphanumeric
+ *  runs collapsed to one `-`, trimmed, capped so the whole filename stays
+ *  reasonable even for a very long subject. */
 function slugify(text: string, max = 60): string {
   let normalised = text.toLowerCase();
   for (const [pattern, replacement] of GERMAN_TRANSLITERATIONS) {
@@ -206,28 +204,56 @@ function slugify(text: string, max = 60): string {
   return (slug || "untitled").slice(0, max);
 }
 
+/**
+ * Cheap, dependency-free FNV-1a hash, hex-encoded. Used only to spread a
+ * mail id's entropy evenly across a short disambiguating suffix (see
+ * `mailNotePath`) — not for anything security-sensitive, so a non-crypto
+ * hash is the right tool.
+ */
+function fnv1aHex(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 /** Deterministic note path for one email — re-opening the same email's
  *  summary overwrites its own note rather than accumulating duplicates.
  *  The date prefix keeps notes sorted chronologically in a file browser;
- *  the id suffix (first 8 chars, cheaply unique enough here — collisions
- *  would only merge two different senders' same-day, same-subject emails'
- *  notes, a cosmetic annoyance, not a data-loss risk) disambiguates two
- *  same-day emails with the same subject. */
+ *  the id suffix disambiguates two same-day emails with the same subject.
+ *  Hashed rather than a prefix-slice of the raw id: an architecture review
+ *  found real mail-tool ids are often structured (`account::mailbox::...`)
+ *  with shared prefixes once separators are stripped, which would make a
+ *  prefix-slice collide across an entire account/mailbox — a hash spreads
+ *  entropy from the whole id instead of depending on where in it the
+ *  distinguishing bits happen to live. Collisions are still only a
+ *  cosmetic annoyance (two notes merge into one), never a data-loss risk. */
 export function mailNotePath(item: MailItem): string {
-  const day = (Date.parse(item.date) ? new Date(item.date) : new Date()).toISOString().slice(0, 10);
-  const idSuffix = item.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "0";
-  return `Mail/${day}-${slugify(item.subject)}-${idSuffix}.md`;
+  const day = (Number.isNaN(Date.parse(item.date)) ? new Date() : new Date(item.date)).toISOString().slice(0, 10);
+  return `Mail/${day}-${slugify(item.subject)}-${fnv1aHex(item.id).slice(0, 8)}.md`;
+}
+
+/** Collapses embedded newlines to spaces so a hostile subject/sender/topic
+ *  — real email header text, reachable by anyone who emails the owner —
+ *  can't inject extra Markdown block structure (a fake heading, a spoofed
+ *  "**Von:**" line) into the note body. Inline formatting (bold, a link)
+ *  can still come through; that's fine, DOMPurify's allow-list already
+ *  bounds what those can render as. Flagged by a security review. */
+function singleLine(text: string): string {
+  return text.replace(/[\r\n]+/g, " ").trim();
 }
 
 /** Writes `item`'s full summary as a workspace note and opens it in the
  *  file viewer as a slide-in panel — the tile itself only ever shows
  *  `summaryPreview`. */
 export async function openMailSummary(invoke: Invoke, item: MailItem): Promise<void> {
-  const reason = item.reason === "topic" && item.topic ? `Thema: ${item.topic}` : "Wichtig";
+  const reason = item.reason === "topic" && item.topic ? `Thema: ${singleLine(item.topic)}` : "Wichtig";
   const body = [
-    `# ${item.subject}`,
+    `# ${singleLine(item.subject)}`,
     "",
-    `**Von:** ${item.sender}`,
+    `**Von:** ${singleLine(item.sender)}`,
     `**Datum:** ${item.date}`,
     `**Grund:** ${reason}`,
     "",

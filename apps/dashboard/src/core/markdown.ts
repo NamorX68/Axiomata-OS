@@ -169,7 +169,10 @@ export function excerptHtml(source: string, max = 600): string {
   return cut(lines.join("\n"), max);
 }
 
-function cut(text: string, max: number): string {
+/** Word/line-boundary truncation shared by every plain-text preview in this
+ *  module — also used by `core/mail.ts`'s `summaryPreview` (a tile-preview
+ *  need, not a document-excerpt one, but the same truncation shape). */
+export function cut(text: string, max: number): string {
   if (text.length <= max) return text;
   const slice = text.slice(0, max);
   const at = Math.max(slice.lastIndexOf(" "), slice.lastIndexOf("\n"));

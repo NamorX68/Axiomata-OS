@@ -103,6 +103,16 @@ describe("mailNotePath", () => {
     expect(path).toContain("kaeufer");
     expect(path).not.toMatch(/[üöäß]/);
   });
+
+  it("still differs for structured ids sharing a long common prefix", () => {
+    // A prefix-slice of the raw id (the original implementation) would
+    // collapse these to the same suffix once separators are stripped —
+    // an architecture review found real mail-tool ids are commonly shaped
+    // like this. The hash-based suffix must not repeat the same mistake.
+    const a = { ...item, id: "account1::INBOX::<msg-0001@example.com>" };
+    const b = { ...item, id: "account1::INBOX::<msg-0002@example.com>" };
+    expect(mailNotePath(a)).not.toBe(mailNotePath(b));
+  });
 });
 
 describe("loadTopics / saveTopics", () => {
@@ -236,5 +246,29 @@ describe("openMailSummary", () => {
       summary: "s",
     });
     expect(writes[0]).toContain("**Grund:** Thema: Fotografie");
+  });
+
+  it("collapses embedded newlines in subject/sender/topic so hostile mail headers can't inject extra Markdown structure", async () => {
+    const writes: string[] = [];
+    const recording = (async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      if (cmd === "write_workspace_file") writes.push(String((args as { content: string }).content));
+      return undefined as T;
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    await openMailSummary(recording, {
+      id: "m-3",
+      sender: "Attacker\n\n**Von:** Chef (spoofed)",
+      subject: "Invoice\n# Fake urgent heading",
+      date: "2026-09-05T08:00:00Z",
+      reason: "topic",
+      topic: "Finance\n**Grund:** Wichtig (spoofed)",
+      summary: "s",
+    });
+    const written = writes[0];
+    expect(written).toContain("# Invoice # Fake urgent heading");
+    expect(written).toContain("**Von:** Attacker **Von:** Chef (spoofed)");
+    expect(written).toContain("**Grund:** Thema: Finance **Grund:** Wichtig (spoofed)");
+    // Exactly one real "**Von:**" line — the spoofed one stayed inline, not
+    // on its own line the way a genuine field would render.
+    expect(written.split("\n").filter((line) => line.startsWith("**Von:**"))).toHaveLength(1);
   });
 });

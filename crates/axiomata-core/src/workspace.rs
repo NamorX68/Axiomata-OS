@@ -90,6 +90,15 @@ fn validate_components(rel_path: &Path) -> Result<(), AxiomataError> {
 /// would take more than one new directory) is left alone; the follow-up
 /// [`resolve`] call surfaces the real "no such file or directory" error
 /// rather than this function silently building a multi-level chain.
+///
+/// Returns `Err` if `rel` itself fails [`validate_components`] (an absolute
+/// path or a `..` component), if [`guarded_root`] can't resolve the
+/// workspace root, or — the only case expected in practice, since both of
+/// the above would also make the follow-up [`resolve`] call fail the same
+/// way — if the OS-level `create_dir` call itself fails (e.g. a permissions
+/// error). It never returns `Ok` for a `rel` this function declined to
+/// create a directory for; those cases fall through to `Ok(())` and rely on
+/// [`resolve`] to report the real problem.
 fn ensure_immediate_parent_dir(config: &Config, rel: &str) -> Result<(), AxiomataError> {
     let rel_path = Path::new(rel);
     validate_components(rel_path)?;
@@ -419,6 +428,68 @@ mod tests {
             AxiomataError::Io { .. }
         ));
         assert!(!root.join("Brand").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ensure_immediate_parent_dir_is_a_no_op_for_a_bare_top_level_filename() {
+        let (root, config) = workspace();
+
+        // "root.md" has no subdirectory component at all -- this exercises
+        // `ensure_immediate_parent_dir`'s early `rel_path.parent().filter(...)`
+        // return, not the "already exists" branch (covered by
+        // `writes_a_new_top_level_directory_but_not_a_nested_one`'s second
+        // write) or the "create it" branch.
+        write_file(&config, "root.md", "hello").unwrap();
+        assert_eq!(fs::read_to_string(root.join("root.md")).unwrap(), "hello");
+        assert!(fs::metadata(root.join("root.md")).unwrap().is_file());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn write_file_rejects_dotdot_and_absolute_paths_before_any_directory_creation() {
+        let (root, config) = workspace();
+
+        // Both of these would, if `validate_components` were skipped, name a
+        // single new top-level directory ("Escape") for `create_dir` to make.
+        // `ensure_immediate_parent_dir` must reject them itself, via its own
+        // `validate_components` call, *before* computing a parent path or
+        // touching the filesystem at all -- not merely rely on the later
+        // `resolve()` call inside `write_file` to catch it after the fact.
+        for rel in ["../Escape/pwned.md", "/etc/Escape/pwned.md"] {
+            let err = write_file(&config, rel, "x").unwrap_err();
+            assert!(
+                matches!(err, AxiomataError::InvalidWorkspacePath { .. }),
+                "{rel}: {err}"
+            );
+        }
+        assert!(!root.join("Escape").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn leaves_an_existing_plain_file_alone_when_it_occupies_the_parent_slot() {
+        let (root, config) = workspace();
+
+        // A plain file (not a directory, not a symlink) already sits at the
+        // name `write_file` would otherwise treat as "a new top-level
+        // directory to create". `ensure_immediate_parent_dir`'s own doc
+        // comment says a parent "already present as *anything*" is left
+        // alone; this is the non-symlink case of that (the symlink case is
+        // `refuses_to_create_a_top_level_directory_through_a_planted_symlink`
+        // below) -- the follow-up `resolve()` call is what actually surfaces
+        // the resulting error (a regular file can't have children).
+        fs::write(root.join("NotADir"), "just a file").unwrap();
+        let err = write_file(&config, "NotADir/inner.md", "x").unwrap_err();
+        assert!(matches!(err, AxiomataError::Io { .. }), "{err}");
+        assert_eq!(
+            fs::read_to_string(root.join("NotADir")).unwrap(),
+            "just a file"
+        );
 
         let _ = fs::remove_dir_all(root);
     }
