@@ -115,6 +115,17 @@
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-sm);
     padding: var(--ax-space-2);
+    /* This settings face lives on `.face.back` — permanently
+       `backface-visibility: hidden` inside `.tile-inner`'s permanent
+       `transform-style: preserve-3d` (the flip card). `<input>` fields on
+       the very same face (Routines' settings) type fine; this is the only
+       `<textarea>` behind a flipped settings face in the app, and it's the
+       one report of typing not registering at all — a guess, not a
+       confirmed fix, that this is the same category of WebKit 3-D-context
+       quirk as the tile-scroll bug, this time specific to `<textarea>`.
+       Promoting it onto its own compositing layer is the same move that
+       didn't fix the scroll bug, but is cheap enough to try here too. */
+    transform: translateZ(0);
   }
   .row {
     display: flex;
