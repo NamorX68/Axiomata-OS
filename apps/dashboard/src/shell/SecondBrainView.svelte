@@ -138,7 +138,7 @@
   });
 
   function pickResult(r: Result) {
-    select(r.node, true);
+    goTo(r.node);
     resultsOpen = false;
   }
   function onSearchKey(e: KeyboardEvent) {
@@ -247,6 +247,20 @@
       renderer.selected = node;
       if (node && fly) renderer.centerOn(node);
     }
+  }
+
+  /** Selects and animates to `node` — the "click a node reference from
+   *  somewhere else in the UI" action (a search result, a file in an
+   *  area's list, a linked-note chip). Unlike `select(node, true)`'s
+   *  instant `centerOn` (reserved for the view's own initial focus-on-
+   *  open/navigate, where an animation would be a surprise nobody asked
+   *  for), this is a navigation the owner just explicitly triggered, so it
+   *  gets the same eased pan/zoom + landing pulse as the "Fly to" button —
+   *  and, since `select` always sets `renderer.selected` first, the same
+   *  highlight ring a direct canvas click gets too. */
+  function goTo(node: GraphNode) {
+    select(node);
+    renderer?.flyTo(node);
   }
 
   function flyTo(node: GraphNode) {
@@ -563,7 +577,7 @@
         <div class="eyebrow">
           <span class="tag kind">{selected.kind}</span>
           {#if selected.area && selected.kind !== "area"}
-            <button type="button" class="tag area" style:--chip={selected.color} onclick={() => areaNode && select(areaNode, true)}>{selected.area}</button>
+            <button type="button" class="tag area" style:--chip={selected.color} onclick={() => areaNode && goTo(areaNode)}>{selected.area}</button>
           {/if}
         </div>
         <h2>{selected.label}</h2>
@@ -614,7 +628,7 @@
             <ul class="links">
               {#each nodes as f (f.id)}
                 <li>
-                  <button type="button" class="link" onclick={() => select(f, true)}>
+                  <button type="button" class="link" onclick={() => goTo(f)}>
                     <span class="dot" style:background={f.color}></span>
                     <span class="txt">{f.label}</span>
                   </button>
@@ -650,14 +664,14 @@
         {#if linksOut.length === 0}<p class="dim small">No links yet.</p>{/if}
         <ul class="links">
           {#each linksOut as l (l.node.id)}
-            <li><button type="button" class="link" onclick={() => select(l.node, true)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>
+            <li><button type="button" class="link" onclick={() => goTo(l.node)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>
           {/each}
         </ul>
         <h3>Linked from ({linksIn.length})</h3>
         {#if linksIn.length === 0}<p class="dim small">No links yet.</p>{/if}
         <ul class="links">
           {#each linksIn as l (l.node.id)}
-            <li><button type="button" class="link" onclick={() => select(l.node, true)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>
+            <li><button type="button" class="link" onclick={() => goTo(l.node)}><span class="dot" style:background={l.node.color}></span><span class="txt">{l.node.label}</span></button></li>
           {/each}
         </ul>
       {/if}

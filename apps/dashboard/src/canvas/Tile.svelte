@@ -418,8 +418,24 @@
        gestures for this whole subtree — a descendant has to explicitly
        re-enable them for its own region. `pan-y` restores vertical
        trackpad/wheel scrolling here without reopening the drag conflict
-       (no tile body scrolls horizontally). */
+       (no tile body scrolls horizontally). This alone turned out not to be
+       enough in the real Tauri app (WKWebView): macOS trackpad scrolling is
+       delivered as native `wheel` events, not touch/pointer gestures, so
+       `touch-action` has no effect on it there — which is also why this
+       never reproduced against the dev-mock in Chromium. */
     touch-action: pan-y;
+    /* `.tile-inner`'s permanent `transform-style: preserve-3d` (needed for
+       the flip card) puts every tile body inside a 3-D rendering context at
+       all times, not just while flipping. WebKit has a known class of bugs
+       where a scrollable descendant of a `preserve-3d` ancestor stops
+       receiving wheel-driven scroll (arrow-key scroll, which doesn't go
+       through wheel/hit-testing at all, keeps working) — Chromium's
+       compositor doesn't have this problem, which is why agent-browser
+       testing against the dev-mock never caught it. Promoting this element
+       onto its own compositing layer isolates it from the parent's 3-D
+       flattening and is the standard fix. */
+    transform: translateZ(0);
+    -webkit-overflow-scrolling: touch;
   }
 
   .tile-unknown {

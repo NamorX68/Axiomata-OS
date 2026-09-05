@@ -10,10 +10,19 @@ import type { AreaSegment, GraphModel, GraphNode } from "./model";
 export const RING = {
   skills: 0.17,
   areas: 0.3,
-  filesInner: 0.4,
+  filesInner: 0.32,
   filesOuter: 0.84,
   routines: 0.95,
 } as const;
+
+/** Hex's own file-band inner radius, deliberately independent of
+ *  `RING.filesInner` (Rings/Circle only) rather than derived from it —
+ *  owner feedback was that Rings/Circle's gap to the hub cluster was too
+ *  large (fixed by shrinking `RING.filesInner` above) while Hex's existing
+ *  gap already looked right, so the two must not move together. This is
+ *  the same absolute radius Hex used before that change (was
+ *  `RING.filesInner + 0.32` back when `RING.filesInner` was `0.4`). */
+const HEX_FILES_INNER = 0.72;
 
 /** Arc spacing between file dots in graph units (at radius r the dot
  *  spacing along the arc is this). */
@@ -92,7 +101,11 @@ export function applyLayout(model: GraphModel, kind: LayoutKind): void {
 export function layoutCircle(model: GraphModel): void {
   layoutRings(model);
   const files = model.nodes.filter((n) => n.kind === "file");
-  const radius = (RING.filesInner + RING.filesOuter) / 2 + 0.1;
+  // Anchored near the inner edge of the file band, not its midpoint — the
+  // midpoint (close to `filesOuter`) left a wide, visually empty annulus
+  // between the hub/skill cluster and the file ring, which owner feedback
+  // flagged as too large a gap.
+  const radius = RING.filesInner + 0.15;
   for (const seg of model.areas) {
     const mine = files
       .filter((n) => n.area === seg.name)
@@ -225,12 +238,12 @@ interface HexCell {
  *  of area (3√3/2)u², cover roughly the annulus Rings uses for files (with
  *  a little slack so the outermost ring isn't razor-tight against
  *  neighbours) — plus the ring-spiral index `kStart` to start generating
- *  cells from. The mosaic starts a bit further out than Rings' dots do
- *  (`RING.filesInner + 0.32`, not `RING.filesInner`) — otherwise the
- *  innermost cells crowd right up against the skill/routine/area icons and
- *  make them hard to pick out. */
+ *  cells from. The mosaic starts further out than Rings' dots do
+ *  (`HEX_FILES_INNER`, not `RING.filesInner`) — otherwise the innermost
+ *  cells crowd right up against the skill/routine/area icons and make them
+ *  hard to pick out. */
 function solveHexUnit(fileCount: number): { u: number; kStart: number } {
-  const innerR = RING.filesInner + 0.32;
+  const innerR = HEX_FILES_INNER;
   const outerR = RING.filesOuter;
   const slack = 1.15;
   const fieldArea = Math.PI * (outerR * outerR - innerR * innerR);
