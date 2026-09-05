@@ -83,6 +83,7 @@ const skills: Skill[] = [
   { name: "newsletter", description: "Summarise the week into a newsletter.", backend: "ollama" },
   { name: "calendar-digest", description: "Reads upcoming calendar events via whichever calendar MCP tool is available.", backend: "claude-code" },
   { name: "reminders-digest", description: "Reads Apple Reminders lists and open tasks via whichever reminders MCP tool is available.", backend: "claude-code" },
+  { name: "mail-digest", description: "Reads recent mail via whichever mail MCP tool is available, picks out important and topic-matched messages, and summarises each.", backend: "claude-code" },
 ];
 
 /** Fixture digest, same shape `calendar-digest`'s SOP produces — invented
@@ -108,7 +109,55 @@ const REMINDERS_DIGEST_JSON = JSON.stringify({
   ],
 });
 
+/** Fixture digest, same shape `mail-digest`'s SOP produces — invented mail,
+ *  not the owner's real inbox. */
+const MAIL_DIGEST_JSON = JSON.stringify({
+  emails: [
+    {
+      id: "mock-mail-1",
+      sender: "Chef",
+      subject: "Bitte um Rückmeldung: Budget Q4",
+      date: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      reason: "important",
+      topic: null,
+      summary: "Braucht bis Freitag eine Entscheidung zum Q4-Budget, sonst verschiebt sich die Planung um eine Woche.",
+    },
+    {
+      id: "mock-mail-2",
+      sender: "Foto-Newsletter",
+      subject: "Neue Kamera-Tests: Drei Vollformatkameras im Vergleich",
+      date: new Date(Date.now() - 20 * 3_600_000).toISOString(),
+      reason: "topic",
+      topic: "Fotografie",
+      summary: "Vergleich dreier aktueller Vollformatkameras, Testsieger ist laut Artikel die Sony A7 wegen Autofokus und Akkulaufzeit.",
+    },
+    {
+      id: "mock-mail-3",
+      sender: "Dev Weekly",
+      subject: "Was ist neu in Rust 1.90",
+      date: new Date(Date.now() - 30 * 3_600_000).toISOString(),
+      reason: "topic",
+      topic: "Development",
+      summary: "Überblick über die Neuerungen in Rust 1.90, unter anderem verbesserte Diagnosemeldungen und ein schnellerer Borrow-Checker.",
+    },
+  ],
+});
+
 let runs: RunRecord[] = [
+  {
+    id: 6,
+    skill_name: "mail-digest",
+    backend: "claude-code",
+    status: "success",
+    exit_code: 0,
+    duration_ms: 21400,
+    stdout: MAIL_DIGEST_JSON,
+    stderr: "",
+    error: null,
+    started_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 4 * 60_000 + 21400).toISOString(),
+    source: "manual",
+  },
   {
     id: 5,
     skill_name: "reminders-digest",
@@ -305,7 +354,14 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         status: "success",
         exit_code: 0,
         duration_ms: durationMs,
-        stdout: name === "calendar-digest" ? CALENDAR_DIGEST_JSON : name === "reminders-digest" ? REMINDERS_DIGEST_JSON : `Ran ${name}.`,
+        stdout:
+          name === "calendar-digest"
+            ? CALENDAR_DIGEST_JSON
+            : name === "reminders-digest"
+              ? REMINDERS_DIGEST_JSON
+              : name === "mail-digest"
+                ? MAIL_DIGEST_JSON
+                : `Ran ${name}.`,
         stderr: "",
         error: null,
         started_at: startedAt.toISOString(),

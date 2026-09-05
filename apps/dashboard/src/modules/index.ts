@@ -9,6 +9,7 @@
 import { registerModule } from "../core/registry";
 import type { RunRecord, WorkspaceFile } from "../core/backend";
 import { CALENDAR_SKILL_NAME, createCalendarEvent, deleteCalendarEvent, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
+import { loadLatestMailDigest, MAIL_SKILL_NAME, parseMailDigest } from "../core/mail";
 import { completeReminderTask, createReminderTask, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
 import type { ModuleContext } from "../core/types";
 import {
@@ -24,6 +25,8 @@ import Calendar from "./calendar.svelte";
 import CalendarSettings from "./calendar-settings.svelte";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
+import Mail from "./mail.svelte";
+import MailSettings from "./mail-settings.svelte";
 import MdFile from "./md-file.svelte";
 import MdFileSettings from "./md-file-settings.svelte";
 import MemoryStatus from "./memory-status.svelte";
@@ -457,6 +460,40 @@ export function registerBuiltins(): void {
           if (typeof id !== "string" || !id) return { ok: false, error: 'missing required "id" param' };
           await deleteReminderTask(ctx.invoke, id);
           return { ok: true };
+        },
+      },
+    ],
+  });
+
+  registerModule({
+    type: "mail",
+    title: "Mail",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='1.5' y='3' width='13' height='10' rx='1.5'/><path d='M2 4.5l6 4.5 6-4.5'/></svg>",
+    component: Mail,
+    settings: MailSettings,
+    defaultSize: { w: 340, h: 360 },
+    minSize: { w: 240, h: 160 },
+    singleton: true,
+    actions: [
+      {
+        name: "refresh",
+        description: "Runs the mail-digest skill now and returns a summary of what it found. This is a real agent turn (not a skill parameter), so it costs real API time same as calendar/reminders' own refresh.",
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: MAIL_SKILL_NAME });
+          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          const digest = parseMailDigest(run.stdout);
+          return { ok: true, emails: digest.emails.length };
+        },
+      },
+      {
+        name: "list",
+        description: "Returns the curated emails from the last mail-digest run (does not trigger a new run).",
+        params: { type: "object", properties: {} },
+        run: async (_params, ctx) => {
+          const result = await loadLatestMailDigest(ctx.invoke);
+          if (result.error) return { emails: [], error: result.error };
+          return { emails: result.digest.emails };
         },
       },
     ],

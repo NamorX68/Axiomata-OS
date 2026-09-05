@@ -8,7 +8,10 @@
 //! shares its content with a file that may live anywhere), and content is
 //! capped at [`MAX_FILE_BYTES`]. Writes are atomic through a temp file that is
 //! created with `O_EXCL` (a planted symlink at the temp path is never
-//! followed) and renamed into place; they never create directories.
+//! followed) and renamed into place. [`write_file`] will create *at most one*
+//! new top-level directory (see [`ensure_immediate_parent_dir`]) — anything
+//! deeper is still left alone, so a write can never conjure a multi-level
+//! chain of directories, symlinked or not.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -46,6 +49,72 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> AxiomataError {
     move |source| AxiomataError::Io { path, source }
 }
 
+/// Rejects an absolute path, a `..` component, or a Windows drive prefix.
+/// Shared by [`resolve`] and [`ensure_immediate_parent_dir`] — the latter
+/// runs *before* a parent directory necessarily exists, so it can't lean on
+/// `resolve`'s own canonicalisation to catch these first.
+fn validate_components(rel_path: &Path) -> Result<(), AxiomataError> {
+    for component in rel_path.components() {
+        match component {
+            Component::Normal(_) => {}
+            Component::CurDir => {}
+            Component::ParentDir => return Err(invalid(rel_path, "`..` is not allowed")),
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(invalid(rel_path, "path must be relative to the workspace"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// If `rel`'s immediate parent directory doesn't exist yet, creates *exactly
+/// that one* directory level — never more, and never through a symlink — so
+/// [`write_file`] can write into a brand-new top-level area (a connector
+/// module's own notes folder, say) without a separate "create this folder
+/// first" step.
+///
+/// Deliberately narrow: `resolve`'s own containment guard needs a directory
+/// to already exist before it can canonicalise and check it, so naively
+/// `create_dir_all`-ing an arbitrary `rel`'s parent chain would create (or
+/// walk through) directories *before* any of them have been proven safe —
+/// exactly the kind of symlinked-ancestor escape the rest of this module
+/// guards against. This function instead only ever creates a directory that
+/// is:
+/// - not already present as *anything* (checked via `symlink_metadata`,
+///   which does not follow a symlink to decide "present"), and
+/// - a single path segment directly under the workspace root, which
+///   [`guarded_root`] has already canonicalised — so there is no unproven
+///   intermediate segment to walk through in the first place.
+///
+/// A `rel` whose parent's *own* parent is also missing (i.e. creating it
+/// would take more than one new directory) is left alone; the follow-up
+/// [`resolve`] call surfaces the real "no such file or directory" error
+/// rather than this function silently building a multi-level chain.
+fn ensure_immediate_parent_dir(config: &Config, rel: &str) -> Result<(), AxiomataError> {
+    let rel_path = Path::new(rel);
+    validate_components(rel_path)?;
+
+    let Some(parent_rel) = rel_path.parent().filter(|p| !p.as_os_str().is_empty()) else {
+        return Ok(()); // `rel` has no subdirectory at all — nothing to ensure.
+    };
+    // A single path segment has an empty parent (`Path::new("Mail").parent()
+    // == Some(Path::new(""))`) — anything deeper is refused, per the doc
+    // comment above.
+    let is_single_segment = parent_rel
+        .parent()
+        .is_some_and(|gp| gp.as_os_str().is_empty());
+    if !is_single_segment {
+        return Ok(());
+    }
+
+    let root = guarded_root(config)?;
+    let parent_full = root.join(parent_rel);
+    if fs::symlink_metadata(&parent_full).is_ok() {
+        return Ok(()); // already exists as *something* — let `resolve` judge it.
+    }
+    fs::create_dir(&parent_full).map_err(io(&parent_full))
+}
+
 /// Resolves `rel` under the guarded workspace root.
 ///
 /// Returns the joined (not necessarily existing) path. The *parent* directory
@@ -57,16 +126,7 @@ pub fn resolve(config: &Config, rel: &str) -> Result<PathBuf, AxiomataError> {
     if rel.trim().is_empty() {
         return Err(invalid(rel_path, "empty path"));
     }
-    for component in rel_path.components() {
-        match component {
-            Component::Normal(_) => {}
-            Component::CurDir => {}
-            Component::ParentDir => return Err(invalid(rel_path, "`..` is not allowed")),
-            Component::RootDir | Component::Prefix(_) => {
-                return Err(invalid(rel_path, "path must be relative to the workspace"));
-            }
-        }
-    }
+    validate_components(rel_path)?;
 
     let root = guarded_root(config)?;
     let full = root.join(rel_path);
@@ -259,7 +319,10 @@ pub fn read_file(config: &Config, rel: &str) -> Result<WorkspaceFile, AxiomataEr
 }
 
 /// Atomically writes `content` to a workspace file, creating it if missing.
-/// The parent directory must already exist.
+/// The parent directory must already exist, with one exception: a missing
+/// parent that is itself a single new top-level directory is created (see
+/// [`ensure_immediate_parent_dir`]) — anything deeper still requires the
+/// parent to already exist.
 pub fn write_file(config: &Config, rel: &str, content: &str) -> Result<(), AxiomataError> {
     if content.len() as u64 > MAX_FILE_BYTES {
         return Err(invalid(
@@ -267,6 +330,7 @@ pub fn write_file(config: &Config, rel: &str, content: &str) -> Result<(), Axiom
             format!("content exceeds the {MAX_FILE_BYTES}-byte limit"),
         ));
     }
+    ensure_immediate_parent_dir(config, rel)?;
     let full = resolve(config, rel)?;
     let file_name = full
         .file_name()
@@ -334,6 +398,54 @@ mod tests {
     }
 
     #[test]
+    fn writes_a_new_top_level_directory_but_not_a_nested_one() {
+        let (root, config) = workspace();
+
+        // "Mail" doesn't exist yet, but is a single new directory directly
+        // under the (already-canonical) workspace root -- created.
+        write_file(&config, "Mail/topics.md", "Development\n").unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("Mail/topics.md")).unwrap(),
+            "Development\n"
+        );
+        // Writing a second file into the now-existing directory still works
+        // (the "already exists" branch of ensure_immediate_parent_dir).
+        write_file(&config, "Mail/other.md", "y").unwrap();
+        assert_eq!(fs::read_to_string(root.join("Mail/other.md")).unwrap(), "y");
+
+        // A parent missing two levels deep is not auto-created.
+        assert!(matches!(
+            write_file(&config, "Brand/New/deep.md", "z").unwrap_err(),
+            AxiomataError::Io { .. }
+        ));
+        assert!(!root.join("Brand").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn refuses_to_create_a_top_level_directory_through_a_planted_symlink() {
+        let (root, config) = workspace();
+        // A pre-planted symlink named "Escape" pointing outside the
+        // workspace root entirely.
+        let outside = unique_temp_dir("axiomata-test-workspace-outside");
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("Escape")).unwrap();
+
+        // `ensure_immediate_parent_dir` must not treat the symlink as "safe
+        // to write through" just because *something* exists at that name —
+        // `resolve`'s own containment check is what actually rejects this,
+        // by canonicalising the parent and finding it outside the root.
+        let err = write_file(&config, "Escape/pwned.md", "x").unwrap_err();
+        assert!(matches!(err, AxiomataError::InvalidWorkspacePath { .. }));
+        assert!(!outside.join("pwned.md").exists());
+
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
     fn refuses_escapes_absolute_paths_and_missing_parents() {
         let (root, config) = workspace();
         for rel in [
@@ -349,9 +461,11 @@ mod tests {
                 "{rel}: {err}"
             );
         }
-        // Missing parent directory: writes never create directories.
+        // A parent missing *more than one* level deep is still refused —
+        // only a single new top-level directory is ever auto-created (see
+        // `writes_a_new_top_level_directory_but_not_a_nested_one` below).
         assert!(matches!(
-            write_file(&config, "nope/new.md", "x").unwrap_err(),
+            write_file(&config, "nope/deeper/new.md", "x").unwrap_err(),
             AxiomataError::Io { .. }
         ));
         let _ = fs::remove_dir_all(root);
