@@ -2,9 +2,15 @@
   second-brain — the particle graph behind the tiles: the workspace as
   rings (skills inner, areas as coloured segments, routines outer, CLAUDE.md
   hub). Loads `get_workspace_graph` on mount and every REFRESH_MS, redraws
-  on theme change, spins slowly. Hover shows the node label; a click on a
-  node or the centre opens the full Second Brain view (bus
-  `open-second-brain`, step 4). Config: `spin`, `labels`.
+  on theme change, spins slowly. Hover shows the node label; a click on the
+  visible cloud (a node hit, or just within its disc radius — the point
+  cloud has real gaps between points) opens the full Second Brain view
+  (bus `open-second-brain`, step 4). This module's own wrapper div is
+  `inset: 0` (full-bleed behind every tile), so a click has to be checked
+  against the cloud's actual footprint explicitly — otherwise any click on
+  empty dashboard background would open Second Brain too (owner feedback:
+  "egal wo ich auf den Hintergrund klicke ich im Brain lande"). Config:
+  `spin`, `labels`.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -58,19 +64,33 @@
     }
   }
 
+  /** True once the pointer is over the visible cloud (an actual node hit,
+   *  or just within the disc — the fibonacci-sphere point cloud has real
+   *  gaps between points, so requiring an exact hit there would make most
+   *  of the cloud's own body feel unclickable) rather than the empty
+   *  background this module's `inset: 0` div otherwise covers full-bleed
+   *  behind every tile. Gates both the click-to-open behaviour and the
+   *  pointer cursor, so the affordance matches what's actually clickable. */
+  let withinCloud = $state(false);
+
   function onMove(e: MouseEvent) {
     if (!renderer) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    hover = renderer.hitTest(e.clientX - rect.left, e.clientY - rect.top);
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    hover = renderer.hitTest(x, y);
     renderer.hover = hover;
+    withinCloud = hover !== null || Math.hypot(x - rect.width / 2, y - rect.height / 2) <= discR;
   }
 
   function onLeave() {
     hover = null;
+    withinCloud = false;
     if (renderer) renderer.hover = null;
   }
 
   function open(node: GraphNode | null) {
+    if (!withinCloud) return;
     ctx.emit("open-second-brain", { focus: node?.id ?? null });
   }
 
@@ -115,6 +135,7 @@
 <div
   class="brain"
   class:hovering={hover !== null}
+  class:clickable={withinCloud}
   onmousemove={onMove}
   onmouseleave={onLeave}
   onclick={() => open(hover)}
@@ -132,9 +153,9 @@
   .brain {
     position: absolute;
     inset: 0;
-    cursor: pointer;
+    cursor: default;
   }
-  .brain.hovering {
+  .brain.clickable {
     cursor: pointer;
   }
   canvas {
