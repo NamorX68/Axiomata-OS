@@ -1,12 +1,81 @@
 /**
  * Markdown → sanitised HTML, shared by the md-file module and the chat panel.
- * `marked` (GFM) renders; DOMPurify scrubs to an allowlist — no raw HTML
+ * `marked` (GFM) renders — fenced code blocks go through `highlight.js` for
+ * syntax colouring first; DOMPurify scrubs the result to an allowlist (the
+ * `hljs-*` `<span>`s highlighting produces are plain elements + `class`, both
+ * already allowed, so no sanitiser change was needed for this). No raw HTML
  * passthrough, no inline event handlers, no `javascript:` URLs, no styles.
  * Everything is bundled, so the `script-src 'self'` CSP holds.
  */
 
 import DOMPurify from "dompurify";
+import hljs from "highlight.js/lib/core";
+import type { LanguageFn } from "highlight.js";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdownLang from "highlight.js/lib/languages/markdown";
+import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
+import sql from "highlight.js/lib/languages/sql";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 import { marked } from "marked";
+
+/** Maps every registered name — canonical or alias — to its canonical form,
+ *  so a code fence's `language-*` class is stable regardless of which one
+ *  the author typed (` ```js ` and ` ```javascript ` render identically). */
+const CANONICAL_LANGUAGE: Record<string, string> = {};
+
+/** Registers one language under `canonical` plus any `aliases`, and records
+ *  the canonical form for {@link CANONICAL_LANGUAGE}. `highlight.js/lib/core`
+ *  ships with no languages registered — only what's listed at the bottom of
+ *  this file is bundled, rather than the ~190-language full build. */
+function registerLanguage(canonical: string, definition: LanguageFn, aliases: string[] = []): void {
+  hljs.registerLanguage(canonical, definition);
+  CANONICAL_LANGUAGE[canonical] = canonical;
+  if (aliases.length > 0) {
+    hljs.registerAliases(aliases, { languageName: canonical });
+    for (const alias of aliases) CANONICAL_LANGUAGE[alias] = canonical;
+  }
+}
+
+// A curated set of languages likely to show up in personal notes / dev docs.
+registerLanguage("javascript", javascript, ["js", "jsx"]);
+registerLanguage("typescript", typescript, ["ts", "tsx"]);
+registerLanguage("python", python, ["py"]);
+registerLanguage("rust", rust, ["rs"]);
+registerLanguage("bash", bash, ["sh", "shell", "zsh"]);
+registerLanguage("json", json);
+registerLanguage("yaml", yaml, ["yml"]);
+registerLanguage("css", css);
+registerLanguage("xml", xml, ["html"]);
+registerLanguage("markdown", markdownLang, ["md"]);
+registerLanguage("sql", sql);
+
+/** Escapes text for safe placement inside HTML — used only for a code block
+ *  whose fence language isn't one `hljs` knows, since `hljs.highlight`
+ *  already returns escaped markup for the ones it does. */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+marked.use({
+  renderer: {
+    code({ text, lang }) {
+      const requested = lang?.trim().split(/\s+/, 1)[0]?.toLowerCase();
+      const canonical = requested ? CANONICAL_LANGUAGE[requested] : undefined;
+      const body = canonical ? hljs.highlight(text, { language: canonical }).value : escapeHtml(text);
+      const langClass = canonical ? ` language-${canonical}` : "";
+      return `<pre><code class="hljs${langClass}">${body}</code></pre>`;
+    },
+  },
+});
 
 marked.setOptions({ gfm: true, breaks: false, async: false });
 

@@ -189,6 +189,14 @@
   .md :global(a) {
     color: var(--ax-accent);
   }
+  .md :global(hr) {
+    margin: var(--ax-space-2) 0;
+    border: none;
+    border-top: 1px solid var(--ax-border);
+  }
+  .md :global(li::marker) {
+    color: var(--ax-accent);
+  }
 
   .thinking {
     padding: var(--ax-space-3);

@@ -1,0 +1,77 @@
+/*
+ * Syntax-highlight colours for `highlight.js`-tokenised code blocks, keyed to
+ * the `hljs-*` classes `core/markdown.ts`'s renderer produces. Global rather
+ * than scoped in a `.svelte` file's `<style>` on purpose: `renderMarkdown` is
+ * shared by the md-file module and the chat panel (see its own doc comment),
+ * so this is one contract with two consumers — a scoped copy in each would
+ * just be the same ~15 rules duplicated and free to drift apart. Every colour
+ * still comes from a `--ax-*` token, so it re-themes exactly like everything
+ * else.
+ */
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--ax-text-muted);
+  font-style: italic;
+}
+
+.hljs-string,
+.hljs-doctag,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--ax-success);
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link {
+  color: var(--ax-accent);
+  font-weight: 600;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--ax-warning);
+}
+
+.hljs-title,
+.hljs-name,
+.hljs-attribute,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--ax-accent-hover);
+}
+
+.hljs-type,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-class .hljs-title {
+  color: var(--ax-text);
+  font-weight: 600;
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-params {
+  color: var(--ax-text);
+}
+
+.hljs-meta {
+  color: var(--ax-text-muted);
+}
+
+.hljs-deletion {
+  color: var(--ax-danger);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}

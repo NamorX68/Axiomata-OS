@@ -12,6 +12,30 @@ describe("renderMarkdown", () => {
     expect(html).toContain('src="data:image/png;base64,iVBOR"');
   });
 
+  it("syntax-highlights a fenced code block in a known language", () => {
+    const html = renderMarkdown("```rust\nfn main() {}\n```\n");
+    expect(html).toContain('<pre><code class="hljs language-rust">');
+    expect(html).toContain('class="hljs-keyword"');
+    expect(html).toContain(">fn<");
+  });
+
+  it("falls back to plain escaped text for an unknown or missing fence language", () => {
+    const known = renderMarkdown("```made-up-lang\n<tag>\n```\n");
+    expect(known).toContain('<pre><code class="hljs">');
+    expect(known).toContain("&lt;tag&gt;");
+    expect(known).not.toContain("language-made-up-lang");
+
+    const bare = renderMarkdown("```\nplain text\n```\n");
+    expect(bare).toContain('<pre><code class="hljs">plain text</code></pre>');
+  });
+
+  it("resolves a common language alias to the same highlighting as its canonical name", () => {
+    const viaAlias = renderMarkdown("```js\nconst x = 1;\n```\n");
+    const canonical = renderMarkdown("```javascript\nconst x = 1;\n```\n");
+    expect(viaAlias).toBe(canonical);
+    expect(viaAlias).toContain("language-javascript");
+  });
+
   it("strips script, handlers, javascript: and data: hrefs, svg data images, styles", () => {
     const html = renderMarkdown(
       [

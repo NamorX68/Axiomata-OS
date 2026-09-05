@@ -12,6 +12,7 @@ import "./themes/steampunk.css";
 import "./themes/forest.css";
 import "./themes/ocean.css";
 import "./styles.css";
+import "./core/markdown-syntax.css";
 
 import App from "./App.svelte";
 import { startAgentBridge } from "./core/agent-bridge";
