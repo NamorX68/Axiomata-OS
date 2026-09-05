@@ -310,9 +310,28 @@
   }
   .rendered :global(h1) {
     font-size: var(--ax-font-size-xl);
+    padding-bottom: var(--ax-space-2);
+    border-bottom: 1px solid var(--ax-border);
   }
   .rendered :global(h2) {
     font-size: var(--ax-font-size-lg);
+  }
+  .rendered :global(hr) {
+    margin: var(--ax-space-3) 0;
+    border: none;
+    border-top: 1px solid var(--ax-border);
+  }
+  .rendered :global(kbd) {
+    font-family: var(--ax-font-mono);
+    font-size: 0.85em;
+    padding: 1px 5px;
+    border: 1px solid var(--ax-border-strong);
+    border-bottom-width: 2px;
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+  }
+  .rendered :global(li::marker) {
+    color: var(--ax-accent);
   }
   .rendered :global(p),
   .rendered :global(ul),

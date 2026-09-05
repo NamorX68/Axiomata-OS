@@ -281,15 +281,15 @@
   }
   /* Front: almost no chrome at rest — the module's content sits straight on
      the canvas, like the reference dashboard's edge panels. The only mark is
-     a faint hairline along the top and bottom edge (a discreet delimiter, no
-     side borders, no fill, no shadow). A faint fill appears on hover so you
-     can see what you are about to grab / resize, and the tile "materialises"
-     fully while it is being moved. */
+     a faint hairline along the bottom edge (a discreet delimiter, no top
+     border, no side borders, no fill, no shadow) — matching the reference,
+     where each panel closes with one rule rather than being boxed in. A
+     faint fill appears on hover so you can see what you are about to grab /
+     resize, and the tile "materialises" fully while it is being moved. */
   .face.front {
     background: transparent;
     box-shadow: none;
     border-radius: 0;
-    border-top: 2px solid var(--ax-border-strong);
     border-bottom: 2px solid var(--ax-border-strong);
   }
   .tile:hover .face.front {
@@ -338,8 +338,12 @@
     border-bottom: none;
   }
   .front-head .tile-title {
-    font-size: var(--ax-font-size-lg);
+    font-size: var(--ax-font-size-xl);
     color: var(--ax-text-muted);
+  }
+  .front-head .tile-icon {
+    width: 20px;
+    height: 20px;
   }
   .front-head .tile-btn {
     opacity: 0;
