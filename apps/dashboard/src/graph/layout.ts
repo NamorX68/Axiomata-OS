@@ -153,8 +153,7 @@ export function layoutRings(model: GraphModel): void {
       .sort((a, b) => a.label.localeCompare(b.label));
     const span = seg.end - seg.start;
     // First pass: how many arcs does this segment need at the natural
-    // spacing? Then spread those arcs evenly across the file band so a
-    // small vault still fills the ring area instead of huddling inside.
+    // spacing?
     const rows: GraphNode[][] = [];
     let radius: number = RING.filesInner;
     let i = 0;
@@ -164,12 +163,18 @@ export function layoutRings(model: GraphModel): void {
       i += perArc;
       radius = Math.min(RING.filesOuter, radius + RING_STEP);
     }
-    const naturalSpan = (rows.length - 1) * RING_STEP;
     const bandSpan = RING.filesOuter - RING.filesInner;
-    const stepR = rows.length > 1 ? Math.max(RING_STEP, bandSpan / (rows.length - 1)) : 0;
-    const startR = rows.length > 1 && naturalSpan < bandSpan ? RING.filesInner : RING.filesInner;
+    // Rows are spread a little past the natural minimum spacing so a vault
+    // needing just a couple of rows doesn't look huddled at the very inner
+    // edge — but capped at a modest multiple of RING_STEP. Spreading them
+    // across the *whole* band instead (bandSpan / (rows.length - 1)) reads
+    // fine with many rows (naturally close to that already), but for
+    // exactly two rows it flung the second one all the way to the outer
+    // edge, reading as an unrelated second cluster rather than more of the
+    // same folder's files (owner feedback, live testing).
+    const stepR = rows.length > 1 ? Math.min(RING_STEP * 3, Math.max(RING_STEP, bandSpan / (rows.length - 1))) : 0;
     rows.forEach((row, k) => {
-      const r = rows.length === 1 ? (RING.filesInner + RING.filesOuter) / 2 : Math.min(RING.filesOuter, startR + k * stepR);
+      const r = Math.min(RING.filesOuter, RING.filesInner + k * stepR);
       const step = row.length > 1 ? span / (row.length - 1) : 0;
       row.forEach((node, j) => {
         const a = row.length > 1 ? seg.start + j * step : (seg.start + seg.end) / 2;

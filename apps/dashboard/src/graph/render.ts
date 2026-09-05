@@ -299,6 +299,17 @@ export class GraphRenderer {
     this.view.y = dest.y;
   }
 
+  /** Whether `node` currently falls within the visible canvas, at least
+   *  `margin` px from the edge. Used to decide whether an external "jump
+   *  to this node" navigation needs to move the camera at all — with the
+   *  graph's whole extent normally fitted to the canvas already, the
+   *  answer is almost always yes; a bigger canvas full of far more notes
+   *  than currently fit is the one case a re-centre would actually help. */
+  isOnScreen(node: GraphNode, margin = 24): boolean {
+    const p = this.toScreen(node);
+    return p.x >= margin && p.x <= this.width - margin && p.y >= margin && p.y <= this.height - margin;
+  }
+
   /** The "Fly to" action: eases the pan/zoom to `node` over a beat instead
    *  of snapping, and marks it with a brief glow pulse so it's easy to spot
    *  the moment the view settles. */
@@ -342,7 +353,20 @@ export class GraphRenderer {
   frame(now: number): void {
     const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
     this.last = now;
-    this.angle = (this.angle + this.options.spin * dt) % TWO_PI;
+    // Ambient rotation pauses for as long as a node stays selected (its
+    // detail panel open), not just during the "fly to" tween/pulse.
+    // `centerOn`/`flyTo`'s destination is computed once, from the angle at
+    // that moment — if the angle kept advancing underneath it, the camera
+    // would end up next to the target instead of on it, drifting further
+    // away the longer the owner actually looks at the panel (which is
+    // usually well past the ~1s pulse). The node's own draw position
+    // already tracks the live angle correctly every frame (so its
+    // highlight ring was never actually missing, just off-centre after a
+    // moment) — pausing here fixes the camera side of that mismatch rather
+    // than chasing the node's math every frame.
+    if (!this.selected && !this.flyAnim && !this.pulse) {
+      this.angle = (this.angle + this.options.spin * dt) % TWO_PI;
+    }
     if (this.flyAnim) {
       const a = this.flyAnim;
       const raw = Math.min(1, (now - a.start) / a.duration);

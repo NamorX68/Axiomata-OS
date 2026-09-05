@@ -234,33 +234,67 @@
       rebuild();
       if (focus && model) {
         lastFocus = focus;
-        select(model.byId.get(focus) ?? null, true);
+        focusExternal(model.byId.get(focus) ?? null);
       }
     } catch (err) {
       error = String(err);
     }
   }
 
-  function select(node: GraphNode | null, fly = false) {
-    selected = node;
-    if (renderer) {
-      renderer.selected = node;
-      if (node && fly) renderer.centerOn(node);
+  /** Re-resolves `node` through the current `model.byId` before it's
+   *  handed to the renderer. Search results (`searchNodes`), an area's
+   *  file list, and linked-note chips are all `$derived` from `model`, but
+   *  a node captured from one of those lists can still end up a stale
+   *  object once `rebuild()` has since swapped in a new `model` (a fresh
+   *  `GraphModel` — new node objects, same ids) — e.g. from a `layout`/
+   *  `grouping` change in between. `renderer.selected` is matched against
+   *  the *current* model's nodes by reference (`n === this.selected`) every
+   *  frame, so a stale reference never matches anything and silently never
+   *  highlights, even though its `x`/`y` still look plausible. Confirmed
+   *  live: a search-result click's node failed this exact identity check
+   *  against `renderer.model.byId.get(node.id)`. Resolving by id here
+   *  fixes it regardless of why the two model instances diverged. */
+  function resolve(node: GraphNode): GraphNode {
+    return model?.byId.get(node.id) ?? node;
+  }
+
+  /** Selects `node` for an external "jump here" trigger — the dashboard's
+   *  Second Brain background widget, `/brain <path>`. Always marks it (the
+   *  same highlight ring any selection gets); only pans the camera if it
+   *  isn't already on screen. With the graph's extent normally fitted to
+   *  the canvas, that's the common case — an unconditional `centerOn` used
+   *  to re-centre (and rezoom-at-current-zoom) on every one of these,
+   *  which owner feedback flagged as a jarring shift for a node that was
+   *  already perfectly visible. A genuinely off-screen target (a much
+   *  bigger graph than fits today) still gets centred, just not zoomed. */
+  function focusExternal(node: GraphNode | null) {
+    const resolved = node ? resolve(node) : null;
+    select(resolved);
+    if (resolved && renderer && !renderer.isOnScreen(resolved)) {
+      renderer.centerOn(resolved);
     }
+  }
+
+  function select(node: GraphNode | null) {
+    const resolved = node ? resolve(node) : null;
+    selected = resolved;
+    if (renderer) renderer.selected = resolved;
   }
 
   /** Selects and animates to `node` — the "click a node reference from
    *  somewhere else in the UI" action (a search result, a file in an
-   *  area's list, a linked-note chip). Unlike `select(node, true)`'s
-   *  instant `centerOn` (reserved for the view's own initial focus-on-
-   *  open/navigate, where an animation would be a surprise nobody asked
-   *  for), this is a navigation the owner just explicitly triggered, so it
-   *  gets the same eased pan/zoom + landing pulse as the "Fly to" button —
-   *  and, since `select` always sets `renderer.selected` first, the same
-   *  highlight ring a direct canvas click gets too. */
+   *  area's list, a linked-note chip). Unlike `focusExternal`'s instant,
+   *  only-if-off-screen `centerOn` (for a jump *into* the view from outside
+   *  it, where an animation would be a surprise nobody asked for), this is
+   *  a navigation the owner just explicitly triggered from within an
+   *  already-open view, so it gets the same eased pan/zoom + landing pulse
+   *  as the "Fly to" button — and, since `select` always sets
+   *  `renderer.selected` first, the same highlight ring a direct canvas
+   *  click gets too. */
   function goTo(node: GraphNode) {
-    select(node);
-    renderer?.flyTo(node);
+    const resolved = resolve(node);
+    select(resolved);
+    renderer?.flyTo(resolved);
   }
 
   function flyTo(node: GraphNode) {
@@ -407,7 +441,7 @@
     // The regroup happens in the layout effect; select the folder node after it.
     queueMicrotask(() => {
       const n = model?.byId.get(`area:${folderOf}`);
-      if (n) select(n, true);
+      if (n) focusExternal(n);
     });
   }
   $effect(() => {
@@ -432,7 +466,7 @@
     if (target && target !== lastFocus && m) {
       lastFocus = target;
       const node = m.byId.get(target) ?? null;
-      if (node) select(node, true);
+      if (node) focusExternal(node);
     }
   });
 
