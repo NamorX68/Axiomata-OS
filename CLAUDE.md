@@ -1,29 +1,29 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this
+repository. It is intentionally short and pointer-heavy — it is resent in full on **every**
+turn in this repo, so it only carries build/run commands, a compact current-state summary,
+and the handful of non-obvious traps that would otherwise cost a whole debug session to
+rediscover. Everything else (design rationale, full module-by-module walkthrough, milestone
+history) lives in **[`docs/architecture.md`](docs/architecture.md)**, which is *not*
+auto-loaded — read it before starting substantial new work, and **update it** (not just the
+paragraph below) when a milestone or major feature lands. It went stale between M3 and M6
+for exactly the opposite reason once already; see its own maintenance note.
 
 ## Project status
 
 Axiomata-OS is an early-stage Rust + Tauri desktop app: a personal "Agentic OS" command
-centre / second brain, built around the **ARMS framework** (Applications, Routines,
-Memory, Skills — see `ARMS-Agentic-OS-Guide.pdf` for the original inspiration, though the
-actual design has since diverged from it in several places).
+centre / second brain, built around the **ARMS framework** (Applications, Routines, Memory,
+Skills — see `ARMS-Agentic-OS-Guide.pdf`, though the actual design has since diverged from it
+in several places; `docs/architecture.md` §1 explains how).
 
-Milestones **M0 (scaffold)**, **M1 (skills runner)**, **M2 (memory router)**,
-**M3 (routines scheduler)**, **M5 (module-canvas dashboard)** and **M6 (particle graph /
-Second Brain)** are complete: the
-`agents` enum, the single-location skills registry + runner + run log, the `memory` router
-(walker / renderer / `sync` / `status`), the `routines` module (cron `schedule` / `store` /
-a 30 s Tokio poll loop in `scheduler`), and the Svelte module canvas (free-form tiles with
-drag / resize / flip, layout persistence, four modules, an agentic chat bar, an
-agent-callable module bridge, themes + custom CSS — see "Dashboard (M5)" below), plus the
-workspace graph behind the tiles and its full-screen Second Brain view (see "Second Brain
-(M6)"). Still unimplemented: always-on/background scheduling (M4). The full architecture rationale and
-the milestone plans live in `~/.claude/plans/ich-m-chte-ein-agentic-shimmering-gadget.md`
-(M0–M4) and `~/.claude/plans/toasty-inventing-crayon.md` (M5; M6 was planned in
-conversation, see the owner's memory notes), outside this repo on the
-owner's machine — read them before starting new work here if available; this file covers
-what's needed to just build/run/navigate the repo as it stands.
+Milestones **M0–M3, M5, M6** are complete (scaffold, skills runner, memory router, routines
+scheduler w/ full CRUD, the Svelte module-canvas dashboard, the particle-graph Second Brain),
+plus ongoing post-M6 feature work (ToDo, Calendar/Reminders/Mail connector modules, themes,
+the `srcdoc` HTML viewer). Only **M4 (always-on/background scheduling)** is still
+unimplemented. Full detail: `docs/architecture.md` §5 (what exists) and §7 (milestone
+history). Detailed step-by-step milestone plans live outside this repo, in the owner's local
+Claude Code planning notes — read them before starting new M0–M6-scale work if available.
 
 ## Commands
 
@@ -43,8 +43,10 @@ cargo run -p axiomata-cli -- memory sync    # regenerate the workspace CLAUDE.md
 cargo run -p axiomata-cli -- memory status  # is the router stale?
 cargo run -p axiomata-cli -- routines list  # scheduled routines, soonest next-fire first
 cargo run -p axiomata-cli -- routines add --name daily --cron '0 0 9 * * *' --skill <name>
+cargo run -p axiomata-cli -- routines edit <id> --name … --cron … --skill|--prompt … [--backend …] [--disabled]
+cargo run -p axiomata-cli -- routines delete <id>
 cargo run -p axiomata-cli -- routines tick  # run one scheduler poll pass now (no 30s wait)
-cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct]  # one chat turn
+cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard
 cargo run -p axiomata-cli -- graph          # workspace graph summary (areas, links, skills, routines)
@@ -54,6 +56,7 @@ cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading 
 cd apps/dashboard && npm run check         # svelte-check + tsc (must be clean)
 cd apps/dashboard && npx vite --port 1420  # frontend alone in a browser: Tauri commands are
                                            # served by src/core/devmock.ts fixtures (DEV only)
+cd apps/dashboard && npx vitest run        # frontend unit tests (pure TS logic, e.g. core/*.ts)
 ```
 
 For browser-level checks (`agent-browser` against `vite --port 1420`) the mock backend
@@ -63,367 +66,61 @@ the agent) is verified by launching `cargo tauri dev` under a scratch `AXIOMATA_
 One-time setup for the Tauri app: `cargo install tauri-cli --version "^2" --locked`, and
 `cd apps/dashboard && npm install`.
 
-## Architecture
+## Architecture — traps worth knowing before you touch things
 
-Cargo workspace (edition 2024), members:
-- `crates/axiomata-core` — the actual "OS" engine. No Tauri or macOS dependency, so it can
-  in principle run headless elsewhere later. Modules: `paths`, `config`, `db`, `error`,
-  `agents`, `skills`, `memory`, `routines` — all implemented.
-- `crates/axiomata-macos` — boundary for future macOS-specific integration (e.g. Mail/
-  Calendar access). Untouched stub.
-- `crates/axiomata-cli` — thin binary that calls `axiomata_core::AxiomataCore::init()` and
-  prints status. Exists specifically so the core can be exercised end-to-end without
-  going through the GUI.
-- `apps/dashboard/src-tauri` — the Tauri shell (package name `Axiomata-OS` — chosen to
-  match exactly what shows in the macOS menu bar during `cargo tauri dev`, since a dev
-  run has no bundled `.app`/`Info.plist` for `productName` to apply to and the OS just
-  shows the compiled binary's own name; the `[lib]` target stays `dashboard_lib`,
-  independent of the package name), depends on
-  `axiomata-core` via a path dependency. Its `.setup()` hook (`src/lib.rs`) calls
-  `AxiomataCore::init()`, kicks off a best-effort memory sync, starts the routine scheduler
-  (`tauri::async_runtime::spawn(routines::serve(…))`, stop handle managed), and stores the
-  `AxiomataCore` as managed state for the Tauri commands. `AxiomataCore` holds `config`
-  unlocked and only `db` behind a `Mutex`, wrapped in an `Arc` so the scheduler task can
-  hold its own handle. Plugins: `tauri-plugin-opener` and `tauri-plugin-window-state`
-  (`StateFlags::SIZE | POSITION | MAXIMIZED` — the window remembers its geometry across
-  restarts in `window-state.json` in the OS app-config dir, *not* `~/.axiomata/`; the
-  `tauri.conf.json` `width`/`height` are only the first-run defaults). Both plugins'
-  `*:default` permission sets are in `capabilities/default.json`.
+Full walkthrough: `docs/architecture.md` §3–§5. The load-bearing facts that aren't obvious
+from the code itself:
 
-New shared dependencies go in root `Cargo.toml` under `[workspace.dependencies]` and are
-referenced per-crate as `some_crate.workspace = true` — don't pin versions ad hoc in an
-individual crate's `Cargo.toml`.
-
-**Runtime data lives outside the repo**, at `~/.axiomata/` (`config.toml`, `axiomata.db`
-SQLite, `logs/`, `skills/` — all skills live here), separate from the user's freely-chosen
-Second-Brain workspace folder (`config.workspace_root`, defaults to `~/Axiomata-Workspace`),
-which holds only M2 memory content. Override the app-data location with the `AXIOMATA_HOME`
-env var (tests do this to avoid touching the real directory).
-
-`AxiomataCore::init()` (`crates/axiomata-core/src/lib.rs`) is the single entry point both
-`axiomata-cli` and the Tauri `.setup()` hook call: loads-or-creates `config.toml`, creates
-`logs/`, `skills/`, and the workspace root if missing, seeds the bundled `example-skill`
-into `~/.axiomata/skills/` if absent (never overwrites), opens the SQLite DB and applies
-pending migrations (`crates/axiomata-core/src/db/migrations/*.sql`, listed in
-`db::MIGRATIONS`). Fully idempotent — safe to call on every app start.
-
-The `memory` router keeps a generated block between `<!-- AXIOMATA-ROUTER:START/END -->` in
-the workspace's `CLAUDE.md` files (root + one per top-level "area"), listing folders and
-files with an extracted (and sanitised) title. `memory::sync` regenerates them (deterministic
-— a no-op sync is byte-identical), stamping `~/.axiomata/memory-last-sync.json` (per-workspace
-timestamp map). `memory::status` reports staleness = a tracked file changed after that
-marker. `upsert_block` never touches bytes outside the line-wise markers, writes atomically,
-and refuses a symlinked target. `sync` refuses a home/`/` workspace root and reports per-file
-failures in `SyncReport.failed` instead of aborting. Startup sync runs on a background
-thread; no file watcher — the 3 s status poll re-walks.
-
-The `routines` module (M3) fires cron-scheduled routines — a named skill or a raw prompt —
-unattended. `routines::store` owns the `routines` / `routine_runs` tables (migration 0003);
-`next_fire_at` is persisted and authoritative (never recomputed from the cron on load).
-`routines::schedule` wraps the `cron` crate (**6–7 field**, seconds first: `0 */2 * * * *`).
-`routines::scheduler::tick` is one poll pass (fire due routines exactly once, no backlog
-replay); `serve` is the 30 s loop; `spawn` is the Tokio-context wrapper. A firing is
-recorded as a normal `runs` row plus a `routine_runs` row linking to it. On startup
-`reconcile_missed` rolls past-due routines forward with a `Missed` history row — **no**
-catch-up fire. Routines fire only while the app or `axiomata-cli routines tick` runs
-(always-on is M4). `RunRecord` / `RunStatus` / `RunSummary` now live in `skills::model`.
-
-Things worth knowing before touching `skills/` or `agents/`:
-- Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
-  (`skills::registry::list_skills` / `find_skill`). They are application-level, not per-vault;
-  there is no workspace-local skill location (dropped deliberately — see `docs/architecture.md`
-  §4 "Why one skill location"). Frontmatter is parsed with `gray_matter`; the filesystem is
-  the only source of truth (skills are never written to the DB). `list_skills` skips a bad
-  `SKILL.md`; `find_skill` surfaces its error. A skill whose SOP needs an MCP tool (a
-  "connector" skill — see `calendar-digest` below) must also set frontmatter
-  `allowed_tools:` (space/comma-separated tool names, passed verbatim to `claude
-  --allowedTools`) — an MCP tool call is **not** covered by `--permission-mode` at all, so
-  a headless `-p` run with no interactive approver denies it outright, silently (found
-  live while building the Calendar module: the run still exits 0 and "succeeds", the tool
-  call is just refused). Threaded through `Skill.allowed_tools` →
-  `skills::runner::execute_skill` → `AgentRequest.allowed_tools`; `execute_prompt`
-  (routines' raw-`prompt` targets, no `SKILL.md`) has no equivalent yet.
-- Agent execution goes through a small enum, not a plugin registry:
-  `AgentBackend::ClaudeCode | AgentBackend::Ollama { model }` — deliberately not a
-  generic multi-CLI abstraction (see the plan for why). `skills::runner::execute_skill`
-  runs a skill without touching the DB (returns an unpersisted `RunRecord`);
-  `execute_and_record_skill` = `execute_skill` + `runlog::record_run` (DB row +
-  `logs/runs.log` JSONL). The Tauri `run_skill` *command* is the no-DB path plus a
-  narrow re-lock to persist.
-
-## Dashboard (M5)
-
-Frontend: Svelte 5 + Vite + TS under `apps/dashboard/src/` — `core/` (stores, registry,
-lifecycle, persist, commands, chat, staging, agent-bridge, backend types + `devmock`),
-`canvas/` (Canvas, Tile, drag/resize actions), `shell/` (TopBar, IconBar, ModulePicker,
-Settings, AssistantBar, ChatPanel, StagingLayer, Toasts), `modules/` (memory-status,
-skills-deck, routines-board, md-file, todo, calendar, reminders, each `.svelte` + settings face,
-registered in `modules/index.ts`; the graph's `second-brain` too), `themes/` (`tokens.css` = the `--ax-*` token template + one file per
-theme: graphite, paper, steampunk, forest, ocean), `theme/validator.ts`. Every colour /
-size goes through a `--ax-*` token; no literals in components.
-
-- A module = `ModuleDefinition` (`core/types.ts`): type, title, inline-SVG icon, front
-  component, optional settings component (flip side), default/min size, `singleton`,
-  `stageable`, `actions[]`. Instances are mounted with a `ModuleContext` (`invoke`,
-  reactive per-instance `config`, `emit`, `requestResize`).
-- **Tile chrome** (`canvas/Tile.svelte`): the **front** face has **no chrome at
-  rest** — no fill, no border, no shadow, no header divider — the module's
-  content sits straight on the canvas, like the reference dashboard's edge
-  panels. A caps section-label (icon + slightly-larger muted title) and faint top/bottom edge hairlines show; the grip glyph
-  and ⚙/× buttons fade in on hover (`:focus-within` too). A faint fill
-  (`color-mix` of `--ax-tile-glass-bg`) appears on hover so you can see what
-  you're about to grab/resize, and the tile "materialises" fully
-  (`--ax-tile-glass-bg` + `backdrop-filter` blur `--ax-tile-glass-blur` +
-  drag shadow) while it is being moved/resized. The **back** (settings) face
-  deliberately keeps the solid framed-window look (`--ax-surface-2` + 1px
-  border + a bordered header bar + shadow) so it reads as a distinct surface.
-  A tile is **dragged only from that top strip** — both headers carry
-  `.tile-drag` and `use:draggable` gets `handle: ".tile-drag"` (`canvas/drag.ts`
-  `DragOptions.handle`); the body no longer initiates a drag.
-  `--ax-tile-glass-bg` is in the custom-theme allow-list (`theme/validator.ts`).
-- **Persistence**: one hand-editable JSON file `~/.axiomata/dashboard.json` (layout +
-  theme + per-instance config); the frontend owns the schema, Rust
-  (`axiomata_core::dashboard`) only checks "object with numeric `version`", writes
-  atomically (0600), and moves a corrupt file to `.bak`. Debounced 400 ms save on every
-  store mutation.
-- **Workspace files** (`axiomata_core::workspace`, commands `read/write_workspace_file`):
-  relative to `config.workspace_root`, no `..`, must canonicalise inside the root,
-  symlinks and hard links refused, ≤ 1 MiB, atomic O_EXCL temp + rename.
-- **ToDo** (`todo` module, `singleton`): simple date-free tasks in one fixed file
-  `ToDo.md` at the workspace root — **not** the (separate, future) Apple-Reminders
-  module. All list logic is pure TS in `core/todo.ts` (+ `todo.test.ts`); the
-  `.svelte` shell just loads / renders / writes back via `read/write_workspace_file`.
-  Format is standard GFM task lists: open items under `# ToDo`, completed ones under a
-  `## Done` heading stamped `- [x] … (done: YYYY-MM-DD)` (the date is for a later
-  cleanup skill). The open/done split is that heading, regardless of each line's
-  checkbox state, so hand-editing never moves an item. 5 s poll + reload; a write is
-  skipped when byte-identical to the last read (same no-clobber trade-off as
-  `md-file`, no deeper conflict detection). No new Rust, no migration. Bridge / `/todo`
-  actions `add` · `complete` (first open item containing the given text) · `list` work
-  statelessly on the file. `ToDo.md` shows up in the Second-Brain graph as an ordinary
-  vault file, no special-casing.
-- **Calendar** (`calendar` module, `singleton`) — the first "connector" module, and the
-  first real use of the "provider = skill, not code" decision
-  ([[axiomata-os-next-roadmap]]): a `calendar-digest` skill (`~/.axiomata/skills/`, not in
-  this repo) reads Apple Calendar via the `apple-reminders` MCP server's
-  `calendar_calendars`/`calendar_events` tools and replies with one JSON object —
-  `{"calendars": [...], "events": [{"id","title","start","end","calendar","location","allDay"}]}`
-  — sorted by `start`. Unlike `todo`, there is **no live poll**: calendar data sits behind
-  an MCP tool only an agent can reach, so every refresh is a real agent turn. The tile
-  reads back whichever run happened most recently (`list_runs` → `get_run` for the
-  captured `stdout`), however that run happened — by hand from the Skills Deck, on a
-  schedule via a Routine, or the tile's own ↻ (a plain `run_skill` call, same mechanism,
-  just a convenience). The calendar-filter dropdown ("All calendars" + one entry per
-  calendar the skill saw, even ones with no upcoming events) is a pure client-side filter
-  over the already-fetched digest — picking a calendar never re-runs the skill. Parsing /
-  filtering / day-grouping is pure TS in `core/calendar.ts` (+ `calendar.test.ts`);
-  `parseCalendarDigest` defensively strips a ` ```json ` fence the model adds despite the
-  SOP saying not to. Bridge / `/calendar` actions `refresh` (runs the skill now) ·
-  `list` (reads back the last run, optionally filtered to one calendar, no new run) ·
-  `create` · `delete` (see "Connector writes" below).
-  **New in `agents`/`skills` for this**: `SKILL.md` frontmatter `allowed_tools:` (see
-  above) — without it the skill's MCP tool call was silently denied in every headless run.
-  The "find the most recent run of skill X" round trip (`list_runs` → `get_run`) is shared
-  connector-module infrastructure, `core/skillRun.ts`'s `loadLatestSkillRun` (plus that
-  same file's `stripCodeFence`, the ` ```json ` defence every digest parser needs) —
-  pulled out once `reminders` needed the exact same things calendar's own module, bridge
-  action, and parser already did independently.
-- **Connector writes** (create / complete / delete, both Calendar and Reminders): a skill's
-  SOP is fixed at authoring time, so it has no way to take a form's runtime parameters — a
-  write instead goes through a fresh, silent one-shot **instruct turn**
-  (`core/instruct.ts`'s `runInstructWrite`, wrapping `assistant_send`), not through
-  `core/chat.ts`'s visible chat-panel path. `buildToolCallInstruction` spells out the exact
-  MCP tool call (`action="create"`, quoted parameters via `quoteForInstruction`, …) in the
-  instruction text itself, leaving nothing for the agent to interpret; the turn ends by
-  replying either `OK` (delete, complete) or the written item's own id (create), which the
-  caller inserts into (or removes from) its already-loaded digest **locally** — no full
-  digest re-run, which for Reminders' ~60-task read (~130 s) would be far too slow for a
-  single checkbox click. This means a write is only as fresh as the last read: an edit made
-  outside the app (or from another device) won't show until the next ↻. **New in
-  `agents` for this**: `ChatRequest`/`agents::chat`/`assistant_send` all gained the same
-  `allowed_tools` an instruct turn needs to reach an MCP tool at all (same root cause as the
-  skills-side fix above — an MCP call is silently denied regardless of `--permission-mode`);
-  `axiomata-cli assistant` gained `--allowed-tools` to test an instruction here first, same
-  way the digest skills were tested via `run-skill` before being wired into the app.
-  Calendar: `core/calendar.ts`'s `createCalendarEvent`/`deleteCalendarEvent`, the tile's "+"
-  form and hover ✕ per event, bridge actions `create`/`delete`. Reminders:
-  `core/reminders.ts`'s `createReminderTask`/`completeReminderTask`/`deleteReminderTask`,
-  the tile's "+" form, a checkbox per task (completing removes it from view — the digest
-  only ever holds open tasks) and hover ✕, bridge actions `create`/`complete`/`delete`.
-- **Reminders** (`reminders` module, `singleton`) — the second connector module, same
-  no-live-poll shape as Calendar (a `reminders-digest` skill reads Apple Reminders via
-  the `apple-reminders` MCP server's `reminders_lists`/`reminders_tasks` tools, replies
-  `{"lists": [...], "tasks": [{"id","title","list","notes","dueDate","priority"}]}`, only ever
-  open/incomplete tasks). The one real difference from Calendar: **no "all lists" view** —
-  the owner's ~12 Apple Reminders lists share no theme (shopping lists, house-project
-  costs, gift ideas, a theatre-season list, …), so a combined feed would just be noise.
-  The picker always shows exactly one real list name, defaulting to the alphabetically
-  first (`core/reminders.ts`'s `defaultList`) until the owner picks another; that choice
-  is remembered in `settings.<instance>.list`. Parsing / list-filtering is pure TS in
-  `core/reminders.ts` (+ `reminders.test.ts`), same defensive-parsing shape as
-  `calendar.ts` (fence-stripping, drops malformed entries, surfaces the skill's own
-  `{"error": …}`). Bridge / `/reminders` actions `refresh` · `lists` (the available list
-  names, one predictable `{lists}` shape) · `list` (one named list's open tasks, `list`
-  required, one predictable `{tasks}` shape) — split into two actions rather than one
-  action whose response shape depended on whether a parameter was given, after an
-  architecture review flagged that as hard for a caller to predict — plus `create` ·
-  `complete` · `delete` (see "Connector writes" above).
-- **HTML pages** (courses): the `md-file` module ("Document") frames `.html/.htm` read-only in
-  a `<iframe sandbox="allow-scripts">` via **`srcdoc`** — raw content from `read_workspace_file`
-  (the same guarded read every other file view uses), run through `core/htmllink.withNavIntercept`
-  before being assigned. There is **no asset protocol** involved (removed 2026-09-04): the
-  original design served lessons via `asset://` + `<iframe src=…>` (`open_workspace_html` +
-  `core/backend.assetFileUrl`, granting the file's folder in the runtime asset scope), which
-  looked correct on paper and even reported `is_allowed == true` on the Rust side — real fix
-  attempts (`allow-same-origin`, a static `tauri.conf.json` scope entry) changed nothing — but
-  every lesson rendered a reproducible blank white frame with "403 (Forbidden)" / "Not allowed
-  to download due to sandboxing" in the WebKit console, jointly diagnosed with the owner via
-  Safari's Web Inspector attached to the running app (matches reports against Tauri's
-  asset/custom-protocol handling inside sandboxed iframes, e.g. tauri-apps/tauri#12767). `srcdoc`
-  sidesteps the whole asset-protocol question — at the cost of two nuances `withNavIntercept`'s
-  injected script handles by hand, since the browser's native behaviour gets both wrong for a
-  `srcdoc` document (whose own URL is `about:srcdoc`, but whose *base URL* — what a relative
-  `href` resolves against — is inherited from the **embedding app**, per the HTML living
-  standard): (1) a same-folder link (`href="0003-next.html"`) has nothing of the lesson's real
-  location to resolve against, so it's intercepted and posted to the parent via `postMessage`,
-  which resolves it with `core/htmllink.resolveRelativeLink` (the WHATWG `URL` algorithm, the
-  same approach validated for `assetFileUrl`) and re-opens the module on that path; (2) a
-  same-page anchor (`href="#etappe-a"`) is worse than merely unresolvable — WebKit resolves it
-  against the *app's* base URL and actually navigates the iframe to
-  `http://localhost:1420/#etappe-a` (the dashboard shell itself), which then fails on CORS
-  (opaque `null` origin) and renders blank — so anchors are intercepted too, handled with a
-  plain `getElementById` + `scrollIntoView`, never letting the browser's own anchor-navigation
-  run. `assetFileUrl` (in `core/backend.ts`) is unused now but left in place — general-purpose,
-  tested, documented — in case a future feature needs a real `asset://` URL for something an
-  iframe isn't involved in. Known limits: external links and anything with a URL scheme
-  (`http:`, `mailto:`, `javascript:`, …) are left alone and simply do nothing, since the frame
-  has no `allow-top-navigation` and no live network access beyond what `srcdoc` inlines.
-- **Chat**: the bottom bar routes input — registered `/command` runs locally
-  (`core/commands.ts`), other `/text` is a one-shot `instruct` turn, plain text a `chat`
-  turn. `agents::claude_code::chat` = `claude -p --output-format json --permission-mode
-  dontAsk|acceptEdits [--resume <id>]`, cwd = workspace root, the module manifest appended
-  via `--append-system-prompt-file`. Markdown replies go through `core/markdown.ts`
-  (marked + DOMPurify allow-list; no `data:` hrefs, raster-only `data:` images).
-- **Agent → module bridge** (`axiomata_core::bridge`): the dashboard writes
-  `~/.axiomata/module-context.md` (mounted instances + actions + how to call the CLI);
-  the agent calls `axiomata-cli module-action <instance> <action> --json …`, which drops
-  `~/.axiomata/module-actions/inbox/<id>.json`; the dashboard polls every 3 s, runs the
-  action in the frontend, answers in `outbox/`; the CLI exits 2 on timeout. The manifest
-  is appended to **every** Claude Code run — chat turns, skill runs and cron-fired
-  routines alike (`AgentRequest.system_prompt_file`) — whenever the file exists, i.e.
-  whenever the dashboard has run at least once; delete `module-context.md` to opt out.
+- **Runtime data lives outside the repo**, at `~/.axiomata/` (config, DB, logs, skills,
+  dashboard layout — all app-owned), separate from the user's freely-chosen Second-Brain
+  workspace folder (`config.workspace_root`, memory-router content only). Override with
+  `AXIOMATA_HOME` in tests. New shared Cargo deps go in the root `Cargo.toml` under
+  `[workspace.dependencies]`, referenced per-crate as `some_crate.workspace = true`.
+- **Skills live in one place only**, `~/.axiomata/skills/<name>/SKILL.md` — there is no
+  workspace-local skill location (dropped deliberately; `docs/architecture.md` §4 explains
+  why).
+- **An MCP tool call is silently denied in a headless run unless `allowed_tools` is set** —
+  it is *not* covered by `--permission-mode` at all. The run still exits 0 and "succeeds";
+  the tool call is just refused, with no error anywhere. This bit the Calendar module once
+  already. Set `SKILL.md` frontmatter `allowed_tools:`, or the caller's own
+  `--allowed-tools` / `ChatRequest.allowed_tools`, for any skill or chat/instruct turn that
+  reaches an MCP tool (`docs/architecture.md` §5 "Agent backends").
+- **Routines**: cron is the `cron` crate's **6–7 field, seconds-first** format
+  (`0 */2 * * * *`), not 5-field crontab. `add`/`update`/`delete` all exist (`update` is a
+  full replace, not a partial patch); the dashboard's Routines module UI uses a friendly
+  interval picker (`core/routineInterval.ts`) over that cron, not a bare text field.
+- **A connector module (Calendar/Reminders/Mail-shaped) is "provider = skill, not code"**:
+  an MCP-backed `*-digest` skill, no live poll (every refresh is a real agent turn), writes
+  go through a silent one-shot instruct turn, not the skill. Follow this pattern for the next
+  integration rather than hand-rolling Tauri commands for it (`docs/architecture.md` §5).
+- **HTML/course pages render via `<iframe sandbox srcdoc=…>`, not `asset://`** — an
+  `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
+  WebKit sandboxing wall); don't re-attempt it without reading the postmortem in
+  `docs/architecture.md` §5 first.
+- **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
+  (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
+  (`:root { --ax-*: … }` only) before injection.
 - **Model**: every `claude -p` run passes `--model` from `config.agents.claude_model`
-  (default `claude-sonnet-5`; a skill's frontmatter `model:` wins; empty = CLI default).
-  Model names are validated against a flag-safe alphabet before reaching the command line.
-- **Canvas physics** (`canvas/snap.ts`, pure + tested): tiles snap to `--ax-grid` (16 px) and
-  magnetically to neighbour edges within 8 px (touch beats align, neighbour beats grid;
-  `settings.snapEdges`), never overlap after a drop / resize (only the moved tile yields,
-  bounded push-out then grid spiral). While dragging / resizing, `alignmentGuides` also
-  emits a guide line wherever the moved tile shares an edge **or centre** with any other
-  tile within `ALIGN_PX` (3 px) — Figma-style, at any distance, purely visual (separate
-  from the 8 px magnet, which barely ever fires between far-apart tiles). `Tile.svelte`
-  `showGuides` merges the two sets; `Canvas.svelte` draws each as a full-span accent line
-  with a glow, above the dragged tile. Each tile carries an `anchor` (nearer edges + the
-  canvas size at commit); the displayed position follows the anchored edge and is clamped
-  into view (`displayRect`, never persisted) — so shrinking pulls tiles in, growing
-  restores them, right/bottom tiles track their edge. Dot grid hidden unless
-  `settings.showGrid`.
-  The assistant bar is a centred pill (`--ax-assistant-width`), the chat panel
-  `--ax-chat-width`; slide-ins use `--ax-dur-slow`. The owner works on a 21:9 monitor —
-  never span the full width.
-- **Themes**: `<html data-theme="…">`; a user `~/.axiomata/theme.css` is validated
-  (`:root { --ax-*: … }` only) before injection; template via Settings → Copy template.
-
-## Second Brain (M6)
-
-- **Data**: `axiomata_core::graph::build` (command `get_workspace_graph`) — every tracked
-  file (memory walker) with area / title / bytes / mtime (`.md` titles from frontmatter /
-  heading, `.html` from `<title>`), `[[wiki]]`, relative Markdown links and relative HTML
-  `href`s resolved to file paths, skills and routines as node kinds, the root `CLAUDE.md` as
-  hub; capped at 5000 files (`truncated`). The owner's courses live in `vault/Learning/…`
-  (a `.ignore` there hides tooling from the walker).
-- **Frontend** `apps/dashboard/src/graph/`: `model.ts` (nodes / edges / area segments,
-  theme-derived colours, `regroup` by folders, `searchNodes`, `neighbours`), `layout.ts`
-  (Rings: skills inner ring, files on arcs inside their area segment, routines outer ring;
-  Circle; **Hex**: hub/skills/routines/area markers placed exactly as in Rings, but every
-  file gets its own flat-top hex cell instead of a dot — a hex-ring spiral out from the
-  origin (`hexRing`/`hexToPixel`, standard axial-coordinate hex-grid math), cells handed
-  out per area in that area's existing angular wedge so the mosaic still reads as "areas
-  around a hub", one shared cell size (`GraphModel.hexUnit`, graph units) solved from the
-  file count and rescaled to land exactly on Rings' file band. `layoutOrbit` (skills,
-  routines and the newest notes as icon nodes on the rim, every file as a point of a 3-D
-  fibonacci-sphere cloud) is a separate export used only by the dashboard-centre background
-  widget directly (not part of `LayoutKind`/`applyLayout` any more — Second Brain's
-  full-view switcher dropped Orbit as an option 2026-09-04, kept only as the home-screen
-  background), `render.ts`
-  (Canvas 2D, DPR-aware, spin, hover hit-test, view transform, highlight; `mode: "rings"`
-  draws ring captions SKILLS / MEMORY / ROUTINES at 12 o'clock and per-segment counts
-  instead of outer area names, `mode: "hex"` is the same draw pass with file nodes drawn as
-  hexagons (`drawHexCell`, sized from `hexUnit`) instead of circles, `mode: "orbit"` draws
-  the dark disc with hex texture and rim, a geodesic wireframe, the spinning cloud and the
-  icon ring with age badges). No graph library on purpose; `d3-force` would only be added
-  for a force layout.
-- **Nodes**: hub, **area** (one per folder, labelled like the folder, on its own ring
-  between skills and files), file, skill, routine — each non-file kind carries a glyph
-  (hexagon / folder / bolt / clock, `graph/Legend.svelte` explains them; the file swatch
-  itself switches from a dot to a small hexagon when the Hex layout is active).
-- **Module `second-brain`**: `singleton` + `background` — mounted full-size in
-  `#particle-slot` behind the tiles by `canvas/BackgroundHost.svelte` (corner ⚙ / ×; always
-  Orbit, not user-switchable there). Click → `open-second-brain` bus event →
-  `shell/SecondBrainView.svelte` (full screen:
-  pan / zoom, search, Rings / Circle / Hex, Areas / Folders, detail panel with View here /
-  Copy path / Fly to / Run skill / toggle routine, content preview via
-  `core/markdown.ts` `excerpt`/`excerptHtml`, links split into out / in, area notes
-  grouped by subfolder; a `?` help block explains Rings / Circle / Hex, Areas / Folders,
-  Rotation). Also `/brain [path | ? query]` and the module actions `open`, `search`,
-  `refresh`. **Search**: the box matches titles / paths / areas locally and, debounced,
-  note **contents** through `search_workspace` (`workspace::search`: case-insensitive,
-  all words on one line, tags stripped, most hits first); a results list with snippets
-  sits under the box (↑↓ / Enter jump to the node), non-matches are dimmed. View
-  preferences live in `dashboard.json` → `settings.secondBrain`.
-- **Import**: `axiomata_core::importer` + `axiomata-cli import obsidian` — notes
-  normalised to "# Title + content" (frontmatter / tag lines dropped, tags only as hints),
-  the agent proposes the areas and assigns every note in one JSON turn, files are written
-  under `<workspace>/<Area>/`, never overwriting; secret-looking notes are flagged, not
-  skipped, unless `--skip-secrets`.
-- **New note**: `axiomata_core::notes` + the top bar's "New note" icon — no separate dialog;
-  opens the `md-file` module itself in compose mode (`isNew` config, no `path` yet: a bare
-  textarea, Save calls the new `create_note` command instead of `write_workspace_file`, then
-  re-points `config.path` at the written file, which falls straight into the module's normal
-  read-mode viewer). No title field either: a note either starts with its own `# Heading`
-  (kept verbatim), or `axiomata_core::notes::placement_prompt` also asks the agent to propose
-  one, via `memory::walker::first_heading` telling which case applies. A scaled-down
-  `importer`: one note instead of a batch, and like `importer::assignment_prompt`,
-  `placement_prompt` lets the agent propose a brand new top-level area when none of the
-  vault's existing ones genuinely fit (that judgment call is the point of asking the agent at
-  all), nudging toward reuse and broad/durable names first; `Inbox` is the last resort, not
-  the only alternative to an existing area. The Rust side does the actual write, deduping on
-  a name collision (`-2`, `-3`, …) rather than skipping like `importer::apply` does.
-- Escape across overlays: the first handler that acts calls `preventDefault()`; later ones
-  (Second Brain, chat) check `defaultPrevented` — never the DOM (outro transitions linger).
-
-**Test convention:** any test that mutates the `AXIOMATA_HOME` env var must lock
-`crate::test_support::ENV_MUTEX` first (`crates/axiomata-core/src/lib.rs`) — `cargo test`
-runs in parallel by default and env vars are process-global. Use
-`crate::test_support::unique_temp_dir(prefix)` for scratch directories instead of writing
-into a fixed path.
+  (default `claude-sonnet-5`); a skill's own `model:` frontmatter wins.
 
 ## Sub-agents (use the Rust variants, not the Python-oriented defaults)
 
 The owner's global `~/.claude/CLAUDE.md` defines mandatory automatic sub-agent triggers.
 Three of the named agents there (`test-engineer`, `dependency-auditor`,
-`performance-analyzer`) are worded for a Python/`uv` stack (pytest, `uv audit`,
-SQLAlchemy/Polars) and **do not apply to this repo**. Global, Rust-flavored replacements
-exist at `~/.claude/agents/{rust-test-engineer,rust-dependency-auditor,
-rust-performance-analyzer}.md` (usable in any Rust project, not just this one) — use
-those instead, with the same trigger conditions translated to Rust terms:
+`performance-analyzer`) are worded for a Python/`uv` stack and **do not apply to this repo**.
+Global, Rust-flavored replacements exist at `~/.claude/agents/{rust-test-engineer,
+rust-dependency-auditor,rust-performance-analyzer}.md` (usable in any Rust project) — use
+those instead, same trigger conditions translated to Rust terms:
 
-- **rust-test-engineer** — invoke after writing or meaningfully modifying any Rust
-  function, struct, or module in this workspace; it runs `cargo test` (not `pytest`).
-- **rust-dependency-auditor** — invoke whenever any `Cargo.toml` in this workspace is
-  modified (not `pyproject.toml`); it runs `cargo audit`/`cargo tree` (not `uv audit`).
-- **rust-performance-analyzer** — invoke when new `rusqlite` queries, `tokio` async
-  functions, or hot-path data processing are written (not SQLAlchemy/Polars/`async def`).
+- **rust-test-engineer** — after writing/modifying any Rust function, struct, or module;
+  runs `cargo test` (not `pytest`).
+- **rust-dependency-auditor** — whenever any `Cargo.toml` in this workspace changes; runs
+  `cargo audit`/`cargo tree` (not `uv audit`). A `.cargo/audit.toml` already exists.
+- **rust-performance-analyzer** — for new `rusqlite` queries, `tokio` async functions, or
+  hot-path data processing (not SQLAlchemy/Polars/`async def`).
 
-`architecture-reviewer`, `security-auditor`, `docs-writer`, and `refactoring-specialist`
-are already language-agnostic as globally defined and apply here unchanged.
+`architecture-reviewer`, `security-auditor`, `docs-writer`, and `refactoring-specialist` are
+already language-agnostic as globally defined and apply here unchanged. When
+`architecture-reviewer` or another background sub-agent run is not available (e.g. a session
+rate limit), do a manual review pass yourself rather than skipping the check — the trigger
+is mandatory, not the specific tool.
