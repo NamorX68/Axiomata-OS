@@ -86,9 +86,13 @@
     box-shadow: var(--ax-shadow-pop);
   }
   .panel.right {
-    top: var(--ax-space-4);
-    right: 0;
+    /* Anchored to the bottom (above the assistant bar), same as before —
+       only the height is now capped so it no longer reaches almost to the
+       top of the window; `top` is left to the browser to compute from
+       `bottom` + `height`. */
     bottom: 64px;
+    right: 0;
+    height: min(80vh, calc(100vh - 64px - var(--ax-space-4)));
     /* Always 40% of the window, with a floor so it stays usable when the
        window itself is narrow — no ceiling: on an ultra-wide monitor 40%
        is genuinely wider than 900px, and that's the point. */
