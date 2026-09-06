@@ -1,21 +1,21 @@
 <script lang="ts">
   import { REMINDERS_SKILL_NAME } from "../core/reminders";
+  import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import SkillNameField from "./SkillNameField.svelte";
 
-  // No per-instance settings yet (nothing here reads/writes config) — `ctx`
-  // is required by `ModuleDefinition.settings`'s signature regardless.
-  let { ctx: _ctx }: { ctx: ModuleContext } = $props();
+  let { ctx }: { ctx: ModuleContext } = $props();
+  // `ctx` is created once per mounted instance and never swapped.
+  // svelte-ignore state_referenced_locally
+  const config = ctx.config;
+  const skillName = $derived(resolveSkillName($config, REMINDERS_SKILL_NAME));
 </script>
 
 <div class="settings">
   <p class="muted">
-    Backed by the <code>{REMINDERS_SKILL_NAME}</code> skill — this tile only ever reads back that
-    skill's last run, it never triggers one on a timer.
+    Currently calling <code>{skillName}</code>.
   </p>
-  <p class="muted">
-    Run it by hand from the Skills Deck, hit ↻ on this tile's front, or schedule it as a Routine
-    for a periodic background refresh.
-  </p>
+  <SkillNameField {ctx} defaultName={REMINDERS_SKILL_NAME} />
   <p class="muted">There's no "all lists" view — pick one list on the front; that choice is remembered.</p>
 </div>
 

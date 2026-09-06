@@ -1,10 +1,15 @@
 <!--
   reminders — a single-list task view backed by the `reminders-digest`
-  skill. Same no-live-poll shape as `calendar` (reminders data sits behind
-  an MCP tool only an agent can reach, so every refresh is a real agent
-  turn, never a timer) — this shell reads back whichever run happened most
-  recently, however it happened: Skills Deck, a Routine, or this tile's own
-  ↻ (a plain `run_skill` call under the hood, same mechanism).
+  skill (or whatever this instance's settings face has renamed it to, see
+  `resolveSkillName`). Same no-live-poll shape as `calendar` (reminders
+  data sits behind an MCP tool only an agent can reach, so every refresh is
+  a real agent turn, never a repeating timer — recurring refresh is
+  exclusively a Routine's job) — but it does trigger one real run of its
+  own the moment it first mounts (app start, or right after it's newly
+  placed), same as `mail`/`calendar`. Otherwise it reads back whichever run
+  happened most recently, however it happened: Skills Deck, a Routine, or
+  this tile's own ↻ (a plain `run_skill` call under the hood, same
+  mechanism).
 
   Unlike `calendar`, there is no "all lists" option — the owner's Apple
   Reminders lists have no shared theme (shopping lists, projects, gift
@@ -39,12 +44,15 @@
     type ReminderDigest,
     type ReminderTask,
   } from "../core/reminders";
+  import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
   // svelte-ignore state_referenced_locally
   const config = ctx.config;
+
+  const skillName = $derived(resolveSkillName($config, REMINDERS_SKILL_NAME));
 
   let digest = $state<ReminderDigest>(EMPTY_REMINDER_DIGEST);
   let lastRun = $state<RunSummary | null>(null);
@@ -159,7 +167,7 @@
   async function loadLatest() {
     loading = true;
     try {
-      const result = await loadLatestReminderDigest(ctx.invoke);
+      const result = await loadLatestReminderDigest(ctx.invoke, skillName);
       lastRun = result.run;
       digest = result.digest;
       error = result.error ?? "";
@@ -175,7 +183,7 @@
     if (running) return;
     running = true;
     try {
-      const full = await ctx.invoke<RunRecord>("run_skill", { name: REMINDERS_SKILL_NAME });
+      const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       applyFreshRun(full);
     } catch (err) {
       error = String(err);
@@ -184,7 +192,14 @@
     }
   }
 
-  onMount(() => void loadLatest());
+  // Show whatever's cached immediately (fast), then kick off one real run
+  // in the background — the mount-time refresh this module's doc comment
+  // describes. `refreshNow` already no-ops if a run is somehow already in
+  // flight, so this can't double-fire. Note this one can genuinely take
+  // ~130 s against a large real Reminders list (MCP round trips, not
+  // instant) — the cached digest shown in the meantime is what makes that
+  // tolerable rather than a long blank tile on every app start.
+  onMount(() => void loadLatest().then(refreshNow));
 </script>
 
 <div class="reminders">
@@ -233,9 +248,11 @@
 
   {#if loading}
     <p class="muted">Loading…</p>
+  {:else if !lastRun && running}
+    <p class="muted empty">Running <code>{skillName}</code> for the first time — this can take a while…</p>
   {:else if !lastRun}
     <p class="muted empty">
-      No data yet — run <code>{REMINDERS_SKILL_NAME}</code> from the Skills Deck, schedule it as a
+      No data yet — run <code>{skillName}</code> from the Skills Deck, schedule it as a
       Routine, or hit ↻ above.
     </p>
   {:else if digest.lists.length === 0}

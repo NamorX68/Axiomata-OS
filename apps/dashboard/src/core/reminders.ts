@@ -117,13 +117,15 @@ export interface LatestReminderDigest {
 }
 
 /**
- * Finds the most recent `reminders-digest` run — however it was triggered
- * (Skills Deck, a scheduled Routine, or a tile's own refresh) — and parses
- * its output. Same shared "find the latest run" round trip as `calendar`
- * (`core/skillRun.ts`), just parsed with this module's own contract.
+ * Finds the most recent run of `skillName` (default `reminders-digest`, or
+ * this instance's `config.skillName` override — see `resolveSkillName`) —
+ * however it was triggered (Skills Deck, a scheduled Routine, or a tile's
+ * own refresh) — and parses its output. Same shared "find the latest run"
+ * round trip as `calendar` (`core/skillRun.ts`), just parsed with this
+ * module's own contract.
  */
-export async function loadLatestReminderDigest(invoke: Invoke): Promise<LatestReminderDigest> {
-  const { run, stdout, error } = await loadLatestSkillRun(invoke, REMINDERS_SKILL_NAME);
+export async function loadLatestReminderDigest(invoke: Invoke, skillName: string = REMINDERS_SKILL_NAME): Promise<LatestReminderDigest> {
+  const { run, stdout, error } = await loadLatestSkillRun(invoke, skillName);
   if (error || stdout === null) return { run, digest: EMPTY_REMINDER_DIGEST, error };
   try {
     return { run, digest: parseReminderDigest(stdout), error: null };

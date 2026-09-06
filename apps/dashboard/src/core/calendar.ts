@@ -136,9 +136,11 @@ export interface LatestDigest {
  *
  * Shared by the `calendar` module's own load and its `list` bridge action
  * (`modules/index.ts`) so the parsing step lives in exactly one place too.
+ * `skillName` defaults to `CALENDAR_SKILL_NAME` but can be overridden by an
+ * instance's `config.skillName` (see `resolveSkillName`).
  */
-export async function loadLatestCalendarDigest(invoke: Invoke): Promise<LatestDigest> {
-  const { run, stdout, error } = await loadLatestSkillRun(invoke, CALENDAR_SKILL_NAME);
+export async function loadLatestCalendarDigest(invoke: Invoke, skillName: string = CALENDAR_SKILL_NAME): Promise<LatestDigest> {
+  const { run, stdout, error } = await loadLatestSkillRun(invoke, skillName);
   if (error || stdout === null) return { run, digest: EMPTY_DIGEST, error };
   try {
     return { run, digest: parseCalendarDigest(stdout), error: null };

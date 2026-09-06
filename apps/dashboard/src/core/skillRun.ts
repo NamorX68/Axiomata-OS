@@ -72,3 +72,21 @@ export function stripCodeFence(text: string): string {
   const m = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(trimmed);
   return m ? m[1].trim() : trimmed;
 }
+
+/**
+ * The skill name a connector module instance actually calls: its own
+ * `config.skillName` if the owner has set one (an instance-level override —
+ * this instance's settings face exposes it as a plain text field), else the
+ * module's hardcoded default (`calendar-digest`, `reminders-digest`,
+ * `mail-digest`). Every connector already had a fixed default constant that
+ * both its refresh button and its own SOP-writing agreed on; this doesn't
+ * replace that (nothing *requires* the field to be filled in), it just lets
+ * an owner repoint one instance at a differently-named skill — a renamed
+ * copy, an experiment — without a code change. Read at every `run_skill`
+ * call site (never cached), so editing it in settings takes effect on the
+ * next refresh.
+ */
+export function resolveSkillName(config: Record<string, unknown>, fallback: string): string {
+  const override = typeof config.skillName === "string" ? config.skillName.trim() : "";
+  return override || fallback;
+}

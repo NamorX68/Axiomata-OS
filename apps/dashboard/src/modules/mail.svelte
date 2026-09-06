@@ -1,10 +1,14 @@
 <!--
-  mail — a curated view backed by the `mail-digest` skill. Same no-live-poll
-  shape as `calendar`/`reminders` (mail data sits behind an MCP tool only an
-  agent can reach, so every refresh is a real agent turn, never a timer) —
-  this shell reads back whichever run happened most recently, however it
-  happened: Skills Deck, a Routine, or this tile's own ↻ (a plain
-  `run_skill` call under the hood, same mechanism).
+  mail — a curated view backed by the `mail-digest` skill (or whatever this
+  instance's settings face has renamed it to, see `resolveSkillName`). Same
+  no-live-poll shape as `calendar`/`reminders` (mail data sits behind an MCP
+  tool only an agent can reach, so every refresh is a real agent turn,
+  never a timer) — but unlike those two, this tile *does* trigger one real
+  run on its own: once, the moment it first mounts (app start, or the
+  instant it's newly placed via Add Module), never on a repeating timer.
+  Any *recurring* refresh is still exclusively a Routine's job. The ↻
+  button is the same `run_skill` call, just user-triggered instead of
+  mount-triggered.
 
   Unlike `calendar`/`reminders`, there is no full inbox listing at all —
   `mail-digest`'s SOP only ever reports messages it judged important, plus
@@ -23,9 +27,13 @@
   import type { RunRecord, RunSummary } from "../core/backend";
   import { relativeTime } from "../core/format";
   import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, type MailDigest, type MailItem } from "../core/mail";
+  import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();
+  // `ctx` is created once per mounted instance and never swapped.
+  // svelte-ignore state_referenced_locally
+  const config = ctx.config;
 
   let digest = $state<MailDigest>(EMPTY_MAIL_DIGEST);
   let lastRun = $state<RunSummary | null>(null);
@@ -33,6 +41,8 @@
   let running = $state(false);
   let error = $state("");
   let openingId = $state<string | null>(null);
+
+  const skillName = $derived(resolveSkillName($config, MAIL_SKILL_NAME));
 
   /** Applies a just-finished `run_skill` result (`refreshNow` only —
    *  `loadLatest` goes through `loadLatestMailDigest` instead, which
@@ -56,7 +66,7 @@
   async function loadLatest() {
     loading = true;
     try {
-      const result = await loadLatestMailDigest(ctx.invoke);
+      const result = await loadLatestMailDigest(ctx.invoke, skillName);
       lastRun = result.run;
       digest = result.digest;
       error = result.error ?? "";
@@ -71,7 +81,7 @@
     if (running) return;
     running = true;
     try {
-      const full = await ctx.invoke<RunRecord>("run_skill", { name: MAIL_SKILL_NAME });
+      const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       applyFreshRun(full);
     } catch (err) {
       error = String(err);
@@ -92,7 +102,11 @@
     }
   }
 
-  onMount(() => void loadLatest());
+  // Show whatever's cached immediately (fast), then kick off one real run
+  // in the background — the mount-time refresh this module's doc comment
+  // describes. `refreshNow` already no-ops if a run is somehow already in
+  // flight, so this can't double-fire.
+  onMount(() => void loadLatest().then(refreshNow));
 </script>
 
 <div class="mail">
@@ -112,9 +126,11 @@
 
   {#if loading}
     <p class="muted">Loading…</p>
+  {:else if !lastRun && running}
+    <p class="muted empty">Running <code>{skillName}</code> for the first time…</p>
   {:else if !lastRun}
     <p class="muted empty">
-      No data yet — run <code>{MAIL_SKILL_NAME}</code> from the Skills Deck, schedule it as a
+      No data yet — run <code>{skillName}</code> from the Skills Deck, schedule it as a
       Routine, or hit ↻ above.
     </p>
   {:else if digest.emails.length === 0}

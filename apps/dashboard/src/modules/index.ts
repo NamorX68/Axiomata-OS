@@ -6,11 +6,14 @@
  * singleton to exercise the guard).
  */
 
+import { get } from "svelte/store";
+
 import { registerModule } from "../core/registry";
 import type { RunRecord, WorkspaceFile } from "../core/backend";
 import { CALENDAR_SKILL_NAME, createCalendarEvent, deleteCalendarEvent, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
 import { loadLatestMailDigest, MAIL_SKILL_NAME, parseMailDigest } from "../core/mail";
 import { completeReminderTask, createReminderTask, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
+import { resolveSkillName } from "../core/skillRun";
 import type { ModuleContext } from "../core/types";
 import {
   addTodo,
@@ -317,7 +320,7 @@ export function registerBuiltins(): void {
         description: "Runs the calendar-digest skill now and returns a summary of what it found.",
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
-          const run = await ctx.invoke<RunRecord>("run_skill", { name: CALENDAR_SKILL_NAME });
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), CALENDAR_SKILL_NAME) });
           if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
           const digest = parseCalendarDigest(run.stdout);
           return { ok: true, calendars: digest.calendars, events: digest.events.length };
@@ -328,7 +331,7 @@ export function registerBuiltins(): void {
         description: "Returns the events from the last calendar-digest run, optionally filtered to one calendar (does not trigger a new run).",
         params: { type: "object", properties: { calendar: { type: "string" } } },
         run: async (params, ctx) => {
-          const result = await loadLatestCalendarDigest(ctx.invoke);
+          const result = await loadLatestCalendarDigest(ctx.invoke, resolveSkillName(get(ctx.config), CALENDAR_SKILL_NAME));
           if (!result.run) return { events: [], note: "no run yet" };
           if (result.error) return { events: [], error: result.error };
           const calendar = typeof (params as { calendar?: unknown }).calendar === "string" ? ((params as { calendar: string }).calendar || null) : null;
@@ -392,7 +395,7 @@ export function registerBuiltins(): void {
         description: "Runs the reminders-digest skill now and returns a summary of what it found.",
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
-          const run = await ctx.invoke<RunRecord>("run_skill", { name: REMINDERS_SKILL_NAME });
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), REMINDERS_SKILL_NAME) });
           if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
           const digest = parseReminderDigest(run.stdout);
           return { ok: true, lists: digest.lists, tasks: digest.tasks.length };
@@ -404,7 +407,7 @@ export function registerBuiltins(): void {
           'Returns the reminder list names from the last reminders-digest run (does not trigger a new run). There is no "all lists" task view — call this first, then "list" with one of these names.',
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
-          const result = await loadLatestReminderDigest(ctx.invoke);
+          const result = await loadLatestReminderDigest(ctx.invoke, resolveSkillName(get(ctx.config), REMINDERS_SKILL_NAME));
           if (result.error) return { lists: [], error: result.error };
           return { lists: result.digest.lists };
         },
@@ -416,7 +419,7 @@ export function registerBuiltins(): void {
         run: async (params, ctx) => {
           const list = typeof (params as { list?: unknown }).list === "string" ? (params as { list: string }).list : "";
           if (!list) return { tasks: [], error: 'missing required "list" param — call the "lists" action first' };
-          const result = await loadLatestReminderDigest(ctx.invoke);
+          const result = await loadLatestReminderDigest(ctx.invoke, resolveSkillName(get(ctx.config), REMINDERS_SKILL_NAME));
           if (result.error) return { tasks: [], error: result.error };
           return { tasks: tasksForList(result.digest.tasks, list) };
         },
@@ -480,7 +483,7 @@ export function registerBuiltins(): void {
         description: "Runs the mail-digest skill now and returns a summary of what it found.",
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
-          const run = await ctx.invoke<RunRecord>("run_skill", { name: MAIL_SKILL_NAME });
+          const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), MAIL_SKILL_NAME) });
           if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
           const digest = parseMailDigest(run.stdout);
           return { ok: true, emails: digest.emails.length };
@@ -491,7 +494,7 @@ export function registerBuiltins(): void {
         description: "Returns the curated emails from the last mail-digest run (does not trigger a new run).",
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
-          const result = await loadLatestMailDigest(ctx.invoke);
+          const result = await loadLatestMailDigest(ctx.invoke, resolveSkillName(get(ctx.config), MAIL_SKILL_NAME));
           if (result.error) return { emails: [], error: result.error };
           return { emails: result.digest.emails };
         },

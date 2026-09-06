@@ -1,10 +1,15 @@
 <!--
-  calendar — an agenda list backed by the `calendar-digest` skill, not a live
-  file: calendar data sits behind an MCP tool only an agent can reach, so
-  every refresh is a real agent turn (unlike `todo`'s free 5 s file poll).
-  This shell never triggers a run on a timer — it reads back whichever run
-  happened most recently (`list_runs` + `get_run`), however it happened: by
-  hand from the Skills Deck, on a schedule via a Routine, or the "Refresh"
+  calendar — an agenda list backed by the `calendar-digest` skill (or
+  whatever this instance's settings face has renamed it to, see
+  `resolveSkillName`), not a live file: calendar data sits behind an MCP
+  tool only an agent can reach, so every refresh is a real agent turn
+  (unlike `todo`'s free 5 s file poll). This shell never triggers a run on
+  a repeating timer — recurring refresh is exclusively a Routine's job —
+  but it does trigger one real run of its own the moment it first mounts
+  (app start, or right after it's newly placed via Add Module), same as
+  `mail`/`reminders`. Otherwise it just reads back whichever run happened
+  most recently (`list_runs` + `get_run`), however it happened: by hand
+  from the Skills Deck, on a schedule via a Routine, or the "Refresh"
   button here, which is just `run_skill` under the hood, same mechanism.
 
   Filter dropdown ("All calendars" + one entry per calendar the skill saw,
@@ -38,12 +43,15 @@
     type CalendarEvent,
   } from "../core/calendar";
   import { dayLabel, relativeTime } from "../core/format";
+  import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
   // svelte-ignore state_referenced_locally
   const config = ctx.config;
+
+  const skillName = $derived(resolveSkillName($config, CALENDAR_SKILL_NAME));
 
   let digest = $state<CalendarDigest>(EMPTY_DIGEST);
   let lastRun = $state<RunSummary | null>(null);
@@ -146,7 +154,7 @@
   async function loadLatest() {
     loading = true;
     try {
-      const result = await loadLatestCalendarDigest(ctx.invoke);
+      const result = await loadLatestCalendarDigest(ctx.invoke, skillName);
       lastRun = result.run;
       digest = result.digest;
       error = result.error ?? "";
@@ -161,7 +169,7 @@
     if (running) return;
     running = true;
     try {
-      const full = await ctx.invoke<RunRecord>("run_skill", { name: CALENDAR_SKILL_NAME });
+      const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
       applyFreshRun(full);
     } catch (err) {
       error = String(err);
@@ -170,7 +178,11 @@
     }
   }
 
-  onMount(() => void loadLatest());
+  // Show whatever's cached immediately (fast), then kick off one real run
+  // in the background — the mount-time refresh this module's doc comment
+  // describes. `refreshNow` already no-ops if a run is somehow already in
+  // flight, so this can't double-fire.
+  onMount(() => void loadLatest().then(refreshNow));
 </script>
 
 <div class="calendar">
@@ -224,9 +236,11 @@
 
   {#if loading}
     <p class="muted">Loading…</p>
+  {:else if !lastRun && running}
+    <p class="muted empty">Running <code>{skillName}</code> for the first time…</p>
   {:else if !lastRun}
     <p class="muted empty">
-      No data yet — run <code>{CALENDAR_SKILL_NAME}</code> from the Skills Deck, schedule it as a
+      No data yet — run <code>{skillName}</code> from the Skills Deck, schedule it as a
       Routine, or hit ↻ above.
     </p>
   {:else if groups.length === 0}

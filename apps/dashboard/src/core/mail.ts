@@ -124,14 +124,15 @@ export interface LatestMailDigest {
 }
 
 /**
- * Finds the most recent `mail-digest` run — however it was triggered
- * (Skills Deck, a scheduled Routine, or the tile's own refresh) — and
- * parses its output. Same shared "find the latest run" round trip as
- * `calendar`/`reminders` (`core/skillRun.ts`), just parsed with this
- * module's own contract.
+ * Finds the most recent run of `skillName` (default `mail-digest`, or this
+ * instance's `config.skillName` override — see `resolveSkillName`) —
+ * however it was triggered (Skills Deck, a scheduled Routine, or the
+ * tile's own refresh) — and parses its output. Same shared "find the
+ * latest run" round trip as `calendar`/`reminders` (`core/skillRun.ts`),
+ * just parsed with this module's own contract.
  */
-export async function loadLatestMailDigest(invoke: Invoke): Promise<LatestMailDigest> {
-  const { run, stdout, error } = await loadLatestSkillRun(invoke, MAIL_SKILL_NAME);
+export async function loadLatestMailDigest(invoke: Invoke, skillName: string = MAIL_SKILL_NAME): Promise<LatestMailDigest> {
+  const { run, stdout, error } = await loadLatestSkillRun(invoke, skillName);
   if (error || stdout === null) return { run, digest: EMPTY_MAIL_DIGEST, error };
   try {
     return { run, digest: parseMailDigest(stdout), error: null };

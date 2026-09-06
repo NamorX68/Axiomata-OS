@@ -12,9 +12,15 @@
   import { onMount } from "svelte";
 
   import { loadTopics, MAIL_SKILL_NAME, saveTopics } from "../core/mail";
+  import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import SkillNameField from "./SkillNameField.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
+  // `ctx` is created once per mounted instance and never swapped.
+  // svelte-ignore state_referenced_locally
+  const config = ctx.config;
+  const skillName = $derived(resolveSkillName($config, MAIL_SKILL_NAME));
 
   let text = $state("");
   let loading = $state(true);
@@ -55,13 +61,9 @@
 
 <div class="settings">
   <p class="muted">
-    Backed by the <code>{MAIL_SKILL_NAME}</code> skill — this tile only ever reads back that
-    skill's last run, it never triggers one on a timer.
+    Currently calling <code>{skillName}</code>.
   </p>
-  <p class="muted">
-    Run it by hand from the Skills Deck, hit ↻ on this tile's front, or schedule it as a Routine
-    for a periodic background refresh.
-  </p>
+  <SkillNameField {ctx} defaultName={MAIL_SKILL_NAME} />
 
   <label class="field" for="mail-topics">
     Topics (one per line) — mail matching any of these shows up alongside whatever the agent
