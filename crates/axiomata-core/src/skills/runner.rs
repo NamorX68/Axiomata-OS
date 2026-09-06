@@ -16,7 +16,8 @@
 //!
 //! Implemented in M1.
 
-use std::sync::Mutex;
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -119,9 +120,41 @@ pub async fn execute_prompt(
     .await
 }
 
-/// Shared tail of [`execute_skill`] / [`execute_prompt`]: build the request,
-/// run the backend, and map the outcome onto an unpersisted [`RunRecord`]
-/// attributed to `name`.
+/// Names currently mid-run, so a second trigger for the same skill/prompt
+/// name (a mount-time auto-refresh racing a manual ↻, a Routine firing while
+/// the tile is also refreshing, a dev-mode hot-reload remounting a component
+/// whose previous run hadn't finished yet — the exact sequence that produced
+/// three concurrent real `mail-digest` runs live, all deadlocking each other
+/// against the same Mail.app automation and timing out at 300s with no
+/// output at all) fails fast instead of launching a competing agent process.
+/// This is a *name* lock, not a slot count like [`crate::agents::claude_code`]'s
+/// `MAX_CONCURRENT_AGENT_RUNS` semaphore (which caps total concurrency but
+/// happily hands out separate slots to N runs of the *same* skill) — the two
+/// guards are complementary, not redundant.
+static RUNNING_NAMES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn running_names() -> &'static Mutex<HashSet<String>> {
+    RUNNING_NAMES.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Removes `name` from [`RUNNING_NAMES`] on drop — including on an early
+/// return or a panic unwinding through `run_on_backend` — so a run can never
+/// wedge the name claimed forever.
+struct RunningGuard(String);
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        running_names()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// Shared tail of [`execute_skill`] / [`execute_prompt`]: claims `name` for
+/// the duration of the run (failing fast if it's already claimed), builds
+/// the request, runs the backend, and maps the outcome onto an unpersisted
+/// [`RunRecord`] attributed to `name`.
 async fn run_on_backend(
     name: &str,
     prompt: String,
@@ -131,6 +164,28 @@ async fn run_on_backend(
     allowed_tools: Option<String>,
 ) -> RunRecord {
     let started_at = Utc::now();
+    let already_running = {
+        let mut running = running_names()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if running.contains(name) {
+            true
+        } else {
+            running.insert(name.to_string());
+            false
+        }
+    };
+    if already_running {
+        return failure_record(
+            name,
+            backend.id(),
+            started_at,
+            0,
+            format!("{name} is already running (triggered elsewhere) — try again once it finishes"),
+        );
+    }
+    let _guard = RunningGuard(name.to_string());
+
     let request = agent_request(prompt, backend, config, model, allowed_tools);
     match backend.run(request).await {
         Ok(result) => record_from_result(name, backend.id(), started_at, result),
@@ -560,6 +615,158 @@ mod tests {
             assert!(record.error.is_some());
             assert_eq!(record.exit_code, None);
         }
+    }
+
+    /// Reproduces live: three concurrent triggers for the same skill (a
+    /// mount-time auto-refresh racing a manual click, a dev hot-reload
+    /// remounting before a previous run finished, …) used to spawn three
+    /// competing agent processes instead of one running and the rest
+    /// failing fast. `tokio::test`'s single-threaded runtime makes this
+    /// deterministic, not just probable: `join!` runs the first future
+    /// synchronously up to its first real await (inside `backend.run`,
+    /// past the dedup check), so by the time the second future's own dedup
+    /// check runs, the first has already claimed the name.
+    #[tokio::test]
+    async fn a_second_concurrent_run_of_the_same_name_fails_fast_instead_of_racing() {
+        let fx = Fixture::new("dedupe-race");
+        fx.write_skill(
+            "racer",
+            "---\nname: racer\ndescription: d\nbackend: ollama\n---\nDo a thing.\n",
+        );
+
+        let (a, b) = tokio::join!(
+            execute_skill("racer", &fx.config),
+            execute_skill("racer", &fx.config)
+        );
+        let a = a.unwrap();
+        let b = b.unwrap();
+        let dedup_hits = [&a, &b]
+            .iter()
+            .filter(|r| {
+                r.error
+                    .as_deref()
+                    .is_some_and(|e| e.contains("already running"))
+            })
+            .count();
+        assert_eq!(
+            dedup_hits, 1,
+            "exactly one of two concurrent same-name runs should be rejected: a={a:?} b={b:?}"
+        );
+
+        // The name is released once its run finishes, so a third, later
+        // call isn't permanently locked out by an earlier one.
+        let c = execute_skill("racer", &fx.config).await.unwrap();
+        assert!(
+            c.error
+                .as_deref()
+                .is_none_or(|e| !e.contains("already running"))
+        );
+    }
+
+    /// The dedup keyspace is a bare `name` string shared by both entry
+    /// points — [`execute_skill`] keys on the skill's own frontmatter
+    /// `name`, [`execute_prompt`] keys on whatever the caller (the routine
+    /// scheduler, passing `routine.name`) hands it. A raw-prompt routine
+    /// that happens to share a name with a skill therefore serializes
+    /// against that skill's runs too, not just against other routines. This
+    /// pins that down as intentional-by-construction (the run log already
+    /// conflates the two under one `skill_name` column) rather than an
+    /// accident that a future refactor could silently change.
+    #[tokio::test]
+    async fn a_skill_and_a_same_named_prompt_run_serialize_against_each_other() {
+        let fx = Fixture::new("dedupe-shared-namespace");
+        fx.write_skill(
+            "racer",
+            "---\nname: racer\ndescription: d\nbackend: ollama\n---\nDo a thing.\n",
+        );
+
+        let (skill_result, prompt_result) = tokio::join!(
+            execute_skill("racer", &fx.config),
+            execute_prompt("racer", "say hi".to_owned(), "ollama", &fx.config)
+        );
+        let skill_result = skill_result.unwrap();
+        let dedup_hits = [
+            skill_result.error.as_deref(),
+            prompt_result.error.as_deref(),
+        ]
+        .iter()
+        .filter(|e| e.is_some_and(|e| e.contains("already running")))
+        .count();
+        assert_eq!(
+            dedup_hits, 1,
+            "a skill run and a same-named prompt run should serialize against \
+             each other: skill={skill_result:?} prompt={prompt_result:?}"
+        );
+    }
+
+    /// The dedup guard is keyed by name, not a single global lock — two
+    /// concurrent runs of two *different* names must not interfere with
+    /// each other.
+    #[tokio::test]
+    async fn concurrent_runs_of_different_names_do_not_dedup_against_each_other() {
+        let fx = Fixture::new("dedupe-different-names");
+        fx.write_skill(
+            "racer-a",
+            "---\nname: racer-a\ndescription: d\nbackend: ollama\n---\nDo a thing.\n",
+        );
+        fx.write_skill(
+            "racer-b",
+            "---\nname: racer-b\ndescription: d\nbackend: ollama\n---\nDo a thing.\n",
+        );
+
+        let (a, b) = tokio::join!(
+            execute_skill("racer-a", &fx.config),
+            execute_skill("racer-b", &fx.config)
+        );
+        let a = a.unwrap();
+        let b = b.unwrap();
+        for record in [&a, &b] {
+            assert!(
+                record
+                    .error
+                    .as_deref()
+                    .is_none_or(|e| !e.contains("already running")),
+                "different-named runs must not dedup against each other: {record:?}"
+            );
+        }
+    }
+
+    /// The name is released even when the run itself fails (not just on
+    /// success, which is all the ollama-backed dedup test above can prove
+    /// on a machine where the daemon happens to be reachable) — a spawn
+    /// failure must not wedge the name claimed forever.
+    #[tokio::test]
+    async fn the_name_lock_is_released_even_when_the_run_fails() {
+        if on_path("claude") {
+            // The binary exists here; this test only covers the guaranteed
+            // spawn-failure case (binary absent).
+            return;
+        }
+        let fx = Fixture::new("dedupe-release-on-failure");
+        fx.write_skill(
+            "summarize",
+            "---\nname: summarize\ndescription: summary\nbackend: claude-code\n---\nSummarize.\n",
+        );
+
+        let first = execute_skill("summarize", &fx.config).await.unwrap();
+        assert_eq!(first.status, RunStatus::Failed);
+        assert!(
+            first
+                .error
+                .as_deref()
+                .is_some_and(|e| !e.contains("already running")),
+            "the first run should fail on the absent spawn, not on dedup: {first:?}"
+        );
+
+        let second = execute_skill("summarize", &fx.config).await.unwrap();
+        assert!(
+            second
+                .error
+                .as_deref()
+                .is_none_or(|e| !e.contains("already running")),
+            "the name must be released after a failed run, not just after a \
+             successful one: {second:?}"
+        );
     }
 
     #[tokio::test]
