@@ -17,16 +17,21 @@
   with no runtime parameters). No write actions yet (no create/reply/
   delete/archive) — read and summarise only, for this first step.
 
-  Clicking a row writes that message's full summary as a workspace note and
-  opens it in the file viewer as a slide-in panel (`openMailSummary`); the
-  row itself only ever shows a short, truncated preview of the same text.
+  Every curated email gets its own workspace note the moment the digest is
+  seen — mount, ↻, or a just-finished run (`writeAllMailSummaries`) — not
+  only the ones clicked, so a mail that later drops out of the live mailbox
+  (deleted, or aged out of the digest on a later run) still leaves a durable
+  summary; the tile's own list still always reflects the *latest* run,
+  never these notes. Clicking a row additionally opens its note in the file
+  viewer as a slide-in panel (`openMailSummary`); the row itself only ever
+  shows a short, truncated preview of the same text.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
 
   import type { RunRecord, RunSummary } from "../core/backend";
   import { relativeTime } from "../core/format";
-  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, type MailDigest, type MailItem } from "../core/mail";
+  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, writeAllMailSummaries, type MailDigest, type MailItem } from "../core/mail";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
@@ -59,6 +64,11 @@
       try {
         digest = parseMailDigest(run.stdout);
         error = "";
+        // Best-effort durability: every curated mail gets its own note the
+        // moment it's seen, not only the ones a user clicks (see
+        // `writeAllMailSummaries`'s own doc comment for why). Fire-and-forget
+        // — a slow or partially-failing write must never block the tile.
+        void writeAllMailSummaries(ctx.invoke, digest.emails);
       } catch (err) {
         digest = EMPTY_MAIL_DIGEST;
         error = String(err instanceof Error ? err.message : err);
@@ -73,6 +83,7 @@
       lastRun = result.run;
       digest = result.digest;
       error = result.error ?? "";
+      void writeAllMailSummaries(ctx.invoke, digest.emails);
     } catch (err) {
       error = String(err);
     } finally {

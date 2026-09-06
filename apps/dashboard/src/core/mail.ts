@@ -283,10 +283,13 @@ function singleLine(text: string): string {
   return text.replace(/[\r\n]+/g, " ").trim();
 }
 
-/** Writes `item`'s full summary as a workspace note and opens it in the
- *  file viewer as a slide-in panel — the tile itself only ever shows
- *  `summaryPreview`. */
-export async function openMailSummary(invoke: Invoke, item: MailItem): Promise<void> {
+/** Writes `item`'s full summary as a workspace note — the write-only half
+ *  of `openMailSummary`, factored out so the module can also write every
+ *  digest item's note automatically (see `writeAllMailSummaries`), not only
+ *  the one a user happens to click. Returns the note's path. Re-writing the
+ *  same email (same `mailNotePath`) simply overwrites its own note, never
+ *  accumulates duplicates. */
+export async function writeMailSummary(invoke: Invoke, item: MailItem): Promise<string> {
   const reason = item.reason === "topic" && item.topic ? `Topic: ${singleLine(item.topic)}` : "Important";
   const body = [
     `# ${singleLine(item.subject)}`,
@@ -300,5 +303,37 @@ export async function openMailSummary(invoke: Invoke, item: MailItem): Promise<v
   ].join("\n");
   const path = mailNotePath(item);
   await invoke("write_workspace_file", { rel: path, content: body });
+  return path;
+}
+
+/**
+ * Writes every curated email's note the moment a digest is seen — on
+ * mount, on manual refresh, and after a just-finished run — not only the
+ * ones a user happens to click. Without this, a mail that later drops out
+ * of the live mailbox (deleted, or simply aged out of "important"/topic
+ * matching on a later run) and was never clicked leaves no trace anywhere:
+ * the tile's own count only ever reflects the *latest* run, so anything
+ * only visible in an earlier, unseen run is gone for good once superseded.
+ *
+ * One item's write failure (logged, not thrown) doesn't stop the rest —
+ * this is best-effort persistence, not the tile's actual data source (that
+ * stays the run log, via `loadLatestMailDigest`), so a partial failure here
+ * should never surface as a tile-breaking error.
+ */
+export async function writeAllMailSummaries(invoke: Invoke, items: readonly MailItem[]): Promise<void> {
+  for (const item of items) {
+    try {
+      await writeMailSummary(invoke, item);
+    } catch (err) {
+      console.error(`mail: failed to write summary note for ${item.id}`, err);
+    }
+  }
+}
+
+/** Writes `item`'s full summary as a workspace note and opens it in the
+ *  file viewer as a slide-in panel — the tile itself only ever shows
+ *  `summaryPreview`. */
+export async function openMailSummary(invoke: Invoke, item: MailItem): Promise<void> {
+  const path = await writeMailSummary(invoke, item);
   openStaged("md-file", { path, mode: "read" }, "right");
 }

@@ -3,7 +3,7 @@ import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
 import type { RunRecord, RunSummary } from "./backend";
-import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailMix, mailNotePath, openMailSummary, parseMailDigest, saveTopics, summaryPreview, TOPICS_PATH, type MailDigest, type MailItem } from "./mail";
+import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailMix, mailNotePath, openMailSummary, parseMailDigest, saveTopics, summaryPreview, TOPICS_PATH, writeAllMailSummaries, writeMailSummary, type MailDigest, type MailItem } from "./mail";
 import { staged } from "./staging";
 
 const DIGEST_JSON = JSON.stringify({
@@ -243,6 +243,76 @@ describe("loadLatestMailDigest", () => {
     const runs = [summary({ status: "failed", error: "agent timed out" })];
     const result = await loadLatestMailDigest(fakeInvoke(runs, {}));
     expect(result.error).toBe("agent timed out");
+  });
+});
+
+describe("writeAllMailSummaries", () => {
+  function item(over: Partial<MailItem>): MailItem {
+    return {
+      id: "x",
+      sender: "s",
+      subject: "s",
+      date: "2026-09-05T08:00:00Z",
+      reason: "important",
+      topic: null,
+      summary: "s",
+      ...over,
+    };
+  }
+
+  it("writes one note per item", async () => {
+    const writes: Record<string, unknown>[] = [];
+    const invoke = (async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      if (cmd !== "write_workspace_file") throw new Error(`unexpected cmd ${cmd}`);
+      writes.push(args ?? {});
+      return undefined as T;
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+
+    await writeAllMailSummaries(invoke, [item({ id: "m-1" }), item({ id: "m-2" }), item({ id: "m-3" })]);
+    expect(writes).toHaveLength(3);
+  });
+
+  it("does not stop at one item's write failure — the rest still get written", async () => {
+    const writes: string[] = [];
+    let call = 0;
+    const invoke = (async <T>(_cmd: string, args?: Record<string, unknown>): Promise<T> => {
+      call++;
+      if (call === 2) throw new Error("disk full");
+      writes.push((args as { rel: string })?.rel);
+      return undefined as T;
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+
+    await writeAllMailSummaries(invoke, [item({ id: "m-1" }), item({ id: "m-2" }), item({ id: "m-3" })]);
+    expect(writes).toHaveLength(2);
+  });
+
+  it("writes nothing for an empty digest", async () => {
+    let calls = 0;
+    const invoke = (async <T>(): Promise<T> => {
+      calls++;
+      return undefined as T;
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    await writeAllMailSummaries(invoke, []);
+    expect(calls).toBe(0);
+  });
+});
+
+describe("writeMailSummary", () => {
+  it("returns the note's path without opening anything (unlike openMailSummary)", async () => {
+    const invoke = (async <T>(): Promise<T> => {
+      return undefined as unknown as T;
+    }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+    const item: MailItem = {
+      id: "m-1",
+      sender: "Chef",
+      subject: "Bitte um Rückmeldung",
+      date: "2026-09-05T08:00:00Z",
+      reason: "important",
+      topic: null,
+      summary: "s",
+    };
+    const path = await writeMailSummary(invoke, item);
+    expect(path).toBe(mailNotePath(item));
   });
 });
 
