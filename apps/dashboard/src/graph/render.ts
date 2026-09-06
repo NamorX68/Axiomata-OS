@@ -144,6 +144,15 @@ export function drawGlyph(
       ctx.arc(0, s * 0.12, s * 0.32, 0, TWO_PI);
       ctx.stroke();
       break;
+    case "mail": // Mail
+      ctx.roundRect(-s * 0.9, -s * 0.6, s * 1.8, s * 1.2, s * 0.12);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.85, -s * 0.5);
+      ctx.lineTo(0, s * 0.08);
+      ctx.lineTo(s * 0.85, -s * 0.5);
+      ctx.stroke();
+      break;
     case "people": // Gesellschaft
       ctx.arc(-s * 0.28, -s * 0.05, s * 0.32, 0, TWO_PI);
       ctx.stroke();

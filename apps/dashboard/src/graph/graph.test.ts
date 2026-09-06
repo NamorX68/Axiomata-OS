@@ -166,6 +166,7 @@ describe("glyphForArea", () => {
     expect(glyphForArea("Persönlich")).toBe("user");
     expect(glyphForArea("System und Werkzeuge")).toBe("wrench");
     expect(glyphForArea("Learning")).toBe("book");
+    expect(glyphForArea("Mail")).toBe("mail");
     expect(glyphForArea("Inbox")).toBe("tray");
   });
 

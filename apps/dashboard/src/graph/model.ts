@@ -114,6 +114,7 @@ const AREA_GLYPH_RULES: [RegExp, string][] = [
   [/lernen|learning|\bkurs(e)?\b|\bcourse/i, "book"],
   [/arbeit|\bwork\b|\bjob\b/i, "briefcase"],
   [/foto|photo|kamera|camera/i, "camera"],
+  [/\bmail\b|e-?mail/i, "mail"],
   [/gesellschaft|society|politik|kultur/i, "people"],
   [/pers[oö]nlich|personal|privat/i, "user"],
   [/system|werkzeug|\btools?\b/i, "wrench"],
