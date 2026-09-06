@@ -269,6 +269,27 @@ pub fn set_routine_enabled(
     routines::store::set_enabled(&db, id, enabled).map_err(|err| err.to_string())
 }
 
+/// Replaces a routine's name, cron expression, target, backend, and enabled
+/// flag — a full replace like `add_routine`, not a partial patch. Returns
+/// `None` if there is no such routine.
+#[tauri::command]
+pub fn update_routine(
+    state: State<'_, CoreState>,
+    id: i64,
+    new: NewRoutine,
+) -> Result<Option<Routine>, String> {
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    routines::store::update(&db, id, new).map_err(|err| err.to_string())
+}
+
+/// Permanently deletes a routine and its firing history. Returns `false` if
+/// there is no such routine.
+#[tauri::command]
+pub fn delete_routine(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|err| err.to_string())?;
+    routines::store::delete(&db, id).map_err(|err| err.to_string())
+}
+
 /// Returns a routine's firing history, newest first. `limit` is clamped in the
 /// core to `routines::store::MAX_ROUTINE_RUN_LIMIT`.
 #[tauri::command]

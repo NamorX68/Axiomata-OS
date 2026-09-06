@@ -119,6 +119,20 @@ enum RoutineAction {
     List,
     /// Create a routine.
     Add(AddRoutine),
+    /// Replace a routine's name/cron/target/backend by id — a full replace,
+    /// like `add`, not a partial patch: pass every field again, not just the
+    /// one that changed.
+    Edit {
+        /// Routine id, as shown by `routines list`.
+        id: i64,
+        #[command(flatten)]
+        fields: AddRoutine,
+    },
+    /// Permanently delete a routine and its firing history by id.
+    Delete {
+        /// Routine id, as shown by `routines list`.
+        id: i64,
+    },
     /// Enable a routine by id (recomputes its next fire from now).
     Enable {
         /// Routine id, as shown by `routines list`.
@@ -571,6 +585,8 @@ async fn routines_cmd(core: &AxiomataCore, action: RoutineAction) -> Result<()> 
     match action {
         RoutineAction::List => routines_list(core),
         RoutineAction::Add(args) => routines_add(core, args),
+        RoutineAction::Edit { id, fields } => routines_edit(core, id, fields),
+        RoutineAction::Delete { id } => routines_delete(core, id),
         RoutineAction::Enable { id } => routines_set_enabled(core, id, true),
         RoutineAction::Disable { id } => routines_set_enabled(core, id, false),
         RoutineAction::History { id, limit } => routines_history(core, id, limit),
@@ -613,14 +629,20 @@ fn routines_list(core: &AxiomataCore) -> Result<()> {
     Ok(())
 }
 
-/// Creates a routine from the parsed `add` arguments.
-fn routines_add(core: &AxiomataCore, args: AddRoutine) -> Result<()> {
-    // The clap ArgGroup guarantees exactly one of skill / prompt is set.
-    let target = match (args.skill, args.prompt) {
+/// Builds a [`RoutineTarget`] from `AddRoutine`'s `skill`/`prompt` pair,
+/// shared by `add` and `edit` — the clap `ArgGroup` on [`AddRoutine`]
+/// guarantees exactly one of the two is set.
+fn routine_target_from_args(skill: Option<String>, prompt: Option<String>) -> RoutineTarget {
+    match (skill, prompt) {
         (Some(name), None) => RoutineTarget::Skill(name),
         (None, Some(text)) => RoutineTarget::Prompt(text),
         _ => unreachable!("clap enforces exactly one target"),
-    };
+    }
+}
+
+/// Creates a routine from the parsed `add` arguments.
+fn routines_add(core: &AxiomataCore, args: AddRoutine) -> Result<()> {
+    let target = routine_target_from_args(args.skill, args.prompt);
 
     let db = core.db.lock().expect("database mutex is poisoned");
     let routine = routines::store::add(
@@ -644,6 +666,55 @@ fn routines_add(core: &AxiomataCore, args: AddRoutine) -> Result<()> {
             .map(|t| t.to_rfc3339())
             .unwrap_or_else(|| "never (cron has no future occurrence)".to_owned()),
     );
+    Ok(())
+}
+
+/// Replaces a routine's fields from the parsed `edit` arguments — a full
+/// replace like `routines_add`, so `--disabled` behaves the same way here
+/// too: omit it to leave the routine enabled, pass it to keep/force it
+/// disabled. Editing a currently-disabled routine without `--disabled` makes
+/// it enabled again, exactly like resubmitting `add` would.
+fn routines_edit(core: &AxiomataCore, id: i64, args: AddRoutine) -> Result<()> {
+    let target = routine_target_from_args(args.skill, args.prompt);
+
+    let db = core.db.lock().expect("database mutex is poisoned");
+    let updated = routines::store::update(
+        &db,
+        id,
+        NewRoutine {
+            name: args.name,
+            cron_expr: args.cron,
+            target,
+            backend: args.backend,
+            enabled: !args.disabled,
+        },
+    )
+    .with_context(|| format!("failed to update routine #{id}"))?;
+    let Some(routine) = updated else {
+        anyhow::bail!("no routine with id {id}");
+    };
+
+    println!(
+        "updated routine #{id} {name:?}  next fire: {next}",
+        id = routine.id,
+        name = routine.name,
+        next = routine
+            .next_fire_at
+            .map(|t| t.to_rfc3339())
+            .unwrap_or_else(|| "never (cron has no future occurrence)".to_owned()),
+    );
+    Ok(())
+}
+
+/// Permanently deletes a routine by id.
+fn routines_delete(core: &AxiomataCore, id: i64) -> Result<()> {
+    let db = core.db.lock().expect("database mutex is poisoned");
+    let found = routines::store::delete(&db, id)
+        .with_context(|| format!("failed to delete routine #{id}"))?;
+    if !found {
+        anyhow::bail!("no routine with id {id}");
+    }
+    println!("routine #{id} deleted");
     Ok(())
 }
 
