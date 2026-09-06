@@ -18,7 +18,7 @@
   --ax-tile-glass-bg: rgba(250, 247, 240, 0.75);
 
   --ax-text: #1f1b17;
-  --ax-text-muted: #75695c;
+  --ax-text-muted: #63594e;
   --ax-text-invert: #fffdf8;
 
   --ax-accent: #d0642c;
@@ -28,8 +28,8 @@
   --ax-warning: #9a6a12;
   --ax-danger: #b23a3a;
 
-  --ax-border: #e0d8c8;
-  --ax-border-strong: #c8bda8;
+  --ax-border: #cac2b4;
+  --ax-border-strong: #b4aa97;
   --ax-focus-ring: rgba(208, 100, 44, 0.45);
 
   --ax-font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
