@@ -3,7 +3,7 @@ import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
 import type { RunRecord, RunSummary } from "./backend";
-import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailNotePath, openMailSummary, parseMailDigest, saveTopics, summaryPreview, TOPICS_PATH, type MailItem } from "./mail";
+import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailMix, mailNotePath, openMailSummary, parseMailDigest, saveTopics, summaryPreview, TOPICS_PATH, type MailDigest, type MailItem } from "./mail";
 import { staged } from "./staging";
 
 const DIGEST_JSON = JSON.stringify({
@@ -54,6 +54,59 @@ describe("parseMailDigest", () => {
     const d = parseMailDigest(mixed);
     expect(d.emails).toHaveLength(1);
     expect(d.emails[0].subject).toBe("ok");
+  });
+});
+
+describe("mailMix", () => {
+  function item(over: Partial<MailItem>): MailItem {
+    return {
+      id: "x",
+      sender: "s",
+      subject: "s",
+      date: "2026-09-05T08:00:00Z",
+      reason: "important",
+      topic: null,
+      summary: "s",
+      ...over,
+    };
+  }
+
+  it("returns an empty list for an empty digest", () => {
+    expect(mailMix(EMPTY_MAIL_DIGEST)).toEqual([]);
+  });
+
+  it("puts Important first, then topics sorted by descending count", () => {
+    const digest: MailDigest = {
+      emails: [
+        item({ reason: "important" }),
+        item({ reason: "topic", topic: "Development" }),
+        item({ reason: "topic", topic: "Fotografie" }),
+        item({ reason: "topic", topic: "Fotografie" }),
+      ],
+    };
+    const mix = mailMix(digest);
+    expect(mix.map((m) => [m.label, m.count])).toEqual([
+      ["Important", 1],
+      ["Fotografie", 2],
+      ["Development", 1],
+    ]);
+  });
+
+  it("omits Important entirely when there are no important emails", () => {
+    const digest: MailDigest = { emails: [item({ reason: "topic", topic: "Fotografie" })] };
+    expect(mailMix(digest).map((m) => m.label)).toEqual(["Fotografie"]);
+  });
+
+  it("gives every segment a colour, and the same topic the same colour twice", () => {
+    const digest: MailDigest = {
+      emails: [
+        item({ reason: "topic", topic: "Fotografie" }),
+        item({ id: "y", reason: "topic", topic: "Fotografie" }),
+      ],
+    };
+    const mix = mailMix(digest);
+    expect(mix).toHaveLength(1);
+    expect(mix[0].color).toMatch(/^hsl\(/);
   });
 });
 
@@ -219,8 +272,8 @@ describe("openMailSummary", () => {
     expect(writes).toHaveLength(1);
     const written = String(writes[0].content);
     expect(written).toContain("# Bitte um Rückmeldung");
-    expect(written).toContain("**Von:** Chef");
-    expect(written).toContain("**Grund:** Wichtig");
+    expect(written).toContain("**From:** Chef");
+    expect(written).toContain("**Reason:** Important");
     expect(written).toContain(item.summary);
 
     const panels = get(staged);
@@ -229,7 +282,7 @@ describe("openMailSummary", () => {
     expect(panels[0].config.path).toBe(writes[0].rel);
   });
 
-  it("labels a topic match with the topic name instead of \"Wichtig\"", async () => {
+  it("labels a topic match with the topic name instead of \"Important\"", async () => {
     const invoke = (async <T>(): Promise<T> => undefined as T) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
     const writes: string[] = [];
     const recording = (async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
@@ -245,7 +298,7 @@ describe("openMailSummary", () => {
       topic: "Fotografie",
       summary: "s",
     });
-    expect(writes[0]).toContain("**Grund:** Thema: Fotografie");
+    expect(writes[0]).toContain("**Reason:** Topic: Fotografie");
   });
 
   it("collapses embedded newlines in subject/sender/topic so hostile mail headers can't inject extra Markdown structure", async () => {
@@ -256,19 +309,19 @@ describe("openMailSummary", () => {
     }) as <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
     await openMailSummary(recording, {
       id: "m-3",
-      sender: "Attacker\n\n**Von:** Chef (spoofed)",
+      sender: "Attacker\n\n**From:** Chef (spoofed)",
       subject: "Invoice\n# Fake urgent heading",
       date: "2026-09-05T08:00:00Z",
       reason: "topic",
-      topic: "Finance\n**Grund:** Wichtig (spoofed)",
+      topic: "Finance\n**Reason:** Important (spoofed)",
       summary: "s",
     });
     const written = writes[0];
     expect(written).toContain("# Invoice # Fake urgent heading");
-    expect(written).toContain("**Von:** Attacker **Von:** Chef (spoofed)");
-    expect(written).toContain("**Grund:** Thema: Finance **Grund:** Wichtig (spoofed)");
-    // Exactly one real "**Von:**" line — the spoofed one stayed inline, not
+    expect(written).toContain("**From:** Attacker **From:** Chef (spoofed)");
+    expect(written).toContain("**Reason:** Topic: Finance **Reason:** Important (spoofed)");
+    // Exactly one real "**From:**" line — the spoofed one stayed inline, not
     // on its own line the way a genuine field would render.
-    expect(written.split("\n").filter((line) => line.startsWith("**Von:**"))).toHaveLength(1);
+    expect(written.split("\n").filter((line) => line.startsWith("**From:**"))).toHaveLength(1);
   });
 });

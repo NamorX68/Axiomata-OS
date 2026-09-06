@@ -49,6 +49,43 @@ export const MAIL_SKILL_NAME = "mail-digest";
 /** An empty digest — the module's state before any run has ever happened. */
 export const EMPTY_MAIL_DIGEST: MailDigest = { emails: [] };
 
+/** One bucket in the tile's "today's mix" segmented bar. */
+export interface MailMixSegment {
+  label: string;
+  count: number;
+  color: string;
+}
+
+/**
+ * Buckets a digest into "Important" (if any) plus one bucket per topic that
+ * actually matched something, for the tile's segmented mix bar — Important
+ * first, then topics by descending count. Purely a display aggregation;
+ * doesn't change which emails are shown in the itemised lists below it.
+ */
+export function mailMix(digest: MailDigest): MailMixSegment[] {
+  const importantCount = digest.emails.filter((e) => e.reason === "important").length;
+  const byTopic = new Map<string, number>();
+  for (const e of digest.emails) {
+    if (e.reason === "topic" && e.topic) byTopic.set(e.topic, (byTopic.get(e.topic) ?? 0) + 1);
+  }
+  const topicSegments = [...byTopic.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([topic, count]) => ({ label: topic, count, color: topicColor(topic) }));
+  return importantCount > 0
+    ? [{ label: "Important", count: importantCount, color: "var(--ax-accent)" }, ...topicSegments]
+    : topicSegments;
+}
+
+/** Stable colour for a topic name — a cheap string hash into a fixed hue,
+ *  tuned to read reasonably on both light and dark themes. Not the Second
+ *  Brain graph's area-colour mechanism (that's tied to its own
+ *  palette/theme plumbing); this is a much smaller, standalone need. */
+function topicColor(topic: string): string {
+  let hash = 0;
+  for (let i = 0; i < topic.length; i++) hash = (hash * 31 + topic.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360} 55% 55%)`;
+}
+
 /**
  * Where the owner's configured topics live — a plain workspace file, one
  * topic per line, that `mail-digest`'s SOP reads directly (its cwd is the
@@ -239,7 +276,7 @@ export function mailNotePath(item: MailItem): string {
 /** Collapses embedded newlines to spaces so a hostile subject/sender/topic
  *  — real email header text, reachable by anyone who emails the owner —
  *  can't inject extra Markdown block structure (a fake heading, a spoofed
- *  "**Von:**" line) into the note body. Inline formatting (bold, a link)
+ *  "**From:**" line) into the note body. Inline formatting (bold, a link)
  *  can still come through; that's fine, DOMPurify's allow-list already
  *  bounds what those can render as. Flagged by a security review. */
 function singleLine(text: string): string {
@@ -250,13 +287,13 @@ function singleLine(text: string): string {
  *  file viewer as a slide-in panel — the tile itself only ever shows
  *  `summaryPreview`. */
 export async function openMailSummary(invoke: Invoke, item: MailItem): Promise<void> {
-  const reason = item.reason === "topic" && item.topic ? `Thema: ${singleLine(item.topic)}` : "Wichtig";
+  const reason = item.reason === "topic" && item.topic ? `Topic: ${singleLine(item.topic)}` : "Important";
   const body = [
     `# ${singleLine(item.subject)}`,
     "",
-    `**Von:** ${singleLine(item.sender)}`,
-    `**Datum:** ${item.date}`,
-    `**Grund:** ${reason}`,
+    `**From:** ${singleLine(item.sender)}`,
+    `**Date:** ${item.date}`,
+    `**Reason:** ${reason}`,
     "",
     item.summary,
     "",

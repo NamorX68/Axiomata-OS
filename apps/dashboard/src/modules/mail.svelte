@@ -26,7 +26,7 @@
 
   import type { RunRecord, RunSummary } from "../core/backend";
   import { relativeTime } from "../core/format";
-  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, type MailDigest, type MailItem } from "../core/mail";
+  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, type MailDigest, type MailItem } from "../core/mail";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
@@ -43,6 +43,9 @@
   let openingId = $state<string | null>(null);
 
   const skillName = $derived(resolveSkillName($config, MAIL_SKILL_NAME));
+  const importantItems = $derived(digest.emails.filter((e) => e.reason === "important"));
+  const topicItems = $derived(digest.emails.filter((e) => e.reason === "topic"));
+  const mix = $derived(mailMix(digest));
 
   /** Applies a just-finished `run_skill` result (`refreshNow` only —
    *  `loadLatest` goes through `loadLatestMailDigest` instead, which
@@ -111,8 +114,10 @@
 
 <div class="mail">
   <div class="head">
-    <span class="count">{digest.emails.length}</span>
-    <span class="muted">curated</span>
+    <div class="stat">
+      <span class="stat-num">{digest.emails.length}</span>
+      <span class="stat-label">curated<br />last 3 days</span>
+    </div>
     <span class="spacer"></span>
     <span class="muted last-run" title={lastRun ? `Last run: ${lastRun.started_at}` : "No run yet"}>
       {lastRun ? relativeTime(lastRun.started_at) : "never run"}
@@ -136,26 +141,61 @@
   {:else if digest.emails.length === 0}
     <p class="muted empty">Nothing important or topic-matched right now.</p>
   {:else}
-    <ul class="emails">
-      {#each digest.emails as item (item.id)}
-        <li class="email">
-          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-          <div class="row" role="button" tabindex="0" onclick={() => void openSummary(item)} onkeydown={(e) => e.key === "Enter" && openSummary(item)}>
-            <span class="chip" class:chip-topic={item.reason === "topic"}>
-              {item.reason === "topic" ? item.topic : "wichtig"}
+    <div class="body">
+      {#if importantItems.length > 0}
+        <div class="section-label">Important</div>
+        <ul class="emails">
+          {#each importantItems as item (item.id)}
+            {@render row(item)}
+          {/each}
+        </ul>
+      {/if}
+
+      {#if mix.length > 0}
+        <div class="section-label">Today's mix</div>
+        <div class="mix-bar">
+          {#each mix as seg (seg.label)}
+            <span class="seg" style:flex="{seg.count} {seg.count} 0" style:background={seg.color} title="{seg.label}: {seg.count}"></span>
+          {/each}
+        </div>
+        <div class="mix-legend">
+          {#each mix as seg (seg.label)}
+            <span class="legend-item">
+              <span class="dot" style:background={seg.color}></span>{seg.label}
+              <b>{seg.count}</b>
             </span>
-            <span class="subject">{item.subject}</span>
-            <span class="muted date">{relativeTime(item.date)}</span>
-          </div>
-          <div class="sender muted">{item.sender}</div>
-          <div class="summary muted">
-            {openingId === item.id ? "Öffne…" : summaryPreview(item.summary)}
-          </div>
-        </li>
-      {/each}
-    </ul>
+          {/each}
+        </div>
+      {/if}
+
+      {#if topicItems.length > 0}
+        <div class="section-label">By topic</div>
+        <ul class="emails">
+          {#each topicItems as item (item.id)}
+            {@render row(item)}
+          {/each}
+        </ul>
+      {/if}
+    </div>
   {/if}
 </div>
+
+{#snippet row(item: MailItem)}
+  <li class="email">
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+    <div class="row" role="button" tabindex="0" onclick={() => void openSummary(item)} onkeydown={(e) => e.key === "Enter" && openSummary(item)}>
+      <span class="chip" class:chip-topic={item.reason === "topic"}>
+        {item.reason === "topic" ? item.topic : "Important"}
+      </span>
+      <span class="subject">{item.subject}</span>
+      <span class="muted date">{relativeTime(item.date)}</span>
+    </div>
+    <div class="sender muted">{item.sender}</div>
+    <div class="summary muted">
+      {openingId === item.id ? "Opening…" : summaryPreview(item.summary)}
+    </div>
+  </li>
+{/snippet}
 
 <style>
   .mail {
@@ -170,13 +210,27 @@
 
   .head {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: var(--ax-space-2);
     flex: 0 0 auto;
   }
-  .count {
+  .stat {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ax-space-2);
+  }
+  .stat-num {
+    font-size: var(--ax-font-size-xl);
     font-weight: 700;
     color: var(--ax-accent);
+    line-height: 1;
+  }
+  .stat-label {
+    font-size: var(--ax-font-size-xs);
+    line-height: 1.3;
+    color: var(--ax-text-muted);
+    text-transform: uppercase;
+    letter-spacing: var(--ax-tracking-wide);
   }
   .spacer {
     flex: 1 1 auto;
@@ -189,13 +243,66 @@
     font-size: var(--ax-font-size-sm);
   }
 
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    overflow-y: auto;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .section-label {
+    flex: 0 0 auto;
+    font-size: var(--ax-font-size-xs);
+    font-weight: 600;
+    color: var(--ax-text-muted);
+    text-transform: uppercase;
+    letter-spacing: var(--ax-tracking-wide);
+  }
+  .section-label:not(:first-child) {
+    margin-top: var(--ax-space-1);
+  }
+
+  .mix-bar {
+    display: flex;
+    height: 8px;
+    border-radius: var(--ax-radius-sm);
+    overflow: hidden;
+    flex: 0 0 auto;
+  }
+  .seg {
+    display: block;
+  }
+  .mix-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-1) var(--ax-space-3);
+    flex: 0 0 auto;
+  }
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text-muted);
+    white-space: nowrap;
+  }
+  .legend-item b {
+    color: var(--ax-text);
+    font-weight: 600;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+  }
+
   .emails {
     list-style: none;
     margin: 0;
     padding: 0;
-    overflow-y: auto;
-    min-height: 0;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
   }
   .email {
     padding: var(--ax-space-2) 0;
