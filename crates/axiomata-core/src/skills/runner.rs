@@ -80,7 +80,7 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
     // run got back a plain "Unknown command: /<name>" chat reply and — since
     // `claude -p` still exits 0 for an ordinary reply — was logged as a
     // success despite the SOP never reaching the model.
-    Ok(run_on_backend(
+    run_on_backend(
         &skill.name,
         skill.body.clone(),
         &backend,
@@ -88,23 +88,34 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
         model,
         skill.allowed_tools.clone(),
     )
-    .await)
+    .await
 }
 
 /// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`),
 /// attributing the resulting [`RunRecord`] to `name`. The counterpart to
 /// [`execute_skill`] for callers that have a prompt but no `SKILL.md` — the
 /// routine scheduler's `prompt` target. An unresolvable `backend_id` yields a
-/// `Failed` record, not an `Err`.
+/// `Failed` record, not an `Err`; [`AxiomataError::AlreadyRunning`] (`name`
+/// already mid-run elsewhere) is the one case that *is* an `Err` — see
+/// [`run_on_backend`]'s doc comment for why that one must not become a
+/// persisted `Failed` record.
 pub async fn execute_prompt(
     name: &str,
     prompt: String,
     backend_id: &str,
     config: &Config,
-) -> RunRecord {
+) -> Result<RunRecord, AxiomataError> {
     let backend = match AgentBackend::resolve(backend_id, None, config) {
         Ok(backend) => backend,
-        Err(err) => return failure_record(name, backend_id, Utc::now(), 0, err.to_string()),
+        Err(err) => {
+            return Ok(failure_record(
+                name,
+                backend_id,
+                Utc::now(),
+                0,
+                err.to_string(),
+            ));
+        }
     };
     run_on_backend(
         name,
@@ -152,9 +163,20 @@ impl Drop for RunningGuard {
 }
 
 /// Shared tail of [`execute_skill`] / [`execute_prompt`]: claims `name` for
-/// the duration of the run (failing fast if it's already claimed), builds
-/// the request, runs the backend, and maps the outcome onto an unpersisted
-/// [`RunRecord`] attributed to `name`.
+/// the duration of the run, builds the request, runs the backend, and maps
+/// the outcome onto an unpersisted [`RunRecord`] attributed to `name`.
+///
+/// Returns [`AxiomataError::AlreadyRunning`] — a real `Err`, not
+/// `Ok(Failed record)` — if `name` is already claimed. That distinction
+/// matters: both `execute_and_record_skill` and the routine scheduler only
+/// call `runlog::record_run` / persist a `routine_runs` history entry when
+/// they get `Ok(record)` back, so an `Err` here never becomes a `runs` row.
+/// It was one, briefly, live: a dedup rejection recorded as an ordinary
+/// `Failed` run sorted *after* the real (successful, or still in-flight) run
+/// it was rejected in favour of, so `list_runs`-based "find the latest run"
+/// lookups (every connector module's own refresh) picked up the rejection
+/// instead of the actual result — the Skills Deck showed red and the tile
+/// showed nothing even though a good run had just completed.
 async fn run_on_backend(
     name: &str,
     prompt: String,
@@ -162,7 +184,7 @@ async fn run_on_backend(
     config: &Config,
     model: Option<String>,
     allowed_tools: Option<String>,
-) -> RunRecord {
+) -> Result<RunRecord, AxiomataError> {
     let started_at = Utc::now();
     let already_running = {
         let mut running = running_names()
@@ -176,24 +198,20 @@ async fn run_on_backend(
         }
     };
     if already_running {
-        return failure_record(
-            name,
-            backend.id(),
-            started_at,
-            0,
-            format!("{name} is already running (triggered elsewhere) — try again once it finishes"),
-        );
+        return Err(AxiomataError::AlreadyRunning {
+            name: name.to_string(),
+        });
     }
     let _guard = RunningGuard(name.to_string());
 
     let request = agent_request(prompt, backend, config, model, allowed_tools);
-    match backend.run(request).await {
+    Ok(match backend.run(request).await {
         Ok(result) => record_from_result(name, backend.id(), started_at, result),
         Err(err) => {
             let elapsed = (Utc::now() - started_at).num_milliseconds().max(0) as u64;
             failure_record(name, backend.id(), started_at, elapsed, err.to_string())
         }
-    }
+    })
 }
 
 /// Builds the [`AgentRequest`] for a prompt on `backend`: the caller-supplied
@@ -638,15 +656,9 @@ mod tests {
             execute_skill("racer", &fx.config),
             execute_skill("racer", &fx.config)
         );
-        let a = a.unwrap();
-        let b = b.unwrap();
         let dedup_hits = [&a, &b]
             .iter()
-            .filter(|r| {
-                r.error
-                    .as_deref()
-                    .is_some_and(|e| e.contains("already running"))
-            })
+            .filter(|r| matches!(r, Err(AxiomataError::AlreadyRunning { .. })))
             .count();
         assert_eq!(
             dedup_hits, 1,
@@ -655,12 +667,8 @@ mod tests {
 
         // The name is released once its run finishes, so a third, later
         // call isn't permanently locked out by an earlier one.
-        let c = execute_skill("racer", &fx.config).await.unwrap();
-        assert!(
-            c.error
-                .as_deref()
-                .is_none_or(|e| !e.contains("already running"))
-        );
+        let c = execute_skill("racer", &fx.config).await;
+        assert!(!matches!(c, Err(AxiomataError::AlreadyRunning { .. })));
     }
 
     /// The dedup keyspace is a bare `name` string shared by both entry
@@ -684,14 +692,10 @@ mod tests {
             execute_skill("racer", &fx.config),
             execute_prompt("racer", "say hi".to_owned(), "ollama", &fx.config)
         );
-        let skill_result = skill_result.unwrap();
-        let dedup_hits = [
-            skill_result.error.as_deref(),
-            prompt_result.error.as_deref(),
-        ]
-        .iter()
-        .filter(|e| e.is_some_and(|e| e.contains("already running")))
-        .count();
+        let dedup_hits = [&skill_result, &prompt_result]
+            .iter()
+            .filter(|r| matches!(r, Err(AxiomataError::AlreadyRunning { .. })))
+            .count();
         assert_eq!(
             dedup_hits, 1,
             "a skill run and a same-named prompt run should serialize against \

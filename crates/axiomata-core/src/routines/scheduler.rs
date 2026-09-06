@@ -227,13 +227,15 @@ async fn fire_one(
 async fn execute_target(routine: &Routine, config: &Config) -> Result<RunRecord, AxiomataError> {
     match &routine.target {
         RoutineTarget::Skill(name) => runner::execute_skill(name, config).await,
-        RoutineTarget::Prompt(text) => Ok(runner::execute_prompt(
-            &routine.name,
-            text.clone(),
-            routine.backend.as_deref().unwrap_or(DEFAULT_PROMPT_BACKEND),
-            config,
-        )
-        .await),
+        RoutineTarget::Prompt(text) => {
+            runner::execute_prompt(
+                &routine.name,
+                text.clone(),
+                routine.backend.as_deref().unwrap_or(DEFAULT_PROMPT_BACKEND),
+                config,
+            )
+            .await
+        }
     }
 }
 

@@ -64,6 +64,17 @@ pub enum AxiomataError {
         timeout: Duration,
     },
 
+    /// A second trigger for the same skill/prompt name arrived while an
+    /// earlier one was still running (a mount-time auto-refresh racing a
+    /// manual ↻, a Routine firing mid-refresh, a dev hot-reload remounting
+    /// before the previous run finished). Deliberately `Err`, not an
+    /// `Ok(Failed RunRecord)` — this never reaches `runlog::record_run` /
+    /// the routine-run history, so it can't shadow the real (in-flight or
+    /// already-successful) run as the "latest run" a connector module's
+    /// `list_runs` lookup would otherwise find.
+    #[error("{name} is already running (triggered elsewhere) — try again once it finishes")]
+    AlreadyRunning { name: String },
+
     /// A backend that talks to an HTTP API (Ollama) returned an error.
     #[error("the {backend} agent API returned an error: {message}")]
     AgentApi {
