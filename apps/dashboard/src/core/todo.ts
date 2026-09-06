@@ -114,6 +114,21 @@ export function reopenTodo(doc: TodoDoc, index: number): TodoDoc {
   };
 }
 
+/** Replaces open item `index`'s text. A blank or whitespace-only `text` is a no-op. */
+export function editOpen(doc: TodoDoc, index: number, text: string): TodoDoc {
+  const t = text.trim();
+  if (!t || index < 0 || index >= doc.open.length) return doc;
+  return { open: doc.open.map((it, i) => (i === index ? { ...it, text: t } : it)), done: doc.done };
+}
+
+/** Replaces done item `index`'s text, keeping its completion date. A blank or
+ *  whitespace-only `text` is a no-op. */
+export function editDone(doc: TodoDoc, index: number, text: string): TodoDoc {
+  const t = text.trim();
+  if (!t || index < 0 || index >= doc.done.length) return doc;
+  return { open: doc.open, done: doc.done.map((it, i) => (i === index ? { ...it, text: t } : it)) };
+}
+
 /** Removes open item `index`. */
 export function deleteOpen(doc: TodoDoc, index: number): TodoDoc {
   if (index < 0 || index >= doc.open.length) return doc;

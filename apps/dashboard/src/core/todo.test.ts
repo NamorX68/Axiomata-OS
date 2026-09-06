@@ -5,6 +5,8 @@ import {
   completeTodo,
   deleteDone,
   deleteOpen,
+  editDone,
+  editOpen,
   parseTodoDoc,
   reopenTodo,
   serializeTodoDoc,
@@ -142,6 +144,25 @@ describe("mutations", () => {
     expect(deleteOpen(base, 0).open.map((i) => i.text)).toEqual(["two"]);
     expect(deleteDone(base, 0).done).toEqual([]);
     expect(deleteOpen(base, 5)).toBe(base);
+  });
+
+  it("editOpen replaces an open item's text, trimmed", () => {
+    expect(editOpen(base, 0, "  one (revised)  ").open.map((i) => i.text)).toEqual(["one (revised)", "two"]);
+  });
+
+  it("editOpen ignores a blank replacement and an out-of-range index", () => {
+    expect(editOpen(base, 0, "   ")).toBe(base);
+    expect(editOpen(base, 9, "x")).toBe(base);
+  });
+
+  it("editDone replaces a done item's text but keeps its completion date", () => {
+    const next = editDone(base, 0, "old (revised)");
+    expect(next.done).toEqual([{ text: "old (revised)", doneOn: "2026-09-01" }]);
+  });
+
+  it("editDone ignores a blank replacement and an out-of-range index", () => {
+    expect(editDone(base, 0, "  ")).toBe(base);
+    expect(editDone(base, 9, "x")).toBe(base);
   });
 });
 
