@@ -54,9 +54,11 @@ impl AxiomataCore {
     ///   on first run so the file exists for the user to inspect/edit,
     /// - creates `~/.axiomata/logs/`, `~/.axiomata/skills/`, and the
     ///   Second-Brain workspace root if any of them don't exist yet,
-    /// - seeds the built-in example skill into `~/.axiomata/skills/` if it
-    ///   isn't there (user edits to it are preserved),
     /// - opens `~/.axiomata/axiomata.db` and applies pending migrations.
+    ///
+    /// No longer seeds the built-in example skill (owner: real skills now
+    /// exist, the smoke-test skill was just clutter) — `skills::seed_example_skill`
+    /// still exists and is still tested on its own, just not called from here.
     ///
     /// Safe to call on every app start: every step here is idempotent.
     pub fn init() -> Result<Self, AxiomataError> {
@@ -80,8 +82,6 @@ impl AxiomataCore {
         restrict_to_owner(&paths::axiomata_home(), 0o700);
         restrict_to_owner(&paths::logs_dir(), 0o700);
         restrict_to_owner(&paths::config_path(), 0o600);
-
-        skills::seed_example_skill()?;
 
         let db = db::open_and_migrate()?;
         restrict_to_owner(&paths::db_path(), 0o600);
