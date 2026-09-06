@@ -86,13 +86,19 @@
     box-shadow: var(--ax-shadow-pop);
   }
   .panel.right {
-    /* Anchored to the bottom (above the assistant bar), same as before —
-       only the height is now capped so it no longer reaches almost to the
-       top of the window; `top` is left to the browser to compute from
-       `bottom` + `height`. */
+    /* Vertically centred within the space between the top gap and the
+       assistant bar, capped at 80% of the window height. `top` and
+       `bottom` both set (rather than anchoring to one) turns this into
+       the fixed-position centring trick: with an explicit `height`
+       smaller than the top/bottom band, `margin: auto 0` splits the
+       leftover space evenly above and below instead of stacking it all
+       at the top. */
+    top: var(--ax-space-4);
     bottom: 64px;
     right: 0;
     height: min(80vh, calc(100vh - 64px - var(--ax-space-4)));
+    margin-top: auto;
+    margin-bottom: auto;
     /* Always 40% of the window, with a floor so it stays usable when the
        window itself is narrow — no ceiling: on an ultra-wide monitor 40%
        is genuinely wider than 900px, and that's the point. */
