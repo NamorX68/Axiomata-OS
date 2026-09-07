@@ -30,8 +30,13 @@ fn default_ollama_model() -> String {
 
 /// Default Claude model passed as `claude --model` for chat, skills, routines
 /// and imports. A skill's frontmatter `model:` overrides it per skill.
+///
+/// Temporarily Haiku (owner, 2026-09-07): the app kept hitting its Claude
+/// session usage limit within a day or two of only small feature work — Haiku
+/// is enough for the current feature scope and for testing. Was
+/// `claude-sonnet-5`; switch back once that's no longer a concern.
 fn default_claude_model() -> String {
-    "claude-sonnet-5".to_string()
+    "claude-haiku-4-5".to_string()
 }
 
 /// Default hard wall-clock limit for a single skill run.

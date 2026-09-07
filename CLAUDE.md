@@ -101,7 +101,10 @@ from the code itself:
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.
 - **Model**: every `claude -p` run passes `--model` from `config.agents.claude_model`
-  (default `claude-sonnet-5`); a skill's own `model:` frontmatter wins.
+  (temporarily `claude-haiku-4-5` as of 2026-09-07 — the app kept hitting its session
+  usage limit within a day or two of small feature work; Haiku is enough for the current
+  scope and for testing. Was `claude-sonnet-5`, switch back once that's not a concern);
+  a skill's own `model:` frontmatter wins.
 
 ## Sub-agents (use the Rust variants, not the Python-oriented defaults)
 
