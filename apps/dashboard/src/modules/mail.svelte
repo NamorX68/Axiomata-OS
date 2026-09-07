@@ -153,15 +153,6 @@
     <p class="muted empty">Nothing important or topic-matched right now.</p>
   {:else}
     <div class="body">
-      {#if importantItems.length > 0}
-        <div class="section-label">Important</div>
-        <ul class="emails">
-          {#each importantItems as item (item.id)}
-            {@render row(item)}
-          {/each}
-        </ul>
-      {/if}
-
       {#if mix.length > 0}
         <div class="section-label">Today's mix</div>
         <div class="mix-bar">
@@ -177,6 +168,15 @@
             </span>
           {/each}
         </div>
+      {/if}
+
+      {#if importantItems.length > 0}
+        <div class="section-label">Important</div>
+        <ul class="emails">
+          {#each importantItems as item (item.id)}
+            {@render row(item)}
+          {/each}
+        </ul>
       {/if}
 
       {#if topicItems.length > 0}
