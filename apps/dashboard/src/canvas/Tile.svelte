@@ -291,6 +291,21 @@
     box-shadow: none;
     border-radius: 0;
     border-bottom: 2px solid var(--ax-border-strong);
+    /* Owner found the mouse-wheel-scroll bug (see .tile-body below) does
+       *not* reproduce on .face.back — the one structural difference is
+       that .face.back carries its own `transform: rotateY(180deg)` (the
+       flip-card trick: combined with .tile-inner's own rotation when
+       flipped, it cancels out to upright), while .face.front has no
+       transform of its own at all, only the inherited one from
+       .tile-inner's `preserve-3d` context. An element with its own
+       `transform` gets its own compositing context "for free" — .face.back
+       already had that; .face.front never did. This identity transform
+       (no visible rotation) exists solely to give .face.front the same
+       property. Two earlier fix attempts on .tile-body itself
+       (touch-action, then its own translateZ(0)) did not resolve this —
+       if this doesn't either, the next step is live WKWebView Web
+       Inspector debugging, not another blind guess. */
+    transform: translateZ(0);
   }
   .tile:hover .face.front {
     background: color-mix(in srgb, var(--ax-tile-glass-bg) 45%, transparent);
