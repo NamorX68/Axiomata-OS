@@ -18,3 +18,4 @@ gray_matter.workspace = true
 ollama-rs.workspace = true
 ignore.workspace = true
 cron.workspace = true
+base64.workspace = true

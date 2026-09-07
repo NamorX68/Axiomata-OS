@@ -27,6 +27,12 @@ use crate::memory::guarded_root;
 /// Hard cap for a single file in either direction.
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
+/// Hard cap for a single image read via [`read_image`] — larger than
+/// [`MAX_FILE_BYTES`] since photos routinely exceed 1 MiB. Base64-encoding
+/// inflates this by about a third over the Tauri IPC bridge, still small for
+/// a local call.
+pub const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// A file read from the workspace.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceFile {
@@ -35,6 +41,36 @@ pub struct WorkspaceFile {
     pub content: String,
     /// Last modification time, if the filesystem reports one.
     pub modified: Option<DateTime<Utc>>,
+}
+
+/// A raster image read from the workspace, ready to inline as a `data:` URI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceImage {
+    /// The relative path as requested (normalised to `/` separators).
+    pub path: String,
+    /// One of `image/png`, `image/jpeg`, `image/gif`, `image/webp` —
+    /// inferred from the file extension by [`image_mime`]; anything else is
+    /// rejected before a `WorkspaceImage` is ever constructed.
+    pub mime: &'static str,
+    /// Base64-encoded file content — the caller wraps this into a
+    /// `data:<mime>;base64,<...>` URI itself.
+    pub base64: String,
+}
+
+/// Maps a file extension onto the raster MIME types the dashboard's Markdown
+/// renderer allows inline (`core/markdown.ts`'s `DATA_IMAGE_RE`) — keep the
+/// two lists in lockstep; extend both together if a format is ever added.
+/// SVG is deliberately never included: it can carry `<script>`, unlike a
+/// raster format.
+fn image_mime(rel: &str) -> Option<&'static str> {
+    let ext = Path::new(rel).extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return None,
+    })
 }
 
 fn invalid(path: &Path, reason: impl Into<String>) -> AxiomataError {
@@ -325,6 +361,57 @@ pub fn read_file(config: &Config, rel: &str) -> Result<WorkspaceFile, AxiomataEr
         content,
         modified: meta.modified().ok().map(DateTime::<Utc>::from),
     })
+}
+
+/// Reads a raster image file from the workspace, base64-encoded — the
+/// binary counterpart to [`read_file`]. Used by the Markdown viewer to
+/// inline a note's own relatively-referenced images (`![alt](photo.jpg)`) as
+/// `data:` URIs, since this app has no other image-serving mechanism: an
+/// `asset://` + `<img src=…>` design was considered instead (there's already
+/// a dormant `assetFileUrl` helper on the frontend for exactly this), but
+/// re-adding the Rust-side scope-granting it needs risks the same class of
+/// Tauri asset-protocol failure that broke the HTML lesson viewer's original
+/// design (see `md-file.svelte`'s doc comment) — inlining is simpler and
+/// already proven (DOMPurify's Markdown sanitiser already allow-lists
+/// exactly this `data:image/…;base64,` shape).
+///
+/// Errors:
+///     [`AxiomataError::InvalidWorkspacePath`] for a path outside the
+///     workspace, a symlink/hard link, a file over [`MAX_IMAGE_BYTES`], or
+///     an extension [`image_mime`] doesn't recognise.
+///     [`AxiomataError::Io`] on any other read failure.
+pub fn read_image(config: &Config, rel: &str) -> Result<WorkspaceImage, AxiomataError> {
+    let mime = image_mime(rel).ok_or_else(|| {
+        invalid(
+            Path::new(rel),
+            "not a supported image type (png/jpeg/gif/webp)",
+        )
+    })?;
+    let full = resolve(config, rel)?;
+    let meta = fs::metadata(&full).map_err(io(&full))?;
+    if meta.len() > MAX_IMAGE_BYTES {
+        return Err(invalid(
+            Path::new(rel),
+            format!("larger than the {MAX_IMAGE_BYTES}-byte limit"),
+        ));
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    fs::File::open(&full)
+        .and_then(|f| f.take(MAX_IMAGE_BYTES).read_to_end(&mut bytes))
+        .map_err(io(&full))?;
+    Ok(WorkspaceImage {
+        path: rel.replace('\\', "/"),
+        mime,
+        base64: base64_encode(&bytes),
+    })
+}
+
+/// `base64` 0.22 dropped the old free-function API in favour of an explicit
+/// `Engine` — this is the standard (not URL-safe) alphabet with padding,
+/// what every `data:` URI expects.
+fn base64_encode(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 /// Atomically writes `content` to a workspace file, creating it if missing.
@@ -669,5 +756,91 @@ mod tests {
             AxiomataError::InvalidWorkspacePath { .. }
         ));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reads_an_image_and_base64_round_trips_the_exact_bytes() {
+        use base64::Engine as _;
+        let (root, config) = workspace();
+        let bytes: Vec<u8> = (0..=255).collect(); // exercises the full byte range
+        fs::write(root.join("notes/photo.png"), &bytes).unwrap();
+
+        let img = read_image(&config, "notes/photo.png").unwrap();
+        assert_eq!(img.path, "notes/photo.png");
+        assert_eq!(img.mime, "image/png");
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(&img.base64)
+                .unwrap(),
+            bytes
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_image_recognises_every_supported_extension_case_insensitively() {
+        let (root, config) = workspace();
+        for (name, mime) in [
+            ("a.png", "image/png"),
+            ("b.jpg", "image/jpeg"),
+            ("c.jpeg", "image/jpeg"),
+            ("d.gif", "image/gif"),
+            ("e.webp", "image/webp"),
+            ("F.PNG", "image/png"),
+        ] {
+            fs::write(root.join(format!("notes/{name}")), [0u8]).unwrap();
+            assert_eq!(
+                read_image(&config, &format!("notes/{name}")).unwrap().mime,
+                mime,
+                "{name}"
+            );
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_image_rejects_an_unsupported_extension_without_touching_the_filesystem() {
+        let (root, config) = workspace();
+        fs::write(root.join("notes/vector.svg"), "<svg/>").unwrap();
+        assert!(matches!(
+            read_image(&config, "notes/vector.svg").unwrap_err(),
+            AxiomataError::InvalidWorkspacePath { .. }
+        ));
+        // No extension at all is rejected the same way, not treated as an I/O miss.
+        assert!(matches!(
+            read_image(&config, "notes/noext").unwrap_err(),
+            AxiomataError::InvalidWorkspacePath { .. }
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_image_enforces_its_own_larger_size_cap() {
+        let (root, config) = workspace();
+        let big = vec![0u8; MAX_IMAGE_BYTES as usize + 1];
+        fs::write(root.join("notes/big.png"), &big).unwrap();
+        assert!(matches!(
+            read_image(&config, "notes/big.png").unwrap_err(),
+            AxiomataError::InvalidWorkspacePath { .. }
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_image_refuses_a_symlinked_file_the_same_way_read_file_does() {
+        let (root, config) = workspace();
+        let outside = unique_temp_dir("axiomata-test-workspace-image-outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.png"), [0u8]).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.png"), root.join("notes/link.png"))
+            .unwrap();
+
+        assert!(matches!(
+            read_image(&config, "notes/link.png").unwrap_err(),
+            AxiomataError::InvalidWorkspacePath { .. }
+        ));
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
     }
 }

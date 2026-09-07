@@ -30,3 +30,7 @@ cron = "0.17"
 # native-tls stack (and, on macOS, the Security.framework link) is dead weight.
 # Add `features = ["rustls"]` if a remote HTTPS endpoint is ever needed.
 ollama-rs = { version = "0.3", default-features = false }
+# Encodes an image's raw bytes for `workspace::read_image` (inlined into the
+# Markdown viewer as a `data:` URI — see that function's doc comment for why
+# not `asset://`).
+base64 = "0.22"

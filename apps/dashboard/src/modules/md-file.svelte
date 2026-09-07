@@ -42,6 +42,7 @@
   import { relativeTime } from "../core/format";
   import { resolveRelativeLink, withNavIntercept } from "../core/htmllink";
   import { renderMarkdown } from "../core/markdown";
+  import { resolveMarkdownImages } from "../core/markdownImages";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -63,7 +64,34 @@
   let frameDoc = $state<string | null>(null);
   let reloadTick = $state(0);
   const dirty = $derived(file !== null && draft !== file.content);
-  const html = $derived(file ? renderMarkdown(mode === "edit" ? draft : file.content) : "");
+
+  /** Word count / reading time for the bar — markdown only (an HTML page's
+   *  content isn't loaded into `file`), read mode only (edit mode shows a
+   *  plain textarea, no point counting the in-progress draft). ~200 wpm,
+   *  rounded up to a whole minute, floor of 1. */
+  const wordCount = $derived(kind === "markdown" && file ? file.content.trim().split(/\s+/).filter(Boolean).length : 0);
+  const readingMins = $derived(Math.max(1, Math.round(wordCount / 200)));
+
+  // Rendering is async (relative image references are resolved to inline
+  // `data:` URIs first — see `resolveMarkdownImages`), so `html` is state
+  // recomputed by an effect rather than a plain `$derived`. `cancelled`
+  // guards against a slower, superseded resolution overwriting a newer one
+  // (switching files quickly, or a reload mid-flight).
+  let html = $state("");
+  $effect(() => {
+    const source = mode === "read" ? file?.content : undefined;
+    if (!source) {
+      html = "";
+      return;
+    }
+    let cancelled = false;
+    void resolveMarkdownImages(source, path, ctx.invoke).then((resolved) => {
+      if (!cancelled) html = renderMarkdown(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   async function load(rel: string) {
     if (!rel) {
@@ -186,14 +214,16 @@
     <div class="bar">
       <span class="path" title={path}>{path}</span>
       {#if file?.modified}<span class="muted">· {relativeTime(file.modified)}</span>{/if}
+      {#if wordCount > 0}<span class="muted">· {wordCount} words · {readingMins} min</span>{/if}
       <span class="spacer"></span>
+      <button type="button" onclick={() => ctx.emit("open-second-brain", { focus: `file:${path}` })} title="Open in Second Brain">In Second Brain</button>
       {#if kind === "html"}
-        <button type="button" onclick={() => ctx.emit("open-second-brain", { focus: `file:${path}` })}>In Second Brain</button>
+        <!-- nothing else — read-only -->
       {:else if mode === "read"}
-        <button type="button" onclick={() => setMode("edit")} disabled={!file}>Edit</button>
+        <button type="button" onclick={() => setMode("edit")} disabled={!file} title="Edit">Edit</button>
       {:else}
-        <button type="button" onclick={() => setMode("read")}>Read</button>
-        <button type="button" class="save" onclick={save} disabled={!dirty || saving}>
+        <button type="button" onclick={() => setMode("read")} title="Back to read view">Read</button>
+        <button type="button" class="save" onclick={save} disabled={!dirty || saving} title="Save">
           {saving ? "Saving…" : "Save"}
         </button>
       {/if}
@@ -257,8 +287,13 @@
     flex: 0 0 auto;
   }
   .bar button {
-    padding: 1px var(--ax-space-2);
+    padding: 2px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
+    /* The plain global button style (--ax-surface-3 on --ax-border) reads
+       too close to the panel's own --ax-surface-1 background to notice at
+       a glance — a stronger border gives it real edges without going as
+       loud as the accent-coloured Save button. */
+    border-color: var(--ax-border-strong);
   }
   .path {
     font-family: var(--ax-font-mono);
@@ -266,6 +301,10 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* Without this, a flex item's minimum width defaults to its full
+       unwrapped content size — a long path would refuse to shrink at all,
+       pushing the buttons after it out of the bar instead of ellipsizing. */
+    min-width: 0;
   }
   .spacer {
     flex: 1 1 auto;
@@ -315,6 +354,7 @@
   }
   .rendered :global(h2) {
     font-size: var(--ax-font-size-lg);
+    color: var(--ax-accent);
   }
   .rendered :global(hr) {
     margin: var(--ax-space-3) 0;
@@ -359,8 +399,10 @@
     padding: 0;
   }
   .rendered :global(blockquote) {
-    padding-left: var(--ax-space-3);
+    padding: var(--ax-space-2) var(--ax-space-3);
     border-left: 3px solid var(--ax-accent);
+    border-radius: 0 var(--ax-radius-sm) var(--ax-radius-sm) 0;
+    background: var(--ax-accent-muted);
     color: var(--ax-text-muted);
   }
   .rendered :global(table) {
@@ -370,6 +412,11 @@
   .rendered :global(td) {
     padding: var(--ax-space-1) var(--ax-space-2);
     border: 1px solid var(--ax-border);
+  }
+  .rendered :global(th) {
+    background: var(--ax-surface-3);
+    color: var(--ax-accent);
+    text-align: left;
   }
   .rendered :global(a) {
     color: var(--ax-accent);

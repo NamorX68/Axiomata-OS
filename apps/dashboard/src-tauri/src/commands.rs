@@ -16,7 +16,7 @@ use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::notes;
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill, SkippedSkill};
-use axiomata_core::workspace::{self, SearchHit, WorkspaceFile};
+use axiomata_core::workspace::{self, SearchHit, WorkspaceFile, WorkspaceImage};
 use serde::Serialize;
 use tauri::State;
 
@@ -150,6 +150,19 @@ pub fn read_workspace_file(
     rel: String,
 ) -> Result<WorkspaceFile, String> {
     workspace::read_file(&state.config, &rel).map_err(|err| err.to_string())
+}
+
+/// Reads a raster image (png/jpeg/gif/webp, ≤ 8 MiB) by workspace-relative
+/// path, base64-encoded — the binary counterpart to `read_workspace_file`,
+/// used by the Markdown viewer to inline a note's own relatively-referenced
+/// images. Same path guard (no `..`, no symlinks, must resolve inside
+/// `config.workspace_root`).
+#[tauri::command]
+pub fn read_workspace_image(
+    state: State<'_, CoreState>,
+    rel: String,
+) -> Result<WorkspaceImage, String> {
+    workspace::read_image(&state.config, &rel).map_err(|err| err.to_string())
 }
 
 /// Atomically writes a workspace file under the same guard as

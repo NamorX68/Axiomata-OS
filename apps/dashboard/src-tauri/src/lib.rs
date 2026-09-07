@@ -38,6 +38,7 @@ pub fn run() {
             commands::get_dashboard_state,
             commands::save_dashboard_state,
             commands::read_workspace_file,
+            commands::read_workspace_image,
             commands::write_workspace_file,
             commands::create_note,
             commands::assistant_send,

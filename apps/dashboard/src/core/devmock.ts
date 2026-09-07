@@ -467,6 +467,23 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (content === undefined) throw new Error(`I/O error at ${rel}: No such file or directory`);
       return { path: rel, content, modified: new Date().toISOString() } as T;
     }
+    case "read_workspace_image": {
+      // No real binary file store in this mock — any supported extension
+      // resolves to the same tiny fixture image, so the Markdown viewer's
+      // image-inlining path is exercisable in a browser without a real
+      // workspace file on disk.
+      const rel = String(args.rel);
+      const ext = rel.split(".").pop()?.toLowerCase();
+      const mime = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" }[ext ?? ""];
+      if (!mime) throw new Error(`invalid workspace image ${rel}: not a supported image type (png/jpeg/gif/webp)`);
+      // A 1×1 transparent PNG, base64-encoded — a real, valid (if trivial)
+      // image regardless of which raster `mime` was actually requested.
+      return {
+        path: rel,
+        mime,
+        base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      } as T;
+    }
     case "write_workspace_file":
       files.set(String(args.rel), String(args.content));
       return undefined as T;

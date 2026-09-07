@@ -18,7 +18,7 @@
   import { bringToFront, canvasSize, guides, instances, removeInstance, snapEdges, updateInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
   import { draggable, type DragDelta } from "./drag";
-  import { resizable, type ResizeDelta, type ResizeDir } from "./resize";
+  import { resizable, type ResizeDelta } from "./resize";
   import {
     alignmentGuides,
     anchorFor,
@@ -46,7 +46,11 @@
       .filter((i) => i.id !== inst.id && getModule(i.type)?.background !== true)
       .map(shown);
   }
-  const HANDLES: ResizeDir[] = ["e", "s", "se"];
+  // A canvas tile only ever resizes from its right/bottom edges — a
+  // narrower local type than `resize.ts`'s shared `ResizeDir` (which also
+  // covers "w"/"n" for StagingLayer's right-anchored panel).
+  type TileResizeDir = "e" | "s" | "se";
+  const HANDLES: TileResizeDir[] = ["e", "s", "se"];
 
   let { inst }: { inst: CanvasInstance } = $props();
 
@@ -84,7 +88,7 @@
     showGuides({ x: r.x, y: r.y, w: base.w, h: base.h }, r.guides);
     return { dx: r.x - base.x, dy: r.y - base.y };
   }
-  function snappedResize(d: ResizeDelta, dir: ResizeDir): ResizeDelta {
+  function snappedResize(d: ResizeDelta, dir: TileResizeDir): ResizeDelta {
     const base = shown(inst);
     const r = magnetResize({ x: base.x, y: base.y, w: base.w + d.dw, h: base.h + d.dh }, others(), dir, min, {
       edges: get(snapEdges),
@@ -120,7 +124,7 @@
     commit(resolveOverlap({ x: base.x + sd.dx, y: base.y + sd.dy, w: base.w, h: base.h }, others(), bounds()));
   }
 
-  let resizeDir: ResizeDir = "se";
+  let resizeDir: TileResizeDir = "se";
   function onResizeEnd() {
     const base = shown(inst);
     const sr = snappedResize(resize ?? { dw: 0, dh: 0 }, resizeDir);

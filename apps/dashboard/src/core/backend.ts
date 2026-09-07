@@ -103,6 +103,15 @@ export interface WorkspaceFile {
   modified: string | null;
 }
 
+/** A raster image read via `read_workspace_image` — `mime` is one of
+ *  `image/png`, `image/jpeg`, `image/gif`, `image/webp`; `base64` is ready
+ *  to wrap into a `data:<mime>;base64,<...>` URI. */
+export interface WorkspaceImage {
+  path: string;
+  mime: string;
+  base64: string;
+}
+
 export interface GraphFile {
   path: string;
   area: string | null;
