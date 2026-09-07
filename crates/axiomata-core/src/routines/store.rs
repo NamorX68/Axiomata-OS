@@ -100,6 +100,88 @@ pub fn add(db: &Connection, new: NewRoutine) -> Result<Routine, AxiomataError> {
     })
 }
 
+/// Updates every mutable field of a routine: name, cron expression, target,
+/// backend, and enabled flag — a full replace, not a partial patch, so
+/// callers (the CLI's `routines edit`, the Tauri `update_routine` command,
+/// the dashboard's edit form) always resubmit the complete set exactly like
+/// [`add`] does; there is no separate "patch just this field" path.
+///
+/// Re-validates name/target/backend/cron the same way [`add`] does.
+/// `next_fire_at` is recomputed from the (possibly new) cron expression when
+/// `new.enabled` is true, mirroring [`set_enabled`]'s re-enable behaviour;
+/// left untouched while staying disabled, so a routine edited while off does
+/// not silently gain a schedule it was never asked to run on.
+///
+/// Returns `Ok(None)` if there is no routine with that id.
+///
+/// # Errors
+///
+/// Same variants as [`add`]: [`AxiomataError::InvalidRoutine`],
+/// [`AxiomataError::InvalidCron`], or [`AxiomataError::Database`]. A
+/// duplicate name is only rejected if it belongs to a *different* routine —
+/// keeping a routine's own current name is always allowed.
+pub fn update(db: &Connection, id: i64, new: NewRoutine) -> Result<Option<Routine>, AxiomataError> {
+    let Some(existing) = get(db, id)? else {
+        return Ok(None);
+    };
+    validate_new(&new)?;
+    schedule::validate(&new.cron_expr)?;
+
+    let now = Utc::now();
+    let next_fire_at = if new.enabled {
+        schedule::next_after(&new.cron_expr, now)?
+    } else {
+        existing.next_fire_at
+    };
+    let (target_type, target) = new.target.to_columns();
+
+    let result = db.execute(
+        "UPDATE routines SET name = ?1, cron_expr = ?2, target_type = ?3, target = ?4, \
+         backend = ?5, enabled = ?6, next_fire_at = ?7, updated_at = ?8 WHERE id = ?9",
+        rusqlite::params![
+            new.name,
+            new.cron_expr,
+            target_type,
+            target,
+            new.backend,
+            new.enabled as i64,
+            next_fire_at.map(|dt| dt.to_rfc3339()),
+            now.to_rfc3339(),
+            id,
+        ],
+    );
+
+    // Same constraint code as `add` — the only way this `UPDATE` can fail on
+    // a validated payload is the `name` UNIQUE index hitting a *different*
+    // row (the row being updated already holds its own current name, so
+    // keeping it unchanged never conflicts with itself).
+    const SQLITE_CONSTRAINT_UNIQUE: i32 = 2067;
+    match result {
+        Ok(_) => {}
+        Err(rusqlite::Error::SqliteFailure(err, _))
+            if err.extended_code == SQLITE_CONSTRAINT_UNIQUE =>
+        {
+            return Err(AxiomataError::InvalidRoutine {
+                reason: format!("a routine named {:?} already exists", new.name),
+            });
+        }
+        Err(err) => return Err(err.into()),
+    }
+
+    get(db, id)
+}
+
+/// Permanently deletes a routine. Its firing history (`routine_runs`)
+/// cascades automatically via the foreign key declared in migration 0003 —
+/// no separate cleanup call needed.
+///
+/// Returns `false` if there is no routine with that id, so the caller can
+/// distinguish "already gone" from an actual delete.
+pub fn delete(db: &Connection, id: i64) -> Result<bool, AxiomataError> {
+    let changed = db.execute("DELETE FROM routines WHERE id = ?1", [id])?;
+    Ok(changed > 0)
+}
+
 /// Rejects a routine whose name, target, or backend is malformed — enforced
 /// here so both the CLI and the Tauri command are covered.
 ///
@@ -1043,6 +1125,232 @@ mod tests {
         assert_eq!(
             history[0].run_id, None,
             "its link is nulled out, not left dangling"
+        );
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_replaces_fields_and_recomputes_next_fire() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("original")).unwrap();
+
+        let mut edited = new_routine("renamed");
+        edited.cron_expr = "0 0 9 * * *".to_owned();
+        edited.target = RoutineTarget::Prompt("say hi".to_owned());
+        edited.backend = Some("ollama".to_owned());
+
+        let updated = update(&db, r.id, edited).unwrap().unwrap();
+        assert_eq!(updated.id, r.id);
+        assert_eq!(updated.name, "renamed");
+        assert_eq!(updated.cron_expr, "0 0 9 * * *");
+        assert_eq!(updated.target, RoutineTarget::Prompt("say hi".to_owned()));
+        assert_eq!(updated.backend.as_deref(), Some("ollama"));
+        assert!(updated.next_fire_at.unwrap() > Utc::now());
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_keeps_next_fire_untouched_while_staying_disabled() {
+        let (path, db) = temp_db();
+        let mut new = new_routine("stays-off");
+        new.enabled = false;
+        let r = add(&db, new).unwrap();
+        let stale = Utc::now() - chrono::Duration::days(1);
+        set_next_fire_at(&db, r.id, Some(stale)).unwrap();
+
+        let mut edited = new_routine("stays-off");
+        edited.enabled = false;
+        edited.cron_expr = "0 0 9 * * *".to_owned();
+        let updated = update(&db, r.id, edited).unwrap().unwrap();
+        assert_eq!(updated.next_fire_at, Some(stale));
+        assert!(!updated.enabled);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_rejects_a_name_already_used_by_another_routine() {
+        let (path, db) = temp_db();
+        add(&db, new_routine("taken")).unwrap();
+        let r = add(&db, new_routine("free")).unwrap();
+
+        let edited = new_routine("taken");
+        let err = update(&db, r.id, edited).unwrap_err();
+        assert!(matches!(err, AxiomataError::InvalidRoutine { .. }));
+        // Unchanged.
+        assert_eq!(get(&db, r.id).unwrap().unwrap().name, "free");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_allows_keeping_a_routines_own_current_name() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("same-name")).unwrap();
+        let edited = new_routine("same-name");
+        let updated = update(&db, r.id, edited).unwrap().unwrap();
+        assert_eq!(updated.name, "same-name");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_on_a_missing_id_returns_none() {
+        let (path, db) = temp_db();
+        assert!(update(&db, 4242, new_routine("ghost")).unwrap().is_none());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn delete_removes_the_routine_and_cascades_its_history() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("gone-soon")).unwrap();
+        record_run(
+            &db,
+            r.id,
+            NewRoutineRun {
+                run_id: None,
+                scheduled_for: Utc::now(),
+                fired_at: Utc::now(),
+                status: RoutineRunStatus::Success,
+                detail: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(list_runs(&db, r.id, 10).unwrap().len(), 1);
+
+        assert!(delete(&db, r.id).unwrap());
+        assert!(get(&db, r.id).unwrap().is_none());
+        assert_eq!(
+            list_runs(&db, r.id, 10).unwrap().len(),
+            0,
+            "routine_runs history must cascade-delete with its routine"
+        );
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn delete_on_a_missing_id_returns_false() {
+        let (path, db) = temp_db();
+        assert!(!delete(&db, 4242).unwrap());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn deleting_the_same_routine_twice_returns_false_the_second_time() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("delete-once")).unwrap();
+
+        assert!(delete(&db, r.id).unwrap(), "first delete removes the row");
+        assert!(
+            !delete(&db, r.id).unwrap(),
+            "second delete on the now-gone id must not report success"
+        );
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_rejects_bad_cron_and_leaves_the_existing_row_untouched() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("was-fine")).unwrap();
+
+        let mut bad = new_routine("was-fine");
+        bad.cron_expr = "*/2 * * * *".to_owned(); // 5-field crontab, unsupported
+        assert!(matches!(
+            update(&db, r.id, bad).unwrap_err(),
+            AxiomataError::InvalidCron { .. }
+        ));
+
+        // The invalid payload must never reach the UPDATE statement.
+        let unchanged = get(&db, r.id).unwrap().unwrap();
+        assert_eq!(unchanged, r);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_rejects_malformed_name_target_and_backend() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("was-fine")).unwrap();
+
+        let cases: Vec<NewRoutine> = vec![
+            NewRoutine {
+                name: "bad/name".to_owned(),
+                ..new_routine("_")
+            },
+            NewRoutine {
+                name: "x".repeat(200),
+                ..new_routine("_")
+            },
+            NewRoutine {
+                target: RoutineTarget::Skill("../etc/passwd".to_owned()),
+                ..new_routine("_")
+            },
+            NewRoutine {
+                target: RoutineTarget::Prompt(String::new()),
+                ..new_routine("_")
+            },
+            NewRoutine {
+                backend: Some("opencode".to_owned()),
+                ..new_routine("_")
+            },
+        ];
+        for case in cases {
+            assert!(
+                matches!(
+                    update(&db, r.id, case.clone()).unwrap_err(),
+                    AxiomataError::InvalidRoutine { .. }
+                ),
+                "expected {case:?} to be rejected"
+            );
+        }
+
+        // None of the rejected payloads should have touched the stored row.
+        let unchanged = get(&db, r.id).unwrap().unwrap();
+        assert_eq!(unchanged, r);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_disables_a_previously_enabled_routine_keeping_its_next_fire_at() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("was-enabled")).unwrap();
+        let original_next_fire = r.next_fire_at;
+        assert!(original_next_fire.is_some());
+
+        let mut edited = new_routine("was-enabled");
+        edited.enabled = false;
+        let updated = update(&db, r.id, edited).unwrap().unwrap();
+
+        assert!(!updated.enabled);
+        assert_eq!(
+            updated.next_fire_at, original_next_fire,
+            "disabling must not clear or recompute next_fire_at, only leave it as-is"
+        );
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn update_preserves_created_at_while_bumping_updated_at() {
+        let (path, db) = temp_db();
+        let r = add(&db, new_routine("stamped")).unwrap();
+
+        let mut edited = new_routine("stamped");
+        edited.cron_expr = "0 0 9 * * *".to_owned();
+        let updated = update(&db, r.id, edited).unwrap().unwrap();
+
+        assert_eq!(
+            updated.created_at, r.created_at,
+            "update must never touch created_at"
+        );
+        assert!(
+            updated.updated_at >= r.updated_at,
+            "update must bump updated_at"
         );
 
         let _ = fs::remove_file(&path);

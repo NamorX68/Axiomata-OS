@@ -2,19 +2,19 @@
 <script lang="ts">
   import type { NewRoutine, Routine } from "../core/backend";
   import type { ModuleContext } from "../core/types";
+  import RoutineForm, { type RoutineFormFields } from "./RoutineForm.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
   // svelte-ignore state_referenced_locally
   const config = ctx.config;
 
-  let name = $state("");
-  let cron = $state("");
-  let targetType = $state<"skill" | "prompt">("skill");
-  let targetValue = $state("");
-  let backend = $state("");
   let adding = $state(false);
   let result = $state("");
+  // Bumped on every successful add to remount `RoutineForm` with fresh
+  // (empty) internal state — simpler than threading a `reset()` method
+  // through the shared component.
+  let formKey = $state(0);
 
   function setShowDisabled(e: Event) {
     const checked = (e.currentTarget as HTMLInputElement).checked;
@@ -25,23 +25,20 @@
     config.update((c) => ({ ...c, sort: value }));
   }
 
-  async function add(e: SubmitEvent) {
-    e.preventDefault();
+  async function add(fields: RoutineFormFields) {
     if (adding) return;
     adding = true;
     const routine: NewRoutine = {
-      name: name.trim(),
-      cron_expr: cron.trim(),
-      target: { type: targetType, value: targetValue.trim() },
-      backend: backend === "" ? null : backend,
+      name: fields.name,
+      cron_expr: fields.cronExpr,
+      target: { type: fields.targetType, value: fields.targetValue },
+      backend: fields.backend === "" ? null : fields.backend,
       enabled: true,
     };
     try {
       const created = await ctx.invoke<Routine>("add_routine", { new: routine });
       result = `Added #${created.id}.`;
-      name = "";
-      cron = "";
-      targetValue = "";
+      formKey += 1;
     } catch (err) {
       result = `Add failed: ${String(err)}`;
     } finally {
@@ -63,33 +60,13 @@
     </select>
   </label>
 
-  <form onsubmit={add}>
+  <div class="add-form">
     <h3>Add routine</h3>
-    <input type="text" placeholder="name" bind:value={name} required />
-    <input
-      type="text"
-      class="mono"
-      placeholder="0 0 9 * * *  (sec min hour dom mon dow)"
-      bind:value={cron}
-      required
-    />
-    <div class="pair">
-      <select bind:value={targetType}>
-        <option value="skill">skill</option>
-        <option value="prompt">prompt</option>
-      </select>
-      <input type="text" placeholder={targetType === "skill" ? "skill name" : "prompt text"} bind:value={targetValue} required />
-    </div>
-    <div class="pair">
-      <select bind:value={backend}>
-        <option value="">default backend</option>
-        <option value="claude-code">claude-code</option>
-        <option value="ollama">ollama</option>
-      </select>
-      <button type="submit" disabled={adding}>{adding ? "Adding…" : "Add"}</button>
-    </div>
+    {#key formKey}
+      <RoutineForm submitLabel={adding ? "Adding…" : "Add"} busy={adding} onSubmit={add} />
+    {/key}
     {#if result}<p class="result">{result}</p>{/if}
-  </form>
+  </div>
 </div>
 
 <style>
@@ -109,7 +86,7 @@
     margin-left: auto;
   }
 
-  form {
+  .add-form {
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-1);
@@ -118,21 +95,11 @@
     border-top: 1px solid var(--ax-border);
   }
   h3 {
+    margin: 0;
     font-size: var(--ax-font-size-sm);
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
     color: var(--ax-text-muted);
-  }
-  .pair {
-    display: flex;
-    gap: var(--ax-space-2);
-  }
-  .pair input {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .mono {
-    font-family: var(--ax-font-mono);
   }
   .result {
     margin: 0;

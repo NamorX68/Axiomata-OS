@@ -57,6 +57,8 @@ pub fn run() {
             commands::list_routines,
             commands::add_routine,
             commands::set_routine_enabled,
+            commands::update_routine,
+            commands::delete_routine,
             commands::routine_history,
         ])
         .setup(|app| {

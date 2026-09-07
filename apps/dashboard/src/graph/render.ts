@@ -589,12 +589,15 @@ export class GraphRenderer {
     const cx = width / 2 + this.view.x;
     const cy = height / 2 + this.view.y;
 
-    // Disc + vignette: deepens the dark themes, a whisper on light ones.
+    // Disc + vignette: deepens the dark themes; light ones (paper is the
+    // only one) got a mere whisper here originally, which read as barely
+    // there against a warm cream background — strengthened so the disc
+    // still reads as a distinct field, not just scattered dots.
     const disc = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R);
     if (this.lightScheme) {
-      disc.addColorStop(0, "rgba(0,0,0,0.07)");
-      disc.addColorStop(0.75, "rgba(0,0,0,0.04)");
-      disc.addColorStop(1, "rgba(0,0,0,0)");
+      disc.addColorStop(0, "rgba(0,0,0,0.14)");
+      disc.addColorStop(0.75, "rgba(0,0,0,0.08)");
+      disc.addColorStop(1, "rgba(0,0,0,0.02)");
     } else {
       disc.addColorStop(0, "rgba(0,0,0,0.55)");
       disc.addColorStop(0.75, "rgba(0,0,0,0.35)");
@@ -610,7 +613,9 @@ export class GraphRenderer {
     ctx.arc(cx, cy, R, 0, TWO_PI);
     ctx.clip();
     ctx.strokeStyle = this.lineColor;
-    ctx.globalAlpha = 0.12;
+    // Same low-contrast-on-cream reason as the vignette above: the hex
+    // texture needs more bite in the light scheme to stay perceptible.
+    ctx.globalAlpha = this.lightScheme ? 0.22 : 0.12;
     ctx.lineWidth = 0.6;
     const hexR = Math.max(14, R * 0.055);
     const hexH = Math.sqrt(3) * hexR;
@@ -633,12 +638,15 @@ export class GraphRenderer {
     }
     ctx.restore();
     ctx.globalAlpha = 1;
-    // Rim.
+    // Rim. In the light scheme, `lineColor` (the theme's border colour) sits
+    // too close in luminance to the cream background to read as an edge at
+    // all — traced in the accent colour instead, which also gives the disc
+    // some of the theme's own identity rather than a flat grey ring.
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, TWO_PI);
-    ctx.strokeStyle = this.lineColor;
-    ctx.globalAlpha = 0.5;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = this.lightScheme ? this.accentColor : this.lineColor;
+    ctx.globalAlpha = this.lightScheme ? 0.55 : 0.5;
+    ctx.lineWidth = this.lightScheme ? 1.4 : 1;
     ctx.stroke();
     ctx.globalAlpha = 1;
 
@@ -660,10 +668,12 @@ export class GraphRenderer {
     // Wireframe geodesic (icosahedron, one subdivision).
     ctx.strokeStyle = this.lineColor;
     ctx.lineWidth = 0.6;
+    const wireBase = this.lightScheme ? 0.16 : 0.08;
+    const wireSpan = this.lightScheme ? 0.14 : 0.1;
     for (const [a, b] of GEODESIC_EDGES) {
       const pa = project(scale(GEODESIC_VERTS[a], 0.66));
       const pb = project(scale(GEODESIC_VERTS[b], 0.66));
-      ctx.globalAlpha = 0.08 + 0.1 * ((pa.z + pb.z) / 2 + 1);
+      ctx.globalAlpha = wireBase + wireSpan * ((pa.z + pb.z) / 2 + 1);
       ctx.beginPath();
       ctx.moveTo(pa.x, pa.y);
       ctx.lineTo(pb.x, pb.y);

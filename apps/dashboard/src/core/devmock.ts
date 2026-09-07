@@ -405,6 +405,23 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       });
       return found as T;
     }
+    case "update_routine": {
+      const id = Number(args.id);
+      const n = args.new as NewRoutine;
+      let updated: Routine | null = null;
+      routines = routines.map((r) => {
+        if (r.id !== id) return r;
+        updated = { ...r, ...n, next_fire_at: n.enabled ? new Date(Date.now() + 3_600_000).toISOString() : r.next_fire_at };
+        return updated;
+      });
+      return updated as T;
+    }
+    case "delete_routine": {
+      const id = Number(args.id);
+      const before = routines.length;
+      routines = routines.filter((r) => r.id !== id);
+      return (routines.length < before) as T;
+    }
     case "assistant_send": {
       await new Promise((r) => setTimeout(r, 900));
       const message = String(args.message);

@@ -4,13 +4,23 @@
   rest "queued", disabled ones "off". Toggle per row. Polls every POLL_MS.
   Config (flip side): `showDisabled`, `sort` ("next" | "name"); the flip side
   also hosts the add-routine form.
+
+  Edit (✎) and delete (✕) live here on the front, not the flip side: a
+  module has no way to flip its own tile from inside itself (see
+  `core/types.ts` `ModuleContext` — no such handle is exposed), so an
+  editable row expands in place into the shared `RoutineForm` instead of
+  reusing the flip-side "Add" form. Delete fires immediately on click, same
+  no-confirmation-dialog convention as Calendar's/Reminders' hover ✕
+  (`modules/calendar.svelte`, `modules/reminders.svelte`) — nothing else in
+  this app uses a native confirm() dialog either.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { Routine } from "../core/backend";
+  import type { NewRoutine, Routine } from "../core/backend";
   import { relativeTime, untilTime } from "../core/format";
   import type { ModuleContext } from "../core/types";
+  import RoutineForm, { type RoutineFormFields } from "./RoutineForm.svelte";
 
   const POLL_MS = 5000;
 
@@ -22,6 +32,10 @@
   let routines = $state<Routine[]>([]);
   let error = $state("");
   let toggling = $state<number[]>([]);
+  let deleting = $state<number[]>([]);
+  // At most one row editing at a time (id, or null when idle).
+  let editingId = $state<number | null>(null);
+  let saving = $state(false);
 
   const showDisabled = $derived($config.showDisabled !== false);
   const sort = $derived($config.sort === "name" ? "name" : "next");
@@ -66,6 +80,41 @@
     }
   }
 
+  async function remove(r: Routine) {
+    if (deleting.includes(r.id)) return;
+    deleting = [...deleting, r.id];
+    try {
+      await ctx.invoke<boolean>("delete_routine", { id: r.id });
+    } catch (err) {
+      error = `delete #${r.id}: ${String(err)}`;
+    } finally {
+      deleting = deleting.filter((id) => id !== r.id);
+      await refresh();
+    }
+  }
+
+  async function saveEdit(r: Routine, fields: RoutineFormFields) {
+    if (saving) return;
+    saving = true;
+    const updated: NewRoutine = {
+      name: fields.name,
+      cron_expr: fields.cronExpr,
+      target: { type: fields.targetType, value: fields.targetValue },
+      backend: fields.backend === "" ? null : fields.backend,
+      // Editing never changes the on/off state — that's the separate toggle.
+      enabled: r.enabled,
+    };
+    try {
+      await ctx.invoke("update_routine", { id: r.id, new: updated });
+      editingId = null;
+    } catch (err) {
+      error = `edit #${r.id}: ${String(err)}`;
+    } finally {
+      saving = false;
+      await refresh();
+    }
+  }
+
   onMount(() => {
     void refresh();
     const id = setInterval(() => void refresh(), POLL_MS);
@@ -97,6 +146,25 @@
             <td class="act">
               <button
                 type="button"
+                class="edit"
+                aria-label={`Edit ${r.name}`}
+                title="Edit"
+                onclick={() => (editingId = editingId === r.id ? null : r.id)}
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                class="del"
+                disabled={deleting.includes(r.id)}
+                aria-label={`Delete ${r.name}`}
+                title="Delete"
+                onclick={() => void remove(r)}
+              >
+                {deleting.includes(r.id) ? "…" : "✕"}
+              </button>
+              <button
+                type="button"
                 disabled={toggling.includes(r.id)}
                 aria-label={r.enabled ? `Disable ${r.name}` : `Enable ${r.name}`}
                 title={r.enabled ? "Disable" : "Enable"}
@@ -106,6 +174,25 @@
               </button>
             </td>
           </tr>
+          {#if editingId === r.id}
+            <tr class="edit-row">
+              <td colspan="4">
+                <RoutineForm
+                  initial={{
+                    name: r.name,
+                    cronExpr: r.cron_expr,
+                    targetType: r.target.type,
+                    targetValue: r.target.value,
+                    backend: r.backend ?? '',
+                  }}
+                  submitLabel={saving ? 'Saving…' : 'Save'}
+                  busy={saving}
+                  onSubmit={(fields) => void saveEdit(r, fields)}
+                  onCancel={() => (editingId = null)}
+                />
+              </td>
+            </tr>
+          {/if}
         {/each}
       </tbody>
     </table>
@@ -142,6 +229,13 @@
   }
   tr.off td {
     color: var(--ax-text-muted);
+  }
+  tr.edit-row td {
+    white-space: normal;
+    background: var(--ax-surface-2);
+  }
+  tr.edit-row:last-child td {
+    border-bottom: none;
   }
 
   .time {
@@ -182,10 +276,27 @@
     color: var(--ax-text);
   }
 
+  .act {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+  }
   .act button {
     min-width: 40px;
     padding: 1px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
+  }
+  .act .edit,
+  .act .del {
+    min-width: 0;
+    color: var(--ax-text-muted);
+    opacity: 0;
+  }
+  tr:hover .edit,
+  tr:hover .del,
+  .edit:focus-visible,
+  .del:focus-visible {
+    opacity: 1;
   }
 
   p {

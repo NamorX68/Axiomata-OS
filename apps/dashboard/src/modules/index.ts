@@ -9,7 +9,7 @@
 import { get } from "svelte/store";
 
 import { registerModule } from "../core/registry";
-import type { RunRecord, WorkspaceFile } from "../core/backend";
+import type { Routine, RunRecord, WorkspaceFile } from "../core/backend";
 import { CALENDAR_SKILL_NAME, createCalendarEvent, deleteCalendarEvent, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
 import { loadLatestMailDigest, MAIL_SKILL_NAME, parseMailDigest } from "../core/mail";
 import { completeReminderTask, createReminderTask, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
@@ -141,6 +141,47 @@ export function registerBuiltins(): void {
         run: (params, ctx) => {
           const p = params as { id: number; on: boolean };
           return ctx.invoke("set_routine_enabled", { id: p.id, enabled: p.on });
+        },
+      },
+      {
+        name: "edit",
+        description:
+          "Replace a routine's name/cron/target/backend by id — a full replace, not a partial patch: pass every field again, not just the one that changed. Its enabled state is left untouched.",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            name: { type: "string" },
+            cron: { type: "string" },
+            skill: { type: "string" },
+            prompt: { type: "string" },
+          },
+          required: ["id", "name", "cron"],
+        },
+        run: async (params, ctx) => {
+          const p = params as { id: number; name: string; cron: string; skill?: string; prompt?: string };
+          const target = p.skill ? { type: "skill", value: p.skill } : { type: "prompt", value: p.prompt ?? "" };
+          // `update_routine` is a full replace (see its own doc comment), so
+          // the current `enabled` has to be read back first — otherwise a
+          // disabled routine would silently come back on with every edit.
+          const current = (await ctx.invoke<Routine[]>("list_routines")).find((r) => r.id === p.id);
+          return ctx.invoke("update_routine", {
+            id: p.id,
+            new: { name: p.name, cron_expr: p.cron, target, backend: null, enabled: current?.enabled ?? true },
+          });
+        },
+      },
+      {
+        name: "delete",
+        description: "Permanently delete a routine and its firing history by id.",
+        params: {
+          type: "object",
+          properties: { id: { type: "integer" } },
+          required: ["id"],
+        },
+        run: (params, ctx) => {
+          const p = params as { id: number };
+          return ctx.invoke("delete_routine", { id: p.id });
         },
       },
       {
