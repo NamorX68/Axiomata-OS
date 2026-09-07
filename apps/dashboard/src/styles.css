@@ -10,6 +10,28 @@
   box-sizing: border-box;
 }
 
+/* Scrollbars stay invisible until the pointer is actually over the
+   scrolling element — a visible-at-rest scrollbar reads as clutter on an
+   otherwise chrome-free tile (`:hover` matches an element while the
+   pointer is over any of its descendants too, so this covers hovering
+   anywhere inside a scrollable tile/panel body, not just the bar itself).
+   WebKit-only (`::-webkit-scrollbar`) is fine — this app only ships on
+   Tauri's WKWebView. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: var(--ax-radius-pill);
+}
+:hover::-webkit-scrollbar-thumb {
+  background: var(--ax-border-strong);
+}
+
 html {
   color-scheme: var(--ax-color-scheme);
 }
