@@ -19,31 +19,33 @@ pub mod notes;
 pub mod paths;
 pub mod routines;
 pub mod skills;
+pub mod spend;
 pub mod workspace;
 
 pub use error::AxiomataError;
 
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use config::Config;
 
 /// The initialized Axiomata-OS core engine.
 ///
-/// The two pieces are held separately on purpose: `config` is read constantly
-/// and effectively never mutated at runtime, so it needs no lock; the database
-/// connection can only be used by one caller at a time, so it — and only it —
-/// sits behind a [`Mutex`]. Async callers therefore never have to hold a lock
-/// across an agent call just to reach the config.
-///
-/// The connection is wrapped in an [`Arc`] as well so the routine scheduler's
-/// background task can hold its own handle to the same database without
-/// borrowing from `AxiomataCore` (see [`routines::scheduler::spawn`]).
+/// Both pieces are `Arc`-wrapped so a background task (the routine scheduler)
+/// can hold its own handle to the same shared state without borrowing from
+/// `AxiomataCore` (see [`routines::scheduler::spawn`]). `config` sits behind a
+/// [`RwLock`], not a plain value, since the Settings dialog (`get_config`/
+/// `save_config` in the dashboard's `commands.rs`) writes it at runtime —
+/// reads vastly outnumber writes, hence `RwLock` over `Mutex` here, unlike
+/// `db` below. Every read site clones the `Config` out from under the lock
+/// immediately (`state.config.read()...clone()`) rather than holding the
+/// guard, so a guard is never held across an `.await` — the same discipline
+/// already used for `db`'s `Mutex`.
 ///
 /// Construct via [`AxiomataCore::init`], which is idempotent and safe to call
 /// on every app start.
 pub struct AxiomataCore {
-    pub config: Config,
+    pub config: Arc<RwLock<Config>>,
     pub db: Arc<Mutex<rusqlite::Connection>>,
 }
 
@@ -92,7 +94,7 @@ impl AxiomataCore {
         restrict_to_owner(&paths::db_path(), 0o600);
 
         Ok(Self {
-            config,
+            config: Arc::new(RwLock::new(config)),
             db: Arc::new(Mutex::new(db)),
         })
     }
@@ -176,7 +178,7 @@ mod tests {
         assert!(paths::config_path().exists());
         assert!(paths::logs_dir().is_dir());
         assert!(paths::global_skills_dir().is_dir());
-        assert_eq!(core.config.workspace_root, temp_workspace);
+        assert_eq!(core.config.read().unwrap().workspace_root, temp_workspace);
         assert!(temp_workspace.is_dir());
         assert!(paths::db_path().exists());
 

@@ -117,6 +117,26 @@ pub struct RunRecord {
     pub started_at: DateTime<Utc>,
     /// When the run finished (or failed).
     pub finished_at: DateTime<Utc>,
+    /// Model-routing provider this run was billed through
+    /// (`config.agents.active_provider` at run time: `"anthropic"` /
+    /// `"open_router"` / `"ollama"`), or `None` for a run on the local Ollama
+    /// backend, which has no provider. Drives the per-provider spend rollup.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// `total_cost_usd` reported by the agent CLI for this run, in USD.
+    /// `None` for the subscription-billed Anthropic path, for Ollama, and for
+    /// any run whose JSON envelope couldn't be parsed.
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+    /// `usage.input_tokens` reported by the agent CLI; `None` when unavailable.
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    /// `usage.output_tokens` reported by the agent CLI; `None` when unavailable.
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    /// `num_turns` the agent loop took; `None` when unavailable.
+    #[serde(default)]
+    pub num_turns: Option<u32>,
     /// Who/what triggered this run. `runner::record_from_result` and
     /// `runner::failure_record` (the only two places a `RunRecord` is built)
     /// have no way to know this themselves — they default to
@@ -148,6 +168,12 @@ pub struct RunSummary {
     pub error: Option<String>,
     /// When the run started.
     pub started_at: DateTime<Utc>,
+    /// Provider this run was billed through — see [`RunRecord::provider`].
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Cost of this run in USD — see [`RunRecord::cost_usd`].
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
     /// Who/what triggered this run — see [`RunRecord::source`].
     pub source: RunSource,
 }

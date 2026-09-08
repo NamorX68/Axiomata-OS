@@ -6,11 +6,20 @@
 use anyhow::{Context, Result};
 use axiomata_core::agents::{self, ChatMode};
 use axiomata_core::bridge::{self, ActionRequest};
+use axiomata_core::config::Config;
 use axiomata_core::importer;
 use axiomata_core::routines::{self, NewRoutine, RoutineTarget};
 use axiomata_core::skills::{self, RunStatus};
-use axiomata_core::{AxiomataCore, memory, paths};
+use axiomata_core::{AxiomataCore, memory, paths, spend};
 use clap::{ArgGroup, Args, Parser, Subcommand};
+
+/// Clones `Config` out from under `core.config`'s `RwLock`. The CLI is a
+/// one-shot process — this just keeps every call site short and consistent
+/// with the dashboard's own `commands::read_config`, rather than holding a
+/// guard across an `.await`.
+fn read_config(core: &AxiomataCore) -> Config {
+    core.config.read().expect("config lock poisoned").clone()
+}
 
 /// Axiomata-OS headless control CLI.
 #[derive(Debug, Parser)]
@@ -261,11 +270,13 @@ async fn import_obsidian(
             "skipped"
         }
     );
-    let root = &core.config.workspace_root;
+    let config = read_config(core);
+    let root = &config.workspace_root;
     let existing = importer::existing_areas(root);
     println!("asking the agent to propose areas…");
-    let reply = agents::chat(
-        &core.config,
+    let reply = agents::chat_and_record(
+        &config,
+        &core.db,
         importer::assignment_prompt(&notes, &existing),
         None,
         ChatMode::Chat,
@@ -308,7 +319,7 @@ async fn import_obsidian(
         );
     }
     if !dry_run {
-        let sync = memory::sync(&core.config).context("memory sync after import")?;
+        let sync = memory::sync(&config).context("memory sync after import")?;
         println!(
             "memory router synced: {} CLAUDE.md written, {} tracked files (session {}, ${:.2})",
             sync.written.len(),
@@ -326,7 +337,7 @@ fn graph_summary(core: &AxiomataCore) -> Result<()> {
         .db
         .lock()
         .map_err(|_| anyhow::anyhow!("database lock poisoned"))?;
-    let g = axiomata_core::graph::build(&core.config, &db).context("building the graph")?;
+    let g = axiomata_core::graph::build(&read_config(core), &db).context("building the graph")?;
     println!(
         "workspace: {}  hub: {}",
         g.workspace_root,
@@ -416,9 +427,16 @@ async fn assistant(
     } else {
         ChatMode::Chat
     };
-    let reply = agents::chat(&core.config, message, resume, mode, allowed_tools)
-        .await
-        .context("assistant turn failed")?;
+    let reply = agents::chat_and_record(
+        &read_config(core),
+        &core.db,
+        message,
+        resume,
+        mode,
+        allowed_tools,
+    )
+    .await
+    .context("assistant turn failed")?;
     println!("{}", reply.reply_markdown.trim_end());
     println!();
     println!(
@@ -440,7 +458,10 @@ async fn assistant(
 /// Prints the resolved runtime paths and workspace root.
 fn print_status(core: &AxiomataCore) {
     println!("Axiomata-OS core initialized.");
-    println!("  workspace root: {}", core.config.workspace_root.display());
+    println!(
+        "  workspace root: {}",
+        read_config(core).workspace_root.display()
+    );
     println!("  config file:    {}", paths::config_path().display());
     println!("  database:       {}", paths::db_path().display());
     println!("  logs directory: {}", paths::logs_dir().display());
@@ -477,7 +498,7 @@ fn list_skills() -> Result<()> {
 
 /// Runs `name`, prints a summary, and exits non-zero if the run failed.
 async fn run_skill(core: &AxiomataCore, name: &str) -> Result<()> {
-    let record = skills::execute_and_record_skill(name, &core.config, &core.db)
+    let record = skills::execute_and_record_skill(name, &read_config(core), &core.db)
         .await
         .with_context(|| format!("failed to run skill {name:?}"))?;
 
@@ -507,23 +528,55 @@ async fn run_skill(core: &AxiomataCore, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Prints recent runs from the database, newest first.
+/// Prints recent runs from the database, newest first, then a one-line spend
+/// summary for the active provider (checkpoint 4).
 fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
+    let config = read_config(core);
     let db = core.db.lock().expect("database mutex is poisoned");
     let runs = skills::list_runs(&db, limit).context("failed to read run history")?;
     if runs.is_empty() {
         println!("No runs recorded yet.");
-        return Ok(());
+    } else {
+        for run in runs {
+            let cost = run
+                .cost_usd
+                .map(|c| format!(", ${c:.4}"))
+                .unwrap_or_default();
+            let provider = run
+                .provider
+                .as_deref()
+                .filter(|p| *p != "anthropic")
+                .map(|p| format!(", {p}"))
+                .unwrap_or_default();
+            println!(
+                "#{id:<4} {started}  {status:<7} {skill} ({backend}, {ms} ms{cost}{provider})",
+                id = run.id,
+                started = run.started_at.to_rfc3339(),
+                status = run.status.as_str(),
+                skill = run.skill_name,
+                backend = run.backend,
+                ms = run.duration_ms,
+            );
+        }
     }
-    for run in runs {
+
+    let summary = spend::active_provider_summary(&db, &config, chrono::Utc::now())
+        .context("failed to compute the spend summary")?;
+    if summary.metered {
+        let cap = summary
+            .daily_cap_usd
+            .map(|c| format!(" / ${c:.2} cap"))
+            .unwrap_or_else(|| " (no cap)".to_string());
         println!(
-            "#{id:<4} {started}  {status:<7} {skill} ({backend}, {ms} ms)",
-            id = run.id,
-            started = run.started_at.to_rfc3339(),
-            status = run.status.as_str(),
-            skill = run.skill_name,
-            backend = run.backend,
-            ms = run.duration_ms,
+            "\nspend ({provider}): ${today:.4} today{cap} · ${month:.2} this month",
+            provider = summary.provider,
+            today = summary.today_usd,
+            month = summary.month_usd,
+        );
+    } else {
+        println!(
+            "\nspend: active provider ({}) is subscription-billed — not metered",
+            summary.provider
         );
     }
     Ok(())
@@ -531,7 +584,7 @@ fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
 
 /// Regenerates the workspace router `CLAUDE.md` blocks and reports what changed.
 fn memory_sync(core: &AxiomataCore) -> Result<()> {
-    let report = memory::sync(&core.config).context("memory sync failed")?;
+    let report = memory::sync(&read_config(core)).context("memory sync failed")?;
     if report.written.is_empty() {
         println!(
             "Router already in sync — {} tracked files, {} CLAUDE.md file(s) unchanged.",
@@ -559,7 +612,7 @@ fn memory_sync(core: &AxiomataCore) -> Result<()> {
 
 /// Prints the memory-router freshness status.
 fn memory_status(core: &AxiomataCore) -> Result<()> {
-    let status = memory::status(&core.config).context("memory status failed")?;
+    let status = memory::status(&read_config(core)).context("memory status failed")?;
     println!("workspace:     {}", status.workspace_root.display());
     println!("tracked files: {}", status.tracked_files);
     println!(
@@ -760,7 +813,7 @@ fn routines_history(core: &AxiomataCore, id: i64, limit: usize) -> Result<()> {
 
 /// Runs one scheduler poll pass and reports what fired.
 async fn routines_tick(core: &AxiomataCore) -> Result<()> {
-    let report = routines::scheduler::tick(&core.config, &core.db)
+    let report = routines::scheduler::tick(&read_config(core), &core.db)
         .await
         .context("routine tick failed")?;
     println!(

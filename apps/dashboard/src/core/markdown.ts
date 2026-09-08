@@ -87,8 +87,10 @@ const ALLOWED_TAGS = [
 const ALLOWED_ATTR = ["href", "title", "alt", "src", "align", "start", "type", "checked", "disabled", "class"];
 
 /** Inline raster images only — never SVG (it can carry script) and never
- *  as a link target (a top-level `data:` navigation would run it). */
-const DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i;
+ *  as a link target (a top-level `data:` navigation would run it). Extension
+ *  list mirrors the Rust `image_mime` (`workspace.rs`) — keep them in
+ *  lockstep, same as `md-file.svelte`'s own copy of this list. */
+const DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp|bmp|tiff|heic|avif);base64,[a-z0-9+/=]+$/i;
 
 const purify = DOMPurify();
 purify.setConfig({
@@ -96,7 +98,7 @@ purify.setConfig({
   ALLOWED_ATTR,
   ALLOW_DATA_ATTR: false,
   FORBID_ATTR: ["style"],
-  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#|\/|\.|data:image\/(?:png|jpe?g|gif|webp);base64,)/i,
+  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#|\/|\.|data:image\/(?:png|jpe?g|gif|webp|bmp|tiff|heic|avif);base64,)/i,
 });
 purify.addHook("uponSanitizeAttribute", (node, data) => {
   const value = data.attrValue.trim();

@@ -35,6 +35,8 @@ struct SkillFrontmatter {
     backend: String,
     #[serde(default)]
     allowed_tools: Option<String>,
+    #[serde(default)]
+    timeout_secs: Option<u64>,
 }
 
 /// Default agent backend for a skill that doesn't name one.
@@ -66,6 +68,11 @@ pub struct Skill {
     /// skill that only needs its default tool access (or targets Ollama,
     /// which ignores this either way).
     pub allowed_tools: Option<String>,
+    /// Per-skill wall-clock limit in seconds, overriding
+    /// `config.agents.skill_timeout_secs` for this one skill. `None` uses the
+    /// global default. Used by the connector-digest skills, whose MCP-heavy
+    /// SOPs legitimately need longer than a quick maintenance skill.
+    pub timeout_secs: Option<u64>,
     /// Absolute path to the skill's `SKILL.md`.
     pub path: PathBuf,
     /// The Markdown body after the frontmatter — the skill's actual
@@ -280,6 +287,7 @@ fn load_skill(manifest: &Path) -> Result<Skill, AxiomataError> {
         trigger: frontmatter.trigger,
         backend: frontmatter.backend,
         allowed_tools: frontmatter.allowed_tools,
+        timeout_secs: frontmatter.timeout_secs,
         path: manifest.to_path_buf(),
         body: parsed.content,
     })

@@ -17,6 +17,51 @@ export interface AppInfo {
   version: string;
 }
 
+/** Model-routing provider for the `claude` child process. Serde
+ *  `rename_all = "snake_case"` variants of the Rust `ProviderId` enum. */
+export type ProviderId = "anthropic" | "open_router" | "ollama";
+
+/** Mirrors `axiomata_core::config::ProviderSettings`. `base_url`/`api_key`
+ *  are `null` (not `""`) when unset — see `apply_config_update`. */
+export interface ProviderSettings {
+  base_url: string | null;
+  api_key: string | null;
+  chat_model: string;
+  skill_model: string;
+}
+
+/** Mirrors `axiomata_core::config::AgentDefaults`. */
+export interface AgentDefaults {
+  claude_model: string;
+  ollama_model: string;
+  skill_timeout_secs: number;
+  claude_env: Record<string, string>;
+  providers: Record<ProviderId, ProviderSettings>;
+  active_provider: ProviderId;
+  /** Daily USD spend cap for a paid (non-Anthropic) active provider;
+   *  `null` disables the cap. Mirrors `AgentDefaults::daily_usd_cap`. */
+  daily_usd_cap: number | null;
+}
+
+/** Mirrors `axiomata_core::spend::SpendSummary` — `get_spend_summary`. */
+export interface SpendSummary {
+  provider: string;
+  today_usd: number;
+  month_usd: number;
+  daily_cap_usd: number | null;
+  /** `false` for the subscription-billed Anthropic provider. */
+  metered: boolean;
+}
+
+/** The full editable config `get_config` returns / `save_config` takes.
+ *  Mirrors `axiomata_core::config::Config`; `workspace_root` is the
+ *  `PathBuf` serialised as a plain string. */
+export interface Config {
+  owner: string;
+  workspace_root: string;
+  agents: AgentDefaults;
+}
+
 export interface Skill {
   name: string;
   description: string;

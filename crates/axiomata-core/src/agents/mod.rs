@@ -122,9 +122,52 @@ pub async fn chat(
         env: crate::skills::runner::claude_env(config, &AgentBackend::ClaudeCode),
         system_prompt_file: module_context_if_present(),
         allowed_tools,
-        model: default_claude_model(config),
+        model: default_chat_model(config),
     })
     .await
+}
+
+/// [`chat`] plus the spend guardrail and the `chat_turns` log entry, in one
+/// call — the form every real caller (the dashboard command, the CLI) wants.
+///
+/// Order: the daily-cap check runs *before* the turn (an
+/// [`AxiomataError::SpendCapReached`] means nothing was spawned); the turn
+/// runs with no lock held; then the result is written to `chat_turns` for the
+/// per-provider rollup. A logging failure is warned about, not propagated —
+/// the turn already happened and its reply is what the caller needs.
+pub async fn chat_and_record(
+    config: &Config,
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    message: String,
+    session_id: Option<String>,
+    mode: ChatMode,
+    allowed_tools: Option<String>,
+) -> Result<ChatReply, AxiomataError> {
+    {
+        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        crate::spend::guard_redirected_turn(&conn, config)?;
+    }
+    let model = default_chat_model(config);
+    let reply = chat(config, message, session_id, mode, allowed_tools).await?;
+    {
+        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        let turn = crate::spend::ChatTurnRecord {
+            session_id: reply.session_id.clone(),
+            mode: mode.as_log_str(),
+            provider: Some(config.agents.active_provider.as_str().to_string()),
+            model,
+            is_error: reply.is_error,
+            cost_usd: reply.cost_usd,
+            input_tokens: reply.input_tokens,
+            output_tokens: reply.output_tokens,
+            num_turns: reply.num_turns,
+            duration_ms: reply.duration_ms,
+        };
+        if let Err(err) = crate::spend::record_chat_turn(&conn, &turn) {
+            tracing::warn!(%err, "failed to record a chat turn to the spend log");
+        }
+    }
+    Ok(reply)
 }
 
 /// A single headless agent invocation.
@@ -162,9 +205,37 @@ pub struct AgentRequest {
     pub allowed_tools: Option<String>,
 }
 
-/// `config.agents.claude_model` unless empty.
-pub fn default_claude_model(config: &Config) -> Option<String> {
-    let m = config.agents.claude_model.trim();
+/// The active provider's `chat_model`, for interactive dashboard-assistant
+/// turns — `None` (let the CLI pick its own default) if unset or the active
+/// provider is missing from `config.agents.providers` (shouldn't happen once
+/// [`crate::config::Config::load`] has run its migration, but a config built
+/// by hand in a test could still lack it).
+pub fn default_chat_model(config: &Config) -> Option<String> {
+    active_provider_model(config, |settings| &settings.chat_model)
+}
+
+/// The active provider's `skill_model` — the fallback for skill/routine runs
+/// that don't pin their own model. A skill's `SKILL.md` frontmatter `model:`
+/// takes precedence over this in [`crate::skills::runner::execute_skill`];
+/// this is only the fallback source, unchanged in that respect from the old
+/// single global `claude_model`.
+pub fn default_skill_model(config: &Config) -> Option<String> {
+    active_provider_model(config, |settings| &settings.skill_model)
+}
+
+/// Shared lookup behind [`default_chat_model`] / [`default_skill_model`]:
+/// resolves `config.agents.active_provider`'s settings, then reads whichever
+/// model field `pick` names off of it, treating a missing/blank value as
+/// "let the CLI choose".
+fn active_provider_model(
+    config: &Config,
+    pick: impl FnOnce(&crate::config::ProviderSettings) -> &String,
+) -> Option<String> {
+    let settings = config
+        .agents
+        .providers
+        .get(&config.agents.active_provider)?;
+    let m = pick(settings).trim();
     (!m.is_empty()).then(|| m.to_string())
 }
 
@@ -178,6 +249,10 @@ pub fn module_context_if_present() -> Option<PathBuf> {
 #[derive(Debug, Clone)]
 pub struct AgentRunResult {
     /// Captured standard output (Claude Code) or completion text (Ollama).
+    /// For a Claude Code skill run this is the **unwrapped** `result` string
+    /// from the `--output-format json` envelope, so it is byte-for-byte what
+    /// the old plain-text mode produced — the JSON wrapper only exists to
+    /// carry the cost/token fields below.
     pub stdout: String,
     /// Captured standard error (Claude Code) or empty (Ollama).
     pub stderr: String,
@@ -186,6 +261,19 @@ pub struct AgentRunResult {
     pub exit_code: i32,
     /// Wall-clock duration of the run, in milliseconds.
     pub duration_ms: u64,
+    /// `total_cost_usd` from the Claude Code JSON envelope, when the run went
+    /// through a paid provider and the CLI reported it. `None` for Ollama, for
+    /// the subscription-billed Anthropic path (the CLI reports `0.0` or omits
+    /// it), and whenever the envelope could not be parsed.
+    pub cost_usd: Option<f64>,
+    /// `usage.input_tokens` from the JSON envelope (the non-cached input
+    /// count, as the CLI reports it). `None` when unavailable.
+    pub input_tokens: Option<u64>,
+    /// `usage.output_tokens` from the JSON envelope. `None` when unavailable.
+    pub output_tokens: Option<u64>,
+    /// `num_turns` from the JSON envelope — how many assistant turns the agent
+    /// loop took. `None` when unavailable.
+    pub num_turns: Option<u32>,
 }
 
 impl AgentRunResult {
@@ -193,12 +281,28 @@ impl AgentRunResult {
     pub fn is_success(&self) -> bool {
         self.exit_code == 0
     }
+
+    /// A result carrying only the process-level fields (no cost/token data
+    /// parsed yet). Used by [`claude_code::spawn_and_collect`] before the
+    /// JSON envelope is inspected and by backends that have no such envelope.
+    pub(crate) fn bare(stdout: String, stderr: String, exit_code: i32, duration_ms: u64) -> Self {
+        Self {
+            stdout,
+            stderr,
+            exit_code,
+            duration_ms,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+            num_turns: None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AgentDefaults, Config};
+    use crate::config::{AgentDefaults, Config, ProviderId};
 
     /// A config whose Ollama default model is set to `model`.
     fn config_with_ollama_model(model: &str) -> Config {
@@ -250,5 +354,72 @@ mod tests {
             err,
             AxiomataError::UnknownAgentBackend { backend } if backend == "opencode"
         ));
+    }
+
+    #[test]
+    fn default_chat_and_skill_models_read_the_active_providers_own_fields_independently() {
+        let mut config = Config::default();
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .chat_model = "chat-model".to_owned();
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .skill_model = "skill-model".to_owned();
+
+        assert_eq!(default_chat_model(&config), Some("chat-model".to_owned()));
+        assert_eq!(default_skill_model(&config), Some("skill-model".to_owned()));
+    }
+
+    #[test]
+    fn default_models_switch_with_the_active_provider() {
+        let mut config = Config::default();
+        config.agents.active_provider = ProviderId::OpenRouter;
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::OpenRouter)
+            .unwrap()
+            .chat_model = "or-chat".to_owned();
+
+        assert_eq!(default_chat_model(&config), Some("or-chat".to_owned()));
+        // Untouched provider entries stay independent — switching the active
+        // provider must not leak Anthropic's own chat_model through.
+        assert_ne!(
+            default_chat_model(&config),
+            Some("claude-sonnet-5".to_owned())
+        );
+    }
+
+    #[test]
+    fn default_model_is_none_when_the_active_providers_field_is_blank() {
+        let mut config = Config::default();
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .chat_model = "   ".to_owned();
+
+        assert_eq!(default_chat_model(&config), None);
+    }
+
+    #[test]
+    fn default_models_are_none_when_the_active_provider_is_missing_from_the_map_entirely() {
+        // Distinct from the blank-field case above: here the active
+        // provider has no entry in `providers` at all (a hand-built test
+        // config, or — per the doc comment on `default_chat_model` — a
+        // config that somehow skipped `Config::load`'s migration), so the
+        // lookup itself must short-circuit to `None` rather than panic.
+        let mut config = Config::default();
+        config.agents.providers.remove(&ProviderId::Anthropic);
+
+        assert_eq!(default_chat_model(&config), None);
+        assert_eq!(default_skill_model(&config), None);
     }
 }

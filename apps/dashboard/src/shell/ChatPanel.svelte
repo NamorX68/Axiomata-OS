@@ -65,7 +65,9 @@
     bottom: 64px;
     transform: translateX(-50%);
     width: min(var(--ax-chat-width), calc(100vw - 2 * var(--ax-space-5)));
-    height: min(60vh, 560px);
+    /* Always a little taller than half the viewport — no fixed px cap, so a
+       short-but-wide 21:9 display still gets a usable-height panel. */
+    height: 56vh;
     z-index: var(--ax-z-assistant);
     display: flex;
     flex-direction: column;

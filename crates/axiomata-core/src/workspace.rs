@@ -48,9 +48,9 @@ pub struct WorkspaceFile {
 pub struct WorkspaceImage {
     /// The relative path as requested (normalised to `/` separators).
     pub path: String,
-    /// One of `image/png`, `image/jpeg`, `image/gif`, `image/webp` —
-    /// inferred from the file extension by [`image_mime`]; anything else is
-    /// rejected before a `WorkspaceImage` is ever constructed.
+    /// One of the MIME types [`image_mime`] maps an extension onto —
+    /// inferred from the file extension; anything else is rejected before a
+    /// `WorkspaceImage` is ever constructed.
     pub mime: &'static str,
     /// Base64-encoded file content — the caller wraps this into a
     /// `data:<mime>;base64,<...>` URI itself.
@@ -58,10 +58,22 @@ pub struct WorkspaceImage {
 }
 
 /// Maps a file extension onto the raster MIME types the dashboard's Markdown
-/// renderer allows inline (`core/markdown.ts`'s `DATA_IMAGE_RE`) — keep the
-/// two lists in lockstep; extend both together if a format is ever added.
+/// renderer allows inline (`core/markdown.ts`'s `DATA_IMAGE_RE`) and that
+/// `md-file.svelte` treats as an image file in its own right — keep all
+/// three lists in lockstep; extend them together if a format is ever added.
 /// SVG is deliberately never included: it can carry `<script>`, unlike a
-/// raster format.
+/// raster format. BMP/TIFF/HEIC/AVIF decoding happens in the *viewer's* image
+/// stack (WKWebView's `<img>`, via macOS's system ImageIO), not in this app —
+/// this function only decides which bytes get base64-shipped to it as which
+/// MIME type; whether a given format actually renders is a client capability
+/// question, not something this function can guarantee. In particular HEIC
+/// is a known WebKit web-content gap (`<img src="…heic">` typically fails to
+/// decode even though the OS itself — Preview, Quick Look — handles it fine)
+/// and TIFF decoders have a history of memory-safety CVEs upstream; both are
+/// offered because the owner asked for them, not because either is verified
+/// to render — confirm in `cargo tauri dev` before calling this done, and see
+/// the note on [`MAX_IMAGE_BYTES`] if uncompressed TIFF/BMP files turn out to
+/// need a larger cap in practice.
 fn image_mime(rel: &str) -> Option<&'static str> {
     let ext = Path::new(rel).extension()?.to_str()?.to_ascii_lowercase();
     Some(match ext.as_str() {
@@ -69,6 +81,10 @@ fn image_mime(rel: &str) -> Option<&'static str> {
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
         "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "heic" | "heif" => "image/heic",
+        "avif" => "image/avif",
         _ => return None,
     })
 }
@@ -384,7 +400,7 @@ pub fn read_image(config: &Config, rel: &str) -> Result<WorkspaceImage, Axiomata
     let mime = image_mime(rel).ok_or_else(|| {
         invalid(
             Path::new(rel),
-            "not a supported image type (png/jpeg/gif/webp)",
+            "not a supported image type (png/jpeg/gif/webp/bmp/tiff/heic/avif)",
         )
     })?;
     let full = resolve(config, rel)?;
@@ -786,6 +802,12 @@ mod tests {
             ("c.jpeg", "image/jpeg"),
             ("d.gif", "image/gif"),
             ("e.webp", "image/webp"),
+            ("f.bmp", "image/bmp"),
+            ("g.tif", "image/tiff"),
+            ("h.tiff", "image/tiff"),
+            ("i.heic", "image/heic"),
+            ("j.heif", "image/heic"),
+            ("k.avif", "image/avif"),
             ("F.PNG", "image/png"),
         ] {
             fs::write(root.join(format!("notes/{name}")), [0u8]).unwrap();

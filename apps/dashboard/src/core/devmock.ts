@@ -8,6 +8,7 @@
 import type {
   AppInfo,
   ChatReply,
+  Config,
   GraphFile,
   GraphLink,
   WorkspaceGraph,
@@ -25,6 +26,26 @@ const LATENCY_MS = 120;
 const delay = () => new Promise((r) => setTimeout(r, LATENCY_MS));
 
 let dashboardJson: string | null = null;
+
+/** In-memory stand-in for `~/.axiomata/config.toml`, mutated by
+ *  `save_config` so the Settings dialog round-trips in browser-only mode. */
+let configState: Config = {
+  owner: "Dev",
+  workspace_root: "/Users/dev/Axiomata-Workspace",
+  agents: {
+    claude_model: "claude-haiku-4-5",
+    ollama_model: "llama3.2",
+    skill_timeout_secs: 300,
+    claude_env: {},
+    active_provider: "anthropic",
+    providers: {
+      anthropic: { base_url: null, api_key: null, chat_model: "claude-sonnet-5", skill_model: "claude-haiku-4-5" },
+      open_router: { base_url: "https://openrouter.ai/api", api_key: null, chat_model: "", skill_model: "" },
+      ollama: { base_url: "http://localhost:11434", api_key: "ollama", chat_model: "", skill_model: "" },
+    },
+    daily_usd_cap: 2,
+  },
+};
 /** Set from the console (`window.__ax.mockCss = "..."`) to exercise the validator. */
 let mockCustomCss: string | null = null;
 export function setMockCustomCss(css: string | null): void {
@@ -316,6 +337,26 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         workspace_root: memory.workspace_root,
         version: "0.0.0-dev",
       } satisfies AppInfo as T;
+    case "get_config":
+      return structuredClone(configState) as T;
+    case "get_spend_summary": {
+      const p = configState.agents.active_provider;
+      return {
+        provider: p,
+        today_usd: p === "anthropic" ? 0 : 0.42,
+        month_usd: p === "anthropic" ? 0 : 7.13,
+        daily_cap_usd: configState.agents.daily_usd_cap,
+        metered: p !== "anthropic",
+      } as T;
+    }
+    case "save_config": {
+      const next = args.newConfig as Config;
+      const workspaceChanged = next.workspace_root !== configState.workspace_root;
+      // Mirror the backend: the new root is "written to disk" but the live
+      // copy keeps the old one until a restart.
+      configState = { ...next, workspace_root: configState.workspace_root };
+      return workspaceChanged as T;
+    }
     case "get_dashboard_state":
       return {
         json: dashboardJson ?? '{"version":1,"settings":{"theme":"graphite"},"canvas":{"instances":[]}}',

@@ -230,6 +230,66 @@ Claude Code run whenever it exists), `model`, and `allowed_tools`.
   `--allowed-tools`/`ChatRequest.allowed_tools`) — there is no other way to reach one.
 - `ollama.rs` makes one non-streaming `POST /api/generate` call to the local daemon.
 
+### Model providers (`config.agents.providers`)
+
+Orthogonal to the `AgentBackend` `enum` above: a **provider** does not change *which*
+executable runs (it is always the Claude Code CLI, `AgentBackend::ClaudeCode`, with the full
+agent loop / tool use / MCP) — it only redirects that one binary at a different upstream
+Messages-API endpoint, exactly the way `ANTHROPIC_BASE_URL` already lets it reach Bedrock or a
+proxy. Not to be confused with `AgentBackend::Ollama` (`agents/ollama.rs`), the separate
+raw/tool-free completion backend selected per skill by `SKILL.md`'s `backend: ollama`.
+
+- `config.rs` defines `ProviderId { Anthropic, OpenRouter, Ollama }` (`ProviderId::ALL` is the
+  single source of the list — loop over it, never enumerate the variants by hand) and, per
+  provider, `ProviderSettings { base_url, api_key, chat_model, skill_model }`, all kept under
+  `agents.providers: BTreeMap<ProviderId, ProviderSettings>` with `agents.active_provider`
+  picking the live one. Every provider's fields are retained even while inactive, so switching
+  in the Settings dialog never discards what was typed for the others.
+- **Env derivation.** `skills::runner::claude_env()` builds `ANTHROPIC_BASE_URL` plus the
+  credential env var for the active provider and merges it over the raw `agents.claude_env`
+  power-user map (provider-derived vars first, `claude_env` can still override — e.g. for
+  Bedrock, which does not fit the provider model). The credential env var differs by provider:
+  Anthropic uses `ANTHROPIC_API_KEY` (direct `x-api-key`); OpenRouter and Ollama both front the
+  Messages API through a bearer token, so their key goes into `ANTHROPIC_AUTH_TOKEN` *with*
+  `ANTHROPIC_API_KEY` explicitly emptied (the CLI otherwise prefers the direct key and the two
+  conflict) — encoded once as `ProviderId::auth_env_var()`, not branched at call sites.
+  Anthropic with no base URL/key ⇒ empty derived env ⇒ byte-identical to the pre-provider
+  behaviour (subscription auth via the CLI's own login).
+- **Model selection.** `agents::default_chat_model()` / `default_skill_model()` read
+  `providers[active_provider].chat_model` / `.skill_model` and feed the existing `--model` CLI
+  flag. `chat()` uses the chat model; the skills runner uses the skill model as its fallback
+  when a `SKILL.md` has no own `model:` frontmatter (per-skill frontmatter still wins). No
+  provider-specific model env var anywhere — both non-Anthropic providers route on the `model`
+  field in the request body.
+- **Runtime mutation.** The settings dialog is the first thing that writes `Config` at
+  runtime, so `AxiomataCore.config` is `Arc<RwLock<Config>>` (many reads, rare writes). Every
+  read site clones the `Config` out from under the lock in its own statement (`read_config()`
+  in `commands.rs`, mirrored in `axiomata-cli`), never holding the guard across an `.await`;
+  the routine scheduler is handed the *same* `Arc` (not a startup value-clone) and re-reads a
+  fresh snapshot before each `tick()`, so provider/model changes apply to routine firings live
+  too. `get_config` returns the full editable config; `save_config` (pure `apply_config_update()`
+  helper, unit-tested without a Tauri harness) validates, writes via `Config::save()` (which
+  keeps the file `0o600` — it can now hold an OpenRouter key), and swaps the in-memory copy.
+- **Workspace root is the exception.** A live workspace swap has too wide a blast radius
+  (memory router, particle graph, module manifests, every open note assume it is fixed for the
+  process lifetime), so a changed `workspace_root` is written to disk immediately but *not*
+  applied in memory — `save_config` returns `true` so the UI can prompt for a restart. Every
+  other field (owner, providers, models, `claude_env`) applies live, effective on the next
+  `claude -p` spawn.
+- **Migration.** A config saved before per-provider models (flat `agents.claude_model`, no
+  `providers` table) is upgraded on load by `AgentDefaults::migrate_legacy_model_if_needed()`:
+  it seeds every `ProviderId::ALL` member with its defaults and folds the old flat value into
+  Anthropic's `chat_model`/`skill_model` so upgrading never silently resets a customised model
+  choice. A no-op once `providers` is populated.
+- **Settings UI.** `shell/Settings.svelte` gained a **Vault** section (editable path +
+  "Speichern & Neustart", surfacing the restart requirement) and a **Modell-Provider** section
+  (a picker rendered by looping `PROVIDERS`, so adding LM Studio later is a UI no-op; per
+  provider: base URL + masked key, both hidden for Anthropic, plus the two model fields). Both
+  persist through `get_config`/`save_config` (TS shapes in `core/backend.ts`, browser-mode
+  fixtures in `core/devmock.ts`). LM Studio is deferred — the schema is built so it is a
+  one-line `ProviderId` addition, not a rework. Full rationale and phase log:
+  `docs/plans/settings-provider-overhaul.md`.
+
 ### Skills runner (`skills/`)
 
 Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
@@ -426,3 +486,13 @@ Each milestone from M1 onward was broken down into a detailed, step-by-step impl
 plan shortly before it was actually started, rather than all at once up front — those plans
 live outside this repository, in the owner's local Claude Code planning notes, since their
 value is in guiding the work in progress rather than as a permanent record once it lands.
+
+A related owner decision (2026-09-08) governs the *cadence* of the mandatory automatic
+sub-agent checks (rust-test-engineer, rust-dependency-auditor, rust-performance-analyzer) and
+of Claude's own `cargo build`/`clippy`/`fmt`/`test` verification loop: during an iterative
+multi-phase implementation (e.g. working through a `docs/plans/*.md` checkpoint list) they
+fire **once per plan checkpoint and always before a commit**, not after every individual edit
+— running the full ladder mid-task burns session-usage budget for little marginal benefit once
+tests are already being written inline as each function lands. The trigger stays mandatory;
+only its timing is batched. This is a project-local override, not an edit to the global agent
+definitions: a fresh Rust project without it keeps the tighter per-edit cadence.

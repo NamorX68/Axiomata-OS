@@ -110,8 +110,10 @@ fn agent_slots() -> &'static tokio::sync::Semaphore {
     AGENT_SLOTS.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_AGENT_RUNS))
 }
 
-/// Spawns `claude -p` in `request.cwd`, applying `request.env` and enforcing
-/// `request.timeout`.
+/// Spawns `claude -p` in `request.cwd`, enforcing `request.timeout`. The
+/// child's environment is *not* inherited wholesale: it starts empty and is
+/// repopulated from a fixed allowlist plus `request.env` (see [`child_env`]),
+/// so an ambient `ANTHROPIC_*` export can never leak in.
 ///
 /// The prompt is written to the child's **stdin**, not passed as a command-line
 /// argument: `claude` reads its prompt from stdin in print mode when given no
@@ -135,7 +137,76 @@ fn agent_slots() -> &'static tokio::sync::Semaphore {
 ///     [`AxiomataError::AgentSpawn`] if the binary cannot be spawned or waited
 ///     on; [`AxiomataError::AgentTimeout`] if it exceeds `request.timeout`.
 pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError> {
-    spawn_and_collect(request, &[]).await
+    let raw = spawn_and_collect(
+        request,
+        &["--output-format".to_string(), "json".to_string()],
+    )
+    .await?;
+    Ok(parse_run_output(raw))
+}
+
+/// What `claude -p --output-format json` prints for a one-shot (non-chat) run.
+/// Every field is optional/defaulted: an older CLI, a crash, or a provider
+/// that doesn't fill the envelope must degrade to "no cost data", never a
+/// hard error on a run that actually produced output.
+#[derive(Debug, Deserialize)]
+struct RawRunResult {
+    #[serde(default)]
+    result: String,
+    #[serde(default)]
+    is_error: bool,
+    #[serde(default)]
+    total_cost_usd: Option<f64>,
+    #[serde(default)]
+    usage: Option<serde_json::Value>,
+    #[serde(default)]
+    num_turns: Option<u32>,
+}
+
+/// Unwraps the `--output-format json` envelope produced by [`run`] into an
+/// [`AgentRunResult`]: `stdout` becomes the inner `result` string (identical
+/// to what the old plain-text mode returned), and the cost/token fields are
+/// lifted out of the envelope.
+///
+/// If the captured stdout is not the expected JSON — an older CLI, a spawn
+/// that printed a diagnostic instead, a truncated capture — the raw output is
+/// passed straight through unchanged, with no cost data. A well-formed
+/// envelope whose `is_error` is set is forced to a non-zero `exit_code` so
+/// the run is recorded as `Failed` (plain-text mode couldn't see this: an
+/// error *reply* still exits 0).
+fn parse_run_output(raw: AgentRunResult) -> AgentRunResult {
+    let Ok(parsed) = serde_json::from_str::<RawRunResult>(raw.stdout.trim()) else {
+        return raw;
+    };
+    let (input_tokens, output_tokens) = usage_tokens(parsed.usage.as_ref());
+    let exit_code = if parsed.is_error && raw.exit_code == 0 {
+        1
+    } else {
+        raw.exit_code
+    };
+    AgentRunResult {
+        stdout: parsed.result,
+        stderr: raw.stderr,
+        exit_code,
+        duration_ms: raw.duration_ms,
+        // The subscription-billed Anthropic path reports 0.0; treat that as
+        // "nothing to meter" so a $0 row doesn't imply a paid call happened.
+        cost_usd: parsed.total_cost_usd.filter(|c| *c > 0.0),
+        input_tokens,
+        output_tokens,
+        num_turns: parsed.num_turns,
+    }
+}
+
+/// Pulls `input_tokens` / `output_tokens` out of the CLI's `usage` object,
+/// tolerating its absence or an unexpected shape.
+fn usage_tokens(usage: Option<&serde_json::Value>) -> (Option<u64>, Option<u64>) {
+    let get = |key: &str| {
+        usage
+            .and_then(|u| u.get(key))
+            .and_then(serde_json::Value::as_u64)
+    };
+    (get("input_tokens"), get("output_tokens"))
 }
 
 /// How a chat turn may act: `Chat` never asks (read-mostly, `dontAsk`);
@@ -153,6 +224,14 @@ impl ChatMode {
         match self {
             ChatMode::Chat => "dontAsk",
             ChatMode::Instruct => "acceptEdits",
+        }
+    }
+
+    /// The token stored in `chat_turns.mode`.
+    pub fn as_log_str(self) -> &'static str {
+        match self {
+            ChatMode::Chat => "chat",
+            ChatMode::Instruct => "instruct",
         }
     }
 }
@@ -188,6 +267,12 @@ pub struct ChatReply {
     pub is_error: bool,
     pub cost_usd: Option<f64>,
     pub usage: Option<serde_json::Value>,
+    /// `usage.input_tokens` / `usage.output_tokens`, lifted out for the
+    /// `chat_turns` spend log; `None` when the envelope didn't carry them.
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    /// `num_turns` from the envelope.
+    pub num_turns: Option<u32>,
     pub duration_ms: u64,
 }
 
@@ -203,6 +288,8 @@ struct RawChatResult {
     total_cost_usd: Option<f64>,
     #[serde(default)]
     usage: Option<serde_json::Value>,
+    #[serde(default)]
+    num_turns: Option<u32>,
 }
 
 /// Runs one assistant turn: `claude -p --output-format json` with the
@@ -241,8 +328,48 @@ pub fn valid_model_name(name: &str) -> bool {
             .next()
             .is_some_and(|b| b.is_ascii_alphanumeric())
         && name.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':' | b'[' | b']')
+            // `/` is needed for `vendor/model` IDs (every OpenRouter model,
+            // e.g. `z-ai/glm-5.3-flash`). It's flag-safe: the value is passed
+            // as a single `Command::arg` token (no shell), the first byte is
+            // already forced to be alphanumeric so it can't start a `-` flag,
+            // and `claude --model` only forwards it as the API `model` string
+            // — never touches the filesystem with it.
+            b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':' | b'[' | b']' | b'/')
         })
+}
+
+/// Decides what to pass to `claude --model`, and — critically — when to
+/// *refuse to spawn at all* rather than let the CLI fall back to its own
+/// built-in default model.
+///
+/// `redirected` is true when `ANTHROPIC_BASE_URL` is set for this run, i.e. a
+/// non-Anthropic provider is pointing the CLI at a paid third-party endpoint.
+/// In that state the CLI's default model would be billed through the proxy,
+/// so a missing or malformed model is a hard configuration error, not a
+/// silently-dropped flag (that gap turned a one-character config typo into a
+/// real OpenRouter bill once — see `docs/plans/provider-hardening.md`).
+///
+/// When the run is *not* redirected (Anthropic via the CLI's own
+/// subscription login), a missing model is fine: the CLI's default is the
+/// intended behaviour and costs nothing extra.
+fn resolve_model_arg(model: Option<&str>, redirected: bool) -> Result<Option<&str>, AxiomataError> {
+    match model.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) if valid_model_name(m) => Ok(Some(m)),
+        Some(m) => Err(AxiomataError::InvalidAgentModel {
+            reason: format!(
+                "the configured model {m:?} is not a valid model id \
+                 (allowed characters: letters, digits, and - _ . : [ ] /)"
+            ),
+        }),
+        None if redirected => Err(AxiomataError::InvalidAgentModel {
+            reason: "the active model provider redirects the Claude CLI \
+                     (ANTHROPIC_BASE_URL is set) but no model is configured for \
+                     it — set that provider's chat/skill model so the CLI's \
+                     built-in default model isn't billed through the proxy"
+                .to_string(),
+        }),
+        None => Ok(None),
+    }
 }
 
 /// `--allowedTools` values come from `SKILL.md` frontmatter, same trust
@@ -328,12 +455,16 @@ fn parse_chat_output(result: &AgentRunResult) -> Result<ChatReply, AxiomataError
             "claude returned a malformed session id".to_string(),
         ));
     }
+    let (input_tokens, output_tokens) = usage_tokens(raw.usage.as_ref());
     Ok(ChatReply {
         session_id: raw.session_id,
         reply_markdown: raw.result,
         is_error: raw.is_error,
-        cost_usd: raw.total_cost_usd,
+        cost_usd: raw.total_cost_usd.filter(|c| *c > 0.0),
         usage: raw.usage,
+        input_tokens,
+        output_tokens,
+        num_turns: raw.num_turns,
         duration_ms: result.duration_ms,
     })
 }
@@ -350,6 +481,55 @@ fn tail(text: &str, max: usize) -> &str {
     &text[start..]
 }
 
+/// Process-environment variables inherited by a `claude` child by exact
+/// name. The CLI needs a working process environment — `PATH` to find `node`
+/// and the tools it shells out to, `HOME` to locate its own `~/.claude`,
+/// locale for correct text handling — but must **not** inherit an ambient
+/// `ANTHROPIC_*` / `CLAUDE_CODE_*` export from the shell Axiomata itself was
+/// launched from. That leakage is exactly what made "does launching from my
+/// GLM shell change billing?" a real question (`docs/plans/provider-hardening.md`
+/// checkpoint 3). Everything the child gets beyond this list comes through
+/// `request.env` (provider routing, the Bedrock escape hatch), applied last.
+const INHERITED_ENV_ALLOWLIST: &[&str] =
+    &["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "TMPDIR"];
+
+/// Prefixes whose every matching process-environment variable is inherited:
+/// `LC_*` (locale categories), `XDG_*` (base-dir spec), `SSL_CERT_*` (OpenSSL
+/// trust-store overrides), and `__CF*` (the CoreFoundation vars macOS injects,
+/// e.g. `__CF_USER_TEXT_ENCODING`; absent on other platforms).
+const INHERITED_ENV_PREFIXES: &[&str] = &["LC_", "XDG_", "SSL_CERT_", "__CF"];
+
+/// Assembles the complete environment for a `claude` child, to be applied on
+/// top of a [`Command::env_clear`]: the allowlisted subset of this process's
+/// environment first, then `request_env` layered over it so a provider's
+/// `ANTHROPIC_BASE_URL` / token always wins and a caller can still override an
+/// inherited key (`PATH`, say) on purpose.
+fn child_env(request_env: &[(String, String)]) -> Vec<(String, String)> {
+    child_env_from(std::env::vars(), request_env)
+}
+
+/// [`child_env`] with the ambient environment injected, so it is unit-testable
+/// without touching the real process environment.
+fn child_env_from<I>(ambient: I, request_env: &[(String, String)]) -> Vec<(String, String)>
+where
+    I: IntoIterator<Item = (String, String)>,
+{
+    let inherited = |key: &str| {
+        INHERITED_ENV_ALLOWLIST.contains(&key)
+            || INHERITED_ENV_PREFIXES.iter().any(|p| key.starts_with(p))
+    };
+    let mut env: Vec<(String, String)> = ambient
+        .into_iter()
+        .filter(|(key, _)| inherited(key))
+        .collect();
+    for (key, value) in request_env {
+        // `request.env` wins over anything inherited under the same key.
+        env.retain(|(k, _)| k != key);
+        env.push((key.clone(), value.clone()));
+    }
+    env
+}
+
 /// The shared harness: spawns `claude -p <extra_args…>` in `request.cwd` and
 /// feeds `request.prompt` on stdin. See [`run`] for the I/O and timeout
 /// guarantees.
@@ -357,6 +537,14 @@ async fn spawn_and_collect(
     request: AgentRequest,
     extra_args: &[String],
 ) -> Result<AgentRunResult, AxiomataError> {
+    // Validate the model *before* taking a concurrency slot or starting the
+    // clock: a config error here must fail loudly and cheaply, never spawn.
+    let redirected = request
+        .env
+        .iter()
+        .any(|(key, value)| key == "ANTHROPIC_BASE_URL" && !value.trim().is_empty());
+    let model_arg = resolve_model_arg(request.model.as_deref(), redirected)?;
+
     // Held until this call returns, so at most `MAX_CONCURRENT_AGENT_RUNS`
     // `claude` processes are ever running at once; queued callers simply wait
     // here rather than piling up spawned processes. Acquired before the
@@ -370,7 +558,7 @@ async fn spawn_and_collect(
 
     let mut command = Command::new(resolve_claude_binary()?);
     command.arg("-p").args(extra_args);
-    if let Some(model) = request.model.as_deref().filter(|m| valid_model_name(m)) {
+    if let Some(model) = model_arg {
         command.arg("--model").arg(model);
     }
     if let Some(file) = &request.system_prompt_file {
@@ -388,8 +576,12 @@ async fn spawn_and_collect(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    for (key, value) in &request.env {
+        .kill_on_drop(true)
+        // Start from nothing, not the launching shell's environment: an
+        // ambient `ANTHROPIC_*` / `CLAUDE_CODE_*` export must never reach the
+        // child except through `request.env`. See `child_env`.
+        .env_clear();
+    for (key, value) in child_env(&request.env) {
         command.env(key, value);
     }
 
@@ -448,12 +640,12 @@ async fn spawn_and_collect(
         }
     };
 
-    Ok(AgentRunResult {
-        stdout: strip_ansi(&into_string_lossy(stdout_buf)),
-        stderr: strip_ansi(&into_string_lossy(stderr_buf)),
-        exit_code: status.code().unwrap_or(-1),
-        duration_ms: started.elapsed().as_millis() as u64,
-    })
+    Ok(AgentRunResult::bare(
+        strip_ansi(&into_string_lossy(stdout_buf)),
+        strip_ansi(&into_string_lossy(stderr_buf)),
+        status.code().unwrap_or(-1),
+        started.elapsed().as_millis() as u64,
+    ))
 }
 
 /// Converts captured child output to a `String`, reusing the buffer directly
@@ -620,12 +812,7 @@ mod tests {
     }
 
     fn output(stdout: &str, exit_code: i32) -> AgentRunResult {
-        AgentRunResult {
-            stdout: stdout.to_string(),
-            stderr: String::new(),
-            exit_code,
-            duration_ms: 7,
-        }
+        AgentRunResult::bare(stdout.to_string(), String::new(), exit_code, 7)
     }
 
     #[test]
@@ -663,6 +850,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_run_output_unwraps_the_envelope_and_lifts_cost_and_tokens() {
+        let raw = output(
+            r#"{"type":"result","is_error":false,"result":"digest text","session_id":"s-9",
+                "total_cost_usd":0.0123,"num_turns":4,
+                "usage":{"input_tokens":1200,"output_tokens":340,"cache_read_input_tokens":50}}"#,
+            0,
+        );
+        let parsed = parse_run_output(raw);
+        assert_eq!(parsed.stdout, "digest text");
+        assert_eq!(parsed.exit_code, 0);
+        assert_eq!(parsed.cost_usd, Some(0.0123));
+        assert_eq!(parsed.input_tokens, Some(1200));
+        assert_eq!(parsed.output_tokens, Some(340));
+        assert_eq!(parsed.num_turns, Some(4));
+    }
+
+    #[test]
+    fn parse_run_output_forces_failure_on_is_error_and_drops_zero_cost() {
+        let raw = output(
+            r#"{"is_error":true,"result":"the tool call was denied","total_cost_usd":0.0}"#,
+            0,
+        );
+        let parsed = parse_run_output(raw);
+        assert_eq!(parsed.stdout, "the tool call was denied");
+        assert_ne!(parsed.exit_code, 0, "is_error must map to a non-zero exit");
+        // A subscription-path 0.0 is "nothing to meter", not a recorded $0.
+        assert_eq!(parsed.cost_usd, None);
+    }
+
+    #[test]
+    fn parse_run_output_passes_non_json_straight_through() {
+        // An older CLI, or a diagnostic printed instead of the envelope.
+        let raw = output("plain text, not an envelope", 0);
+        let parsed = parse_run_output(raw.clone());
+        assert_eq!(parsed.stdout, raw.stdout);
+        assert_eq!(parsed.cost_usd, None);
+        assert_eq!(parsed.num_turns, None);
+    }
+
+    #[test]
     fn parses_a_json_result() {
         let out = output(
             r#"{"type":"result","subtype":"success","is_error":false,"result":"**hi**","session_id":"s-1","total_cost_usd":0.01,"usage":{"input_tokens":3}}"#,
@@ -695,11 +922,66 @@ mod tests {
             "sonnet",
             "claude-opus-4-1[1m]",
             "us.anthropic.claude-x:0",
+            // `vendor/model` OpenRouter IDs — the whole point of allowing `/`.
+            "z-ai/glm-5.3-flash",
+            "anthropic/claude-sonnet-5",
+            "deepseek/deepseek-v4-flash-0731",
         ] {
             assert!(valid_model_name(ok), "{ok}");
         }
-        for bad in ["", "--model", "a b", "x;rm", &"a".repeat(81)] {
+        for bad in [
+            "",
+            "--model",
+            "a b",
+            "x;rm",
+            &"a".repeat(81),
+            // `/` is allowed inside, but the first byte must still be
+            // alphanumeric — a leading slash (path-shaped) stays rejected.
+            "/etc/passwd",
+        ] {
             assert!(!valid_model_name(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_model_arg_passes_a_valid_model_through_unchanged() {
+        assert_eq!(
+            resolve_model_arg(Some("z-ai/glm-5.3-flash[1m]"), true).unwrap(),
+            Some("z-ai/glm-5.3-flash[1m]")
+        );
+        assert_eq!(
+            resolve_model_arg(Some("  claude-sonnet-5  "), false).unwrap(),
+            Some("claude-sonnet-5"),
+            "surrounding whitespace is trimmed, not treated as invalid"
+        );
+    }
+
+    #[test]
+    fn resolve_model_arg_allows_no_model_only_when_not_redirected() {
+        // Anthropic via the CLI's own login: no model is fine, the CLI default
+        // is intended and free.
+        assert_eq!(resolve_model_arg(None, false).unwrap(), None);
+        assert_eq!(resolve_model_arg(Some("   "), false).unwrap(), None);
+
+        // ANTHROPIC_BASE_URL in effect: a missing model must NOT fall through
+        // to the CLI default (that default would be billed via the proxy).
+        assert!(matches!(
+            resolve_model_arg(None, true),
+            Err(AxiomataError::InvalidAgentModel { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_model_arg_rejects_a_malformed_model_rather_than_dropping_it() {
+        // The exact typo that caused the real OpenRouter bill: `)` for `]`.
+        for redirected in [true, false] {
+            assert!(
+                matches!(
+                    resolve_model_arg(Some("z-ai/glm-5.3-flash[1m)"), redirected),
+                    Err(AxiomataError::InvalidAgentModel { .. })
+                ),
+                "redirected={redirected}"
+            );
         }
     }
 
@@ -723,5 +1005,99 @@ mod tests {
         assert_eq!(tail("héllo", 3), "llo");
         assert_eq!(tail("héllo", 4), "llo");
         assert_eq!(tail("abc", 10), "abc");
+    }
+
+    fn ambient(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn lookup<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
+        env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn child_env_drops_an_ambient_anthropic_base_url_unless_request_env_sets_it() {
+        // Leaked from the launching shell, no request override: gone.
+        let assembled = child_env_from(
+            ambient(&[("ANTHROPIC_BASE_URL", "https://leaked.example")]),
+            &[],
+        );
+        assert_eq!(lookup(&assembled, "ANTHROPIC_BASE_URL"), None);
+
+        // Same leak, but the active provider sets its own: the request value
+        // wins and appears exactly once.
+        let assembled = child_env_from(
+            ambient(&[("ANTHROPIC_BASE_URL", "https://leaked.example")]),
+            &[(
+                "ANTHROPIC_BASE_URL".to_string(),
+                "https://openrouter.ai/api".to_string(),
+            )],
+        );
+        assert_eq!(
+            lookup(&assembled, "ANTHROPIC_BASE_URL"),
+            Some("https://openrouter.ai/api")
+        );
+        assert_eq!(
+            assembled
+                .iter()
+                .filter(|(k, _)| k == "ANTHROPIC_BASE_URL")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn child_env_keeps_the_allowlist_and_prefixes_but_nothing_else() {
+        let assembled = child_env_from(
+            ambient(&[
+                ("PATH", "/usr/bin"),
+                ("HOME", "/home/ada"),
+                ("LC_ALL", "en_US.UTF-8"),
+                ("XDG_CONFIG_HOME", "/home/ada/.config"),
+                ("SSL_CERT_FILE", "/etc/ssl/cert.pem"),
+                ("__CF_USER_TEXT_ENCODING", "0x1F5:0x0:0x0"),
+                ("CLAUDE_CODE_USE_BEDROCK", "1"),
+                ("ANTHROPIC_AUTH_TOKEN", "sk-leak"),
+                ("AWS_SECRET_ACCESS_KEY", "leak"),
+                ("RANDOM_SHELL_VAR", "x"),
+            ]),
+            &[],
+        );
+
+        for kept in [
+            "PATH",
+            "HOME",
+            "LC_ALL",
+            "XDG_CONFIG_HOME",
+            "SSL_CERT_FILE",
+            "__CF_USER_TEXT_ENCODING",
+        ] {
+            assert!(lookup(&assembled, kept).is_some(), "{kept} should be kept");
+        }
+        for dropped in [
+            "CLAUDE_CODE_USE_BEDROCK",
+            "ANTHROPIC_AUTH_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "RANDOM_SHELL_VAR",
+        ] {
+            assert_eq!(
+                lookup(&assembled, dropped),
+                None,
+                "{dropped} should be dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn child_env_request_env_overrides_an_inherited_key() {
+        let assembled = child_env_from(
+            ambient(&[("PATH", "/usr/bin")]),
+            &[("PATH".to_string(), "/opt/custom/bin:/usr/bin".to_string())],
+        );
+        assert_eq!(lookup(&assembled, "PATH"), Some("/opt/custom/bin:/usr/bin"));
+        assert_eq!(assembled.iter().filter(|(k, _)| k == "PATH").count(), 1);
     }
 }

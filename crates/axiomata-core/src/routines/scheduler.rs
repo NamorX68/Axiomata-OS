@@ -32,7 +32,7 @@
 //! `routine_runs` history row silently missing for whichever firing was still
 //! in flight, rather than that only being possible on a hard kill.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -182,8 +182,19 @@ async fn fire_one(
         };
     }
 
-    // The agent call: no lock held (it awaits, possibly for the whole timeout).
-    let outcome = execute_target(routine, config).await;
+    // Spend guardrail: a routine firing through a paid provider counts against
+    // the same daily cap as a manual run. Over the cap, skip the agent call
+    // entirely and record the firing as failed (provider-hardening
+    // checkpoint 5). No-op on the Anthropic subscription path.
+    let cap_check = {
+        let conn = lock(db);
+        crate::spend::guard_redirected_turn(&conn, config)
+    };
+    let outcome = match cap_check {
+        // The agent call: no lock held (it awaits, possibly for the whole timeout).
+        Ok(()) => execute_target(routine, config).await,
+        Err(capped) => Err(capped),
+    };
 
     let conn = lock(db);
     let (status, detail, run_id) = match outcome {
@@ -362,7 +373,7 @@ impl Drop for SchedulerHandle {
 /// has no runtime, uses [`SchedulerHandle::new`] + [`SchedulerHandle::subscribe`]
 /// + [`serve`] instead.
 pub fn spawn(
-    config: Config,
+    config: Arc<RwLock<Config>>,
     db: Arc<Mutex<Connection>>,
 ) -> (SchedulerHandle, tokio::task::JoinHandle<()>) {
     spawn_with_interval(config, db, POLL_INTERVAL)
@@ -371,7 +382,7 @@ pub fn spawn(
 /// [`spawn`] with a caller-chosen poll interval — used by tests to drive the
 /// loop without waiting [`POLL_INTERVAL`].
 pub(crate) fn spawn_with_interval(
-    config: Config,
+    config: Arc<RwLock<Config>>,
     db: Arc<Mutex<Connection>>,
     interval: Duration,
 ) -> (SchedulerHandle, tokio::task::JoinHandle<()>) {
@@ -384,8 +395,14 @@ pub(crate) fn spawn_with_interval(
 /// Runs the scheduler loop until the stop signal flips to `true` or its sender
 /// drops. This is the whole loop as a future; run it with `tokio::spawn`,
 /// `tauri::async_runtime::spawn`, or by awaiting it directly.
+///
+/// `config` is the same shared, lockable config the rest of the app reads —
+/// not an owned snapshot — so a live Settings-dialog change (provider/model)
+/// reaches the *next* tick without an app restart. Each tick reads a fresh
+/// clone right before running (see the loop body below); the lock is never
+/// held across an `.await`.
 pub async fn serve(
-    config: Config,
+    config: Arc<RwLock<Config>>,
     db: Arc<Mutex<Connection>>,
     stop_rx: tokio::sync::watch::Receiver<bool>,
 ) {
@@ -394,7 +411,7 @@ pub async fn serve(
 
 /// [`serve`] with an explicit poll interval.
 async fn serve_with_interval(
-    config: Config,
+    config: Arc<RwLock<Config>>,
     db: Arc<Mutex<Connection>>,
     mut stop_rx: tokio::sync::watch::Receiver<bool>,
     interval: Duration,
@@ -419,8 +436,18 @@ async fn serve_with_interval(
                 // `fire_one` tasks still in flight; that is no worse than the
                 // process being killed outright, which the at-most-once
                 // firing design already tolerates (see the module doc).
+                //
+                // Read + clone a fresh snapshot right here, synchronously —
+                // the guard is a temporary, dropped at the end of this `let`
+                // statement, well before the `.await` below. This is what
+                // lets a live Settings-dialog provider/model change reach the
+                // very next tick without a restart.
+                let config_snapshot = config
+                    .read()
+                    .expect("routine scheduler config lock is poisoned")
+                    .clone();
                 tokio::select! {
-                    outcome = tick(&config, &db) => match outcome {
+                    outcome = tick(&config_snapshot, &db) => match outcome {
                         Ok(report) if report.fired > 0 || !report.errors.is_empty() => {
                             tracing::info!(
                                 fired = report.fired,
@@ -739,7 +766,7 @@ mod tests {
         .unwrap();
 
         let (handle, join) = spawn_with_interval(
-            fx.config.clone(),
+            Arc::new(RwLock::new(fx.config.clone())),
             Arc::clone(&fx.db),
             Duration::from_millis(40),
         );
@@ -768,6 +795,91 @@ mod tests {
         assert_eq!(
             store::list_runs(&fx.conn(), routine.id, 100).unwrap().len(),
             count_after_stop
+        );
+    }
+
+    #[tokio::test]
+    async fn spawned_loop_reads_a_config_change_made_after_it_starts_running() {
+        // Proves the loop holds the *same* shared `Arc<RwLock<Config>>` as the
+        // rest of the app, not a value snapshot frozen at `spawn_with_interval`
+        // time — a live Settings-dialog edit must reach the very next tick.
+        //
+        // The observable is deliberately something that fails at OS-level
+        // process spawn, *before* `execve` ever runs: a `claude-code` routine
+        // whose `cwd` (`config.workspace_root`) is invalid. That happens
+        // inside the child, pre-exec, so the real `claude` binary on this
+        // machine's PATH is never actually invoked — no live agent call, no
+        // network. Two different *kinds* of invalid path yield two
+        // distinguishable `io::Error`s (`ENOENT` vs. `ENOTDIR`), so the
+        // recorded failure detail proves which of the two config values was
+        // active when the routine actually fired.
+        let fx = Fixture::new("live-config");
+        let missing_dir = fx.home.join("workspace-does-not-exist");
+        let not_a_dir = fx.home.join("workspace-is-a-file");
+        fs::write(&not_a_dir, b"not a directory").unwrap();
+
+        let mut config = fx.config.clone();
+        config.workspace_root = missing_dir;
+        let shared_config = Arc::new(RwLock::new(config));
+
+        let routine = store::add(
+            &fx.conn(),
+            NewRoutine {
+                name: "live-config-probe".to_owned(),
+                cron_expr: "*/1 * * * * *".to_owned(),
+                target: RoutineTarget::Prompt("irrelevant — spawn fails first".to_owned()),
+                backend: Some("claude-code".to_owned()),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        // Not due yet: held back until well after the config swap below, so
+        // the loop's first live firing observes the *new* value rather than
+        // the one present when the loop started.
+        store::set_next_fire_at(
+            &fx.conn(),
+            routine.id,
+            Some(Utc::now() + chrono::Duration::milliseconds(400)),
+        )
+        .unwrap();
+
+        let (handle, join) = spawn_with_interval(
+            Arc::clone(&shared_config),
+            Arc::clone(&fx.db),
+            Duration::from_millis(30),
+        );
+
+        // Several poll intervals elapse here against the *old* config value
+        // with nothing due yet — nothing should fire during this window.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            store::list_runs(&fx.conn(), routine.id, 10)
+                .unwrap()
+                .is_empty(),
+            "routine was not due yet and must not have fired early"
+        );
+        shared_config.write().unwrap().workspace_root = not_a_dir;
+
+        let mut history = Vec::new();
+        for _ in 0..100 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            history = store::list_runs(&fx.conn(), routine.id, 10).unwrap();
+            if !history.is_empty() {
+                break;
+            }
+        }
+
+        handle.shutdown();
+        join.await.unwrap();
+
+        assert_eq!(history.len(), 1, "routine should have fired exactly once");
+        let detail = history[0].detail.as_deref().unwrap_or_default();
+        assert!(
+            detail.contains("Not a directory") || detail.contains("os error 20"),
+            "expected the failure to reflect the *post-change* workspace_root \
+             (a file, not a directory — ENOTDIR), proving the running loop \
+             re-read the shared config rather than the value captured at \
+             spawn time: {detail}"
         );
     }
 }
