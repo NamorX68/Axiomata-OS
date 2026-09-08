@@ -27,6 +27,14 @@
 ::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: var(--ax-radius-pill);
+  /* Without a transition, WKWebView only repaints this pseudo-element when
+     the pointer physically crosses the scrollbar's own pixel strip. Cursor
+     movements that enter/leave the tile elsewhere (fast exits, exiting past
+     the left edge) never touch that strip, so the last-painted state — thumb
+     stuck visible, or stuck invisible — never gets invalidated. Animating
+     the colour forces WebKit to repaint on every :hover state change,
+     independent of where exactly the pointer crossed. */
+  transition: background-color var(--ax-dur-fast) var(--ax-ease);
 }
 :hover::-webkit-scrollbar-thumb {
   background: var(--ax-border-strong);

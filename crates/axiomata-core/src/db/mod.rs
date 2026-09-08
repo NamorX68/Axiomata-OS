@@ -16,6 +16,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (2, include_str!("migrations/0002_runs.sql")),
     (3, include_str!("migrations/0003_routines.sql")),
     (4, include_str!("migrations/0004_runs_source.sql")),
+    (5, include_str!("migrations/0005_runs_cost.sql")),
+    (6, include_str!("migrations/0006_chat_turns.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -88,7 +90,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 4);
+            assert_eq!(version, 6);
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -138,6 +140,27 @@ mod tests {
                 )
                 .expect("runs.source column should exist");
             assert_eq!(source, "manual");
+
+            // Migration 0005's columns exist and default to NULL for a row
+            // inserted without them.
+            let cost: Option<f64> = conn
+                .query_row(
+                    "SELECT cost_usd FROM runs WHERE skill_name = 'probe'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("runs.cost_usd column should exist");
+            assert_eq!(cost, None);
+
+            // Migration 0006's table exists.
+            conn.execute(
+                "INSERT INTO chat_turns \
+                 (session_id, mode, provider, model, is_error, created_at) \
+                 VALUES ('s-1', 'chat', 'anthropic', NULL, 0, \
+                         '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("chat_turns table should exist");
         }
 
         {
@@ -146,7 +169,7 @@ mod tests {
             let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(applied_count, 4);
+            assert_eq!(applied_count, 6);
 
             let probe_value: String = conn
                 .query_row(

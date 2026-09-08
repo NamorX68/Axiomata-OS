@@ -100,11 +100,18 @@ from the code itself:
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.
-- **Model**: every `claude -p` run passes `--model` from `config.agents.claude_model`
-  (temporarily `claude-haiku-4-5` as of 2026-09-07 — the app kept hitting its session
-  usage limit within a day or two of small feature work; Haiku is enough for the current
-  scope and for testing. Was `claude-sonnet-5`, switch back once that's not a concern);
-  a skill's own `model:` frontmatter wins.
+- **Model**: every `claude -p` run passes `--model` from the **active provider**'s settings —
+  `config.agents.providers[active_provider].chat_model` for chat turns,
+  `.skill_model` for skill/routine runs (a skill's own `model:` frontmatter still wins). v1
+  providers: `Anthropic` (default; no base URL/key, subscription-billed via the CLI login) |
+  `OpenRouter` | `Ollama` — all four `ProviderSettings` fields kept per provider even while
+  inactive. Anthropic's defaults are `claude-sonnet-5` (chat) / `claude-haiku-4-5` (skills) —
+  skills stay on Haiku because the app kept hitting its session usage limit within a day or
+  two of small feature work; bump `skill_model` once that's not a concern. The old flat
+  `agents.claude_model` is migration-only now. Provider env plumbing and the
+  `RwLock<Config>` / `get_config`/`save_config` runtime-mutation path:
+  `docs/architecture.md` §5 "Model providers"; full rationale:
+  `docs/plans/settings-provider-overhaul.md`.
 
 ## Sub-agents (use the Rust variants, not the Python-oriented defaults)
 
@@ -113,14 +120,15 @@ Three of the named agents there (`test-engineer`, `dependency-auditor`,
 `performance-analyzer`) are worded for a Python/`uv` stack and **do not apply to this repo**.
 Global, Rust-flavored replacements exist at `~/.claude/agents/{rust-test-engineer,
 rust-dependency-auditor,rust-performance-analyzer}.md` (usable in any Rust project) — use
-those instead, same trigger conditions translated to Rust terms:
-
-- **rust-test-engineer** — after writing/modifying any Rust function, struct, or module;
-  runs `cargo test` (not `pytest`).
-- **rust-dependency-auditor** — whenever any `Cargo.toml` in this workspace changes; runs
-  `cargo audit`/`cargo tree` (not `uv audit`). A `.cargo/audit.toml` already exists.
-- **rust-performance-analyzer** — for new `rusqlite` queries, `tokio` async functions, or
-  hot-path data processing (not SQLAlchemy/Polars/`async def`).
+those instead, same trigger conditions translated to Rust terms (`cargo test`, `cargo audit`,
+`rusqlite`/`tokio`), with a **project-local cadence override** (owner, 2026-09-08; rationale
+in `docs/architecture.md` §7): fire them **once per plan checkpoint, and always before a
+commit**, not after every single changed `fn`/`struct`/`Cargo.toml` line mid-task. Keep
+writing/updating tests inline as code lands regardless — the test-engineer's run is a bundled
+second-pass gap check over the accumulated diff, not the first pass. The same override applies
+to Claude's own verification loop: batch `cargo build`/`clippy`/`fmt`/`test` per unit of work,
+and run the full set only when the work is done, before handing off to a sub-agent, and before
+a commit.
 
 `architecture-reviewer`, `security-auditor`, `docs-writer`, and `refactoring-specialist` are
 already language-agnostic as globally defined and apply here unchanged. When

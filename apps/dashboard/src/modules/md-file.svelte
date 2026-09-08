@@ -29,6 +29,22 @@
     links and anything with a URL scheme (`http:`, `mailto:`, …) are left
     alone and simply do nothing inside a frame with no `allow-top-navigation`
     and no network access of its own beyond what `srcdoc` inlines.
+  - `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.bmp` / `.tif` / `.tiff` /
+    `.heic` / `.heif` / `.avif`: shown read-only as a plain `<img>` fed by
+    `read_workspace_image`'s base64 `data:` URI — the same backend call
+    `core/markdownImages.ts` already uses to inline an image *referenced from
+    inside* a note, now also used when the opened file *is* the image itself.
+    Before this branch existed, opening one of these directly fell through to
+    the markdown path below, which reads the file as UTF-8 text and fails
+    with "not valid UTF-8" for any binary file — exactly the bug this fixes.
+    Extension list must stay in lockstep with the Rust `image_mime`
+    (`workspace.rs`) and `core/markdown.ts`'s `DATA_IMAGE_RE`; anything
+    outside it (SVG included, deliberately — see `image_mime`'s doc comment)
+    still falls through to the markdown branch and still fails the same way.
+    Whether HEIC/TIFF/BMP/AVIF actually *render* is up to WKWebView's own
+    image decoder, not this app — see `image_mime`'s doc comment for the
+    caveat (HEIC in particular is a known WebKit web-content gap even though
+    the OS decodes it fine elsewhere); verify each in `cargo tauri dev`.
   - `isNew` + no `path` yet: a bare textarea, no title field — either the
     note starts with its own `# Heading`, or the agent proposes one, exactly
     like `axiomata_core::notes`. Save calls `create_note`, then re-points
@@ -38,7 +54,7 @@
   `stageFrom`.
 -->
 <script lang="ts">
-  import { type WorkspaceFile } from "../core/backend";
+  import { type WorkspaceFile, type WorkspaceImage } from "../core/backend";
   import { relativeTime } from "../core/format";
   import { resolveRelativeLink, withNavIntercept } from "../core/htmllink";
   import { renderMarkdown } from "../core/markdown";
@@ -56,10 +72,15 @@
   let saving = $state(false);
   let pathInput = $state("");
   let iframeEl = $state<HTMLIFrameElement | null>(null);
+  let imageSrc = $state<string | null>(null);
 
   const path = $derived(typeof $config.path === "string" ? $config.path : "");
   const isNew = $derived($config.isNew === true && !path);
-  const kind = $derived(/\.html?$/i.test(path) ? "html" : "markdown");
+  // Extension list mirrors the Rust `image_mime` (`workspace.rs`) and
+  // `core/markdown.ts`'s `DATA_IMAGE_RE` — keep all three in lockstep.
+  const kind = $derived(
+    /\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(path) ? "image" : /\.html?$/i.test(path) ? "html" : "markdown",
+  );
   const mode = $derived($config.mode === "edit" && kind === "markdown" ? "edit" : "read");
   let frameDoc = $state<string | null>(null);
   let reloadTick = $state(0);
@@ -97,6 +118,11 @@
     if (!rel) {
       file = null;
       frameDoc = null;
+      imageSrc = null;
+      return;
+    }
+    if (/\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(rel)) {
+      await loadImage(rel);
       return;
     }
     if (/\.html?$/i.test(rel)) {
@@ -122,6 +148,19 @@
       error = "";
     } catch (err) {
       frameDoc = null;
+      error = String(err);
+    }
+  }
+
+  async function loadImage(rel: string) {
+    file = null;
+    imageSrc = null;
+    try {
+      const img = await ctx.invoke<WorkspaceImage>("read_workspace_image", { rel });
+      imageSrc = `data:${img.mime};base64,${img.base64}`;
+      error = "";
+    } catch (err) {
+      imageSrc = null;
       error = String(err);
     }
   }
@@ -217,7 +256,7 @@
       {#if wordCount > 0}<span class="muted">· {wordCount} words · {readingMins} min</span>{/if}
       <span class="spacer"></span>
       <button type="button" onclick={() => ctx.emit("open-second-brain", { focus: `file:${path}` })} title="Open in Second Brain">In Second Brain</button>
-      {#if kind === "html"}
+      {#if kind === "html" || kind === "image"}
         <!-- nothing else — read-only -->
       {:else if mode === "read"}
         <button type="button" onclick={() => setMode("edit")} disabled={!file} title="Edit">Edit</button>
@@ -243,6 +282,12 @@
             bind:this={iframeEl}
           ></iframe>
         {/key}
+      {:else}
+        <p class="muted">Loading…</p>
+      {/if}
+    {:else if kind === "image"}
+      {#if imageSrc}
+        <div class="image-view"><img src={imageSrc} alt={path} /></div>
       {:else}
         <p class="muted">Loading…</p>
       {/if}
@@ -333,6 +378,21 @@
     width: 100%;
     border: 0;
     background: var(--ax-surface-1);
+  }
+
+  .image-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: var(--ax-space-3) var(--ax-space-4);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: var(--ax-surface-1);
+  }
+  .image-view img {
+    max-width: 100%;
+    height: auto;
   }
 
   .rendered {

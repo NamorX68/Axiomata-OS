@@ -78,10 +78,10 @@ pub async fn run(request: AgentRequest, model: &str) -> Result<AgentRunResult, A
         }
     };
 
-    Ok(AgentRunResult {
-        stdout: truncate_utf8(response.response, MAX_RESPONSE_BYTES),
-        stderr: String::new(),
-        exit_code: 0,
-        duration_ms: started.elapsed().as_millis() as u64,
-    })
+    Ok(AgentRunResult::bare(
+        truncate_utf8(response.response, MAX_RESPONSE_BYTES),
+        String::new(),
+        0,
+        started.elapsed().as_millis() as u64,
+    ))
 }

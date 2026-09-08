@@ -31,8 +31,10 @@ pub fn bootstrap() -> Services {
 
     // Off the setup thread so a large vault or a slow disk doesn't stall
     // window creation. A failure surfaces as a "stale" badge the user can act
-    // on with "Sync now" — it is not fatal to starting the app.
-    let sync_config = core.config.clone();
+    // on with "Sync now" — it is not fatal to starting the app. A one-shot
+    // read: this thread doesn't stay alive, so a plain cloned-out `Config`
+    // value (not the shared lock) is all it needs.
+    let sync_config = core.config.read().expect("config lock poisoned").clone();
     std::thread::spawn(move || {
         if let Err(err) = axiomata_core::memory::sync(&sync_config) {
             tracing::warn!(%err, "startup memory sync failed");
@@ -43,10 +45,16 @@ pub fn bootstrap() -> Services {
     // to `tauri::async_runtime` and only the stop handle is kept here;
     // `lib.rs`'s `RunEvent::ExitRequested` hook uses it to request a stop
     // before the process exits.
+    //
+    // Unlike `sync_config` above, this hands the scheduler the *same* shared
+    // `Arc<RwLock<Config>>` as `core.config` (a cheap `Arc` clone, not a
+    // `Config` value clone) — the scheduler loop re-reads it on every tick,
+    // so a live Settings-dialog provider/model change reaches scheduled
+    // routine firings too, not just manual runs.
     let scheduler = SchedulerHandle::new();
     let stop_rx = scheduler.subscribe();
     tauri::async_runtime::spawn(routines::serve(
-        core.config.clone(),
+        Arc::clone(&core.config),
         Arc::clone(&core.db),
         stop_rx,
     ));

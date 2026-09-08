@@ -82,6 +82,28 @@ pub enum AxiomataError {
         message: String,
     },
 
+    /// The model to run with is missing or malformed for the active provider.
+    /// The Claude Code CLI is *not* spawned in this case: with a non-Anthropic
+    /// `ANTHROPIC_BASE_URL` in effect, letting the CLI fall back to its own
+    /// built-in default model would route that default through the paid proxy
+    /// and bill it — a config typo must fail loudly, not silently cost money.
+    #[error("{reason}")]
+    InvalidAgentModel { reason: String },
+
+    /// Today's spend through a paid model-routing provider has reached the
+    /// configured daily cap. The turn is *not* spawned — see
+    /// [`crate::spend::guard_redirected_turn`] and provider-hardening
+    /// checkpoint 5.
+    #[error(
+        "{provider} daily spend cap of ${cap_usd:.2} reached (${spent_usd:.2} so far today) — \
+         raise it in Settings or wait until tomorrow"
+    )]
+    SpendCapReached {
+        provider: String,
+        cap_usd: f64,
+        spent_usd: f64,
+    },
+
     /// A `SKILL.md` file could not be read, or its frontmatter was missing or
     /// malformed.
     #[error("invalid skill at {path}: {reason}")]

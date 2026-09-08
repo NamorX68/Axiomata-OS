@@ -79,8 +79,10 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
     db.execute(
         "INSERT INTO runs \
          (skill_name, backend, status, exit_code, duration_ms, \
-          stdout, stderr, error, started_at, finished_at, source) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+          stdout, stderr, error, started_at, finished_at, source, \
+          provider, cost_usd, input_tokens, output_tokens, num_turns) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
+                 ?12, ?13, ?14, ?15, ?16)",
         rusqlite::params![
             record.skill_name,
             record.backend,
@@ -93,6 +95,11 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
             record.started_at.to_rfc3339(),
             record.finished_at.to_rfc3339(),
             record.source.as_str(),
+            record.provider,
+            record.cost_usd,
+            record.input_tokens,
+            record.output_tokens,
+            record.num_turns,
         ],
     )?;
     Ok(db.last_insert_rowid())
@@ -134,7 +141,8 @@ pub const MAX_RUN_LIMIT: usize = 500;
 pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunSummary>, AxiomataError> {
     let limit = limit.min(MAX_RUN_LIMIT);
     let mut stmt = db.prepare(
-        "SELECT id, skill_name, backend, status, exit_code, duration_ms, error, started_at, source \
+        "SELECT id, skill_name, backend, status, exit_code, duration_ms, error, started_at, source, \
+                provider, cost_usd \
          FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit as i64], row_to_summary)?;
@@ -153,7 +161,8 @@ pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunSummary>, Axiom
 pub fn get_run(db: &Connection, id: i64) -> Result<Option<RunRecord>, AxiomataError> {
     let mut stmt = db.prepare(
         "SELECT id, skill_name, backend, status, exit_code, \
-         duration_ms, stdout, stderr, error, started_at, finished_at, source \
+         duration_ms, stdout, stderr, error, started_at, finished_at, source, \
+         provider, cost_usd, input_tokens, output_tokens, num_turns \
          FROM runs WHERE id = ?1",
     )?;
     match stmt.query_row([id], row_to_record) {
@@ -178,6 +187,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunSummary> {
         error: row.get(6)?,
         started_at: parse_timestamp(row, 7, &started_at)?,
         source: RunSource::from_db_str(&source, 8)?,
+        provider: row.get(9)?,
+        cost_usd: row.get(10)?,
     })
 }
 
@@ -201,6 +212,11 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         started_at: parse_timestamp(row, 9, &started_at)?,
         finished_at: parse_timestamp(row, 10, &finished_at)?,
         source: RunSource::from_db_str(&source, 11)?,
+        provider: row.get(12)?,
+        cost_usd: row.get(13)?,
+        input_tokens: row.get::<_, Option<i64>>(14)?.map(|n| n as u64),
+        output_tokens: row.get::<_, Option<i64>>(15)?.map(|n| n as u64),
+        num_turns: row.get::<_, Option<i64>>(16)?.map(|n| n as u32),
     })
 }
 
@@ -244,6 +260,11 @@ mod tests {
             error: None,
             started_at: now,
             finished_at: now,
+            provider: None,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+            num_turns: None,
             source: RunSource::Manual,
         }
     }
@@ -292,6 +313,42 @@ mod tests {
         assert_eq!(full.skill_name, "triage");
         assert_eq!(full.stdout, "done");
         assert!(get_run(&db, 999).unwrap().is_none());
+
+        unsafe {
+            env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn cost_provider_and_tokens_round_trip_through_list_runs_and_get_run() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-cost-home");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+
+        let mut paid = sample_record("mail-digest");
+        paid.provider = Some("open_router".to_owned());
+        paid.cost_usd = Some(0.0731);
+        paid.input_tokens = Some(9000);
+        paid.output_tokens = Some(450);
+        paid.num_turns = Some(6);
+        record_run(&db, paid).unwrap();
+
+        let summary = &list_runs(&db, 5).unwrap()[0];
+        assert_eq!(summary.provider.as_deref(), Some("open_router"));
+        assert_eq!(summary.cost_usd, Some(0.0731));
+
+        let full = get_run(&db, 1).unwrap().unwrap();
+        assert_eq!(full.cost_usd, Some(0.0731));
+        assert_eq!(full.input_tokens, Some(9000));
+        assert_eq!(full.output_tokens, Some(450));
+        assert_eq!(full.num_turns, Some(6));
+        assert_eq!(full.provider.as_deref(), Some("open_router"));
 
         unsafe {
             env::remove_var(crate::paths::AXIOMATA_HOME_ENV);

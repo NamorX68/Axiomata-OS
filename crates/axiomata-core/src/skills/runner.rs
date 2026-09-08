@@ -16,7 +16,7 @@
 //!
 //! Implemented in M1.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -58,6 +58,9 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
             return Ok(failure_record(
                 &skill.name,
                 &skill.backend,
+                // The backend string didn't resolve, so there is no provider
+                // to attribute this to.
+                None,
                 Utc::now(),
                 0,
                 err.to_string(),
@@ -66,10 +69,7 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
     };
 
     let model = match backend {
-        AgentBackend::ClaudeCode => skill
-            .model
-            .clone()
-            .or_else(|| crate::agents::default_claude_model(config)),
+        AgentBackend::ClaudeCode => resolve_skill_model(skill.model.as_deref(), config),
         AgentBackend::Ollama { .. } => None,
     };
     // The skill's own instruction body is the prompt on every backend. Claude
@@ -87,6 +87,7 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
         config,
         model,
         skill.allowed_tools.clone(),
+        skill.timeout_secs,
     )
     .await
 }
@@ -111,6 +112,7 @@ pub async fn execute_prompt(
             return Ok(failure_record(
                 name,
                 backend_id,
+                None,
                 Utc::now(),
                 0,
                 err.to_string(),
@@ -122,10 +124,14 @@ pub async fn execute_prompt(
         prompt,
         &backend,
         config,
-        crate::agents::default_claude_model(config),
+        // A `prompt`-target routine is unattended, same as a skill run — use
+        // the skill-model fallback, not the interactive chat model.
+        crate::agents::default_skill_model(config),
         // Raw prompt targets (no `SKILL.md`) have nowhere to declare a tool
         // allow-list yet — same limitation `execute_prompt`'s doc already
         // implies by only taking a bare string.
+        None,
+        // ...nor a per-target timeout override; the global default applies.
         None,
     )
     .await
@@ -184,6 +190,7 @@ async fn run_on_backend(
     config: &Config,
     model: Option<String>,
     allowed_tools: Option<String>,
+    timeout_override_secs: Option<u64>,
 ) -> Result<RunRecord, AxiomataError> {
     let started_at = Utc::now();
     let already_running = {
@@ -204,30 +211,60 @@ async fn run_on_backend(
     }
     let _guard = RunningGuard(name.to_string());
 
-    let request = agent_request(prompt, backend, config, model, allowed_tools);
+    let provider = provider_label(backend, config);
+    let request = agent_request(
+        prompt,
+        backend,
+        config,
+        model,
+        allowed_tools,
+        timeout_override_secs,
+    );
     Ok(match backend.run(request).await {
-        Ok(result) => record_from_result(name, backend.id(), started_at, result),
+        Ok(result) => record_from_result(name, backend.id(), provider, started_at, result),
         Err(err) => {
             let elapsed = (Utc::now() - started_at).num_milliseconds().max(0) as u64;
-            failure_record(name, backend.id(), started_at, elapsed, err.to_string())
+            failure_record(
+                name,
+                backend.id(),
+                provider,
+                started_at,
+                elapsed,
+                err.to_string(),
+            )
         }
     })
 }
 
+/// The `provider` string to stamp on a run's record: the active model-routing
+/// provider for a Claude Code run, `None` for the local Ollama backend (which
+/// has no provider and never bills).
+fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
+    match backend {
+        AgentBackend::ClaudeCode => Some(config.agents.active_provider.as_str().to_string()),
+        AgentBackend::Ollama { .. } => None,
+    }
+}
+
 /// Builds the [`AgentRequest`] for a prompt on `backend`: the caller-supplied
-/// prompt, the workspace as the working directory, the configured run timeout,
-/// and (for Claude Code only) the filtered provider environment.
+/// prompt, the workspace as the working directory, the run timeout (the
+/// skill's own `timeout_secs` frontmatter if set, else
+/// `config.agents.skill_timeout_secs`), and (for Claude Code only) the
+/// filtered provider environment.
 fn agent_request(
     prompt: String,
     backend: &AgentBackend,
     config: &Config,
     model: Option<String>,
     allowed_tools: Option<String>,
+    timeout_override_secs: Option<u64>,
 ) -> AgentRequest {
     AgentRequest {
         prompt,
         cwd: config.workspace_root.clone(),
-        timeout: Duration::from_secs(config.agents.skill_timeout_secs),
+        timeout: Duration::from_secs(
+            timeout_override_secs.unwrap_or(config.agents.skill_timeout_secs),
+        ),
         env: claude_env(config, backend),
         // Skills and routines get the dashboard's module manifest too, so an
         // unattended run can call mounted modules; None when the GUI never ran.
@@ -245,6 +282,7 @@ fn agent_request(
 fn record_from_result(
     skill_name: &str,
     backend_id: &str,
+    provider: Option<String>,
     started_at: chrono::DateTime<Utc>,
     result: AgentRunResult,
 ) -> RunRecord {
@@ -264,6 +302,11 @@ fn record_from_result(
         error: None,
         started_at,
         finished_at: Utc::now(),
+        provider,
+        cost_usd: result.cost_usd,
+        input_tokens: result.input_tokens,
+        output_tokens: result.output_tokens,
+        num_turns: result.num_turns,
         // Neither this function nor its caller here knows whether a
         // routine fired it — routines::scheduler::fire_one overrides this
         // to `Routine` itself, right before recording it.
@@ -286,9 +329,32 @@ pub async fn execute_and_record_skill(
     config: &Config,
     db: &Mutex<Connection>,
 ) -> Result<RunRecord, AxiomataError> {
+    // Refuse before doing any work if today's spend through a paid provider
+    // is already over the cap (provider-hardening checkpoint 5). No-op on the
+    // subscription-billed Anthropic path.
+    {
+        let conn = db.lock().expect("run-log database mutex is poisoned");
+        crate::spend::guard_redirected_turn(&conn, config)?;
+    }
     let record = execute_skill(name, config).await?;
     let db = db.lock().expect("run-log database mutex is poisoned");
     runlog::record_run(&db, record)
+}
+
+/// Model precedence for a Claude Code skill run: the skill's own `SKILL.md`
+/// frontmatter `model:` wins when present; otherwise falls back to the
+/// active provider's `skill_model` (unset/blank there means "let the CLI
+/// choose its own default"). Pulled out of [`execute_skill`] as its own
+/// function so this precedence is unit-testable without a real agent spawn.
+fn resolve_skill_model(frontmatter_model: Option<&str>, config: &Config) -> Option<String> {
+    // Trim + treat blank as "not pinned", same convention `active_provider_model`
+    // already uses for a blank provider-config field — a `model:` line left
+    // empty or whitespace-only should fall through to the provider default,
+    // not literally reach the child process as `claude --model ""`.
+    let pinned = frontmatter_model.map(str::trim).filter(|m| !m.is_empty());
+    pinned
+        .map(str::to_owned)
+        .or_else(|| crate::agents::default_skill_model(config))
 }
 
 /// Environment-variable name prefixes that `config.agents.claude_env` is
@@ -308,23 +374,73 @@ const CLAUDE_ENV_ALLOWED_PREFIXES: &[&str] = &[
     "no_proxy",
 ];
 
-/// The provider environment for the `claude` process, filtered through
-/// [`CLAUDE_ENV_ALLOWED_PREFIXES`]; empty for Ollama.
+/// The provider environment for the `claude` process; empty for Ollama.
+///
+/// Two layers, in precedence order (later wins): first the active provider's
+/// `ProviderSettings` (`agents.providers[agents.active_provider]`) —
+/// `base_url` into `ANTHROPIC_BASE_URL`, `api_key` into whichever env var
+/// [`crate::config::ProviderId::auth_env_var`] names for that provider — then
+/// `config.agents.claude_env`, filtered through
+/// [`CLAUDE_ENV_ALLOWED_PREFIXES`], layered on top as a power-user escape
+/// hatch that can still add to or override what the provider derived (e.g.
+/// Bedrock, which doesn't fit the provider model at all). For the Anthropic
+/// provider (`base_url`/`api_key` both `None` by default) the first layer
+/// contributes nothing, so behavior is unchanged from before providers
+/// existed: empty env unless `claude_env` sets something, i.e. the real
+/// Anthropic API via the CLI's own subscription login.
 pub(crate) fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String, String)> {
     match backend {
-        AgentBackend::ClaudeCode => config
-            .agents
-            .claude_env
-            .iter()
-            .filter(|(key, _)| {
-                CLAUDE_ENV_ALLOWED_PREFIXES
+        AgentBackend::ClaudeCode => {
+            let mut env: BTreeMap<String, String> = BTreeMap::new();
+
+            if let Some(settings) = config.agents.providers.get(&config.agents.active_provider) {
+                let base_url = non_blank(settings.base_url.as_deref());
+                if let Some(base_url) = base_url {
+                    env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.to_string());
+                }
+                if let Some(api_key) = non_blank(settings.api_key.as_deref()) {
+                    env.insert(
+                        config.agents.active_provider.auth_env_var().to_string(),
+                        api_key.to_string(),
+                    );
+                }
+                // A non-Anthropic provider fronts the Messages API through a
+                // bearer token (`ANTHROPIC_AUTH_TOKEN`). The `claude` CLI
+                // otherwise prefers a direct `ANTHROPIC_API_KEY` — inherited
+                // from the ambient environment, or implied by a subscription
+                // login — as an `x-api-key` header, which conflicts with the
+                // bearer token and makes the CLI silently keep talking to
+                // Anthropic. The child is spawned without `env_clear()`
+                // (`agents/claude_code.rs`), so neutralise any such key with
+                // an explicit empty value. Only when a `base_url` redirect is
+                // actually in effect, so a half-configured provider can't
+                // accidentally break Anthropic-via-login too. Phase 0 spike:
+                // `docs/plans/settings-provider-overhaul.md`.
+                if base_url.is_some()
+                    && config.agents.active_provider.auth_env_var() == "ANTHROPIC_AUTH_TOKEN"
+                {
+                    env.insert("ANTHROPIC_API_KEY".to_string(), String::new());
+                }
+            }
+
+            for (key, value) in &config.agents.claude_env {
+                if CLAUDE_ENV_ALLOWED_PREFIXES
                     .iter()
                     .any(|prefix| key.starts_with(prefix))
-            })
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect(),
+                {
+                    env.insert(key.clone(), value.clone());
+                }
+            }
+
+            env.into_iter().collect()
+        }
         AgentBackend::Ollama { .. } => Vec::new(),
     }
+}
+
+/// `Some(s)` unless `s` is `None`, empty, or all whitespace.
+fn non_blank(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|s| !s.is_empty())
 }
 
 /// Builds an unpersisted `Failed` [`RunRecord`] for a run that produced no
@@ -332,6 +448,7 @@ pub(crate) fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String
 fn failure_record(
     skill_name: &str,
     backend_id: &str,
+    provider: Option<String>,
     started_at: chrono::DateTime<Utc>,
     duration_ms: u64,
     message: String,
@@ -348,6 +465,11 @@ fn failure_record(
         error: Some(message),
         started_at,
         finished_at: Utc::now(),
+        provider,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+        num_turns: None,
         // See the matching comment in `record_from_result`.
         source: RunSource::default(),
     }
@@ -356,8 +478,9 @@ fn failure_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::{Config, ProviderId, ProviderSettings};
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
+    use std::collections::HashMap;
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -436,13 +559,9 @@ mod tests {
         let ok = record_from_result(
             "s",
             "ollama",
+            None,
             now,
-            AgentRunResult {
-                stdout: "hi".to_owned(),
-                stderr: String::new(),
-                exit_code: 0,
-                duration_ms: 12,
-            },
+            AgentRunResult::bare("hi".to_owned(), String::new(), 0, 12),
         );
         assert_eq!(ok.status, RunStatus::Success);
         assert_eq!(ok.exit_code, Some(0));
@@ -456,16 +575,17 @@ mod tests {
         let bad = record_from_result(
             "s",
             "ollama",
+            Some("open_router".to_owned()),
             now,
             AgentRunResult {
-                stdout: String::new(),
-                stderr: "boom".to_owned(),
-                exit_code: 3,
-                duration_ms: 5,
+                cost_usd: Some(0.012),
+                ..AgentRunResult::bare(String::new(), "boom".to_owned(), 3, 5)
             },
         );
         assert_eq!(bad.status, RunStatus::Failed);
         assert_eq!(bad.exit_code, Some(3));
+        assert_eq!(bad.provider.as_deref(), Some("open_router"));
+        assert_eq!(bad.cost_usd, Some(0.012));
     }
 
     #[test]
@@ -484,6 +604,7 @@ mod tests {
             &config,
             None,
             None,
+            None,
         );
         assert_eq!(req.system_prompt_file, None);
         std::fs::write(home.join("module-context.md"), "# modules").unwrap();
@@ -491,6 +612,7 @@ mod tests {
             "p".to_string(),
             &AgentBackend::ClaudeCode,
             &config,
+            None,
             None,
             None,
         );
@@ -518,6 +640,7 @@ mod tests {
             &config,
             None,
             Some("mcp__apple-reminders__calendar_events".to_string()),
+            None,
         );
         assert_eq!(
             req.allowed_tools,
@@ -530,8 +653,47 @@ mod tests {
             &config,
             None,
             None,
+            None,
         );
         assert_eq!(req.allowed_tools, None);
+
+        unsafe {
+            std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn agent_request_timeout_uses_the_override_when_set_else_the_config_default() {
+        let _guard = crate::test_support::ENV_MUTEX.lock().unwrap();
+        let home = crate::test_support::unique_temp_dir("axiomata-test-runner-timeout");
+        std::fs::create_dir_all(&home).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+        let mut config = Config::default();
+        config.agents.skill_timeout_secs = 300;
+
+        let default_req = agent_request(
+            "p".into(),
+            &AgentBackend::ClaudeCode,
+            &config,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(default_req.timeout, Duration::from_secs(300));
+
+        let overridden = agent_request(
+            "p".into(),
+            &AgentBackend::ClaudeCode,
+            &config,
+            None,
+            None,
+            Some(600),
+        );
+        assert_eq!(overridden.timeout, Duration::from_secs(600));
 
         unsafe {
             std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
@@ -578,6 +740,178 @@ mod tests {
                 }
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn claude_env_is_empty_for_anthropic_with_no_claude_env_overrides() {
+        let config = Config::default();
+        assert_eq!(config.agents.active_provider, ProviderId::Anthropic);
+        // Anthropic's `ProviderSettings` carry no base_url/api_key by design
+        // (billed via the CLI's own subscription login) — this must stay
+        // byte-identical to pre-provider behavior.
+        assert!(claude_env(&config, &AgentBackend::ClaudeCode).is_empty());
+    }
+
+    #[test]
+    fn claude_env_derives_base_url_and_bearer_token_for_openrouter() {
+        let mut config = Config::default();
+        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some("https://openrouter.ai/api".to_string()),
+                api_key: Some("sk-or-test".to_string()),
+                chat_model: String::new(),
+                skill_model: String::new(),
+            },
+        );
+
+        let env: HashMap<String, String> = claude_env(&config, &AgentBackend::ClaudeCode)
+            .into_iter()
+            .collect();
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://openrouter.ai/api")
+        );
+        // OpenRouter's key goes into the bearer-token var, not
+        // `ANTHROPIC_API_KEY` (see `ProviderId::auth_env_var`) — setting both
+        // makes the CLI prefer the wrong/absent direct key.
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("sk-or-test")
+        );
+        // `ANTHROPIC_API_KEY` must be present *and empty* — an explicit
+        // neutraliser for any inherited/subscription key, since the child is
+        // spawned without `env_clear()`.
+        assert_eq!(env.get("ANTHROPIC_API_KEY").map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn claude_env_derives_base_url_only_when_ollama_has_no_key_configured() {
+        let mut config = Config::default();
+        config.agents.active_provider = ProviderId::Ollama;
+        config.agents.providers.insert(
+            ProviderId::Ollama,
+            ProviderSettings {
+                base_url: Some("http://localhost:11434".to_string()),
+                api_key: None,
+                chat_model: String::new(),
+                skill_model: String::new(),
+            },
+        );
+
+        let env = claude_env(&config, &AgentBackend::ClaudeCode);
+        let keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains(&"ANTHROPIC_BASE_URL"));
+        assert!(!keys.contains(&"ANTHROPIC_AUTH_TOKEN"));
+    }
+
+    #[test]
+    fn claude_env_treats_an_empty_or_whitespace_only_base_url_and_key_as_absent() {
+        // `Some("")` / `Some("   ")` are distinct from `None` at the type
+        // level -- this exercises `non_blank`'s job of collapsing both down
+        // to "not configured" rather than emitting a blank env var value.
+        let mut config = Config::default();
+        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some("   ".to_string()),
+                api_key: Some(String::new()),
+                chat_model: String::new(),
+                skill_model: String::new(),
+            },
+        );
+
+        assert!(claude_env(&config, &AgentBackend::ClaudeCode).is_empty());
+    }
+
+    #[test]
+    fn claude_env_lets_claude_env_entries_override_the_provider_derived_base_url() {
+        let mut config = Config::default();
+        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some("https://openrouter.ai/api".to_string()),
+                api_key: Some("sk-or-test".to_string()),
+                chat_model: String::new(),
+                skill_model: String::new(),
+            },
+        );
+        // The power-user escape hatch (e.g. for Bedrock) wins over the
+        // provider-derived value, per the documented precedence.
+        config.agents.claude_env.insert(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://my-proxy.example".to_string(),
+        );
+
+        let env: HashMap<String, String> = claude_env(&config, &AgentBackend::ClaudeCode)
+            .into_iter()
+            .collect();
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://my-proxy.example")
+        );
+    }
+
+    #[test]
+    fn resolve_skill_model_prefers_frontmatter_over_the_provider_skill_model() {
+        let mut config = Config::default();
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .skill_model = "provider-default".to_string();
+
+        assert_eq!(
+            resolve_skill_model(Some("pinned-model"), &config),
+            Some("pinned-model".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_skill_model_falls_back_to_the_provider_skill_model_when_unpinned() {
+        let mut config = Config::default();
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .skill_model = "provider-default".to_string();
+
+        assert_eq!(
+            resolve_skill_model(None, &config),
+            Some("provider-default".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_skill_model_treats_a_blank_frontmatter_model_as_unset_not_pinned() {
+        // A `model:` line left empty or whitespace-only in `SKILL.md`
+        // frontmatter must fall through to the provider default, the same
+        // convention `active_provider_model` uses for a blank provider-config
+        // field — not literally reach the child process as `claude --model
+        // ""`. Found as a real inconsistency during Phase 2 test review, then
+        // fixed in `resolve_skill_model` itself (trim + treat blank as
+        // "not pinned").
+        let mut config = Config::default();
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .skill_model = "provider-default".to_string();
+
+        assert_eq!(
+            resolve_skill_model(Some(""), &config),
+            Some("provider-default".to_string())
+        );
+        assert_eq!(
+            resolve_skill_model(Some("   "), &config),
+            Some("provider-default".to_string())
         );
     }
 
