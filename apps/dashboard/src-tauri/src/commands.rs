@@ -221,9 +221,18 @@ fn merge_view_update(current: &Config, update: ConfigUpdate) -> Config {
 
 /// Returns the redacted editable config for the Settings dialog — see
 /// [`ConfigView`]. The raw `api_key` / `claude_env` values are **not** sent.
+///
+/// `workspace_root` is taken from the config **on disk**, which may already
+/// hold a change queued by an earlier save this session that only takes
+/// effect on restart — so the dialog shows (and round-trips) the pending
+/// value, not the frozen live one.
 #[tauri::command]
 pub fn get_config(state: State<'_, CoreState>) -> ConfigView {
-    ConfigView::from_config(&read_config(&state.config))
+    let mut view = ConfigView::from_config(&read_config(&state.config));
+    if let Ok(on_disk) = Config::load() {
+        view.workspace_root = on_disk.workspace_root.to_string_lossy().into_owned();
+    }
+    view
 }
 
 /// Today's / this month's recorded agent spend for the active model-routing
@@ -233,7 +242,7 @@ pub fn get_config(state: State<'_, CoreState>) -> ConfigView {
 #[tauri::command]
 pub fn get_spend_summary(state: State<'_, CoreState>) -> Result<spend::SpendSummary, String> {
     let config = read_config(&state.config);
-    let db = state.db.lock().expect("run-log database mutex is poisoned");
+    let db = state.db_lock();
     spend::active_provider_summary_now(&db, &config).map_err(|err| err.to_string())
 }
 
@@ -273,7 +282,10 @@ pub fn save_config(state: State<'_, CoreState>, new_config: ConfigUpdate) -> Res
 /// `State` so it — and [`apply_config_update`] below — are plain, unit-
 /// testable functions with no Tauri test harness needed.
 fn read_config(config: &RwLock<Config>) -> Config {
-    config.read().expect("config lock poisoned").clone()
+    config
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone()
 }
 
 /// [`save_config`]'s actual logic, factored out from the `State` extraction
@@ -285,17 +297,25 @@ fn apply_config_update(config: &RwLock<Config>, mut new_config: Config) -> Resul
     // happen before the write lock is ever taken.
     new_config.validate_for_save()?;
 
-    let mut current = config
-        .write()
-        .map_err(|err| format!("config lock poisoned: {err}"))?;
-    let workspace_changed = new_config.workspace_root != current.workspace_root;
+    let mut current = config.write().unwrap_or_else(|poison| poison.into_inner());
+
+    // Judge "did the workspace root change" against what's **on disk** — which
+    // may already hold a change queued by an earlier save this session — not
+    // against the frozen live root. Otherwise a later unrelated save (which
+    // echoes back the root `get_config` surfaced) would silently revert a
+    // pending workspace switch by rewriting the old root over the queued one.
+    let on_disk_root = Config::load().ok().map(|c| c.workspace_root);
+    let baseline_root = on_disk_root
+        .as_deref()
+        .unwrap_or(current.workspace_root.as_path());
+    let workspace_changed = new_config.workspace_root.as_path() != baseline_root;
 
     new_config.save().map_err(|err| err.to_string())?;
-    if workspace_changed {
-        // Disk has the new root now; the live copy keeps the old one until
-        // restart — see `save_config`'s doc comment.
-        new_config.workspace_root = current.workspace_root.clone();
-    }
+    // The live workspace root is frozen for the process's lifetime — a live
+    // swap has too wide a blast radius (see `save_config`'s doc). Whatever
+    // was just written to disk, the in-memory copy keeps its root until
+    // restart.
+    new_config.workspace_root = current.workspace_root.clone();
     *current = new_config;
 
     Ok(workspace_changed)
@@ -531,6 +551,14 @@ mod tests {
         }
 
         let root = home.join("Workspace");
+        // There is always a config on disk after first run — seed one whose
+        // root matches, so `apply_config_update`'s on-disk baseline is `root`.
+        Config {
+            workspace_root: root.clone(),
+            ..Config::default()
+        }
+        .save()
+        .unwrap();
         let lock = RwLock::new(Config {
             workspace_root: root.clone(),
             ..Config::default()
@@ -560,6 +588,71 @@ mod tests {
             ..Config::default()
         });
         assert_eq!(read_config(&lock).owner, "Cleo");
+    }
+
+    /// A workspace-root change queued by one save must survive a later,
+    /// unrelated save in the same session (which echoes back the pending
+    /// root, since that's what `get_config` now surfaces) — the second save
+    /// must not rewrite the old root over the queued one.
+    #[test]
+    fn a_pending_workspace_root_survives_a_later_unrelated_save() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-cmd-config-pending-root");
+        std::fs::create_dir_all(&home).unwrap();
+        // SAFETY: serialized by `_guard`, matching `axiomata_core::paths::tests`.
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        let old_root = home.join("Old");
+        let new_root = home.join("New");
+        Config {
+            workspace_root: old_root.clone(),
+            ..Config::default()
+        }
+        .save()
+        .unwrap();
+        let lock = RwLock::new(Config {
+            workspace_root: old_root.clone(),
+            ..Config::default()
+        });
+
+        // Save 1: change the root. Queued on disk, live keeps the old one.
+        let changed = apply_config_update(
+            &lock,
+            Config {
+                workspace_root: new_root.clone(),
+                ..Config::default()
+            },
+        )
+        .unwrap();
+        assert!(changed);
+        assert_eq!(Config::load().unwrap().workspace_root, new_root);
+        assert_eq!(lock.read().unwrap().workspace_root, old_root);
+
+        // Save 2: change something else. The frontend echoes back the root
+        // `get_config` surfaces — the pending `new_root` — not the live one.
+        let changed = apply_config_update(
+            &lock,
+            Config {
+                workspace_root: new_root.clone(),
+                owner: "Later".to_string(),
+                ..Config::default()
+            },
+        )
+        .unwrap();
+        assert!(!changed, "the root didn't change relative to what's queued");
+        assert_eq!(
+            Config::load().unwrap().workspace_root,
+            new_root,
+            "the queued root must not be clobbered"
+        );
+        assert_eq!(lock.read().unwrap().owner, "Later");
+
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
@@ -620,6 +713,12 @@ mod tests {
         }
 
         let root = home.join("Workspace");
+        Config {
+            workspace_root: root.clone(),
+            ..Config::default()
+        }
+        .save()
+        .unwrap();
         let lock = RwLock::new(Config {
             workspace_root: root.clone(),
             ..Config::default()
@@ -735,7 +834,7 @@ pub fn save_dashboard_state(json: String) -> Result<(), String> {
 /// the routine list.
 #[tauri::command]
 pub fn get_workspace_graph(state: State<'_, CoreState>) -> Result<WorkspaceGraph, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     graph::build(&read_config(&state.config), &db).map_err(|err| err.to_string())
 }
 
@@ -891,14 +990,14 @@ pub fn list_skipped_skills() -> Result<Vec<SkippedSkill>, String> {
 /// is clamped to `skills::MAX_RUN_LIMIT` in the core.
 #[tauri::command]
 pub fn list_runs(state: State<'_, CoreState>, limit: usize) -> Result<Vec<RunSummary>, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     skills::list_runs(&db, limit).map_err(|err| err.to_string())
 }
 
 /// Returns one full run (with captured output) by id, or `null` if unknown.
 #[tauri::command]
 pub fn get_run(state: State<'_, CoreState>, id: i64) -> Result<Option<RunRecord>, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     skills::get_run(&db, id).map_err(|err| err.to_string())
 }
 
@@ -926,7 +1025,7 @@ pub fn get_memory_status(state: State<'_, CoreState>) -> Result<MemoryStatus, St
 /// Lists every routine, soonest next-fire first.
 #[tauri::command]
 pub fn list_routines(state: State<'_, CoreState>) -> Result<Vec<Routine>, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     routines::store::list(&db).map_err(|err| err.to_string())
 }
 
@@ -934,7 +1033,7 @@ pub fn list_routines(state: State<'_, CoreState>) -> Result<Vec<Routine>, String
 /// "value": "..." }`. Returns the stored routine (with its computed next fire).
 #[tauri::command]
 pub fn add_routine(state: State<'_, CoreState>, new: NewRoutine) -> Result<Routine, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     routines::store::add(&db, new).map_err(|err| err.to_string())
 }
 
@@ -946,7 +1045,7 @@ pub fn set_routine_enabled(
     id: i64,
     enabled: bool,
 ) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     routines::store::set_enabled(&db, id, enabled).map_err(|err| err.to_string())
 }
 
@@ -959,7 +1058,7 @@ pub fn update_routine(
     id: i64,
     new: NewRoutine,
 ) -> Result<Option<Routine>, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     routines::store::update(&db, id, new).map_err(|err| err.to_string())
 }
 
@@ -967,7 +1066,7 @@ pub fn update_routine(
 /// there is no such routine.
 #[tauri::command]
 pub fn delete_routine(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     routines::store::delete(&db, id).map_err(|err| err.to_string())
 }
 
@@ -979,6 +1078,6 @@ pub fn routine_history(
     id: i64,
     limit: usize,
 ) -> Result<Vec<RoutineRun>, String> {
-    let db = state.db.lock().map_err(|err| err.to_string())?;
+    let db = state.db_lock();
     routines::store::list_runs(&db, id, limit).map_err(|err| err.to_string())
 }

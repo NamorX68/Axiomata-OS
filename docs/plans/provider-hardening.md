@@ -1,8 +1,7 @@
 # Plan: model-provider hardening
 
-Status: **in progress**. Checkpoints 0–7 landed (0–3 on 2026-09-08, 4–7 on 2026-09-09);
-only CP8 (cleanup sweep) left. Follow the owner's usual stepwise workflow — confirm each
-checkpoint before starting the next.
+Status: **COMPLETE**. Checkpoints 0–8 all landed (0–3 on 2026-09-08, 4–8 on 2026-09-09).
+Only optional future work remains (per-role provider — see the end).
 
 This is the safety follow-up to `settings-provider-overhaul.md` (that plan is "complete" as a
 feature, but shipping it uncovered real holes). Keep both files: the overhaul explains *how
@@ -206,43 +205,48 @@ renderer the whole `Config` over IPC — every `providers[*].api_key` and every
 - Tests (`commands::tests`): `ConfigView` serialisation contains no raw secret; `KeyUpdate`
   keep/set/clear behave; a `Keep` save still validates the merged config.
 
-## Checkpoint 8 — remaining review findings (fold in where cheap)
+## Checkpoint 8 — remaining review findings — **done 2026-09-09**
 
-From the `settings-provider-overhaul` architecture + security reviews, not yet applied:
+From the `settings-provider-overhaul` architecture + security reviews. All applied:
 
-- `Config::save()` — create the file already `0o600` (`OpenOptions … .mode(0o600)`), don't
-  create-then-`chmod`; `warn!` on a perms failure instead of `let _ =`. Temp-file + rename
-  for atomicity.
-- Workspace-root "write to disk, keep old in memory" is clobbered by a second same-session
-  save — make the pending root durable (`apply_config_update` re-applies it before every
-  `save()`, `get_config` surfaces it).
-- `migrate_legacy_model_if_needed` guard `if !providers.is_empty()` never backfills a
-  *newly added* `ProviderId` — change to "seed any `ProviderId::ALL` member missing from the
-  map".
-- Extract `seeded_providers()` (dup'd between `Default` and migration).
-- Extract `provider_env(config)` from the `claude_env` `ClaudeCode` arm (~30 lines, two
-  jobs) — also makes checkpoint 3 land in one place.
-- Lock-poison: scheduler + `read_config` use `.expect()`, `db` uses `map_err`. Pick graceful
-  recovery (`unwrap_or_else(|e| e.into_inner())`) for config and apply consistently.
-- `activeMeta` falls back to `PROVIDERS[0]` (Anthropic copy) for an unknown active provider
-  while the form binds the real entry — render an explicit "unknown provider" state instead.
-- Re-seed a provider entry that exists but is entirely blank from `ProviderSettings::default_for`
-  on load, so the base-URL default reappears after the data-loss incident.
-- `agents.claude_model` (migration-only) still round-trips through the frontend contract —
-  `#[serde(skip_serializing)]` it once migration has folded it, or mark the TS field
-  `@deprecated`.
-- Per-section Save buttons both persist the whole config — acceptable for a single-user app
-  (owner, 2026-09-08), but run `validate_for_save` on every path so the Vault button can't
-  commit a half-typed provider.
+- **`Config::save()` is atomic + `0o600` up front** — new `write_private` helper writes the
+  TOML to a sibling `config.toml.tmp` created `mode(0o600)` from the start (no
+  world-readable window), `sync_all()`s it, then `fs::rename`s over the real path; a
+  `set_permissions` fallback is best-effort and only `warn!`ed (not `let _ =`).
+- **Pending workspace root is durable** — `get_config` surfaces the *on-disk*
+  `workspace_root` (which may hold a queued change), and `apply_config_update` judges
+  "changed" and preserves against the on-disk baseline, so a later unrelated same-session
+  save no longer rewrites the old root over the queued one. Live root stays frozen for the
+  process lifetime. New test `a_pending_workspace_root_survives_a_later_unrelated_save`.
+- **`migrate_legacy_model_if_needed` backfills any missing `ProviderId::ALL` member**
+  (`entry(id).or_insert(...)`), not only when the whole map is empty; the legacy
+  `claude_model` fold still happens only for a truly empty (pre-`providers`) map.
+- **`seeded_providers()` extracted** — the one source for `Default` and migration.
+- **`provider_env(config)` extracted** from `claude_env`'s `ClaudeCode` arm.
+- **Lock-poison recovery is consistent** — `AxiomataCore::db_lock()` / `config_read()`
+  helpers (`unwrap_or_else(|p| p.into_inner())`), used by the CLI, dashboard commands,
+  bootstrap, scheduler, and `execute_and_record_skill` — no more `.expect("… poisoned")`
+  crashing the whole app on a stray panic.
+- **Unknown active provider** — `Settings.svelte` renders an explicit "Unbekannter aktiver
+  Provider" banner instead of silently binding the wrong entry (also now unreachable in
+  practice: migration backfills every provider, and `ProviderId` is a closed enum).
+- **Blank provider entries re-seeded on load** — `reseed_blank_providers()` restores a
+  fully-wiped entry from `default_for` (so OpenRouter's base-URL default reappears after the
+  data-loss incident); a configured entry is untouched.
+- **`agents.claude_model` `#[serde(skip_serializing)]`** — a fresh `config.toml` no longer
+  carries the migration-only field; `serde(default)` still reads it from old files. (CP7
+  already dropped it from the webview contract.)
+- **`validate_for_save` on every save path** — already true since CP2 (`saveVault` and
+  `saveProvider` both go through `save_config` → `apply_config_update` → `validate_for_save`).
 
-## Suggested checkpoint order
+## Status
 
-0–7 done (2–5 were the safety core). Remaining: **8** (cleanup sweep), then the separate
-"per-role provider" idea if the owner wants it.
+Checkpoints 0–8 all landed (0–3 on 2026-09-08, 4–8 on 2026-09-09). The plan is **complete**.
+Optional future work: the separate "per-role provider" idea (Ollama for digests / OpenRouter
+for chat) — its own plan if the owner wants it.
 
-## Commit note
+## Commit note (historical)
 
-The `settings-provider-overhaul` work (its Phases 1–5) plus checkpoints 0–1 here are all
-uncommitted in the working tree, alongside the unrelated fileview (commit B) and
-sub-agent-cadence (commit C) changes. Decide the commit split once at least checkpoints 2–5
-land — a paid-provider feature shouldn't be committed as "done" without the guardrails.
+Checkpoints 0–6 landed as one squashed commit on `main` (`fa4aecb`, merge `44c9f6c`) — the
+A/B/C split the plan once envisaged was abandoned as too entangled for a solo project. CP7
+followed (`b5f5771` / `c46476e`), then CP8.

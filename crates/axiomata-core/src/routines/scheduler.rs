@@ -444,7 +444,7 @@ async fn serve_with_interval(
                 // very next tick without a restart.
                 let config_snapshot = config
                     .read()
-                    .expect("routine scheduler config lock is poisoned")
+                    .unwrap_or_else(|poison| poison.into_inner())
                     .clone();
                 tokio::select! {
                     outcome = tick(&config_snapshot, &db) => match outcome {
@@ -477,11 +477,12 @@ async fn serve_with_interval(
     }
 }
 
-/// Locks the shared connection, treating poisoning (a previous panic while
-/// holding it) as unrecoverable — consistent with the rest of the crate.
+/// Locks the shared connection, recovering the guard if a previous panic
+/// poisoned it rather than propagating — consistent with
+/// [`AxiomataCore::db_lock`](crate::AxiomataCore::db_lock) and the rest of
+/// the crate.
 fn lock(db: &Arc<Mutex<Connection>>) -> std::sync::MutexGuard<'_, Connection> {
-    db.lock()
-        .expect("routine scheduler database mutex is poisoned")
+    db.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
 #[cfg(test)]

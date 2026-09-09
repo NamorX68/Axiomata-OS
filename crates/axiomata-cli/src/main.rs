@@ -18,7 +18,7 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 /// with the dashboard's own `commands::read_config`, rather than holding a
 /// guard across an `.await`.
 fn read_config(core: &AxiomataCore) -> Config {
-    core.config.read().expect("config lock poisoned").clone()
+    core.config_read().clone()
 }
 
 /// Axiomata-OS headless control CLI.
@@ -333,10 +333,7 @@ async fn import_obsidian(
 
 /// Prints a summary of the workspace graph.
 fn graph_summary(core: &AxiomataCore) -> Result<()> {
-    let db = core
-        .db
-        .lock()
-        .map_err(|_| anyhow::anyhow!("database lock poisoned"))?;
+    let db = core.db_lock();
     let g = axiomata_core::graph::build(&read_config(core), &db).context("building the graph")?;
     println!(
         "workspace: {}  hub: {}",
@@ -532,7 +529,7 @@ async fn run_skill(core: &AxiomataCore, name: &str) -> Result<()> {
 /// summary for the active provider (checkpoint 4).
 fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
     let config = read_config(core);
-    let db = core.db.lock().expect("database mutex is poisoned");
+    let db = core.db_lock();
     let runs = skills::list_runs(&db, limit).context("failed to read run history")?;
     if runs.is_empty() {
         println!("No runs recorded yet.");
@@ -651,7 +648,7 @@ async fn routines_cmd(core: &AxiomataCore, action: RoutineAction) -> Result<()> 
 /// warning line for each row that's too corrupted to list normally (see
 /// `routines::store::list_corrupted`) rather than letting it vanish silently.
 fn routines_list(core: &AxiomataCore) -> Result<()> {
-    let db = core.db.lock().expect("database mutex is poisoned");
+    let db = core.db_lock();
     let routines = routines::store::list(&db).context("failed to read routines")?;
     let corrupted = routines::store::list_corrupted(&db).context("failed to read routines")?;
 
@@ -697,7 +694,7 @@ fn routine_target_from_args(skill: Option<String>, prompt: Option<String>) -> Ro
 fn routines_add(core: &AxiomataCore, args: AddRoutine) -> Result<()> {
     let target = routine_target_from_args(args.skill, args.prompt);
 
-    let db = core.db.lock().expect("database mutex is poisoned");
+    let db = core.db_lock();
     let routine = routines::store::add(
         &db,
         NewRoutine {
@@ -730,7 +727,7 @@ fn routines_add(core: &AxiomataCore, args: AddRoutine) -> Result<()> {
 fn routines_edit(core: &AxiomataCore, id: i64, args: AddRoutine) -> Result<()> {
     let target = routine_target_from_args(args.skill, args.prompt);
 
-    let db = core.db.lock().expect("database mutex is poisoned");
+    let db = core.db_lock();
     let updated = routines::store::update(
         &db,
         id,
@@ -761,7 +758,7 @@ fn routines_edit(core: &AxiomataCore, id: i64, args: AddRoutine) -> Result<()> {
 
 /// Permanently deletes a routine by id.
 fn routines_delete(core: &AxiomataCore, id: i64) -> Result<()> {
-    let db = core.db.lock().expect("database mutex is poisoned");
+    let db = core.db_lock();
     let found = routines::store::delete(&db, id)
         .with_context(|| format!("failed to delete routine #{id}"))?;
     if !found {
@@ -773,7 +770,7 @@ fn routines_delete(core: &AxiomataCore, id: i64) -> Result<()> {
 
 /// Enables or disables a routine by id.
 fn routines_set_enabled(core: &AxiomataCore, id: i64, enabled: bool) -> Result<()> {
-    let db = core.db.lock().expect("database mutex is poisoned");
+    let db = core.db_lock();
     let found = routines::store::set_enabled(&db, id, enabled)
         .with_context(|| format!("failed to update routine #{id}"))?;
     if !found {
@@ -788,7 +785,7 @@ fn routines_set_enabled(core: &AxiomataCore, id: i64, enabled: bool) -> Result<(
 
 /// Prints a routine's firing history.
 fn routines_history(core: &AxiomataCore, id: i64, limit: usize) -> Result<()> {
-    let db = core.db.lock().expect("database mutex is poisoned");
+    let db = core.db_lock();
     let runs = routines::store::list_runs(&db, id, limit)
         .with_context(|| format!("failed to read history for routine #{id}"))?;
     if runs.is_empty() {

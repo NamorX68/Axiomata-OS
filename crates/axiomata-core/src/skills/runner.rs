@@ -333,11 +333,11 @@ pub async fn execute_and_record_skill(
     // is already over the cap (provider-hardening checkpoint 5). No-op on the
     // subscription-billed Anthropic path.
     {
-        let conn = db.lock().expect("run-log database mutex is poisoned");
+        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
         crate::spend::guard_redirected_turn(&conn, config)?;
     }
     let record = execute_skill(name, config).await?;
-    let db = db.lock().expect("run-log database mutex is poisoned");
+    let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
     runlog::record_run(&db, record)
 }
 
@@ -391,38 +391,9 @@ const CLAUDE_ENV_ALLOWED_PREFIXES: &[&str] = &[
 pub(crate) fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String, String)> {
     match backend {
         AgentBackend::ClaudeCode => {
-            let mut env: BTreeMap<String, String> = BTreeMap::new();
-
-            if let Some(settings) = config.agents.providers.get(&config.agents.active_provider) {
-                let base_url = non_blank(settings.base_url.as_deref());
-                if let Some(base_url) = base_url {
-                    env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.to_string());
-                }
-                if let Some(api_key) = non_blank(settings.api_key.as_deref()) {
-                    env.insert(
-                        config.agents.active_provider.auth_env_var().to_string(),
-                        api_key.to_string(),
-                    );
-                }
-                // A non-Anthropic provider fronts the Messages API through a
-                // bearer token (`ANTHROPIC_AUTH_TOKEN`). The `claude` CLI
-                // otherwise prefers a direct `ANTHROPIC_API_KEY` — inherited
-                // from the ambient environment, or implied by a subscription
-                // login — as an `x-api-key` header, which conflicts with the
-                // bearer token and makes the CLI silently keep talking to
-                // Anthropic. The child is spawned without `env_clear()`
-                // (`agents/claude_code.rs`), so neutralise any such key with
-                // an explicit empty value. Only when a `base_url` redirect is
-                // actually in effect, so a half-configured provider can't
-                // accidentally break Anthropic-via-login too. Phase 0 spike:
-                // `docs/plans/settings-provider-overhaul.md`.
-                if base_url.is_some()
-                    && config.agents.active_provider.auth_env_var() == "ANTHROPIC_AUTH_TOKEN"
-                {
-                    env.insert("ANTHROPIC_API_KEY".to_string(), String::new());
-                }
-            }
-
+            let mut env = provider_env(config);
+            // The `claude_env` power-user escape hatch, filtered and layered
+            // on top so it can add to or override what the provider derived.
             for (key, value) in &config.agents.claude_env {
                 if CLAUDE_ENV_ALLOWED_PREFIXES
                     .iter()
@@ -431,11 +402,50 @@ pub(crate) fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String
                     env.insert(key.clone(), value.clone());
                 }
             }
-
             env.into_iter().collect()
         }
         AgentBackend::Ollama { .. } => Vec::new(),
     }
+}
+
+/// The `ANTHROPIC_*` environment derived from the active provider's
+/// `ProviderSettings` alone (`agents.providers[agents.active_provider]`):
+/// `base_url` → `ANTHROPIC_BASE_URL`, `api_key` → the provider's
+/// [`auth_env_var`](crate::config::ProviderId::auth_env_var), and — for a
+/// redirected bearer-token provider — an explicit empty `ANTHROPIC_API_KEY`.
+/// Empty for the Anthropic provider's own defaults (no base URL / key), so
+/// behaviour there is unchanged from before providers existed.
+fn provider_env(config: &Config) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    let Some(settings) = config.agents.providers.get(&config.agents.active_provider) else {
+        return env;
+    };
+
+    let base_url = non_blank(settings.base_url.as_deref());
+    if let Some(base_url) = base_url {
+        env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.to_string());
+    }
+    if let Some(api_key) = non_blank(settings.api_key.as_deref()) {
+        env.insert(
+            config.agents.active_provider.auth_env_var().to_string(),
+            api_key.to_string(),
+        );
+    }
+    // A non-Anthropic provider fronts the Messages API through a bearer token
+    // (`ANTHROPIC_AUTH_TOKEN`). The `claude` CLI otherwise prefers a direct
+    // `ANTHROPIC_API_KEY` — inherited or implied by a subscription login — as
+    // an `x-api-key` header, which conflicts with the bearer token and makes
+    // the CLI silently keep talking to Anthropic. `spawn_and_collect` clears
+    // the env now (checkpoint 3), but a `claude_env` override or a stray
+    // allowlisted var could still reintroduce one, so neutralise it with an
+    // explicit empty value — only when a `base_url` redirect is in effect, so
+    // a half-configured provider can't break Anthropic-via-login too. Phase 0
+    // spike: `docs/plans/settings-provider-overhaul.md`.
+    if base_url.is_some() && config.agents.active_provider.auth_env_var() == "ANTHROPIC_AUTH_TOKEN"
+    {
+        env.insert("ANTHROPIC_API_KEY".to_string(), String::new());
+    }
+    env
 }
 
 /// `Some(s)` unless `s` is `None`, empty, or all whitespace.

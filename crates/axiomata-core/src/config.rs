@@ -186,8 +186,11 @@ pub struct AgentDefaults {
     /// Superseded by `providers[active_provider].chat_model`/`skill_model`;
     /// kept only so [`Self::migrate_legacy_model_if_needed`] has a value to
     /// migrate from when loading a config saved before this field's
-    /// replacement existed. Not read anywhere else.
-    #[serde(default = "default_claude_model")]
+    /// replacement existed. Not read anywhere else, and **not written back**
+    /// (`skip_serializing`) — once the migration has folded it into the
+    /// providers map it is dead weight, so a fresh `config.toml` no longer
+    /// carries it; `serde(default)` still supplies it when reading an old file.
+    #[serde(default = "default_claude_model", skip_serializing)]
     pub claude_model: String,
 
     /// Ollama model used when a skill or routine doesn't specify one. (This
@@ -234,26 +237,51 @@ pub struct AgentDefaults {
     pub daily_usd_cap: Option<f64>,
 }
 
+/// Every provider seeded with its starting settings — the shared source for
+/// both [`AgentDefaults::default`] and [`AgentDefaults::migrate_legacy_model_if_needed`].
+fn seeded_providers() -> BTreeMap<ProviderId, ProviderSettings> {
+    ProviderId::ALL
+        .into_iter()
+        .map(|id| (id, ProviderSettings::default_for(id)))
+        .collect()
+}
+
 impl AgentDefaults {
-    /// Upgrades a config saved before per-provider models existed: when
-    /// `providers` is absent/empty (an old install, or a manually cleared
-    /// table), seeds every known provider with its defaults and folds the
-    /// legacy flat `claude_model` into Anthropic's `chat_model`/
-    /// `skill_model` so upgrading doesn't silently reset a customized model
-    /// choice. A no-op once `providers` is populated (the normal case after
-    /// the first load following an upgrade, and always for a fresh install —
-    /// see `ProviderSettings::default_for`, used directly by
-    /// `AgentDefaults::default()`).
+    /// Upgrades a config saved before per-provider models existed. **Seeds any
+    /// `ProviderId::ALL` member missing from the map** — so adding a fourth
+    /// provider later backfills it on the next load, which the old
+    /// "only when the whole map is empty" guard silently skipped. Only when
+    /// the map was *entirely* empty (a true pre-`providers` config) is the
+    /// legacy flat `claude_model` folded into Anthropic's model fields, so an
+    /// upgrade doesn't reset a customized model choice.
     fn migrate_legacy_model_if_needed(&mut self) {
-        if !self.providers.is_empty() {
-            return;
+        let was_empty = self.providers.is_empty();
+        for (id, settings) in seeded_providers() {
+            self.providers.entry(id).or_insert(settings);
         }
-        for id in ProviderId::ALL {
-            self.providers.insert(id, ProviderSettings::default_for(id));
-        }
-        if let Some(anthropic) = self.providers.get_mut(&ProviderId::Anthropic) {
+        if was_empty && let Some(anthropic) = self.providers.get_mut(&ProviderId::Anthropic) {
             anthropic.chat_model = self.claude_model.clone();
             anthropic.skill_model = self.claude_model.clone();
+        }
+    }
+
+    /// Restores a provider entry that exists but is *entirely* blank
+    /// (`base_url`/`api_key` both unset, both model fields empty) from
+    /// [`ProviderSettings::default_for`] — so the base-URL default reappears
+    /// after the 2026-09-08 data-loss incident progressively wiped
+    /// `[agents.providers.open_router]`. A configured entry (any field set) is
+    /// left untouched.
+    fn reseed_blank_providers(&mut self) {
+        for id in ProviderId::ALL {
+            let blank = self.providers.get(&id).is_some_and(|s| {
+                s.base_url.is_none()
+                    && s.api_key.is_none()
+                    && s.chat_model.is_empty()
+                    && s.skill_model.is_empty()
+            });
+            if blank {
+                self.providers.insert(id, ProviderSettings::default_for(id));
+            }
         }
     }
 }
@@ -265,10 +293,7 @@ impl Default for AgentDefaults {
             ollama_model: default_ollama_model(),
             skill_timeout_secs: default_skill_timeout_secs(),
             claude_env: BTreeMap::new(),
-            providers: ProviderId::ALL
-                .into_iter()
-                .map(|id| (id, ProviderSettings::default_for(id)))
-                .collect(),
+            providers: seeded_providers(),
             active_provider: ProviderId::default(),
             daily_usd_cap: default_daily_usd_cap(),
         }
@@ -415,11 +440,17 @@ impl Config {
         let mut config: Config =
             toml::from_str(&raw).map_err(|source| AxiomataError::ConfigParse { path, source })?;
         config.agents.migrate_legacy_model_if_needed();
+        config.agents.reseed_blank_providers();
         Ok(config)
     }
 
-    /// Writes the config to `~/.axiomata/config.toml`, creating the parent
-    /// directory if necessary.
+    /// Writes the config to `~/.axiomata/config.toml`.
+    ///
+    /// Atomic: the serialized TOML is written to a sibling `*.tmp` file
+    /// created `0o600` from the start (never world-readable for a window),
+    /// then `rename`d over the real path so a crash mid-write can't leave a
+    /// truncated config. The file may hold a plaintext token in
+    /// `agents.claude_env`, hence the up-front mode.
     pub fn save(&self) -> Result<(), AxiomataError> {
         let path = paths::config_path();
         if let Some(parent) = path.parent() {
@@ -432,20 +463,47 @@ impl Config {
         let raw = toml::to_string_pretty(self)
             .map_err(|source| AxiomataError::ConfigSerialize { source })?;
 
-        fs::write(&path, raw).map_err(|source| AxiomataError::Io {
-            path: path.clone(),
+        let tmp = path.with_extension("toml.tmp");
+        write_private(&tmp, raw.as_bytes()).map_err(|source| AxiomataError::Io {
+            path: tmp.clone(),
             source,
         })?;
-
-        // May hold a plaintext token in `agents.claude_env`; keep it owner-only
-        // on Unix. Best-effort — a permissions failure is not a save failure.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        }
+        fs::rename(&tmp, &path).map_err(|source| {
+            let _ = fs::remove_file(&tmp);
+            AxiomataError::Io {
+                path: path.clone(),
+                source,
+            }
+        })?;
         Ok(())
     }
+}
+
+/// Writes `bytes` to `path`, truncating any existing file. On Unix the file is
+/// created `0o600` up front (not created-then-`chmod`); a `set_permissions`
+/// fallback for an already-existing temp file is best-effort and only
+/// `warn!`ed.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(err) = file.set_permissions(fs::Permissions::from_mode(0o600)) {
+            tracing::warn!(path = %path.display(), %err, "could not tighten config file permissions");
+        }
+    }
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(())
 }
 
 /// Minimal, dependency-free check that `url` is an absolute HTTP(S) URL with a
@@ -682,6 +740,102 @@ mod tests {
         defaults.migrate_legacy_model_if_needed();
 
         assert_eq!(defaults, before);
+    }
+
+    /// The old `if !providers.is_empty() { return }` guard never backfilled a
+    /// provider added to `ProviderId::ALL` after the map was first written.
+    /// Migration must now seed *any* missing member — without re-folding the
+    /// legacy `claude_model` (the map wasn't empty, so it's not a legacy
+    /// config).
+    #[test]
+    fn migrate_backfills_a_single_missing_provider_without_refolding_claude_model() {
+        let mut defaults = AgentDefaults {
+            claude_model: "claude-opus-4".to_string(),
+            ..AgentDefaults::default()
+        };
+        defaults.providers.remove(&ProviderId::Ollama);
+        defaults
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .chat_model = "kept-custom".to_string();
+
+        defaults.migrate_legacy_model_if_needed();
+
+        assert_eq!(defaults.providers.len(), ProviderId::ALL.len());
+        assert_eq!(
+            defaults.providers.get(&ProviderId::Ollama),
+            Some(&ProviderSettings::default_for(ProviderId::Ollama))
+        );
+        // Not a legacy config → Anthropic's hand-set model is left alone.
+        assert_eq!(
+            defaults.providers[&ProviderId::Anthropic].chat_model,
+            "kept-custom"
+        );
+    }
+
+    #[test]
+    fn reseed_blank_providers_restores_a_wiped_entry_but_leaves_a_configured_one() {
+        let mut defaults = AgentDefaults::default();
+        // Simulate the data-loss incident: OpenRouter progressively emptied.
+        defaults.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: None,
+                api_key: None,
+                chat_model: String::new(),
+                skill_model: String::new(),
+            },
+        );
+        // Ollama stays configured (its default base_url is set).
+        let ollama_before = defaults.providers[&ProviderId::Ollama].clone();
+
+        defaults.reseed_blank_providers();
+
+        assert_eq!(
+            defaults.providers[&ProviderId::OpenRouter],
+            ProviderSettings::default_for(ProviderId::OpenRouter),
+            "a fully-blank entry is restored from default_for"
+        );
+        assert_eq!(
+            defaults.providers[&ProviderId::Ollama],
+            ollama_before,
+            "an entry with any field set is left untouched"
+        );
+    }
+
+    #[test]
+    fn save_writes_owner_only_0o600_and_omits_the_legacy_claude_model_key() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let temp_home = unique_temp_dir("axiomata-test-config-save-perms");
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &temp_home);
+        }
+
+        Config::default().save().expect("save should succeed");
+
+        let path = paths::config_path();
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(
+            !raw.contains("claude_model"),
+            "the migration-only field must not be written back: {raw}"
+        );
+        assert!(
+            !path.with_extension("toml.tmp").exists(),
+            "the temp file must be renamed away, not left behind"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "config file must be owner-only");
+        }
+
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&temp_home);
     }
 
     // --- Checkpoint 2: `validate_for_save` -------------------------------

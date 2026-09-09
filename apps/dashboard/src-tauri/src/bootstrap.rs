@@ -34,7 +34,7 @@ pub fn bootstrap() -> Services {
     // on with "Sync now" — it is not fatal to starting the app. A one-shot
     // read: this thread doesn't stay alive, so a plain cloned-out `Config`
     // value (not the shared lock) is all it needs.
-    let sync_config = core.config.read().expect("config lock poisoned").clone();
+    let sync_config = core.config_read().clone();
     std::thread::spawn(move || {
         if let Err(err) = axiomata_core::memory::sync(&sync_config) {
             tracing::warn!(%err, "startup memory sync failed");

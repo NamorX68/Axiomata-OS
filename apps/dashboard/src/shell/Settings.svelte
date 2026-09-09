@@ -367,6 +367,11 @@
                 </label>
                 <p class="hint">Ein <code>model:</code> im SKILL.md-Frontmatter überschreibt das Skills-Modell weiterhin.</p>
               </div>
+            {:else}
+              <p class="status error">
+                Unbekannter aktiver Provider „{config.agents.active_provider}“ — keine
+                Einstellungen zum Bearbeiten. Wähle oben einen der bekannten Provider.
+              </p>
             {/if}
 
             <div class="provider-form spend-form">
