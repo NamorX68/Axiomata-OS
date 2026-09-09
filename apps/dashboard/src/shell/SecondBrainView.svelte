@@ -58,6 +58,7 @@
   // that comparison silently (property reads like `selected.label` still
   // work fine through a proxy, which is why this went unnoticed).
   let selected = $state.raw<GraphNode | null>(null);
+  let searchInput = $state<HTMLInputElement | null>(null);
   let hover = $state.raw<GraphNode | null>(null);
   // svelte-ignore state_referenced_locally
   let query = $state(initialQuery);
@@ -278,6 +279,7 @@
   function select(node: GraphNode | null) {
     const resolved = node ? resolve(node) : null;
     selected = resolved;
+    confirmDelete = false; // never carry a pending "delete?" to another node
     if (renderer) renderer.selected = resolved;
   }
 
@@ -368,6 +370,25 @@
 
   function viewFile(path: string) {
     openStaged("md-file", { path, mode: "read" }, "right");
+  }
+
+  // --- delete (two-step, destructive) ---
+  let confirmDelete = $state(false);
+  let deleting = $state(false);
+
+  async function deleteFile(path: string) {
+    if (deleting) return;
+    deleting = true;
+    try {
+      await invokeBackend("delete_workspace_file", { rel: path });
+      toast("Datei gelöscht.");
+      select(null); // also clears confirmDelete
+      await load(); // rebuild the graph without the deleted node
+    } catch (err) {
+      toast(`Löschen fehlgeschlagen: ${err}`, "warning");
+    } finally {
+      deleting = false;
+    }
   }
 
   async function copyPath(path: string) {
@@ -486,6 +507,10 @@
     };
     raf = requestAnimationFrame(tick);
     void load();
+    // Opened straight to search (the top-bar icon, `/brain` with no path) —
+    // put the cursor in the search box. A node-targeted open passes `focus`
+    // and is left alone.
+    if (!focus && !initialQuery) queueMicrotask(() => searchInput?.focus());
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
@@ -525,6 +550,7 @@
     <div class="controls-head">
       <input
         type="search"
+        bind:this={searchInput}
         placeholder={model ? `Search ${model.totalFiles} notes…` : "Search…"}
         aria-label="Search nodes"
         title="Titel, Pfad, Bereich und Inhalt; Treffer bleiben hell, der Rest wird gedimmt. ↑↓ wählen, Enter springt hin"
@@ -643,6 +669,14 @@
           <button type="button" class="primary" onclick={() => viewFile(selected!.path!)}>Open</button>
           <button type="button" onclick={() => copyPath(selected!.path!)}>Copy path</button>
           <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
+          {#if confirmDelete}
+            <button type="button" class="danger" disabled={deleting} onclick={() => deleteFile(selected!.path!)}>
+              {deleting ? "Löschen…" : "Wirklich löschen"}
+            </button>
+            <button type="button" disabled={deleting} onclick={() => (confirmDelete = false)}>Abbrechen</button>
+          {:else}
+            <button type="button" class="danger-ghost" onclick={() => (confirmDelete = true)}>Löschen</button>
+          {/if}
         </div>
       {:else if selected.kind === "area"}
         <dl class="meta">
@@ -1104,6 +1138,16 @@
   }
   .actions .primary:hover:not(:disabled) {
     background: var(--ax-accent-hover);
+  }
+  .actions .danger-ghost {
+    color: var(--ax-danger);
+    border-color: var(--ax-danger);
+  }
+  .actions .danger {
+    background: var(--ax-danger);
+    border-color: var(--ax-danger);
+    color: var(--ax-text-invert);
+    font-weight: 600;
   }
 
   .detail h3 {

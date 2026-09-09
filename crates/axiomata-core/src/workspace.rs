@@ -466,6 +466,20 @@ pub fn write_file(config: &Config, rel: &str, content: &str) -> Result<(), Axiom
     })
 }
 
+/// Deletes a regular file from the workspace. The path is guarded exactly
+/// like [`read_file`] via [`resolve_existing`]: no `..`, no symlink / hard
+/// link, must resolve inside `workspace_root`, and must already exist as a
+/// regular file.
+///
+/// Errors:
+///     [`AxiomataError::InvalidWorkspacePath`] for a guard failure or a path
+///     that isn't an existing regular file; [`AxiomataError::Io`] if the
+///     `unlink` itself fails.
+pub fn delete_file(config: &Config, rel: &str) -> Result<(), AxiomataError> {
+    let full = resolve_existing(config, rel)?;
+    fs::remove_file(&full).map_err(io(&full))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +503,32 @@ mod tests {
         assert_eq!(file.path, "notes/inbox.md");
         assert_eq!(file.content, "# Inbox\n\n- one\n");
         assert!(file.modified.is_some());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn deletes_a_file_and_guards_the_path() {
+        let (root, config) = workspace();
+
+        // Happy path — the file is gone, `read_file` now fails.
+        delete_file(&config, "notes/inbox.md").unwrap();
+        assert!(!root.join("notes/inbox.md").exists());
+        assert!(read_file(&config, "notes/inbox.md").is_err());
+
+        // A second delete of the same (now missing) path is a clean error,
+        // not a panic (`resolve_existing` reports the missing metadata as Io).
+        assert!(delete_file(&config, "notes/inbox.md").is_err());
+
+        // A directory and a climb-out path are both refused.
+        assert!(matches!(
+            delete_file(&config, "notes").unwrap_err(),
+            AxiomataError::InvalidWorkspacePath { .. }
+        ));
+        assert!(matches!(
+            delete_file(&config, "../secret.md").unwrap_err(),
+            AxiomataError::InvalidWorkspacePath { .. }
+        ));
+
         let _ = fs::remove_dir_all(root);
     }
 
