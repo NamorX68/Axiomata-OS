@@ -1,7 +1,7 @@
 # Plan: model-provider hardening
 
 Status: **COMPLETE**. Checkpoints 0–8 all landed (0–3 on 2026-09-08, 4–8 on 2026-09-09).
-Only optional future work remains (per-role provider — see the end).
+The "per-role provider" follow-up (see the end) landed 2026-09-09 — `docs/plans/per-role-provider.md`.
 
 This is the safety follow-up to `settings-provider-overhaul.md` (that plan is "complete" as a
 feature, but shipping it uncovered real holes). Keep both files: the overhaul explains *how
@@ -173,17 +173,16 @@ copies both updated.
 whatever provider is configured — no model pinning, no auto-refresh suppression. The spend
 cap (CP5) is the guardrail; the SOP slimming is the cost reduction. Closed.
 
-## Future — per-role provider, not just per-role model
+## Future — per-role provider, not just per-role model — **done 2026-09-09**
 
-Owner idea (2026-09-09), not scheduled: today `active_provider` is one global switch and
-only the *model* differs between chat (`chat_model`) and skills (`skill_model`). Want the
-**provider** itself selectable per role too — e.g. **Ollama for digests / skills, OpenRouter
-for chat**. Shape TBD: probably `agents.chat_provider` / `agents.skill_provider` (each an
-optional `ProviderId` overriding `active_provider` for that role), threaded through
-`default_chat_model` / `default_skill_model` and `claude_env` so each role gets its own
-`ANTHROPIC_BASE_URL` + credential. Touches the Settings provider UI (two active-provider
-pickers), `validate_for_save`, and the CP4/CP5 rollup (`provider` column already per-run, so
-that part already works). Revisit as its own plan.
+Shipped as `docs/plans/per-role-provider.md`. `agents.active_provider` was **replaced** (not
+layered) by `agents.chat_provider` + `agents.skill_provider`, resolved via
+`AgentDefaults::provider_for(ProviderRole)`; `default_chat_model` / `default_skill_model`,
+`claude_env(config, backend, role)`, `guard_redirected_turn(db, config, role)`, and the run
+`provider` label all thread the role. `validate_for_save` runs its checks per role. A
+pre-split `active_provider` migrates into both fields on load; `save()` drops it. Settings
+gets two role `<select>`s over a per-provider edit form. e.g. Anthropic chat + Ollama skills
+now works.
 
 ## Checkpoint 7 — stop shipping provider secrets to the webview — **done 2026-09-09**
 
@@ -242,8 +241,8 @@ From the `settings-provider-overhaul` architecture + security reviews. All appli
 ## Status
 
 Checkpoints 0–8 all landed (0–3 on 2026-09-08, 4–8 on 2026-09-09). The plan is **complete**.
-Optional future work: the separate "per-role provider" idea (Ollama for digests / OpenRouter
-for chat) — its own plan if the owner wants it.
+The "per-role provider" follow-up (Ollama for skills / Anthropic for chat) also landed
+2026-09-09 — `docs/plans/per-role-provider.md`.
 
 ## Commit note (historical)
 

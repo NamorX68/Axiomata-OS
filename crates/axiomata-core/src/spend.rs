@@ -127,11 +127,15 @@ pub fn spent_today_usd(
     spent_usd_since(db, provider, start_of_local_day(now))
 }
 
-/// The spend rollup the Settings UI shows for the active provider.
+/// The spend rollup the Settings UI shows for one provider, plus which
+/// role(s) route to it.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SpendSummary {
     /// Provider token (`ProviderId::as_str`).
     pub provider: String,
+    /// Which role(s) this provider serves: `"chat"`, `"skill"`, or
+    /// `"chat & skill"` when both role selectors point at it.
+    pub role: String,
     /// Spend so far in the current local day.
     pub today_usd: f64,
     /// Spend so far in the current local calendar month.
@@ -142,28 +146,52 @@ pub struct SpendSummary {
     pub metered: bool,
 }
 
-/// [`active_provider_summary`] as of now — the form UI callers want, so they
+/// [`role_spend_summaries`] as of now — the form UI callers want, so they
 /// don't need a `chrono` dependency just to pass the current instant.
-pub fn active_provider_summary_now(
+pub fn role_spend_summaries_now(
     db: &Connection,
     config: &Config,
-) -> Result<SpendSummary, AxiomataError> {
-    active_provider_summary(db, config, Utc::now())
+) -> Result<Vec<SpendSummary>, AxiomataError> {
+    role_spend_summaries(db, config, Utc::now())
 }
 
-/// Builds the [`SpendSummary`] for `config.agents.active_provider`.
+/// One [`SpendSummary`] per **distinct** provider across the chat and skill
+/// role selectors (a single entry, labelled `"chat & skill"`, when both point
+/// at the same provider).
 ///
 /// Errors:
 ///     [`AxiomataError::Database`] if a query fails.
-pub fn active_provider_summary(
+pub fn role_spend_summaries(
     db: &Connection,
     config: &Config,
     now: DateTime<Utc>,
+) -> Result<Vec<SpendSummary>, AxiomataError> {
+    let chat = config.agents.chat_provider;
+    let skill = config.agents.skill_provider;
+    let mut summaries = vec![provider_summary(db, config, chat, "chat", now)?];
+    if skill == chat {
+        summaries[0].role = "chat & skill".to_string();
+    } else {
+        summaries.push(provider_summary(db, config, skill, "skill", now)?);
+    }
+    Ok(summaries)
+}
+
+/// Builds the [`SpendSummary`] for one provider.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if a query fails.
+pub fn provider_summary(
+    db: &Connection,
+    config: &Config,
+    provider: crate::config::ProviderId,
+    role: &str,
+    now: DateTime<Utc>,
 ) -> Result<SpendSummary, AxiomataError> {
-    let provider = config.agents.active_provider;
     let token = provider.as_str();
     Ok(SpendSummary {
         provider: token.to_string(),
+        role: role.to_string(),
         today_usd: spent_today_usd(db, token, now)?,
         month_usd: spent_usd_since(db, token, start_of_local_month(now))?,
         daily_cap_usd: config.agents.daily_usd_cap,
@@ -171,18 +199,23 @@ pub fn active_provider_summary(
     })
 }
 
-/// Refuses a new agent turn when today's spend through the active paid
-/// provider has reached the daily cap. A no-op when the active provider is
+/// Refuses a new agent turn when today's spend through the paid provider
+/// serving `role` has reached the daily cap. A no-op when that provider is
 /// Anthropic (subscription-billed) or the cap is unset.
 ///
 /// Call this immediately before dispatching any turn that could reach a
-/// `claude -p` spawn: skill/routine runs and dashboard chat/instruct turns.
+/// `claude -p` spawn: skill/routine runs (`ProviderRole::Skill`) and dashboard
+/// chat/instruct turns (`ProviderRole::Chat`).
 ///
 /// Errors:
 ///     [`AxiomataError::SpendCapReached`] when over the cap (the turn must not
 ///     be started); [`AxiomataError::Database`] if the spend query fails.
-pub fn guard_redirected_turn(db: &Connection, config: &Config) -> Result<(), AxiomataError> {
-    let provider = config.agents.active_provider;
+pub fn guard_redirected_turn(
+    db: &Connection,
+    config: &Config,
+    role: crate::config::ProviderRole,
+) -> Result<(), AxiomataError> {
+    let provider = config.agents.provider_for(role);
     if !provider.is_redirected() {
         return Ok(());
     }
@@ -203,7 +236,7 @@ pub fn guard_redirected_turn(db: &Connection, config: &Config) -> Result<(), Axi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ProviderId;
+    use crate::config::{ProviderId, ProviderRole};
     use chrono::Duration;
 
     fn mem_db() -> Connection {
@@ -274,7 +307,7 @@ mod tests {
         let db = mem_db();
         add_run(&db, "anthropic", Some(999.0), Utc::now());
         let config = Config::default(); // active = Anthropic, cap = Some(2.0)
-        assert!(guard_redirected_turn(&db, &config).is_ok());
+        assert!(guard_redirected_turn(&db, &config, ProviderRole::Skill).is_ok());
     }
 
     #[test]
@@ -282,9 +315,10 @@ mod tests {
         let db = mem_db();
         add_run(&db, "open_router", Some(2.50), Utc::now());
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
         // cap defaults to $2.00
-        let err = guard_redirected_turn(&db, &config).unwrap_err();
+        let err = guard_redirected_turn(&db, &config, ProviderRole::Skill).unwrap_err();
         match err {
             AxiomataError::SpendCapReached {
                 provider,
@@ -304,13 +338,17 @@ mod tests {
         let db = mem_db();
         add_run(&db, "open_router", Some(1.00), Utc::now());
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::OpenRouter;
-        assert!(guard_redirected_turn(&db, &config).is_ok(), "under cap");
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
+        assert!(
+            guard_redirected_turn(&db, &config, ProviderRole::Skill).is_ok(),
+            "under cap"
+        );
 
         add_run(&db, "open_router", Some(50.0), Utc::now());
         config.agents.daily_usd_cap = None;
         assert!(
-            guard_redirected_turn(&db, &config).is_ok(),
+            guard_redirected_turn(&db, &config, ProviderRole::Skill).is_ok(),
             "cap disabled -> never blocks"
         );
     }

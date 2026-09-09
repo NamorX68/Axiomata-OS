@@ -117,8 +117,8 @@ pub struct RunRecord {
     pub started_at: DateTime<Utc>,
     /// When the run finished (or failed).
     pub finished_at: DateTime<Utc>,
-    /// Model-routing provider this run was billed through
-    /// (`config.agents.active_provider` at run time: `"anthropic"` /
+    /// Model-routing provider this run was billed through — the **skill**
+    /// provider at run time (`config.agents.skill_provider`: `"anthropic"` /
     /// `"open_router"` / `"ollama"`), or `None` for a run on the local Ollama
     /// backend, which has no provider. Drives the per-provider spend rollup.
     #[serde(default)]

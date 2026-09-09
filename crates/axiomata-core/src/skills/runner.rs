@@ -24,7 +24,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::agents::{AgentBackend, AgentRequest, AgentRunResult};
-use crate::config::Config;
+use crate::config::{Config, ProviderRole};
 use crate::error::AxiomataError;
 use crate::skills::model::{RunRecord, RunSource, RunStatus};
 use crate::skills::registry;
@@ -236,12 +236,19 @@ async fn run_on_backend(
     })
 }
 
-/// The `provider` string to stamp on a run's record: the active model-routing
-/// provider for a Claude Code run, `None` for the local Ollama backend (which
-/// has no provider and never bills).
+/// The `provider` string to stamp on a run's record: the **skill** provider
+/// for a Claude Code run (every runner path here is an unattended skill /
+/// routine run — the interactive chat path lives in [`crate::agents`]),
+/// `None` for the local Ollama backend (which has no provider and never bills).
 fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
     match backend {
-        AgentBackend::ClaudeCode => Some(config.agents.active_provider.as_str().to_string()),
+        AgentBackend::ClaudeCode => Some(
+            config
+                .agents
+                .provider_for(ProviderRole::Skill)
+                .as_str()
+                .to_string(),
+        ),
         AgentBackend::Ollama { .. } => None,
     }
 }
@@ -265,10 +272,15 @@ fn agent_request(
         timeout: Duration::from_secs(
             timeout_override_secs.unwrap_or(config.agents.skill_timeout_secs),
         ),
-        env: claude_env(config, backend),
-        // Skills and routines get the dashboard's module manifest too, so an
-        // unattended run can call mounted modules; None when the GUI never ran.
-        system_prompt_file: crate::agents::module_context_if_present(),
+        env: claude_env(config, backend, ProviderRole::Skill),
+        // Skill and routine runs do NOT get the dashboard module manifest
+        // (`module-context.md`). No current skill calls a module action — the
+        // digests only read via MCP and emit JSON, `cleanup` edits files — so
+        // it was ~1.6K tokens of dead weight resent on every step of the agent
+        // loop, on every provider. Only interactive chat keeps it
+        // (`agents::chat`). A future skill that genuinely needs module access
+        // should reintroduce this behind a `SKILL.md` frontmatter flag.
+        system_prompt_file: None,
         model,
         allowed_tools,
     }
@@ -334,7 +346,7 @@ pub async fn execute_and_record_skill(
     // subscription-billed Anthropic path.
     {
         let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
-        crate::spend::guard_redirected_turn(&conn, config)?;
+        crate::spend::guard_redirected_turn(&conn, config, ProviderRole::Skill)?;
     }
     let record = execute_skill(name, config).await?;
     let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -347,7 +359,7 @@ pub async fn execute_and_record_skill(
 /// choose its own default"). Pulled out of [`execute_skill`] as its own
 /// function so this precedence is unit-testable without a real agent spawn.
 fn resolve_skill_model(frontmatter_model: Option<&str>, config: &Config) -> Option<String> {
-    // Trim + treat blank as "not pinned", same convention `active_provider_model`
+    // Trim + treat blank as "not pinned", same convention `provider_model`
     // already uses for a blank provider-config field — a `model:` line left
     // empty or whitespace-only should fall through to the provider default,
     // not literally reach the child process as `claude --model ""`.
@@ -376,8 +388,8 @@ const CLAUDE_ENV_ALLOWED_PREFIXES: &[&str] = &[
 
 /// The provider environment for the `claude` process; empty for Ollama.
 ///
-/// Two layers, in precedence order (later wins): first the active provider's
-/// `ProviderSettings` (`agents.providers[agents.active_provider]`) —
+/// Two layers, in precedence order (later wins): first the `role` provider's
+/// `ProviderSettings` (`agents.providers[agents.provider_for(role)]`) —
 /// `base_url` into `ANTHROPIC_BASE_URL`, `api_key` into whichever env var
 /// [`crate::config::ProviderId::auth_env_var`] names for that provider — then
 /// `config.agents.claude_env`, filtered through
@@ -388,10 +400,14 @@ const CLAUDE_ENV_ALLOWED_PREFIXES: &[&str] = &[
 /// contributes nothing, so behavior is unchanged from before providers
 /// existed: empty env unless `claude_env` sets something, i.e. the real
 /// Anthropic API via the CLI's own subscription login.
-pub(crate) fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String, String)> {
+pub(crate) fn claude_env(
+    config: &Config,
+    backend: &AgentBackend,
+    role: ProviderRole,
+) -> Vec<(String, String)> {
     match backend {
         AgentBackend::ClaudeCode => {
-            let mut env = provider_env(config);
+            let mut env = provider_env(config, role);
             // The `claude_env` power-user escape hatch, filtered and layered
             // on top so it can add to or override what the provider derived.
             for (key, value) in &config.agents.claude_env {
@@ -408,16 +424,17 @@ pub(crate) fn claude_env(config: &Config, backend: &AgentBackend) -> Vec<(String
     }
 }
 
-/// The `ANTHROPIC_*` environment derived from the active provider's
-/// `ProviderSettings` alone (`agents.providers[agents.active_provider]`):
+/// The `ANTHROPIC_*` environment derived from the `role` provider's
+/// `ProviderSettings` alone (`agents.providers[agents.provider_for(role)]`):
 /// `base_url` → `ANTHROPIC_BASE_URL`, `api_key` → the provider's
 /// [`auth_env_var`](crate::config::ProviderId::auth_env_var), and — for a
 /// redirected bearer-token provider — an explicit empty `ANTHROPIC_API_KEY`.
 /// Empty for the Anthropic provider's own defaults (no base URL / key), so
 /// behaviour there is unchanged from before providers existed.
-fn provider_env(config: &Config) -> BTreeMap<String, String> {
+fn provider_env(config: &Config, role: ProviderRole) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
-    let Some(settings) = config.agents.providers.get(&config.agents.active_provider) else {
+    let provider = config.agents.provider_for(role);
+    let Some(settings) = config.agents.providers.get(&provider) else {
         return env;
     };
 
@@ -426,10 +443,7 @@ fn provider_env(config: &Config) -> BTreeMap<String, String> {
         env.insert("ANTHROPIC_BASE_URL".to_string(), base_url.to_string());
     }
     if let Some(api_key) = non_blank(settings.api_key.as_deref()) {
-        env.insert(
-            config.agents.active_provider.auth_env_var().to_string(),
-            api_key.to_string(),
-        );
+        env.insert(provider.auth_env_var().to_string(), api_key.to_string());
     }
     // A non-Anthropic provider fronts the Messages API through a bearer token
     // (`ANTHROPIC_AUTH_TOKEN`). The `claude` CLI otherwise prefers a direct
@@ -441,8 +455,7 @@ fn provider_env(config: &Config) -> BTreeMap<String, String> {
     // explicit empty value — only when a `base_url` redirect is in effect, so
     // a half-configured provider can't break Anthropic-via-login too. Phase 0
     // spike: `docs/plans/settings-provider-overhaul.md`.
-    if base_url.is_some() && config.agents.active_provider.auth_env_var() == "ANTHROPIC_AUTH_TOKEN"
-    {
+    if base_url.is_some() && provider.auth_env_var() == "ANTHROPIC_AUTH_TOKEN" {
         env.insert("ANTHROPIC_API_KEY".to_string(), String::new());
     }
     env
@@ -598,8 +611,12 @@ mod tests {
         assert_eq!(bad.cost_usd, Some(0.012));
     }
 
+    /// Skill / routine runs never attach the dashboard module manifest, even
+    /// when `module-context.md` exists — it is dead weight in the agent loop
+    /// and no skill uses a module action. (Interactive chat still gets it, via
+    /// `agents::chat`; that path is exercised in `agents::mod`'s tests.)
     #[test]
-    fn agent_request_picks_up_the_module_manifest_only_when_present() {
+    fn agent_request_never_attaches_the_module_manifest() {
         let _guard = crate::test_support::ENV_MUTEX.lock().unwrap();
         let home = crate::test_support::unique_temp_dir("axiomata-test-runner-manifest");
         std::fs::create_dir_all(&home).unwrap();
@@ -608,15 +625,6 @@ mod tests {
             std::env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
         }
         let config = Config::default();
-        let req = agent_request(
-            "p".to_string(),
-            &AgentBackend::ClaudeCode,
-            &config,
-            None,
-            None,
-            None,
-        );
-        assert_eq!(req.system_prompt_file, None);
         std::fs::write(home.join("module-context.md"), "# modules").unwrap();
         let req = agent_request(
             "p".to_string(),
@@ -626,7 +634,7 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(req.system_prompt_file, Some(home.join("module-context.md")));
+        assert_eq!(req.system_prompt_file, None);
         unsafe {
             std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
         }
@@ -730,7 +738,7 @@ mod tests {
                 .insert(key.to_owned(), "x".to_owned());
         }
 
-        let env = claude_env(&config, &AgentBackend::ClaudeCode);
+        let env = claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Skill);
         let kept: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         assert!(kept.contains(&"ANTHROPIC_BASE_URL"));
         assert!(kept.contains(&"CLAUDE_CODE_USE_BEDROCK"));
@@ -747,7 +755,8 @@ mod tests {
                 &config,
                 &AgentBackend::Ollama {
                     model: "m".to_owned()
-                }
+                },
+                ProviderRole::Skill,
             )
             .is_empty()
         );
@@ -756,17 +765,19 @@ mod tests {
     #[test]
     fn claude_env_is_empty_for_anthropic_with_no_claude_env_overrides() {
         let config = Config::default();
-        assert_eq!(config.agents.active_provider, ProviderId::Anthropic);
+        assert_eq!(config.agents.chat_provider, ProviderId::Anthropic);
+        assert_eq!(config.agents.skill_provider, ProviderId::Anthropic);
         // Anthropic's `ProviderSettings` carry no base_url/api_key by design
         // (billed via the CLI's own subscription login) — this must stay
         // byte-identical to pre-provider behavior.
-        assert!(claude_env(&config, &AgentBackend::ClaudeCode).is_empty());
+        assert!(claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Skill).is_empty());
     }
 
     #[test]
     fn claude_env_derives_base_url_and_bearer_token_for_openrouter() {
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
         config.agents.providers.insert(
             ProviderId::OpenRouter,
             ProviderSettings {
@@ -777,9 +788,10 @@ mod tests {
             },
         );
 
-        let env: HashMap<String, String> = claude_env(&config, &AgentBackend::ClaudeCode)
-            .into_iter()
-            .collect();
+        let env: HashMap<String, String> =
+            claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Skill)
+                .into_iter()
+                .collect();
         assert_eq!(
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://openrouter.ai/api")
@@ -800,7 +812,8 @@ mod tests {
     #[test]
     fn claude_env_derives_base_url_only_when_ollama_has_no_key_configured() {
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::Ollama;
+        config.agents.chat_provider = ProviderId::Ollama;
+        config.agents.skill_provider = ProviderId::Ollama;
         config.agents.providers.insert(
             ProviderId::Ollama,
             ProviderSettings {
@@ -811,7 +824,7 @@ mod tests {
             },
         );
 
-        let env = claude_env(&config, &AgentBackend::ClaudeCode);
+        let env = claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Skill);
         let keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
         assert!(keys.contains(&"ANTHROPIC_BASE_URL"));
         assert!(!keys.contains(&"ANTHROPIC_AUTH_TOKEN"));
@@ -823,7 +836,8 @@ mod tests {
         // level -- this exercises `non_blank`'s job of collapsing both down
         // to "not configured" rather than emitting a blank env var value.
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
         config.agents.providers.insert(
             ProviderId::OpenRouter,
             ProviderSettings {
@@ -834,13 +848,14 @@ mod tests {
             },
         );
 
-        assert!(claude_env(&config, &AgentBackend::ClaudeCode).is_empty());
+        assert!(claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Skill).is_empty());
     }
 
     #[test]
     fn claude_env_lets_claude_env_entries_override_the_provider_derived_base_url() {
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
         config.agents.providers.insert(
             ProviderId::OpenRouter,
             ProviderSettings {
@@ -857,12 +872,47 @@ mod tests {
             "https://my-proxy.example".to_string(),
         );
 
-        let env: HashMap<String, String> = claude_env(&config, &AgentBackend::ClaudeCode)
-            .into_iter()
-            .collect();
+        let env: HashMap<String, String> =
+            claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Skill)
+                .into_iter()
+                .collect();
         assert_eq!(
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://my-proxy.example")
+        );
+    }
+
+    /// The chat and skill roles resolve their `ANTHROPIC_*` env from their own
+    /// provider: with chat on Anthropic (no redirect) and skills on Ollama,
+    /// `ProviderRole::Skill` derives the loopback base URL while
+    /// `ProviderRole::Chat` derives nothing.
+    #[test]
+    fn claude_env_is_role_aware_across_a_split_provider_config() {
+        let mut config = Config::default();
+        config.agents.chat_provider = ProviderId::Anthropic;
+        config.agents.skill_provider = ProviderId::Ollama;
+        config.agents.providers.insert(
+            ProviderId::Ollama,
+            ProviderSettings {
+                base_url: Some("http://localhost:11434".to_string()),
+                api_key: None,
+                chat_model: String::new(),
+                skill_model: "qwen3:30b".to_string(),
+            },
+        );
+
+        let skill_env: HashMap<String, String> =
+            claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Skill)
+                .into_iter()
+                .collect();
+        assert_eq!(
+            skill_env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("http://localhost:11434")
+        );
+
+        assert!(
+            claude_env(&config, &AgentBackend::ClaudeCode, ProviderRole::Chat).is_empty(),
+            "the chat role stays on Anthropic-via-login — no provider env"
         );
     }
 
@@ -902,7 +952,7 @@ mod tests {
     fn resolve_skill_model_treats_a_blank_frontmatter_model_as_unset_not_pinned() {
         // A `model:` line left empty or whitespace-only in `SKILL.md`
         // frontmatter must fall through to the provider default, the same
-        // convention `active_provider_model` uses for a blank provider-config
+        // convention `provider_model` uses for a blank provider-config
         // field — not literally reach the child process as `claude --model
         // ""`. Found as a real inconsistency during Phase 2 test review, then
         // fixed in `resolve_skill_model` itself (trim + treat blank as

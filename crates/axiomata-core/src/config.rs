@@ -115,6 +115,18 @@ impl ProviderId {
     }
 }
 
+/// Which role a `claude` turn is filling, so the provider (and therefore the
+/// model, base URL, and credential) can be picked per role: interactive
+/// dashboard chat vs. unattended skill / routine runs. See
+/// [`AgentDefaults::provider_for`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderRole {
+    /// Interactive dashboard-assistant turns.
+    Chat,
+    /// Skill and routine runs (`SKILL.md` body or a routine's raw prompt).
+    Skill,
+}
+
 /// Per-provider settings: where its Messages-API-compatible endpoint lives,
 /// what credential (if any) it needs, and which model to use for
 /// interactive chat vs. unattended skill/routine runs. Kept independently
@@ -223,16 +235,31 @@ pub struct AgentDefaults {
     #[serde(default)]
     pub providers: BTreeMap<ProviderId, ProviderSettings>,
 
-    /// Which provider's settings `claude_env()` derives
-    /// `ANTHROPIC_BASE_URL`/credential env from.
-    #[serde(default)]
-    pub active_provider: ProviderId,
+    /// Pre-split single provider switch. Superseded by `chat_provider` /
+    /// `skill_provider`; kept only so [`Self::migrate_legacy_provider_if_needed`]
+    /// can fold it into both new fields when loading a config saved before the
+    /// per-role split. Not written back (`skip_serializing`) — a fresh
+    /// `config.toml` carries only the two role fields.
+    #[serde(default, rename = "active_provider", skip_serializing)]
+    pub legacy_active_provider: Option<ProviderId>,
 
-    /// Daily spend cap in USD for a paid (non-Anthropic) active provider.
+    /// Which provider serves interactive dashboard-chat turns — its
+    /// `chat_model`, `base_url`, and credential. See [`Self::provider_for`].
+    #[serde(default)]
+    pub chat_provider: ProviderId,
+
+    /// Which provider serves unattended skill / routine runs — its
+    /// `skill_model`, `base_url`, and credential. A skill's own `SKILL.md`
+    /// `model:` frontmatter still overrides the model. See [`Self::provider_for`].
+    #[serde(default)]
+    pub skill_provider: ProviderId,
+
+    /// Daily spend cap in USD, applied per paid (non-Anthropic) role provider.
     /// Checked before every redirected agent turn against the sum of today's
-    /// recorded `cost_usd` (skill runs + chat turns) for that provider; over
-    /// the cap, the turn is refused and not spawned. `None` disables the cap.
-    /// See [`crate::spend`] and `docs/plans/provider-hardening.md` checkpoint 5.
+    /// recorded `cost_usd` (skill runs + chat turns) for *that role's*
+    /// provider; over the cap, the turn is refused and not spawned. `None`
+    /// disables the cap. See [`crate::spend`] and
+    /// `docs/plans/provider-hardening.md` checkpoint 5.
     #[serde(default = "default_daily_usd_cap")]
     pub daily_usd_cap: Option<f64>,
 }
@@ -265,6 +292,28 @@ impl AgentDefaults {
         }
     }
 
+    /// Upgrades a config saved before the per-role provider split: a present
+    /// `active_provider` (now parsed into `legacy_active_provider`) seeds
+    /// **both** `chat_provider` and `skill_provider`. A config carrying that
+    /// key is by definition pre-split, so the copy is unconditional; `save()`
+    /// then drops the legacy key (`skip_serializing`).
+    fn migrate_legacy_provider_if_needed(&mut self) {
+        if let Some(legacy) = self.legacy_active_provider.take() {
+            self.chat_provider = legacy;
+            self.skill_provider = legacy;
+        }
+    }
+
+    /// The provider serving `role` — the single lookup every model / env /
+    /// spend call site should go through instead of reaching for a role field
+    /// directly.
+    pub fn provider_for(&self, role: ProviderRole) -> ProviderId {
+        match role {
+            ProviderRole::Chat => self.chat_provider,
+            ProviderRole::Skill => self.skill_provider,
+        }
+    }
+
     /// Restores a provider entry that exists but is *entirely* blank
     /// (`base_url`/`api_key` both unset, both model fields empty) from
     /// [`ProviderSettings::default_for`] — so the base-URL default reappears
@@ -294,7 +343,9 @@ impl Default for AgentDefaults {
             skill_timeout_secs: default_skill_timeout_secs(),
             claude_env: BTreeMap::new(),
             providers: seeded_providers(),
-            active_provider: ProviderId::default(),
+            legacy_active_provider: None,
+            chat_provider: ProviderId::default(),
+            skill_provider: ProviderId::default(),
             daily_usd_cap: default_daily_usd_cap(),
         }
     }
@@ -347,63 +398,66 @@ impl Config {
             return Err("workspace root must not be empty".to_string());
         }
 
-        let active = self.agents.active_provider;
-        let settings = self.agents.providers.get(&active).ok_or_else(|| {
-            format!("active provider {active:?} has no entry in [agents.providers]")
-        })?;
-        let is_anthropic = active == ProviderId::Anthropic;
-
-        // Models. Anthropic may leave them blank — the Claude CLI's own
-        // default model is billed through the subscription login, i.e. free.
-        // Every other provider redirects the CLI at a paid endpoint, where a
-        // blank or malformed model turns into a silent full-rate fallback.
-        if !is_anthropic {
-            for (label, model) in [
-                ("chat_model", settings.chat_model.trim()),
-                ("skill_model", settings.skill_model.trim()),
-            ] {
-                if model.is_empty() {
-                    return Err(format!(
-                        "provider {active:?} is active but its {label} is empty — set it so the \
-                         Claude CLI's built-in default model isn't billed through the proxy"
-                    ));
-                }
-                if !valid_model_name(model) {
-                    return Err(format!(
-                        "provider {active:?} {label} {model:?} is not a valid model id \
-                         (allowed characters: letters, digits, and - _ . : [ ] /)"
-                    ));
-                }
+        // Providers, one per role (chat, skills). Each role's provider must
+        // exist in the map. Anthropic may leave everything blank — the Claude
+        // CLI's own default model is billed through the subscription login,
+        // i.e. free. Every other provider redirects the CLI at a paid
+        // endpoint, where a blank/malformed model, base URL, or missing token
+        // turns into a silent full-rate fallback — so each is checked against
+        // *that role's* model field. Both roles are validated even when they
+        // resolve to the same provider.
+        for (role, label) in [
+            (ProviderRole::Chat, "chat_model"),
+            (ProviderRole::Skill, "skill_model"),
+        ] {
+            let id = self.agents.provider_for(role);
+            let settings = self.agents.providers.get(&id).ok_or_else(|| {
+                format!("{role:?} provider {id:?} has no entry in [agents.providers]")
+            })?;
+            if id == ProviderId::Anthropic {
+                continue;
             }
-        }
 
-        // Base URL. A redirecting provider must point somewhere well-formed
-        // and https, the sole exception being a loopback Ollama endpoint.
-        if !is_anthropic {
+            let model = match role {
+                ProviderRole::Chat => settings.chat_model.trim(),
+                ProviderRole::Skill => settings.skill_model.trim(),
+            };
+            if model.is_empty() {
+                return Err(format!(
+                    "{role:?} provider {id:?} redirects the Claude CLI but its {label} is empty — \
+                     set it so the CLI's built-in default model isn't billed through the proxy"
+                ));
+            }
+            if !valid_model_name(model) {
+                return Err(format!(
+                    "{role:?} provider {id:?} {label} {model:?} is not a valid model id \
+                     (allowed characters: letters, digits, and - _ . : [ ] /)"
+                ));
+            }
+
             let base_url = settings
                 .base_url
                 .as_deref()
                 .map(str::trim)
                 .filter(|u| !u.is_empty())
-                .ok_or_else(|| {
-                    format!("provider {active:?} is active but has no base URL configured")
-                })?;
-            validate_base_url(base_url)
-                .map_err(|reason| format!("provider {active:?} base URL {base_url:?}: {reason}"))?;
-        }
+                .ok_or_else(|| format!("{role:?} provider {id:?} has no base URL configured"))?;
+            validate_base_url(base_url).map_err(|reason| {
+                format!("{role:?} provider {id:?} base URL {base_url:?}: {reason}")
+            })?;
 
-        // Credential. A bearer-token provider needs a token, unless it is the
-        // local-Ollama placeholder case (loopback, no real auth).
-        if active.auth_env_var() == "ANTHROPIC_AUTH_TOKEN" && active != ProviderId::Ollama {
-            let has_key = settings
-                .api_key
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|k| !k.is_empty());
-            if !has_key {
-                return Err(format!(
-                    "provider {active:?} is active but has no API key / auth token"
-                ));
+            // A bearer-token provider needs a token, unless it is the
+            // local-Ollama placeholder case (loopback, no real auth).
+            if id.auth_env_var() == "ANTHROPIC_AUTH_TOKEN" && id != ProviderId::Ollama {
+                let has_key = settings
+                    .api_key
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|k| !k.is_empty());
+                if !has_key {
+                    return Err(format!(
+                        "{role:?} provider {id:?} has no API key / auth token"
+                    ));
+                }
             }
         }
 
@@ -440,6 +494,7 @@ impl Config {
         let mut config: Config =
             toml::from_str(&raw).map_err(|source| AxiomataError::ConfigParse { path, source })?;
         config.agents.migrate_legacy_model_if_needed();
+        config.agents.migrate_legacy_provider_if_needed();
         config.agents.reseed_blank_providers();
         Ok(config)
     }
@@ -631,7 +686,59 @@ mod tests {
         // code can index the map directly without falling back to
         // `default_for`.
         assert_eq!(loaded.agents.providers.len(), ProviderId::ALL.len());
-        assert_eq!(loaded.agents.active_provider, ProviderId::Anthropic);
+        assert_eq!(loaded.agents.chat_provider, ProviderId::Anthropic);
+        assert_eq!(loaded.agents.skill_provider, ProviderId::Anthropic);
+
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
+    /// A config saved before the per-role provider split carries a single
+    /// `active_provider` key. On load it must seed **both** `chat_provider`
+    /// and `skill_provider`, and a subsequent `save()` must drop the legacy
+    /// key entirely.
+    #[test]
+    fn load_migrates_legacy_active_provider_into_both_role_fields() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let temp_home = unique_temp_dir("axiomata-test-config-role-migration-home");
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &temp_home);
+        }
+
+        let legacy_toml = r#"
+            owner = "Ada"
+            workspace_root = "/tmp/somewhere"
+
+            [agents]
+            ollama_model = "qwen3:30b"
+            skill_timeout_secs = 300
+            active_provider = "ollama"
+
+            [agents.providers.ollama]
+            base_url = "http://localhost:11434"
+            chat_model = "qwen3:30b"
+            skill_model = "qwen3:30b"
+        "#;
+        let path = paths::config_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, legacy_toml).unwrap();
+
+        let loaded = Config::load().expect("load should migrate the legacy provider key");
+        assert_eq!(loaded.agents.chat_provider, ProviderId::Ollama);
+        assert_eq!(loaded.agents.skill_provider, ProviderId::Ollama);
+        assert_eq!(loaded.agents.legacy_active_provider, None);
+
+        loaded.save().expect("save should succeed");
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(
+            !raw.contains("active_provider"),
+            "legacy key should be gone: {raw}"
+        );
+        assert!(raw.contains("chat_provider = \"ollama\""));
+        assert!(raw.contains("skill_provider = \"ollama\""));
 
         unsafe {
             env::remove_var(paths::AXIOMATA_HOME_ENV);
@@ -725,7 +832,8 @@ mod tests {
     fn migrate_legacy_model_if_needed_is_a_no_op_once_providers_is_populated() {
         let mut defaults = AgentDefaults {
             claude_model: "claude-opus-4".to_string(),
-            active_provider: ProviderId::OpenRouter,
+            chat_provider: ProviderId::OpenRouter,
+            skill_provider: ProviderId::OpenRouter,
             ..AgentDefaults::default()
         };
         // Hand-customize Anthropic's chat model so a wrongful re-migration
@@ -840,11 +948,13 @@ mod tests {
 
     // --- Checkpoint 2: `validate_for_save` -------------------------------
 
-    /// A config with the given active provider and that provider's settings
-    /// hand-set to a known-good triple, everything else default.
+    /// A config with **both** role providers pointed at `id` and that
+    /// provider's settings hand-set to a known-good triple, everything else
+    /// default.
     fn config_with_active(id: ProviderId, settings: ProviderSettings) -> Config {
         let mut config = Config::default();
-        config.agents.active_provider = id;
+        config.agents.chat_provider = id;
+        config.agents.skill_provider = id;
         config.agents.providers.insert(id, settings);
         config
     }
@@ -894,10 +1004,54 @@ mod tests {
         assert_eq!(config.validate_for_save(), Ok(()));
     }
 
+    /// The point of the feature: chat on Anthropic (blank models OK — CLI
+    /// login) while skills route through a fully-configured Ollama. Only the
+    /// skill role's `skill_model` needs to be set; the chat role is exempt.
     #[test]
-    fn validate_for_save_rejects_an_active_provider_missing_from_the_map() {
+    fn validate_for_save_allows_split_anthropic_chat_and_ollama_skills() {
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.chat_provider = ProviderId::Anthropic;
+        config.agents.skill_provider = ProviderId::Ollama;
+        config.agents.providers.insert(
+            ProviderId::Ollama,
+            ProviderSettings {
+                base_url: Some("http://localhost:11434".to_string()),
+                api_key: None,
+                chat_model: String::new(),
+                skill_model: "qwen3:30b".to_string(),
+            },
+        );
+        assert_eq!(config.validate_for_save(), Ok(()));
+    }
+
+    /// With that same split, a blank `skill_model` on the skill-role provider
+    /// is rejected — even though the chat-role provider is perfectly fine.
+    #[test]
+    fn validate_for_save_rejects_a_blank_skill_model_on_the_skill_role_provider() {
+        let mut config = Config::default();
+        config.agents.chat_provider = ProviderId::Anthropic;
+        config.agents.skill_provider = ProviderId::Ollama;
+        config.agents.providers.insert(
+            ProviderId::Ollama,
+            ProviderSettings {
+                base_url: Some("http://localhost:11434".to_string()),
+                api_key: None,
+                chat_model: String::new(),
+                skill_model: String::new(),
+            },
+        );
+        let err = config.validate_for_save().unwrap_err();
+        assert!(
+            err.contains("Skill") && err.contains("skill_model"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn validate_for_save_rejects_a_role_provider_missing_from_the_map() {
+        let mut config = Config::default();
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
         config.agents.providers.remove(&ProviderId::OpenRouter);
         assert!(
             config
@@ -1031,7 +1185,8 @@ mod tests {
             workspace_root: temp_home.join("Brain"),
             ..Config::default()
         };
-        config.agents.active_provider = ProviderId::OpenRouter;
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
         config
             .agents
             .providers

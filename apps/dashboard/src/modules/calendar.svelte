@@ -125,9 +125,9 @@
   let miniH = $state(0);
   const showClock = $derived($config.showClock === true);
   const clockStyle = $derived($config.clockStyle === "analog" ? "analog" : "digital");
-  // Track the mini-month height, but cap it so the clock still fits beside a
-  // 12rem grid in a default-width tile (the row wraps below that).
-  const clockSize = $derived(Math.min(miniH, 144));
+  // Track the mini-month height, but cap it so the clock still fits beside the
+  // 11rem grid in a default-width tile (the row wraps below that).
+  const clockSize = $derived(Math.min(miniH, 160));
 
   function selectCalendar(e: Event) {
     selectedCalendar = (e.currentTarget as HTMLSelectElement).value;
@@ -378,10 +378,10 @@
     flex: 0 0 auto;
   }
   .mini-wrap :global(.mini) {
-    /* Compact so the agenda below still has room and the clock fits beside
-       it; the mini-month drives the row height and the clock matches it
-       (`size` prop). */
-    width: 12rem;
+    /* Compact so the agenda below still has room and the (enlarged) clock
+       still fits beside it on a default-width tile; the mini-month drives
+       the row height and the clock matches it (`size` prop). */
+    width: 11rem;
     max-width: 100%;
   }
   /* Push the optional clock to the tile's right edge, away from the grid. */

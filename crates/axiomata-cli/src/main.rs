@@ -557,24 +557,28 @@ fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
         }
     }
 
-    let summary = spend::active_provider_summary(&db, &config, chrono::Utc::now())
+    let summaries = spend::role_spend_summaries(&db, &config, chrono::Utc::now())
         .context("failed to compute the spend summary")?;
-    if summary.metered {
-        let cap = summary
-            .daily_cap_usd
-            .map(|c| format!(" / ${c:.2} cap"))
-            .unwrap_or_else(|| " (no cap)".to_string());
-        println!(
-            "\nspend ({provider}): ${today:.4} today{cap} · ${month:.2} this month",
-            provider = summary.provider,
-            today = summary.today_usd,
-            month = summary.month_usd,
-        );
-    } else {
-        println!(
-            "\nspend: active provider ({}) is subscription-billed — not metered",
-            summary.provider
-        );
+    for summary in &summaries {
+        if summary.metered {
+            let cap = summary
+                .daily_cap_usd
+                .map(|c| format!(" / ${c:.2} cap"))
+                .unwrap_or_else(|| " (no cap)".to_string());
+            println!(
+                "\nspend ({role} → {provider}): ${today:.4} today{cap} · ${month:.2} this month",
+                role = summary.role,
+                provider = summary.provider,
+                today = summary.today_usd,
+                month = summary.month_usd,
+            );
+        } else {
+            println!(
+                "\nspend ({role} → {provider}): subscription-billed — not metered",
+                role = summary.role,
+                provider = summary.provider,
+            );
+        }
     }
     Ok(())
 }

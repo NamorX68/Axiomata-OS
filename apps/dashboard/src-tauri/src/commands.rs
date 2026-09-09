@@ -85,7 +85,8 @@ pub struct AgentDefaultsView {
     pub ollama_model: String,
     pub skill_timeout_secs: u64,
     pub providers: BTreeMap<ProviderId, ProviderSettingsView>,
-    pub active_provider: ProviderId,
+    pub chat_provider: ProviderId,
+    pub skill_provider: ProviderId,
     pub daily_usd_cap: Option<f64>,
     /// Names only of the `agents.claude_env` power-user overrides — their
     /// values can be Bedrock / proxy tokens, so they never cross the IPC line.
@@ -125,7 +126,8 @@ impl ConfigView {
                 ollama_model: c.agents.ollama_model.clone(),
                 skill_timeout_secs: c.agents.skill_timeout_secs,
                 providers,
-                active_provider: c.agents.active_provider,
+                chat_provider: c.agents.chat_provider,
+                skill_provider: c.agents.skill_provider,
                 daily_usd_cap: c.agents.daily_usd_cap,
                 claude_env_keys: c.agents.claude_env.keys().cloned().collect(),
             },
@@ -162,7 +164,8 @@ pub struct AgentDefaultsUpdate {
     pub ollama_model: String,
     pub skill_timeout_secs: u64,
     pub providers: BTreeMap<ProviderId, ProviderSettingsUpdate>,
-    pub active_provider: ProviderId,
+    pub chat_provider: ProviderId,
+    pub skill_provider: ProviderId,
     pub daily_usd_cap: Option<f64>,
 }
 
@@ -185,7 +188,8 @@ fn merge_view_update(current: &Config, update: ConfigUpdate) -> Config {
     merged.workspace_root = PathBuf::from(update.workspace_root);
     merged.agents.ollama_model = update.agents.ollama_model;
     merged.agents.skill_timeout_secs = update.agents.skill_timeout_secs;
-    merged.agents.active_provider = update.agents.active_provider;
+    merged.agents.chat_provider = update.agents.chat_provider;
+    merged.agents.skill_provider = update.agents.skill_provider;
     merged.agents.daily_usd_cap = update.agents.daily_usd_cap;
 
     let mut providers = BTreeMap::new();
@@ -235,15 +239,16 @@ pub fn get_config(state: State<'_, CoreState>) -> ConfigView {
     view
 }
 
-/// Today's / this month's recorded agent spend for the active model-routing
-/// provider, plus the configured daily cap — shown in the Settings provider
-/// section (provider-hardening checkpoint 4). `metered` is `false` for the
+/// Today's / this month's recorded agent spend, one entry per distinct
+/// model-routing provider across the chat and skill role selectors, plus the
+/// configured daily cap — shown in the Settings provider section
+/// (provider-hardening checkpoint 4). `metered` is `false` for the
 /// subscription-billed Anthropic provider.
 #[tauri::command]
-pub fn get_spend_summary(state: State<'_, CoreState>) -> Result<spend::SpendSummary, String> {
+pub fn get_spend_summary(state: State<'_, CoreState>) -> Result<Vec<spend::SpendSummary>, String> {
     let config = read_config(&state.config);
     let db = state.db_lock();
-    spend::active_provider_summary_now(&db, &config).map_err(|err| err.to_string())
+    spend::role_spend_summaries_now(&db, &config).map_err(|err| err.to_string())
 }
 
 /// Validates and saves `new_config`: writes the full config to
@@ -353,7 +358,8 @@ mod tests {
             workspace_root: PathBuf::from("/ws"),
             ..Config::default()
         };
-        c.agents.active_provider = ProviderId::OpenRouter;
+        c.agents.chat_provider = ProviderId::OpenRouter;
+        c.agents.skill_provider = ProviderId::OpenRouter;
         c.agents.providers.insert(
             ProviderId::OpenRouter,
             ProviderSettings {
@@ -393,7 +399,8 @@ mod tests {
             agents: AgentDefaultsUpdate {
                 ollama_model: current.agents.ollama_model.clone(),
                 skill_timeout_secs: current.agents.skill_timeout_secs,
-                active_provider: ProviderId::OpenRouter,
+                chat_provider: ProviderId::OpenRouter,
+                skill_provider: ProviderId::OpenRouter,
                 daily_usd_cap: current.agents.daily_usd_cap,
                 providers: BTreeMap::from([(
                     ProviderId::OpenRouter,
@@ -448,7 +455,8 @@ mod tests {
             workspace_root: PathBuf::from("/ws"),
             ..Config::default()
         };
-        current.agents.active_provider = ProviderId::OpenRouter;
+        current.agents.chat_provider = ProviderId::OpenRouter;
+        current.agents.skill_provider = ProviderId::OpenRouter;
         current
             .agents
             .providers
@@ -462,7 +470,8 @@ mod tests {
             agents: AgentDefaultsUpdate {
                 ollama_model: "llama3.2".to_string(),
                 skill_timeout_secs: 300,
-                active_provider: ProviderId::OpenRouter,
+                chat_provider: ProviderId::OpenRouter,
+                skill_provider: ProviderId::OpenRouter,
                 daily_usd_cap: Some(2.0),
                 providers: BTreeMap::from([(
                     ProviderId::OpenRouter,
@@ -728,9 +737,10 @@ mod tests {
             workspace_root: root.clone(),
             ..Config::default()
         };
-        new_config.agents.active_provider = ProviderId::Ollama;
+        new_config.agents.chat_provider = ProviderId::Ollama;
+        new_config.agents.skill_provider = ProviderId::Ollama;
         // Ollama is non-Anthropic, so `validate_for_save` now requires
-        // concrete models on the active provider (its seeded defaults leave
+        // concrete models on both role providers (its seeded defaults leave
         // them blank for the owner to fill in).
         if let Some(ollama) = new_config.agents.providers.get_mut(&ProviderId::Ollama) {
             ollama.chat_model = "llama3.2".to_string();
@@ -745,7 +755,8 @@ mod tests {
         assert!(!changed, "the workspace root did not change");
 
         let live = lock.read().unwrap();
-        assert_eq!(live.agents.active_provider, ProviderId::Ollama);
+        assert_eq!(live.agents.chat_provider, ProviderId::Ollama);
+        assert_eq!(live.agents.skill_provider, ProviderId::Ollama);
         assert_eq!(
             live.agents
                 .claude_env

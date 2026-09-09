@@ -100,17 +100,20 @@ from the code itself:
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.
-- **Model**: every `claude -p` run passes `--model` from the **active provider**'s settings —
-  `config.agents.providers[active_provider].chat_model` for chat turns,
-  `.skill_model` for skill/routine runs (a skill's own `model:` frontmatter still wins). v1
-  providers: `Anthropic` (default; no base URL/key, subscription-billed via the CLI login) |
-  `OpenRouter` | `Ollama` — all four `ProviderSettings` fields kept per provider even while
-  inactive. Anthropic's defaults are `claude-sonnet-5` (chat) / `claude-haiku-4-5` (skills) —
-  skills stay on Haiku because the app kept hitting its session usage limit within a day or
-  two of small feature work; bump `skill_model` once that's not a concern. The old flat
-  `agents.claude_model` is migration-only now. Provider env plumbing and the
-  `RwLock<Config>` / `get_config`/`save_config` runtime-mutation path:
-  `docs/architecture.md` §5 "Model providers"; full rationale:
+- **Model / provider**: the provider is chosen **per role** — `agents.chat_provider` for
+  interactive chat, `agents.skill_provider` for skill/routine runs — resolved via
+  `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. Each `claude -p` run passes
+  `--model` from *its role's* provider (`providers[chat_provider].chat_model` /
+  `providers[skill_provider].skill_model`; a skill's own `model:` frontmatter still wins) and
+  gets that provider's `ANTHROPIC_BASE_URL` + credential — so Anthropic chat + Ollama skills
+  is a valid config. `claude_env(config, backend, role)` and
+  `guard_redirected_turn(db, config, role)` both take the role. v1 providers: `Anthropic`
+  (default; no base URL/key, subscription-billed via the CLI login) | `OpenRouter` | `Ollama`
+  — all `ProviderSettings` fields kept per provider even while unused. Anthropic's defaults
+  are `claude-sonnet-5` (chat) / `claude-haiku-4-5` (skills). The old flat `agents.claude_model`
+  and single `agents.active_provider` are both migration-only now (`active_provider` folds
+  into both role fields on load, then `save()` drops it). Details: `docs/architecture.md` §5
+  "Model providers"; `docs/plans/per-role-provider.md`;
   `docs/plans/settings-provider-overhaul.md`.
 
 ## Sub-agents (use the Rust variants, not the Python-oriented defaults)

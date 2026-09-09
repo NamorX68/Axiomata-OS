@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::config::Config;
+use crate::config::{Config, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 
 pub mod claude_code;
@@ -119,7 +119,11 @@ pub async fn chat(
         mode,
         cwd: config.workspace_root.clone(),
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
-        env: crate::skills::runner::claude_env(config, &AgentBackend::ClaudeCode),
+        env: crate::skills::runner::claude_env(
+            config,
+            &AgentBackend::ClaudeCode,
+            ProviderRole::Chat,
+        ),
         system_prompt_file: module_context_if_present(),
         allowed_tools,
         model: default_chat_model(config),
@@ -145,7 +149,7 @@ pub async fn chat_and_record(
 ) -> Result<ChatReply, AxiomataError> {
     {
         let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
-        crate::spend::guard_redirected_turn(&conn, config)?;
+        crate::spend::guard_redirected_turn(&conn, config, ProviderRole::Chat)?;
     }
     let model = default_chat_model(config);
     let reply = chat(config, message, session_id, mode, allowed_tools).await?;
@@ -154,7 +158,7 @@ pub async fn chat_and_record(
         let turn = crate::spend::ChatTurnRecord {
             session_id: reply.session_id.clone(),
             mode: mode.as_log_str(),
-            provider: Some(config.agents.active_provider.as_str().to_string()),
+            provider: Some(config.agents.chat_provider.as_str().to_string()),
             model,
             is_error: reply.is_error,
             cost_usd: reply.cost_usd,
@@ -205,36 +209,37 @@ pub struct AgentRequest {
     pub allowed_tools: Option<String>,
 }
 
-/// The active provider's `chat_model`, for interactive dashboard-assistant
-/// turns — `None` (let the CLI pick its own default) if unset or the active
+/// The chat provider's `chat_model`, for interactive dashboard-assistant
+/// turns — `None` (let the CLI pick its own default) if unset or the chat
 /// provider is missing from `config.agents.providers` (shouldn't happen once
 /// [`crate::config::Config::load`] has run its migration, but a config built
 /// by hand in a test could still lack it).
 pub fn default_chat_model(config: &Config) -> Option<String> {
-    active_provider_model(config, |settings| &settings.chat_model)
+    provider_model(config, config.agents.chat_provider, |settings| {
+        &settings.chat_model
+    })
 }
 
-/// The active provider's `skill_model` — the fallback for skill/routine runs
+/// The skill provider's `skill_model` — the fallback for skill/routine runs
 /// that don't pin their own model. A skill's `SKILL.md` frontmatter `model:`
 /// takes precedence over this in [`crate::skills::runner::execute_skill`];
 /// this is only the fallback source, unchanged in that respect from the old
 /// single global `claude_model`.
 pub fn default_skill_model(config: &Config) -> Option<String> {
-    active_provider_model(config, |settings| &settings.skill_model)
+    provider_model(config, config.agents.skill_provider, |settings| {
+        &settings.skill_model
+    })
 }
 
 /// Shared lookup behind [`default_chat_model`] / [`default_skill_model`]:
-/// resolves `config.agents.active_provider`'s settings, then reads whichever
-/// model field `pick` names off of it, treating a missing/blank value as
-/// "let the CLI choose".
-fn active_provider_model(
+/// resolves `provider`'s settings, then reads whichever model field `pick`
+/// names off of it, treating a missing/blank value as "let the CLI choose".
+fn provider_model(
     config: &Config,
+    provider: ProviderId,
     pick: impl FnOnce(&crate::config::ProviderSettings) -> &String,
 ) -> Option<String> {
-    let settings = config
-        .agents
-        .providers
-        .get(&config.agents.active_provider)?;
+    let settings = config.agents.providers.get(&provider)?;
     let m = pick(settings).trim();
     (!m.is_empty()).then(|| m.to_string())
 }
@@ -377,19 +382,30 @@ mod tests {
     }
 
     #[test]
-    fn default_models_switch_with_the_active_provider() {
+    fn default_models_follow_their_own_role_provider() {
         let mut config = Config::default();
-        config.agents.active_provider = ProviderId::OpenRouter;
+        // Chat routes through OpenRouter, skills stay on Anthropic.
+        config.agents.chat_provider = ProviderId::OpenRouter;
         config
             .agents
             .providers
             .get_mut(&ProviderId::OpenRouter)
             .unwrap()
             .chat_model = "or-chat".to_owned();
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Anthropic)
+            .unwrap()
+            .skill_model = "claude-skill".to_owned();
 
         assert_eq!(default_chat_model(&config), Some("or-chat".to_owned()));
-        // Untouched provider entries stay independent — switching the active
-        // provider must not leak Anthropic's own chat_model through.
+        assert_eq!(
+            default_skill_model(&config),
+            Some("claude-skill".to_owned())
+        );
+        // Untouched provider entries stay independent — pointing the chat role
+        // at OpenRouter must not leak Anthropic's own chat_model through.
         assert_ne!(
             default_chat_model(&config),
             Some("claude-sonnet-5".to_owned())

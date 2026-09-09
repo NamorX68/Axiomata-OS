@@ -47,7 +47,8 @@ let configState: {
     ollama_model: string;
     skill_timeout_secs: number;
     claude_env: Record<string, string>;
-    active_provider: ProviderId;
+    chat_provider: ProviderId;
+    skill_provider: ProviderId;
     providers: Record<ProviderId, MockProvider>;
     daily_usd_cap: number | null;
   };
@@ -58,7 +59,8 @@ let configState: {
     ollama_model: "llama3.2",
     skill_timeout_secs: 300,
     claude_env: {},
-    active_provider: "anthropic",
+    chat_provider: "anthropic",
+    skill_provider: "anthropic",
     providers: {
       anthropic: { base_url: null, api_key: null, chat_model: "claude-sonnet-5", skill_model: "claude-haiku-4-5" },
       open_router: { base_url: "https://openrouter.ai/api", api_key: null, chat_model: "", skill_model: "" },
@@ -84,7 +86,8 @@ function configView(): ConfigView {
       ollama_model: a.ollama_model,
       skill_timeout_secs: a.skill_timeout_secs,
       providers,
-      active_provider: a.active_provider,
+      chat_provider: a.chat_provider,
+      skill_provider: a.skill_provider,
       daily_usd_cap: a.daily_usd_cap,
       claude_env_keys: Object.keys(a.claude_env),
     },
@@ -429,14 +432,20 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "get_config":
       return configView() as T;
     case "get_spend_summary": {
-      const p = configState.agents.active_provider;
-      return {
+      const { chat_provider: chat, skill_provider: skill } = configState.agents;
+      const summaryFor = (p: ProviderId, role: string): SpendSummary => ({
         provider: p,
+        role,
         today_usd: p === "anthropic" ? 0 : 0.42,
         month_usd: p === "anthropic" ? 0 : 7.13,
         daily_cap_usd: configState.agents.daily_usd_cap,
         metered: p !== "anthropic",
-      } satisfies SpendSummary as T;
+      });
+      const summaries =
+        chat === skill
+          ? [summaryFor(chat, "chat & skill")]
+          : [summaryFor(chat, "chat"), summaryFor(skill, "skill")];
+      return summaries as T;
     }
     case "save_config": {
       const next = args.newConfig as ConfigUpdate;
@@ -444,7 +453,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const a = configState.agents;
       a.ollama_model = next.agents.ollama_model;
       a.skill_timeout_secs = next.agents.skill_timeout_secs;
-      a.active_provider = next.agents.active_provider;
+      a.chat_provider = next.agents.chat_provider;
+      a.skill_provider = next.agents.skill_provider;
       a.daily_usd_cap = next.agents.daily_usd_cap;
       for (const [id, u] of Object.entries(next.agents.providers) as [ProviderId, ConfigUpdate["agents"]["providers"][ProviderId]][]) {
         const stored = a.providers[id]?.api_key ?? null;

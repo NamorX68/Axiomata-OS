@@ -140,6 +140,27 @@
 
   {#if error}<p class="error">{error}</p>{/if}
 
+  {#if !loading && mix.length > 0}
+    <!-- A fixed "Today's mix" header: it stays put while the email lists
+         below scroll (moved out of the scrolling `.body` on purpose). -->
+    <div class="mix">
+      <div class="section-label">Today's mix</div>
+      <div class="mix-bar">
+        {#each mix as seg (seg.label)}
+          <span class="seg" style:flex="{seg.count} {seg.count} 0" style:background={seg.color} title="{seg.label}: {seg.count}"></span>
+        {/each}
+      </div>
+      <div class="mix-legend">
+        {#each mix as seg (seg.label)}
+          <span class="legend-item">
+            <span class="dot" style:background={seg.color}></span>{seg.label}
+            <b>{seg.count}</b>
+          </span>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
   {#if loading}
     <p class="muted">Loading…</p>
   {:else if !lastRun && running}
@@ -153,23 +174,6 @@
     <p class="muted empty">Nothing important or topic-matched right now.</p>
   {:else}
     <div class="body">
-      {#if mix.length > 0}
-        <div class="section-label">Today's mix</div>
-        <div class="mix-bar">
-          {#each mix as seg (seg.label)}
-            <span class="seg" style:flex="{seg.count} {seg.count} 0" style:background={seg.color} title="{seg.label}: {seg.count}"></span>
-          {/each}
-        </div>
-        <div class="mix-legend">
-          {#each mix as seg (seg.label)}
-            <span class="legend-item">
-              <span class="dot" style:background={seg.color}></span>{seg.label}
-              <b>{seg.count}</b>
-            </span>
-          {/each}
-        </div>
-      {/if}
-
       {#if importantItems.length > 0}
         <div class="section-label">Important</div>
         <ul class="emails">
@@ -252,6 +256,16 @@
   .refresh {
     padding: 1px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
+  }
+
+  /* Fixed header: does not scroll with the email lists. */
+  .mix {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    padding-bottom: var(--ax-space-2);
+    border-bottom: 1px solid var(--ax-border);
   }
 
   .body {

@@ -41,8 +41,8 @@
   </div>
 {:else}
   <div class="clock digital" style="height: {size}px">
-    <span class="time" style="font-size: {Math.min(44, Math.round(size * 0.32))}px">{hh}:{mm}</span>
-    <span class="date" style="font-size: {Math.max(10, Math.min(14, Math.round(size * 0.11)))}px">{dateLine}</span>
+    <span class="time" style="font-size: {Math.min(52, Math.round(size * 0.32))}px">{hh}:{mm}</span>
+    <span class="date" style="font-size: {Math.max(10, Math.min(15, Math.round(size * 0.11)))}px">{dateLine}</span>
   </div>
 {/if}
 
@@ -65,6 +65,9 @@
     letter-spacing: 0.02em;
     line-height: 1;
     color: var(--ax-text);
+    /* Knock the near-white down a touch so the large digits don't glare;
+       still clearly brighter than the muted date line below. */
+    opacity: 0.78;
   }
   .date {
     color: var(--ax-text-muted);

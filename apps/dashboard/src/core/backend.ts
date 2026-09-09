@@ -21,9 +21,13 @@ export interface AppInfo {
  *  `rename_all = "snake_case"` variants of the Rust `ProviderId` enum. */
 export type ProviderId = "anthropic" | "open_router" | "ollama";
 
-/** Mirrors `axiomata_core::spend::SpendSummary` — `get_spend_summary`. */
+/** Mirrors `axiomata_core::spend::SpendSummary`. `get_spend_summary` returns
+ *  one entry per distinct provider across the chat and skill role selectors. */
 export interface SpendSummary {
   provider: string;
+  /** Which role(s) route to this provider: `"chat"`, `"skill"`, or
+   *  `"chat & skill"` when both selectors point at it. */
+  role: string;
   today_usd: number;
   month_usd: number;
   daily_cap_usd: number | null;
@@ -50,7 +54,10 @@ export interface AgentDefaultsView {
   ollama_model: string;
   skill_timeout_secs: number;
   providers: Record<ProviderId, ProviderSettingsView>;
-  active_provider: ProviderId;
+  /** Provider serving interactive dashboard-chat turns. */
+  chat_provider: ProviderId;
+  /** Provider serving unattended skill / routine runs. */
+  skill_provider: ProviderId;
   /** Daily USD spend cap for a paid provider; `null` disables it. */
   daily_usd_cap: number | null;
   /** Names only of the `agents.claude_env` overrides. */
@@ -79,7 +86,8 @@ export interface AgentDefaultsUpdate {
   ollama_model: string;
   skill_timeout_secs: number;
   providers: Record<ProviderId, ProviderSettingsUpdate>;
-  active_provider: ProviderId;
+  chat_provider: ProviderId;
+  skill_provider: ProviderId;
   daily_usd_cap: number | null;
 }
 

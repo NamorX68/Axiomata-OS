@@ -43,14 +43,15 @@
     keyEdits = { ...keyEdits, [id]: value };
   }
 
-  /** Recorded agent spend for the active provider (`get_spend_summary`),
-   *  refreshed on open and after every provider save. */
-  let spend = $state<SpendSummary | null>(null);
+  /** Recorded agent spend, one entry per distinct provider across the chat
+   *  and skill role selectors (`get_spend_summary`), refreshed on open and
+   *  after every provider save. */
+  let spend = $state<SpendSummary[]>([]);
   async function refreshSpend() {
     try {
-      spend = await invokeBackend<SpendSummary>("get_spend_summary");
+      spend = await invokeBackend<SpendSummary[]>("get_spend_summary");
     } catch {
-      spend = null;
+      spend = [];
     }
   }
   /** Empty field = no cap (`null`); any number is the daily USD cap. */
@@ -69,8 +70,12 @@
     { id: "ollama", label: "Ollama", blurb: "Lokales Modell auf diesem Rechner", key: "optional" },
   ];
 
-  const activeMeta = $derived(PROVIDERS.find((p) => p.id === config?.agents.active_provider) ?? PROVIDERS[0]);
-  const activeSettings = $derived(config ? config.agents.providers[config.agents.active_provider] : null);
+  /** Which provider's settings the form below edits. The provider list is now
+   *  an edit selector, not the role picker — the two `<select>`s above it map
+   *  roles → providers. Defaults to the chat provider once the config loads. */
+  let editingProvider = $state<ProviderId>("anthropic");
+  const metaFor = (id: ProviderId) => PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
+  const editingMeta = $derived(metaFor(editingProvider));
 
   async function reload() {
     reloading = true;
@@ -118,7 +123,8 @@
         ollama_model: c.agents.ollama_model,
         skill_timeout_secs: c.agents.skill_timeout_secs,
         providers,
-        active_provider: c.agents.active_provider,
+        chat_provider: c.agents.chat_provider,
+        skill_provider: c.agents.skill_provider,
         daily_usd_cap: c.agents.daily_usd_cap,
       },
     };
@@ -152,36 +158,44 @@
     }
   }
 
-  /** Fast-path affordance only — `Config::validate_for_save` on the Rust
-   *  side is the authority. Catches the obvious mistakes (empty / bracket-
-   *  unbalanced / whitespace-laden model id) before the round-trip so the
-   *  toast can be specific; the 2026-09-08 incident was a `]`→`)` typo. */
-  function providerLooksSane(): string | null {
-    if (!config || !activeSettings) return null;
-    const hasKey = activeSettings.has_key || keyUpdateFor(activeMeta.id).kind === "set";
-    if (activeMeta.key === "required" && !hasKey) {
-      return `${activeMeta.label} braucht einen API-Schlüssel.`;
+  /** One role's provider: its role-relevant model field must be set + sane,
+   *  its base URL https (or loopback), and its key present when required.
+   *  Mirrors the per-role loop in Rust's `Config::validate_for_save`. */
+  function roleProviderLooksSane(roleLabel: string, id: ProviderId, modelLabel: "chat_model" | "skill_model"): string | null {
+    if (!config) return null;
+    const meta = metaFor(id);
+    if (id === "anthropic") return null; // blank models = free CLI default
+    const s = config.agents.providers[id];
+    if (!s) return `${roleLabel}: Provider „${id}“ hat keine Einstellungen.`;
+    const hasKey = s.has_key || keyUpdateFor(id).kind === "set";
+    if (meta.key === "required" && !hasKey) return `${roleLabel} (${meta.label}) braucht einen API-Schlüssel.`;
+
+    const v = (modelLabel === "chat_model" ? s.chat_model : s.skill_model).trim();
+    const human = modelLabel === "chat_model" ? "Chat-Modell" : "Skills-Modell";
+    if (!v) return `${roleLabel} (${meta.label}): ${human} darf nicht leer sein.`;
+    if (/\s/.test(v)) return `${roleLabel} (${meta.label}): ${human} enthält Leerzeichen.`;
+    const opens = (v.match(/\[/g) ?? []).length;
+    const closes = (v.match(/\]/g) ?? []).length;
+    if (opens !== closes || /[()]/.test(v)) {
+      return `${roleLabel} (${meta.label}): ${human} hat unausgeglichene Klammern — „${v}“.`;
     }
-    if (activeMeta.id === "anthropic") return null; // blank models = free CLI default
-    for (const [label, value] of [
-      ["Chat-Modell", activeSettings.chat_model],
-      ["Skills-Modell", activeSettings.skill_model],
-    ] as const) {
-      const v = value.trim();
-      if (!v) return `${activeMeta.label}: ${label} darf nicht leer sein.`;
-      if (/\s/.test(v)) return `${activeMeta.label}: ${label} enthält Leerzeichen.`;
-      const opens = (v.match(/\[/g) ?? []).length;
-      const closes = (v.match(/\]/g) ?? []).length;
-      if (opens !== closes || /[()]/.test(v)) {
-        return `${activeMeta.label}: ${label} hat unausgeglichene Klammern — „${v}“.`;
-      }
-    }
-    const url = activeSettings.base_url?.trim();
+    const url = s.base_url?.trim();
     if (!url || !/^https:\/\/.+/.test(url)) {
       const loopback = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(url ?? "");
-      if (!loopback) return `${activeMeta.label}: Basis-URL muss mit https:// beginnen.`;
+      if (!loopback) return `${roleLabel} (${meta.label}): Basis-URL muss mit https:// beginnen.`;
     }
     return null;
+  }
+
+  /** Fast-path affordance only — `Config::validate_for_save` on the Rust side
+   *  is the authority. Checks the chat provider's `chat_model` and the skill
+   *  provider's `skill_model`; the 2026-09-08 incident was a `]`→`)` typo. */
+  function providerLooksSane(): string | null {
+    if (!config) return null;
+    return (
+      roleProviderLooksSane("Chat", config.agents.chat_provider, "chat_model") ??
+      roleProviderLooksSane("Skills", config.agents.skill_provider, "skill_model")
+    );
   }
 
   async function saveProvider() {
@@ -209,6 +223,11 @@
     try {
       const loaded = await invokeBackend<ConfigView>("get_config");
       for (const p of Object.values(loaded.agents.providers)) p.base_url ??= "";
+      // Keep the current edit target across a save-triggered reload; on the
+      // first load (or if it vanished) fall back to the chat provider.
+      if (!config || !loaded.agents.providers[editingProvider]) {
+        editingProvider = loaded.agents.chat_provider;
+      }
       config = loaded;
     } catch {
       config = null;
@@ -294,10 +313,11 @@
           </section>
 
           <section>
-            <h3>Modell-Provider</h3>
+            <h3>Provider bearbeiten</h3>
             <p class="lead">
               Die Ausführung bleibt immer der Claude-Code-Agent — der Provider wählt nur den Upstream-Endpoint,
-              an den <code>claude</code> zeigt.
+              an den <code>claude</code> zeigt. Jeder Provider wird hier unabhängig konfiguriert;
+              welcher wofür genutzt wird, steuert der nächste Abschnitt.
             </p>
             <ul class="providers">
               {#each PROVIDERS as p (p.id)}
@@ -305,11 +325,15 @@
                   <button
                     type="button"
                     class="provider"
-                    class:active={config.agents.active_provider === p.id}
-                    onclick={() => config && (config.agents.active_provider = p.id)}
+                    class:active={editingProvider === p.id}
+                    onclick={() => (editingProvider = p.id)}
                   >
                     <span class="text">
-                      <span class="title">{p.label}</span>
+                      <span class="title">
+                        {p.label}
+                        {#if config.agents.chat_provider === p.id}<span class="role-badge">Chat</span>{/if}
+                        {#if config.agents.skill_provider === p.id}<span class="role-badge">Skills</span>{/if}
+                      </span>
                       <span class="meta">{p.blurb}</span>
                     </span>
                   </button>
@@ -319,17 +343,17 @@
 
             <!--
               Bindings target the concrete `config.agents.providers[<id>]`
-              path, never the `activeSettings` `$derived` — a `bind:value` to a
+              path, never the `editingSettings` `$derived` — a `bind:value` to a
               property of a derived is silently dropped on the next recompute
               in Svelte 5, which quietly wiped provider fields from
               config.toml. `config` is `$state`, so the computed-member path
-              below is a real two-way target and retargets when the picker
-              changes `active_provider`.
+              below is a real two-way target and retargets when the list
+              changes `editingProvider`.
             -->
-            {#if config.agents.providers[config.agents.active_provider]}
-              {@const pid = config.agents.active_provider}
+            {#if config.agents.providers[editingProvider]}
+              {@const pid = editingProvider}
               <div class="provider-form">
-                {#if activeMeta.key === "none"}
+                {#if editingMeta.key === "none"}
                   <p class="hint">
                     Kein Schlüssel oder Basis-URL nötig — Anthropic wird über den CLI-Login des Abos abgerechnet.
                   </p>
@@ -339,7 +363,7 @@
                     <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].base_url} placeholder="https://…" />
                   </label>
                   <label class="field">
-                    <span>API-Schlüssel {activeMeta.key === "optional" ? "(optional)" : ""}</span>
+                    <span>API-Schlüssel {editingMeta.key === "optional" ? "(optional)" : ""}</span>
                     <input
                       type="password"
                       autocomplete="off"
@@ -348,7 +372,7 @@
                       oninput={(e) => setKeyEdit(pid, e.currentTarget.value)}
                       placeholder={config.agents.providers[pid].has_key
                         ? "•••••• gespeichert — leer lassen zum Behalten"
-                        : activeMeta.key === "optional"
+                        : editingMeta.key === "optional"
                           ? "Platzhalter genügt für lokales Ollama"
                           : "erforderlich"}
                     />
@@ -369,23 +393,52 @@
               </div>
             {:else}
               <p class="status error">
-                Unbekannter aktiver Provider „{config.agents.active_provider}“ — keine
+                Unbekannter Provider „{editingProvider}“ — keine
                 Einstellungen zum Bearbeiten. Wähle oben einen der bekannten Provider.
               </p>
             {/if}
 
+            <div class="actions">
+              <button type="button" disabled={savingProvider} onclick={saveProvider}>
+                {savingProvider ? "Speichern…" : "Provider speichern"}
+              </button>
+            </div>
+          </section>
+
+          <section>
+            <h3>Provider-Zuordnung</h3>
+            <p class="lead">
+              Welcher Provider den interaktiven Chat bedient und welcher die Skills &amp; Routinen — das dürfen
+              verschiedene sein, z. B. Anthropic für den Chat und lokales Ollama für die Digests.
+            </p>
+            <div class="role-picks">
+              <label class="field">
+                <span>Provider für Chat</span>
+                <select bind:value={config.agents.chat_provider}>
+                  {#each PROVIDERS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
+                </select>
+              </label>
+              <label class="field">
+                <span>Provider für Skills &amp; Routinen</span>
+                <select bind:value={config.agents.skill_provider}>
+                  {#each PROVIDERS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
+                </select>
+              </label>
+            </div>
+
             <div class="provider-form spend-form">
-              {#if config}
-              {#if spend?.metered}
-                <p class="hint">
-                  Ausgaben <strong>{spend.provider}</strong>:
-                  <strong>${spend.today_usd.toFixed(4)}</strong> heute{#if spend.daily_cap_usd != null}
-                    &nbsp;/&nbsp;${spend.daily_cap_usd.toFixed(2)} Limit{/if}
-                  &nbsp;·&nbsp;${spend.month_usd.toFixed(2)} diesen Monat
-                </p>
-              {:else if spend}
-                <p class="hint">{spend.provider} wird übers Abo abgerechnet — keine Kostenerfassung.</p>
-              {/if}
+              {#each spend as s (s.role)}
+                {#if s.metered}
+                  <p class="hint">
+                    Ausgaben <strong>{s.role} → {s.provider}</strong>:
+                    <strong>${s.today_usd.toFixed(4)}</strong> heute{#if s.daily_cap_usd != null}
+                      &nbsp;/&nbsp;${s.daily_cap_usd.toFixed(2)} Limit{/if}
+                    &nbsp;·&nbsp;${s.month_usd.toFixed(2)} diesen Monat
+                  </p>
+                {:else}
+                  <p class="hint">{s.role} → {s.provider} wird übers Abo abgerechnet — keine Kostenerfassung.</p>
+                {/if}
+              {/each}
               <label class="field">
                 <span>Tageslimit (USD, bezahlte Provider)</span>
                 <input
@@ -398,12 +451,11 @@
                 />
               </label>
               <p class="hint">Erreicht die heutige Summe das Limit, wird der nächste Agenten-Aufruf über einen bezahlten Provider abgelehnt.</p>
-              {/if}
             </div>
 
             <div class="actions">
               <button type="button" disabled={savingProvider} onclick={saveProvider}>
-                {savingProvider ? "Speichern…" : "Provider speichern"}
+                {savingProvider ? "Speichern…" : "Zuordnung speichern"}
               </button>
             </div>
           </section>
@@ -604,6 +656,34 @@
   .field input:focus {
     outline: none;
     border-color: var(--ax-accent);
+  }
+  .field select {
+    width: 100%;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+  }
+  .field select:focus {
+    outline: none;
+    border-color: var(--ax-accent);
+  }
+
+  .role-picks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--ax-space-2);
+    margin-bottom: var(--ax-space-3);
+  }
+  .role-badge {
+    margin-left: var(--ax-space-1);
+    padding: 0 var(--ax-space-1);
+    font-size: var(--ax-font-size-xs);
+    color: var(--ax-accent);
+    background: var(--ax-accent-muted);
+    border-radius: var(--ax-radius-sm);
   }
 
   .providers {

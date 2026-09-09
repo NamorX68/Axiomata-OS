@@ -212,8 +212,8 @@ pending migrations.
 
 Execution dispatches through a small `enum`, `AgentBackend { ClaudeCode, Ollama { model } }`
 — deliberately not a trait/registry (see §6). `AgentRequest` carries `prompt`, `cwd`,
-`timeout`, `env`, `system_prompt_file` (the module bridge manifest, appended to **every**
-Claude Code run whenever it exists), `model`, and `allowed_tools`.
+`timeout`, `env`, `system_prompt_file` (the module bridge manifest, appended to **chat turns
+only** — skill/routine runs omit it), `model`, and `allowed_tools`.
 
 - `claude_code.rs` spawns `claude -p --output-format json --permission-mode
   dontAsk|acceptEdits [--resume <id>] [--model …] [--allowedTools …]` via
@@ -242,11 +242,18 @@ raw/tool-free completion backend selected per skill by `SKILL.md`'s `backend: ol
 - `config.rs` defines `ProviderId { Anthropic, OpenRouter, Ollama }` (`ProviderId::ALL` is the
   single source of the list — loop over it, never enumerate the variants by hand) and, per
   provider, `ProviderSettings { base_url, api_key, chat_model, skill_model }`, all kept under
-  `agents.providers: BTreeMap<ProviderId, ProviderSettings>` with `agents.active_provider`
-  picking the live one. Every provider's fields are retained even while inactive, so switching
-  in the Settings dialog never discards what was typed for the others.
-- **Env derivation.** `skills::runner::claude_env()` builds `ANTHROPIC_BASE_URL` plus the
-  credential env var for the active provider and merges it over the raw `agents.claude_env`
+  `agents.providers: BTreeMap<ProviderId, ProviderSettings>`. Every provider's fields are
+  retained even while unused, so switching in the Settings dialog never discards what was typed
+  for the others.
+- **Per-role provider.** The provider is chosen *per role*, not globally:
+  `agents.chat_provider` and `agents.skill_provider` (each a `ProviderId`), resolved through
+  `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. Interactive dashboard chat routes
+  through `chat_provider`; every skill / routine run through `skill_provider`. So Anthropic (or
+  OpenRouter) for chat while Ollama serves the connector digests is a supported config. The old
+  single `agents.active_provider` key is migration-only (see **Migration** below).
+- **Env derivation.** `skills::runner::claude_env(config, backend, role)` builds
+  `ANTHROPIC_BASE_URL` plus the credential env var for **that role's** provider and merges it
+  over the raw `agents.claude_env`
   power-user map (provider-derived vars first, `claude_env` can still override — e.g. for
   Bedrock, which does not fit the provider model). The credential env var differs by provider:
   Anthropic uses `ANTHROPIC_API_KEY` (direct `x-api-key`); OpenRouter and Ollama both front the
@@ -255,12 +262,18 @@ raw/tool-free completion backend selected per skill by `SKILL.md`'s `backend: ol
   conflict) — encoded once as `ProviderId::auth_env_var()`, not branched at call sites.
   Anthropic with no base URL/key ⇒ empty derived env ⇒ byte-identical to the pre-provider
   behaviour (subscription auth via the CLI's own login).
-- **Model selection.** `agents::default_chat_model()` / `default_skill_model()` read
-  `providers[active_provider].chat_model` / `.skill_model` and feed the existing `--model` CLI
-  flag. `chat()` uses the chat model; the skills runner uses the skill model as its fallback
-  when a `SKILL.md` has no own `model:` frontmatter (per-skill frontmatter still wins). No
-  provider-specific model env var anywhere — both non-Anthropic providers route on the `model`
-  field in the request body.
+- **Model selection.** `agents::default_chat_model()` reads
+  `providers[chat_provider].chat_model`, `default_skill_model()` reads
+  `providers[skill_provider].skill_model` (shared `provider_model()` helper), both feeding the
+  existing `--model` CLI flag. `chat()` uses the chat model; the skills runner uses the skill
+  model as its fallback when a `SKILL.md` has no own `model:` frontmatter (per-skill frontmatter
+  still wins). No provider-specific model env var anywhere — both non-Anthropic providers route
+  on the `model` field in the request body.
+- **Spend.** `spend::guard_redirected_turn(db, config, role)` checks the daily cap against the
+  spend of *that role's* provider; `spend::role_spend_summaries()` returns one `SpendSummary`
+  per distinct provider across the two roles (a single `"chat & skill"` entry when they match).
+  The per-run `provider` column already carried the role's provider token, so the CP4/CP5
+  rollup needed no schema change.
 - **Runtime mutation.** The settings dialog is the first thing that writes `Config` at
   runtime, so `AxiomataCore.config` is `Arc<RwLock<Config>>` (many reads, rare writes). Every
   read site clones the `Config` out from under the lock in its own statement (`read_config()`
@@ -276,19 +289,23 @@ raw/tool-free completion backend selected per skill by `SKILL.md`'s `backend: ol
   applied in memory — `save_config` returns `true` so the UI can prompt for a restart. Every
   other field (owner, providers, models, `claude_env`) applies live, effective on the next
   `claude -p` spawn.
-- **Migration.** A config saved before per-provider models (flat `agents.claude_model`, no
-  `providers` table) is upgraded on load by `AgentDefaults::migrate_legacy_model_if_needed()`:
-  it seeds every `ProviderId::ALL` member with its defaults and folds the old flat value into
-  Anthropic's `chat_model`/`skill_model` so upgrading never silently resets a customised model
-  choice. A no-op once `providers` is populated.
-- **Settings UI.** `shell/Settings.svelte` gained a **Vault** section (editable path +
-  "Speichern & Neustart", surfacing the restart requirement) and a **Modell-Provider** section
-  (a picker rendered by looping `PROVIDERS`, so adding LM Studio later is a UI no-op; per
-  provider: base URL + masked key, both hidden for Anthropic, plus the two model fields). Both
-  persist through `get_config`/`save_config` (TS shapes in `core/backend.ts`, browser-mode
-  fixtures in `core/devmock.ts`). LM Studio is deferred — the schema is built so it is a
-  one-line `ProviderId` addition, not a rework. Full rationale and phase log:
-  `docs/plans/settings-provider-overhaul.md`.
+- **Migration.** Two on-load upgrades run in sequence: (1)
+  `migrate_legacy_model_if_needed()` seeds every `ProviderId::ALL` member with its defaults and
+  folds a flat pre-`providers` `agents.claude_model` into Anthropic's model fields; (2)
+  `migrate_legacy_provider_if_needed()` folds a pre-split `agents.active_provider` into **both**
+  `chat_provider` and `skill_provider` (unconditional — a config carrying that key is by
+  definition pre-split), and `Config::save()` then drops the legacy key
+  (`#[serde(skip_serializing)]` on `legacy_active_provider`). Both are no-ops on an
+  already-current config.
+- **Settings UI.** `shell/Settings.svelte` has a **Vault** section (editable path + restart
+  prompt) and a **Modell-Provider** section: two `<select>`s map `chat_provider` /
+  `skill_provider` to a provider, and the provider list below is an *edit* selector
+  (`editingProvider`) — clicking a row opens that provider's form (base URL + masked key,
+  hidden for Anthropic, plus the two model fields); `[Chat]` / `[Skills]` badges mark the
+  role providers. `providerLooksSane()` mirrors the Rust per-role validation loop. Persist
+  through `get_config`/`save_config` (TS shapes in `core/backend.ts`, browser-mode fixtures in
+  `core/devmock.ts`). LM Studio is still a one-line `ProviderId` addition. Full rationale:
+  `docs/plans/settings-provider-overhaul.md`, `docs/plans/per-role-provider.md`.
 
 ### Skills runner (`skills/`)
 
@@ -377,8 +394,11 @@ carrying its own config.
   `~/.axiomata/module-context.md` (mounted instances + actions + how to call the CLI); the
   agent calls `axiomata-cli module-action <instance> <action> --json …`, which drops a file
   into `~/.axiomata/module-actions/inbox/`; the dashboard polls every 3 s, runs the action,
-  answers in `outbox/`; the CLI exits 2 on timeout. Appended to every Claude Code run
-  (chat, skill runs, cron-fired routines) whenever the manifest file exists.
+  answers in `outbox/`; the CLI exits 2 on timeout. Appended to **interactive chat turns
+  only** (`agents::chat`); skill and routine runs omit it — nothing they do needs a module
+  action and it was ~1.6K tokens resent on every step of the agent loop (Stufe 1, 2026-09).
+  A future skill that needs module access should reintroduce it behind a `SKILL.md`
+  frontmatter flag.
 - **Themes**: `<html data-theme="…">`, every colour/size through a `--ax-*` token (graphite,
   paper, steampunk, forest, ocean); a user `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.

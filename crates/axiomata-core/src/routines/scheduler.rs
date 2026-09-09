@@ -39,7 +39,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::config::Config;
+use crate::config::{Config, ProviderRole};
 use crate::error::AxiomataError;
 use crate::routines::model::{Routine, RoutineRunStatus, RoutineTarget};
 use crate::routines::store::{self, Advance, NewRoutineRun};
@@ -188,7 +188,7 @@ async fn fire_one(
     // checkpoint 5). No-op on the Anthropic subscription path.
     let cap_check = {
         let conn = lock(db);
-        crate::spend::guard_redirected_turn(&conn, config)
+        crate::spend::guard_redirected_turn(&conn, config, ProviderRole::Skill)
     };
     let outcome = match cap_check {
         // The agent call: no lock held (it awaits, possibly for the whole timeout).
