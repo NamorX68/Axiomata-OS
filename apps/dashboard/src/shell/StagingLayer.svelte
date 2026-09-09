@@ -1,22 +1,36 @@
 <!--
-  Fixed layer for staged panels (core/staging.ts): each slides in from the
-  bottom or the right, hosts a `stageable` module with a transient context,
-  and closes via its × or Escape.
+  Fixed layer for staged panels (core/staging.ts): each slides in (`slide`
+  transition below — a plain `fly` fights the panels' `translateX(-50%)`
+  centring), hosts a `stageable` module with a transient context, and closes
+  via its × or Escape.
 
-  The right-side panel (the file/Document viewer) is resizable from its
-  left/top/bottom edges — not the right, which is the screen edge — since
-  it's the one people actually want bigger for a long note or a wide table.
-  The last size is remembered across restarts (`settings.stagingPanelSize`
-  in dashboard.json, via core/persist's generic getSetting/setSetting) and
-  applied to whatever gets staged there next; before the first resize ever
-  happens, the panel still uses its CSS defaults (35vw wide, vertically
-  centred, capped at 80vh) exactly as before.
+  The "right" panel (the file/Document viewer) animates in from the right but
+  comes to rest **centred** on screen — a floating reading/edit pane, not
+  edge-docked. It's resizable from all four edges; the last size is
+  remembered across restarts (`settings.stagingPanelSize` in dashboard.json,
+  via core/persist's generic getSetting/setSetting) and applied to whatever
+  gets staged there next. Before the first resize, it uses its CSS defaults
+  (35vw wide, vertically centred, capped at 80vh).
 -->
 <script lang="ts">
   import { cubicOut } from "svelte/easing";
-  import { fly } from "svelte/transition";
+  import type { TransitionConfig } from "svelte/transition";
 
   const SLIDE_MS = 560;
+
+  /** Slide-in for a staged panel. A plain `fly` can't be used because both
+   *  panels are centred with `transform: translateX(-50%)` (right → floating
+   *  centre, bottom → horizontal centre) and Svelte's `fly` *replaces* the
+   *  element transform for the duration — which would knock the panel
+   *  off-centre mid-animation. This keeps the `-50%` and adds the offset. */
+  function slide(_node: Element, { from }: { from: "bottom" | "right" }): TransitionConfig {
+    const axis = from === "bottom" ? "translate(-50%, VARpx)" : "translateX(calc(-50% + VARpx))";
+    return {
+      duration: SLIDE_MS,
+      easing: cubicOut,
+      css: (t, u) => `opacity: ${t}; transform: ${axis.replace("VAR", String(u * 600))}`,
+    };
+  }
 
   import { resizable, type ResizeDelta } from "../canvas/resize";
   import { getModule, createContext } from "../core/registry";
@@ -48,11 +62,6 @@
     }
   });
 
-  function flyParams(panel: StagedPanel) {
-    return panel.from === "bottom"
-      ? { y: 600, duration: SLIDE_MS, easing: cubicOut }
-      : { x: 600, duration: SLIDE_MS, easing: cubicOut };
-  }
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape" && !e.defaultPrevented && $staged.length > 0) {
@@ -132,7 +141,7 @@
     class="panel {panel.from}"
     class:resizing={panel.from === "right" && resizing !== null}
     data-staged={panel.id}
-    transition:fly={flyParams(panel)}
+    transition:slide={{ from: panel.from }}
     aria-label={def?.title ?? panel.type}
     use:captureIfRight={panel.from === "right"}
     style={panel.from === "right" && (rightSize || resizing) ? `width: ${liveW}px; height: ${liveH}px;` : undefined}
@@ -141,6 +150,10 @@
       <div
         class="resize-handle resize-w"
         use:resizable={{ dir: "w", onStart: startResize, onMove: (d) => (resizing = d), onEnd: endResize }}
+      ></div>
+      <div
+        class="resize-handle resize-e"
+        use:resizable={{ dir: "e", onStart: startResize, onMove: (d) => (resizing = d), onEnd: endResize }}
       ></div>
       <div
         class="resize-handle resize-n"
@@ -175,18 +188,17 @@
     box-shadow: var(--ax-shadow-pop);
   }
   .panel.right {
-    /* Vertically centred within the space between the top gap and the
-       assistant bar, capped at 80% of the window height. `top` and
-       `bottom` both set (rather than anchoring to one) turns this into
-       the fixed-position centring trick: with an explicit `height`
-       smaller than the top/bottom band, `margin: auto 0` splits the
-       leftover space evenly above and below instead of stacking it all
-       at the top. Once a custom size is set (inline `style` above), that
-       explicit height still centres the same way — only the *number*
-       changed, not the mechanism. */
+    /* Flies in from the right (the `fly` transition) but comes to rest
+       *centred* on the screen — a floating reading/edit pane, not docked
+       to the edge. Both `top` and `bottom` set + `margin: auto 0` is the
+       fixed-position vertical-centring trick: with an explicit `height`
+       smaller than the top/bottom band the leftover space splits evenly
+       above and below. Once the owner resizes it, the inline `width` /
+       `height` (`style` above) win and still centre the same way. */
     top: var(--ax-space-4);
     bottom: 64px;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     height: min(80vh, calc(100vh - 64px - var(--ax-space-4)));
     margin-top: auto;
     margin-bottom: auto;
@@ -195,8 +207,7 @@
        35% is genuinely wider than 900px, and that's the point. Overridden
        by an inline `width` once the owner has resized it once. */
     width: max(480px, 35vw);
-    border-right: none;
-    border-radius: var(--ax-radius-lg) 0 0 var(--ax-radius-lg);
+    border-radius: var(--ax-radius-lg);
   }
   .panel.right.resizing {
     transition: none; /* no fighting the drag with the (nonexistent, but
@@ -227,6 +238,13 @@
   .resize-w {
     top: 0;
     left: -3px;
+    width: 6px;
+    height: 100%;
+    cursor: ew-resize;
+  }
+  .resize-e {
+    top: 0;
+    right: -3px;
     width: 6px;
     height: 100%;
     cursor: ew-resize;

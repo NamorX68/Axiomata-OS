@@ -32,6 +32,13 @@
         openStaged("md-file", { path: d.path, mode: d.mode === "edit" ? "edit" : "read" }, d.from ?? "right");
       }),
       on("shell:settings", () => (settingsOpen = true)),
+      // The top-bar search icon → the Second Brain, focused on its search
+      // box (SecondBrainView autofocuses when opened with no query/target).
+      on("shell:search", () => {
+        brainFocus = null;
+        brainQuery = "";
+        brainOpen = true;
+      }),
       // Reuses the Document module's own compose mode instead of a bespoke
       // dialog — same viewer, same Save-picks-the-folder agent flow.
       on("shell:new-note", () => openStaged("md-file", { path: "", mode: "edit", isNew: true }, "right")),
