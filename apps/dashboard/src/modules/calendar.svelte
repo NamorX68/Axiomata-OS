@@ -41,11 +41,13 @@
     parseCalendarDigest,
     type CalendarDigest,
     type CalendarEvent,
+    type NewCalendarEvent,
   } from "../core/calendar";
   import { dayLabel, relativeTime } from "../core/format";
-  import { monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
+  import { monthDiff, monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import CalendarCreateForm from "./CalendarCreateForm.svelte";
   import Clock from "./Clock.svelte";
   import MiniCalendar from "./MiniCalendar.svelte";
 
@@ -72,6 +74,14 @@
   let selectedDay = $state(today);
   let viewMonth = $state<YearMonth>(monthOf(today));
 
+  // `calendar-digest` fetches this month + next month only, so the mini-month
+  // can't be paged (or a day picked) outside that range — there'd be no data
+  // and it would read as "nothing scheduled".
+  const rangeMin = monthOf(today);
+  const rangeMax = shiftMonth(rangeMin, 1);
+  const inRange = (m: YearMonth) => monthDiff(rangeMin, m) >= 0 && monthDiff(m, rangeMax) >= 0;
+  const atRangeEnd = $derived(monthDiff(viewMonth, rangeMax) === 0);
+
   /** The 7 ISO days the agenda covers: selected day … +6. */
   const agendaDays = $derived(new Set(weekRange(selectedDay)));
   const agendaEvents = $derived(filteredEvents.filter((e) => agendaDays.has(e.start.slice(0, 10))));
@@ -88,12 +98,14 @@
   );
 
   function pickDay(iso: string) {
-    selectedDay = iso;
     const m = monthOf(iso);
+    if (!inRange(m)) return; // out-of-range cells are disabled; guard anyway
+    selectedDay = iso;
     if (m.year !== viewMonth.year || m.month !== viewMonth.month) viewMonth = m;
   }
   function pageMonth(delta: number) {
-    viewMonth = shiftMonth(viewMonth, delta);
+    const next = shiftMonth(viewMonth, delta);
+    if (inRange(next)) viewMonth = next;
   }
 
   // Optional clock (right of the mini-month) — toggled + styled in settings.
@@ -110,44 +122,22 @@
     config.update((c) => ({ ...c, calendar: selectedCalendar }));
   }
 
-  // --- Create ---
+  // --- Create --- (fields + form markup live in `CalendarCreateForm.svelte`)
   let showCreate = $state(false);
   let creating = $state(false);
   let createError = $state("");
-  let newTitle = $state("");
-  let newCalendar = $state("");
-  let newDate = $state("");
-  let newAllDay = $state(false);
-  let newStartTime = $state("");
-  let newEndTime = $state("");
-  let newLocation = $state("");
 
   function openCreate() {
-    newCalendar = selectedCalendar || digest.calendars[0] || "";
-    newDate = selectedDay;
-    newAllDay = false;
-    newStartTime = "";
-    newEndTime = "";
-    newLocation = "";
-    newTitle = "";
     createError = "";
     showCreate = true;
   }
 
-  async function submitCreate() {
-    const title = newTitle.trim();
-    if (!title || !newCalendar || !newDate || creating) return;
+  async function handleCreate(input: NewCalendarEvent) {
+    if (creating) return;
     creating = true;
     createError = "";
     try {
-      const event = await createCalendarEvent(ctx.invoke, {
-        title,
-        calendar: newCalendar,
-        date: newDate,
-        startTime: newAllDay ? null : newStartTime || null,
-        endTime: newAllDay ? null : newEndTime || null,
-        location: newLocation.trim() || null,
-      });
+      const event = await createCalendarEvent(ctx.invoke, input);
       digest = { ...digest, events: [...digest.events, event].sort((a, b) => a.start.localeCompare(b.start)) };
       showCreate = false;
     } catch (err) {
@@ -252,6 +242,8 @@
         selected={selectedDay}
         {today}
         {eventDays}
+        minMonth={rangeMin}
+        maxMonth={rangeMax}
         onSelect={pickDay}
         onPage={pageMonth}
       />
@@ -261,33 +253,20 @@
     {/if}
   </div>
 
+  {#if atRangeEnd}
+    <p class="range-hint muted">Nur dieser und der nächste Monat werden geladen — ↻ aktualisiert.</p>
+  {/if}
+
   {#if showCreate}
-    <form class="create" onsubmit={(e) => (e.preventDefault(), submitCreate())}>
-      <input type="text" placeholder="Title…" bind:value={newTitle} disabled={creating} />
-      <div class="row">
-        <select bind:value={newCalendar} disabled={creating} aria-label="Calendar">
-          {#each digest.calendars as name (name)}
-            <option value={name}>{name}</option>
-          {/each}
-        </select>
-        <input type="date" bind:value={newDate} disabled={creating} />
-      </div>
-      <label class="row check"><input type="checkbox" bind:checked={newAllDay} disabled={creating} /> All day</label>
-      {#if !newAllDay}
-        <div class="row">
-          <input type="time" bind:value={newStartTime} disabled={creating} aria-label="Start time" />
-          <input type="time" bind:value={newEndTime} disabled={creating} aria-label="End time" />
-        </div>
-      {/if}
-      <input type="text" placeholder="Location (optional)…" bind:value={newLocation} disabled={creating} />
-      {#if createError}<p class="error">{createError}</p>{/if}
-      <div class="row">
-        <button type="button" onclick={() => (showCreate = false)} disabled={creating}>Cancel</button>
-        <button type="submit" class="primary" disabled={creating || !newTitle.trim() || !newCalendar || !newDate}>
-          {creating ? "Creating…" : "Create"}
-        </button>
-      </div>
-    </form>
+    <CalendarCreateForm
+      calendars={digest.calendars}
+      defaultCalendar={selectedCalendar || digest.calendars[0] || ""}
+      defaultDate={selectedDay}
+      busy={creating}
+      error={createError}
+      onSubmit={handleCreate}
+      onCancel={() => (showCreate = false)}
+    />
   {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
@@ -396,47 +375,9 @@
     font-weight: 600;
     padding-top: var(--ax-space-1);
   }
-
-  .create {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ax-space-2);
+  .range-hint {
     flex: 0 0 auto;
-    padding: var(--ax-space-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-md);
-  }
-  .create .row {
-    display: flex;
-    gap: var(--ax-space-2);
-  }
-  .create .row > * {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  .create .row.check {
-    flex: 0 0 auto;
-    align-items: center;
-    font-size: var(--ax-font-size-sm);
-  }
-  .create .row.check input {
-    flex: 0 0 auto;
-    accent-color: var(--ax-accent);
-  }
-  .create input[type="text"] {
-    width: 100%;
-  }
-  .create .row:last-child {
-    justify-content: flex-end;
-  }
-  .primary {
-    background: var(--ax-accent);
-    border-color: var(--ax-accent);
-    color: var(--ax-text-invert);
-    font-weight: 600;
-  }
-  .primary:hover:not(:disabled) {
-    background: var(--ax-accent-hover);
+    font-size: var(--ax-font-size-xs);
   }
 
   .agenda {

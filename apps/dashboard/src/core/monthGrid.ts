@@ -71,12 +71,22 @@ export function monthOf(iso: string): YearMonth {
   return { year, month };
 }
 
+/** A 0-based absolute month count, so months can be compared / subtracted. */
+function monthIndex(ym: YearMonth): number {
+  return ym.year * 12 + (ym.month - 1);
+}
+
 /** A displayed month shifted by `delta` months (negative allowed),
  *  rolling the year over. */
 export function shiftMonth(ym: YearMonth, delta: number): YearMonth {
-  // month is 1–12; work in a 0-based absolute month count, then back.
-  const abs = ym.year * 12 + (ym.month - 1) + delta;
+  const abs = monthIndex(ym) + delta;
   return { year: Math.floor(abs / 12), month: (abs % 12) + 1 };
+}
+
+/** Signed month distance from `a` to `b` (`b - a`): `0` when the same month,
+ *  positive when `b` is later. */
+export function monthDiff(a: YearMonth, b: YearMonth): number {
+  return monthIndex(b) - monthIndex(a);
 }
 
 /** The `len` consecutive days starting at `iso` — the agenda's window
