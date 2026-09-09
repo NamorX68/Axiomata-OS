@@ -98,6 +98,26 @@ impl AxiomataCore {
             db: Arc::new(Mutex::new(db)),
         })
     }
+
+    /// Locks the run-log database, recovering the guard if the mutex was
+    /// poisoned by a panic in another thread rather than propagating the
+    /// panic. The stored data is a plain SQLite connection whose writes are
+    /// single autocommit statements, so a recovered guard is safe to use —
+    /// and for a personal desktop app, degrading one operation beats taking
+    /// the whole process down. Use this instead of `core.db.lock().unwrap()`
+    /// / `.expect(...)` at every call site.
+    pub fn db_lock(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.db.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// Read-locks the live config, recovering a poisoned guard — see
+    /// [`Self::db_lock`]. The value behind the lock is only ever replaced
+    /// wholesale (`*guard = new_config`), so a recovered read is consistent.
+    pub fn config_read(&self) -> std::sync::RwLockReadGuard<'_, Config> {
+        self.config
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
 }
 
 /// Best-effort `chmod` to the given mode on Unix; a no-op elsewhere and on
