@@ -1,6 +1,6 @@
 # Plan: Calendar module — mini-month, 7-day agenda, optional clock
 
-Status: **in progress.** CP1–2 landed 2026-09-09; CP3–5 planned. Follows the owner's stepwise
+Status: **in progress.** CP1–3 landed 2026-09-09; CP4–5 planned. Follows the owner's stepwise
 workflow — confirm each checkpoint before starting the next.
 
 **Owner sign-off (2026-09-09):** D1 = **Option (a)** (wide fetch + client-side filter — "find
@@ -88,18 +88,17 @@ changes beyond the one SOP edit.
   ring, dots), day-select re-filters the agenda + caption, cross-month select pulls the grid
   along, prev/next paging leaves the selection alone, empty 7-day window shows the fallback.
 
-## Checkpoint 3 — skill window (Option a per D1/D5)
+## Checkpoint 3 — skill window (Option a per D1/D5) — **done 2026-09-09**
 
-- `resources/calendar-digest/SKILL.md`: change step 2 from *"the next 14 days (today through
-  +14 days)"* to *"from the **first day of the current month** through the **end of next
-  month**"* (so the mini-month's current-month dots are complete and there's always ≥ 4 weeks
-  of forward agenda). Everything else in the SOP (fields, sort, one-JSON-object contract,
-  `{"error": …}` fallback) unchanged. Bump the seeded copy **and** `~/.axiomata/skills/
-  calendar-digest/SKILL.md` (seed won't overwrite an existing file).
-- No `execute_skill` / routine changes: the Routine's automated run and the tile's `↻` both
-  fetch the same wide window; "today + 7" vs "selected + 7" is purely the client-side agenda
-  filter. Update this plan's own D1 note in `docs/architecture.md` §5 if the wording there
-  implies a 14-day window.
+- `resources/calendar-digest/SKILL.md` step 2: "the next 14 days (today through +14)" →
+  "from the **first day of the current month** through the **last day of next month**", with
+  a one-line note that the module filters client-side. Frontmatter and the rest of the SOP
+  unchanged. Copied to the live `~/.axiomata/skills/calendar-digest/SKILL.md` too (seed
+  won't overwrite an existing file). Seed tests still pass (valid + parseable).
+- No `execute_skill` / routine changes — the Routine run and the tile's `↻` fetch the same
+  wide window; "today + 7" vs "selected + 7" is purely the client-side agenda filter.
+- `docs/architecture.md` §5 has no 14-day wording to fix; the broader §5 connector-module
+  note (mini-month + agenda slice) is folded into CP5.
 - *(If the owner picks D1 (b) instead: separate mini-plan — `run_skill` gains
   `params: Record<string,string>` threaded into the prompt as a "Constraints:" preamble,
   `execute_skill`/`execute_prompt` signatures change, the routine target stays date-less

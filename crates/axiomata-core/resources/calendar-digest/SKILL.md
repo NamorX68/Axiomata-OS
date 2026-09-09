@@ -17,9 +17,11 @@ Do exactly this and nothing more:
 1. List the available calendars using whichever calendar tool is available
    right now (the `apple-reminders` MCP server's `calendar_calendars` tool).
    Collect every calendar's display name, even ones with no events coming up.
-2. List events over the next 14 days (today through +14 days), across every
-   calendar found in step 1, using that same tool's `calendar_events`. For
-   each event capture:
+2. List events from the **first day of the current month** through the
+   **last day of next month**, across every calendar found in step 1, using
+   that same tool's `calendar_events`. (This wider window lets the dashboard
+   module page the mini-month and slice out any 7-day agenda without a fresh
+   run — it filters client-side.) For each event capture:
    - `id` — the event's own identifier, exactly as the tool returns it
    - `title` — the event's title
    - `start` — ISO 8601 timestamp (date only, `YYYY-MM-DD`, for an all-day event)
