@@ -41,8 +41,8 @@
   </div>
 {:else}
   <div class="clock digital" style="height: {size}px">
-    <span class="time" style="font-size: {Math.min(36, Math.round(size * 0.3))}px">{hh}:{mm}</span>
-    <span class="date" style="font-size: {Math.max(10, Math.min(13, Math.round(size * 0.11)))}px">{dateLine}</span>
+    <span class="time" style="font-size: {Math.min(44, Math.round(size * 0.32))}px">{hh}:{mm}</span>
+    <span class="date" style="font-size: {Math.max(10, Math.min(14, Math.round(size * 0.11)))}px">{dateLine}</span>
   </div>
 {/if}
 
@@ -57,7 +57,7 @@
   .clock.digital {
     flex-direction: column;
     gap: var(--ax-space-1);
-    padding: 0 var(--ax-space-2);
+    padding: 0 var(--ax-space-1);
   }
   .time {
     font-family: var(--ax-font-mono);
