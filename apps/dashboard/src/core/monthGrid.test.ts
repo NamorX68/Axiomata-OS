@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   isoDate,
+  monthDiff,
   monthGrid,
   monthOf,
   parseIso,
@@ -40,12 +41,19 @@ describe("addDays", () => {
   });
 });
 
-describe("monthOf / shiftMonth", () => {
+describe("monthOf / shiftMonth / monthDiff", () => {
   it("reads and shifts a displayed month, rolling the year", () => {
     expect(monthOf("2026-09-15")).toEqual({ year: 2026, month: 9 });
     expect(shiftMonth({ year: 2026, month: 1 }, -1)).toEqual({ year: 2025, month: 12 });
     expect(shiftMonth({ year: 2026, month: 12 }, 1)).toEqual({ year: 2027, month: 1 });
     expect(shiftMonth({ year: 2026, month: 6 }, -14)).toEqual({ year: 2025, month: 4 });
+  });
+
+  it("monthDiff is a signed month distance across the year boundary", () => {
+    expect(monthDiff({ year: 2026, month: 9 }, { year: 2026, month: 9 })).toBe(0);
+    expect(monthDiff({ year: 2026, month: 9 }, { year: 2026, month: 11 })).toBe(2);
+    expect(monthDiff({ year: 2026, month: 12 }, { year: 2027, month: 1 })).toBe(1);
+    expect(monthDiff({ year: 2027, month: 1 }, { year: 2026, month: 12 })).toBe(-1);
   });
 });
 

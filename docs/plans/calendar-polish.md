@@ -1,6 +1,6 @@
 # Plan: Calendar module — mini-month, 7-day agenda, optional clock
 
-Status: **COMPLETE** — CP1–5 all landed 2026-09-09.
+Status: **COMPLETE** — CP1–5 landed 2026-09-09; CP6 follow-ups landed the same day.
 
 **Owner sign-off (2026-09-09):** D1 = **Option (a)** (wide fetch + client-side filter — "find
 ich klasse, verringert die Agentaufrufe"). D2/D4/D5/D6/D7/D8/D9 recommendations accepted as
@@ -138,11 +138,29 @@ changes beyond the one SOP edit.
   repo)" corrected to the `resources/…/SKILL.md` seed. §7 post-M6 list updated.
 - `ToDo.md`: not on the list; nothing to close.
 
-**Plan complete.** Follow-up ideas noted but not scheduled: D7's "load this range" hint when
-paging the mini-month past the fetched window; extracting `calendar.svelte`'s create-form
-into its own component (the file is ~400 lines now).
+## Checkpoint 6 — clamp paging + extract the create-form — **done 2026-09-09**
+
+Owner asked for both after CP5.
+
+- **Month paging is clamped to the fetched window** (this month + next). `core/monthGrid.ts`
+  gains `monthDiff(a, b)`. `MiniCalendar.svelte` takes `minMonth` / `maxMonth`: the `‹` / `›`
+  buttons `disabled` at the bounds, and day cells whose month is outside the range are
+  `disabled` + dimmed. `calendar.svelte` passes `rangeMin = monthOf(today)` /
+  `rangeMax = shiftMonth(rangeMin, 1)`, guards `pageMonth` / `pickDay`, and shows a
+  `range-hint` line ("Nur dieser und der nächste Monat werden geladen — ↻ aktualisiert.")
+  when the grid is on `rangeMax`. So the "empty December" confusion can't happen — you can't
+  get there. (D7's full "load an arbitrary range" is still out of scope — it needs the
+  declined D1(b) date-param plumbing.)
+- **`CalendarCreateForm.svelte`** — the new-event form pulled out of `calendar.svelte`
+  (mirrors `RoutineForm.svelte`): props `calendars` / `defaultCalendar` / `defaultDate` /
+  `busy` / `error` / `onSubmit(NewCalendarEvent)` / `onCancel`; it owns the field state,
+  the parent keeps `showCreate` / `creating` / `createError` and `handleCreate` (the
+  instruct-turn write + local-digest patch). `calendar.svelte` down from ~525 to ~400
+  lines; the `.create` / `.primary` CSS moved with the form.
+- Browser-verified: paging stops at the bounds, out-of-range cells greyed, hint on the
+  next-month view, create form still creates + closes. `monthDiff` unit-tested (227 total).
 
 ## Suggested order
 
 Decisions settled (D1–D10). **CP1** (widget) → **CP2** (layout) → **CP3** (SOP window) →
-**CP4** (clock) → **CP5** (polish/docs) — all landed 2026-09-09.
+**CP4** (clock) → **CP5** (polish/docs) → **CP6** (clamp + extract) — all landed 2026-09-09.

@@ -11,13 +11,15 @@
     the month, which the parent handles)
 -->
 <script lang="ts">
-  import { monthGrid, weekdayLabels, type YearMonth } from "../core/monthGrid";
+  import { monthDiff, monthGrid, monthOf, weekdayLabels, type YearMonth } from "../core/monthGrid";
 
   let {
     month,
     selected,
     today,
     eventDays,
+    minMonth,
+    maxMonth,
     onSelect,
     onPage,
   }: {
@@ -28,6 +30,11 @@
     today: string;
     /** Days (`YYYY-MM-DD`) that have at least one event. */
     eventDays: Set<string>;
+    /** Earliest / latest month the caller has data for. When set, the nav
+     *  buttons stop at these bounds and cells outside them are disabled —
+     *  the calendar module only fetches this month + next. */
+    minMonth?: YearMonth;
+    maxMonth?: YearMonth;
     onSelect: (iso: string) => void;
     /** `delta` is -1 (previous month) or +1 (next). */
     onPage: (delta: number) => void;
@@ -35,13 +42,20 @@
 
   const grid = $derived(monthGrid(month.year, month.month, today));
   const weekdays = weekdayLabels("short");
+
+  const canPrev = $derived(!minMonth || monthDiff(minMonth, month) > 0);
+  const canNext = $derived(!maxMonth || monthDiff(month, maxMonth) > 0);
+  const outOfRange = (iso: string) => {
+    const m = monthOf(iso);
+    return (!!minMonth && monthDiff(minMonth, m) < 0) || (!!maxMonth && monthDiff(m, maxMonth) < 0);
+  };
 </script>
 
 <div class="mini">
   <div class="bar">
-    <button type="button" class="nav" aria-label="Previous month" onclick={() => onPage(-1)}>‹</button>
+    <button type="button" class="nav" aria-label="Previous month" disabled={!canPrev} onclick={() => onPage(-1)}>‹</button>
     <span class="label">{grid.label}</span>
-    <button type="button" class="nav" aria-label="Next month" onclick={() => onPage(1)}>›</button>
+    <button type="button" class="nav" aria-label="Next month" disabled={!canNext} onclick={() => onPage(1)}>›</button>
   </div>
 
   <div class="grid" role="grid" aria-label="Month">
@@ -50,6 +64,7 @@
     {/each}
     {#each grid.weeks as week (week[0].iso)}
       {#each week as cell (cell.iso)}
+        {@const blocked = outOfRange(cell.iso)}
         <button
           type="button"
           class="day"
@@ -58,6 +73,7 @@
           class:selected={cell.iso === selected}
           aria-pressed={cell.iso === selected}
           aria-label={cell.iso}
+          disabled={blocked}
           onclick={() => onSelect(cell.iso)}
         >
           <span class="num">{Number(cell.iso.slice(8, 10))}</span>
@@ -93,8 +109,12 @@
     line-height: 1.4;
     color: var(--ax-text-muted);
   }
-  .nav:hover {
+  .nav:hover:not(:disabled) {
     color: var(--ax-text);
+  }
+  .nav:disabled {
+    opacity: 0.3;
+    cursor: default;
   }
 
   .grid {
@@ -123,12 +143,17 @@
     color: var(--ax-text);
     cursor: pointer;
   }
-  .day:hover {
+  .day:hover:not(:disabled) {
     background: var(--ax-surface-2);
   }
   .day.out {
     color: var(--ax-text-muted);
     opacity: 0.55;
+  }
+  .day:disabled {
+    color: var(--ax-text-muted);
+    opacity: 0.25;
+    cursor: default;
   }
   .day.today {
     background: var(--ax-accent);
