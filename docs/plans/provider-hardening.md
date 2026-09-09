@@ -1,8 +1,8 @@
 # Plan: model-provider hardening
 
-Status: **in progress**. Checkpoints 0–5 landed (0–3 on 2026-09-08, 4–5 on 2026-09-09);
-CP6 partially done (digest timeout + SOP slim); CP7–8 planned. Follow the owner's usual
-stepwise workflow — confirm each checkpoint before starting the next.
+Status: **in progress**. Checkpoints 0–6 landed (0–3 on 2026-09-08, 4–6 on 2026-09-09);
+CP7–8 planned. Follow the owner's usual stepwise workflow — confirm each checkpoint before
+starting the next.
 
 This is the safety follow-up to `settings-provider-overhaul.md` (that plan is "complete" as a
 feature, but shipping it uncovered real holes). Keep both files: the overhaul explains *how
@@ -161,19 +161,30 @@ resolution should be unaffected — but confirm before committing 2–5).
   $2.52 (the tauri-dev auto-refresh loop), so the guard now blocks every paid turn until the
   owner raises the cap or the day rolls over — exactly the intended behaviour.
 
-## Checkpoint 6 — connector modules vs. a paid provider — **partially done 2026-09-09**
+## Checkpoint 6 — connector modules vs. a paid provider — **done 2026-09-09**
 
-The acute half is done (owner's call): a per-skill **`timeout_secs:`** frontmatter field
-(`registry` → `runner::agent_request`), with the three `*-digest` skills set to `600`, and
-the **`mail-digest` SOP slimmed** — 2-day window, one `search_emails` per topic group not per
+Done: a per-skill **`timeout_secs:`** frontmatter field (`registry` →
+`runner::agent_request`), with the three `*-digest` skills set to `600`, and the
+**`mail-digest` SOP slimmed** — 2-day window, one `search_emails` per topic group not per
 keyword, ~6 tool calls total, 1–2-sentence summaries, output capped at 12 messages. Live
 `mail-digest` runs dropped from 90–230 s to <10 s. Resource + live `~/.axiomata/skills/`
 copies both updated.
 
-Still open — **model pinning** (option a): a `SKILL.md model:` still can't be set to "the
-cheapest/free one regardless of `active_provider`", and there's no auto-refresh suppression
-(option b). Revisit once the owner decides whether digests should always run on
-Anthropic/Haiku.
+**Options a/b explicitly declined (owner, 2026-09-09):** digests should keep running on
+whatever provider is configured — no model pinning, no auto-refresh suppression. The spend
+cap (CP5) is the guardrail; the SOP slimming is the cost reduction. Closed.
+
+## Future — per-role provider, not just per-role model
+
+Owner idea (2026-09-09), not scheduled: today `active_provider` is one global switch and
+only the *model* differs between chat (`chat_model`) and skills (`skill_model`). Want the
+**provider** itself selectable per role too — e.g. **Ollama for digests / skills, OpenRouter
+for chat**. Shape TBD: probably `agents.chat_provider` / `agents.skill_provider` (each an
+optional `ProviderId` overriding `active_provider` for that role), threaded through
+`default_chat_model` / `default_skill_model` and `claude_env` so each role gets its own
+`ANTHROPIC_BASE_URL` + credential. Touches the Settings provider UI (two active-provider
+pickers), `validate_for_save`, and the CP4/CP5 rollup (`provider` column already per-run, so
+that part already works). Revisit as its own plan.
 
 ## Checkpoint 7 — stop shipping provider secrets to the webview
 
@@ -219,9 +230,8 @@ From the `settings-provider-overhaul` architecture + security reviews, not yet a
 
 ## Suggested checkpoint order
 
-0–5 done (2–5 are the safety core). Then: finish **6** (connector model pinning) →
-**5** (spend cap) → **6** (connector modules) → **7** (secret redaction) → **8** (cleanup
-sweep). 2–5 are the safety core; do those before re-enabling a paid provider for real use.
+0–6 done (2–5 were the safety core). Remaining: **7** (secret redaction) → **8** (cleanup
+sweep), then the separate "per-role provider" idea if the owner wants it.
 
 ## Commit note
 
