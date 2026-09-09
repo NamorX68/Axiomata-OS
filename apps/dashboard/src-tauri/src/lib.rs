@@ -43,6 +43,7 @@ pub fn run() {
             commands::read_workspace_file,
             commands::read_workspace_image,
             commands::write_workspace_file,
+            commands::delete_workspace_file,
             commands::create_note,
             commands::assistant_send,
             commands::write_module_manifest,

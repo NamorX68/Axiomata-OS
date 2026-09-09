@@ -944,6 +944,15 @@ pub fn write_workspace_file(
         .map_err(|err| err.to_string())
 }
 
+/// Deletes a workspace file under the same path guard as
+/// `read_workspace_file` (no `..`, no symlink, must be an existing regular
+/// file inside `config.workspace_root`). Used by the Second Brain detail
+/// panel's "Delete" action.
+#[tauri::command]
+pub fn delete_workspace_file(state: State<'_, CoreState>, rel: String) -> Result<(), String> {
+    workspace::delete_file(&read_config(&state.config), &rel).map_err(|err| err.to_string())
+}
+
 /// Creates a new Markdown note from `content` alone — no separate title:
 /// if `content` starts with its own `#` heading that wins, otherwise the
 /// agent proposes one as part of the same turn. The agent also picks which

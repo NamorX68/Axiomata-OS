@@ -625,6 +625,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "write_workspace_file":
       files.set(String(args.rel), String(args.content));
       return undefined as T;
+    case "delete_workspace_file":
+      files.delete(String(args.rel));
+      return undefined as T;
     case "create_note": {
       // No agent to ask in the browser mock — always files into "Inbox",
       // mirroring `notes::write_placed_note`'s dedup-on-collision rule. No
