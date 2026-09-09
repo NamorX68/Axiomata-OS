@@ -36,7 +36,6 @@
     EMPTY_DIGEST,
     eventTimeLabel,
     filterByCalendar,
-    groupByDay,
     loadLatestCalendarDigest,
     parseCalendarDigest,
     type CalendarDigest,
@@ -82,14 +81,27 @@
   const inRange = (m: YearMonth) => monthDiff(rangeMin, m) >= 0 && monthDiff(m, rangeMax) >= 0;
   const atRangeEnd = $derived(monthDiff(viewMonth, rangeMax) === 0);
 
-  /** The 7 ISO days the agenda covers: selected day … +6. */
-  const agendaDays = $derived(new Set(weekRange(selectedDay)));
-  const agendaEvents = $derived(filteredEvents.filter((e) => agendaDays.has(e.start.slice(0, 10))));
-  const groups = $derived(groupByDay(agendaEvents));
+  /** How many days the agenda lists from `selectedDay` on — every day gets a
+   *  header, even empty ones. Configurable in settings; default 5. */
+  const agendaSpan = $derived(
+    Math.min(14, Math.max(1, typeof $config.agendaDays === "number" ? Math.floor($config.agendaDays) : 5)),
+  );
+  /** The ISO days the agenda shows, `selectedDay … +span-1`. */
+  const agendaDayList = $derived(weekRange(selectedDay, agendaSpan));
+  /** Events (already calendar-filtered) grouped by their day, for lookup. */
+  const eventsByDay = $derived(
+    filteredEvents.reduce((map, e) => {
+      const d = e.start.slice(0, 10);
+      (map.get(d) ?? map.set(d, []).get(d)!).push(e);
+      return map;
+    }, new Map<string, CalendarEvent[]>()),
+  );
+  /** True once the whole span has zero events — shows a single empty line. */
+  const agendaEmpty = $derived(agendaDayList.every((d) => !eventsByDay.has(d)));
   /** Days (any month) that have at least one event, for the grid's dots. */
   const eventDays = $derived(new Set(filteredEvents.map((e) => e.start.slice(0, 10))));
 
-  const agendaEnd = $derived(weekRange(selectedDay)[6]);
+  const agendaEnd = $derived(agendaDayList[agendaDayList.length - 1]);
   const agendaCaption = $derived(
     `${dayLabel(selectedDay)} – ${new Date(`${agendaEnd}T00:00:00`).toLocaleDateString(undefined, {
       day: "numeric",
@@ -282,36 +294,41 @@
     </p>
   {:else}
     <div class="agenda-caption muted">{agendaCaption}</div>
-    {#if groups.length === 0}
+    {#if agendaEmpty}
       <p class="muted empty">
         Keine Termine {selectedCalendar ? `in „${selectedCalendar}" ` : ""}in diesem Zeitraum.
       </p>
     {:else}
-    <ul class="agenda">
-      {#each groups as group (group.day)}
-        <li class="day-group">
-          <div class="day-head">{dayLabel(group.day)}</div>
-          <ul class="events">
-            {#each group.events as ev (ev.id)}
-              <li class="event">
-                <span class="time muted">{eventTimeLabel(ev)}</span>
-                <span class="title">{ev.title}</span>
-                {#if ev.location}<span class="location muted">{ev.location}</span>{/if}
-                <button
-                  type="button"
-                  class="del"
-                  aria-label={`Delete "${ev.title}"`}
-                  disabled={deletingId === ev.id}
-                  onclick={() => void removeEvent(ev)}
-                >
-                  {deletingId === ev.id ? "…" : "✕"}
-                </button>
-              </li>
-            {/each}
-          </ul>
-        </li>
-      {/each}
-    </ul>
+      <ul class="agenda">
+        {#each agendaDayList as day (day)}
+          {@const dayEvents = eventsByDay.get(day) ?? []}
+          <li class="day-group">
+            <div class="day-head">{dayLabel(day)}</div>
+            {#if dayEvents.length === 0}
+              <p class="muted no-events">–</p>
+            {:else}
+              <ul class="events">
+                {#each dayEvents as ev (ev.id)}
+                  <li class="event">
+                    <span class="time muted">{eventTimeLabel(ev)}</span>
+                    <span class="title">{ev.title}</span>
+                    {#if ev.location}<span class="location muted">{ev.location}</span>{/if}
+                    <button
+                      type="button"
+                      class="del"
+                      aria-label={`Delete "${ev.title}"`}
+                      disabled={deletingId === ev.id}
+                      onclick={() => void removeEvent(ev)}
+                    >
+                      {deletingId === ev.id ? "…" : "✕"}
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </li>
+        {/each}
+      </ul>
     {/if}
   {/if}
 </div>
@@ -405,6 +422,10 @@
     padding: 0;
     display: flex;
     flex-direction: column;
+  }
+  .no-events {
+    padding: 0 0 var(--ax-space-1);
+    opacity: 0.7;
   }
   .event {
     display: flex;

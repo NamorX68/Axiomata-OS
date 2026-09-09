@@ -12,6 +12,9 @@
 
   const showClock = $derived($config.showClock === true);
   const clockStyle = $derived($config.clockStyle === "analog" ? "analog" : "digital");
+  const agendaDays = $derived(
+    Math.min(14, Math.max(1, typeof $config.agendaDays === "number" ? Math.floor($config.agendaDays) : 5)),
+  );
 
   function set(key: string, value: unknown) {
     config.update((c) => ({ ...c, [key]: value }));
@@ -23,6 +26,17 @@
     Currently calling <code>{skillName}</code>.
   </p>
   <SkillNameField {ctx} defaultName={CALENDAR_SKILL_NAME} />
+
+  <label class="check">
+    Tage in der Agenda
+    <input
+      type="number"
+      min="1"
+      max="14"
+      value={agendaDays}
+      onchange={(e) => set("agendaDays", Math.min(14, Math.max(1, Math.floor(e.currentTarget.valueAsNumber || 5))))}
+    />
+  </label>
 
   <label class="check">
     Uhr neben dem Kalender
@@ -70,6 +84,9 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--ax-space-3);
+  }
+  .check input[type="number"] {
+    width: 4rem;
   }
   .radios {
     display: flex;
