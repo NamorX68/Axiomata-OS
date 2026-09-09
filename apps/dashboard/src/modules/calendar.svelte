@@ -43,8 +43,10 @@
     type CalendarEvent,
   } from "../core/calendar";
   import { dayLabel, relativeTime } from "../core/format";
+  import { monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import MiniCalendar from "./MiniCalendar.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -61,7 +63,37 @@
   let selectedCalendar = $state(typeof $config.calendar === "string" ? $config.calendar : "");
 
   const filteredEvents = $derived(filterByCalendar(digest.events, selectedCalendar === "" ? null : selectedCalendar));
-  const groups = $derived(groupByDay(filteredEvents));
+
+  // --- Mini-month + 7-day agenda window ---
+  // `selectedDay` starts on "today" every mount (a calendar opens on now);
+  // `viewMonth` is the month the grid shows and can be paged independently.
+  const today = todayIso();
+  let selectedDay = $state(today);
+  let viewMonth = $state<YearMonth>(monthOf(today));
+
+  /** The 7 ISO days the agenda covers: selected day … +6. */
+  const agendaDays = $derived(new Set(weekRange(selectedDay)));
+  const agendaEvents = $derived(filteredEvents.filter((e) => agendaDays.has(e.start.slice(0, 10))));
+  const groups = $derived(groupByDay(agendaEvents));
+  /** Days (any month) that have at least one event, for the grid's dots. */
+  const eventDays = $derived(new Set(filteredEvents.map((e) => e.start.slice(0, 10))));
+
+  const agendaEnd = $derived(weekRange(selectedDay)[6]);
+  const agendaCaption = $derived(
+    `${dayLabel(selectedDay)} – ${new Date(`${agendaEnd}T00:00:00`).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+    })}`,
+  );
+
+  function pickDay(iso: string) {
+    selectedDay = iso;
+    const m = monthOf(iso);
+    if (m.year !== viewMonth.year || m.month !== viewMonth.month) viewMonth = m;
+  }
+  function pageMonth(delta: number) {
+    viewMonth = shiftMonth(viewMonth, delta);
+  }
 
   function selectCalendar(e: Event) {
     selectedCalendar = (e.currentTarget as HTMLSelectElement).value;
@@ -82,7 +114,7 @@
 
   function openCreate() {
     newCalendar = selectedCalendar || digest.calendars[0] || "";
-    newDate = new Date().toISOString().slice(0, 10);
+    newDate = selectedDay;
     newAllDay = false;
     newStartTime = "";
     newEndTime = "";
@@ -203,6 +235,18 @@
     </button>
   </div>
 
+  <div class="top">
+    <MiniCalendar
+      month={viewMonth}
+      selected={selectedDay}
+      {today}
+      {eventDays}
+      onSelect={pickDay}
+      onPage={pageMonth}
+    />
+    <!-- CP4: optional <Clock /> mounts here, right of the mini-month -->
+  </div>
+
   {#if showCreate}
     <form class="create" onsubmit={(e) => (e.preventDefault(), submitCreate())}>
       <input type="text" placeholder="Title…" bind:value={newTitle} disabled={creating} />
@@ -243,9 +287,13 @@
       No data yet — run <code>{skillName}</code> from the Skills Deck, schedule it as a
       Routine, or hit ↻ above.
     </p>
-  {:else if groups.length === 0}
-    <p class="muted empty">No upcoming events{selectedCalendar ? ` in "${selectedCalendar}"` : ""}.</p>
   {:else}
+    <div class="agenda-caption muted">{agendaCaption}</div>
+    {#if groups.length === 0}
+      <p class="muted empty">
+        Keine Termine {selectedCalendar ? `in „${selectedCalendar}" ` : ""}in diesem Zeitraum.
+      </p>
+    {:else}
     <ul class="agenda">
       {#each groups as group (group.day)}
         <li class="day-group">
@@ -271,6 +319,7 @@
         </li>
       {/each}
     </ul>
+    {/if}
   {/if}
 </div>
 
@@ -305,6 +354,30 @@
   .refresh {
     padding: 1px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
+  }
+
+  .top {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ax-space-3);
+    flex: 0 0 auto;
+  }
+  .top :global(.mini) {
+    /* Compact so the agenda below still has room; the mini-month drives the
+       row height and the clock (CP4) matches it. */
+    flex: 0 0 auto;
+    width: 13rem;
+    max-width: 100%;
+  }
+  .top :global(.mini .day) {
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .agenda-caption {
+    flex: 0 0 auto;
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
+    padding-top: var(--ax-space-1);
   }
 
   .create {

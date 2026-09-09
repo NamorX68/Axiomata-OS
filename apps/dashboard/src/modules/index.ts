@@ -11,6 +11,7 @@ import { get } from "svelte/store";
 import { registerModule } from "../core/registry";
 import type { Routine, RunRecord, WorkspaceFile } from "../core/backend";
 import { CALENDAR_SKILL_NAME, createCalendarEvent, deleteCalendarEvent, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
+import { todayIso as calendarToday, weekRange } from "../core/monthGrid";
 import { loadLatestMailDigest, MAIL_SKILL_NAME, parseMailDigest } from "../core/mail";
 import { completeReminderTask, createReminderTask, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
 import { resolveSkillName } from "../core/skillRun";
@@ -358,8 +359,9 @@ export function registerBuiltins(): void {
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='3' width='12' height='11' rx='1.5'/><path d='M2 6.5h12M5 1.5v3M11 1.5v3'/></svg>",
     component: Calendar,
     settings: CalendarSettings,
-    defaultSize: { w: 340, h: 360 },
-    minSize: { w: 240, h: 160 },
+    // Tall enough for the mini-month + a few agenda days without scrolling.
+    defaultSize: { w: 380, h: 540 },
+    minSize: { w: 300, h: 420 },
     singleton: true,
     actions: [
       {
@@ -375,14 +377,30 @@ export function registerBuiltins(): void {
       },
       {
         name: "list",
-        description: "Returns the events from the last calendar-digest run, optionally filtered to one calendar (does not trigger a new run).",
-        params: { type: "object", properties: { calendar: { type: "string" } } },
+        description:
+          "Returns events from the last calendar-digest run (does not trigger a new run). Optionally filtered to one `calendar`, and/or to a window of `days` (default 7) starting at `from` (YYYY-MM-DD, default today) — the same 7-day slice the tile's agenda shows.",
+        params: {
+          type: "object",
+          properties: {
+            calendar: { type: "string" },
+            from: { type: "string", description: "YYYY-MM-DD; defaults to today" },
+            days: { type: "integer", description: "window length in days; defaults to 7" },
+          },
+        },
         run: async (params, ctx) => {
           const result = await loadLatestCalendarDigest(ctx.invoke, resolveSkillName(get(ctx.config), CALENDAR_SKILL_NAME));
           if (!result.run) return { events: [], note: "no run yet" };
           if (result.error) return { events: [], error: result.error };
-          const calendar = typeof (params as { calendar?: unknown }).calendar === "string" ? ((params as { calendar: string }).calendar || null) : null;
-          return { events: filterByCalendar(result.digest.events, calendar) };
+          const p = params as { calendar?: unknown; from?: unknown; days?: unknown };
+          const calendar = typeof p.calendar === "string" ? p.calendar || null : null;
+          let events = filterByCalendar(result.digest.events, calendar);
+          if (typeof p.from === "string" || typeof p.days === "number") {
+            const from = typeof p.from === "string" && p.from ? p.from : calendarToday();
+            const len = typeof p.days === "number" && p.days > 0 ? Math.floor(p.days) : 7;
+            const window = new Set(weekRange(from, len));
+            events = events.filter((e) => window.has(e.start.slice(0, 10)));
+          }
+          return { events };
         },
       },
       {

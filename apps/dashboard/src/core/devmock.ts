@@ -152,15 +152,53 @@ const skills: Skill[] = [
 ];
 
 /** Fixture digest, same shape `calendar-digest`'s SOP produces — invented
- *  events, not the owner's real calendar. */
-const CALENDAR_DIGEST_JSON = JSON.stringify({
-  calendars: ["Arbeit", "Privat", "Familie"],
-  events: [
-    { id: "mock-evt-1", title: "Team-Sync", start: new Date(Date.now() + 20 * 3_600_000).toISOString().slice(0, 16), end: new Date(Date.now() + 21 * 3_600_000).toISOString().slice(0, 16), calendar: "Arbeit", location: null, allDay: false },
-    { id: "mock-evt-2", title: "Zahnarzt", start: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), calendar: "Privat", location: "Praxis Dr. Beispiel", allDay: true },
-    { id: "mock-evt-3", title: "Geburtstag Mira", start: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), end: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10), calendar: "Familie", location: null, allDay: true },
-  ],
-});
+ *  events, not the owner's real calendar. Spread across ~6 weeks (a couple
+ *  in the past, several this week, some next month) so the mini-month's
+ *  dots + paging are visible in browser-only dev. */
+const CALENDAR_DIGEST_JSON = (() => {
+  // Local `YYYY-MM-DD` for `n` days from today, and a local `YYYY-MM-DD HH:mm`.
+  const day = (n: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const at = (n: number, hh: number, mm = 0) => `${day(n)} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  const timed = (id: string, title: string, n: number, h: number, dur: number, calendar: string, location: string | null = null) => ({
+    id,
+    title,
+    start: at(n, h),
+    end: at(n, h + dur),
+    calendar,
+    location,
+    allDay: false,
+  });
+  const allDay = (id: string, title: string, n: number, calendar: string, location: string | null = null) => ({
+    id,
+    title,
+    start: day(n),
+    end: day(n),
+    calendar,
+    location,
+    allDay: true,
+  });
+  return JSON.stringify({
+    calendars: ["Arbeit", "Privat", "Familie"],
+    events: [
+      timed("mock-evt-p1", "Rückblick Q3", -6, 10, 1, "Arbeit"),
+      allDay("mock-evt-p2", "Urlaub Anna", -3, "Familie"),
+      timed("mock-evt-1", "Team-Sync", 0, 9, 1, "Arbeit"),
+      timed("mock-evt-2", "1:1 mit Sam", 0, 14, 1, "Arbeit"),
+      allDay("mock-evt-3", "Zahnarzt", 2, "Privat", "Praxis Dr. Beispiel"),
+      timed("mock-evt-4", "Sprint Planning", 3, 11, 2, "Arbeit"),
+      allDay("mock-evt-5", "Geburtstag Mira", 5, "Familie"),
+      timed("mock-evt-6", "Sport", 6, 18, 1, "Privat"),
+      timed("mock-evt-7", "Kundentermin", 12, 10, 1, "Arbeit", "Vor Ort"),
+      allDay("mock-evt-8", "Konferenz", 21, "Arbeit"),
+      allDay("mock-evt-9", "Konferenz", 22, "Arbeit"),
+      allDay("mock-evt-10", "Familientreffen", 34, "Familie"),
+    ],
+  });
+})();
 
 /** Fixture digest, same shape `reminders-digest`'s SOP produces — invented
  *  lists/tasks, not the owner's real reminders. */
