@@ -9,6 +9,13 @@
   // svelte-ignore state_referenced_locally
   const config = ctx.config;
   const skillName = $derived(resolveSkillName($config, CALENDAR_SKILL_NAME));
+
+  const showClock = $derived($config.showClock === true);
+  const clockStyle = $derived($config.clockStyle === "analog" ? "analog" : "digital");
+
+  function set(key: string, value: unknown) {
+    config.update((c) => ({ ...c, [key]: value }));
+  }
 </script>
 
 <div class="settings">
@@ -16,6 +23,31 @@
     Currently calling <code>{skillName}</code>.
   </p>
   <SkillNameField {ctx} defaultName={CALENDAR_SKILL_NAME} />
+
+  <label class="check">
+    Uhr neben dem Kalender
+    <input type="checkbox" checked={showClock} onchange={(e) => set("showClock", e.currentTarget.checked)} />
+  </label>
+  {#if showClock}
+    <div class="radios" role="radiogroup" aria-label="Uhr-Stil">
+      <label>
+        <input
+          type="radio"
+          name="clockStyle-{ctx.instanceId}"
+          checked={clockStyle === "digital"}
+          onchange={() => set("clockStyle", "digital")}
+        /> Digital
+      </label>
+      <label>
+        <input
+          type="radio"
+          name="clockStyle-{ctx.instanceId}"
+          checked={clockStyle === "analog"}
+          onchange={() => set("clockStyle", "analog")}
+        /> Analog
+      </label>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -32,5 +64,25 @@
   }
   code {
     font-family: var(--ax-font-mono);
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ax-space-3);
+  }
+  .radios {
+    display: flex;
+    gap: var(--ax-space-3);
+    padding-left: var(--ax-space-2);
+  }
+  .radios label {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--ax-accent);
   }
 </style>
