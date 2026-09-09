@@ -107,6 +107,11 @@ const files = new Map<string, string>([
   ],
   ["Learning/Rust/GLOSSARY.md", "# Glossar\n\n- **Ownership** — wer den Wert besitzt.\n"],
   [
+    "Learning/Rust/snippets/hello.rs",
+    'fn main() {\n    // a plain text / source file — read as monospace, editable\n    let name = "Rust";\n    println!("Hallo, {name}!");\n}\n',
+  ],
+  ["config/settings.json", '{\n  "theme": "graphite",\n  "autosave": true,\n  "recent": ["notes/inbox.md"]\n}\n'],
+  [
     "Learning/Rust/lessons/0000-roadmap.html",
     lessonPage("Roadmap", "Der Kurs in Etappen.", "0001-hallo-rust.html", "Hallo Rust"),
   ],

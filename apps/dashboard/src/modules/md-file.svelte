@@ -1,9 +1,14 @@
 <!--
-  md-file ("Document") — the viewer for one workspace file, and (via `isNew`)
-  the compose UI for a brand new one.
-  - `.md`: read mode renders through core/markdown (marked + DOMPurify), edit
-    mode is a textarea, Save writes via `write_workspace_file`.
-  - `.html` / `.htm` (courses): shown read-only in a `sandbox="allow-scripts"`
+  md-file ("Document") — the viewer/editor for one workspace file, and (via
+  `isNew`) the compose UI for a brand new one. Every text-ish file can be
+  edited; only images are view-only.
+  - `.md` / `.markdown` / …: read mode renders through core/markdown (marked +
+    DOMPurify), edit mode is a textarea, Save writes via `write_workspace_file`.
+  - Any other UTF-8 text file (`.txt`, `.json`, `.csv`, source code, no
+    extension, …): read mode is a monospace `<pre>`, edit mode a textarea,
+    Save the same. A non-UTF-8 (binary) file fails `read_workspace_file` and
+    its error is shown — that's the "not a text file" refusal.
+  - `.html` / `.htm` (courses): read mode is a `sandbox="allow-scripts"`
     iframe via `srcdoc` — **not** the asset protocol (`asset://` + `src=`),
     which was the original design (see git history) but proved unreliable:
     every lesson rendered a blank white frame with "Failed to load resource:
@@ -28,19 +33,20 @@
     now (an improvement over the asset-protocol version), but external
     links and anything with a URL scheme (`http:`, `mailto:`, …) are left
     alone and simply do nothing inside a frame with no `allow-top-navigation`
-    and no network access of its own beyond what `srcdoc` inlines.
+    and no network access of its own beyond what `srcdoc` inlines. Edit mode
+    swaps the iframe for a raw-HTML textarea; Save rebuilds the preview.
   - `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.bmp` / `.tif` / `.tiff` /
     `.heic` / `.heif` / `.avif`: shown read-only as a plain `<img>` fed by
     `read_workspace_image`'s base64 `data:` URI — the same backend call
     `core/markdownImages.ts` already uses to inline an image *referenced from
     inside* a note, now also used when the opened file *is* the image itself.
     Before this branch existed, opening one of these directly fell through to
-    the markdown path below, which reads the file as UTF-8 text and fails
-    with "not valid UTF-8" for any binary file — exactly the bug this fixes.
-    Extension list must stay in lockstep with the Rust `image_mime`
-    (`workspace.rs`) and `core/markdown.ts`'s `DATA_IMAGE_RE`; anything
-    outside it (SVG included, deliberately — see `image_mime`'s doc comment)
-    still falls through to the markdown branch and still fails the same way.
+    the text path below, which reads the file as UTF-8 and fails with "not
+    valid UTF-8" for any binary file — exactly the bug this fixes. Extension
+    list must stay in lockstep with the Rust `image_mime` (`workspace.rs`)
+    and `core/markdown.ts`'s `DATA_IMAGE_RE`; anything outside it (SVG
+    included, deliberately — see `image_mime`'s doc comment) is treated as a
+    text document and shows its source.
     Whether HEIC/TIFF/BMP/AVIF actually *render* is up to WKWebView's own
     image decoder, not this app — see `image_mime`'s doc comment for the
     caveat (HEIC in particular is a known WebKit web-content gap even though
@@ -76,22 +82,35 @@
 
   const path = $derived(typeof $config.path === "string" ? $config.path : "");
   const isNew = $derived($config.isNew === true && !path);
-  // Extension list mirrors the Rust `image_mime` (`workspace.rs`) and
+  // Image extension list mirrors the Rust `image_mime` (`workspace.rs`) and
   // `core/markdown.ts`'s `DATA_IMAGE_RE` — keep all three in lockstep.
+  // Everything that isn't an image, an HTML page, or a Markdown file is a
+  // plain "text" document: read as monospace, edited in a textarea. A
+  // non-UTF-8 (binary) file fails `read_workspace_file` and shows its error.
   const kind = $derived(
-    /\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(path) ? "image" : /\.html?$/i.test(path) ? "html" : "markdown",
+    /\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(path)
+      ? "image"
+      : /\.html?$/i.test(path)
+        ? "html"
+        : /\.(?:md|markdown|mdown|mkd|mkdn)$/i.test(path)
+          ? "markdown"
+          : "text",
   );
-  const mode = $derived($config.mode === "edit" && kind === "markdown" ? "edit" : "read");
+  /** Every text-ish kind can be edited; only images are view-only. */
+  const editable = $derived(kind === "markdown" || kind === "text" || kind === "html");
+  const mode = $derived($config.mode === "edit" && editable ? "edit" : "read");
   let frameDoc = $state<string | null>(null);
   let reloadTick = $state(0);
   const dirty = $derived(file !== null && draft !== file.content);
 
-  /** Word count / reading time for the bar — markdown only (an HTML page's
-   *  content isn't loaded into `file`), read mode only (edit mode shows a
-   *  plain textarea, no point counting the in-progress draft). ~200 wpm,
-   *  rounded up to a whole minute, floor of 1. */
-  const wordCount = $derived(kind === "markdown" && file ? file.content.trim().split(/\s+/).filter(Boolean).length : 0);
+  /** Word count / reading time for the bar — Markdown read mode only. ~200
+   *  wpm, rounded, floor of 1. */
+  const wordCount = $derived(
+    kind === "markdown" && mode === "read" && file ? file.content.trim().split(/\s+/).filter(Boolean).length : 0,
+  );
   const readingMins = $derived(Math.max(1, Math.round(wordCount / 200)));
+  /** Line count for the bar — plain-text kind, either mode. */
+  const lineCount = $derived(kind === "text" && file ? file.content.split("\n").length : 0);
 
   // Rendering is async (relative image references are resolved to inline
   // `data:` URIs first — see `resolveMarkdownImages`), so `html` is state
@@ -100,7 +119,7 @@
   // (switching files quickly, or a reload mid-flight).
   let html = $state("");
   $effect(() => {
-    const source = mode === "read" ? file?.content : undefined;
+    const source = kind === "markdown" && mode === "read" ? file?.content : undefined;
     if (!source) {
       html = "";
       return;
@@ -140,13 +159,17 @@
   }
 
   async function loadHtml(rel: string) {
-    file = null;
     try {
       const f = await ctx.invoke<WorkspaceFile>("read_workspace_file", { rel });
+      // `file`/`draft` back the edit-mode textarea + Save; `frameDoc` is the
+      // read-mode sandboxed preview.
+      file = f;
+      draft = f.content;
       frameDoc = withNavIntercept(f.content);
       reloadTick++;
       error = "";
     } catch (err) {
+      file = null;
       frameDoc = null;
       error = String(err);
     }
@@ -192,6 +215,11 @@
     try {
       await ctx.invoke("write_workspace_file", { rel: file.path, content: draft });
       file = { ...file, content: draft, modified: new Date().toISOString() };
+      // Refresh the read-mode preview to what was just written.
+      if (kind === "html") {
+        frameDoc = withNavIntercept(draft);
+        reloadTick++;
+      }
       error = "";
     } catch (err) {
       error = String(err);
@@ -243,7 +271,7 @@
     ></textarea>
   {:else if !path}
     <form class="ask" onsubmit={(e) => (e.preventDefault(), open(pathInput))}>
-      <p class="muted">Open a Markdown file from the workspace:</p>
+      <p class="muted">Open a file from the workspace:</p>
       <div class="pair">
         <input type="text" placeholder="notes/inbox.md" bind:value={pathInput} />
         <button type="submit">Open</button>
@@ -254,10 +282,11 @@
       <span class="path" title={path}>{path}</span>
       {#if file?.modified}<span class="muted">· {relativeTime(file.modified)}</span>{/if}
       {#if wordCount > 0}<span class="muted">· {wordCount} words · {readingMins} min</span>{/if}
+      {#if lineCount > 0}<span class="muted">· {lineCount} {lineCount === 1 ? "line" : "lines"}</span>{/if}
       <span class="spacer"></span>
       <button type="button" onclick={() => ctx.emit("open-second-brain", { focus: `file:${path}` })} title="Open in Second Brain">In Second Brain</button>
-      {#if kind === "html" || kind === "image"}
-        <!-- nothing else — read-only -->
+      {#if kind === "image"}
+        <!-- image: view-only -->
       {:else if mode === "read"}
         <button type="button" onclick={() => setMode("edit")} disabled={!file} title="Edit">Edit</button>
       {:else}
@@ -270,6 +299,12 @@
     </div>
     {#if error}
       <p class="error">{error}</p>
+    {:else if mode === "edit"}
+      {#if file}
+        <textarea bind:value={draft} spellcheck="false"></textarea>
+      {:else}
+        <p class="muted">Loading…</p>
+      {/if}
     {:else if kind === "html"}
       {#if frameDoc}
         {#key reloadTick}
@@ -293,8 +328,8 @@
       {/if}
     {:else if !file}
       <p class="muted">Loading…</p>
-    {:else if mode === "edit"}
-      <textarea bind:value={draft} spellcheck="false"></textarea>
+    {:else if kind === "text"}
+      <pre class="code-view">{file.content}</pre>
     {:else}
       <div class="rendered">{@html html}</div>
     {/if}
@@ -393,6 +428,21 @@
   .image-view img {
     max-width: 100%;
     height: auto;
+  }
+
+  .code-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    margin: 0;
+    padding: var(--ax-space-3);
+    background: var(--ax-surface-1);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-sm);
+    line-height: 1.55;
+    white-space: pre;
+    tab-size: 2;
+    user-select: text;
   }
 
   .rendered {

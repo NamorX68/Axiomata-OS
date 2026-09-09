@@ -251,7 +251,7 @@ export function registerBuiltins(): void {
     actions: [
       {
         name: "open",
-        description: "Open a workspace-relative Markdown or HTML file in this instance (read mode).",
+        description: "Open a workspace-relative file in this instance (read mode) — Markdown, HTML, any UTF-8 text file, or an image.",
         params: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
         run: async (params, ctx) => {
           const path = String((params as { path: string }).path);
@@ -261,7 +261,7 @@ export function registerBuiltins(): void {
       },
       {
         name: "setMode",
-        description: 'Switch between "read" and "edit".',
+        description: 'Switch between "read" and "edit" (edit works for Markdown, HTML and any text file — not images).',
         params: { type: "object", properties: { mode: { type: "string", enum: ["read", "edit"] } }, required: ["mode"] },
         run: async (params, ctx) => {
           const mode = (params as { mode: string }).mode === "edit" ? "edit" : "read";
