@@ -10,7 +10,7 @@
 use axiomata_core::AxiomataCore;
 use axiomata_core::agents::{self, ChatMode, ChatReply};
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
-use axiomata_core::config::Config;
+use axiomata_core::config::{Config, ProviderId, ProviderSettings};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::graph::{self, WorkspaceGraph};
 use axiomata_core::importer;
@@ -20,7 +20,9 @@ use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill, SkippedSkill};
 use axiomata_core::spend;
 use axiomata_core::workspace::{self, SearchHit, WorkspaceFile, WorkspaceImage};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::RwLock;
 use tauri::State;
 
@@ -56,12 +58,172 @@ pub fn get_app_info(state: State<'_, CoreState>) -> AppInfo {
     }
 }
 
-/// Returns the full editable config for the Settings dialog. Same trust
-/// boundary as today's plaintext `config.toml` on disk — nothing here is
-/// exposed that the user couldn't already read from that file directly.
+// ---- Redacted config view for the webview (provider-hardening CP7) ----
+//
+// `get_config` used to hand the renderer the whole `Config`, including every
+// `providers[*].api_key` and every `agents.claude_env` value. Before the
+// model-provider feature, nothing sensitive was reachable from a (possibly
+// XSS-compromised) webview at all. These view/update types keep the raw
+// secrets on the Rust side: the renderer sees only a `has_key` flag and the
+// *names* of the `claude_env` overrides, and sends key changes back as an
+// explicit [`KeyUpdate`] rather than round-tripping a value it never had.
+
+/// One provider's settings as sent to the renderer — credential redacted.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderSettingsView {
+    pub base_url: Option<String>,
+    /// Whether a non-blank `api_key` is stored. The value itself is never sent.
+    pub has_key: bool,
+    pub chat_model: String,
+    pub skill_model: String,
+}
+
+/// `agents` as sent to the renderer. Omits `claude_model` (migration-only)
+/// and the `claude_env` *values*.
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentDefaultsView {
+    pub ollama_model: String,
+    pub skill_timeout_secs: u64,
+    pub providers: BTreeMap<ProviderId, ProviderSettingsView>,
+    pub active_provider: ProviderId,
+    pub daily_usd_cap: Option<f64>,
+    /// Names only of the `agents.claude_env` power-user overrides — their
+    /// values can be Bedrock / proxy tokens, so they never cross the IPC line.
+    pub claude_env_keys: Vec<String>,
+}
+
+/// The config the Settings dialog renders. See the module note above.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfigView {
+    pub owner: String,
+    pub workspace_root: String,
+    pub agents: AgentDefaultsView,
+}
+
+impl ConfigView {
+    fn from_config(c: &Config) -> Self {
+        let providers = c
+            .agents
+            .providers
+            .iter()
+            .map(|(id, s)| {
+                (
+                    *id,
+                    ProviderSettingsView {
+                        base_url: s.base_url.clone(),
+                        has_key: s.api_key.as_deref().is_some_and(|k| !k.trim().is_empty()),
+                        chat_model: s.chat_model.clone(),
+                        skill_model: s.skill_model.clone(),
+                    },
+                )
+            })
+            .collect();
+        ConfigView {
+            owner: c.owner.clone(),
+            workspace_root: c.workspace_root.to_string_lossy().into_owned(),
+            agents: AgentDefaultsView {
+                ollama_model: c.agents.ollama_model.clone(),
+                skill_timeout_secs: c.agents.skill_timeout_secs,
+                providers,
+                active_provider: c.agents.active_provider,
+                daily_usd_cap: c.agents.daily_usd_cap,
+                claude_env_keys: c.agents.claude_env.keys().cloned().collect(),
+            },
+        }
+    }
+}
+
+/// How the renderer wants one provider's stored API key changed.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum KeyUpdate {
+    /// The key field wasn't edited — keep whatever is stored.
+    Keep,
+    /// The key field was emptied — clear the stored key.
+    Clear,
+    /// The key field holds a new value.
+    Set { value: String },
+}
+
+/// One provider's settings coming back from the dialog. `api_key` is a
+/// [`KeyUpdate`], not a value.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderSettingsUpdate {
+    pub base_url: Option<String>,
+    pub api_key: KeyUpdate,
+    pub chat_model: String,
+    pub skill_model: String,
+}
+
+/// `agents` coming back from the dialog. No `claude_env` (no editor for it;
+/// preserved server-side) and no `claude_model`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentDefaultsUpdate {
+    pub ollama_model: String,
+    pub skill_timeout_secs: u64,
+    pub providers: BTreeMap<ProviderId, ProviderSettingsUpdate>,
+    pub active_provider: ProviderId,
+    pub daily_usd_cap: Option<f64>,
+}
+
+/// The payload `save_config` accepts. See the module note above.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConfigUpdate {
+    pub owner: String,
+    pub workspace_root: String,
+    pub agents: AgentDefaultsUpdate,
+}
+
+/// Folds a renderer [`ConfigUpdate`] onto `current`: everything the dialog can
+/// edit is taken from the update, but each provider's `api_key` is resolved
+/// against what's already stored (the renderer never had the raw value), and
+/// `agents.claude_env` + the migration-only `claude_model` are carried over
+/// from `current` untouched.
+fn merge_view_update(current: &Config, update: ConfigUpdate) -> Config {
+    let mut merged = current.clone();
+    merged.owner = update.owner;
+    merged.workspace_root = PathBuf::from(update.workspace_root);
+    merged.agents.ollama_model = update.agents.ollama_model;
+    merged.agents.skill_timeout_secs = update.agents.skill_timeout_secs;
+    merged.agents.active_provider = update.agents.active_provider;
+    merged.agents.daily_usd_cap = update.agents.daily_usd_cap;
+
+    let mut providers = BTreeMap::new();
+    for (id, u) in update.agents.providers {
+        let stored_key = current
+            .agents
+            .providers
+            .get(&id)
+            .and_then(|s| s.api_key.clone());
+        let api_key = match u.api_key {
+            KeyUpdate::Keep => stored_key,
+            KeyUpdate::Clear => None,
+            KeyUpdate::Set { value } => Some(value),
+        };
+        providers.insert(
+            id,
+            ProviderSettings {
+                base_url: u.base_url,
+                api_key,
+                chat_model: u.chat_model,
+                skill_model: u.skill_model,
+            },
+        );
+    }
+    // A provider the dialog didn't send stays as-is (defensive; it always
+    // sends all three).
+    for (id, s) in &current.agents.providers {
+        providers.entry(*id).or_insert_with(|| s.clone());
+    }
+    merged.agents.providers = providers;
+    merged
+}
+
+/// Returns the redacted editable config for the Settings dialog — see
+/// [`ConfigView`]. The raw `api_key` / `claude_env` values are **not** sent.
 #[tauri::command]
-pub fn get_config(state: State<'_, CoreState>) -> Config {
-    read_config(&state.config)
+pub fn get_config(state: State<'_, CoreState>) -> ConfigView {
+    ConfigView::from_config(&read_config(&state.config))
 }
 
 /// Today's / this month's recorded agent spend for the active model-routing
@@ -89,9 +251,18 @@ pub fn get_spend_summary(state: State<'_, CoreState>) -> Result<spend::SpendSumm
 /// Returns `true` if the workspace root actually changed, so the frontend
 /// can prompt for a restart instead of quietly no-op'ing that part of the
 /// save.
+///
+/// Takes a [`ConfigUpdate`], not a `Config`: the renderer never holds the raw
+/// `api_key` / `claude_env` values, so those are merged in from the current
+/// live config here (see [`merge_view_update`]).
 #[tauri::command]
-pub fn save_config(state: State<'_, CoreState>, new_config: Config) -> Result<bool, String> {
-    apply_config_update(&state.config, new_config)
+pub fn save_config(state: State<'_, CoreState>, new_config: ConfigUpdate) -> Result<bool, String> {
+    // Merge against the current live config so the retained secrets come from
+    // Rust-side state. The read guard is dropped before `apply_config_update`
+    // takes the write guard; a single Settings dialog is the only caller, so
+    // that read→write gap can't realistically race.
+    let merged = merge_view_update(&read_config(&state.config), new_config);
+    apply_config_update(&state.config, merged)
 }
 
 /// Clones `Config` out from under `config`'s lock. Every command does this
@@ -151,6 +322,141 @@ mod tests {
             .expect("system clock should be after the Unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
+    }
+
+    // ---- CP7: redacted config view + key-preserving merge ----
+
+    /// A `Config` with OpenRouter active, a real key, and a `claude_env`
+    /// override — the shape that used to leak wholesale to the webview.
+    fn config_with_secrets() -> Config {
+        let mut c = Config {
+            workspace_root: PathBuf::from("/ws"),
+            ..Config::default()
+        };
+        c.agents.active_provider = ProviderId::OpenRouter;
+        c.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some("https://openrouter.ai/api".to_string()),
+                api_key: Some("sk-or-v1-SECRET".to_string()),
+                chat_model: "z-ai/glm-5.3-flash".to_string(),
+                skill_model: "deepseek/deepseek-v4-flash".to_string(),
+            },
+        );
+        c.agents.claude_env.insert(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            "BEARER-SECRET".to_string(),
+        );
+        c
+    }
+
+    #[test]
+    fn config_view_redacts_api_keys_and_claude_env_values() {
+        let view = ConfigView::from_config(&config_with_secrets());
+        let json = serde_json::to_string(&view).unwrap();
+
+        assert!(!json.contains("SECRET"), "no raw secret may appear: {json}");
+        assert!(!json.contains("BEARER-SECRET"));
+        // has_key still tells the UI a credential is stored.
+        assert!(view.agents.providers[&ProviderId::OpenRouter].has_key);
+        assert!(!view.agents.providers[&ProviderId::Anthropic].has_key);
+        // claude_env is reduced to its key names only.
+        assert_eq!(view.agents.claude_env_keys, vec!["ANTHROPIC_AUTH_TOKEN"]);
+    }
+
+    #[test]
+    fn merge_view_update_keeps_set_and_clears_the_stored_key_per_keyupdate() {
+        let current = config_with_secrets();
+        let base_update = |key: KeyUpdate| ConfigUpdate {
+            owner: "Roman".to_string(),
+            workspace_root: "/ws".to_string(),
+            agents: AgentDefaultsUpdate {
+                ollama_model: current.agents.ollama_model.clone(),
+                skill_timeout_secs: current.agents.skill_timeout_secs,
+                active_provider: ProviderId::OpenRouter,
+                daily_usd_cap: current.agents.daily_usd_cap,
+                providers: BTreeMap::from([(
+                    ProviderId::OpenRouter,
+                    ProviderSettingsUpdate {
+                        base_url: Some("https://openrouter.ai/api".to_string()),
+                        api_key: key,
+                        chat_model: "new-chat-model".to_string(),
+                        skill_model: "deepseek/deepseek-v4-flash".to_string(),
+                    },
+                )]),
+            },
+        };
+
+        let kept = merge_view_update(&current, base_update(KeyUpdate::Keep));
+        let or = |c: &Config| c.agents.providers[&ProviderId::OpenRouter].api_key.clone();
+        assert_eq!(
+            or(&kept).as_deref(),
+            Some("sk-or-v1-SECRET"),
+            "Keep retains"
+        );
+        // ...and an unrelated edit in the same save still lands.
+        assert_eq!(
+            kept.agents.providers[&ProviderId::OpenRouter].chat_model,
+            "new-chat-model"
+        );
+        // claude_env is preserved untouched (the update carries none).
+        assert_eq!(
+            kept.agents
+                .claude_env
+                .get("ANTHROPIC_AUTH_TOKEN")
+                .map(String::as_str),
+            Some("BEARER-SECRET")
+        );
+
+        let set = merge_view_update(
+            &current,
+            base_update(KeyUpdate::Set {
+                value: "sk-or-v1-NEW".to_string(),
+            }),
+        );
+        assert_eq!(or(&set).as_deref(), Some("sk-or-v1-NEW"));
+
+        let cleared = merge_view_update(&current, base_update(KeyUpdate::Clear));
+        assert_eq!(or(&cleared), None);
+    }
+
+    #[test]
+    fn save_path_with_keep_still_validates_the_merged_config() {
+        // A required provider whose stored key is empty + a Keep update must
+        // still be rejected by `validate_for_save` on the merged result.
+        let mut current = Config {
+            workspace_root: PathBuf::from("/ws"),
+            ..Config::default()
+        };
+        current.agents.active_provider = ProviderId::OpenRouter;
+        current
+            .agents
+            .providers
+            .get_mut(&ProviderId::OpenRouter)
+            .unwrap()
+            .api_key = None;
+
+        let update = ConfigUpdate {
+            owner: String::new(),
+            workspace_root: "/ws".to_string(),
+            agents: AgentDefaultsUpdate {
+                ollama_model: "llama3.2".to_string(),
+                skill_timeout_secs: 300,
+                active_provider: ProviderId::OpenRouter,
+                daily_usd_cap: Some(2.0),
+                providers: BTreeMap::from([(
+                    ProviderId::OpenRouter,
+                    ProviderSettingsUpdate {
+                        base_url: Some("https://openrouter.ai/api".to_string()),
+                        api_key: KeyUpdate::Keep,
+                        chat_model: "m".to_string(),
+                        skill_model: "m".to_string(),
+                    },
+                )]),
+            },
+        };
+        let merged = merge_view_update(&current, update);
+        assert!(merged.validate_for_save().unwrap_err().contains("API key"));
     }
 
     #[test]
