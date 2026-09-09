@@ -21,45 +21,73 @@ export interface AppInfo {
  *  `rename_all = "snake_case"` variants of the Rust `ProviderId` enum. */
 export type ProviderId = "anthropic" | "open_router" | "ollama";
 
-/** Mirrors `axiomata_core::config::ProviderSettings`. `base_url`/`api_key`
- *  are `null` (not `""`) when unset — see `apply_config_update`. */
-export interface ProviderSettings {
-  base_url: string | null;
-  api_key: string | null;
-  chat_model: string;
-  skill_model: string;
-}
-
-/** Mirrors `axiomata_core::config::AgentDefaults`. */
-export interface AgentDefaults {
-  claude_model: string;
-  ollama_model: string;
-  skill_timeout_secs: number;
-  claude_env: Record<string, string>;
-  providers: Record<ProviderId, ProviderSettings>;
-  active_provider: ProviderId;
-  /** Daily USD spend cap for a paid (non-Anthropic) active provider;
-   *  `null` disables the cap. Mirrors `AgentDefaults::daily_usd_cap`. */
-  daily_usd_cap: number | null;
-}
-
 /** Mirrors `axiomata_core::spend::SpendSummary` — `get_spend_summary`. */
 export interface SpendSummary {
   provider: string;
   today_usd: number;
   month_usd: number;
   daily_cap_usd: number | null;
-  /** `false` for the subscription-billed Anthropic provider. */
+  /** `false` for the subscribed Anthropic provider. */
   metered: boolean;
 }
 
-/** The full editable config `get_config` returns / `save_config` takes.
- *  Mirrors `axiomata_core::config::Config`; `workspace_root` is the
- *  `PathBuf` serialised as a plain string. */
-export interface Config {
+// ---- Config: redacted view (get_config) + update payload (save_config) ----
+// The raw `api_key` / `claude_env` values never cross the IPC boundary
+// (provider-hardening CP7). `get_config` returns a `has_key` flag and the
+// `claude_env` key names only; `save_config` takes key changes as a
+// `KeyUpdate`, and the Rust side merges the retained secret back in.
+
+/** One provider's settings as `get_config` returns them — no raw key. */
+export interface ProviderSettingsView {
+  base_url: string | null;
+  /** Whether a credential is stored. The value is never sent. */
+  has_key: boolean;
+  chat_model: string;
+  skill_model: string;
+}
+
+export interface AgentDefaultsView {
+  ollama_model: string;
+  skill_timeout_secs: number;
+  providers: Record<ProviderId, ProviderSettingsView>;
+  active_provider: ProviderId;
+  /** Daily USD spend cap for a paid provider; `null` disables it. */
+  daily_usd_cap: number | null;
+  /** Names only of the `agents.claude_env` overrides. */
+  claude_env_keys: string[];
+}
+
+/** What `get_config` returns; `workspace_root` is a plain string path. */
+export interface ConfigView {
   owner: string;
   workspace_root: string;
-  agents: AgentDefaults;
+  agents: AgentDefaultsView;
+}
+
+/** How a provider's stored key should change on save. `keep` = field
+ *  untouched, `clear` = field emptied, `set` = new value typed. */
+export type KeyUpdate = { kind: "keep" } | { kind: "clear" } | { kind: "set"; value: string };
+
+export interface ProviderSettingsUpdate {
+  base_url: string | null;
+  api_key: KeyUpdate;
+  chat_model: string;
+  skill_model: string;
+}
+
+export interface AgentDefaultsUpdate {
+  ollama_model: string;
+  skill_timeout_secs: number;
+  providers: Record<ProviderId, ProviderSettingsUpdate>;
+  active_provider: ProviderId;
+  daily_usd_cap: number | null;
+}
+
+/** The payload `save_config` takes — no `claude_env`, no `claude_model`. */
+export interface ConfigUpdate {
+  owner: string;
+  workspace_root: string;
+  agents: AgentDefaultsUpdate;
 }
 
 export interface Skill {

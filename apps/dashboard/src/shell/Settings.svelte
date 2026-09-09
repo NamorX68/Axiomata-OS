@@ -7,7 +7,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import { type AppInfo, type Config, type ProviderId, type SpendSummary, invokeBackend } from "../core/backend";
+  import {
+    type AppInfo,
+    type ConfigUpdate,
+    type ConfigView,
+    type KeyUpdate,
+    type ProviderId,
+    type SpendSummary,
+    invokeBackend,
+  } from "../core/backend";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges } from "../core/stores";
   import { THEMES, applyTheme } from "../core/themes";
@@ -20,12 +28,20 @@
   let reloading = $state(false);
   let showTemplate = $state(false);
 
-  /** The full editable config from `get_config`. `base_url` / `api_key`
-   *  nulls are normalised to `""` on load so `<input>` can bind to them;
-   *  `cleanConfig` reverses that before every `save_config`. */
-  let config = $state<Config | null>(null);
+  /** The redacted config from `get_config` — no raw API keys (CP7). `base_url`
+   *  nulls are normalised to `""` on load so `<input>` can bind; `buildUpdate`
+   *  reverses that. */
+  let config = $state<ConfigView | null>(null);
   let savingVault = $state(false);
   let savingProvider = $state(false);
+
+  /** Per-provider API-key edits. A provider absent from this map means its
+   *  key field was not touched → the backend keeps the stored key. Present
+   *  with `""` → clear it; present with a value → set it. */
+  let keyEdits = $state<Partial<Record<ProviderId, string>>>({});
+  function setKeyEdit(id: ProviderId, value: string) {
+    keyEdits = { ...keyEdits, [id]: value };
+  }
 
   /** Recorded agent spend for the active provider (`get_spend_summary`),
    *  refreshed on open and after every provider save. */
@@ -72,29 +88,47 @@
     }
   }
 
-  /** Reverse the load-time null→"" normalisation: an empty base URL or key
-   *  is "unset", which the backend stores as `null`, not `""`. */
-  function cleanConfig(c: Config): Config {
+  /** How a provider's key should change on save, from `keyEdits`. */
+  function keyUpdateFor(id: ProviderId): KeyUpdate {
+    if (!(id in keyEdits)) return { kind: "keep" };
+    const v = (keyEdits[id] ?? "").trim();
+    return v === "" ? { kind: "clear" } : { kind: "set", value: v };
+  }
+
+  /** Build the `save_config` payload: trims fields, reverses the null→""
+   *  normalisation, and turns each key field into a `KeyUpdate`. */
+  function buildUpdate(c: ConfigView): ConfigUpdate {
     const providers = Object.fromEntries(
-      Object.entries(c.agents.providers).map(([id, p]) => [
-        id,
-        {
-          ...p,
-          base_url: p.base_url?.trim() ? p.base_url.trim() : null,
-          api_key: p.api_key?.trim() ? p.api_key.trim() : null,
-          chat_model: p.chat_model.trim(),
-          skill_model: p.skill_model.trim(),
-        },
-      ]),
-    ) as Config["agents"]["providers"];
-    return { ...c, workspace_root: c.workspace_root.trim(), agents: { ...c.agents, providers } };
+      (Object.entries(c.agents.providers) as [ProviderId, ConfigView["agents"]["providers"][ProviderId]][]).map(
+        ([id, p]) => [
+          id,
+          {
+            base_url: p.base_url?.trim() ? p.base_url.trim() : null,
+            api_key: keyUpdateFor(id),
+            chat_model: p.chat_model.trim(),
+            skill_model: p.skill_model.trim(),
+          },
+        ],
+      ),
+    ) as ConfigUpdate["agents"]["providers"];
+    return {
+      owner: c.owner,
+      workspace_root: c.workspace_root.trim(),
+      agents: {
+        ollama_model: c.agents.ollama_model,
+        skill_timeout_secs: c.agents.skill_timeout_secs,
+        providers,
+        active_provider: c.agents.active_provider,
+        daily_usd_cap: c.agents.daily_usd_cap,
+      },
+    };
   }
 
   /** `save_config` returns `true` when only a restart will pick up the new
    *  workspace root (everything else applies live). */
   async function persist(): Promise<boolean> {
     if (!config) return false;
-    return invokeBackend<boolean>("save_config", { newConfig: cleanConfig(config) });
+    return invokeBackend<boolean>("save_config", { newConfig: buildUpdate(config) });
   }
 
   async function saveVault() {
@@ -124,7 +158,8 @@
    *  toast can be specific; the 2026-09-08 incident was a `]`→`)` typo. */
   function providerLooksSane(): string | null {
     if (!config || !activeSettings) return null;
-    if (activeMeta.key === "required" && !activeSettings.api_key?.trim()) {
+    const hasKey = activeSettings.has_key || keyUpdateFor(activeMeta.id).kind === "set";
+    if (activeMeta.key === "required" && !hasKey) {
       return `${activeMeta.label} braucht einen API-Schlüssel.`;
     }
     if (activeMeta.id === "anthropic") return null; // blank models = free CLI default
@@ -160,11 +195,23 @@
     try {
       await persist();
       toast("Provider-Einstellungen gespeichert — gelten ab dem nächsten Agenten-Aufruf.", "info");
+      keyEdits = {};
+      await loadConfig();
       await refreshSpend();
     } catch (e) {
       toast(`Speichern fehlgeschlagen: ${e}`, "warning");
     } finally {
       savingProvider = false;
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      const loaded = await invokeBackend<ConfigView>("get_config");
+      for (const p of Object.values(loaded.agents.providers)) p.base_url ??= "";
+      config = loaded;
+    } catch {
+      config = null;
     }
   }
 
@@ -178,16 +225,7 @@
     } catch {
       info = null;
     }
-    try {
-      const loaded = await invokeBackend<Config>("get_config");
-      for (const p of Object.values(loaded.agents.providers)) {
-        p.base_url ??= "";
-        p.api_key ??= "";
-      }
-      config = loaded;
-    } catch {
-      config = null;
-    }
+    await loadConfig();
     await refreshSpend();
   });
 </script>
@@ -306,9 +344,17 @@
                       type="password"
                       autocomplete="off"
                       spellcheck="false"
-                      bind:value={config.agents.providers[pid].api_key}
-                      placeholder={activeMeta.key === "optional" ? "Platzhalter genügt für lokales Ollama" : "erforderlich"}
+                      value={keyEdits[pid] ?? ""}
+                      oninput={(e) => setKeyEdit(pid, e.currentTarget.value)}
+                      placeholder={config.agents.providers[pid].has_key
+                        ? "•••••• gespeichert — leer lassen zum Behalten"
+                        : activeMeta.key === "optional"
+                          ? "Platzhalter genügt für lokales Ollama"
+                          : "erforderlich"}
                     />
+                    {#if config.agents.providers[pid].has_key && (keyEdits[pid] ?? "") === "" && pid in keyEdits}
+                      <span class="hint">Schlüssel wird beim Speichern gelöscht.</span>
+                    {/if}
                   </label>
                 {/if}
                 <label class="field">

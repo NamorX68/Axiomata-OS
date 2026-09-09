@@ -1,8 +1,8 @@
 # Plan: model-provider hardening
 
-Status: **in progress**. Checkpoints 0–6 landed (0–3 on 2026-09-08, 4–6 on 2026-09-09);
-CP7–8 planned. Follow the owner's usual stepwise workflow — confirm each checkpoint before
-starting the next.
+Status: **in progress**. Checkpoints 0–7 landed (0–3 on 2026-09-08, 4–7 on 2026-09-09);
+only CP8 (cleanup sweep) left. Follow the owner's usual stepwise workflow — confirm each
+checkpoint before starting the next.
 
 This is the safety follow-up to `settings-provider-overhaul.md` (that plan is "complete" as a
 feature, but shipping it uncovered real holes). Keep both files: the overhaul explains *how
@@ -186,18 +186,25 @@ optional `ProviderId` overriding `active_provider` for that role), threaded thro
 pickers), `validate_for_save`, and the CP4/CP5 rollup (`provider` column already per-run, so
 that part already works). Revisit as its own plan.
 
-## Checkpoint 7 — stop shipping provider secrets to the webview
+## Checkpoint 7 — stop shipping provider secrets to the webview — **done 2026-09-09**
 
-(Carried over from the `settings-provider-overhaul` security audit, HIGH.) `get_config`
-returns every `providers[*].api_key` and every `agents.claude_env` value to the renderer —
-reachable via IPC where nothing was before.
+(Was HIGH in the `settings-provider-overhaul` security audit.) `get_config` used to hand the
+renderer the whole `Config` over IPC — every `providers[*].api_key` and every
+`agents.claude_env` value. Fixed in `apps/dashboard/src-tauri/src/commands.rs`:
 
-- `get_config` returns `api_key` redacted (a `has_key: bool`, or a masked `"…abcd"`); never
-  the raw secret.
-- `save_config` treats a redacted/sentinel `api_key` as "keep the stored one"; a real value
-  as a change; empty as an explicit clear. Or a dedicated write-only `set_provider_key`
-  command.
-- Don't send `agents.claude_env` values to the renderer at all.
+- New **`ConfigView`** (`get_config` return): `ProviderSettingsView` carries `has_key: bool`
+  instead of the key; `claude_env` is reduced to **`claude_env_keys: Vec<String>`** (names
+  only); `claude_model` (migration-only) is dropped from the wire entirely.
+- New **`ConfigUpdate`** (`save_config` arg): each provider's `api_key` is a **`KeyUpdate`**
+  enum — `Keep` (field untouched), `Clear` (emptied), `Set { value }`. `merge_view_update`
+  folds it onto the live `Config`, resolving `Keep` against the stored key and carrying
+  `claude_env` + `claude_model` over untouched. `validate_for_save` still runs on the merged
+  result (so `Keep` with no stored key for a required provider is still rejected).
+- `Settings.svelte`: key field shows `••••••  gespeichert` when `has_key`, tracks edits in a
+  `keyEdits` map, sends `keep`/`clear`/`set` accordingly; re-fetches after save. `backend.ts`
+  + `devmock.ts` updated (mock keeps the full config internally, redacts on `get_config`).
+- Tests (`commands::tests`): `ConfigView` serialisation contains no raw secret; `KeyUpdate`
+  keep/set/clear behave; a `Keep` save still validates the merged config.
 
 ## Checkpoint 8 — remaining review findings (fold in where cheap)
 
@@ -230,8 +237,8 @@ From the `settings-provider-overhaul` architecture + security reviews, not yet a
 
 ## Suggested checkpoint order
 
-0–6 done (2–5 were the safety core). Remaining: **7** (secret redaction) → **8** (cleanup
-sweep), then the separate "per-role provider" idea if the owner wants it.
+0–7 done (2–5 were the safety core). Remaining: **8** (cleanup sweep), then the separate
+"per-role provider" idea if the owner wants it.
 
 ## Commit note
 

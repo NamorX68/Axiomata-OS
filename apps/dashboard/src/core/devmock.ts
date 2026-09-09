@@ -8,17 +8,20 @@
 import type {
   AppInfo,
   ChatReply,
-  Config,
+  ConfigUpdate,
+  ConfigView,
   GraphFile,
   GraphLink,
   WorkspaceGraph,
   LoadedDashboardState,
   MemoryStatus,
   NewRoutine,
+  ProviderId,
   Routine,
   RunRecord,
   RunSummary,
   Skill,
+  SpendSummary,
   SyncReport,
 } from "./backend";
 
@@ -27,13 +30,31 @@ const delay = () => new Promise((r) => setTimeout(r, LATENCY_MS));
 
 let dashboardJson: string | null = null;
 
-/** In-memory stand-in for `~/.axiomata/config.toml`, mutated by
- *  `save_config` so the Settings dialog round-trips in browser-only mode. */
-let configState: Config = {
+/** In-memory stand-in for `~/.axiomata/config.toml` — the *full* config
+ *  including the raw keys, i.e. what lives on disk. `get_config` hands the
+ *  webview a redacted `ConfigView` derived from this; `save_config` folds a
+ *  `ConfigUpdate` back in, resolving each key per its `KeyUpdate`. */
+interface MockProvider {
+  base_url: string | null;
+  api_key: string | null;
+  chat_model: string;
+  skill_model: string;
+}
+let configState: {
+  owner: string;
+  workspace_root: string;
+  agents: {
+    ollama_model: string;
+    skill_timeout_secs: number;
+    claude_env: Record<string, string>;
+    active_provider: ProviderId;
+    providers: Record<ProviderId, MockProvider>;
+    daily_usd_cap: number | null;
+  };
+} = {
   owner: "Dev",
   workspace_root: "/Users/dev/Axiomata-Workspace",
   agents: {
-    claude_model: "claude-haiku-4-5",
     ollama_model: "llama3.2",
     skill_timeout_secs: 300,
     claude_env: {},
@@ -46,6 +67,29 @@ let configState: Config = {
     daily_usd_cap: 2,
   },
 };
+
+/** Redacted view of `configState`, mirroring `ConfigView::from_config`. */
+function configView(): ConfigView {
+  const a = configState.agents;
+  const providers = Object.fromEntries(
+    (Object.entries(a.providers) as [ProviderId, MockProvider][]).map(([id, p]) => [
+      id,
+      { base_url: p.base_url, has_key: !!p.api_key?.trim(), chat_model: p.chat_model, skill_model: p.skill_model },
+    ]),
+  ) as ConfigView["agents"]["providers"];
+  return {
+    owner: configState.owner,
+    workspace_root: configState.workspace_root,
+    agents: {
+      ollama_model: a.ollama_model,
+      skill_timeout_secs: a.skill_timeout_secs,
+      providers,
+      active_provider: a.active_provider,
+      daily_usd_cap: a.daily_usd_cap,
+      claude_env_keys: Object.keys(a.claude_env),
+    },
+  };
+}
 /** Set from the console (`window.__ax.mockCss = "..."`) to exercise the validator. */
 let mockCustomCss: string | null = null;
 export function setMockCustomCss(css: string | null): void {
@@ -338,7 +382,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         version: "0.0.0-dev",
       } satisfies AppInfo as T;
     case "get_config":
-      return structuredClone(configState) as T;
+      return configView() as T;
     case "get_spend_summary": {
       const p = configState.agents.active_provider;
       return {
@@ -347,14 +391,29 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         month_usd: p === "anthropic" ? 0 : 7.13,
         daily_cap_usd: configState.agents.daily_usd_cap,
         metered: p !== "anthropic",
-      } as T;
+      } satisfies SpendSummary as T;
     }
     case "save_config": {
-      const next = args.newConfig as Config;
+      const next = args.newConfig as ConfigUpdate;
       const workspaceChanged = next.workspace_root !== configState.workspace_root;
+      const a = configState.agents;
+      a.ollama_model = next.agents.ollama_model;
+      a.skill_timeout_secs = next.agents.skill_timeout_secs;
+      a.active_provider = next.agents.active_provider;
+      a.daily_usd_cap = next.agents.daily_usd_cap;
+      for (const [id, u] of Object.entries(next.agents.providers) as [ProviderId, ConfigUpdate["agents"]["providers"][ProviderId]][]) {
+        const stored = a.providers[id]?.api_key ?? null;
+        a.providers[id] = {
+          base_url: u.base_url,
+          api_key: u.api_key.kind === "keep" ? stored : u.api_key.kind === "set" ? u.api_key.value : null,
+          chat_model: u.chat_model,
+          skill_model: u.skill_model,
+        };
+      }
+      configState.owner = next.owner;
       // Mirror the backend: the new root is "written to disk" but the live
       // copy keeps the old one until a restart.
-      configState = { ...next, workspace_root: configState.workspace_root };
+      if (!workspaceChanged) configState.workspace_root = next.workspace_root;
       return workspaceChanged as T;
     }
     case "get_dashboard_state":
