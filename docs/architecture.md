@@ -384,11 +384,17 @@ carrying its own config.
   (`:root { --ax-*: … }` only) before injection.
 - **Connector modules — "provider = skill, not code"**: Calendar and Reminders (and Mail)
   are the pattern for any future integration behind an MCP server the app doesn't have
-  first-class Tauri commands for. A `*-digest` skill (not in this repo) reads the source via
-  an MCP server's tools and replies with one JSON object; **there is no live poll** — data
-  sits behind an MCP tool only an agent can reach, so every refresh is a real agent turn
-  (whichever run happened most recently: by hand, on a schedule via a Routine, or the tile's
-  own ↻, all the same `run_skill` mechanism). `core/skillRun.ts`'s `loadLatestSkillRun` (find
+  first-class Tauri commands for. A `*-digest` skill (seeded on first run from
+  `crates/axiomata-core/resources/<name>/SKILL.md`) reads the source via an MCP server's
+  tools and replies with one JSON object; **there is no live poll** — data sits behind an
+  MCP tool only an agent can reach, so every refresh is a real agent turn (whichever run
+  happened most recently: by hand, on a schedule via a Routine, or the tile's own ↻, all the
+  same `run_skill` mechanism). The Calendar tile goes further on the client: a Monday-first
+  **mini-month** (`core/monthGrid.ts` + `modules/MiniCalendar.svelte`) plus an agenda
+  showing only the **selected day … +7** — so `calendar-digest` fetches a wide window (this
+  month + next) once and every day-click / month-page is a free client-side filter, not a
+  new run. An **optional clock** (digital or analog, `config.showClock` / `clockStyle`) sits
+  beside the mini-month. `core/skillRun.ts`'s `loadLatestSkillRun` (find
   the most recent run of skill X) and its `stripCodeFence` (the model adds a ` ```json ` fence
   despite the SOP saying not to) are shared connector infrastructure. **Writes** (create /
   complete / delete) go through a fresh, silent one-shot **instruct turn**
@@ -480,7 +486,9 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   `srcdoc`-based HTML/course viewer (replacing an `asset://` design that never actually
   worked); the Mail module; five selectable themes (graphite, paper, steampunk, forest,
   ocean); Routines CRUD in the UI itself — edit and delete, plus a friendly interval picker
-  replacing the raw cron text field.
+  replacing the raw cron text field; every dashboard tool module made a canvas singleton;
+  the Calendar tile's mini-month + selected-day-plus-7 agenda + optional digital/analog
+  clock (`docs/plans/calendar-polish.md`).
 
 Each milestone from M1 onward was broken down into a detailed, step-by-step implementation
 plan shortly before it was actually started, rather than all at once up front — those plans

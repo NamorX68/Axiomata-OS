@@ -1,7 +1,6 @@
 # Plan: Calendar module — mini-month, 7-day agenda, optional clock
 
-Status: **in progress.** CP1–4 landed 2026-09-09; CP5 (polish/docs) planned. Follows the
-owner's stepwise workflow — confirm each checkpoint before starting the next.
+Status: **COMPLETE** — CP1–5 all landed 2026-09-09.
 
 **Owner sign-off (2026-09-09):** D1 = **Option (a)** (wide fetch + client-side filter — "find
 ich klasse, verringert die Agentaufrufe"). D2/D4/D5/D6/D7/D8/D9 recommendations accepted as
@@ -124,19 +123,26 @@ changes beyond the one SOP edit.
 - **Verified** in `agent-browser`: digital + analog both render, sized to the mini-month,
   toggle + style switch through settings.
 
-## Checkpoint 5 — polish, tests, docs
+## Checkpoint 5 — polish, tests, docs — **done 2026-09-09**
 
-- `npm run check` clean, `npx vitest run` green (new `monthGrid.test.ts`, updated
-  `calendar`-related tests). `cargo` untouched unless D1 (b).
-- Visual pass in `cargo tauri dev`: today ring, selected-day state, event dots, month
-  paging, empty 7-day window, clock on/off, digital ↔ analog, clock height == mini-month
-  height, tile at `minSize`.
-- `docs/architecture.md` §5 "connector modules" — note the calendar tile now has a
-  mini-month + 7-day agenda slice and the digest window is "this month + next".
-- `ToDo.md`: this was not on the list; no entry to close.
+- `npm run check` clean, `npx vitest run` green (226; new `monthGrid.test.ts`).
+- Visual pass done via `agent-browser` against `vite --port 1420` (the documented method for
+  mock-backed checks): today ring, selected-day filter + caption, event dots, cross-month
+  select, prev/next paging, empty 7-day window, clock on/off, digital ↔ analog, clock sized
+  to the mini-month.
+- `format.ts` `dayLabel` now judges "Today"/"Tomorrow" in **local** time (was UTC) and is
+  DST-safe — otherwise the agenda header could disagree with `monthGrid`'s `todayIso` near
+  midnight. `format.test.ts` still green.
+- `docs/architecture.md` §5 connector-modules bullet rewritten (mini-month + selected-day
+  agenda + wide digest window + optional clock); the stale "a `*-digest` skill (not in this
+  repo)" corrected to the `resources/…/SKILL.md` seed. §7 post-M6 list updated.
+- `ToDo.md`: not on the list; nothing to close.
+
+**Plan complete.** Follow-up ideas noted but not scheduled: D7's "load this range" hint when
+paging the mini-month past the fetched window; extracting `calendar.svelte`'s create-form
+into its own component (the file is ~400 lines now).
 
 ## Suggested order
 
 Decisions settled (D1–D10). **CP1** (widget) → **CP2** (layout) → **CP3** (SOP window) →
-**CP4** (clock) → **CP5** (polish/docs). CP1–2 and CP4 are frontend-only; CP3 is a one-file
-SOP edit (Option a) plus the live `~/.axiomata/skills/` copy.
+**CP4** (clock) → **CP5** (polish/docs) — all landed 2026-09-09.

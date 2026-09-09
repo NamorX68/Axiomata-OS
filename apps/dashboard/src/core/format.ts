@@ -53,12 +53,17 @@ export function absoluteTime(iso: string | null | undefined): string {
 }
 
 /** "Today", "Tomorrow", or a short locale weekday + date — for a
- *  `YYYY-MM-DD` day (the `calendar` module's agenda-list day headers). */
+ *  `YYYY-MM-DD` day (the `calendar` module's agenda-list day headers).
+ *  "Today"/"Tomorrow" are judged in **local** time (matching the events'
+ *  local wall-clock dates), not UTC — otherwise near midnight the header
+ *  could disagree with `core/monthGrid.ts`'s `todayIso`. */
 export function dayLabel(day: string, now = Date.now()): string {
+  const localIso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const base = new Date(now);
-  const todayIso = base.toISOString().slice(0, 10);
-  const tomorrowIso = new Date(base.getTime() + DAY).toISOString().slice(0, 10);
-  if (day === todayIso) return "Today";
-  if (day === tomorrowIso) return "Tomorrow";
+  const tomorrow = new Date(base);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (day === localIso(base)) return "Today";
+  if (day === localIso(tomorrow)) return "Tomorrow";
   return new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
