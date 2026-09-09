@@ -1,6 +1,6 @@
 # Plan: Calendar module — mini-month, 7-day agenda, optional clock
 
-Status: **in progress.** CP1 landed 2026-09-09; CP2–5 planned. Follows the owner's stepwise
+Status: **in progress.** CP1–2 landed 2026-09-09; CP3–5 planned. Follows the owner's stepwise
 workflow — confirm each checkpoint before starting the next.
 
 **Owner sign-off (2026-09-09):** D1 = **Option (a)** (wide fetch + client-side filter — "find
@@ -69,26 +69,24 @@ changes beyond the one SOP edit.
   `monthOf`/`shiftMonth`, `weekRange`, grid is always 6×7 Monday-first, exactly-one-today,
   filler flags, label, `weekdayLabels`. `npm run check` + vitest (226) green.
 
-## Checkpoint 2 — Calendar module layout rework
+## Checkpoint 2 — Calendar module layout rework — **done 2026-09-09**
 
-- New top region in `calendar.svelte`: a flex row — `MiniCalendar` on the left, and when
-  `$config.showClock` the `Clock` (CP4) immediately to its **right**. The row's height is
-  driven by the mini-month; the clock is told that height (see CP4) so the two align. When
-  the clock is off the mini-month keeps its natural width (left-aligned, not stretched).
-- `selectedDay = $state(todayIso())`; `viewMonth = $state(monthOf(selectedDay))`.
-  `MiniCalendar` `select` sets `selectedDay` (and `viewMonth` if the click was an adjacent-
-  month day); `page` shifts `viewMonth` only.
-- **Agenda below** = `groupByDay(filterByCalendar(digest.events, …).filter(e => weekRange(selectedDay).includes(e.start.slice(0,10))))`.
-  Keep the existing day headers (`dayLabel`), event rows, delete button, empty-state (D6).
-- `eventDays` for the mini-month = `new Set(filteredEvents.map(e => e.start.slice(0,10)))`
-  intersected with the visible month.
-- Keep: calendar-filter `<select>`, `+` create form (default its date to `selectedDay`, not
-  `today`), last-run indicator, `↻`, mount-time `loadLatest().then(refreshNow)`.
-- The `list` bridge action (`modules/index.ts`) gains an optional `from`/`days` param so the
-  agent can ask for "the week of <date>" against the cached digest (no re-run) — mirrors the
-  client-side filter.
-- `devmock.ts`: widen the mock calendar events to span ~6 weeks and a couple of past days so
-  the mini-month + paging are visible in browser-only dev.
+- `calendar.svelte`: a `.top` flex row — `<MiniCalendar>` on the left (a `<!-- CP4 -->`
+  placeholder marks where the clock mounts to its right). `selectedDay = $state(today)`,
+  `viewMonth = $state(monthOf(today))`; `pickDay(iso)` sets `selectedDay` and pulls
+  `viewMonth` along on a cross-month click, `pageMonth(delta)` shifts `viewMonth` only.
+- Agenda = `groupByDay(filteredEvents.filter(e => weekRange(selectedDay).has(e.start.slice(0,10))))`
+  with a `{dayLabel(selectedDay)} – {end}` caption; empty-window → "Keine Termine … in
+  diesem Zeitraum." `eventDays` (a `Set` over all filtered events) feeds the grid dots.
+- Kept: calendar filter, `+` create (its date defaults to `selectedDay`), last-run, `↻`,
+  mount refresh. Tile `defaultSize` 380×540 / `minSize` 300×420; mini-month `width: 13rem`.
+- `list` bridge action gained optional `from` / `days` (default today / 7) — the same
+  client-side window filter, no re-run.
+- `devmock.ts` calendar fixture now spans ~6 weeks (a couple past, several this week, two
+  next month).
+- **Verified** via `agent-browser` against `vite --port 1420`: mini-month renders (today
+  ring, dots), day-select re-filters the agenda + caption, cross-month select pulls the grid
+  along, prev/next paging leaves the selection alone, empty 7-day window shows the fallback.
 
 ## Checkpoint 3 — skill window (Option a per D1/D5)
 
