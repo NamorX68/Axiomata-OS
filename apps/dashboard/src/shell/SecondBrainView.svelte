@@ -429,7 +429,10 @@
       return;
     }
     const isHtml = /\.html?$/i.test(path);
-    if (!(node?.isMarkdown ?? node?.kind === "hub") && !isHtml) {
+    // Preview any text file (notes, HTML, source code, …); only images have
+    // no text to show. A binary that slips through fails the read below and
+    // shows "Preview unavailable."
+    if (/\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif|ico|icns)$/i.test(path)) {
       preview = null;
       previewState = "none";
       return;

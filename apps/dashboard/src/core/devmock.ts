@@ -386,9 +386,11 @@ function mockGraph(): WorkspaceGraph {
     ["BlockOS/0000-roadmap.html", "BlockOS Roadmap"],
     ["BlockOS/0001-freestanding-binary.html", "Freestanding Binary"],
     ["BlockOS/0002-minimal-kernel.html", "Minimal Kernel"],
+    ["Rust/snippets/hello.rs", "hello.rs"],
   ] as const) {
     files.push({ path: `Learning/${rel}`, area: "Learning", title, bytes: 24_000, modified: new Date().toISOString(), is_markdown: rel.endsWith(".md") });
   }
+  files.push({ path: "config/settings.json", area: "config", title: "settings.json", bytes: 90, modified: new Date().toISOString(), is_markdown: false });
   const links: GraphLink[] = [
     { from: "Learning/Rust/lessons/0000-roadmap.html", to: "Learning/Rust/lessons/0001-hallo-rust.html" },
     { from: "Learning/Rust/lessons/0001-hallo-rust.html", to: "Learning/Rust/lessons/0002-variablen.html" },

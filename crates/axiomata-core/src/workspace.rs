@@ -253,10 +253,39 @@ pub const SNIPPET_CHARS: usize = 160;
 /// Files larger than this are skipped by the search.
 pub const SEARCH_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
-/// Case-insensitive full-text search over the tracked `.md` / `.html` / `.txt`
-/// files (the memory walker's file set, so hidden and ignored paths are
-/// skipped). Every whitespace-separated word must occur on the same line.
-/// Returns at most `limit` files, best (most matching lines) first.
+/// Extensions the full-text search **skips** — binary / opaque formats where
+/// line scanning is meaningless. Everything else in the (hand-curated)
+/// workspace is indexed as long as it reads as UTF-8 and is under
+/// [`SEARCH_MAX_FILE_BYTES`] — so notes, HTML, and source files (`.rs`,
+/// `.py`, `.toml`, …) all match.
+const SEARCH_SKIP_EXTS: &[&str] = &[
+    // images
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "ico",
+    "icns", // audio / video
+    "mp3", "wav", "flac", "aac", "ogg", "m4a", "mp4", "m4v", "mov", "avi", "mkv", "webm",
+    // archives
+    "zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar", "jar", "war",
+    // documents / office
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "key", "pages", "numbers",
+    // fonts
+    "ttf", "otf", "woff", "woff2", "eot", // compiled / db / other binary
+    "so", "dylib", "dll", "a", "o", "exe", "bin", "wasm", "class", "pyc", "db", "sqlite",
+    "sqlite3",
+];
+
+/// Whether the full-text search should scan this (lowercased) workspace path.
+fn is_search_indexed(rel_lower: &str) -> bool {
+    match rel_lower.rsplit_once('.') {
+        Some((_, ext)) => !SEARCH_SKIP_EXTS.contains(&ext),
+        None => true, // README, Dockerfile, Makefile, LICENSE, …
+    }
+}
+
+/// Case-insensitive full-text search over the workspace's text files (the
+/// memory walker's file set, so hidden and ignored paths are skipped; binary
+/// extensions are skipped too — see [`SEARCH_SKIP_EXTS`]). Every
+/// whitespace-separated word must occur on the same line. Returns at most
+/// `limit` files, best (most matching lines) first.
 pub fn search(config: &Config, query: &str, limit: usize) -> Result<Vec<SearchHit>, AxiomataError> {
     let words: Vec<String> = query.split_whitespace().map(|w| w.to_lowercase()).collect();
     if words.is_empty() {
@@ -271,11 +300,7 @@ pub fn search(config: &Config, query: &str, limit: usize) -> Result<Vec<SearchHi
     let mut hits = Vec::new();
     for rel in entries {
         let lower = rel.to_lowercase();
-        if !(lower.ends_with(".md")
-            || lower.ends_with(".html")
-            || lower.ends_with(".htm")
-            || lower.ends_with(".txt"))
-        {
+        if !is_search_indexed(&lower) {
             continue;
         }
         let full = root.join(&rel);
@@ -784,14 +809,24 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("notes/skip.png"), "ownership").unwrap();
+        // Source files are indexed too now (curated vault) — this `.rs` has
+        // three "ownership" lines, so it ranks first.
+        fs::write(
+            root.join("notes/example.rs"),
+            "// ownership demo\nlet a = String::from(\"ownership\");\ndrop(a); // ownership moved\n",
+        )
+        .unwrap();
         let hits = search(&config, "OWNERSHIP", 10).unwrap();
         assert_eq!(
             hits.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(),
-            vec!["notes/rust.md", "Learning/l1.html"]
+            vec!["notes/example.rs", "notes/rust.md", "Learning/l1.html"]
         );
-        assert_eq!(hits[0].matches, 2);
-        assert_eq!(hits[0].line, 3);
-        assert_eq!(hits[1].snippet, "Lektion 1Ownership & erkl\u{e4}rt");
+        assert_eq!(hits[0].matches, 3);
+        assert_eq!(hits[1].matches, 2);
+        assert_eq!(hits[1].line, 3);
+        assert_eq!(hits[2].snippet, "Lektion 1Ownership & erkl\u{e4}rt");
+        // …but the binary `.png` (also containing the word) stays out.
+        assert!(hits.iter().all(|h| h.path != "notes/skip.png"));
         assert!(search(&config, "ownership again", 10).unwrap().len() == 1);
         assert!(search(&config, "   ", 10).unwrap().is_empty());
         assert_eq!(search(&config, "ownership", 1).unwrap().len(), 1);
