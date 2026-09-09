@@ -4,15 +4,11 @@
   instruction, plain text is a chat turn. ↑/↓ walk the input history.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
-
-  import { on } from "../core/bus";
   import { busy, panelOpen, pushInstruction, send, turns } from "../core/chat";
   import { route, runCommand } from "../core/commands";
   import { toast } from "../core/toast";
 
   let input = $state("");
-  let field = $state<HTMLInputElement | null>(null);
   let history = $state<string[]>([]);
   let cursor = $state(-1);
 
@@ -49,14 +45,14 @@
     }
   }
 
-  onMount(() => on("shell:search", () => field?.focus()));
+  // `shell:search` (the top-bar search icon) opens the Second Brain search
+  // now — handled in `App.svelte` — not this chat field.
 </script>
 
 <div class="dock">
 <form class="bar" onsubmit={submit}>
   <span class="prompt" aria-hidden="true">›</span>
   <input
-    bind:this={field}
     bind:value={input}
     type="text"
     {placeholder}
