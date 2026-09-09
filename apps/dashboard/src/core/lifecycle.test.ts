@@ -16,11 +16,14 @@ describe("createInstance", () => {
   });
 
   it("uses the definition's default size and cascades positions", () => {
-    const a = createInstance("memory-status");
-    const b = createInstance("memory-status");
+    // `md-file` is one of the few non-singleton modules — every dashboard
+    // tool (memory, skills, routines, mail, calendar, reminders, todo) is now
+    // limited to a single instance.
+    const a = createInstance("md-file");
+    const b = createInstance("md-file");
     expect(a.ok && b.ok).toBe(true);
     if (!a.ok || !b.ok) return;
-    expect(a.instance).toMatchObject({ x: ORIGIN.x, y: ORIGIN.y, w: 360, h: 150, z: 1 });
+    expect(a.instance).toMatchObject({ x: ORIGIN.x, y: ORIGIN.y, w: 480, h: 420, z: 1 });
     expect(b.instance).toMatchObject({ x: ORIGIN.x + CASCADE_PX, y: ORIGIN.y + CASCADE_PX, z: 2 });
     expect(get(instances)).toHaveLength(2);
   });

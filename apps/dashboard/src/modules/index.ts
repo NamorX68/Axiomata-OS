@@ -57,6 +57,8 @@ export function registerBuiltins(): void {
     settings: MemoryStatusSettings,
     defaultSize: { w: 360, h: 150 },
     minSize: { w: 240, h: 90 },
+    // One workspace → one router status. No reason for a second tile.
+    singleton: true,
     actions: [
       {
         name: "sync",
@@ -81,6 +83,8 @@ export function registerBuiltins(): void {
     settings: SkillsDeckSettings,
     defaultSize: { w: 420, h: 240 },
     minSize: { w: 220, h: 120 },
+    // Shows every discovered skill — one deck is the whole set.
+    singleton: true,
     actions: [
       {
         name: "run",
@@ -106,6 +110,8 @@ export function registerBuiltins(): void {
     // Tall enough for the flip-side add-routine form without scrolling.
     defaultSize: { w: 440, h: 340 },
     minSize: { w: 280, h: 120 },
+    // Lists every routine — one board is the whole schedule.
+    singleton: true,
     actions: [
       {
         name: "add",
