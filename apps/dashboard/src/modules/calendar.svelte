@@ -46,6 +46,7 @@
   import { monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
   import { resolveSkillName } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
+  import Clock from "./Clock.svelte";
   import MiniCalendar from "./MiniCalendar.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -94,6 +95,15 @@
   function pageMonth(delta: number) {
     viewMonth = shiftMonth(viewMonth, delta);
   }
+
+  // Optional clock (right of the mini-month) — toggled + styled in settings.
+  // `miniH` is the mini-month's rendered height so the clock lines up with it.
+  let miniH = $state(0);
+  const showClock = $derived($config.showClock === true);
+  const clockStyle = $derived($config.clockStyle === "analog" ? "analog" : "digital");
+  // Track the mini-month height, but cap it so the clock still fits beside a
+  // 13rem grid in a default-width tile (the row wraps below that).
+  const clockSize = $derived(Math.min(miniH, 128));
 
   function selectCalendar(e: Event) {
     selectedCalendar = (e.currentTarget as HTMLSelectElement).value;
@@ -236,15 +246,19 @@
   </div>
 
   <div class="top">
-    <MiniCalendar
-      month={viewMonth}
-      selected={selectedDay}
-      {today}
-      {eventDays}
-      onSelect={pickDay}
-      onPage={pageMonth}
-    />
-    <!-- CP4: optional <Clock /> mounts here, right of the mini-month -->
+    <div class="mini-wrap" bind:clientHeight={miniH}>
+      <MiniCalendar
+        month={viewMonth}
+        selected={selectedDay}
+        {today}
+        {eventDays}
+        onSelect={pickDay}
+        onPage={pageMonth}
+      />
+    </div>
+    {#if showClock && clockSize > 0}
+      <Clock style={clockStyle} size={clockSize} />
+    {/if}
   </div>
 
   {#if showCreate}
@@ -359,17 +373,20 @@
   .top {
     display: flex;
     align-items: flex-start;
+    flex-wrap: wrap;
     gap: var(--ax-space-3);
     flex: 0 0 auto;
   }
-  .top :global(.mini) {
-    /* Compact so the agenda below still has room; the mini-month drives the
-       row height and the clock (CP4) matches it. */
+  .mini-wrap {
     flex: 0 0 auto;
+  }
+  .mini-wrap :global(.mini) {
+    /* Compact so the agenda below still has room; the mini-month drives the
+       row height and the clock matches it (`size` prop). */
     width: 13rem;
     max-width: 100%;
   }
-  .top :global(.mini .day) {
+  .mini-wrap :global(.mini .day) {
     font-size: var(--ax-font-size-xs);
   }
 

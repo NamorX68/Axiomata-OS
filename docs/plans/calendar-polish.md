@@ -1,7 +1,7 @@
 # Plan: Calendar module — mini-month, 7-day agenda, optional clock
 
-Status: **in progress.** CP1–3 landed 2026-09-09; CP4–5 planned. Follows the owner's stepwise
-workflow — confirm each checkpoint before starting the next.
+Status: **in progress.** CP1–4 landed 2026-09-09; CP5 (polish/docs) planned. Follows the
+owner's stepwise workflow — confirm each checkpoint before starting the next.
 
 **Owner sign-off (2026-09-09):** D1 = **Option (a)** (wide fetch + client-side filter — "find
 ich klasse, verringert die Agentaufrufe"). D2/D4/D5/D6/D7/D8/D9 recommendations accepted as
@@ -105,30 +105,24 @@ changes beyond the one SOP edit.
   (defaults today…+7 in the SOP), the module passes `from=<selectedDay>`. Costs one agent
   turn per out-of-cache selection — gate behind the CP5 spend guard, show the spinner.)*
 
-## Checkpoint 4 — optional clock (digital / analog)
+## Checkpoint 4 — optional clock (digital / analog) — **done 2026-09-09**
 
-- **`modules/Clock.svelte`** — one component, `style: "digital" | "analog"` and `size`
-  (px, = the mini-month's rendered height, passed from `calendar.svelte`) props.
-  - Ticks: a single `setInterval` (20 s), `clearInterval` on destroy, recompute from
-    `new Date()` each tick (drift-free, no accumulation).
-  - **Digital**: `HH:mm` (24 h) large, weekday + `D. MMM YYYY` line under it (locale). Font
-    size scales off `size`.
-  - **Analog**: an inline `<svg viewBox="0 0 100 100">` face `size`×`size` — 12 tick marks,
-    hour + minute hands rotated via `transform`, optional slim second hand (jumps every
-    20 s — acceptable, or drop it). Face / hands / ticks all `--ax-*` tokens
-    (`--ax-border`, `--ax-text`, `--ax-accent` for the hands). Legible in light + dark.
-  - Purely presentational — no `ctx` needed; `calendar.svelte` owns the config read.
-- **Options** (`calendar-settings.svelte`, `config.update` pattern like
-  `todo-settings.svelte`):
-  - `showClock: boolean` — a checkbox, default `false`.
-  - `clockStyle: "digital" | "analog"` — a small radio / segmented control, default
-    `"digital"`, only shown when `showClock` is on.
-- `calendar.svelte` renders `<Clock style={clockStyle} size={miniMonthHeight} />` to the
-  right of the mini-month only when `$config.showClock`. `miniMonthHeight` comes from a
-  `bind:clientHeight` on the mini-month wrapper (or a shared fixed token if that's simpler).
-- Config keys are free-form per-instance `config` entries (the canvas stores `config` as an
-  opaque `Record<string, unknown>`), so **no `backend.ts` schema change** — read them
-  defensively (`$config.clockStyle === "analog" ? "analog" : "digital"`).
+- **`modules/Clock.svelte`** — `style: "digital" | "analog"` + `size` (px) props, one
+  `setInterval(20 s)` recomputing `new Date()`, `clearInterval` on destroy.
+  - **Digital**: `HH:mm` (24 h) + a `weekday, D. MMM YYYY` line, font sizes derived from
+    `size` and capped (36 / 13 px) so a wide time string can't overflow the tile.
+  - **Analog**: inline `<svg viewBox="0 0 100 100">` `size`×`size` — 12 ticks, white hour
+    hand, `--ax-accent` minute hand, accent centre pin; all `--ax-*` tokens.
+- **`calendar-settings.svelte`**: `showClock` checkbox (default off) + a `clockStyle`
+  radio group (`digital` / `analog`, shown only when the clock is on), both via
+  `config.update`.
+- **`calendar.svelte`**: `bind:clientHeight` on a `.mini-wrap` → `clockSize =
+  min(miniH, 128)` → `<Clock size={clockSize}>` right of the mini-month when
+  `$config.showClock`. `.top` is `flex-wrap: wrap` so the clock drops below the grid in a
+  narrow tile instead of overflowing. Config keys are free-form per-instance entries — no
+  `backend.ts` change; read defensively.
+- **Verified** in `agent-browser`: digital + analog both render, sized to the mini-month,
+  toggle + style switch through settings.
 
 ## Checkpoint 5 — polish, tests, docs
 
