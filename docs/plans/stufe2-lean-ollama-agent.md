@@ -1,17 +1,21 @@
 # Plan: Stufe 2 — a lean local agent for connector digests
 
-Status: **CP1 + CP2 done; CP3 spec'd in detail.** CP1 (`54173bf`): the
-`[mcp_servers]` config schema, a hand-rolled stdio MCP client
+Status: **CP1 + CP2 + CP3-mechanisms done; CP3 bake-off round 1 done.** CP1
+(`54173bf`): the `[mcp_servers]` config schema, a hand-rolled stdio MCP client
 (`crates/axiomata-core/src/mcp/mod.rs`), the `axiomata-cli mcp import` helper —
 verified against the real `apple-mail` (27 tools) and `apple-reminders`
 (5 tools) servers. CP2 (`e2a2b28`): `AgentBackend::OllamaAgent` +
 `crates/axiomata-core/src/agents/ollama_agent.rs` (bounded tool-call loop), the
 two `AgentRequest` fields, the `runner` arms, 14 tests incl. two `FakeOllama`
-loop tests. **CP3 is next** — two runner mechanisms so that selecting **Ollama
-as the skill provider** makes *all three* connector digests run on
-`ollama-agent` (one switch, auto-reverting), then a candidate-model bake-off.
-See **"CP3 — implementation plan (detail)"**. Follows Stufe 1 (drop
-`module-context.md` from skill runs, `42fc45d`).
+loop tests. **CP3 mechanisms** (2026-09-10): `local_backend` /
+`effective_backend` (provider-driven selection), `prepend_files` (feeds
+`Mail/.topics.md` into the prompt), per-turn loop `tracing::info!`,
+`axiomata-cli get-run <id>`, the three digest `SKILL.md` edits, unit tests.
+**CP3 bake-off round 1:** see `docs/plans/stufe2-cp3-bakeoff.md` — the switch
+works (all three digests resolve to `ollama-agent` under `skill_provider =
+ollama`); gemma4:e4b-mlx clears reminders 2/2 but calendar/mail emit broken
+JSON and Spark-X2.5-4B cannot load on Ollama 0.33.3. **CP4 is next** (docs,
+spend-guard fix, Settings hint).
 
 ## Context
 
@@ -106,8 +110,8 @@ the `apple-mail` / `apple-reminders` MCP servers itself and speak the protocol.
   `Mail/.topics.md` into the prompt — unblocks `mail-digest`, which has no file
   tool locally). All three digests get `local_backend: ollama-agent`; `cleanup`
   does not. Plus one `tracing::info!` per loop turn. Then a bake-off under a
-  scratch `AXIOMATA_HOME` against real Ollama + MCP over `gemma4:e4b-mlx` /
-  `granite4.2:8b` / `lfm2.5:8b` (**last two need `ollama pull`**); pass =
+  scratch `AXIOMATA_HOME` against real Ollama + MCP over a 4-model roster
+  (`gemma4:e4b-mlx` / `gemma4:12b-mlx` / `granite4.2:8b` / `lfm2.5:8b`); pass =
   `Success` + shape-valid stdout + under `timeout_secs`, 2/2 runs (mail summary
   *quality* judged separately). **Full spec: "CP3 — implementation plan
   (detail)" below.**
@@ -650,10 +654,18 @@ missing file skipped, `..`/absolute rejected).
 
 ### Bake-off procedure
 
-Candidate models (confirm exact tags with `ollama list` first — owner's local
-names): `gemma4:e4b-mlx` (re-test without the Claude-Code framing),
-`granite4.2:8b`, `lfm2.5:8b`. **`granite4.2:8b` and `lfm2.5:8b` need
-`ollama pull <tag>` — not local yet.**
+Candidate roster (4, owner-set 2026-09-11 — confirm exact tags with
+`ollama list`):
+
+| tag | size | note |
+|---|---|---|
+| `gemma4:e4b-mlx` | ~4B | round 1: reminders 2/2, calendar/mail broke JSON — the fast baseline |
+| `gemma4:12b-mlx` | 12B | the Context table's ">600 s timeout" verdict was under the *old* `claude -p` framing — worth a fresh run now that it's gone; expect it to be the slow one, the 600 s ceiling is the real risk here |
+| `granite4.2:8b` | 8B | pulled 2026-09-11 |
+| `lfm2.5:8b` | 8B | pulled 2026-09-11 |
+
+Spread is 4B / 8B / 8B / 12B — if none of the 8B/12B clear a digest that
+`gemma4:e4b-mlx` also fails, that digest is cloud-only for now.
 
 - **`SparkLLM/Spark-X2.5-4B:latest`** (owner suggestion, 2026-09-10) — 4.11B,
   ~1M ctx, markets "strong agent/coding" + tool use. **Two gates before it can
