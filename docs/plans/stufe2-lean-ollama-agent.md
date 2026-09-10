@@ -7,15 +7,16 @@ verified against the real `apple-mail` (27 tools) and `apple-reminders`
 (5 tools) servers. CP2 (`e2a2b28`): `AgentBackend::OllamaAgent` +
 `crates/axiomata-core/src/agents/ollama_agent.rs` (bounded tool-call loop), the
 two `AgentRequest` fields, the `runner` arms, 14 tests incl. two `FakeOllama`
-loop tests. **CP3 mechanisms** (2026-09-10): `local_backend` /
-`effective_backend` (provider-driven selection), `prepend_files` (feeds
-`Mail/.topics.md` into the prompt), per-turn loop `tracing::info!`,
-`axiomata-cli get-run <id>`, the three digest `SKILL.md` edits, unit tests.
-**CP3 bake-off round 1:** see `docs/plans/stufe2-cp3-bakeoff.md` — the switch
-works (all three digests resolve to `ollama-agent` under `skill_provider =
-ollama`); gemma4:e4b-mlx clears reminders 2/2 but calendar/mail emit broken
-JSON and Spark-X2.5-4B cannot load on Ollama 0.33.3. **CP4 is next** (docs,
-spend-guard fix, Settings hint).
+loop tests. **CP3 mechanisms** (`3a63f58`, 2026-09-11):
+`local_backend` / `Skill::effective_backend` (provider-driven backend
+selection), `prepend_files` + `build_prompt` (feeds `Mail/.topics.md` into the
+prompt), per-turn loop `tracing::info!`, `axiomata-cli get-run <id>`, the three
+digest `SKILL.md` edits, 6 unit tests. **CP3 bake-off round 1:** see
+`docs/plans/stufe2-cp3-bakeoff.md` — the switch works (all three digests
+resolve to `ollama-agent` under `skill_provider = ollama`); `gemma4:e4b-mlx`
+clears reminders 2/2, calendar/mail emit broken JSON; `Spark-X2.5-4B` can't
+load on Ollama 0.33.3; `granite4.2:8b` / `lfm2.5:8b` pulled 2026-09-11, round 2
+pending. **CP4 is next and last** — see "CP4 — implementation plan (detail)".
 
 ## Context
 
@@ -115,14 +116,23 @@ the `apple-mail` / `apple-reminders` MCP servers itself and speak the protocol.
   `Success` + shape-valid stdout + under `timeout_secs`, 2/2 runs (mail summary
   *quality* judged separately). **Full spec: "CP3 — implementation plan
   (detail)" below.**
-- **CP4 — docs + polish.** `docs/architecture.md` §6 "Agent backends" (three
-  variants) + the connector-module note; project `CLAUDE.md`'s backend list.
-  A one-line Settings hint under `skill_provider` ("Ollama → digests run
-  locally, no cloud cost"). The spend-guard fix (skip `guard_redirected_turn`
-  when the resolved backend is local). Optionally a `claude-code` fallback when
-  Ollama is unreachable. Update `docs/plans/per-role-provider.md`'s "Stufe 2"
-  pointer. (The "flip the default" question is **answered** — it's the
-  `skill_provider` switch, not a hardcoded flip.)
+- **CP4 — docs + polish (last checkpoint).** `docs/architecture.md`
+  §"Agent backends" (three variants now) + §"Model providers" (the
+  `local_backend` switch) + §5/§7 milestone landing; project `CLAUDE.md`
+  (commands, the connector-module exception). A one-line Settings hint under
+  `skill_provider` when it's `ollama`. Observability polish: set `num_turns` on
+  `ollama-agent` results, an explicit "final answer" trace line, a
+  `debug!` on a skipped `prepend_files` entry. Decide (a note counts): the
+  `build_prompt` error path, and the spend-guard corner
+  (`guard_redirected_turn` before backend resolution — moot on the
+  `skill_provider = ollama` path). Handle the **bundled-skill re-seed gotcha**
+  (`seed_skill` is seed-if-absent → `resources/` edits don't reach an existing
+  install): a `CLAUDE.md` note or an `axiomata-cli skills reseed --force`.
+  Update `docs/plans/per-role-provider.md`'s "Stufe 2" pointer. **Full spec:
+  "CP4 — implementation plan (detail)" below.** (The "flip the default"
+  question is **answered** — it's the `skill_provider` switch. A `claude-code`
+  fallback when Ollama is down is **out of scope** — it would silently bill
+  cloud after the user picked local.)
 
 ## CP2 — implementation plan (detail)
 
@@ -765,15 +775,144 @@ Validator: `list-runs --limit 1` → id → `get-run <id>` → `jq -e`.
   `FakeOllama` tests cover the loop glue; CP3's residual branches (multi-call
   turns, `MAX_ITERS`, `is_error`) get eyeballed during the bake-off.
 
-### CP4 note (spend guard)
+## CP4 — implementation plan (detail)
 
-With the `local_backend` design the earlier wrinkle is largely moot: the switch
-*is* `skill_provider = ollama`, so `guard_redirected_turn` checks the Ollama
-provider, whose recorded spend is always 0 (`ollama-agent` runs record
-`provider: None`) — the guard passes. It only bites if a `SKILL.md` sets
-`backend: ollama-agent` *directly* while `skill_provider` is a paid provider
-over its cap. Still worth fixing in CP4 (guard should skip when the resolved
-backend is local), but no longer on the CP3 path.
+Checked against `3a63f58` (CP3 mechanisms shipped). CP4 is **the last
+checkpoint of Stufe 2** — docs to catch up with reality, a one-line Settings
+hint, small observability polish, and one deploy gotcha. No behaviour change of
+substance. After CP4, Stufe 2 is a complete feature; what's left (below,
+"After CP4") is operational, not a checkpoint.
+
+### A. Docs — the bulk of CP4
+
+`docs/architecture.md`:
+- §"Agent backends (`agents/`)" — the `enum` is now
+  `AgentBackend { ClaudeCode, Ollama { model }, OllamaAgent { model } }`. Add a
+  bullet for `ollama_agent.rs`: the bounded `POST /api/chat` tool-call loop
+  (`ollama-rs` native tools, non-stream, `MAX_ITERS` + `timeout`), the CP1 MCP
+  client it drives, `shutdown` on every exit path. Note the two new
+  `AgentRequest` fields (`mcp_servers`, `ollama_base_url`) other backends ignore.
+- §"Model providers" — add: `skill_provider = ollama` no longer just redirects
+  `claude -p`; a skill with `local_backend:` frontmatter *resolves to a
+  different backend* (`ollama-agent`) under that provider, via
+  `Skill::effective_backend`. The three connector digests opt in; `cleanup`
+  does not.
+- New short §: **`local_backend` + `prepend_files`** (or fold into "Model
+  providers") — the CP3 mechanisms, one paragraph each, pointing here.
+- line ~91 "agent backend dispatch (Claude Code / Ollama)" → "… / Ollama /
+  ollama-agent".
+- §5 "what exists" + §7 milestone history — add the Stufe 2 landing
+  (CP1 MCP client + `[mcp_servers]`; CP2 `OllamaAgent`; CP3 the switch +
+  `prepend_files`; bake-off ongoing). This is exactly the "update it when a
+  milestone lands" the file's own maintenance note asks for.
+
+Project `CLAUDE.md` ("traps worth knowing"):
+- backend list / commands: add `mcp import|list|tools`, `get-run`, the
+  `ollama-agent` backend, `local_backend:` / `prepend_files:` frontmatter.
+- the "connector = provider = skill, not code" trap gets its Stufe 2 exception
+  spelled out: for the *local* case a digest runs a real Rust loop
+  (`ollama-agent`), selected by `skill_provider = ollama` + `local_backend`.
+
+`docs/plans/per-role-provider.md` — its "Stufe 2" pointer: mark CP1–CP3 done,
+point at `stufe2-cp3-bakeoff.md` for model status.
+
+### B. Settings hint (small UI)
+
+`apps/dashboard/src/shell/Settings.svelte` (~line 423, under the
+`skill_provider` `<select>`): a hint line shown only when
+`config.agents.skill_provider === "ollama"`, e.g. *"Connector digests run
+locally via the tool-call agent — no cloud cost."* All colours/sizes via
+`--ax-*` tokens, no literals (theme rule). Static text — `devmock.ts` needs
+nothing. `npm run check` must stay clean.
+
+### C. Observability polish (from the CP3 review)
+
+In `agents/ollama_agent.rs`:
+- set `num_turns: Some((turn + 1) as u32)` on the returned `AgentRunResult`
+  instead of `bare()`'s `None`, so step count shows in `list-runs` / `get-run`
+  without `RUST_LOG` (the loop counter is right there).
+- an explicit `tracing::info!(turn, "ollama-agent: final answer")` on the
+  `Step::Final` branch (right now "final" is inferred from the *absence* of a
+  "dispatching" line).
+
+In `skills/runner.rs` `build_prompt`:
+- `tracing::debug!(rel, "prepend_files: skipping a missing/unreadable context file")`
+  in the `_ => {}` arm, so a typo'd path is diagnosable instead of silently
+  yielding no context.
+
+### D. `build_prompt` error path — decide
+
+A bad `prepend_files` entry (`..` / absolute) makes `execute_skill` return
+`Err(InvalidSkill)`, so `execute_and_record_skill` persists **no run** —
+unlike the unknown-backend case, which records a `Failed` run the dashboard
+can show. Moot for the three digests (paths are correct + tested); matters
+only for a future misconfigured skill.
+- **Minimum:** a line in `execute_skill`'s doc comment — `prepend_files` path
+  errors join the "resolution failure → `Err`, nothing recorded" bucket.
+- **Or:** map it to `failure_record(&skill.name, backend_id, …)` like the
+  unknown-backend arm, for dashboard visibility. Cheap; slightly more
+  consistent. Recommended if touching the file anyway.
+
+### E. Spend guard — document, don't fix (unless trivial)
+
+`guard_redirected_turn` runs in `execute_and_record_skill` *before* the
+backend is resolved. With the `local_backend` design this is a non-issue on
+the intended path: `skill_provider = ollama` ⇒ the guard checks the Ollama
+provider, whose recorded spend is ~0 (`ollama-agent` runs record
+`provider: None`) ⇒ guard passes. It only bites a `SKILL.md` that hard-codes
+`backend: ollama-agent` *while* `skill_provider` is a paid provider over its
+cap — a corner the mechanism is designed to avoid.
+- **CP4:** a one-paragraph note in `docs/architecture.md` §"Model providers"
+  (spend bullet) is enough.
+- **If fixing:** move the `guard_redirected_turn` call out of
+  `execute_and_record_skill` into `run_on_backend` (right after
+  `provider_label`), and skip it for `AgentBackend::Ollama | OllamaAgent`.
+  Check the routine scheduler's own guard call (`routines::scheduler`) too —
+  it has the same shape. Not required for CP4.
+
+### F. Deploy gotcha — bundled-skill re-seed
+
+`skills::seed_skill` is **seed-if-absent** (`create_new`; an existing
+`SKILL.md` is left untouched). So the `resources/` edits (`local_backend:` on
+all three digests, `prepend_files:` + the step-1 reword on `mail-digest`)
+**do not reach an install whose `~/.axiomata/skills/<name>/SKILL.md` already
+exists** — only a fresh `AXIOMATA_HOME` picks them up. The owner's machine is
+already hand-synced (verified in the CP3 session); the bake-off's scratch
+`AXIOMATA_HOME` gets them via the seed. But this needs one of:
+- **Minimum:** a line in `CLAUDE.md` / the architecture doc — "changing a
+  bundled skill's `resources/SKILL.md` requires re-copying it into
+  `~/.axiomata/skills/` on any existing install; the seed won't."
+- **Or (recommended if cheap):** `axiomata-cli skills reseed [--force]` — a
+  thin CLI over a new `skills::reseed_default_skills(force: bool)` that, with
+  `--force`, overwrites the bundled four from `resources/` (leaving
+  non-bundled skills alone). Generally useful beyond Stufe 2.
+
+### CP4 done when
+
+Docs (§A) updated; the Settings hint (§B) ships and `npm run check` is clean;
+§C polish applied; §D and §E decisions recorded (a note is a valid outcome);
+§F handled (note or `reseed` command). `cargo fmt` / `clippy --all-targets -D
+warnings` / `cargo test --workspace` clean; `cd apps/dashboard && npm run
+check` clean. Update this plan's status line and check off CP4.
+
+### After CP4 — operational, not a checkpoint
+
+Stufe 2 is a complete feature at that point. What remains is *running the
+procedure*, not building:
+
+1. **Bake-off round 2** — `granite4.2:8b` / `lfm2.5:8b` (pulled 2026-09-11) +
+   a `gemma4:12b-mlx` retry, per `stufe2-cp3-bakeoff.md`'s "next round". Try
+   the `think: false` knob if a model is slow. Judgement call, not code.
+2. **Per-digest go/no-go** — for each of the three digests, does *any* local
+   model clear shape + timeout 2/2? If yes, that digest can go local; if no,
+   it stays cloud-only (its `local_backend` line is harmless — the switch just
+   won't have a working target). Then the owner decides whether to flip their
+   live `skill_provider` to `ollama`.
+3. **`mail-digest` summary quality** — only meaningful once a model produces
+   non-empty `emails[]`; compare against the OpenRouter baseline.
+
+Separately: **M4 (always-on / background scheduling)** from the original M0–M6
+milestone plan is still unimplemented and is unrelated to Stufe 2.
 
 ## Non-goals (v1)
 
