@@ -44,8 +44,11 @@ pub enum AxiomataError {
     },
 
     /// A skill's frontmatter or a routine referenced an agent backend
-    /// identifier that is neither `"claude-code"` nor `"ollama"`.
-    #[error("unknown agent backend {backend:?} (expected \"claude-code\" or \"ollama\")")]
+    /// identifier that is neither `"claude-code"`, `"ollama"`, nor
+    /// `"ollama-agent"`.
+    #[error(
+        "unknown agent backend {backend:?} (expected \"claude-code\", \"ollama\", or \"ollama-agent\")"
+    )]
     UnknownAgentBackend { backend: String },
 
     /// The agent child process could not be spawned or waited on.

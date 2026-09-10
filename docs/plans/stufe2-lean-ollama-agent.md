@@ -1,13 +1,15 @@
 # Plan: Stufe 2 — a lean local agent for connector digests
 
-Status: **CP1 done, CP2 planned in detail.** The `[mcp_servers]` config schema, a
+Status: **CP1 + CP2 done.** The `[mcp_servers]` config schema, a
 hand-rolled stdio MCP client (`crates/axiomata-core/src/mcp/mod.rs`), and the
 Claude-Code import helper (`axiomata-cli mcp import`) are shipped and verified
 against the real `apple-mail` (27 tools) and `apple-reminders` (5 tools) servers
-(commit `54173bf`). CP2 (the `OllamaAgent` backend + tool-call loop) is spec'd
-below — see **"CP2 — implementation plan (detail)"** — ready to hand to a
-mid-capability model. Follows Stufe 1 (drop `module-context.md` from skill runs,
-shipped in commit `42fc45d`).
+(commit `54173bf`). CP2 (the `OllamaAgent` backend + tool-call loop) is fully
+spec'd below — see **"CP2 — implementation plan (detail)"** — and implemented
+(`AgentBackend::OllamaAgent`, `crates/axiomata-core/src/agents/ollama_agent.rs`,
+the two `AgentRequest` fields, the `runner` arms, the pure-helper + `FakeOllama`
+loop tests). CP3 (wire the digests, live quality check) is next. Follows Stufe 1
+(drop `module-context.md` from skill runs, shipped in commit `42fc45d`).
 
 ## Context
 

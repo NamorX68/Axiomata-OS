@@ -1,23 +1,27 @@
-//! Agent backends: `ClaudeCode` (headless Claude Code CLI) and `Ollama` (local
-//! models via the Ollama HTTP API).
+//! Agent backends: `ClaudeCode` (headless Claude Code CLI), `Ollama` (local
+//! models via the Ollama HTTP API, single completion) and `OllamaAgent` (the
+//! same local models, but a bounded tool-call loop over MCP servers — the
+//! "lean local agent" of Stufe 2).
 //!
 //! Skill and routine execution dispatches through the [`AgentBackend`] enum
 //! rather than a plugin registry or trait-object abstraction — a deliberate
-//! choice, since only two backends are needed and a generic multi-CLI
+//! choice, since only a few backends are needed and a generic multi-CLI
 //! abstraction would be premature. See `docs/architecture.md` §6 for the
 //! rationale. A further variant can be added later without reworking the runner
 //! or scheduler.
 //!
-//! Implemented in M1.
+//! Implemented in M1; `OllamaAgent` in Stufe 2 CP2.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::config::{Config, ProviderId, ProviderRole};
+use crate::config::{Config, McpServerConfig, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 
 pub mod claude_code;
 pub mod ollama;
+pub mod ollama_agent;
 
 /// Backend identifier stored verbatim in a `SKILL.md` frontmatter `backend`
 /// field and in a routine's DB row. Kept as a plain string on disk so the file
@@ -25,6 +29,27 @@ pub mod ollama;
 pub const BACKEND_CLAUDE_CODE: &str = "claude-code";
 /// See [`BACKEND_CLAUDE_CODE`].
 pub const BACKEND_OLLAMA: &str = "ollama";
+/// See [`BACKEND_CLAUDE_CODE`].
+pub const BACKEND_OLLAMA_AGENT: &str = "ollama-agent";
+
+/// Upper bound on how much of a backend's output is kept, shared by the raw
+/// completion [`AgentBackend::Ollama`] and the tool-call loop
+/// [`AgentBackend::OllamaAgent`] (mirrors the Claude Code backend's output
+/// cap).
+pub(crate) const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+
+/// Truncates `text` to at most `max_bytes`, respecting UTF-8 char boundaries.
+pub(crate) fn truncate_utf8(mut text: String, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    text
+}
 
 /// Which agent runs a given skill or routine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +61,12 @@ pub enum AgentBackend {
     /// loop. Intended for simple, deterministic tasks (e.g. appending a to-do
     /// item).
     Ollama { model: String },
+    /// A bounded tool-call loop against a local Ollama model (`POST /api/chat`
+    /// with native tool calling) over the MCP servers a skill's `allowed_tools`
+    /// names — the "lean local agent" of Stufe 2: only the skill's SOP + the
+    /// tool schemas it needs, no Claude Code system prompt. See
+    /// [`ollama_agent`] and `docs/plans/stufe2-lean-ollama-agent.md`.
+    OllamaAgent { model: String },
 }
 
 impl AgentBackend {
@@ -67,6 +98,24 @@ impl AgentBackend {
                     .unwrap_or_else(|| config.agents.ollama_model.clone());
                 Ok(Self::Ollama { model })
             }
+            BACKEND_OLLAMA_AGENT => {
+                // One tier more than the plain `Ollama` arm: the provider's
+                // `skill_model` sits between `SKILL.md model:` and the legacy
+                // `agents.ollama_model` fallback (see the plan, "Model
+                // resolution").
+                let provider_default = config
+                    .agents
+                    .providers
+                    .get(&ProviderId::Ollama)
+                    .map(|s| s.skill_model.trim())
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_owned);
+                let model = model_override
+                    .map(str::to_owned)
+                    .or(provider_default)
+                    .unwrap_or_else(|| config.agents.ollama_model.clone());
+                Ok(Self::OllamaAgent { model })
+            }
             other => Err(AxiomataError::UnknownAgentBackend {
                 backend: other.to_owned(),
             }),
@@ -79,6 +128,7 @@ impl AgentBackend {
         match self {
             Self::ClaudeCode => BACKEND_CLAUDE_CODE,
             Self::Ollama { .. } => BACKEND_OLLAMA,
+            Self::OllamaAgent { .. } => BACKEND_OLLAMA_AGENT,
         }
     }
 
@@ -91,6 +141,7 @@ impl AgentBackend {
         match self {
             Self::ClaudeCode => claude_code::run(request).await,
             Self::Ollama { model } => ollama::run(request, model).await,
+            Self::OllamaAgent { model } => ollama_agent::run(request, model).await,
         }
     }
 }
@@ -178,7 +229,9 @@ pub async fn chat_and_record(
 #[derive(Debug, Clone)]
 pub struct AgentRequest {
     /// The prompt handed to the agent. For Claude Code it is passed to
-    /// `claude -p`; for Ollama it is the raw completion prompt.
+    /// `claude -p`; for Ollama it is the raw completion prompt; for
+    /// `ollama-agent` it is the user turn of the tool-call loop (the
+    /// `SKILL.md` body).
     pub prompt: String,
     /// Working directory for the agent. Claude Code treats this as its project
     /// root (loads `CLAUDE.md`, resolves project skills); ignored by Ollama.
@@ -205,8 +258,20 @@ pub struct AgentRequest {
     /// matter the permission mode (found live while building the calendar
     /// skill — the run "succeeds" but the tool call is refused). `None`
     /// passes no flag, i.e. no MCP tools beyond whatever the permission mode
-    /// already allows. Ignored by Ollama (no tool use at all).
+    /// already allows. For `ollama-agent` it is instead the **derivation
+    /// source** for which MCP servers to spawn and which of their tools to
+    /// advertise to the model (the `mcp__<server>__<tool>` prefixes), not a
+    /// verbatim allow-list. Ignored by plain Ollama (no tool use at all).
     pub allowed_tools: Option<String>,
+    /// MCP stdio servers this run may spawn — a copy of `config.mcp_servers`.
+    /// Read only by the `ollama-agent` backend, which spawns just the servers
+    /// its `allowed_tools` name (see [`ollama_agent`]); every other backend
+    /// ignores this field.
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
+    /// Local Ollama daemon URL for `ollama-agent`
+    /// (`config.agents.providers[Ollama].base_url`); `None` → the library
+    /// default (`http://127.0.0.1:11434`). Ignored by other backends.
+    pub ollama_base_url: Option<String>,
 }
 
 /// The chat provider's `chat_model`, for interactive dashboard-assistant
@@ -347,6 +412,87 @@ mod tests {
         assert_eq!(
             backend,
             AgentBackend::Ollama {
+                model: "mistral".to_owned()
+            }
+        );
+    }
+
+    /// `ollama-agent` has one more precedence tier than `ollama`: the
+    /// Ollama provider's `skill_model` sits between an explicit override and
+    /// the legacy `agents.ollama_model` fallback.
+    #[test]
+    fn resolve_ollama_agent_uses_config_default_model_with_no_override_and_blank_provider_model() {
+        let mut config = config_with_ollama_model("llama3.2");
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Ollama)
+            .unwrap()
+            .skill_model = "".to_owned();
+
+        let backend = AgentBackend::resolve(BACKEND_OLLAMA_AGENT, None, &config).unwrap();
+        assert_eq!(
+            backend,
+            AgentBackend::OllamaAgent {
+                model: "llama3.2".to_owned()
+            }
+        );
+        assert_eq!(backend.id(), "ollama-agent");
+    }
+
+    #[test]
+    fn resolve_ollama_agent_prefers_a_provider_skill_model_over_the_default_model() {
+        let mut config = config_with_ollama_model("llama3.2");
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Ollama)
+            .unwrap()
+            .skill_model = "qwen3:30b".to_owned();
+
+        let backend = AgentBackend::resolve(BACKEND_OLLAMA_AGENT, None, &config).unwrap();
+        assert_eq!(
+            backend,
+            AgentBackend::OllamaAgent {
+                model: "qwen3:30b".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_ollama_agent_treats_a_blank_provider_model_as_unset() {
+        let mut config = config_with_ollama_model("llama3.2");
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Ollama)
+            .unwrap()
+            .skill_model = "   ".to_owned();
+
+        let backend = AgentBackend::resolve(BACKEND_OLLAMA_AGENT, None, &config).unwrap();
+        assert_eq!(
+            backend,
+            AgentBackend::OllamaAgent {
+                model: "llama3.2".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_ollama_agent_prefers_the_model_override_over_the_provider_model() {
+        let mut config = config_with_ollama_model("llama3.2");
+        config
+            .agents
+            .providers
+            .get_mut(&ProviderId::Ollama)
+            .unwrap()
+            .skill_model = "qwen3:30b".to_owned();
+
+        let backend =
+            AgentBackend::resolve(BACKEND_OLLAMA_AGENT, Some("mistral"), &config).unwrap();
+        assert_eq!(
+            backend,
+            AgentBackend::OllamaAgent {
                 model: "mistral".to_owned()
             }
         );

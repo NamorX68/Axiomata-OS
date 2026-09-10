@@ -311,6 +311,10 @@ pub async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataError> {
             system_prompt_file: request.system_prompt_file,
             model: request.model,
             allowed_tools: request.allowed_tools,
+            // The Claude Code backend never spawns MCP servers itself
+            // (its own tool/MCP loop does that) and has no Ollama URL.
+            mcp_servers: std::collections::BTreeMap::new(),
+            ollama_base_url: None,
         },
         &args,
     )

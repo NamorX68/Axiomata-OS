@@ -14,30 +14,13 @@ use ollama_rs::Ollama;
 use ollama_rs::generation::completion::request::GenerationRequest;
 use tokio::time::timeout;
 
-use super::{AgentRequest, AgentRunResult, BACKEND_OLLAMA};
+use super::{AgentRequest, AgentRunResult, BACKEND_OLLAMA, MAX_RESPONSE_BYTES, truncate_utf8};
 use crate::error::AxiomataError;
 
 /// Shared client for the local daemon, so successive runs reuse the connection
 /// pool instead of opening a fresh TCP connection each time. Fine to be
 /// process-global while the host is fixed; revisit if it becomes configurable.
 static OLLAMA: LazyLock<Ollama> = LazyLock::new(Ollama::default);
-
-/// Upper bound on how much of a completion is kept, mirroring the Claude Code
-/// backend's output cap.
-const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
-
-/// Truncates `text` to at most `max_bytes`, respecting UTF-8 char boundaries.
-fn truncate_utf8(mut text: String, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text.truncate(end);
-    text
-}
 
 /// Sends `request.prompt` to the local Ollama daemon as a single completion
 /// call against `model`.

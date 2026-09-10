@@ -474,8 +474,11 @@ fn import_from_claude_json(raw: &str) -> Vec<(String, McpServerConfig)> {
         .collect()
 }
 
+// The test-only mock MCP server, promoted out of `mcp::tests` so the
+// `ollama-agent` backend's loop tests (`agents::ollama_agent`) can spawn the
+// same `echo`/`boom` server.
 #[cfg(test)]
-mod tests {
+pub(crate) mod mock_server {
     use super::*;
     use std::collections::BTreeMap;
 
@@ -486,10 +489,10 @@ mod tests {
 
     /// Test-only entry point that acts as a tiny MCP stdio server. Outside
     /// mock mode it is a no-op, so the normal `cargo test` run never enters
-    /// the server loop; the client tests spawn this exact test via
-    /// `--exact mcp::tests::mock_server_self_entry`.
+    /// the server loop; the client and `ollama-agent` loop tests spawn this
+    /// exact test via `--exact mcp::mock_server::mock_server_self_entry`.
     #[test]
-    fn mock_server_self_entry() {
+    pub(crate) fn mock_server_self_entry() {
         if std::env::var(MOCK_ENV).as_deref() == Ok(MOCK_ENABLED) {
             serve_mock();
         }
@@ -499,7 +502,7 @@ mod tests {
     /// server: self-exec with `--exact`, so only [`mock_server_self_entry`]
     /// runs (the client tests live in this same process image but are not
     /// re-run by the child). The reliable no-extra-files fixture pattern.
-    fn mock_server_config() -> McpServerConfig {
+    pub(crate) fn mock_server_config() -> McpServerConfig {
         let mut env = BTreeMap::new();
         env.insert(MOCK_ENV.to_string(), MOCK_ENABLED.to_string());
         McpServerConfig {
@@ -509,7 +512,7 @@ mod tests {
                 .into_owned(),
             args: vec![
                 "--exact".to_owned(),
-                "mcp::tests::mock_server_self_entry".to_owned(),
+                "mcp::mock_server::mock_server_self_entry".to_owned(),
                 "--test-threads".to_owned(),
                 "1".to_owned(),
                 // --quiet drops libtest's per-test progress lines, whose
@@ -667,6 +670,13 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mock_server::mock_server_config;
+    use super::*;
+    use std::collections::BTreeMap;
 
     #[tokio::test]
     async fn connect_handshakes_then_lists_and_calls_tools() {

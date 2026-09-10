@@ -70,7 +70,7 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
 
     let model = match backend {
         AgentBackend::ClaudeCode => resolve_skill_model(skill.model.as_deref(), config),
-        AgentBackend::Ollama { .. } => None,
+        AgentBackend::Ollama { .. } | AgentBackend::OllamaAgent { .. } => None,
     };
     // The skill's own instruction body is the prompt on every backend. Claude
     // Code used to be sent `/<name>` instead, on the assumption that its own
@@ -249,7 +249,7 @@ fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
                 .as_str()
                 .to_string(),
         ),
-        AgentBackend::Ollama { .. } => None,
+        AgentBackend::Ollama { .. } | AgentBackend::OllamaAgent { .. } => None,
     }
 }
 
@@ -283,6 +283,14 @@ fn agent_request(
         system_prompt_file: None,
         model,
         allowed_tools,
+        // The `ollama-agent` backend's inputs: which MCP servers to spawn and
+        // where the local daemon lives. Every other backend ignores them.
+        mcp_servers: config.mcp_servers.clone(),
+        ollama_base_url: config
+            .agents
+            .providers
+            .get(&crate::config::ProviderId::Ollama)
+            .and_then(|settings| settings.base_url.clone()),
     }
 }
 
@@ -420,7 +428,7 @@ pub(crate) fn claude_env(
             }
             env.into_iter().collect()
         }
-        AgentBackend::Ollama { .. } => Vec::new(),
+        AgentBackend::Ollama { .. } | AgentBackend::OllamaAgent { .. } => Vec::new(),
     }
 }
 
