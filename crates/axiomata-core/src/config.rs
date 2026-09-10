@@ -351,6 +351,30 @@ impl Default for AgentDefaults {
     }
 }
 
+/// A single stdio MCP server definition (`config.mcp_servers["<name>"]`):
+/// the command to spawn and the extra environment to set on top of the
+/// process environment. The MCP client (`crate::mcp`) spawns only the servers
+/// a given run needs, derived from a skill's `allowed_tools` — see
+/// `docs/plans/stufe2-lean-ollama-agent.md` CP1.
+///
+/// Deliberately distinct from Claude Code's own `~/.claude.json` MCP block:
+/// that file's format is not something we want to depend on at run time, so
+/// the servers are copied into Axiomata-owned config once, via
+/// [`crate::mcp::import_from_claude_code`] (`axiomata-cli mcp import`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Executable to spawn, resolved through `PATH` — e.g. `"npx"` or
+    /// `"uvx"`, or `/bin/sh -c …` for a server that needs a shell.
+    #[serde(default)]
+    pub command: String,
+    /// Command-line arguments, e.g. `["-y", "mcp-server-apple-events"]`.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Extra environment variables layered over the process environment.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
 /// Axiomata-OS's own configuration (`~/.axiomata/config.toml`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -367,6 +391,13 @@ pub struct Config {
     /// Defaults for the built-in agent backends.
     #[serde(default)]
     pub agents: AgentDefaults,
+
+    /// MCP stdio servers this app can talk to directly — `name` -> spawn
+    /// config. Empty by default; seed it once from Claude Code with
+    /// [`crate::mcp::import_from_claude_code`] (`axiomata-cli mcp import`),
+    /// or edit `config.toml` by hand.
+    #[serde(default)]
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
 }
 
 impl Default for Config {
@@ -375,6 +406,7 @@ impl Default for Config {
             owner: String::new(),
             workspace_root: default_workspace_root(),
             agents: AgentDefaults::default(),
+            mcp_servers: BTreeMap::new(),
         }
     }
 }
@@ -632,6 +664,7 @@ mod tests {
                 skill_timeout_secs: 120,
                 ..AgentDefaults::default()
             },
+            ..Config::default()
         };
         custom.save().expect("save should succeed");
 
@@ -793,6 +826,50 @@ mod tests {
     /// `#[serde(rename_all = "snake_case")]` variant name; this must survive
     /// a full serialize/deserialize round trip with every `ALL` member
     /// present as its own distinct key, not collapse or reorder.
+    #[test]
+    fn mcp_servers_round_trip_through_save_and_load() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let temp_home = unique_temp_dir("axiomata-test-config-mcp");
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &temp_home);
+        }
+
+        let mut config = Config {
+            workspace_root: temp_home.join("Brain"),
+            ..Config::default()
+        };
+        let mut env = BTreeMap::new();
+        env.insert("LANG".to_string(), "en_US.UTF-8".to_string());
+        config.mcp_servers.insert(
+            "apple-mail".to_string(),
+            McpServerConfig {
+                command: "uvx".to_string(),
+                args: vec![
+                    "--with".to_string(),
+                    "mcp<2".to_string(),
+                    "mcp-apple-mail".to_string(),
+                ],
+                env,
+            },
+        );
+
+        config
+            .save()
+            .expect("a config with mcp_servers should save");
+        let reloaded = Config::load().expect("reload should succeed");
+        assert_eq!(reloaded.mcp_servers, config.mcp_servers);
+        assert_eq!(
+            reloaded.mcp_servers["apple-mail"].command, "uvx",
+            "the emitted TOML should keep the command and args intact"
+        );
+
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&temp_home);
+    }
+
     #[test]
     fn provider_id_all_members_round_trip_as_distinct_toml_map_keys() {
         let mut providers = BTreeMap::new();

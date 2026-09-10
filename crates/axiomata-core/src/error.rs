@@ -82,6 +82,21 @@ pub enum AxiomataError {
         message: String,
     },
 
+    /// A stdio MCP server could not be spawned or misbehaved on the wire: a
+    /// JSON-RPC `error` object for one of our requests, non-JSON / malformed
+    /// stdout, or the process exiting before answering. One variant covers
+    /// all of them because the individual situations share no recovery path —
+    /// the run fails either way; `server` names the offending
+    /// `[mcp_servers]` entry (see `crate::mcp`).
+    #[error("MCP server {server:?} error: {message}")]
+    Mcp { server: String, message: String },
+
+    /// A request to a stdio MCP server did not get an answer within its
+    /// timeout. A hung server (e.g. waiting on an unattended permission
+    /// dialog) must not block the agent loop forever.
+    #[error("MCP server {server:?} request timed out after {timeout:?}")]
+    McpTimeout { server: String, timeout: Duration },
+
     /// The model to run with is missing or malformed for the active provider.
     /// The Claude Code CLI is *not* spawned in this case: with a non-Anthropic
     /// `ANTHROPIC_BASE_URL` in effect, letting the CLI fall back to its own

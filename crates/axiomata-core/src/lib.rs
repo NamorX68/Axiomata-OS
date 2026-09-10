@@ -14,6 +14,7 @@ pub mod db;
 pub mod error;
 pub mod graph;
 pub mod importer;
+pub mod mcp;
 pub mod memory;
 pub mod notes;
 pub mod paths;

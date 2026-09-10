@@ -1,7 +1,11 @@
 # Plan: Stufe 2 — a lean local agent for connector digests
 
-Status: **not started.** Follows Stufe 1 (drop `module-context.md` from skill runs, shipped
-in commit `42fc45d`). Pick up with a fresh budget.
+Status: **CP1 done.** The `[mcp_servers]` config schema, a hand-rolled stdio MCP
+client (`crates/axiomata-core/src/mcp/mod.rs`), and the Claude-Code import helper
+(`axiomata-cli mcp import`) are shipped and verified against the real `apple-mail`
+(27 tools) and `apple-reminders` (5 tools) servers. CP2 (the `OllamaAgent`
+backend + tool-call loop) is next. Follows Stufe 1 (drop `module-context.md`
+from skill runs, shipped in commit `42fc45d`).
 
 ## Context
 
@@ -51,20 +55,30 @@ else `providers.ollama.skill_model`, else `ollama_model`.
 Axiomata speaks MCP **nowhere** today; `claude -p` does it. Stufe 2 needs Axiomata to spawn
 the `apple-mail` / `apple-reminders` MCP servers itself and speak the protocol.
 
-- **CP1 decision:** `rmcp` (official `modelcontextprotocol/rust-sdk`, stdio transport) vs. a
-  minimal hand-rolled stdio JSON-RPC client. Lean toward `rmcp` unless it drags in too much.
-- **Server definitions:** where from? Claude Code's `~/.claude.json` MCP block is the de-facto
-  source but its format is undocumented. Safer: a new Axiomata-owned `[mcp_servers]` table in
-  `config.toml` (`name -> {command, args, env}`), seeded from the current Claude config once.
+- **CP1 decision (made):** hand-rolled stdio JSON-RPC client, **not** `rmcp`. `rmcp` 0.8
+  pulls ~75 crates (`darling`, `schemars`, `futures`, `tokio-util`) for exactly three
+  methods over newline-delimited JSON-RPC, and it is two majors behind the current 3.x
+  (API-churn risk). The shipped client is ~260 lines with zero new dependencies, matches the
+  workspace's explicit dependency discipline, and owns the lifecycle guarantees the runner
+  needs (kill on completion, per-call timeouts, skip unsolicited notification lines).
+  Transport: one JSON-RPC message per line; the reader skips non-JSON / notification lines
+  until a matching `id` responds, so a chatty server can't wedge a request.
+- **Server definitions:** a new Axiomata-owned `[mcp_servers]` table in `config.toml`
+  (`McpServerConfig { command, args, env }`), seeded from the current Claude config once —
+  `axiomata-cli mcp import` reads `~/.claude.json`'s well-known `mcpServers` block (only
+  `type: "stdio"` entries with a `command`), merging without overwriting. Servers are
+  **copied**, never parsed from Claude's file at run time.
 - **Per run:** derive the needed servers from the skill's `allowed_tools` prefixes
   (`mcp__apple-mail__…` -> `apple-mail`), spawn only those (stdio subprocess), `initialize`
   handshake, `tools/list`, then `tools/call` in the loop, kill on completion. No pooling in v1.
 
 ## Checkpoints
 
-- **CP1 — MCP client.** Dependency decision + a thin wrapper: spawn a stdio server,
-  initialize, list tools, call a tool, shut down. `[mcp_servers]` config schema + a one-time
-  import helper. Unit tests against a trivial mock server (or `rmcp`'s test fixtures).
+- **CP1 — MCP client.** ✅ Dependency decision (hand-rolled over `rmcp`, see above) + a thin
+  wrapper in `crates/axiomata-core/src/mcp/`: spawn a stdio server, initialize, list tools,
+  call a tool, shut down. `[mcp_servers]` config schema + `axiomata-cli mcp import` helper.
+  Unit tests against an in-binary mock MCP server; verified live against `apple-mail` and
+  `apple-reminders`.
 - **CP2 — the backend + loop.** `AgentBackend::OllamaAgent { model }`; `AgentBackend::resolve`
   maps `"ollama-agent"`; new `run_on_backend` arm in `skills/runner.rs`; `provider_label` ->
   `None` (local, unmetered). Tool-call loop via `ollama-rs` chat + tools. Preamble text.

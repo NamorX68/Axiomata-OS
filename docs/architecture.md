@@ -89,6 +89,12 @@ declared in `crates/axiomata-core/src/lib.rs`:
 - `db` — SQLite connection setup and schema migrations.
 - `error` — the crate-wide `AxiomataError` type (`thiserror`-based).
 - `agents` — agent backend dispatch (Claude Code / Ollama), chat turns, the module bridge.
+- `mcp` — a hand-rolled, dependency-free stdio MCP client (`initialize` / `tools/list` /
+  `tools/call` over newline-delimited JSON-RPC; shutdown is by closing the pipe, per the
+  transport spec — MCP has no `shutdown` message) plus the `~/.claude.json` import helper
+  behind the `[mcp_servers]` config table. Slated to serve the local-agent loop of
+  `docs/plans/stufe2-lean-ollama-agent.md` (CP2); today it is exercised by
+  `axiomata-cli mcp tools <name>`.
 - `skills` — skill discovery, headless execution, and run logging.
 - `memory` — `CLAUDE.md` router file generation and staleness tracking.
 - `routines` — cron-scheduled skill/prompt execution via a background poll loop, full CRUD
@@ -118,7 +124,7 @@ A `clap`-based binary whose job is to exercise `axiomata-core` end to end withou
 `status`, `list-skills`, `run-skill`, `list-runs`, `memory sync|status`,
 `routines list|add|edit|delete|enable|disable|history|tick`, `assistant` (one chat/instruct
 turn, `--allowed-tools` for testing an MCP tool call before wiring it into the dashboard),
-`import obsidian`, `graph`, `modules`, `module-action`. Run it with
+`mcp import|list|tools`, `import obsidian`, `graph`, `modules`, `module-action`. Run it with
 `cargo run -p axiomata-cli -- <subcommand>`.
 
 ### `apps/dashboard/src-tauri`
@@ -154,7 +160,8 @@ data lives in **two distinct places** with two distinct ownership models.
 Everything that belongs to the application itself, independent of which Second-Brain
 workspace the user currently has configured:
 
-- `config.toml` — the app config (agent backend defaults, model, `workspace_root`).
+- `config.toml` — the app config (agent backend defaults, model, `workspace_root`,
+  `[mcp_servers]` stdio server definitions).
 - `axiomata.db` — the SQLite database (skill runs, routines + their history).
 - `logs/` — `runs.log` (JSONL skill-run mirror, 0600).
 - `skills/` — **all** skills. Skills are application-level: always available regardless of
