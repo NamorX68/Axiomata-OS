@@ -7,10 +7,11 @@ verified against the real `apple-mail` (27 tools) and `apple-reminders`
 (5 tools) servers. CP2 (`e2a2b28`): `AgentBackend::OllamaAgent` +
 `crates/axiomata-core/src/agents/ollama_agent.rs` (bounded tool-call loop), the
 two `AgentRequest` fields, the `runner` arms, 14 tests incl. two `FakeOllama`
-loop tests. **CP3 is next** — wire `calendar-digest` + `reminders-digest` onto
-`ollama-agent` and bake-off candidate models; `mail-digest` waits on the
-`.topics.md` blocker. See **"CP3 — implementation plan (detail)"**. Follows
-Stufe 1 (drop `module-context.md` from skill runs, `42fc45d`).
+loop tests. **CP3 is next** — two runner mechanisms so that selecting **Ollama
+as the skill provider** makes *all three* connector digests run on
+`ollama-agent` (one switch, auto-reverting), then a candidate-model bake-off.
+See **"CP3 — implementation plan (detail)"**. Follows Stufe 1 (drop
+`module-context.md` from skill runs, `42fc45d`).
 
 ## Context
 
@@ -38,13 +39,19 @@ but only for the *local* case, and with a clear reason.
 
 ## Shape
 
-New `AgentBackend` variant, selected per skill by `SKILL.md` frontmatter
-`backend: ollama-agent` (opt-in; `claude-code` stays the default and the fallback). It
-bypasses the per-role provider system entirely — always talks to local Ollama at
-`config.agents.providers.ollama.base_url`.
+New `AgentBackend::OllamaAgent` variant. A skill opts in with `SKILL.md`
+frontmatter `local_backend: ollama-agent`; the runner picks it over the skill's
+declared `backend` **when `config.agents.skill_provider == ollama`** (CP3
+mechanism 1) — so one Settings switch moves every connector digest, and cloud
+providers revert them to `claude-code`. The backend bypasses the per-role
+provider *env* system entirely — it always talks to local Ollama at
+`config.agents.providers.ollama.base_url` and takes its model from
+`providers.ollama.skill_model`. (`backend: ollama-agent` directly also works,
+for an always-local skill.)
 
 ```
-system  = <preamble> + SKILL.md body
+system  = <preamble>
+user    = <prepend_files contents, if any> + SKILL.md body
 tools   = MCP tool schemas for the servers referenced by the skill's `allowed_tools`
 loop (max ~12 iterations, within timeout_secs):
   POST /api/chat {messages, tools}      (ollama-rs, native tool calling — no Anthropic shim)
@@ -92,21 +99,26 @@ the `apple-mail` / `apple-reminders` MCP servers itself and speak the protocol.
   test surface, the settled decisions). CP2 tests: the pure helpers **and** two loop
   tests against a tiny in-repo `FakeOllama`; the failure-matrix branches get live
   coverage at CP3.
-- **CP3 — wire the digests + bake-off.** `backend: ollama-agent` in
-  `calendar-digest` + `reminders-digest` (pure MCP tool-call + fixed JSON);
-  `mail-digest` stays on `claude-code` — it needs to read `Mail/.topics.md`,
-  which the local backend has no tool for. Run each under a scratch
-  `AXIOMATA_HOME` against real Ollama + real MCP, over candidate models
-  (`gemma4:e4b-mlx`, `granite4.2:8b`, `lfm2.5:8b` — **last two need
-  `ollama pull`**); pass = `Success` record, shape-valid stdout, under
-  `timeout_secs`, 2/2 runs. **Full spec: "CP3 — implementation plan (detail)"
-  below** (SKILL.md edits, the `.topics.md` blocker + its fix options, the one
-  `tracing::info!` code add, the bake-off procedure + commands, success
-  criteria, the CP4 spend-guard wrinkle).
-- **CP4 — docs + default.** `docs/architecture.md` §6 "Agent backends" (three variants now)
-  and the connector-module note; CLAUDE.md's backend list. Decide: flip the digests' default
-  to `ollama-agent` (with `claude-code` fallback if Ollama is down), or keep it opt-in via a
-  config toggle. Update `docs/plans/per-role-provider.md`'s "Stufe 2" pointer.
+- **CP3 — provider switch + wire all three digests + bake-off.** Two runner
+  mechanisms so that **`skill_provider = ollama` makes every connector digest
+  run on `ollama-agent`, one switch**: (1) `local_backend:` SKILL.md frontmatter
+  + `Skill::effective_backend(config)`; (2) `prepend_files:` frontmatter (feeds
+  `Mail/.topics.md` into the prompt — unblocks `mail-digest`, which has no file
+  tool locally). All three digests get `local_backend: ollama-agent`; `cleanup`
+  does not. Plus one `tracing::info!` per loop turn. Then a bake-off under a
+  scratch `AXIOMATA_HOME` against real Ollama + MCP over `gemma4:e4b-mlx` /
+  `granite4.2:8b` / `lfm2.5:8b` (**last two need `ollama pull`**); pass =
+  `Success` + shape-valid stdout + under `timeout_secs`, 2/2 runs (mail summary
+  *quality* judged separately). **Full spec: "CP3 — implementation plan
+  (detail)" below.**
+- **CP4 — docs + polish.** `docs/architecture.md` §6 "Agent backends" (three
+  variants) + the connector-module note; project `CLAUDE.md`'s backend list.
+  A one-line Settings hint under `skill_provider` ("Ollama → digests run
+  locally, no cloud cost"). The spend-guard fix (skip `guard_redirected_turn`
+  when the resolved backend is local). Optionally a `claude-code` fallback when
+  Ollama is unreachable. Update `docs/plans/per-role-provider.md`'s "Stufe 2"
+  pointer. (The "flip the default" question is **answered** — it's the
+  `skill_provider` switch, not a hardcoded flip.)
 
 ## CP2 — implementation plan (detail)
 
@@ -485,69 +497,130 @@ gets real exercise in **CP3** against live Ollama + MCP under a scratch
 
 ## CP3 — implementation plan (detail)
 
-Checked against the tree at `e2a2b28` (CP2 shipped). CP3 = **wire the digests
-onto `ollama-agent` + a viability/quality bake-off**. No new loop code beyond
-one tracing line; the risk here is not Rust, it's "does a 4–8B local model
-actually drive these SOPs".
+Checked against the tree at `e2a2b28` (CP2 shipped). CP3 delivers **two small
+runner mechanisms + wires all three connector digests to run locally when the
+skill provider is Ollama** + a viability/quality bake-off. The risk is not
+Rust, it's "does a 4–8B local model actually drive these SOPs".
 
-### Scope
+### Goal (owner, 2026-09-10)
 
-- **`calendar-digest` + `reminders-digest` → `ollama-agent`.** Both are pure
-  MCP tool-call + fixed-shape JSON, exactly what the plan's Risks note says
-  Stufe 2 "still pays off for" even if mail doesn't. These are the CP3
-  deliverable.
-- **`mail-digest` stays on `claude-code` for now** — it has a dependency the
-  local backend cannot satisfy (see "the `.topics.md` blocker" below). Its
-  local-summarisation quality question is real but downstream of that; track it
-  as a follow-on, not a CP3 blocker.
-- **`cleanup` stays on `claude-code`** (edits files — always was out of scope).
+> Selecting **Ollama as the skill provider** must make *all* connector digests
+> (`calendar` / `reminders` / `mail`) run on `ollama-agent` — one switch, no
+> per-skill fiddling. Switching back to a cloud provider reverts them to
+> `claude-code`.
+
+So the digests are **not** hard-flipped to `backend: ollama-agent`. Instead a
+skill declares a *local variant* and the runner picks it when
+`config.agents.skill_provider == ProviderId::Ollama`.
+
+### Mechanism 1 — provider-driven backend selection
+
+New optional `SKILL.md` frontmatter field **`local_backend`** (a backend id,
+in practice `ollama-agent`): "use this instead of `backend` when the configured
+skill provider is a local one".
+
+- `skills/registry.rs` — `SkillFrontmatter { local_backend: Option<String>, … }`;
+  `skills/model.rs` — `Skill { local_backend: Option<String>, … }`, plumbed
+  through `registry`'s builder like `backend` already is.
+- `skills/model.rs` — a helper on `Skill`:
+  ```rust
+  /// The backend id to actually resolve: `local_backend` when the configured
+  /// skill provider is local (Ollama today) and the skill declares one, else
+  /// the plain `backend`. Keyed on the provider, so one Settings switch moves
+  /// every skill that opts in.
+  pub fn effective_backend<'a>(&'a self, config: &Config) -> &'a str {
+      match self.local_backend.as_deref() {
+          Some(local) if config.agents.provider_for(ProviderRole::Skill) == ProviderId::Ollama => local,
+          _ => &self.backend,
+      }
+  }
+  ```
+- `skills/runner.rs` `execute_skill` — resolve `skill.effective_backend(config)`
+  instead of `&skill.backend` (one line). Nothing else in the resolve path
+  changes; `AgentBackend::resolve("ollama-agent", skill.model.as_deref(), config)`
+  already does the right model precedence (→ `providers[Ollama].skill_model`).
+- `execute_prompt` (raw-prompt routines) is untouched — it has no `Skill`, so no
+  `local_backend`; a routine that names a *skill* target goes through
+  `execute_skill` and gets the switch for free.
+- **Reverts cleanly:** provider back to `anthropic`/`open_router` → next digest
+  refresh resolves `backend: claude-code` again (config is read per run). No
+  restart.
+- **Out of scope, unchanged:** a non-digest skill with no `local_backend` (e.g.
+  `cleanup`) still routes through `claude -p` when `skill_provider = ollama` —
+  same as today, and `cleanup` needs file-editing tools the loop hasn't got
+  anyway.
+- **Settings:** no new control — the `skill_provider` `<select>` from the
+  per-role-provider work is the switch. A one-line hint under it ("Ollama →
+  connector digests run locally via the tool-call agent, no cloud cost") is
+  nice-to-have; fold into CP4.
+
+### Mechanism 2 — `prepend_files` (unblocks `mail-digest`)
+
+`mail-digest` step 1 tells the agent to *read `Mail/.topics.md` from the
+workspace*. `ollama-agent` has **only** the 3 MCP mail tools — no file tool —
+so a local run can't see configured topics, and a small model told to "read a
+file" with no file tool thrashes. Fix it generically (needed now, since "all
+digests" includes mail):
+
+New optional frontmatter **`prepend_files: ["Mail/.topics.md"]`**. In
+`execute_skill`, before the prompt is built:
+
+```rust
+let mut prompt = String::new();
+for rel in &skill.prepend_files {
+    // Path-safety: workspace-relative only, no escape.
+    if rel.contains("..") || std::path::Path::new(rel).is_absolute() {
+        return Err(AxiomataError::InvalidSkill { path: skill_path, reason:
+            format!("prepend_files entry {rel:?} must be a workspace-relative path") });
+    }
+    match std::fs::read_to_string(config.workspace_root.join(rel)) {
+        Ok(content) if !content.trim().is_empty() =>
+            prompt.push_str(&format!("## Context file: {rel}\n\n{}\n\n---\n\n", content.trim())),
+        _ => {}   // missing / empty file → contribute nothing
+    }
+}
+prompt.push_str(&skill.body);
+```
+
+Applies to **every backend** — for `claude-code` the digest gets topics inline
+instead of reading them, which is strictly fine. Then `mail-digest` step 1 is
+reworded once (works for both backends):
+
+> 1. Configured topics, if any, appear at the very top of this message under
+>    "Context file: Mail/.topics.md" — one topic per line. If that block is
+>    absent, there are no configured topics: skip the per-topic `search_emails`
+>    calls and the topic classification in step 4. Never try to open the file
+>    yourself.
+
+`calendar-digest` / `reminders-digest` have no file dependency — no
+`prepend_files`, no body change (beyond the tool-wording tuning below).
 
 ### The SKILL.md edits (`~/.axiomata/skills/`)
 
-`calendar-digest/SKILL.md` and `reminders-digest/SKILL.md`: change exactly one
-frontmatter line,
+All three connector digests get one added frontmatter line:
 
 ```
--backend: claude-code
-+backend: ollama-agent
+ backend: claude-code
++local_backend: ollama-agent
 ```
 
-Leave `allowed_tools` (now the server/tool *derivation source* — same string,
-new meaning), `timeout_secs: 600`, and the SOP body **as-is for the first
-run**. Do **not** add a `model:` line — the bake-off swaps the model globally
-via `providers[Ollama].skill_model`, and a per-skill pin would defeat that.
+`mail-digest` additionally gets `prepend_files: ["Mail/.topics.md"]` and the
+step-1 reword above. Leave `allowed_tools` (now also the `ollama-agent`
+server/tool *derivation source*), `timeout_secs: 600`, and — for calendar /
+reminders — the SOP body as-is for the first run. Do **not** add a `model:`
+line: the model comes from `providers[Ollama].skill_model`, which is what the
+owner sets when picking Ollama as the skill provider; a per-skill pin would
+fight the bake-off.
 
-SOP-body wording is a **tuning knob, not a pre-edit**: the two SOPs say things
-like "the `reminders_lists` tool, action `read`". A native-tool-calling model
-gets each tool's real JSON schema (via `tool_infos`), so "action `read`" may or
-may not match a real parameter. First run the digest unchanged; only if a model
-*systematically* malforms a call, reword that step to match the schema
-`cargo run -p axiomata-cli -- mcp tools apple-reminders` prints. Record every
-body edit in the bake-off notes so a model comparison stays apples-to-apples.
+SOP tool-wording is a **tuning knob, not a pre-edit**: the SOPs say things like
+"the `reminders_lists` tool, action `read`". A native-tool-calling model gets
+each tool's real JSON schema (via `tool_infos`), so "action `read`" may not
+match a real parameter. First run unchanged; only if a model *systematically*
+malforms a call, reword that step to the schema
+`cargo run -p axiomata-cli -- mcp tools apple-reminders` prints. Log every body
+edit in the bake-off notes.
 
-### The `.topics.md` blocker (why `mail-digest` waits)
-
-`mail-digest` step 1 tells the agent to *read `Mail/.topics.md` from the
-workspace*. Under `claude-code` that works (the CLI has filesystem tools);
-under `ollama-agent` the model has **only** the 3 MCP mail tools —
-`wanted_servers` drops every non-`mcp__` token and `mail-digest`'s
-`allowed_tools` has no file tool anyway. So a local `mail-digest` run cannot
-see configured topics; a small model told to "look for a file" with no file
-tool tends to thrash or hallucinate one.
-
-Options, for a later mini-checkpoint (not CP3):
-
-1. **Runner injects the file.** A generic `SKILL.md` frontmatter field
-   (`prepend_files: ["Mail/.topics.md"]`) the runner reads relative to `cwd`
-   and prepends to the prompt for any backend. Clean, generic, ~20 lines in
-   `execute_skill`; also useful for future skills. **Recommended.**
-2. **Drop topics for the local path.** `mail-digest` on `ollama-agent` runs
-   importance-only (the SOP already documents a "no topics file" fallback).
-   Half the value of `mail-digest` gone; cheap.
-3. **A separate `mail-digest-local` SKILL** with topics inlined by hand.
-   Duplication; rejected.
-
-### One code addition (CP3)
+### Mechanism 3 — one loop-tracing line
 
 A `tracing::info!` at the top of each loop iteration in `ollama_agent::run` —
 turn index, and after the response, the tool names called (or "final") — so a
@@ -558,81 +631,117 @@ surfaces. ~2 lines; no behaviour change. (Optionally also set `num_turns` on
 the returned `AgentRunResult` from the loop counter — nicer, shows up in
 `list-runs` — but the log is the CP3 essential.)
 
+### Files touched (CP3)
+
+| File | Change |
+|---|---|
+| `crates/axiomata-core/src/skills/registry.rs` | `SkillFrontmatter`: `local_backend: Option<String>`, `prepend_files: Option<Vec<String>>` (`#[serde(default)]`). |
+| `crates/axiomata-core/src/skills/model.rs` | `Skill`: `local_backend: Option<String>`, `prepend_files: Vec<String>`; `fn effective_backend(&self, &Config) -> &str`. |
+| `crates/axiomata-core/src/skills/runner.rs` | `execute_skill`: resolve `skill.effective_backend(config)`; build the prompt with the `prepend_files` prefix loop (path-safety guard). |
+| `crates/axiomata-core/src/agents/ollama_agent.rs` | the per-iteration `tracing::info!`. |
+| `~/.axiomata/skills/{calendar,reminders,mail}-digest/SKILL.md` | `local_backend: ollama-agent`; mail also `prepend_files:` + the step-1 reword. |
+| `crates/axiomata-cli/src/main.rs` | add `get-run <id>` if the bake-off validator wants it (thin wrapper over `runlog::get_run`). Optional. |
+
+No `config.rs` change — the switch is `agents.skill_provider`, which already
+exists. Unit tests: `effective_backend` (provider Ollama + `local_backend` set →
+local; provider Ollama + no `local_backend` → `backend`; provider Anthropic +
+`local_backend` set → `backend`); `prepend_files` (present file prepended,
+missing file skipped, `..`/absolute rejected).
+
 ### Bake-off procedure
 
-Candidate models (confirm exact tags with `ollama list` first — these are the
-owner's local names): `gemma4:e4b-mlx` (already tested, re-test without the
-Claude-Code framing), `granite4.2:8b`, `lfm2.5:8b`. **`granite4.2:8b` and
-`lfm2.5:8b` need `ollama pull <tag>` — they are not local yet.**
+Candidate models (confirm exact tags with `ollama list` first — owner's local
+names): `gemma4:e4b-mlx` (re-test without the Claude-Code framing),
+`granite4.2:8b`, `lfm2.5:8b`. **`granite4.2:8b` and `lfm2.5:8b` need
+`ollama pull <tag>` — not local yet.**
 
-Setup once, per bake-off session:
+Setup once per bake-off session (the `local_backend` edits are already in the
+repo; the scratch config just needs the provider switch + a topics file):
 
 ```sh
-export AXIOMATA_HOME=$(mktemp -d)              # fresh DB → the spend guard is a no-op
-cargo run -p axiomata-cli -- mcp import        # seeds [mcp_servers] from ~/.claude.json
-# then, per candidate model M, edit $AXIOMATA_HOME/config.toml:
+export AXIOMATA_HOME=$(mktemp -d)                       # fresh DB
+cargo run -p axiomata-cli -- mcp import                 # seeds [mcp_servers] from ~/.claude.json
+mkdir -p "$AXIOMATA_HOME/workspace/Mail"                # or point workspace_root at the real vault
+printf 'Fotografie\nDevelopment\nKI/AI/LLM\n' > "$AXIOMATA_HOME/workspace/Mail/.topics.md"
+# edit $AXIOMATA_HOME/config.toml:
+#   workspace_root = "…/workspace"           (or the real ~/Documents/vault)
+#   [agents]
+#   skill_provider = "ollama"                # <- the switch: digests now resolve to ollama-agent
 #   [agents.providers.ollama]
 #   base_url = "http://localhost:11434"
-#   skill_model = "M"
+#   skill_model = "M"                        # <- the candidate, per run
 ```
 
-Per candidate model M, for `calendar-digest` and `reminders-digest`, run **2×**
-each:
+Per candidate model M, for **all three** digests (`calendar-digest`,
+`reminders-digest`, `mail-digest`), run **2×** each:
 
 ```sh
 RUST_LOG=axiomata_core::agents::ollama_agent=info \
-  cargo run -p axiomata-cli -- run-skill calendar-digest
-cargo run -p axiomata-cli -- list-runs --limit 5   # status, duration_ms, provider (should be empty)
+  cargo run -p axiomata-cli -- run-skill mail-digest
+cargo run -p axiomata-cli -- list-runs --limit 5        # status, duration_ms, provider (empty = local)
 ```
 
+Sanity-check the switch itself once: with `skill_provider = "ollama"` a run's
+`backend` column is `ollama-agent`; flip to `skill_provider = "anthropic"` and
+the same skill's next run is `claude-code`.
+
 Record per run: **status** (Success/Failed + error), **wall-clock** vs 600 s,
-**step count / tool sequence** (from the log), and whether **stdout parses to
-the right shape**:
+**step count / tool sequence** (from the log), **stdout shape-valid?**:
 
-- `calendar-digest`: a JSON object with `calendars: string[]` and `events: []`
-  of `{id,title,start,end,calendar,location,allDay}` — or the documented
-  `{"calendars":[],"events":[],"error":"no calendar tool available"}`. The
-  dashboard parser strips one ` ```json ` fence defensively, so a fenced reply
-  still counts as a pass; anything else non-parseable is a fail.
-- `reminders-digest`: `{lists: string[], tasks: [{id,title,list,notes,dueDate,priority}]}`,
-  `priority` one of `none|low|medium|high`.
+- `calendar-digest`: object with `calendars: string[]`, `events[]` of
+  `{id,title,start,end,calendar,location,allDay}` — or the documented
+  `{"calendars":[],"events":[],"error":"…"}`. The dashboard parser strips one
+  ` ```json ` fence, so a fenced reply still passes; anything else non-parseable
+  fails.
+- `reminders-digest`: `{lists: string[], tasks:[{id,title,list,notes,dueDate,priority}]}`,
+  `priority ∈ none|low|medium|high`.
+- `mail-digest`: `{emails:[{id,sender,subject,date,reason,topic,summary}]}`,
+  `reason ∈ important|topic`, `topic` a string from `.topics.md` or `null`. Plus
+  the **quality** read: are `summary` fields real 1–2-sentence gists (not
+  subject restatements)? Compare against an OpenRouter baseline run of the same
+  inbox.
 
-A one-liner validator (bash) is enough:
-`cargo run -q -p axiomata-cli -- list-runs --limit 1` → get id →
-`… get-run <id>` (add a `get-run` CLI subcommand if absent — it's a thin wrapper
-over `runlog::get_run`) → pipe stdout through `jq -e '.events|type=="array"'`.
+Validator: `list-runs --limit 1` → id → `get-run <id>` → `jq -e`.
 
 ### Success criteria (CP3 done)
 
-- `calendar-digest` and `reminders-digest` each run on `ollama-agent` to a
-  **`Success`** record with **shape-valid** stdout, **under `timeout_secs`**,
-  on **at least one** candidate model, reproducibly (2/2 runs).
-- The winning model + any SOP-body edits are written into the bake-off notes and
-  `docs/plans/per-role-provider.md`'s Stufe 2 pointer.
-- If **no** candidate clears the bar for a digest: that digest stays on
-  `claude-code`; record which models were tried and how they failed (timeout /
-  malformed JSON / wrong tool calls / greeted). Stufe 2 still delivered the
-  backend + MCP client; the digests just don't have a viable local model yet.
+- The **switch works**: `skill_provider = ollama` ⇒ all three digests resolve to
+  `ollama-agent`; back to a cloud provider ⇒ `claude-code`. `effective_backend`
+  + `prepend_files` unit tests green.
+- `calendar-digest` + `reminders-digest`: **`Success`**, **shape-valid** stdout,
+  **under `timeout_secs`**, on **≥1** candidate model, 2/2 runs.
+- `mail-digest`: same bar for *shape* (valid JSON, right keys) on ≥1 model, 2/2.
+  Summary **quality** is judged separately by the owner against the OpenRouter
+  baseline — a shape-pass with weak summaries still counts as "wired", with a
+  note that quality needs a bigger model or stays on cloud.
+- Winning model(s) + every SOP-body edit recorded in
+  `docs/plans/stufe2-cp3-bakeoff.md` and `docs/plans/per-role-provider.md`'s
+  Stufe 2 pointer.
+- If a digest clears shape on **no** candidate: it keeps `local_backend:
+  ollama-agent` in frontmatter (so the switch still targets it once a model
+  works) but the bake-off notes flag it as "cloud-only for now", and the owner
+  keeps `skill_provider` on cloud. The mechanism shipped regardless.
 
 ### Repo artefacts vs report
 
-- **In the repo:** the 1–2 `SKILL.md` `backend:` flips (only for digests that
-  passed), the `tracing::info!` line, any SOP-body tuning edits, a short
+- **In the repo:** the three `SKILL.md` `local_backend:` additions (+ mail's
+  `prepend_files:` and step-1 reword), the two runner mechanisms + their unit
+  tests, the `tracing::info!` line, any SOP tuning edits, and
   `docs/plans/stufe2-cp3-bakeoff.md` with the results table.
-- **Not a test file.** The repo has no e2e harness and the CLAUDE.md convention
-  is that real-backend checks are run by hand under a scratch `AXIOMATA_HOME`.
-  The loop glue is already covered by CP2's `FakeOllama` tests; CP3's residual
-  branches (multi-call turns, `MAX_ITERS`, `is_error`) get eyeballed during the
-  bake-off runs, not a new `#[ignore]` test.
+- **No e2e test file.** The repo has no e2e harness; real-backend checks are run
+  by hand under a scratch `AXIOMATA_HOME` (CLAUDE.md convention). CP2's
+  `FakeOllama` tests cover the loop glue; CP3's residual branches (multi-call
+  turns, `MAX_ITERS`, `is_error`) get eyeballed during the bake-off.
 
-### Known wrinkle for CP4
+### CP4 note (spend guard)
 
-`execute_and_record_skill` calls `spend::guard_redirected_turn(db, config,
-ProviderRole::Skill)` **before** the backend is resolved — so if `skill_provider`
-is a paid provider over its daily cap, an `ollama-agent` skill run (which costs
-nothing) is blocked too. Harmless under a scratch HOME (zero spend), but in the
-real app the guard should skip when the *resolved* backend is local. Fold into
-CP4.
+With the `local_backend` design the earlier wrinkle is largely moot: the switch
+*is* `skill_provider = ollama`, so `guard_redirected_turn` checks the Ollama
+provider, whose recorded spend is always 0 (`ollama-agent` runs record
+`provider: None`) — the guard passes. It only bites if a `SKILL.md` sets
+`backend: ollama-agent` *directly* while `skill_provider` is a paid provider
+over its cap. Still worth fixing in CP4 (guard should skip when the resolved
+backend is local), but no longer on the CP3 path.
 
 ## Non-goals (v1)
 
