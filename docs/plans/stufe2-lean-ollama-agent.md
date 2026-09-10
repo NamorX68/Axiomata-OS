@@ -655,6 +655,16 @@ names): `gemma4:e4b-mlx` (re-test without the Claude-Code framing),
 `granite4.2:8b`, `lfm2.5:8b`. **`granite4.2:8b` and `lfm2.5:8b` need
 `ollama pull <tag>` — not local yet.**
 
+- **`SparkLLM/Spark-X2.5-4B:latest`** (owner suggestion, 2026-09-10) — 4.11B,
+  ~1M ctx, markets "strong agent/coding" + tool use. **Two gates before it can
+  even enter the bake-off:** (1) stock Ollama does **not** yet support the
+  `spark2_5` architecture — `ollama pull`/`run` fails on a mainline install
+  until that lands (or the owner runs a patched build); (2) native
+  `/api/chat` tool-call emission is *not* confirmed on its model card — the
+  `ollama-agent` loop needs it. Put it **last** in the bake-off order and try
+  it only once gate 1 clears; if the loop shows zero `tool_calls` in the trace,
+  it's out regardless of gate 1.
+
 Setup once per bake-off session (the `local_backend` edits are already in the
 repo; the scratch config just needs the provider switch + a topics file):
 
