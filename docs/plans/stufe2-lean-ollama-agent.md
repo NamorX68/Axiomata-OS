@@ -664,8 +664,18 @@ Candidate roster (4, owner-set 2026-09-11 — confirm exact tags with
 | `granite4.2:8b` | 8B | pulled 2026-09-11 |
 | `lfm2.5:8b` | 8B | pulled 2026-09-11 |
 
+All four are local, load on Ollama 0.33.3, and `ollama show` lists `tools`
+(native `/api/chat` tool calling — what the loop needs) **and** `thinking`.
 Spread is 4B / 8B / 8B / 12B — if none of the 8B/12B clear a digest that
 `gemma4:e4b-mlx` also fails, that digest is cloud-only for now.
+
+**Tuning knob — `think: false`.** All four are reasoning models and think by
+default; the loop doesn't set `ChatMessageRequest::think(...)`, so every turn
+pays reasoning latency + tokens, ×up to 12 turns, against the 600 s ceiling.
+The digests are mechanical extract-and-shape tasks, not reasoning tasks. If a
+model times out or thrashes, first retry with `.think(false)` on the request
+(one line in `ollama_agent::run`); note per-model whether it helped or hurt
+JSON validity.
 
 - **`SparkLLM/Spark-X2.5-4B:latest`** (owner suggestion, 2026-09-10) — 4.11B,
   ~1M ctx, markets "strong agent/coding" + tool use. **Two gates before it can
