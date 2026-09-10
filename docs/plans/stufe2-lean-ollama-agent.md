@@ -1,15 +1,16 @@
 # Plan: Stufe 2 — a lean local agent for connector digests
 
-Status: **CP1 + CP2 done.** The `[mcp_servers]` config schema, a
-hand-rolled stdio MCP client (`crates/axiomata-core/src/mcp/mod.rs`), and the
-Claude-Code import helper (`axiomata-cli mcp import`) are shipped and verified
-against the real `apple-mail` (27 tools) and `apple-reminders` (5 tools) servers
-(commit `54173bf`). CP2 (the `OllamaAgent` backend + tool-call loop) is fully
-spec'd below — see **"CP2 — implementation plan (detail)"** — and implemented
-(`AgentBackend::OllamaAgent`, `crates/axiomata-core/src/agents/ollama_agent.rs`,
-the two `AgentRequest` fields, the `runner` arms, the pure-helper + `FakeOllama`
-loop tests). CP3 (wire the digests, live quality check) is next. Follows Stufe 1
-(drop `module-context.md` from skill runs, shipped in commit `42fc45d`).
+Status: **CP1 + CP2 done; CP3 spec'd in detail.** CP1 (`54173bf`): the
+`[mcp_servers]` config schema, a hand-rolled stdio MCP client
+(`crates/axiomata-core/src/mcp/mod.rs`), the `axiomata-cli mcp import` helper —
+verified against the real `apple-mail` (27 tools) and `apple-reminders`
+(5 tools) servers. CP2 (`e2a2b28`): `AgentBackend::OllamaAgent` +
+`crates/axiomata-core/src/agents/ollama_agent.rs` (bounded tool-call loop), the
+two `AgentRequest` fields, the `runner` arms, 14 tests incl. two `FakeOllama`
+loop tests. **CP3 is next** — wire `calendar-digest` + `reminders-digest` onto
+`ollama-agent` and bake-off candidate models; `mail-digest` waits on the
+`.topics.md` blocker. See **"CP3 — implementation plan (detail)"**. Follows
+Stufe 1 (drop `module-context.md` from skill runs, `42fc45d`).
 
 ## Context
 
@@ -91,20 +92,30 @@ the `apple-mail` / `apple-reminders` MCP servers itself and speak the protocol.
   test surface, the settled decisions). CP2 tests: the pure helpers **and** two loop
   tests against a tiny in-repo `FakeOllama`; the failure-matrix branches get live
   coverage at CP3.
-- **CP3 — wire the digests.** `backend: ollama-agent` in the 3 read-only digest `SKILL.md`s
-  (leave `cleanup` on `claude-code` — it edits files). End-to-end: run each under a scratch
-  `AXIOMATA_HOME` against real Ollama + real MCP servers; assert valid JSON, under
-  `timeout_secs`; this is also where the loop's glue (history accumulation, timeout
-  budgeting, shutdown-on-every-path) first gets real coverage. Compare `mail-digest`
-  summary quality against the OpenRouter baseline (run #235-style output) with 2–3
-  candidate models (gemma4:e4b-mlx, and re-test granite4.2:8b / lfm2.5:8b now that the
-  framing is gone — **both still need `ollama pull`**).
+- **CP3 — wire the digests + bake-off.** `backend: ollama-agent` in
+  `calendar-digest` + `reminders-digest` (pure MCP tool-call + fixed JSON);
+  `mail-digest` stays on `claude-code` — it needs to read `Mail/.topics.md`,
+  which the local backend has no tool for. Run each under a scratch
+  `AXIOMATA_HOME` against real Ollama + real MCP, over candidate models
+  (`gemma4:e4b-mlx`, `granite4.2:8b`, `lfm2.5:8b` — **last two need
+  `ollama pull`**); pass = `Success` record, shape-valid stdout, under
+  `timeout_secs`, 2/2 runs. **Full spec: "CP3 — implementation plan (detail)"
+  below** (SKILL.md edits, the `.topics.md` blocker + its fix options, the one
+  `tracing::info!` code add, the bake-off procedure + commands, success
+  criteria, the CP4 spend-guard wrinkle).
 - **CP4 — docs + default.** `docs/architecture.md` §6 "Agent backends" (three variants now)
   and the connector-module note; CLAUDE.md's backend list. Decide: flip the digests' default
   to `ollama-agent` (with `claude-code` fallback if Ollama is down), or keep it opt-in via a
   config toggle. Update `docs/plans/per-role-provider.md`'s "Stufe 2" pointer.
 
 ## CP2 — implementation plan (detail)
+
+**Status: shipped in `e2a2b28`** — `agents/ollama_agent.rs`, the enum variant +
+`resolve`/`id`/`run` arms, the two `AgentRequest` fields, the `runner` arms, the
+shared `truncate_utf8`, the `mcp::mock_server` promotion, 14 new tests (pure
+helpers + the two `FakeOllama` loop tests). Build / `clippy --all-targets -D
+warnings` / `fmt` / 259 tests all clean. The plan below is kept as the record of
+what was built.
 
 Everything here was checked against the tree at `54173bf` and `ollama-rs` **0.3.6**
 (the version in `Cargo.lock`; workspace dep is `ollama-rs = "0.3"`,
@@ -471,6 +482,157 @@ gets real exercise in **CP3** against live Ollama + MCP under a scratch
 4. **Loop tests land in CP2**, not CP3 — two, via the tiny hand-rolled
    `FakeOllama` above (happy path + run-timeout). The failure-matrix branches stay
    eyeballed and get live coverage at CP3.
+
+## CP3 — implementation plan (detail)
+
+Checked against the tree at `e2a2b28` (CP2 shipped). CP3 = **wire the digests
+onto `ollama-agent` + a viability/quality bake-off**. No new loop code beyond
+one tracing line; the risk here is not Rust, it's "does a 4–8B local model
+actually drive these SOPs".
+
+### Scope
+
+- **`calendar-digest` + `reminders-digest` → `ollama-agent`.** Both are pure
+  MCP tool-call + fixed-shape JSON, exactly what the plan's Risks note says
+  Stufe 2 "still pays off for" even if mail doesn't. These are the CP3
+  deliverable.
+- **`mail-digest` stays on `claude-code` for now** — it has a dependency the
+  local backend cannot satisfy (see "the `.topics.md` blocker" below). Its
+  local-summarisation quality question is real but downstream of that; track it
+  as a follow-on, not a CP3 blocker.
+- **`cleanup` stays on `claude-code`** (edits files — always was out of scope).
+
+### The SKILL.md edits (`~/.axiomata/skills/`)
+
+`calendar-digest/SKILL.md` and `reminders-digest/SKILL.md`: change exactly one
+frontmatter line,
+
+```
+-backend: claude-code
++backend: ollama-agent
+```
+
+Leave `allowed_tools` (now the server/tool *derivation source* — same string,
+new meaning), `timeout_secs: 600`, and the SOP body **as-is for the first
+run**. Do **not** add a `model:` line — the bake-off swaps the model globally
+via `providers[Ollama].skill_model`, and a per-skill pin would defeat that.
+
+SOP-body wording is a **tuning knob, not a pre-edit**: the two SOPs say things
+like "the `reminders_lists` tool, action `read`". A native-tool-calling model
+gets each tool's real JSON schema (via `tool_infos`), so "action `read`" may or
+may not match a real parameter. First run the digest unchanged; only if a model
+*systematically* malforms a call, reword that step to match the schema
+`cargo run -p axiomata-cli -- mcp tools apple-reminders` prints. Record every
+body edit in the bake-off notes so a model comparison stays apples-to-apples.
+
+### The `.topics.md` blocker (why `mail-digest` waits)
+
+`mail-digest` step 1 tells the agent to *read `Mail/.topics.md` from the
+workspace*. Under `claude-code` that works (the CLI has filesystem tools);
+under `ollama-agent` the model has **only** the 3 MCP mail tools —
+`wanted_servers` drops every non-`mcp__` token and `mail-digest`'s
+`allowed_tools` has no file tool anyway. So a local `mail-digest` run cannot
+see configured topics; a small model told to "look for a file" with no file
+tool tends to thrash or hallucinate one.
+
+Options, for a later mini-checkpoint (not CP3):
+
+1. **Runner injects the file.** A generic `SKILL.md` frontmatter field
+   (`prepend_files: ["Mail/.topics.md"]`) the runner reads relative to `cwd`
+   and prepends to the prompt for any backend. Clean, generic, ~20 lines in
+   `execute_skill`; also useful for future skills. **Recommended.**
+2. **Drop topics for the local path.** `mail-digest` on `ollama-agent` runs
+   importance-only (the SOP already documents a "no topics file" fallback).
+   Half the value of `mail-digest` gone; cheap.
+3. **A separate `mail-digest-local` SKILL** with topics inlined by hand.
+   Duplication; rejected.
+
+### One code addition (CP3)
+
+A `tracing::info!` at the top of each loop iteration in `ollama_agent::run` —
+turn index, and after the response, the tool names called (or "final") — so a
+bake-off run under `RUST_LOG=axiomata_core::agents::ollama_agent=info` shows
+step count and tool-call sequence per model. `AgentRunResult` from this backend
+sets `num_turns: None` (via `bare()`), so the log is the only place step count
+surfaces. ~2 lines; no behaviour change. (Optionally also set `num_turns` on
+the returned `AgentRunResult` from the loop counter — nicer, shows up in
+`list-runs` — but the log is the CP3 essential.)
+
+### Bake-off procedure
+
+Candidate models (confirm exact tags with `ollama list` first — these are the
+owner's local names): `gemma4:e4b-mlx` (already tested, re-test without the
+Claude-Code framing), `granite4.2:8b`, `lfm2.5:8b`. **`granite4.2:8b` and
+`lfm2.5:8b` need `ollama pull <tag>` — they are not local yet.**
+
+Setup once, per bake-off session:
+
+```sh
+export AXIOMATA_HOME=$(mktemp -d)              # fresh DB → the spend guard is a no-op
+cargo run -p axiomata-cli -- mcp import        # seeds [mcp_servers] from ~/.claude.json
+# then, per candidate model M, edit $AXIOMATA_HOME/config.toml:
+#   [agents.providers.ollama]
+#   base_url = "http://localhost:11434"
+#   skill_model = "M"
+```
+
+Per candidate model M, for `calendar-digest` and `reminders-digest`, run **2×**
+each:
+
+```sh
+RUST_LOG=axiomata_core::agents::ollama_agent=info \
+  cargo run -p axiomata-cli -- run-skill calendar-digest
+cargo run -p axiomata-cli -- list-runs --limit 5   # status, duration_ms, provider (should be empty)
+```
+
+Record per run: **status** (Success/Failed + error), **wall-clock** vs 600 s,
+**step count / tool sequence** (from the log), and whether **stdout parses to
+the right shape**:
+
+- `calendar-digest`: a JSON object with `calendars: string[]` and `events: []`
+  of `{id,title,start,end,calendar,location,allDay}` — or the documented
+  `{"calendars":[],"events":[],"error":"no calendar tool available"}`. The
+  dashboard parser strips one ` ```json ` fence defensively, so a fenced reply
+  still counts as a pass; anything else non-parseable is a fail.
+- `reminders-digest`: `{lists: string[], tasks: [{id,title,list,notes,dueDate,priority}]}`,
+  `priority` one of `none|low|medium|high`.
+
+A one-liner validator (bash) is enough:
+`cargo run -q -p axiomata-cli -- list-runs --limit 1` → get id →
+`… get-run <id>` (add a `get-run` CLI subcommand if absent — it's a thin wrapper
+over `runlog::get_run`) → pipe stdout through `jq -e '.events|type=="array"'`.
+
+### Success criteria (CP3 done)
+
+- `calendar-digest` and `reminders-digest` each run on `ollama-agent` to a
+  **`Success`** record with **shape-valid** stdout, **under `timeout_secs`**,
+  on **at least one** candidate model, reproducibly (2/2 runs).
+- The winning model + any SOP-body edits are written into the bake-off notes and
+  `docs/plans/per-role-provider.md`'s Stufe 2 pointer.
+- If **no** candidate clears the bar for a digest: that digest stays on
+  `claude-code`; record which models were tried and how they failed (timeout /
+  malformed JSON / wrong tool calls / greeted). Stufe 2 still delivered the
+  backend + MCP client; the digests just don't have a viable local model yet.
+
+### Repo artefacts vs report
+
+- **In the repo:** the 1–2 `SKILL.md` `backend:` flips (only for digests that
+  passed), the `tracing::info!` line, any SOP-body tuning edits, a short
+  `docs/plans/stufe2-cp3-bakeoff.md` with the results table.
+- **Not a test file.** The repo has no e2e harness and the CLAUDE.md convention
+  is that real-backend checks are run by hand under a scratch `AXIOMATA_HOME`.
+  The loop glue is already covered by CP2's `FakeOllama` tests; CP3's residual
+  branches (multi-call turns, `MAX_ITERS`, `is_error`) get eyeballed during the
+  bake-off runs, not a new `#[ignore]` test.
+
+### Known wrinkle for CP4
+
+`execute_and_record_skill` calls `spend::guard_redirected_turn(db, config,
+ProviderRole::Skill)` **before** the backend is resolved — so if `skill_provider`
+is a paid provider over its daily cap, an `ollama-agent` skill run (which costs
+nothing) is blocked too. Harmless under a scratch HOME (zero spend), but in the
+real app the guard should skip when the *resolved* backend is local. Fold into
+CP4.
 
 ## Non-goals (v1)
 
