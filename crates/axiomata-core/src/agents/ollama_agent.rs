@@ -146,7 +146,7 @@ pub async fn run(request: AgentRequest, model: &str) -> Result<AgentRunResult, A
         ChatMessage::user(request.prompt.clone()),
     ];
 
-    for _ in 0..MAX_ITERS {
+    for turn in 0..MAX_ITERS {
         let left =
             request
                 .timeout
@@ -155,6 +155,7 @@ pub async fn run(request: AgentRequest, model: &str) -> Result<AgentRunResult, A
                     backend: BACKEND,
                     timeout: request.timeout,
                 })?;
+        tracing::info!(turn, tool_count = infos.len(), "ollama-agent: chat turn");
         let req = ChatMessageRequest::new(model.to_owned(), messages.clone()).tools(infos.clone());
         let resp = match timeout(left, ollama.send_chat_messages(req)).await {
             Ok(Ok(resp)) => resp,
@@ -185,6 +186,11 @@ pub async fn run(request: AgentRequest, model: &str) -> Result<AgentRunResult, A
                 ));
             }
             Step::Calls(calls) => {
+                tracing::info!(
+                    turn,
+                    tools = ?calls.iter().map(|c| &c.function.name).collect::<Vec<_>>(),
+                    "ollama-agent: dispatching tool calls"
+                );
                 // Keep the assistant turn (role + tool_calls) in context, then
                 // append one `tool` message per call result.
                 messages.push(resp.message.clone());

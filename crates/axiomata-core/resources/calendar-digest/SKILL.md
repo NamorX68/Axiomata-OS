@@ -2,6 +2,7 @@
 name: calendar-digest
 description: Reads upcoming calendar events from whichever calendar tool is available (Apple Calendar via the apple-reminders MCP server today) and reports them as one JSON object for the Calendar dashboard module to read back from this skill's last run.
 backend: claude-code
+local_backend: ollama-agent
 allowed_tools: mcp__apple-reminders__calendar_calendars mcp__apple-reminders__calendar_events
 timeout_secs: 600
 ---

@@ -47,6 +47,11 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Show one full run record (including the captured stdout).
+    GetRun {
+        /// Run id, as shown by `list-runs`.
+        id: i64,
+    },
     /// Memory router: regenerate or inspect the workspace `CLAUDE.md` blocks.
     Memory {
         #[command(subcommand)]
@@ -237,6 +242,7 @@ async fn main() -> Result<()> {
         Command::ListSkills => list_skills()?,
         Command::RunSkill { name } => return run_skill(&core, &name).await,
         Command::ListRuns { limit } => list_runs(&core, limit)?,
+        Command::GetRun { id } => get_run(&core, id)?,
         Command::Memory { action } => match action {
             MemoryAction::Sync => memory_sync(&core)?,
             MemoryAction::Status => memory_status(&core)?,
@@ -602,6 +608,45 @@ fn list_runs(core: &AxiomataCore, limit: usize) -> Result<()> {
                 provider = summary.provider,
             );
         }
+    }
+    Ok(())
+}
+
+/// Prints one full run record by id: metadata, then the captured stdout /
+/// stderr so a validator can pipe it into `jq`.
+fn get_run(core: &AxiomataCore, id: i64) -> Result<()> {
+    let db = core.db_lock();
+    let run = skills::get_run(&db, id)
+        .with_context(|| format!("failed to read run #{id}"))?
+        .ok_or_else(|| anyhow::anyhow!("no run #{id}"))?;
+    let cost = run
+        .cost_usd
+        .map(|c| format!(", ${c:.4}"))
+        .unwrap_or_default();
+    println!(
+        "#{id} {started}→{finished}  {status}  ({backend}, {ms} ms{cost})",
+        id = run.id.unwrap_or_default(),
+        started = run.started_at.to_rfc3339(),
+        finished = run.finished_at.to_rfc3339(),
+        status = run.status.as_str(),
+        backend = run.backend,
+        ms = run.duration_ms,
+    );
+    if let Some(code) = run.exit_code {
+        println!("exit code: {code}");
+    }
+    if let Some(err) = &run.error {
+        println!("error: {err}");
+    }
+    println!(
+        "num_turns: {}",
+        run.num_turns.map_or("-".to_string(), |n| n.to_string())
+    );
+    if !run.stdout.trim().is_empty() {
+        println!("--- stdout ---\n{}", run.stdout.trim_end());
+    }
+    if !run.stderr.trim().is_empty() {
+        println!("--- stderr ---\n{}", run.stderr.trim_end());
     }
     Ok(())
 }

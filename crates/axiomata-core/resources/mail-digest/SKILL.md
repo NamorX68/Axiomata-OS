@@ -2,6 +2,8 @@
 name: mail-digest
 description: Reads recent mail via whichever mail tool is available (the apple-mail MCP server today), picks out messages the agent judges important plus ones matching the owner's configured topics, summarises each, and reports them as one JSON object for the Mail dashboard module to read back from this skill's last run.
 backend: claude-code
+local_backend: ollama-agent
+prepend_files: ["Mail/.topics.md"]
 allowed_tools: mcp__apple-mail__get_needs_response mcp__apple-mail__search_emails mcp__apple-mail__list_inbox_emails
 timeout_secs: 600
 ---
@@ -21,12 +23,11 @@ keyword). Don't re-fetch a message you already have.
 
 Do exactly this and nothing more:
 
-1. Look for `Mail/.topics.md` in your current directory (the workspace root).
-   If it exists, read it: each non-empty line is one topic of interest
-   (e.g. "Fotografie", "Development", "KI/AI/LLM"). If it does not exist or
-   is all blank, there are no configured topics — do step 3 without the
-   per-topic searches and skip topic classification in step 4. Never create
-   or edit this file.
+1. Configured topics, if any, appear at the very top of this message under
+   "Context file: Mail/.topics.md" — one topic per line. If that block is
+   absent, there are no configured topics: skip the per-topic `search_emails`
+   calls and the topic classification in step 4. Never try to open the file
+   yourself.
 2. Build the candidate pool for the **last 2 days**, using the mail tool
    available now (the `apple-mail` MCP server):
    - `list_inbox_emails` once, for subject/sender/date of recent inbox mail.

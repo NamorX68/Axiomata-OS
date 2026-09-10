@@ -2,6 +2,7 @@
 name: reminders-digest
 description: Reads Apple Reminders lists and open tasks via whichever reminders tool is available (the apple-reminders MCP server today) and reports them as one JSON object for the Reminders dashboard module to read back from this skill's last run.
 backend: claude-code
+local_backend: ollama-agent
 allowed_tools: mcp__apple-reminders__reminders_lists mcp__apple-reminders__reminders_tasks
 timeout_secs: 600
 ---

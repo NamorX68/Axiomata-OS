@@ -50,14 +50,20 @@ use crate::skills::runlog;
 pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, AxiomataError> {
     let skill = registry::find_skill(name)?;
 
+    // `effective_backend` resolves the skill's `local_backend` when the
+    // configured skill provider is Ollama — so one `skill_provider` switch
+    // moves every opted-in skill (e.g. the connector digests) onto
+    // `ollama-agent`, and flipping back to a cloud provider reverts them.
+    let backend_id = skill.effective_backend(config);
+
     // An unknown backend string in the frontmatter is a recordable failure: the
     // skill exists and someone tried to run it.
-    let backend = match AgentBackend::resolve(&skill.backend, skill.model.as_deref(), config) {
+    let backend = match AgentBackend::resolve(backend_id, skill.model.as_deref(), config) {
         Ok(backend) => backend,
         Err(err) => {
             return Ok(failure_record(
                 &skill.name,
-                &skill.backend,
+                backend_id,
                 // The backend string didn't resolve, so there is no provider
                 // to attribute this to.
                 None,
@@ -80,9 +86,10 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
     // run got back a plain "Unknown command: /<name>" chat reply and — since
     // `claude -p` still exits 0 for an ordinary reply — was logged as a
     // success despite the SOP never reaching the model.
+    let prompt = build_prompt(config, &skill)?;
     run_on_backend(
         &skill.name,
-        skill.body.clone(),
+        prompt,
         &backend,
         config,
         model,
@@ -90,6 +97,44 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
         skill.timeout_secs,
     )
     .await
+}
+
+/// Assembles the prompt for a skill run: the skill's declared
+/// `prepend_files`, read from the workspace and prefixed as
+/// `## Context file: <rel>` blocks (missing/blank files contribute nothing),
+/// then the `SKILL.md` body itself.
+///
+/// This bridge exists for a skill that references a workspace file (e.g.
+/// `mail-digest`'s `Mail/.topics.md`) but runs on a backend with no file tool
+/// — the local `ollama-agent` only has its MCP tools. Applies to every
+/// backend: a `claude-code` run gets the topics inline instead of reading
+/// them, which is strictly fine.
+///
+/// Errors:
+///     [`AxiomataError::InvalidSkill`] if a `prepend_files` entry is an
+///     absolute path or contains `..` (workspace-relative only, no escape).
+fn build_prompt(config: &Config, skill: &registry::Skill) -> Result<String, AxiomataError> {
+    let mut prompt = String::new();
+    for rel in &skill.prepend_files {
+        if rel.contains("..") || std::path::Path::new(rel).is_absolute() {
+            return Err(AxiomataError::InvalidSkill {
+                path: skill.path.clone(),
+                reason: format!("prepend_files entry {rel:?} must be a workspace-relative path"),
+            });
+        }
+        match std::fs::read_to_string(config.workspace_root.join(rel)) {
+            // Missing or blank file → contribute nothing.
+            Ok(content) if !content.trim().is_empty() => {
+                prompt.push_str(&format!(
+                    "## Context file: {rel}\n\n{}\n\n---\n\n",
+                    content.trim()
+                ));
+            }
+            _ => {}
+        }
+    }
+    prompt.push_str(&skill.body);
+    Ok(prompt)
 }
 
 /// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`),
@@ -725,6 +770,87 @@ mod tests {
             std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
         }
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A minimal `Skill` whose prompt-relevant fields are set.
+    fn skill(backend: &str, prepend: &[&str]) -> registry::Skill {
+        registry::Skill {
+            name: "s".to_string(),
+            description: "d".to_string(),
+            model: None,
+            effort: None,
+            trigger: None,
+            backend: backend.to_string(),
+            local_backend: None,
+            prepend_files: prepend.iter().map(|s| s.to_string()).collect(),
+            allowed_tools: None,
+            timeout_secs: None,
+            path: PathBuf::from("/tmp/s/SKILL.md"),
+            body: "BODY-BODY".to_string(),
+        }
+    }
+
+    #[test]
+    fn build_prompt_prepends_a_present_file_and_skips_a_missing_one() {
+        let cwd = unique_temp_dir("axiomata-test-runner-prepend");
+        fs::create_dir_all(cwd.join("Mail")).unwrap();
+        fs::write(cwd.join("Mail/.topics.md"), "Fotografie\nDevelopment\n").unwrap();
+        let config = Config {
+            workspace_root: cwd.clone(),
+            ..Config::default()
+        };
+
+        let prompt = build_prompt(
+            &config,
+            &skill("claude-code", &["Mail/.topics.md", "Mail/ghost.md"]),
+        )
+        .unwrap();
+        assert!(
+            prompt.starts_with(
+                "## Context file: Mail/.topics.md\n\nFotografie\nDevelopment\n\n---\n\n"
+            ),
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains("ghost.md"),
+            "a missing file contributes nothing"
+        );
+        assert!(prompt.ends_with("BODY-BODY"), "{prompt}");
+        fs::remove_dir_all(&cwd).ok();
+    }
+
+    #[test]
+    fn build_prompt_skips_a_missing_or_blank_context_file() {
+        let cwd = unique_temp_dir("axiomata-test-runner-blank");
+        fs::create_dir_all(cwd.join("Mail")).unwrap();
+        fs::write(cwd.join("Mail/.topics.md"), "   \n").unwrap();
+        let config = Config {
+            workspace_root: cwd.clone(),
+            ..Config::default()
+        };
+
+        let prompt = build_prompt(&config, &skill("claude-code", &["Mail/.topics.md"])).unwrap();
+        assert_eq!(
+            prompt, "BODY-BODY",
+            "a blank topic file adds no context block"
+        );
+        fs::remove_dir_all(&cwd).ok();
+    }
+
+    #[test]
+    fn build_prompt_rejects_dotdot_and_absolute_prepend_paths() {
+        let config = Config {
+            workspace_root: unique_temp_dir("axiomata-test-runner-escape"),
+            ..Config::default()
+        };
+        for bad in ["../evil", "/etc/passwd"] {
+            let err = build_prompt(&config, &skill("claude-code", &[bad])).unwrap_err();
+            assert!(
+                matches!(&err, AxiomataError::InvalidSkill { reason, .. }
+                    if reason.contains("workspace-relative")),
+                "{bad}: {err}"
+            );
+        }
     }
 
     #[test]
