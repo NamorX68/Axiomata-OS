@@ -74,10 +74,12 @@ impl AgentBackend {
     /// onto a concrete backend.
     ///
     /// Args:
-    ///     backend: `"claude-code"` or `"ollama"`.
-    ///     model_override: For `"ollama"`, a model name that wins over the
-    ///         configured default; ignored for `"claude-code"`.
-    ///     config: Provides `agents.ollama_model` as the fallback model.
+    ///     backend: `"claude-code"`, `"ollama"`, or `"ollama-agent"`.
+    ///     model_override: For `"ollama"` and `"ollama-agent"`, a model name
+    ///         that wins over the configured default(s); ignored for
+    ///         `"claude-code"`.
+    ///     config: Provides the model fallbacks (`agents.ollama_model` and, for
+    ///         `ollama-agent`, the Ollama provider's `skill_model`).
     ///
     /// Returns:
     ///     The resolved [`AgentBackend`].

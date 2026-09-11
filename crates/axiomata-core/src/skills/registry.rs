@@ -69,8 +69,9 @@ pub struct Skill {
     pub effort: Option<String>,
     /// Optional trigger description from the frontmatter.
     pub trigger: Option<String>,
-    /// Agent backend identifier (`"claude-code"` or `"ollama"`). Not validated
-    /// here — [`crate::agents::AgentBackend::resolve`] checks it at run time.
+    /// Agent backend identifier (`"claude-code"`, `"ollama"`, or
+    /// `"ollama-agent"`). Not validated here —
+    /// [`crate::agents::AgentBackend::resolve`] checks it at run time.
     pub backend: String,
     /// Backend id to resolve *instead of* [`Skill::backend`] when the
     /// configured skill provider is a local one (Ollama today) — see

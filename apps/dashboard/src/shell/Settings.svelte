@@ -423,6 +423,12 @@
                 <select bind:value={config.agents.skill_provider}>
                   {#each PROVIDERS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
                 </select>
+                {#if config.agents.skill_provider === "ollama"}
+                  <p class="hint">
+                    Ollama → die Connector-Digests (Calendar/Reminders/Mail) laufen lokal über den
+                    Tool-Call-Agenten — keine Cloud-Kosten.
+                  </p>
+                {/if}
               </label>
             </div>
 

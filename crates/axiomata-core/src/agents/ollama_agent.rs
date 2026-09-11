@@ -13,9 +13,9 @@
 //! system = PREAMBLE
 //! user   = request.prompt                     (the SKILL.md body)
 //! loop (max MAX_ITERS turns):
-//!   POST /api/chat { messages, tools }        (ollama-rs native tool calling)
+//!       POST /api/chat { messages, tools }        (ollama-rs native tool calling)
 //!   -> tool_calls? dispatch each via the MCP client, append `tool` messages
-//!   -> plain content? that is the final output -> AgentRunResult::bare
+//!   -> plain content? that is the final output (carries `num_turns`)
 //! ```
 //!
 //! Every early return shuts the spawned MCP servers down (see [`shutdown`]),
@@ -177,13 +177,21 @@ pub async fn run(request: AgentRequest, model: &str) -> Result<AgentRunResult, A
 
         match interpret(&resp.message) {
             Step::Final(text) => {
+                tracing::info!(turn, "ollama-agent: final answer");
                 shutdown(&mut clients).await;
-                return Ok(AgentRunResult::bare(
-                    truncate_utf8(text, MAX_RESPONSE_BYTES),
-                    String::new(),
-                    0,
-                    started.elapsed().as_millis() as u64,
-                ));
+                // `num_turns` carries the loop counter (bare() leaves it None)
+                // so the step count surfaces in `get-run` / the DB without
+                // needing `RUST_LOG`.
+                return Ok(AgentRunResult {
+                    stdout: truncate_utf8(text, MAX_RESPONSE_BYTES),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                    cost_usd: None,
+                    input_tokens: None,
+                    output_tokens: None,
+                    num_turns: Some((turn + 1) as u32),
+                });
             }
             Step::Calls(calls) => {
                 tracing::info!(
@@ -603,6 +611,11 @@ mod tests {
         .expect("a two-turn run should succeed");
         assert_eq!(result.stdout, "final answer");
         assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            result.num_turns,
+            Some(2),
+            "the loop counter records how many turns the run took"
+        );
 
         let seen = fake.seen.lock().await;
         assert_eq!(seen.len(), 2, "one http request per chat turn");

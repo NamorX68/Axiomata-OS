@@ -35,8 +35,9 @@ use crate::skills::runlog;
 /// Resolution failures (no such skill, malformed `SKILL.md`) are returned as
 /// `Err` — there is no run to attribute. Once the skill is found, every other
 /// outcome (success, non-zero exit, unknown backend, spawn failure, timeout,
-/// API error) yields `Ok(record)` with `record.id == None`; the caller
-/// inspects [`RunRecord::status`] and persists via [`runlog::record_run`].
+/// API error, and a `prepend_files` path error) yields `Ok(record)` with
+/// `record.id == None`; the caller inspects [`RunRecord::status`] and persists
+/// via [`runlog::record_run`].
 ///
 /// Args:
 ///     name: Skill name to run.
@@ -46,7 +47,9 @@ use crate::skills::runlog;
 ///
 /// Errors:
 ///     [`AxiomataError::SkillNotFound`] / [`AxiomataError::InvalidSkill`] if the
-///     skill cannot be resolved.
+///     skill cannot be resolved; [`AxiomataError::AlreadyRunning`] if `name` is
+///     mid-run elsewhere (a real `Err`, deliberately *not* recorded — see
+///     [`run_on_backend`]'s doc comment).
 pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, AxiomataError> {
     let skill = registry::find_skill(name)?;
 
@@ -61,15 +64,11 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
     let backend = match AgentBackend::resolve(backend_id, skill.model.as_deref(), config) {
         Ok(backend) => backend,
         Err(err) => {
-            return Ok(failure_record(
-                &skill.name,
-                backend_id,
+            return Ok(misconfigured_skill_record(
+                &skill, backend_id,
                 // The backend string didn't resolve, so there is no provider
                 // to attribute this to.
-                None,
-                Utc::now(),
-                0,
-                err.to_string(),
+                None, &err,
             ));
         }
     };
@@ -86,7 +85,26 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
     // run got back a plain "Unknown command: /<name>" chat reply and — since
     // `claude -p` still exits 0 for an ordinary reply — was logged as a
     // success despite the SOP never reaching the model.
-    let prompt = build_prompt(config, &skill)?;
+    let prompt = match build_prompt(config, &skill) {
+        Ok(prompt) => prompt,
+        // A prompt-build failure (today: a `prepend_files` entry breaking the
+        // workspace-relative guard — `build_prompt` is the only fallible step)
+        // means the skill exists but is misconfigured, which is not a
+        // resolution failure: record a `Failed` run the dashboard can show
+        // (matching the unknown-backend arm above), rather than returning
+        // `Err`, which `execute_and_record_skill` would drop without
+        // persisting anything.
+        Err(err) => {
+            // Provider is known here: the backend already resolved, only the
+            // prompt build failed.
+            return Ok(misconfigured_skill_record(
+                &skill,
+                backend_id,
+                provider_label(&backend, config),
+                &err,
+            ));
+        }
+    };
     run_on_backend(
         &skill.name,
         prompt,
@@ -123,21 +141,55 @@ fn build_prompt(config: &Config, skill: &registry::Skill) -> Result<String, Axio
             });
         }
         match std::fs::read_to_string(config.workspace_root.join(rel)) {
-            // Missing or blank file → contribute nothing.
+            // Missing or blank file → contribute nothing. Traced at debug
+            // level so a typo'd path is diagnosable instead of silently
+            // yielding no context.
             Ok(content) if !content.trim().is_empty() => {
                 prompt.push_str(&format!(
                     "## Context file: {rel}\n\n{}\n\n---\n\n",
                     content.trim()
                 ));
             }
-            _ => {}
+            _ => {
+                tracing::debug!(
+                    rel,
+                    "prepend_files: skipping a missing/unreadable context file"
+                );
+            }
         }
     }
     prompt.push_str(&skill.body);
     Ok(prompt)
 }
 
-/// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`),
+/// A `Failed` [`RunRecord`] for a skill that *resolved* but couldn't be run —
+/// the unknown-backend and prompt-build misconfiguration outcomes of
+/// [`execute_skill`].
+///
+/// `provider` is `None` when the failure happened before a backend existed to
+/// attribute a provider to it (an unresolvable backend string has no provider);
+/// `Some(label)` when the backend resolved (`provider_label`) and only the
+/// prompt build failed. Both cases deliberately persist a record rather than
+/// return `Err` — `execute_and_record_skill` keeps runs visible for them.
+fn misconfigured_skill_record(
+    skill: &registry::Skill,
+    backend_id: &str,
+    provider: Option<String>,
+    err: &AxiomataError,
+) -> RunRecord {
+    failure_record(
+        &skill.name,
+        backend_id,
+        provider,
+        Utc::now(),
+        0,
+        err.to_string(),
+    )
+}
+
+/// Runs the raw string `prompt` on `backend_id` (`"claude-code"` / `"ollama"`
+/// — the routine store validates those two; `"ollama-agent"` is also accepted
+/// by `AgentBackend::resolve`),
 /// attributing the resulting [`RunRecord`] to `name`. The counterpart to
 /// [`execute_skill`] for callers that have a prompt but no `SKILL.md` — the
 /// routine scheduler's `prompt` target. An unresolvable `backend_id` yields a
@@ -1299,6 +1351,32 @@ mod tests {
             "the name must be released after a failed run, not just after a \
              successful one: {second:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_bad_prepend_files_path_is_recorded_as_a_failed_run_not_an_error() {
+        let fx = Fixture::new("bad-prepend");
+        fx.write_skill(
+            "prep",
+            "---\nname: prep\ndescription: d\nbackend: claude-code\n\
+             prepend_files: [\"../evil\"]\n---\nDo a thing.\n",
+        );
+
+        // §D decision: a `prepend_files` entry that breaks the workspace-
+        // relative guard is a misconfigured skill, not a resolution failure —
+        // it persists a `Failed` run the dashboard can show instead of
+        // returning `Err` (which records nothing).
+        let record = execute_and_record_skill("prep", &fx.config, &fx.db)
+            .await
+            .unwrap();
+        assert_eq!(record.status, RunStatus::Failed);
+        assert!(record.error.unwrap().contains("workspace-relative"));
+
+        let recent = runlog::list_runs(&fx.conn(), 10).unwrap();
+        assert_eq!(recent.len(), 1, "the failed run must be persisted");
+        assert_eq!(recent[0].skill_name, "prep");
+        assert_eq!(recent[0].backend, "claude-code");
+        assert_eq!(recent[0].status, RunStatus::Failed);
     }
 
     #[tokio::test]

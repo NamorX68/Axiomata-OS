@@ -39,6 +39,11 @@ cargo run -p axiomata-cli                  # headless: init the core, print stat
 cargo run -p axiomata-cli -- list-skills   # discovered skills (~/.axiomata/skills/)
 cargo run -p axiomata-cli -- run-skill <name>   # run a skill, print outcome, exit 1 if it failed
 cargo run -p axiomata-cli -- list-runs --limit 20   # recent run history from the DB
+cargo run -p axiomata-cli -- get-run <id>    # one full run record incl. captured stdout
+cargo run -p axiomata-cli -- skills reseed [--force]  # re-copy bundled skills from resources/ (seed-if-absent unless --force)
+cargo run -p axiomata-cli -- mcp import      # seed [mcp_servers] from ~/.claude.json (one-time)
+cargo run -p axiomata-cli -- mcp list        # configured MCP stdio servers
+cargo run -p axiomata-cli -- mcp tools <name>  # connect + list one server's tools (MCP smoke test)
 cargo run -p axiomata-cli -- memory sync    # regenerate the workspace CLAUDE.md router blocks
 cargo run -p axiomata-cli -- memory status  # is the router stale?
 cargo run -p axiomata-cli -- routines list  # scheduled routines, soonest next-fire first
@@ -93,6 +98,18 @@ from the code itself:
   an MCP-backed `*-digest` skill, no live poll (every refresh is a real agent turn), writes
   go through a silent one-shot instruct turn, not the skill. Follow this pattern for the next
   integration rather than hand-rolling Tauri commands for it (`docs/architecture.md` §5).
+  **One deliberate exception — the local case (Stufe 2):** when `skill_provider = ollama`,
+  a digest's refresh runs on the `ollama-agent` backend, a real Rust tool-call loop over
+  local Ollama + the MCP servers (§5 "Agent backends" / "[`local_backend` +
+  `prepend_files`]"). It's selected by the skill's `local_backend:` frontmatter via
+  `Skill::effective_backend`, never by hand per-skill; switching the skill provider back to a
+  cloud provider reverts the digests to `claude-code`. `mail-digest` also uses
+  `prepend_files: ["Mail/.topics.md"]` to inline its workspace topics (the loop has no file
+  tool).
+- **Bundled skills are seed-if-absent**: a `resources/<name>/SKILL.md` edit does **not**
+  reach an install whose `~/.axiomata/skills/<name>/SKILL.md` already exists (the seed never
+  overwrites). Bring it up to date with `cargo run -p axiomata-cli -- skills reseed --force`
+  (re-copies only the bundled four; user skills untouched).
 - **HTML/course pages render via `<iframe sandbox srcdoc=…>`, not `asset://`** — an
   `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
   WebKit sandboxing wall); don't re-attempt it without reading the postmortem in
@@ -100,6 +117,13 @@ from the code itself:
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.
+- **Backend ids + the two lean-agent frontmatter fields**: `backend:` is `claude-code` |
+  `ollama` | `ollama-agent`; `ollama-agent` is the bounded local tool-call loop and is only
+  picked automatically through the `local_backend:` mechanism (§5 "Agent backends").
+  `SKILL.md` may add `local_backend: ollama-agent` (used instead of `backend` when
+  `skill_provider = ollama`) and `prepend_files: ["rel/path.md"]` (workspace files inlined
+  into the prompt as `## Context file:` blocks; missing = skipped, `..`/absolute = run
+  fails as a recorded `Failed`, per §D of the Stufe 2 plan).
 - **Model / provider**: the provider is chosen **per role** — `agents.chat_provider` for
   interactive chat, `agents.skill_provider` for skill/routine runs — resolved via
   `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. Each `claude -p` run passes

@@ -122,8 +122,11 @@ pub enum AxiomataError {
         spent_usd: f64,
     },
 
-    /// A `SKILL.md` file could not be read, or its frontmatter was missing or
-    /// malformed.
+    /// A `SKILL.md` file could not be read, its frontmatter was missing or
+    /// malformed, or a `prepend_files` entry broke the workspace-relative-path
+    /// guard when its prompt was built. Note: at the `build_prompt` raise site
+    /// the skill *has* been resolved, so the runner records it as a `Failed`
+    /// run rather than no run at all (see `skills::runner::execute_skill`).
     #[error("invalid skill at {path}: {reason}")]
     InvalidSkill { path: PathBuf, reason: String },
 

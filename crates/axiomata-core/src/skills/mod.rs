@@ -112,11 +112,85 @@ pub fn seed_example_skill() -> Result<(), AxiomataError> {
 ///
 /// Errors:
 ///     [`AxiomataError::Io`] if any skill's directory or file cannot be
-///     created; stops at the first failure rather than partially seeding.
+///     created; aborts at the first failure (the skills already written stay put).
 pub fn seed_default_skills() -> Result<(), AxiomataError> {
     for (name, content) in DEFAULT_SKILLS {
         seed_skill(name, content)?;
     }
+    Ok(())
+}
+
+/// Writes every skill in [`DEFAULT_SKILLS`] into `~/.axiomata/skills/`,
+/// optionally overwriting copies that already exist.
+///
+/// Without `force` this is exactly [`seed_default_skills`] (seed-if-absent —
+/// a user's own edits always survive). With `force` the bundled skills are
+/// re-copied from `resources/`, replacing any current `SKILL.md`: the escape
+/// hatch for the seed's seed-if-absent gotcha — an edit to a bundled
+/// skill's `resources/SKILL.md` does **not** reach an install whose
+/// `~/.axiomata/skills/<name>/SKILL.md` already exists. Skills outside
+/// [`DEFAULT_SKILLS`] (the user's own) are never touched.
+///
+/// Errors:
+///     [`AxiomataError::Io`] if any skill's file cannot be created or
+///     overwritten; aborts at the first failure (the skills already written stay put).
+pub fn reseed_default_skills(force: bool) -> Result<(), AxiomataError> {
+    if !force {
+        return seed_default_skills();
+    }
+    for (name, content) in DEFAULT_SKILLS {
+        write_skill(name, content)?;
+    }
+    Ok(())
+}
+
+/// Overwrites `~/.axiomata/skills/<name>/SKILL.md` with `content`, atomically.
+///
+/// The overwrite writes an `O_EXCL` temp sibling then renames it over the
+/// target, so a crash mid-write can't leave a truncated manifest behind and a
+/// symlink planted at the predictable temp path is never followed. Only the
+/// named skill is touched.
+fn write_skill(name: &str, content: &str) -> Result<(), AxiomataError> {
+    let dir = paths::global_skills_dir().join(name);
+    let manifest = dir.join("SKILL.md");
+
+    fs::create_dir_all(&dir).map_err(|source| AxiomataError::Io {
+        path: dir.clone(),
+        source,
+    })?;
+
+    let tmp = dir.join("SKILL.md.tmp");
+    let write_result = {
+        // `create_new` = O_CREAT|O_EXCL, matching the workspace write path: a
+        // leftover temp from a crashed write, or a planted symlink, fails the
+        // open rather than being clobbered/followed.
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(|source| AxiomataError::Io {
+                path: tmp.clone(),
+                source,
+            })?;
+        file.write_all(content.as_bytes())
+            .map_err(|source| AxiomataError::Io {
+                path: tmp.clone(),
+                source,
+            })
+    };
+    if let Err(err) = write_result {
+        // A failed write must not leave `SKILL.md.tmp` behind — it would
+        // wedge every future forced reseed on the `create_new` open above.
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
+    fs::rename(&tmp, &manifest).map_err(|source| {
+        let _ = fs::remove_file(&tmp);
+        AxiomataError::Io {
+            path: manifest,
+            source,
+        }
+    })?;
     Ok(())
 }
 
@@ -250,6 +324,77 @@ mod tests {
             "---\nname: mail-digest\ndescription: mine\n---\n",
             "a hand-edited default skill must never be overwritten"
         );
+
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn reseed_without_force_preserves_a_hand_edit() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-reseed-noop-home");
+        fs::create_dir_all(&home).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        seed_default_skills().unwrap();
+        // The owner tuned a bundled skill's SOP by hand.
+        let mail_manifest = paths::global_skills_dir()
+            .join("mail-digest")
+            .join("SKILL.md");
+        let edit = "---\nname: mail-digest\ndescription: mine\n---\n";
+        fs::write(&mail_manifest, edit).unwrap();
+
+        // Without --force the reseed is seed-if-absent: the edit survives.
+        reseed_default_skills(false).unwrap();
+        assert_eq!(fs::read_to_string(&mail_manifest).unwrap(), edit);
+
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn reseed_with_force_restores_bundled_skills_but_leaves_user_skills_alone() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-reseed-force-home");
+        fs::create_dir_all(&home).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &home);
+        }
+
+        seed_default_skills().unwrap();
+        // Mess with a bundled skill and create one of the user's own.
+        let mail_manifest = paths::global_skills_dir()
+            .join("mail-digest")
+            .join("SKILL.md");
+        fs::write(
+            &mail_manifest,
+            "---\nname: mail-digest\ndescription: hacked\n---\n",
+        )
+        .unwrap();
+        let user_dir = paths::global_skills_dir().join("mine");
+        fs::create_dir_all(&user_dir).unwrap();
+        let user_manifest = user_dir.join("SKILL.md");
+        let user_content = "---\nname: mine\ndescription: my own\n---\n";
+        fs::write(&user_manifest, user_content).unwrap();
+
+        reseed_default_skills(true).unwrap();
+
+        // The bundled skill is back to the resources copy (byte-identical)…
+        let (_, wanted_md) = DEFAULT_SKILLS
+            .iter()
+            .find(|(name, _)| *name == "mail-digest")
+            .unwrap();
+        assert_eq!(fs::read_to_string(&mail_manifest).unwrap(), *wanted_md);
+        // …and the user-owned skill is untouched.
+        assert_eq!(fs::read_to_string(&user_manifest).unwrap(), user_content);
 
         unsafe {
             env::remove_var(paths::AXIOMATA_HOME_ENV);

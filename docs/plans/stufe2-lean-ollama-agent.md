@@ -1,6 +1,6 @@
 # Plan: Stufe 2 — a lean local agent for connector digests
 
-Status: **CP1 + CP2 + CP3-mechanisms done; CP3 bake-off round 1 done.** CP1
+Status: **COMPLETE — CP1 + CP2 + CP3 + CP4 done** (CP4 2026-09-11). CP1
 (`54173bf`): the `[mcp_servers]` config schema, a hand-rolled stdio MCP client
 (`crates/axiomata-core/src/mcp/mod.rs`), the `axiomata-cli mcp import` helper —
 verified against the real `apple-mail` (27 tools) and `apple-reminders`
@@ -11,12 +11,17 @@ loop tests. **CP3 mechanisms** (`3a63f58`, 2026-09-11):
 `local_backend` / `Skill::effective_backend` (provider-driven backend
 selection), `prepend_files` + `build_prompt` (feeds `Mail/.topics.md` into the
 prompt), per-turn loop `tracing::info!`, `axiomata-cli get-run <id>`, the three
-digest `SKILL.md` edits, 6 unit tests. **CP3 bake-off round 1:** see
+digest `SKILL.md` edits, 6 unit tests. **CP4** (docs catch-up in
+`docs/architecture.md` / `CLAUDE.md`, the Settings hint, `num_turns` + a
+"final answer" trace line, the `prepend_files` debug trace, the
+`build_prompt`-error→`Failed`-record decision, the spend-guard note, and
+`axiomata-cli skills reseed [--force]` for the bundled-skill re-seed gotcha).
+**CP3 bake-off round 1:** see
 `docs/plans/stufe2-cp3-bakeoff.md` — the switch works (all three digests
 resolve to `ollama-agent` under `skill_provider = ollama`); `gemma4:e4b-mlx`
 clears reminders 2/2, calendar/mail emit broken JSON; `Spark-X2.5-4B` can't
 load on Ollama 0.33.3; `granite4.2:8b` / `lfm2.5:8b` pulled 2026-09-11, round 2
-pending. **CP4 is next and last** — see "CP4 — implementation plan (detail)".
+pending. What's left is operational, not a checkpoint — see "After CP4".
 
 ## Context
 
@@ -116,23 +121,13 @@ the `apple-mail` / `apple-reminders` MCP servers itself and speak the protocol.
   `Success` + shape-valid stdout + under `timeout_secs`, 2/2 runs (mail summary
   *quality* judged separately). **Full spec: "CP3 — implementation plan
   (detail)" below.**
-- **CP4 — docs + polish (last checkpoint).** `docs/architecture.md`
-  §"Agent backends" (three variants now) + §"Model providers" (the
-  `local_backend` switch) + §5/§7 milestone landing; project `CLAUDE.md`
-  (commands, the connector-module exception). A one-line Settings hint under
-  `skill_provider` when it's `ollama`. Observability polish: set `num_turns` on
-  `ollama-agent` results, an explicit "final answer" trace line, a
-  `debug!` on a skipped `prepend_files` entry. Decide (a note counts): the
-  `build_prompt` error path, and the spend-guard corner
-  (`guard_redirected_turn` before backend resolution — moot on the
-  `skill_provider = ollama` path). Handle the **bundled-skill re-seed gotcha**
-  (`seed_skill` is seed-if-absent → `resources/` edits don't reach an existing
-  install): a `CLAUDE.md` note or an `axiomata-cli skills reseed --force`.
-  Update `docs/plans/per-role-provider.md`'s "Stufe 2" pointer. **Full spec:
-  "CP4 — implementation plan (detail)" below.** (The "flip the default"
-  question is **answered** — it's the `skill_provider` switch. A `claude-code`
-  fallback when Ollama is down is **out of scope** — it would silently bill
-  cloud after the user picked local.)
+- **CP4 — docs + polish (last checkpoint). ✅ COMPLETE (2026-09-11).** See "CP4 —
+  implementation plan (detail)" below for what shipped: §A docs in
+  `docs/architecture.md` + `CLAUDE.md` + the `per-role-provider.md` pointer; §B the
+  Settings hint under `skill_provider` when it's `ollama`; §C observability polish
+  (`num_turns`, the "final answer" trace line, the `prepend_files` `debug!`); §D the
+  `build_prompt` error → recorded `Failed` run (recommended option); §E documented only;
+  §F the `axiomata-cli skills reseed [--force]` command.
 
 ## CP2 — implementation plan (detail)
 
@@ -639,11 +634,11 @@ edit in the bake-off notes.
 A `tracing::info!` at the top of each loop iteration in `ollama_agent::run` —
 turn index, and after the response, the tool names called (or "final") — so a
 bake-off run under `RUST_LOG=axiomata_core::agents::ollama_agent=info` shows
-step count and tool-call sequence per model. `AgentRunResult` from this backend
+step count and tool-call sequence per model. ~~`AgentRunResult` from this backend
 sets `num_turns: None` (via `bare()`), so the log is the only place step count
-surfaces. ~2 lines; no behaviour change. (Optionally also set `num_turns` on
-the returned `AgentRunResult` from the loop counter — nicer, shows up in
-`list-runs` — but the log is the CP3 essential.)
+surfaces.~~ **Superseded by CP4:** `ollama-agent` now sets `num_turns: Some(turn + 1)`
+on its result, so the step count also shows in `get-run`. ~2 lines; no behaviour
+change.
 
 ### Files touched (CP3)
 
@@ -776,6 +771,13 @@ Validator: `list-runs --limit 1` → id → `get-run <id>` → `jq -e`.
   turns, `MAX_ITERS`, `is_error`) get eyeballed during the bake-off.
 
 ## CP4 — implementation plan (detail)
+
+**Status: shipped (2026-09-11).** §B–§F decision summaries: the `build_prompt`
+path error is mapped to a recorded `Failed` run (recommended option, §D); the
+spend-guard corner is documented only (architected away, §E); the bundled-skill
+re-seed gotcha ships as `axiomata-cli skills reseed [--force]` over the new
+`skills::reseed_default_skills(force)` (§F). The plan below describes the work
+as specified.
 
 Checked against `3a63f58` (CP3 mechanisms shipped). CP4 is **the last
 checkpoint of Stufe 2** — docs to catch up with reality, a one-line Settings

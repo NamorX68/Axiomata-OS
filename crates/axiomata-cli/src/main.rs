@@ -63,6 +63,12 @@ enum Command {
         #[command(subcommand)]
         action: McpAction,
     },
+    /// Bundled skills: re-copy the default four from `resources/` into
+    /// `~/.axiomata/skills/`.
+    Skills {
+        #[command(subcommand)]
+        action: SkillsAction,
+    },
     /// Scheduled routines: list, create, enable/disable, or run one poll pass.
     Routines {
         #[command(subcommand)]
@@ -132,6 +138,24 @@ enum MemoryAction {
     Sync,
     /// Report whether the router is stale (a tracked file changed since sync).
     Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillsAction {
+    /// Re-copy the bundled skills from `resources/` into `~/.axiomata/skills/`.
+    ///
+    /// Without `--force` this only seeds any *missing* bundled skill (the
+    /// app's normal every-start behaviour). With `--force` the bundled four
+    /// (`calendar-digest`, `mail-digest`, `reminders-digest`, `cleanup`) are
+    /// overwritten from `resources/` — the escape hatch for the seed's
+    /// seed-if-absent gotcha, where a bundled `SKILL.md` edit never reaches an
+    /// install whose copy already exists. User-created skills are never
+    /// touched.
+    Reseed {
+        /// Overwrite the bundled skills even where a copy already exists.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -248,6 +272,9 @@ async fn main() -> Result<()> {
             MemoryAction::Status => memory_status(&core)?,
         },
         Command::Mcp { action } => return mcp_cmd(&core, action).await,
+        Command::Skills { action } => match action {
+            SkillsAction::Reseed { force } => skills_reseed(force)?,
+        },
         Command::Routines { action } => return routines_cmd(&core, action).await,
         Command::Assistant {
             message,
@@ -517,6 +544,27 @@ fn list_skills() -> Result<()> {
             "⚠ skipped {name}: {reason}",
             name = skill.name,
             reason = skill.reason
+        );
+    }
+    Ok(())
+}
+
+/// Re-copies the bundled skills from `resources/` into `~/.axiomata/skills/`.
+/// Without `--force` this is the every-start seed (missing-only); with
+/// `--force` existing bundled copies are overwritten. User skills are always
+/// left alone.
+fn skills_reseed(force: bool) -> Result<()> {
+    let dir = paths::global_skills_dir();
+    skills::reseed_default_skills(force).context("reseed failed")?;
+    if force {
+        println!(
+            "overwrote the bundled skills in {} — user skills untouched",
+            dir.display()
+        );
+    } else {
+        println!(
+            "seeded any missing bundled skills in {} (no overwrite)",
+            dir.display()
         );
     }
     Ok(())
