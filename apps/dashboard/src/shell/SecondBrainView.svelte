@@ -392,11 +392,15 @@
   }
 
   async function copyPath(path: string) {
+    // `selected.path` is workspace-relative; the clipboard should carry the
+    // resolvable absolute path (owner feedback: it only ever copied a bare
+    // file name for root-level notes).
+    const absolute = graph && path ? `${graph.workspace_root.replace(/\/+$/, "")}/${path}` : path;
     try {
-      await navigator.clipboard.writeText(path);
+      await navigator.clipboard.writeText(absolute);
       toast("Path copied.");
     } catch {
-      toast(path);
+      toast(absolute);
     }
   }
 

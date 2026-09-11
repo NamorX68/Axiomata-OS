@@ -349,6 +349,8 @@
     align-items: center;
     gap: var(--ax-space-2);
     flex: 0 0 auto;
+    /* A touch more air between the filter row and the mini-month below. */
+    margin-bottom: var(--ax-space-1);
   }
   select {
     min-width: 0;
@@ -368,11 +370,13 @@
 
   .top {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    align-items: center;
+    justify-content: flex-start;
     flex-wrap: wrap;
     gap: var(--ax-space-2);
     flex: 0 0 auto;
+    /* A bit more separation between the mini-month and the agenda below. */
+    margin-bottom: var(--ax-space-1);
   }
   .mini-wrap {
     flex: 0 0 auto;
@@ -384,9 +388,12 @@
     width: 11rem;
     max-width: 100%;
   }
-  /* Push the optional clock to the tile's right edge, away from the grid. */
+  /* Center the optional clock vertically against the mini-month and
+     horizontally in the space between the calendar's right edge and the
+     tile's right edge. */
   .top :global(.clock) {
     margin-left: auto;
+    margin-right: auto;
   }
   .mini-wrap :global(.mini .day) {
     font-size: var(--ax-font-size-xs);
@@ -396,7 +403,7 @@
     flex: 0 0 auto;
     font-size: var(--ax-font-size-sm);
     font-weight: 600;
-    padding-top: var(--ax-space-1);
+    padding-top: var(--ax-space-2);
   }
   .range-hint {
     flex: 0 0 auto;

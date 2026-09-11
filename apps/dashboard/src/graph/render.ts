@@ -718,7 +718,7 @@ export class GraphRenderer {
     }
 
     // Icon nodes on the rim.
-    const nodeR = Math.max(12, Math.min(19, R * 0.062));
+    const nodeR = Math.max(14, Math.min(24, R * 0.072));
     ctx.font = this.font(Math.max(8, nodeR * 0.55), 600);
     for (const n of model.nodes) {
       if (!n.onOrbit) continue;
