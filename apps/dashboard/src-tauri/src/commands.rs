@@ -261,7 +261,7 @@ pub fn get_spend_summary(state: State<'_, CoreState>) -> Result<Vec<spend::Spend
 /// process's lifetime. So a changed `workspace_root` is written to disk
 /// immediately (a restart will pick it up) but is *not* swapped into the
 /// live in-memory config; every other field (owner, agent providers/models,
-/// `claude_env`) applies live, effective on the very next `claude -p` spawn.
+/// `claude_env`) applies live, effective on the very next `opencode run`.
 /// Returns `true` if the workspace root actually changed, so the frontend
 /// can prompt for a restart instead of quietly no-op'ing that part of the
 /// save.

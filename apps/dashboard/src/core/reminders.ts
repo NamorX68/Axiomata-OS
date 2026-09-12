@@ -14,7 +14,7 @@
 
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
-import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
+import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 
 /** One reminders priority, normalised by the skill's SOP onto exactly one
  *  of these four (whatever the underlying tool actually returns). */
@@ -58,9 +58,14 @@ const PRIORITIES: readonly ReminderPriority[] = ["none", "low", "medium", "high"
  */
 export function parseReminderDigest(stdout: string): ReminderDigest {
   const stripped = stripCodeFence(stdout);
+  // Prefer the first balanced object (salvages prose-wrapped / duplicated
+  // output); when there is none, fall back to the whole reply so the plain
+  // `JSON.parse` error messages (and the "not a JSON object" check, for a
+  // bare `"42"`) stay exactly as they were.
+  const object = firstJsonObject(stripped) ?? stripped;
   let raw: unknown;
   try {
-    raw = JSON.parse(stripped);
+    raw = JSON.parse(object);
   } catch (err) {
     throw new Error(`reminders-digest output was not valid JSON: ${(err as Error).message}`);
   }
@@ -68,11 +73,13 @@ export function parseReminderDigest(stdout: string): ReminderDigest {
     throw new Error("reminders-digest output was not a JSON object");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.error === "string") {
-    throw new Error(obj.error);
-  }
   const lists = Array.isArray(obj.lists) ? obj.lists.filter((l): l is string => typeof l === "string") : [];
   const tasks = Array.isArray(obj.tasks) ? obj.tasks.filter(isReminderTask) : [];
+  // The skill's fallback contract: partial data wins over the `error` string.
+  // Only when there is no usable data does the error itself surface.
+  if (typeof obj.error === "string" && tasks.length === 0) {
+    throw new Error(obj.error);
+  }
   return { lists, tasks };
 }
 

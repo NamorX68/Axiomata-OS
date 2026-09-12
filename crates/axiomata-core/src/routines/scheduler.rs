@@ -82,8 +82,8 @@ pub struct TickReport {
 /// each), not sequentially — with several routines due in the same pass, a
 /// slow agent no longer holds up the others' firing behind it for up to its
 /// own timeout. No separate cap is applied here: the real resource to bound
-/// is concurrently-running `claude` child processes, which
-/// [`crate::agents::claude_code`] already caps process-wide across every
+/// is concurrently-running `opencode` child processes, which
+/// [`crate::agents::agent_slots`] already caps process-wide across every
 /// caller (routines, manual "run now", chat alike) — an Ollama-backed prompt
 /// routine is the one target this pass doesn't gate, since it is an HTTP call
 /// rather than a spawned process.
@@ -806,9 +806,9 @@ mod tests {
         // time — a live Settings-dialog edit must reach the very next tick.
         //
         // The observable is deliberately something that fails at OS-level
-        // process spawn, *before* `execve` ever runs: a `claude-code` routine
+        // process spawn, *before* `execve` ever runs: an `opencode` routine
         // whose `cwd` (`config.workspace_root`) is invalid. That happens
-        // inside the child, pre-exec, so the real `claude` binary on this
+        // inside the child, pre-exec, so the real `opencode` binary on this
         // machine's PATH is never actually invoked — no live agent call, no
         // network. Two different *kinds* of invalid path yield two
         // distinguishable `io::Error`s (`ENOENT` vs. `ENOTDIR`), so the
@@ -829,7 +829,7 @@ mod tests {
                 name: "live-config-probe".to_owned(),
                 cron_expr: "*/1 * * * * *".to_owned(),
                 target: RoutineTarget::Prompt("irrelevant — spawn fails first".to_owned()),
-                backend: Some("claude-code".to_owned()),
+                backend: Some("opencode".to_owned()),
                 enabled: true,
             },
         )

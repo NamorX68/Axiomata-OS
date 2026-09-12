@@ -75,7 +75,7 @@ describe("loadLatestReminderDigest", () => {
   const summary = (over: Partial<RunSummary>): RunSummary => ({
     id: 1,
     skill_name: "reminders-digest",
-    backend: "claude-code",
+    backend: "opencode",
     status: "success",
     exit_code: 0,
     duration_ms: 100,

@@ -80,9 +80,9 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
         "INSERT INTO runs \
          (skill_name, backend, status, exit_code, duration_ms, \
           stdout, stderr, error, started_at, finished_at, source, \
-          provider, cost_usd, input_tokens, output_tokens, num_turns) \
+          provider, cost_usd, input_tokens, output_tokens, num_turns, model) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
-                 ?12, ?13, ?14, ?15, ?16)",
+                 ?12, ?13, ?14, ?15, ?16, ?17)",
         rusqlite::params![
             record.skill_name,
             record.backend,
@@ -100,6 +100,7 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
             record.input_tokens,
             record.output_tokens,
             record.num_turns,
+            record.model,
         ],
     )?;
     Ok(db.last_insert_rowid())
@@ -162,7 +163,7 @@ pub fn get_run(db: &Connection, id: i64) -> Result<Option<RunRecord>, AxiomataEr
     let mut stmt = db.prepare(
         "SELECT id, skill_name, backend, status, exit_code, \
          duration_ms, stdout, stderr, error, started_at, finished_at, source, \
-         provider, cost_usd, input_tokens, output_tokens, num_turns \
+         provider, cost_usd, input_tokens, output_tokens, num_turns, model \
          FROM runs WHERE id = ?1",
     )?;
     match stmt.query_row([id], row_to_record) {
@@ -217,6 +218,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         input_tokens: row.get::<_, Option<i64>>(14)?.map(|n| n as u64),
         output_tokens: row.get::<_, Option<i64>>(15)?.map(|n| n as u64),
         num_turns: row.get::<_, Option<i64>>(16)?.map(|n| n as u32),
+        model: row.get(17)?,
     })
 }
 
@@ -265,6 +267,7 @@ mod tests {
             input_tokens: None,
             output_tokens: None,
             num_turns: None,
+            model: None,
             source: RunSource::Manual,
         }
     }

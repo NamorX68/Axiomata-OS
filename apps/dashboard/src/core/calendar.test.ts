@@ -35,8 +35,46 @@ describe("parseCalendarDigest", () => {
     expect(() => parseCalendarDigest(noTool)).toThrow("no calendar tool available");
   });
 
+  it("keeps the events when a run reports an error but still delivered data", () => {
+    // Run 303 live: one calendar's read failed, the rest came back. The
+    // partial data must win over the error string (matches the SOP's
+    // graceful-degradation contract).
+    const partial = JSON.stringify({
+      calendars: ["Arbeit", "Temporär"],
+      events: [
+        { id: "evt-1", title: "Team-Sync", start: "2026-09-05T09:00:00", end: "2026-09-05T09:30:00", calendar: "Arbeit", location: null, allDay: false },
+      ],
+      error: "Calendar 'Temporär' not found",
+    });
+    const d = parseCalendarDigest(partial);
+    expect(d.events).toHaveLength(1);
+    expect(d.events[0].title).toBe("Team-Sync");
+  });
+
   it("throws on unparseable output", () => {
     expect(() => parseCalendarDigest("not json at all")).toThrow(/not valid JSON/);
+  });
+
+  it("digests prose-wrapped output the model added despite being told not to", () => {
+    const wrapped = `Here are the events:\n\n${DIGEST_JSON}\n\nLet me know if you need more.`;
+    expect(parseCalendarDigest(wrapped)).toEqual(parseCalendarDigest(DIGEST_JSON));
+  });
+
+  it("takes the first of two concatenated objects — the live bake-off failure mode", () => {
+    // Observed live (docs/plans/stufe2-cp3-bakeoff.md, calendar run #1): a
+    // model answered with the valid object followed by a second, truncated
+    // copy. The first object is the contract — the trailing copy must not
+    // fail the parse.
+    const duplicated = DIGEST_JSON + '{"calendars":["Arbeit"],"events":[{"id":"evt-9","title":';
+    expect(parseCalendarDigest(duplicated)).toEqual(parseCalendarDigest(DIGEST_JSON));
+  });
+
+  it("throws when a brace inside a string would otherwise end the scan early", () => {
+    const tricky = JSON.stringify({
+      calendars: ["Arbeit"],
+      events: [{ id: "e1", title: "Dropbox {sync}", start: "2026-09-05", end: "2026-09-05", calendar: "Arbeit", location: null, allDay: true }],
+    });
+    expect(parseCalendarDigest(tricky).events[0].title).toBe("Dropbox {sync}");
   });
 
   it("throws when the JSON isn't an object", () => {
@@ -106,7 +144,7 @@ describe("loadLatestCalendarDigest", () => {
   const summary = (over: Partial<RunSummary>): RunSummary => ({
     id: 1,
     skill_name: "calendar-digest",
-    backend: "claude-code",
+    backend: "opencode",
     status: "success",
     exit_code: 0,
     duration_ms: 100,
@@ -155,6 +193,83 @@ describe("loadLatestCalendarDigest", () => {
     const records = { 1: { ...summary({}), stdout: "not json", stderr: "", finished_at: "" } };
     const result = await loadLatestCalendarDigest(fakeInvoke([summary({})], records));
     expect(result.error).toMatch(/not valid JSON/);
+  });
+
+  it("falls back to the previous non-empty run when the newest run has empty output", async () => {
+    const runs = [summary({ id: 3, started_at: "2026-09-05T11:00:00Z" }), summary({ id: 1, started_at: "2026-09-05T09:00:00Z" })];
+    const records = {
+      3: { ...summary({ id: 3 }), stdout: "   \n", stderr: "", finished_at: "" },
+      1: { ...summary({ id: 1 }), stdout: DIGEST_JSON, stderr: "", finished_at: "" },
+    };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(1);
+    expect(result.error).toBeNull();
+    expect(result.digest.events).toHaveLength(3);
+  });
+
+  it("skips a failed run and still serves the previous non-empty run", async () => {
+    const runs = [
+      summary({ id: 2, status: "failed", error: "agent timed out" }),
+      summary({ id: 1 }),
+    ];
+    const records = { 1: { ...summary({ id: 1 }), stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(1);
+    expect(result.error).toBeNull();
+    expect(result.digest.events).toHaveLength(3);
+  });
+
+  it("keeps scanning past a missing record to the previous non-empty run", async () => {
+    const runs = [summary({ id: 2 }), summary({ id: 1 })];
+    const records = { 1: { ...summary({ id: 1 }), stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(1);
+    expect(result.error).toBeNull();
+    expect(result.digest.events).toHaveLength(3);
+  });
+
+  it("falls back to the previous parseable run when the newest run's JSON is truncated (observed live: 'Unexpected EOF')", async () => {
+    const runs = [summary({ id: 3, started_at: "2026-09-05T11:00:00Z" }), summary({ id: 1, started_at: "2026-09-05T09:00:00Z" })];
+    const records = {
+      3: { ...summary({ id: 3 }), stdout: '{"calendars":["Arbeit"],"events":[{"id":"evt-9","title":"Kino","start"', stderr: "", finished_at: "" },
+      1: { ...summary({ id: 1 }), stdout: DIGEST_JSON, stderr: "", finished_at: "" },
+    };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(1);
+    expect(result.error).toBeNull();
+    expect(result.digest.calendars).toEqual(["Arbeit", "Privat", "Familie"]);
+  });
+
+  it("serves the newest run even when its output is prose-wrapped or duplicates the object", async () => {
+    const runs = [summary({ id: 2 })];
+    const records = {
+      2: { ...summary({ id: 2 }), stdout: `Ergebnis:\n${DIGEST_JSON}\n\n${DIGEST_JSON.slice(0, 40)}`, stderr: "", finished_at: "" },
+    };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(2);
+    expect(result.error).toBeNull();
+    expect(result.digest.events).toHaveLength(3);
+  });
+
+  it("surfaces the parse error when every run produced unparseable JSON, skipping between them", async () => {
+    const runs = [summary({ id: 2 }), summary({ id: 1 })];
+    const records = {
+      2: { ...summary({ id: 2 }), stdout: '{"calendars":[', stderr: "", finished_at: "" },
+      1: { ...summary({ id: 1 }), stdout: "   \n", stderr: "", finished_at: "" },
+    };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(2);
+    expect(result.error).toMatch(/not valid JSON/);
+    expect(result.digest).toEqual({ calendars: [], events: [] });
+  });
+
+  it("reports an error when every run produced no output", async () => {
+    const runs = [summary({})];
+    const records = { 1: { ...summary({}), stdout: "   \n", stderr: "", finished_at: "" } };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(1);
+    expect(result.error).toBe("Last run produced no output.");
+    expect(result.digest).toEqual({ calendars: [], events: [] });
   });
 });
 

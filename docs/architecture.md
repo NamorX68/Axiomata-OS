@@ -88,14 +88,8 @@ declared in `crates/axiomata-core/src/lib.rs`:
 - `config` — loads/saves `~/.axiomata/config.toml`.
 - `db` — SQLite connection setup and schema migrations.
 - `error` — the crate-wide `AxiomataError` type (`thiserror`-based).
-- `agents` — agent backend dispatch (Claude Code / Ollama / the `ollama-agent`
-  tool-call loop), chat turns, the module bridge.
-- `mcp` — a hand-rolled, dependency-free stdio MCP client (`initialize` / `tools/list` /
-  `tools/call` over newline-delimited JSON-RPC; shutdown is by closing the pipe, per the
-  transport spec — MCP has no `shutdown` message) plus the `~/.claude.json` import helper
-  behind the `[mcp_servers]` config table. Slated to serve the local-agent loop of
-  `docs/plans/stufe2-lean-ollama-agent.md` (CP2); today it is exercised by
-  `axiomata-cli mcp tools <name>`.
+- `agents` — agent backend dispatch (Opencode — the single harness — / the plain Ollama
+  completion), opencode-based chat turns, the module bridge.
 - `skills` — skill discovery, headless execution, and run logging.
 - `memory` — `CLAUDE.md` router file generation and staleness tracking.
 - `routines` — cron-scheduled skill/prompt execution via a background poll loop, full CRUD
@@ -115,7 +109,7 @@ milestone plan (see §7).
 ### `axiomata-macos`
 
 A boundary crate reserved for future macOS-specific integration beyond what MCP servers
-(Apple Mail / Reminders / Calendar, used today via Claude Code's own MCP tool-calling — see
+(Apple Mail / Reminders / Calendar, used today via opencode's own MCP tool-calling — see
 §5 "Connector modules") already cover. Currently an untouched template stub with no
 Axiomata-specific code.
 
@@ -124,8 +118,8 @@ Axiomata-specific code.
 A `clap`-based binary whose job is to exercise `axiomata-core` end to end without the GUI:
 `status`, `list-skills`, `run-skill`, `list-runs`, `memory sync|status`,
 `routines list|add|edit|delete|enable|disable|history|tick`, `assistant` (one chat/instruct
-turn, `--allowed-tools` for testing an MCP tool call before wiring it into the dashboard),
-`mcp import|list|tools`, `import obsidian`, `graph`, `modules`, `module-action`. Run it with
+turn, `--allowed-tools` kept for API symmetry — the opencode harness auto-approves tool use),
+`import obsidian`, `graph`, `modules`, `module-action`. Run it with
 `cargo run -p axiomata-cli -- <subcommand>`.
 
 ### `apps/dashboard/src-tauri`
@@ -161,8 +155,7 @@ data lives in **two distinct places** with two distinct ownership models.
 Everything that belongs to the application itself, independent of which Second-Brain
 workspace the user currently has configured:
 
-- `config.toml` — the app config (agent backend defaults, model, `workspace_root`,
-  `[mcp_servers]` stdio server definitions).
+- `config.toml` — the app config (agent backend defaults, model, `workspace_root`).
 - `axiomata.db` — the SQLite database (skill runs, routines + their history).
 - `logs/` — `runs.log` (JSONL skill-run mirror, 0600).
 - `skills/` — **all** skills. Skills are application-level: always available regardless of
@@ -218,52 +211,41 @@ pending migrations.
 
 ### Agent backends (`agents/`)
 
-Execution dispatches through a small `enum`, `AgentBackend { ClaudeCode, Ollama { model },
-OllamaAgent { model } }` — deliberately not a trait/registry (see §6). `AgentRequest`
-carries `prompt`, `cwd`, `timeout`, `env`, `system_prompt_file` (the module bridge
-manifest, appended to **chat turns only** — skill/routine runs omit it), `model`,
-`allowed_tools`, and — read only by `ollama-agent` — `mcp_servers` (the `[mcp_servers]`
-table copy that backend may spawn) and `ollama_base_url` (the local daemon URL).
+Execution dispatches through a small `enum`, `AgentBackend { Opencode, Ollama { model } }` —
+deliberately not a trait/registry (see §6). `AgentRequest` carries `prompt`, `cwd`, `timeout`,
+`env`, `system_prompt_file` (the module bridge manifest, appended to **chat turns only** —
+skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see below).
 
-- `claude_code.rs` spawns `claude -p --output-format json --permission-mode
-  dontAsk|acceptEdits [--resume <id>] [--model …] [--allowedTools …]` via
-  `tokio::process::Command`. The prompt goes on the child's **stdin**, never as an argv
-  token, so a prompt beginning with `-` can't be parsed as a flag (routines fire this
-  unattended). `--model` is validated against a flag-safe alphabet before reaching the
-  command line; empty means CLI default.
-- **`allowed_tools` and MCP tools — a real trap, found live building the Calendar module:**
-  an MCP tool call (e.g. `apple-reminders`'s `calendar_events`) is **not** covered by
-  `--permission-mode` at all. A headless `-p` run with no interactive approver **silently
-  denies** the call — the run still exits 0 and "succeeds", the tool call is just refused,
-  with no error surfaced anywhere. Any skill or chat/instruct turn that needs an MCP tool
-  must set `allowed_tools` (skill frontmatter `allowed_tools:`, or the caller's own
-  `--allowed-tools`/`ChatRequest.allowed_tools`) — there is no other way to reach one.
-- `ollama.rs` makes one non-streaming `POST /api/generate` call to the local daemon.
-- `ollama_agent.rs` (Stufe 2) is the "lean local agent": a **bounded tool-call loop**
-  against local Ollama (`POST /api/chat` with `ollama-rs` native tool calling, one
-  non-streaming call per turn, `MAX_ITERS` = 12 turns or `request.timeout`, whichever comes
-  first). The model receives *only* the skill's SOP as the user turn plus the MCP tool
-  schemas its `allowed_tools` names — no Claude Code system prompt, no dev `CLAUDE.md`, no
-  module manifest — and drives the spawned MCP servers itself: `wanted_servers` derives
-  which `[mcp_servers]` to spawn from the `mcp__<server>__<tool>` prefixes, each advertised
-  `ToolInfo` is deserialised at run time (ollama-rs 0.3.6's typed constructors are generic
-  over a compile-time `Tool` trait), and a `tools/call` that times out or a run that
-  exhausts `MAX_ITERS` fails the run (`shutdown` closes every server on all exit paths).
-  Documents the whole design as `docs/plans/stufe2-lean-ollama-agent.md`.
+- `opencode.rs` (Stufe 2 CP5) is the single agent harness: it spawns `opencode run --dir
+  <workspace_root> --model <provider/model> --format json --auto [--session <id>]` with the
+  prompt on **stdin** (a positional would read the YAML `---` frontmatter as a flag and make
+  opencode print its help and exit). It hands the prompt to whichever provider
+  `skill_provider` (skills) / `chat_provider` (assistant bar) routes to using that provider's
+  own native tool-calling protocol — so a non-Anthropic model (Deepseek via OpenRouter, or a
+  local Ollama model) executes its skills the way it does inside opencode itself. The old
+  `claude -p` Anthropic framing was the root cause of the digests' off-topic prose /
+  empty-results / 10-minute-timeout runs, and was retired along with the Stufe 2
+  `ollama-agent` tool loop: one harness for everything. It inherits the user's opencode
+  config (`~/.config/opencode`, MCP servers incl. `apple-mail`/`apple-reminders`, credential
+  store) and needs no provider env. `--model` is built by `opencode::model_id` /
+  `opencode::chat_model_id` as `provider/<model>` from the role's provider + its model (or a
+  skill's `model:`); the shared tokio harness streams NDJSON `--format json` events and joins
+  the `text` parts into the reply (`cost`/`tokens`/`reason` ride on `step_finish`). `--auto`
+  auto-approves tool use, so an unattended run never stalls on a permission question nobody
+  will answer. `allowed_tools` frontmatter is now documentation only — there is no runtime
+  allow-list (that was the Claude Code `--allowedTools` mechanism, which silently refused MCP
+  calls headless and is gone with it).
+- `ollama.rs` makes one non-streaming `POST /api/generate` call to the local daemon — the
+  simple, tool-free `backend: ollama` completion for deterministic tasks.
 
 ### Model providers (`config.agents.providers`)
 
-Orthogonal to the `AgentBackend` `enum` above: a **provider** does not, by itself, change
-*which* executable runs (it is always the Claude Code CLI, `AgentBackend::ClaudeCode`, with the
-full agent loop / tool use / MCP) — it only redirects that one binary at a different upstream
-Messages-API endpoint, exactly the way `ANTHROPIC_BASE_URL` already lets it reach Bedrock or a
-proxy. Not to be confused with `AgentBackend::Ollama` (`agents/ollama.rs`), the separate
-raw/tool-free completion backend selected per skill by `SKILL.md`'s `backend: ollama`.
-
-There is one carve-out, the [`local_backend`](#the-local_backend-and-prepend_files-frontmatter)
-mechanism below: under `skill_provider = ollama`, a skill that declares `local_backend:`
-resolves to a *different backend* (`ollama-agent`) entirely — so for those skills the
-provider switch really does change the executable/runtime, not just the upstream endpoint.
+Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
+`opencode run` `--model` id points at (`openrouter/deepseek/…`, `anthropic/claude-haiku-4-5`,
+`ollama/qwen3.8:27b-mlx`). Opencode resolves the provider's auth/keys itself from its own
+credential store, so Axiomata carries no `ANTHROPIC_*` env plumbing. Not to be confused with
+`AgentBackend::Ollama` (`agents/ollama.rs`), the separate raw/tool-free completion backend
+selected per skill by `SKILL.md`'s `backend: ollama`.
 
 - `config.rs` defines `ProviderId { Anthropic, OpenRouter, Ollama }` (`ProviderId::ALL` is the
   single source of the list — loop over it, never enumerate the variants by hand) and, per
@@ -276,38 +258,30 @@ provider switch really does change the executable/runtime, not just the upstream
   `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. Interactive dashboard chat routes
   through `chat_provider`; every skill / routine run through `skill_provider`. So Anthropic (or
   OpenRouter) for chat while Ollama serves the connector digests is a supported config. The old
-  single `agents.active_provider` key is migration-only (see **Migration** below). Under
-  `skill_provider = ollama` the switch additionally selects a *different backend* for any
-  skill with `local_backend:` frontmatter (the three connector digests — see
-  [`local_backend` + `prepend_files`](#the-local_backend-and-prepend_files-frontmatter) below).
-- **Env derivation.** `skills::runner::claude_env(config, backend, role)` builds
-  `ANTHROPIC_BASE_URL` plus the credential env var for **that role's** provider and merges it
-  over the raw `agents.claude_env`
-  power-user map (provider-derived vars first, `claude_env` can still override — e.g. for
-  Bedrock, which does not fit the provider model). The credential env var differs by provider:
-  Anthropic uses `ANTHROPIC_API_KEY` (direct `x-api-key`); OpenRouter and Ollama both front the
-  Messages API through a bearer token, so their key goes into `ANTHROPIC_AUTH_TOKEN` *with*
-  `ANTHROPIC_API_KEY` explicitly emptied (the CLI otherwise prefers the direct key and the two
-  conflict) — encoded once as `ProviderId::auth_env_var()`, not branched at call sites.
-  Anthropic with no base URL/key ⇒ empty derived env ⇒ byte-identical to the pre-provider
-  behaviour (subscription auth via the CLI's own login).
+  single `agents.active_provider` key is migration-only (see **Migration** below).
 - **Model selection.** `agents::default_chat_model()` reads
   `providers[chat_provider].chat_model`, `default_skill_model()` reads
   `providers[skill_provider].skill_model` (shared `provider_model()` helper), both feeding the
-  existing `--model` CLI flag. `chat()` uses the chat model; the skills runner uses the skill
-  model as its fallback when a `SKILL.md` has no own `model:` frontmatter (per-skill frontmatter
-  still wins). No provider-specific model env var anywhere — both non-Anthropic providers route
+  opencode `--model` `provider/<model>` id. `chat()` uses the chat model; the skills runner uses
+  the skill model as its fallback when a `SKILL.md` has no own `model:` frontmatter (per-skill
+  frontmatter still wins). No provider-specific model env var anywhere — both non-Anthropic
+  providers route
   on the `model` field in the request body.
 - **Spend.** `spend::guard_redirected_turn(db, config, role)` checks the daily cap against the
   spend of *that role's* provider; `spend::role_spend_summaries()` returns one `SpendSummary`
   per distinct provider across the two roles (a single `"chat & skill"` entry when they match).
   The per-run `provider` column already carried the role's provider token, so the CP4/CP5
-  rollup needed no schema change. With the `local_backend` design the guard is a non-issue on
-  the intended path: `skill_provider = ollama` ⇒ the guard checks the Ollama provider, whose
-  recorded spend is ~0 (`ollama-agent` runs record `provider: None`, local/unmetered) ⇒ it
-  passes. It only ever bites a `SKILL.md` that hard-codes `backend: ollama-agent` *while*
-  `skill_provider` is a paid provider over its cap — a corner the mechanism is designed to
-  avoid.
+  rollup needed no schema change. The guard only ever bites a paid provider over its cap — a
+  local `skill_provider = ollama` records ~0 spend and always passes.
+- **Metered cost (CP5).** The daily cap meters recorded spend from token counts × an
+  owner-configured per-model price table, `config.agents.costs` (`ModelCost` — USD per million
+  input/output tokens, keyed by the *bare* model id, no `provider/` prefix): the opencode
+  `step_finish` cost for a non-Anthropic model can be an order of magnitude too high, which
+  made the cap fire on spend never incurred. `spend::metered_cost_usd` computes the figure and
+  the runner substitutes it for the recorded `cost_usd` when the model is priced. The `model`
+  column on `runs` (migration 0007) records which model a run used, and
+  `spend::reconcile_recorded_costs` re-meters already-recorded runs/chat turns against the
+  price table on every startup (best-effort; a failure is warned about, never fatal).
 - **Runtime mutation.** The settings dialog is the first thing that writes `Config` at
   runtime, so `AxiomataCore.config` is `Arc<RwLock<Config>>` (many reads, rare writes). Every
   read site clones the `Config` out from under the lock in its own statement (`read_config()`
@@ -321,8 +295,7 @@ provider switch really does change the executable/runtime, not just the upstream
   (memory router, particle graph, module manifests, every open note assume it is fixed for the
   process lifetime), so a changed `workspace_root` is written to disk immediately but *not*
   applied in memory — `save_config` returns `true` so the UI can prompt for a restart. Every
-  other field (owner, providers, models, `claude_env`) applies live, effective on the next
-  `claude -p` spawn.
+  other field (owner, providers, models) applies live, effective on the next `opencode run`.
 - **Migration.** Two on-load upgrades run in sequence: (1)
   `migrate_legacy_model_if_needed()` seeds every `ProviderId::ALL` member with its defaults and
   folds a flat pre-`providers` `agents.claude_model` into Anthropic's model fields; (2)
@@ -341,38 +314,31 @@ provider switch really does change the executable/runtime, not just the upstream
   `core/devmock.ts`). LM Studio is still a one-line `ProviderId` addition. Full rationale:
   `docs/plans/settings-provider-overhaul.md`, `docs/plans/per-role-provider.md`.
 
-### The `local_backend` and `prepend_files` frontmatter
+### The `prepend_files` frontmatter
 
-Two `SKILL.md` frontmatter mechanisms, both from Stufe 2's lean-local-agent plan
-(`docs/plans/stufe2-lean-ollama-agent.md`):
+One `SKILL.md` frontmatter mechanism surviving from Stufe 2's lean-local-agent plan
+(`docs/plans/stufe2-lean-ollama-agent.md`); the plan's other mechanism (`local_backend`, the
+`ollama-agent` tool loop) was retired in Stufe 2 CP5 — every skill now runs on
+`AgentBackend::Opencode` regardless of provider.
 
-- **`local_backend: ollama-agent`** — a skill's *local variant*. `Skill::effective_backend`
-  returns it when the configured skill provider is `Ollama`, else the skill's plain `backend`
-  (`claude-code`). One `skill_provider` Settings switch therefore moves **every** opted-in
-  skill onto the local tool-call loop (`ollama-agent`), and flipping back to a cloud provider
-  reverts them to `claude -p` on the next run — no restart, no per-skill fiddling. The three
-  connector digests opt in (`calendar-digest`, `mail-digest`, `reminders-digest`); `cleanup`
-  does not (it needs file-editing tools the loop hasn't got). A skill hard-coding
-  `backend: ollama-agent` works too, bypassing the switch.
 - **`prepend_files: ["Mail/.topics.md"]`** — workspace files read at run time and prefixed to
   the prompt as `## Context file: <rel>` blocks (missing/blank files contribute nothing; a
   `..`/absolute entry is rejected). The generic fix for a skill that references a workspace
-  file but runs on a backend with no file tool — `ollama-agent` only has its MCP tools, so
-  `mail-digest` needs its configured topics inline. Applies to **every** backend: a
-  `claude-code` run of `mail-digest` gets the topics inline instead of reading them, which is
-  strictly fine. Applies live to the routine scheduler's `skill` targets too (they go through
-  `execute_skill`); a raw-`prompt` target has no `SKILL.md`, so no `local_backend`/`prepend_files`.
+  file but runs on a backend with no file tool — the opencode harness doesn't get `mail-digest`'s
+  topics file as context, so `mail-digest` needs its configured topics inline. Applies to
+  **every** backend. Applies live to the routine scheduler's `skill` targets too (they go
+  through `execute_skill`); a raw-`prompt` target has no `SKILL.md`, so no `prepend_files`.
 
 ### Skills runner (`skills/`)
 
 Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
 (`registry::list_skills`/`find_skill`, frontmatter via `gray_matter`, filesystem is the only
-source of truth). `runner::execute_skill` resolves the backend via
-`skill.effective_backend(config)`, builds the prompt (any `prepend_files` blocks, then the
-`SKILL.md` body — for every backend) and runs it without touching the database;
-`execute_and_record_skill` adds the DB/log write. `runlog.rs` persists to the SQLite `runs`
-table and appends JSONL to `logs/runs.log`. A skill whose SOP needs an MCP tool (a
-"connector" skill, see below) must set frontmatter `allowed_tools:` — see the trap above.
+source of truth). `runner::execute_skill` resolves the backend (`opencode` by default; `ollama`
+for a tool-free local completion), builds the prompt (any `prepend_files` blocks, then the
+`SKILL.md` body) and runs it without touching the database; `execute_and_record_skill` adds the
+DB/log write. `runlog.rs` persists to the SQLite `runs` table and appends JSONL to
+`logs/runs.log`. A connector skill's SOP reaches its MCP tools through opencode's own config —
+`allowed_tools:` frontmatter is documentation only (see "Agent backends" above).
 
 ### Memory router (`memory/`)
 
@@ -466,12 +432,10 @@ carrying its own config.
   tools and replies with one JSON object; **there is no live poll** — data sits behind an
   MCP tool only an agent can reach, so every refresh is a real agent turn (whichever run
   happened most recently: by hand, on a schedule via a Routine, or the tile's own ↻, all the
-  same `run_skill` mechanism). **Stufe 2 exception:** when `skill_provider = ollama`, a
-  digest's refresh is no longer a `claude -p` turn at all — its `local_backend: ollama-agent`
-  resolves it to the bounded `ollama-agent` tool-call loop instead (§"Agent backends" and
-  "[`local_backend` + `prepend_files`](#the-local_backend-and-prepend_files-frontmatter)" above; a
-  `backend: ollama-agent` field *does* exist, but the digests deliberately use the switch so
-  cloud providers revert them). The Calendar tile goes further on the client: a Monday-first
+  same `run_skill` mechanism). Since Stufe 2 CP5 a digest's refresh is an `opencode run`
+  against whichever model `skill_provider` routes to — cloud (Deepseek via OpenRouter,
+  Anthropic) or local (`ollama/<model>`) alike, no backend switch needed (§"Agent backends").
+  The Calendar tile goes further on the client: a Monday-first
   **mini-month** (`core/monthGrid.ts` + `modules/MiniCalendar.svelte`) plus an agenda
   showing only the **selected day … +7** — so `calendar-digest` fetches a wide window (this
   month + next) once and every day-click / month-page is a free client-side filter, not a
@@ -522,7 +486,7 @@ top-level areas, or a brand-new one when none genuinely fit, in one JSON turn.
 ### Why the agent backend is an `enum`, not a trait
 
 Skill and routine execution dispatches through `AgentBackend` (an `enum`, today
-`{ ClaudeCode, Ollama, OllamaAgent }`), not a plugin registry or trait-object abstraction — a
+`{ Opencode, Ollama }`), not a plugin registry or trait-object abstraction — a
 deliberate choice, since only a few backends are needed and a generic multi-CLI abstraction
 would be premature generalization. A further backend can gain a variant without reworking the
 runner or scheduler.
@@ -571,16 +535,17 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   replacing the raw cron text field; every dashboard tool module made a canvas singleton;
   the Calendar tile's mini-month + selected-day-plus-7 agenda + optional digital/analog
   clock (`docs/plans/calendar-polish.md`).
-- **Stufe 2 — the lean local agent (CP1–CP4): done; bake-off ongoing.** The hand-rolled
-  stdio MCP client + `[mcp_servers]` config + `axiomata-cli mcp import|list|tools` (CP1); the
-  `AgentBackend::OllamaAgent` bounded tool-call loop over Ollama + MCP (CP2); the
-  provider-driven `local_backend:` switch + `prepend_files:` (CP3, so `skill_provider =
-  ollama` moves every connector digest onto `ollama-agent`), `num_turns` on loop results, the
-  Settings hint, `axiomata-cli skills reseed [--force]`, and this doc catching up (CP4). The
-  model *quality* bake-off (which 4–8B model actually clears the digests' JSON shape within
-  `timeout_secs`) is a judgement call, tracked in
-  `docs/plans/stufe2-cp3-bakeoff.md` — the mechanism ships regardless. Full plan:
-  `docs/plans/stufe2-lean-ollama-agent.md`.
+- **Stufe 2 — the lean local agent (CP1–CP4): shipped, then superseded by CP5.** The
+  hand-rolled stdio MCP client + `[mcp_servers]` config + `axiomata-cli mcp import|list|tools`
+  (CP1), the `AgentBackend::OllamaAgent` bounded tool-call loop over Ollama + MCP (CP2), the
+  provider-driven `local_backend:` switch + `prepend_files:` (CP3), `num_turns` on loop
+  results, the Settings hint, `axiomata-cli skills reseed [--force]`, and this doc catching up
+  (CP4) were built to run connector digests on a local model without the Claude Code CLI. The
+  bake-off (`docs/plans/stufe2-cp3-bakeoff.md`) showed the *harness*, not just the model, was
+  the problem — **CP5 replaced the whole stack**: Claude Code and `ollama-agent` are gone, and
+  every skill runs through the headless Opencode CLI (`AgentBackend::Opencode`, MCP from
+  opencode's own config), which serves cloud *and* local models with one mechanism. Full
+  original plan: `docs/plans/stufe2-lean-ollama-agent.md`.
 
 Each milestone from M1 onward was broken down into a detailed, step-by-step implementation
 plan shortly before it was actually started, rather than all at once up front — those plans

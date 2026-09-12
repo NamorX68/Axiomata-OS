@@ -124,7 +124,7 @@
   }
   .wd {
     text-align: center;
-    font-size: var(--ax-font-size-xs);
+    font-size: var(--ax-font-size-base);
     color: var(--ax-text-muted);
     padding-bottom: var(--ax-space-1);
   }

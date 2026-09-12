@@ -189,7 +189,7 @@ pub fn delete(db: &Connection, id: i64) -> Result<bool, AxiomataError> {
 /// - `RoutineTarget::Skill`: a non-empty `[A-Za-z0-9_-]` slug, so it cannot
 ///   traverse out of `~/.axiomata/skills/`.
 /// - `RoutineTarget::Prompt`: 1–[`MAX_TARGET_LEN`] bytes.
-/// - `backend`: `None`, `"claude-code"`, or `"ollama"`.
+/// - `backend`: `None`, `"opencode"`, or `"ollama"`.
 fn validate_new(new: &NewRoutine) -> Result<(), AxiomataError> {
     let bad = |reason: String| Err(AxiomataError::InvalidRoutine { reason });
 
@@ -227,9 +227,9 @@ fn validate_new(new: &NewRoutine) -> Result<(), AxiomataError> {
     }
 
     match new.backend.as_deref() {
-        None | Some("claude-code") | Some("ollama") => Ok(()),
+        None | Some("opencode") | Some("ollama") => Ok(()),
         Some(other) => bad(format!(
-            "backend must be \"claude-code\" or \"ollama\", got {other:?}"
+            "backend must be \"opencode\" or \"ollama\", got {other:?}"
         )),
     }
 }
@@ -776,7 +776,7 @@ mod tests {
                 ..new_routine("empty-prompt")
             },
             NewRoutine {
-                backend: Some("opencode".to_owned()),
+                backend: Some("gemini".to_owned()),
                 ..new_routine("weird-backend")
             },
         ];
@@ -1294,7 +1294,7 @@ mod tests {
                 ..new_routine("_")
             },
             NewRoutine {
-                backend: Some("opencode".to_owned()),
+                backend: Some("gemini".to_owned()),
                 ..new_routine("_")
             },
         ];

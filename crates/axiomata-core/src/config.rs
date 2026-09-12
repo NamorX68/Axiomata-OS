@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agents::claude_code::valid_model_name;
+use crate::agents::valid_model_name;
 use crate::error::AxiomataError;
 use crate::paths;
 
@@ -53,10 +53,18 @@ fn default_daily_usd_cap() -> Option<f64> {
     Some(2.0)
 }
 
-/// Which model-routing provider the `claude` child process talks to.
-/// Execution always stays on the Claude Code CLI/agent loop — this only
-/// selects the upstream API endpoint the CLI is pointed at, the same way
-/// `ANTHROPIC_BASE_URL` already lets it reach Bedrock or a proxy today. Not
+/// Default for [`AgentDefaults::auto_approve_tools`]: on, so an unattended
+/// skill / routine / chat run never stalls on a permission prompt nobody will
+/// answer (the exact hang `claude -p` demonstrated live).
+fn default_auto_approve_tools() -> bool {
+    true
+}
+
+/// Which upstream the opencode harness points `--model` at
+/// (`provider/<model>` — see [`crate::agents::opencode::model_id`]). The
+/// provider does not change *which* executable runs (it is always
+/// `opencode run`); opencode resolves the provider's auth/keys from its own
+/// credential store, so Axiomata carries no `ANTHROPIC_*` env plumbing. Not
 /// to be confused with `AgentBackend::Ollama` (`agents/ollama.rs`), an
 /// entirely separate raw/tool-free completion backend selectable per skill —
 /// see `docs/plans/settings-provider-overhaul.md`'s scoping note.
@@ -80,13 +88,13 @@ impl ProviderId {
         ProviderId::Ollama,
     ];
 
-    /// The environment variable this provider's API credential goes into.
-    /// Anthropic wants a direct key (`x-api-key` header via
-    /// `ANTHROPIC_API_KEY`); OpenRouter and Ollama both front the Anthropic
-    /// Messages API through a bearer token instead (`ANTHROPIC_AUTH_TOKEN`) —
-    /// setting `ANTHROPIC_API_KEY` alongside a non-empty value there makes
-    /// the CLI prefer the (wrong or absent) direct key. Confirmed in the
-    /// Phase 0 spike, `docs/plans/settings-provider-overhaul.md`.
+    /// The environment variable this provider's credential *would* go into
+    /// under the retired Messages-API env-plumbing model. Since Stufe 2 CP5
+    /// the opencode harness resolves provider auth itself, so no
+    /// `ANTHROPIC_*` var is set on agent children; the method now only marks
+    /// which providers need a stored key (`validate_for_save` requires an
+    /// `api_key` for every bearer-token provider except local Ollama).
+    /// Confirmed in the Phase 0 spike, `docs/plans/settings-provider-overhaul.md`.
     pub fn auth_env_var(self) -> &'static str {
         match self {
             ProviderId::Anthropic => "ANTHROPIC_API_KEY",
@@ -106,19 +114,17 @@ impl ProviderId {
         }
     }
 
-    /// Whether a run through this provider redirects the Claude CLI at a paid
-    /// third-party endpoint (`ANTHROPIC_BASE_URL`). Anthropic goes through the
-    /// CLI's own subscription login and is never metered here; everything else
-    /// is subject to the spend guardrail.
+    /// Whether a run through this provider is metered by Axiomata's own
+    /// spend guardrail. Anthropic is billed through opencode's subscription
+    /// login and is never metered here; every other provider is.
     pub fn is_redirected(self) -> bool {
         !matches!(self, ProviderId::Anthropic)
     }
 }
 
-/// Which role a `claude` turn is filling, so the provider (and therefore the
-/// model, base URL, and credential) can be picked per role: interactive
-/// dashboard chat vs. unattended skill / routine runs. See
-/// [`AgentDefaults::provider_for`].
+/// Which role an `opencode run` is filling, so the provider (and therefore
+/// the `--model` id) can be picked per role: interactive dashboard chat vs.
+/// unattended skill / routine runs. See [`AgentDefaults::provider_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderRole {
     /// Interactive dashboard-assistant turns.
@@ -127,32 +133,39 @@ pub enum ProviderRole {
     Skill,
 }
 
-/// Per-provider settings: where its Messages-API-compatible endpoint lives,
-/// what credential (if any) it needs, and which model to use for
-/// interactive chat vs. unattended skill/routine runs. Kept independently
-/// per provider (`AgentDefaults::providers`) so switching the active
-/// provider in the Settings UI never discards what was typed for the others.
+/// Per-provider settings: which model to use for interactive chat vs.
+/// unattended skill/routine runs, plus the endpoint/credential fields kept
+/// for the Settings UI. Opencode resolves providers and auth from its own
+/// config, so the `base_url`/`api_key` fields are stored-but-unused by the
+/// harness (they still drive `validate_for_save`). Kept independently per
+/// provider (`AgentDefaults::providers`) so switching the active provider in
+/// the Settings UI never discards what was typed for the others.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderSettings {
-    /// `ANTHROPIC_BASE_URL` for this provider. `None` for Anthropic itself —
-    /// it talks to the real API via the CLI's own subscription login, no
-    /// override needed.
+    /// Endpoint the provider's API lives at. Stored but not used by the
+    /// opencode harness (it resolves endpoints itself); retained for the
+    /// Settings UI and validated at save time. `None` for Anthropic — billed
+    /// via opencode's own subscription login, no endpoint needed.
     #[serde(default)]
     pub base_url: Option<String>,
 
-    /// Credential for `ProviderId::auth_env_var()`. Plaintext in
-    /// `config.toml`, same trust boundary as `agents.claude_env` today.
-    /// `None`/empty for Anthropic (billed via the CLI's own subscription
-    /// login; no key stored here).
+    /// API credential, stored plaintext in `config.toml` (same trust
+    /// boundary as `agents.claude_env`). No longer handed to agent children —
+    /// opencode reads its own credential store — but still required by
+    /// `validate_for_save` for every bearer-token provider except local
+    /// Ollama. `None`/empty for Anthropic (billed via opencode's own
+    /// subscription login; no key stored here).
     #[serde(default)]
     pub api_key: Option<String>,
 
-    /// Model passed as `claude --model` for interactive chat turns.
+    /// Model used for interactive chat turns — becomes the opencode
+    /// `--model` id as `provider/<model>` (`opencode::chat_model_id`).
     #[serde(default)]
     pub chat_model: String,
 
-    /// Model passed as `claude --model` for skill/routine runs, unless a
-    /// skill's own `SKILL.md` frontmatter pins one.
+    /// Model used for skill/routine runs, unless a skill's own `SKILL.md`
+    /// frontmatter pins one — becomes the opencode `--model` id as
+    /// `provider/<model>` (`opencode::model_id`).
     #[serde(default)]
     pub skill_model: String,
 }
@@ -191,6 +204,21 @@ impl ProviderSettings {
     }
 }
 
+/// First principles: the CLI's own `total_cost_usd` estimate is not usable
+/// for the daily cap when a run is routed to a non-Anthropic model — the CLI
+/// prices unknown model ids from its internal Anthropic price table, which
+/// was observed (2026-09-11) to inflate the real OpenRouter bill for
+/// `deepseek/deepseek-v4-flash-0731` by roughly an order of magnitude. The cap
+/// therefore meters redirected runs from token counts × the owner-configured
+/// price in [`AgentDefaults::costs`]; this is that per-model price.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelCost {
+    /// USD per million input tokens.
+    pub input_per_m: f64,
+    /// USD per million output tokens.
+    pub output_per_m: f64,
+}
+
 /// Defaults for the built-in agent backends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentDefaults {
@@ -215,16 +243,15 @@ pub struct AgentDefaults {
     #[serde(default = "default_skill_timeout_secs")]
     pub skill_timeout_secs: u64,
 
-    /// Extra environment variables passed to the `claude` process for provider
-    /// routing (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
-    /// `CLAUDE_CODE_USE_BEDROCK`, …). Empty means the real Anthropic API.
-    ///
-    /// Only keys matching an allow-list of prefixes (`ANTHROPIC_`,
-    /// `CLAUDE_CODE_`, `AWS_`, the proxy variables) are actually forwarded;
-    /// loader / `PATH` variables are dropped. Values are stored in plaintext in
-    /// `config.toml`, so treat a token here as a plaintext secret. A
-    /// power-user escape hatch layered on top of `providers` below (e.g. for
-    /// Bedrock, which doesn't fit the provider model at all).
+    /// Power-user environment overrides for the retired Claude Code /
+    /// Messages-API env-plumbing model (`ANTHROPIC_BASE_URL`,
+    /// `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`, …). **No longer
+    /// applied**: since Stufe 2 CP5 every agent runs on the opencode harness,
+    /// which resolves providers/auth from its own config, so nothing in
+    /// `axiomata-core` reads this map. Retained so existing `config.toml`
+    /// files round-trip and the Settings dialog keeps showing the stored key
+    /// *names*. Values are stored in plaintext in `config.toml`, so treat a
+    /// token here as a plaintext secret.
     #[serde(default)]
     pub claude_env: BTreeMap<String, String>,
 
@@ -262,6 +289,30 @@ pub struct AgentDefaults {
     /// `docs/plans/provider-hardening.md` checkpoint 5.
     #[serde(default = "default_daily_usd_cap")]
     pub daily_usd_cap: Option<f64>,
+
+    /// Per-model USD prices (per **million** input/output tokens) for the
+    /// daily-cap meter. The agent CLIs' cost estimates are worthless for
+    /// non-Anthropic models (observed 8–100× too high for OpenRouter's
+    /// `deepseek/...` family), so the app meters redirected runs from token
+    /// counts × these prices instead. Keyed by the **bare** model id, without
+    /// the opencode `provider/` prefix (e.g. `deepseek/deepseek-v4-flash-0731`;
+    /// the runner strips the prefix before metering). A model without an
+    /// entry falls back to the CLI's own estimate.
+    #[serde(default)]
+    pub costs: BTreeMap<String, ModelCost>,
+
+    /// Whether the headless opencode harness passes `--auto` (auto-approve
+    /// every tool permission that is not explicitly denied). On by default —
+    /// an unattended skill / routine / chat run must never stall asking a
+    /// question nobody will answer. The security trade-off is real, though: a
+    /// prompt that embeds untrusted content (MCP-fetched mail / calendar
+    /// bodies, workspace `prepend_files`) can steer an auto-approved `bash`
+    /// call into arbitrary local command execution (prompt injection). Set
+    /// `false` to drop `--auto`; runs then fail on unapproved tool use instead
+    /// of executing it, at the cost of tool-using skills needing a human
+    /// approver. Connector digests are the common untrusted-input case.
+    #[serde(default = "default_auto_approve_tools")]
+    pub auto_approve_tools: bool,
 }
 
 /// Every provider seeded with its starting settings — the shared source for
@@ -347,32 +398,10 @@ impl Default for AgentDefaults {
             chat_provider: ProviderId::default(),
             skill_provider: ProviderId::default(),
             daily_usd_cap: default_daily_usd_cap(),
+            costs: BTreeMap::new(),
+            auto_approve_tools: default_auto_approve_tools(),
         }
     }
-}
-
-/// A single stdio MCP server definition (`config.mcp_servers["<name>"]`):
-/// the command to spawn and the extra environment to set on top of the
-/// process environment. The MCP client (`crate::mcp`) spawns only the servers
-/// a given run needs, derived from a skill's `allowed_tools` — see
-/// `docs/plans/stufe2-lean-ollama-agent.md` CP1.
-///
-/// Deliberately distinct from Claude Code's own `~/.claude.json` MCP block:
-/// that file's format is not something we want to depend on at run time, so
-/// the servers are copied into Axiomata-owned config once, via
-/// [`crate::mcp::import_from_claude_code`] (`axiomata-cli mcp import`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct McpServerConfig {
-    /// Executable to spawn, resolved through `PATH` — e.g. `"npx"` or
-    /// `"uvx"`, or `/bin/sh -c …` for a server that needs a shell.
-    #[serde(default)]
-    pub command: String,
-    /// Command-line arguments, e.g. `["-y", "mcp-server-apple-events"]`.
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Extra environment variables layered over the process environment.
-    #[serde(default)]
-    pub env: BTreeMap<String, String>,
 }
 
 /// Axiomata-OS's own configuration (`~/.axiomata/config.toml`).
@@ -391,13 +420,6 @@ pub struct Config {
     /// Defaults for the built-in agent backends.
     #[serde(default)]
     pub agents: AgentDefaults,
-
-    /// MCP stdio servers this app can talk to directly — `name` -> spawn
-    /// config. Empty by default; seed it once from Claude Code with
-    /// [`crate::mcp::import_from_claude_code`] (`axiomata-cli mcp import`),
-    /// or edit `config.toml` by hand.
-    #[serde(default)]
-    pub mcp_servers: BTreeMap<String, McpServerConfig>,
 }
 
 impl Default for Config {
@@ -406,7 +428,6 @@ impl Default for Config {
             owner: String::new(),
             workspace_root: default_workspace_root(),
             agents: AgentDefaults::default(),
-            mcp_servers: BTreeMap::new(),
         }
     }
 }
@@ -431,11 +452,11 @@ impl Config {
         }
 
         // Providers, one per role (chat, skills). Each role's provider must
-        // exist in the map. Anthropic may leave everything blank — the Claude
-        // CLI's own default model is billed through the subscription login,
-        // i.e. free. Every other provider redirects the CLI at a paid
-        // endpoint, where a blank/malformed model, base URL, or missing token
-        // turns into a silent full-rate fallback — so each is checked against
+        // exist in the map. Anthropic may leave everything blank — billed via
+        // opencode's own subscription login, no concrete model needed. Every
+        // other provider needs a concrete model id: a blank/malformed model or
+        // missing token would fail the run (or, worse, route a fallback model
+        // through the wrong endpoint and bill it) — so each is checked against
         // *that role's* model field. Both roles are validated even when they
         // resolve to the same provider.
         for (role, label) in [
@@ -456,8 +477,9 @@ impl Config {
             };
             if model.is_empty() {
                 return Err(format!(
-                    "{role:?} provider {id:?} redirects the Claude CLI but its {label} is empty — \
-                     set it so the CLI's built-in default model isn't billed through the proxy"
+                    "{role:?} provider {id:?} has an empty {label} — \
+                     opencode needs a concrete `provider/<model>` id, and a blank \
+                     model would silently bill a fallback through this endpoint"
                 ));
             }
             if !valid_model_name(model) {
@@ -505,6 +527,24 @@ impl Config {
                 "daily spend cap must be a positive dollar amount (got {cap}) — \
                  leave it unset to disable the cap"
             ));
+        }
+
+        // Per-model metering prices: a model may be missing (falls back to the
+        // CLI's own estimate), but a present entry must be a sane, finite,
+        // non-negative price per million tokens — a negative or NaN price
+        // would silently corrupt the daily-cap meter.
+        for (model, cost) in &self.agents.costs {
+            for (name, price) in [
+                ("input_per_m", cost.input_per_m),
+                ("output_per_m", cost.output_per_m),
+            ] {
+                if !price.is_finite() || price < 0.0 {
+                    return Err(format!(
+                        "cost for model {model:?}: {name} must be a finite non-negative \
+                         USD price per million tokens (got {price})"
+                    ));
+                }
+            }
         }
 
         Ok(())
@@ -820,54 +860,6 @@ mod tests {
         assert_eq!(settings.api_key.as_deref(), Some("ollama"));
         assert_eq!(settings.chat_model, "");
         assert_eq!(settings.skill_model, "");
-    }
-
-    /// `BTreeMap<ProviderId, _>` serializes as a TOML table keyed by the
-    /// `#[serde(rename_all = "snake_case")]` variant name; this must survive
-    /// a full serialize/deserialize round trip with every `ALL` member
-    /// present as its own distinct key, not collapse or reorder.
-    #[test]
-    fn mcp_servers_round_trip_through_save_and_load() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let temp_home = unique_temp_dir("axiomata-test-config-mcp");
-        // SAFETY: serialized by `_guard`, see `paths::tests`.
-        unsafe {
-            env::set_var(paths::AXIOMATA_HOME_ENV, &temp_home);
-        }
-
-        let mut config = Config {
-            workspace_root: temp_home.join("Brain"),
-            ..Config::default()
-        };
-        let mut env = BTreeMap::new();
-        env.insert("LANG".to_string(), "en_US.UTF-8".to_string());
-        config.mcp_servers.insert(
-            "apple-mail".to_string(),
-            McpServerConfig {
-                command: "uvx".to_string(),
-                args: vec![
-                    "--with".to_string(),
-                    "mcp<2".to_string(),
-                    "mcp-apple-mail".to_string(),
-                ],
-                env,
-            },
-        );
-
-        config
-            .save()
-            .expect("a config with mcp_servers should save");
-        let reloaded = Config::load().expect("reload should succeed");
-        assert_eq!(reloaded.mcp_servers, config.mcp_servers);
-        assert_eq!(
-            reloaded.mcp_servers["apple-mail"].command, "uvx",
-            "the emitted TOML should keep the command and args intact"
-        );
-
-        unsafe {
-            env::remove_var(paths::AXIOMATA_HOME_ENV);
-        }
-        let _ = fs::remove_dir_all(&temp_home);
     }
 
     #[test]

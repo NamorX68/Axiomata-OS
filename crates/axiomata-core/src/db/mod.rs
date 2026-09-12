@@ -18,6 +18,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (4, include_str!("migrations/0004_runs_source.sql")),
     (5, include_str!("migrations/0005_runs_cost.sql")),
     (6, include_str!("migrations/0006_chat_turns.sql")),
+    (7, include_str!("migrations/0007_runs_model.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -90,7 +91,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 6);
+            assert_eq!(version, 7);
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -161,6 +162,14 @@ mod tests {
                 [],
             )
             .expect("chat_turns table should exist");
+
+            // Migration 0007's column exists.
+            conn.execute(
+                "UPDATE runs SET model = 'deepseek/deepseek-v4-flash-0731' \
+                 WHERE skill_name = 'probe'",
+                [],
+            )
+            .expect("runs.model column should exist");
         }
 
         {
@@ -169,7 +178,7 @@ mod tests {
             let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(applied_count, 6);
+            assert_eq!(applied_count, 7);
 
             let probe_value: String = conn
                 .query_row(

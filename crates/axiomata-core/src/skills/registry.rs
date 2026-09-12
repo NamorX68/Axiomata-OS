@@ -17,7 +17,7 @@ use gray_matter::Matter;
 use gray_matter::engine::YAML;
 use serde::{Deserialize, Serialize};
 
-use crate::agents::BACKEND_CLAUDE_CODE;
+use crate::agents::BACKEND_OPENCODE;
 use crate::error::AxiomataError;
 
 /// The YAML frontmatter of a `SKILL.md`, as authored by the user.
@@ -33,15 +33,9 @@ struct SkillFrontmatter {
     trigger: Option<String>,
     #[serde(default = "default_backend")]
     backend: String,
-    /// Backend id to use *instead of* [`SkillFrontmatter::backend`] when the
-    /// configured skill provider is a local one (Ollama today) — the "one
-    /// Settings switch moves every connector digest to `ollama-agent`"
-    /// mechanism of Stufe 2 CP3 (see [`Skill::effective_backend`]).
-    #[serde(default)]
-    local_backend: Option<String>,
     /// Workspace-relative files whose contents are prepended to the skill's
     /// prompt as a `## Context file: <rel>` block (e.g. `mail-digest`'s
-    /// `Mail/.topics.md`, which a local agent has no file tool to read).
+    /// `Mail/.topics.md`, which opencode has no file tool to read).
     #[serde(default)]
     prepend_files: Option<Vec<String>>,
     #[serde(default)]
@@ -52,7 +46,7 @@ struct SkillFrontmatter {
 
 /// Default agent backend for a skill that doesn't name one.
 fn default_backend() -> String {
-    BACKEND_CLAUDE_CODE.to_owned()
+    BACKEND_OPENCODE.to_owned()
 }
 
 /// A discovered skill: its frontmatter metadata, its instruction body, and
@@ -69,28 +63,19 @@ pub struct Skill {
     pub effort: Option<String>,
     /// Optional trigger description from the frontmatter.
     pub trigger: Option<String>,
-    /// Agent backend identifier (`"claude-code"`, `"ollama"`, or
-    /// `"ollama-agent"`). Not validated here —
-    /// [`crate::agents::AgentBackend::resolve`] checks it at run time.
+    /// Agent backend identifier (`"opencode"` or `"ollama"`). Not validated
+    /// here — [`crate::agents::AgentBackend::resolve`] checks it at run time.
     pub backend: String,
-    /// Backend id to resolve *instead of* [`Skill::backend`] when the
-    /// configured skill provider is a local one (Ollama today) — see
-    /// [`Skill::effective_backend`] and `docs/plans/stufe2-lean-ollama-agent.md`
-    /// CP3 mechanism 1.
-    pub local_backend: Option<String>,
     /// Workspace-relative files whose contents are prepended to the run's
     /// prompt as `## Context file: <rel>` blocks — the bridge for a skill that
     /// references a workspace file (e.g. `mail-digest`'s `Mail/.topics.md`) but
-    /// runs on a backend with no file tool (the local `ollama-agent`). See
-    /// `docs/plans/stufe2-lean-ollama-agent.md` CP3 mechanism 2.
+    /// runs on a backend with no file tool. See `docs/plans/stufe2-lean-ollama-agent.md`
+    /// CP3 mechanism 2 (the mechanism survived the ollama-agent's retirement;
+    /// `mail-digest` still uses it).
     pub prepend_files: Vec<String>,
-    /// Optional Claude Code `--allowedTools` value (space/comma-separated
-    /// tool names, e.g. an MCP tool the skill's SOP calls) — see
-    /// [`crate::agents::AgentRequest::allowed_tools`] for why a skill that
-    /// uses an MCP tool needs this spelled out explicitly. `None` for a
-    /// skill that only needs its default tool access (or targets Ollama,
-    /// which ignores this either way). For the `ollama-agent` backend this
-    /// is also the derivation source for which MCP servers to spawn.
+    /// Optional tool names the skill's SOP calls (e.g. MCP tools). Kept for
+    /// declaration symmetry — the opencode backend resolves MCP servers from
+    /// its own config and ignores this.
     pub allowed_tools: Option<String>,
     /// Per-skill wall-clock limit in seconds, overriding
     /// `config.agents.skill_timeout_secs` for this one skill. `None` uses the
@@ -100,31 +85,8 @@ pub struct Skill {
     /// Absolute path to the skill's `SKILL.md`.
     pub path: PathBuf,
     /// The Markdown body after the frontmatter — the skill's actual
-    /// instructions. Used as the prompt for the Ollama backend.
+    /// instructions. Used as the prompt for the agent.
     pub body: String,
-}
-
-impl Skill {
-    /// The backend id the runner should actually resolve: `local_backend`
-    /// when the configured skill provider is a local one (Ollama today) and
-    /// the skill declares one, else the plain `backend`.
-    ///
-    /// Keyed on the provider, so **one Settings switch** (`skill_provider =
-    /// ollama`) moves every skill that opts in, and switching back to a
-    /// cloud provider reverts them — config is read per run, no restart.
-    pub fn effective_backend(&self, config: &crate::config::Config) -> &str {
-        match self.local_backend.as_deref() {
-            Some(local)
-                if config
-                    .agents
-                    .provider_for(crate::config::ProviderRole::Skill)
-                    == crate::config::ProviderId::Ollama =>
-            {
-                local
-            }
-            _ => &self.backend,
-        }
-    }
 }
 
 /// Upper bound on the size of a `SKILL.md` we will read and parse, as a guard
@@ -333,7 +295,6 @@ fn load_skill(manifest: &Path) -> Result<Skill, AxiomataError> {
         effort: frontmatter.effort,
         trigger: frontmatter.trigger,
         backend: frontmatter.backend,
-        local_backend: frontmatter.local_backend,
         prepend_files: frontmatter.prepend_files.unwrap_or_default(),
         allowed_tools: frontmatter.allowed_tools,
         timeout_secs: frontmatter.timeout_secs,
@@ -424,14 +385,14 @@ mod tests {
     }
 
     #[test]
-    fn backend_defaults_to_claude_code_when_absent() {
+    fn backend_defaults_to_opencode_when_absent() {
         let h = TestHome::new("default-backend");
         write_skill(
             &h.skills_dir(),
             "plain",
             "---\nname: plain\ndescription: no backend field\n---\nbody\n",
         );
-        assert_eq!(find_skill("plain").unwrap().backend, "claude-code");
+        assert_eq!(find_skill("plain").unwrap().backend, "opencode");
     }
 
     #[test]
@@ -558,9 +519,9 @@ mod tests {
         ));
     }
 
-    /// A bare `Skill` with the two backend-relevant fields set, everything
-    /// else default.
-    fn skill_with_backends(backend: &str, local_backend: Option<&str>) -> Skill {
+    /// A bare `Skill` with the backend-relevant field set, everything else
+    /// default.
+    fn skill_with_backend(backend: &str) -> Skill {
         Skill {
             name: "s".to_string(),
             description: "d".to_string(),
@@ -568,7 +529,6 @@ mod tests {
             effort: None,
             trigger: None,
             backend: backend.to_string(),
-            local_backend: local_backend.map(str::to_string),
             prepend_files: Vec::new(),
             allowed_tools: None,
             timeout_secs: None,
@@ -578,25 +538,14 @@ mod tests {
     }
 
     #[test]
-    fn effective_backend_uses_local_backend_when_provider_is_ollama() {
-        let mut config = crate::config::Config::default();
-        config.agents.skill_provider = crate::config::ProviderId::Ollama;
-        let skill = skill_with_backends("claude-code", Some("ollama-agent"));
-        assert_eq!(skill.effective_backend(&config), "ollama-agent");
-    }
-
-    #[test]
-    fn effective_backend_falls_back_to_the_declared_backend_without_local_backend() {
-        let mut config = crate::config::Config::default();
-        config.agents.skill_provider = crate::config::ProviderId::Ollama;
-        let skill = skill_with_backends("claude-code", None);
-        assert_eq!(skill.effective_backend(&config), "claude-code");
-    }
-
-    #[test]
-    fn effective_backend_ignores_local_backend_on_a_cloud_provider() {
-        let config = crate::config::Config::default(); // skill_provider = anthropic
-        let skill = skill_with_backends("claude-code", Some("ollama-agent"));
-        assert_eq!(skill.effective_backend(&config), "claude-code");
+    fn a_skill_without_a_backend_frontmatter_defaults_to_opencode() {
+        let home = TestHome::new("default-backend");
+        write_skill(
+            &home.skills_dir(),
+            "implicit",
+            "---\nname: implicit\ndescription: d\n---\n\nDo the thing.\n",
+        );
+        let skill = find_skill("implicit").unwrap();
+        assert_eq!(skill.backend, "opencode");
     }
 }
