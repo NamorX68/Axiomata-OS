@@ -64,8 +64,14 @@
   {#if $busy}
     <span class="chip"><span class="spinner"></span>working…</span>
   {:else if $turns.length > 0}
-    <button type="button" class="toggle" onclick={() => panelOpen.update((v) => !v)}>
-      {$panelOpen ? "hide chat" : `chat (${$turns.length})`}
+    <button
+      type="button"
+      class="toggle"
+      title="{$turns.length} Nachrichten in dieser Unterhaltung"
+      onclick={() => panelOpen.update((v) => !v)}
+    >
+      <span class="toggle-label">{$panelOpen ? "hide chat" : "chat"}</span>
+      <span class="toggle-count" aria-hidden="true">{$turns.length}</span>
     </button>
   {/if}
 </form>
@@ -130,8 +136,29 @@
     }
   }
   .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
     padding: 1px var(--ax-space-3);
     border-radius: var(--ax-radius-pill);
+  }
+  .toggle-label {
+    color: var(--ax-text);
+  }
+  /* Turn count as a distinct badge, not a "chat #N" label — the panel has a
+     single session, so a bare number reads like the conversation's size. */
+  .toggle-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.2em;
+    height: 1.2em;
+    padding: 0 0.3em;
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-accent-muted);
+    color: var(--ax-accent);
+    font-size: 0.85em;
+    font-weight: 600;
   }
 </style>
