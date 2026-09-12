@@ -1,8 +1,7 @@
 ---
 name: mail-digest
 description: Reads recent mail via whichever mail tool is available (the apple-mail MCP server today), picks out messages the agent judges important plus ones matching the owner's configured topics, summarises each, and reports them as one JSON object for the Mail dashboard module to read back from this skill's last run.
-backend: claude-code
-local_backend: ollama-agent
+backend: opencode
 prepend_files: ["Mail/.topics.md"]
 allowed_tools: mcp__apple-mail__get_needs_response mcp__apple-mail__search_emails mcp__apple-mail__list_inbox_emails
 timeout_secs: 600
@@ -10,16 +9,27 @@ timeout_secs: 600
 
 # Mail Digest
 
+Your entire reply must be **exactly one JSON object** — this is parsed by
+software, not read by a person. Output nothing before or after it: no
+introduction, no summary, no bullet points, no markdown code fence, no second
+copy of the object. If a tool call errors, keep going with the rest; if you
+cannot finish, output what you did collect and set `"error"` to a short
+reason — an object containing only `"error"` is better than an empty reply.
+
 Report a short, curated list of noteworthy emails as a single JSON object —
-this is read by a dashboard module afterwards, not by a person, so the
-output format below must be followed exactly. This is deliberately **not** a
-full inbox listing: only messages that are either clearly important or match
-one of the owner's configured topics belong in the output.
+this is read by a dashboard module afterwards, not by a person, so the output
+format must be followed exactly. This is deliberately **not** a full inbox
+listing: only messages that are either clearly important or match one of the
+owner's configured topics belong in the output.
 
 Keep the run tight — every tool call is a slow round-trip against Mail.app.
-Make **at most ~6 tool calls total**: one inbox listing, one
-needs-response pull, and one `search_emails` per *topic group* (not per
-keyword). Don't re-fetch a message you already have.
+Make **at most ~6 tool calls total** and stop the moment you have enough
+candidates: one inbox listing, one needs-response pull, and one
+`search_emails` per *topic group* (not per keyword). Don't re-fetch a message
+you already have. A call that errors or takes unusually long is **skipped,
+not retried** — Mail.app automation is slow; a timed-out `get_needs_response`
+is not a reason to give up, leave that signal out and keep going with what
+you have.
 
 Do exactly this and nothing more:
 

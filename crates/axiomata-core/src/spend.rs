@@ -8,9 +8,9 @@
 //! for one provider since a cutoff, and [`guard_redirected_turn`] refuses to
 //! start a new turn once today's sum has reached `config.agents.daily_usd_cap`.
 //!
-//! The Anthropic provider is subscription-billed through the CLI's own login
+//! The Anthropic provider is subscription-billed through opencode's own login
 //! and is never metered here — the guard is a no-op unless the active provider
-//! [redirects the CLI](crate::config::ProviderId::is_redirected).
+//! is a [metered one](crate::config::ProviderId::is_redirected).
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Utc};
 use rusqlite::Connection;
@@ -22,14 +22,15 @@ use crate::error::AxiomataError;
 /// caller right after [`crate::agents::chat`] returns.
 #[derive(Debug, Clone)]
 pub struct ChatTurnRecord {
-    /// `session_id` claude returned for this turn.
+    /// `session_id` opencode returned for this turn.
     pub session_id: String,
     /// `"chat"` or `"instruct"`.
     pub mode: &'static str,
     /// Active model-routing provider when the turn ran (`ProviderId::as_str`),
     /// or `None` if it could not be determined.
     pub provider: Option<String>,
-    /// The resolved `claude --model`, or `None` for the CLI default.
+    /// The resolved model id (the bare `providers[…].chat_model`), or `None`
+    /// for a turn whose model couldn't be determined.
     pub model: Option<String>,
     pub is_error: bool,
     pub cost_usd: Option<f64>,
@@ -203,9 +204,9 @@ pub fn provider_summary(
 /// serving `role` has reached the daily cap. A no-op when that provider is
 /// Anthropic (subscription-billed) or the cap is unset.
 ///
-/// Call this immediately before dispatching any turn that could reach a
-/// `claude -p` spawn: skill/routine runs (`ProviderRole::Skill`) and dashboard
-/// chat/instruct turns (`ProviderRole::Chat`).
+/// Call this immediately before dispatching any turn that spawns an agent:
+/// skill/routine runs (`ProviderRole::Skill`) and dashboard chat/instruct
+/// turns (`ProviderRole::Chat`).
 ///
 /// Errors:
 ///     [`AxiomataError::SpendCapReached`] when over the cap (the turn must not
@@ -231,6 +232,129 @@ pub fn guard_redirected_turn(
         });
     }
     Ok(())
+}
+
+/// The metered cost of a run/turn in USD from its token counts × the
+/// owner-configured per-model price ([`Config::agents`]`.costs`), when that
+/// model has an entry. `None` when the model is absent / unlisted — the
+/// caller falls back to the CLI's own estimate (the subscription-billed
+/// Anthropic path, where the estimate is real yet the cap is a no-op).
+///
+/// This is the fix for the 2026-09-11 spend-cap incident: the CLIs' cost
+/// estimate for a non-Anthropic model (e.g. OpenRouter's
+/// `deepseek/deepseek-v4-flash-0731`) can be an order of magnitude too high,
+/// which made the daily cap fire on recorded spend the owner never incurred.
+pub fn metered_cost_usd(
+    config: &Config,
+    model: Option<&str>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+) -> Option<f64> {
+    let model = model.map(str::trim).filter(|m| !m.is_empty())?;
+    let price = config.agents.costs.get(model)?;
+    let (input_tokens, output_tokens) = (input_tokens?, output_tokens?);
+    let cost = input_tokens as f64 / 1e6 * price.input_per_m
+        + output_tokens as f64 / 1e6 * price.output_per_m;
+    (cost > 0.0).then_some(cost)
+}
+
+/// Two-part reconciliation of already-recorded spend against
+/// [`metered_cost_usd`]: for **runs**, the `model` column was only added in
+/// migration 0007 (pre-existing rows carry `NULL`), but every pre-0007 run
+/// was a skill/routine run, whose model is the active skill provider's
+/// `skill_model` — so a NULL model is resolved to that before metering.
+/// **chat_turns** always carried a `model` column.
+///
+/// The recorded `cost_usd` is rewritten in place for every row whose resolved
+/// model has a configured price **and whose stored cost differs from the
+/// metered figure**; rows already at the metered value are left untouched (so
+/// a second run on the same history is a no-op). Idempotent; returns how many
+/// rows were actually rewritten. The whole pass runs in one transaction —
+/// this is called from [`crate::AxiomataCore::init`] on every launch, and an
+/// autocommit per row would turn a small history into seconds of startup
+/// latency.
+pub fn reconcile_recorded_costs(db: &Connection, config: &Config) -> Result<usize, AxiomataError> {
+    // Nothing priced → nothing to re-meter; skip the two full-table scans
+    // that run on every startup entirely (the common case).
+    if config.agents.costs.is_empty() {
+        return Ok(0);
+    }
+    let skill_provider = config.agents.skill_provider;
+    let skill_model = config
+        .agents
+        .providers
+        .get(&skill_provider)
+        .map(|p| p.skill_model.trim())
+        .filter(|m| !m.is_empty())
+        .map(str::to_owned);
+    let mut changed = 0usize;
+
+    let tx = db.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "SELECT id, model, cost_usd, input_tokens, output_tokens FROM runs \
+             WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<i64>>(3)?.map(|n| n as u64),
+                row.get::<_, Option<i64>>(4)?.map(|n| n as u64),
+            ))
+        })?;
+        for row in rows {
+            let (id, model, stored_cost, input, output) = row?;
+            // A pre-0007 run has no stored model; assume the skill provider's
+            // model (they were all skill runs). A *stored* model wins.
+            let effective = model.as_deref().or(skill_model.as_deref());
+            let Some(cost) = metered_cost_usd(config, effective, input, output) else {
+                continue;
+            };
+            if stored_cost.is_some_and(|c| (c - cost).abs() < 1e-9) {
+                continue; // already metered to the same figure
+            }
+            tx.execute(
+                "UPDATE runs SET cost_usd = ?1 WHERE id = ?2",
+                rusqlite::params![cost, id],
+            )?;
+            changed += 1;
+        }
+    }
+
+    {
+        let mut stmt = tx.prepare(
+            "SELECT id, model, cost_usd, input_tokens, output_tokens FROM chat_turns \
+             WHERE model IS NOT NULL AND input_tokens IS NOT NULL AND output_tokens IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<i64>>(3)?.map(|n| n as u64),
+                row.get::<_, Option<i64>>(4)?.map(|n| n as u64),
+            ))
+        })?;
+        for row in rows {
+            let (id, model, stored_cost, input, output) = row?;
+            let Some(cost) = metered_cost_usd(config, Some(&model), input, output) else {
+                continue;
+            };
+            if stored_cost.is_some_and(|c| (c - cost).abs() < 1e-9) {
+                continue;
+            }
+            tx.execute(
+                "UPDATE chat_turns SET cost_usd = ?1 WHERE id = ?2",
+                rusqlite::params![cost, id],
+            )?;
+            changed += 1;
+        }
+    }
+
+    tx.commit()?;
+    Ok(changed)
 }
 
 #[cfg(test)]
@@ -350,6 +474,150 @@ mod tests {
         assert!(
             guard_redirected_turn(&db, &config, ProviderRole::Skill).is_ok(),
             "cap disabled -> never blocks"
+        );
+    }
+
+    #[test]
+    fn metered_cost_usd_uses_configured_price_per_token() {
+        let mut config = Config::default();
+        config.agents.costs.insert(
+            "deepseek/deepseek-v4-flash-0731".into(),
+            crate::config::ModelCost {
+                input_per_m: 0.065,
+                output_per_m: 0.18,
+            },
+        );
+
+        // 1.0M input + 1.0M output -> 0.065 + 0.18 = 0.245.
+        let cost = metered_cost_usd(
+            &config,
+            Some("deepseek/deepseek-v4-flash-0731"),
+            Some(1_000_000),
+            Some(1_000_000),
+        )
+        .unwrap();
+        assert!((cost - 0.245).abs() < 1e-9, "got {cost}");
+
+        // An unlisted model has no metered cost -> falls back (None).
+        assert!(metered_cost_usd(&config, Some("other/model"), Some(1), Some(1)).is_none());
+
+        // A missing model id (CLI default) metered via the config is None too.
+        assert!(metered_cost_usd(&config, None, Some(1), Some(1)).is_none());
+
+        // Missing token counts cannot be metered.
+        assert!(
+            metered_cost_usd(
+                &config,
+                Some("deepseek/deepseek-v4-flash-0731"),
+                Some(1),
+                None
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn reconcile_replaces_cli_estimated_costs_on_runs_and_chat_turns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE runs (id INTEGER PRIMARY KEY, skill_name TEXT, backend TEXT, \
+                     status TEXT, exit_code INTEGER, duration_ms INTEGER, stdout TEXT, \
+                     stderr TEXT, error TEXT, started_at TEXT NOT NULL, finished_at TEXT, \
+                     source TEXT, provider TEXT, cost_usd REAL, input_tokens INTEGER, \
+                     output_tokens INTEGER, num_turns INTEGER, model TEXT);
+              CREATE TABLE chat_turns (id INTEGER PRIMARY KEY, session_id TEXT, mode TEXT, \
+                     provider TEXT, model TEXT, is_error INTEGER DEFAULT 0, cost_usd REAL, \
+                     input_tokens INTEGER, output_tokens INTEGER, num_turns INTEGER, \
+                     duration_ms INTEGER DEFAULT 0, created_at TEXT NOT NULL);",
+        )
+        .unwrap();
+
+        let mut config = Config::default();
+        config.agents.costs.insert(
+            "deepseek/deepseek-v4-flash-0731".into(),
+            crate::config::ModelCost {
+                input_per_m: 0.065,
+                output_per_m: 0.18,
+            },
+        );
+        config.agents.skill_provider = ProviderId::OpenRouter;
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            crate::config::ProviderSettings {
+                base_url: Some("https://openrouter.ai/api".into()),
+                api_key: Some("sk".into()),
+                chat_model: "z-ai/glm-5.3-flash[1m]".into(),
+                skill_model: "deepseek/deepseek-v4-flash-0731".into(),
+            },
+        );
+
+        // A pre-0007 run (model NULL updates even NULL model) and a run with
+        // the model stored — both with the CLI's inflated estimate.
+        conn.execute(
+            "INSERT INTO runs (skill_name, backend, status, exit_code, duration_ms, \
+                     stdout, stderr, error, started_at, finished_at, source, provider, \
+                     cost_usd, input_tokens, output_tokens, num_turns, model) \
+                     VALUES ('skill', 'claude-code', 'success', 0, 100, '', '', NULL, \
+                     '2026-09-11T10:00:00Z', '2026-09-11T10:01:00Z', 'manual', 'open_router', \
+                     1.0, 1_000_000, 1_000_000, 4, NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO runs (skill_name, backend, status, exit_code, duration_ms, \
+                     stdout, stderr, error, started_at, finished_at, source, provider, \
+                     cost_usd, input_tokens, output_tokens, num_turns, model) \
+                     VALUES ('skill', 'claude-code', 'success', 0, 100, '', '', NULL, \
+                     '2026-09-11T11:00:00Z', '2026-09-11T11:01:00Z', 'manual', 'open_router', \
+                     1.0, 1_000_000, 1_000_000, 4, 'deepseek/deepseek-v4-flash-0731')",
+            [],
+        )
+        .unwrap();
+
+        // A chat turn using an *unlisted* model — must be left untouched.
+        record_chat_turn(
+            &conn,
+            &ChatTurnRecord {
+                session_id: "s".into(),
+                mode: "chat",
+                provider: Some("open_router".into()),
+                model: Some("z-ai/glm-5.3-flash[1m]".into()),
+                is_error: false,
+                cost_usd: Some(5.0),
+                input_tokens: Some(1_000_000),
+                output_tokens: Some(1_000_000),
+                num_turns: None,
+                duration_ms: 10,
+            },
+        )
+        .unwrap();
+
+        let changed = reconcile_recorded_costs(&conn, &config).unwrap();
+        assert_eq!(
+            changed, 2,
+            "both runs re-metered at 0.065/0.18; the glm chat turn is unlisted"
+        );
+
+        // 1.0M input + 1.0M output × (0.065 + 0.18)/1M = 0.245.
+        let mut stmt = conn
+            .prepare("SELECT cost_usd FROM runs ORDER BY id")
+            .unwrap();
+        let costs: Vec<f64> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for cost in costs {
+            assert!((cost - 0.245).abs() < 1e-9, "got {cost}");
+        }
+
+        let saved_chat: f64 = conn
+            .query_row("SELECT cost_usd FROM chat_turns", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            (saved_chat - 5.0).abs() < 1e-9,
+            "unlisted model left untouched"
         );
     }
 }

@@ -42,19 +42,74 @@ export interface LatestSkillRun {
 }
 
 /**
- * Finds the most recent run of `skillName` (`list_runs`) and fetches its
- * full record (`get_run`) for the captured `stdout`.
+ * Finds the most recent *usable* run of `skillName` (`list_runs`) and
+ * fetches its full record (`get_run`) for the captured `stdout`.
+ *
+ * "Usable" is deliberately loose: the newest run is tried first, but a run
+ * that can't contribute data is skipped over in favour of the next-newest —
+ * a `failed` run, a record whose full row vanished (`get_run` returned
+ * nothing), a run whose stdout is empty/whitespace, or a run whose stdout
+ * isn't valid JSON after fence-stripping. Connector modules parse stdout
+ * as JSON — a skill's SOP promises exactly one JSON object — so a run the
+ * parser would choke on (observed live as `calendar-digest` finishing with
+ * an empty `result`, or a truncated `{"calendars":[],"events":[` cut off
+ * mid-object) must never wipe a tile's previously-good digest; the reader
+ * prefers the most recent run that produced a parseable digest and only
+ * falls back to surfacing a bad run's error when no usable run exists at
+ * all. The parseability check is deliberately a bare `JSON.parse` — a
+ * *valid* object the connector still rejects (e.g. the skill's own
+ * `{"error": "..."}` report) is the connector's job to surface as an
+ * error, not something this layer should silently skip over.
  */
 export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Promise<LatestSkillRun> {
   const runs = await invoke<RunSummary[]>("list_runs", { limit: RUN_LOOKUP_LIMIT });
-  const run = runs.find((r) => r.skill_name === skillName) ?? null;
-  if (!run) return { run: null, stdout: null, error: null };
-  if (run.status === "failed") {
-    return { run, stdout: null, error: run.error ?? "Last run failed." };
+  let newestFailed: RunSummary | null = null;
+  let newestMissing: RunSummary | null = null;
+  let newestEmpty: RunSummary | null = null;
+  let newestUnparseable: RunSummary | null = null;
+  let unparseableReason: string | null = null;
+  for (const run of runs) {
+    if (run.skill_name !== skillName) continue;
+    if (run.status === "failed") {
+      newestFailed ??= run;
+      continue;
+    }
+    const full = await invoke<RunRecord | null>("get_run", { id: run.id });
+    if (!full) {
+      newestMissing ??= run;
+      continue;
+    }
+    const stripped = stripCodeFence(full.stdout);
+    if (!stripped) {
+      newestEmpty ??= run;
+      continue;
+    }
+    const object = firstJsonObject(stripped);
+    let unusable = false;
+    if (object === null) {
+      unusable = true;
+      unparseableReason ??= "no JSON object found";
+    } else {
+      try {
+        JSON.parse(object);
+      } catch (err) {
+        unusable = true;
+        unparseableReason ??= (err as Error).message;
+      }
+    }
+    if (unusable) {
+      newestUnparseable ??= run;
+      continue;
+    }
+    return { run, stdout: full.stdout, error: null };
   }
-  const full = await invoke<RunRecord | null>("get_run", { id: run.id });
-  if (!full) return { run, stdout: null, error: "Run record not found." };
-  return { run, stdout: full.stdout, error: null };
+  if (newestFailed) return { run: newestFailed, stdout: null, error: newestFailed.error ?? "Last run failed." };
+  if (newestMissing) return { run: newestMissing, stdout: null, error: "Run record not found." };
+  if (newestUnparseable) {
+    return { run: newestUnparseable, stdout: null, error: `${skillName} output was not valid JSON: ${unparseableReason}` };
+  }
+  if (newestEmpty) return { run: newestEmpty, stdout: null, error: "Last run produced no output." };
+  return { run: null, stdout: null, error: null };
 }
 
 /**
@@ -71,6 +126,49 @@ export function stripCodeFence(text: string): string {
   const trimmed = text.trim();
   const m = /^```(?:json)?\s*\n([\s\S]*?)\n?```$/.exec(trimmed);
   return m ? m[1].trim() : trimmed;
+}
+
+/**
+ * The first *balanced* JSON object in `text`, as a raw string; `null` when no
+ * complete object survives to a matching `}` (a truncated `{"a":1` — the
+ * "Unexpected EOF" seen live — or no `{` at all). Braces inside JSON strings
+ * are skipped, so a `"{"` inside a title can't end the scan early.
+ *
+ * Why not just `JSON.parse(text)`? A connector skill's reply is frequently not
+ * *only* the object: per the CP3 bake-off (`docs/plans/stufe2-cp3-bakeoff.md`),
+ * a small model wrapped the digest in prose, or emitted a second, truncated
+ * copy of the object right after the first valid one (concatenated). Parsing
+ * the whole reply fails both — the first is prose, the second unparseable —
+ * even though the first object itself is exactly the contract. Taking the
+ * balanced first object salvages both: leading prose is skipped, and a
+ * trailing duplicate is never reached. Used by every digest parser and by
+ * `loadLatestSkillRun`'s "is this run's output usable?" check, so the two
+ * always agree on what a usable run's stdout looks like.
+ */
+export function firstJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+    } else if (c === "{") {
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null; // the object runs off the end of the text — unterminated
 }
 
 /**

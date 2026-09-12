@@ -146,20 +146,30 @@
 
   /** Applies a just-finished `run_skill` result (`refreshNow` only —
    *  `loadLatest` goes through `loadLatestReminderDigest` instead, which
-   *  already does this same mapping for the "find the latest run" path). */
-  function applyFreshRun(run: RunRecord) {
-    lastRun = run;
+   *  already does this same mapping for the "find the latest run" path).
+   *
+   *  A failed or unparseable fresh run keeps the last good digest instead of
+   *  replacing it with nothing — a connector run that ends with empty output
+   *  shouldn't blank a tile that already has data.
+   *
+   *  `lastRun` is only ever stamped with a run that actually contributed the
+   *  digest on screen — a fresh run whose output failed or parsed to nothing
+   *  would otherwise set the badge to "just now" while the list still shows
+   *  an older run's data, so the badge falls back to whichever run the
+   *  re-resolved digest actually came from. */
+  async function applyFreshRun(run: RunRecord) {
     if (run.status === "failed") {
-      digest = EMPTY_REMINDER_DIGEST;
       error = run.error ?? "Last run failed.";
-    } else {
-      try {
-        digest = parseReminderDigest(run.stdout);
-        error = "";
-      } catch (err) {
-        digest = EMPTY_REMINDER_DIGEST;
-        error = String(err instanceof Error ? err.message : err);
-      }
+      await loadLatest();
+      return;
+    }
+    try {
+      digest = parseReminderDigest(run.stdout);
+      lastRun = run;
+      error = "";
+    } catch {
+      await loadLatest();
+      return;
     }
     settleSelection();
   }
@@ -184,7 +194,7 @@
     running = true;
     try {
       const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
-      applyFreshRun(full);
+      await applyFreshRun(full);
     } catch (err) {
       error = String(err);
     } finally {

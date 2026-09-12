@@ -151,12 +151,12 @@ let memory: MemoryStatus = {
   tracked_files: 42,
 };
 const skills: Skill[] = [
-  { name: "example-skill", description: "Bundled example skill.", backend: "claude-code" },
-  { name: "sprint-planning", description: "Draft the next sprint plan.", backend: "claude-code" },
+  { name: "example-skill", description: "Bundled example skill.", backend: "opencode" },
+  { name: "sprint-planning", description: "Draft the next sprint plan.", backend: "opencode" },
   { name: "newsletter", description: "Summarise the week into a newsletter.", backend: "ollama" },
-  { name: "calendar-digest", description: "Reads upcoming calendar events via whichever calendar MCP tool is available.", backend: "claude-code" },
-  { name: "reminders-digest", description: "Reads Apple Reminders lists and open tasks via whichever reminders MCP tool is available.", backend: "claude-code" },
-  { name: "mail-digest", description: "Reads recent mail via whichever mail MCP tool is available, picks out important and topic-matched messages, and summarises each.", backend: "claude-code" },
+  { name: "calendar-digest", description: "Reads upcoming calendar events via whichever calendar MCP tool is available.", backend: "opencode" },
+  { name: "reminders-digest", description: "Reads Apple Reminders lists and open tasks via whichever reminders MCP tool is available.", backend: "opencode" },
+  { name: "mail-digest", description: "Reads recent mail via whichever mail MCP tool is available, picks out important and topic-matched messages, and summarises each.", backend: "opencode" },
 ];
 
 /** Fixture digest, same shape `calendar-digest`'s SOP produces — invented
@@ -258,7 +258,7 @@ let runs: RunRecord[] = [
   {
     id: 6,
     skill_name: "mail-digest",
-    backend: "claude-code",
+    backend: "opencode",
     status: "success",
     exit_code: 0,
     duration_ms: 21400,
@@ -272,7 +272,7 @@ let runs: RunRecord[] = [
   {
     id: 5,
     skill_name: "reminders-digest",
-    backend: "claude-code",
+    backend: "opencode",
     status: "success",
     exit_code: 0,
     duration_ms: 15800,
@@ -286,7 +286,7 @@ let runs: RunRecord[] = [
   {
     id: 4,
     skill_name: "calendar-digest",
-    backend: "claude-code",
+    backend: "opencode",
     status: "success",
     exit_code: 0,
     duration_ms: 9200,
@@ -300,7 +300,7 @@ let runs: RunRecord[] = [
   {
     id: 3,
     skill_name: "example-skill",
-    backend: "claude-code",
+    backend: "opencode",
     status: "success",
     exit_code: 0,
     duration_ms: 2310,
@@ -342,7 +342,7 @@ let routines: Routine[] = [
     name: "evening ritual",
     cron_expr: "0 0 20 * * *",
     target: { type: "prompt", value: "Summarise today's notes." },
-    backend: "claude-code",
+    backend: "opencode",
     enabled: false,
     next_fire_at: null,
     last_fired_at: null,
@@ -505,7 +505,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const run: RunRecord = {
         id: (runs[0]?.id ?? 0) + 1,
         skill_name: name,
-        backend: skills.find((s) => s.name === name)?.backend ?? "claude-code",
+        backend: skills.find((s) => s.name === name)?.backend ?? "opencode",
         status: "success",
         exit_code: 0,
         duration_ms: durationMs,

@@ -134,6 +134,7 @@ export interface RunRecord extends RunSummary {
   stdout: string;
   stderr: string;
   finished_at: string;
+  model?: string | null;
 }
 
 export interface MemoryStatus {

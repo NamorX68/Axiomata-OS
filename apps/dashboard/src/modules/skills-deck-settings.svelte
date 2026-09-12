@@ -17,7 +17,7 @@
     Backend
     <select value={typeof $config.filterBackend === "string" ? $config.filterBackend : ""} onchange={(e) => set("filterBackend", value(e))}>
       <option value="">all</option>
-      <option value="claude-code">claude-code</option>
+      <option value="opencode">opencode</option>
       <option value="ollama">ollama</option>
     </select>
   </label>

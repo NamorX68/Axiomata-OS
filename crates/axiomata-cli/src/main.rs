@@ -12,7 +12,6 @@ use axiomata_core::routines::{self, NewRoutine, RoutineTarget};
 use axiomata_core::skills::{self, RunStatus};
 use axiomata_core::{AxiomataCore, memory, paths, spend};
 use clap::{ArgGroup, Args, Parser, Subcommand};
-use std::collections::btree_map::Entry;
 
 /// Clones `Config` out from under `core.config`'s `RwLock`. The CLI is a
 /// one-shot process — this just keeps every call site short and consistent
@@ -56,12 +55,6 @@ enum Command {
     Memory {
         #[command(subcommand)]
         action: MemoryAction,
-    },
-    /// MCP stdio servers: import from Claude Code, list configured servers, or
-    /// connect to one and enumerate its tools.
-    Mcp {
-        #[command(subcommand)]
-        action: McpAction,
     },
     /// Bundled skills: re-copy the default four from `resources/` into
     /// `~/.axiomata/skills/`.
@@ -159,21 +152,6 @@ enum SkillsAction {
 }
 
 #[derive(Debug, Subcommand)]
-enum McpAction {
-    /// Seed `[mcp_servers]` from Claude Code's `~/.claude.json` MCP block
-    /// (the Stufe-2 one-time import; see `docs/plans/stufe2-lean-ollama-agent.md`).
-    Import,
-    /// List the configured MCP servers.
-    List,
-    /// Connect to one configured server, run the `initialize` handshake, and
-    /// list the tools it advertises — a smoke test of the MCP client.
-    Tools {
-        /// Server name, as configured in `[mcp_servers]` (e.g. `apple-mail`).
-        name: String,
-    },
-}
-
-#[derive(Debug, Subcommand)]
 enum RoutineAction {
     /// List every routine, soonest next-fire first.
     List,
@@ -235,7 +213,7 @@ struct AddRoutine {
     /// Send this raw prompt to an agent when the routine runs.
     #[arg(long, group = "target")]
     prompt: Option<String>,
-    /// Backend override: "claude-code" or "ollama". Defaults to the skill's
+    /// Backend override: "opencode" or "ollama". Defaults to the skill's
     /// own backend, or "ollama" for a raw prompt.
     #[arg(long)]
     backend: Option<String>,
@@ -271,7 +249,6 @@ async fn main() -> Result<()> {
             MemoryAction::Sync => memory_sync(&core)?,
             MemoryAction::Status => memory_status(&core)?,
         },
-        Command::Mcp { action } => return mcp_cmd(&core, action).await,
         Command::Skills { action } => match action {
             SkillsAction::Reseed { force } => skills_reseed(force)?,
         },
@@ -747,106 +724,6 @@ fn memory_status(core: &AxiomataCore) -> Result<()> {
             "fresh"
         },
     );
-    Ok(())
-}
-
-/// Dispatches the `mcp` subcommands.
-async fn mcp_cmd(core: &AxiomataCore, action: McpAction) -> Result<()> {
-    match action {
-        McpAction::Import => mcp_import(core),
-        McpAction::List => mcp_list(core),
-        McpAction::Tools { name } => mcp_tools(core, &name).await,
-    }
-}
-
-/// Seeds `[mcp_servers]` from Claude Code's `~/.claude.json` MCP block, then
-/// persists the merged config. Existing entries are never overwritten.
-fn mcp_import(core: &AxiomataCore) -> Result<()> {
-    let imported = axiomata_core::mcp::import_from_claude_code();
-    let Some(imported) = imported else {
-        println!("no ~/.claude.json found — nothing to import");
-        return Ok(());
-    };
-    if imported.is_empty() {
-        println!(
-            "~/.claude.json has no importable stdio MCP servers (only `type: stdio` with a command are imported)"
-        );
-        return Ok(());
-    }
-
-    let mut config = read_config(core);
-    let mut added = 0;
-    for (name, server) in imported {
-        match config.mcp_servers.entry(name.clone()) {
-            Entry::Occupied(_) => println!("skip {name}: already configured"),
-            Entry::Vacant(slot) => {
-                println!(
-                    "imported {name}: {} {}",
-                    server.command,
-                    server.args.join(" ")
-                );
-                slot.insert(server);
-                added += 1;
-            }
-        }
-    }
-    if added == 0 {
-        return Ok(());
-    }
-    config.save().context("saving config.toml")?;
-    let mut guard = core
-        .config
-        .write()
-        .unwrap_or_else(|poison| poison.into_inner());
-    *guard = config;
-    println!(
-        "wrote {added} MCP server(s) to {}",
-        paths::config_path().display()
-    );
-    Ok(())
-}
-
-/// Prints the configured MCP servers, one line each.
-fn mcp_list(core: &AxiomataCore) -> Result<()> {
-    let config = read_config(core);
-    if config.mcp_servers.is_empty() {
-        println!(
-            "no MCP servers configured — run `axiomata-cli mcp import` (seeds from ~/.claude.json) \
-             or add a [mcp_servers.<name>] table to {}",
-            paths::config_path().display()
-        );
-        return Ok(());
-    }
-    for (name, server) in &config.mcp_servers {
-        println!("{name}: {} {}", server.command, server.args.join(" "));
-    }
-    Ok(())
-}
-
-/// Connects to one server and prints the tools it advertises — a live smoke
-/// test of `axiomata_core::mcp` against the real connector servers.
-async fn mcp_tools(core: &AxiomataCore, name: &str) -> Result<()> {
-    let config = read_config(core);
-    let server = config
-        .mcp_servers
-        .get(name)
-        .cloned()
-        .with_context(|| format!("no MCP server named {name:?} configured"))?;
-
-    let mut client =
-        axiomata_core::mcp::McpClient::connect(name, &server, std::time::Duration::from_secs(30))
-            .await
-            .context("MCP handshake failed")?;
-    let tools = client.list_tools().await.context("tools/list failed")?;
-    println!("{} advertises {} tool(s):", name, tools.len());
-    for tool in &tools {
-        println!(
-            "  {:<36} {}",
-            tool.name,
-            tool.description.as_deref().unwrap_or("-")
-        );
-    }
-    client.shutdown().await;
     Ok(())
 }
 

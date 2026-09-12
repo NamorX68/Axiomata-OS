@@ -29,7 +29,6 @@ cargo test -p axiomata-core                # just the core engine
 cargo run -p axiomata-cli                  # headless: init core, print status, exit
 cargo run -p axiomata-cli -- list-skills   # also: run-skill <name>, list-runs, get-run <id>, memory sync|status
 cargo run -p axiomata-cli -- routines tick # also: routines list|add|enable|disable|history
-cargo run -p axiomata-cli -- mcp import    # also: mcp list, mcp tools <name> (MCP stdio servers)
 cargo run -p axiomata-cli -- skills reseed [--force]  # re-copy bundled skills from resources/ (seed-if-absent unless --force)
 cd apps/dashboard && cargo tauri dev       # desktop app (hot-reload)
 ```

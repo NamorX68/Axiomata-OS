@@ -69,7 +69,7 @@ pub struct NewRoutine {
     pub name: String,
     pub cron_expr: String,
     pub target: RoutineTarget,
-    /// Backend override: `Some("claude-code")` / `Some("ollama")`, or `None`
+    /// Backend override: `Some("opencode")` / `Some("ollama")`, or `None`
     /// to use the target skill's own declared backend (skill target) or the
     /// configured default (prompt target).
     pub backend: Option<String>,

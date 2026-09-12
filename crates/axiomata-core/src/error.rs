@@ -44,11 +44,8 @@ pub enum AxiomataError {
     },
 
     /// A skill's frontmatter or a routine referenced an agent backend
-    /// identifier that is neither `"claude-code"`, `"ollama"`, nor
-    /// `"ollama-agent"`.
-    #[error(
-        "unknown agent backend {backend:?} (expected \"claude-code\", \"ollama\", or \"ollama-agent\")"
-    )]
+    /// identifier that is neither `"opencode"` nor `"ollama"`.
+    #[error("unknown agent backend {backend:?} (expected \"opencode\" or \"ollama\")")]
     UnknownAgentBackend { backend: String },
 
     /// The agent child process could not be spawned or waited on.
@@ -85,26 +82,11 @@ pub enum AxiomataError {
         message: String,
     },
 
-    /// A stdio MCP server could not be spawned or misbehaved on the wire: a
-    /// JSON-RPC `error` object for one of our requests, non-JSON / malformed
-    /// stdout, or the process exiting before answering. One variant covers
-    /// all of them because the individual situations share no recovery path —
-    /// the run fails either way; `server` names the offending
-    /// `[mcp_servers]` entry (see `crate::mcp`).
-    #[error("MCP server {server:?} error: {message}")]
-    Mcp { server: String, message: String },
-
-    /// A request to a stdio MCP server did not get an answer within its
-    /// timeout. A hung server (e.g. waiting on an unattended permission
-    /// dialog) must not block the agent loop forever.
-    #[error("MCP server {server:?} request timed out after {timeout:?}")]
-    McpTimeout { server: String, timeout: Duration },
-
     /// The model to run with is missing or malformed for the active provider.
-    /// The Claude Code CLI is *not* spawned in this case: with a non-Anthropic
-    /// `ANTHROPIC_BASE_URL` in effect, letting the CLI fall back to its own
-    /// built-in default model would route that default through the paid proxy
-    /// and bill it — a config typo must fail loudly, not silently cost money.
+    /// The agent is *not* spawned in this case: opencode needs a concrete
+    /// `provider/model` id, and there is no safe "default model" to fall back
+    /// to that stays on the right provider — a config gap must fail loudly,
+    /// not silently bill the wrong endpoint.
     #[error("{reason}")]
     InvalidAgentModel { reason: String },
 

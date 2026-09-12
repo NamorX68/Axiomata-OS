@@ -14,7 +14,7 @@
 
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
-import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
+import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 
 /** One event from the digest, already whatever the skill's SOP promises:
  *  `start`/`end` are `YYYY-MM-DD` for an all-day event, full ISO 8601
@@ -56,9 +56,14 @@ export const EMPTY_DIGEST: CalendarDigest = { calendars: [], events: [] };
  */
 export function parseCalendarDigest(stdout: string): CalendarDigest {
   const stripped = stripCodeFence(stdout);
+  // Prefer the first balanced object (salvages prose-wrapped / duplicated
+  // output); when there is none, fall back to the whole reply so the plain
+  // `JSON.parse` error messages (and the "not a JSON object" check, for a
+  // bare `"42"`) stay exactly as they were.
+  const object = firstJsonObject(stripped) ?? stripped;
   let raw: unknown;
   try {
-    raw = JSON.parse(stripped);
+    raw = JSON.parse(object);
   } catch (err) {
     throw new Error(`calendar-digest output was not valid JSON: ${(err as Error).message}`);
   }
@@ -66,11 +71,15 @@ export function parseCalendarDigest(stdout: string): CalendarDigest {
     throw new Error("calendar-digest output was not a JSON object");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.error === "string") {
-    throw new Error(obj.error);
-  }
   const calendars = Array.isArray(obj.calendars) ? obj.calendars.filter((c): c is string => typeof c === "string") : [];
   const events = Array.isArray(obj.events) ? obj.events.filter(isCalendarEvent) : [];
+  // The skill's fallback contract: partial data wins over the `error` string.
+  // A run that had to bail out of one calendar but still fetched the rest
+  // reports `{"events": [...], "error": "..."}` — that's data, not a dead run.
+  // Only when there is no usable data does the error itself surface.
+  if (typeof obj.error === "string" && events.length === 0) {
+    throw new Error(obj.error);
+  }
   return { calendars, events };
 }
 

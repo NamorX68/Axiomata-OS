@@ -14,7 +14,6 @@ pub mod db;
 pub mod error;
 pub mod graph;
 pub mod importer;
-pub mod mcp;
 pub mod memory;
 pub mod notes;
 pub mod paths;
@@ -93,6 +92,19 @@ impl AxiomataCore {
 
         let db = db::open_and_migrate()?;
         restrict_to_owner(&paths::db_path(), 0o600);
+
+        // Re-meter recorded spend against the owner's per-model price table
+        // (`config.agents.costs`): spreads the 2026-09-11 cost-metering fix
+        // onto already-recorded runs, so the daily cap stops counting the
+        // CLI's inflated estimates for non-Anthropic models. Best-effort:
+        // a failure to rewrite rows must not block the app from starting.
+        match spend::reconcile_recorded_costs(&db, &config) {
+            Ok(changed) => tracing::info!(
+                changed,
+                "re-metered recorded spend against configured model prices"
+            ),
+            Err(err) => tracing::warn!(%err, "failed to re-meter recorded spend"),
+        }
 
         Ok(Self {
             config: Arc::new(RwLock::new(config)),

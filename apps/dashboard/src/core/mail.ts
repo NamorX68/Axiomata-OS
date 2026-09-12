@@ -14,7 +14,7 @@
 
 import type { RunSummary } from "./backend";
 import { cut } from "./markdown";
-import { loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
+import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
 import { openStaged } from "./staging";
 
 /** Why one message made it into the digest at all. */
@@ -118,9 +118,14 @@ const REASONS: readonly MailReason[] = ["important", "topic"];
  */
 export function parseMailDigest(stdout: string): MailDigest {
   const stripped = stripCodeFence(stdout);
+  // Prefer the first balanced object (salvages prose-wrapped / duplicated
+  // output); when there is none, fall back to the whole reply so the plain
+  // `JSON.parse` error messages (and the "not a JSON object" check, for a
+  // bare `"42"`) stay exactly as they were.
+  const object = firstJsonObject(stripped) ?? stripped;
   let raw: unknown;
   try {
-    raw = JSON.parse(stripped);
+    raw = JSON.parse(object);
   } catch (err) {
     throw new Error(`mail-digest output was not valid JSON: ${(err as Error).message}`);
   }
@@ -128,10 +133,12 @@ export function parseMailDigest(stdout: string): MailDigest {
     throw new Error("mail-digest output was not a JSON object");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.error === "string") {
+  const emails = Array.isArray(obj.emails) ? obj.emails.filter(isMailItem) : [];
+  // The skill's fallback contract: partial data wins over the `error` string.
+  // Only when there is no usable data does the error itself surface.
+  if (typeof obj.error === "string" && emails.length === 0) {
     throw new Error(obj.error);
   }
-  const emails = Array.isArray(obj.emails) ? obj.emails.filter(isMailItem) : [];
   return { emails };
 }
 

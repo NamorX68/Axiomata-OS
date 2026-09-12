@@ -39,7 +39,7 @@ function fixture(): WorkspaceGraph {
       { from: "Dev/sub0/n0.md", to: "Work/sub1/n1.md" },
       { from: "Dev/sub0/n0.md", to: "missing.md" },
     ],
-    skills: [{ name: "a", description: "", backend: "claude-code", model: null, effort: null }],
+    skills: [{ name: "a", description: "", backend: "opencode", model: null, effort: null }],
     routines: [],
     total_files: 41,
     truncated: false,

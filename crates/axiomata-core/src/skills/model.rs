@@ -97,7 +97,7 @@ pub struct RunRecord {
     pub id: Option<i64>,
     /// Skill name as resolved at run time.
     pub skill_name: String,
-    /// `"claude-code"`, `"ollama"`, or `"ollama-agent"`.
+    /// `"opencode"` or `"ollama"`.
     pub backend: String,
     /// Overall outcome.
     pub status: RunStatus,
@@ -123,9 +123,22 @@ pub struct RunRecord {
     /// backend, which has no provider. Drives the per-provider spend rollup.
     #[serde(default)]
     pub provider: Option<String>,
-    /// `total_cost_usd` reported by the agent CLI for this run, in USD.
-    /// `None` for the subscription-billed Anthropic path, for Ollama, and for
-    /// any run whose JSON envelope couldn't be parsed.
+    /// Model id this run was executed with: the **bare** model id (no
+    /// `provider/` prefix — the `provider` column carries that, and the
+    /// full `provider/<model>` id is reconstructable from the two), or `None`
+    /// for a run that resolution never reached (e.g. the Ollama backend,
+    /// whose model lives in the backend enum). Persisted (migration 0007) so
+    /// a run's recorded cost can be re-metered against the owner's per-model
+    /// price table after the fact — `config.agents.costs` is keyed by the
+    /// same bare id.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// The run's cost in USD: the opencode `step_finish` cost, replaced by
+    /// the token-count × per-model-price figure when the owner priced the
+    /// model in `config.agents.costs` (see
+    /// [`crate::spend::metered_cost_usd`]). `None` for the
+    /// subscription-billed Anthropic path, for Ollama, and for any run whose
+    /// JSON envelope couldn't be parsed.
     #[serde(default)]
     pub cost_usd: Option<f64>,
     /// `usage.input_tokens` reported by the agent CLI; `None` when unavailable.
@@ -156,7 +169,7 @@ pub struct RunSummary {
     pub id: i64,
     /// Skill name as resolved at run time.
     pub skill_name: String,
-    /// `"claude-code"`, `"ollama"`, or `"ollama-agent"`.
+    /// `"opencode"` or `"ollama"`.
     pub backend: String,
     /// Overall outcome.
     pub status: RunStatus,

@@ -67,17 +67,31 @@
   const filteredEvents = $derived(filterByCalendar(digest.events, selectedCalendar === "" ? null : selectedCalendar));
 
   // --- Mini-month + 7-day agenda window ---
-  // `selectedDay` starts on "today" every mount (a calendar opens on now);
-  // `viewMonth` is the month the grid shows and can be paged independently.
-  const today = todayIso();
+  // `today` is a live value, not a mount-time constant: this module can stay
+  // mounted across midnight while the dashboard runs, and a one-shot `today`
+  // would leave the mini-month's highlight (and the default agenda anchor)
+  // stuck on yesterday (observed live: calendar still showing the 11th while
+  // the real date had moved on to the 12th). A 60 s tick in `onMount` nudges
+  // it forward across day boundaries.
+  let today = $state(todayIso());
+  // `selectedDay` opens on "today" and follows `today` across midnight — but
+  // only until the user picks a day of their own; an explicit pick stops the
+  // auto-follow.
+  let userPicked = false;
+  // `selectedDay`/`viewMonth` deliberately capture `today`'s *initial* value:
+  // after this line they are independent state, driven by the 60 s midnight
+  // tick and the user's own picks — they must not track `today` reactively.
+  // svelte-ignore state_referenced_locally
   let selectedDay = $state(today);
+  // svelte-ignore state_referenced_locally
   let viewMonth = $state<YearMonth>(monthOf(today));
 
   // `calendar-digest` fetches this month + next month only, so the mini-month
   // can't be paged (or a day picked) outside that range — there'd be no data
-  // and it would read as "nothing scheduled".
-  const rangeMin = monthOf(today);
-  const rangeMax = shiftMonth(rangeMin, 1);
+  // and it would read as "nothing scheduled". The window follows `today`, so
+  // it rolls forward when the month does.
+  const rangeMin = $derived(monthOf(today));
+  const rangeMax = $derived(shiftMonth(rangeMin, 1));
   const inRange = (m: YearMonth) => monthDiff(rangeMin, m) >= 0 && monthDiff(m, rangeMax) >= 0;
   const atRangeEnd = $derived(monthDiff(viewMonth, rangeMax) === 0);
 
@@ -110,6 +124,7 @@
   );
 
   function pickDay(iso: string) {
+    userPicked = true;
     const m = monthOf(iso);
     if (!inRange(m)) return; // out-of-range cells are disabled; guard anyway
     selectedDay = iso;
@@ -126,7 +141,7 @@
   const showClock = $derived($config.showClock === true);
   const clockStyle = $derived($config.clockStyle === "analog" ? "analog" : "digital");
   // Track the mini-month height, but cap it so the clock still fits beside the
-  // 11rem grid in a default-width tile (the row wraps below that).
+  // 15rem grid in a default-width tile (the row wraps below that).
   const clockSize = $derived(Math.min(miniH, 160));
 
   function selectCalendar(e: Event) {
@@ -178,20 +193,32 @@
   /** Applies a just-finished `run_skill` result (`refreshNow` only —
    *  `loadLatest` goes through `loadLatestCalendarDigest` instead, which
    *  already does this same success/failure/parse-error mapping for the
-   *  "find the latest run" path). */
-  function applyFreshRun(run: RunRecord) {
-    lastRun = run;
+   *  "find the latest run" path).
+   *
+   *  A failed or unparseable fresh run keeps the last good digest instead of
+   *  replacing it with nothing — a connector run that ends with empty output
+   *  shouldn't blank a tile that already has data. The error is still
+   *  surfaced above the (now stale) list.
+   *
+   *  `lastRun` is only ever stamped with a run that actually contributed the
+   *  digest on screen. A fresh run whose output failed or parsed to nothing
+   *  dropped right into the tile would otherwise set the badge to "just now"
+   *  while the list still shows an older run's data (observed live: "vor 2
+   *  Minuten aktualisiert" stamped over a digest already hours old) — so when
+   *  a fresh run contributes nothing, the badge falls back to whichever run
+   *  the re-resolved digest actually came from. */
+  async function applyFreshRun(run: RunRecord) {
     if (run.status === "failed") {
-      digest = EMPTY_DIGEST;
       error = run.error ?? "Last run failed.";
+      await loadLatest();
       return;
     }
     try {
       digest = parseCalendarDigest(run.stdout);
+      lastRun = run;
       error = "";
-    } catch (err) {
-      digest = EMPTY_DIGEST;
-      error = String(err instanceof Error ? err.message : err);
+    } catch {
+      await loadLatest();
     }
   }
 
@@ -214,7 +241,7 @@
     running = true;
     try {
       const full = await ctx.invoke<RunRecord>("run_skill", { name: skillName });
-      applyFreshRun(full);
+      await applyFreshRun(full);
     } catch (err) {
       error = String(err);
     } finally {
@@ -227,6 +254,24 @@
   // describes. `refreshNow` already no-ops if a run is somehow already in
   // flight, so this can't double-fire.
   onMount(() => void loadLatest().then(refreshNow));
+
+  // Keep the mini-month's "today" and the agenda's default anchor honest
+  // across midnight while this module stays mounted (see `today`'s comment):
+  // a cheap 60 s tick nudges both forward when the local date rolls over. A
+  // user-picked day stops the agenda anchor from moving; the today highlight
+  // still follows the real date.
+  onMount(() => {
+    const id = setInterval(() => {
+      const next = todayIso();
+      if (next === today) return;
+      today = next;
+      if (!userPicked) {
+        selectedDay = next;
+        viewMonth = monthOf(next);
+      }
+    }, 60_000);
+    return () => clearInterval(id);
+  });
 </script>
 
 <div class="calendar">
@@ -350,7 +395,7 @@
     gap: var(--ax-space-2);
     flex: 0 0 auto;
     /* A touch more air between the filter row and the mini-month below. */
-    margin-bottom: var(--ax-space-1);
+    margin-bottom: var(--ax-space-3);
   }
   select {
     min-width: 0;
@@ -385,7 +430,7 @@
     /* Compact so the agenda below still has room and the (enlarged) clock
        still fits beside it on a default-width tile; the mini-month drives
        the row height and the clock matches it (`size` prop). */
-    width: 11rem;
+    width: 15rem;
     max-width: 100%;
   }
   /* Center the optional clock vertically against the mini-month and
@@ -396,7 +441,7 @@
     margin-right: auto;
   }
   .mini-wrap :global(.mini .day) {
-    font-size: var(--ax-font-size-xs);
+    font-size: var(--ax-font-size-base);
   }
 
   .agenda-caption {

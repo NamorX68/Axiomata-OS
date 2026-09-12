@@ -151,7 +151,7 @@
   <div class="pair">
     <select bind:value={backend}>
       <option value="">default backend</option>
-      <option value="claude-code">claude-code</option>
+      <option value="opencode">opencode</option>
       <option value="ollama">ollama</option>
     </select>
     <button type="submit" disabled={busy}>{busy ? "…" : submitLabel}</button>
