@@ -11,6 +11,7 @@
 
 import { get } from "svelte/store";
 
+import { appGroups, loadAppGroups, type AppGroup } from "./appGroups";
 import { loadUserApps, userApps, type UserApp } from "./apps";
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges, windowTransparency } from "./stores";
@@ -30,7 +31,7 @@ interface DashboardState extends Record<string, unknown> {
   version: number;
   settings: DashboardSettings;
   canvas: { instances: CanvasInstance[] };
-  apps: { user: UserApp[] };
+  apps: { user: UserApp[]; groups: AppGroup[] };
 }
 
 /** Everything from the loaded file except what the stores own, so hand-added
@@ -92,7 +93,41 @@ export function sanitizeUserApps(raw: unknown): UserApp[] {
     const r = item as Record<string, unknown>;
     if (!isStr(r.path) || !isStr(r.name) || seen.has(r.path)) continue;
     seen.add(r.path);
-    out.push({ path: r.path, name: r.name });
+    out.push({ path: r.path, name: r.name, ...(isStr(r.glyph) ? { glyph: r.glyph } : {}) });
+  }
+  return out;
+}
+
+/** Keeps only well-formed groups; a bad hand-edit drops the row, not the
+ *  file (same contract as `sanitizeInstances`/`sanitizeUserApps`). Members
+ *  are deduplicated within a group and, per side, across groups — the
+ *  first group in file order keeps a member a later group's hand-edit also
+ *  lists, so one app is never rendered on two ring slots at once. A group
+ *  left with no members after dedup is dropped entirely — a 0-member group
+ *  doesn't exist even transiently, matching `appGroups.ts`'s own
+ *  auto-dissolve-at-zero-members behaviour. */
+export function sanitizeAppGroups(raw: unknown): AppGroup[] {
+  if (!Array.isArray(raw)) return [];
+  const seenIds = new Set<string>();
+  const seenMembers: Record<"builtin" | "user", Set<string>> = { builtin: new Set(), user: new Set() };
+  const out: AppGroup[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const r = item as Record<string, unknown>;
+    if (!isStr(r.id) || !isStr(r.name) || seenIds.has(r.id)) continue;
+    if (r.side !== "builtin" && r.side !== "user") continue;
+    const side = r.side;
+    const glyph = isStr(r.glyph) ? r.glyph : "group";
+    const rawMembers = Array.isArray(r.members) ? r.members : [];
+    const members: string[] = [];
+    for (const m of rawMembers) {
+      if (!isStr(m) || seenMembers[side].has(m)) continue;
+      seenMembers[side].add(m);
+      members.push(m);
+    }
+    if (members.length === 0) continue;
+    seenIds.add(r.id);
+    out.push({ id: r.id, side, name: r.name, glyph, members });
   }
   return out;
 }
@@ -123,7 +158,7 @@ export function parseState(text: string): DashboardState | null {
         customCssPath: isStr(settings.customCssPath) ? settings.customCssPath : null,
       },
       canvas: { instances: sanitizeInstances(canvas.instances) },
-      apps: { user: sanitizeUserApps(apps.user) },
+      apps: { user: sanitizeUserApps(apps.user), groups: sanitizeAppGroups(apps.groups) },
     };
   } catch {
     return null;
@@ -136,7 +171,7 @@ export function buildState(): DashboardState {
     version: STATE_VERSION,
     settings: { ...extraSettings, theme: get(activeTheme), customCssPath },
     canvas: { instances: get(instances) },
-    apps: { user: get(userApps) },
+    apps: { user: get(userApps), groups: get(appGroups) },
   };
 }
 
@@ -177,6 +212,7 @@ export async function initPersistence(): Promise<void> {
     loading = true;
     loadInstances(canvas.instances);
     loadUserApps(apps.user);
+    loadAppGroups(apps.groups);
     applyTheme(theme);
     loading = false;
   }
@@ -199,6 +235,9 @@ export async function initPersistence(): Promise<void> {
     if (!loading) scheduleSave();
   });
   userApps.subscribe(() => {
+    if (!loading) scheduleSave();
+  });
+  appGroups.subscribe(() => {
     if (!loading) scheduleSave();
   });
   let first = true;

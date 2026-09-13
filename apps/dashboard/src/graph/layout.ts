@@ -125,6 +125,42 @@ export function layoutAppRing(builtins: GraphNode[], userApps: GraphNode[]): voi
   });
 }
 
+/** Radius of a group's expanded secondary ring — further out than the App
+ *  Ring itself, same graph-unit scale as `APP_RING`. Kept close to it
+ *  (small delta): the App Ring's own radius is already tuned to clear the
+ *  fixed header above the canvas (owner feedback on an earlier, larger
+ *  delta — members near 12 o'clock scrolled up under the header bar), so
+ *  any further push outward eats directly into that same margin. */
+export const EXPANDED_GROUP_RING = APP_RING + 0.09;
+
+/** Angular step between adjacent members on the expanded ring, centered on
+ *  the group's own ring-slot angle (`anchorAngle`) — a per-member spacing
+ *  rather than a fixed total arc, so a 2-member group sits as a tight,
+ *  clearly-"grouped" pair instead of snapping straight to the two far ends
+ *  of a wide arc (owner feedback: a 2-member group looked oddly spread
+ *  out). The total span still grows with membership count, capped so a
+ *  large group doesn't fan out indefinitely. */
+const EXPANDED_GROUP_STEP = 0.07;
+const EXPANDED_GROUP_MAX_ARC = 1.1;
+
+/** Positions one group's member nodes (`onExpandedRing`, from
+ *  `model.ts`'s `buildAppNodes`) on the expanded secondary ring, spread
+ *  across `EXPANDED_GROUP_STEP` radians per member (capped at
+ *  `EXPANDED_GROUP_MAX_ARC` total) centered on `anchorAngle` (the group's
+ *  own already-laid-out ring-slot angle). A single member sits exactly at
+ *  `anchorAngle` — a group of one is the normal starting state, not a
+ *  degenerate case, so it gets no arbitrary offset. Static, like
+ *  `layoutAppRing` — no time/angle dependency. */
+export function layoutExpandedGroup(members: GraphNode[], anchorAngle: number): void {
+  const n = members.length;
+  const span = Math.min(EXPANDED_GROUP_MAX_ARC, EXPANDED_GROUP_STEP * Math.max(0, n - 1));
+  members.forEach((m, i) => {
+    const a = n > 1 ? anchorAngle - span / 2 + (i / (n - 1)) * span : anchorAngle;
+    m.x = Math.cos(a) * EXPANDED_GROUP_RING;
+    m.y = Math.sin(a) * EXPANDED_GROUP_RING;
+  });
+}
+
 export function applyLayout(model: GraphModel, kind: LayoutKind): void {
   if (kind === "hex") layoutHex(model);
   else if (kind === "circle") layoutCircle(model);

@@ -4,6 +4,7 @@
  * Rust `WorkspaceGraph` payload plus a palette read from the active theme.
  */
 
+import type { AppGroup } from "../core/appGroups";
 import type { BuiltinApp, UserApp } from "../core/apps";
 import type { WorkspaceGraph } from "../core/backend";
 
@@ -57,6 +58,20 @@ export interface GraphNode {
    *  above — that one is documented as workspace-relative (files/hub), and
    *  an absolute macOS app path would silently break that contract. */
   appPath?: string;
+  /** `"app"` nodes only, App-Ring grouping: set on a group's own ring-slot
+   *  node (`isGroup: true`, this is the group's own id) or on a member node
+   *  currently shown on that group's expanded secondary ring (`isGroup`
+   *  unset) — the two are mutually exclusive, so `core/appGroups.ts`'s
+   *  `menuActionsFor` branches on `isGroup` first, `groupId` second. */
+  groupId?: string;
+  /** `"app"` nodes only: this node is a group's own collapsed ring-slot
+   *  circle, not a solo app or an expanded member. */
+  isGroup?: boolean;
+  /** `"app"` nodes only: this node is a member drawn on its group's
+   *  expanded secondary ring (see `layout.ts`'s `layoutExpandedGroup`) —
+   *  mirrors the existing `onOrbit` convention: only nodes flagged this way
+   *  are eligible for the expanded-ring layout/draw pass. */
+  onExpandedRing?: boolean;
 }
 
 export interface GraphEdge {
@@ -379,15 +394,8 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
   return { nodes, edges, areas, byId, totalFiles: g.total_files, truncated: g.truncated };
 }
 
-/** Builds the App-Ring's node objects from the builtin-module list and the
- *  owner's added Mac apps — colour and (for builtins) the rasterizable icon
- *  markup already set, position left at `(0, 0)` for `layoutAppRing`
- *  (`./layout`) to fill in. Independent of `buildModel`/`WorkspaceGraph`:
- *  the ring's contents track the module registry and the `userApps` store,
- *  not a workspace refresh, so `second-brain.svelte` calls this separately
- *  and appends the result to `model.nodes`. */
-export function buildAppNodes(builtins: BuiltinApp[], userApps: UserApp[], palette: Palette): GraphNode[] {
-  const builtinNodes: GraphNode[] = builtins.map((b) => ({
+function builtinAppNode(b: BuiltinApp, palette: Palette): GraphNode {
+  return {
     id: `app:builtin:${b.type}`,
     kind: "app",
     label: b.title,
@@ -401,8 +409,11 @@ export function buildAppNodes(builtins: BuiltinApp[], userApps: UserApp[], palet
     degree: 0,
     appType: b.type,
     glyph: glyphForModuleType(b.type),
-  }));
-  const userNodes: GraphNode[] = userApps.map((a) => ({
+  };
+}
+
+function userAppNode(a: UserApp, palette: Palette): GraphNode {
+  return {
     id: `app:user:${a.path}`,
     kind: "app",
     label: a.name,
@@ -416,6 +427,87 @@ export function buildAppNodes(builtins: BuiltinApp[], userApps: UserApp[], palet
     degree: 0,
     userApp: true,
     appPath: a.path,
-  }));
-  return [...builtinNodes, ...userNodes];
+    // Only set when the owner picked one via "Symbol ändern" — omitting it
+    // otherwise (rather than a fallback like "folder") is what lets
+    // render.ts's drawAppRing tell "no custom icon, draw the monogram"
+    // apart from "has one, draw it".
+    ...(a.glyph ? { glyph: a.glyph } : {}),
+  };
+}
+
+/** Builds the App-Ring's node objects from the builtin-module list, the
+ *  owner's added Mac apps, and the current App-Ring groups (see
+ *  `core/appGroups.ts`) — colour/glyph already set, position left at
+ *  `(0, 0)` for `layoutAppRing`/`layoutExpandedGroup` (`./layout`) to fill
+ *  in. Independent of `buildModel`/`WorkspaceGraph`: the ring's contents
+ *  track the module registry, the `userApps` store and the `appGroups`
+ *  store, not a workspace refresh, so `second-brain.svelte` calls this
+ *  separately and appends the result to `model.nodes`.
+ *
+ *  A builtin/user app that's a member of a group gets no solo ring-slot
+ *  node of its own — the group's own node stands in for it. Each non-empty
+ *  group gets exactly one ring-slot node (`isGroup: true`); additionally,
+ *  *only* for `g.id === expandedGroupId` (at most one at a time — see
+ *  `second-brain.svelte`), one node per member is emitted too
+ *  (`onExpandedRing: true`), for `layoutExpandedGroup` to place on the
+ *  secondary ring. A collapsed group therefore has zero member nodes to
+ *  accidentally hit-test or draw — see the App-Ring-Gruppierung plan's
+ *  Checkpoint 3 rationale for why that's the load-bearing simplification
+ *  here, instead of keeping every member node alive and toggling
+ *  visibility. A member referencing a since-removed builtin/app is skipped
+ *  silently, the same convention `buildModel` already uses for edges whose
+ *  endpoint no longer exists. */
+export function buildAppNodes(
+  builtins: BuiltinApp[],
+  userApps: UserApp[],
+  groups: AppGroup[],
+  expandedGroupId: string | null,
+  palette: Palette,
+): GraphNode[] {
+  const groupedBuiltinTypes = new Set(groups.filter((g) => g.side === "builtin").flatMap((g) => g.members));
+  const groupedUserPaths = new Set(groups.filter((g) => g.side === "user").flatMap((g) => g.members));
+  const builtinByType = new Map(builtins.map((b) => [b.type, b]));
+  const userByPath = new Map(userApps.map((a) => [a.path, a]));
+
+  const builtinNodes = builtins.filter((b) => !groupedBuiltinTypes.has(b.type)).map((b) => builtinAppNode(b, palette));
+  const userNodes = userApps.filter((a) => !groupedUserPaths.has(a.path)).map((a) => userAppNode(a, palette));
+
+  const groupNodes: GraphNode[] = [];
+  const expandedMemberNodes: GraphNode[] = [];
+  for (const g of groups) {
+    if (g.members.length === 0) continue; // shouldn't happen (appGroups.ts auto-dissolves at 0), stay defensive
+    groupNodes.push({
+      id: `app:group:${g.id}`,
+      kind: "app",
+      label: g.name,
+      area: null,
+      bytes: 0,
+      x: 0,
+      y: 0,
+      r: 12, // somewhat bigger than a solo app's 9 — matches render.ts's drawAppRing scaling for isGroup nodes
+      color: g.side === "user" ? areaColor(g.id, palette.light) : palette.accent,
+      phase: nodePhase(g.id),
+      degree: 0,
+      userApp: g.side === "user",
+      glyph: g.glyph,
+      isGroup: true,
+      groupId: g.id,
+    });
+
+    if (g.id !== expandedGroupId) continue;
+    for (const memberId of g.members) {
+      let node: GraphNode | null = null;
+      if (g.side === "builtin") {
+        const b = builtinByType.get(memberId);
+        if (b) node = builtinAppNode(b, palette);
+      } else {
+        const a = userByPath.get(memberId);
+        if (a) node = userAppNode(a, palette);
+      }
+      if (!node) continue;
+      expandedMemberNodes.push({ ...node, groupId: g.id, onExpandedRing: true });
+    }
+  }
+
+  return [...builtinNodes, ...userNodes, ...groupNodes, ...expandedMemberNodes];
 }

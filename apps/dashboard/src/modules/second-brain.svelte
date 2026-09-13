@@ -30,14 +30,23 @@
   import { get } from "svelte/store";
   import { openPath } from "@tauri-apps/plugin-opener";
 
-  import { listBuiltinApps, removeUserApp, userApps } from "../core/apps";
+  import {
+    addToGroup,
+    appGroups,
+    createGroup,
+    menuActionsFor,
+    removeFromGroup,
+    renameGroup,
+    setGroupGlyph,
+  } from "../core/appGroups";
+  import { listBuiltinApps, removeUserApp, setUserAppGlyph, userApps } from "../core/apps";
   import type { WorkspaceGraph } from "../core/backend";
   import { createInstance } from "../core/lifecycle";
   import { openStaged } from "../core/staging";
   import { bringToFront, instances } from "../core/stores";
   import { toast } from "../core/toast";
   import type { ModuleContext } from "../core/types";
-  import { APP_RING, layoutAppRing, layoutOrbit } from "../graph/layout";
+  import { APP_RING, layoutAppRing, layoutExpandedGroup, layoutOrbit } from "../graph/layout";
   import { buildAppNodes, buildModel, readPalette, type GraphNode } from "../graph/model";
   import { appNodeRadiusPx, GraphRenderer } from "../graph/render";
   import AppAddDialog from "./AppAddDialog.svelte";
@@ -87,6 +96,15 @@
    *  on open so it can never render partly off-screen. */
   let menu = $state<{ node: GraphNode; x: number; y: number } | null>(null);
   let dialogOpen = $state(false);
+  /** Which App-Ring group's secondary ring is currently expanded — an id,
+   *  not a node reference, because `rebuild()` creates brand-new `GraphNode`
+   *  objects every time (workspace refresh, theme change, or a `userApps`/
+   *  `appGroups` edit — see the subscriptions in `onMount`), so any state
+   *  that has to survive a rebuild must be keyed by id, not object identity.
+   *  Only one group open at a time (owner decision), so a single nullable
+   *  id is enough — expanding a different group, or collapsing, replaces
+   *  it rather than tracking a set. */
+  let expandedGroupId = $state<string | null>(null);
 
   const spin = $derived($config.spin !== false);
   const labels = $derived($config.labels !== false);
@@ -101,12 +119,21 @@
     const model = buildModel(graph, palette);
     layoutOrbit(model);
     // The App Ring is independent of the workspace graph — attached here so
-    // every `rebuild()` (workspace refresh, theme change, or a `userApps`
-    // edit, see the subscription in `onMount`) carries it too.
-    const appNodes = buildAppNodes(listBuiltinApps(), get(userApps), palette);
-    const builtinNodes = appNodes.filter((n) => !n.userApp);
-    const userAppNodes = appNodes.filter((n) => n.userApp);
+    // every `rebuild()` (workspace refresh, theme change, or a `userApps`/
+    // `appGroups` edit, see the subscriptions in `onMount`) carries it too.
+    const appNodes = buildAppNodes(listBuiltinApps(), get(userApps), get(appGroups), expandedGroupId, palette);
+    // Expanded-ring members are laid out separately, below — they must not
+    // reach `layoutAppRing`, which would otherwise place them as if they
+    // were solo ring-slot nodes.
+    const ringNodes = appNodes.filter((n) => !n.onExpandedRing);
+    const builtinNodes = ringNodes.filter((n) => !n.userApp);
+    const userAppNodes = ringNodes.filter((n) => n.userApp);
     layoutAppRing(builtinNodes, userAppNodes);
+    const expandedGroupNode = ringNodes.find((n) => n.isGroup && n.groupId === expandedGroupId);
+    if (expandedGroupNode) {
+      const members = appNodes.filter((n) => n.onExpandedRing);
+      layoutExpandedGroup(members, Math.atan2(expandedGroupNode.y, expandedGroupNode.x));
+    }
     for (const n of appNodes) {
       model.nodes.push(n);
       model.byId.set(n.id, n);
@@ -156,6 +183,19 @@
     ctx.emit("open-second-brain", { focus: node?.id ?? null });
   }
 
+  /** The App-Ring-group member id for a solo/member "app" node — its
+   *  registry `type` on the builtin side, its filesystem `path` on the
+   *  user-app side (matching `AppGroup.members`' own identity convention,
+   *  `core/appGroups.ts`). `undefined` for a group's own ring-slot node
+   *  (`isGroup`), which has neither. */
+  function memberIdOf(n: GraphNode): string | undefined {
+    return n.userApp ? n.appPath : n.appType;
+  }
+
+  function menuSide(n: GraphNode): "builtin" | "user" {
+    return n.userApp ? "user" : "builtin";
+  }
+
   /** Builtin: launch (create) it, or bring an already-placed instance to
    *  front — every builtin currently on the ring is a singleton (`apps.ts`
    *  excludes the one exception, `md-file`), so there's no "repeat click on
@@ -180,22 +220,41 @@
 
   /** Click routing: closing an open context menu takes priority over
    *  everything else (the click that dismisses it must not also act on
-   *  whatever's still hovered underneath); an "app" node hit routes to
-   *  `handleAppClick` instead of the normal open-Second-Brain behaviour;
-   *  a "file" node hit on the inner ring (`onOrbit` — a recent file with
-   *  its own individually addressable icon slot, per `layoutOrbit`) opens
-   *  the file directly in the staged viewer — the same one-click-to-content
+   *  whatever's still hovered underneath); a hit on a group's own ring-slot
+   *  circle toggles its expanded secondary ring (only one group open at a
+   *  time — expanding a different one, or this same click, replaces
+   *  whatever was open); any other click first collapses an open expanded
+   *  ring, if there is one (owner decision: opening a different group or
+   *  clicking elsewhere always closes the current one); an "app" node hit
+   *  (a solo node, or a member on the just-collapsed expanded ring — it
+   *  behaves exactly the same either way) routes to `handleAppClick`
+   *  instead of the normal open-Second-Brain behaviour; a "file" node hit
+   *  on the inner ring (`onOrbit` — a recent file with its own
+   *  individually addressable icon slot, per `layoutOrbit`) opens the file
+   *  directly in the staged viewer — the same one-click-to-content
    *  experience `openMailSummary` already gives a mail item. A "file" node
    *  hit inside the general 3-D point cloud (every file, dense and with
    *  real gaps — `onOrbit` false) is *not* precise enough to trust a single
    *  click on: it falls through to `open`, landing in the full Second Brain
    *  graph to browse/select from instead of blindly opening whatever point
-   *  the cursor happened to land nearest to. Everything else (hub/skill/
-   *  routine/background) also falls through to `open`. */
+   *  the cursor happened to land nearest to. A click that only closed an
+   *  expanded ring (hub/skill/routine/background otherwise) is swallowed —
+   *  it must not also open Second Brain, same reasoning as the `menu`
+   *  dismiss above. */
   function onClick(): void {
     if (menu) {
       menu = null;
       return;
+    }
+    if (hover?.kind === "app" && hover.isGroup) {
+      expandedGroupId = expandedGroupId === hover.groupId ? null : (hover.groupId ?? null);
+      rebuild();
+      return;
+    }
+    const wasExpanded = expandedGroupId !== null;
+    if (wasExpanded) {
+      expandedGroupId = null;
+      rebuild();
     }
     if (hover?.kind === "app") {
       handleAppClick(hover);
@@ -205,6 +264,7 @@
       openStaged("md-file", { path: hover.path, mode: "read" });
       return;
     }
+    if (wasExpanded) return;
     open(hover);
   }
 
@@ -218,20 +278,18 @@
     };
   }
 
-  /** Right-click on a user-app node opens the removal menu; anywhere else,
-   *  a right-click just closes one that's already open (no menu ever
-   *  appears for a builtin — those aren't removable, see the plan doc).
+  /** Right-click on any "app" node (solo, a group's own circle, or a
+   *  member on an expanded ring) opens `AppContextMenu`, whose actual
+   *  content is decided by `menuActionsFor` (`core/appGroups.ts`) — a
+   *  builtin gets only grouping actions there, never "Entfernen"; anywhere
+   *  else, a right-click just closes one that's already open.
    *  `preventDefault` is unconditional — this canvas has no legitimate use
    *  for the OS/browser's own context menu anywhere on it, "just close an
    *  open menu" included; without it, a right-click on ordinary background
    *  could pop the native menu on top of (or instead of) the dismiss. */
   function onContextMenu(e: MouseEvent): void {
     e.preventDefault();
-    if (hover?.kind === "app" && hover.userApp) {
-      menu = { node: hover, ...clampMenuPos(e.clientX, e.clientY) };
-    } else {
-      menu = null;
-    }
+    menu = hover?.kind === "app" ? { node: hover, ...clampMenuPos(e.clientX, e.clientY) } : null;
   }
 
   function onMenuKeydown(e: KeyboardEvent): void {
@@ -247,13 +305,24 @@
    *  click doesn't fire a `click` event in any browser (only `contextmenu`
    *  does), so opening the menu here never immediately re-closes it. Runs
    *  on the bubble phase, after the target's own handlers (including
-   *  `AppContextMenu`'s own "Entfernen"/"Abbrechen" buttons, which already
-   *  set `menu = null` themselves) — so this only ever does anything on a
-   *  genuine outside click. */
+   *  `AppContextMenu`'s own action buttons, which already set `menu = null`
+   *  themselves) — so this only ever does anything on a genuine outside
+   *  click.
+   *
+   *  Reads `e.composedPath()`, not `e.target.closest(...)`: a click inside
+   *  `AppContextMenu` that also changes its `stage` (e.g. "Entfernen" →
+   *  the confirm step) removes the clicked button from the DOM as part of
+   *  that same re-render — by the time this bubble-phase listener runs,
+   *  `e.target` can already be a detached node whose `closest()` walk has
+   *  nothing left to climb, so it wrongly fails to find `.app-context-menu`
+   *  and closes the whole menu right as it was about to show the next
+   *  stage. `composedPath()` instead returns the path as it was at dispatch
+   *  time, unaffected by any DOM mutation the click's own handlers made. */
   $effect(() => {
     if (!menu) return;
     const onWindowClick = (e: MouseEvent) => {
-      if ((e.target as HTMLElement | null)?.closest(".app-context-menu")) return;
+      const inMenu = e.composedPath().some((t) => t instanceof Element && t.classList.contains("app-context-menu"));
+      if (inMenu) return;
       menu = null;
     };
     window.addEventListener("click", onWindowClick);
@@ -293,12 +362,19 @@
     // until `graph` is loaded, so an immediate fire from `.subscribe()`
     // itself (the Svelte store contract) before that happens is harmless.
     const unsubUserApps = userApps.subscribe(() => rebuild());
+    // App-Ring group CRUD (create/add/remove/rename/change icon) all go
+    // through `appGroups` — this alone is enough to pick up every one of
+    // them automatically, no call site needs to remember to `rebuild()`
+    // itself. Toggling `expandedGroupId` is *not* a store change, so
+    // `onClick` below calls `rebuild()` directly for that.
+    const unsubAppGroups = appGroups.subscribe(() => rebuild());
     return () => {
       cancelAnimationFrame(raf);
       clearInterval(refresh);
       ro.disconnect();
       mo.disconnect();
       unsubUserApps();
+      unsubAppGroups();
     };
   });
 </script>
@@ -347,12 +423,42 @@
        $state would survive the retarget and silently skip the new node's
        first "Entfernen" stage. -->
   {#key menu.node.id}
+    {@const node = menu.node}
     <AppContextMenu
       x={menu.x}
       y={menu.y}
-      label={menu.node.label}
+      label={node.label}
+      glyph={node.glyph ?? "folder"}
+      actions={menuActionsFor(node, $appGroups)}
       onRemove={() => {
-        if (menu?.node.appPath) removeUserApp(menu.node.appPath);
+        if (node.appPath) removeUserApp(node.appPath);
+        menu = null;
+      }}
+      onAddToNewGroup={() => {
+        const id = memberIdOf(node);
+        if (id) createGroup(menuSide(node), id);
+        menu = null;
+      }}
+      onAddToGroup={(groupId) => {
+        const id = memberIdOf(node);
+        if (id) addToGroup(groupId, id);
+        menu = null;
+      }}
+      onRemoveFromGroup={() => {
+        const id = memberIdOf(node);
+        if (node.groupId && id) removeFromGroup(node.groupId, id);
+        menu = null;
+      }}
+      onRename={(name) => {
+        if (node.groupId) renameGroup(node.groupId, name);
+        menu = null;
+      }}
+      onChangeIcon={(glyph) => {
+        // Offered for two, mutually exclusive node shapes (menuActionsFor):
+        // a group's own circle (`groupId` set, its own id) or an ungrouped
+        // solo Mac app (`appPath` set, no `groupId`) — never both.
+        if (node.groupId) setGroupGlyph(node.groupId, glyph);
+        else if (node.appPath) setUserAppGlyph(node.appPath, glyph);
         menu = null;
       }}
       onCancel={() => (menu = null)}

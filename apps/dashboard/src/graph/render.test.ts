@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { appNodeRadiusPx, rimNodeRadiusPx } from "./render";
 
 describe("appNodeRadiusPx", () => {
-  it("clamps to [12, 20] px", () => {
-    expect(appNodeRadiusPx(10)).toBe(12);
-    expect(appNodeRadiusPx(10_000)).toBe(20);
-    expect(appNodeRadiusPx(250)).toBeCloseTo(15, 0);
+  it("clamps to [14, 26] px", () => {
+    expect(appNodeRadiusPx(10)).toBe(14);
+    expect(appNodeRadiusPx(10_000)).toBe(26);
+    expect(appNodeRadiusPx(250)).toBeCloseTo(18.75, 1);
   });
 });
 
@@ -14,12 +14,12 @@ describe("rimNodeRadiusPx", () => {
   it("matches the plain size cap when few nodes share the ring", () => {
     // Plenty of arc length available — the size-based cap binds, same as
     // before this function existed.
-    expect(rimNodeRadiusPx(300, 5)).toBe(Math.max(14, Math.min(24, 300 * 0.072)));
+    expect(rimNodeRadiusPx(300, 5)).toBe(Math.max(16, Math.min(30, 300 * 0.09)));
   });
 
   it("shrinks below the size cap once enough nodes would otherwise overlap", () => {
     const R = 288;
-    const sizeCap = Math.max(14, Math.min(24, R * 0.072));
+    const sizeCap = Math.max(16, Math.min(30, R * 0.09));
     const r = rimNodeRadiusPx(R, 60); // ORBIT_MAX-scale crowding
     expect(r).toBeLessThan(sizeCap);
     // Diameters must fit within the arc length each node actually gets,
@@ -34,6 +34,6 @@ describe("rimNodeRadiusPx", () => {
   });
 
   it("falls back to the size cap for zero nodes (no division by zero)", () => {
-    expect(rimNodeRadiusPx(300, 0)).toBe(Math.max(14, Math.min(24, 300 * 0.072)));
+    expect(rimNodeRadiusPx(300, 0)).toBe(Math.max(16, Math.min(30, 300 * 0.09)));
   });
 });

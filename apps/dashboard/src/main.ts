@@ -13,6 +13,12 @@ import "./themes/forest.css";
 import "./themes/ocean.css";
 import "./styles.css";
 import "./core/markdown-syntax.css";
+// Icon glyphs (App Ring, Second-Brain legend, area/group icons) — static
+// weight-400 file only, deliberately not the variable-font package: canvas
+// `ctx.font` can't set `font-variation-settings`, so a variable font would
+// render at undefined default axis values. See `graph/render.ts`'s
+// `drawGlyph`.
+import "@fontsource/material-symbols-rounded/400.css";
 
 import App from "./App.svelte";
 import { startAgentBridge } from "./core/agent-bridge";

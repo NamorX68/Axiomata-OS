@@ -5,7 +5,7 @@
  * the device pixel ratio; call `resize()` when the canvas box changes.
  */
 
-import { APP_RING } from "./layout";
+import { APP_RING, EXPANDED_GROUP_RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 
 export type RenderMode = "rings" | "orbit" | "hex";
@@ -35,14 +35,69 @@ export interface View {
 const TWO_PI = Math.PI * 2;
 
 /**
- * Small vector glyph inside a non-file node, drawn in the node's contrast
- * colour. `glyph` is either a structural id — "hub" (hexagon), "skill"
- * (bolt), "routine" (clock), "folder" (the generic area default) — or one
- * of the per-area icons from `model.glyphForArea` (e.g. "book", "code",
- * "briefcase"), or one of the App-Ring-only icons from
+ * Material Symbols Rounded codepoints for every glyph id `drawGlyph` can
+ * draw — see that function's own doc comment for what each id means / where
+ * it comes from. Verified directly against Google's own Material Symbols
+ * Rounded codepoints file (`variablefont/MaterialSymbolsRounded[...]
+ * .codepoints` in google/material-design-icons), not guessed from an
+ * icon's name — a wrong codepoint would silently render as tofu or an
+ * unrelated icon rather than erroring.
+ */
+const GLYPH_CODEPOINTS: Record<string, number> = {
+  hub: 0xe9f4,
+  folder: 0xe2c7,
+  skill: 0xea0b, // bolt
+  routine: 0xefd6, // schedule
+  code: 0xe86f,
+  chip: 0xe322, // memory
+  book: 0xea19, // menu_book
+  briefcase: 0xe943, // work
+  camera: 0xe412, // photo_camera
+  mail: 0xe159,
+  people: 0xea21, // group
+  user: 0xf0d3, // person
+  wrench: 0xf8cd, // build
+  tray: 0xe156, // inbox
+  check: 0xe668,
+  calendar: 0xebcc, // calendar_month
+  list: 0xe6b1, // checklist
+  group: 0xe5c3, // apps — App-Ring group default
+  terminal: 0xeb8e,
+  ide: 0xf2e2, // developer_mode
+  graphic: 0xe40a, // palette
+  calculator: 0xea5f, // calculate
+  browser: 0xe80b, // public
+  music: 0xe405, // music_note
+  messenger: 0xe0c9, // chat
+  writer: 0xe745, // edit_note
+  journal: 0xe666, // auto_stories
+  photos: 0xe413, // photo_library
+};
+
+/**
+ * Small icon inside a non-file node, drawn in the node's contrast colour —
+ * a character from the bundled Material Symbols Rounded icon font
+ * (`main.ts` imports `@fontsource/material-symbols-rounded/400.css`, a
+ * static weight file, deliberately not the variable-font package: canvas
+ * `ctx.font` can't set `font-variation-settings`, so a variable font would
+ * render at undefined default axis values). `glyph` is either a structural
+ * id — "hub", "skill" (bolt), "routine" (clock), "folder" (the generic area
+ * default) — or one of the per-area icons from `model.glyphForArea` (e.g.
+ * "book", "code", "briefcase"), or one of the App-Ring-only icons from
  * `model.glyphForModuleType` ("check", "calendar", "list" — the others it
- * assigns are all glyphs already listed here). Unknown ids fall back to
- * nothing drawn (just the ring).
+ * assigns are all glyphs already listed here) or the App-Ring group default
+ * ("group", `core/appGroups.ts`'s `createGroup`). Unknown ids fall back to
+ * "folder" (`GLYPH_CODEPOINTS` lookup miss).
+ *
+ * Replaces an earlier hand-drawn-vector-path version — each new icon the
+ * App Ring's grouping feature needed (terminal, calculator, …) cost its own
+ * manual path design, which didn't scale. Adding an icon now is a one-line
+ * codepoint lookup, not new geometry. The font is loaded async like any
+ * other web font; since this canvas already redraws every animation frame
+ * regardless of `rebuild()` (`second-brain.svelte`'s running
+ * `requestAnimationFrame` loop), an icon drawn before the font finishes
+ * loading self-corrects on its own within a frame or two — no explicit
+ * load-then-redraw plumbing needed.
  */
 export function drawGlyph(
   ctx: CanvasRenderingContext2D,
@@ -52,183 +107,50 @@ export function drawGlyph(
   r: number,
   color: string,
 ): void {
-  const s = r * 0.62;
+  const codepoint = GLYPH_CODEPOINTS[glyph] ?? GLYPH_CODEPOINTS.folder;
   ctx.save();
-  ctx.translate(x, y);
-  ctx.strokeStyle = color;
   ctx.fillStyle = color;
-  ctx.lineWidth = Math.max(1, r * 0.16);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
   ctx.globalAlpha = 0.95;
-  ctx.beginPath();
-  switch (glyph) {
-    case "hub":
-      for (let i = 0; i < 6; i++) {
-        const a = -Math.PI / 2 + (i * Math.PI) / 3;
-        const px = Math.cos(a) * s;
-        const py = Math.sin(a) * s;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.stroke();
-      break;
-    case "folder":
-      ctx.moveTo(-s, -s * 0.55);
-      ctx.lineTo(-s * 0.3, -s * 0.55);
-      ctx.lineTo(-s * 0.05, -s * 0.25);
-      ctx.lineTo(s, -s * 0.25);
-      ctx.lineTo(s, s * 0.6);
-      ctx.lineTo(-s, s * 0.6);
-      ctx.closePath();
-      ctx.stroke();
-      break;
-    case "skill":
-      ctx.moveTo(s * 0.25, -s);
-      ctx.lineTo(-s * 0.55, s * 0.1);
-      ctx.lineTo(s * 0.05, s * 0.1);
-      ctx.lineTo(-s * 0.25, s);
-      ctx.lineTo(s * 0.55, -s * 0.1);
-      ctx.lineTo(-s * 0.05, -s * 0.1);
-      ctx.closePath();
-      ctx.fill();
-      break;
-    case "routine":
-      ctx.arc(0, 0, s, 0, TWO_PI);
-      ctx.moveTo(0, -s * 0.55);
-      ctx.lineTo(0, 0);
-      ctx.lineTo(s * 0.45, s * 0.25);
-      ctx.stroke();
-      break;
-    case "code": // </> — Entwicklung / Rust / BlockOS
-      ctx.moveTo(-s * 0.15, -s * 0.55);
-      ctx.lineTo(-s * 0.8, 0);
-      ctx.lineTo(-s * 0.15, s * 0.55);
-      ctx.moveTo(s * 0.15, -s * 0.55);
-      ctx.lineTo(s * 0.8, 0);
-      ctx.lineTo(s * 0.15, s * 0.55);
-      ctx.stroke();
-      break;
-    case "chip": // KI
-      ctx.roundRect(-s * 0.5, -s * 0.5, s, s, s * 0.12);
-      ctx.stroke();
-      for (const o of [-0.55, 0.55]) {
-        ctx.beginPath();
-        ctx.moveTo(o * s * 0.6, -s * 0.5);
-        ctx.lineTo(o * s * 0.6, -s * 0.75);
-        ctx.moveTo(o * s * 0.6, s * 0.5);
-        ctx.lineTo(o * s * 0.6, s * 0.75);
-        ctx.stroke();
-      }
-      break;
-    case "book": // Learning
-      ctx.moveTo(0, -s * 0.5);
-      ctx.quadraticCurveTo(-s * 0.95, -s * 0.7, -s * 0.95, s * 0.05);
-      ctx.quadraticCurveTo(-s * 0.95, s * 0.6, 0, s * 0.4);
-      ctx.moveTo(0, -s * 0.5);
-      ctx.quadraticCurveTo(s * 0.95, -s * 0.7, s * 0.95, s * 0.05);
-      ctx.quadraticCurveTo(s * 0.95, s * 0.6, 0, s * 0.4);
-      ctx.moveTo(0, -s * 0.5);
-      ctx.lineTo(0, s * 0.4);
-      ctx.stroke();
-      break;
-    case "briefcase": // Arbeit
-      ctx.roundRect(-s * 0.9, -s * 0.25, s * 1.8, s * 0.95, s * 0.15);
-      ctx.moveTo(-s * 0.35, -s * 0.25);
-      ctx.lineTo(-s * 0.35, -s * 0.55);
-      ctx.lineTo(s * 0.35, -s * 0.55);
-      ctx.lineTo(s * 0.35, -s * 0.25);
-      ctx.stroke();
-      break;
-    case "camera": // Fotografie
-      ctx.roundRect(-s * 0.9, -s * 0.35, s * 1.8, s * 0.95, s * 0.15);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(0, s * 0.12, s * 0.32, 0, TWO_PI);
-      ctx.stroke();
-      break;
-    case "mail": // Mail
-      ctx.roundRect(-s * 0.9, -s * 0.6, s * 1.8, s * 1.2, s * 0.12);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.85, -s * 0.5);
-      ctx.lineTo(0, s * 0.08);
-      ctx.lineTo(s * 0.85, -s * 0.5);
-      ctx.stroke();
-      break;
-    case "people": // Gesellschaft
-      ctx.arc(-s * 0.28, -s * 0.05, s * 0.32, 0, TWO_PI);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(s * 0.28, -s * 0.05, s * 0.32, 0, TWO_PI);
-      ctx.stroke();
-      break;
-    case "user": // Persönlich
-      ctx.arc(0, -s * 0.32, s * 0.32, 0, TWO_PI);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(0, s * 0.85, s * 0.6, Math.PI * 1.18, Math.PI * 1.82);
-      ctx.stroke();
-      break;
-    case "wrench": // System und Werkzeuge
-      ctx.moveTo(-s * 0.55, s * 0.55);
-      ctx.lineTo(s * 0.25, -s * 0.25);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(-s * 0.6, s * 0.6, s * 0.26, 0, TWO_PI);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(s * 0.6, -s * 0.6, s * 0.26, 0, TWO_PI);
-      ctx.stroke();
-      break;
-    case "tray": // Inbox
-      ctx.moveTo(-s * 0.8, -s * 0.25);
-      ctx.lineTo(-s * 0.35, s * 0.5);
-      ctx.lineTo(s * 0.35, s * 0.5);
-      ctx.lineTo(s * 0.8, -s * 0.25);
-      ctx.moveTo(-s * 0.8, -s * 0.25);
-      ctx.lineTo(s * 0.8, -s * 0.25);
-      ctx.stroke();
-      break;
-    case "check": // ToDo (App Ring builtin)
-      ctx.roundRect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7, s * 0.25);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.4, s * 0.05);
-      ctx.lineTo(-s * 0.05, s * 0.4);
-      ctx.lineTo(s * 0.45, -s * 0.35);
-      ctx.stroke();
-      break;
-    case "calendar": // Calendar (App Ring builtin)
-      ctx.roundRect(-s * 0.85, -s * 0.7, s * 1.7, s * 1.5, s * 0.15);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.85, -s * 0.25);
-      ctx.lineTo(s * 0.85, -s * 0.25);
-      ctx.moveTo(-s * 0.4, -s * 0.85);
-      ctx.lineTo(-s * 0.4, -s * 0.55);
-      ctx.moveTo(s * 0.4, -s * 0.85);
-      ctx.lineTo(s * 0.4, -s * 0.55);
-      ctx.stroke();
-      break;
-    case "list": // Reminders (App Ring builtin)
-      ctx.roundRect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7, s * 0.15);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.45, -s * 0.35);
-      ctx.lineTo(s * 0.45, -s * 0.35);
-      ctx.moveTo(-s * 0.45, 0);
-      ctx.lineTo(s * 0.45, 0);
-      ctx.moveTo(-s * 0.45, s * 0.35);
-      ctx.lineTo(s * 0.2, s * 0.35);
-      ctx.stroke();
-      break;
-    default:
-      break;
-  }
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `${Math.max(8, Math.round(r * 1.9))}px "Material Symbols Rounded"`;
+  ctx.fillText(String.fromCodePoint(codepoint), x, y);
   ctx.restore();
 }
+
+/** Glyph ids offered by the App-Ring group icon picker (`GlyphPicker.svelte`)
+ *  — deliberately excludes "hub" (the App Ring never shows a hub node); the
+ *  structural "skill"/"routine" glyphs stay in since they read fine as a
+ *  group icon too. Appending a new `drawGlyph` case later just means
+ *  appending it here — the picker itself never hardcodes a count, so a
+ *  future expansion stage (more glyphs to choose from) is a one-line change. */
+export const APP_GROUP_GLYPHS: readonly string[] = [
+  "group",
+  "folder",
+  "code",
+  "terminal",
+  "ide",
+  "chip",
+  "graphic",
+  "calculator",
+  "browser",
+  "book",
+  "briefcase",
+  "camera",
+  "photos",
+  "music",
+  "mail",
+  "messenger",
+  "writer",
+  "journal",
+  "people",
+  "user",
+  "wrench",
+  "tray",
+  "check",
+  "calendar",
+  "list",
+];
 
 /**
  * The glyph id for a node: structural for hub/skill/routine; for an area,
@@ -782,6 +704,7 @@ export class GraphRenderer {
     }
 
     this.drawAppRing(cx, cy, R);
+    this.drawExpandedGroupRing(cx, cy, R);
   }
 
   /** One ring node's disc, shared by the inner orbit ring's rim loop and the
@@ -864,8 +787,71 @@ export class GraphRenderer {
     const nodeR = appNodeRadiusPx(R);
     ctx.font = this.font(Math.max(8, nodeR * 0.5), 600);
     for (const n of model.nodes) {
-      if (n.kind !== "app") continue;
+      // Expanded-ring members are drawn by `drawExpandedGroupRing` instead,
+      // further out — a collapsed group's members never even reach this
+      // loop (`model.ts`'s `buildAppNodes` only emits them while their
+      // group is the expanded one), but a currently-expanded group's own
+      // members would otherwise also match `n.kind === "app"` here.
+      if (n.kind !== "app" || n.onExpandedRing) continue;
       const a = Math.atan2(n.y, n.x); // static — no `+ this.angle`
+      const x = cx + Math.cos(a) * ringR;
+      const y = cy + Math.sin(a) * ringR;
+      n.sx = x;
+      n.sy = y;
+      const hot = n === this.hover || n === this.selected;
+      // A group's own circle reads as "somewhat bigger" than a solo app
+      // icon (the owner's own framing when asking for grouping) — the
+      // disc/glyph/hot-label below all key off this per-node `r` instead of
+      // the shared `nodeR`, so they scale together consistently.
+      const r = n.isGroup ? nodeR * 1.25 : nodeR;
+      this.drawNodeDisc(x, y, r, n.color, hot);
+
+      if (n.userApp && !n.glyph) {
+        // No icon extraction for Mac apps by default — a monogram stands
+        // in until the owner picks one via "Symbol ändern" (`n.glyph` set,
+        // `core/apps.ts`'s `setUserAppGlyph`). A user-side *group* node
+        // also has `userApp: true` (so the App Ring's left/right split
+        // keeps working for it too) but always has a glyph (`"group"`
+        // default), so it never falls into this branch either.
+        //
+        // A real-icon-as-silhouette feature was attempted here (see the
+        // App-Ring-Gruppierung follow-up plan) — the underlying pipeline
+        // (a new `get_app_icon` Tauri command, base64 PNG, canvas
+        // `drawImage`) was proven working live (Safari's icon rendered
+        // correctly), but debugging it was very costly (an early test app
+        // happened to have a nearly all-white/transparent icon, which
+        // looked exactly like "drawImage silently paints nothing" for a
+        // long time) and the owner chose to revert rather than build it
+        // out further for now. Kept here as a known "not pursued, not
+        // proven broken" item, alongside the tile mouse-wheel-scroll bug.
+        ctx.fillStyle = hot ? this.accentColor : n.color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(monogram(n.label), x, y + 1);
+      } else {
+        drawGlyph(ctx, n.glyph ?? "folder", x, y, r * 0.62, hot ? this.accentColor : n.color);
+      }
+
+      if (hot) this.drawHotLabel(x, y, r, n.label, 0.75, 0.5);
+    }
+  }
+
+  /** A group's expanded secondary ring: its member nodes (`onExpandedRing`),
+   *  drawn at `EXPANDED_GROUP_RING` — further out than the App Ring itself
+   *  — with the exact same per-node drawing `drawAppRing` uses for a solo
+   *  app, so a member looks identical whether it's shown here or (once
+   *  ungrouped) back on the App Ring proper. Called right after
+   *  `drawAppRing` so the App Ring's own separation circle/icons are
+   *  already down first. */
+  private drawExpandedGroupRing(cx: number, cy: number, R: number): void {
+    const { ctx } = this;
+    const model = this.model!;
+    const ringR = R * EXPANDED_GROUP_RING;
+    const nodeR = appNodeRadiusPx(R);
+    ctx.font = this.font(Math.max(8, nodeR * 0.5), 600);
+    for (const n of model.nodes) {
+      if (!n.onExpandedRing) continue;
+      const a = Math.atan2(n.y, n.x);
       const x = cx + Math.cos(a) * ringR;
       const y = cy + Math.sin(a) * ringR;
       n.sx = x;
@@ -873,8 +859,7 @@ export class GraphRenderer {
       const hot = n === this.hover || n === this.selected;
       this.drawNodeDisc(x, y, nodeR, n.color, hot);
 
-      if (n.userApp) {
-        // No icon extraction for Mac apps in v1 — a monogram stands in.
+      if (n.userApp && !n.glyph) {
         ctx.fillStyle = hot ? this.accentColor : n.color;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -929,7 +914,7 @@ export class GraphRenderer {
  *  would drift from the ring's actual scale on resize — or simply read as
  *  a separate piece of chrome rather than a slot on the ring itself. */
 export function appNodeRadiusPx(R: number): number {
-  return Math.max(12, Math.min(20, R * 0.06));
+  return Math.max(14, Math.min(26, R * 0.075));
 }
 
 /** The orbit ring's own icon-node radius in px, given the ring's radius `R`
@@ -946,7 +931,7 @@ export function appNodeRadiusPx(R: number): number {
  *  is still the smaller (hence binding) one. Exported so the fix is
  *  unit-testable without a canvas. */
 export function rimNodeRadiusPx(R: number, onOrbitCount: number): number {
-  const sizeCap = Math.max(14, Math.min(24, R * 0.072));
+  const sizeCap = Math.max(16, Math.min(30, R * 0.09));
   // `* 0.4` (not `0.5`) leaves a visible gap between adjacent icons instead
   // of just touching edge-to-edge at the crowding limit.
   const spacingCap = onOrbitCount > 0 ? ((TWO_PI * R) / onOrbitCount) * 0.4 : sizeCap;

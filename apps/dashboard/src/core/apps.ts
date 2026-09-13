@@ -11,6 +11,7 @@
 
 import { writable, type Writable } from "svelte/store";
 
+import { removeMemberFromAllGroups } from "./appGroups";
 import { listModules } from "./registry";
 import type { ModuleDefinition } from "./types";
 
@@ -49,6 +50,11 @@ export function listBuiltinApps(): BuiltinApp[] {
 export interface UserApp {
   path: string;
   name: string;
+  /** One of `drawGlyph`'s ids (`graph/render.ts`), chosen via the ring's
+   *  "Symbol ändern" action (same `GlyphPicker` a group uses). `undefined`
+   *  until the owner picks one — the ring then falls back to a monogram of
+   *  `name`, since there's no way to extract a Mac app's real icon (v1). */
+  glyph?: string;
 }
 
 export const userApps: Writable<UserApp[]> = writable([]);
@@ -61,9 +67,21 @@ export function addUserApp(app: UserApp): void {
 
 /** Removes the app at `path`. A path that isn't present is not an error —
  *  the ring's right-click menu and the "+" dialog's toggle button both call
- *  this for the same path and may race. */
+ *  this for the same path and may race. Also drops it from whatever App-
+ *  Ring group it was a member of (see `appGroups.ts`) — done here, once,
+ *  rather than at every call site, so a future third caller can't forget
+ *  it: a Mac app removed from the ring entirely can't stay a dangling
+ *  group member. */
 export function removeUserApp(path: string): void {
   userApps.update((list) => list.filter((a) => a.path !== path));
+  removeMemberFromAllGroups("user", path);
+}
+
+/** Sets (or clears, with `undefined`) the ring icon override for the app at
+ *  `path`. A path that isn't present is a no-op, same convention as
+ *  `removeUserApp`. */
+export function setUserAppGlyph(path: string, glyph: string | undefined): void {
+  userApps.update((list) => list.map((a) => (a.path === path ? { ...a, glyph } : a)));
 }
 
 /** Replaces the whole list (used by `persist.ts` on boot). Does not mark

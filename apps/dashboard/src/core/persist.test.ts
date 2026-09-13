@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseState, sanitizeInstances, sanitizeUserApps } from "./persist";
+import { parseState, sanitizeAppGroups, sanitizeInstances, sanitizeUserApps } from "./persist";
 
 const good = { id: "a", type: "dummy", x: 1, y: 2, w: 100, h: 50 };
 
@@ -61,6 +61,53 @@ describe("sanitizeUserApps", () => {
     expect(sanitizeUserApps(undefined)).toEqual([]);
     expect(sanitizeUserApps({})).toEqual([]);
   });
+
+  it("carries a well-formed glyph override, drops a malformed one", () => {
+    expect(sanitizeUserApps([{ ...app, glyph: "wrench" }])).toEqual([{ ...app, glyph: "wrench" }]);
+    expect(sanitizeUserApps([{ ...app, glyph: 5 }])).toEqual([app]);
+  });
+});
+
+describe("sanitizeAppGroups", () => {
+  const group = { id: "g1", side: "user" as const, name: "Gruppe 1", glyph: "group", members: ["/Applications/Foo.app"] };
+
+  it("keeps well-formed rows", () => {
+    expect(sanitizeAppGroups([group])).toEqual([group]);
+  });
+
+  it("drops rows with a missing id/name, a bad side, duplicate ids, and a group left with zero members", () => {
+    const rows = [
+      group,
+      { ...group, id: "" }, // missing id
+      { ...group, id: "g2", name: "" }, // missing name
+      { ...group, id: "g3", side: "other" }, // bad side
+      { ...group, id: "g1", name: "Dup id" }, // duplicate id, dropped
+      { ...group, id: "g4", members: ["", 5, null] }, // every member malformed -> 0 members -> dropped
+      "not an object",
+      null,
+    ];
+    expect(sanitizeAppGroups(rows).map((g) => g.id)).toEqual(["g1"]);
+  });
+
+  it("dedups a member across groups of the same side, first group wins", () => {
+    const rows = [group, { ...group, id: "g2", members: ["/Applications/Foo.app", "/Applications/Bar.app"] }];
+    const groups = sanitizeAppGroups(rows);
+    expect(groups.find((g) => g.id === "g1")?.members).toEqual(["/Applications/Foo.app"]);
+    expect(groups.find((g) => g.id === "g2")?.members).toEqual(["/Applications/Bar.app"]);
+  });
+
+  it("does not dedup the same member id across different sides", () => {
+    const rows = [
+      { ...group, id: "g1", side: "user" as const, members: ["shared"] },
+      { ...group, id: "g2", side: "builtin" as const, members: ["shared"] },
+    ];
+    expect(sanitizeAppGroups(rows).map((g) => g.members)).toEqual([["shared"], ["shared"]]);
+  });
+
+  it("returns an empty list for anything that is not an array", () => {
+    expect(sanitizeAppGroups(undefined)).toEqual([]);
+    expect(sanitizeAppGroups({})).toEqual([]);
+  });
 });
 
 describe("parseState", () => {
@@ -76,22 +123,30 @@ describe("parseState", () => {
     expect(s.settings).toEqual({ theme: "graphite", customCssPath: null });
     expect(s.canvas.instances).toEqual([]);
     expect(s.apps.user).toEqual([]);
+    expect(s.apps.groups).toEqual([]);
   });
 
-  it("carries unknown top-level and settings keys and sanitises instances and user apps", () => {
+  it("carries unknown top-level and settings keys and sanitises instances, user apps and groups", () => {
     const s = parseState(
       JSON.stringify({
         version: 1,
         hello: "kept",
         settings: { theme: "ocean", extra: 42, customCssPath: "/tmp/x.css" },
         canvas: { instances: [good, { id: "broken" }] },
-        apps: { user: [{ path: "/Applications/Foo.app", name: "Foo" }, { path: "" }] },
+        apps: {
+          user: [{ path: "/Applications/Foo.app", name: "Foo" }, { path: "" }],
+          groups: [
+            { id: "g1", side: "user", name: "Gruppe 1", glyph: "group", members: ["/Applications/Foo.app"] },
+            { id: "g2", side: "user", name: "" }, // missing name, dropped
+          ],
+        },
       }),
     )!;
     expect(s.hello).toBe("kept");
     expect(s.settings).toMatchObject({ theme: "ocean", extra: 42, customCssPath: "/tmp/x.css" });
     expect(s.canvas.instances.map((i) => i.id)).toEqual(["a"]);
     expect(s.apps.user).toEqual([{ path: "/Applications/Foo.app", name: "Foo" }]);
+    expect(s.apps.groups.map((g) => g.id)).toEqual(["g1"]);
   });
 
   it("falls back to the default theme and null css path for bad values", () => {
@@ -116,5 +171,13 @@ describe("settings accessors", () => {
     const app = { path: "/Applications/Foo.app", name: "Foo" };
     userApps.set([app]);
     expect(buildState().apps.user).toEqual([app]);
+  });
+
+  it("buildState reflects the appGroups store", async () => {
+    const { buildState } = await import("./persist");
+    const { appGroups } = await import("./appGroups");
+    const group = { id: "g1", side: "user" as const, name: "Gruppe 1", glyph: "group", members: ["/Applications/Foo.app"] };
+    appGroups.set([group]);
+    expect(buildState().apps.groups).toEqual([group]);
   });
 });
