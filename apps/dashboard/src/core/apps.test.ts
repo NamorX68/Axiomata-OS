@@ -12,10 +12,11 @@ beforeEach(() => {
 });
 
 describe("listBuiltinApps", () => {
-  it("excludes background, dev, and md-file modules", () => {
+  it("excludes background, dev, md-file, and terminal modules", () => {
     const types = listBuiltinApps().map((a) => a.type);
     expect(types).not.toContain("second-brain");
     expect(types).not.toContain("md-file");
+    expect(types).not.toContain("terminal");
     expect(types).not.toContain("dummy");
     expect(types).not.toContain("dummy-singleton");
   });

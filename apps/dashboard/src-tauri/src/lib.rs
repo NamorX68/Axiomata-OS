@@ -3,6 +3,7 @@ use tauri::Manager;
 
 mod bootstrap;
 mod commands;
+mod terminal;
 
 /// Initializes `tracing`'s output so `axiomata_core`'s `tracing::info!`/
 /// `warn!` calls (the routine scheduler's tick/reconcile summaries, in
@@ -66,6 +67,10 @@ pub fn run() {
             commands::update_routine,
             commands::delete_routine,
             commands::routine_history,
+            terminal::terminal_spawn,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close,
         ])
         .setup(|app| {
             // Core init, the startup memory sync, and the routine scheduler —
@@ -74,6 +79,7 @@ pub fn run() {
             let services = bootstrap::bootstrap();
             app.manage(services.core);
             app.manage(services.scheduler);
+            app.manage(terminal::TerminalSessions::default());
             Ok(())
         })
         .build(tauri::generate_context!())

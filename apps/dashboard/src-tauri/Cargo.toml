@@ -29,4 +29,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 home.workspace = true
 axiomata-core = { path = "../../../crates/axiomata-core" }
+axiomata-terminal = { path = "../../../crates/axiomata-terminal" }
 

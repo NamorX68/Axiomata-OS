@@ -26,13 +26,22 @@ export interface BuiltinApp {
 
 /** Registry entries excluded from the App Ring: `background` (the Second
  *  Brain canvas itself, not a launchable tile), `dev` scaffolding (the
- *  `dummy*` modules), and `md-file` — it needs a `path` a blank ring click
+ *  `dummy*` modules), `md-file` — it needs a `path` a blank ring click
  *  has no way to supply, so `createInstance("md-file")` would just produce a
- *  broken tile. Every other registered module is currently a singleton, so
- *  the ring's click handler never has to decide what a repeat click on a
+ *  broken tile — and `terminal`, the first non-singleton builtin
+ *  (`docs/plans/terminal.md` Checkpoint 1): `handleAppClick`
+ *  (`second-brain.svelte`) brings an existing instance of a clicked type to
+ *  front rather than creating another, which is exactly right for every
+ *  other builtin here (all singletons) but would silently cap the ring's
+ *  Terminal icon at one shell no matter how many are already open. Placing
+ *  more than one is still the ordinary multi-instance path (the "Add
+ *  module" dialog), just not through the ring — revisit if the ring itself
+ *  should ever spawn a fresh terminal on click instead of reusing one.
+ *  Every other registered module is a singleton, so the ring's click
+ *  handler otherwise never has to decide what a repeat click on a
  *  non-singleton builtin should do. */
 function isRingEligible(def: ModuleDefinition): boolean {
-  return !def.background && !def.dev && def.type !== "md-file";
+  return !def.background && !def.dev && def.type !== "md-file" && def.type !== "terminal";
 }
 
 /** Every builtin module the ring should show, in registry order — a newly

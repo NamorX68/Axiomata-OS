@@ -43,6 +43,7 @@ import SecondBrainSettings from "./second-brain-settings.svelte";
 import RoutinesBoardSettings from "./routines-board-settings.svelte";
 import SkillsDeck from "./skills-deck.svelte";
 import SkillsDeckSettings from "./skills-deck-settings.svelte";
+import Terminal from "./terminal.svelte";
 import Todo from "./todo.svelte";
 import TodoSettings from "./todo-settings.svelte";
 
@@ -565,6 +566,20 @@ export function registerBuiltins(): void {
         },
       },
     ],
+  });
+
+  registerModule({
+    type: "terminal",
+    title: "Terminal",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><rect x='1.5' y='2.5' width='13' height='11' rx='1.5'/><path d='M4 6.5 6.5 9 4 11.5M8 11.5h4'/></svg>",
+    component: Terminal,
+    defaultSize: { w: 640, h: 400 },
+    minSize: { w: 320, h: 200 },
+    // One shell process per placed tile (Checkpoint 0/1 of
+    // docs/plans/terminal.md) — the dashboard's existing multi-instance
+    // mechanism is the "multiple terminals" story, not a tab bar inside the
+    // module itself.
+    singleton: false,
   });
 
   if (import.meta.env.DEV) {
