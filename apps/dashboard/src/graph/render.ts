@@ -931,7 +931,12 @@ export function appNodeRadiusPx(R: number): number {
  *  is still the smaller (hence binding) one. Exported so the fix is
  *  unit-testable without a canvas. */
 export function rimNodeRadiusPx(R: number, onOrbitCount: number): number {
-  const sizeCap = Math.max(16, Math.min(30, R * 0.09));
+  // Owner feedback (2026-09-13): the App Ring (outside this rim, see
+  // `appNodeRadiusPx`) reads well as-is; this inner rim's own icon nodes
+  // (skills/routines/recent files on the orbit sphere's own surface) read
+  // slightly too big next to it, so its size cap sits a notch below the App
+  // Ring's own `Math.max(14, Math.min(26, R * 0.075))`.
+  const sizeCap = Math.max(14, Math.min(26, R * 0.08));
   // `* 0.4` (not `0.5`) leaves a visible gap between adjacent icons instead
   // of just touching edge-to-edge at the crowding limit.
   const spacingCap = onOrbitCount > 0 ? ((TWO_PI * R) / onOrbitCount) * 0.4 : sizeCap;

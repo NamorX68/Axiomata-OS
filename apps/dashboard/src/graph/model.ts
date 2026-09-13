@@ -282,7 +282,12 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     bytes: 0,
     x: 0,
     y: 0,
-    r: 13,
+    // Owner feedback (2026-09-13): the hub and the skills ring around it —
+    // the Second Brain's innermost nodes — read a bit small next to their
+    // icon-font glyph (`render.ts`'s `drawGlyph` sizes off this same `r`);
+    // bumped up from 13. Areas (8) and routines (8), further out, are
+    // untouched — the ask was specifically about the inner area.
+    r: 15,
     color: palette.text,
     phase: 0,
     degree: 0,
@@ -297,7 +302,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       bytes: 0,
       x: 0,
       y: 0,
-      r: 9,
+      r: 11, // see the hub's own `r` comment above
       color: palette.accent,
       phase: phase(s.name),
       degree: 0,
