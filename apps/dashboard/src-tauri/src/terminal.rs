@@ -7,10 +7,11 @@
 //! `commands.rs` plays for `axiomata-core` (see this crate's own doc
 //! comment).
 //!
-//! Checkpoint 2 of `docs/plans/terminal.md`: each session now owns a
-//! `Terminal` alongside its `PtySession`, so what reaches the frontend is
-//! an interpreted screen snapshot (plain text per row, cursor position),
-//! not raw bytes — see `TerminalEvent`.
+//! Since Checkpoint 2, each session owns a `Terminal` alongside its
+//! `PtySession`, so what reaches the frontend is an interpreted screen
+//! snapshot, not raw bytes — see `TerminalEvent`. Checkpoint 3 upgraded that
+//! snapshot from plain text to full `Cell` data (colour/attributes), now
+//! that the frontend has a canvas renderer able to draw it.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -18,7 +19,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
-use axiomata_terminal::{PtySession, Terminal};
+use axiomata_terminal::{Cell, PtySession, Terminal};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -33,15 +34,16 @@ use tauri::{AppHandle, Manager, State};
 ///
 /// `Screen` replaces Checkpoint 1's raw `Data { bytes }` now that there's an
 /// actual screen model (`axiomata_terminal::Terminal`) to read instead of
-/// forwarding bytes untouched: `lines` is the interpreted plain text per
-/// row (no colour/attributes yet — the frontend just replaces its `<pre>`
-/// content with it), `cursor_row`/`cursor_col` the current cursor position
-/// (unused by the frontend until Checkpoint 3 draws one).
+/// forwarding bytes untouched. Checkpoint 2 sent plain text per row;
+/// Checkpoint 3's canvas renderer needs to actually draw colour/attributes,
+/// so `rows` is now full `Cell` data (`axiomata_terminal::Cell` derives
+/// `Serialize` itself — no parallel DTO here) and `cursor_row`/`cursor_col`
+/// are drawn as a blinking cursor instead of sitting unused.
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalEvent {
     Screen {
-        lines: Vec<String>,
+        rows: Vec<Vec<Cell>>,
         cursor_row: u16,
         cursor_col: u16,
     },
@@ -100,7 +102,7 @@ fn screen_event(terminal: &Terminal) -> TerminalEvent {
     let screen = terminal.screen();
     let (cursor_row, cursor_col) = screen.cursor();
     TerminalEvent::Screen {
-        lines: screen.to_lines(),
+        rows: screen.rows().to_vec(),
         cursor_row,
         cursor_col,
     }
@@ -228,6 +230,7 @@ pub fn terminal_close(sessions: State<'_, TerminalSessions>, id: String) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiomata_terminal::Color;
     use std::sync::Arc;
     use std::thread;
 
@@ -320,23 +323,52 @@ mod tests {
     }
 
     /// `screen_event` reads straight off a `Terminal`'s current screen — no
-    /// PTY needed, so this is where the plain-text/cursor snapshot logic
-    /// itself is checked, rather than only exercising it indirectly through
-    /// a spawned shell.
+    /// PTY needed, so this is where the cell/cursor snapshot logic itself is
+    /// checked, rather than only exercising it indirectly through a spawned
+    /// shell.
     #[test]
     fn screen_event_reflects_fed_bytes_and_cursor_position() {
         let mut terminal = Terminal::new(2, 5);
         terminal.feed(b"hi");
 
         let TerminalEvent::Screen {
-            lines,
+            rows,
             cursor_row,
             cursor_col,
         } = screen_event(&terminal)
         else {
             panic!("expected a Screen event");
         };
-        assert_eq!(lines, vec!["hi   ".to_string(), "     ".to_string()]);
+        let line_of = |row: &[Cell]| row.iter().map(|c| c.ch).collect::<String>();
+        assert_eq!(line_of(&rows[0]), "hi   ");
+        assert_eq!(line_of(&rows[1]), "     ");
         assert_eq!((cursor_row, cursor_col), (0, 2));
+    }
+
+    /// The predecessor of this test (`screen_event_reflects_fed_bytes_and_cursor_position`,
+    /// above) only ever checked `Cell::ch` — it would have passed unchanged
+    /// even if `screen_event` still flattened `TerminalEvent::Screen` down to
+    /// plain text the way the pre-Checkpoint-3 `lines: Vec<String>` field
+    /// did. This checks the actual reason `rows` is now `Vec<Vec<Cell>>`:
+    /// colour and attributes reach the frontend's `Cell` data unflattened.
+    #[test]
+    fn screen_event_rows_carry_cell_color_and_attributes_not_just_the_character() {
+        let mut terminal = Terminal::new(1, 2);
+        terminal.feed(b"\x1b[1;31mA");
+
+        let TerminalEvent::Screen { rows, .. } = screen_event(&terminal) else {
+            panic!("expected a Screen event");
+        };
+
+        let hot = rows[0][0];
+        assert_eq!(hot.ch, 'A');
+        assert_eq!(hot.fg, Color::Indexed { index: 1 });
+        assert!(hot.bold);
+
+        // The second cell was never printed to, so it must keep the
+        // renderer's default rather than also picking up the bold-red pen.
+        let untouched = rows[0][1];
+        assert_eq!(untouched.fg, Color::Default);
+        assert!(!untouched.bold);
     }
 }

@@ -9,6 +9,10 @@ description = "Standalone PTY + terminal-emulation engine — no Tauri/axiomata-
 portable-pty.workspace = true
 vte.workspace = true
 unicode-width.workspace = true
+# `Cell`/`Color` derive `Serialize` (Checkpoint 3) so the Tauri glue layer
+# can send them straight over IPC instead of hand-rolling a parallel DTO —
+# a plain derive, not a step back on the "no Tauri/axiomata-core" rule.
+serde.workspace = true
 
 [[bin]]
 name = "term-poc"

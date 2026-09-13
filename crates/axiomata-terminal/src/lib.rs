@@ -78,7 +78,7 @@ mod tests {
 
         let cell = terminal.screen().cell(0, 0);
         assert_eq!(cell.ch, 'A');
-        assert_eq!(cell.fg, Color::Indexed(1));
+        assert_eq!(cell.fg, Color::Indexed { index: 1 });
         assert!(cell.bold);
         // Only "A" is visible -- none of the split escape bytes leaked
         // through as printed characters.

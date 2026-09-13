@@ -16,6 +16,7 @@
 //! implemented here). None of that is silently broken so much as not yet
 //! asked for by this checkpoint.
 
+use serde::Serialize;
 use unicode_width::UnicodeWidthChar;
 use vte::{Params, Perform};
 
@@ -26,22 +27,30 @@ const TAB_STOP: usize = 8;
 
 /// A cell's foreground/background colour. Palette resolution (which actual
 /// RGB an `Indexed` value maps to, e.g. against the active theme) is a
-/// rendering concern — Checkpoint 3's canvas renderer, not this model.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// rendering concern — Checkpoint 3's canvas renderer (`TerminalScreen.ts`),
+/// not this model. `Serialize` (tagged, snake_case — matching the Tauri
+/// glue layer's own `TerminalEvent` convention) lets that renderer receive
+/// this enum over IPC as-is, with no parallel DTO to keep in sync.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Color {
     /// No SGR colour set (or explicitly reset via 39/49) — the renderer's
     /// own default foreground/background, whatever that ends up being.
     #[default]
     Default,
     /// A 16- or 256-colour palette index (SGR 30-37/90-97/40-47/100-107, or
-    /// the extended `38;5;n` / `48;5;n` forms).
-    Indexed(u8),
+    /// the extended `38;5;n` / `48;5;n` forms). A struct variant (not a
+    /// tuple one) purely so `#[serde(tag = "type")]` — internally-tagged
+    /// representation, matching `TerminalEvent`'s own convention — is even
+    /// allowed here; serde requires struct or unit variants for that.
+    Indexed { index: u8 },
     /// A 24-bit truecolor value (`38;2;r;g;b` / `48;2;r;g;b`).
-    Rgb(u8, u8, u8),
+    Rgb { r: u8, g: u8, b: u8 },
 }
 
-/// One character cell: what to draw, and how.
-#[derive(Clone, Copy, PartialEq, Debug)]
+/// One character cell: what to draw, and how. `Serialize` for the same
+/// reason as [`Color`] — sent to the frontend renderer as-is.
+#[derive(Clone, Copy, PartialEq, Debug, Serialize)]
 pub struct Cell {
     pub ch: char,
     pub fg: Color,
@@ -162,6 +171,15 @@ impl Screen {
         (0..self.rows as u16).map(|r| self.line_text(r)).collect()
     }
 
+    /// Every row's full cell data (character, colours, attributes) — what
+    /// Checkpoint 3's canvas renderer actually draws from, unlike
+    /// [`Self::to_lines`]'s plain-text view (kept for whatever still wants
+    /// it, e.g. a future copy/paste feature, but no longer what the Tauri
+    /// glue layer sends over IPC once there's colour to show).
+    pub fn rows(&self) -> &[Vec<Cell>] {
+        &self.grid
+    }
+
     /// Shifts every row up by one, dropping the top line and appending a
     /// blank one at the bottom — the bare minimum "content keeps flowing"
     /// behaviour a shell needs once output exceeds one screen. Not a real
@@ -269,18 +287,34 @@ impl Screen {
                 4 => self.pen.underline = true,
                 22 => self.pen.bold = false,
                 24 => self.pen.underline = false,
-                code @ 30..=37 => self.pen.fg = Color::Indexed((code - 30) as u8),
+                code @ 30..=37 => {
+                    self.pen.fg = Color::Indexed {
+                        index: (code - 30) as u8,
+                    }
+                }
                 39 => self.pen.fg = Color::Default,
-                code @ 40..=47 => self.pen.bg = Color::Indexed((code - 40) as u8),
+                code @ 40..=47 => {
+                    self.pen.bg = Color::Indexed {
+                        index: (code - 40) as u8,
+                    }
+                }
                 49 => self.pen.bg = Color::Default,
-                code @ 90..=97 => self.pen.fg = Color::Indexed((code - 90 + 8) as u8),
-                code @ 100..=107 => self.pen.bg = Color::Indexed((code - 100 + 8) as u8),
+                code @ 90..=97 => {
+                    self.pen.fg = Color::Indexed {
+                        index: (code - 90 + 8) as u8,
+                    }
+                }
+                code @ 100..=107 => {
+                    self.pen.bg = Color::Indexed {
+                        index: (code - 100 + 8) as u8,
+                    }
+                }
                 code @ (38 | 48) => {
                     let is_fg = code == 38;
                     match flat.get(i + 1) {
                         Some(5) => {
                             if let Some(&idx) = flat.get(i + 2) {
-                                let color = Color::Indexed(idx as u8);
+                                let color = Color::Indexed { index: idx as u8 };
                                 if is_fg {
                                     self.pen.fg = color;
                                 } else {
@@ -293,7 +327,11 @@ impl Screen {
                             if let (Some(&r), Some(&g), Some(&b)) =
                                 (flat.get(i + 2), flat.get(i + 3), flat.get(i + 4))
                             {
-                                let color = Color::Rgb(r as u8, g as u8, b as u8);
+                                let color = Color::Rgb {
+                                    r: r as u8,
+                                    g: g as u8,
+                                    b: b as u8,
+                                };
                                 if is_fg {
                                     self.pen.fg = color;
                                 } else {
@@ -545,7 +583,7 @@ mod tests {
         let mut parser = vte::Parser::new();
         parser.advance(&mut screen, b"\x1b[1;31mA\x1b[0mB");
         let hot = screen.cell(0, 0);
-        assert_eq!(hot.fg, Color::Indexed(1));
+        assert_eq!(hot.fg, Color::Indexed { index: 1 });
         assert!(hot.bold);
         let plain = screen.cell(0, 1);
         assert_eq!(plain.fg, Color::Default);
@@ -557,9 +595,16 @@ mod tests {
         let mut screen = Screen::new(1, 2);
         let mut parser = vte::Parser::new();
         parser.advance(&mut screen, b"\x1b[38;5;200mA");
-        assert_eq!(screen.cell(0, 0).fg, Color::Indexed(200));
+        assert_eq!(screen.cell(0, 0).fg, Color::Indexed { index: 200 });
         parser.advance(&mut screen, b"\x1b[48;2;10;20;30mB");
-        assert_eq!(screen.cell(0, 1).bg, Color::Rgb(10, 20, 30));
+        assert_eq!(
+            screen.cell(0, 1).bg,
+            Color::Rgb {
+                r: 10,
+                g: 20,
+                b: 30
+            }
+        );
     }
 
     #[test]
@@ -567,7 +612,7 @@ mod tests {
         let mut screen = Screen::new(1, 4);
         let mut parser = vte::Parser::new();
         parser.advance(&mut screen, b"\x1b[42m\x1b[2J");
-        assert_eq!(screen.cell(0, 0).bg, Color::Indexed(2));
+        assert_eq!(screen.cell(0, 0).bg, Color::Indexed { index: 2 });
     }
 
     #[test]
@@ -645,6 +690,42 @@ mod tests {
         screen.resize(0, 0);
         assert_eq!(screen.size(), (1, 1));
         assert_eq!(screen.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn rows_exposes_the_full_grid_with_matching_dimensions_and_cell_data() {
+        let mut screen = Screen::new(2, 3);
+        let mut parser = vte::Parser::new();
+        // Bold red on "AB", left untouched for the rest of row 0, so this
+        // also checks that `rows()` isn't just a plain-text view like
+        // `line_text`/`to_lines` — colour/attribute data has to survive too.
+        parser.advance(&mut screen, b"\x1b[1;31mAB\r\ncd");
+
+        let rows = screen.rows();
+        assert_eq!(rows.len(), 2, "rows() must report every row, not a subset");
+        assert_eq!(rows[0].len(), 3, "each row must report every column");
+        assert_eq!(rows[1].len(), 3);
+
+        // `rows()` reads from the same grid `cell()` does, not a separate
+        // snapshot that could drift out of sync with it.
+        for row in 0..2u16 {
+            for col in 0..3u16 {
+                assert_eq!(
+                    rows[row as usize][col as usize],
+                    screen.cell(row, col),
+                    "rows()[{row}][{col}] should match cell({row}, {col})"
+                );
+            }
+        }
+
+        let hot = rows[0][0];
+        assert_eq!(hot.ch, 'A');
+        assert_eq!(hot.fg, Color::Indexed { index: 1 });
+        assert!(hot.bold);
+        // The third cell of row 0 was never printed to, so it keeps the
+        // grid's original default rather than picking up the still-active
+        // bold-red pen.
+        assert_eq!(rows[0][2], Cell::default());
     }
 
     #[test]
