@@ -34,3 +34,8 @@ ollama-rs = { version = "0.3", default-features = false }
 # Markdown viewer as a `data:` URI — see that function's doc comment for why
 # not `asset://`).
 base64 = "0.22"
+# PTY spawning for the `axiomata-terminal` engine crate (from the wezterm
+# project, also used by e.g. Zed). Rolling our own openpty/fork/exec would
+# teach little about *terminals* specifically and is a real unsafe-syscall
+# footgun — see docs/plans/terminal.md's technology-choice table.
+portable-pty = "0.9"
