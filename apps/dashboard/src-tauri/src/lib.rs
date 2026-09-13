@@ -40,6 +40,7 @@ pub fn run() {
             commands::get_spend_summary,
             commands::get_dashboard_state,
             commands::save_dashboard_state,
+            commands::list_installed_apps,
             commands::read_workspace_file,
             commands::read_workspace_image,
             commands::write_workspace_file,

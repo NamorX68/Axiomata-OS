@@ -40,8 +40,11 @@ function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2
 
 export type LayoutKind = "rings" | "circle" | "hex";
 
-/** Most icon nodes on the dashboard orbit ring. */
-export const ORBIT_MAX = 36;
+/** Most icon nodes on the dashboard orbit ring (the inner of the two rings
+ *  now that the App Ring sits outside it) — skills and routines always get
+ *  a slot each; recent files fill the rest up to this cap. Raised from the
+ *  original `36` on owner feedback that too few recent files were showing. */
+export const ORBIT_MAX = 60;
 
 /** Dashboard-centre layout (the reference look): skills, routines and the
  *  most recently changed notes as icon nodes on the outer ring; every file
@@ -87,6 +90,38 @@ export function layoutOrbit(model: GraphModel): void {
     const theta = golden * i;
     const radius = 0.62 * Math.cbrt(0.25 + 0.75 * ((n.phase + 0.5) % 1));
     n.p3 = [Math.cos(theta) * rUnit * radius, yUnit * radius, Math.sin(theta) * rUnit * radius];
+  });
+}
+
+/** App-Ring radius, in the same graph-unit scale as the orbit ring's radius
+ *  1 (`layoutOrbit` above) — drawn just outside it. */
+export const APP_RING = 1.18;
+
+/** Angular step between successive app-ring icons, going outward from the
+ *  "+" at 12 o'clock — fixed, not spread across the available arc, so a
+ *  single icon sits snug next to the "+" instead of floating mid-quadrant.
+ *  Deliberately uncapped for v1 (see `docs/plans/app-ring.md`) — somewhere
+ *  around 12 apps per side the icons start to crowd. */
+const APP_RING_STEP = 0.26;
+
+/** Positions the App-Ring's builtin (left of the "+") and user-app (right of
+ *  the "+") nodes, mutating `x`/`y` in place — the counterpart to
+ *  `model.ts`'s `buildAppNodes`, which builds the node objects this expects
+ *  to receive. Static: no `angle`/time dependency, unlike the inner orbit
+ *  ring's `spin`. That alone isn't enough to keep the ring visually still,
+ *  though — `render.ts` must also draw these nodes without adding its own
+ *  live spin on top, or the "static" layout would still appear to rotate. */
+export function layoutAppRing(builtins: GraphNode[], userApps: GraphNode[]): void {
+  const plus = -Math.PI / 2;
+  builtins.forEach((n, i) => {
+    const a = plus - APP_RING_STEP * (i + 1);
+    n.x = Math.cos(a) * APP_RING;
+    n.y = Math.sin(a) * APP_RING;
+  });
+  userApps.forEach((n, i) => {
+    const a = plus + APP_RING_STEP * (i + 1);
+    n.x = Math.cos(a) * APP_RING;
+    n.y = Math.sin(a) * APP_RING;
   });
 }
 

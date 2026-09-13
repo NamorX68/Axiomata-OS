@@ -6,11 +6,19 @@
   import { readPalette, type NodeKind } from "./model";
   import { drawGlyph } from "./render";
 
+  /** `app` nodes only exist in orbit mode (the dashboard background's App
+   *  Ring) — this legend covers the Second Brain's own rings/circle/hex
+   *  views, which never show one. Excluding it from the type (rather than
+   *  giving `NodeKind`'s full `Record` a phantom, never-read `app` entry)
+   *  keeps the exhaustiveness check meaningful: a kind this legend actually
+   *  needs but forgets still fails to compile. */
+  type LegendKind = Exclude<NodeKind, "app">;
+
   /** In Hex mode the "file" swatch matches the honeycomb cell it stands
    *  for instead of the dot every other layout uses. */
   let { hex = false }: { hex?: boolean } = $props();
 
-  const KINDS: { kind: NodeKind; label: string }[] = [
+  const KINDS: { kind: LegendKind; label: string }[] = [
     { kind: "hub", label: "CLAUDE.md (hub)" },
     { kind: "area", label: "Bereich (Ordner)" },
     { kind: "file", label: "Notiz / Seite" },
@@ -22,7 +30,13 @@
 
   function paint() {
     const p = readPalette();
-    const colors: Record<NodeKind, string> = { hub: p.text, area: p.accent, file: p.muted, skill: p.accent, routine: p.warning };
+    const colors: Record<LegendKind, string> = {
+      hub: p.text,
+      area: p.accent,
+      file: p.muted,
+      skill: p.accent,
+      routine: p.warning,
+    };
     KINDS.forEach(({ kind }, i) => {
       const c = canvases[i];
       if (!c) return;

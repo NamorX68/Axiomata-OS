@@ -13,6 +13,7 @@ import type {
   GraphFile,
   GraphLink,
   WorkspaceGraph,
+  InstalledAppsResult,
   LoadedDashboardState,
   MemoryStatus,
   NewRoutine,
@@ -684,6 +685,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       out.sort((a, b) => b.matches - a.matches || a.path.localeCompare(b.path));
       return out.slice(0, Number(args.limit ?? 40)) as T;
     }
+    case "list_installed_apps":
+      return {
+        apps: [
+          { path: "/Applications/Safari.app", name: "Safari" },
+          { path: "/Applications/Notes.app", name: "Notes" },
+          { path: "/Applications/Slack.app", name: "Slack" },
+          { path: "/System/Applications/Utilities/Terminal.app", name: "Terminal" },
+        ],
+        truncated: false,
+      } satisfies InstalledAppsResult as T;
     case "open_workspace_html": {
       const rel = String(args.rel);
       if (!/\.html?$/i.test(rel)) throw new Error(`${rel}: only .html / .htm files are framed`);

@@ -54,6 +54,11 @@ export interface ModuleDefinition {
   /** Renders full-size behind the tiles (in `#particle-slot`) instead of as
    *  a tile — the particle graph. Implies one instance at a time. */
   background?: boolean;
+  /** Dev-only scaffolding (the `dummy*` modules), registered only in
+   *  `import.meta.env.DEV`. An explicit opt-out flag rather than a `dummy*`
+   *  name-prefix convention, so anything that filters dev modules out (e.g.
+   *  the App Ring) doesn't have to know that convention exists. */
+  dev?: boolean;
   actions?: ModuleAction[];
 }
 

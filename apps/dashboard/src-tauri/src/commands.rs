@@ -823,6 +823,148 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    // ---- App Ring: `list_installed_apps`'s scan core (`scan_apps`) ----
+
+    fn make_app(dir: &std::path::Path, name: &str) {
+        std::fs::create_dir_all(dir.join(name)).unwrap();
+    }
+
+    #[test]
+    fn scan_apps_finds_top_level_bundles_sorted_by_name() {
+        let root = unique_temp_dir("scan-apps-basic");
+        std::fs::create_dir_all(&root).unwrap();
+        make_app(&root, "Zebra.app");
+        make_app(&root, "Alpha.app");
+        std::fs::write(root.join("readme.txt"), "not an app").unwrap();
+
+        let result = scan_apps(&[root.clone()], 300);
+        assert_eq!(
+            result
+                .apps
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Alpha", "Zebra"]
+        );
+        assert!(!result.truncated);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scan_apps_skips_a_missing_root_without_failing_the_others() {
+        let root = unique_temp_dir("scan-apps-missing-root");
+        std::fs::create_dir_all(&root).unwrap();
+        make_app(&root, "Real.app");
+        let ghost = unique_temp_dir("scan-apps-ghost"); // deliberately never created
+
+        let result = scan_apps(&[ghost, root.clone()], 300);
+        assert_eq!(result.apps.len(), 1);
+        assert_eq!(result.apps[0].name, "Real");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A `.app` bundle's own `Contents/…` can contain further
+    /// `.app`-suffixed helper/plugin bundles — the scan must not surface
+    /// those as their own top-level rows.
+    #[test]
+    fn scan_apps_does_not_recurse_into_a_bundle_s_own_nested_app() {
+        let root = unique_temp_dir("scan-apps-nested");
+        let frameworks = root.join("Outer.app/Contents/Frameworks");
+        std::fs::create_dir_all(&frameworks).unwrap();
+        make_app(&frameworks, "Helper.app");
+
+        let result = scan_apps(&[root.clone()], 300);
+        assert_eq!(result.apps.len(), 1, "{:?}", result.apps);
+        assert_eq!(result.apps[0].name, "Outer");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scan_apps_deduplicates_the_same_path_seen_via_two_roots() {
+        let root = unique_temp_dir("scan-apps-dedup");
+        std::fs::create_dir_all(&root).unwrap();
+        make_app(&root, "Once.app");
+
+        // The same root listed twice (e.g. `~/Applications` resolving to a
+        // path already covered by another root) must not double the result.
+        let result = scan_apps(&[root.clone(), root.clone()], 300);
+        assert_eq!(result.apps.len(), 1);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scan_apps_strips_only_the_app_suffix_and_trims() {
+        let root = unique_temp_dir("scan-apps-name");
+        std::fs::create_dir_all(&root).unwrap();
+        make_app(&root, "Visual Studio Code.app");
+
+        let result = scan_apps(&[root.clone()], 300);
+        assert_eq!(result.apps[0].name, "Visual Studio Code");
+        assert_eq!(
+            result.apps[0].path,
+            root.join("Visual Studio Code.app")
+                .to_string_lossy()
+                .into_owned()
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scan_apps_caps_and_reports_truncated() {
+        let root = unique_temp_dir("scan-apps-cap");
+        std::fs::create_dir_all(&root).unwrap();
+        for i in 0..5 {
+            make_app(&root, &format!("App{i}.app"));
+        }
+
+        let result = scan_apps(&[root.clone()], 3);
+        assert_eq!(result.apps.len(), 3);
+        assert!(result.truncated);
+
+        let full = scan_apps(&[root.clone()], 10);
+        assert_eq!(full.apps.len(), 5);
+        assert!(!full.truncated);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scan_apps_ignores_non_app_entries_and_a_plain_file_named_like_one() {
+        let root = unique_temp_dir("scan-apps-ignore");
+        std::fs::create_dir_all(&root).unwrap();
+        make_app(&root, "Real.app");
+        std::fs::create_dir_all(root.join("NotAnApp")).unwrap();
+        // A plain file happening to be named like a bundle is not one.
+        std::fs::write(root.join("Fake.app"), b"not a directory").unwrap();
+
+        let result = scan_apps(&[root.clone()], 300);
+        assert_eq!(result.apps.len(), 1);
+        assert_eq!(result.apps[0].name, "Real");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// The plan explicitly calls for treating a symlinked `.app` like any
+    /// other entry — `path.is_dir()` follows symlinks (unlike
+    /// `DirEntry::file_type()`), so this pins that platform-API assumption
+    /// down with a real symlink instead of leaving it true only by
+    /// inspection of `scan_apps`'s own comment.
+    #[test]
+    fn scan_apps_includes_a_symlinked_app_like_a_real_one() {
+        let target_root = unique_temp_dir("scan-apps-symlink-target");
+        std::fs::create_dir_all(&target_root).unwrap();
+        make_app(&target_root, "Real.app");
+
+        let root = unique_temp_dir("scan-apps-symlink-root");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(target_root.join("Real.app"), root.join("Linked.app")).unwrap();
+
+        let result = scan_apps(&[root.clone()], 300);
+        assert_eq!(result.apps.len(), 1, "{:?}", result.apps);
+        assert_eq!(result.apps[0].name, "Linked");
+
+        std::fs::remove_dir_all(&target_root).ok();
+        std::fs::remove_dir_all(&root).ok();
+    }
 }
 
 /// Reads `~/.axiomata/dashboard.json` (raw text) or the defaults; a corrupt
@@ -837,6 +979,96 @@ pub fn get_dashboard_state() -> Result<LoadedState, String> {
 #[tauri::command]
 pub fn save_dashboard_state(json: String) -> Result<(), String> {
     dashboard::save_state(&json).map_err(|err| err.to_string())
+}
+
+/// One `*.app` bundle found by [`list_installed_apps`]'s scan.
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledApp {
+    pub path: String,
+    pub name: String,
+}
+
+/// [`list_installed_apps`]'s return shape. `truncated` mirrors
+/// [`WorkspaceGraph`]'s own field — `true` once the scan hit
+/// [`MAX_INSTALLED_APPS`], so the dialog can say so instead of silently
+/// showing an incomplete list.
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledAppsResult {
+    pub apps: Vec<InstalledApp>,
+    pub truncated: bool,
+}
+
+/// Cap on how many apps [`list_installed_apps`] returns — generous enough to
+/// never realistically trigger on a real Mac (a few hundred at most), but
+/// bounded all the same.
+const MAX_INSTALLED_APPS: usize = 300;
+
+/// Every `*.app` bundle for the App Ring's "+" dialog: the three standard
+/// macOS application folders, deduplicated by path, sorted by name.
+#[tauri::command]
+pub fn list_installed_apps() -> Result<InstalledAppsResult, String> {
+    let mut roots = vec![
+        PathBuf::from("/Applications"),
+        PathBuf::from("/System/Applications"),
+    ];
+    if let Some(home) = home::home_dir() {
+        roots.push(home.join("Applications"));
+    }
+    // No error path here: a missing/unreadable root (most machines have no
+    // `~/Applications` at all) is `scan_apps`'s problem to skip quietly, not
+    // this command's to fail on.
+    Ok(scan_apps(&roots, MAX_INSTALLED_APPS))
+}
+
+/// Scans each of `roots` for `*.app` entries directly inside it (never
+/// recursing into a found bundle itself — an `.app`'s own `Contents/…` can
+/// contain further `.app`-suffixed helper/plugin bundles that have no
+/// business showing up as top-level rows), deduplicated by path and capped
+/// at `max`.
+///
+/// Takes `roots` as a parameter — rather than hard-coding the three real
+/// macOS paths — purely so it's unit-testable against a temp-dir fixture;
+/// [`list_installed_apps`] is the only caller that supplies the real ones.
+/// A root that doesn't exist or can't be read is skipped, not an error: most
+/// machines have no `~/Applications` at all, and that must not fail the
+/// other two roots' results.
+fn scan_apps(roots: &[PathBuf], max: usize) -> InstalledAppsResult {
+    let mut apps: Vec<InstalledApp> = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // `.is_dir()` follows symlinks (unlike `DirEntry::file_type()`),
+            // so a symlinked `.app` is picked up like any other entry —
+            // deliberately no special-casing for it.
+            if path.extension().and_then(|e| e.to_str()) != Some("app") || !path.is_dir() {
+                continue;
+            }
+            let path_str = path.to_string_lossy().into_owned();
+            if !seen_paths.insert(path_str.clone()) {
+                continue;
+            }
+            // `file_stem` strips only the trailing `.app`, leaving the rest
+            // of a macOS bundle name — already human-readable — untouched
+            // beyond a trim.
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| path_str.clone());
+            apps.push(InstalledApp {
+                path: path_str,
+                name,
+            });
+        }
+    }
+    apps.sort_by_key(|a| a.name.to_lowercase());
+    let truncated = apps.len() > max;
+    apps.truncate(max);
+    InstalledAppsResult { apps, truncated }
 }
 
 /// The workspace as a graph for the particle view: files (with area, title,

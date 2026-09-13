@@ -11,6 +11,7 @@
 
 import { get } from "svelte/store";
 
+import { loadUserApps, userApps, type UserApp } from "./apps";
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
@@ -29,6 +30,7 @@ interface DashboardState extends Record<string, unknown> {
   version: number;
   settings: DashboardSettings;
   canvas: { instances: CanvasInstance[] };
+  apps: { user: UserApp[] };
 }
 
 /** Everything from the loaded file except what the stores own, so hand-added
@@ -79,6 +81,22 @@ export function sanitizeInstances(raw: unknown): CanvasInstance[] {
   return out;
 }
 
+/** Keeps only well-formed rows, deduplicated by path — a bad hand-edit drops
+ *  the row, not the file (same contract as `sanitizeInstances`). */
+export function sanitizeUserApps(raw: unknown): UserApp[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: UserApp[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const r = item as Record<string, unknown>;
+    if (!isStr(r.path) || !isStr(r.name) || seen.has(r.path)) continue;
+    seen.add(r.path);
+    out.push({ path: r.path, name: r.name });
+  }
+  return out;
+}
+
 export function parseState(text: string): DashboardState | null {
   try {
     const v = JSON.parse(text) as unknown;
@@ -92,6 +110,10 @@ export function parseState(text: string): DashboardState | null {
       typeof obj.canvas === "object" && obj.canvas !== null
         ? (obj.canvas as Record<string, unknown>)
         : {};
+    const apps =
+      typeof obj.apps === "object" && obj.apps !== null
+        ? (obj.apps as Record<string, unknown>)
+        : {};
     return {
       ...obj,
       version: isNum(obj.version) ? obj.version : STATE_VERSION,
@@ -101,6 +123,7 @@ export function parseState(text: string): DashboardState | null {
         customCssPath: isStr(settings.customCssPath) ? settings.customCssPath : null,
       },
       canvas: { instances: sanitizeInstances(canvas.instances) },
+      apps: { user: sanitizeUserApps(apps.user) },
     };
   } catch {
     return null;
@@ -113,6 +136,7 @@ export function buildState(): DashboardState {
     version: STATE_VERSION,
     settings: { ...extraSettings, theme: get(activeTheme), customCssPath },
     canvas: { instances: get(instances) },
+    apps: { user: get(userApps) },
   };
 }
 
@@ -145,13 +169,14 @@ export async function initPersistence(): Promise<void> {
 
   const state = parseState(loaded.json);
   if (state) {
-    const { version: _v, settings, canvas, ...rest } = state;
+    const { version: _v, settings, canvas, apps, ...rest } = state;
     const { theme, customCssPath: css, ...restSettings } = settings;
     extras = rest;
     extraSettings = restSettings;
     customCssPath = css;
     loading = true;
     loadInstances(canvas.instances);
+    loadUserApps(apps.user);
     applyTheme(theme);
     loading = false;
   }
@@ -170,6 +195,9 @@ export async function initPersistence(): Promise<void> {
   // Svelte stores call the subscriber once immediately, so this also
   // materialises dashboard.json on the very first boot — handy for hand-edits.
   activeTheme.subscribe(() => {
+    if (!loading) scheduleSave();
+  });
+  userApps.subscribe(() => {
     if (!loading) scheduleSave();
   });
   let first = true;

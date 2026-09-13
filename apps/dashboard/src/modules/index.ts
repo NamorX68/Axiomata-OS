@@ -576,6 +576,7 @@ export function registerBuiltins(): void {
       settings: DummySettings,
       defaultSize: { w: 260, h: 160 },
       minSize: { w: 160, h: 100 },
+      dev: true,
       actions: [
         {
           name: "ping",
@@ -592,6 +593,7 @@ export function registerBuiltins(): void {
       component: Dummy,
       defaultSize: { w: 220, h: 120 },
       singleton: true,
+      dev: true,
     });
   }
 }

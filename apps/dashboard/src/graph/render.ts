@@ -5,6 +5,7 @@
  * the device pixel ratio; call `resize()` when the canvas box changes.
  */
 
+import { APP_RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 
 export type RenderMode = "rings" | "orbit" | "hex";
@@ -38,7 +39,10 @@ const TWO_PI = Math.PI * 2;
  * colour. `glyph` is either a structural id — "hub" (hexagon), "skill"
  * (bolt), "routine" (clock), "folder" (the generic area default) — or one
  * of the per-area icons from `model.glyphForArea` (e.g. "book", "code",
- * "briefcase"). Unknown ids fall back to nothing drawn (just the ring).
+ * "briefcase"), or one of the App-Ring-only icons from
+ * `model.glyphForModuleType` ("check", "calendar", "list" — the others it
+ * assigns are all glyphs already listed here). Unknown ids fall back to
+ * nothing drawn (just the ring).
  */
 export function drawGlyph(
   ctx: CanvasRenderingContext2D,
@@ -185,6 +189,39 @@ export function drawGlyph(
       ctx.lineTo(s * 0.8, -s * 0.25);
       ctx.moveTo(-s * 0.8, -s * 0.25);
       ctx.lineTo(s * 0.8, -s * 0.25);
+      ctx.stroke();
+      break;
+    case "check": // ToDo (App Ring builtin)
+      ctx.roundRect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7, s * 0.25);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.4, s * 0.05);
+      ctx.lineTo(-s * 0.05, s * 0.4);
+      ctx.lineTo(s * 0.45, -s * 0.35);
+      ctx.stroke();
+      break;
+    case "calendar": // Calendar (App Ring builtin)
+      ctx.roundRect(-s * 0.85, -s * 0.7, s * 1.7, s * 1.5, s * 0.15);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.85, -s * 0.25);
+      ctx.lineTo(s * 0.85, -s * 0.25);
+      ctx.moveTo(-s * 0.4, -s * 0.85);
+      ctx.lineTo(-s * 0.4, -s * 0.55);
+      ctx.moveTo(s * 0.4, -s * 0.85);
+      ctx.lineTo(s * 0.4, -s * 0.55);
+      ctx.stroke();
+      break;
+    case "list": // Reminders (App Ring builtin)
+      ctx.roundRect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7, s * 0.15);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.45, -s * 0.35);
+      ctx.lineTo(s * 0.45, -s * 0.35);
+      ctx.moveTo(-s * 0.45, 0);
+      ctx.lineTo(s * 0.45, 0);
+      ctx.moveTo(-s * 0.45, s * 0.35);
+      ctx.lineTo(s * 0.2, s * 0.35);
       ctx.stroke();
       break;
     default:
@@ -718,7 +755,8 @@ export class GraphRenderer {
     }
 
     // Icon nodes on the rim.
-    const nodeR = Math.max(14, Math.min(24, R * 0.072));
+    const onOrbitCount = model.nodes.reduce((n, node) => n + (node.onOrbit ? 1 : 0), 0);
+    const nodeR = rimNodeRadiusPx(R, onOrbitCount);
     ctx.font = this.font(Math.max(8, nodeR * 0.55), 600);
     for (const n of model.nodes) {
       if (!n.onOrbit) continue;
@@ -728,28 +766,7 @@ export class GraphRenderer {
       n.sx = x;
       n.sy = y;
       const hot = n === this.hover || n === this.selected;
-      if (hot) {
-        const g = ctx.createRadialGradient(x, y, nodeR * 0.6, x, y, nodeR * 2.2);
-        g.addColorStop(0, this.accentColor);
-        g.addColorStop(1, "transparent");
-        ctx.globalAlpha = 0.45;
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(x, y, nodeR * 2.2, 0, TWO_PI);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-      ctx.fillStyle = this.surfaceColor;
-      ctx.beginPath();
-      ctx.arc(x, y, nodeR, 0, TWO_PI);
-      ctx.fill();
-      // File nodes keep their area colour on the ring, same as everywhere
-      // else in the graph — the reference "New" badge is not a category.
-      ctx.strokeStyle = hot ? this.accentColor : n.color;
-      ctx.lineWidth = hot ? 1.6 : 1;
-      ctx.globalAlpha = hot ? 1 : 0.8;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      this.drawNodeDisc(x, y, nodeR, n.color, hot);
       drawGlyph(ctx, glyphOf(n), x, y, nodeR * 0.62, hot ? this.accentColor : n.color);
       // Age / schedule badge under the node.
       const badge = this.badgeFor(n, t);
@@ -761,14 +778,112 @@ export class GraphRenderer {
         ctx.fillText(badge, x, y + nodeR + 3);
         ctx.globalAlpha = 1;
       }
-      if (hot) {
-        ctx.fillStyle = this.textColor;
+      if (hot) this.drawHotLabel(x, y, nodeR, n.label, 0.7, 0.55);
+    }
+
+    this.drawAppRing(cx, cy, R);
+  }
+
+  /** One ring node's disc, shared by the inner orbit ring's rim loop and the
+   *  App Ring below: an accent hover/selection halo (only when `hot`), a
+   *  surface-filled circle, and a border (accent when `hot`, `color`
+   *  otherwise) — everything each ring draws before its own glyph/icon goes
+   *  on top. Extracted because the two rings' node-circle code was an exact
+   *  duplicate (App Ring's icons/monogram and the orbit ring's glyph/badge
+   *  are genuinely ring-specific and stay in their own methods). */
+  private drawNodeDisc(x: number, y: number, nodeR: number, color: string, hot: boolean): void {
+    const { ctx } = this;
+    if (hot) {
+      const g = ctx.createRadialGradient(x, y, nodeR * 0.6, x, y, nodeR * 2.2);
+      g.addColorStop(0, this.accentColor);
+      g.addColorStop(1, "transparent");
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, nodeR * 2.2, 0, TWO_PI);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = this.surfaceColor;
+    ctx.beginPath();
+    ctx.arc(x, y, nodeR, 0, TWO_PI);
+    ctx.fill();
+    // File nodes keep their area colour on the ring, same as everywhere
+    // else in the graph — the reference "New" badge is not a category.
+    ctx.strokeStyle = hot ? this.accentColor : color;
+    ctx.lineWidth = hot ? 1.6 : 1;
+    ctx.globalAlpha = hot ? 1 : 0.8;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  /** Draws `label` above a hot (hovered/selected) node, then restores the
+   *  ring's own resting-size font — shared by both rings, which only differ
+   *  in how large their resting vs. hot text reads relative to their own
+   *  `nodeR` (`hotScale`/`restingScale`). */
+  private drawHotLabel(
+    x: number,
+    y: number,
+    nodeR: number,
+    label: string,
+    hotScale: number,
+    restingScale: number,
+  ): void {
+    const { ctx } = this;
+    ctx.fillStyle = this.textColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.font = this.font(Math.max(10, nodeR * hotScale), 600);
+    ctx.fillText(label, x, y - nodeR - 6);
+    ctx.font = this.font(Math.max(8, nodeR * restingScale), 600);
+  }
+
+  /** The App Ring: a second, static ring just outside the one above —
+   *  builtin modules left of the "+", externally added Mac apps right of
+   *  it. Deliberately outside the "Icon nodes on the rim" loop (these nodes
+   *  never set `onOrbit`, so that loop already skips them) and drawn with
+   *  no `+ this.angle` term, so the ring doesn't rotate with the ambient
+   *  spin the way the loop above does (see `layout.ts`'s `layoutAppRing`
+   *  doc comment for why that's required, not just the lack of a time
+   *  dependency in the layout itself). */
+  private drawAppRing(cx: number, cy: number, R: number): void {
+    const { ctx } = this;
+    const model = this.model!;
+    const ringR = R * APP_RING;
+
+    // Subtle separation circle, distinguishing this ring from the one it
+    // surrounds without competing with it for attention.
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringR, 0, TWO_PI);
+    ctx.strokeStyle = this.lineColor;
+    ctx.globalAlpha = 0.25;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    const nodeR = appNodeRadiusPx(R);
+    ctx.font = this.font(Math.max(8, nodeR * 0.5), 600);
+    for (const n of model.nodes) {
+      if (n.kind !== "app") continue;
+      const a = Math.atan2(n.y, n.x); // static — no `+ this.angle`
+      const x = cx + Math.cos(a) * ringR;
+      const y = cy + Math.sin(a) * ringR;
+      n.sx = x;
+      n.sy = y;
+      const hot = n === this.hover || n === this.selected;
+      this.drawNodeDisc(x, y, nodeR, n.color, hot);
+
+      if (n.userApp) {
+        // No icon extraction for Mac apps in v1 — a monogram stands in.
+        ctx.fillStyle = hot ? this.accentColor : n.color;
         ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-        ctx.font = this.font(Math.max(10, nodeR * 0.7), 600);
-        ctx.fillText(n.label, x, y - nodeR - 6);
-        ctx.font = this.font(Math.max(8, nodeR * 0.55), 600);
+        ctx.textBaseline = "middle";
+        ctx.fillText(monogram(n.label), x, y + 1);
+      } else {
+        drawGlyph(ctx, n.glyph ?? "folder", x, y, nodeR * 0.62, hot ? this.accentColor : n.color);
       }
+
+      if (hot) this.drawHotLabel(x, y, nodeR, n.label, 0.75, 0.5);
     }
   }
 
@@ -805,6 +920,48 @@ export class GraphRenderer {
     if (n.kind === "routine") return n.enabled === false ? "OFF" : "ON";
     return null;
   }
+}
+
+/** The App Ring's icon-node radius in px, given the orbit ring's own radius
+ *  `R`. Exported (unlike the rim loop's own, differently-scaled `nodeR`)
+ *  so `second-brain.svelte` can size and place its "+" DOM button to match
+ *  the canvas-drawn app nodes exactly, instead of a fixed CSS size that
+ *  would drift from the ring's actual scale on resize — or simply read as
+ *  a separate piece of chrome rather than a slot on the ring itself. */
+export function appNodeRadiusPx(R: number): number {
+  return Math.max(12, Math.min(20, R * 0.06));
+}
+
+/** The orbit ring's own icon-node radius in px, given the ring's radius `R`
+ *  and how many icon nodes (`onOrbit: true` — skills, routines, recent
+ *  files) currently share its circumference.
+ *
+ *  A plain `R`-only formula assumed a roughly-constant node count; once
+ *  `ORBIT_MAX` (the ring's own cap, `graph/layout.ts`) could actually be
+ *  reached in practice, that assumption broke — neighbouring icons started
+ *  overlapping on any vault with enough recently-modified files to fill the
+ *  ring, which is the normal populated state, not an edge case. Capping by
+ *  the arc length actually available per node fixes that without changing
+ *  anything about a lightly-populated ring, where the size-based cap below
+ *  is still the smaller (hence binding) one. Exported so the fix is
+ *  unit-testable without a canvas. */
+export function rimNodeRadiusPx(R: number, onOrbitCount: number): number {
+  const sizeCap = Math.max(14, Math.min(24, R * 0.072));
+  // `* 0.4` (not `0.5`) leaves a visible gap between adjacent icons instead
+  // of just touching edge-to-edge at the crowding limit.
+  const spacingCap = onOrbitCount > 0 ? ((TWO_PI * R) / onOrbitCount) * 0.4 : sizeCap;
+  return Math.min(sizeCap, Math.max(6, spacingCap));
+}
+
+/** One or two uppercase initials from an app's display name (e.g. "Visual
+ *  Studio Code" → "VS", "Slack" → "S") — the App Ring's stand-in icon for a
+ *  user-added Mac app, which has no extracted `.app` icon in v1. */
+function monogram(label: string): string {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  const first = words[0]?.[0] ?? "";
+  const second = words.length > 1 ? (words[1]?.[0] ?? "") : "";
+  return (first + second).toUpperCase();
 }
 
 function scale(v: [number, number, number], k: number): [number, number, number] {

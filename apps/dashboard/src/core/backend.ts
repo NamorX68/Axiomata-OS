@@ -250,6 +250,20 @@ export interface LoadedDashboardState {
   recovered_backup: string | null;
 }
 
+/** One `*.app` bundle found by `list_installed_apps`'s scan. */
+export interface InstalledApp {
+  path: string;
+  name: string;
+}
+
+/** `list_installed_apps`'s return shape — `truncated` mirrors
+ *  `WorkspaceGraph.truncated`: `true` once the scan hit its cap, so the
+ *  dialog can say so instead of silently showing an incomplete list. */
+export interface InstalledAppsResult {
+  apps: InstalledApp[];
+  truncated: boolean;
+}
+
 export type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 export function insideTauri(): boolean {

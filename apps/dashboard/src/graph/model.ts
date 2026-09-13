@@ -4,9 +4,10 @@
  * Rust `WorkspaceGraph` payload plus a palette read from the active theme.
  */
 
+import type { BuiltinApp, UserApp } from "../core/apps";
 import type { WorkspaceGraph } from "../core/backend";
 
-export type NodeKind = "hub" | "area" | "file" | "skill" | "routine";
+export type NodeKind = "hub" | "area" | "file" | "skill" | "routine" | "app";
 
 export interface GraphNode {
   id: string;
@@ -29,8 +30,11 @@ export interface GraphNode {
   degree: number;
   modified?: string | null;
   isMarkdown?: boolean;
-  /** Area nodes only: which icon to draw (see `glyphForArea`); other kinds
-   *  are keyed by `kind` itself ("hub" / "skill" / "routine"). */
+  /** Area nodes: which icon to draw (see `glyphForArea`). Builtin `"app"`
+   *  nodes: which icon to draw (see `glyphForModuleType`) — a hand-drawn
+   *  vector glyph, not a rasterized image; see that function's doc comment
+   *  for why. Every other kind is keyed by `kind` itself ("hub" / "skill" /
+   *  "routine"). */
   glyph?: string;
   /** Orbit mode: 3-D point of the particle cloud (graph units). */
   p3?: [number, number, number];
@@ -39,6 +43,20 @@ export interface GraphNode {
   /** Orbit mode: last projected screen position (for hit-testing). */
   sx?: number;
   sy?: number;
+  /** `"app"` nodes only: `true` for an externally added Mac app (right of
+   *  the ring's "+"), unset/`false` for a builtin module (left of it).
+   *  Stamped fresh by `layoutAppRing` on every model rebuild — never a
+   *  runtime store lookup — so both the click router and the right-click
+   *  context-menu gate can read it directly off the hit node. */
+  userApp?: boolean;
+  /** `"app"` nodes only, builtins: the registry module `type` to pass to
+   *  `createInstance`/`bringToFront`. */
+  appType?: string;
+  /** `"app"` nodes only, user apps: the absolute filesystem path to pass to
+   *  `openPath`/`removeUserApp`. Deliberately not the shared `path` field
+   *  above — that one is documented as workspace-relative (files/hub), and
+   *  an absolute macOS app path would silently break that contract. */
+  appPath?: string;
 }
 
 export interface GraphEdge {
@@ -128,6 +146,42 @@ export function glyphForArea(path: string): string {
   return "folder";
 }
 
+/** Which `drawGlyph` icon a builtin App-Ring node uses, by its registry
+ *  `type`. A hand-drawn vector glyph — deliberately **not** the module's
+ *  own `ModuleDefinition.icon` SVG string rasterized into an image: that
+ *  was tried first (`graph/appIcons.ts`, since removed) and, twice, failed
+ *  to actually render in the real app (a malformed data URL, then a
+ *  dimensionless-SVG sizing issue once that was fixed) — plausible WebKit
+ *  data-URI/image-loading quirks that were hard to diagnose without a
+ *  visual test loop. `drawGlyph`'s existing vector-path glyphs are already
+ *  proven reliable everywhere else on this exact canvas (skills, routines,
+ *  area folders), so reusing that mechanism trades "the module's literal
+ *  icon" for "something that reliably draws at all." `skill`/`routine`/
+ *  `mail` are the same glyphs those kinds already use elsewhere in the
+ *  graph, for visual consistency. Falls back to `"folder"` (matching
+ *  `glyphForArea`'s own fallback) for any module not listed here, so a
+ *  future builtin never renders nothing while it waits for a proper glyph. */
+export function glyphForModuleType(type: string): string {
+  switch (type) {
+    case "memory-status":
+      return "book";
+    case "skills-deck":
+      return "skill";
+    case "routines-board":
+      return "routine";
+    case "todo":
+      return "check";
+    case "calendar":
+      return "calendar";
+    case "reminders":
+      return "list";
+    case "mail":
+      return "mail";
+    default:
+      return "folder";
+  }
+}
+
 /** Stable per-area hue from the name; saturation/lightness by scheme. */
 export function areaColor(name: string, light: boolean): string {
   let h = 0;
@@ -186,6 +240,15 @@ export function neighbours(model: GraphModel, id: string): { node: GraphNode; ou
   return out;
 }
 
+/** Stable twinkle-phase offset from a string (a node id/name/path) — every
+ *  node kind in `buildModel` derives its `phase` from this, so pulled out
+ *  once instead of re-declared per kind. */
+export function nodePhase(s: string): number {
+  let h = 0;
+  for (const ch of s) h = (h * 33 + ch.charCodeAt(0)) >>> 0;
+  return (h % 1000) / 1000;
+}
+
 export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
   const nodes: GraphNode[] = [];
   const byId = new Map<string, GraphNode>();
@@ -193,11 +256,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     nodes.push(n);
     byId.set(n.id, n);
   };
-  const phase = (s: string) => {
-    let h = 0;
-    for (const ch of s) h = (h * 33 + ch.charCodeAt(0)) >>> 0;
-    return (h % 1000) / 1000;
-  };
+  const phase = nodePhase;
 
   add({
     id: "hub",
@@ -318,4 +377,45 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
   }
 
   return { nodes, edges, areas, byId, totalFiles: g.total_files, truncated: g.truncated };
+}
+
+/** Builds the App-Ring's node objects from the builtin-module list and the
+ *  owner's added Mac apps — colour and (for builtins) the rasterizable icon
+ *  markup already set, position left at `(0, 0)` for `layoutAppRing`
+ *  (`./layout`) to fill in. Independent of `buildModel`/`WorkspaceGraph`:
+ *  the ring's contents track the module registry and the `userApps` store,
+ *  not a workspace refresh, so `second-brain.svelte` calls this separately
+ *  and appends the result to `model.nodes`. */
+export function buildAppNodes(builtins: BuiltinApp[], userApps: UserApp[], palette: Palette): GraphNode[] {
+  const builtinNodes: GraphNode[] = builtins.map((b) => ({
+    id: `app:builtin:${b.type}`,
+    kind: "app",
+    label: b.title,
+    area: null,
+    bytes: 0,
+    x: 0,
+    y: 0,
+    r: 9,
+    color: palette.accent,
+    phase: nodePhase(b.type),
+    degree: 0,
+    appType: b.type,
+    glyph: glyphForModuleType(b.type),
+  }));
+  const userNodes: GraphNode[] = userApps.map((a) => ({
+    id: `app:user:${a.path}`,
+    kind: "app",
+    label: a.name,
+    area: null,
+    bytes: 0,
+    x: 0,
+    y: 0,
+    r: 9,
+    color: areaColor(a.path, palette.light),
+    phase: nodePhase(a.path),
+    degree: 0,
+    userApp: true,
+    appPath: a.path,
+  }));
+  return [...builtinNodes, ...userNodes];
 }
