@@ -7,12 +7,13 @@
   is a real, reversible action), instant, no confirmation: a deliberate
   click on one row of a searchable list is structurally far less likely to
   be accidental than the ring's own right-click, which does get a confirm
-  step (see AppContextMenu.svelte). Styling mirrors `ModulePicker.svelte`.
+  step (see AppContextMenu.svelte). Chrome is the shared `Window.svelte`.
 -->
 <script lang="ts">
   import { addUserApp, removeUserApp, userApps } from "../core/apps";
   import { invokeBackend } from "../core/backend";
   import type { InstalledApp } from "../core/backend";
+  import Window from "../shell/Window.svelte";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -50,34 +51,18 @@
     else addUserApp(app);
   }
 
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") open = false;
-  }
-
   $effect(() => {
     if (open) void load();
   });
 </script>
 
-<svelte:window onkeydown={open ? onKeydown : undefined} />
-
 {#if open}
-  <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="overlay" onclick={() => (open = false)}>
-    <div
-      class="dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="app-add-title"
-      tabindex="-1"
-      onclick={(e) => e.stopPropagation()}
-    >
-      <header>
-        <h2 id="app-add-title">Add app</h2>
-        <button type="button" class="close" aria-label="Close" onclick={() => (open = false)}>
-          ×
-        </button>
-      </header>
+  <Window
+    title="Add app"
+    onClose={() => (open = false)}
+    style="width: min(420px, calc(100vw - 2 * var(--ax-space-5))); height: min(560px, calc(100vh - 2 * var(--ax-space-5)));"
+  >
+    <div class="content">
       <input type="search" class="filter" placeholder="Search…" aria-label="Filter apps" bind:value={query} />
       {#if loading}
         <p class="muted">Loading…</p>
@@ -101,56 +86,21 @@
         {/if}
       {/if}
     </div>
-  </div>
+  </Window>
 {/if}
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: var(--ax-z-dialog);
-    display: grid;
-    place-items: center;
-    background: var(--ax-overlay);
-  }
-
-  .dialog {
-    width: min(420px, calc(100vw - 2 * var(--ax-space-5)));
-    max-height: calc(100vh - 2 * var(--ax-space-5));
+  .content {
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border-strong);
-    border-radius: var(--ax-radius-lg);
-    box-shadow: var(--ax-shadow-pop);
-    padding: var(--ax-space-2) var(--ax-space-4) var(--ax-space-4);
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    padding: var(--ax-space-3) 0;
-    border-bottom: 1px solid var(--ax-border);
-    margin-bottom: var(--ax-space-3);
-  }
-  h2 {
-    flex: 1 1 auto;
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
-  }
-  .close {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    line-height: 1;
-    background: transparent;
-    border-color: transparent;
-    color: var(--ax-text-muted);
+    padding: 0 var(--ax-space-3) var(--ax-space-3);
   }
 
   .filter {
     width: 100%;
+    flex: 0 0 auto;
     margin-bottom: var(--ax-space-2);
   }
 
@@ -159,6 +109,8 @@
     margin: 0;
     padding: 0;
     overflow: auto;
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-1);
@@ -189,5 +141,6 @@
   }
   .hint {
     margin-top: var(--ax-space-2);
+    flex: 0 0 auto;
   }
 </style>

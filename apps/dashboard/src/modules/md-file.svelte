@@ -56,8 +56,7 @@
     like `axiomata_core::notes`. Save calls `create_note`, then re-points
     `config.path` at the file it wrote, which falls straight through into
     the normal read-mode viewer above.
-  Config: `path` (workspace-relative), `mode` ("read" | "edit"), `isNew`,
-  `stageFrom`.
+  Config: `path` (workspace-relative), `mode` ("read" | "edit"), `isNew`.
 -->
 <script lang="ts">
   import { type WorkspaceFile, type WorkspaceImage } from "../core/backend";
@@ -370,8 +369,8 @@
     padding: 2px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
     /* The plain global button style (--ax-surface-3 on --ax-border) reads
-       too close to the panel's own --ax-surface-1 background to notice at
-       a glance — a stronger border gives it real edges without going as
+       too close to the surrounding glass background to notice at a
+       glance — a stronger border gives it real edges without going as
        loud as the accent-coloured Save button. */
     border-color: var(--ax-border-strong);
   }
@@ -394,13 +393,25 @@
     color: var(--ax-accent);
   }
 
+  /* No opaque `--ax-surface-1` fill here (or on `.page`/`.image-view`/
+     `.code-view` below) — that matched the file viewer's own background
+     back when `StagingLayer`'s staged panel was an opaque dialog. Now that
+     panel is a glass/blur surface (see StagingLayer.svelte), and this
+     content sits directly on top of it (as a plain canvas tile, on the
+     tile's own transparent front face) — an opaque fill here would show up
+     as a solid rectangle breaking that glass look in edit/code/image/HTML
+     view, the one thing `.rendered` (plain Markdown reading, no background
+     of its own) never had wrong. `--ax-tile-glass-bg` + blur keeps text
+     legible without going back to a flat opaque colour. */
   textarea {
     flex: 1 1 auto;
     min-height: 0;
     resize: none;
     border: none;
     border-radius: 0;
-    background: var(--ax-surface-1);
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-sm);
     line-height: 1.55;
@@ -412,7 +423,9 @@
     min-height: 0;
     width: 100%;
     border: 0;
-    background: var(--ax-surface-1);
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
   }
 
   .image-view {
@@ -423,7 +436,9 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    background: var(--ax-surface-1);
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
   }
   .image-view img {
     max-width: 100%;
@@ -436,7 +451,9 @@
     overflow: auto;
     margin: 0;
     padding: var(--ax-space-3);
-    background: var(--ax-surface-1);
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-sm);
     line-height: 1.55;

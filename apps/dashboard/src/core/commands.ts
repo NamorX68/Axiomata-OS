@@ -4,7 +4,7 @@
  *   /add <type>                 place a module
  *   /remove <type|id-prefix>    remove the first matching instance
  *   /theme <id>                 switch theme
- *   /open <path> [right|bottom] stage a workspace Markdown file
+ *   /open <path>                stage a workspace Markdown file
  *   /newfile <path>             create an empty workspace file and stage it
  *   /skill run <name>           run a skill
  *   /brain [file path | ? query] open the Second Brain view (on a file, or searching)
@@ -20,7 +20,7 @@ import { get } from "svelte/store";
 import { emit } from "./bus";
 import { createInstance, destroyInstance } from "./lifecycle";
 import { getModule, invokeAction, listModules } from "./registry";
-import { openStaged, type StageFrom } from "./staging";
+import { openStaged } from "./staging";
 import { instances } from "./stores";
 import { THEMES, applyTheme, isTheme } from "./themes";
 import { invokeBackend } from "./backend";
@@ -60,7 +60,7 @@ export const HELP = `**Commands**
 - \`/add <type>\` — place a module (${listTypes()})
 - \`/remove <type|id>\` — remove the first matching tile
 - \`/theme <id>\` — ${THEMES.map((t) => t.id).join(" · ")}
-- \`/open <path> [right|bottom]\` — stage a workspace file (.md or .html)
+- \`/open <path>\` — stage a workspace file (.md or .html)
 - \`/newfile <path>\` — create an empty workspace file and open it
 - \`/skill run <name>\` — run a skill
 - \`/brain [path | ? query]\` — open the Second Brain graph (on a file, or searching)
@@ -104,9 +104,8 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
 
     case "open": {
       const path = args[0];
-      if (!path) return { ok: false, message: "usage: /open <path> [right|bottom]" };
-      const from: StageFrom = args[1] === "bottom" ? "bottom" : "right";
-      openStaged("md-file", { path, mode: "read" }, from);
+      if (!path) return { ok: false, message: "usage: /open <path>" };
+      openStaged("md-file", { path, mode: "read" });
       return { ok: true, message: `Opened ${path}.` };
     }
 
@@ -118,7 +117,7 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
       } catch (err) {
         return { ok: false, message: String(err) };
       }
-      openStaged("md-file", { path, mode: "edit" }, "right");
+      openStaged("md-file", { path, mode: "edit" });
       return { ok: true, message: `Created ${path}.` };
     }
 

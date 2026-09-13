@@ -40,6 +40,7 @@ export const ALLOWED_TOKENS: readonly string[] = [
   "--ax-border-strong",
   "--ax-focus-ring",
   "--ax-tile-glass-bg",
+  "--ax-tile-glass-opacity",
   "--ax-font-display",
   "--ax-font-sans",
   "--ax-font-mono",

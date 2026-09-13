@@ -27,9 +27,9 @@
       on("shell:add-module", () => (pickerOpen = true)),
       // A file handed over by a module, the chat or the agent → staged viewer.
       on("open-file", (detail) => {
-        const d = (detail ?? {}) as { path?: string; from?: "bottom" | "right"; mode?: string };
+        const d = (detail ?? {}) as { path?: string; mode?: string };
         if (typeof d.path !== "string") return;
-        openStaged("md-file", { path: d.path, mode: d.mode === "edit" ? "edit" : "read" }, d.from ?? "right");
+        openStaged("md-file", { path: d.path, mode: d.mode === "edit" ? "edit" : "read" });
       }),
       on("shell:settings", () => (settingsOpen = true)),
       // The top-bar search icon → the Second Brain, focused on its search
@@ -41,7 +41,7 @@
       }),
       // Reuses the Document module's own compose mode instead of a bespoke
       // dialog — same viewer, same Save-picks-the-folder agent flow.
-      on("shell:new-note", () => openStaged("md-file", { path: "", mode: "edit", isNew: true }, "right")),
+      on("shell:new-note", () => openStaged("md-file", { path: "", mode: "edit", isNew: true })),
       // The background graph (or /brain) → full-screen Second Brain.
       on("open-second-brain", (detail) => {
         const d = (detail ?? {}) as { focus?: string | null; query?: string };

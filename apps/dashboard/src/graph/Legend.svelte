@@ -106,9 +106,15 @@
     gap: var(--ax-space-1);
     font-size: var(--ax-font-size-sm);
     color: var(--ax-text-muted);
-    background: color-mix(in srgb, var(--ax-surface-1) 85%, transparent);
-    border: 1px solid var(--ax-border);
+    /* Same glass/hairline/elevated-shadow language as Window.svelte and
+       every other panel in the app. */
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    border: none;
+    border-bottom: 2px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-md);
+    box-shadow: var(--ax-shadow-drag);
   }
   li {
     display: flex;

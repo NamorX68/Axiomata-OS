@@ -63,10 +63,10 @@ describe("runCommand", () => {
     expect(get(activeTheme)).toBe("ocean");
   });
 
-  it("/open stages a markdown panel from the requested side", async () => {
+  it("/open stages a markdown panel", async () => {
     expect((await runCommand("open", [])).ok).toBe(false);
-    expect((await runCommand("open", ["notes/inbox.md", "bottom"])).ok).toBe(true);
-    expect(get(staged)).toMatchObject([{ type: "md-file", from: "bottom", config: { path: "notes/inbox.md" } }]);
+    expect((await runCommand("open", ["notes/inbox.md"])).ok).toBe(true);
+    expect(get(staged)).toMatchObject([{ type: "md-file", config: { path: "notes/inbox.md" } }]);
   });
 
   it("module actions need a mounted instance and valid JSON params", async () => {

@@ -15,7 +15,12 @@
   --ax-surface-2: #fffdf8;
   --ax-surface-3: #efe9dc;
   --ax-overlay: rgba(46, 40, 32, 0.35);
-  --ax-tile-glass-bg: rgba(250, 247, 240, 0.75);
+  /* Same alpha range as every other theme (~0.62–0.64) — this was 0.75,
+     which combined with being nearly the same colour as --ax-surface-1
+     made the glass/blur look on staged panels and dragged tiles blend
+     into ordinary opaque surfaces almost completely (owner-reported: "the
+     transparency is missing entirely" in this theme specifically). */
+  --ax-tile-glass-bg: rgba(250, 247, 240, calc(0.6 * var(--ax-tile-glass-opacity)));
 
   --ax-text: #1f1b17;
   --ax-text-muted: #63594e;

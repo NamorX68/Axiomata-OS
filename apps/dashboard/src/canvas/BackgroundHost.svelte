@@ -66,9 +66,14 @@
     left: 0;
     bottom: 30px;
     min-width: 180px;
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border-strong);
+    /* Same glass/hairline/elevated-shadow language as Window.svelte and
+       every other panel in the app. */
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    border: none;
+    border-bottom: 2px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-md);
-    box-shadow: var(--ax-shadow-pop);
+    box-shadow: var(--ax-shadow-drag);
   }
 </style>

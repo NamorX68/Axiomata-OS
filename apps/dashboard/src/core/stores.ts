@@ -14,6 +14,17 @@ export const activeTheme: Writable<string> = writable("graphite");
 export const showGrid: Writable<boolean> = writable(false);
 /** Magnetic edge snapping between tiles. */
 export const snapEdges: Writable<boolean> = writable(true);
+/** 0 (opaque) – 100 (fully see-through), the one global knob for how
+ *  transparent every window/panel's glass background (`Window.svelte`,
+ *  `Tile.svelte`'s frameless front face while dragging, `StagingLayer.svelte`,
+ *  `AppContextMenu.svelte`, …) reads. Mapped to `--ax-tile-glass-opacity` in
+ *  `persist.ts`'s `initPersistence` as `(100 - v) / 50` — a 0–2 multiplier on
+ *  each theme's own authored alpha, not 0–1: a 0–1 range could only ever
+ *  reach "this theme's normal look" at best, never a genuinely solid
+ *  window, and CSS clamps `rgba()`'s alpha above 1 for free, so 50 is the
+ *  default (multiplier 1 — exactly each theme's authored look,
+ *  unchanged), 0 pushes toward fully opaque, 100 toward fully transparent. */
+export const windowTransparency: Writable<number> = writable(50);
 /** Current canvas box in CSS px (set by Canvas.svelte's ResizeObserver). */
 export const canvasSize: Writable<{ w: number; h: number }> = writable({ w: 0, h: 0 });
 /** Snap guide lines while a tile is dragged / resized (canvas coordinates). */

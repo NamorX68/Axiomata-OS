@@ -342,5 +342,5 @@ export async function writeAllMailSummaries(invoke: Invoke, items: readonly Mail
  *  `summaryPreview`. */
 export async function openMailSummary(invoke: Invoke, item: MailItem): Promise<void> {
   const path = await writeMailSummary(invoke, item);
-  openStaged("md-file", { path, mode: "read" }, "right");
+  openStaged("md-file", { path, mode: "read" });
 }

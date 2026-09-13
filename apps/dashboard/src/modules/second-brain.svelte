@@ -9,8 +9,16 @@
   a click on the visible cloud (a node hit, or just within its disc radius —
   the point cloud has real gaps between points) opens the full Second Brain
   view (bus `open-second-brain`, step 4) — *unless* the hit node is an "app"
-  node, which instead launches/focuses it, or a context menu is open, which
-  the click just closes. This module's own wrapper div is `inset: 0`
+  node (launches/focuses it instead) or a "file" node sitting on the inner
+  ring (`onOrbit` — a recent file with its own icon slot, not just a cloud
+  point; opens it directly in the staged viewer via `openStaged`, the same
+  one-click-to-content experience `core/mail.ts`'s `openMailSummary` already
+  gives a mail item), or a context menu is open, which the click just
+  closes. A "file" hit inside the general point cloud (every file, dense,
+  no individual icon slot) still falls through to Second Brain — a single
+  click there isn't precise enough to trust for opening the right file
+  directly. This module's own wrapper div
+  is `inset: 0`
   (full-bleed behind every tile), so a click has to be checked against the
   cloud's actual footprint explicitly — otherwise any click on empty
   dashboard background would open Second Brain too (owner feedback: "egal
@@ -25,6 +33,7 @@
   import { listBuiltinApps, removeUserApp, userApps } from "../core/apps";
   import type { WorkspaceGraph } from "../core/backend";
   import { createInstance } from "../core/lifecycle";
+  import { openStaged } from "../core/staging";
   import { bringToFront, instances } from "../core/stores";
   import { toast } from "../core/toast";
   import type { ModuleContext } from "../core/types";
@@ -173,7 +182,16 @@
    *  everything else (the click that dismisses it must not also act on
    *  whatever's still hovered underneath); an "app" node hit routes to
    *  `handleAppClick` instead of the normal open-Second-Brain behaviour;
-   *  everything else falls through to the existing `open`. */
+   *  a "file" node hit on the inner ring (`onOrbit` — a recent file with
+   *  its own individually addressable icon slot, per `layoutOrbit`) opens
+   *  the file directly in the staged viewer — the same one-click-to-content
+   *  experience `openMailSummary` already gives a mail item. A "file" node
+   *  hit inside the general 3-D point cloud (every file, dense and with
+   *  real gaps — `onOrbit` false) is *not* precise enough to trust a single
+   *  click on: it falls through to `open`, landing in the full Second Brain
+   *  graph to browse/select from instead of blindly opening whatever point
+   *  the cursor happened to land nearest to. Everything else (hub/skill/
+   *  routine/background) also falls through to `open`. */
   function onClick(): void {
     if (menu) {
       menu = null;
@@ -181,6 +199,10 @@
     }
     if (hover?.kind === "app") {
       handleAppClick(hover);
+      return;
+    }
+    if (hover?.kind === "file" && hover.path && hover.onOrbit) {
+      openStaged("md-file", { path: hover.path, mode: "read" });
       return;
     }
     open(hover);

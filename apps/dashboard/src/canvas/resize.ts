@@ -2,8 +2,8 @@
  * `use:resizable` — attach to a resize handle. The handle's `dir` says which
  * edge(s) move: `"e"`/`"w"` (width, growing right/left), `"s"`/`"n"`
  * (height, growing down/up), or `"se"` (both, growing right+down — the
- * canvas tile corner handle). `"w"`/`"n"` are for a panel anchored on the
- * opposite side (`StagingLayer`'s right-side panel: dragging its *left*
+ * canvas tile corner handle). `"w"`/`"n"` are for an edge anchored on the
+ * opposite side (e.g. `StagingLayer`'s staged panel: dragging its *left*
  * edge left, or its *top* edge up, both grow it, so those two report a
  * positive delta for a *negative* pointer movement). Unlike drag there is no
  * click threshold: a handle has no other job, so capture starts on press.

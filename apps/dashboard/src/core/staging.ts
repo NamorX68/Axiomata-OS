@@ -1,49 +1,43 @@
 /**
- * Staged panels: a `stageable` module opened as a slide-in panel (from the
- * bottom or the right) instead of a canvas tile — how the chat and the agent
- * hand the user a file to look at. Transient: not persisted, gone on close.
+ * Staged panels: a `stageable` module opened as a slide-in panel from the
+ * bottom of the screen instead of a canvas tile — how the chat and the
+ * agent hand the user a file to look at. Transient: not persisted, gone on
+ * close.
  */
 
 import { get, writable } from "svelte/store";
 
 import { getModule } from "./registry";
 
-export type StageFrom = "bottom" | "right";
-
 export interface StagedPanel {
   id: string;
   type: string;
   config: Record<string, unknown>;
-  from: StageFrom;
 }
 
 export const staged = writable<StagedPanel[]>([]);
 
 /**
- * Opens a staged panel. Every side (`right` / `bottom`) holds at most one —
- * they are all rendered at the same fixed position, so more than one per
- * side would silently stack on top of each other. Opening the same `type` +
- * `config.path` again (e.g. clicking "Open" repeatedly) is a no-op: the
- * existing panel is left exactly as it is, since a mounted module's context
- * only ever pushes config *out* to the store (see `registry.createContext`),
- * so there is nothing to usefully overwrite. Opening something else on an
- * occupied side replaces it with a freshly mounted panel.
+ * Opens a staged panel. At most one is ever open — every panel renders at
+ * the same fixed position, so a second one would silently stack on top of
+ * the first. Opening the same `type` + `config.path` again (e.g. clicking
+ * "Open" repeatedly) is a no-op: the existing panel is left exactly as it
+ * is, since a mounted module's context only ever pushes config *out* to the
+ * store (see `registry.createContext`), so there is nothing to usefully
+ * overwrite. Opening anything else replaces whatever is currently staged
+ * with a freshly mounted panel.
  */
-export function openStaged(
-  type: string,
-  config: Record<string, unknown> = {},
-  from: StageFrom = "right",
-): StagedPanel | null {
+export function openStaged(type: string, config: Record<string, unknown> = {}): StagedPanel | null {
   const def = getModule(type);
   if (!def?.stageable) return null;
 
-  const existing = get(staged).find((p) => p.from === from);
+  const existing = get(staged)[0];
   if (existing && existing.type === type && samePath(existing.config, config)) {
     return existing;
   }
 
-  const panel: StagedPanel = { id: crypto.randomUUID(), type, config, from };
-  staged.update((list) => [...list.filter((p) => p.from !== from), panel]);
+  const panel: StagedPanel = { id: crypto.randomUUID(), type, config };
+  staged.set([panel]);
   return panel;
 }
 

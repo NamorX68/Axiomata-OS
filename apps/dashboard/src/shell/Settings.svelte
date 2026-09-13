@@ -1,8 +1,9 @@
 <!--
-  Settings dialog: built-in theme picker (applies instantly, persists via
-  the theme store), custom-CSS status with reload / copy-template, the
-  editable Vault path + model-provider config (both persisted through
-  `save_config`), and the read-only app facts (version).
+  Settings dialog, in four tabs (chrome is the shared `Window.svelte`):
+  Darstellung (theme, canvas options, window-transparency slider, custom
+  CSS), Workspace (vault path), KI-Provider (provider config + role
+  assignment + spend), Über (read-only app facts). Was one long scrolling
+  body before this — split into tabs once it grew past ~9 sections.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -17,12 +18,22 @@
     invokeBackend,
   } from "../core/backend";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
-  import { activeTheme, showGrid, snapEdges } from "../core/stores";
+  import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
   import { THEMES, applyTheme } from "../core/themes";
   import { toast } from "../core/toast";
   import { TEMPLATE } from "../theme/validator";
+  import Window from "./Window.svelte";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
+
+  type TabId = "appearance" | "workspace" | "providers" | "about";
+  const TABS: { id: TabId; label: string }[] = [
+    { id: "appearance", label: "Darstellung" },
+    { id: "workspace", label: "Workspace" },
+    { id: "providers", label: "KI-Provider" },
+    { id: "about", label: "Über" },
+  ];
+  let tab = $state<TabId>("appearance");
 
   let info = $state<AppInfo | null>(null);
   let reloading = $state(false);
@@ -234,10 +245,6 @@
     }
   }
 
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") open = false;
-  }
-
   onMount(async () => {
     try {
       info = await invokeBackend<AppInfo>("get_app_info");
@@ -249,25 +256,22 @@
   });
 </script>
 
-<svelte:window onkeydown={open ? onKeydown : undefined} />
-
 {#if open}
-  <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="overlay" onclick={() => (open = false)}>
-    <div
-      class="dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-title"
-      tabindex="-1"
-      onclick={(e) => e.stopPropagation()}
-    >
-      <header>
-        <h2 id="settings-title">Settings</h2>
-        <button type="button" class="close" aria-label="Close" onclick={() => (open = false)}>×</button>
-      </header>
+  <Window
+    title="Settings"
+    onClose={() => (open = false)}
+    style="width: min(620px, calc(100vw - 2 * var(--ax-space-5))); max-height: calc(100vh - 2 * var(--ax-space-5));"
+  >
+    <nav class="tabs">
+      {#each TABS as t (t.id)}
+        <button type="button" class="tab" class:active={tab === t.id} onclick={() => (tab = t.id)}>
+          {t.label}
+        </button>
+      {/each}
+    </nav>
 
-      <div class="body">
+    <div class="body">
+      {#if tab === "appearance"}
         <section>
           <h3>Theme</h3>
           <ul class="themes">
@@ -297,6 +301,38 @@
           <label class="opt"><input type="checkbox" bind:checked={$snapEdges} /> Magnetic edges <span class="hint">(tiles stick to their neighbours within 8 px)</span></label>
         </section>
 
+        <section>
+          <h3>Transparenz</h3>
+          <label class="row">
+            <span class="label">Fenster-Transparenz</span>
+            <input type="range" min="0" max="100" step="5" bind:value={$windowTransparency} />
+            <span class="readout">{$windowTransparency}%</span>
+          </label>
+          <p class="hint">
+            Wie durchsichtig Fenster, Dialoge und gezogene Kacheln wirken — 0% eine deckende Fläche,
+            100% vollständig durchsichtig, 50% der unveränderte Standard-Look des jeweiligen Themes.
+          </p>
+        </section>
+
+        <section>
+          <h3>Custom CSS</h3>
+          <p class="status {$customTheme.status}">{$customTheme.message || "Not loaded."}</p>
+          {#if $customTheme.errors.length > 0}
+            <ul class="errors">
+              {#each $customTheme.errors as e, i (i)}
+                <li><code>{e.rule}</code>{#if e.property} · <code>{e.property}</code>{/if} — {e.message}</li>
+              {/each}
+            </ul>
+          {/if}
+          <div class="actions">
+            <button type="button" disabled={reloading} onclick={reload}>{reloading ? "Reloading…" : "Reload custom CSS"}</button>
+            <button type="button" onclick={copyTemplate}>Copy template</button>
+          </div>
+          {#if showTemplate}
+            <textarea readonly rows="8" spellcheck="false">{TEMPLATE}</textarea>
+          {/if}
+        </section>
+      {:else if tab === "workspace"}
         {#if config}
           <section>
             <h3>Vault</h3>
@@ -311,7 +347,9 @@
               </button>
             </div>
           </section>
-
+        {/if}
+      {:else if tab === "providers"}
+        {#if config}
           <section>
             <h3>Provider bearbeiten</h3>
             <p class="lead">
@@ -466,26 +504,7 @@
             </div>
           </section>
         {/if}
-
-        <section>
-          <h3>Custom CSS</h3>
-          <p class="status {$customTheme.status}">{$customTheme.message || "Not loaded."}</p>
-          {#if $customTheme.errors.length > 0}
-            <ul class="errors">
-              {#each $customTheme.errors as e, i (i)}
-                <li><code>{e.rule}</code>{#if e.property} · <code>{e.property}</code>{/if} — {e.message}</li>
-              {/each}
-            </ul>
-          {/if}
-          <div class="actions">
-            <button type="button" disabled={reloading} onclick={reload}>{reloading ? "Reloading…" : "Reload custom CSS"}</button>
-            <button type="button" onclick={copyTemplate}>Copy template</button>
-          </div>
-          {#if showTemplate}
-            <textarea readonly rows="8" spellcheck="false">{TEMPLATE}</textarea>
-          {/if}
-        </section>
-
+      {:else if tab === "about"}
         <section>
           <h3>About</h3>
           {#if info}
@@ -496,53 +515,41 @@
             </dl>
           {/if}
         </section>
-      </div>
+      {/if}
     </div>
-  </div>
+  </Window>
 {/if}
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    z-index: var(--ax-z-dialog);
-    display: grid;
-    place-items: center;
-    background: var(--ax-overlay);
-  }
-  .dialog {
-    width: min(620px, calc(100vw - 2 * var(--ax-space-5)));
-    max-height: calc(100vh - 2 * var(--ax-space-5));
+  .tabs {
     display: flex;
-    flex-direction: column;
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border-strong);
-    border-radius: var(--ax-radius-lg);
-    box-shadow: var(--ax-shadow-pop);
-  }
-  header {
-    display: flex;
-    align-items: center;
-    padding: var(--ax-space-3) var(--ax-space-4);
+    gap: var(--ax-space-1);
+    padding: 0 var(--ax-space-4);
     border-bottom: 1px solid var(--ax-border);
+    flex: 0 0 auto;
   }
-  h2 {
-    flex: 1 1 auto;
+  .tab {
+    padding: var(--ax-space-2) var(--ax-space-3);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: var(--ax-text-muted);
     font-size: var(--ax-font-size-sm);
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
   }
-  .close {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    line-height: 1;
-    background: transparent;
-    border-color: transparent;
-    color: var(--ax-text-muted);
+  .tab:hover:not(.active) {
+    color: var(--ax-text);
+  }
+  .tab.active {
+    color: var(--ax-accent);
+    border-bottom-color: var(--ax-accent);
   }
 
   .body {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: auto;
     padding: var(--ax-space-3) var(--ax-space-4) var(--ax-space-4);
     display: flex;
@@ -626,6 +633,27 @@
   .hint {
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-sm);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    font-size: var(--ax-font-size-sm);
+    margin-bottom: var(--ax-space-1);
+  }
+  .row .label {
+    flex: 0 0 auto;
+  }
+  .row input[type="range"] {
+    flex: 1 1 auto;
+    accent-color: var(--ax-accent);
+  }
+  .readout {
+    min-width: 40px;
+    text-align: right;
+    font-size: var(--ax-font-size-xs);
+    color: var(--ax-text-muted);
   }
 
   .lead {

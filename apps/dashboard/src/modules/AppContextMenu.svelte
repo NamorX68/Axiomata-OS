@@ -63,10 +63,18 @@
     z-index: var(--ax-z-dialog);
     min-width: 160px;
     padding: var(--ax-space-2);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border-strong);
+    /* Same glass/hairline/elevated-shadow language as Window.svelte and
+       every other panel — a plain rgba surface + full border would read as
+       the "classic dialog" look everything else just moved away from. Not
+       wrapped in Window.svelte itself: this has no header/title/close-
+       button shape at all, just the "Entfernen" action(s). */
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    border: none;
+    border-bottom: 2px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-md);
-    box-shadow: var(--ax-shadow-pop);
+    box-shadow: var(--ax-shadow-drag);
   }
 
   .item {

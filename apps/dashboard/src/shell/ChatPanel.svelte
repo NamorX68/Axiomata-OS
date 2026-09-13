@@ -1,27 +1,37 @@
 <!--
   The chat transcript: slides up from bottom-centre above the assistant bar.
   Assistant / instruction turns render as Markdown (core/markdown); user
-  turns as text. Auto-scrolls to the newest turn.
+  turns as text. Auto-scrolls to the newest turn. Chrome is the shared
+  `Window.svelte` (`modal={false}` — no scrim, this panel never blocks
+  interaction with the rest of the app); `.chat-wrap` below owns the fixed
+  bottom-centre positioning and the slide-in transition, exactly the split
+  `Window.svelte`'s own doc comment describes.
 -->
 <script lang="ts">
   import { cubicOut } from "svelte/easing";
-  import { fly } from "svelte/transition";
+  import type { TransitionConfig } from "svelte/transition";
 
   const SLIDE_MS = 560;
 
+  /** Same technique as `StagingLayer.svelte`'s `slide()` — a plain `fly`
+   *  can't be used because `.chat-wrap` is horizontally centred with
+   *  `transform: translateX(-50%)`, and Svelte's `fly` *replaces* the
+   *  element transform for the duration, which would knock the panel
+   *  off-centre mid-animation (this panel used to do exactly that, via a
+   *  bare `fly`, before it shared `Window.svelte`'s chrome). */
+  function slide(_node: Element): TransitionConfig {
+    return {
+      duration: SLIDE_MS,
+      easing: cubicOut,
+      css: (t, u) => `opacity: ${t}; transform: translate(-50%, ${u * 420}px)`,
+    };
+  }
+
   import { busy, newSession, panelOpen, sessionId, turns } from "../core/chat";
   import { renderMarkdown } from "../core/markdown";
+  import Window from "./Window.svelte";
 
   let list = $state<HTMLDivElement | null>(null);
-
-  // Escape closes the chat — unless a staged panel / the Second Brain
-  // already consumed it (they mark the event).
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && !e.defaultPrevented && $panelOpen) {
-      e.preventDefault();
-      panelOpen.set(false);
-    }
-  }
 
   $effect(() => {
     void $turns.length;
@@ -30,36 +40,36 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
-
 {#if $panelOpen}
-  <section class="chat" transition:fly={{ y: 420, duration: SLIDE_MS, easing: cubicOut }} aria-label="Chat">
-    <header>
-      <h2>Agent</h2>
-      <span class="session">{$sessionId ? `session ${$sessionId.slice(0, 8)}…` : "new session"}</span>
-      <button type="button" onclick={newSession} disabled={$busy || $turns.length === 0}>New session</button>
-      <button type="button" class="close" aria-label="Close chat" onclick={() => panelOpen.set(false)}>×</button>
-    </header>
-    <div class="turns" bind:this={list}>
-      {#each $turns as t (t.id)}
-        <article class="turn {t.role}">
-          {#if t.role === "user"}
-            <p>{t.text}</p>
-          {:else}
-            <div class="md">{@html renderMarkdown(t.text)}</div>
-            {#if t.costUsd != null}<span class="cost">${t.costUsd.toFixed(4)}</span>{/if}
-          {/if}
-        </article>
-      {/each}
-      {#if $busy}
-        <article class="turn assistant thinking"><span class="dots"><i></i><i></i><i></i></span></article>
-      {/if}
-    </div>
-  </section>
+  <div class="chat-wrap" transition:slide>
+    <Window title="Agent" modal={false} onClose={() => panelOpen.set(false)} style="width: 100%; height: 100%;">
+      {#snippet headerExtra()}
+        <span class="session">{$sessionId ? `session ${$sessionId.slice(0, 8)}…` : "new session"}</span>
+        <button type="button" class="new-session" onclick={newSession} disabled={$busy || $turns.length === 0}>
+          New session
+        </button>
+      {/snippet}
+      <div class="turns" bind:this={list}>
+        {#each $turns as t (t.id)}
+          <article class="turn {t.role}">
+            {#if t.role === "user"}
+              <p>{t.text}</p>
+            {:else}
+              <div class="md">{@html renderMarkdown(t.text)}</div>
+              {#if t.costUsd != null}<span class="cost">${t.costUsd.toFixed(4)}</span>{/if}
+            {/if}
+          </article>
+        {/each}
+        {#if $busy}
+          <article class="turn assistant thinking"><span class="dots"><i></i><i></i><i></i></span></article>
+        {/if}
+      </div>
+    </Window>
+  </div>
 {/if}
 
 <style>
-  .chat {
+  .chat-wrap {
     position: fixed;
     left: 50%;
     bottom: 64px;
@@ -69,44 +79,17 @@
        short-but-wide 21:9 display still gets a usable-height panel. */
     height: 56vh;
     z-index: var(--ax-z-assistant);
-    display: flex;
-    flex-direction: column;
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border-strong);
-    border-radius: var(--ax-radius-lg);
-    box-shadow: var(--ax-shadow-pop);
   }
 
-  header {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-3);
-    padding: var(--ax-space-2) var(--ax-space-3);
-    border-bottom: 1px solid var(--ax-border);
-    flex: 0 0 auto;
-  }
-  h2 {
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
-  }
   .session {
     flex: 1 1 auto;
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-sm);
     color: var(--ax-text-muted);
   }
-  header button {
+  .new-session {
     font-size: var(--ax-font-size-sm);
     padding: 1px var(--ax-space-2);
-  }
-  .close {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    background: transparent;
-    border-color: transparent;
-    color: var(--ax-text-muted);
   }
 
   .turns {

@@ -13,10 +13,6 @@
     const clean = pathInput.trim();
     if (clean) config.update((c) => ({ ...c, path: clean, mode: "read" }));
   }
-  function setStageFrom(e: Event) {
-    const value = (e.currentTarget as HTMLSelectElement).value;
-    config.update((c) => ({ ...c, stageFrom: value }));
-  }
 </script>
 
 <div class="settings">
@@ -27,13 +23,6 @@
       <button type="submit">Open</button>
     </div>
   </form>
-  <label class="row">
-    Stage from
-    <select value={$config.stageFrom === "bottom" ? "bottom" : "right"} onchange={setStageFrom}>
-      <option value="right">right</option>
-      <option value="bottom">bottom</option>
-    </select>
-  </label>
 </div>
 
 <style>
@@ -57,13 +46,5 @@
     flex: 1 1 auto;
     min-width: 0;
     font-family: var(--ax-font-mono);
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-  }
-  .row select {
-    margin-left: auto;
   }
 </style>

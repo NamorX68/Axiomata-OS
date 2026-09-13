@@ -369,7 +369,7 @@
   }
 
   function viewFile(path: string) {
-    openStaged("md-file", { path, mode: "read" }, "right");
+    openStaged("md-file", { path, mode: "read" });
   }
 
   // --- delete (two-step, destructive) ---
@@ -839,10 +839,15 @@
     flex-direction: column;
     gap: var(--ax-space-3);
     padding: var(--ax-space-3);
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border-strong);
+    /* Same glass/hairline/elevated-shadow language as Window.svelte and
+       every other panel in the app. */
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    border: none;
+    border-bottom: 2px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-lg);
-    box-shadow: var(--ax-shadow-pop);
+    box-shadow: var(--ax-shadow-drag);
     font-size: var(--ax-font-size-sm);
   }
   .controls-head {
@@ -1007,10 +1012,15 @@
     max-height: calc(100vh - 100px);
     overflow: auto;
     padding: var(--ax-space-4) var(--ax-space-5) var(--ax-space-5);
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border-strong);
+    /* Same glass/hairline/elevated-shadow language as Window.svelte and
+       every other panel in the app. */
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    border: none;
+    border-bottom: 2px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-lg);
-    box-shadow: var(--ax-shadow-pop);
+    box-shadow: var(--ax-shadow-drag);
     font-size: var(--ax-font-size-base);
     line-height: 1.6;
   }
@@ -1031,6 +1041,10 @@
     line-height: 1.25;
     word-break: break-word;
   }
+  /* Hover/focus-reveal like Window.svelte and canvas/Tile.svelte's front
+     face — was permanently visible before, which is also why the panel
+     read as an unchanged classic card despite the glass background below
+     already being in place. */
   .close {
     position: absolute;
     top: 0;
@@ -1042,6 +1056,16 @@
     border-color: transparent;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-lg);
+    opacity: 0;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+  .detail:hover .close,
+  .detail:focus-within .close {
+    opacity: 1;
+  }
+  .close:hover:not(:disabled) {
+    color: var(--ax-text);
+    background: var(--ax-surface-3);
   }
   .tag {
     padding: 1px var(--ax-space-2);
