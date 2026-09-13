@@ -205,7 +205,11 @@ export function areaColor(name: string, light: boolean): string {
   return light ? `hsl(${hue % 360} 55% 42%)` : `hsl(${hue % 360} 70% 68%)`;
 }
 
-const AREA_GAP = 0.06; // radians between segments
+// Owner feedback (2026-09-13): bumped from 0.06 once the area nodes'
+// own circles grew (see the hub's `r` comment above) and started sitting
+// closer together at the segment midpoints this gap also drives (see
+// `layout.ts`'s area-node placement).
+const AREA_GAP = 0.1; // radians between segments
 /** Free angle around 12 o'clock for the ring captions. */
 export const CAPTION_GAP = 0.26;
 
@@ -282,12 +286,13 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     bytes: 0,
     x: 0,
     y: 0,
-    // Owner feedback (2026-09-13, two rounds): the hub and the skills ring
-    // around it — the Second Brain's innermost nodes — kept reading a bit
-    // small next to their icon-font glyph (`render.ts`'s `drawGlyph` sizes
-    // off this same `r`); bumped up again from the first pass's 15. Areas
-    // (8) and routines (8), further out, are untouched — the ask was
-    // specifically about the inner area.
+    // Owner feedback (2026-09-13, three rounds): every structural node's
+    // circle read a bit small next to its icon-font glyph (`render.ts`'s
+    // `drawGlyph` sizes off this same `r`) — hub/skill first (rounds 1-2,
+    // since those were called out first), area/routine caught up to match
+    // once the mismatch against the still-small outer rings was pointed
+    // out (round 3, see their own `r` below). Only `file` (the point-cloud
+    // dots, sized by byte count, not by kind) is unaffected.
     r: 18,
     color: palette.text,
     phase: 0,
@@ -335,7 +340,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       bytes: a.count,
       x: 0,
       y: 0,
-      r: 8,
+      r: 13, // see the hub's own `r` comment above
       color: a.color,
       phase: phase(a.name),
       degree: 0,
@@ -372,7 +377,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       enabled: r.enabled,
       x: 0,
       y: 0,
-      r: 8,
+      r: 13, // see the hub's own `r` comment above
       color: palette.warning,
       phase: phase(r.name),
       degree: 0,
