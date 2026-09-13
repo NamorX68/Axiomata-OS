@@ -1,11 +1,15 @@
 <!--
-  terminal — Checkpoint 1 of docs/plans/terminal.md: the full pipeline
-  (axiomata-terminal's PtySession -> the four Tauri IPC commands in
-  src-tauri/src/terminal.rs -> this tile) wired end-to-end, still with no
-  ANSI/screen-model awareness. Every output chunk arrives over a Tauri
-  `Channel` and is appended as raw text to a scrolling `<pre>` — escape
-  sequences render as visible garbage for now, fixed once there's a real
-  screen model to draw from (Checkpoint 2/3), not a bug at this checkpoint.
+  terminal — Checkpoint 2 of docs/plans/terminal.md: output is no longer raw
+  bytes. `axiomata-terminal`'s `Terminal` (a `vte` parser + a `Screen` cell
+  grid) interprets the shell's escape sequences server-side, and every
+  update replaces this tile's `<pre>` content with the *current* screen's
+  plain text (one join('\n') of `Screen::to_lines()`), not an append of
+  what just arrived — the model, not the byte stream, is the source of
+  truth for what's on screen, so a redraw (cursor move + overwrite, erase,
+  …) just looks like a redraw instead of leftover text underneath it. Still
+  no colour/attributes and no visible cursor — the screen model tracks both
+  already, but drawing them is Checkpoint 3's canvas renderer; this interim
+  `<pre>` only prints characters.
 
   Input has no local echo: keystrokes are forwarded to the shell as bytes
   (via the hidden-ish text field below, which is cleared on every native
@@ -46,8 +50,13 @@
   const MIN_ROWS = 4;
   const MIN_COLS = 20;
 
-  /** Mirrors the backend's `TerminalEvent` (`src-tauri/src/terminal.rs`). */
-  type TerminalEvent = { type: "data"; bytes: number[] } | { type: "exited" };
+  /** Mirrors the backend's `TerminalEvent` (`src-tauri/src/terminal.rs`).
+   *  Field names are snake_case, not camelCase: this rides over a raw
+   *  `Channel` payload, not a `#[tauri::command]` argument list, so none of
+   *  `invoke`'s usual camelCase<->snake_case bridging applies here. */
+  type TerminalEvent =
+    | { type: "screen"; lines: string[]; cursor_row: number; cursor_col: number }
+    | { type: "exited" };
 
   let root = $state<HTMLDivElement>();
   let outputEl = $state<HTMLPreElement>();
@@ -56,7 +65,6 @@
   let error = $state("");
   let sessionId: string | null = null;
 
-  const decoder = new TextDecoder();
   const encoder = new TextEncoder();
 
   function cellsFor(width: number, height: number): { rows: number; cols: number } {
@@ -74,7 +82,10 @@
 
   /** The shell is gone (told us so via a `TerminalEvent.exited`, or a write
    *  against it just failed, which means the same thing) — stop treating
-   *  `sessionId` as live and say so inline, calmly, like a real terminal. */
+   *  `sessionId` as live and say so, calmly, like a real terminal. There's
+   *  no further screen snapshot coming once this fires, so appending to
+   *  whatever `output` currently holds (the last real snapshot) rather than
+   *  replacing it is safe and permanent, not just until the next update. */
   function markEnded(): void {
     if (!sessionId) return;
     sessionId = null;
@@ -97,8 +108,10 @@
         markEnded();
         return;
       }
-      output += decoder.decode(new Uint8Array(event.bytes));
-      scrollToEnd(); // keep the view pinned to the latest output
+      // Replace, not append: `event.lines` is the *whole* current screen,
+      // not a new chunk — see the component doc comment.
+      output = event.lines.join("\n");
+      scrollToEnd();
     };
 
     try {

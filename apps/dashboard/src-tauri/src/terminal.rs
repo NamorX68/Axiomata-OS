@@ -1,11 +1,16 @@
 //! Tauri glue for the Terminal module: a small session registry plus the
 //! four IPC commands the frontend calls (`terminal_spawn`/`_write`/
-//! `_resize`/`_close`). All PTY/terminal logic lives in the standalone
-//! `axiomata-terminal` crate — this file only translates between Tauri IPC
-//! and that crate's `PtySession`, the same translation-only role
+//! `_resize`/`_close`). All PTY/ANSI/screen logic lives in the standalone
+//! `axiomata-terminal` crate (`PtySession` for the shell process,
+//! `Terminal` for interpreting its output) — this file only translates
+//! between Tauri IPC and those two types, the same translation-only role
 //! `commands.rs` plays for `axiomata-core` (see this crate's own doc
-//! comment). Checkpoint 1 of `docs/plans/terminal.md`: plain bytes over the
-//! wire, no ANSI/screen-model awareness here or in the frontend yet.
+//! comment).
+//!
+//! Checkpoint 2 of `docs/plans/terminal.md`: each session now owns a
+//! `Terminal` alongside its `PtySession`, so what reaches the frontend is
+//! an interpreted screen snapshot (plain text per row, cursor position),
+//! not raw bytes — see `TerminalEvent`.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -13,7 +18,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
-use axiomata_terminal::PtySession;
+use axiomata_terminal::{PtySession, Terminal};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -24,19 +29,36 @@ use tauri::{AppHandle, Manager, State};
 /// forwarding bytes, so the tile looked frozen rather than closed, and the
 /// *next* keystroke's `terminal_write` against the now-dead session turned
 /// an entirely ordinary `exit` into a hard error (architecture review,
-/// Checkpoint 1). `Exited` is that missing signal; `Data` is the same raw
-/// bytes as before, just tagged.
+/// Checkpoint 1). `Exited` is that missing signal.
+///
+/// `Screen` replaces Checkpoint 1's raw `Data { bytes }` now that there's an
+/// actual screen model (`axiomata_terminal::Terminal`) to read instead of
+/// forwarding bytes untouched: `lines` is the interpreted plain text per
+/// row (no colour/attributes yet — the frontend just replaces its `<pre>`
+/// content with it), `cursor_row`/`cursor_col` the current cursor position
+/// (unused by the frontend until Checkpoint 3 draws one).
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalEvent {
-    Data {
-        bytes: Vec<u8>,
+    Screen {
+        lines: Vec<String>,
+        cursor_row: u16,
+        cursor_col: u16,
     },
     /// The shell process ended (on its own, or the PTY tore down) — not an
     /// error, and not something `terminal_write`/`_resize` should still be
     /// called against. Sent exactly once, after the registry entry for this
     /// session has already been removed.
     Exited,
+}
+
+/// One running session: the PTY/shell process, and the screen model that
+/// interprets its output. Kept together so a single registry lookup (and a
+/// single `Mutex` lock) reaches both — `terminal_resize` in particular needs
+/// to resize each in step.
+struct Session {
+    pty: PtySession,
+    terminal: Terminal,
 }
 
 /// Tauri-managed registry of running terminal sessions, keyed by the id
@@ -46,7 +68,7 @@ pub enum TerminalEvent {
 /// dropped at app exit) kills the shell immediately.
 #[derive(Default)]
 pub struct TerminalSessions {
-    sessions: Mutex<HashMap<String, PtySession>>,
+    sessions: Mutex<HashMap<String, Session>>,
 }
 
 impl TerminalSessions {
@@ -56,7 +78,7 @@ impl TerminalSessions {
     /// can't leave it memory-unsafe, only possibly short one insert, and for
     /// a personal desktop app degrading one terminal beats taking the whole
     /// process down.
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, PtySession>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Session>> {
         self.sessions
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -73,10 +95,21 @@ fn next_session_id() -> String {
     format!("term-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-/// Spawns a new shell session in a `rows`x`cols` PTY and streams its raw
-/// output to `on_output` as `TerminalEvent::Data` chunks, unmodified (no
-/// ANSI interpretation until Checkpoint 2). Returns the new session's id,
-/// passed back into every other command below.
+/// A session's current screen as a `TerminalEvent::Screen`.
+fn screen_event(terminal: &Terminal) -> TerminalEvent {
+    let screen = terminal.screen();
+    let (cursor_row, cursor_col) = screen.cursor();
+    TerminalEvent::Screen {
+        lines: screen.to_lines(),
+        cursor_row,
+        cursor_col,
+    }
+}
+
+/// Spawns a new shell session in a `rows`x`cols` PTY and streams interpreted
+/// screen snapshots to `on_output` (no raw bytes — see `TerminalEvent`).
+/// Returns the new session's id, passed back into every other command
+/// below.
 ///
 /// The read loop runs on its own thread — `PtySession::try_clone_reader`'s
 /// reader blocks, so this is the same threading choice `term-poc` already
@@ -102,28 +135,37 @@ pub fn terminal_spawn(
     cols: u16,
     on_output: Channel<TerminalEvent>,
 ) -> Result<String, String> {
-    let session = PtySession::spawn(rows, cols).map_err(|err| err.to_string())?;
-    let mut reader = session.try_clone_reader().map_err(|err| err.to_string())?;
+    let pty = PtySession::spawn(rows, cols).map_err(|err| err.to_string())?;
+    let mut reader = pty.try_clone_reader().map_err(|err| err.to_string())?;
+    let terminal = Terminal::new(rows, cols);
 
     let id = next_session_id();
-    sessions.lock().insert(id.clone(), session);
+    sessions
+        .lock()
+        .insert(id.clone(), Session { pty, terminal });
 
     let closing_id = id.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 4096];
         loop {
-            match reader.read(&mut buf) {
+            let n = match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if on_output
-                        .send(TerminalEvent::Data {
-                            bytes: buf[..n].to_vec(),
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
+                Ok(n) => n,
+            };
+            // Feeding the bytes and reading the resulting snapshot both
+            // need the same session, so this holds the registry lock for
+            // the whole step — brief (in-memory grid updates only, no I/O
+            // under the lock) and not contended by anything long-running.
+            let sessions = app.state::<TerminalSessions>();
+            let mut guard = sessions.lock();
+            let Some(session) = guard.get_mut(&closing_id) else {
+                break;
+            };
+            session.terminal.feed(&buf[..n]);
+            let event = screen_event(&session.terminal);
+            drop(guard);
+            if on_output.send(event).is_err() {
+                break;
             }
         }
         app.state::<TerminalSessions>().lock().remove(&closing_id);
@@ -147,12 +189,13 @@ pub fn terminal_write(
     let session = guard
         .get_mut(&id)
         .ok_or_else(|| format!("no terminal session {id:?}"))?;
-    session.write(&data).map_err(|err| err.to_string())
+    session.pty.write(&data).map_err(|err| err.to_string())
 }
 
-/// Resizes a session's PTY (tile resize -> `SIGWINCH` for the shell). Same
-/// error convention as `terminal_write`: an unknown `id` is a real error,
-/// not a silent no-op.
+/// Resizes a session's PTY (tile resize -> `SIGWINCH` for the shell) and its
+/// screen model together, so the two stay in agreement about how big the
+/// terminal is. Same error convention as `terminal_write`: an unknown `id`
+/// is a real error, not a silent no-op.
 #[tauri::command]
 pub fn terminal_resize(
     sessions: State<'_, TerminalSessions>,
@@ -164,7 +207,12 @@ pub fn terminal_resize(
     let session = guard
         .get_mut(&id)
         .ok_or_else(|| format!("no terminal session {id:?}"))?;
-    session.resize(rows, cols).map_err(|err| err.to_string())
+    session
+        .pty
+        .resize(rows, cols)
+        .map_err(|err| err.to_string())?;
+    session.terminal.resize(rows, cols);
+    Ok(())
 }
 
 /// Ends a session: drops its `PtySession` (whose own `Drop` kills and reaps
@@ -223,9 +271,12 @@ mod tests {
     #[test]
     fn insert_find_then_remove_round_trips_a_session() {
         let sessions = TerminalSessions::default();
-        let session = PtySession::spawn(24, 80).expect("failed to spawn pty session for test");
+        let pty = PtySession::spawn(24, 80).expect("failed to spawn pty session for test");
+        let terminal = Terminal::new(24, 80);
 
-        sessions.lock().insert("term-test".to_string(), session);
+        sessions
+            .lock()
+            .insert("term-test".to_string(), Session { pty, terminal });
         assert!(sessions.lock().contains_key("term-test"));
 
         let removed = sessions.lock().remove("term-test");
@@ -266,5 +317,26 @@ mod tests {
         // `lock()` must recover the poisoned guard rather than propagating
         // the panic to this (unrelated) caller.
         assert!(sessions.lock().is_empty());
+    }
+
+    /// `screen_event` reads straight off a `Terminal`'s current screen — no
+    /// PTY needed, so this is where the plain-text/cursor snapshot logic
+    /// itself is checked, rather than only exercising it indirectly through
+    /// a spawned shell.
+    #[test]
+    fn screen_event_reflects_fed_bytes_and_cursor_position() {
+        let mut terminal = Terminal::new(2, 5);
+        terminal.feed(b"hi");
+
+        let TerminalEvent::Screen {
+            lines,
+            cursor_row,
+            cursor_col,
+        } = screen_event(&terminal)
+        else {
+            panic!("expected a Screen event");
+        };
+        assert_eq!(lines, vec!["hi   ".to_string(), "     ".to_string()]);
+        assert_eq!((cursor_row, cursor_col), (0, 2));
     }
 }

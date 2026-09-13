@@ -7,6 +7,8 @@ description = "Standalone PTY + terminal-emulation engine — no Tauri/axiomata-
 
 [dependencies]
 portable-pty.workspace = true
+vte.workspace = true
+unicode-width.workspace = true
 
 [[bin]]
 name = "term-poc"

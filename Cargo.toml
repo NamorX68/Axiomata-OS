@@ -39,3 +39,13 @@ base64 = "0.22"
 # teach little about *terminals* specifically and is a real unsafe-syscall
 # footgun — see docs/plans/terminal.md's technology-choice table.
 portable-pty = "0.9"
+# ANSI/VT100 escape-sequence parser for the `axiomata-terminal` engine crate
+# (Checkpoint 2) — the same crate Alacritty uses. Tokenizing escape
+# sequences is fiddly and error-prone but teaches little about terminal
+# *behavior*; what a parsed event does to the screen model is all our own
+# code. Default features only (`std`) — no `ansi`/`serde` support needed.
+vte = "0.15"
+# Display width (1/2 cells) of a Unicode scalar value, for the screen grid's
+# CJK/emoji handling (Checkpoint 2) — a lookup-table problem with no
+# terminal-specific insight to gain from reimplementing it.
+unicode-width = "0.2"
