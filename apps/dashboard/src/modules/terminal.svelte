@@ -16,41 +16,53 @@
   own clock — but only at `scrollOffset === 0`; scrolled into history,
   there's no live edit point to point at.
 
-  Checkpoint 5b, Block A added `config.cwd`/`config.env`/`config.scrollbackLimit`
+  Checkpoint 5d moved every setting mentioned below from `ctx.config` (this
+  tile's own per-instance config, `dashboard.json`) to `terminalSettings`
+  (`./terminalSettings.ts`) — one global preferences store shared by every
+  placed Terminal tile, persisted in its own `terminal-settings.json`.
+  Owner feedback that motivated the move: closing/removing a tile used to
+  discard every setting on it. `spawn()` `await`s
+  `ensureTerminalSettingsLoaded()` before reading any of them — the fetch
+  is async, and reading empty defaults because it hadn't resolved yet would
+  silently ignore real saved preferences on the very first spawn after app
+  boot. Everywhere else below just reads `$terminalSettings` directly
+  (Svelte's store auto-subscription), same as it read `$config` before.
+
+  Checkpoint 5b, Block A added `terminalSettings.cwd`/`terminalSettings.env`/`terminalSettings.scrollbackLimit`
   — a starting working directory, extra environment variables (parsed from a
   `KEY=value`-per-line textarea by `terminalEnv.parseEnvLines`), and a
-  scrollback-size override. Read once in `spawn()`, same as `config.shell`:
+  scrollback-size override. Read once in `spawn()`, same as `terminalSettings.shell`:
   none of the four can be applied to an already-running session, only to
   the next one spawned.
 
   Checkpoint 5b, Block B added six purely visual settings, all read fresh
-  every `tick()`/`currentFont()` call (like `config.fontSizePx` already
+  every `tick()`/`currentFont()` call (like `terminalSettings.fontSizePx` already
   was) rather than needing their own `$effect`, since nothing about them
   requires a resize or a fresh spawn to take effect: cursor style
-  (`config.cursorStyle` — `currentCursorStyle()`) and blink on/off
-  (`config.cursorBlink`), a named 16-colour theme (`config.theme` —
+  (`terminalSettings.cursorStyle` — `currentCursorStyle()`) and blink on/off
+  (`terminalSettings.cursorBlink`), a named 16-colour theme (`terminalSettings.theme` —
   `currentPalette()`, see `terminalThemes.THEMES`), bold-as-bright-colour
-  (`config.boldIsBright`, on by default), a custom font family
-  (`config.fontFamily`, folded into `currentFont()` alongside the existing
-  `fontSizePx`), and background opacity (`config.opacity`, converted to
+  (`terminalSettings.boldIsBright`, on by default), a custom font family
+  (`terminalSettings.fontFamily`, folded into `currentFont()` alongside the existing
+  `fontSizePx`), and background opacity (`terminalSettings.opacity`, converted to
   `DrawOptions.backgroundOpacity` — applies only to a cell with no explicit
   background of its own, see that option's own doc comment in
   `TerminalScreen.ts`). The visual bell (`bell` on `TerminalEvent::Screen`,
   Checkpoint 5b) is the one exception that isn't purely visual on the wire —
   it flashes `.bell-flash` for `BELL_FLASH_MS` via `triggerBellFlash`,
-  togglable off with `config.bellEnabled`.
+  togglable off with `terminalSettings.bellEnabled`.
 
   Row/column count is genuinely measured (`TerminalScreen.measureChar`
   against the canvas's own resolved `--ax-font-mono`/`--ax-font-size-sm`, or
-  `config.fontSizePx` in its place once Checkpoint 5's settings side sets
+  `terminalSettings.fontSizePx` in its place once Checkpoint 5's settings side sets
   one — see `currentFont`). Both a tile drag (`ResizeObserver`) and a live
-  `config.fontSizePx` change (its own `$effect`) route through one
+  `terminalSettings.fontSizePx` change (its own `$effect`) route through one
   `scheduleResize` — debounced, so `terminal_resize` (which resizes the PTY,
   `SIGWINCH` for the shell, and the screen model together) only actually
   fires once things settle, and so the two triggers can't race each other
   into applying a stale size (architecture review: they used to debounce
   independently, and a resize timer already in flight could fire *after*,
-  and silently undo, an immediate font-size resize). `config.shell` (also
+  and silently undo, an immediate font-size resize). `terminalSettings.shell` (also
   Checkpoint 5) only applies to the *next* spawned session — there's
   no way to swap a shell under an already-running process — so it's just
   read once in `spawn()`, not watched.
@@ -101,13 +113,11 @@
   } from "./TerminalScreen";
   import { keyToBytes } from "./terminalInput";
   import { createSequenceGuard } from "./terminalScrollback";
+  import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
   import { DEFAULT_THEME, THEMES } from "./terminalThemes";
   import { parseEnvLines } from "./terminalEnv";
 
   let { ctx }: { ctx: ModuleContext } = $props();
-  // `ctx` is created once per mounted instance and never swapped.
-  // svelte-ignore state_referenced_locally
-  const config = ctx.config;
 
   const MIN_ROWS = 4;
   const MIN_COLS = 20;
@@ -183,7 +193,7 @@
 
   // Checkpoint 5b's visual bell: `true` for `BELL_FLASH_MS` after a
   // `TerminalEvent::Screen.bell` arrives, then auto-clears — see
-  // `triggerBellFlash`. Togglable off via `config.bellEnabled`.
+  // `triggerBellFlash`. Togglable off via `terminalSettings.bellEnabled`.
   let bellFlash = $state(false);
   let bellFlashTimeout: ReturnType<typeof setTimeout> | undefined;
   const BELL_FLASH_MS = 200;
@@ -209,37 +219,61 @@
 
   /** A plain CSS font shorthand (no weight — `TerminalScreen.draw` adds
    *  `"bold "` itself per cell) off the canvas's own resolved
-   *  `--ax-font-mono`/`--ax-font-size-sm` — or `config.fontSizePx`/
-   *  `config.fontFamily` (Checkpoint 5/5b's settings-side overrides,
+   *  `--ax-font-mono`/`--ax-font-size-sm` — or `terminalSettings.fontSizePx`/
+   *  `terminalSettings.fontFamily` (Checkpoint 5/5b's settings-side overrides,
    *  `terminal-settings.svelte`) in place of the theme's own size/family
    *  when set. Read fresh each call, matching `graph/render.ts`'s own
    *  per-frame `getComputedStyle` convention for the same reason: cheap,
-   *  and stays correct across a theme switch (or a config change) with no
-   *  extra wiring. */
+   *  and stays correct across a theme switch (or a `terminalSettings` change)
+   *  with no extra wiring. */
   function currentFont(): string {
     if (!canvasEl) return "13px monospace";
     const cs = getComputedStyle(canvasEl);
-    const size = typeof $config.fontSizePx === "number" ? `${$config.fontSizePx}px` : cs.fontSize;
-    const family = typeof $config.fontFamily === "string" && $config.fontFamily.trim() ? $config.fontFamily : cs.fontFamily;
+    const size = typeof $terminalSettings.fontSizePx === "number" ? `${$terminalSettings.fontSizePx}px` : cs.fontSize;
+    const family = typeof $terminalSettings.fontFamily === "string" && $terminalSettings.fontFamily.trim() ? $terminalSettings.fontFamily : cs.fontFamily;
     return `${size} ${family}`;
   }
 
-  /** `config.theme` (Checkpoint 5b's "Farbschema/Theme" setting) resolved
+  /** `terminalSettings.theme` (Checkpoint 5b's "Farbschema/Theme" setting) resolved
    *  to an actual 16-colour table — an unrecognized/stale name (or none
    *  set) falls back to `THEMES[DEFAULT_THEME]`, the original palette,
    *  rather than throwing or drawing with `undefined` colours. */
   function currentPalette(): readonly string[] {
-    const name = typeof $config.theme === "string" ? $config.theme : DEFAULT_THEME;
+    const name = typeof $terminalSettings.theme === "string" ? $terminalSettings.theme : DEFAULT_THEME;
     return THEMES[name] ?? THEMES[DEFAULT_THEME];
   }
 
-  /** `config.cursorStyle` (Checkpoint 5b) narrowed to a real `CursorStyle`
+  /** `terminalSettings.cursorStyle` (Checkpoint 5b) narrowed to a real `CursorStyle`
    *  — anything else (unset, a stale/typo'd value) falls back to
    *  `DEFAULT_CURSOR_STYLE`, the original shape. */
   function currentCursorStyle(): CursorStyle {
-    const raw = $config.cursorStyle;
+    const raw = $terminalSettings.cursorStyle;
     return raw === "outline" || raw === "underline" || raw === "bar" ? raw : DEFAULT_CURSOR_STYLE;
   }
+
+  /** `terminalSettings.opacity` (0-100) normalized to a 0-1 fraction — a
+   *  real `$derived` (not computed inline in `tick()`, which is a plain
+   *  function the animation loop calls, not a template expression) purely
+   *  for reuse/readability, not because anything else reads it.
+   *
+   *  Bug fix history: the canvas's own `backgroundOpacity` alone first
+   *  appeared to have no visible effect, because `.terminal`'s wrapper
+   *  `<div>` painted an opaque `--ax-surface-1` behind it — the exact
+   *  colour the canvas's own "default background" cells already paint, so
+   *  punching a transparent hole in the canvas only ever revealed an
+   *  identically-coloured div, not whatever's actually behind the tile.
+   *  The first fix also made `.terminal` itself translucent at the same
+   *  fraction (architecture review caught this): compositing two "over"
+   *  blends at the same alpha `O` stacks to an effective `O·(2−O)`, not
+   *  `O` — e.g. the slider's midpoint read as ~75% opaque, not 50%
+   *  see-through, even though both endpoints (fully opaque / fully
+   *  see-through) still looked correct. Fixed properly below: `.terminal`
+   *  is now unconditionally `background: transparent` (see its own CSS
+   *  comment) — only the canvas's per-cell alpha does any blending, so the
+   *  slider is linear across its whole range, not just at its ends. */
+  const backgroundOpacity = $derived(
+    typeof $terminalSettings.opacity === "number" ? Math.min(100, Math.max(0, $terminalSettings.opacity)) / 100 : 1,
+  );
 
   /** Measures the real character cell against the canvas (replacing
    *  Checkpoint 1's guessed average), sizes the canvas's backing store for
@@ -247,7 +281,7 @@
    *  `GraphRenderer.resize()`), and returns the row/column count that fits.
    *  Fetches `context2d` itself if it isn't set yet rather than requiring
    *  the caller to have already done so — used both from `onMount` (after
-   *  that assignment) and from the `config.fontSizePx` effect below, whose
+   *  that assignment) and from the `terminalSettings.fontSizePx` effect below, whose
    *  ordering relative to `onMount` isn't something worth depending on. */
   function measureAndSize(): { rows: number; cols: number } {
     if (!canvasEl || !root) return { rows: MIN_ROWS, cols: MIN_COLS };
@@ -266,15 +300,14 @@
 
   function tick(now: number): void {
     if (context2d && metrics) {
-      // `config.cursorBlink` (Checkpoint 5b) defaults to on — set to
+      // `terminalSettings.cursorBlink` (Checkpoint 5b) defaults to on — set to
       // `false` and the cursor stays continuously visible instead of
       // toggling with `CURSOR_BLINK_MS`.
-      const blinkOn = $config.cursorBlink === false || Math.floor(now / CURSOR_BLINK_MS) % 2 === 0;
+      const blinkOn = $terminalSettings.cursorBlink === false || Math.floor(now / CURSOR_BLINK_MS) % 2 === 0;
       // No cursor while scrolled into history (nothing "live" to point at
       // there) or once the shell has ended.
       const cursor = !ended && sessionId && scrollOffset === 0 && blinkOn ? liveCursor : null;
       const selection = selStart && selEnd ? { start: selStart, end: selEnd } : null;
-      const opacityPercent = typeof $config.opacity === "number" ? Math.min(100, Math.max(0, $config.opacity)) : 100;
       context2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       draw(context2d, {
         rows: displayRows(),
@@ -289,9 +322,9 @@
         cursorStyle: currentCursorStyle(),
         palette: currentPalette(),
         // Owner decision (docs/plans/terminal.md, Checkpoint 5b): on by
-        // default — only `config.boldIsBright === false` turns it off.
-        boldIsBright: $config.boldIsBright !== false,
-        backgroundOpacity: opacityPercent / 100,
+        // default — only `terminalSettings.boldIsBright === false` turns it off.
+        boldIsBright: $terminalSettings.boldIsBright !== false,
+        backgroundOpacity,
       });
     }
     raf = requestAnimationFrame(tick);
@@ -329,6 +362,14 @@
   }
 
   async function spawn(): Promise<void> {
+    // Must resolve before anything below reads `$terminalSettings` — the
+    // fetch is async, and reading its empty pre-load default (rather than
+    // whatever's really saved) would silently spawn with wrong settings on
+    // the very first terminal after app boot. Cheap after the first
+    // Terminal instance: `ensureTerminalSettingsLoaded` is a no-op once
+    // already loaded.
+    await ensureTerminalSettingsLoaded();
+
     const { rows, cols } = measureAndSize();
     lastRows = rows;
     lastCols = cols;
@@ -343,23 +384,23 @@
       liveRows = event.rows;
       liveCursor = { row: event.cursor_row, col: event.cursor_col };
       bracketedPaste = event.bracketed_paste;
-      // `config.bellEnabled` (Checkpoint 5b) defaults to on; only an
+      // `terminalSettings.bellEnabled` (Checkpoint 5b) defaults to on; only an
       // explicit `false` suppresses the flash.
-      if (event.bell && $config.bellEnabled !== false) triggerBellFlash();
+      if (event.bell && $terminalSettings.bellEnabled !== false) triggerBellFlash();
     };
 
-    // `config.shell` (Checkpoint 5's settings-side override) only picks
+    // `terminalSettings.shell` (Checkpoint 5's settings-side override) only picks
     // which shell *this* spawn uses — see `terminal-settings.svelte`'s own
     // hint that a shell change needs a fresh session, not a live swap
-    // under an already-running one. `config.cwd`/`config.env`/
-    // `config.scrollbackLimit` (Checkpoint 5b) work the same way: read once
+    // under an already-running one. `terminalSettings.cwd`/`terminalSettings.env`/
+    // `terminalSettings.scrollbackLimit` (Checkpoint 5b) work the same way: read once
     // here, not watched, since none of them can be applied to an
     // already-running session either.
-    const shell = typeof $config.shell === "string" && $config.shell ? $config.shell : null;
-    const cwd = typeof $config.cwd === "string" && $config.cwd.trim() ? $config.cwd.trim() : null;
-    const env = typeof $config.env === "string" ? parseEnvLines($config.env) : [];
+    const shell = typeof $terminalSettings.shell === "string" && $terminalSettings.shell ? $terminalSettings.shell : null;
+    const cwd = typeof $terminalSettings.cwd === "string" && $terminalSettings.cwd.trim() ? $terminalSettings.cwd.trim() : null;
+    const env = typeof $terminalSettings.env === "string" ? parseEnvLines($terminalSettings.env) : [];
     const scrollbackLimit =
-      typeof $config.scrollbackLimit === "number" && $config.scrollbackLimit >= 0 ? $config.scrollbackLimit : null;
+      typeof $terminalSettings.scrollbackLimit === "number" && $terminalSettings.scrollbackLimit >= 0 ? $terminalSettings.scrollbackLimit : null;
 
     try {
       sessionId = await ctx.invoke<string>("terminal_spawn", {
@@ -493,25 +534,26 @@
     if (text) sendBytes(encoder.encode(text));
   }
 
-  /** Live-applies a `config.fontSizePx` change from the settings side
+  /** Live-applies a `terminalSettings.fontSizePx` change from the settings side
    *  (`terminal-settings.svelte`): re-measure the character cell at the new
    *  size and, if that changes the row/column count, resize the session to
    *  match — the same reflow a tile drag-resize already triggers via
    *  `ResizeObserver` below, just driven by a font-size change instead of a
-   *  pixel-size one. Runs once on mount too (reading `$config.fontSizePx`
+   *  pixel-size one. Runs once on mount too (reading `$terminalSettings.fontSizePx`
    *  is what makes this effect re-run on later changes), when `sessionId`
    *  is still `null` and `measureAndSize` alone is a no-op beyond sizing
    *  the canvas — harmless, and `spawn()`'s own first `measureAndSize` call
-   *  already accounts for whatever the config held at that point anyway. */
+   *  already accounts for whatever `terminalSettings` held at that point
+   *  anyway. */
   $effect(() => {
-    void $config.fontSizePx;
+    void $terminalSettings.fontSizePx;
     if (!sessionId) return; // spawn()'s own first measureAndSize() already covers the pre-spawn case
     const { rows, cols } = measureAndSize();
     scheduleResize(rows, cols);
   });
 
   /** The one place that actually calls `terminal_resize` — both the
-   *  `ResizeObserver` (tile drag) and the `config.fontSizePx` effect above
+   *  `ResizeObserver` (tile drag) and the `terminalSettings.fontSizePx` effect above
    *  route through here instead of each debouncing/invoking independently.
    *  Found necessary in architecture review: two separate debounce-or-not
    *  paths writing the same `lastRows`/`lastCols` raced each other — a tile
@@ -616,7 +658,22 @@
   .terminal {
     position: relative;
     height: 100%;
-    background: var(--ax-surface-1);
+    /* Unconditionally transparent — see `backgroundOpacity`'s own doc
+     *  comment for the two-round bug-fix history. The canvas is the *only*
+     *  thing that paints this tile's background: at the default
+     *  `backgroundOpacity` (1, fully opaque), it paints every default-bg
+     *  cell at full alpha, which looks identical to this wrapper having its
+     *  own opaque fill; below 1, only the canvas's own per-cell alpha
+     *  blends toward whatever is actually behind the tile, so the slider is
+     *  linear across its whole range. A second, independently-alpha-scaled
+     *  layer here (the first fix attempt) would compound with the canvas's
+     *  own blend instead of composing cleanly (architecture review).
+     *  Trade-off: the sliver of canvas beyond the exact row/col grid (a
+     *  rounding remainder when the tile's pixel size isn't an exact
+     *  multiple of one cell) is now genuinely transparent rather than
+     *  solid-coloured — a pre-existing rounding gap that simply wasn't
+     *  visible before this file's background was always opaque. */
+    background: transparent;
     cursor: text;
     overflow: hidden;
   }

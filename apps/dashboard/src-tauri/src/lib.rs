@@ -41,6 +41,8 @@ pub fn run() {
             commands::get_spend_summary,
             commands::get_dashboard_state,
             commands::save_dashboard_state,
+            commands::get_terminal_settings,
+            commands::save_terminal_settings,
             commands::list_installed_apps,
             commands::read_workspace_file,
             commands::read_workspace_image,

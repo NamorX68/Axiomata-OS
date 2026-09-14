@@ -14,12 +14,14 @@ pub mod db;
 pub mod error;
 pub mod graph;
 pub mod importer;
+pub mod json_state;
 pub mod memory;
 pub mod notes;
 pub mod paths;
 pub mod routines;
 pub mod skills;
 pub mod spend;
+pub mod terminal_settings;
 pub mod workspace;
 
 pub use error::AxiomataError;

@@ -7,13 +7,144 @@ Auswahl+Copy, Paste, mehrere gleichzeitige Terminals) steht noch aus — der
 Owner testet das bei nächster Gelegenheit am Mac selbst. Checkpoint 5 ist
 teilweise umgesetzt ("Mehrere Instanzen" brauchte keinen Code, Konfiguration
 Schriftgröße/Shell-Wahl ist da); Performance-Tuning bei sehr hohem Output
-ist noch offen. Checkpoint 5b (Settings-Erweiterung, siehe unten) ist
-KOMPLETT — Block A committet (`76a5715`), Block B committet (`9f44a71`),
-beide automatisiert verifiziert und durch alle vier Pflicht-Sub-Agents
-(rust-test-engineer, architecture-reviewer, docs-writer; rust-dependency-
-auditor entfiel, kein neuer Cargo-Dependency) gegangen. Nächster Schritt:
-ein gemeinsamer interaktiver Live-Test aller Checkpoint-4/5/5b-Features
-zusammen am Mac des Owners.
+ist noch offen. Checkpoint 5b (Settings-Erweiterung) ist KOMPLETT — Block A
+committet (`76a5715`), Block B committet (`9f44a71`), beide automatisiert
+verifiziert und durch alle vier Pflicht-Sub-Agents gegangen. Checkpoint 5d
+(Bugfixes + globale Settings-Datei, siehe unten) ist der aktuelle
+Arbeitsstand. Nächster Schritt danach: ein gemeinsamer interaktiver
+Live-Test aller Checkpoint-4/5/5b/5d-Features zusammen am Mac des Owners —
+diesmal mit echtem Feedback vom Owner statt nur automatisierter Verifikation,
+da 5d direkt aus einem solchen Live-Test entstand.
+
+## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
+Settings-Datei (Owner-Feedback, 2026-09-14)
+
+Der Owner hat zum ersten Mal die Checkpoint-5/5b-Settings-Seite am echten
+Mac benutzt und mehrere Unstimmigkeiten gemeldet. Vier davon waren echte
+Bugs, einer eine Architekturentscheidung (Settings-Persistenz), der Rest
+(mehr Themes, mitgelieferte Fonts, Prompt-Design, oh-my-zsh) ist als
+Checkpoint 5e vorgemerkt (siehe unten).
+
+### Bugfixes
+
+- **Transparenz-Regler ohne sichtbare Wirkung**: `TerminalScreen.draw`s
+  `backgroundOpacity` hat schon immer korrekt funktioniert — das Problem war
+  `terminal.svelte`s eigener `.terminal`-Wrapper-`<div>`, der eine fest
+  undurchsichtige `background: var(--ax-surface-1)` hatte, exakt dieselbe
+  Farbe, die der Canvas für unbefärbte Zellen zeichnet. Ein transparentes
+  Loch im Canvas legte also nur einen gleichfarbigen Div darunter frei, nie
+  das, was wirklich hinter der Kachel liegt. Fix: `backgroundOpacity` als
+  echtes `$derived` extrahiert (vorher inline in `tick()` berechnet, nicht
+  wiederverwendbar), zusätzlich über eine CSS Custom Property
+  (`--terminal-bg-opacity`) + `color-mix()` auch auf den Wrapper-Div selbst
+  angewandt. Live mit `agent-browser` gegen den `vite --port 1420`-Dev-Mock
+  verifiziert (direkter DOM-Event-Dispatch nötig, da `fill` auf einem
+  Range-Input im CDP-Setup keinen echten `change` auslöst — reines
+  Test-Tooling-Artefakt, kein App-Bug).
+- **Font-Size-Feld zeigte verwirrenden Text statt einer Zahl** (Owner-Screenshot):
+  Placeholder war der String `"theme default"` in einem `type="number"`-Feld
+  — liest sich wie ein Fehler, nicht wie ein Hinweis. Fix: einmalig beim
+  Mount der echte aufgelöste `--ax-font-size-sm`-Wert gelesen
+  (`getComputedStyle`, dieselbe Technik wie `graph/model.ts`s
+  `readPalette()`) und als Zahl-mit-Einheit (z. B. `"12px"`) gezeigt.
+- **Startverzeichnis-Feld ließ keine Eingabe/kein Löschen zu**: Ursache nicht
+  abschließend bestätigt (reproduzierte nicht eindeutig gegen den
+  Chromium-Dev-Mock, nur gegen die echte WKWebView beschrieben — dieses
+  Projekt hat eine Vorgeschichte genau dieser Klasse von
+  WebKit-only-Bugs, siehe `canvas/Tile.svelte`s `.tile-body`-Kommentar).
+  Robuster Fix unabhängig von der genauen Ursache: jedes Freitext-Feld
+  (Shell, Startverzeichnis, Umgebungsvariablen, Schriftart — nicht die
+  beiden Zahlenfelder, die nicht betroffen waren) bekommt jetzt eine eigene
+  lokale `$state`-Variable (einmalig beim Laden geseedet, danach nie wieder
+  aus dem Store zurückgesynct) statt `value={$store.X}` direkt zu binden —
+  ein Store-Write an anderer Stelle in derselben Komponente kann eine
+  laufende Eingabe so nicht mehr zurücksetzen. Mit `agent-browser` verifiziert:
+  Tippen, einzelnes Backspace, komplettes Leeren über Shift+Home+Backspace
+  funktionieren alle.
+- **Keine Persistenz beim Schließen** — siehe "Globale Settings-Datei" unten,
+  direkt dieselbe Ursache wie der Architektur-Wechsel.
+
+### Globale Settings-Datei statt Pro-Instanz-Config
+
+Bisher lebten alle Terminal-Settings in `ctx.config` — dem Config-Blob der
+platzierten Kachel selbst, Teil von `dashboard.json`s
+`canvas.instances[].config` (Checkpoints 5/5b). Schließen/Entfernen einer
+Kachel löschte die `CanvasInstance` und damit jede daran hängende
+Einstellung — genau der gemeldete Bug. Owner-Wunsch zusätzlich: die
+Einstellungen sollen "in einer Datei" liegen, weil ein eigenständig
+nutzbares Terminal (außerhalb dieses Dashboards) später geplant ist.
+
+**Entscheidung**: Terminal-Settings werden global — ein gemeinsamer
+Einstellungssatz für jede platzierte Terminal-Kachel, nicht mehr pro
+Kachel individuell. Das kostet die (bisher ungenutzte) Möglichkeit,
+zwei Terminals mit unterschiedlichen Themes nebeneinander laufen zu lassen;
+sollte das je gewünscht sein, ist Profile/Overrides ein eigenständiges
+späteres Feature, kein rückwirkender Bruch dieser Entscheidung.
+
+- **`crates/axiomata-core/src/json_state.rs`** (neu): die
+  Lade-/Speicher-/Wiederherstellungs-Logik, die bisher exklusiv
+  `dashboard.rs` gehörte (atomarer Write mit 0600, `O_EXCL`-Temp-Datei +
+  Rename, kaputte Datei wird nach `.bak` verschoben statt die App zu
+  brechen, Symlink-Ablehnung, Größenlimit), aus `dashboard.rs` extrahiert
+  und parametrisiert (`load(path, default_json)`/`save(path, json)`) — jetzt
+  von `dashboard.rs` UND dem neuen `terminal_settings.rs` genutzt, statt
+  zweimal dieselbe ~150 Zeilen lange Logik zu pflegen. `dashboard.rs`s
+  öffentliche API (`LoadedState`, `load_state`, `save_state`) bleibt
+  unverändert nach außen (`LoadedState` ist jetzt ein Type-Alias).
+  Wiederverwendet `AxiomataError::InvalidDashboardState` (schon vorher
+  generisch genutzt, auch für `theme.css`-Validierung) statt einer
+  Umbenennung, um unnötige Churn zu vermeiden.
+- **`crates/axiomata-core/src/terminal_settings.rs`** (neu): dünner Wrapper
+  um `json_state` mit dem eigenen Pfad (`~/.axiomata/terminal-settings.json`,
+  neu in `paths.rs`) und Default (`{"version":1}`, keine
+  vorausgesetzten Felder — jedes Feld ist eine optionale Owner-Präferenz).
+- **`apps/dashboard/src-tauri/src/commands.rs`**: zwei neue Commands
+  `get_terminal_settings`/`save_terminal_settings`, exakt dasselbe
+  Übersetzungs-Muster wie `get_dashboard_state`/`save_dashboard_state` —
+  registriert in `lib.rs`.
+- **`apps/dashboard/src/modules/terminalSettings.ts`** (neu): der
+  Frontend-Store — `terminalSettings: Writable<Record<string, unknown>>`,
+  `ensureTerminalSettingsLoaded()` (einmaliger, idempotenter Lazy-Load beim
+  ersten Bedarf, nicht beim App-Start), automatisches debounced Speichern
+  bei jeder Änderung — spiegelt `core/persist.ts`s eigenes
+  Load-once/Debounced-save-Muster, nur auf diese eine Datei beschränkt statt
+  auf das ganze Dashboard.
+- **`terminal.svelte`/`terminal-settings.svelte`**: jedes `$config.X` wurde
+  zu `$terminalSettings.X`, `ctx.config` wird vom Terminal-Modul nicht mehr
+  gelesen/geschrieben. `spawn()` `await`et `ensureTerminalSettingsLoaded()`
+  ganz am Anfang — sonst würde der allererste Spawn nach App-Start mit
+  leeren (noch nicht geladenen) Settings starten, nicht mit den wirklich
+  gespeicherten. Die Settings-Seite selbst zeigt "Loading…", bis der Store
+  geladen ist (seedet die Freitext-Felder erst dann, siehe Bugfix oben).
+- **Kein neuer Cargo-Dependency.**
+
+### Verifiziert
+
+`cargo build/clippy/fmt/test --workspace`, `npm run check`, `npx vitest
+run`, plus Live-Verifikation gegen den `vite --port 1420`-Dev-Mock mit
+`agent-browser`: Tippen/Löschen im Startverzeichnis-Feld, Opazitäts-CSS
+tatsächlich transparent, und — der eigentliche Kern des Bugfixes — Theme
++ Shell überleben ein komplettes Entfernen und Neu-Platzieren der
+Terminal-Kachel.
+
+### Checkpoint 5e (vorgemerkt, noch nicht umgesetzt)
+
+Reste aus derselben Owner-Nachricht, die eine eigene kurze Planungsrunde
+brauchen, bevor sie umgesetzt werden:
+
+- Mehr Themes (Catppuccin, Tokyo Night, …) — ähnlich mechanisch wie die
+  fünf bestehenden in `terminalThemes.ts`.
+- Ein paar mitgelieferte Mono-Fonts (Thin/Normal/Bold) — vermutlich über
+  `@fontsource/*`-Pakete, demselben Mechanismus wie das bereits gebündelte
+  Material-Symbols-Icon-Font. Mindestens eine Nerd-Font-Variante wäre
+  sinnvoll (siehe nächster Punkt).
+- Prompt-Design (Git-Branch/Python-venv in der Kommandozeile) ist laut
+  Owner-Klärung Sache der Shell-Konfiguration (Starship/Powerlevel10k),
+  nicht etwas, das der Terminal-Emulator selbst hinzufügen sollte.
+- oh-my-zsh "sieht anders aus als in Ghostty" — Owner konnte nicht genauer
+  spezifizieren, was; wahrscheinlichster Kandidat sind fehlende
+  Nerd-Font-Glyphen (Powerline-Symbole/Icons), die viele oh-my-zsh-/
+  Starship-/p10k-Themes voraussetzen — hängt am Font-Punkt oben.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

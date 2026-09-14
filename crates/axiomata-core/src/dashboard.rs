@@ -5,15 +5,17 @@
 //! pass through untouched. The only structural guarantee enforced on both
 //! read and write is "a JSON object with a numeric `version`". A file that
 //! fails even that is moved aside as `dashboard.json.bak` and replaced by the
-//! defaults, so a bad edit never bricks the app.
+//! defaults, so a bad edit never bricks the app. That read/write/recovery
+//! machinery itself now lives in `crate::json_state` (Checkpoint 5d of
+//! `docs/plans/terminal.md`, extracted once `terminal-settings.json` needed
+//! the identical contract against a different path) — this module only
+//! supplies `dashboard.json`'s own path and default JSON.
 
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 use crate::error::AxiomataError;
+use crate::json_state::{self, LoadedJsonState};
 use crate::paths;
 
 /// Current on-disk schema version written by the frontend.
@@ -22,17 +24,11 @@ pub const STATE_VERSION: u64 = 1;
 /// Largest custom theme file read (it goes into the webview as text).
 pub const MAX_CUSTOM_CSS_BYTES: u64 = 64 * 1024;
 
-/// Hard cap on the state file — anything larger is treated as corrupt.
-pub const MAX_STATE_BYTES: u64 = 4 * 1024 * 1024;
-
-/// What the frontend gets on boot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LoadedState {
-    /// Raw file text (or the serialised default). Parsed by the frontend.
-    pub json: String,
-    /// Set when the existing file was unreadable and moved to `.bak`.
-    pub recovered_backup: Option<PathBuf>,
-}
+/// What the frontend gets on boot. A type alias, not a re-export under a new
+/// name, so every existing caller (`src-tauri/src/commands.rs`, the
+/// frontend's mirrored `LoadedDashboardState` TS type) keeps working
+/// unchanged after the `crate::json_state` extraction.
+pub type LoadedState = LoadedJsonState;
 
 /// The state written when no file exists yet.
 pub fn default_state_json() -> String {
@@ -42,52 +38,11 @@ pub fn default_state_json() -> String {
     )
 }
 
-/// Loads `dashboard.json`, or the defaults if it is missing.
-///
-/// A file that is not a JSON object with a numeric `version` — or that is
-/// oversized — is renamed to `dashboard.json.bak` (replacing any older backup)
-/// and the defaults are returned with `recovered_backup` set. A symlinked
-/// state file is refused outright.
+/// Loads `dashboard.json`, or the defaults if it is missing. See
+/// `crate::json_state::load`'s own doc comment for the full corrupt-file/
+/// symlink/oversized-file contract this delegates to.
 pub fn load_state() -> Result<LoadedState, AxiomataError> {
-    let path = paths::dashboard_state_path();
-    let Ok(meta) = fs::symlink_metadata(&path) else {
-        return Ok(LoadedState {
-            json: default_state_json(),
-            recovered_backup: None,
-        });
-    };
-    if meta.file_type().is_symlink() {
-        return Err(AxiomataError::InvalidDashboardState {
-            path,
-            reason: "refusing to follow a symlinked state file".to_string(),
-        });
-    }
-
-    let content = if meta.len() > MAX_STATE_BYTES {
-        Err(format!("file exceeds {MAX_STATE_BYTES} bytes"))
-    } else {
-        fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|text| validate(&text).map(|()| text))
-    };
-
-    match content {
-        Ok(json) => Ok(LoadedState {
-            json,
-            recovered_backup: None,
-        }),
-        Err(_) => {
-            let backup = backup_path(&path);
-            fs::rename(&path, &backup).map_err(|source| AxiomataError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            Ok(LoadedState {
-                json: default_state_json(),
-                recovered_backup: Some(backup),
-            })
-        }
-    }
+    json_state::load(&paths::dashboard_state_path(), default_state_json)
 }
 
 /// Reads the user's custom theme CSS: `override_path` if given (absolute,
@@ -130,64 +85,9 @@ pub fn load_custom_css(override_path: Option<&Path>) -> Result<Option<String>, A
 }
 
 /// Validates and atomically writes `json` to `dashboard.json` (mode 0600).
+/// See `crate::json_state::save`'s own doc comment for the full contract.
 pub fn save_state(json: &str) -> Result<(), AxiomataError> {
-    let path = paths::dashboard_state_path();
-    validate(json).map_err(|reason| AxiomataError::InvalidDashboardState {
-        path: path.clone(),
-        reason,
-    })?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| AxiomataError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-    }
-    atomic_write(&path, json)
-}
-
-/// The structural check both directions share.
-fn validate(text: &str) -> Result<(), String> {
-    let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let obj = value
-        .as_object()
-        .ok_or_else(|| "top level must be a JSON object".to_string())?;
-    match obj.get("version") {
-        Some(v) if v.is_u64() => Ok(()),
-        Some(_) => Err("`version` must be a non-negative integer".to_string()),
-        None => Err("missing `version`".to_string()),
-    }
-}
-
-fn backup_path(path: &Path) -> PathBuf {
-    path.with_extension("json.bak")
-}
-
-/// Temp file beside the target (created `O_EXCL`, so a planted symlink is
-/// never followed), then `rename`, then best-effort `0600`.
-fn atomic_write(path: &Path, content: &str) -> Result<(), AxiomataError> {
-    let tmp = path.with_extension("json.axiomata-tmp");
-    let _ = fs::remove_file(&tmp); // a stale leftover from a crashed save
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(content.as_bytes()))
-        .map_err(|source| AxiomataError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
-    }
-    fs::rename(&tmp, path).map_err(|source| {
-        let _ = fs::remove_file(&tmp);
-        AxiomataError::Io {
-            path: path.to_path_buf(),
-            source,
-        }
-    })
+    json_state::save(&paths::dashboard_state_path(), json)
 }
 
 #[cfg(test)]
@@ -218,7 +118,12 @@ mod tests {
             let loaded = load_state().unwrap();
             assert_eq!(loaded.json, default_state_json());
             assert!(loaded.recovered_backup.is_none());
-            validate(&loaded.json).expect("default must validate");
+            // The default must itself satisfy `save_state`'s own validation
+            // (the structural check now lives in `crate::json_state`, not
+            // exposed here to call directly) — round-tripping it through a
+            // real save proves that rather than just asserting on the
+            // string's shape.
+            save_state(&loaded.json).expect("default must validate");
         });
     }
 

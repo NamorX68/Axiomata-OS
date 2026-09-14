@@ -19,6 +19,7 @@ use axiomata_core::notes;
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
 use axiomata_core::skills::{self, RunRecord, RunSummary, Skill, SkippedSkill};
 use axiomata_core::spend;
+use axiomata_core::terminal_settings::{self, LoadedTerminalSettings};
 use axiomata_core::workspace::{self, SearchHit, WorkspaceFile, WorkspaceImage};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -979,6 +980,25 @@ pub fn get_dashboard_state() -> Result<LoadedState, String> {
 #[tauri::command]
 pub fn save_dashboard_state(json: String) -> Result<(), String> {
     dashboard::save_state(&json).map_err(|err| err.to_string())
+}
+
+/// Reads `~/.axiomata/terminal-settings.json` (raw text) or the defaults —
+/// the Terminal module's own global preferences file (Checkpoint 5d of
+/// `docs/plans/terminal.md`), a sibling of `dashboard.json`, not a section
+/// of it. Same translation-only role as `get_dashboard_state` above; a
+/// corrupt file is moved to `.bak` and reported in `recovered_backup`, same
+/// contract as `axiomata_core::json_state::load`.
+#[tauri::command]
+pub fn get_terminal_settings() -> Result<LoadedTerminalSettings, String> {
+    terminal_settings::load_settings().map_err(|err| err.to_string())
+}
+
+/// Validates and atomically writes the Terminal module's global preferences
+/// handed in by the frontend. The core only checks "object with numeric
+/// `version`", same as `save_dashboard_state`.
+#[tauri::command]
+pub fn save_terminal_settings(json: String) -> Result<(), String> {
+    terminal_settings::save_settings(&json).map_err(|err| err.to_string())
 }
 
 /// One `*.app` bundle found by [`list_installed_apps`]'s scan.

@@ -137,9 +137,19 @@ pub enum AxiomataError {
     #[error("invalid workspace file {path}: {reason}")]
     InvalidWorkspacePath { path: PathBuf, reason: String },
 
-    /// `~/.axiomata/dashboard.json` (or the state handed in to save) is not a
-    /// JSON object with a numeric `version`, or the file is a symlink.
-    #[error("invalid dashboard state at {path}: {reason}")]
+    /// One of the app's own local state/config files (`dashboard.json`,
+    /// `terminal-settings.json`, or the state handed in to either one's
+    /// save) is not a JSON object with a numeric `version`, is a symlink, or
+    /// is oversized — also reused by `crate::dashboard::load_custom_css` for
+    /// `theme.css`'s own symlink/size checks (a CSS file, not JSON, but the
+    /// same "one of our own local files is invalid" category). The variant
+    /// name still says "DashboardState" (kept to avoid unrelated call-site
+    /// churn when `crate::json_state` was extracted for `terminal-settings.json`
+    /// too — see that module's own doc comment), but the *message* text
+    /// deliberately says "state file", not "dashboard state" — the former
+    /// was user-visible (surfaced verbatim as a toast) and wrong for a
+    /// `terminal-settings.json` or `theme.css` failure.
+    #[error("invalid state file at {path}: {reason}")]
     InvalidDashboardState { path: PathBuf, reason: String },
 
     /// A new (or edited) routine's `name`, `target`, or `backend` failed

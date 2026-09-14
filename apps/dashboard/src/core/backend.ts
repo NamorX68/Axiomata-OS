@@ -245,10 +245,20 @@ export interface ChatReply {
   duration_ms: number;
 }
 
-export interface LoadedDashboardState {
+/** Mirrors `axiomata_core::json_state::LoadedJsonState` — the shared shape
+ *  behind both `LoadedDashboardState` and `LoadedTerminalSettings` below,
+ *  which on the Rust side are themselves just `pub type` aliases of the
+ *  same struct (`dashboard::LoadedState`, `terminal_settings::LoadedTerminalSettings`),
+ *  not two distinct types. Declared once here and aliased twice, same
+ *  shape, so a field added to the Rust struct only needs updating in one
+ *  place on this side too. */
+export interface LoadedJsonState {
   json: string;
   recovered_backup: string | null;
 }
+
+export type LoadedDashboardState = LoadedJsonState;
+export type LoadedTerminalSettings = LoadedJsonState;
 
 /** One `*.app` bundle found by `list_installed_apps`'s scan. */
 export interface InstalledApp {

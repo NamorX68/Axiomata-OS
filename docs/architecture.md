@@ -177,6 +177,12 @@ workspace the user currently has configured:
   which Second Brain is active, and managed only by the user. There is no second,
   workspace-local skill location — see "Why one skill location" below.
 - `dashboard.json` — the frontend-owned canvas layout + theme + per-instance module config.
+- `terminal-settings.json` — the Terminal module's own global preferences (font, theme,
+  shell, cwd, env, scrollback size, cursor, bell, opacity), shared by every placed Terminal
+  tile rather than living in `dashboard.json`'s per-instance config (Checkpoint 5d of
+  `docs/plans/terminal.md` — closing/removing a tile used to discard its settings along with
+  it). Same read/write/recovery contract as `dashboard.json`, both backed by the shared
+  `crate::json_state` machinery.
 - `module-context.md` / `module-actions/{inbox,outbox}/` — the agent → module bridge (§5).
 - `memory-last-sync.json` — the memory router's per-workspace staleness marker.
 
@@ -565,11 +571,13 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   self-built PTY/VT100 emulator rather than an embedded existing terminal or `xterm.js`,
   deliberately so the ANSI-interpretation and screen-model parts stay a hands-on learning
   project rather than hidden inside a library. Checkpoints 0–4 (PTY spawn, end-to-end IPC
-  wiring, ANSI/VT100 + Canvas-2D rendering, scrollback/alternate-screen/selection/paste) and
-  Checkpoint 5's per-instance font/shell settings are done; Checkpoint 5b (scrollback size,
-  start directory, extra env vars, cursor style, colour themes, bold-is-bright, visual bell,
-  custom font, background opacity) is the current work; full detail and status:
-  `docs/plans/terminal.md`.
+  wiring, ANSI/VT100 + Canvas-2D rendering, scrollback/alternate-screen/selection/paste),
+  Checkpoint 5 (font/shell settings), and Checkpoint 5b (scrollback size, start directory,
+  extra env vars, cursor style, colour themes, bold-is-bright, visual bell, custom font,
+  background opacity) are done. Checkpoint 5d — bug fixes from the first real owner
+  live-test, plus moving Terminal settings out of per-instance `dashboard.json` config into
+  their own global `terminal-settings.json` (§4 above) so closing a tile no longer discards
+  its settings — is the current work; full detail and status: `docs/plans/terminal.md`.
 - **Stufe 2 — the lean local agent (CP1–CP4): shipped, then superseded by CP5.** The
   hand-rolled stdio MCP client + `[mcp_servers]` config + `axiomata-cli mcp import|list|tools`
   (CP1), the `AgentBackend::OllamaAgent` bounded tool-call loop over Ollama + MCP (CP2), the

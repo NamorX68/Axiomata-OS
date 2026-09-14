@@ -15,6 +15,7 @@ import type {
   WorkspaceGraph,
   InstalledAppsResult,
   LoadedDashboardState,
+  LoadedTerminalSettings,
   MemoryStatus,
   NewRoutine,
   ProviderId,
@@ -30,6 +31,7 @@ const LATENCY_MS = 120;
 const delay = () => new Promise((r) => setTimeout(r, LATENCY_MS));
 
 let dashboardJson: string | null = null;
+let terminalSettingsJson: string | null = null;
 
 /** In-memory stand-in for `~/.axiomata/config.toml` — the *full* config
  *  including the raw keys, i.e. what lives on disk. `get_config` hands the
@@ -479,6 +481,14 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       } satisfies LoadedDashboardState as T;
     case "save_dashboard_state":
       dashboardJson = String(args.json);
+      return undefined as T;
+    case "get_terminal_settings":
+      return {
+        json: terminalSettingsJson ?? '{"version":1}',
+        recovered_backup: null,
+      } satisfies LoadedTerminalSettings as T;
+    case "save_terminal_settings":
+      terminalSettingsJson = String(args.json);
       return undefined as T;
     case "get_memory_status":
       return { ...memory } as T;

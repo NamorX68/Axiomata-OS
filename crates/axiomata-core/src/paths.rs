@@ -83,6 +83,17 @@ pub fn custom_theme_path() -> PathBuf {
     axiomata_home().join("theme.css")
 }
 
+/// Path to the Terminal module's global preferences file
+/// (`~/.axiomata/terminal-settings.json`) — Checkpoint 5d of
+/// `docs/plans/terminal.md`. Deliberately its own file, not a section of
+/// `dashboard.json`'s per-instance `canvas.instances[].config`: every
+/// Terminal tile shares one preference set, and a future standalone
+/// Terminal (outside this dashboard) would have something dashboard-shaped
+/// state isn't. See `crate::terminal_settings`.
+pub fn terminal_settings_path() -> PathBuf {
+    axiomata_home().join("terminal-settings.json")
+}
+
 /// Root of the agent → module action queue (`~/.axiomata/module-actions/`),
 /// with `inbox/` (requests written by the CLI) and `outbox/` (responses
 /// written by the running dashboard). See `crate::bridge`.
@@ -118,6 +129,10 @@ mod tests {
         assert_eq!(logs_dir(), expected_home.join("logs"));
         assert_eq!(runs_log_path(), expected_home.join("logs").join("runs.log"));
         assert_eq!(global_skills_dir(), expected_home.join("skills"));
+        assert_eq!(
+            terminal_settings_path(),
+            expected_home.join("terminal-settings.json")
+        );
 
         unsafe {
             env::remove_var(AXIOMATA_HOME_ENV);
