@@ -163,6 +163,14 @@
     onEnd: onDragEnd,
   }}
 >
+  <!-- `terminal.svelte`'s `watchFlipBack()` reaches in from outside via
+       `closest(".tile-inner")` + this element's own `flipped` class, to
+       notice a flip back to the front face (its own `onMount` only fires
+       once, at the tile's original placement, not on later flips — front
+       and back both stay mounted the whole time, see the module doc
+       comment above). Renaming this class or moving `flipped` onto a
+       different element would silently break that without touching this
+       file at all — grep for `.tile-inner` before doing either. -->
   <div class="tile-inner" class:flipped={inst.flipped}>
     <div class="face front">
       <header class="tile-head front-head tile-drag">

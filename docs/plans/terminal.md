@@ -17,18 +17,22 @@ echten Live-Test am Mac aber NICHT gehalten (Owner-Feedback: weiterhin
 Klick nötig). Checkpoint 5f (robusterer Autofokus-Fix + Gating gegen
 Fokus-Diebstahl, `e415426`) ist committet — Owner-Feedback danach: der
 Fokus beim Öffnen/Start funktioniert jetzt, ABER ein verbleibender Fall
-ist noch offen (Flip zu den Settings und zurück erfordert weiterhin einen
-Klick, siehe "Offene Punkte" am Ende von Checkpoint 5f). Auf Owner-Wunsch
-zurückgestellt zugunsten von Checkpoint 5g. Der Owner hat außerdem die
-Frage aufgeworfen, ob die App auf ein Chromium-basiertes Webview statt
-WKWebView umsteigen sollte, um diese ganze Klasse von Bugs zu vermeiden —
-ebenfalls zurückgestellt, noch nicht beantwortet. Checkpoint 5g (mehr
-Themes, mitgelieferte Fonts inkl. Nerd Font) ist KOMPLETT (siehe unten) —
-auf ausdrücklichen Owner-Wunsch vorgezogen, noch vor Bestätigung des
-verbleibenden Fokus-Falls. Nächster Schritt: Live-Test von 5f+5g am Mac
-des Owners, danach ggf. der verbleibende Flip-Fokus-Fall und die
-Chromium-Frage — diese ganze Kette (5d, 5e, 5f) entstand aus genau
-solchen Live-Tests, nicht aus automatisierter Verifikation allein.
+war noch offen (Flip zu den Settings und zurück erforderte weiterhin
+einen Klick, siehe Checkpoint 5f). Checkpoint 5g (mehr Themes, mitgelieferte
+Fonts inkl. Nerd Font) ist KOMPLETT (siehe unten) — auf ausdrücklichen
+Owner-Wunsch vorgezogen, noch vor Behebung des verbleibenden Fokus-Falls.
+Checkpoint 5f2 (Fix für genau diesen Flip-Fokus-Fall, siehe unten) ist
+ebenfalls KOMPLETT, Chromium-verifiziert. Farbtiefe (Owner-Frage): volles
+24-Bit-True-Color End-to-End (Rust-Parser → Screen-Modell → Canvas
+`rgb()`), plus die 16-Farben-ANSI-Palette und den 256er-Cube/
+Graustufen-Ramp — dieselbe Farbtiefe wie Ghostty; die vom Owner
+beobachtete fehlende Abstufung lag an den Nerd-Font-Glyphen (5g), nicht an
+der Farbtiefe. Der Owner hat außerdem die Frage aufgeworfen, ob die App
+auf ein Chromium-basiertes Webview statt WKWebView umsteigen sollte, um
+diese ganze Klasse von Bugs zu vermeiden — zurückgestellt, noch nicht
+beantwortet. Nächster Schritt: Live-Test von 5f+5f2+5g am Mac des Owners
+— diese ganze Kette (5d, 5e, 5f, 5f2) entstand aus genau solchen
+Live-Tests, nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -252,19 +256,10 @@ Vergrößern/Verkleinern und Transparenz als erledigt bestätigt wurden.
 
 - **Bestätigt behoben**: Öffnen einer neuen Terminal-Kachel ist jetzt
   sofort tippbereit, kein Klick mehr nötig.
-- **Noch offen — neuer, enger gefasster Fall**: Flippt man zu den
-  Settings (Rückseite der Kachel) und wieder zurück zur Terminal-Vorderseite,
-  ist erneut ein Klick nötig, bevor Tippen wieder funktioniert. Ursache noch
-  nicht untersucht — vermutlich derselbe Effekt wie beim ursprünglichen Bug,
-  nur an einer anderen Stelle: `Tile.svelte` mountet Vorder- und Rückseite
-  gleichzeitig (reines CSS-`rotateY`-Flip, kein Neumounten), Vorderseite/
-  `terminal.svelte`s `onMount` feuert also nur einmal beim allerersten
-  Platzieren der Kachel, nicht beim Zurückflippen — es gibt aktuell keinen
-  Mechanismus, der `focusInputSoon()` beim Zurückflippen erneut auslöst.
-  **Auf ausdrücklichen Owner-Wunsch zurückgestellt** ("Bevor wir das machen
-  oder weiter rumdoktorn mach erst einmal die anderen Sachen fertig Themes,
-  Schriftarten etc.") — Checkpoint 5g (unten) hat Vorrang; dieser Fall ist
-  der nächste Schritt danach.
+- **Neuer, enger gefasster Fall, inzwischen behoben — siehe Checkpoint 5f2**
+  (nach Checkpoint 5g weiter unten): Flippt man zu den Settings (Rückseite
+  der Kachel) und wieder zurück zur Terminal-Vorderseite, war erneut ein
+  Klick nötig, bevor Tippen wieder funktionierte.
 - **Owner-Frage, ebenfalls zurückgestellt, noch nicht beantwortet**: sollte
   die App statt WKWebView ein Chromium-basiertes Webview voraussetzen/
   bündeln, um diese ganze Klasse von Timing-Bugs zu vermeiden? Tauri bietet
@@ -338,6 +333,51 @@ Exakt-Pin) — beide vor dem Commit behoben. Ein docs-writer-Pass fand und
 korrigierte zwei faktische Ungenauigkeiten in eigenen Kommentaren (Anzahl
 der Paletten "vier" → "sechs"; die "Thin/Bold werden beide gerendert"-
 Behauptung war falsch, siehe Ehrlichkeitshinweis oben).
+
+## Checkpoint 5f2 — Fokus beim Zurückflippen von den Settings (Owner-Feedback, 2026-09-14) — KOMPLETT
+
+Der in Checkpoint 5f offen gebliebene, enger gefasste Fall: `Tile.svelte`
+mountet Vorder- (Terminal) und Rückseite (Settings) einer Kachel
+gleichzeitig und wechselt zwischen ihnen nur per CSS (`rotateY`-Transform
+auf `.tile-inner`, gesteuert über dessen `flipped`-Klasse) — es wird nie
+neu gemountet. `terminal.svelte`s `onMount` feuert deshalb nur genau
+einmal, beim allerersten Platzieren der Kachel; ein späteres Zurückflippen
+von den Settings hatte keinerlei Mechanismus, der den Fokus erneut auf das
+`.typer`-Input legt.
+
+- **Fix**: `focusInputSoon()` bekommt einen optionalen `{ gated?: boolean }`-
+  Parameter (Default `true`, bestehendes Verhalten an den beiden
+  bisherigen Aufrufstellen unverändert). Neue Funktion `watchFlipBack()`
+  (aus `onMount` aufgerufen) sucht per `root?.closest(".tile-inner")` die
+  Kachel-Hülle und beobachtet deren `class`-Attribut mit einem
+  `MutationObserver` — exakt dieselbe Technik wie der bestehende
+  `themeObserver` für Theme-Wechsel. Beim Übergang von `flipped` zu nicht
+  mehr `flipped` (= Rückflug zur Terminal-Vorderseite) wird
+  `focusInputSoon({ gated: false })` aufgerufen — ungegated, weil
+  `document.activeElement` direkt nach einem Klick auf "Flip back" der
+  Button selbst ist, nicht `body`; das bestehende Gating (gegen
+  Fokus-Diebstahl beim gleichzeitigen Mounten mehrerer Kacheln, Checkpoint
+  5f) würde hier genau den gewünschten Rückfokus verhindern. Aufräumen via
+  `flipObserver?.disconnect()` in `onDestroy`, exakt wie die anderen
+  Observer.
+- **Architektur-Review-Nachbesserung** (MEDIUM, vor dem Commit behoben):
+  die Kopplung an `Tile.svelte`s konkrete DOM-Struktur (`.tile-inner`,
+  `flipped`-Klasse) ist unsichtbar aus `Tile.svelte`s eigener Sicht — eine
+  künftige Umbenennung dort würde diesen Mechanismus lautlos abschalten,
+  ohne dass `terminal.svelte` überhaupt angefasst wird. Fix: ein
+  Cross-Reference-Kommentar direkt bei `.tile-inner`/`class:flipped` in
+  `Tile.svelte` selbst, plus ein dev-only `console.warn` in
+  `watchFlipBack()`s "nicht gefunden"-Zweig, damit eine echte Regression
+  sichtbar wird statt nur "Fokus geht plötzlich nicht mehr" zu sein.
+- **Verifiziert** (`agent-browser` gegen echtes Chromium, `vite --port
+  1420`): Kachel erzeugt → automatisch fokussiert; zu Settings geflippt →
+  Fokus bleibt (erwartet) auf dem Flip-Button; zurückgeflippt → `.typer`
+  sofort wieder fokussiert, auch nach Ablauf des Retry-Fensters; zweiter
+  Flip-Zyklus (Settings → zurück) funktioniert erneut. `npm run check` und
+  `npx vitest run` (357 Tests) bleiben grün, kein Rust betroffen.
+- **Wichtige Einschränkung**: wie bei Checkpoint 5f kann Chromium das
+  eigentliche WKWebView-Timing-Problem nicht reproduzieren — auch dieser
+  Fix ist nur DOM-/JS-seitig verifiziert, nicht am echten Mac.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

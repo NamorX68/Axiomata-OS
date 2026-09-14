@@ -641,26 +641,33 @@
    *  redundancy costs nothing on a browser/engine where the very first
    *  call already worked.
    *
-   *  Every attempt (including the immediate one) is gated on nothing else
-   *  already holding meaningful focus (`document.activeElement` is `body`
-   *  or unset): `Canvas.svelte` mounts every placed tile at once, not one
-   *  at a time behind a lazy tab, so an ungated auto-focus would steal
-   *  keyboard focus from an unrelated field (search, settings, another
-   *  module) whenever a terminal tile happens to mount, and would fight
-   *  with sibling terminal tiles mounting in the same pass — e.g.
+   *  Every attempt (including the immediate one) is gated by default on
+   *  nothing else already holding meaningful focus (`document.activeElement`
+   *  is `body` or unset): `Canvas.svelte` mounts every placed tile at once,
+   *  not one at a time behind a lazy tab, so an ungated auto-focus would
+   *  steal keyboard focus from an unrelated field (search, settings,
+   *  another module) whenever a terminal tile happens to mount, and would
+   *  fight with sibling terminal tiles mounting in the same pass — e.g.
    *  restoring a saved layout with several terminals at once, where
    *  whichever tile's retry chain landed last would otherwise "win"
-   *  arbitrarily (architecture review, Checkpoint 5f). A deliberate click
-   *  (the `.terminal` wrapper's own `onclick` below) is intentionally
-   *  `inputEl?.focus()` directly, NOT this helper: that click IS the
-   *  user's intent, a single synchronous call already worked for it before
-   *  this checkpoint, and giving every click its own gated retry chain
-   *  would add the same cross-tile stale-focus risk to a path that was
-   *  never broken. */
-  function focusInputSoon(): void {
+   *  arbitrarily (architecture review, Checkpoint 5f). Pass
+   *  `{ gated: false }` for a moment that is itself already unambiguous user
+   *  intent — the flip-back-to-front `MutationObserver` below is the one
+   *  other caller, Checkpoint 5f2/Owner-Feedback: gating there would be
+   *  self-defeating, since `document.activeElement` right after clicking
+   *  the tile's own "Flip back" button is that button, not `body`, so the
+   *  gate would always refuse to hand focus back to the terminal. A
+   *  deliberate click straight into the tile body (the `.terminal` wrapper's
+   *  own `onclick` below) is intentionally `inputEl?.focus()` directly, NOT
+   *  this helper at all: that click IS the user's intent, a single
+   *  synchronous call already worked for it before Checkpoint 5f, and
+   *  giving every click its own retry chain would add the same
+   *  cross-tile stale-focus risk to a path that was never broken. */
+  function focusInputSoon(opts: { gated?: boolean } = {}): void {
+    const gated = opts.gated ?? true;
     cancelPendingFocusAttempts();
     const attempt = () => {
-      if (document.activeElement && document.activeElement !== document.body) return;
+      if (gated && document.activeElement && document.activeElement !== document.body) return;
       inputEl?.focus();
     };
     attempt();
@@ -672,10 +679,62 @@
     focusRafIds.push(id1);
   }
 
+  /** Watches this tile's own `.tile-inner` wrapper (`Tile.svelte`) for its
+   *  `flipped` class — present while the settings back-face is showing,
+   *  absent while this terminal front-face is — and refocuses the typer the
+   *  moment it goes from present to absent, i.e. right when the owner flips
+   *  back from settings to the terminal. Checkpoint 5f2 (owner feedback
+   *  after Checkpoint 5f shipped): `Tile.svelte` mounts both faces at once
+   *  and only rotates between them in CSS (`transform: rotateY`), so this
+   *  component's own `onMount` fires exactly once, the very first time the
+   *  tile is placed — there is otherwise no signal at all telling this
+   *  component "you just became visible again," so a second, later flip
+   *  back to the front face silently stayed unfocused until a manual click
+   *  into the tile body, same underlying complaint as Checkpoint 5f's
+   *  original bug, just triggered from a different UI action. Mirrors
+   *  `themeObserver` right below it — a `MutationObserver` on an ancestor's
+   *  `class`/attribute, the same technique this file already uses for
+   *  reacting to something changing outside this component's own props. */
+  let flipObserver: MutationObserver | undefined;
+
+  function watchFlipBack(): void {
+    const tileInner = root?.closest<HTMLElement>(".tile-inner");
+    if (!tileInner) {
+      // Today this only happens for a genuine regression — every Terminal
+      // tile is mounted inside a `Tile.svelte` (see its own `.tile-inner`
+      // comment) and there is no other host yet. Warn instead of failing
+      // silently (architecture review, Checkpoint 5f2), dev-only so it
+      // can't spam a real user's console. Once a standalone/out-of-Tile
+      // Terminal use exists (`docs/plans/terminal.md`'s own noted future
+      // goal), this branch stops being an error and the warning below
+      // should be revisited/removed alongside whatever change makes that
+      // legitimate.
+      if (import.meta.env.DEV) {
+        console.warn('terminal.svelte: watchFlipBack() found no ancestor ".tile-inner" — flip-back autofocus is disabled for this instance.');
+      }
+      return;
+    }
+    let wasFlipped = tileInner.classList.contains("flipped");
+    flipObserver = new MutationObserver(() => {
+      const flipped = tileInner.classList.contains("flipped");
+      if (wasFlipped && !flipped) {
+        // Just flipped back to the front face — always the direct result of
+        // the owner's own "Flip back" click, so (unlike onMount/spawn())
+        // there is nothing else in the app whose focus this could be
+        // stealing; gating would only suppress the very refocus this exists
+        // to do (see `focusInputSoon`'s own doc comment).
+        focusInputSoon({ gated: false });
+      }
+      wasFlipped = flipped;
+    });
+    flipObserver.observe(tileInner, { attributes: true, attributeFilter: ["class"] });
+  }
+
   onMount(() => {
     if (canvasEl) context2d = canvasEl.getContext("2d");
     readThemeColors();
     focusInputSoon();
+    watchFlipBack();
     void spawn();
 
     if (root) {
@@ -703,6 +762,7 @@
     clearTimeout(bellFlashTimeout);
     resizeObserver?.disconnect();
     themeObserver?.disconnect();
+    flipObserver?.disconnect();
     if (sessionId) void ctx.invoke("terminal_close", { id: sessionId });
   });
 </script>
