@@ -17,10 +17,19 @@
   there's no live edit point to point at.
 
   Row/column count is genuinely measured (`TerminalScreen.measureChar`
-  against the canvas's own resolved `--ax-font-mono`/`--ax-font-size-sm`),
-  and a `ResizeObserver` keeps it in sync as the tile is resized — feeding
-  `terminal_resize` (debounced; see its own comment), which resizes the PTY
-  (`SIGWINCH` for the shell) and the screen model together.
+  against the canvas's own resolved `--ax-font-mono`/`--ax-font-size-sm`, or
+  `config.fontSizePx` in its place once Checkpoint 5's settings side sets
+  one — see `currentFont`). Both a tile drag (`ResizeObserver`) and a live
+  `config.fontSizePx` change (its own `$effect`) route through one
+  `scheduleResize` — debounced, so `terminal_resize` (which resizes the PTY,
+  `SIGWINCH` for the shell, and the screen model together) only actually
+  fires once things settle, and so the two triggers can't race each other
+  into applying a stale size (architecture review: they used to debounce
+  independently, and a resize timer already in flight could fire *after*,
+  and silently undo, an immediate font-size resize). `config.shell` (also
+  Checkpoint 5) only applies to the *next* spawned session — there's
+  no way to swap a shell under an already-running process — so it's just
+  read once in `spawn()`, not watched.
 
   Input has no local echo: keystrokes are forwarded to the shell as bytes
   (via the hidden-ish text field below, which is cleared on every native
@@ -61,6 +70,9 @@
   import { createSequenceGuard } from "./terminalScrollback";
 
   let { ctx }: { ctx: ModuleContext } = $props();
+  // `ctx` is created once per mounted instance and never swapped.
+  // svelte-ignore state_referenced_locally
+  const config = ctx.config;
 
   const MIN_ROWS = 4;
   const MIN_COLS = 20;
@@ -148,22 +160,31 @@
 
   /** A plain CSS font shorthand (no weight — `TerminalScreen.draw` adds
    *  `"bold "` itself per cell) off the canvas's own resolved
-   *  `--ax-font-mono`/`--ax-font-size-sm`. Read fresh each call, matching
-   *  `graph/render.ts`'s own per-frame `getComputedStyle` convention for
-   *  the same reason: cheap, and stays correct across a theme switch with
-   *  no extra wiring. */
+   *  `--ax-font-mono`/`--ax-font-size-sm` — or `config.fontSizePx`
+   *  (Checkpoint 5's settings-side override, `terminal-settings.svelte`) in
+   *  place of the theme's own size when it's set. Read fresh each call,
+   *  matching `graph/render.ts`'s own per-frame `getComputedStyle`
+   *  convention for the same reason: cheap, and stays correct across a
+   *  theme switch (or a config change) with no extra wiring. */
   function currentFont(): string {
     if (!canvasEl) return "13px monospace";
     const cs = getComputedStyle(canvasEl);
-    return `${cs.fontSize} ${cs.fontFamily}`;
+    const size = typeof $config.fontSizePx === "number" ? `${$config.fontSizePx}px` : cs.fontSize;
+    return `${size} ${cs.fontFamily}`;
   }
 
   /** Measures the real character cell against the canvas (replacing
    *  Checkpoint 1's guessed average), sizes the canvas's backing store for
    *  the current device pixel ratio (same pattern as `graph/render.ts`'s
-   *  `GraphRenderer.resize()`), and returns the row/column count that fits. */
+   *  `GraphRenderer.resize()`), and returns the row/column count that fits.
+   *  Fetches `context2d` itself if it isn't set yet rather than requiring
+   *  the caller to have already done so — used both from `onMount` (after
+   *  that assignment) and from the `config.fontSizePx` effect below, whose
+   *  ordering relative to `onMount` isn't something worth depending on. */
   function measureAndSize(): { rows: number; cols: number } {
-    if (!canvasEl || !root || !context2d) return { rows: MIN_ROWS, cols: MIN_COLS };
+    if (!canvasEl || !root) return { rows: MIN_ROWS, cols: MIN_COLS };
+    if (!context2d) context2d = canvasEl.getContext("2d");
+    if (!context2d) return { rows: MIN_ROWS, cols: MIN_COLS };
     const rect = root.getBoundingClientRect();
     dpr = window.devicePixelRatio || 1;
     metrics = measureChar(context2d, currentFont());
@@ -234,8 +255,14 @@
       bracketedPaste = event.bracketed_paste;
     };
 
+    // `config.shell` (Checkpoint 5's settings-side override) only picks
+    // which shell *this* spawn uses — see `terminal-settings.svelte`'s own
+    // hint that a shell change needs a fresh session, not a live swap
+    // under an already-running one.
+    const shell = typeof $config.shell === "string" && $config.shell ? $config.shell : null;
+
     try {
-      sessionId = await ctx.invoke<string>("terminal_spawn", { rows, cols, onOutput });
+      sessionId = await ctx.invoke<string>("terminal_spawn", { rows, cols, shell, onOutput });
     } catch (err) {
       error = String(err);
     }
@@ -361,6 +388,53 @@
     if (text) sendBytes(encoder.encode(text));
   }
 
+  /** Live-applies a `config.fontSizePx` change from the settings side
+   *  (`terminal-settings.svelte`): re-measure the character cell at the new
+   *  size and, if that changes the row/column count, resize the session to
+   *  match — the same reflow a tile drag-resize already triggers via
+   *  `ResizeObserver` below, just driven by a font-size change instead of a
+   *  pixel-size one. Runs once on mount too (reading `$config.fontSizePx`
+   *  is what makes this effect re-run on later changes), when `sessionId`
+   *  is still `null` and `measureAndSize` alone is a no-op beyond sizing
+   *  the canvas — harmless, and `spawn()`'s own first `measureAndSize` call
+   *  already accounts for whatever the config held at that point anyway. */
+  $effect(() => {
+    void $config.fontSizePx;
+    if (!sessionId) return; // spawn()'s own first measureAndSize() already covers the pre-spawn case
+    const { rows, cols } = measureAndSize();
+    scheduleResize(rows, cols);
+  });
+
+  /** The one place that actually calls `terminal_resize` — both the
+   *  `ResizeObserver` (tile drag) and the `config.fontSizePx` effect above
+   *  route through here instead of each debouncing/invoking independently.
+   *  Found necessary in architecture review: two separate debounce-or-not
+   *  paths writing the same `lastRows`/`lastCols` raced each other — a tile
+   *  drag's *already-scheduled* timer could fire after a font-size change's
+   *  immediate call and silently revert the terminal back to the stale
+   *  pre-font-change size, since the timer's closure never re-checked
+   *  anything at fire time. `clearTimeout` on every call guarantees only
+   *  the *last* requested size — whichever trigger produced it — ever
+   *  actually reaches `terminal_resize`. */
+  function scheduleResize(rows: number, cols: number): void {
+    if (!sessionId || (rows === lastRows && cols === lastCols)) return;
+    lastRows = rows;
+    lastCols = cols;
+    // Debounced, not immediate: a continuous tile drag can cross several
+    // row/col thresholds in quick succession, and each one is a real
+    // `SIGWINCH` to whatever full-screen program is running (vim, htop, …)
+    // — a real terminal coalesces these to the size things actually settle
+    // on rather than firing on every intermediate size. A font-size change
+    // is a single discrete event, not a drag, but the same debounce is
+    // harmless for it too (120ms is imperceptible for a one-off change) and
+    // having only one code path is worth more than either trigger's own
+    // "ideal" timing.
+    clearTimeout(resizeDebounce);
+    resizeDebounce = setTimeout(() => {
+      if (sessionId) void ctx.invoke("terminal_resize", { id: sessionId, rows, cols }).catch(() => {});
+    }, RESIZE_DEBOUNCE_MS);
+  }
+
   onMount(() => {
     if (canvasEl) context2d = canvasEl.getContext("2d");
     readThemeColors();
@@ -370,20 +444,10 @@
       resizeObserver = new ResizeObserver(() => {
         if (!sessionId) return; // not spawned yet, or the shell already ended
         // Resize the canvas's own backing store immediately (cheap, local
-        // only) so drawing stays crisp through the drag, but debounce the
-        // `terminal_resize` call itself: a continuous tile drag can cross
-        // several row/col thresholds in quick succession, and each one is a
-        // real `SIGWINCH` to whatever full-screen program is running (vim,
-        // htop, …) — a real terminal coalesces these to the size the drag
-        // actually settles on instead of firing on every intermediate size.
+        // only) so drawing stays crisp through the drag; the actual
+        // `terminal_resize` call is debounced inside `scheduleResize`.
         const { rows, cols } = measureAndSize();
-        if (rows === lastRows && cols === lastCols) return;
-        lastRows = rows;
-        lastCols = cols;
-        clearTimeout(resizeDebounce);
-        resizeDebounce = setTimeout(() => {
-          if (sessionId) void ctx.invoke("terminal_resize", { id: sessionId, rows, cols }).catch(() => {});
-        }, RESIZE_DEBOUNCE_MS);
+        scheduleResize(rows, cols);
       });
       resizeObserver.observe(root);
     }

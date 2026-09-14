@@ -139,15 +139,21 @@ fn screen_event(terminal: &Terminal) -> TerminalEvent {
 /// which outlives this call — can re-fetch the registry via
 /// `app.state::<TerminalSessions>()` when it's done, rather than needing a
 /// `'static` borrow this function has no way to hand it.
+///
+/// `shell` is the per-instance "Shell-Wahl" setting (Checkpoint 5) — `None`
+/// (the frontend sends this whenever its own `config.shell` is unset) falls
+/// back to `PtySession::spawn`'s own `$SHELL`/`/bin/zsh` default; a bad path
+/// surfaces as this call's own `Err`, same as any other spawn failure.
 #[tauri::command]
 pub fn terminal_spawn(
     app: AppHandle,
     sessions: State<'_, TerminalSessions>,
     rows: u16,
     cols: u16,
+    shell: Option<String>,
     on_output: Channel<TerminalEvent>,
 ) -> Result<String, String> {
-    let pty = PtySession::spawn(rows, cols).map_err(|err| err.to_string())?;
+    let pty = PtySession::spawn(rows, cols, shell.as_deref()).map_err(|err| err.to_string())?;
     let mut reader = pty.try_clone_reader().map_err(|err| err.to_string())?;
     let terminal = Terminal::new(rows, cols);
 
@@ -312,7 +318,7 @@ mod tests {
     #[test]
     fn insert_find_then_remove_round_trips_a_session() {
         let sessions = TerminalSessions::default();
-        let pty = PtySession::spawn(24, 80).expect("failed to spawn pty session for test");
+        let pty = PtySession::spawn(24, 80, None).expect("failed to spawn pty session for test");
         let terminal = Terminal::new(24, 80);
 
         sessions

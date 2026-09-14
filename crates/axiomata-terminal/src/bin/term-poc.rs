@@ -20,7 +20,7 @@ const ROWS: u16 = 24;
 const COLS: u16 = 80;
 
 fn main() -> io::Result<()> {
-    let mut session = PtySession::spawn(ROWS, COLS)?;
+    let mut session = PtySession::spawn(ROWS, COLS, None)?;
     let mut reader = session.try_clone_reader()?;
 
     // Relay the shell's output to our own stdout. When the shell exits, the
