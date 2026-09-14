@@ -1,15 +1,24 @@
 # Eigenes Terminal-Modul
 
-Status: geplant, noch nicht begonnen (durchgesprochen per `/grilling`, zwei
-Runden, alle Fragen geklärt). Dieses Dokument ist bewusst so detailliert
-geschrieben, dass einzelne Checkpoints auch ohne den ursprünglichen
-Chat-Kontext umsetzbar sind — z. B. über den `opencode`-Harness mit einem
-günstigeren Modell (DeepSeek Flash), wenn Claude-Kontingent gerade knapp ist.
-Phase 0 und 1 sind vollständig spezifiziert; Phase 2–5 sind ein Fahrplan, der
-vor der jeweiligen Umsetzung noch eine eigene kurze Planungsrunde bekommt
-(gleiche Arbeitsweise wie der Rest des Projekts, siehe `docs/architecture.md`
-und die Meilenstein-Historie: ein Teil nach dem anderen, nicht alles vorab
-im Detail).
+Status (2026-09-14): Checkpoints 0–4 sind umgesetzt und automatisiert
+verifiziert (Engine-/Tauri-/Frontend-Tests, Sub-Agent-Reviews); der volle
+interaktive Live-Test (Scrollback-Gefühl, `vim`/`htop` im Alternate-Screen,
+Auswahl+Copy, Paste, mehrere gleichzeitige Terminals) steht noch aus — der
+Owner testet das bei nächster Gelegenheit am Mac selbst. Checkpoint 5 ist
+teilweise umgesetzt ("Mehrere Instanzen" brauchte keinen Code, Konfiguration
+Schriftgröße/Shell-Wahl ist da); Performance-Tuning bei sehr hohem Output
+ist noch offen. Checkpoint 5b (Settings-Erweiterung, siehe unten) ist der
+aktuelle Arbeitsstand.
+
+Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
+Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.
+über den `opencode`-Harness mit einem günstigeren Modell (DeepSeek Flash),
+wenn Claude-Kontingent gerade knapp ist. Phase 0 und 1 waren von Anfang an
+vollständig spezifiziert; Phase 2–5 waren ein grober Fahrplan, der vor der
+jeweiligen Umsetzung noch eine eigene kurze Planungsrunde bekam (gleiche
+Arbeitsweise wie der Rest des Projekts, siehe `docs/architecture.md` und die
+Meilenstein-Historie: ein Teil nach dem anderen, nicht alles vorab im
+Detail) — das gilt unverändert für alles, was noch aussteht.
 
 ## Context
 
@@ -261,6 +270,96 @@ Alltag ausgiebig testen, Konfiguration (Schriftgröße, ggf. Shell-Wahl) über
 die `settings`-Rückseite des Moduls, Performance-Tuning bei sehr hohem
 Output (z. B. `yes` oder große Log-Dateien), ggf. offene Kleinigkeiten aus
 den vorherigen Checkpoints.
+
+## Checkpoint 5b — Settings-Erweiterung (Owner-Wunschliste, 2026-09-14)
+
+Erweitert die `terminal-settings.svelte`-Rückseite aus Checkpoint 5 um eine
+Reihe weiterer Einstellungen — vom Owner freigegeben ("all deine Vorschläge
+setzen wir um"). In zwei Blöcken umgesetzt, weil sie unterschiedlich tief in
+den Stack reichen; jeder Block bekommt den üblichen Verifikations-/
+Sub-Agent-Durchlauf und einen eigenen Commit, kein großer Rutsch.
+
+**Block A — reicht bis in die Engine-Crate (`PtySession`/`Screen`):**
+- **Scrollback-Größe**: `SCREEN_LIMIT`/`SCROLLBACK_LIMIT` ist aktuell eine
+  feste Konstante (`crates/axiomata-terminal/src/screen.rs`) — wird ein
+  Konstruktor-Parameter von `Screen::new`/`Terminal::new`, mit dem
+  bisherigen Wert (2000) als Default, wenn das Config-Feld leer ist.
+- **Start-Verzeichnis der Shell**: `PtySession::spawn` setzt aktuell kein
+  `cwd` (`CommandBuilder`s eigener Default greift — vermutlich das
+  Home-Verzeichnis oder das der App, nicht klar definiert). Neuer
+  `cwd_override: Option<&Path>`-Parameter, analog zu `shell_override`
+  (ungültiger Pfad = Spawn-Fehler, kein stiller Fallback). Der Standard,
+  den die Einstellungsseite vorschlägt (aber nicht erzwingt): der
+  Second-Brain-Workspace-Root — das Frontend müsste dafür `config.workspace_root`
+  (schon Teil von `get_app_info`, siehe `apps/dashboard/src-tauri/src/commands.rs`)
+  kennen; prüfen, ob `ModuleContext` das schon hergibt oder ob
+  `terminal.svelte` dafür `get_app_info` selbst aufrufen muss (kein
+  Präzedenzfall bisher — andere Module lesen so etwas nicht direkt).
+- **Eigene Umgebungsvariablen**: `PtySession::spawn` bekommt eine
+  `extra_env: &[(String, String)]`-artige Liste, angewandt nach `TERM`
+  (damit ein eigener `TERM`-Eintrag in der Liste bewusst gewinnen kann,
+  falls das je gewünscht ist — sonst gewinnt der letzte `cmd.env()`-Aufruf
+  ohnehin, das ist portable-pty/`CommandBuilder`s eigenes Verhalten, nur
+  hier explizit festgehalten). UI-seitig eine einfache
+  `KEY=value`-pro-Zeile-Textarea, keine strukturierte Key/Value-Tabelle
+  (Aufwand steht in keinem Verhältnis zum Nutzen bei aktuell einem
+  Terminal-Modul).
+
+**Block B — reine Darstellung, nur `TerminalScreen.ts`/`terminal.svelte`/
+`terminal-settings.svelte`, keine Engine-/Tauri-Änderung nötig:**
+- **Cursor-Stil**: `block` (aktuell, einzige Option), `outline` (nur
+  Rahmen, kein Fill), `underline`, `bar` (schmaler vertikaler Strich am
+  linken Zellrand) — ein `cursorStyle`-Parameter in `TerminalScreen.draw`,
+  vier Zeichenpfade statt der aktuellen fest verdrahteten Fill-Rect-Logik.
+  Plus ein Blinken-an/aus-Schalter (der bestehende `CURSOR_BLINK_MS`-Takt
+  bleibt, wird nur übersprungen wenn Blinken aus ist — Cursor bleibt dann
+  dauerhaft sichtbar statt im Wechsel).
+- **Farbschema/Theme**: `ANSI_16` in `TerminalScreen.ts` wird von einer
+  festen Konstante zu einer benannten Palette unter mehreren (mind.
+  xterm-Default als aktueller Ist-Zustand, dazu Solarized Dark, Dracula,
+  Nord, Gruvbox Dark — allesamt öffentlich dokumentierte 16-Werte-Tabellen,
+  keine Lizenzfragen). Eine `<select>` in `terminal-settings.svelte`,
+  gespeichert als `config.theme` (Name-String, z. B. `"nord"`), Default
+  `"xterm"` = heutiges Verhalten unverändert.
+- **Bold-Text in heller Farbe**: klassische Terminal-Konvention — wenn ein
+  Zeichen fett *und* mit einer der unteren 8 Indexfarben (0–7) gefärbt ist,
+  wird beim Zeichnen automatisch die helle Variante (+8) verwendet. Reine
+  Render-Entscheidung in `TerminalScreen.resolveColor`/`draw` (ein
+  `boldIsBright: boolean`-Flag in `DrawOptions`), das Bildschirm-Modell in
+  Rust bleibt unverändert (`Cell.bold` und `Cell.fg` sind ja schon getrennt
+  gespeichert). Default an (gängigste Erwartungshaltung), abschaltbar.
+- **Visueller Bell**: `\x07` (BEL) ist aktuell ein reines No-op
+  (`Screen::execute`s `_ => {}`-Zweig). Bleibt so im Bildschirm-Modell
+  (kein Zustand nötig, den `visible_rows`/`rows()` transportieren
+  müssten) — stattdessen bekommt `TerminalEvent::Screen` ein
+  `bell: bool`-Feld, das pro `feed()`-Aufruf anzeigt, ob seit dem letzten
+  Snapshot ein BEL durchkam (`Screen` braucht dafür ein kleines
+  `bell_pending`-Flag, von `execute` gesetzt und von einer neuen
+  `Screen::take_bell()`-Methode gelesen+zurückgesetzt — bewusst kein
+  Ringpuffer/Zähler, ein Bell zwischen zwei Snapshots reicht als Signal).
+  Frontend blitzt bei `bell: true` kurz einen Rahmen/Overlay auf der
+  Kachel auf. Kein Ton (Audio-Wiedergabe aus einem Hintergrund-Tauri-
+  Prozess ist ein eigenes Fass, für eine Backlog-Position dieser Größe
+  nicht gerechtfertigt) — abschaltbar auf "aus" für wer’s stört.
+- **Eigene Schriftart**: `config.fontFamily`, analog zu `config.fontSizePx`
+  aus Checkpoint 5 — überschreibt `--ax-font-mono` in `currentFont()`,
+  wenn gesetzt. Kein Font-Picker mit Vorschau (Scope-Explosion für wenig
+  Mehrwert) — ein einfaches Textfeld mit dem CSS-`font-family`-Freitext
+  (z. B. `"Fira Code, monospace"`), genau wie bei jeder anderen
+  CSS-`font-family`-Angabe.
+- **Transparenz/Deckkraft**: `config.opacity` (0–100, Default 100 = heutiges
+  Verhalten), wirkt NUR auf den Terminal-Hintergrund (`defaultBg` bekommt
+  einen Alpha-Kanal mit angewandt, Text/Cursor/Auswahl bleiben voll
+  deckend — sonst wird’s bei dunklem Text auf dunklem, transparentem
+  Hintergrund schnell unlesbar). Eigenständig von der schon vorhandenen
+  globalen Fenster-Transparenz der App — dieser Regler betrifft nur die
+  Terminal-Kachel selbst, nicht das ganze Fenster.
+
+**Reihenfolge**: Block A zuerst (reicht tiefer, blockiert nichts an Block B
+— aber andersherum macht es wenig Sinn, z. B. das Scrollback-Limit
+Rust-seitig zu bauen, bevor der Rest der Settings-Seite überhaupt die
+neuen UI-Muster hat). Nach beiden Blöcken: kurzer gemeinsamer Live-Test
+aller neuen Einstellungen zusammen mit dem noch offenen CP4/5-Live-Test.
 
 ## Verifikation (gesamt, pro Checkpoint anwendbar)
 

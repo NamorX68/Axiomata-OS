@@ -42,6 +42,16 @@ impl Terminal {
         }
     }
 
+    /// Overrides the underlying [`Screen`]'s scrollback cap (Checkpoint 5b's
+    /// per-instance scrollback-size setting) — see
+    /// [`Screen::with_scrollback_limit`]. A builder, like its `Screen`
+    /// counterpart, so `Terminal::new`'s signature and every existing call
+    /// site stay unchanged.
+    pub fn with_scrollback_limit(mut self, limit: usize) -> Self {
+        self.screen = self.screen.with_scrollback_limit(limit);
+        self
+    }
+
     /// Feeds newly read output bytes through the parser, updating the
     /// screen in place.
     pub fn feed(&mut self, bytes: &[u8]) {

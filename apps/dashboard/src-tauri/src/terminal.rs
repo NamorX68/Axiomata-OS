@@ -20,12 +20,13 @@
 
 use std::collections::HashMap;
 use std::io::Read;
+use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 use axiomata_terminal::{Cell, PtySession, Terminal};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
@@ -140,22 +141,54 @@ fn screen_event(terminal: &Terminal) -> TerminalEvent {
 /// `app.state::<TerminalSessions>()` when it's done, rather than needing a
 /// `'static` borrow this function has no way to hand it.
 ///
-/// `shell` is the per-instance "Shell-Wahl" setting (Checkpoint 5) — `None`
-/// (the frontend sends this whenever its own `config.shell` is unset) falls
-/// back to `PtySession::spawn`'s own `$SHELL`/`/bin/zsh` default; a bad path
-/// surfaces as this call's own `Err`, same as any other spawn failure.
+/// The per-instance settings `terminal_spawn` accepts, bundled into one
+/// struct (Checkpoint 5b, architecture review) rather than four more
+/// individual parameters — `shell` (Checkpoint 5) plus `cwd`/`env`/
+/// `scrollback_limit` (Checkpoint 5b) already pushed the command past a
+/// comfortable flat argument list, and each *is* a genuine per-instance
+/// setting (unlike `rows`/`cols`/`on_output`, which are spawn mechanics, not
+/// settings — those stay their own parameters). Bundling here means the
+/// next settings addition that reaches this far down the stack only grows
+/// this struct, not `terminal_spawn`'s own signature.
+///
+/// All four fields are forwarded to `PtySession::spawn`/`Terminal` without
+/// any validation of their own — same "thin glue, translation only" role
+/// this whole file plays; the actual behaviour (including `cwd`'s "bad path
+/// is a loud `Err`" contract) lives in `axiomata-terminal` itself. `env`
+/// arrives as a flat `Vec<(String, String)>` rather than a `HashMap` since
+/// the setting's own UI (a `KEY=value`-per-line textarea) parses into an
+/// ordered list, and `PtySession::spawn` applies entries in that order.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSpawnOptions {
+    /// `None` (the frontend sends this whenever its own `config.shell` is
+    /// unset) falls back to `PtySession::spawn`'s own `$SHELL`/`/bin/zsh`
+    /// default; a bad path surfaces as this call's own `Err`, same as any
+    /// other spawn failure.
+    pub shell: Option<String>,
+    pub cwd: Option<String>,
+    pub env: Option<Vec<(String, String)>>,
+    pub scrollback_limit: Option<usize>,
+}
+
 #[tauri::command]
 pub fn terminal_spawn(
     app: AppHandle,
     sessions: State<'_, TerminalSessions>,
     rows: u16,
     cols: u16,
-    shell: Option<String>,
+    options: TerminalSpawnOptions,
     on_output: Channel<TerminalEvent>,
 ) -> Result<String, String> {
-    let pty = PtySession::spawn(rows, cols, shell.as_deref()).map_err(|err| err.to_string())?;
+    let cwd_path = options.cwd.as_ref().map(|c| Path::new(c.as_str()));
+    let extra_env = options.env.unwrap_or_default();
+    let pty = PtySession::spawn(rows, cols, options.shell.as_deref(), cwd_path, &extra_env)
+        .map_err(|err| err.to_string())?;
     let mut reader = pty.try_clone_reader().map_err(|err| err.to_string())?;
-    let terminal = Terminal::new(rows, cols);
+    let terminal = match options.scrollback_limit {
+        Some(limit) => Terminal::new(rows, cols).with_scrollback_limit(limit),
+        None => Terminal::new(rows, cols),
+    };
 
     let id = next_session_id();
     sessions
@@ -318,7 +351,8 @@ mod tests {
     #[test]
     fn insert_find_then_remove_round_trips_a_session() {
         let sessions = TerminalSessions::default();
-        let pty = PtySession::spawn(24, 80, None).expect("failed to spawn pty session for test");
+        let pty = PtySession::spawn(24, 80, None, None, &[])
+            .expect("failed to spawn pty session for test");
         let terminal = Terminal::new(24, 80);
 
         sessions

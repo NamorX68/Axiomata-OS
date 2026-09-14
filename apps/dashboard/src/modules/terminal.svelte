@@ -16,6 +16,13 @@
   own clock — but only at `scrollOffset === 0`; scrolled into history,
   there's no live edit point to point at.
 
+  Checkpoint 5b added `config.cwd`/`config.env`/`config.scrollbackLimit` —
+  a starting working directory, extra environment variables (parsed from a
+  `KEY=value`-per-line textarea by `terminalEnv.parseEnvLines`), and a
+  scrollback-size override. Read once in `spawn()`, same as `config.shell`:
+  none of the four can be applied to an already-running session, only to
+  the next one spawned.
+
   Row/column count is genuinely measured (`TerminalScreen.measureChar`
   against the canvas's own resolved `--ax-font-mono`/`--ax-font-size-sm`, or
   `config.fontSizePx` in its place once Checkpoint 5's settings side sets
@@ -68,6 +75,7 @@
   import { draw, measureChar, selectionText, type CellPos, type CharMetrics, type TermCell } from "./TerminalScreen";
   import { keyToBytes } from "./terminalInput";
   import { createSequenceGuard } from "./terminalScrollback";
+  import { parseEnvLines } from "./terminalEnv";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -258,11 +266,23 @@
     // `config.shell` (Checkpoint 5's settings-side override) only picks
     // which shell *this* spawn uses — see `terminal-settings.svelte`'s own
     // hint that a shell change needs a fresh session, not a live swap
-    // under an already-running one.
+    // under an already-running one. `config.cwd`/`config.env`/
+    // `config.scrollbackLimit` (Checkpoint 5b) work the same way: read once
+    // here, not watched, since none of them can be applied to an
+    // already-running session either.
     const shell = typeof $config.shell === "string" && $config.shell ? $config.shell : null;
+    const cwd = typeof $config.cwd === "string" && $config.cwd.trim() ? $config.cwd.trim() : null;
+    const env = typeof $config.env === "string" ? parseEnvLines($config.env) : [];
+    const scrollbackLimit =
+      typeof $config.scrollbackLimit === "number" && $config.scrollbackLimit >= 0 ? $config.scrollbackLimit : null;
 
     try {
-      sessionId = await ctx.invoke<string>("terminal_spawn", { rows, cols, shell, onOutput });
+      sessionId = await ctx.invoke<string>("terminal_spawn", {
+        rows,
+        cols,
+        options: { shell, cwd, env, scrollbackLimit },
+        onOutput,
+      });
     } catch (err) {
       error = String(err);
     }

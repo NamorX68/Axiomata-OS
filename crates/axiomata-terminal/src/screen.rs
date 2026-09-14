@@ -123,7 +123,7 @@ pub struct Screen {
     /// read; `print` always overwrites it before storing the cell.
     pen: Cell,
     /// Lines the primary screen has scrolled off the top, oldest first,
-    /// capped at `SCROLLBACK_LIMIT`. Never touched while
+    /// capped at [`Self::scrollback_limit`]. Never touched while
     /// [`Self::in_alt_screen`] — `vim`/`less`/`htop` redraw their own
     /// screen constantly, and none of that transient churn belongs in a
     /// history a user might later scroll back into.
@@ -139,6 +139,13 @@ pub struct Screen {
     /// wrapped in `\x1b[200~...\x1b[201~` only when the program actually
     /// asked for it (see [`Self::bracketed_paste`]'s own doc comment).
     bracketed_paste: bool,
+    /// The cap [`Self::scroll_up`] enforces on [`Self::scrollback`].
+    /// Defaults to [`SCROLLBACK_LIMIT`] in [`Self::new`]; overridable via
+    /// [`Self::with_scrollback_limit`] (Checkpoint 5b's per-instance
+    /// scrollback-size setting) without changing `new`'s own signature —
+    /// keeps every existing `Screen::new(rows, cols)` call site (most of
+    /// this file's own tests included) working unchanged.
+    scrollback_limit: usize,
 }
 
 impl Screen {
@@ -159,7 +166,21 @@ impl Screen {
             in_alt_screen: false,
             saved_primary: None,
             bracketed_paste: false,
+            scrollback_limit: SCROLLBACK_LIMIT,
         }
+    }
+
+    /// Overrides the scrollback cap set by [`Self::new`] (Checkpoint 5b's
+    /// per-instance scrollback-size setting). A builder rather than a `new`
+    /// parameter so every existing `Screen::new(rows, cols)` call site —
+    /// this file's own tests included — keeps compiling unchanged.
+    ///
+    /// `0` is accepted as-is (no scrollback at all, `scroll_up` evicts
+    /// immediately) rather than silently substituting the default — an
+    /// owner who explicitly sets `0` gets exactly that, not a surprise.
+    pub fn with_scrollback_limit(mut self, limit: usize) -> Self {
+        self.scrollback_limit = limit;
+        self
     }
 
     /// Builds a `new_rows`x`new_cols` grid from `old`, keeping whatever
@@ -240,7 +261,8 @@ impl Screen {
         &self.grid
     }
 
-    /// How many lines are in scrollback right now (0..=`SCROLLBACK_LIMIT`).
+    /// How many lines are in scrollback right now (0..=`scrollback_limit`,
+    /// `SCROLLBACK_LIMIT` by default — see [`Self::with_scrollback_limit`]).
     pub fn scrollback_len(&self) -> usize {
         self.scrollback.len()
     }
@@ -379,7 +401,12 @@ impl Screen {
         // own doc comment) — its dropped line is just discarded.
         if !self.in_alt_screen {
             self.scrollback.push_back(dropped);
-            if self.scrollback.len() > SCROLLBACK_LIMIT {
+            // A `while` (not `if`) so this stays correct even if a future
+            // caller shrinks `scrollback_limit` on a `Screen` that already
+            // holds more lines than the new cap allows — not reachable
+            // today (the limit is only ever set once, at construction via
+            // `with_scrollback_limit`), but cheap to keep robust.
+            while self.scrollback.len() > self.scrollback_limit {
                 self.scrollback.pop_front();
             }
         }
@@ -1038,6 +1065,24 @@ mod tests {
         // The oldest 5 pushes ("00".."04") must have been evicted; the
         // farthest-back line still in scrollback is "05".
         let oldest = screen.visible_rows(SCROLLBACK_LIMIT as u16)[0]
+            .iter()
+            .map(|c| c.ch)
+            .collect::<String>();
+        assert_eq!(oldest, "05");
+    }
+
+    #[test]
+    fn with_scrollback_limit_overrides_the_default_cap() {
+        let mut screen = Screen::new(1, 2).with_scrollback_limit(3);
+        let mut parser = vte::Parser::new();
+        // Same shape as `scrollback_is_capped_at_the_limit_dropping_the_oldest_first`,
+        // but against the overridden limit (3) rather than the module
+        // default, proving the constructor value actually took effect.
+        for n in 0..8 {
+            parser.advance(&mut screen, format!("{:02}\r\n", n).as_bytes());
+        }
+        assert_eq!(screen.scrollback_len(), 3);
+        let oldest = screen.visible_rows(3)[0]
             .iter()
             .map(|c| c.ch)
             .collect::<String>();
