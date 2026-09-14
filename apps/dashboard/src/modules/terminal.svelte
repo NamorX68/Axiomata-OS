@@ -16,12 +16,29 @@
   own clock — but only at `scrollOffset === 0`; scrolled into history,
   there's no live edit point to point at.
 
-  Checkpoint 5b added `config.cwd`/`config.env`/`config.scrollbackLimit` —
-  a starting working directory, extra environment variables (parsed from a
+  Checkpoint 5b, Block A added `config.cwd`/`config.env`/`config.scrollbackLimit`
+  — a starting working directory, extra environment variables (parsed from a
   `KEY=value`-per-line textarea by `terminalEnv.parseEnvLines`), and a
   scrollback-size override. Read once in `spawn()`, same as `config.shell`:
   none of the four can be applied to an already-running session, only to
   the next one spawned.
+
+  Checkpoint 5b, Block B added six purely visual settings, all read fresh
+  every `tick()`/`currentFont()` call (like `config.fontSizePx` already
+  was) rather than needing their own `$effect`, since nothing about them
+  requires a resize or a fresh spawn to take effect: cursor style
+  (`config.cursorStyle` — `currentCursorStyle()`) and blink on/off
+  (`config.cursorBlink`), a named 16-colour theme (`config.theme` —
+  `currentPalette()`, see `terminalThemes.THEMES`), bold-as-bright-colour
+  (`config.boldIsBright`, on by default), a custom font family
+  (`config.fontFamily`, folded into `currentFont()` alongside the existing
+  `fontSizePx`), and background opacity (`config.opacity`, converted to
+  `DrawOptions.backgroundOpacity` — applies only to a cell with no explicit
+  background of its own, see that option's own doc comment in
+  `TerminalScreen.ts`). The visual bell (`bell` on `TerminalEvent::Screen`,
+  Checkpoint 5b) is the one exception that isn't purely visual on the wire —
+  it flashes `.bell-flash` for `BELL_FLASH_MS` via `triggerBellFlash`,
+  togglable off with `config.bellEnabled`.
 
   Row/column count is genuinely measured (`TerminalScreen.measureChar`
   against the canvas's own resolved `--ax-font-mono`/`--ax-font-size-sm`, or
@@ -72,9 +89,19 @@
   import { Channel } from "@tauri-apps/api/core";
 
   import type { ModuleContext } from "../core/types";
-  import { draw, measureChar, selectionText, type CellPos, type CharMetrics, type TermCell } from "./TerminalScreen";
+  import {
+    draw,
+    DEFAULT_CURSOR_STYLE,
+    measureChar,
+    selectionText,
+    type CellPos,
+    type CharMetrics,
+    type CursorStyle,
+    type TermCell,
+  } from "./TerminalScreen";
   import { keyToBytes } from "./terminalInput";
   import { createSequenceGuard } from "./terminalScrollback";
+  import { DEFAULT_THEME, THEMES } from "./terminalThemes";
   import { parseEnvLines } from "./terminalEnv";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -94,7 +121,14 @@
    *  `Channel` payload, not a `#[tauri::command]` argument list, so none of
    *  `invoke`'s usual camelCase<->snake_case bridging applies here. */
   type TerminalEvent =
-    | { type: "screen"; rows: TermCell[][]; cursor_row: number; cursor_col: number; bracketed_paste: boolean }
+    | {
+        type: "screen";
+        rows: TermCell[][];
+        cursor_row: number;
+        cursor_col: number;
+        bracketed_paste: boolean;
+        bell: boolean;
+      }
     | { type: "exited" };
 
   let root = $state<HTMLDivElement>();
@@ -147,6 +181,13 @@
    *  can't just call it on every observer tick. */
   const RESIZE_DEBOUNCE_MS = 120;
 
+  // Checkpoint 5b's visual bell: `true` for `BELL_FLASH_MS` after a
+  // `TerminalEvent::Screen.bell` arrives, then auto-clears — see
+  // `triggerBellFlash`. Togglable off via `config.bellEnabled`.
+  let bellFlash = $state(false);
+  let bellFlashTimeout: ReturnType<typeof setTimeout> | undefined;
+  const BELL_FLASH_MS = 200;
+
   const encoder = new TextEncoder();
 
   /** The rows actually drawn/selected-from right now: the live screen at
@@ -168,17 +209,36 @@
 
   /** A plain CSS font shorthand (no weight — `TerminalScreen.draw` adds
    *  `"bold "` itself per cell) off the canvas's own resolved
-   *  `--ax-font-mono`/`--ax-font-size-sm` — or `config.fontSizePx`
-   *  (Checkpoint 5's settings-side override, `terminal-settings.svelte`) in
-   *  place of the theme's own size when it's set. Read fresh each call,
-   *  matching `graph/render.ts`'s own per-frame `getComputedStyle`
-   *  convention for the same reason: cheap, and stays correct across a
-   *  theme switch (or a config change) with no extra wiring. */
+   *  `--ax-font-mono`/`--ax-font-size-sm` — or `config.fontSizePx`/
+   *  `config.fontFamily` (Checkpoint 5/5b's settings-side overrides,
+   *  `terminal-settings.svelte`) in place of the theme's own size/family
+   *  when set. Read fresh each call, matching `graph/render.ts`'s own
+   *  per-frame `getComputedStyle` convention for the same reason: cheap,
+   *  and stays correct across a theme switch (or a config change) with no
+   *  extra wiring. */
   function currentFont(): string {
     if (!canvasEl) return "13px monospace";
     const cs = getComputedStyle(canvasEl);
     const size = typeof $config.fontSizePx === "number" ? `${$config.fontSizePx}px` : cs.fontSize;
-    return `${size} ${cs.fontFamily}`;
+    const family = typeof $config.fontFamily === "string" && $config.fontFamily.trim() ? $config.fontFamily : cs.fontFamily;
+    return `${size} ${family}`;
+  }
+
+  /** `config.theme` (Checkpoint 5b's "Farbschema/Theme" setting) resolved
+   *  to an actual 16-colour table — an unrecognized/stale name (or none
+   *  set) falls back to `THEMES[DEFAULT_THEME]`, the original palette,
+   *  rather than throwing or drawing with `undefined` colours. */
+  function currentPalette(): readonly string[] {
+    const name = typeof $config.theme === "string" ? $config.theme : DEFAULT_THEME;
+    return THEMES[name] ?? THEMES[DEFAULT_THEME];
+  }
+
+  /** `config.cursorStyle` (Checkpoint 5b) narrowed to a real `CursorStyle`
+   *  — anything else (unset, a stale/typo'd value) falls back to
+   *  `DEFAULT_CURSOR_STYLE`, the original shape. */
+  function currentCursorStyle(): CursorStyle {
+    const raw = $config.cursorStyle;
+    return raw === "outline" || raw === "underline" || raw === "bar" ? raw : DEFAULT_CURSOR_STYLE;
   }
 
   /** Measures the real character cell against the canvas (replacing
@@ -206,11 +266,15 @@
 
   function tick(now: number): void {
     if (context2d && metrics) {
-      const blinkOn = Math.floor(now / CURSOR_BLINK_MS) % 2 === 0;
+      // `config.cursorBlink` (Checkpoint 5b) defaults to on — set to
+      // `false` and the cursor stays continuously visible instead of
+      // toggling with `CURSOR_BLINK_MS`.
+      const blinkOn = $config.cursorBlink === false || Math.floor(now / CURSOR_BLINK_MS) % 2 === 0;
       // No cursor while scrolled into history (nothing "live" to point at
       // there) or once the shell has ended.
       const cursor = !ended && sessionId && scrollOffset === 0 && blinkOn ? liveCursor : null;
       const selection = selStart && selEnd ? { start: selStart, end: selEnd } : null;
+      const opacityPercent = typeof $config.opacity === "number" ? Math.min(100, Math.max(0, $config.opacity)) : 100;
       context2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       draw(context2d, {
         rows: displayRows(),
@@ -222,9 +286,27 @@
         cursorColor,
         selectionColor,
         font: currentFont(),
+        cursorStyle: currentCursorStyle(),
+        palette: currentPalette(),
+        // Owner decision (docs/plans/terminal.md, Checkpoint 5b): on by
+        // default — only `config.boldIsBright === false` turns it off.
+        boldIsBright: $config.boldIsBright !== false,
+        backgroundOpacity: opacityPercent / 100,
       });
     }
     raf = requestAnimationFrame(tick);
+  }
+
+  /** Flashes the tile's bell overlay for `BELL_FLASH_MS`, then auto-clears
+   *  — Checkpoint 5b's "Visueller Bell" setting. No audio (see the plan's
+   *  own reasoning: playing sound from a background Tauri process is its
+   *  own can of worms, not justified for a backlog item this size). */
+  function triggerBellFlash(): void {
+    bellFlash = true;
+    clearTimeout(bellFlashTimeout);
+    bellFlashTimeout = setTimeout(() => {
+      bellFlash = false;
+    }, BELL_FLASH_MS);
   }
 
   /** Any input (typed or pasted) snaps the view back to the live bottom —
@@ -261,6 +343,9 @@
       liveRows = event.rows;
       liveCursor = { row: event.cursor_row, col: event.cursor_col };
       bracketedPaste = event.bracketed_paste;
+      // `config.bellEnabled` (Checkpoint 5b) defaults to on; only an
+      // explicit `false` suppresses the flash.
+      if (event.bell && $config.bellEnabled !== false) triggerBellFlash();
     };
 
     // `config.shell` (Checkpoint 5's settings-side override) only picks
@@ -481,6 +566,7 @@
   onDestroy(() => {
     cancelAnimationFrame(raf);
     clearTimeout(resizeDebounce);
+    clearTimeout(bellFlashTimeout);
     resizeObserver?.disconnect();
     themeObserver?.disconnect();
     if (sessionId) void ctx.invoke("terminal_close", { id: sessionId });
@@ -510,6 +596,8 @@
     {:else if scrollOffset > 0}
       <div class="banner">history — scroll down to return</div>
     {/if}
+    <!-- Checkpoint 5b's visual bell — a brief border flash, no audio. -->
+    <div class="bell-flash" class:active={bellFlash}></div>
     <input
       class="typer"
       bind:this={inputEl}
@@ -583,5 +671,18 @@
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-sm);
     color: var(--ax-danger);
+  }
+  /* Checkpoint 5b's visual bell: an inset border that briefly appears and
+   *  fades, rather than popping instantly on and off — `bellFlash` toggles
+   *  `.active` for `BELL_FLASH_MS` (see `triggerBellFlash`). */
+  .bell-flash {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 2px transparent;
+    transition: box-shadow 60ms ease-out;
+  }
+  .bell-flash.active {
+    box-shadow: inset 0 0 0 2px var(--ax-accent);
   }
 </style>

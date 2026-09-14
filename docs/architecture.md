@@ -69,6 +69,7 @@ Axiomata-OS/
     axiomata-core/                # the actual "OS" engine — no Tauri or macOS dependency
     axiomata-macos/                # boundary for future macOS-specific integration (stub)
     axiomata-cli/                   # headless binary that exercises axiomata-core end to end
+    axiomata-terminal/              # standalone PTY + VT100 engine for the Terminal module
   apps/
     dashboard/
       src/                           # Svelte frontend (core/canvas/shell/modules/themes/graph)
@@ -112,6 +113,20 @@ A boundary crate reserved for future macOS-specific integration beyond what MCP 
 (Apple Mail / Reminders / Calendar, used today via opencode's own MCP tool-calling — see
 §5 "Connector modules") already cover. Currently an untouched template stub with no
 Axiomata-specific code.
+
+### `axiomata-terminal`
+
+A standalone PTY + terminal-emulation engine backing the dashboard's Terminal module: no
+dependency on Tauri or `axiomata-core`, so it is independently unit-testable and even runnable
+on its own (`cargo run -p axiomata-terminal --bin term-poc`). `PtySession` (`portable-pty`)
+owns the shell process; `Terminal`/`Screen` (`vte` for tokenizing, a hand-written
+`vte::Perform` for everything the tokens actually *do*) is the cell-grid state machine —
+cursor, SGR colours/attributes, scrollback, the alternate screen (`vim`/`less`/`htop`),
+bracketed paste, and the visual bell. `apps/dashboard/src-tauri/src/terminal.rs` is the thin
+Tauri glue (session registry + `terminal_spawn`/`_write`/`_resize`/`_close`/`_scrollback`
+commands, streaming interpreted `Cell` snapshots — not raw bytes — over a Tauri `Channel`);
+`apps/dashboard/src/modules/terminal.svelte` + `TerminalScreen.ts` render it on a `<canvas>`.
+Full phased build log and the current checkpoint: `docs/plans/terminal.md`.
 
 ### `axiomata-cli`
 
@@ -460,8 +475,8 @@ carrying its own config.
 - **Modules shipped today**: memory-status, skills-deck, routines-board (§5 above), md-file
   (Markdown + HTML viewer, also used as the compose surface for "New note"), todo (a flat
   `ToDo.md` checklist, GFM task lists, inline-editable), calendar, reminders, mail (connector
-  modules per the pattern above), and second-brain (below) — each with a front and, where
-  relevant, a settings face.
+  modules per the pattern above), terminal (a self-built PTY/VT100 emulator, `axiomata-terminal`
+  — see §3), and second-brain (below) — each with a front and, where relevant, a settings face.
 
 ### Second Brain — particle graph
 
@@ -534,7 +549,15 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   ocean); Routines CRUD in the UI itself — edit and delete, plus a friendly interval picker
   replacing the raw cron text field; every dashboard tool module made a canvas singleton;
   the Calendar tile's mini-month + selected-day-plus-7 agenda + optional digital/analog
-  clock (`docs/plans/calendar-polish.md`).
+  clock (`docs/plans/calendar-polish.md`); the Terminal module (`axiomata-terminal`, §3) — a
+  self-built PTY/VT100 emulator rather than an embedded existing terminal or `xterm.js`,
+  deliberately so the ANSI-interpretation and screen-model parts stay a hands-on learning
+  project rather than hidden inside a library. Checkpoints 0–4 (PTY spawn, end-to-end IPC
+  wiring, ANSI/VT100 + Canvas-2D rendering, scrollback/alternate-screen/selection/paste) and
+  Checkpoint 5's per-instance font/shell settings are done; Checkpoint 5b (scrollback size,
+  start directory, extra env vars, cursor style, colour themes, bold-is-bright, visual bell,
+  custom font, background opacity) is the current work; full detail and status:
+  `docs/plans/terminal.md`.
 - **Stufe 2 — the lean local agent (CP1–CP4): shipped, then superseded by CP5.** The
   hand-rolled stdio MCP client + `[mcp_servers]` config + `axiomata-cli mcp import|list|tools`
   (CP1), the `AgentBackend::OllamaAgent` bounded tool-call loop over Ollama + MCP (CP2), the

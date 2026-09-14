@@ -21,11 +21,20 @@
   sends nothing at all and the backend falls back to its own default (see
   `PtySession::spawn`'s own doc comment). Owner decision (`docs/plans/terminal.md`,
   Checkpoint 5b): suggest, don't force.
+
+  Checkpoint 5b, Block B added six purely visual settings, unlike the
+  section above all *live*-applied (`terminal.svelte` reads them fresh
+  every frame/font-resolution, same as `fontSizePx` already was — no
+  reopen or new session needed): cursor style + blink, a named colour
+  theme, bold-as-bright, a custom font family, background opacity, and the
+  visual bell's on/off toggle.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
   import type { AppInfo } from "../core/backend";
   import type { ModuleContext } from "../core/types";
+  import { DEFAULT_CURSOR_STYLE } from "./TerminalScreen";
+  import { DEFAULT_THEME, THEMES } from "./terminalThemes";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per mounted instance and never swapped.
@@ -34,6 +43,19 @@
 
   const MIN_FONT_PX = 8;
   const MAX_FONT_PX = 32;
+
+  /** Friendly display names for `THEMES`' keys, in the order the `<select>`
+   *  below lists them — driven off `THEMES` itself (not a separately
+   *  hand-maintained list) so a palette can't exist in one place but not
+   *  the other. */
+  const THEME_LABELS: Record<string, string> = {
+    xterm: "xterm (default)",
+    "solarized-dark": "Solarized Dark",
+    dracula: "Dracula",
+    nord: "Nord",
+    "gruvbox-dark": "Gruvbox Dark",
+  };
+  const themeNames = Object.keys(THEMES);
 
   /** The workspace root, fetched once on mount purely to *suggest* a start
    *  directory (see the component doc comment) — never written into
@@ -69,6 +91,45 @@
     const raw = (e.currentTarget as HTMLInputElement).value.trim();
     const limit = raw ? Math.max(0, Math.floor(Number(raw))) : undefined;
     config.update((c) => ({ ...c, scrollbackLimit: limit }));
+  }
+
+  function setCursorStyle(e: Event) {
+    const value = (e.currentTarget as HTMLSelectElement).value;
+    // `DEFAULT_CURSOR_STYLE` is what the frontend already falls back to
+    // (`currentCursorStyle()`) when the field is unset, so storing it
+    // explicitly would just be redundant persisted state.
+    config.update((c) => ({ ...c, cursorStyle: value === DEFAULT_CURSOR_STYLE ? undefined : value }));
+  }
+
+  function setCursorBlink(e: Event) {
+    const checked = (e.currentTarget as HTMLInputElement).checked;
+    config.update((c) => ({ ...c, cursorBlink: checked ? undefined : false }));
+  }
+
+  function setTheme(e: Event) {
+    const value = (e.currentTarget as HTMLSelectElement).value;
+    config.update((c) => ({ ...c, theme: value === DEFAULT_THEME ? undefined : value }));
+  }
+
+  function setBoldIsBright(e: Event) {
+    const checked = (e.currentTarget as HTMLInputElement).checked;
+    config.update((c) => ({ ...c, boldIsBright: checked ? undefined : false }));
+  }
+
+  function setBellEnabled(e: Event) {
+    const checked = (e.currentTarget as HTMLInputElement).checked;
+    config.update((c) => ({ ...c, bellEnabled: checked ? undefined : false }));
+  }
+
+  function setFontFamily(e: Event) {
+    const value = (e.currentTarget as HTMLInputElement).value.trim();
+    config.update((c) => ({ ...c, fontFamily: value || undefined }));
+  }
+
+  function setOpacity(e: Event) {
+    const raw = Number((e.currentTarget as HTMLInputElement).value);
+    const opacity = Math.min(100, Math.max(0, raw));
+    config.update((c) => ({ ...c, opacity: opacity === 100 ? undefined : opacity }));
   }
 
   onMount(() => {
@@ -132,6 +193,63 @@
     None of these apply to the terminal that's currently running — they take effect the next time this tile spawns a
     new session.
   </p>
+
+  <div class="divider"></div>
+
+  <label>
+    Cursor style
+    <select
+      value={typeof $config.cursorStyle === "string" ? $config.cursorStyle : DEFAULT_CURSOR_STYLE}
+      onchange={setCursorStyle}
+    >
+      <option value="block">Block</option>
+      <option value="outline">Outline</option>
+      <option value="underline">Underline</option>
+      <option value="bar">Bar</option>
+    </select>
+  </label>
+  <label>
+    Cursor blink
+    <input type="checkbox" checked={$config.cursorBlink !== false} onchange={setCursorBlink} />
+  </label>
+  <label>
+    Theme
+    <select value={typeof $config.theme === "string" ? $config.theme : DEFAULT_THEME} onchange={setTheme}>
+      {#each themeNames as name (name)}
+        <option value={name}>{THEME_LABELS[name] ?? name}</option>
+      {/each}
+    </select>
+  </label>
+  <label>
+    Bold text in bright colour
+    <input type="checkbox" checked={$config.boldIsBright !== false} onchange={setBoldIsBright} />
+  </label>
+  <label>
+    Visual bell
+    <input type="checkbox" checked={$config.bellEnabled !== false} onchange={setBellEnabled} />
+  </label>
+  <label>
+    Font family
+    <input
+      type="text"
+      placeholder="theme default"
+      value={typeof $config.fontFamily === "string" ? $config.fontFamily : ""}
+      onchange={setFontFamily}
+    />
+  </label>
+  <label>
+    Background opacity
+    <input
+      type="range"
+      min="0"
+      max="100"
+      value={typeof $config.opacity === "number" ? $config.opacity : 100}
+      onchange={setOpacity}
+    />
+  </label>
+  <p class="hint">
+    These apply live to the terminal that's currently running — no reopen or new session needed.
+  </p>
 </div>
 
 <style>
@@ -154,8 +272,18 @@
     flex-direction: column;
     align-items: stretch;
   }
-  input {
+  input,
+  select {
     width: 9em;
+  }
+  /* A checkbox/range shouldn't take the same fixed 9em box a text/number/
+   *  select field does — that would stretch a checkbox's hit area oddly and
+   *  give a slider far more room than it needs next to a short label. */
+  input[type="checkbox"] {
+    width: auto;
+  }
+  input[type="range"] {
+    width: 8em;
   }
   textarea {
     width: 100%;
@@ -163,6 +291,11 @@
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
     box-sizing: border-box;
+  }
+  .divider {
+    height: 1px;
+    background: var(--ax-border);
+    margin: var(--ax-space-1) 0;
   }
   .hint {
     margin: 0;

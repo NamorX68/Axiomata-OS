@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { isCellSelected, resolveColor, selectionText, type TermCell, type TermColor } from "./TerminalScreen";
+import { THEMES } from "./terminalThemes";
 
 /** A minimal `TermCell` for selection tests — only `ch` matters there. */
 function cell(ch: string): TermCell {
@@ -45,6 +46,31 @@ describe("resolveColor", () => {
   it("passes truecolor rgb values through directly", () => {
     const color: TermColor = { type: "rgb", r: 10, g: 20, b: 30 };
     expect(resolveColor(color, "#fff")).toBe("rgb(10, 20, 30)");
+  });
+
+  it("resolves an indexed colour against an explicit palette instead of the xterm default", () => {
+    expect(resolveColor({ type: "indexed", index: 1 }, "#fff", { palette: THEMES.nord })).toBe(THEMES.nord[1]);
+    expect(resolveColor({ type: "indexed", index: 1 }, "#fff", { palette: THEMES["gruvbox-dark"] })).toBe(
+      THEMES["gruvbox-dark"][1],
+    );
+  });
+
+  it("maps a bold low-8 index (0-7) to its +8 bright counterpart when bright is set", () => {
+    expect(resolveColor({ type: "indexed", index: 1 }, "#fff", { bright: true })).toBe(
+      resolveColor({ type: "indexed", index: 9 }, "#fff"),
+    );
+  });
+
+  it("leaves an already-bright index (8-15) unchanged when bright is set", () => {
+    expect(resolveColor({ type: "indexed", index: 9 }, "#fff", { bright: true })).toBe(
+      resolveColor({ type: "indexed", index: 9 }, "#fff"),
+    );
+  });
+
+  it("ignores bright for default and truecolor rgb colours (no bright variant exists)", () => {
+    expect(resolveColor({ type: "default" }, "#abcdef", { bright: true })).toBe("#abcdef");
+    const color: TermColor = { type: "rgb", r: 10, g: 20, b: 30 };
+    expect(resolveColor(color, "#fff", { bright: true })).toBe("rgb(10, 20, 30)");
   });
 });
 

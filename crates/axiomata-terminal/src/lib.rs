@@ -69,6 +69,13 @@ impl Terminal {
     pub fn screen(&self) -> &Screen {
         &self.screen
     }
+
+    /// Delegates to [`Screen::take_bell`] — see its own doc comment. Exposed
+    /// here (not just via `screen()`, which only hands out `&Screen`)
+    /// because it needs `&mut self`.
+    pub fn take_bell(&mut self) -> bool {
+        self.screen.take_bell()
+    }
 }
 
 #[cfg(test)]
@@ -108,5 +115,23 @@ mod tests {
         // Existing content survives the resize, same as `Screen::resize`
         // itself guarantees.
         assert_eq!(terminal.screen().line_text(0), "ab  ");
+    }
+
+    /// `Terminal::take_bell` is a thin delegation to `Screen::take_bell` (see
+    /// its own doc comment) — `screen.rs`'s tests cover the underlying
+    /// "read once, then clears itself" semantics in depth; this only checks
+    /// the delegation itself actually reaches through `Terminal::feed`,
+    /// mirroring `resize_delegates_to_the_underlying_screen` above.
+    #[test]
+    fn take_bell_delegates_to_the_underlying_screen() {
+        let mut terminal = Terminal::new(1, 5);
+        assert!(!terminal.take_bell(), "no bell has arrived yet");
+
+        terminal.feed(b"\x07");
+        assert!(terminal.take_bell());
+        assert!(
+            !terminal.take_bell(),
+            "must be cleared after being read once"
+        );
     }
 }

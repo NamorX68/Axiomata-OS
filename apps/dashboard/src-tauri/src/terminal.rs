@@ -56,6 +56,12 @@ pub enum TerminalEvent {
         cursor_row: u16,
         cursor_col: u16,
         bracketed_paste: bool,
+        /// Whether a BEL (`0x07`) arrived since the *previous* snapshot
+        /// (Checkpoint 5b's "Visueller Bell" setting) — `Screen::take_bell()`'s
+        /// value at snapshot time, already consumed, so it never repeats
+        /// across two consecutive events for the same bell. The frontend
+        /// briefly flashes the tile when this is `true`; no audio.
+        bell: bool,
     },
     /// The shell process ended (on its own, or the PTY tore down) — not an
     /// error, and not something `terminal_write`/`_resize` should still be
@@ -107,8 +113,13 @@ fn next_session_id() -> String {
     format!("term-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-/// A session's current screen as a `TerminalEvent::Screen`.
-fn screen_event(terminal: &Terminal) -> TerminalEvent {
+/// A session's current screen as a `TerminalEvent::Screen`. Takes `&mut
+/// Terminal` (not `&Terminal`, unlike every other read-only accessor in this
+/// file) because `bell` reads and clears `Screen::take_bell()` as a side
+/// effect — see that method's own doc comment for why it's consume-once
+/// rather than a plain getter.
+fn screen_event(terminal: &mut Terminal) -> TerminalEvent {
+    let bell = terminal.take_bell();
     let screen = terminal.screen();
     let (cursor_row, cursor_col) = screen.cursor();
     TerminalEvent::Screen {
@@ -116,6 +127,7 @@ fn screen_event(terminal: &Terminal) -> TerminalEvent {
         cursor_row,
         cursor_col,
         bracketed_paste: screen.bracketed_paste(),
+        bell,
     }
 }
 
@@ -166,8 +178,20 @@ pub struct TerminalSpawnOptions {
     /// default; a bad path surfaces as this call's own `Err`, same as any
     /// other spawn failure.
     pub shell: Option<String>,
+    /// `None` leaves `PtySession::spawn`'s `cwd_override` unset (whatever
+    /// `CommandBuilder`'s own default resolves to); `Some` of a path that
+    /// isn't an existing directory surfaces as this call's own `Err` rather
+    /// than a silent fallback — see `PtySession::spawn`'s own doc comment.
     pub cwd: Option<String>,
+    /// `None` is the same as an empty list (no extra environment variables
+    /// beyond `TERM=xterm-256color`); forwarded to `PtySession::spawn`'s
+    /// `extra_env` in order, applied after `TERM` — see that parameter's own
+    /// doc comment for the "later entry wins" ordering.
     pub env: Option<Vec<(String, String)>>,
+    /// `None` leaves `Terminal::new`'s own default scrollback cap
+    /// (`SCROLLBACK_LIMIT` in `screen.rs`) in place; `Some(n)` overrides it
+    /// via `Terminal::with_scrollback_limit`, including `Some(0)` for no
+    /// scrollback at all — see that method's own doc comment.
     pub scrollback_limit: Option<usize>,
 }
 
@@ -213,7 +237,7 @@ pub fn terminal_spawn(
                 break;
             };
             session.terminal.feed(&buf[..n]);
-            let event = screen_event(&session.terminal);
+            let event = screen_event(&mut session.terminal);
             drop(guard);
             if on_output.send(event).is_err() {
                 break;
@@ -414,7 +438,7 @@ mod tests {
             cursor_row,
             cursor_col,
             ..
-        } = screen_event(&terminal)
+        } = screen_event(&mut terminal)
         else {
             panic!("expected a Screen event");
         };
@@ -435,7 +459,7 @@ mod tests {
         let mut terminal = Terminal::new(1, 2);
         terminal.feed(b"\x1b[1;31mA");
 
-        let TerminalEvent::Screen { rows, .. } = screen_event(&terminal) else {
+        let TerminalEvent::Screen { rows, .. } = screen_event(&mut terminal) else {
             panic!("expected a Screen event");
         };
 
@@ -461,7 +485,7 @@ mod tests {
 
         let TerminalEvent::Screen {
             bracketed_paste, ..
-        } = screen_event(&terminal)
+        } = screen_event(&mut terminal)
         else {
             panic!("expected a Screen event");
         };
@@ -470,11 +494,37 @@ mod tests {
         terminal.feed(b"\x1b[?2004h");
         let TerminalEvent::Screen {
             bracketed_paste, ..
-        } = screen_event(&terminal)
+        } = screen_event(&mut terminal)
         else {
             panic!("expected a Screen event");
         };
         assert!(bracketed_paste);
+    }
+
+    /// `screen_event`'s `bell` field (Checkpoint 5b) has to actually read
+    /// and consume `Terminal::take_bell()` — a stale/stuck `true` would
+    /// flash the frontend's overlay on every subsequent snapshot instead of
+    /// just once for the one BEL that actually arrived.
+    #[test]
+    fn screen_event_bell_is_true_once_then_false_again() {
+        let mut terminal = Terminal::new(1, 5);
+
+        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal) else {
+            panic!("expected a Screen event");
+        };
+        assert!(!bell, "no BEL has arrived yet");
+
+        terminal.feed(b"\x07");
+        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal) else {
+            panic!("expected a Screen event");
+        };
+        assert!(bell);
+
+        // The same BEL must not show up again in the *next* snapshot.
+        let TerminalEvent::Screen { bell, .. } = screen_event(&mut terminal) else {
+            panic!("expected a Screen event");
+        };
+        assert!(!bell);
     }
 
     /// `terminal_scrollback`'s whole body is `session.terminal.screen()

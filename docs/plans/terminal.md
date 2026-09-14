@@ -8,7 +8,8 @@ Owner testet das bei nächster Gelegenheit am Mac selbst. Checkpoint 5 ist
 teilweise umgesetzt ("Mehrere Instanzen" brauchte keinen Code, Konfiguration
 Schriftgröße/Shell-Wahl ist da); Performance-Tuning bei sehr hohem Output
 ist noch offen. Checkpoint 5b (Settings-Erweiterung, siehe unten) ist der
-aktuelle Arbeitsstand.
+aktuelle Arbeitsstand — Block A ist committet (`76a5715`); Block B ist
+umgesetzt und steht vor seinem eigenen Verifikations-/Commit-Durchlauf.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

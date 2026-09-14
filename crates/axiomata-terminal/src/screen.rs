@@ -146,6 +146,10 @@ pub struct Screen {
     /// keeps every existing `Screen::new(rows, cols)` call site (most of
     /// this file's own tests included) working unchanged.
     scrollback_limit: usize,
+    /// Set by [`Self::execute`] on a BEL byte (`0x07`), read and cleared by
+    /// [`Self::take_bell`] — see that method's own doc comment for why this
+    /// is a plain flag rather than a counter/queue.
+    bell_pending: bool,
 }
 
 impl Screen {
@@ -167,6 +171,7 @@ impl Screen {
             saved_primary: None,
             bracketed_paste: false,
             scrollback_limit: SCROLLBACK_LIMIT,
+            bell_pending: false,
         }
     }
 
@@ -283,6 +288,25 @@ impl Screen {
     /// this flag is what lets the caller pick correctly either way.
     pub fn bracketed_paste(&self) -> bool {
         self.bracketed_paste
+    }
+
+    /// Reads and clears whether a BEL (`0x07`) has arrived since the last
+    /// call — Checkpoint 5b's "Visueller Bell" setting. A plain flag, not a
+    /// counter or queue: the Tauri glue layer calls this once per `feed()`
+    /// (see `terminal.rs`'s `screen_event`) to build each `TerminalEvent::Screen`
+    /// snapshot, and the frontend only ever needs "did at least one bell
+    /// happen since the last snapshot" to flash its own overlay once — a
+    /// program ringing the bell five times between two snapshots doesn't
+    /// need the tile to flash five times, it needs to flash once, same as
+    /// the debounced-by-nature "redraw the whole grid from the model every
+    /// update" approach the rest of this crate already uses. `take_bell`
+    /// (not `bell`/`bell_pending()`) is named as a verb specifically to
+    /// signal the side effect — an ordinary getter wouldn't be expected to
+    /// also reset state, and a caller polling this in a loop without
+    /// intending to consume it would silently miss every bell after the
+    /// first read otherwise.
+    pub fn take_bell(&mut self) -> bool {
+        std::mem::take(&mut self.bell_pending)
     }
 
     /// A `rows`-tall window of content, `scroll_offset` lines up from the
@@ -652,7 +676,8 @@ impl Perform for Screen {
                 let next_stop = (self.cursor_col / TAB_STOP + 1) * TAB_STOP;
                 self.cursor_col = next_stop.min(self.cols - 1);
             }
-            _ => {} // other C0/C1 controls (bell, …) have no screen effect here
+            0x07 => self.bell_pending = true, // BEL — see `take_bell`'s own doc comment
+            _ => {}                           // other C0/C1 controls have no screen effect here
         }
     }
 
@@ -1181,6 +1206,70 @@ mod tests {
         assert!(screen.bracketed_paste());
         parser.advance(&mut screen, b"\x1b[?2004l");
         assert!(!screen.bracketed_paste());
+    }
+
+    #[test]
+    fn take_bell_reports_a_bel_once_and_then_clears_it() {
+        let mut screen = Screen::new(1, 5);
+        let mut parser = vte::Parser::new();
+        assert!(!screen.take_bell(), "no bell has arrived yet");
+        parser.advance(&mut screen, b"\x07");
+        assert!(screen.take_bell());
+        assert!(!screen.take_bell(), "must be cleared after being read once");
+    }
+
+    #[test]
+    fn several_bells_before_a_read_still_only_report_once() {
+        let mut screen = Screen::new(1, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x07\x07\x07");
+        assert!(screen.take_bell());
+        assert!(!screen.take_bell());
+    }
+
+    /// `bell_pending` is deliberately *not* part of `SavedPrimary` (see
+    /// `Screen`'s own field doc comment) — `execute()` sets it regardless of
+    /// which grid (`vim`/`htop`'s alternate screen, or the primary one) is
+    /// currently active, since a `Perform` implementation has no notion of
+    /// "the alternate screen suppresses this control code". A bell rung
+    /// while the alternate screen is up must still reach `take_bell`, and
+    /// switching back to the primary screen afterwards must not resurrect or
+    /// swallow it either way.
+    #[test]
+    fn a_bell_rung_while_the_alternate_screen_is_up_is_still_reported() {
+        let mut screen = Screen::new(1, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[?1049h"); // vim/htop takes over
+        assert!(!screen.take_bell(), "no bell yet, just entered alt screen");
+
+        parser.advance(&mut screen, b"\x07"); // the program in the alt screen rings the bell
+        assert!(
+            screen.take_bell(),
+            "a bell rung during the alternate screen must still be reported"
+        );
+        assert!(!screen.take_bell(), "already consumed");
+
+        // Leaving the alternate screen afterwards must not, on its own,
+        // resurrect an already-consumed bell.
+        parser.advance(&mut screen, b"\x1b[?1049l");
+        assert!(!screen.take_bell());
+    }
+
+    /// Same interaction, the other order: a bell rung on the primary screen
+    /// that hasn't been read yet must survive entering *and* leaving the
+    /// alternate screen untouched, since `enter_alt_screen`/`exit_alt_screen`
+    /// only ever move grid/cursor/pen state, never `bell_pending`.
+    #[test]
+    fn a_pending_bell_survives_a_round_trip_through_the_alternate_screen() {
+        let mut screen = Screen::new(1, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x07"); // ring the bell on the primary screen
+        parser.advance(&mut screen, b"\x1b[?1049h\x1b[?1049l"); // enter and immediately leave
+
+        assert!(
+            screen.take_bell(),
+            "a bell pending before the alternate screen must not be lost by the round trip"
+        );
     }
 
     #[test]
