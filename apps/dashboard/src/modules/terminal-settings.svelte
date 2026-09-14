@@ -70,8 +70,30 @@
     dracula: "Dracula",
     nord: "Nord",
     "gruvbox-dark": "Gruvbox Dark",
+    "catppuccin-mocha": "Catppuccin Mocha",
+    "tokyo-night": "Tokyo Night",
   };
   const themeNames = Object.keys(THEMES);
+
+  /** Bundled coding-monospace families (Checkpoint 5g, owner request: "wir
+   *  sollten einige MonoFonts... bereits mitliefern"). Real `@fontsource`
+   *  family names, matching the static weights bundled in `main.ts`
+   *  (100/400/700 → Thin/Regular/Bold — see that import's own comment for
+   *  why 100 is bundled even though nothing renders at it yet: this page
+   *  only picks a font *family* here, never a weight), so picking one of
+   *  these always has a real Bold face to render with, not just a
+   *  browser-synthesized fake bold. This `<select>` is a one-click shortcut
+   *  into the "Font family" free-text field right below, not a separate
+   *  setting — picking a locally installed font (or clearing it back to the
+   *  theme default) still goes through that same field. */
+  const BUNDLED_FONTS = ["JetBrains Mono", "IBM Plex Mono"];
+
+  function pickBundledFont(e: Event) {
+    const value = (e.currentTarget as HTMLSelectElement).value;
+    if (!value) return; // "Custom…" placeholder — leave the text field as-is
+    fontFamilyText = value;
+    setFontFamily();
+  }
 
   /** The workspace root, fetched once on mount purely to *suggest* a start
    *  directory (see the component doc comment) — never written into
@@ -279,6 +301,15 @@
     <label>
       Visual bell
       <input type="checkbox" checked={$terminalSettings.bellEnabled !== false} onchange={setBellEnabled} />
+    </label>
+    <label>
+      Bundled font
+      <select value={BUNDLED_FONTS.includes(fontFamilyText) ? fontFamilyText : ""} onchange={pickBundledFont}>
+        <option value="">Custom…</option>
+        {#each BUNDLED_FONTS as name (name)}
+          <option value={name}>{name}</option>
+        {/each}
+      </select>
     </label>
     <label>
       Font family

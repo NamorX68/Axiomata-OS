@@ -217,6 +217,23 @@
     selectionColor = v("--ax-accent-muted", selectionColor);
   }
 
+  /** Appended as the last fallback to whatever font family is actually
+   *  configured, so glyphs the primary family doesn't have — Powerline
+   *  separators, devicon/git-branch icons in a Starship/Powerlevel10k
+   *  prompt — still render instead of showing as blank boxes (Checkpoint
+   *  5g, owner-confirmed via Ghostty-comparison screenshots in Checkpoint
+   *  5e). Canvas `ctx.font` resolves a comma-separated family list the same
+   *  way CSS does: per-glyph, not per-string, so normal text still comes
+   *  from the primary family and only genuinely missing glyphs fall
+   *  through to this one. Bundled in `main.ts`
+   *  (`@azurity/pure-nerd-font/pure-nerd-font.css`) — icons only, no
+   *  regular character set, deliberately layered onto any font rather than
+   *  being its own patched monospace family. That import's own comment has
+   *  the full caveat (architecture review, Checkpoint 5g): the bundled
+   *  glyph set is pinned to an old Nerd Fonts generation, so a codepoint
+   *  added upstream after that pin may still render blank. */
+  const NERD_FONT_FALLBACK = '"PureNerdFont"';
+
   /** A plain CSS font shorthand (no weight — `TerminalScreen.draw` adds
    *  `"bold "` itself per cell) off the canvas's own resolved
    *  `--ax-font-mono`/`--ax-font-size-sm` — or `terminalSettings.fontSizePx`/
@@ -231,7 +248,7 @@
     const cs = getComputedStyle(canvasEl);
     const size = typeof $terminalSettings.fontSizePx === "number" ? `${$terminalSettings.fontSizePx}px` : cs.fontSize;
     const family = typeof $terminalSettings.fontFamily === "string" && $terminalSettings.fontFamily.trim() ? $terminalSettings.fontFamily : cs.fontFamily;
-    return `${size} ${family}`;
+    return `${size} ${family}, ${NERD_FONT_FALLBACK}`;
   }
 
   /** `terminalSettings.theme` (Checkpoint 5b's "Farbschema/Theme" setting) resolved

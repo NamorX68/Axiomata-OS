@@ -14,14 +14,21 @@ verifiziert und durch alle vier Pflicht-Sub-Agents gegangen. Checkpoint 5d
 (zweite Live-Test-Runde: Ghosting/Clear-Fix, Startgröße 120×60, erster
 Autofokus-Versuch, `f6f945e`) ist committet — der Autofokus-Teil hat beim
 echten Live-Test am Mac aber NICHT gehalten (Owner-Feedback: weiterhin
-Klick nötig). Checkpoint 5f (robusterer Autofokus-Fix, siehe unten) ist
-der aktuelle Arbeitsstand, Chromium-verifiziert, Bestätigung am echten
-Mac steht noch aus. Checkpoint 5g (mehr Themes, mitgelieferte Fonts inkl.
-Nerd Font) ist vorgemerkt, noch nicht begonnen — laut Owner ausdrücklich
-davon abhängig, dass 5f sich am Mac als wirklich behoben bestätigt.
-Nächster Schritt: Live-Test von 5f am Mac des Owners — diese ganze Kette
-(5d, 5e, 5f) entstand aus genau solchen Live-Tests, nicht aus
-automatisierter Verifikation allein.
+Klick nötig). Checkpoint 5f (robusterer Autofokus-Fix + Gating gegen
+Fokus-Diebstahl, `e415426`) ist committet — Owner-Feedback danach: der
+Fokus beim Öffnen/Start funktioniert jetzt, ABER ein verbleibender Fall
+ist noch offen (Flip zu den Settings und zurück erfordert weiterhin einen
+Klick, siehe "Offene Punkte" am Ende von Checkpoint 5f). Auf Owner-Wunsch
+zurückgestellt zugunsten von Checkpoint 5g. Der Owner hat außerdem die
+Frage aufgeworfen, ob die App auf ein Chromium-basiertes Webview statt
+WKWebView umsteigen sollte, um diese ganze Klasse von Bugs zu vermeiden —
+ebenfalls zurückgestellt, noch nicht beantwortet. Checkpoint 5g (mehr
+Themes, mitgelieferte Fonts inkl. Nerd Font) ist KOMPLETT (siehe unten) —
+auf ausdrücklichen Owner-Wunsch vorgezogen, noch vor Bestätigung des
+verbleibenden Fokus-Falls. Nächster Schritt: Live-Test von 5f+5g am Mac
+des Owners, danach ggf. der verbleibende Flip-Fokus-Fall und die
+Chromium-Frage — diese ganze Kette (5d, 5e, 5f) entstand aus genau
+solchen Live-Tests, nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -239,27 +246,98 @@ Vergrößern/Verkleinern und Transparenz als erledigt bestätigt wurden.
   keine Regression einführen. Ob das echte Problem damit behoben ist, kann
   nur der Live-Test am Mac des Owners zeigen.
 
-## Checkpoint 5g (vormals 5e, vorgemerkt, noch nicht umgesetzt)
+**Committet als `e415426`.**
 
-Reste aus derselben Owner-Nachricht, die eine eigene kurze Planungsrunde
-brauchen, bevor sie umgesetzt werden:
+### Owner-Rückmeldung nach dem Live-Test am Mac (2026-09-14) — teilweise behoben
 
-- Mehr Themes (Catppuccin, Tokyo Night, …) — ähnlich mechanisch wie die
-  fünf bestehenden in `terminalThemes.ts`.
-- Ein paar mitgelieferte Mono-Fonts (Thin/Normal/Bold) — vermutlich über
-  `@fontsource/*`-Pakete, demselben Mechanismus wie das bereits gebündelte
-  Material-Symbols-Icon-Font. Mindestens eine Nerd-Font-Variante wäre
-  sinnvoll (siehe nächster Punkt) — durch Owner-Screenshots (Checkpoint 5e)
-  bestätigt, nicht mehr nur Vermutung: Powerlevel10k-Prompt zeigt in Ghostty
-  Icons + Powerline-Trennsymbole, bei uns nur flache Farbblöcke ohne
-  Glyphen.
-- Prompt-Design (Git-Branch/Python-venv in der Kommandozeile) ist laut
-  Owner-Klärung Sache der Shell-Konfiguration (Starship/Powerlevel10k),
-  nicht etwas, das der Terminal-Emulator selbst hinzufügen sollte.
-- oh-my-zsh "sieht anders aus als in Ghostty" — Owner konnte nicht genauer
-  spezifizieren, was; wahrscheinlichster Kandidat sind fehlende
-  Nerd-Font-Glyphen (Powerline-Symbole/Icons), die viele oh-my-zsh-/
-  Starship-/p10k-Themes voraussetzen — hängt am Font-Punkt oben.
+- **Bestätigt behoben**: Öffnen einer neuen Terminal-Kachel ist jetzt
+  sofort tippbereit, kein Klick mehr nötig.
+- **Noch offen — neuer, enger gefasster Fall**: Flippt man zu den
+  Settings (Rückseite der Kachel) und wieder zurück zur Terminal-Vorderseite,
+  ist erneut ein Klick nötig, bevor Tippen wieder funktioniert. Ursache noch
+  nicht untersucht — vermutlich derselbe Effekt wie beim ursprünglichen Bug,
+  nur an einer anderen Stelle: `Tile.svelte` mountet Vorder- und Rückseite
+  gleichzeitig (reines CSS-`rotateY`-Flip, kein Neumounten), Vorderseite/
+  `terminal.svelte`s `onMount` feuert also nur einmal beim allerersten
+  Platzieren der Kachel, nicht beim Zurückflippen — es gibt aktuell keinen
+  Mechanismus, der `focusInputSoon()` beim Zurückflippen erneut auslöst.
+  **Auf ausdrücklichen Owner-Wunsch zurückgestellt** ("Bevor wir das machen
+  oder weiter rumdoktorn mach erst einmal die anderen Sachen fertig Themes,
+  Schriftarten etc.") — Checkpoint 5g (unten) hat Vorrang; dieser Fall ist
+  der nächste Schritt danach.
+- **Owner-Frage, ebenfalls zurückgestellt, noch nicht beantwortet**: sollte
+  die App statt WKWebView ein Chromium-basiertes Webview voraussetzen/
+  bündeln, um diese ganze Klasse von Timing-Bugs zu vermeiden? Tauri bietet
+  auf macOS aktuell kein Chromium-Backend — das wäre praktisch ein Wechsel
+  auf Electron (eigenes gebündeltes Chromium, deutlich größerer
+  Programmordner/Speicherverbrauch), keine einfache Konfigurationsoption.
+  Braucht eine eigene Abwägung, bevor daran gearbeitet wird.
+
+## Checkpoint 5g — Mehr Themes + mitgelieferte Fonts inkl. Nerd Font (Owner-Feedback, 2026-09-14) — KOMPLETT
+
+Owner-Wunsch: erst diesen Checkpoint fertig machen, bevor am offenen
+Flip-Fokus-Fall (Checkpoint 5f, siehe oben) weitergearbeitet wird.
+
+- **Mehr Themes**: `terminalThemes.ts`'s `THEMES` um `catppuccin-mocha` und
+  `tokyo-night` erweitert (mechanisch, exakt wie die vier bestehenden
+  Community-Paletten) — je die offiziell veröffentlichte 16-Farben-ANSI-
+  Zuordnung des jeweiligen Projekts, nicht selbst zusammengestellt.
+  `terminal-settings.svelte`s `THEME_LABELS` und `terminalThemes.test.ts`
+  (inkl. eines neuen generischen Hex-Format-Tests über alle Paletten)
+  entsprechend ergänzt.
+- **Mitgelieferte Mono-Fonts**: `@fontsource/jetbrains-mono` und
+  `@fontsource/ibm-plex-mono`, je Gewicht 100/400/700 (Thin/Regular/Bold —
+  beide Familien haben, anders als z. B. Fira Code, ein echtes 100er-Gewicht),
+  in `main.ts` importiert, exakt nach dem bestehenden Muster des schon
+  gebündelten Material-Symbols-Icon-Fonts. Neuer "Bundled font"-`<select>`
+  in `terminal-settings.svelte` (JetBrains Mono / IBM Plex Mono / Custom…)
+  als Ein-Klick-Shortcut in das bestehende Freitextfeld — keine eigene
+  Einstellung, keine zweite Quelle der Wahrheit. Ehrlichkeitshinweis: nur
+  Regular und Bold werden aktuell tatsächlich gezeichnet
+  (`TerminalScreen.draw` kennt nur "fett" oder "normal" pro Zelle, keine
+  Gewichts-Auswahl in der UI) — das 100er/Thin-Gewicht ist mitgebündelt,
+  weil der Owner es wörtlich so gewünscht hat, wird aber aktuell nirgends
+  gerendert. Eine echte Gewichts-Einstellung wäre ein eigenes, noch nicht
+  angefragtes Feature.
+- **Nerd-Font-Glyphen**: neue Abhängigkeit `@azurity/pure-nerd-font` (MIT,
+  exakt gepinnt statt Caret-Range — Architektur-Review, Checkpoint 5g:
+  Einzelperson-Projekt, keine offizielle nerd-fonts.com-Distribution,
+  seit über einem Jahr nicht aktualisiert, ~1 MB reines Icon-Glyphen-Font
+  ohne normale Zeichen, gepinnt auf Nerd Fonts v2.2.0-RC laut eigener CSS).
+  `terminal.svelte`s `currentFont()` hängt `"PureNerdFont"` als letzten
+  Fallback an die jeweils konfigurierte Font-Familie an — Canvas `ctx.font`
+  löst eine Fallback-Liste pro Glyph auf (wie CSS), normaler Text kommt
+  weiter aus der Primärfamilie, nur wirklich fehlende Glyphen (Powerline-
+  Trennsymbole, Devicons in Starship/p10k) fallen durch. **Wichtige
+  Einschränkung**: da das gebündelte Glyphen-Set auf einer älteren
+  Nerd-Fonts-Generation basiert, kann ein einzelnes, sehr neues Icon aus
+  einem aktuellen p10k-/Starship-Preset trotzdem als leere Box erscheinen —
+  ob das beim Owner konkret der Fall ist, kann nur der Live-Test zeigen.
+- **Prompt-Design** (Git-Branch/Python-venv in der Kommandozeile) bleibt
+  laut Owner-Klärung Sache der Shell-Konfiguration (Starship/Powerlevel10k),
+  nicht etwas, das der Terminal-Emulator selbst hinzufügen sollte — kein
+  Code-Änderungsbedarf.
+- **oh-my-zsh "sieht anders aus als in Ghostty"**: Owner konnte nicht genauer
+  spezifizieren, was; wahrscheinlichster Kandidat waren fehlende
+  Nerd-Font-Glyphen — durch den Font-Fallback oben adressiert, aber nicht
+  eigenständig verifizierbar ohne den Owner's echtes oh-my-zsh-Setup.
+
+**Verifiziert**: `npm run check` und `npx vitest run` (357 Tests, 2 neu)
+grün, kein Rust betroffen. Live mit `agent-browser` gegen echtes Chromium
+(`vite --port 1420`): alle drei neuen/gebündelten Fonts (JetBrains Mono,
+IBM Plex Mono, PureNerdFont) tatsächlich in `document.fonts` registriert;
+Theme-`<select>` zeigt beide neuen Paletten; "Bundled font"-`<select>`
+schreibt korrekt in das Font-family-Freitextfeld durch. Die tatsächliche
+Canvas-Zeichnung mit den neuen Fonts/Glyphen konnte NICHT gegen den
+Dev-Mock verifiziert werden (`terminal_spawn` existiert dort nicht, siehe
+`devmock.ts` — dieselbe Einschränkung wie bei jeder Terminal-Checkpoint
+zuvor), nur die Konfigurationskette bis zum `ctx.font`-String-Aufbau.
+Architektur-Review (Checkpoint 5g) fand ein HIGH-Finding (Nerd-Fonts-
+Versions-Staleness, oben dokumentiert) und ein MEDIUM (Caret- statt
+Exakt-Pin) — beide vor dem Commit behoben. Ein docs-writer-Pass fand und
+korrigierte zwei faktische Ungenauigkeiten in eigenen Kommentaren (Anzahl
+der Paletten "vier" → "sechs"; die "Thin/Bold werden beide gerendert"-
+Behauptung war falsch, siehe Ehrlichkeitshinweis oben).
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

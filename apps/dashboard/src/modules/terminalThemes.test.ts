@@ -18,4 +18,17 @@ describe("THEMES", () => {
     expect(THEMES[DEFAULT_THEME]).toBeDefined();
     expect(DEFAULT_THEME).toBe("xterm");
   });
+
+  it("includes the Checkpoint 5g palettes (owner request: Catppuccin, Tokyo Night)", () => {
+    expect(THEMES["catppuccin-mocha"]).toBeDefined();
+    expect(THEMES["tokyo-night"]).toBeDefined();
+  });
+
+  it("only uses lowercase 6-digit hex colours", () => {
+    for (const [name, palette] of Object.entries(THEMES)) {
+      for (const color of palette) {
+        expect(color, `theme ${name}`).toMatch(/^#[0-9a-f]{6}$/);
+      }
+    }
+  });
 });

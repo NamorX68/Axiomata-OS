@@ -34,8 +34,9 @@ const ANSI_16: readonly string[] = [
 /**
  * Named 16-colour ANSI palettes for Checkpoint 5b's "Farbschema/Theme"
  * setting — `xterm` (the palette this module always drew before this
- * checkpoint) plus four publicly documented, widely-used community
- * palettes. Only indices 0-15 are themeable; the 256-colour cube
+ * checkpoint) plus six publicly documented, widely-used community
+ * palettes (four from Checkpoint 5b, plus Catppuccin Mocha and Tokyo Night
+ * added in Checkpoint 5g). Only indices 0-15 are themeable; the 256-colour cube
  * (16-231) and greyscale ramp (232-255) are a fixed algorithm, not part
  * of any named palette, same as real terminals (`TerminalScreen.indexedToCss`
  * only consults a palette for index < 16).
@@ -45,7 +46,13 @@ const ANSI_16: readonly string[] = [
  * `base03`/accent mapping (ethanschoonover.com/solarized); Dracula is the
  * project's own published "ANSI Colors" (draculatheme.com/contribute);
  * Nord and Gruvbox Dark are each project's own widely-adopted terminal
- * palette (nordtheme.com; github.com/morhetz/gruvbox).
+ * palette (nordtheme.com; github.com/morhetz/gruvbox); Catppuccin Mocha is
+ * the project's own published terminal ANSI mapping, reused verbatim by its
+ * official terminal ports (catppuccin.com; github.com/catppuccin/catppuccin
+ * — "Mocha" flavour); Tokyo Night is the `tokyonight.nvim`/VS Code theme's
+ * own widely-replicated terminal mapping (its `terminal.integrated.colors`,
+ * base "Night" variant, not Storm/Light) — both added in Checkpoint 5g,
+ * owner request for "mehr Themes (Catppuccin, Tokio etc.)".
  */
 export const THEMES: Record<string, readonly string[]> = {
   xterm: ANSI_16,
@@ -120,6 +127,42 @@ export const THEMES: Record<string, readonly string[]> = {
     "#d3869b",
     "#8ec07c",
     "#ebdbb2",
+  ],
+  "catppuccin-mocha": [
+    "#45475a",
+    "#f38ba8",
+    "#a6e3a1",
+    "#f9e2af",
+    "#89b4fa",
+    "#f5c2e7",
+    "#94e2d5",
+    "#bac2de",
+    "#585b70",
+    "#f38ba8",
+    "#a6e3a1",
+    "#f9e2af",
+    "#89b4fa",
+    "#f5c2e7",
+    "#94e2d5",
+    "#a6adc8",
+  ],
+  "tokyo-night": [
+    "#15161e",
+    "#f7768e",
+    "#9ece6a",
+    "#e0af68",
+    "#7aa2f7",
+    "#bb9af7",
+    "#7dcfff",
+    "#a9b1d6",
+    "#414868",
+    "#f7768e",
+    "#9ece6a",
+    "#e0af68",
+    "#7aa2f7",
+    "#bb9af7",
+    "#7dcfff",
+    "#c0caf5",
   ],
 };
 
