@@ -412,11 +412,12 @@
       // Owner feedback: a freshly spawned terminal should be ready to type
       // into immediately, not require a deliberate click first — the same
       // expectation a real terminal app's newly opened window already
-      // meets. `.terminal`'s own `onclick` still focuses it for every
-      // later click (switching back from another tile, re-focusing after
-      // clicking elsewhere), this only covers the initial "just appeared"
-      // moment `onclick` can't.
-      inputEl?.focus();
+      // meets. `onMount`'s own earlier `focusInputSoon()` call already
+      // tries this well before `spawn()` gets here; this one more attempt
+      // is for whatever might have stolen focus during the round trip
+      // above (see `focusInputSoon`'s own doc comment for why it retries
+      // instead of a single `.focus()` call).
+      focusInputSoon();
     } catch (err) {
       error = String(err);
     }
@@ -590,9 +591,74 @@
     }, RESIZE_DEBOUNCE_MS);
   }
 
+  /** Pending `requestAnimationFrame` ids from the last `focusInputSoon()`
+   *  call, so a stale chain can be cancelled — before scheduling a new one,
+   *  or on unmount — instead of a late, ungated `.focus()` call landing
+   *  after something newer already decided otherwise (architecture review,
+   *  Checkpoint 5f). */
+  let focusRafIds: number[] = [];
+
+  function cancelPendingFocusAttempts(): void {
+    for (const id of focusRafIds) cancelAnimationFrame(id);
+    focusRafIds = [];
+  }
+
+  /** Repeatedly attempts to focus the hidden `.typer` input — immediately,
+   *  then again on each of the next couple of animation frames — for the
+   *  two *automatic* (non-click) moments a freshly placed/opened terminal
+   *  should already be typeable into: right after it mounts, and once
+   *  `spawn()` actually brings up a shell. Checkpoint 5e's first attempt (a
+   *  single `inputEl?.focus()` right after `spawn()`'s `terminal_spawn`
+   *  IPC call resolved) did not reliably work in the real app — the owner
+   *  reported the same "still need to click first" symptom afterward.
+   *  Checkpoint 5f: the most likely explanation is a known class of
+   *  WebKit/WKWebView timing quirk (this project's own track record, see
+   *  `canvas/Tile.svelte`'s `.tile-body` comment) where a `.focus()` call
+   *  issued well after the triggering interaction — here, after two
+   *  `await`s (`ensureTerminalSettingsLoaded`, then the `terminal_spawn`
+   *  round trip itself) — silently fails to move real OS-level keyboard
+   *  focus, even though the DOM's own `document.activeElement` may say
+   *  otherwise. Retrying across a couple of animation frames is the
+   *  standard, low-risk mitigation for exactly this timing class; calling
+   *  `.focus()` on an already-focused element is a harmless no-op, so the
+   *  redundancy costs nothing on a browser/engine where the very first
+   *  call already worked.
+   *
+   *  Every attempt (including the immediate one) is gated on nothing else
+   *  already holding meaningful focus (`document.activeElement` is `body`
+   *  or unset): `Canvas.svelte` mounts every placed tile at once, not one
+   *  at a time behind a lazy tab, so an ungated auto-focus would steal
+   *  keyboard focus from an unrelated field (search, settings, another
+   *  module) whenever a terminal tile happens to mount, and would fight
+   *  with sibling terminal tiles mounting in the same pass — e.g.
+   *  restoring a saved layout with several terminals at once, where
+   *  whichever tile's retry chain landed last would otherwise "win"
+   *  arbitrarily (architecture review, Checkpoint 5f). A deliberate click
+   *  (the `.terminal` wrapper's own `onclick` below) is intentionally
+   *  `inputEl?.focus()` directly, NOT this helper: that click IS the
+   *  user's intent, a single synchronous call already worked for it before
+   *  this checkpoint, and giving every click its own gated retry chain
+   *  would add the same cross-tile stale-focus risk to a path that was
+   *  never broken. */
+  function focusInputSoon(): void {
+    cancelPendingFocusAttempts();
+    const attempt = () => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      inputEl?.focus();
+    };
+    attempt();
+    const id1 = requestAnimationFrame(() => {
+      attempt();
+      const id2 = requestAnimationFrame(attempt);
+      focusRafIds.push(id2);
+    });
+    focusRafIds.push(id1);
+  }
+
   onMount(() => {
     if (canvasEl) context2d = canvasEl.getContext("2d");
     readThemeColors();
+    focusInputSoon();
     void spawn();
 
     if (root) {
@@ -615,6 +681,7 @@
 
   onDestroy(() => {
     cancelAnimationFrame(raf);
+    cancelPendingFocusAttempts();
     clearTimeout(resizeDebounce);
     clearTimeout(bellFlashTimeout);
     resizeObserver?.disconnect();

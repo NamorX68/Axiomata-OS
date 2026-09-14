@@ -11,12 +11,17 @@ ist noch offen. Checkpoint 5b (Settings-Erweiterung) ist KOMPLETT — Block A
 committet (`76a5715`), Block B committet (`9f44a71`), beide automatisiert
 verifiziert und durch alle vier Pflicht-Sub-Agents gegangen. Checkpoint 5d
 (Bugfixes + globale Settings-Datei, `5f22b51`) ist committet. Checkpoint 5e
-(zweite Live-Test-Runde: Ghosting/Clear-Fix, Startgröße 120×60,
-Autofokus, siehe unten) ist der aktuelle Arbeitsstand. Checkpoint 5g
-(mehr Themes, mitgelieferte Fonts inkl. Nerd Font) ist vorgemerkt, noch
-nicht begonnen. Nächster Schritt nach 5e: wieder ein Live-Test am Mac des
-Owners — diese ganze Kette (5d, 5e) entstand aus genau solchen
-Live-Tests, nicht aus automatisierter Verifikation allein.
+(zweite Live-Test-Runde: Ghosting/Clear-Fix, Startgröße 120×60, erster
+Autofokus-Versuch, `f6f945e`) ist committet — der Autofokus-Teil hat beim
+echten Live-Test am Mac aber NICHT gehalten (Owner-Feedback: weiterhin
+Klick nötig). Checkpoint 5f (robusterer Autofokus-Fix, siehe unten) ist
+der aktuelle Arbeitsstand, Chromium-verifiziert, Bestätigung am echten
+Mac steht noch aus. Checkpoint 5g (mehr Themes, mitgelieferte Fonts inkl.
+Nerd Font) ist vorgemerkt, noch nicht begonnen — laut Owner ausdrücklich
+davon abhängig, dass 5f sich am Mac als wirklich behoben bestätigt.
+Nächster Schritt: Live-Test von 5f am Mac des Owners — diese ganze Kette
+(5d, 5e, 5f) entstand aus genau solchen Live-Tests, nicht aus
+automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -178,6 +183,61 @@ Checkpoint 5g unten), nicht an Farbtiefe.
 `computeDefaultSize`-Präferenz in `lifecycle.test.ts`), Live-Verifikation
 der Startgröße mit `agent-browser` gegen echtes Chromium. Kein Rust
 betroffen.
+
+## Checkpoint 5f — Autofokus wirklich robust machen (Owner-Feedback, 2026-09-14)
+
+Checkpoint 5e's Autofokus-Fix (ein einzelnes `inputEl?.focus()` nach
+`spawn()`s `terminal_spawn`-IPC-Aufruf) hat den gemeldeten Bug am echten
+Mac NICHT behoben — der Owner meldete exakt dasselbe Symptom
+("ich muss immer zuerst in das Fenster klicken") erneut, nachdem
+Vergrößern/Verkleinern und Transparenz als erledigt bestätigt wurden.
+
+- **Vermutete Ursache**: dieselbe Klasse von WebKit/WKWebView-Timing-Bug,
+  die dieses Projekt schon öfter getroffen hat (siehe `canvas/Tile.svelte`s
+  `.tile-body`-Kommentar) — ein `.focus()`-Aufruf, der erst nach zwei
+  `await`s (`ensureTerminalSettingsLoaded`, dann der `terminal_spawn`-Round-
+  Trip) kommt, bewegt in der echten WKWebView den tatsächlichen
+  Tastatur-Fokus nicht zuverlässig, auch wenn `document.activeElement` im
+  DOM selbst korrekt aussieht.
+- **Fix**: neue Hilfsfunktion `focusInputSoon()` in `terminal.svelte` — statt
+  eines einzelnen Aufrufs wird sofort UND auf den nächsten zwei
+  `requestAnimationFrame`-Frames erneut fokussiert (`.focus()` auf einem
+  bereits fokussierten Element ist ein No-Op, also kostet die Redundanz auf
+  einer Engine, bei der der erste Aufruf schon funktioniert, nichts).
+  Aufgerufen in `onMount` (so früh wie möglich, noch vor `spawn()`) und
+  erneut in `spawn()`s Erfolgsfall (falls während des Roundtrips etwas den
+  Fokus doch weggenommen hat).
+- **Architektur-Review-Nachbesserung** (vor dem Commit, wie beim Rest dieser
+  Checkpoint-Kette): die erste Fassung hätte bei jedem Mount ungebremst
+  fokussiert — `Canvas.svelte` montiert aber alle platzierten Kacheln
+  gleichzeitig, nicht eine nach der anderen hinter einem Tab. Ein
+  wiederhergestelltes Layout mit mehreren Terminal-Kacheln (oder generell
+  irgendein anderes fokussiertes Feld, z. B. die Suche oder ein
+  Einstellungsfeld) hätte den Fokus ungefragt an die zuletzt gemountete
+  Terminal-Kachel verloren. Fix: jeder automatische Fokus-Versuch (Mount +
+  `spawn()`-Fallback) prüft jetzt zuerst, ob `document.activeElement`
+  bereits etwas Sinnvolles ist (`!== document.body`) und bricht sonst ab;
+  zusätzlich werden die ausstehenden `requestAnimationFrame`-IDs jetzt
+  festgehalten und sowohl vor jedem neuen `focusInputSoon()`-Aufruf als
+  auch in `onDestroy` abgebrochen, damit keine verspätete Fokussierung
+  einer längst verlassenen Kachel nachträglich zuschlägt. Der bewusste
+  Klick auf eine Kachel (`.terminal`s `onclick`) bleibt bewusst ein
+  einzelner, ungegateter `inputEl?.focus()`-Aufruf statt über
+  `focusInputSoon()` zu laufen — das war vor dieser Checkpoint nie kaputt,
+  und ein Klick ist immer expliziter User-Intent, den man nicht abbrechen
+  sollte.
+- **Verifiziert** (`agent-browser` gegen echtes Chromium, `vite --port
+  1420`): (1) frische Kachel ohne vorherigen Fokus → automatisch
+  fokussiert; (2) Assistant-Input fokussiert, dann eine zweite
+  Terminal-Kachel per synthetischem Klick erzeugt → Fokus bleibt im
+  Assistant-Input, auch nach Ablauf des Retry-Fensters; (3) Klick auf eine
+  Kachel → deren `.typer`-Input wird fokussiert. `npm run check` und `npx
+  vitest run` (355 Tests) bleiben grün, kein Rust betroffen.
+- **Wichtige Einschränkung**: Chromium kann das eigentliche
+  WKWebView-Zeitproblem nicht reproduzieren — diese Verifikation zeigt nur,
+  dass die DOM-/JS-Logik korrekt ist und die neuen Gating-/Cleanup-Regeln
+  keine Regression einführen. Ob das echte Problem damit behoben ist, kann
+  nur der Live-Test am Mac des Owners zeigen.
 
 ## Checkpoint 5g (vormals 5e, vorgemerkt, noch nicht umgesetzt)
 
