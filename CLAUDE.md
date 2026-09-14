@@ -68,6 +68,11 @@ the agent) is verified by launching `cargo tauri dev` under a scratch `AXIOMATA_
 One-time setup for the Tauri app: `cargo install tauri-cli --version "^2" --locked`, and
 `cd apps/dashboard && npm install`.
 
+Dev-only: a local `apps/dashboard/.env.local` with `VITE_AXIOMATA_DISABLE_AUTO_REFRESH=true`
+skips the calendar/mail/reminders modules' mount-time auto-refresh (each is a billed
+`run_skill` agent turn) on repeated `cargo tauri dev` restarts — cached digests still load,
+and each module's manual ↻ still runs regardless (`core/devFlags.ts`).
+
 ## Architecture — traps worth knowing before you touch things
 
 Full walkthrough: `docs/architecture.md` §3–§5. The load-bearing facts that aren't obvious

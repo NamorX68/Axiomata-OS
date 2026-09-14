@@ -30,6 +30,7 @@
   import { onMount } from "svelte";
 
   import type { RunRecord, RunSummary } from "../core/backend";
+  import { runUnlessAutoRefreshDisabled } from "../core/devFlags";
   import { relativeTime } from "../core/format";
   import {
     completeReminderTask,
@@ -208,8 +209,10 @@
   // flight, so this can't double-fire. Note this one can genuinely take
   // ~130 s against a large real Reminders list (MCP round trips, not
   // instant) — the cached digest shown in the meantime is what makes that
-  // tolerable rather than a long blank tile on every app start.
-  onMount(() => void loadLatest().then(refreshNow));
+  // tolerable rather than a long blank tile on every app start, and it's
+  // exactly why `runUnlessAutoRefreshDisabled` (`core/devFlags.ts`, its own
+  // doc comment) is especially worth it for this module.
+  onMount(() => void loadLatest().then(() => runUnlessAutoRefreshDisabled(refreshNow)));
 </script>
 
 <div class="reminders">

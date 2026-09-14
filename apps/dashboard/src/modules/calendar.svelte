@@ -29,6 +29,7 @@
   import { onMount } from "svelte";
 
   import type { RunRecord, RunSummary } from "../core/backend";
+  import { runUnlessAutoRefreshDisabled } from "../core/devFlags";
   import {
     CALENDAR_SKILL_NAME,
     createCalendarEvent,
@@ -252,8 +253,10 @@
   // Show whatever's cached immediately (fast), then kick off one real run
   // in the background — the mount-time refresh this module's doc comment
   // describes. `refreshNow` already no-ops if a run is somehow already in
-  // flight, so this can't double-fire.
-  onMount(() => void loadLatest().then(refreshNow));
+  // flight, so this can't double-fire. `runUnlessAutoRefreshDisabled`
+  // (`core/devFlags.ts`) skips just the real run, not `loadLatest()` — see
+  // its own doc comment for why this exists (a dev-only escape hatch).
+  onMount(() => void loadLatest().then(() => runUnlessAutoRefreshDisabled(refreshNow)));
 
   // Keep the mini-month's "today" and the agenda's default anchor honest
   // across midnight while this module stays mounted (see `today`'s comment):
