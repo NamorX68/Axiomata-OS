@@ -46,6 +46,28 @@ export interface ModuleDefinition {
   /** Flip-card back; mounted lazily with `{ ctx }`. */
   settings?: Component<{ ctx: ModuleContext }>;
   defaultSize: { w: number; h: number };
+  /** Overrides `defaultSize` for a freshly created instance — called fresh
+   *  by `core/lifecycle.ts`'s `createInstance` each time, instead of a
+   *  static value, for a module whose "reasonable starting size" genuinely
+   *  depends on something computed at creation time rather than fixed at
+   *  registration (Terminal: a size that fits a fixed character-cell count
+   *  at whatever font is currently configured — see
+   *  `modules/index.ts`'s Terminal registration). `defaultSize` above still
+   *  has to be set regardless (used if this throws, or is absent, or a
+   *  caller reads `defaultSize` directly without going through
+   *  `createInstance` — e.g. `ModulePicker`'s own size-label text). */
+  computeDefaultSize?: () => { w: number; h: number };
+  /** Overrides `ModulePicker.svelte`'s own `${defaultSize.w}×${defaultSize.h}`
+   *  size label for a module that declares `computeDefaultSize` — that
+   *  label would otherwise keep showing the static `defaultSize` (a real
+   *  pixel figure, now stale by construction the moment a computed size
+   *  diverges meaningfully from it, e.g. Terminal at a larger-than-default
+   *  font size — architecture review, Checkpoint 5e) as if it were still
+   *  accurate. A plain string, not a second size computation: the picker
+   *  renders a whole list, so calling `computeDefaultSize` per row just to
+   *  throw the number away on the next render would be wasted work for a
+   *  label that's illustrative, not load-bearing, either way. */
+  sizeLabel?: string;
   minSize?: { w: number; h: number };
   /** Only one instance allowed (e.g. a future particle-graph module). */
   singleton?: boolean;

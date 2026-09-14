@@ -10,11 +10,13 @@ Schriftgröße/Shell-Wahl ist da); Performance-Tuning bei sehr hohem Output
 ist noch offen. Checkpoint 5b (Settings-Erweiterung) ist KOMPLETT — Block A
 committet (`76a5715`), Block B committet (`9f44a71`), beide automatisiert
 verifiziert und durch alle vier Pflicht-Sub-Agents gegangen. Checkpoint 5d
-(Bugfixes + globale Settings-Datei, siehe unten) ist der aktuelle
-Arbeitsstand. Nächster Schritt danach: ein gemeinsamer interaktiver
-Live-Test aller Checkpoint-4/5/5b/5d-Features zusammen am Mac des Owners —
-diesmal mit echtem Feedback vom Owner statt nur automatisierter Verifikation,
-da 5d direkt aus einem solchen Live-Test entstand.
+(Bugfixes + globale Settings-Datei, `5f22b51`) ist committet. Checkpoint 5e
+(zweite Live-Test-Runde: Ghosting/Clear-Fix, Startgröße 120×60,
+Autofokus, siehe unten) ist der aktuelle Arbeitsstand. Checkpoint 5g
+(mehr Themes, mitgelieferte Fonts inkl. Nerd Font) ist vorgemerkt, noch
+nicht begonnen. Nächster Schritt nach 5e: wieder ein Live-Test am Mac des
+Owners — diese ganze Kette (5d, 5e) entstand aus genau solchen
+Live-Tests, nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -127,7 +129,57 @@ tatsächlich transparent, und — der eigentliche Kern des Bugfixes — Theme
 + Shell überleben ein komplettes Entfernen und Neu-Platzieren der
 Terminal-Kachel.
 
-### Checkpoint 5e (vorgemerkt, noch nicht umgesetzt)
+## Checkpoint 5e — Zweite Live-Test-Runde: Ghosting/Clear, Startgröße,
+Autofokus (Owner-Feedback, 2026-09-14)
+
+Direkt im Anschluss an 5d, mit zwei Screenshots (unser Terminal vs.
+Ghostty) zur Untermauerung — bestätigte unter anderem, dass der Prompt-
+Unterschied tatsächlich an fehlenden Nerd-Font-Glyphen liegt (siehe
+Checkpoint 5g unten), nicht an Farbtiefe.
+
+- **Doppelt/verschmiert gezeichneter Text nach Schriftgrößen-Änderung, `clear`
+  räumt nicht wirklich auf**: `TerminalScreen.draw` hat den Canvas nie
+  explizit geleert — verließ sich komplett darauf, dass jede Zelle bei
+  jedem Frame vollständig neu übermalt wird. Das hält nur, wenn ein Frame
+  exakt dieselben Pixel abdeckt wie der vorherige; das gilt nicht mehr,
+  sobald `canvasEl.width/height` (löscht den Backing-Store implizit,
+  HTML5-Canvas-Spezifikation) und die tatsächlich vom Rust-Modell
+  gelieferte Zeilen/Spalten-Anzahl (ein separater, debounced IPC-Roundtrip)
+  zeitlich auseinanderlaufen — ein Frame kann mit neuen Zell-Metriken über
+  alten Grid-Dimensionen landen oder umgekehrt, und hinterlässt dann
+  Alt-Pixel außerhalb dessen, was der aktuelle Frame wirklich malt. Exakte
+  Ursache nicht abschließend verifiziert (könnte auch mit HMR während
+  aktiver Entwicklung zusammenhängen), robuster Fix unabhängig davon: ein
+  echtes `ctx.clearRect(...)` (transform-unabhängig via
+  `save`/`setTransform(1,0,0,1,0,0)`/`restore`) an den Anfang von `draw()`.
+- **Startgröße soll sich an der Schriftgröße orientieren, immer von 120×60
+  Zeichen ausgehend** statt der bisherigen festen `640×400`px: neues
+  optionales `ModuleDefinition.computeDefaultSize?: () => {w,h}`
+  (`core/types.ts`), von `core/lifecycle.ts`s `createInstance` bevorzugt,
+  wenn vorhanden — Terminal registriert dafür `computeTerminalDefaultSize`
+  (`modules/index.ts`): misst einen echten Zeichen-Zelle über einen
+  Wegwerf-Canvas + `TerminalScreen.measureChar`, gegen die aktuell
+  konfigurierte (oder Theme-Default-)Schrift, multipliziert mit 120×60 plus
+  einer groben Kachel-Chrome-Schätzung. Mit `agent-browser` gegen echtes
+  Chromium (nicht jsdom, da echte Font-Metriken gebraucht werden)
+  verifiziert: 120 Spalten × gemessene Zeichenbreite ergab exakt die
+  erwartete Pixelbreite; die zunächst kleiner wirkende Höhe war reine
+  Viewport-Klemmung des Test-Fensters, kein Bug (bei größerem Fenster
+  passte auch die Höhe). `ModulePicker`s Größen-Label zeigt weiterhin die
+  statische `defaultSize` (rein informativ, kein Anspruch auf exakte
+  Übereinstimmung).
+- **Autofokus statt Pflicht-Klick**: `terminal.svelte`s `spawn()` ruft nach
+  erfolgreichem `terminal_spawn` jetzt `inputEl?.focus()` — eine frisch
+  erzeugte Terminal-Kachel ist sofort tippbereit, kein Klick mehr nötig.
+  Das bestehende `onclick`-Fokussieren auf der ganzen Kachel bleibt
+  unverändert für jeden späteren Klick (Kachel-Wechsel etc.).
+
+**Verifikation**: `npm run check`, `npx vitest run` (inkl. neuer Tests für
+`computeDefaultSize`-Präferenz in `lifecycle.test.ts`), Live-Verifikation
+der Startgröße mit `agent-browser` gegen echtes Chromium. Kein Rust
+betroffen.
+
+## Checkpoint 5g (vormals 5e, vorgemerkt, noch nicht umgesetzt)
 
 Reste aus derselben Owner-Nachricht, die eine eigene kurze Planungsrunde
 brauchen, bevor sie umgesetzt werden:
@@ -137,7 +189,10 @@ brauchen, bevor sie umgesetzt werden:
 - Ein paar mitgelieferte Mono-Fonts (Thin/Normal/Bold) — vermutlich über
   `@fontsource/*`-Pakete, demselben Mechanismus wie das bereits gebündelte
   Material-Symbols-Icon-Font. Mindestens eine Nerd-Font-Variante wäre
-  sinnvoll (siehe nächster Punkt).
+  sinnvoll (siehe nächster Punkt) — durch Owner-Screenshots (Checkpoint 5e)
+  bestätigt, nicht mehr nur Vermutung: Powerlevel10k-Prompt zeigt in Ghostty
+  Icons + Powerline-Trennsymbole, bei uns nur flache Farbblöcke ohne
+  Glyphen.
 - Prompt-Design (Git-Branch/Python-venv in der Kommandozeile) ist laut
   Owner-Klärung Sache der Shell-Konfiguration (Starship/Powerlevel10k),
   nicht etwas, das der Terminal-Emulator selbst hinzufügen sollte.

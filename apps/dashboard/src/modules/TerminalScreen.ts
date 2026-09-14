@@ -291,6 +291,33 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
   const { width: cw, height: ch, ascent } = metrics;
   ctx.textBaseline = "alphabetic";
 
+  // Explicit full clear, transform-independent — bug fix (owner-reported,
+  // live-tested: overlapping/"ghosted" double text after a font-size
+  // change, and `clear` not actually clearing). Every cell's background is
+  // already painted opaquely below, which *should* make an explicit clear
+  // redundant in the steady state — but that only holds if this frame's
+  // grid covers exactly the same pixels the previous frame's did. It
+  // doesn't always: at least one concrete way this can drift — the exact
+  // root cause of the live-tested symptom wasn't fully confirmed, dev-mode
+  // HMR may also play a role — is that the caller (`terminal.svelte`'s
+  // `measureAndSize`, invoked from its `ResizeObserver` callback and its
+  // `fontSizePx` effect, not from `tick()` itself, which only ever draws)
+  // resizes the canvas's own backing store (which clears it, per the HTML5
+  // canvas spec) independently of when a resized `rows` grid actually
+  // arrives from the engine (a separate, debounced IPC round trip) — a
+  // frame can land with new cell metrics (from a just-changed font size)
+  // over old grid dimensions, or vice versa, leaving stale pixels outside
+  // whatever this frame actually painted. Robust regardless of the exact
+  // cause: `save`/`restore` around an identity transform so this clears the
+  // *whole* backing store regardless of the DPR scale transform the caller
+  // already applied — using CSS-pixel coordinates here (under that
+  // transform) would only clear the visible viewport at the *current* DPR,
+  // not necessarily the whole backing store if it changed since.
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.restore();
+
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
     for (let c = 0; c < row.length; c++) {

@@ -43,6 +43,8 @@ import SecondBrainSettings from "./second-brain-settings.svelte";
 import RoutinesBoardSettings from "./routines-board-settings.svelte";
 import SkillsDeck from "./skills-deck.svelte";
 import SkillsDeckSettings from "./skills-deck-settings.svelte";
+import { measureChar } from "./TerminalScreen";
+import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
 import Terminal from "./terminal.svelte";
 import TerminalSettings from "./terminal-settings.svelte";
 import Todo from "./todo.svelte";
@@ -50,6 +52,75 @@ import TodoSettings from "./todo-settings.svelte";
 
 const DUMMY_ICON =
   "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor'><rect x='2.5' y='2.5' width='11' height='11' rx='2'/></svg>";
+
+/** A freshly placed Terminal tile's target size, in characters — owner
+ *  request: "immer von 120x60 (Zeichen) ausgehen" (always start from
+ *  120×60 characters), not a fixed pixel size that happens to fit a
+ *  different number of cells depending on the configured font. */
+const TERMINAL_DEFAULT_COLS = 120;
+const TERMINAL_DEFAULT_ROWS = 60;
+/** Rough allowance for the tile's own chrome around the canvas — the front
+ *  face's header (icon + title line, its own padding) sits above the
+ *  canvas, which otherwise fills the tile body exactly (`width/height:
+ *  100%`, no padding of its own). Not a measured value (that would need a
+ *  real mounted `Tile.svelte` instance, not just a throwaway canvas) — a
+ *  deliberately generous estimate in the same spirit as this codebase's
+ *  other "rough footprint, doesn't need to be exact" constants (e.g.
+ *  `second-brain.svelte`'s `MENU_W`/`MENU_H`). Being a little off just
+ *  means the placed tile's real row/col count (genuinely measured against
+ *  the actual canvas once mounted, see `terminal.svelte`'s
+ *  `measureAndSize`) ends up a line or two short of/over 120×60, not that
+ *  anything breaks.
+ */
+const TERMINAL_CHROME_H_PX = 44;
+
+/** Computes a Terminal tile's starting pixel size so it actually fits
+ *  `TERMINAL_DEFAULT_COLS`×`TERMINAL_DEFAULT_ROWS` characters at whatever
+ *  font is currently configured (`terminalSettings.fontSizePx`/
+ *  `fontFamily`, Checkpoint 5b) — falling back to the theme's own
+ *  `--ax-font-mono`/`--ax-font-size-sm` tokens when unset, same fallback
+ *  `terminal.svelte`'s own `currentFont` already uses. Measured against a
+ *  throwaway, never-attached `<canvas>` (`TerminalScreen.measureChar` only
+ *  needs a 2D context, not a mounted element) rather than the real tile's
+ *  own canvas, since this runs *before* any tile exists yet — it's what
+ *  `core/lifecycle.ts`'s `createInstance` calls to decide a new instance's
+ *  size in the first place. Reads `terminalSettings` synchronously (`get`,
+ *  not `$terminalSettings` — this isn't a Svelte component).
+ *
+ *  `registerBuiltins` (below) kicks off `ensureTerminalSettingsLoaded()`
+ *  speculatively at app boot specifically so this doesn't hit the store's
+ *  empty pre-load default for the *first* Terminal tile of a session
+ *  (architecture review, Checkpoint 5e: without that boot-time kick-off,
+ *  this always fell back to the theme's CSS font here, silently missing
+ *  a real saved custom font for exactly that one placement — a
+ *  deterministic, not just theoretical, gap). By the time a user actually
+ *  reaches "Add module → Terminal", that IPC round trip has very likely
+ *  already resolved; if it somehow hasn't (a genuinely fast/scripted
+ *  first action), this still degrades gracefully to the theme default
+ *  rather than blocking or throwing. Thrown errors (`ctx === null` below)
+ *  are a separate case, caught by `createInstance` itself, not here. */
+function computeTerminalDefaultSize(): { w: number; h: number } {
+  const settings = get(terminalSettings);
+  const cs = getComputedStyle(document.documentElement);
+  const fallbackFamily = cs.getPropertyValue("--ax-font-mono").trim() || "monospace";
+  const fallbackSizePx = cs.getPropertyValue("--ax-font-size-sm").trim() || "13px";
+  const size = typeof settings.fontSizePx === "number" ? `${settings.fontSizePx}px` : fallbackSizePx;
+  const family =
+    typeof settings.fontFamily === "string" && settings.fontFamily.trim() ? settings.fontFamily : fallbackFamily;
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  // No 2D context available (shouldn't happen in a real browser/WKWebView,
+  // but not impossible in an unusual embedding) — the module's own static
+  // `defaultSize` below is the fallback `createInstance` uses whenever this
+  // throws or is absent, so failing loudly here is fine.
+  if (!ctx) throw new Error("2D canvas context unavailable");
+  const metrics = measureChar(ctx, `${size} ${family}`);
+  return {
+    w: Math.round(TERMINAL_DEFAULT_COLS * metrics.width),
+    h: Math.round(TERMINAL_DEFAULT_ROWS * metrics.height) + TERMINAL_CHROME_H_PX,
+  };
+}
 
 export function registerBuiltins(): void {
   registerModule({
@@ -575,7 +646,19 @@ export function registerBuiltins(): void {
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><rect x='1.5' y='2.5' width='13' height='11' rx='1.5'/><path d='M4 6.5 6.5 9 4 11.5M8 11.5h4'/></svg>",
     component: Terminal,
     settings: TerminalSettings,
+    // Static fallback for `computeDefaultSize`'s own failure path, and for
+    // anything that reads `defaultSize` directly rather than going through
+    // `createInstance` (e.g. `ModulePicker`'s size label) — see
+    // `core/types.ts`'s own doc comment on `computeDefaultSize`.
     defaultSize: { w: 640, h: 400 },
+    computeDefaultSize: computeTerminalDefaultSize,
+    // The real computed size (font-dependent) can land far enough from the
+    // static `defaultSize` above (roughly 2× in both dimensions at a
+    // typical font) that showing it as a pixel figure would read as
+    // actively wrong, not just approximate — architecture review,
+    // Checkpoint 5e. A font-independent, honestly-approximate label
+    // instead.
+    sizeLabel: `~${TERMINAL_DEFAULT_COLS}×${TERMINAL_DEFAULT_ROWS} chars`,
     minSize: { w: 320, h: 200 },
     // One shell process per placed tile (Checkpoint 0/1 of
     // docs/plans/terminal.md) — the dashboard's existing multi-instance
@@ -583,6 +666,20 @@ export function registerBuiltins(): void {
     // module itself.
     singleton: false,
   });
+  // Speculative, fire-and-forget: kicks off `terminalSettings`'s load right
+  // at app boot instead of waiting for the first Terminal instance to
+  // mount (`ensureTerminalSettingsLoaded`'s normal trigger). Architecture
+  // review, Checkpoint 5e: without this, `computeTerminalDefaultSize`
+  // above — called synchronously by `createInstance` the moment the
+  // *first* Terminal tile of a session is placed, which can easily happen
+  // before any Terminal component has ever mounted — always saw the
+  // store's empty pre-load `{}`, silently sizing that one tile off the
+  // theme's CSS font defaults instead of the owner's real saved
+  // `fontSizePx`/`fontFamily`, even when they'd already set one. Cheap and
+  // idempotent (`ensureTerminalSettingsLoaded`'s own doc comment) — by the
+  // time a user actually clicks "Add module → Terminal", this IPC round
+  // trip has very likely already resolved.
+  void ensureTerminalSettingsLoaded();
 
   if (import.meta.env.DEV) {
     registerModule({

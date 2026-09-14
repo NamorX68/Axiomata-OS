@@ -577,7 +577,12 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   background opacity) are done. Checkpoint 5d — bug fixes from the first real owner
   live-test, plus moving Terminal settings out of per-instance `dashboard.json` config into
   their own global `terminal-settings.json` (§4 above) so closing a tile no longer discards
-  its settings — is the current work; full detail and status: `docs/plans/terminal.md`.
+  its settings — and Checkpoint 5e — a second live-test round's fixes: an explicit
+  `clearRect` against canvas ghosting, a startup size driven off a fixed 120×60-character
+  target at the currently configured font (a new optional `ModuleDefinition.computeDefaultSize`
+  hook, `core/types.ts`, preferred over the static `defaultSize` by `core/lifecycle.ts`'s
+  `createInstance` when a module declares one — so far only Terminal does), and autofocus on
+  a freshly spawned terminal — are both done; full detail and status: `docs/plans/terminal.md`.
 - **Stufe 2 — the lean local agent (CP1–CP4): shipped, then superseded by CP5.** The
   hand-rolled stdio MCP client + `[mcp_servers]` config + `axiomata-cli mcp import|list|tools`
   (CP1), the `AgentBackend::OllamaAgent` bounded tool-call loop over Ollama + MCP (CP2), the

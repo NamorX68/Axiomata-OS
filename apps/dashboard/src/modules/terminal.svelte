@@ -409,6 +409,14 @@
         options: { shell, cwd, env, scrollbackLimit },
         onOutput,
       });
+      // Owner feedback: a freshly spawned terminal should be ready to type
+      // into immediately, not require a deliberate click first — the same
+      // expectation a real terminal app's newly opened window already
+      // meets. `.terminal`'s own `onclick` still focuses it for every
+      // later click (switching back from another tile, re-focusing after
+      // clicking elsewhere), this only covers the initial "just appeared"
+      // moment `onclick` can't.
+      inputEl?.focus();
     } catch (err) {
       error = String(err);
     }
