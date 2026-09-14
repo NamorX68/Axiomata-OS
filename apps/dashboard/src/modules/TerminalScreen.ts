@@ -1,10 +1,12 @@
 /**
  * Pure Canvas-2D rendering for the terminal grid (Checkpoint 3 of
- * docs/plans/terminal.md). No Svelte, no Tauri — this file only knows how
- * to turn a `Cell` grid into pixels; `terminal.svelte` owns the canvas
- * element, the animation/blink loop, and the IPC wiring. Kept separate so
- * the colour-resolution logic (the part with actual room for bugs) is
- * plain-function testable without a real `CanvasRenderingContext2D`.
+ * docs/plans/terminal.md, mouse selection added in Checkpoint 4). No
+ * Svelte, no Tauri — this file only knows how to turn a `Cell` grid into
+ * pixels (plus, now, a selection range into plain text); `terminal.svelte`
+ * owns the canvas element, the animation/blink loop, mouse event listeners,
+ * and the IPC wiring. Kept separate so the colour-resolution and selection
+ * logic (the parts with actual room for bugs) are plain-function testable
+ * without a real `CanvasRenderingContext2D`.
  */
 
 /** Mirrors `axiomata-terminal::screen::Color` as it comes over the wire
@@ -110,12 +112,77 @@ export function measureChar(ctx: CanvasRenderingContext2D, font: string): CharMe
   return { width: m.width, height: ascent + descent, ascent };
 }
 
+/** A cell coordinate — used for the cursor and (Checkpoint 4) selection
+ *  endpoints alike. */
+export interface CellPos {
+  row: number;
+  col: number;
+}
+
+/** Normalizes a `(start, end)` pair so `a` is never after `b` in reading
+ *  order — the user can drag a selection in any of the four directions,
+ *  but every consumer (`isCellSelected`, `selectionText`) wants one
+ *  consistent "earlier" and "later" endpoint regardless of drag direction. */
+function normalizeRange(start: CellPos, end: CellPos): [CellPos, CellPos] {
+  if (start.row > end.row || (start.row === end.row && start.col > end.col)) {
+    return [end, start];
+  }
+  return [start, end];
+}
+
+/**
+ * Whether `(row, col)` falls inside a linear (stream) selection from
+ * `start` to `end` — "linear" meaning it spans full row width for every row
+ * strictly between the two endpoints (like selecting text in a document),
+ * not a rectangular block. Order-independent: dragging up-and-left selects
+ * the same cells as dragging down-and-right between the same two points.
+ */
+export function isCellSelected(row: number, col: number, start: CellPos, end: CellPos): boolean {
+  const [a, b] = normalizeRange(start, end);
+  if (row < a.row || row > b.row) return false;
+  if (a.row === b.row) return col >= a.col && col <= b.col;
+  if (row === a.row) return col >= a.col;
+  if (row === b.row) return col <= b.col;
+  return true; // a full row strictly between the two endpoints
+}
+
+/**
+ * Plain text for a linear selection from `start` to `end` across `rows`,
+ * one line per row joined with `\n` — what actually gets copied to the
+ * clipboard. Trims nothing (a row's trailing spaces are real grid content,
+ * same convention `Screen::line_text` uses on the Rust side), and clamps to
+ * whatever rows/columns actually exist rather than assuming the endpoints
+ * are in bounds (the selection was made against whatever was on screen at
+ * drag time, which a resize or new output could have since changed under
+ * it — see `terminal.svelte`'s own selection-clearing rules for when that
+ * can happen).
+ */
+export function selectionText(rows: readonly (readonly TermCell[])[], start: CellPos, end: CellPos): string {
+  const [a, b] = normalizeRange(start, end);
+  const lines: string[] = [];
+  for (let r = a.row; r <= b.row && r < rows.length; r++) {
+    const row = rows[r];
+    const fromCol = r === a.row ? a.col : 0;
+    const toCol = r === b.row ? b.col + 1 : row.length;
+    lines.push(
+      row
+        .slice(Math.max(0, fromCol), Math.min(toCol, row.length))
+        .map((c) => c.ch)
+        .join(""),
+    );
+  }
+  return lines.join("\n");
+}
+
 export interface DrawOptions {
   rows: readonly (readonly TermCell[])[];
   /** `null` while the cursor is in its "off" blink phase, or there's no
    *  live session to show one for — `draw` just skips it, the blink timing
    *  itself is the caller's concern (`terminal.svelte`'s animation loop). */
-  cursor: { row: number; col: number } | null;
+  cursor: CellPos | null;
+  /** `null` when nothing is selected. Drawn as a translucent overlay, not a
+   *  colour swap, so the cell's own colours stay legible underneath it. */
+  selection: { start: CellPos; end: CellPos } | null;
   metrics: CharMetrics;
   /** Already resolved against the active theme (`--ax-text`/`--ax-surface-1`
    *  in practice) — see `resolveColor`'s own doc comment for why this model
@@ -123,6 +190,10 @@ export interface DrawOptions {
   defaultFg: string;
   defaultBg: string;
   cursorColor: string;
+  /** The selection overlay's fill colour — expected to already carry some
+   *  transparency (e.g. the theme's `--ax-accent-muted` token) so it reads
+   *  as a highlight, not an opaque colour swap. */
+  selectionColor: string;
   /** A plain CSS font shorthand with no weight, e.g. `"14px ui-monospace"` —
    *  `draw` prepends `"bold "` itself for bold cells, so a weight baked in
    *  here would double up. */
@@ -144,7 +215,7 @@ export interface DrawOptions {
  * shape options (bar/underline) are a possible Checkpoint 5 config item.
  */
 export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void {
-  const { rows, cursor, metrics, defaultFg, defaultBg, cursorColor, font } = options;
+  const { rows, cursor, selection, metrics, defaultFg, defaultBg, cursorColor, selectionColor, font } = options;
   const { width: cw, height: ch, ascent } = metrics;
   ctx.textBaseline = "alphabetic";
 
@@ -158,6 +229,13 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
 
       ctx.fillStyle = isCursor ? cursorColor : resolveColor(cell.bg, defaultBg);
       ctx.fillRect(x, y, cw, ch);
+      // Drawn as a translucent overlay on top of the cell's own background
+      // (not instead of it), so selected text keeps reading with its
+      // normal colours underneath the highlight.
+      if (selection && isCellSelected(r, c, selection.start, selection.end)) {
+        ctx.fillStyle = selectionColor;
+        ctx.fillRect(x, y, cw, ch);
+      }
 
       if (cell.ch === " ") continue;
       ctx.font = cell.bold ? `bold ${font}` : font;

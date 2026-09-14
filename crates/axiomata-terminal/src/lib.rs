@@ -5,14 +5,16 @@
 //! runnable on its own (see the `term-poc` binary). See
 //! `docs/plans/terminal.md` for the full phased plan.
 //!
-//! Checkpoint 2 (this state): [`Terminal`] feeds a shell's raw output
-//! through a [`vte`] parser into a [`Screen`] — a cell grid with cursor,
-//! colours, and basic attributes. `PtySession` (Checkpoint 0/1) and
-//! `Terminal` are deliberately separate: the former only knows about PTYs
-//! and bytes, the latter only knows about interpreting those bytes, so
-//! either is independently testable (`Terminal` needs no real PTY at all —
-//! see `screen.rs`'s tests) and a caller wires them together (see
-//! `apps/dashboard/src-tauri/src/terminal.rs`).
+//! Since Checkpoint 2: [`Terminal`] feeds a shell's raw output through a
+//! [`vte`] parser into a [`Screen`] — a cell grid with cursor, colours, and
+//! basic attributes. `PtySession` (Checkpoint 0/1) and `Terminal` are
+//! deliberately separate: the former only knows about PTYs and bytes, the
+//! latter only knows about interpreting those bytes, so either is
+//! independently testable (`Terminal` needs no real PTY at all — see
+//! `screen.rs`'s tests) and a caller wires them together (see
+//! `apps/dashboard/src-tauri/src/terminal.rs`). `Screen` itself has since
+//! grown scrollback, an alternate screen, and bracketed-paste tracking
+//! (Checkpoint 4) — see its own module doc comment for the current state.
 
 mod pty;
 mod screen;

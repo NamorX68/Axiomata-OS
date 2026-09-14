@@ -11,7 +11,12 @@
 //! `PtySession`, so what reaches the frontend is an interpreted screen
 //! snapshot, not raw bytes — see `TerminalEvent`. Checkpoint 3 upgraded that
 //! snapshot from plain text to full `Cell` data (colour/attributes), now
-//! that the frontend has a canvas renderer able to draw it.
+//! that the frontend has a canvas renderer able to draw it. Checkpoint 4
+//! added `bracketed_paste` to the same snapshot (so the frontend knows
+//! whether to wrap pasted text) and a `terminal_scrollback` command for
+//! fetching history on demand — the live `on_output` channel only ever
+//! streams the *current* screen, scrollback is a separate, deliberately
+//! pull-based fetch (see that command's own doc comment for why).
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -38,7 +43,10 @@ use tauri::{AppHandle, Manager, State};
 /// Checkpoint 3's canvas renderer needs to actually draw colour/attributes,
 /// so `rows` is now full `Cell` data (`axiomata_terminal::Cell` derives
 /// `Serialize` itself — no parallel DTO here) and `cursor_row`/`cursor_col`
-/// are drawn as a blinking cursor instead of sitting unused.
+/// are drawn as a blinking cursor instead of sitting unused. `bracketed_paste`
+/// (Checkpoint 4) is `Screen::bracketed_paste()`'s value at snapshot time —
+/// the frontend's own paste handler reads it to decide whether to wrap
+/// pasted text in `\x1b[200~...\x1b[201~` before sending it.
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalEvent {
@@ -46,6 +54,7 @@ pub enum TerminalEvent {
         rows: Vec<Vec<Cell>>,
         cursor_row: u16,
         cursor_col: u16,
+        bracketed_paste: bool,
     },
     /// The shell process ended (on its own, or the PTY tore down) — not an
     /// error, and not something `terminal_write`/`_resize` should still be
@@ -105,6 +114,7 @@ fn screen_event(terminal: &Terminal) -> TerminalEvent {
         rows: screen.rows().to_vec(),
         cursor_row,
         cursor_col,
+        bracketed_paste: screen.bracketed_paste(),
     }
 }
 
@@ -170,6 +180,13 @@ pub fn terminal_spawn(
                 break;
             }
         }
+        // Removing the whole `Session` here — not just the `PtySession` —
+        // also discards its `Terminal`'s scrollback the instant the shell
+        // ends, so `terminal_scrollback` has nothing left to serve once
+        // `Exited` fires below. Raised in architecture review and confirmed
+        // as the intended behavior (owner decision, 2026-09-14): scrollback
+        // dying with the shell is consistent with Checkpoint 0's original
+        // "no docking, closed/ended means gone" call, not an oversight.
         app.state::<TerminalSessions>().lock().remove(&closing_id);
         let _ = on_output.send(TerminalEvent::Exited);
     });
@@ -225,6 +242,27 @@ pub fn terminal_resize(
 pub fn terminal_close(sessions: State<'_, TerminalSessions>, id: String) -> Result<(), String> {
     sessions.lock().remove(&id);
     Ok(())
+}
+
+/// Fetches a scrollback viewport on demand: `offset` lines up from the live
+/// bottom (see `Screen::visible_rows`'s own doc comment for the exact
+/// semantics). Deliberately a separate, pull-based command rather than
+/// something `on_output`'s live channel keeps pushing — the owner only
+/// needs this while actively scrolled up (a mouse-wheel gesture in the
+/// frontend), and streaming a scrollback-aware snapshot on every single PTY
+/// read regardless of whether anyone is looking at history would be pure
+/// waste. Same "unknown id is an error" convention as `terminal_write`.
+#[tauri::command]
+pub fn terminal_scrollback(
+    sessions: State<'_, TerminalSessions>,
+    id: String,
+    offset: u16,
+) -> Result<Vec<Vec<Cell>>, String> {
+    let guard = sessions.lock();
+    let session = guard
+        .get(&id)
+        .ok_or_else(|| format!("no terminal session {id:?}"))?;
+    Ok(session.terminal.screen().visible_rows(offset))
 }
 
 #[cfg(test)]
@@ -335,6 +373,7 @@ mod tests {
             rows,
             cursor_row,
             cursor_col,
+            ..
         } = screen_event(&terminal)
         else {
             panic!("expected a Screen event");
@@ -370,5 +409,55 @@ mod tests {
         let untouched = rows[0][1];
         assert_eq!(untouched.fg, Color::Default);
         assert!(!untouched.bold);
+    }
+
+    /// `screen_event`'s `bracketed_paste` field (Checkpoint 4) has to
+    /// actually read `Screen::bracketed_paste()`, not just default to
+    /// `false` regardless of what the program running in the shell asked
+    /// for — the frontend's paste handler trusts this field completely.
+    #[test]
+    fn screen_event_bracketed_paste_reflects_the_screen_flag() {
+        let mut terminal = Terminal::new(1, 5);
+
+        let TerminalEvent::Screen {
+            bracketed_paste, ..
+        } = screen_event(&terminal)
+        else {
+            panic!("expected a Screen event");
+        };
+        assert!(!bracketed_paste, "no program asked for it yet");
+
+        terminal.feed(b"\x1b[?2004h");
+        let TerminalEvent::Screen {
+            bracketed_paste, ..
+        } = screen_event(&terminal)
+        else {
+            panic!("expected a Screen event");
+        };
+        assert!(bracketed_paste);
+    }
+
+    /// `terminal_scrollback`'s whole body is `session.terminal.screen()
+    /// .visible_rows(offset)` behind a lookup that (like every other command
+    /// body in this file) needs a real Tauri `State` to exercise directly —
+    /// see the review note on `insert_find_then_remove_round_trips_a_session`.
+    /// `Screen::visible_rows` itself is already covered end-to-end in
+    /// `screen.rs`, but only ever through a bare `Screen`; this mirrors the
+    /// command's actual call path — through a real `Terminal`, the type the
+    /// command's `Session` actually stores — so a future change to how
+    /// `Terminal` exposes its screen wouldn't go unnoticed here.
+    #[test]
+    fn terminal_scrollback_logic_reads_scrolled_off_lines_through_a_real_terminal() {
+        let mut terminal = Terminal::new(1, 4);
+        terminal.feed(b"one\r\ntwo\r\nthr");
+
+        let line_of = |row: &[Cell]| row.iter().map(|c| c.ch).collect::<String>();
+        // offset 0: exactly what the live on_output snapshot already shows.
+        let live = terminal.screen().visible_rows(0);
+        assert_eq!(line_of(&live[0]), "thr ");
+
+        // offset 1: one line further back into scrollback than the live view.
+        let scrolled = terminal.screen().visible_rows(1);
+        assert_eq!(line_of(&scrolled[0]), "two ");
     }
 }

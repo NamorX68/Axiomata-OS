@@ -71,6 +71,7 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            terminal::terminal_scrollback,
         ])
         .setup(|app| {
             // Core init, the startup memory sync, and the routine scheduler —
