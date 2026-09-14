@@ -15,3 +15,7 @@ apps/dashboard/src-tauri/target/
 # Editor
 .vscode/
 .idea/
+
+# Owner's local screenshot dump (Bildschirmfotos) — not project content,
+# just where ad-hoc screenshots for live-testing feedback land locally.
+/Screenshots/
