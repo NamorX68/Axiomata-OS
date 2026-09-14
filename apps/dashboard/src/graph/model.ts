@@ -173,8 +173,11 @@ export function glyphForArea(path: string): string {
  *  area folders), so reusing that mechanism trades "the module's literal
  *  icon" for "something that reliably draws at all." `skill`/`routine`/
  *  `mail` are the same glyphs those kinds already use elsewhere in the
- *  graph, for visual consistency. Falls back to `"folder"` (matching
- *  `glyphForArea`'s own fallback) for any module not listed here, so a
+ *  graph, for visual consistency; `terminal` (Checkpoint 5c) likewise reuses
+ *  an id that already existed in `render.ts`'s `GLYPH_CODEPOINTS` for the
+ *  App-Ring group icon picker, rather than being new artwork. Falls back to
+ *  `"folder"` (matching `glyphForArea`'s own fallback) for any module not
+ *  listed here, so a
  *  future builtin never renders nothing while it waits for a proper glyph. */
 export function glyphForModuleType(type: string): string {
   switch (type) {
@@ -192,6 +195,8 @@ export function glyphForModuleType(type: string): string {
       return "list";
     case "mail":
       return "mail";
+    case "terminal":
+      return "terminal";
     default:
       return "folder";
   }

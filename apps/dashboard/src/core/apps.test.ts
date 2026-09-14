@@ -2,23 +2,40 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
-import { addUserApp, listBuiltinApps, loadUserApps, removeUserApp, setUserAppGlyph, userApps } from "./apps";
+import {
+  addUserApp,
+  hiddenBuiltins,
+  hideBuiltinApp,
+  listAllRingEligibleBuiltins,
+  listBuiltinApps,
+  loadHiddenBuiltins,
+  loadUserApps,
+  removeUserApp,
+  setUserAppGlyph,
+  showBuiltinApp,
+  userApps,
+} from "./apps";
 import { appGroups, createGroup, groupFor, loadAppGroups } from "./appGroups";
 
 beforeAll(() => registerBuiltins());
 beforeEach(() => {
   loadUserApps([]);
   loadAppGroups([]);
+  loadHiddenBuiltins([]);
 });
 
-describe("listBuiltinApps", () => {
-  it("excludes background, dev, md-file, and terminal modules", () => {
-    const types = listBuiltinApps().map((a) => a.type);
+describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
+  it("excludes background, dev, and md-file modules", () => {
+    const types = listAllRingEligibleBuiltins().map((a) => a.type);
     expect(types).not.toContain("second-brain");
     expect(types).not.toContain("md-file");
-    expect(types).not.toContain("terminal");
     expect(types).not.toContain("dummy");
     expect(types).not.toContain("dummy-singleton");
+  });
+
+  it("includes terminal — a non-singleton builtin is still ring-eligible", () => {
+    expect(listAllRingEligibleBuiltins().map((a) => a.type)).toContain("terminal");
+    expect(listBuiltinApps().map((a) => a.type)).toContain("terminal");
   });
 
   it("carries title through from the registry", () => {
@@ -26,12 +43,8 @@ describe("listBuiltinApps", () => {
     expect(memoryStatus).toMatchObject({ title: "Memory" });
   });
 
-  it("preserves registry order for the remaining tools", () => {
-    // Every one of these is a singleton (see `apps.ts`'s doc comment) — a
-    // regression here would also silently reopen the "what does a repeat
-    // ring click on a non-singleton do" question the plan deliberately
-    // sidesteps for v1.
-    expect(listBuiltinApps().map((a) => a.type)).toEqual([
+  it("preserves registry order", () => {
+    expect(listAllRingEligibleBuiltins().map((a) => a.type)).toEqual([
       "memory-status",
       "skills-deck",
       "routines-board",
@@ -39,7 +52,37 @@ describe("listBuiltinApps", () => {
       "calendar",
       "reminders",
       "mail",
+      "terminal",
     ]);
+  });
+
+  it("listBuiltinApps excludes a hidden type, listAllRingEligibleBuiltins still includes it", () => {
+    hideBuiltinApp("mail");
+    expect(listBuiltinApps().map((a) => a.type)).not.toContain("mail");
+    expect(listAllRingEligibleBuiltins().map((a) => a.type)).toContain("mail");
+  });
+});
+
+describe("hiddenBuiltins store", () => {
+  it("hideBuiltinApp adds, ignoring a duplicate; showBuiltinApp removes", () => {
+    hideBuiltinApp("mail");
+    hideBuiltinApp("mail");
+    expect(get(hiddenBuiltins)).toEqual(["mail"]);
+    showBuiltinApp("mail");
+    expect(get(hiddenBuiltins)).toEqual([]);
+  });
+
+  it("showBuiltinApp on a type that isn't hidden is a no-op", () => {
+    hideBuiltinApp("mail");
+    showBuiltinApp("todo");
+    expect(get(hiddenBuiltins)).toEqual(["mail"]);
+  });
+
+  it("hiding one type leaves the others visible", () => {
+    hideBuiltinApp("mail");
+    const types = listBuiltinApps().map((a) => a.type);
+    expect(types).toContain("todo");
+    expect(types).not.toContain("mail");
   });
 });
 

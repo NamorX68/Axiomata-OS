@@ -1,5 +1,96 @@
 # Applikations-Ring im Orbit (App Ring)
 
+## Checkpoint 5c — Tools und Apps verwaltbar machen (Owner-Wunsch, 2026-09-14)
+
+Bis hierhin hatte die Ring-Seite links vom „+" (Builtins) keinerlei
+Nutzerkontrolle: `isRingEligible` war eine feste Ausschlussliste
+(`background`/`dev`/`md-file`, dazu bis hier `terminal` extra), jedes
+verbleibende registrierte Modul erschien automatisch, und nur Claude
+(als Code-Änderung an dieser Liste) konnte das ändern. Owner-Feedback:
+"dem User steht keine Funktion zur Verfügung das zu tun" — sowohl für die
+bestehenden Builtins ("Tools": Memory, Skills, Routines, ToDo, Calendar,
+Reminders, Mail) als auch für das neue Terminal ("Apps" — Owner-Sprachgebrauch:
+"Wenn ich von Apps spreche meine ich sowas wie unser neues Terminal").
+
+**Begriffe** (Owner-Klärung): **Tool** = ein Singleton-Builtin
+(`ModuleDefinition.singleton` `true`/unset) — Ring-Klick bringt eine
+platzierte Instanz nach vorne, sonst erzeugt er eine. **App** =
+`singleton: false` (aktuell nur Terminal) — jeder Ring-Klick erzeugt eine
+neue Instanz, es gibt keine "die eine" Instanz zum Nach-vorne-Bringen. Die
+Unterscheidung existierte technisch schon (`ModuleDefinition.singleton`),
+wurde vor 5c nur nirgends für den Ring-Klick ausgewertet — `terminal` war
+deshalb komplett vom Ring ausgeschlossen (`docs/plans/terminal.md`
+Checkpoint 1), nicht weil es nicht ring-tauglich wäre, sondern weil der
+Klick-Handler die Singleton-Unterscheidung noch nicht kannte.
+
+**Umsetzung:**
+
+- **`src/core/apps.ts`**: `isRingEligible` verliert die
+  `terminal`-Sonderbehandlung (nur `background`/`dev`/`md-file` bleiben
+  draußen — die Gründe dafür ändern sich nicht). Neue Funktion
+  `listAllRingEligibleBuiltins()` (ring-fähig, unabhängig vom
+  Sichtbarkeits-Status) neben dem bestehenden `listBuiltinApps()`, das jetzt
+  zusätzlich nach dem neuen `hiddenBuiltins`-Store filtert. Neuer Store
+  `hiddenBuiltins: Writable<string[]>` (Registry-`type`s, die der Owner
+  versteckt hat) + Mutatoren `hideBuiltinApp(type)`/`showBuiltinApp(type)`/
+  `loadHiddenBuiltins(list)` — spiegelbildlicher Default zu `userApps`
+  (`userApps` startet leer, man opted pro App ein; `hiddenBuiltins` startet
+  leer, jedes ring-fähige Builtin ist sichtbar bis man es explizit versteckt).
+- **`src/core/persist.ts`**: neue Sektion `apps.hiddenBuiltins: string[]` in
+  `dashboard.json`, `sanitizeHiddenBuiltins` (nicht-leere Strings,
+  dedupliziert — Einzeleintrag verwerfen statt die ganze Datei zu
+  gefährden, wie die übrigen Sanitizer hier).
+- **`src/modules/second-brain.svelte`**: `handleAppClick` prüft jetzt
+  `getModule(n.appType)?.singleton !== false`, bevor es eine platzierte
+  Instanz nach vorne holt — bei `singleton: false` (Apps) wird immer eine
+  neue Instanz erzeugt. Neue `hiddenBuiltins.subscribe(() => rebuild())`
+  (analog zur bestehenden `userApps`-Subscription), damit ein Sichtbarkeits-
+  Toggle im „+"-Dialog den Ring live aktualisiert, während der Dialog offen
+  ist.
+- **`src/modules/AppAddDialog.svelte`**: Umschalter „Intern"/„Extern" oben im
+  Dialog (Owner-Vorschlag: "Radiostation"). „Extern" ist unverändert der
+  bestehende Mac-App-Scan. „Intern" listet `listAllRingEligibleBuiltins()`
+  — Tools und Apps in **einer gemeinsamen Liste** (Owner-Entscheidung: die
+  Unterscheidung zeigt sich nur im Ring-Klick-Verhalten, nicht in dieser
+  Liste), Zeile pro Modul mit demselben instant-ohne-Bestätigung-Toggle wie
+  die externe Seite — aber mit eigenen Verb-Labels „Anzeigen"/„Ausblenden"
+  statt „Hinzufügen"/„Entfernen": ein Builtin wird nie wirklich aus der App
+  entfernt, nur vom Ring versteckt, und ist hier jederzeit wiederfindbar
+  (anders als eine Mac-App, die `userApps` wirklich verlässt). Umschalten
+  zwischen den Modi leert das Suchfeld. Rechtsklick-Kontextmenü
+  (`AppContextMenu`/`menuActionsFor`) bleibt unverändert — Builtins bekommen
+  weiterhin kein „Entfernen" dort, Verstecken geht ausschließlich über den
+  „+"-Dialog.
+- **`src/graph/model.ts`**: `glyphForModuleType` bekommt einen
+  `"terminal"`-Fall (`GLYPH_CODEPOINTS` hatte den Material-Symbols-Codepoint
+  für "terminal" schon, ungenutzt, seit der App-Ring-Gruppierung ihn für den
+  Icon-Picker brauchte).
+
+**Entschiedene Detailfragen** (Owner, kurz vorab bestätigt):
+- Tools/Apps im Intern-Tab eine gemeinsame Liste, nicht zwei getrennte.
+- Ein verstecktes Tool/App verschwindet komplett vom Ring (nicht nur
+  ausgegraut) — gleiches Verhalten wie das Entfernen externer Apps.
+- Terminal-Klick im Ring spawnt immer eine neue Instanz ohne Rückfrage.
+
+**Kein Rust nötig** — `apps.hiddenBuiltins` läuft über denselben generischen
+`get_dashboard_state`/`save_dashboard_state`-Mechanismus wie jede andere
+Frontend-Sektion von `dashboard.json` (das Schema gehört dem Frontend, Rust
+schreibt nur atomar; siehe `persist.ts`'s eigener Modul-Kommentar).
+
+**Tests**: `src/core/apps.test.ts` (Terminal jetzt in
+`listAllRingEligibleBuiltins`, `hideBuiltinApp`/`showBuiltinApp`/gefilterte
+vs. ungefilterte Liste), `src/core/persist.test.ts`
+(`sanitizeHiddenBuiltins`, `parseState`/`buildState`-Rundtrip). Kein
+dedizierter Test für `handleAppClick`s neue Singleton-Verzweigung — die
+Datei hat wie jedes andere Second-Brain-Modul keine eigene Testdatei
+(DOM/Canvas-lastig, gleiche Konvention wie `terminal.svelte`).
+
+**Verifikation**: `npm run check`, `npx vitest run`, `architecture-reviewer`
++ `docs-writer` (kein Rust berührt, daher kein `rust-test-engineer`/
+`rust-dependency-auditor` nötig). Manueller Live-Test am Mac des Owners noch
+offen (gleiche Einschränkung wie beim Terminal-Modul — diese Session hat
+keine Accessibility-/Screen-Recording-Rechte).
+
 Status: implementiert (alle 4 Checkpoints) + abschließender `architecture-reviewer`-
 Lauf über den Gesamt-Diff samt `rust-dependency-auditor` für die neue
 `home`-Dependency abgeschlossen, alle Befunde behoben. **Kurswechsel bei den
@@ -103,10 +194,13 @@ Anforderungen (Owner-Feedback):
 1. **In-App-Apps erscheinen automatisch** — die in der App angebotenen Module
    (Registry), ohne die `background`-Module, ohne Dev-Dummies und ohne
    `md-file` (braucht einen `path`, den es ohne Kontext nicht hat — ein
-   blanker Ring-Klick würde eine kaputte Kachel erzeugen). Folge: jedes
-   verbleibende eingebaute Modul ist aktuell ein Singleton (`memory-status`,
+   blanker Ring-Klick würde eine kaputte Kachel erzeugen). Folge (v1): jedes
+   verbleibende eingebaute Modul war damals ein Singleton (`memory-status`,
    `skills-deck`, `routines-board`, `todo`, `calendar`, `reminders`, `mail`)
-   — für v1 keine Sonderbehandlung für Nicht-Singleton-Klicks nötig.
+   — keine Sonderbehandlung für Nicht-Singleton-Klicks nötig. **Überholt seit
+   Checkpoint 5c** (siehe oben): Terminal (`singleton: false`) ist jetzt auch
+   ring-fähig, `handleAppClick` unterscheidet Tool/App-Klickverhalten
+   explizit über `ModuleDefinition.singleton`.
 2. **Installierte Apps über „+-Button" anlegen** — der Button sitzt auf 12 Uhr
    dieses Rings; er öffnet einen Dialog, in dem man eine App des Rechners
    hinterlegen kann.

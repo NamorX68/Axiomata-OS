@@ -4,7 +4,7 @@
   hub), plus the App Ring around the outside (builtin modules left of the
   "+", externally added Mac apps right of it — see docs/plans/app-ring.md).
   Loads `get_workspace_graph` on mount and every REFRESH_MS, redraws on
-  theme change or a `userApps` change, spins slowly (the App Ring itself
+  theme change or a `userApps`/`hiddenBuiltins` change, spins slowly (the App Ring itself
   does not — see `layout.ts`'s `layoutAppRing`). Hover shows the node label;
   a click on the visible cloud (a node hit, or just within its disc radius —
   the point cloud has real gaps between points) opens the full Second Brain
@@ -39,9 +39,10 @@
     renameGroup,
     setGroupGlyph,
   } from "../core/appGroups";
-  import { listBuiltinApps, removeUserApp, setUserAppGlyph, userApps } from "../core/apps";
+  import { hiddenBuiltins, listBuiltinApps, removeUserApp, setUserAppGlyph, userApps } from "../core/apps";
   import type { WorkspaceGraph } from "../core/backend";
   import { createInstance } from "../core/lifecycle";
+  import { getModule } from "../core/registry";
   import { openStaged } from "../core/staging";
   import { bringToFront, instances } from "../core/stores";
   import { toast } from "../core/toast";
@@ -196,23 +197,29 @@
     return n.userApp ? "user" : "builtin";
   }
 
-  /** Builtin: launch (create) it, or bring an already-placed instance to
-   *  front — every builtin currently on the ring is a singleton (`apps.ts`
-   *  excludes the one exception, `md-file`), so there's no "repeat click on
-   *  a non-singleton" case to handle. User app: launch the `.app` bundle via
-   *  the OS. Either can fail (a module rejects `createInstance`, the `.app`
-   *  has moved/been deleted) — surfaced as a toast, same as `ModulePicker`'s
-   *  own failed-create path. */
+  /** Builtin "Tool" (`ModuleDefinition.singleton` true/unset — Memory,
+   *  Skills, Routines, ToDo, Calendar, Reminders, Mail): launch (create) it,
+   *  or bring an already-placed instance to front. Builtin "App"
+   *  (`singleton: false` — currently only Terminal, `docs/plans/terminal.md`):
+   *  always create a fresh instance, same as a repeat click on the "Add
+   *  module" dialog would — there's no single "the" placed instance to
+   *  bring forward, and reusing one would silently cap the ring's icon at
+   *  one no matter how many are already open. User app: launch the `.app`
+   *  bundle via the OS. Any of these can fail (a module rejects
+   *  `createInstance`, the `.app` has moved/been deleted) — surfaced as a
+   *  toast, same as `ModulePicker`'s own failed-create path. */
   function handleAppClick(n: GraphNode): void {
     if (n.userApp) {
       if (n.appPath) void openPath(n.appPath).catch((err) => toast(String(err), "warning"));
       return;
     }
     if (!n.appType) return;
-    const placed = get(instances).find((i) => i.type === n.appType);
-    if (placed) {
-      bringToFront(placed.id);
-      return;
+    if (getModule(n.appType)?.singleton !== false) {
+      const placed = get(instances).find((i) => i.type === n.appType);
+      if (placed) {
+        bringToFront(placed.id);
+        return;
+      }
     }
     const result = createInstance(n.appType);
     if (!result.ok) toast(result.reason, "warning");
@@ -362,6 +369,11 @@
     // until `graph` is loaded, so an immediate fire from `.subscribe()`
     // itself (the Svelte store contract) before that happens is harmless.
     const unsubUserApps = userApps.subscribe(() => rebuild());
+    // Toggling a Tool/App's visibility in the "+" dialog's "Intern" tab
+    // changes `hiddenBuiltins`, not `userApps` — needs its own subscription
+    // so the ring updates live while the dialog is still open, same
+    // reasoning as `unsubUserApps` above.
+    const unsubHiddenBuiltins = hiddenBuiltins.subscribe(() => rebuild());
     // App-Ring group CRUD (create/add/remove/rename/change icon) all go
     // through `appGroups` — this alone is enough to pick up every one of
     // them automatically, no call site needs to remember to `rebuild()`
@@ -374,6 +386,7 @@
       ro.disconnect();
       mo.disconnect();
       unsubUserApps();
+      unsubHiddenBuiltins();
       unsubAppGroups();
     };
   });

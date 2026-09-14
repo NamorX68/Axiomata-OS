@@ -12,7 +12,7 @@
 import { get } from "svelte/store";
 
 import { appGroups, loadAppGroups, type AppGroup } from "./appGroups";
-import { loadUserApps, userApps, type UserApp } from "./apps";
+import { hiddenBuiltins, loadHiddenBuiltins, loadUserApps, userApps, type UserApp } from "./apps";
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges, windowTransparency } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
@@ -31,7 +31,7 @@ interface DashboardState extends Record<string, unknown> {
   version: number;
   settings: DashboardSettings;
   canvas: { instances: CanvasInstance[] };
-  apps: { user: UserApp[]; groups: AppGroup[] };
+  apps: { user: UserApp[]; groups: AppGroup[]; hiddenBuiltins: string[] };
 }
 
 /** Everything from the loaded file except what the stores own, so hand-added
@@ -98,6 +98,21 @@ export function sanitizeUserApps(raw: unknown): UserApp[] {
   return out;
 }
 
+/** Keeps only non-empty string entries, deduplicated — a bad hand-edit drops
+ *  the entry, not the file (same contract as `sanitizeInstances`/
+ *  `sanitizeUserApps`). A hidden-but-no-longer-ring-eligible/registered
+ *  type is left in untouched: `apps.ts`'s `listBuiltinApps` already just
+ *  ignores anything not in `listAllRingEligibleBuiltins`, so there's
+ *  nothing here that needs cross-checking against the registry. */
+export function sanitizeHiddenBuiltins(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (isStr(item)) seen.add(item);
+  }
+  return [...seen];
+}
+
 /** Keeps only well-formed groups; a bad hand-edit drops the row, not the
  *  file (same contract as `sanitizeInstances`/`sanitizeUserApps`). Members
  *  are deduplicated within a group and, per side, across groups — the
@@ -158,7 +173,11 @@ export function parseState(text: string): DashboardState | null {
         customCssPath: isStr(settings.customCssPath) ? settings.customCssPath : null,
       },
       canvas: { instances: sanitizeInstances(canvas.instances) },
-      apps: { user: sanitizeUserApps(apps.user), groups: sanitizeAppGroups(apps.groups) },
+      apps: {
+        user: sanitizeUserApps(apps.user),
+        groups: sanitizeAppGroups(apps.groups),
+        hiddenBuiltins: sanitizeHiddenBuiltins(apps.hiddenBuiltins),
+      },
     };
   } catch {
     return null;
@@ -171,7 +190,7 @@ export function buildState(): DashboardState {
     version: STATE_VERSION,
     settings: { ...extraSettings, theme: get(activeTheme), customCssPath },
     canvas: { instances: get(instances) },
-    apps: { user: get(userApps), groups: get(appGroups) },
+    apps: { user: get(userApps), groups: get(appGroups), hiddenBuiltins: get(hiddenBuiltins) },
   };
 }
 
@@ -213,6 +232,7 @@ export async function initPersistence(): Promise<void> {
     loadInstances(canvas.instances);
     loadUserApps(apps.user);
     loadAppGroups(apps.groups);
+    loadHiddenBuiltins(apps.hiddenBuiltins);
     applyTheme(theme);
     loading = false;
   }
@@ -238,6 +258,9 @@ export async function initPersistence(): Promise<void> {
     if (!loading) scheduleSave();
   });
   appGroups.subscribe(() => {
+    if (!loading) scheduleSave();
+  });
+  hiddenBuiltins.subscribe(() => {
     if (!loading) scheduleSave();
   });
   let first = true;

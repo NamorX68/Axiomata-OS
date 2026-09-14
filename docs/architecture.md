@@ -496,6 +496,18 @@ path / fly-to / run skill / toggle routine). Import (`axiomata_core::importer` +
 note" icon) both have the agent propose placement into one of the workspace's existing
 top-level areas, or a brand-new one when none genuinely fit, in one JSON turn.
 
+**App Ring** (`core/apps.ts`, `graph/model.ts`'s `buildAppNodes`/`layoutAppRing`): a ring of
+launcher nodes around the Orbit background widget, builtin modules on one side of the "+" and
+externally added Mac apps on the other, plus owner-defined groups on either side
+(`core/appGroups.ts`) that collapse to one ring-slot node and expand to a secondary ring on
+click. Since Checkpoint 5c a builtin can be hidden from the ring (and un-hidden again) from
+the "+" dialog's "Intern" tab — `hiddenBuiltins`, a `~/.axiomata/dashboard.json` store next to
+`userApps`, opposite default (everything ring-eligible shows until explicitly hidden, vs.
+`userApps` starting empty). A ring click on a singleton builtin (`ModuleDefinition.singleton`
+true/unset) brings its placed instance to front or creates one; a non-singleton builtin (only
+`terminal` today) always creates a fresh instance. Full design and checkpoint history:
+`docs/plans/app-ring.md`.
+
 ## 6. What is designed but not yet implemented
 
 ### Why the agent backend is an `enum`, not a trait

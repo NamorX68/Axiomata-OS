@@ -2,14 +2,15 @@
  * App-Ring data layer: built-in modules from the registry (the ring's left,
  * "+"-adjacent side) and externally added Mac apps (the right side).
  *
- * `userApps` is persisted under `apps.user` in `~/.axiomata/dashboard.json`
- * by `core/persist.ts`, the same way `core/stores.ts`'s `activeTheme` is —
- * this module owns the store and its mutators, `persist.ts` owns wiring it
- * to disk (subscribes and calls `scheduleSave`). See
- * `docs/plans/app-ring.md` for the full design.
+ * `userApps` and `hiddenBuiltins` are persisted under `apps.user`/
+ * `apps.hiddenBuiltins` in `~/.axiomata/dashboard.json` by `core/persist.ts`,
+ * the same way `core/stores.ts`'s `activeTheme` is — this module owns the
+ * stores and their mutators, `persist.ts` owns wiring them to disk
+ * (subscribes and calls `scheduleSave`). See `docs/plans/app-ring.md` for
+ * the full design (`hiddenBuiltins`: Checkpoint 5c).
  */
 
-import { writable, type Writable } from "svelte/store";
+import { get, writable, type Writable } from "svelte/store";
 
 import { removeMemberFromAllGroups } from "./appGroups";
 import { listModules } from "./registry";
@@ -24,32 +25,75 @@ export interface BuiltinApp {
   title: string;
 }
 
-/** Registry entries excluded from the App Ring: `background` (the Second
- *  Brain canvas itself, not a launchable tile), `dev` scaffolding (the
- *  `dummy*` modules), `md-file` — it needs a `path` a blank ring click
- *  has no way to supply, so `createInstance("md-file")` would just produce a
- *  broken tile — and `terminal`, the first non-singleton builtin
- *  (`docs/plans/terminal.md` Checkpoint 1): `handleAppClick`
- *  (`second-brain.svelte`) brings an existing instance of a clicked type to
- *  front rather than creating another, which is exactly right for every
- *  other builtin here (all singletons) but would silently cap the ring's
- *  Terminal icon at one shell no matter how many are already open. Placing
- *  more than one is still the ordinary multi-instance path (the "Add
- *  module" dialog), just not through the ring — revisit if the ring itself
- *  should ever spawn a fresh terminal on click instead of reusing one.
- *  Every other registered module is a singleton, so the ring's click
- *  handler otherwise never has to decide what a repeat click on a
- *  non-singleton builtin should do. */
+/** Registry entries excluded from the App Ring, unconditionally (the owner
+ *  has no way to bring these back — see `hiddenBuiltins` below for the
+ *  ones they *can* toggle): `background` (the Second Brain canvas itself,
+ *  not a launchable tile), `dev` scaffolding (the `dummy*` modules), and
+ *  `md-file` — it needs a `path` a blank ring click has no way to supply,
+ *  so `createInstance("md-file")` would just produce a broken tile.
+ *
+ *  `terminal` (or any other `singleton: false` builtin) is otherwise
+ *  ring-eligible like everything else — `second-brain.svelte`'s
+ *  `handleAppClick` checks `ModuleDefinition.singleton` at click time and
+ *  always creates a fresh instance for a non-singleton, rather than the
+ *  bring-existing-to-front behaviour every singleton builtin gets, so there
+ *  is no "which one wins" ambiguity to sidestep by excluding it here (as an
+ *  earlier version of this function did — `docs/plans/terminal.md`
+ *  Checkpoint 1's original exclusion, superseded by the App Ring's
+ *  Checkpoint 5c "Tools und Apps verwaltbar machen"). */
 function isRingEligible(def: ModuleDefinition): boolean {
-  return !def.background && !def.dev && def.type !== "md-file" && def.type !== "terminal";
+  return !def.background && !def.dev && def.type !== "md-file";
 }
 
-/** Every builtin module the ring should show, in registry order — a newly
- *  registered module appears automatically, nothing to maintain here. */
-export function listBuiltinApps(): BuiltinApp[] {
+/** Every ring-*eligible* builtin, regardless of whether the owner has hidden
+ *  it (`hiddenBuiltins` below) — what the "+" dialog's "Intern" tab lists,
+ *  so a hidden one can be found again and shown. Registry order, same as
+ *  `listBuiltinApps`. */
+export function listAllRingEligibleBuiltins(): BuiltinApp[] {
   return listModules()
     .filter(isRingEligible)
     .map((def) => ({ type: def.type, title: def.title }));
+}
+
+/** Every builtin module the ring should actually *draw* — ring-eligible
+ *  and not hidden. A newly registered module appears automatically (until
+ *  the owner hides it), nothing to maintain here. */
+export function listBuiltinApps(): BuiltinApp[] {
+  const hidden = new Set(get(hiddenBuiltins));
+  return listAllRingEligibleBuiltins().filter((a) => !hidden.has(a.type));
+}
+
+/** Registry `type`s of builtin Tools/Apps the owner has hidden from the
+ *  ring via the "+" dialog's "Intern" tab (Checkpoint 5c of
+ *  `docs/plans/app-ring.md`) — every ring-eligible builtin shows
+ *  automatically until explicitly hidden here, the opposite default of
+ *  `userApps` (which starts empty and is opted into one app at a time). A
+ *  plain `string[]`, not a `Set`, so it round-trips through
+ *  `JSON.stringify` in `persist.ts`'s `buildState` unchanged, same
+ *  convention as every other persisted store in this module. */
+export const hiddenBuiltins: Writable<string[]> = writable([]);
+
+/** Hides `type` from the ring, unless it's already hidden. No existence
+ *  check against the registry — a type that later becomes ring-ineligible
+ *  or gets removed just never shows up in `listAllRingEligibleBuiltins`
+ *  either, so a stale hidden entry is inert, not a dangling reference to
+ *  clean up. */
+export function hideBuiltinApp(type: string): void {
+  hiddenBuiltins.update((list) => (list.includes(type) ? list : [...list, type]));
+}
+
+/** Un-hides `type`. A type that wasn't hidden is not an error — the "+"
+ *  dialog's toggle button calls this unconditionally based on its own
+ *  displayed state, same convention as `removeUserApp`. */
+export function showBuiltinApp(type: string): void {
+  hiddenBuiltins.update((list) => list.filter((t) => t !== type));
+}
+
+/** Replaces the whole list (used by `persist.ts` on boot). Does not mark
+ *  anything dirty — this IS the loaded state, same convention as
+ *  `loadUserApps`. */
+export function loadHiddenBuiltins(list: string[]): void {
+  hiddenBuiltins.set(list);
 }
 
 /** An externally installed Mac app the owner added via the "+" dialog.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseState, sanitizeAppGroups, sanitizeInstances, sanitizeUserApps } from "./persist";
+import { parseState, sanitizeAppGroups, sanitizeHiddenBuiltins, sanitizeInstances, sanitizeUserApps } from "./persist";
 
 const good = { id: "a", type: "dummy", x: 1, y: 2, w: 100, h: 50 };
 
@@ -68,6 +68,21 @@ describe("sanitizeUserApps", () => {
   });
 });
 
+describe("sanitizeHiddenBuiltins", () => {
+  it("keeps well-formed, deduplicated string entries", () => {
+    expect(sanitizeHiddenBuiltins(["mail", "todo", "mail"])).toEqual(["mail", "todo"]);
+  });
+
+  it("drops non-string and empty-string entries", () => {
+    expect(sanitizeHiddenBuiltins(["mail", "", 5, null, {}, "todo"])).toEqual(["mail", "todo"]);
+  });
+
+  it("returns an empty list for anything that is not an array", () => {
+    expect(sanitizeHiddenBuiltins(undefined)).toEqual([]);
+    expect(sanitizeHiddenBuiltins({})).toEqual([]);
+  });
+});
+
 describe("sanitizeAppGroups", () => {
   const group = { id: "g1", side: "user" as const, name: "Gruppe 1", glyph: "group", members: ["/Applications/Foo.app"] };
 
@@ -124,9 +139,10 @@ describe("parseState", () => {
     expect(s.canvas.instances).toEqual([]);
     expect(s.apps.user).toEqual([]);
     expect(s.apps.groups).toEqual([]);
+    expect(s.apps.hiddenBuiltins).toEqual([]);
   });
 
-  it("carries unknown top-level and settings keys and sanitises instances, user apps and groups", () => {
+  it("carries unknown top-level and settings keys and sanitises instances, user apps, groups and hidden builtins", () => {
     const s = parseState(
       JSON.stringify({
         version: 1,
@@ -139,6 +155,7 @@ describe("parseState", () => {
             { id: "g1", side: "user", name: "Gruppe 1", glyph: "group", members: ["/Applications/Foo.app"] },
             { id: "g2", side: "user", name: "" }, // missing name, dropped
           ],
+          hiddenBuiltins: ["mail", "", 5, "mail"],
         },
       }),
     )!;
@@ -147,6 +164,7 @@ describe("parseState", () => {
     expect(s.canvas.instances.map((i) => i.id)).toEqual(["a"]);
     expect(s.apps.user).toEqual([{ path: "/Applications/Foo.app", name: "Foo" }]);
     expect(s.apps.groups.map((g) => g.id)).toEqual(["g1"]);
+    expect(s.apps.hiddenBuiltins).toEqual(["mail"]);
   });
 
   it("falls back to the default theme and null css path for bad values", () => {
@@ -171,6 +189,13 @@ describe("settings accessors", () => {
     const app = { path: "/Applications/Foo.app", name: "Foo" };
     userApps.set([app]);
     expect(buildState().apps.user).toEqual([app]);
+  });
+
+  it("buildState reflects the hiddenBuiltins store", async () => {
+    const { buildState } = await import("./persist");
+    const { hiddenBuiltins } = await import("./apps");
+    hiddenBuiltins.set(["mail"]);
+    expect(buildState().apps.hiddenBuiltins).toEqual(["mail"]);
   });
 
   it("buildState reflects the appGroups store", async () => {
