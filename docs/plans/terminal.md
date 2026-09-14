@@ -7,9 +7,13 @@ Auswahl+Copy, Paste, mehrere gleichzeitige Terminals) steht noch aus — der
 Owner testet das bei nächster Gelegenheit am Mac selbst. Checkpoint 5 ist
 teilweise umgesetzt ("Mehrere Instanzen" brauchte keinen Code, Konfiguration
 Schriftgröße/Shell-Wahl ist da); Performance-Tuning bei sehr hohem Output
-ist noch offen. Checkpoint 5b (Settings-Erweiterung, siehe unten) ist der
-aktuelle Arbeitsstand — Block A ist committet (`76a5715`); Block B ist
-umgesetzt und steht vor seinem eigenen Verifikations-/Commit-Durchlauf.
+ist noch offen. Checkpoint 5b (Settings-Erweiterung, siehe unten) ist
+KOMPLETT — Block A committet (`76a5715`), Block B committet (`9f44a71`),
+beide automatisiert verifiziert und durch alle vier Pflicht-Sub-Agents
+(rust-test-engineer, architecture-reviewer, docs-writer; rust-dependency-
+auditor entfiel, kein neuer Cargo-Dependency) gegangen. Nächster Schritt:
+ein gemeinsamer interaktiver Live-Test aller Checkpoint-4/5/5b-Features
+zusammen am Mac des Owners.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.
