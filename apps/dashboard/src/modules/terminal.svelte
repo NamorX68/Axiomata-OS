@@ -114,7 +114,7 @@
   import { keyToBytes } from "./terminalInput";
   import { createSequenceGuard } from "./terminalScrollback";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
-  import { DEFAULT_THEME, THEMES } from "./terminalThemes";
+  import { DEFAULT_THEME, THEME_DEFAULT_COLORS, THEMES } from "./terminalThemes";
   import { parseEnvLines } from "./terminalEnv";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -261,13 +261,33 @@
     return `${size} ${family}, ${NERD_FONT_FALLBACK}`;
   }
 
+  /** `terminalSettings.theme`, or `DEFAULT_THEME` when unset/not a string —
+   *  the one place that resolves *which* named theme is active, shared by
+   *  `currentPalette` and `currentDefaultColors` below so they can't ever
+   *  disagree on it. */
+  function currentThemeName(): string {
+    return typeof $terminalSettings.theme === "string" ? $terminalSettings.theme : DEFAULT_THEME;
+  }
+
   /** `terminalSettings.theme` (Checkpoint 5b's "Farbschema/Theme" setting) resolved
    *  to an actual 16-colour table — an unrecognized/stale name (or none
    *  set) falls back to `THEMES[DEFAULT_THEME]`, the original palette,
    *  rather than throwing or drawing with `undefined` colours. */
   function currentPalette(): readonly string[] {
-    const name = typeof $terminalSettings.theme === "string" ? $terminalSettings.theme : DEFAULT_THEME;
+    const name = currentThemeName();
     return THEMES[name] ?? THEMES[DEFAULT_THEME];
+  }
+
+  /** The actual background/foreground an *unwritten* cell shows — Checkpoint
+   *  5k: `THEME_DEFAULT_COLORS[currentThemeName()]`'s own authentic colours
+   *  when the active theme has them (every named theme except `xterm`, see
+   *  that table's own doc comment), otherwise the app's chrome-theme colours
+   *  `readThemeColors` already keeps in `defaultFg`/`defaultBg` — unchanged
+   *  pre-5k behaviour, and still what `xterm` (this module's own "inherit
+   *  the app theme" default) uses. */
+  function currentDefaultColors(): { fg: string; bg: string } {
+    const override = THEME_DEFAULT_COLORS[currentThemeName()];
+    return { fg: override?.foreground ?? defaultFg, bg: override?.background ?? defaultBg };
   }
 
   /** `terminalSettings.cursorStyle` (Checkpoint 5b) narrowed to a real `CursorStyle`
@@ -415,14 +435,15 @@
       // there) or once the shell has ended.
       const cursor = !ended && sessionId && scrollOffset === 0 && blinkOn ? liveCursor : null;
       const selection = selStart && selEnd ? { start: selStart, end: selEnd } : null;
+      const { fg: resolvedDefaultFg, bg: resolvedDefaultBg } = currentDefaultColors();
       context2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       draw(context2d, {
         rows: displayRows(),
         cursor,
         selection,
         metrics,
-        defaultFg,
-        defaultBg,
+        defaultFg: resolvedDefaultFg,
+        defaultBg: resolvedDefaultBg,
         cursorColor,
         selectionColor,
         font: currentFont(),

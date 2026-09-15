@@ -36,10 +36,13 @@ PageUp/PageDown/Delete wurden nie an die Shell weitergegeben — fixt u. a.
 die vom Owner gemeldete fehlende Shell-Autosuggestion-Übernahme per →)
 sind beide KOMPLETT. Checkpoint 5j (Font-Wechsel löste kein Neu-Vermessen
 aus + Web-Font-Lade-Race, gefunden beim Erstellen von Demo-Screenshots für
-den Owner, siehe unten) ist ebenfalls KOMPLETT. Nächster Schritt: Live-Test
-von 5f+5f2+5g+5h+5i+5j am Mac des Owners — diese ganze Kette entstand aus
-genau solchen Live-Tests (oder, bei 5j, deren Chromium-Ersatz), nicht aus
-automatisierter Verifikation allein.
+den Owner, siehe unten) ist ebenfalls KOMPLETT. Checkpoint 5k
+(Hintergrundfarbe folgte dem App- statt dem Terminal-Theme + kaputte
+Blockzeichen, per Ghostty-Screenshot-Vergleich vom Owner gefunden, siehe
+unten) ist ebenfalls KOMPLETT. Nächster Schritt: Live-Test von
+5f+5f2+5g+5h+5i+5j+5k am Mac des Owners — diese ganze Kette entstand aus
+genau solchen Live-Tests (oder, bei 5j/5k, deren Chromium-Ersatz), nicht
+aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -562,6 +565,57 @@ reproduzierbar:
   bestätigten: Theme-only- und Gewicht-only-Wechsel waren schon vorher
   sauber (kein Zellmaß-Einfluss) — nur Familie-ändernde Wechsel waren
   betroffen.
+
+## Checkpoint 5k — Hintergrundfarbe folgte dem App-Theme statt dem Terminal-Theme + kaputte Blockzeichen (Owner-Feedback mit Ghostty-Vergleich, 2026-09-15) — KOMPLETT
+
+Owner-Vergleich mit echten Ghostty-Screenshots deckte zwei Probleme auf:
+"was ist mit der Hintergrundfarbe die passt zwar zum App Theme aber nicht
+zu[m] Theme des Terminals?" und ein kaputt aussehendes `opencode`-Start-
+Logo (Blockzeichen-ASCII-Art).
+
+- **Bug 1 — Hintergrundfarbe**: `terminal.svelte` hat `defaultFg`/`defaultBg`
+  (die Farbe einer unbeschriebenen Zelle) schon immer aus dem App-eigenen
+  Chrome-Theme gelesen (`--ax-text`/`--ax-surface-1`), komplett unabhängig
+  von `terminalSettings.theme` (dem 16-Farben-ANSI-Schema, z. B. "Catppuccin
+  Mocha"). Ein Theme-Wechsel färbte also allen ANSI-indizierten Text um,
+  aber der eigentliche Hintergrund blieb, was auch immer das App-Theme
+  gerade war — sichtbarer Clash. Fix: neue `THEME_DEFAULT_COLORS`-Tabelle
+  in `terminalThemes.ts` mit dem echten, offiziellen Hintergrund/Vordergrund
+  jedes Themes außer `xterm` (das bewusst weiter dem App-Theme folgt, kein
+  Versehen). `terminal.svelte`s neues `currentDefaultColors()` nutzt diese
+  Tabelle für das aktive Theme, fällt sonst auf die bisherigen
+  CSS-Farben zurück.
+- **Bug 2 — kaputte Blockzeichen**: TUI-ASCII-Art mit Unicode-"Block
+  Elements" (█▀▄ etc., U+2580-259F) zeigte ein "Schachbrett"-Muster statt
+  durchgehender Flächen. Zwei Ursachen: (a) `measureChar`s Zellmaße waren
+  Fließkomma-Werte, wodurch die meisten Zellpositionen auf Sub-Pixel-
+  Grenzen landeten; (b) selbst bei Pixel-genauer Positionierung füllt das
+  Glyph vieler Fonts für z. B. "█" (VOLLER BLOCK) sein eigenes
+  Zeichen-Feld nicht randlos aus (Font-Design, kein Bug in der Schrift) —
+  unsichtbar bei normalem Text, aber sofort sichtbar bei aneinandergereihten
+  "durchgehenden" Blockzeichen. Fix: `measureChar` rundet jetzt auf ganze
+  CSS-Pixel; neue `BLOCK_ELEMENT_RECTS`-Tabelle (jedes Blockzeichen als
+  1-3 zellrelative Rechtecke, inkl. der vier Quadranten-Zeichen ▖▗▘▙▚▛▜▝▞▟
+  als 1-3 Viertel-Zell-Rechtecke) + `SHADE_ALPHA` (die drei Schattierungs-
+  zeichen ░▒▓, als alpha-geblendete Vollflächen angenähert) + neue
+  `drawBlockElement()`-Funktion, die diese Zeichen prozedural als Rechtecke
+  zeichnet statt über die Font-Glyphe — exakt wie echte Terminals (Kitty,
+  Alacritty, Ghostty, iTerm2) das für genau diesen Zeichenbereich handhaben.
+  Box-Zeichnungs-*Linien* (U+2500-257F, ┌┐└┘─│├┤┬┴┼ für TUI-Rahmen) sind
+  bewusst NICHT Teil dieses Fixes — eigenständiges, noch nicht umgesetztes
+  Folge-Thema (Liniensegmente statt Flächen, ein anderes Rendering-Problem).
+- **Verifiziert**: `npm run check` + `npx vitest run` (374 Tests, 8 neu)
+  grün, kein Rust betroffen. Live mit `agent-browser` gegen echtes Chromium,
+  inkl. Pixel-genauer Verifikation via `getImageData`: Catppuccin-Mocha-
+  Hintergrund exakt `rgb(30,30,46)` = `#1e1e2e`, Vordergrund exakt
+  `rgb(205,214,244)` = `#cdd6f4` — beides die offiziellen Catppuccin-Werte.
+  Blockzeichen-Testgrafik vorher sichtbar löchrig, nachher komplett
+  durchgehend. Architektur-Review bestätigte `BLOCK_ELEMENT_RECTS`s
+  Geometrie als korrekt gegen die echte Unicode-Definition (inkl. der
+  komplexesten Drei-Quadranten-Fälle ▙▛▜▟) und `THEME_DEFAULT_COLORS`s
+  sechs neue Werte als korrekt gegen die jeweils offiziellen Theme-Farben;
+  nur LOW-Findings (Zeilenlänge, Kommentar-Genauigkeit, Test-Beschreibung,
+  fehlender Cross-Reference-Kommentar) — alle vor dem Commit behoben.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

@@ -128,7 +128,20 @@ export function measureChar(ctx: CanvasRenderingContext2D, font: string): CharMe
   const m = ctx.measureText("M");
   const ascent = m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent ?? m.width * 0.8;
   const descent = m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent ?? m.width * 0.2;
-  return { width: m.width, height: ascent + descent, ascent };
+  // Rounded to whole CSS pixels (Checkpoint 5k, owner-reported: a TUI's
+  // block-character ASCII art — U+2580-259F, e.g. opencode's startup logo —
+  // rendered as a "checkered"/gapped pattern instead of solid rectangles).
+  // `draw()` positions every cell at `col * width`/`row * height`; a
+  // fractional cell size puts most of those positions on sub-pixel
+  // boundaries, and adjacent full-block glyphs — meant to tile perfectly
+  // seamlessly, zero gap between them — then anti-alias against each other
+  // at that seam instead of forming one solid shape. Ordinary text mostly
+  // hides this (a sub-pixel gap between two letters just reads as slightly
+  // uneven spacing), which is why it wasn't caught earlier. Real terminal
+  // emulators universally use integer-pixel cell metrics for exactly this
+  // reason — not a workaround specific to block-drawing characters, just
+  // the one case where a fractional gap is immediately, glaringly visible.
+  return { width: Math.round(m.width), height: Math.round(ascent + descent), ascent: Math.round(ascent) };
 }
 
 /** A cell coordinate — used for the cursor and (Checkpoint 4) selection
@@ -301,6 +314,134 @@ export function cellFont(font: string, bold: boolean, weight?: number): string {
   return weight !== undefined ? `${weight} ${font}` : font;
 }
 
+/** Unicode "Block Elements" (U+2580-259F) expressed as one or more
+ *  cell-relative rectangles (`[x0, y0, x1, y1]`, each 0-1 across the
+ *  cell's own width/height) to fill solidly — Checkpoint 5k, owner-
+ *  reported: a TUI's block-character ASCII art (opencode's startup logo)
+ *  rendered as a "checkered"/gapped pattern instead of solid shapes when
+ *  drawn as ordinary glyphs via `fillText`. Real terminal emulators
+ *  (Kitty, Alacritty, Ghostty, iTerm2) don't trust a font's own glyph for
+ *  this Unicode range at all, for exactly this reason: a block glyph is
+ *  frequently drawn with a small margin inside its own em-square (a font's
+ *  own design choice, not a bug in it), which is invisible for ordinary
+ *  letters but immediately, glaringly visible as gaps between adjacent
+ *  "solid" block characters meant to tile seamlessly. `drawBlockElement`
+ *  below draws these procedurally instead — a plain `fillRect` per
+ *  rectangle, sized to the *actual* measured cell, which by construction
+ *  can never gap against its neighbour. The four "quadrant" characters
+ *  (▖▗▘▙▚▛▜▝▞▟) are expressed as 1-3 quarter-cell rectangles rather than
+ *  one shape, since they're each some combination of the cell's four
+ *  quadrants. Box-drawing *line* characters (U+2500-257F — ┌┐└┘─│├┤┬┴┼,
+ *  used for TUI panel borders) are a distinct, not-yet-implemented
+ *  follow-up: they're line segments, not fills, a different rendering
+ *  problem than this table solves.
+ *
+ *  Exported (alongside `SHADE_ALPHA` below) purely so `TerminalScreen.test.ts`
+ *  can check the *data* — every rectangle's coordinates stay within the
+ *  cell, glyph coverage matches the full U+2580-259F range — without a real
+ *  `CanvasRenderingContext2D` (`drawBlockElement`'s actual drawing, like
+ *  `draw()` itself, is Chromium/`agent-browser`-verified instead, jsdom
+ *  doesn't implement canvas). */
+export const BLOCK_ELEMENT_RECTS: Readonly<Record<string, readonly (readonly [number, number, number, number])[]>> = {
+  "▀": [[0, 0, 1, 0.5]], // ▀ upper half
+  "▁": [[0, 0.875, 1, 1]], // ▁ lower one eighth
+  "▂": [[0, 0.75, 1, 1]], // ▂ lower one quarter
+  "▃": [[0, 0.625, 1, 1]], // ▃ lower three eighths
+  "▄": [[0, 0.5, 1, 1]], // ▄ lower half
+  "▅": [[0, 0.375, 1, 1]], // ▅ lower five eighths
+  "▆": [[0, 0.25, 1, 1]], // ▆ lower three quarters
+  "▇": [[0, 0.125, 1, 1]], // ▇ lower seven eighths
+  "█": [[0, 0, 1, 1]], // █ full block
+  "▉": [[0, 0, 0.875, 1]], // ▉ left seven eighths
+  "▊": [[0, 0, 0.75, 1]], // ▊ left three quarters
+  "▋": [[0, 0, 0.625, 1]], // ▋ left five eighths
+  "▌": [[0, 0, 0.5, 1]], // ▌ left half
+  "▍": [[0, 0, 0.375, 1]], // ▍ left three eighths
+  "▎": [[0, 0, 0.25, 1]], // ▎ left one quarter
+  "▏": [[0, 0, 0.125, 1]], // ▏ left one eighth
+  "▐": [[0.5, 0, 1, 1]], // ▐ right half
+  "▔": [[0, 0, 1, 0.125]], // ▔ upper one eighth
+  "▕": [[0.875, 0, 1, 1]], // ▕ right one eighth
+  "▖": [[0, 0.5, 0.5, 1]], // ▖ quadrant lower left
+  "▗": [[0.5, 0.5, 1, 1]], // ▗ quadrant lower right
+  "▘": [[0, 0, 0.5, 0.5]], // ▘ quadrant upper left
+  "▙": [
+    [0, 0, 0.5, 0.5],
+    [0, 0.5, 0.5, 1],
+    [0.5, 0.5, 1, 1],
+  ], // ▙ upper-left + lower-left + lower-right
+  "▚": [
+    [0, 0, 0.5, 0.5],
+    [0.5, 0.5, 1, 1],
+  ], // ▚ upper-left + lower-right (diagonal)
+  "▛": [
+    [0, 0, 0.5, 0.5],
+    [0.5, 0, 1, 0.5],
+    [0, 0.5, 0.5, 1],
+  ], // ▛ upper-left + upper-right + lower-left
+  "▜": [
+    [0, 0, 0.5, 0.5],
+    [0.5, 0, 1, 0.5],
+    [0.5, 0.5, 1, 1],
+  ], // ▜ upper-left + upper-right + lower-right
+  "▝": [[0.5, 0, 1, 0.5]], // ▝ quadrant upper right
+  "▞": [
+    [0.5, 0, 1, 0.5],
+    [0, 0.5, 0.5, 1],
+  ], // ▞ upper-right + lower-left (diagonal)
+  "▟": [
+    [0.5, 0, 1, 0.5],
+    [0, 0.5, 0.5, 1],
+    [0.5, 0.5, 1, 1],
+  ], // ▟ upper-right + lower-left + lower-right
+};
+
+/** The three "Shade" block characters (U+2591-2593) — approximated as an
+ *  alpha-blended full-cell fill rather than their real dithered dot
+ *  pattern (canvas has no cheap way to draw a crisp sub-cell dither at
+ *  ordinary terminal font sizes); close enough to read as "lighter than
+ *  solid" at a glance, which is these characters' actual job in TUI art
+ *  (shading/depth), without the complexity a true per-pixel pattern would
+ *  add for a difference unlikely to be visible at typical cell sizes. */
+export const SHADE_ALPHA: Readonly<Record<string, number>> = {
+  "░": 0.25, // ░ light shade
+  "▒": 0.5, // ▒ medium shade
+  "▓": 0.75, // ▓ dark shade
+};
+
+/** Draws `ch` procedurally if it's one of the block/shade characters above
+ *  (see `BLOCK_ELEMENT_RECTS`'s own doc comment for why), filling with
+ *  `color` at the cell `(x, y, cellW, cellH)`. Returns `false` for every other
+ *  character — the caller's cue to fall back to its normal `fillText`
+ *  glyph path unchanged. */
+function drawBlockElement(
+  ctx: CanvasRenderingContext2D,
+  glyph: string,
+  x: number,
+  y: number,
+  cellW: number,
+  cellH: number,
+  color: string,
+): boolean {
+  const rects = BLOCK_ELEMENT_RECTS[glyph];
+  if (rects) {
+    ctx.fillStyle = color;
+    for (const [x0, y0, x1, y1] of rects) {
+      ctx.fillRect(x + x0 * cellW, y + y0 * cellH, (x1 - x0) * cellW, (y1 - y0) * cellH);
+    }
+    return true;
+  }
+  const alpha = SHADE_ALPHA[glyph];
+  if (alpha !== undefined) {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, cellW, cellH);
+    ctx.globalAlpha = 1;
+    return true;
+  }
+  return false;
+}
+
 /**
  * Draws the whole grid: every cell's background rect, then (skipped for a
  * blank space — nothing to draw) its glyph, with an underline rect where
@@ -397,11 +538,17 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
       }
 
       if (cell.ch !== " ") {
-        ctx.font = cellFont(font, cell.bold, fontWeight);
-        ctx.fillStyle = isBlockCursor
+        const fg = isBlockCursor
           ? defaultBg
           : resolveColor(cell.fg, defaultFg, { palette, bright: cell.bold && boldIsBright });
-        ctx.fillText(cell.ch, x, y + ascent);
+        // Block/shade characters draw as plain rects instead of glyphs —
+        // see `drawBlockElement`'s own doc comment for why — and skip
+        // `cellFont`/`fillText` entirely when handled that way.
+        if (!drawBlockElement(ctx, cell.ch, x, y, cw, ch, fg)) {
+          ctx.font = cellFont(font, cell.bold, fontWeight);
+          ctx.fillStyle = fg;
+          ctx.fillText(cell.ch, x, y + ascent);
+        }
         if (cell.underline) {
           ctx.fillRect(x, y + ascent + 1, cw, 1);
         }

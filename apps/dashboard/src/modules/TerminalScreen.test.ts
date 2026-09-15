@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { cellFont, isCellSelected, resolveColor, selectionText, type TermCell, type TermColor } from "./TerminalScreen";
+import {
+  BLOCK_ELEMENT_RECTS,
+  cellFont,
+  isCellSelected,
+  resolveColor,
+  SHADE_ALPHA,
+  selectionText,
+  type TermCell,
+  type TermColor,
+} from "./TerminalScreen";
 import { THEMES } from "./terminalThemes";
 
 /** A minimal `TermCell` for selection tests — only `ch` matters there. */
@@ -87,6 +96,49 @@ describe("cellFont", () => {
   it("always uses the literal bold keyword for a bold cell, ignoring any configured weight", () => {
     expect(cellFont("14px monospace", true)).toBe("bold 14px monospace");
     expect(cellFont("14px monospace", true, 300)).toBe("bold 14px monospace");
+  });
+});
+
+describe("BLOCK_ELEMENT_RECTS / SHADE_ALPHA (Checkpoint 5k)", () => {
+  it("together cover the full U+2580-259F Block Elements range", () => {
+    // 32 codepoints in the range; every one is either a rect-fill entry or
+    // a shade-alpha entry, none are both, and nothing outside the range
+    // sneaks into either table.
+    const covered = new Set([...Object.keys(BLOCK_ELEMENT_RECTS), ...Object.keys(SHADE_ALPHA)]);
+    expect(covered.size).toBe(32);
+    for (const ch of covered) {
+      const code = ch.codePointAt(0) ?? 0;
+      expect(code, ch).toBeGreaterThanOrEqual(0x2580);
+      expect(code, ch).toBeLessThanOrEqual(0x259f);
+    }
+    for (const ch of Object.keys(BLOCK_ELEMENT_RECTS)) {
+      expect(SHADE_ALPHA[ch], `${ch} in both tables`).toBeUndefined();
+    }
+  });
+
+  it("every rectangle stays within the cell and has positive area", () => {
+    for (const [ch, rects] of Object.entries(BLOCK_ELEMENT_RECTS)) {
+      expect(rects.length, ch).toBeGreaterThan(0);
+      for (const [x0, y0, x1, y1] of rects) {
+        for (const v of [x0, y0, x1, y1]) {
+          expect(v, ch).toBeGreaterThanOrEqual(0);
+          expect(v, ch).toBeLessThanOrEqual(1);
+        }
+        expect(x1, ch).toBeGreaterThan(x0);
+        expect(y1, ch).toBeGreaterThan(y0);
+      }
+    }
+  });
+
+  it("every shade alpha is a fraction strictly between 0 and 1", () => {
+    for (const [ch, alpha] of Object.entries(SHADE_ALPHA)) {
+      expect(alpha, ch).toBeGreaterThan(0);
+      expect(alpha, ch).toBeLessThan(1);
+    }
+  });
+
+  it("SHADE_ALPHA contains exactly the three shade characters ░▒▓", () => {
+    expect(Object.keys(SHADE_ALPHA).sort()).toEqual(["░", "▒", "▓"].sort());
   });
 });
 

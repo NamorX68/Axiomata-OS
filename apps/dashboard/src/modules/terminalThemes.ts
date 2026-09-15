@@ -53,6 +53,12 @@ const ANSI_16: readonly string[] = [
  * own widely-replicated terminal mapping (its `terminal.integrated.colors`,
  * base "Night" variant, not Storm/Light) — both added in Checkpoint 5g,
  * owner request for "mehr Themes (Catppuccin, Tokio etc.)".
+ *
+ * Adding a theme here also means adding its own entry to
+ * `THEME_DEFAULT_COLORS` below (skip only for a theme that's deliberately
+ * meant to inherit the app's own chrome-theme colours, `xterm`'s own
+ * choice) — `terminalThemes.test.ts` enforces this, but it's easy to forget
+ * since the two tables are otherwise edited independently.
  */
 export const THEMES: Record<string, readonly string[]> = {
   xterm: ANSI_16,
@@ -174,3 +180,36 @@ export const THEMES: Record<string, readonly string[]> = {
  *  form) so those callers reference one source of truth instead of each
  *  re-typing the literal `"xterm"`. */
 export const DEFAULT_THEME = "xterm";
+
+/** Each named palette's own authentic default background/foreground —
+ *  the colour an *unwritten* cell (`TermColor` `"default"`) actually shows,
+ *  as opposed to the 16 indexed ANSI colours in `THEMES` above, which only
+ *  ever apply to explicitly-coloured text/backgrounds a program requests.
+ *  Checkpoint 5k, owner feedback: "die Hintergrundfarbe... passt zwar zum
+ *  App Theme aber nicht zu[m] Theme des Terminals" — `terminal.svelte`
+ *  previously always sourced its default bg/fg from the *app's own* chrome
+ *  theme (`--ax-surface-1`/`--ax-text`), completely independent of
+ *  `terminalSettings.theme` — so switching to "Catppuccin Mocha" recoloured
+ *  every 16-colour-indexed thing (prompt segments, `ls` colours, …) but the
+ *  actual background stayed whatever the app's own theme (graphite/paper/…)
+ *  happened to be, visibly clashing with the rest of the theme.
+ *
+ *  `xterm` is deliberately absent here, not an oversight: it's this app's
+ *  own "inherit the app's chrome theme" default (unchanged pre-5k
+ *  behaviour), not a real named palette with its own established identity
+ *  the way the other six are — there's no single "authentic xterm
+ *  background" to be faithful to the way there is for Catppuccin's own
+ *  published Base/Text colours. `terminal.svelte`'s resolution order:
+ *  this table's entry for the active theme, else the CSS-derived app-theme
+ *  colour, exactly as before this checkpoint. Sources: same per-theme
+ *  projects `THEMES`' own doc comment already cites for the 16-colour
+ *  tables (their standard/official "background"+"foreground" values, not
+ *  invented). */
+export const THEME_DEFAULT_COLORS: Partial<Record<string, { background: string; foreground: string }>> = {
+  "solarized-dark": { background: "#002b36", foreground: "#839496" },
+  dracula: { background: "#282a36", foreground: "#f8f8f2" },
+  nord: { background: "#2e3440", foreground: "#d8dee9" },
+  "gruvbox-dark": { background: "#282828", foreground: "#ebdbb2" },
+  "catppuccin-mocha": { background: "#1e1e2e", foreground: "#cdd6f4" },
+  "tokyo-night": { background: "#1a1b26", foreground: "#c0caf5" },
+};
