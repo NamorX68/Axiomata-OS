@@ -11,10 +11,11 @@
 /**
  * Maps one key press to the raw byte(s) to forward to the shell — the keys
  * that either produce no native `input` event or need a specific C0
- * control byte instead of literal text. `null` means "not one of these",
- * i.e. let the caller's `input`-event path handle it instead (printable
- * characters, IME composition, paste — see `terminal.svelte`'s own
- * `handleInput`).
+ * control byte or CSI escape sequence instead of literal text (Checkpoint
+ * 5i added the latter — see the `ArrowUp` case below for the full story).
+ * `null` means "not one of these", i.e. let the caller's `input`-event path
+ * handle it instead (printable characters, IME composition, paste — see
+ * `terminal.svelte`'s own `handleInput`).
  */
 export function keyToBytes(key: string, ctrlKey: boolean): Uint8Array | null {
   if (ctrlKey && key.length === 1) {
@@ -31,11 +32,67 @@ export function keyToBytes(key: string, ctrlKey: boolean): Uint8Array | null {
     case "Tab":
       return new Uint8Array([0x09]);
     case "Escape":
-      // A single C0 byte, unlike arrow keys/etc. (which need a full CSI
-      // sequence, e.g. `\x1b[A` — still not handled here) — cheap to
-      // support and critical for vim's own mode switching (found live:
-      // neovim opened and worked, but Escape did nothing without this).
+      // A single C0 byte, unlike arrow keys/etc. below (a full CSI
+      // sequence, e.g. `\x1b[A`) — cheap to support and critical for vim's
+      // own mode switching (found live: neovim opened and worked, but
+      // Escape did nothing without this).
       return new Uint8Array([0x1b]);
+    // Checkpoint 5i (owner-reported: shell autosuggestion — a greyed
+    // suggested completion already rendered correctly, e.g. typing `ls`
+    // showing `ls -altr` with `-altr` dim, since that's just the shell's
+    // own program output — but pressing → to accept it, like Ghostty, did
+    // nothing at all: these nine keys fell through to the `default: null`
+    // case below and were never forwarded to the PTY, at all, full stop.
+    // Not autosuggestion-specific — this silently broke shell history
+    // recall (↑/↓), in-line cursor movement (←/→), and Home/End/PageUp/
+    // PageDown/Delete for every session, the whole time; it just hadn't
+    // been noticed yet. Sequences below are the standard xterm "normal
+    // cursor key mode" (DECCKM reset) encoding — what a shell's own line
+    // editor (zsh's zle, GNU readline) always expects regardless of any
+    // program-requested mode switch, and confirmed (architecture review)
+    // against `infocmp xterm-256color` / xterm's own `ctlseqs.txt` — not
+    // the rxvt/VT220-style `\x1b[1~`/`\x1b[4~` convention some other
+    // terminals use for Home/End, which would have been the wrong choice
+    // given the PTY is always spawned with `TERM=xterm-256color`
+    // (`crates/axiomata-terminal/src/pty.rs`). Known limitation, not
+    // addressed here: a full-screen program that has switched into DECCKM
+    // "application cursor key" mode (`\x1b[?1h` — vim and other TUIs
+    // commonly do) technically expects `\x1bO`-prefixed sequences instead
+    // of `\x1b[`-prefixed ones for the *cursor-key group* specifically —
+    // per xterm's own terminfo, that's the four arrows AND Home/End
+    // (`kcuu1`/`khome`/etc. all have an `\x1bO...` app-mode counterpart);
+    // PageUp/PageDown/Delete are NOT part of that group and always use
+    // the same `\x1b[…~` form regardless of mode, so only the six
+    // cursor-key entries carry this caveat. This engine doesn't track
+    // DECCKM at all yet (`crates/axiomata-terminal`'s `set_private_mode`
+    // silently no-ops on mode 1), so those six always use normal-mode
+    // encoding even inside such a program. In practice this matches what
+    // most terminfo databases already accept for arrows specifically
+    // (vim in particular is documented to recognize both forms
+    // defensively), so this is expected to work for ordinary vim/htop/
+    // less use — if a specific full-screen program is ever found where
+    // arrows or Home/End misbehave, that's the concrete case to finally
+    // add DECCKM tracking for, not a reason to withhold this fix
+    // (shell-prompt use, the overwhelming common case, needs it right now
+    // and isn't affected by DECCKM at all).
+    case "ArrowUp":
+      return new Uint8Array([0x1b, 0x5b, 0x41]); // \x1b[A
+    case "ArrowDown":
+      return new Uint8Array([0x1b, 0x5b, 0x42]); // \x1b[B
+    case "ArrowRight":
+      return new Uint8Array([0x1b, 0x5b, 0x43]); // \x1b[C
+    case "ArrowLeft":
+      return new Uint8Array([0x1b, 0x5b, 0x44]); // \x1b[D
+    case "Home":
+      return new Uint8Array([0x1b, 0x5b, 0x48]); // \x1b[H
+    case "End":
+      return new Uint8Array([0x1b, 0x5b, 0x46]); // \x1b[F
+    case "PageUp":
+      return new Uint8Array([0x1b, 0x5b, 0x35, 0x7e]); // \x1b[5~
+    case "PageDown":
+      return new Uint8Array([0x1b, 0x5b, 0x36, 0x7e]); // \x1b[6~
+    case "Delete":
+      return new Uint8Array([0x1b, 0x5b, 0x33, 0x7e]); // \x1b[3~ (forward-delete, distinct from Backspace)
     default:
       return null;
   }

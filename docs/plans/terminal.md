@@ -1,6 +1,6 @@
 # Eigenes Terminal-Modul
 
-Status (2026-09-14): Checkpoints 0–4 sind umgesetzt und automatisiert
+Status (2026-09-15): Checkpoints 0–4 sind umgesetzt und automatisiert
 verifiziert (Engine-/Tauri-/Frontend-Tests, Sub-Agent-Reviews); der volle
 interaktive Live-Test (Scrollback-Gefühl, `vim`/`htop` im Alternate-Screen,
 Auswahl+Copy, Paste, mehrere gleichzeitige Terminals) steht noch aus — der
@@ -30,9 +30,13 @@ beobachtete fehlende Abstufung lag an den Nerd-Font-Glyphen (5g), nicht an
 der Farbtiefe. Der Owner hat außerdem die Frage aufgeworfen, ob die App
 auf ein Chromium-basiertes Webview statt WKWebView umsteigen sollte, um
 diese ganze Klasse von Bugs zu vermeiden — zurückgestellt, noch nicht
-beantwortet. Nächster Schritt: Live-Test von 5f+5f2+5g am Mac des Owners
-— diese ganze Kette (5d, 5e, 5f, 5f2) entstand aus genau solchen
-Live-Tests, nicht aus automatisierter Verifikation allein.
+beantwortet. Checkpoint 5h (echtes Font-Gewicht-Setting + acht weitere
+Mono-Fonts, zehn insgesamt) und Checkpoint 5i (Pfeiltasten/Home/End/
+PageUp/PageDown/Delete wurden nie an die Shell weitergegeben — fixt u. a.
+die vom Owner gemeldete fehlende Shell-Autosuggestion-Übernahme per →)
+sind beide KOMPLETT (siehe unten). Nächster Schritt: Live-Test von
+5f+5f2+5g+5h+5i am Mac des Owners — diese ganze Kette entstand aus genau
+solchen Live-Tests, nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -378,6 +382,131 @@ von den Settings hatte keinerlei Mechanismus, der den Fokus erneut auf das
 - **Wichtige Einschränkung**: wie bei Checkpoint 5f kann Chromium das
   eigentliche WKWebView-Timing-Problem nicht reproduzieren — auch dieser
   Fix ist nur DOM-/JS-seitig verifiziert, nicht am echten Mac.
+
+## Checkpoint 5h — Echtes Font-Gewicht-Setting + acht weitere Mono-Fonts (Owner-Feedback, 2026-09-15) — KOMPLETT
+
+Owner-Wunsch: "Ich würde das Font-Gewicht-Setting noch angehen wollen und
+auch gerne noch ein paar Monoschriften auch wenn sie kein Thin etc.
+anbieten. Denke so 10 Fonts wären toll."
+
+- **Acht weitere Fonts**: Fira Code, Source Code Pro, Roboto Mono, Space
+  Mono, Ubuntu Mono, Inconsolata, Victor Mono, Anonymous Pro — zusammen mit
+  den beiden aus Checkpoint 5g jetzt zehn. Bewusste Mischung: einige mit
+  vollem Gewichtsspektrum (z. B. Roboto Mono, Victor Mono — echtes Thin),
+  andere ausdrücklich mit nur Regular+Bold (Space Mono, Ubuntu Mono,
+  Anonymous Pro) — genau der vom Owner explizit gewünschte Fall "auch wenn
+  sie kein Thin etc. anbieten". Jeder Font bündelt sein leichtestes
+  verfügbares Gewicht (nicht immer 100), 400 und 700 — alle zehn haben ein
+  echtes 700, also ist "Bold" (sowohl die neue Gewichts-Auswahl als auch
+  `TerminalScreen`s separates SGR-Bold-Rendering) über die ganze Liste
+  konsistent.
+- **Neues `terminalFonts.ts`**: die zehn Familien + ihre gebündelten
+  Gewichte als eine einzige Quelle der Wahrheit (Architektur-Review,
+  spiegelt exakt `terminalThemes.ts`s `THEMES`-Muster) —
+  `terminal-settings.svelte`s "Bundled font"-Auswahl leitet ihre
+  Namensliste jetzt daraus ab, statt eine eigene Kopie zu pflegen.
+  `main.ts`s statische CSS-Imports bleiben zwangsläufig separat (Vite
+  braucht literale Importpfade), verweisen aber jetzt per Kommentar auf
+  diesen Katalog als deklarierte Quelle.
+- **Echtes Font-Gewicht-Setting**: neue "Font weight"-Auswahl in
+  `terminal-settings.svelte` mit der vollen CSS-Standardskala 100-900,
+  unabhängig vom gerade gewählten Font (bewusst nicht auf dessen
+  gebündelte Gewichte beschränkt — ein nicht gebündeltes Gewicht rendert
+  trotzdem, über das normale Browser-Font-Matching auf das nächstliegende
+  registrierte Gewicht, kein Sonderfall). `TerminalScreen.ts` bekam dafür
+  eine neue reine Funktion `cellFont(font, bold, weight?)`: Bold-Zellen
+  benutzen immer das literale `"bold"`-Schlüsselwort (ignoriert das
+  konfigurierte Gewicht komplett — SGR-Bold bleibt ein eigener visueller
+  Zustand), Nicht-Bold-Zellen bekommen das konfigurierte Gewicht als
+  numerisches CSS-Token vorangestellt, wenn gesetzt. Eigens als kleine,
+  pure Funktion herausgezogen und unit-getestet — `draw()` selbst braucht
+  einen echten 2D-Canvas-Context, den jsdom nicht implementiert.
+- **Architektur-Review-Nachbesserungen** (vor dem Commit behoben):
+  - **HIGH**: `fontWeight` wurde ungeprüft aus dem untypisierten,
+    Schema-losen `terminalSettings`-Store gelesen — eine von Hand
+    editierte oder alte `terminal-settings.json` könnte einen ungültigen
+    Wert enthalten (NaN, negativ, außerhalb des gültigen CSS-Bereichs),
+    was `ctx.font` bei der Zuweisung nicht wirft, sondern nach Canvas-2D-
+    Spec lautlos den *vorherigen* Font behält — ein deutlich schlimmerer
+    Fehlerfall als ein Clamp. Fix: neues `fontWeight`-`$derived` in
+    `terminal.svelte`, das genau wie das bestehende
+    `backgroundOpacity`-`$derived` auf Lese-Seite klemmt (`[1, 1000]`,
+    gerundet). Zusätzlich `cellFont`s eigener Truthy-Check (`weight ? ...`)
+    auf `weight !== undefined` korrigiert, damit die Funktion auch isoliert
+    aufgerufen korrekt bleibt, nicht nur durch die Klemmung des Callers.
+  - **MEDIUM**: `measureChar`/`computeTerminalDefaultSize` messen die
+    Zellbreite immer beim Standardgewicht der Schrift, während `draw()`
+    Normal-Zellen jetzt tatsächlich im konfigurierten Gewicht zeichnet —
+    funktioniert nur, weil echte Monospace-Fonts laut Definition dieselbe
+    Laufweite über alle Schnitte behalten. War bisher nirgends
+    dokumentiert; jetzt ein expliziter Kommentar bei `measureChar`, der
+    diese Annahme benennt und den bekannten Grenzfall (ein
+    selbst-getippter Systemfont, der die Annahme nicht erfüllt) offen als
+    akzeptierte Lücke einordnet statt sie zu verschweigen.
+  - **MEDIUM**: die Font-Namensliste existierte doppelt (Kommentar in
+    `main.ts`, eigenes Array in `terminal-settings.svelte`) — behoben durch
+    das neue `terminalFonts.ts` (siehe oben).
+  - **LOW**: `currentFont()`s Kommentar war nach der Änderung veraltet
+    (erwähnte nur noch Bold, nicht das neue Gewicht) — korrigiert; eine
+    Template-Zeile über 120 Zeichen umgebrochen.
+- **Verifiziert**: `npm run check` und `npx vitest run` (367 Tests, 10 neu)
+  grün, kein Rust betroffen. Live mit `agent-browser` gegen echtes
+  Chromium: alle zehn Fonts tatsächlich in `document.fonts` registriert,
+  "Bundled font"- und "Font weight"-Auswahl beide vollständig sichtbar und
+  funktionsfähig nach dem Refactor. Die tatsächliche Canvas-Zeichnung bei
+  einem gewählten Gewicht ist wie bei CP5g nicht gegen den Dev-Mock
+  verifizierbar (kein `terminal_spawn`) — Live-Test am Mac steht aus.
+
+## Checkpoint 5i — Pfeiltasten/Navigationstasten wurden nie an die Shell weitergegeben (Owner-Feedback, 2026-09-15) — KOMPLETT
+
+Owner-Beobachtung: "im Terminal [...] macht er ja schon bei einem Befehl
+eine Vorhersage z.B. ich tippe ls dann steht im Terminal ls -altr das
+-altr aber grau. In Ghostty brauche ich dann nur den Pfeil nach rechts zu
+drücken und ich habe den ganzen Befehl." — die Shell-Autosuggestion
+(zsh-autosuggestions o. ä.) rendert bei uns bereits korrekt (reine
+Programmausgabe, nichts Terminal-Spezifisches), aber → zum Übernehmen tat
+nichts.
+
+- **Root Cause**: `terminalInput.ts`s `keyToBytes()` — die reine Funktion,
+  die `KeyboardEvent.key` auf die an die PTY weiterzuleitenden Rohbytes
+  abbildet — hatte für ArrowUp/Down/Left/Right (und Home/End/PageUp/
+  PageDown/Delete) gar keinen Fall; sie fielen alle auf `default: return
+  null` durch, `terminal.svelte`s `handleKeydown` verwarf sie also
+  stillschweigend. Nicht auf Autosuggestion beschränkt: das bedeutete,
+  Shell-History (↑/↓) und Cursor-Bewegung innerhalb der Zeile (←/→) haben
+  in diesem Terminal die ganze Zeit über gar nicht funktioniert — nur
+  bisher niemandem aufgefallen.
+- **Fix**: alle neun Tasten bekommen jetzt die xterm-Standard-"Normal
+  Cursor Key Mode"-Kodierung (CSI-Sequenzen, z. B. `\x1b[C` für
+  ArrowRight) — exakt das, was eine Shell-eigene Zeileneditierung (zsh
+  zle, GNU readline) immer erwartet. Architektur-Review bestätigte die
+  Sequenzen gegen `infocmp xterm-256color`/xterms eigene `ctlseqs.txt` als
+  korrekt (nicht die rxvt/VT220-Variante `\x1b[1~`/`\x1b[4~`, die falsch
+  gewesen wäre, da die PTY immer mit `TERM=xterm-256color` gestartet
+  wird).
+- **Bekannte, bewusst offen gelassene Einschränkung**: die Rust-Engine
+  trackt den DECCKM-Modus (`\x1b[?1h`/`\x1b[?1l`, "Application Cursor Key
+  Mode", von Vollbild-Programmen wie vim gesetzt) noch gar nicht — Arrow-
+  Tasten UND Home/End (laut xterms eigenem Terminfo dieselbe
+  "Cursor-Key"-Gruppe) werden deshalb immer in der Normal-Modus-Kodierung
+  gesendet, auch innerhalb eines Programms, das Application-Modus
+  angefordert hat. PageUp/PageDown/Delete sind von dieser Einschränkung
+  NICHT betroffen (immer dieselbe Kodierung, unabhängig vom Modus). In der
+  Praxis funktioniert das laut Architektur-Review-Recherche für normale
+  vim/htop/less-Nutzung (vim erkennt dokumentiert beide Kodierungsformen
+  defensiv) — bewusste Entscheidung, den Shell-Prompt-Fall (der
+  eigentliche, akute Bug) nicht auf eine vollständige DECCKM-Implementierung
+  warten zu lassen. Sollte je ein konkretes Vollbild-Programm gefunden
+  werden, bei dem Pfeiltasten/Home/End falsch reagieren, ist das der Anlass,
+  DECCKM wirklich zu tracken.
+- **Verifiziert**: reine Unit-Tests (`terminalInput.test.ts`) prüfen alle
+  neun Tasten byte-genau, inkl. Korrektur eines jetzt falschen
+  Alt-Tests (`keyToBytes("ArrowUp", false)` gab vorher `null` zurück) und
+  eines neuen Ctrl-Modifier-Tests über die ganze Gruppe. `npm run check` +
+  `npx vitest run` (367 Tests) grün. Kein Live-`agent-browser`-Test nötig
+  oder möglich — reine Byte-Logik ohne DOM/Canvas-Bezug, vollständig durch
+  Unit-Tests abgedeckt; ob es an der echten PTY/Shell tatsächlich greift,
+  kann nur der Live-Test am Mac zeigen.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.
