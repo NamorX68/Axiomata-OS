@@ -183,6 +183,13 @@
   let lastRows = 0;
   let lastCols = 0;
   let raf = 0;
+  /** Set in `onDestroy` — checked by the `document.fonts.load()` callback in
+   *  `measureAndSize` (architecture review, Checkpoint 5j) so a font that's
+   *  still loading when the tile is removed doesn't act on a stale
+   *  component after the fact, matching every other lingering-callback
+   *  guard already in this file (`focusRafIds`, the observers' own
+   *  `.disconnect()`). */
+  let destroyed = false;
   let resizeObserver: ResizeObserver | undefined;
   let themeObserver: MutationObserver | undefined;
   let resizeDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -322,17 +329,76 @@
    *  `GraphRenderer.resize()`), and returns the row/column count that fits.
    *  Fetches `context2d` itself if it isn't set yet rather than requiring
    *  the caller to have already done so — used both from `onMount` (after
-   *  that assignment) and from the `terminalSettings.fontSizePx` effect below, whose
-   *  ordering relative to `onMount` isn't something worth depending on. */
+   *  that assignment) and from the settings-reactive `$effect` below, whose
+   *  ordering relative to `onMount` isn't something worth depending on.
+   *
+   *  Bug found producing Checkpoint 5h/5g demo screenshots (Chromium
+   *  dev-mock, not a live-tested owner report): a bundled font's `@font-face`
+   *  rule is declared at app boot (`main.ts`), but browsers fetch/rasterize
+   *  the actual font file lazily, only once something is actually measured
+   *  or drawn with it — the *first* time a given family is picked in a
+   *  session, `measureChar`'s synchronous `ctx.measureText("M")` call below
+   *  can run before that fetch finishes, silently measuring against
+   *  whatever fallback font was already loaded instead. That wrong
+   *  `metrics` value then gets baked into the canvas's backing-store size
+   *  and row/col count — and since nothing re-measures once the real font
+   *  *does* finish loading a few dozen ms later, every subsequent frame's
+   *  `fillText` draws the correct glyphs into a grid still laid out for the
+   *  wrong font, visibly overlapping/misaligned. `document.fonts.check`
+   *  confirmed this empirically: `false` for a family never used yet this
+   *  session, even though its CSS was imported at boot. Fixed below by
+   *  explicitly loading the font and re-measuring once it's actually
+   *  ready, instead of trusting one synchronous measurement.
+   *
+   *  Two follow-up guards (architecture review, Checkpoint 5j): the retry
+   *  bails out via `destroyed` if the tile was removed while a font was
+   *  still loading — every other lingering callback in this component
+   *  (`focusRafIds`, `resizeDebounce`, the observers) is already cancelled
+   *  in `onDestroy`, and this one wasn't; and `attemptedFontLoads` makes
+   *  the retry a one-shot per distinct font string, not an unbounded
+   *  loop — a font/weight combination this app didn't actually bundle a
+   *  face for (some fonts only ship Regular/Bold, see `main.ts`) could in
+   *  principle keep `document.fonts.check` returning `false` forever even
+   *  after `.load()` resolves, and without this guard every later
+   *  `measureAndSize()` call (each settings change, each resize) would
+   *  re-issue another `.load()` for the same unsatisfiable descriptor. */
+  const attemptedFontLoads = new Set<string>();
+
   function measureAndSize(): { rows: number; cols: number } {
     if (!canvasEl || !root) return { rows: MIN_ROWS, cols: MIN_COLS };
     if (!context2d) context2d = canvasEl.getContext("2d");
     if (!context2d) return { rows: MIN_ROWS, cols: MIN_COLS };
     const rect = root.getBoundingClientRect();
     dpr = window.devicePixelRatio || 1;
-    metrics = measureChar(context2d, currentFont());
+    const font = currentFont();
+    metrics = measureChar(context2d, font);
     canvasEl.width = Math.max(1, Math.round(rect.width * dpr));
     canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
+    // `document.fonts` doesn't exist in every conceivable environment (old
+    // WebKit, some embeddings) — treat its absence as "already fine",
+    // matching this measurement's own pre-existing fallback behaviour
+    // rather than throwing.
+    if (document.fonts && !document.fonts.check(font) && !attemptedFontLoads.has(font)) {
+      attemptedFontLoads.add(font);
+      document.fonts
+        .load(font)
+        .then(() => {
+          if (destroyed) return; // tile removed while the font was still loading
+          // The font that just finished loading might not be the one
+          // configured any more (the owner could have changed it again
+          // while this was in flight) — `measureAndSize`/`currentFont`
+          // both always read the *current* live settings, so re-running
+          // the whole measurement naturally picks up whatever's current,
+          // not stale data captured in this closure.
+          const resized = measureAndSize();
+          scheduleResize(resized.rows, resized.cols);
+        })
+        .catch(() => {
+          // Font failed to load (offline, corrupt file, …) — the
+          // fallback-font measurement already computed above stays in
+          // effect, same as it always did before this fix existed.
+        });
+    }
     return {
       rows: Math.max(MIN_ROWS, Math.floor(rect.height / metrics.height)),
       cols: Math.max(MIN_COLS, Math.floor(rect.width / metrics.width)),
@@ -585,19 +651,33 @@
     if (text) sendBytes(encoder.encode(text));
   }
 
-  /** Live-applies a `terminalSettings.fontSizePx` change from the settings side
-   *  (`terminal-settings.svelte`): re-measure the character cell at the new
-   *  size and, if that changes the row/column count, resize the session to
-   *  match — the same reflow a tile drag-resize already triggers via
-   *  `ResizeObserver` below, just driven by a font-size change instead of a
-   *  pixel-size one. Runs once on mount too (reading `$terminalSettings.fontSizePx`
-   *  is what makes this effect re-run on later changes), when `sessionId`
-   *  is still `null` and `measureAndSize` alone is a no-op beyond sizing
-   *  the canvas — harmless, and `spawn()`'s own first `measureAndSize` call
-   *  already accounts for whatever `terminalSettings` held at that point
-   *  anyway. */
+  /** Live-applies a `terminalSettings` change that can move the character
+   *  cell's own pixel size from the settings side (`terminal-settings.svelte`):
+   *  re-measure the cell and, if that changes the row/column count, resize
+   *  the session to match — the same reflow a tile drag-resize already
+   *  triggers via `ResizeObserver` below, just driven by a settings change
+   *  instead of a pixel-size one. Runs once on mount too (reading each of
+   *  these is what makes this effect re-run on later changes), when
+   *  `sessionId` is still `null` and `measureAndSize` alone is a no-op
+   *  beyond sizing the canvas — harmless, and `spawn()`'s own first
+   *  `measureAndSize` call already accounts for whatever `terminalSettings`
+   *  held at that point anyway.
+   *
+   *  Bug found while producing demo screenshots (not a live-tested owner
+   *  report): originally only watched `fontSizePx` — changing the font
+   *  *family* (the "Bundled font"/"Font family" fields) or, from
+   *  Checkpoint 5h, `fontWeight` never re-measured the cell at all, so the
+   *  canvas kept drawing at the *previous* font's cached cell dimensions
+   *  while `ctx.font` (via `currentFont`/`cellFont`) had already switched
+   *  to the new one — visibly mismatched glyph spacing/line height, not a
+   *  clear/ghosting bug (Checkpoint 5e's `clearRect` fix is unrelated and
+   *  still correct; this is a stale-`metrics` bug, a different failure
+   *  mode). A font's own size is far from the only thing that can change
+   *  its cell footprint. */
   $effect(() => {
     void $terminalSettings.fontSizePx;
+    void $terminalSettings.fontFamily;
+    void $terminalSettings.fontWeight;
     if (!sessionId) return; // spawn()'s own first measureAndSize() already covers the pre-spawn case
     const { rows, cols } = measureAndSize();
     scheduleResize(rows, cols);
@@ -781,6 +861,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     cancelAnimationFrame(raf);
     cancelPendingFocusAttempts();
     clearTimeout(resizeDebounce);

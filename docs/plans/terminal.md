@@ -34,9 +34,12 @@ beantwortet. Checkpoint 5h (echtes Font-Gewicht-Setting + acht weitere
 Mono-Fonts, zehn insgesamt) und Checkpoint 5i (Pfeiltasten/Home/End/
 PageUp/PageDown/Delete wurden nie an die Shell weitergegeben — fixt u. a.
 die vom Owner gemeldete fehlende Shell-Autosuggestion-Übernahme per →)
-sind beide KOMPLETT (siehe unten). Nächster Schritt: Live-Test von
-5f+5f2+5g+5h+5i am Mac des Owners — diese ganze Kette entstand aus genau
-solchen Live-Tests, nicht aus automatisierter Verifikation allein.
+sind beide KOMPLETT. Checkpoint 5j (Font-Wechsel löste kein Neu-Vermessen
+aus + Web-Font-Lade-Race, gefunden beim Erstellen von Demo-Screenshots für
+den Owner, siehe unten) ist ebenfalls KOMPLETT. Nächster Schritt: Live-Test
+von 5f+5f2+5g+5h+5i+5j am Mac des Owners — diese ganze Kette entstand aus
+genau solchen Live-Tests (oder, bei 5j, deren Chromium-Ersatz), nicht aus
+automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -507,6 +510,58 @@ nichts.
   oder möglich — reine Byte-Logik ohne DOM/Canvas-Bezug, vollständig durch
   Unit-Tests abgedeckt; ob es an der echten PTY/Shell tatsächlich greift,
   kann nur der Live-Test am Mac zeigen.
+
+## Checkpoint 5j — Font-Wechsel löste kein Neu-Vermessen aus + Web-Font-Lade-Race (gefunden beim Screenshot-Erstellen, 2026-09-15) — KOMPLETT
+
+Beim Erstellen von Demo-Screenshots für den Owner (Chromium-Dev-Mock mit
+simuliertem Terminal-Output, da die echte WKWebView hier nicht bedienbar
+ist) fielen zwei echte Bugs auf — kein Owner-Live-Test, aber real und
+reproduzierbar:
+
+- **Bug 1**: Das `$effect`, das die Zeichen-Zelle neu vermisst und bei
+  Bedarf das Terminal-Grid resized, beobachtete nur `terminalSettings.fontSizePx`.
+  Ein Font-*Familien*-Wechsel (Bundled-font-Auswahl oder Freitextfeld) oder,
+  seit Checkpoint 5h, ein Gewichts-Wechsel lösten gar kein Neu-Vermessen
+  aus — der Canvas zeichnete weiter mit den alten Zell-Maßen, während
+  `ctx.font` längst auf den neuen Font umgestellt war. Fix: `$effect`
+  beobachtet jetzt zusätzlich `fontFamily` und `fontWeight`.
+- **Bug 2, auch nach Fix 1 noch reproduzierbar**: Ein Font, der in dieser
+  Session noch nie benutzt wurde, ist beim ersten Vermessen oft noch nicht
+  geladen — Browser laden `@font-face`-Dateien lazy bei tatsächlicher
+  Erstnutzung, nicht beim App-Start, obwohl `main.ts` sie schon importiert.
+  `measureChar`s synchroner `ctx.measureText("M")`-Aufruf lief also vor dem
+  Laden ab, maß gegen einen Fallback-Font, und dieses falsche Zellmaß
+  wurde ins Canvas-Backing-Store/Grid eingebrannt — während spätere Frames
+  mit dem (inzwischen geladenen) echten Font zeichneten. Ergebnis: sichtbar
+  überlappender/verschobener Text. Empirisch bestätigt über
+  `document.fonts.check(font)`, das für einen in dieser Session noch nie
+  genutzten Font `false` zurückgab. Fix: `measureAndSize` prüft das jetzt
+  und lädt bei Bedarf explizit über `document.fonts.load(font)`, misst nach
+  Abschluss neu und stößt bei Bedarf ein Resize an.
+- **Architektur-Review-Nachbesserungen** (vor dem Commit behoben):
+  - **HIGH**: der neue `document.fonts.load().then(...)`-Callback war als
+    einziger asynchroner Vorgang in dieser Datei NICHT gegen ein
+    zwischenzeitliches Entfernen der Kachel abgesichert (jeder andere
+    hängende Callback — `focusRafIds`, `resizeDebounce`, alle Observer —
+    ist es bereits). Fix: neues `destroyed`-Flag, in `onDestroy` gesetzt,
+    im Callback geprüft.
+  - **MEDIUM**: ohne Schutz hätte eine Font/Gewichts-Kombination, für die
+    gar kein passendes `@font-face` gebündelt ist (einige Fonts haben nur
+    Regular/Bold, siehe Checkpoint 5h), `document.fonts.check` theoretisch
+    dauerhaft `false` liefern können — jeder weitere Aufruf von
+    `measureAndSize` (jede Einstellungsänderung, jeder Resize) hätte dann
+    erneut denselben unerfüllbaren `.load()`-Versuch gestartet. Fix: neues
+    `attemptedFontLoads`-Set macht den Retry pro exaktem Font-String
+    einmalig statt unbegrenzt wiederholbar.
+- **Verifiziert**: `npm run check` + `npx vitest run` (367 Tests) grün,
+  kein Rust betroffen. Live mit `agent-browser` gegen echtes Chromium: vor
+  dem Fix reproduzierbar überlappender Text bei einem frischen
+  Font-Wechsel (getestet mit Victor Mono und Fira Code), nach dem Fix
+  sauber bei mehreren zuvor nie benutzten Fonts (Anonymous Pro, Victor
+  Mono) inkl. gleichzeitigem Theme-Wechsel. Gezielte Isolations-Tests
+  bestätigten: Theme-only- und Gewicht-only-Wechsel waren schon vorher
+  sauber (kein Zellmaß-Einfluss) — nur Familie-ändernde Wechsel waren
+  betroffen.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.
