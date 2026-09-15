@@ -263,121 +263,165 @@
   <p class="muted">Loading…</p>
 {:else}
   <div class="settings">
-    <label>
-      Font size (px)
-      <input
-        type="number"
-        min={MIN_FONT_PX}
-        max={MAX_FONT_PX}
-        placeholder={fontSizeDefaultHint}
-        value={typeof $terminalSettings.fontSizePx === "number" ? $terminalSettings.fontSizePx : ""}
-        onchange={setFontSize}
-      />
-    </label>
-    <label>
-      Shell
-      <input type="text" placeholder="$SHELL" bind:value={shellText} onchange={setShell} />
-    </label>
-    <label>
-      Scrollback (lines)
-      <input
-        type="number"
-        min="0"
-        placeholder="2000"
-        value={typeof $terminalSettings.scrollbackLimit === "number" ? $terminalSettings.scrollbackLimit : ""}
-        onchange={setScrollbackLimit}
-      />
-    </label>
-    <label>
-      Start directory
-      <input type="text" placeholder={workspaceRootHint || "app default"} bind:value={cwdText} onchange={setCwd} />
-    </label>
-    <label class="stacked">
-      Environment variables
-      <textarea rows="3" placeholder={"KEY=value\nANOTHER=value"} bind:value={envText} onchange={setEnv}></textarea>
-    </label>
-    <p class="hint">
-      Shell/scrollback/start directory/environment variables/visual bell apply to the next terminal spawned in any
-      tile — not the one currently running.
-    </p>
+    <section>
+      <h3>Session</h3>
+      <label class="field">
+        <span>Shell</span>
+        <input type="text" placeholder="$SHELL" bind:value={shellText} onchange={setShell} />
+      </label>
+      <label class="field">
+        <span>Start directory</span>
+        <input type="text" placeholder={workspaceRootHint || "app default"} bind:value={cwdText} onchange={setCwd} />
+      </label>
+      <label class="field field-inline">
+        <span>Scrollback (lines)</span>
+        <input
+          type="number"
+          min="0"
+          placeholder="2000"
+          value={typeof $terminalSettings.scrollbackLimit === "number" ? $terminalSettings.scrollbackLimit : ""}
+          onchange={setScrollbackLimit}
+        />
+      </label>
+      <label class="field">
+        <span>Environment variables</span>
+        <textarea rows="3" placeholder={"KEY=value\nANOTHER=value"} bind:value={envText} onchange={setEnv}></textarea>
+      </label>
+      <label class="field field-inline">
+        <span>Visual bell</span>
+        <input type="checkbox" checked={$terminalSettings.bellEnabled !== false} onchange={setBellEnabled} />
+      </label>
+      <p class="hint">
+        Shell, start directory, scrollback, environment variables, and visual bell apply to the next terminal
+        spawned in any tile — not the one currently running.
+      </p>
+    </section>
 
-    <div class="divider"></div>
+    <section>
+      <h3>Font</h3>
+      <label class="field">
+        <span>Bundled font</span>
+        <select value={bundledFontNames.includes(fontFamilyText) ? fontFamilyText : ""} onchange={pickBundledFont}>
+          <option value="">Custom…</option>
+          {#each bundledFontNames as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
+      </label>
+      <label class="field">
+        <span>Font family</span>
+        <input type="text" placeholder="theme default" bind:value={fontFamilyText} onchange={setFontFamily} />
+      </label>
+      <div class="field-row">
+        <label class="field field-inline">
+          <span>Size (px)</span>
+          <input
+            type="number"
+            min={MIN_FONT_PX}
+            max={MAX_FONT_PX}
+            placeholder={fontSizeDefaultHint}
+            value={typeof $terminalSettings.fontSizePx === "number" ? $terminalSettings.fontSizePx : ""}
+            onchange={setFontSize}
+          />
+        </label>
+        <label class="field field-inline">
+          <span>Weight</span>
+          <select
+            value={typeof $terminalSettings.fontWeight === "number" ? String($terminalSettings.fontWeight) : ""}
+            onchange={setFontWeight}
+          >
+            <option value="">Theme default</option>
+            {#each FONT_WEIGHTS as w (w.value)}
+              <option value={w.value}>{w.label}</option>
+            {/each}
+          </select>
+        </label>
+      </div>
+    </section>
 
-    <label>
-      Cursor style
-      <select
-        value={typeof $terminalSettings.cursorStyle === "string" ? $terminalSettings.cursorStyle : DEFAULT_CURSOR_STYLE}
-        onchange={setCursorStyle}
-      >
-        <option value="block">Block</option>
-        <option value="outline">Outline</option>
-        <option value="underline">Underline</option>
-        <option value="bar">Bar</option>
-      </select>
-    </label>
-    <label>
-      Cursor blink
-      <input type="checkbox" checked={$terminalSettings.cursorBlink !== false} onchange={setCursorBlink} />
-    </label>
-    <label>
-      Theme
-      <select value={typeof $terminalSettings.theme === "string" ? $terminalSettings.theme : DEFAULT_THEME} onchange={setTheme}>
-        {#each themeNames as name (name)}
-          <option value={name}>{THEME_LABELS[name] ?? name}</option>
-        {/each}
-      </select>
-    </label>
-    <label>
-      Bold text in bright colour
-      <input type="checkbox" checked={$terminalSettings.boldIsBright !== false} onchange={setBoldIsBright} />
-    </label>
-    <label>
-      Visual bell
-      <input type="checkbox" checked={$terminalSettings.bellEnabled !== false} onchange={setBellEnabled} />
-    </label>
-    <label>
-      Bundled font
-      <select value={bundledFontNames.includes(fontFamilyText) ? fontFamilyText : ""} onchange={pickBundledFont}>
-        <option value="">Custom…</option>
-        {#each bundledFontNames as name (name)}
-          <option value={name}>{name}</option>
-        {/each}
-      </select>
-    </label>
-    <label>
-      Font family
-      <input type="text" placeholder="theme default" bind:value={fontFamilyText} onchange={setFontFamily} />
-    </label>
-    <label>
-      Font weight
-      <select
-        value={typeof $terminalSettings.fontWeight === "number" ? String($terminalSettings.fontWeight) : ""}
-        onchange={setFontWeight}
-      >
-        <option value="">Theme default</option>
-        {#each FONT_WEIGHTS as w (w.value)}
-          <option value={w.value}>{w.label}</option>
-        {/each}
-      </select>
-    </label>
-    <label>
-      Background opacity
-      <input
-        type="range"
-        min="0"
-        max="100"
-        value={typeof $terminalSettings.opacity === "number" ? $terminalSettings.opacity : 100}
-        onchange={setOpacity}
-      />
-    </label>
-    <p class="hint">
-      These apply live to every open terminal — no reopen or new session needed. All settings on this page are
-      shared by every Terminal tile and saved to terminal-settings.json, not to this one tile.
-    </p>
+    <section>
+      <h3>Appearance</h3>
+      <label class="field">
+        <span>Theme</span>
+        <select value={typeof $terminalSettings.theme === "string" ? $terminalSettings.theme : DEFAULT_THEME} onchange={setTheme}>
+          {#each themeNames as name (name)}
+            <option value={name}>{THEME_LABELS[name] ?? name}</option>
+          {/each}
+        </select>
+      </label>
+      <label class="field field-inline">
+        <span>Background opacity</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={typeof $terminalSettings.opacity === "number" ? $terminalSettings.opacity : 100}
+          onchange={setOpacity}
+        />
+      </label>
+      <div class="field-row">
+        <label class="field field-inline">
+          <span>Cursor style</span>
+          <select
+            value={typeof $terminalSettings.cursorStyle === "string" ? $terminalSettings.cursorStyle : DEFAULT_CURSOR_STYLE}
+            onchange={setCursorStyle}
+          >
+            <option value="block">Block</option>
+            <option value="outline">Outline</option>
+            <option value="underline">Underline</option>
+            <option value="bar">Bar</option>
+          </select>
+        </label>
+        <label class="field field-inline">
+          <span>Cursor blink</span>
+          <input type="checkbox" checked={$terminalSettings.cursorBlink !== false} onchange={setCursorBlink} />
+        </label>
+      </div>
+      <label class="field field-inline">
+        <span>Bold text in bright colour</span>
+        <input type="checkbox" checked={$terminalSettings.boldIsBright !== false} onchange={setBoldIsBright} />
+      </label>
+      <p class="hint">
+        Everything on this page applies live to every open terminal — no reopen or new session needed except where
+        noted above. All settings are shared by every Terminal tile and saved to terminal-settings.json, not to
+        this one tile.
+      </p>
+    </section>
   </div>
 {/if}
 
 <style>
+  /* Checkpoint 5o (owner feedback: "Viele Felder/Dropdown zu klein...
+   *  Anfänger Design") — full redesign of this page's layout, no
+   *  behavioural change (every `on*`/`bind:value` wire-up above is
+   *  untouched). The previous version put every field — text, select,
+   *  number, checkbox alike — through one shared `<label>` flex row with a
+   *  hardcoded `width: 9em` control column, regardless of what the control
+   *  actually was or how wide the panel itself happened to be (this page
+   *  is the back face of a user-resizable tile, so that panel width varies
+   *  a lot). Two concrete failures that caused, not just "some text/select
+   *  fields (font family, theme, bundled font names) routinely got cut off
+   *  mid-word — "JetBrainsMono Nerd Font Mono" had no way to ever fit in
+   *  9em; and a wide/resized tile left a large, unbalanced gap between the
+   *  label and its tiny control instead of using the space.
+   *
+   *  Fix: `.field` (a labeled text/select/number/checkbox/textarea group)
+   *  defaults to *stacked* — label on its own line, control below at
+   *  `width: 100%` — for every field type where a fixed small width was
+   *  the actual bug (text inputs, selects, the textarea). `.field-inline`
+   *  opts a field back into the old label-left/control-right row, but only
+   *  for control types a fixed, modest width is genuinely correct for
+   *  (numbers, checkboxes, the range slider, and the two short-option
+   *  selects grouped into a `.field-row` below) — not applied by mistake
+   *  to anything that can hold arbitrary-length text. Related fields are
+   *  grouped into `<section>`s with a heading, matching this app's
+   *  existing settings-panel convention (see e.g.
+   *  `routines-board-settings.svelte`'s own `h3`) instead of one flat,
+   *  ungrouped list of a dozen rows — also fixes a small pre-existing
+   *  content bug: "Visual bell" is documented (this page's own hint text)
+   *  as a next-spawn-only setting, but was visually grouped with the
+   *  live-apply fields before this reorganization; it's in the "Session"
+   *  section now, where it behaviourally belongs. */
   .muted {
     padding: var(--ax-space-3);
     margin: 0;
@@ -385,48 +429,85 @@
     font-size: var(--ax-font-size-sm);
   }
   .settings {
-    padding: var(--ax-space-3);
+    padding: var(--ax-space-3) var(--ax-space-4) var(--ax-space-4);
+    max-width: 34rem;
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-2);
+    gap: var(--ax-space-5);
     font-size: var(--ax-font-size-sm);
   }
-  label {
+  section {
     display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-3);
+  }
+  h3 {
+    margin: 0;
+    font-size: var(--ax-font-size-xs);
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
+    color: var(--ax-text-muted);
+    border-bottom: 1px solid var(--ax-border);
+    padding-bottom: var(--ax-space-2);
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--ax-space-1);
+  }
+  .field > span {
+    color: var(--ax-text-muted);
+  }
+  .field input,
+  .field select,
+  .field textarea {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Two or more short, genuinely-fixed-width fields side by side, instead
+   *  of each claiming a full stacked row it doesn't need — "Size (px)" +
+   *  "Weight", "Cursor style" + "Cursor blink". */
+  .field-row {
+    display: flex;
+    gap: var(--ax-space-4);
+  }
+  .field-row .field {
+    flex: 1;
+  }
+
+  /* Back to the original label-left/control-right row, for control types a
+   *  small fixed width is actually correct for — see this `<style>`
+   *  block's own doc comment above for which ones and why. */
+  .field-inline {
+    flex-direction: row;
     align-items: center;
     justify-content: space-between;
     gap: var(--ax-space-3);
   }
-  /* The env-vars textarea needs its own line, not squeezed next to its
-   *  label the way every single-line input above it is. */
-  label.stacked {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  input,
-  select {
-    width: 9em;
-  }
-  /* A checkbox/range shouldn't take the same fixed 9em box a text/number/
-   *  select field does — that would stretch a checkbox's hit area oddly and
-   *  give a slider far more room than it needs next to a short label. */
-  input[type="checkbox"] {
+  .field-inline input,
+  .field-inline select {
     width: auto;
+    min-width: 7em;
   }
-  input[type="range"] {
-    width: 8em;
+  .field-inline input[type="checkbox"] {
+    min-width: 0;
+    flex: 0 0 auto;
   }
+  .field-inline input[type="range"] {
+    flex: 1;
+    min-width: 0;
+  }
+  .field-inline input[type="number"] {
+    min-width: 5em;
+  }
+
   textarea {
-    width: 100%;
     resize: vertical;
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
-    box-sizing: border-box;
-  }
-  .divider {
-    height: 1px;
-    background: var(--ax-border);
-    margin: var(--ax-space-1) 0;
   }
   .hint {
     margin: 0;

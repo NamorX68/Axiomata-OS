@@ -45,10 +45,12 @@ Icon-Fallback-Kette, direkte Ursache der abweichenden Kommandozeilen-
 Symbole/-Farben) sind ebenfalls beide KOMPLETT. Checkpoint 5n
 (Hintergrundfarben ignorierten das Theme komplett — echter Engine-Bug,
 vom Owner selbst per `printf`-Repro am echten Mac bewiesen, siehe unten)
-ist ebenfalls KOMPLETT. Nächster Schritt: Live-Test von
-5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n am Mac des Owners (bei 5l zusätzlich
-`cargo test`, das in dieser Session wegen eines Umgebungs-Linker-Problems
-nicht laufen konnte) — diese ganze Kette
+ist ebenfalls KOMPLETT — vom Owner selbst am echten Mac bestätigt
+(korrektes Pastell-Blau, saubere abgerundete Pills). Checkpoint 5o
+(Settings-Seite Redesign, siehe unten) ist ebenfalls KOMPLETT. Nächster
+Schritt: Live-Test von 5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o am Mac des
+Owners (bei 5l zusätzlich `cargo test`, das in dieser Session wegen eines
+Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze Kette
 entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m, deren
 Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
 
@@ -761,6 +763,42 @@ Auf Nachfrage bestätigt: Catppuccin Mocha war die ganze Zeit ausgewählt.
   `#89b4fa` (vorher `#0000ee`). Vom Owner am echten Mac als tatsächliche
   Ursache bestätigt (per eigenem `printf`-Repro), volle Bestätigung nach
   diesem Fix steht noch aus.
+
+## Checkpoint 5o — Settings-Seite Redesign (Owner-Feedback, 2026-09-15) — KOMPLETT
+
+"Das könnten wir im Anschluss noch etwas schöner Design.. sieht nicht
+toll aus. Viele Felder/Dropdown zu klein. Irgendwie wie von einem
+Anfänger Design." — mit Screenshot.
+
+- **Root Cause**: jedes Feld (Text, Select, Zahl, Checkbox) lief durch
+  dieselbe `<label>`-Flex-Zeile mit fest `width: 9em` für die Kontrolle,
+  unabhängig vom tatsächlichen Feldtyp oder der Panel-Breite (diese Seite
+  ist die Rückseite einer vom Owner frei skalierbaren Kachel). Ergebnis:
+  Text-/Select-Felder mit längerem Inhalt ("JetBrainsMono Nerd Font
+  Mono", volle Pfade, Theme-Namen) wurden mitten im Wort abgeschnitten,
+  und bei einer breiten Kachel blieb ein großer, unausgewogener Leerraum
+  zwischen Label und der winzigen Kontrolle.
+- **Fix**: reines Layout-Redesign, keine Verhaltensänderung (jede
+  `on*`/`bind:value`-Verdrahtung bleibt exakt wie vorher). Text-/Select-/
+  Textarea-Felder sind jetzt standardmäßig gestapelt (Label über der
+  Kontrolle, Kontrolle auf `width: 100%`) — genau die Feldtypen, bei denen
+  eine feste kleine Breite der eigentliche Bug war. Zahlen, Checkboxen,
+  der Opacity-Regler und zwei kurze Selects (Cursor-Stil, Cursor-Blink)
+  behalten bewusst eine kompakte Zeile (`.field-inline`). Verwandte Felder
+  sind jetzt in drei Abschnitte gruppiert (Session, Font, Appearance) mit
+  Überschrift — spiegelt das bestehende Muster dieser App (siehe z. B.
+  `routines-board-settings.svelte`s eigenes `h3`) statt einer flachen,
+  ungruppierten Liste. Dabei nebenbei einen kleinen bestehenden
+  Inhalts-Bug behoben: "Visual bell" war laut eigenem Hinweistext dieser
+  Seite ein "erst beim nächsten Spawn"-Setting, stand aber visuell in der
+  Gruppe der Live-Anwendungen — jetzt korrekt bei "Session" einsortiert.
+- **Verifiziert**: `npm run check` + `npx vitest run` (378 Tests,
+  unverändert — reine Präsentationsänderung) grün. Live mit
+  `agent-browser` gegen echtes Chromium: alle drei Abschnitte
+  gegengeprüft, keine abgeschnittenen Texte mehr, keine verwaisten
+  CSS-Klassen. Kein Rust betroffen, kein Sub-Agent-Review (reines
+  Layout, keine neue Logik, ein einzelnes File unter dem
+  ">3 Dateien"-Trigger).
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.
