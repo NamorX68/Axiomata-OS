@@ -316,6 +316,13 @@ export function cellFont(font: string, bold: boolean, weight?: number): string {
   return weight !== undefined ? `${weight} ${font}` : font;
 }
 
+/** A `[x0, y0, x1, y1]` rectangle or line segment, 0-1 cell-relative — the
+ *  one shared shape behind both `BLOCK_ELEMENT_RECTS` (filled rects,
+ *  Checkpoint 5k) and `BOX_DRAWING_LINES`/`CORNER_*` (line segments,
+ *  Checkpoint 5p) below, named once here instead of spelled out at each of
+ *  their five separate declarations. */
+type CellRect = readonly [number, number, number, number];
+
 /** Unicode "Block Elements" (U+2580-259F) expressed as one or more
  *  cell-relative rectangles (`[x0, y0, x1, y1]`, each 0-1 across the
  *  cell's own width/height) to fill solidly — Checkpoint 5k, owner-
@@ -334,9 +341,9 @@ export function cellFont(font: string, bold: boolean, weight?: number): string {
  *  (▖▗▘▙▚▛▜▝▞▟) are expressed as 1-3 quarter-cell rectangles rather than
  *  one shape, since they're each some combination of the cell's four
  *  quadrants. Box-drawing *line* characters (U+2500-257F — ┌┐└┘─│├┤┬┴┼,
- *  used for TUI panel borders) are a distinct, not-yet-implemented
- *  follow-up: they're line segments, not fills, a different rendering
- *  problem than this table solves.
+ *  used for TUI panel borders) are a distinct rendering problem — line
+ *  segments, not fills — handled separately below by `BOX_DRAWING_LINES`/
+ *  `drawBoxDrawingLine` (Checkpoint 5p).
  *
  *  Exported (alongside `SHADE_ALPHA` below) purely so `TerminalScreen.test.ts`
  *  can check the *data* — every rectangle's coordinates stay within the
@@ -344,7 +351,7 @@ export function cellFont(font: string, bold: boolean, weight?: number): string {
  *  `CanvasRenderingContext2D` (`drawBlockElement`'s actual drawing, like
  *  `draw()` itself, is Chromium/`agent-browser`-verified instead, jsdom
  *  doesn't implement canvas). */
-export const BLOCK_ELEMENT_RECTS: Readonly<Record<string, readonly (readonly [number, number, number, number])[]>> = {
+export const BLOCK_ELEMENT_RECTS: Readonly<Record<string, readonly CellRect[]>> = {
   "▀": [[0, 0, 1, 0.5]], // ▀ upper half
   "▁": [[0, 0.875, 1, 1]], // ▁ lower one eighth
   "▂": [[0, 0.75, 1, 1]], // ▂ lower one quarter
@@ -443,6 +450,159 @@ function drawBlockElement(
   }
   return false;
 }
+
+// Each of the four light-line corners, reused for both the sharp-cornered
+// glyph and its "rounded" counterpart (see `BOX_DRAWING_LINES`'s own doc
+// comment for why rounded corners are drawn identically).
+const CORNER_TOP_LEFT: readonly CellRect[] = [
+  [0.5, 0.5, 1, 0.5],
+  [0.5, 0.5, 0.5, 1],
+];
+const CORNER_TOP_RIGHT: readonly CellRect[] = [
+  [0, 0.5, 0.5, 0.5],
+  [0.5, 0.5, 0.5, 1],
+];
+const CORNER_BOTTOM_LEFT: readonly CellRect[] = [
+  [0.5, 0, 0.5, 0.5],
+  [0.5, 0.5, 1, 0.5],
+];
+const CORNER_BOTTOM_RIGHT: readonly CellRect[] = [
+  [0.5, 0, 0.5, 0.5],
+  [0, 0.5, 0.5, 0.5],
+];
+
+/** Box-drawing "light" line characters (U+2500-2503, the light subset of
+ *  U+250C-253C, plus the four "rounded corner" variants U+256D-2570) —
+ *  Checkpoint 5p, owner-reported: Claude Code's own TUI, running inside
+ *  this terminal, showed a doubled/misaligned horizontal rule where a
+ *  single clean line was expected. Same root problem as
+ *  `BLOCK_ELEMENT_RECTS` above (Checkpoint 5k): a font's own glyph for a
+ *  box-drawing line sits somewhere inside its own em-square, not
+ *  necessarily at a consistent position from one font (or weight) to the
+ *  next — two adjacent rows/columns of line characters, meant to connect
+ *  into one continuous rule, can land at slightly different offsets and
+ *  read as a doubled or broken line instead of one. Drawn procedurally
+ *  here instead, exactly like `BLOCK_ELEMENT_RECTS` already does for
+ *  fills: each entry is one or more line *segments* (`[x0, y0, x1, y1]`,
+ *  0-1 cell-relative, always axis-aligned — box-drawing has no diagonals)
+ *  stroked at a fixed thin width, guaranteed to land at the exact same
+ *  position in every cell regardless of font.
+ *
+ *  Scope, deliberately not "the whole Unicode Box Drawing block"
+ *  (U+2500-257F is 128 codepoints — light/heavy/dashed/double variants,
+ *  every possible T-junction and cross combination): these eleven light
+ *  single-line glyphs (─│┌┐└┘├┤┬┴┼) cover the overwhelming majority of
+ *  real-world TUI borders (Claude Code, opencode, htop, vim splits, …).
+ *  The four "rounded corner" glyphs (╭╮╰╯ — popular with Go/bubbletea-
+ *  style TUIs) reuse their sharp-cornered equivalents rather than being
+ *  drawn as a true arc: an actual curve would need real arc geometry
+ *  (`ctx.arc`) with its own edge cases for non-square cells, for a visual
+ *  difference that's barely noticeable at ordinary terminal font sizes —
+ *  a deliberate, scoped-down simplification, not an oversight. Double/
+ *  heavy/dashed lines and the remaining T-junction/cross combinations are
+ *  a possible future follow-up if a real TUI is found using them, not
+ *  implemented speculatively ahead of an actual need. */
+export const BOX_DRAWING_LINES: Readonly<Record<string, readonly CellRect[]>> = {
+  "─": [[0, 0.5, 1, 0.5]],
+  "│": [[0.5, 0, 0.5, 1]],
+  "┌": CORNER_TOP_LEFT,
+  "╭": CORNER_TOP_LEFT,
+  "┐": CORNER_TOP_RIGHT,
+  "╮": CORNER_TOP_RIGHT,
+  "└": CORNER_BOTTOM_LEFT,
+  "╰": CORNER_BOTTOM_LEFT,
+  "┘": CORNER_BOTTOM_RIGHT,
+  "╯": CORNER_BOTTOM_RIGHT,
+  "├": [
+    [0.5, 0, 0.5, 1],
+    [0.5, 0.5, 1, 0.5],
+  ],
+  "┤": [
+    [0.5, 0, 0.5, 1],
+    [0, 0.5, 0.5, 0.5],
+  ],
+  "┬": [
+    [0, 0.5, 1, 0.5],
+    [0.5, 0.5, 0.5, 1],
+  ],
+  "┴": [
+    [0, 0.5, 1, 0.5],
+    [0.5, 0, 0.5, 0.5],
+  ],
+  "┼": [
+    [0, 0.5, 1, 0.5],
+    [0.5, 0, 0.5, 1],
+  ],
+};
+
+/** Thin — a box-drawing rule is meant to read as a hairline, not a thick
+ *  bar. CSS px, pre-DPR-scale, same convention as `CURSOR_LINE_WIDTH`
+ *  below. */
+const BOX_LINE_WIDTH = 1;
+
+/** Rounds a stroke coordinate down to the nearest whole CSS pixel and
+ *  re-centers it half a pixel above — the same "inset by half a device
+ *  pixel" trick the `outline` cursor style already applies below
+ *  (`ctx.strokeRect(x + 0.5, y + 0.5, ...)`), generalized here since a
+ *  box-drawing segment's endpoints aren't always already-integer cell
+ *  corners: a half-cell midpoint (`x + 0.5 * cellW`) only lands on a
+ *  pixel *center* on its own when `cellW` is odd — when it's even, the
+ *  raw midpoint is itself a whole pixel, and a 1px stroke centered on a
+ *  whole-pixel coordinate straddles (and blurs across) two physical
+ *  pixels instead of landing crisply on one. `Math.floor(v) + 0.5` is
+ *  idempotent for a coordinate that's already correctly centered (odd
+ *  `cellW` case) and shifts a whole-pixel coordinate (even `cellW`, or
+ *  either case at a cell edge) onto the nearest pixel center instead —
+ *  without this, this checkpoint would trade the doubled/misaligned-line
+ *  bug it fixes for a new, more subtle "blurry line" one. */
+function snapToPixelCenter(v: number): number {
+  return Math.floor(v) + 0.5;
+}
+
+/** Draws `ch` procedurally if it's one of the box-drawing line characters
+ *  above (see `BOX_DRAWING_LINES`'s own doc comment for why), stroking
+ *  with `color` at the cell `(x, y, cellW, cellH)`. Returns `false` for
+ *  every other character — the caller's cue to fall back further (to
+ *  `drawBlockElement`, then finally its normal `fillText` glyph path). */
+function drawBoxDrawingLine(
+  ctx: CanvasRenderingContext2D,
+  glyph: string,
+  x: number,
+  y: number,
+  cellW: number,
+  cellH: number,
+  color: string,
+): boolean {
+  const segments = BOX_DRAWING_LINES[glyph];
+  if (!segments) return false;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = BOX_LINE_WIDTH;
+  ctx.beginPath();
+  for (const [x0, y0, x1, y1] of segments) {
+    ctx.moveTo(snapToPixelCenter(x + x0 * cellW), snapToPixelCenter(y + y0 * cellH));
+    ctx.lineTo(snapToPixelCenter(x + x1 * cellW), snapToPixelCenter(y + y1 * cellH));
+  }
+  ctx.stroke();
+  return true;
+}
+
+/** One shared shape for `drawBlockElement`/`drawBoxDrawingLine` (and any
+ *  future procedural-glyph handler added the same way): try each in order,
+ *  first one to return `true` "claims" the glyph. Pulled out into its own
+ *  ordered array — rather than a growing `!a(...) && !b(...) && ...` chain
+ *  inlined into `draw()` — specifically because this pair is meant to be
+ *  the template for future additions (double/heavy/dashed box-drawing
+ *  lines, see `BOX_DRAWING_LINES`'s own doc comment); a third handler can
+ *  be appended here without touching `draw()`'s per-cell branch at all. */
+const PROCEDURAL_GLYPH_HANDLERS: readonly ((
+  ctx: CanvasRenderingContext2D,
+  glyph: string,
+  x: number,
+  y: number,
+  cellW: number,
+  cellH: number,
+  color: string,
+) => boolean)[] = [drawBlockElement, drawBoxDrawingLine];
 
 /** A cell's actual background colour, theme-aware — pulled out of `draw()`
  *  specifically so this one call has a unit test (Checkpoint 5n, real bug,
@@ -578,10 +738,12 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
         const fg = isBlockCursor
           ? defaultBg
           : resolveColor(cell.fg, defaultFg, { palette, bright: cell.bold && boldIsBright });
-        // Block/shade characters draw as plain rects instead of glyphs —
-        // see `drawBlockElement`'s own doc comment for why — and skip
-        // `cellFont`/`fillText` entirely when handled that way.
-        if (!drawBlockElement(ctx, cell.ch, x, y, cw, ch, fg)) {
+        // Block/shade characters draw as plain rects, box-drawing line
+        // characters as plain strokes, instead of glyphs — see
+        // `drawBlockElement`'s and `drawBoxDrawingLine`'s own doc comments
+        // for why — and skip `cellFont`/`fillText` entirely when handled
+        // by any `PROCEDURAL_GLYPH_HANDLERS` entry.
+        if (!PROCEDURAL_GLYPH_HANDLERS.some((handler) => handler(ctx, cell.ch, x, y, cw, ch, fg))) {
           ctx.font = cellFont(font, cell.bold, fontWeight);
           ctx.fillStyle = fg;
           ctx.fillText(cell.ch, x, y + ascent);

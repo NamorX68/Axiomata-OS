@@ -47,11 +47,18 @@ Symbole/-Farben) sind ebenfalls beide KOMPLETT. Checkpoint 5n
 vom Owner selbst per `printf`-Repro am echten Mac bewiesen, siehe unten)
 ist ebenfalls KOMPLETT — vom Owner selbst am echten Mac bestätigt
 (korrektes Pastell-Blau, saubere abgerundete Pills). Checkpoint 5o
-(Settings-Seite Redesign, siehe unten) ist ebenfalls KOMPLETT. Nächster
-Schritt: Live-Test von 5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o am Mac des
-Owners (bei 5l zusätzlich `cargo test`, das in dieser Session wegen eines
+(Settings-Seite Redesign, siehe unten) ist ebenfalls KOMPLETT — vom Owner
+selbst am echten Mac bestätigt und als "kann so bleiben" akzeptiert.
+Checkpoint 5p (kaputte Box-Drawing-Linien — derselbe Bug wie 5k, nur für
+Linienzeichen statt Füllzeichen, vom Owner per Screenshot der eigenen
+Claude-Code-Darstellung im Terminal gemeldet, siehe unten) ist ebenfalls
+KOMPLETT. Ein zweites, im selben Screenshot sichtbares Problem
+(ungewöhnlich viel/durchgehende Unterstreichung) ist NICHT gefixt —
+bewusst zurückgestellt, siehe Checkpoint 5p. Nächster Schritt: Live-Test
+von 5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p am Mac des Owners (bei 5l
+zusätzlich `cargo test`, das in dieser Session wegen eines
 Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze Kette
-entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m, deren
+entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p, deren
 Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
@@ -799,6 +806,115 @@ Anfänger Design." — mit Screenshot.
   CSS-Klassen. Kein Rust betroffen, kein Sub-Agent-Review (reines
   Layout, keine neue Logik, ein einzelnes File unter dem
   ">3 Dateien"-Trigger).
+
+## Checkpoint 5p — Kaputte Box-Drawing-Linien (Owner-Feedback mit
+Claude-Code-Screenshot, 2026-09-15) — KOMPLETT
+
+"Du selbst ( Claude Code ) siehst aber in unserem Terminal echt nicht
+gut aus... da passt so einiges nicht:" — mit Screenshot der eigenen
+Claude-Code-TUI, die in unserem Terminal lief. Per ImageMagick-Zoom-Crop
+zwei getrennte Probleme identifiziert:
+
+1. Eine doppelt/versetzt wirkende horizontale Trennlinie über zwei
+   Boxen ("Try 'refactor runner.rs'" / "auto mode on..."-Fußzeile) —
+   **gefixt, siehe unten**.
+2. Ungewöhnlich viel/durchgehende Unterstreichung auf den meisten
+   Textsegmenten — **NICHT gefixt, zurückgestellt** (siehe eigener
+   Abschnitt unten).
+
+### Problem 1: Box-Drawing-Linien
+
+- **Root Cause**: exakt dieselbe Bug-Klasse wie Checkpoint 5k, nur für
+  Linienzeichen statt Füllzeichen. Checkpoint 5k hatte bereits
+  dokumentiert (eigener Kommentar im Code), dass Unicode Block Elements
+  (U+2580–259F, Füllzeichen/Shades) über `ctx.fillText()` je nach Font
+  inkonsistent rendern — als Fix wurde `drawBlockElement()` eingeführt,
+  das diese Zeichen prozedural über Canvas-Rect-Primitives statt über
+  die Font-Glyphen zeichnet. Box Drawing Characters (U+2500–257F, das
+  "leichte Einzellinien"-Subset `─│┌┐└┘├┤┬┴┼╭╮╰╯`, 15 Zeichen) waren
+  als bekannter, noch offener Folgefall in genau diesem Kommentar
+  vermerkt — jetzt vom Owner am echten Beispiel (Claude Codes eigene
+  Box-Rahmen) bestätigt: dieselbe Font-Glyph-Inkonsistenz, dieses Mal
+  bei Linien statt Flächen.
+- **Fix**: gleiches Muster wie `drawBlockElement()`, für Linien statt
+  Flächen. Neue `CORNER_TOP_LEFT`/`CORNER_TOP_RIGHT`/
+  `CORNER_BOTTOM_LEFT`/`CORNER_BOTTOM_RIGHT`-Segment-Konstanten (je ein
+  L-förmiges 2-Segment-Array in zellrelativen 0–1-Koordinaten
+  `[x0,y0,x1,y1]`), eine exportierte `BOX_DRAWING_LINES`-Tabelle, die
+  alle 15 Zeichen auf ihre Segment-Arrays abbildet — die vier
+  gerundeten Eckvarianten (`╭╮╰╯`) verweisen dabei bewusst auf
+  dasselbe Array-Objekt wie ihre scharfen Gegenstücke (keine Kopie, da
+  wir Ecken ohnehin nicht tatsächlich runden — visuell ununterscheidbar
+  bei `BOX_LINE_WIDTH = 1`), und eine neue `drawBoxDrawingLine(ctx,
+  glyph, x, y, cellW, cellH, color): boolean`-Funktion, die pro Zeichen
+  jedes Segment über `beginPath()/moveTo()/lineTo()/stroke()` zeichnet
+  und `false` zurückgibt, wenn das Zeichen nicht in der Tabelle steht
+  (nicht zuständig). In `draw()`s bestehender Fallback-Kette pro Zelle
+  als zweite Prüfung nach `drawBlockElement()` verdrahtet: `if
+  (!drawBlockElement(...) && !drawBoxDrawingLine(...)) { ...fillText-
+  Fallback... }` — derselbe "bin ich zuständig?"-Dispatch, den 5k schon
+  etabliert hat.
+- **Architektur-Review**: Geometrie aller 15 Einträge unabhängig
+  nachgerechnet, keine Fehler gefunden. Ein echtes HIGH-Finding: die neuen
+  1px-Strokes hatten kein Pixel-Grid-Snapping, obwohl genau diese Datei
+  bereits einen dokumentierten Präzedenzfall dafür hat (`outline`-Cursor,
+  `x + 0.5`/`y + 0.5`-Inset) — je nach Parität von `cellW`/`cellH` konnte
+  eine Segment-Mittelkoordinate exakt auf einer Pixelgrenze statt einem
+  Pixelzentrum landen und dadurch als 2px-Unschärfe statt scharfer 1px-
+  Linie rendern; wäre praktisch der "verschwommene Linie"-Nachfolgebug
+  der hier eigentlich behobenen "doppelte Linie" gewesen. Gefixt mit einer
+  neuen `snapToPixelCenter()`-Hilfsfunktion (`Math.floor(v) + 0.5`,
+  idempotent für bereits korrekt zentrierte Koordinaten), angewendet auf
+  jeden Segment-Endpunkt. Drei MEDIUM-Findings gefixt: veralteter 5k-
+  Kommentar, der Box-Drawing-Linien fälschlich noch als "nicht
+  implementiert" beschrieb, jetzt korrigiert und verweist auf
+  `BOX_DRAWING_LINES`; die inline `!a(...) && !b(...)`-Dispatch-Kette in
+  `draw()` zu einem `PROCEDURAL_GLYPH_HANDLERS`-Array samt `.some(...)`
+  umgebaut (dieses Handler-Paar ist laut eigener Aufgabenstellung die
+  Vorlage für künftige Glyph-Handler — jetzt erweiterbar ohne `draw()`
+  selbst anzufassen); der fünffach ausgeschriebene `[number, number,
+  number, number]`-Segmenttyp zu einem gemeinsamen `CellRect`-Typalias
+  zusammengefasst. Ein LOW-Finding gefixt: eine 147 Zeichen lange
+  Testzeile (Projekt-Standard 120 Zeichen) umgebrochen. Ein LOW/INFO-
+  Hinweis (die geteilten `CORNER_*`-Arrays sind nur typseitig,
+  nicht zur Laufzeit `readonly`) bewusst nicht behoben — spiegelt eine
+  bereits bestehende, nicht neu eingeführte Lücke bei
+  `BLOCK_ELEMENT_RECTS`, vom Review selbst als "nicht blockierend"
+  eingestuft.
+- **Verifiziert**: `npm run check` (0 Fehler) + `npx vitest run`
+  (382/382, 4 neue Tests unter `describe("BOX_DRAWING_LINES (Checkpoint
+  5p)")`: Zeichensatz-Vollständigkeit gegen die 15 erwarteten Zeichen,
+  Segment-Gültigkeit (achsenparallel, im Bereich [0,1], Länge ≠ 0),
+  Objekt-Identität der gerundeten Ecken mit ihren scharfen Gegenstücken
+  (`toBe`, nicht `toEqual`), und eine Struktur-Prüfung speziell für
+  `┼`) grün. Live mit `agent-browser` gegen echtes Chromium: temporäre
+  Devmock-Fixture (`terminal_spawn`-Mock-Case mit einer kleinen
+  `┌─────────┐ / │ hello │ / ├─────────┤ / │ world │ / └─────────┘`-Box,
+  über ein Python-Skript mit `\uXXXX`-Escapes eingefügt, da der
+  `Edit`-Tool literale Box-Drawing-Unicode-Zeichen in einem früheren
+  Versuch stillschweigend zu leeren Strings verstümmelt hatte) plus
+  temporärer `terminal.svelte`-Bypass für den echten Tauri-`Channel`
+  (beide vor dem Commit zurückgesetzt) — Screenshot + 4×-Zoom-Crop
+  zeigen ein sauberes, durchgezogenes Rechteck ohne Versatz/Doppelung,
+  Ecken und das Kreuzungszeichen (`├─┤`) korrekt ausgerichtet.
+
+### Problem 2: Unterstreichung — zurückgestellt
+
+- Untersucht, ob unser Rust-Engine OSC-8-Hyperlinks unterstützt (Ghostty
+  zeigt Hyperlink-Text typischerweise nur bei Hover unterstrichen) —
+  per `grep` in `screen.rs` bestätigt: keine dedizierte OSC-8-Behandlung
+  vorhanden. Konnte aber NICHT abschließend klären, ob die im Screenshot
+  sichtbare Unterstreichung (a) legitimes SGR-4-Styling aus Claude Codes
+  eigener TUI ist, das in Ghostty identisch aussehen würde, oder (b) ein
+  echter Unterschied ist, der daher kommt, dass Ghostty OSC-8-verpackten
+  Hyperlink-Text nur bei Hover unterstreicht, während wir ihn permanent
+  unterstrichen zeigen.
+- Bewusst NICHT spekulativ weitergebaut (OSC-8-Hyperlink-Tracking wäre
+  ein nicht-triviales neues Feature: OSC-8-Parsing, Pro-Zelle/Pro-Lauf-
+  Hyperlink-Zustand, geänderte Unterstreichungs-Logik für Text innerhalb
+  eines Hyperlinks) ohne vorherige Bestätigung, dass das tatsächlich der
+  Mechanismus ist. Nächster Schritt: Owner fragen, ob Ghostty bei
+  derselben Claude-Code-Ausgabe dasselbe Unterstreichungsmuster zeigt.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

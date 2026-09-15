@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BLOCK_ELEMENT_RECTS,
+  BOX_DRAWING_LINES,
   cellFont,
   isCellSelected,
   resolveBgColor,
@@ -119,6 +120,50 @@ describe("resolveBgColor (Checkpoint 5n regression guard)", () => {
   it("passes a truecolor rgb background through directly, ignoring the palette", () => {
     const color: TermColor = { type: "rgb", r: 1, g: 2, b: 3 };
     expect(resolveBgColor(color, "#000000", THEMES.xterm)).toBe("rgb(1, 2, 3)");
+  });
+});
+
+describe("BOX_DRAWING_LINES (Checkpoint 5p)", () => {
+  it("has the eleven light single-line glyphs plus their four rounded-corner equivalents", () => {
+    const expectedGlyphs = ["─", "│", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼", "╭", "╮", "╰", "╯"];
+    const chars = Object.keys(BOX_DRAWING_LINES);
+    expect(chars.sort()).toEqual(expectedGlyphs.sort());
+  });
+
+  it("every segment is axis-aligned, stays within the cell, and has nonzero length", () => {
+    for (const [ch, segments] of Object.entries(BOX_DRAWING_LINES)) {
+      expect(segments.length, ch).toBeGreaterThan(0);
+      for (const [x0, y0, x1, y1] of segments) {
+        for (const v of [x0, y0, x1, y1]) {
+          expect(v, ch).toBeGreaterThanOrEqual(0);
+          expect(v, ch).toBeLessThanOrEqual(1);
+        }
+        // Axis-aligned: exactly one of x or y changes between the two
+        // endpoints — box-drawing has no diagonal segments.
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        expect(dx === 0 || dy === 0, ch).toBe(true);
+        expect(dx !== 0 || dy !== 0, ch).toBe(true);
+      }
+    }
+  });
+
+  it("each rounded-corner glyph reuses its sharp-cornered equivalent's exact segments", () => {
+    const pairs: [string, string][] = [
+      ["┌", "╭"],
+      ["┐", "╮"],
+      ["└", "╰"],
+      ["┘", "╯"],
+    ];
+    for (const [sharp, rounded] of pairs) {
+      expect(BOX_DRAWING_LINES[rounded], rounded).toBe(BOX_DRAWING_LINES[sharp]);
+    }
+  });
+
+  it("┼ (cross) has both a full-width horizontal and a full-height vertical segment", () => {
+    const segments = BOX_DRAWING_LINES["┼"];
+    expect(segments).toContainEqual([0, 0.5, 1, 0.5]);
+    expect(segments).toContainEqual([0.5, 0, 0.5, 1]);
   });
 });
 
