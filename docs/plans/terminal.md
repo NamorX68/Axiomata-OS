@@ -61,12 +61,18 @@ Wechsel-Shortcut — tat nichts, Owner-Feedback) ist ebenfalls KOMPLETT.
 Checkpoint 5r (OSC-8-Hyperlinks — permanentes Unterstreichen
 unterdrückt, Fortsetzung von Checkpoint 5p Problem 2, per
 Ghostty-Vergleichs-Screenshots vom Owner bestätigt) ist ebenfalls
-KOMPLETT. Nächster Schritt: Live-Test von
-5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q+5r am Mac des Owners (bei 5l
-UND 5r zusätzlich `cargo test`, das in dieser Session wegen eines
-Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze Kette
-entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p/5r, deren
-Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
+KOMPLETT. Owners erster echter Live-Test danach zeigte: der Screenshot
+sah nach CP5r unverändert aus (Text weiterhin durchgehend
+unterstrichen) — Ursache war aber gar nicht OSC-8, sondern ein
+unabhängiger, älterer CSI-Parsing-Bug, jetzt als eigener Checkpoint 5s
+gefixt (siehe unten) KOMPLETT. Nächster Schritt: Live-Test von
+5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q+5r+5s am Mac des Owners (bei 5l
+zusätzlich `cargo test`, das in jener Session wegen eines
+Umgebungs-Linker-Problems nicht laufen konnte; bei 5s lief `cargo test`
+erstmals wieder durch und deckte dabei nebenbei auch einen Bug in einem
+5r-eigenen Test auf, siehe 5s) — diese ganze Kette entstand aus genau
+solchen Live-Tests (oder, bei 5j/5k/5m/5p/5r, deren Chromium-Ersatz),
+nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -1049,6 +1055,72 @@ durchgehendem SGR-4-Styling eines ganzen Satzes.
   Devmock-Fixture, seither zurückgesetzt): eine `underline: true,
   hyperlink: false`-Zelle blieb unterstrichen, eine `underline: true,
   hyperlink: true`-Zelle verlor die Unterstreichung — beide wie erwartet.
+
+## Checkpoint 5s — Durchgehende Unterstreichung: eigentliche Ursache war kein
+OSC-8-Problem, sondern ein CSI-Marker-Parsing-Bug (Owner-Screenshot nach
+CP5r, 2026-09-15/16) — KOMPLETT
+
+Owner meldete nach CP5r per Screenshot: Terminal-Text weiterhin komplett
+unterstrichen, sichtbar unverändert gegenüber vorher. Statt direkt einer
+zweiten Hyperlink-Theorie nachzugehen, wurde die echte `claude`-Binary
+(exakt die App-Version, v2.1.273) mit genau den Env-Variablen gestartet,
+die `pty.rs::spawn` setzt (`TERM=xterm-256color`, `COLORTERM=truecolor`,
+kein `TERM_PROGRAM`), und die rohen PTY-Bytes des Begrüßungs-Banners
+mitgeschnitten (`script -q -F ... claude`, dann `cat -v`/`od -c`).
+
+- **Root Cause**: Der Banner-Text ("Claude Code", "Sonnet 5 · Claude
+  Pro", Pfad, "auto mode on …") enthält in den echten Bytes **weder**
+  ein SGR-4-Underline **noch** ein OSC-8 — CP5r/OSC-8 war von Anfang an
+  die falsche Spur für dieses zweite Problem. Direkt am Sitzungsanfang,
+  vor jedem gedruckten Zeichen, sendet die CLI aber
+  `\x1b[>4m\x1b[<u` (xterms `modifyOtherKeys`-Konfiguration, Marker
+  `>`, Endbyte `m`). `Screen::csi_dispatch` prüfte auf einen führenden
+  Intermediate-Marker bisher **nur** `?` (für DEC-Private-Modes wie
+  `?1049h`); jeder andere Marker (`>`, `<`, `=`) fiel durch in den
+  generischen `match action`-Block, wo `'m' => apply_sgr(params)`
+  ausschließlich auf das Endbyte prüft, unabhängig vom Marker.
+  `CSI > 4 m` wurde dadurch als reines SGR-Code-4 (Underline)
+  fehlinterpretiert und landete auf `pen` — und blieb dort für den Rest
+  der Sitzung hängen, weil danach nie ein `CSI 0m`/`CSI 24m` kam. Jedes
+  folgende gedruckte Zeichen erbte `underline: true`. Erklärt exakt das
+  Symptom: nicht selektiv pro Begriff (das wäre OSC-8 gewesen), sondern
+  durchgehend alles ab dem allerersten Zeichen.
+- **Fix (`crates/axiomata-terminal/src/screen.rs::csi_dispatch`)**: Jeder
+  nicht-leere Intermediate-Marker wird jetzt als eigene, von dieser
+  Engine nicht modellierte Vendor-/Private-Sequenzfamilie behandelt —
+  nur bei `?` wird weiterhin auf `h`/`l` (Private-Mode-Set/Reset)
+  geprüft, jeder andere Marker (`>`, `<`, `=`, …) ist ein reines No-op,
+  bevor der generische, markerlose `match action`-Block (SGR
+  eingeschlossen) überhaupt erreicht wird — echte SGR trägt laut
+  ECMA-48 nie einen Intermediate-Marker.
+- **Nebenfund beim ersten echten `cargo test`-Lauf dieser Kette**: CP5rs
+  eigener Alt-Screen-Leck-Test
+  (`alt_screen_boundary_does_not_leak_hyperlink_state_either_direction`)
+  war selbst fehlerhaft, nicht die geprüfte Funktionalität — `cargo
+  test` konnte in CP5rs Session nie laufen (Sandbox-Linker-Problem), lief
+  hier zum ersten Mal wirklich durch und deckte es auf: der Testaufbau
+  öffnete einen Hyperlink auf der Primärebene und schloss ihn vor dem
+  zweiten Teilszenario nie wieder, wodurch der zweite Teil (den
+  Alt-Screen offen gelassenen Link) versehentlich mit einem *bereits vor
+  dem Wechsel* offenen Primär-Hyperlink vermischte — dessen Wiederkehr
+  beim Verlassen ist korrektes, gewolltes Verhalten (siehe den positiven
+  Roundtrip-Test), keine echte Leck-Situation. Test in zwei unabhängige
+  `Screen`-Instanzen aufgeteilt statt einer wiederverwendeten; die
+  eigentliche `enter_alt_screen`/`exit_alt_screen`-Logik brauchte keine
+  Änderung.
+- **Neuer Regressionstest**: `a_non_dec_private_marker_csi_m_sequence_is_not_read_as_sgr`
+  — `CSI > 4 m` gefolgt von einem Zeichen darf kein `underline: true`
+  auf der Zelle hinterlassen.
+- **Verifiziert**: `cargo test -p axiomata-terminal` lief diesmal
+  tatsächlich durch (48/48 `screen`-Tests grün, inkl. Neuerung + Fix);
+  vereinzelte PTY-Teardown-Timeouts sind das in `pty.rs` bereits
+  dokumentierte Umgebungs-Flake (jeder Lauf ein anderer betroffener
+  Test), keine Regression. `clippy -p axiomata-terminal --tests -- -D
+  warnings` und `fmt --check` grün. `cargo check -p Axiomata-OS`
+  (src-tauri) grün — Wire-Format unverändert. Kein Frontend-Fix nötig:
+  `shouldDrawUnderline`/`cell.hyperlink` aus CP5r sind funktional
+  korrekt, das Problem lag ausschließlich im Rust-Parsing vor der
+  Cell-Erzeugung. Owner-Live-Test am Mac steht noch aus.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

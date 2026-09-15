@@ -752,12 +752,29 @@ impl Perform for Screen {
         // see the primary screen's *actual* pending-wrap state to save it
         // correctly in `enter_alt_screen`, not one this function already
         // clobbered to `false` on its way there.
-        let private = intermediates.first() == Some(&b'?');
-        if private {
-            match action {
-                'h' => self.set_private_mode(Self::first_param_or(params, 0), true),
-                'l' => self.set_private_mode(Self::first_param_or(params, 0), false),
-                _ => {}
+        //
+        // Any *other* non-empty intermediate byte (`>`, `<`, `=`, …) marks a
+        // different xterm/vendor private-sequence family this crate doesn't
+        // model at all — e.g. `CSI > 4 m` (xterm's `modifyOtherKeys` set,
+        // final byte `m`) or `CSI < u` (Kitty keyboard protocol query).
+        // These are NOT SGR just because they happen to share a final byte
+        // with one (real SGR, ECMA-48, never carries an intermediate byte).
+        // A real live-app bug (owner-reported, terminal text permanently
+        // underlined session-wide from the very first character): before
+        // this check existed, `CSI > 4 m` fell through to the generic
+        // `match action` below, which matched `'m' => apply_sgr(params)`
+        // on the final byte alone and misread it as bare SGR code 4 —
+        // underline — applied to `pen` at session start, before any content
+        // even printed, with nothing after it to ever turn underline back
+        // off again. Silently no-op'd here instead, same convention as the
+        // unrecognized-sequence fallback at the bottom of this method.
+        if let Some(&marker) = intermediates.first() {
+            if marker == b'?' {
+                match action {
+                    'h' => self.set_private_mode(Self::first_param_or(params, 0), true),
+                    'l' => self.set_private_mode(Self::first_param_or(params, 0), false),
+                    _ => {}
+                }
             }
             return;
         }
@@ -1272,7 +1289,17 @@ mod tests {
 
         // A hyperlink the alternate-screen program left open (no closing
         // OSC 8 before `?1049l`) must not leak back onto the primary
-        // screen's next printed characters either.
+        // screen's next printed characters either. A fresh `Screen` here,
+        // not a continuation of the one above: that one still has its own
+        // *primary*-screen hyperlink (`http://x`) open from the first half
+        // of this test, and restoring that on exit is the correct, wanted
+        // behaviour (see the positive round-trip test below) — reusing it
+        // here would conflate "primary's own still-open link correctly
+        // survives" with the actual thing under test, whether the
+        // alt-screen program's *own* unclosed link leaks out.
+        let mut screen = Screen::new(1, 10);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[?1049h");
         parser.advance(&mut screen, b"\x1b]8;;http://y\x1b\\link");
         parser.advance(&mut screen, b"\x1b[?1049l");
         parser.advance(&mut screen, b"prim");
@@ -1591,6 +1618,29 @@ mod tests {
         assert!(
             screen.cell(0, 1).hyperlink,
             "OSC 0 must not close the still-open hyperlink"
+        );
+    }
+
+    #[test]
+    fn a_non_dec_private_marker_csi_m_sequence_is_not_read_as_sgr() {
+        // Owner-reported live bug: real Claude Code CLI sessions sent
+        // `CSI > 4 m` (xterm's `modifyOtherKeys` set) once, right at session
+        // start, before any content printed. `csi_dispatch` only checked
+        // for the `?` DEC-private-mode marker before falling through to the
+        // generic `match action` block, so `> 4 m` fell through and matched
+        // `'m' => apply_sgr(params)` on the final byte alone — misreading
+        // it as bare SGR code 4 (underline), turned on at the very start of
+        // the session with nothing after it to ever turn it back off, so
+        // every subsequently printed character inherited a permanent
+        // underline. `>` (and `<`, `=`, …) must be treated the same as `?`:
+        // a vendor/private sequence family this crate doesn't model, not
+        // SGR, regardless of shared final byte.
+        let mut screen = Screen::new(1, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[>4ma");
+        assert!(
+            !screen.cell(0, 0).underline,
+            "CSI > 4 m must not be misread as SGR 4 (underline)"
         );
     }
 }
