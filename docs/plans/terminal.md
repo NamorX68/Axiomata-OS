@@ -42,10 +42,13 @@ Blockzeichen, per Ghostty-Screenshot-Vergleich vom Owner gefunden, siehe
 unten) ist ebenfalls KOMPLETT. Checkpoint 5l (COLORTERM=truecolor nie
 gesetzt) und Checkpoint 5m (echter gepatchter Nerd Font statt
 Icon-Fallback-Kette, direkte Ursache der abweichenden Kommandozeilen-
-Symbole/-Farben) sind ebenfalls beide KOMPLETT. Nächster Schritt:
-Live-Test von 5f+5f2+5g+5h+5i+5j+5k+5l+5m am Mac des Owners (bei 5l
-zusätzlich `cargo test`, das in dieser Session wegen eines
-Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze Kette
+Symbole/-Farben) sind ebenfalls beide KOMPLETT. Checkpoint 5n
+(Hintergrundfarben ignorierten das Theme komplett — echter Engine-Bug,
+vom Owner selbst per `printf`-Repro am echten Mac bewiesen, siehe unten)
+ist ebenfalls KOMPLETT. Nächster Schritt: Live-Test von
+5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n am Mac des Owners (bei 5l zusätzlich
+`cargo test`, das in dieser Session wegen eines Umgebungs-Linker-Problems
+nicht laufen konnte) — diese ganze Kette
 entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m, deren
 Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
 
@@ -711,6 +714,53 @@ eine Font-Fidelity-Lücke.
   U+F418) rendert jetzt korrekt abgerundet mit richtigen Icon-Formen —
   sichtbar besser als der alte Fallback-Ansatz. Reale Bestätigung am Mac
   (echter p10k-Prompt, nicht nur synthetische Testdaten) steht aus.
+
+## Checkpoint 5n — Hintergrundfarben ignorierten das Theme komplett (Owner-Live-Test am echten Mac, 2026-09-15) — KOMPLETT
+
+Nach Checkpoint 5m am echten Mac getestet: "Die Leiste sieht von den
+Symbolen her gut aus aber nicht was die Farben angeht" — mit Screenshot.
+Auf Nachfrage bestätigt: Catppuccin Mocha war die ganze Zeit ausgewählt.
+
+- **Root Cause, per direktem Reproduktions-Test vom Owner bestätigt**: In
+  `TerminalScreen.ts`s `draw()` bekam der Aufruf für die Zell-
+  **Hintergrundfarbe** (`resolveColor(cell.bg, defaultBg)`) gar kein
+  drittes Argument — `options` war also immer `undefined`, wodurch JEDE
+  indizierte Hintergrundfarbe (SGR `4x`/`48;5;n` — genau das, was
+  Prompt-Frameworks wie Powerlevel10k für ihre farbigen Segment-
+  Hintergründe nutzen) stillschweigend auf `resolveColor`s eigenen
+  Xterm-Standard zurückfiel, unabhängig vom gewählten Theme. Der
+  Geschwister-Aufruf für die **Vordergrundfarbe** ein paar Zeilen weiter
+  unten übergab `{ palette, bright: ... }` schon immer korrekt — genau
+  deshalb sahen Icons/Text theme-korrekt aus, während Hintergrund-Pills
+  es nie waren. Vom Owner selbst mit einem minimalen Repro bewiesen, das
+  die Shell komplett umgeht: `printf '\033[44m    \033[0m\n'` (reines SGR
+  44 = indizierter Hintergrund Blau) zeigte unter Catppuccin Mocha
+  weiterhin Xterms `#0000ee` statt Catppuccins `#89b4fa` — damit
+  zweifelsfrei als echter Engine-Bug bestätigt, nicht als p10k-/Shell-
+  Konfigurationsproblem.
+- **Fix**: neue exportierte, pure Funktion `resolveBgColor(color, fallback,
+  palette)` (wrapt `resolveColor(color, fallback, { palette })`), extra
+  herausgezogen für Unit-Testbarkeit — spiegelt das bestehende Muster
+  von `cellFont`/`drawBlockElement` in dieser Datei (`draw()` selbst
+  kann ohne echten Canvas-Context nicht getestet werden). `draw()`s
+  Hintergrund-Fill nutzt jetzt `resolveBgColor(cell.bg, defaultBg,
+  palette)` statt des kaputten nackten Aufrufs. Drei neue Tests
+  (indizierte Farbe gegen ein bewusst abweichendes Custom-Palette,
+  `"default"` fällt auf den Fallback zurück, True-Color-RGB bleibt
+  unverändert durchgereicht).
+- **Architektur-Review**: keine weiteren Fundstellen derselben Bug-Klasse
+  im gesamten Codebase (`resolveColor` hat nur genau diese zwei
+  Aufrufstellen; `terminal.svelte`s `defaultBg`/`cursorColor`/
+  `selectionColor` laufen nie über `resolveColor`, sondern über
+  CSS-Tokens/`THEME_DEFAULT_COLORS`). Nur zwei LOW-Findings (keine
+  Handlung nötig).
+- **Verifiziert**: `npm run check` + `npx vitest run` (378 Tests, 3 neu)
+  grün, kein Rust betroffen. Live mit `agent-browser` gegen echtes
+  Chromium, pixel-genau via `getImageData`: indizierte Hintergrundfarbe 4
+  unter Catppuccin Mocha rendert jetzt exakt `rgb(137,180,250)` =
+  `#89b4fa` (vorher `#0000ee`). Vom Owner am echten Mac als tatsächliche
+  Ursache bestätigt (per eigenem `printf`-Repro), volle Bestätigung nach
+  diesem Fix steht noch aus.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

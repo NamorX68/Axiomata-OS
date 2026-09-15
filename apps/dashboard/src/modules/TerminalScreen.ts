@@ -54,8 +54,10 @@ function indexedToCss(index: number, palette: readonly string[]): string {
 
 /** Options for `resolveColor` beyond the color itself and its fallback —
  *  both Checkpoint 5b additions, both optional so every pre-existing caller
- *  (this file's own `draw`'s background-colour resolution included, plus
- *  every test written before this checkpoint) keeps working unchanged. */
+ *  (every test written before that checkpoint included) keeps compiling
+ *  unchanged. Optional is not the same as "safe to omit for a *new*
+ *  indexed-colour caller" — see `resolveBgColor`'s own doc comment
+ *  (Checkpoint 5n) for a real bug that came from exactly that mix-up. */
 export interface ResolveColorOptions {
   /** The 16-colour table to resolve indices 0-15 against — one of
    *  `THEMES`' values, defaulting to `THEMES.xterm` (the original `ANSI_16`
@@ -442,6 +444,25 @@ function drawBlockElement(
   return false;
 }
 
+/** A cell's actual background colour, theme-aware — pulled out of `draw()`
+ *  specifically so this one call has a unit test (Checkpoint 5n, real bug,
+ *  owner-reported and live-tested at the real Mac app): `draw()`'s own
+ *  background-fill call once passed no `options` argument to `resolveColor`
+ *  at all, so *every* indexed background colour (a shell prompt's coloured
+ *  segments included, e.g. Powerlevel10k's pill backgrounds) silently fell
+ *  back to `resolveColor`'s own `THEMES[DEFAULT_THEME]` default, ignoring
+ *  `terminalSettings.theme` completely — while the sibling *foreground*
+ *  resolution a few lines below already passed `palette` correctly, so
+ *  only backgrounds were affected. Confirmed with a minimal reproduction
+ *  that bypasses the shell prompt entirely (raw SGR 44, indexed background
+ *  blue) still rendering xterm's colour under a different selected theme,
+ *  proving this was a real engine bug, not a shell/prompt-config issue.
+ *  `bright` is deliberately not a parameter here — never meaningful for
+ *  backgrounds, see `ResolveColorOptions.bright`'s own doc comment. */
+export function resolveBgColor(color: TermColor, fallback: string, palette: readonly string[]): string {
+  return resolveColor(color, fallback, { palette });
+}
+
 /**
  * Draws the whole grid: every cell's background rect, then (skipped for a
  * blank space — nothing to draw) its glyph, with an underline rect where
@@ -523,8 +544,24 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
         // background of its own (about to be filled with `defaultBg`) — see
         // `DrawOptions.backgroundOpacity`'s own doc comment for why an
         // explicit per-cell background (e.g. a colored prompt) stays opaque.
+        //
+        // Real bug, Checkpoint 5n (owner-reported, live-tested at the real
+        // Mac app): this call was missing `{ palette }` entirely — every
+        // *indexed* background colour (SGR `4x`/`48;5;n`, exactly what a
+        // shell prompt's coloured segments use) silently fell back to
+        // `resolveColor`'s own `THEMES[DEFAULT_THEME]` default (xterm),
+        // regardless of `terminalSettings.theme`. The *foreground* call a
+        // few lines below already passed `palette` correctly, which is
+        // exactly why text/icon colours looked theme-correct while segment
+        // *background* pills (blue, grey, …) stayed hard xterm colours no
+        // matter which theme — Catppuccin Mocha included — was selected.
+        // Confirmed with a minimal reproduction bypassing the shell prompt
+        // entirely (`printf '\033[44m    \033[0m\n'`, raw SGR 44 = indexed
+        // background blue): still rendered xterm's harsh `#0000ee`, not
+        // Catppuccin's `#89b4fa`, proving this was a real engine bug, not
+        // a shell/prompt-configuration issue.
         ctx.globalAlpha = cell.bg.type === "default" ? backgroundOpacity : 1;
-        ctx.fillStyle = resolveColor(cell.bg, defaultBg);
+        ctx.fillStyle = resolveBgColor(cell.bg, defaultBg, palette);
         ctx.fillRect(x, y, cw, ch);
         ctx.globalAlpha = 1;
       }

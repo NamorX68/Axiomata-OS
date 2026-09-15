@@ -4,6 +4,7 @@ import {
   BLOCK_ELEMENT_RECTS,
   cellFont,
   isCellSelected,
+  resolveBgColor,
   resolveColor,
   SHADE_ALPHA,
   selectionText,
@@ -96,6 +97,28 @@ describe("cellFont", () => {
   it("always uses the literal bold keyword for a bold cell, ignoring any configured weight", () => {
     expect(cellFont("14px monospace", true)).toBe("bold 14px monospace");
     expect(cellFont("14px monospace", true, 300)).toBe("bold 14px monospace");
+  });
+});
+
+describe("resolveBgColor (Checkpoint 5n regression guard)", () => {
+  it("resolves an indexed background colour against the given palette, not THEMES.xterm", () => {
+    // A custom palette that's deliberately different from xterm's own
+    // colour 4 at every index this test touches — if `resolveBgColor` ever
+    // silently fell back to the default palette again (the exact bug this
+    // guards against), this would fail by returning an xterm colour
+    // instead of the one this custom palette actually names.
+    const custom = THEMES.xterm.map((_, i) => `#${i.toString(16).padStart(2, "0")}0000`);
+    expect(custom[4]).not.toBe(THEMES.xterm[4]);
+    expect(resolveBgColor({ type: "indexed", index: 4 }, "#000000", custom)).toBe(custom[4]);
+  });
+
+  it("defers a 'default' background colour to the caller's fallback, same as resolveColor", () => {
+    expect(resolveBgColor({ type: "default" }, "#abcdef", THEMES.xterm)).toBe("#abcdef");
+  });
+
+  it("passes a truecolor rgb background through directly, ignoring the palette", () => {
+    const color: TermColor = { type: "rgb", r: 1, g: 2, b: 3 };
+    expect(resolveBgColor(color, "#000000", THEMES.xterm)).toBe("rgb(1, 2, 3)");
   });
 });
 
