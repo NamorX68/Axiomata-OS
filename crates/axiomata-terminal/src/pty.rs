@@ -51,11 +51,28 @@ impl PtySession {
     /// in place (unchanged from every earlier checkpoint).
     ///
     /// `extra_env` (Checkpoint 5b) applies additional environment variables
-    /// after `TERM=xterm-256color` — so an entry named `TERM` in the list
-    /// deliberately wins over the line above it, should that ever be
+    /// after `TERM=xterm-256color` and `COLORTERM=truecolor` (Checkpoint
+    /// 5l — see below) — so an entry named `TERM`/`COLORTERM` in the list
+    /// deliberately wins over the lines above it, should that ever be
     /// wanted, rather than being silently dropped. Applied in the given
     /// order; a repeated key follows `CommandBuilder`/`std::process::Command`'s
     /// own "last call wins" behaviour, not enforced separately here.
+    ///
+    /// `COLORTERM=truecolor` (Checkpoint 5l, owner-reported: a shell prompt
+    /// framework's colours/glyphs looked noticeably different than in
+    /// Ghostty or Kitty, even after the terminal-theme background/foreground
+    /// fix in Checkpoint 5k) — there's no formal terminfo capability for
+    /// 24-bit colour support, so most modern colour-aware CLI tools
+    /// (Powerlevel10k/Starship prompts, `chalk`-based Node tools, `git
+    /// diff --color`, …) check this de-facto-standard variable instead to
+    /// decide whether to emit real RGB escape sequences or fall back to a
+    /// 256-colour approximation. This engine has supported real 24-bit
+    /// `38;2;r;g;b`/`48;2;r;g;b` SGR sequences since Checkpoint 1 (see
+    /// `screen.rs`'s `Color::Rgb`) — this was simply never advertised, so a
+    /// capability-detecting tool had no way to know and likely picked
+    /// duller, approximated colours by default. Real terminal emulators
+    /// with truecolor support (Ghostty, Kitty, iTerm2, Alacritty, …) all set
+    /// this themselves, unprompted.
     pub fn spawn(
         rows: u16,
         cols: u16,
@@ -89,6 +106,7 @@ impl PtySession {
         });
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
         for (key, value) in extra_env {
             cmd.env(key, value);
         }
@@ -470,6 +488,110 @@ mod tests {
                 .recv_timeout(Duration::from_secs(5))
                 .expect("timed out waiting for the shell to echo the extra env var");
             assert!(String::from_utf8_lossy(&output).contains("hallo_welt"));
+        });
+    }
+
+    /// `TERM=xterm-256color` and `COLORTERM=truecolor` (Checkpoint 5l) both
+    /// actually reach the spawned shell's environment — `COLORTERM` is the
+    /// signal capability-detecting tools (Powerlevel10k/Starship prompts,
+    /// `chalk`-based Node tools, …) use to decide whether to emit real
+    /// 24-bit colour instead of a 256-colour approximation.
+    ///
+    /// Checks *both* variables together, not `COLORTERM` alone (architecture
+    /// review, Checkpoint 5l): `portable_pty::CommandBuilder` seeds its
+    /// environment from this test process's own *inherited* environment
+    /// before `PtySession::spawn`'s own `cmd.env(...)` calls run — and
+    /// `COLORTERM=truecolor` alone is a near-universal value in any modern
+    /// interactive dev shell (this repo's own `cargo test` runs from one),
+    /// so a test checking only that could pass by coincidental inheritance
+    /// even if `spawn`'s own line were deleted, proving nothing. `TERM` is
+    /// far less likely to coincidentally already equal the literal string
+    /// `"xterm-256color"` — most real terminals set their own
+    /// self-identifying value instead (`xterm-ghostty`, `xterm-kitty`,
+    /// `screen-256color` under `tmux`, …) — so asserting on *both* together
+    /// gives much stronger (though, being environment-dependent, still not
+    /// perfectly airtight) evidence that `spawn`'s own `cmd.env` calls are
+    /// what put these values there, not inheritance alone. A fully airtight
+    /// version would need the test to control its own process environment
+    /// before spawning, which needs `unsafe` `std::env::set_var` in this
+    /// crate's 2024 edition and its own real soundness caveats under
+    /// `cargo test`'s parallel execution — judged not worth it here.
+    #[test]
+    fn term_and_colorterm_reach_the_shell() {
+        with_watchdog(|| {
+            let mut session = PtySession::spawn(24, 80, Some("/bin/sh"), None, &[])
+                .expect("failed to spawn pty session");
+            let mut reader = session.try_clone_reader().expect("failed to clone reader");
+
+            session
+                .write(b"echo $TERM:$COLORTERM\n")
+                .expect("failed to write to pty");
+
+            let (tx, rx) = mpsc::channel();
+            thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                let mut collected = Vec::new();
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            collected.extend_from_slice(&buf[..n]);
+                            if String::from_utf8_lossy(&collected)
+                                .contains("xterm-256color:truecolor")
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let _ = tx.send(collected);
+            });
+
+            let output = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("timed out waiting for the shell to echo TERM/COLORTERM");
+            assert!(String::from_utf8_lossy(&output).contains("xterm-256color:truecolor"));
+        });
+    }
+
+    /// An `extra_env` entry named `COLORTERM` wins over the built-in
+    /// `truecolor` default — same "later entry with this name wins" contract
+    /// `spawn`'s own doc comment already establishes for `TERM`, now
+    /// actually exercised for `COLORTERM` too rather than just claimed.
+    #[test]
+    fn extra_env_can_override_colorterm() {
+        with_watchdog(|| {
+            let extra = vec![("COLORTERM".to_string(), "overridden".to_string())];
+            let mut session = PtySession::spawn(24, 80, Some("/bin/sh"), None, &extra)
+                .expect("failed to spawn pty session with extra env vars");
+            let mut reader = session.try_clone_reader().expect("failed to clone reader");
+
+            session
+                .write(b"echo $COLORTERM\n")
+                .expect("failed to write to pty");
+
+            let (tx, rx) = mpsc::channel();
+            thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                let mut collected = Vec::new();
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            collected.extend_from_slice(&buf[..n]);
+                            if String::from_utf8_lossy(&collected).contains("overridden") {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let _ = tx.send(collected);
+            });
+
+            let output = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("timed out waiting for the shell to echo the overridden COLORTERM");
+            assert!(String::from_utf8_lossy(&output).contains("overridden"));
         });
     }
 }
