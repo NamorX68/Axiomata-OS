@@ -87,6 +87,11 @@ import "@fontsource/anonymous-pro/700.css";
 // repack with no test coverage of its own content — an unreviewed minor
 // bump could silently change glyph coverage.
 import "@azurity/pure-nerd-font/pure-nerd-font.css";
+// The real, officially Nerd-Fonts-patched "JetBrainsMono Nerd Font Mono" —
+// see this file's own doc comment for the full story (Checkpoint 5m: a
+// single cohesive patched font, not a fallback chain, to genuinely match
+// what Ghostty/Kitty render).
+import "./modules/terminal-nerd-fonts.css";
 
 import App from "./App.svelte";
 import { startAgentBridge } from "./core/agent-bridge";

@@ -39,10 +39,15 @@ aus + Web-Font-Lade-Race, gefunden beim Erstellen von Demo-Screenshots für
 den Owner, siehe unten) ist ebenfalls KOMPLETT. Checkpoint 5k
 (Hintergrundfarbe folgte dem App- statt dem Terminal-Theme + kaputte
 Blockzeichen, per Ghostty-Screenshot-Vergleich vom Owner gefunden, siehe
-unten) ist ebenfalls KOMPLETT. Nächster Schritt: Live-Test von
-5f+5f2+5g+5h+5i+5j+5k am Mac des Owners — diese ganze Kette entstand aus
-genau solchen Live-Tests (oder, bei 5j/5k, deren Chromium-Ersatz), nicht
-aus automatisierter Verifikation allein.
+unten) ist ebenfalls KOMPLETT. Checkpoint 5l (COLORTERM=truecolor nie
+gesetzt) und Checkpoint 5m (echter gepatchter Nerd Font statt
+Icon-Fallback-Kette, direkte Ursache der abweichenden Kommandozeilen-
+Symbole/-Farben) sind ebenfalls beide KOMPLETT. Nächster Schritt:
+Live-Test von 5f+5f2+5g+5h+5i+5j+5k+5l+5m am Mac des Owners (bei 5l
+zusätzlich `cargo test`, das in dieser Session wegen eines
+Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze Kette
+entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m, deren
+Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -616,6 +621,96 @@ Logo (Blockzeichen-ASCII-Art).
   sechs neue Werte als korrekt gegen die jeweils offiziellen Theme-Farben;
   nur LOW-Findings (Zeilenlänge, Kommentar-Genauigkeit, Test-Beschreibung,
   fehlender Cross-Reference-Kommentar) — alle vor dem Commit behoben.
+
+## Checkpoint 5l — COLORTERM=truecolor nie gesetzt (gefunden bei der Ursachensuche zur Kommandozeile, 2026-09-15) — KOMPLETT
+
+Owner-Nachfrage nach Checkpoint 5k: "Wie erklärst du dir aber die
+Kommandozeile in der Shell dass sie sowohl was die Symbole angeht als
+auch die Farben komplett von der Kommandozeile z.B in Ghostty abweicht?"
+— mit Ghostty- und Kitty-Vergleichsscreenshots.
+
+- **Fix**: `crates/axiomata-terminal/src/pty.rs`s `PtySession::spawn`
+  setzt jetzt zusätzlich zu `TERM=xterm-256color` auch
+  `COLORTERM=truecolor`. Es gibt keine formale Terminfo-Fähigkeit für
+  24-Bit-Farbunterstützung — Capability-erkennende Tools
+  (Powerlevel10k/Starship-Prompts, `chalk`-basierte Node-Tools,
+  `git diff --color` u. a.) prüfen stattdessen diese De-facto-Standard-
+  Variable, um zu entscheiden, ob sie echte RGB-Escape-Sequenzen senden
+  oder auf eine blassere 256-Farben-Näherung zurückfallen. Diese Engine
+  unterstützt echte 24-Bit-`38;2;r;g;b`-Sequenzen bereits seit Checkpoint 1
+  — das wurde nur nie angekündigt. Echte Terminals mit True-Color
+  (Ghostty, Kitty, iTerm2, Alacritty) setzen diese Variable alle selbst.
+- **Zwei neue Rust-Tests**, die `TERM`+`COLORTERM` zusammen prüfen statt
+  nur `COLORTERM` allein (Architektur-Review-Nachbesserung: `COLORTERM=
+  truecolor` allein ist in praktisch jeder modernen Dev-Shell schon
+  vererbt vorhanden — ein Test, der nur das prüft, könnte auch dann grün
+  bleiben, wenn die eigentliche Fix-Zeile gelöscht würde. `TERM` ist als
+  zweite Bedingung deutlich unwahrscheinlicher zufällig ererbt, da die
+  meisten echten Terminals ihren eigenen, selbst-identifizierenden Wert
+  setzen). Ein vollständig wasserdichter Test bräuchte `unsafe
+  std::env::set_var` (in der 2024-Edition dieses Crates unsafe, mit
+  echten Soundness-Fallstricken unter paralleler Testausführung) —
+  bewusst nicht gemacht, stattdessen die Testabdeckung so weit gestärkt
+  wie ohne dieses Risiko sinnvoll möglich.
+- **Verifiziert**: `cargo check`/`cargo clippy -- -D warnings`/`cargo fmt
+  --check` alle sauber. `cargo test` konnte in dieser Session NICHT
+  laufen (ein Xcode-Lizenz-/Linker-Problem der Umgebung, unabhängig von
+  dieser Änderung, blockiert jedes Linking hier) — die beiden neuen Tests
+  sind also unausgeführt, nur durch sorgfältiges manuelles Review
+  (Architektur-Review + eigene Nachbesserung) abgesichert. Live-Bestätigung
+  am Mac (inkl. `cargo test`) steht aus.
+
+## Checkpoint 5m — Echter gepatchter Nerd Font statt Icon-Fallback-Kette (gefunden bei der Ursachensuche zur Kommandozeile, 2026-09-15) — KOMPLETT
+
+Direkter Vergleich (gezoomte Screenshots) von Ghostty, Kitty und unserem
+Terminal zeigte: Ghostty UND Kitty (zwei unabhängige, echte Terminal-
+Programme) rendern beide abgerundete Powerline-Pill-Segmente mit
+korrekten Icons; unseres zeigte eckige Kanten und mindestens ein falsches
+Icon-Glyph. Da Kitty (kein von uns gebautes Programm) genauso "richtig"
+aussah wie Ghostty, war klar: das ist kein Rendering-Engine-Bug, sondern
+eine Font-Fidelity-Lücke.
+
+- **Root Cause**: Checkpoint 5g bündelte `PureNerdFont`, eine reine
+  Icon-Schrift, als CSS-Fallback HINTER der eigentlich gewählten Schrift.
+  Der Owner's eigene Ghostty-Config zeigt aber `font-family =
+  "JetBrainsMono Nerd Font Mono"` — die ECHTE, offiziell von
+  Nerd-Fonts gepatchte Version von JetBrains Mono, wo Buchstaben UND
+  Icons vom selben Patch-Werkzeug in EINER Schriftdatei zusammengeführt
+  wurden. Ein CSS-Fallback über zwei separat entworfene Schriften kann
+  diese Pixel-genaue Konsistenz (Rundungen, Icon-Formen) grundsätzlich
+  nicht garantieren, egal wie vollständig die Fallback-Schrift ist.
+- **Fix**: die echten offiziellen `JetBrainsMonoNerdFontMono-{Thin,
+  Regular,Bold}`-Dateien aus dem offiziellen `ryanoasis/nerd-fonts`-
+  Release v3.5.1 (`JetBrainsMono.tar.xz`, "Mono"-Variante — erzwingt
+  Icon-Glyphen auf exakt eine Zeichenzelle Breite, im Unterschied zur
+  Standard-Variante) extrahiert, von TTF zu WOFF2 konvertiert
+  (`fonttools ttLib.woff2 compress`, ~1 MB pro Gewicht) und unter
+  `apps/dashboard/public/fonts/` gebündelt (Vite-Konvention für
+  unverändert durchgereichte statische Assets — kein npm-Paket für die
+  gepatchte Version verfügbar, nur für die ungepatchte Basisschrift). Neue
+  `terminal-nerd-fonts.css` mit den drei `@font-face`-Regeln, importiert
+  in `main.ts`. `terminalFonts.ts`s `BUNDLED_FONTS`-Katalog um einen
+  neuen ersten Eintrag erweitert (elf Fonts insgesamt jetzt). Lizenzen
+  (beide SIL OFL 1.1, wie jede andere gebündelte Schrift hier) liegen als
+  `.txt`-Dateien neben den Font-Dateien, wie von OFL bei Weiterverbreitung
+  gefordert.
+- **Architektur-Review-Nachbesserung**: Kommentar ergänzt, der den
+  bewussten Kompromiss `public/fonts/` (kein Cache-Busting) vs.
+  `src/assets/` (das bestehende Muster für andere gebündelte Binär-Assets,
+  MIT Cache-Busting über Vite's Modul-Graph) benennt — hier bewusst
+  `public/` gewählt, da die Dateien ohnehin fest im Tauri-App-Bundle
+  landen, nicht über einen langlebigen HTTP-Cache ausgeliefert werden.
+  Zusätzlich klargestellt, dass der bestehende `PureNerdFont`-Fallback
+  auch hinter dieser neuen, bereits vollständigen Schrift liegen bleibt —
+  harmlos (greift nie), kein Zeichen von Unvollständigkeit.
+- **Verifiziert**: `npm run check` + `npx vitest run` (375 Tests, 2 neu)
+  grün, kein Rust betroffen. Live mit `agent-browser` gegen echtes
+  Chromium: alle drei Gewichte in `document.fonts` registriert; eine
+  synthetische Testzeile mit echten Powerline-/Icon-Codepoints
+  (abgerundete Kappen U+E0B6/U+E0B4, Haus-Icon U+F015, Git-Branch-Icon
+  U+F418) rendert jetzt korrekt abgerundet mit richtigen Icon-Formen —
+  sichtbar besser als der alte Fallback-Ansatz. Reale Bestätigung am Mac
+  (echter p10k-Prompt, nicht nur synthetische Testdaten) steht aus.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

@@ -22,11 +22,12 @@
  *  it — not always literally 100/400/700 (`weights[0]` is each family's
  *  *lightest available* static weight, several publish no true Thin/100 at
  *  all), but always includes 400 (Regular) and 700 (Bold): every one of
- *  these ten has a real 700 face, so "Bold" (both `terminal-settings.svelte`'s
+ *  these eleven has a real 700 face, so "Bold" (both `terminal-settings.svelte`'s
  *  "Font weight" option and `TerminalScreen`'s separate, always-literal-
  *  `"bold"` SGR-bold rendering) is consistent across the whole set. */
 export interface BundledFont {
-  /** Exact `@fontsource` / CSS `font-family` name. */
+  /** Exact `@fontsource` (or, for the one Checkpoint 5m entry, `public/fonts/`-
+   *  served) CSS `font-family` name. */
   family: string;
   /** Ascending; informational (nothing currently branches on the exact
    *  values beyond documenting them in one place) — `terminal-settings.svelte`'s
@@ -37,6 +38,15 @@ export interface BundledFont {
 }
 
 export const BUNDLED_FONTS: readonly BundledFont[] = [
+  // Checkpoint 5m: the one *actually* Nerd-Fonts-patched entry in this list
+  // (see `terminal-nerd-fonts.css`'s own doc comment) — every other entry
+  // below relies on the separate `PureNerdFont` fallback (Checkpoint 5g)
+  // for icon glyphs, which owner-reported screenshot comparisons against
+  // Ghostty/Kitty showed rendering visibly different (wrong glyph shapes,
+  // square instead of rounded Powerline segment caps). This is the one to
+  // pick for the closest possible match to Ghostty — it's the exact same
+  // font family name the owner's own Ghostty config uses.
+  { family: "JetBrainsMono Nerd Font Mono", weights: [100, 400, 700] },
   { family: "JetBrains Mono", weights: [100, 400, 700] },
   { family: "IBM Plex Mono", weights: [100, 400, 700] },
   { family: "Fira Code", weights: [300, 400, 700] },

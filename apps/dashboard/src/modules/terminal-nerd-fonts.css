@@ -1,0 +1,87 @@
+/**
+ * "JetBrainsMono Nerd Font Mono" — Checkpoint 5m, owner-reported: even
+ * after Checkpoint 5g's `PureNerdFont` icon-only fallback, Powerline
+ * separators/icons in a Starship/Powerlevel10k prompt still visibly
+ * differed from Ghostty (wrong glyph shapes, square instead of rounded
+ * segment caps) — confirmed by directly comparing zoomed screenshots
+ * against both Ghostty and Kitty. Root cause: `PureNerdFont` is a small,
+ * unofficial, icons-only repack pinned to an old Nerd Fonts generation
+ * (see its own comment in `main.ts`) layered as a CSS fallback onto a
+ * *different* font (JetBrains Mono's own regular glyphs) — that's a
+ * fundamentally different, lower-fidelity approach than what Ghostty
+ * actually uses: the owner's own Ghostty config sets
+ * `font-family = "JetBrainsMono Nerd Font Mono"`, the *official*
+ * Nerd-Fonts-patched build of JetBrains Mono — one cohesive font file
+ * where every glyph (letters and icons alike) was patched together by the
+ * same tool at the same time, guaranteeing pixel-consistent alignment,
+ * weight, and rounding. A fallback *chain* across two separately-designed
+ * fonts can never guarantee that.
+ *
+ * These three weights (Thin/Regular/Bold, matching this project's existing
+ * convention for every other bundled font) are extracted from the official
+ * `ryanoasis/nerd-fonts` v3.5.1 release
+ * (github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1,
+ * `JetBrainsMono.tar.xz`), converted from TTF to WOFF2 (`fonttools
+ * ttLib.woff2 compress`) for a much smaller download — the "Mono" variant
+ * specifically (not the default "NerdFont" or "Propo" builds): it forces
+ * every icon glyph to exactly one character cell wide, which is what a
+ * fixed-grid terminal actually needs (the default variant allows some
+ * icons to render at double width, meant for proportional contexts) — and
+ * is the exact same variant name the owner's Ghostty config uses, so
+ * picking this option is a genuinely like-for-like comparison, not an
+ * approximation.
+ *
+ * Licensing (SIL Open Font License 1.1, redistribution-friendly, same
+ * licence family already used by every other bundled font in this app):
+ * `public/fonts/JETBRAINS-MONO-OFL.txt` (the base font's own licence) and
+ * `public/fonts/NERD-FONTS-LICENSE.txt` (the patch project's licence,
+ * itself OFL 1.1 for patched fonts) ship alongside the `.woff2` files —
+ * required to accompany redistributed copies under OFL's own terms.
+ *
+ * Served from `public/fonts/` (Vite's static-asset convention: files
+ * copied as-is, not processed through the module graph) rather than
+ * `@fontsource`-style npm packages like the other ten bundled fonts,
+ * since there is no npm-published package for the actual Nerd-Fonts-patched
+ * build — only the unpatched base font is on npm. `src/assets/` is this
+ * codebase's other existing home for bundled binary assets (`tauri.svg`,
+ * `vite.svg`, …), which *does* flow through Vite's module graph (hashed,
+ * cache-busted URLs) — deliberately not used here (architecture review,
+ * Checkpoint 5m): these `.woff2` files need a stable, hand-written path for
+ * the plain-CSS `@font-face` `url()`s above, and Vite's own docs recommend
+ * `public/` for exactly that "no processing, needs a fixed path" case. The
+ * trade-off: a future re-extraction under the same filenames (e.g. bumping
+ * to a newer Nerd Fonts release) has no automatic cache-busting the way an
+ * `import`-based asset would — acceptable here since these ship inside the
+ * Tauri app bundle itself, not served from a long-lived HTTP cache.
+ *
+ * `terminal.svelte`'s `currentFont()` still appends the Checkpoint 5g
+ * `PureNerdFont` fallback after *any* configured family, this one included
+ * — harmless, not a sign this font is somehow incomplete: the fallback
+ * simply never triggers once the primary family already covers every glyph
+ * it would supply, exactly like it already did for a `fillText` call that
+ * never needed to fall through at all.
+ */
+
+@font-face {
+  font-family: "JetBrainsMono Nerd Font Mono";
+  src: url("/fonts/JetBrainsMonoNerdFontMono-Thin.woff2") format("woff2");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrainsMono Nerd Font Mono";
+  src: url("/fonts/JetBrainsMonoNerdFontMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrainsMono Nerd Font Mono";
+  src: url("/fonts/JetBrainsMonoNerdFontMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

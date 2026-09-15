@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import { BUNDLED_FONTS } from "./terminalFonts";
 
 describe("BUNDLED_FONTS", () => {
-  it("has ten distinct family names, matching the owner's request", () => {
+  it("has eleven distinct family names (ten from the owner's original request, plus the Checkpoint 5m Nerd-Fonts-patched entry)", () => {
     const names = BUNDLED_FONTS.map((f) => f.family);
-    expect(names).toHaveLength(10);
-    expect(new Set(names).size).toBe(10);
+    expect(names).toHaveLength(11);
+    expect(new Set(names).size).toBe(11);
+  });
+
+  it("includes the Checkpoint 5m Nerd-Fonts-patched entry, matching the owner's own Ghostty config exactly", () => {
+    expect(BUNDLED_FONTS.some((f) => f.family === "JetBrainsMono Nerd Font Mono")).toBe(true);
   });
 
   it("every family bundles 400 (Regular) and 700 (Bold), ascending", () => {
