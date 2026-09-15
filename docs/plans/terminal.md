@@ -65,14 +65,24 @@ KOMPLETT. Owners erster echter Live-Test danach zeigte: der Screenshot
 sah nach CP5r unverändert aus (Text weiterhin durchgehend
 unterstrichen) — Ursache war aber gar nicht OSC-8, sondern ein
 unabhängiger, älterer CSI-Parsing-Bug, jetzt als eigener Checkpoint 5s
-gefixt (siehe unten) KOMPLETT. Nächster Schritt: Live-Test von
-5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q+5r+5s am Mac des Owners (bei 5l
-zusätzlich `cargo test`, das in jener Session wegen eines
-Umgebungs-Linker-Problems nicht laufen konnte; bei 5s lief `cargo test`
-erstmals wieder durch und deckte dabei nebenbei auch einen Bug in einem
-5r-eigenen Test auf, siehe 5s) — diese ganze Kette entstand aus genau
-solchen Live-Tests (oder, bei 5j/5k/5m/5p/5r, deren Chromium-Ersatz),
-nicht aus automatisierter Verifikation allein.
+gefixt (siehe unten) KOMPLETT. Owner hat direkt im Anschluss den ersten
+echten Live-Test der ganzen Kette gemacht: Underline-Problem bestätigt
+behoben; `vim`/`bpytop`/`neovim` laufen, Rendering laut Owner "nicht
+wirklich smooth" (noch nicht weiter eingegrenzt — evtl. das offene
+Performance-Tuning bei hohem Output, siehe unten); Maus-Auswahl,
+`Cmd+C`/`Cmd+V` und mehrere gleichzeitige Kacheln funktionieren alle;
+`Cmd+C` verursachte aber jedes Mal einen Systemton — gefixt als
+Checkpoint 5t (siehe unten) KOMPLETT. Nächster Schritt: das
+"nicht smooth"-Rendering bei vim/bpytop genauer eingrenzen (ruckelt es,
+flackert es, hängt die Eingabe nach?), außerdem weiterhin ausstehend:
+Scrollback-Gefühl explizit testen, danach Live-Test von
+5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q+5r+5s+5t insgesamt als
+abgeschlossen bestätigen (bei 5l zusätzlich `cargo test`, das in jener
+Session wegen eines Umgebungs-Linker-Problems nicht laufen konnte; bei 5s
+lief `cargo test` erstmals wieder durch und deckte dabei nebenbei auch
+einen Bug in einem 5r-eigenen Test auf, siehe 5s) — diese ganze Kette
+entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p/5r, deren
+Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -1121,6 +1131,38 @@ mitgeschnitten (`script -q -F ... claude`, dann `cat -v`/`od -c`).
   `shouldDrawUnderline`/`cell.hyperlink` aus CP5r sind funktional
   korrekt, das Problem lag ausschließlich im Rust-Parsing vor der
   Cell-Erzeugung. Owner-Live-Test am Mac steht noch aus.
+
+## Checkpoint 5t — Cmd+C piepste bei jedem Kopieren (Owner-Live-Test am Mac,
+2026-09-16) — KOMPLETT
+
+Owner-Feedback aus dem ersten echten Live-Test der 5f–5s-Kette: Maus-Drag-
+Auswahl und `Cmd+C`/`Cmd+V` funktionieren beide (Text landet korrekt in der
+Zwischenablage), `Cmd+C` verursacht aber jedes Mal zusätzlich einen
+System-Ton.
+
+- **Root Cause**: Die Terminal-Auswahl ist reiner interner JS-State
+  (`selStart`/`selEnd`), nie eine echte `document.getSelection()`, und
+  `src-tauri` definiert kein natives Edit-Menü (kein `Copy`-Menüpunkt mit
+  Key-Equivalent). `Cmd+C` fällt dadurch komplett auf WKWebViews
+  Standard-`copy:`-Verhalten zurück, findet dort aber nie eine echte
+  DOM-Selektion zum Kopieren — macOS quittiert eine nicht greifende
+  Tastenkombination mit dem bekannten Systemton ("Beep of Doom"), unabhängig
+  davon, dass der Maus-Drag (`handlePointerUp`) die Zwischenablage vorher
+  schon korrekt per `navigator.clipboard.writeText` befüllt hatte.
+- **Fix (`apps/dashboard/src/modules/terminal.svelte`)**: neuer
+  `oncopy={handleCopy}`-Handler auf demselben versteckten `<input
+  class="typer">`, das auch `onpaste` schon trägt — ruft immer
+  `e.preventDefault()` (verhindert, dass WKWebViews eigener,
+  wirkungsloser Fallback überhaupt läuft, unabhängig davon ob etwas
+  ausgewählt ist) und befüllt bei vorhandener Auswahl
+  `e.clipboardData.setData(...)` direkt (synchron, im selben Event —
+  bewusst nicht `navigator.clipboard.writeText`, das asynchron ist und mit
+  dem bereits verhinderten Default-Verhalten race'n würde). Kein
+  Verhaltens-Unterschied beim eigentlichen Kopieren, nur der Ton fällt weg.
+- **Verifiziert**: `npm run check` (0 Fehler) + `npx vitest run` (387/387,
+  unverändert — reines Event-Handling ohne neue reine Logik, die eigene
+  Testabdeckung verdient hätte) grün. Owner-Live-Bestätigung am Mac steht
+  aus.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

@@ -633,6 +633,32 @@
     }
   }
 
+  /** Cmd/Ctrl+C — owner-reported, live Mac test: it copied the drag
+   *  selection fine (`handlePointerUp` above already wrote it to the
+   *  clipboard on mouse-up, independent of any keypress) but *also* beeped
+   *  every time. Root cause: this canvas-based selection is plain internal
+   *  `selStart`/`selEnd` state, never a real `document.getSelection()` —
+   *  and the app defines no native Edit/Copy menu item (`src-tauri` has no
+   *  menu at all) for Cmd+C's key-equivalent to land on either. WKWebView's
+   *  own default `copy:` responder still runs, finds no genuine DOM
+   *  selection to act on, and macOS falls back to its "no responder
+   *  handled this key combo" system beep — independent of whether our own
+   *  JS copy already quietly succeeded via the drag above. The fix other
+   *  web-based apps use for exactly this: handle the native `copy` DOM
+   *  event ourselves and always `preventDefault()` it, the same way
+   *  `handlePaste` already does for `paste` — that's what stops WKWebView's
+   *  own fallback from ever running, silencing the beep. Populates
+   *  `clipboardData` directly (not `navigator.clipboard.writeText`, which
+   *  is async and would race the event's own default being prevented) when
+   *  there's a selection; a Cmd+C with nothing selected is silently a
+   *  no-op, matching real terminals rather than beeping either. */
+  function handleCopy(e: ClipboardEvent): void {
+    e.preventDefault();
+    if (!selStart || !selEnd) return;
+    const text = selectionText(displayRows(), selStart, selEnd);
+    if (text) e.clipboardData?.setData("text/plain", text);
+  }
+
   /** Wraps pasted text in bracketed-paste markers only if the program
    *  running in the shell actually asked for them (`bracketedPaste`) — see
    *  the component doc comment. The native paste event, not a keydown, so
@@ -929,6 +955,7 @@
       onkeydown={handleKeydown}
       oninput={handleInput}
       onpaste={handlePaste}
+      oncopy={handleCopy}
     />
   {/if}
 </div>
