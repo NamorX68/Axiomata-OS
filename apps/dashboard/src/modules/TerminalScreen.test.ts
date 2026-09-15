@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isCellSelected, resolveColor, selectionText, type TermCell, type TermColor } from "./TerminalScreen";
+import { cellFont, isCellSelected, resolveColor, selectionText, type TermCell, type TermColor } from "./TerminalScreen";
 import { THEMES } from "./terminalThemes";
 
 /** A minimal `TermCell` for selection tests — only `ch` matters there. */
@@ -71,6 +71,22 @@ describe("resolveColor", () => {
     expect(resolveColor({ type: "default" }, "#abcdef", { bright: true })).toBe("#abcdef");
     const color: TermColor = { type: "rgb", r: 10, g: 20, b: 30 };
     expect(resolveColor(color, "#fff", { bright: true })).toBe("rgb(10, 20, 30)");
+  });
+});
+
+describe("cellFont", () => {
+  it("leaves the font shorthand untouched when neither bold nor a weight is set", () => {
+    expect(cellFont("14px monospace", false)).toBe("14px monospace");
+    expect(cellFont("14px monospace", false, undefined)).toBe("14px monospace");
+  });
+
+  it("prefixes a configured weight for a non-bold cell", () => {
+    expect(cellFont("14px monospace", false, 300)).toBe("300 14px monospace");
+  });
+
+  it("always uses the literal bold keyword for a bold cell, ignoring any configured weight", () => {
+    expect(cellFont("14px monospace", true)).toBe("bold 14px monospace");
+    expect(cellFont("14px monospace", true, 300)).toBe("bold 14px monospace");
   });
 });
 

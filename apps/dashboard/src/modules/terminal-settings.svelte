@@ -52,6 +52,7 @@
   import type { AppInfo } from "../core/backend";
   import type { ModuleContext } from "../core/types";
   import { DEFAULT_CURSOR_STYLE } from "./TerminalScreen";
+  import { BUNDLED_FONTS } from "./terminalFonts";
   import { DEFAULT_THEME, THEMES } from "./terminalThemes";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
 
@@ -75,24 +76,56 @@
   };
   const themeNames = Object.keys(THEMES);
 
-  /** Bundled coding-monospace families (Checkpoint 5g, owner request: "wir
-   *  sollten einige MonoFonts... bereits mitliefern"). Real `@fontsource`
-   *  family names, matching the static weights bundled in `main.ts`
-   *  (100/400/700 → Thin/Regular/Bold — see that import's own comment for
-   *  why 100 is bundled even though nothing renders at it yet: this page
-   *  only picks a font *family* here, never a weight), so picking one of
-   *  these always has a real Bold face to render with, not just a
-   *  browser-synthesized fake bold. This `<select>` is a one-click shortcut
+  /** Family names for the "Bundled font" `<select>` below, derived from
+   *  `terminalFonts.ts`'s `BUNDLED_FONTS` — the single source of truth for
+   *  what's actually bundled (architecture review, Checkpoint 5h: this
+   *  used to be its own hand-typed copy of the same list, the exact
+   *  "two places to keep in sync" problem `terminalThemes.ts`'s `THEMES`
+   *  already exists to avoid for the "Farbschema" setting, see
+   *  `themeNames` right above). This `<select>` is a one-click shortcut
    *  into the "Font family" free-text field right below, not a separate
-   *  setting — picking a locally installed font (or clearing it back to the
-   *  theme default) still goes through that same field. */
-  const BUNDLED_FONTS = ["JetBrains Mono", "IBM Plex Mono"];
+   *  setting — picking a locally installed font (or clearing it back to
+   *  the theme default) still goes through that same field. */
+  const bundledFontNames = BUNDLED_FONTS.map((f) => f.family);
 
   function pickBundledFont(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement).value;
     if (!value) return; // "Custom…" placeholder — leave the text field as-is
     fontFamilyText = value;
     setFontFamily();
+  }
+
+  /** Checkpoint 5h's "Schriftgewicht" setting — the standard 9-step CSS
+   *  numeric font-weight scale, independent of which font (bundled or
+   *  custom-typed) is actually selected. Deliberately NOT limited to
+   *  whatever weights `main.ts` happens to have imported for the
+   *  currently-picked bundled font (that would mean recomputing this list
+   *  every time `fontFamilyText` changes, and would have nothing sensible
+   *  to offer at all for a custom-typed font this app knows nothing
+   *  about) — picking a weight this app didn't bundle a face for still
+   *  does something: the browser falls back to its own standard
+   *  nearest-available-weight matching, the same as any other web font
+   *  weight choice, not a broken/no-op setting. */
+  const FONT_WEIGHTS: { value: number; label: string }[] = [
+    { value: 100, label: "100 – Thin" },
+    { value: 200, label: "200 – Extra Light" },
+    { value: 300, label: "300 – Light" },
+    { value: 400, label: "400 – Regular" },
+    { value: 500, label: "500 – Medium" },
+    { value: 600, label: "600 – Semi Bold" },
+    { value: 700, label: "700 – Bold" },
+    { value: 800, label: "800 – Extra Bold" },
+    { value: 900, label: "900 – Black" },
+  ];
+
+  function setFontWeight(e: Event) {
+    const raw = (e.currentTarget as HTMLSelectElement).value;
+    // Empty ("Theme default") means "unset", same convention as `setFontSize`
+    // — `TerminalScreen.draw`'s `cellFont` omits the weight token entirely
+    // rather than defaulting to a hardcoded 400, so this stays a true "don't
+    // override anything" rather than a value that happens to look the same
+    // as most fonts' own natural default.
+    terminalSettings.update((c) => ({ ...c, fontWeight: raw ? Number(raw) : undefined }));
   }
 
   /** The workspace root, fetched once on mount purely to *suggest* a start
@@ -304,9 +337,9 @@
     </label>
     <label>
       Bundled font
-      <select value={BUNDLED_FONTS.includes(fontFamilyText) ? fontFamilyText : ""} onchange={pickBundledFont}>
+      <select value={bundledFontNames.includes(fontFamilyText) ? fontFamilyText : ""} onchange={pickBundledFont}>
         <option value="">Custom…</option>
-        {#each BUNDLED_FONTS as name (name)}
+        {#each bundledFontNames as name (name)}
           <option value={name}>{name}</option>
         {/each}
       </select>
@@ -314,6 +347,18 @@
     <label>
       Font family
       <input type="text" placeholder="theme default" bind:value={fontFamilyText} onchange={setFontFamily} />
+    </label>
+    <label>
+      Font weight
+      <select
+        value={typeof $terminalSettings.fontWeight === "number" ? String($terminalSettings.fontWeight) : ""}
+        onchange={setFontWeight}
+      >
+        <option value="">Theme default</option>
+        {#each FONT_WEIGHTS as w (w.value)}
+          <option value={w.value}>{w.label}</option>
+        {/each}
+      </select>
     </label>
     <label>
       Background opacity

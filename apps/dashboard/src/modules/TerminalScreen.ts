@@ -108,7 +108,21 @@ export interface CharMetrics {
  *  representative glyph is enough; "M" is the traditional choice (tall,
  *  wide, present in every font actually shipped as monospace). Falls back
  *  to `actualBoundingBox*`/a fixed ratio for the (now rare) browser missing
- *  `fontBoundingBox*` support, rather than throwing. */
+ *  `fontBoundingBox*` support, rather than throwing.
+ *
+ *  `font` here never carries a weight (it's always `currentFont()`'s
+ *  weight-free shorthand — see its own doc comment), even though
+ *  Checkpoint 5h's "Font weight" setting can make `draw()` actually paint
+ *  non-bold cells at a different weight than this measured. Documented
+ *  assumption (architecture review, Checkpoint 5h), not an oversight: a
+ *  real monospace font keeps the same advance width across static weights
+ *  by definition — that's what "monospace" means — so measuring at the
+ *  family's default weight and drawing at a different one is safe for
+ *  every bundled font. It is *not* guaranteed for an arbitrary
+ *  custom-typed "Font family" (this page's free-text field allows any
+ *  locally installed font) combined with an unusual weight that doesn't
+ *  hold that invariant — a known, accepted gap, not silently assumed to
+ *  be impossible. */
 export function measureChar(ctx: CanvasRenderingContext2D, font: string): CharMetrics {
   ctx.font = font;
   const m = ctx.measureText("M");
@@ -214,9 +228,17 @@ export interface DrawOptions {
    *  as a highlight, not an opaque colour swap. */
   selectionColor: string;
   /** A plain CSS font shorthand with no weight, e.g. `"14px ui-monospace"` —
-   *  `draw` prepends `"bold "` itself for bold cells, so a weight baked in
-   *  here would double up. */
+   *  `draw` (via `cellFont`) prepends a weight token itself per cell, so a
+   *  weight baked in here would double up (two weight tokens in one CSS
+   *  font shorthand is invalid and silently fails to parse). */
   font: string;
+  /** Checkpoint 5h's "Schriftgewicht" setting for *non-bold* cells — a
+   *  standard CSS numeric weight (100-900). Bold cells always render with
+   *  the literal `"bold"` keyword regardless of this value (see `cellFont`'s
+   *  own doc comment for why). `undefined` (the default, current pre-5h
+   *  behaviour) omits any weight token, leaving the family's own default
+   *  face — exactly the same shorthand this option didn't exist before. */
+  fontWeight?: number;
   /** Checkpoint 5b's "Cursor-Stil" setting. Defaults to `"block"` — the
    *  original, only Checkpoint 3-5a shape — when omitted. */
   cursorStyle?: CursorStyle;
@@ -255,6 +277,30 @@ export interface DrawOptions {
  *  canvas units — thin enough to read as a marker, not a second block. */
 const CURSOR_LINE_WIDTH = 2;
 
+/** Builds one cell's actual `ctx.font` value from the weight-free `font`
+ *  shorthand (`DrawOptions.font`) plus its bold/weight state. A bold cell
+ *  always gets the literal `"bold"` keyword, ignoring `weight` entirely —
+ *  SGR bold is its own distinct visual state (classic terminal behaviour,
+ *  same as before Checkpoint 5h), not "the configured regular weight plus
+ *  some". A non-bold cell gets `weight` prefixed as a plain numeric CSS
+ *  font-weight token when set, or no weight token at all when it isn't
+ *  (the family's own default face — unchanged pre-5h behaviour). Exported,
+ *  and kept as a small pure function, specifically so this one piece of
+ *  string-building logic has a plain unit test — `draw` itself can't:
+ *  it needs a real 2D canvas context, which jsdom doesn't implement, so
+ *  this file's canvas-drawing behaviour is verified live against real
+ *  Chromium via `agent-browser` instead (see `docs/plans/terminal.md`). */
+export function cellFont(font: string, bold: boolean, weight?: number): string {
+  if (bold) return `bold ${font}`;
+  // `!== undefined`, not a truthy check (architecture review, Checkpoint
+  // 5h) — a weight of `0` is invalid CSS and shouldn't reach here in
+  // practice (the caller, `terminal.svelte`'s `fontWeight` $derived,
+  // clamps to CSS's valid 1-1000 range), but this function is exported
+  // and independently unit-tested, so its own contract shouldn't silently
+  // rely on a caller-side guarantee it can't see.
+  return weight !== undefined ? `${weight} ${font}` : font;
+}
+
 /**
  * Draws the whole grid: every cell's background rect, then (skipped for a
  * blank space — nothing to draw) its glyph, with an underline rect where
@@ -283,6 +329,7 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
     cursorColor,
     selectionColor,
     font,
+    fontWeight,
     cursorStyle = DEFAULT_CURSOR_STYLE,
     palette = THEMES[DEFAULT_THEME],
     boldIsBright = false,
@@ -350,7 +397,7 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
       }
 
       if (cell.ch !== " ") {
-        ctx.font = cell.bold ? `bold ${font}` : font;
+        ctx.font = cellFont(font, cell.bold, fontWeight);
         ctx.fillStyle = isBlockCursor
           ? defaultBg
           : resolveColor(cell.fg, defaultFg, { palette, bright: cell.bold && boldIsBright });

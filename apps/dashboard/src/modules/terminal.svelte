@@ -234,8 +234,11 @@
    *  added upstream after that pin may still render blank. */
   const NERD_FONT_FALLBACK = '"PureNerdFont"';
 
-  /** A plain CSS font shorthand (no weight — `TerminalScreen.draw` adds
-   *  `"bold "` itself per cell) off the canvas's own resolved
+  /** A plain CSS font shorthand — no weight baked in, since `draw` (via
+   *  `TerminalScreen.cellFont`) prepends one itself per cell: the literal
+   *  `"bold"` keyword for a bold cell, or Checkpoint 5h's configured
+   *  `fontWeight` (see the `fontWeight` `$derived` below) for a non-bold
+   *  one — off the canvas's own resolved
    *  `--ax-font-mono`/`--ax-font-size-sm` — or `terminalSettings.fontSizePx`/
    *  `terminalSettings.fontFamily` (Checkpoint 5/5b's settings-side overrides,
    *  `terminal-settings.svelte`) in place of the theme's own size/family
@@ -292,6 +295,27 @@
     typeof $terminalSettings.opacity === "number" ? Math.min(100, Math.max(0, $terminalSettings.opacity)) / 100 : 1,
   );
 
+  /** `terminalSettings.fontWeight` clamped to CSS's valid 1-1000
+   *  `font-weight` range and rounded to a whole number — same "clamp
+   *  untrusted persisted data on read" pattern as `backgroundOpacity`
+   *  right above (architecture review, Checkpoint 5h): the settings
+   *  page's own `<select>` only ever writes one of nine known-good values,
+   *  but `terminalSettings` is untyped, schema-free persisted JSON
+   *  (`crates/axiomata-core/src/terminal_settings.rs` only checks for a
+   *  numeric `version`), so a hand-edited or foreign `terminal-settings.json`
+   *  could contain anything — `NaN`, a negative number, a value outside
+   *  the spec's own range. `cellFont` builds a raw CSS font shorthand
+   *  string from this value with no parsing/escaping of its own; an
+   *  invalid weight token there doesn't throw, it makes the whole
+   *  `ctx.font` assignment silently fail per the Canvas 2D spec, which
+   *  *keeps the previous font* rather than falling back to anything
+   *  sensible — a much worse failure mode than clamping here ever risks. */
+  const fontWeight = $derived(
+    typeof $terminalSettings.fontWeight === "number" && Number.isFinite($terminalSettings.fontWeight)
+      ? Math.min(1000, Math.max(1, Math.round($terminalSettings.fontWeight)))
+      : undefined,
+  );
+
   /** Measures the real character cell against the canvas (replacing
    *  Checkpoint 1's guessed average), sizes the canvas's backing store for
    *  the current device pixel ratio (same pattern as `graph/render.ts`'s
@@ -336,6 +360,7 @@
         cursorColor,
         selectionColor,
         font: currentFont(),
+        fontWeight,
         cursorStyle: currentCursorStyle(),
         palette: currentPalette(),
         // Owner decision (docs/plans/terminal.md, Checkpoint 5b): on by

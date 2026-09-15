@@ -19,24 +19,55 @@ import "./core/markdown-syntax.css";
 // render at undefined default axis values. See `graph/render.ts`'s
 // `drawGlyph`.
 import "@fontsource/material-symbols-rounded/400.css";
-// Terminal module (Checkpoint 5g, owner request: "einige MonoFonts... in
-// Thin, Normal und Bold") — two bundled coding-monospace families, in the
-// three weights the owner asked for (100/400/700 → Thin/Regular/Bold), not
-// every static weight `@fontsource` ships. Only Regular and Bold are
-// actually reachable today: `TerminalScreen.draw` only ever prepends
-// `"bold "` or nothing per cell (see its own doc comment), and the Terminal
-// settings picker (`terminal-settings.svelte`'s "Bundled font" `<select>`)
-// only chooses a font *family*, not a weight. The 100 (Thin) face is
-// bundled anyway per the literal request and for parity between the two
-// families — nothing in the app currently renders text at that weight.
-// Picked specifically because both, unlike e.g. Fira Code, publish a real
-// 100 (Thin) static weight.
-import "@fontsource/jetbrains-mono/100.css";
+// Terminal module — ten bundled coding-monospace families (Checkpoint 5g
+// started with two; Checkpoint 5h added eight more plus a real "Font weight"
+// setting, owner request: "auch gerne noch ein paar Monoschriften auch wenn
+// sie kein Thin etc. anbieten... so 10 Fonts wären toll"). Each imports its
+// lightest available static weight (not always literally 100/Thin — several
+// of these families don't publish one, see per-font notes below), 400
+// (Regular), and 700 (Bold) — every one of the ten actually has a real 700
+// face, so "Bold" (both the settings picker's own "Bold" weight option and
+// `TerminalScreen`'s separate SGR-bold rendering, which always uses the
+// literal CSS `"bold"` keyword regardless of the chosen regular weight) is
+// consistent across the whole set. `terminal-settings.svelte`'s "Font weight"
+// `<select>` (Checkpoint 5h) lets the owner actually choose a *regular-text*
+// weight from the full standard 100-900 scale — not limited to just these
+// three per font; a weight this file didn't import a face for still renders,
+// via the browser's own standard nearest-available-weight matching against
+// whatever *is* registered here (the normal way missing static weights are
+// handled for any web font, not a bug). `./modules/terminalFonts.ts`'s
+// `BUNDLED_FONTS` is the declared, single-source-of-truth family list this
+// block's imports must stay in sync with by hand (architecture review,
+// Checkpoint 5h) — Vite needs these as literal, statically-analyzable
+// `import` paths, so that catalog can't drive them directly; update both
+// when adding/removing a font.
+import "@fontsource/jetbrains-mono/100.css"; // has a real Thin (100)
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
-import "@fontsource/ibm-plex-mono/100.css";
+import "@fontsource/ibm-plex-mono/100.css"; // has a real Thin (100)
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/700.css";
+import "@fontsource/fira-code/300.css"; // lightest available is Light (300), no Thin/ExtraLight
+import "@fontsource/fira-code/400.css";
+import "@fontsource/fira-code/700.css";
+import "@fontsource/source-code-pro/200.css"; // lightest available is ExtraLight (200)
+import "@fontsource/source-code-pro/400.css";
+import "@fontsource/source-code-pro/700.css";
+import "@fontsource/roboto-mono/100.css"; // has a real Thin (100)
+import "@fontsource/roboto-mono/400.css";
+import "@fontsource/roboto-mono/700.css";
+import "@fontsource/space-mono/400.css"; // only ships Regular/Bold — owner's explicit "even without Thin" case
+import "@fontsource/space-mono/700.css";
+import "@fontsource/ubuntu-mono/400.css"; // only ships Regular/Bold — owner's explicit "even without Thin" case
+import "@fontsource/ubuntu-mono/700.css";
+import "@fontsource/inconsolata/200.css"; // lightest available is ExtraLight (200)
+import "@fontsource/inconsolata/400.css";
+import "@fontsource/inconsolata/700.css";
+import "@fontsource/victor-mono/100.css"; // has a real Thin (100)
+import "@fontsource/victor-mono/400.css";
+import "@fontsource/victor-mono/700.css";
+import "@fontsource/anonymous-pro/400.css"; // only ships Regular/Bold — owner's explicit "even without Thin" case
+import "@fontsource/anonymous-pro/700.css";
 // Icon-glyphs-only Nerd Font build (MIT, `azurity/pure-nerd-font` — not the
 // official nerd-fonts.com project, a small community repackaging of its
 // glyph set as a standalone ~1MB webfont meant to be layered onto any other
