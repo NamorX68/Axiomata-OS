@@ -58,11 +58,15 @@ per Owner-Screenshot-Vergleich mit Ghostty jetzt als echter OSC-8-
 Hyperlink-Unterschied bestätigt — Implementierung folgt als eigener
 Checkpoint 5r. Checkpoint 5q (Shift+Tab — Claude Codes eigener Modus-
 Wechsel-Shortcut — tat nichts, Owner-Feedback) ist ebenfalls KOMPLETT.
-Nächster Schritt: Live-Test von 5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q
-am Mac des Owners (bei 5l zusätzlich `cargo test`, das in dieser Session
-wegen eines Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze
-Kette entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p,
-deren Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
+Checkpoint 5r (OSC-8-Hyperlinks — permanentes Unterstreichen
+unterdrückt, Fortsetzung von Checkpoint 5p Problem 2, per
+Ghostty-Vergleichs-Screenshots vom Owner bestätigt) ist ebenfalls
+KOMPLETT. Nächster Schritt: Live-Test von
+5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q+5r am Mac des Owners (bei 5l
+UND 5r zusätzlich `cargo test`, das in dieser Session wegen eines
+Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze Kette
+entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p/5r, deren
+Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -964,6 +968,87 @@ Modi (Plan-Modus, Auto-Accept-Edits, …).
   Argumentation wie Checkpoint 5o (reine, in sich geschlossene
   Erweiterung eines bereits unit-getesteten, reinen Funktions-Patterns,
   identisch zum bewährten Checkpoint-5i-Muster für dieselbe Datei).
+
+## Checkpoint 5r — OSC-8-Hyperlinks: permanentes Unterstreichen unterdrücken
+(Owner-Feedback mit Ghostty-Vergleichs-Screenshots, 2026-09-15) — KOMPLETT
+
+Fortsetzung von Checkpoint 5p, Problem 2 (dort zurückgestellt). Owner hat
+per Screenshot-Vergleich bestätigt: Ghostty zeigt „Claude Code", „Sonnet
+5 · Claude Pro", den Pfad, „auto mode on", „shift+tab to cycle",
+„agents" usw. OHNE Unterstreichung, nur eine Hervorhebung (Hintergrund-
+Kasten) bei Hover. In unserem Screenshot war die Unterstreichung
+selektiv pro klickbarem Begriff (Satzzeichen dazwischen nicht
+unterstrichen) — das Muster von OSC-8-Hyperlinks, nicht von
+durchgehendem SGR-4-Styling eines ganzen Satzes.
+
+- **Root Cause**: Claude Codes CLI verpackt diese Begriffe in echte
+  OSC-8-Terminal-Hyperlinks, dabei üblicherweise zusätzlich in ein
+  literales SGR 4 (Unterstreichung) als Klartext-Fallback für Terminals
+  ohne Hyperlink-Unterstützung. Ghostty (wie die meisten
+  hyperlink-fähigen Terminals) unterdrückt dieses Fallback-Underline zu
+  Gunsten der eigenen Hover-Darstellung. Unser Rust-Engine kannte OSC 8
+  überhaupt nicht — jedes Unterstreichungs-Byte wurde einfach immer
+  gezeichnet.
+- **Fix (Rust, `crates/axiomata-terminal/src/screen.rs`)**: `Cell`
+  bekommt ein neues `pub hyperlink: bool`-Feld. `Screen` bekommt ein
+  neues `active_hyperlink: bool`-Feld — bewusst NICHT Teil von `pen`
+  (dort leben `bold`/`underline`/Farben, und `CSI 0 m` ersetzt `pen`
+  komplett via `self.pen = Cell::default()`): eine Hyperlink-Grenze ist
+  keine SGR-Eigenschaft, eine App darf Farben mitten in einem Link frei
+  ändern/zurücksetzen, ohne den Link zu beenden — nur ein erneutes OSC 8
+  mit leerer URI beendet ihn wirklich. Neue `osc_dispatch()`-Methode
+  erkennt OSC 8 (`params[0] == b"8"`) und setzt `active_hyperlink` je
+  nachdem, ob `params[2]` (die URI) nicht-leer ist. `print()` übernimmt
+  `active_hyperlink` explizit auf jede gedruckte Zelle (nicht über
+  `pen`). `blank_cell()` (Erase/Clear) setzt `hyperlink` immer auf
+  `false` — jetzt über `..Cell::default()` statt eines vollständig
+  ausgeschriebenen Feld-Literals (Architektur-Review-Fix, siehe unten).
+- **Fix (TS, `TerminalScreen.ts`)**: `TermCell` bekommt `hyperlink:
+  boolean`. Eine neue, exportierte reine Funktion `shouldDrawUnderline
+  (cell): boolean` (`cell.underline && !cell.hyperlink`) ersetzt die
+  bisherige Inline-Bedingung in `draw()` — kein Hover-Highlight (bräuchte
+  neues Maus-Tracking, das dieser Renderer noch nicht hat), aber
+  Ghosttys „nicht gehovert"-Zustand (kein Underline) ist bereits eine
+  klare Verbesserung gegenüber dem bisherigen Dauer-Underline.
+- **Architektur-Review (Sub-Agent)**: Ein echtes **CRITICAL**-Finding —
+  `active_hyperlink` wurde beim Alt-Screen-Wechsel (`CSI ?1049h`/`l`,
+  `vim`/`htop`/etc.) weder gesichert noch wiederhergestellt, obwohl
+  `pen` genau das an derselben Stelle bereits korrekt tut: ein auf der
+  primären Ebene offener Hyperlink hätte in die ersten Zeichen der
+  frischen Alt-Screen-Grid „durchgesickert", und ein vom
+  Alt-Screen-Programm offen gelassener Hyperlink hätte beim Verlassen
+  zurück auf die primäre Ebene durchgesickert — exakt dieselbe Bug-Klasse,
+  vor der der eigene Code-Kommentar zu `active_hyperlink` bereits für
+  `CSI 0 m` warnte, nur an der Alt-Screen-Grenze statt der
+  SGR-Reset-Grenze. Gefixt: `SavedPrimary` bekommt ein eigenes
+  `active_hyperlink`-Feld, `enter_alt_screen` sichert den alten Wert und
+  setzt für die frische Alt-Screen-Grid `false`, `exit_alt_screen`
+  stellt ihn wieder her — exakt gespiegelt an `pen`s eigener Behandlung.
+  Zwei neue Rust-Tests (Leck in beide Richtungen ausgeschlossen, plus ein
+  positiver Test: ein noch offener Hyperlink übersteht den
+  Alt-Screen-Roundtrip tatsächlich). Zwei MEDIUM-Findings ebenfalls
+  gefixt: `blank_cell()` auf `..Cell::default()` umgestellt (verhindert,
+  dass ein künftiges neues `Cell`-Feld dort vergessen werden kann); die
+  TS-Unterstreichungs-Bedingung in die benannte, jetzt unit-getestete
+  `shouldDrawUnderline()`-Funktion ausgelagert (reine Boolean-Logik ohne
+  Canvas-Abhängigkeit — hatte keinen Grund, ungetestet zu bleiben, anders
+  als das umliegende `fillRect`/`fillText`, das echtes Canvas braucht).
+  Ein LOW/INFO-Hinweis übernommen: Doc-Kommentar ergänzt, dass OSC 8s
+  `id=`-Parameter und die URI selbst bereits geparst, aber bewusst nicht
+  auf `Cell` gespeichert werden (nur als Bool für die
+  Underline-Entscheidung gebraucht) — als Fingerzeig für ein künftiges
+  Klick-zum-Öffnen- oder Hover-Feature, nicht als vergessene Arbeit.
+- **Verifiziert**: `cargo check`/`clippy -p axiomata-terminal --tests --
+  -D warnings`/`fmt --check` grün (kein `cargo test` in dieser Sandbox
+  möglich, bekanntes Xcode-Lizenz-Problem — 7 neue Rust-Tests liegen
+  bereit für den nächsten `cargo test` am Mac des Owners). `cargo check`
+  für `src-tauri` ebenfalls grün (Wire-Format `Cell`↔`TermCell` bleibt in
+  Sync). `npm run check` (0 Fehler) + `npx vitest run` (387/387, 3 neue
+  Tests für `shouldDrawUnderline`) grün. Live mit `agent-browser` gegen
+  echtes Chromium (vor dem Review-Refactor, mit temporärer
+  Devmock-Fixture, seither zurückgesetzt): eine `underline: true,
+  hyperlink: false`-Zelle blieb unterstrichen, eine `underline: true,
+  hyperlink: true`-Zelle verlor die Unterstreichung — beide wie erwartet.
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

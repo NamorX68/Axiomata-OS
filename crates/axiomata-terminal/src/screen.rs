@@ -66,6 +66,24 @@ pub struct Cell {
     pub bg: Color,
     pub bold: bool,
     pub underline: bool,
+    /// Whether this cell is part of an active OSC 8 terminal hyperlink —
+    /// Checkpoint 5r, owner-reported (Ghostty screenshot comparison):
+    /// Claude Code's own TUI wraps its clickable terms (its own name,
+    /// model/plan info, the working-directory path, action hints like
+    /// "auto mode on") in real OSC 8 hyperlinks, commonly also wrapped in a
+    /// literal SGR 4 (underline) as a plain-text fallback for terminals
+    /// with no hyperlink support at all. Ghostty (like most hyperlink-aware
+    /// terminals) *suppresses* that fallback underline for its own
+    /// hyperlink-hover styling instead — this crate had no OSC 8 handling
+    /// at all, so every one of those underline bytes rendered permanently,
+    /// looking visibly different from Ghostty. Deliberately just a `bool`
+    /// (not the actual URL/id): the only consumer so far is the renderer's
+    /// "was this underlined via a hyperlink, and if so don't draw the
+    /// underline" decision — no click-to-open support yet, which is the
+    /// only reason an actual URL would matter. See [`Screen::active_hyperlink`]
+    /// for how this gets set, and why it's tracked independently of `pen`'s
+    /// own SGR-reset lifecycle rather than as a `pen`-only attribute.
+    pub hyperlink: bool,
 }
 
 impl Default for Cell {
@@ -76,6 +94,7 @@ impl Default for Cell {
             bg: Color::Default,
             bold: false,
             underline: false,
+            hyperlink: false,
         }
     }
 }
@@ -89,6 +108,16 @@ struct SavedPrimary {
     cursor_col: usize,
     wrap_pending: bool,
     pen: Cell,
+    /// Checkpoint 5r architecture-review finding (CRITICAL): `pen` already
+    /// crossed this exact boundary correctly, but `active_hyperlink` didn't
+    /// — without this field, a hyperlink open on the primary screen at the
+    /// moment `vim`/`htop`/etc. took over would leak onto the alternate
+    /// screen's first characters, and a hyperlink the alternate-screen
+    /// program itself left open would leak back onto the primary screen on
+    /// exit. Same class of "boundary state survives past where it should"
+    /// bug `Screen::active_hyperlink`'s own doc comment already warns about
+    /// for `CSI 0 m` — just at this boundary instead of that one.
+    active_hyperlink: bool,
 }
 
 /// The screen: a fixed `rows`x`cols` grid of [`Cell`]s, a cursor position,
@@ -150,6 +179,20 @@ pub struct Screen {
     /// [`Self::take_bell`] — see that method's own doc comment for why this
     /// is a plain flag rather than a counter/queue.
     bell_pending: bool,
+    /// Whether an OSC 8 hyperlink is currently open (`ESC ] 8 ; params ;
+    /// URI ST` seen with a non-empty `URI`, not yet closed by a matching
+    /// empty-URI form) — Checkpoint 5r, applied to every [`Cell`] printed
+    /// while it's set (see [`Cell::hyperlink`]'s own doc comment for why).
+    /// Deliberately a field on `Screen` itself, *not* on `pen` alongside
+    /// `bold`/`underline`: `apply_sgr`'s `CSI 0 m` full reset replaces
+    /// `pen` wholesale (`self.pen = Cell::default()`), and a real terminal's
+    /// hyperlink boundary is *not* an SGR attribute — an app is free to
+    /// change colours (even reset them entirely) partway through a single
+    /// hyperlink's link text without ending the link; only a matching
+    /// empty-URI OSC 8 does that. Had this lived on `pen` instead, any
+    /// mid-hyperlink `CSI 0 m` would have silently (and wrongly) turned the
+    /// rest of that same link's text back into a non-hyperlink cell.
+    active_hyperlink: bool,
 }
 
 impl Screen {
@@ -172,6 +215,7 @@ impl Screen {
             bracketed_paste: false,
             scrollback_limit: SCROLLBACK_LIMIT,
             bell_pending: false,
+            active_hyperlink: false,
         }
     }
 
@@ -371,10 +415,16 @@ impl Screen {
             cursor_col: self.cursor_col,
             wrap_pending: self.wrap_pending,
             pen: self.pen,
+            active_hyperlink: self.active_hyperlink,
         });
         self.cursor_row = 0;
         self.cursor_col = 0;
         self.wrap_pending = false;
+        // The fresh alternate-screen grid starts blank, same as `pen`
+        // conceptually resetting to whatever the alt-screen program sets up
+        // itself — a hyperlink open on the primary screen has nothing to do
+        // with the alternate screen's own, entirely separate content.
+        self.active_hyperlink = false;
         self.in_alt_screen = true;
     }
 
@@ -392,6 +442,7 @@ impl Screen {
         self.cursor_row = saved.cursor_row.min(self.rows - 1);
         self.cursor_col = saved.cursor_col.min(self.cols - 1);
         self.pen = saved.pen;
+        self.active_hyperlink = saved.active_hyperlink;
         self.wrap_pending = saved.wrap_pending;
         self.in_alt_screen = false;
     }
@@ -449,14 +500,18 @@ impl Screen {
 
     /// An erased cell takes the *current* background colour, like a real
     /// terminal (`\x1b[42m\x1b[2J` clears to green) — not always
-    /// [`Cell::default`].
+    /// [`Cell::default`]. Built from `..Cell::default()` (architecture
+    /// review, Checkpoint 5r) rather than a full field-by-field literal —
+    /// the previous form had already silently drifted once (this method
+    /// existed before `hyperlink` did, and needed a manual edit to add
+    /// `hyperlink: false` when that field was introduced); every field
+    /// *not* explicitly named here now automatically inherits its default,
+    /// so a future field addition can't be forgotten at this call site the
+    /// way a fully-spelled-out literal would let it be.
     fn blank_cell(&self) -> Cell {
         Cell {
-            ch: ' ',
-            fg: Color::Default,
             bg: self.pen.bg,
-            bold: false,
-            underline: false,
+            ..Cell::default()
         }
     }
 
@@ -658,6 +713,11 @@ impl Perform for Screen {
         }
         let mut cell = self.pen;
         cell.ch = c;
+        // Not part of `pen` — see `Self::active_hyperlink`'s own doc
+        // comment for why it's applied here instead, on every printed
+        // cell, rather than living on `pen` and following its SGR-reset
+        // lifecycle.
+        cell.hyperlink = self.active_hyperlink;
         self.grid[self.cursor_row][self.cursor_col] = cell;
         self.cursor_col += width;
         if self.cursor_col >= self.cols {
@@ -735,6 +795,36 @@ impl Perform for Screen {
             // match) — silently no-op rather than corrupting the grid on
             // an unrecognized sequence.
             _ => {}
+        }
+    }
+
+    /// OSC 8 (`ESC ] 8 ; params ; URI ST`) — terminal hyperlinks, Checkpoint
+    /// 5r (see [`Screen::active_hyperlink`]'s own doc comment for the full
+    /// story). `vte` splits the OSC payload on `;` into `params`: `params[0]`
+    /// is the OSC number itself (`b"8"`), `params[1]` is OSC 8's own
+    /// `id=...`/`key=value` parameter list, `params[2]` is the URI —
+    /// present and non-empty opens a hyperlink, empty or altogether missing
+    /// closes one (the standard `ESC]8;;ST` closing form has an empty, not
+    /// missing, third segment, but a missing one is treated the same way
+    /// defensively rather than leaving a hyperlink stuck open on a
+    /// malformed sequence). Every other OSC number (window title, clipboard,
+    /// …) is silently ignored — same "unrecognized is a no-op" convention
+    /// `csi_dispatch` already uses, not a gap specific to this method.
+    ///
+    /// `params[1]` (the `id=...` parameter) and `params[2]` itself (the
+    /// actual URI) are both read here only far enough to decide open/closed
+    /// — neither is stored on [`Cell`]. Intentional, scoped-down debt, not
+    /// an oversight: [`Cell::hyperlink`] is a plain `bool` because the only
+    /// consumer today is the renderer's "don't draw the fallback underline"
+    /// decision, which needs no more than that. Click-to-open, or grouping
+    /// same-link cells for a Ghostty-style hover highlight across the whole
+    /// span, would need the URI (and possibly this `id=`) threaded through
+    /// [`Cell`]/the wire format for real — a future implementer picking
+    /// that up doesn't need to rediscover that both are available here and
+    /// simply not kept yet.
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if params.first() == Some(&b"8".as_slice()) {
+            self.active_hyperlink = params.get(2).is_some_and(|uri| !uri.is_empty());
         }
     }
 }
@@ -1161,6 +1251,55 @@ mod tests {
     }
 
     #[test]
+    fn alt_screen_boundary_does_not_leak_hyperlink_state_either_direction() {
+        // Architecture-review finding (CRITICAL, Checkpoint 5r): `pen`
+        // already crossed the alt-screen boundary correctly (see the test
+        // above); `active_hyperlink` originally didn't, which would leak a
+        // hyperlink open on one side of the switch onto unrelated content
+        // on the other side.
+        let mut screen = Screen::new(1, 10);
+        let mut parser = vte::Parser::new();
+
+        // A hyperlink open on the primary screen must not leak onto the
+        // alternate screen's own, entirely unrelated first characters.
+        parser.advance(&mut screen, b"\x1b]8;;http://x\x1b\\");
+        parser.advance(&mut screen, b"\x1b[?1049h");
+        parser.advance(&mut screen, b"alt");
+        assert!(
+            !screen.cell(0, 0).hyperlink,
+            "alt-screen content must not inherit the primary screen's open hyperlink"
+        );
+
+        // A hyperlink the alternate-screen program left open (no closing
+        // OSC 8 before `?1049l`) must not leak back onto the primary
+        // screen's next printed characters either.
+        parser.advance(&mut screen, b"\x1b]8;;http://y\x1b\\link");
+        parser.advance(&mut screen, b"\x1b[?1049l");
+        parser.advance(&mut screen, b"prim");
+        assert!(
+            !screen.cell(0, 0).hyperlink,
+            "primary-screen content must not inherit a hyperlink left open by the alt-screen program"
+        );
+    }
+
+    #[test]
+    fn a_hyperlink_still_open_on_the_primary_screen_survives_an_alt_screen_round_trip() {
+        // The positive counterpart of the leak-prevention test above: not
+        // just "no leak", but an actually-open hyperlink genuinely
+        // surviving the round trip, the same way `pen`'s colour/bold state
+        // already does (`alt_screen_hides_and_restores_the_primary_screen_exactly`).
+        let mut screen = Screen::new(1, 10);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b]8;;http://x\x1b\\a"); // hyperlink still open, not yet closed
+        parser.advance(&mut screen, b"\x1b[?1049h\x1b[?1049l"); // vim opens and immediately quits
+        parser.advance(&mut screen, b"b");
+        assert!(
+            screen.cell(0, 1).hyperlink,
+            "the still-open hyperlink from before the round trip must still be open after it"
+        );
+    }
+
+    #[test]
     fn alt_screen_overflow_never_reaches_scrollback() {
         let mut screen = Screen::new(1, 4);
         let mut parser = vte::Parser::new();
@@ -1351,5 +1490,107 @@ mod tests {
         assert_eq!(screen.scrollback_len(), 0, "mode 3 clears scrollback too");
         // The visible screen is still cleared, same as mode 2.
         assert_eq!(screen.line_text(0), "    ");
+    }
+
+    // Checkpoint 5r (owner-reported, Ghostty screenshot comparison): OSC 8
+    // terminal hyperlinks weren't tracked at all, so a hyperlink's own SGR-4
+    // fallback underline rendered permanently instead of being suppressed
+    // the way a hyperlink-aware terminal like Ghostty suppresses it.
+
+    #[test]
+    fn osc_8_marks_cells_printed_while_a_hyperlink_is_open() {
+        let mut screen = Screen::new(1, 20);
+        let mut parser = vte::Parser::new();
+        // ESC ] 8 ; <params> ; <uri> ST — an empty `id=` param list is fine,
+        // only the URI (third segment) matters to `osc_dispatch`.
+        parser.advance(
+            &mut screen,
+            b"before \x1b]8;;http://example.com\x1b\\link\x1b]8;;\x1b\\ after",
+        );
+        assert!(!screen.cell(0, 0).hyperlink, "'before' is plain text");
+        // "before " is 7 characters (indices 0-6); "link" starts at index 7.
+        for col in 7..11 {
+            assert!(
+                screen.cell(0, col).hyperlink,
+                "'link' should be marked, col {col}"
+            );
+        }
+        assert!(
+            !screen.cell(0, 11).hyperlink,
+            "' after' is plain text again"
+        );
+    }
+
+    #[test]
+    fn osc_8_with_bel_string_terminator_works_the_same_as_esc_backslash() {
+        // `ST` (String Terminator) is either `ESC \` or a bare BEL (`\x07`)
+        // — real-world emitters use both; this crate's own `execute` already
+        // treats BEL specially for `bell_pending`, so worth its own explicit
+        // coverage that OSC termination via BEL still reaches `osc_dispatch`
+        // correctly rather than being swallowed by that other handling.
+        let mut screen = Screen::new(1, 10);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b]8;;http://x\x07hi\x1b]8;;\x07");
+        assert!(screen.cell(0, 0).hyperlink);
+        assert!(screen.cell(0, 1).hyperlink);
+    }
+
+    #[test]
+    fn a_mid_hyperlink_sgr_reset_does_not_close_the_hyperlink() {
+        // The exact bug class `Screen::active_hyperlink`'s own doc comment
+        // warns against: had hyperlink state lived on `pen` instead of its
+        // own field, this `CSI 0 m` (full SGR reset) partway through the
+        // link text would have wrongly ended it early — a real terminal's
+        // hyperlink boundary is only ever another OSC 8, never an SGR reset.
+        let mut screen = Screen::new(1, 10);
+        let mut parser = vte::Parser::new();
+        parser.advance(
+            &mut screen,
+            b"\x1b]8;;http://x\x1b\\a\x1b[0mb\x1b]8;;\x1b\\c",
+        );
+        assert!(screen.cell(0, 0).hyperlink, "'a', before the reset");
+        assert!(
+            screen.cell(0, 1).hyperlink,
+            "'b', after a mid-hyperlink CSI 0 m — must still be open"
+        );
+        assert!(
+            !screen.cell(0, 2).hyperlink,
+            "'c', after the actual closing OSC 8"
+        );
+    }
+
+    #[test]
+    fn erasing_never_produces_a_hyperlink_cell() {
+        // `blank_cell` (erase/clear) must always yield `hyperlink: false`,
+        // independent of whatever hyperlink happened to be open when the
+        // erase happened — an erased cell has no character to be "part of a
+        // link" at all.
+        let mut screen = Screen::new(1, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b]8;;http://x\x1b\\ab\x1b[2K");
+        for col in 0..5 {
+            assert!(
+                !screen.cell(0, col).hyperlink,
+                "col {col} after erase-in-line"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrelated_osc_number_is_ignored_and_does_not_touch_hyperlink_state() {
+        // OSC 0 (window title) is the most common other OSC a real shell
+        // sends constantly (every prompt, in many configs) — must not be
+        // mistaken for OSC 8 or otherwise disturb `active_hyperlink`.
+        let mut screen = Screen::new(1, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(
+            &mut screen,
+            b"\x1b]8;;http://x\x1b\\a\x1b]0;some title\x1b\\b",
+        );
+        assert!(screen.cell(0, 0).hyperlink);
+        assert!(
+            screen.cell(0, 1).hyperlink,
+            "OSC 0 must not close the still-open hyperlink"
+        );
     }
 }

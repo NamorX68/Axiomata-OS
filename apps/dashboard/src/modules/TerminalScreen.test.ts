@@ -9,6 +9,7 @@ import {
   resolveColor,
   SHADE_ALPHA,
   selectionText,
+  shouldDrawUnderline,
   type TermCell,
   type TermColor,
 } from "./TerminalScreen";
@@ -16,7 +17,7 @@ import { THEMES } from "./terminalThemes";
 
 /** A minimal `TermCell` for selection tests — only `ch` matters there. */
 function cell(ch: string): TermCell {
-  return { ch, fg: { type: "default" }, bg: { type: "default" }, bold: false, underline: false };
+  return { ch, fg: { type: "default" }, bg: { type: "default" }, bold: false, underline: false, hyperlink: false };
 }
 
 function row(text: string): TermCell[] {
@@ -120,6 +121,27 @@ describe("resolveBgColor (Checkpoint 5n regression guard)", () => {
   it("passes a truecolor rgb background through directly, ignoring the palette", () => {
     const color: TermColor = { type: "rgb", r: 1, g: 2, b: 3 };
     expect(resolveBgColor(color, "#000000", THEMES.xterm)).toBe("rgb(1, 2, 3)");
+  });
+});
+
+describe("shouldDrawUnderline (Checkpoint 5r)", () => {
+  const base = cell("x");
+
+  it("draws the underline for an ordinary underlined cell", () => {
+    expect(shouldDrawUnderline({ ...base, underline: true, hyperlink: false })).toBe(true);
+  });
+
+  it("suppresses the underline for a hyperlink cell, even if underline is also set", () => {
+    // A hyperlink's underline byte is commonly just the emitting app's
+    // plain-text fallback styling (see this function's own doc comment) —
+    // `underline: true` alongside `hyperlink: true` is the realistic case
+    // this guards against, not an unreachable combination.
+    expect(shouldDrawUnderline({ ...base, underline: true, hyperlink: true })).toBe(false);
+  });
+
+  it("draws nothing for a plain, non-underlined cell regardless of hyperlink", () => {
+    expect(shouldDrawUnderline({ ...base, underline: false, hyperlink: false })).toBe(false);
+    expect(shouldDrawUnderline({ ...base, underline: false, hyperlink: true })).toBe(false);
   });
 });
 

@@ -24,13 +24,19 @@ export type TermColor =
   | { type: "indexed"; index: number }
   | { type: "rgb"; r: number; g: number; b: number };
 
-/** Mirrors `axiomata-terminal::screen::Cell`. */
+/** Mirrors `axiomata-terminal::screen::Cell`. `hyperlink` — Checkpoint 5r —
+ *  is `true` for a cell printed while an OSC 8 terminal hyperlink was open;
+ *  see `Cell::hyperlink`'s own doc comment on the Rust side for why the
+ *  renderer needs it (suppressing the always-on `underline` a hyperlink's
+ *  own SGR-4 fallback styling sets, matching Ghostty's own hyperlink
+ *  rendering instead of showing a permanent underline it doesn't). */
 export interface TermCell {
   ch: string;
   fg: TermColor;
   bg: TermColor;
   bold: boolean;
   underline: boolean;
+  hyperlink: boolean;
 }
 
 /** The xterm 256-colour cube's 6 possible levels per channel — indices
@@ -623,6 +629,28 @@ export function resolveBgColor(color: TermColor, fallback: string, palette: read
   return resolveColor(color, fallback, { palette });
 }
 
+/** Whether `draw()` should paint `cell`'s underline rect — pulled out into
+ *  its own named, unit-testable function (architecture review, Checkpoint
+ *  5r) since this is plain boolean logic with no canvas dependency at all,
+ *  unlike the `fillRect`/`fillText` calls around it that genuinely do need
+ *  a real `CanvasRenderingContext2D` (jsdom has none) and are only
+ *  live/Chromium-verified for that reason — this predicate has no such
+ *  excuse to go untested.
+ *
+ *  `cell.hyperlink` cells are excluded — Checkpoint 5r, owner-reported
+ *  (Ghostty screenshot comparison): an OSC 8 hyperlink's underline is
+ *  commonly just the emitting app's plain-text fallback styling for
+ *  terminals with no hyperlink support, and hyperlink-aware terminals
+ *  (Ghostty included) suppress it in favour of their own hover-only
+ *  styling rather than showing it permanently. No hover styling of our own
+ *  yet (no mouse-position tracking in this renderer) — matching Ghostty's
+ *  *un-hovered* state (no underline at all) is still a strict improvement
+ *  over the always-on underline this used to draw, and is exactly what the
+ *  owner's own side-by-side screenshots asked for. */
+export function shouldDrawUnderline(cell: TermCell): boolean {
+  return cell.underline && !cell.hyperlink;
+}
+
 /**
  * Draws the whole grid: every cell's background rect, then (skipped for a
  * blank space — nothing to draw) its glyph, with an underline rect where
@@ -748,7 +776,7 @@ export function draw(ctx: CanvasRenderingContext2D, options: DrawOptions): void 
           ctx.fillStyle = fg;
           ctx.fillText(cell.ch, x, y + ascent);
         }
-        if (cell.underline) {
+        if (shouldDrawUnderline(cell)) {
           ctx.fillRect(x, y + ascent + 1, cw, 1);
         }
       }
