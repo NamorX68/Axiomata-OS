@@ -655,7 +655,7 @@
    *  coverage instead of being reachable only through a live
    *  `KeyboardEvent`. */
   function handleKeydown(e: KeyboardEvent): void {
-    const bytes = keyToBytes(e.key, e.ctrlKey);
+    const bytes = keyToBytes(e.key, e.ctrlKey, e.shiftKey);
     if (!bytes) return;
     e.preventDefault();
     sendBytes(bytes);

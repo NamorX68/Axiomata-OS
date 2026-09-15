@@ -16,8 +16,12 @@
  * `null` means "not one of these", i.e. let the caller's `input`-event path
  * handle it instead (printable characters, IME composition, paste — see
  * `terminal.svelte`'s own `handleInput`).
+ *
+ * `shiftKey` defaults to `false` so every pre-existing call site (this
+ * file's own tests included) keeps compiling unchanged — only `Tab` reads
+ * it at all (see that case below).
  */
-export function keyToBytes(key: string, ctrlKey: boolean): Uint8Array | null {
+export function keyToBytes(key: string, ctrlKey: boolean, shiftKey: boolean = false): Uint8Array | null {
   if (ctrlKey && key.length === 1) {
     const code = key.toUpperCase().charCodeAt(0);
     if (code >= 65 && code <= 90) {
@@ -30,7 +34,17 @@ export function keyToBytes(key: string, ctrlKey: boolean): Uint8Array | null {
     case "Backspace":
       return new Uint8Array([0x7f]);
     case "Tab":
-      return new Uint8Array([0x09]);
+      // Owner-reported: Shift+Tab (Claude Code's own mode-cycling shortcut —
+      // plan mode / auto-accept-edits / etc.) did nothing in this terminal.
+      // Root cause: plain Tab's fixed 0x09 byte was returned unconditionally,
+      // `shiftKey` never even looked at. `CSI Z` (Cursor Backward Tabulation)
+      // is the standard xterm sequence a `shiftKey`-modified Tab produces —
+      // not "reverse-tab" in the literal terminal sense here, but the de
+      // facto convention readline/zle and most full-screen TUIs (Claude
+      // Code's own CLI included) already listen for specifically to detect
+      // Shift+Tab, since a browser's `KeyboardEvent` has no C0 byte of its
+      // own for a *shifted* Tab the way it does for plain Tab.
+      return shiftKey ? new Uint8Array([0x1b, 0x5b, 0x5a]) : new Uint8Array([0x09]); // \x1b[Z or \t
     case "Escape":
       // A single C0 byte, unlike arrow keys/etc. below (a full CSI
       // sequence, e.g. `\x1b[A`) — cheap to support and critical for vim's

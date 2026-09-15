@@ -53,13 +53,16 @@ Checkpoint 5p (kaputte Box-Drawing-Linien — derselbe Bug wie 5k, nur für
 Linienzeichen statt Füllzeichen, vom Owner per Screenshot der eigenen
 Claude-Code-Darstellung im Terminal gemeldet, siehe unten) ist ebenfalls
 KOMPLETT. Ein zweites, im selben Screenshot sichtbares Problem
-(ungewöhnlich viel/durchgehende Unterstreichung) ist NICHT gefixt —
-bewusst zurückgestellt, siehe Checkpoint 5p. Nächster Schritt: Live-Test
-von 5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p am Mac des Owners (bei 5l
-zusätzlich `cargo test`, das in dieser Session wegen eines
-Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze Kette
-entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p, deren
-Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
+(ungewöhnlich viel/durchgehende Unterstreichung) ist NICHT gefixt, aber
+per Owner-Screenshot-Vergleich mit Ghostty jetzt als echter OSC-8-
+Hyperlink-Unterschied bestätigt — Implementierung folgt als eigener
+Checkpoint 5r. Checkpoint 5q (Shift+Tab — Claude Codes eigener Modus-
+Wechsel-Shortcut — tat nichts, Owner-Feedback) ist ebenfalls KOMPLETT.
+Nächster Schritt: Live-Test von 5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q
+am Mac des Owners (bei 5l zusätzlich `cargo test`, das in dieser Session
+wegen eines Umgebungs-Linker-Problems nicht laufen konnte) — diese ganze
+Kette entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p,
+deren Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -913,8 +916,54 @@ zwei getrennte Probleme identifiziert:
   ein nicht-triviales neues Feature: OSC-8-Parsing, Pro-Zelle/Pro-Lauf-
   Hyperlink-Zustand, geänderte Unterstreichungs-Logik für Text innerhalb
   eines Hyperlinks) ohne vorherige Bestätigung, dass das tatsächlich der
-  Mechanismus ist. Nächster Schritt: Owner fragen, ob Ghostty bei
-  derselben Claude-Code-Ausgabe dasselbe Unterstreichungsmuster zeigt.
+  Mechanismus ist. Owner gefragt, ob Ghostty bei derselben Claude-Code-
+  Ausgabe dasselbe Unterstreichungsmuster zeigt.
+- **Owner-Antwort (mit Screenshots)**: Ghostty zeigt dieselben Begriffe
+  („Claude Code", „Sonnet 5 · Claude Pro", der Pfad, „auto mode on",
+  „shift+tab to cycle", „agents", …) OHNE Unterstreichung — stattdessen
+  nur eine Hervorhebung (farbiger Hintergrund-Kasten) beim Hover über
+  einen einzelnen Begriff. Das Muster in unserem eigenen Screenshot
+  bestätigt das zusätzlich unabhängig von der Owner-Aussage: es ist
+  selektiv pro klickbarem Begriff unterstrichen (Satzzeichen/Leerzeichen
+  dazwischen nicht) — genau die Struktur von OSC-8-Hyperlinks, nicht von
+  durchgehendem SGR-4-Styling eines ganzen Satzes. Damit bestätigt:
+  Mechanismus (b), siehe Checkpoint 5r unten (Hyperlink-Tracking selbst
+  ist eigenständig genug für einen eigenen Checkpoint, nicht rückwirkend
+  in 5p reingequetscht).
+
+## Checkpoint 5q — Shift+Tab (Moduswechsel in Claude Code) tat nichts
+(Owner-Feedback, 2026-09-15) — KOMPLETT
+
+„Was auch noch in Claude nicht geht ist Shift Tab um zwischen den
+Modien zu wechseln." — Claude Code (und viele andere volle TUIs)
+verwenden Shift+Tab als festen Shortcut zum Durchschalten zwischen
+Modi (Plan-Modus, Auto-Accept-Edits, …).
+
+- **Root Cause**: `terminalInput.ts`s `keyToBytes()` kannte gar kein
+  `shiftKey`-Argument — die `"Tab"`-Fallunterscheidung gab immer
+  bedingungslos das reine `0x09`-Byte zurück, unabhängig davon, ob
+  Shift gedrückt war. Ein Browser-`KeyboardEvent` liefert für ein
+  „geshiftetes" Tab kein eigenes C0-Byte (anders als z. B. Backspace);
+  das muss die Anwendung selbst unterscheiden und ausdrücklich anders
+  kodieren.
+- **Fix**: `keyToBytes()` bekommt einen neuen, auf `false` defaulteten
+  dritten Parameter `shiftKey` (jeder bestehende Aufrufer — auch alle
+  bisherigen Tests — bleibt dadurch unverändert kompilierbar). Bei
+  Shift+Tab wird jetzt `CSI Z` (`\x1b[Z`, "Cursor Backward Tabulation")
+  gesendet statt des reinen Tab-Bytes — die de-facto-Konvention, die
+  Readline/zle und praktisch jede volle TUI (Claude Codes eigene CLI
+  eingeschlossen) für Shift+Tab abfragt. `terminal.svelte`s
+  `handleKeydown` reicht jetzt `e.shiftKey` mit durch.
+- **Verifiziert**: `npm run check` (0 Fehler) + `npx vitest run`
+  (384/384, 2 neue Tests: Shift+Tab → `CSI Z`, plain Tab sowohl explizit
+  als auch über den `shiftKey`-Default weiterhin `0x09`, und Ctrl+Shift+
+  Tab — die Ctrl-Branche greift ohnehin nur bei einzeichigen Keys, also
+  weiterhin `CSI Z`) grün. Kein Sub-Agent-Review: drei Dateien
+  (`terminalInput.ts`, `terminal.svelte`, `terminalInput.test.ts`),
+  exakt am „mehr als drei Dateien"-Trigger, nicht darüber — dieselbe
+  Argumentation wie Checkpoint 5o (reine, in sich geschlossene
+  Erweiterung eines bereits unit-getesteten, reinen Funktions-Patterns,
+  identisch zum bewährten Checkpoint-5i-Muster für dieselbe Datei).
 
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.

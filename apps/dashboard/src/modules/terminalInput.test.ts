@@ -54,6 +54,21 @@ describe("keyToBytes", () => {
     expect(keyToBytes("Delete", false)).toEqual(new Uint8Array([0x1b, 0x5b, 0x33, 0x7e]));
   });
 
+  // Checkpoint 5q (owner-reported: Shift+Tab — Claude Code's own mode-
+  // cycling shortcut — did nothing in this terminal). `shiftKey` is a new,
+  // defaulted-to-`false` third parameter; every other `keyToBytes` call in
+  // this file (all two-argument) exercises that default and must keep
+  // returning plain Tab's 0x09, unchanged.
+  it("maps Shift+Tab to CSI Z, and plain Tab to 0x09 regardless of the shiftKey default", () => {
+    expect(keyToBytes("Tab", false, true)).toEqual(new Uint8Array([0x1b, 0x5b, 0x5a]));
+    expect(keyToBytes("Tab", false, false)).toEqual(new Uint8Array([0x09]));
+    expect(keyToBytes("Tab", false)).toEqual(new Uint8Array([0x09])); // shiftKey defaults to false
+  });
+
+  it("Ctrl+Shift+Tab still maps to CSI Z (Ctrl-letter branch only ever matches single-character keys)", () => {
+    expect(keyToBytes("Tab", true, true)).toEqual(new Uint8Array([0x1b, 0x5b, 0x5a]));
+  });
+
   it("arrow/navigation keys are unaffected by Ctrl (no Ctrl+key mapping exists for any of them)", () => {
     // `ctrlKey && key.length === 1` only matches single-character keys —
     // every key in this group is a multi-character `e.key` value, so the
