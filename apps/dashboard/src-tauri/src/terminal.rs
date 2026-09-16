@@ -17,13 +17,28 @@
 //! fetching history on demand — the live `on_output` channel only ever
 //! streams the *current* screen, scrollback is a separate, deliberately
 //! pull-based fetch (see that command's own doc comment for why).
+//!
+//! Checkpoint 6 changed *when* a snapshot goes out, not its shape: through
+//! CP5, every session's reader thread sent one full `screen_event` per raw
+//! PTY `read()` (up to 4096 bytes), completely unthrottled — a full-screen
+//! repaint from `bpytop`/`nvim`/`opencode` routinely spans many `read()`s in
+//! a couple of milliseconds, each one its own IPC round trip, and a
+//! genuinely mid-repaint, incomplete grid state could reach and get painted
+//! by the frontend before the burst's final chunk arrived (owner-reported:
+//! visible flicker on full-screen redraws, and non-smooth scrolling inside
+//! `nvim`, whose alt-screen redraws go over this exact channel). CP6 splits
+//! "feed the parser" (still the reader thread, on every `read()`) from
+//! "build and send a snapshot" (now [`spawn_flush_ticker`], one shared
+//! thread per app process, running at `FLUSH_INTERVAL`) via a per-session
+//! `dirty` flag on [`Session`] — see both items' own doc comments.
 
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, Once};
 use std::thread;
+use std::time::Duration;
 
 use axiomata_terminal::{Cell, PtySession, Terminal};
 use serde::{Deserialize, Serialize};
@@ -74,9 +89,20 @@ pub enum TerminalEvent {
 /// interprets its output. Kept together so a single registry lookup (and a
 /// single `Mutex` lock) reaches both — `terminal_resize` in particular needs
 /// to resize each in step.
+///
+/// `on_output`/`dirty` (CP6) are the coalescing mechanism between the reader
+/// thread and [`spawn_flush_ticker`]'s periodic flush: the reader thread
+/// only ever sets `dirty = true` after feeding bytes into `terminal`, never
+/// building or sending a snapshot itself — see that function's own doc
+/// comment for why a single shared ticker replaces the old "one full-grid
+/// event per PTY `read()`" behaviour. `on_output` is a `Clone` of the same
+/// channel `terminal_spawn`'s caller already holds, so the ticker can send
+/// on it without going through the reader thread at all.
 struct Session {
     pty: PtySession,
     terminal: Terminal,
+    on_output: Channel<TerminalEvent>,
+    dirty: bool,
 }
 
 /// Tauri-managed registry of running terminal sessions, keyed by the id
@@ -130,6 +156,68 @@ fn screen_event(terminal: &mut Terminal) -> TerminalEvent {
         bell,
     }
 }
+
+/// How often [`spawn_flush_ticker`] checks sessions for unsent output. 8ms
+/// is ~125Hz — comfortably above both 60Hz and 120Hz display refresh, so no
+/// display ever waits on this being the limiting factor, while still
+/// collapsing a burst of PTY `read()`s (a full-screen `bpytop`/`nvim`/
+/// `opencode` repaint routinely spans 5-15 of them within a millisecond or
+/// two) into a single snapshot instead of one per `read()` (CP6; see
+/// `docs/plans/terminal.md`'s CP6 entry for the flicker this fixes: a
+/// mid-repaint, genuinely incomplete grid state reaching the frontend and
+/// getting painted before the burst's final chunk arrived).
+const FLUSH_INTERVAL: Duration = Duration::from_millis(8);
+
+/// Runs forever on its own thread, one per app process (not per session —
+/// [`terminal_spawn`] starts this exactly once via `TICKER_STARTED`). Every
+/// `FLUSH_INTERVAL`, flushes every session whose `dirty` flag the reader
+/// thread has set: builds one `screen_event` snapshot and sends it, instead
+/// of the reader thread doing that on every single `read()`. A session whose
+/// `on_output.send` fails (its webview/channel is already gone) is removed
+/// here rather than left permanently `dirty` — the still-running shell's own
+/// reader thread then either sees the removal directly (`guard.get_mut`
+/// returns `None` on its next `read()`) or, more commonly, has its blocked
+/// `read()` unblocked first by `PtySession`'s `Drop` killing the child
+/// process — either way it ends the same way it always did when the
+/// frontend disappeared mid-stream.
+///
+/// Two accepted trade-offs, not addressed here (architecture review, CP6;
+/// fine for this app's actual scale — a personal desktop app with a handful
+/// of tiles — revisit only if that changes): this thread runs for the rest
+/// of the process's life once started, even after every session closes and
+/// the registry is empty again; and one sweep holds the registry lock for
+/// as long as it takes to clone+serialize *every* dirty session's grid, so
+/// several simultaneously busy terminals serialize their snapshot-building
+/// against each other and briefly block reader threads/`terminal_write`/
+/// `terminal_resize`, where pre-CP6 contention was naturally per-session.
+fn spawn_flush_ticker(app: AppHandle) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(FLUSH_INTERVAL);
+            let sessions = app.state::<TerminalSessions>();
+            let mut guard = sessions.lock();
+            let mut dead = Vec::new();
+            for (id, session) in guard.iter_mut() {
+                if !session.dirty {
+                    continue;
+                }
+                session.dirty = false;
+                let event = screen_event(&mut session.terminal);
+                if session.on_output.send(event).is_err() {
+                    dead.push(id.clone());
+                }
+            }
+            for id in dead {
+                guard.remove(&id);
+            }
+        }
+    });
+}
+
+/// Guards [`spawn_flush_ticker`] so it starts exactly once regardless of how
+/// many terminal tiles get spawned — one shared ticker serves every session
+/// in the registry, not one per session.
+static TICKER_STARTED: Once = Once::new();
 
 /// Spawns a new shell session in a `rows`x`cols` PTY and streams interpreted
 /// screen snapshots to `on_output` (no raw bytes — see `TerminalEvent`).
@@ -214,10 +302,18 @@ pub fn terminal_spawn(
         None => Terminal::new(rows, cols),
     };
 
+    TICKER_STARTED.call_once(|| spawn_flush_ticker(app.clone()));
+
     let id = next_session_id();
-    sessions
-        .lock()
-        .insert(id.clone(), Session { pty, terminal });
+    sessions.lock().insert(
+        id.clone(),
+        Session {
+            pty,
+            terminal,
+            on_output: on_output.clone(),
+            dirty: false,
+        },
+    );
 
     let closing_id = id.clone();
     thread::spawn(move || {
@@ -227,21 +323,34 @@ pub fn terminal_spawn(
                 Ok(0) | Err(_) => break,
                 Ok(n) => n,
             };
-            // Feeding the bytes and reading the resulting snapshot both
-            // need the same session, so this holds the registry lock for
-            // the whole step — brief (in-memory grid updates only, no I/O
-            // under the lock) and not contended by anything long-running.
+            // CP6: this thread only feeds the parser and marks the session
+            // dirty now — it no longer builds or sends a snapshot itself.
+            // `spawn_flush_ticker` does that, at most every `FLUSH_INTERVAL`,
+            // so a burst of `read()`s from one full-screen repaint collapses
+            // into one snapshot instead of one per `read()`.
             let sessions = app.state::<TerminalSessions>();
             let mut guard = sessions.lock();
             let Some(session) = guard.get_mut(&closing_id) else {
                 break;
             };
             session.terminal.feed(&buf[..n]);
+            session.dirty = true;
+        }
+        // One forced flush of whatever the ticker hasn't sent yet, before
+        // the session disappears — otherwise the frontend's last-seen screen
+        // could be a stale, pre-flush state rather than the shell's true
+        // final one (e.g. a program's exit-time cleanup redraw arriving in
+        // the same `read()` that returns `Ok(0)` next). Holding the lock
+        // across this flush and the removal below closes the same race
+        // `spawn_flush_ticker` itself is exposed to: it cannot flush a
+        // session that's already gone by the time it gets to it.
+        let sessions = app.state::<TerminalSessions>();
+        let mut guard = sessions.lock();
+        if let Some(session) = guard.get_mut(&closing_id)
+            && session.dirty
+        {
             let event = screen_event(&mut session.terminal);
-            drop(guard);
-            if on_output.send(event).is_err() {
-                break;
-            }
+            let _ = session.on_output.send(event);
         }
         // Removing the whole `Session` here — not just the `PtySession` —
         // also discards its `Terminal`'s scrollback the instant the shell
@@ -250,7 +359,8 @@ pub fn terminal_spawn(
         // as the intended behavior (owner decision, 2026-09-14): scrollback
         // dying with the shell is consistent with Checkpoint 0's original
         // "no docking, closed/ended means gone" call, not an oversight.
-        app.state::<TerminalSessions>().lock().remove(&closing_id);
+        guard.remove(&closing_id);
+        drop(guard);
         let _ = on_output.send(TerminalEvent::Exited);
     });
 
@@ -334,6 +444,29 @@ mod tests {
     use axiomata_terminal::Color;
     use std::sync::Arc;
     use std::thread;
+    use tauri::ipc::InvokeResponseBody;
+
+    /// Builds a `Channel<TerminalEvent>` that records every event it's sent
+    /// (as parsed JSON, so assertions can read `TerminalEvent`'s fields
+    /// without needing `Deserialize` on it — it currently only derives
+    /// `Serialize`, and adding `Deserialize` purely for tests isn't worth
+    /// the production-code change) instead of forwarding to a real webview.
+    /// Used by the CP6 tests below, which have no `AppHandle`/running Tauri
+    /// app to drive a real `Channel::send` through.
+    fn recording_channel() -> (Channel<TerminalEvent>, Arc<Mutex<Vec<serde_json::Value>>>) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&events);
+        let channel = Channel::new(move |body| {
+            let InvokeResponseBody::Json(json) = body else {
+                panic!("TerminalEvent always serializes as JSON, not raw bytes");
+            };
+            let value: serde_json::Value =
+                serde_json::from_str(&json).expect("TerminalEvent must serialize to valid JSON");
+            sink.lock().unwrap().push(value);
+            Ok(())
+        });
+        (channel, events)
+    }
 
     /// `next_session_id` is the only pure logic this file owns outside the
     /// `#[tauri::command]` bodies themselves — a plain, deterministic
@@ -379,9 +512,15 @@ mod tests {
             .expect("failed to spawn pty session for test");
         let terminal = Terminal::new(24, 80);
 
-        sessions
-            .lock()
-            .insert("term-test".to_string(), Session { pty, terminal });
+        sessions.lock().insert(
+            "term-test".to_string(),
+            Session {
+                pty,
+                terminal,
+                on_output: Channel::new(|_| Ok(())),
+                dirty: false,
+            },
+        );
         assert!(sessions.lock().contains_key("term-test"));
 
         let removed = sessions.lock().remove("term-test");
@@ -549,5 +688,179 @@ mod tests {
         // offset 1: one line further back into scrollback than the live view.
         let scrolled = terminal.screen().visible_rows(1);
         assert_eq!(line_of(&scrolled[0]), "two ");
+    }
+
+    /// CP6's whole point: several `feed()` calls between two flushes must
+    /// collapse into a single sent snapshot, carrying *all* of them, not one
+    /// snapshot per `feed()`. `spawn_flush_ticker` and the reader thread's
+    /// loop in `terminal_spawn` both need a live `AppHandle`/webview `State`
+    /// to run for real (same constraint the file-level review note on
+    /// `insert_find_then_remove_round_trips_a_session` already documents for
+    /// every command body here), so this drives a real `Session`'s
+    /// `dirty`/`terminal`/`on_output` fields directly, replaying the reader
+    /// thread's `feed` + `dirty = true` two-liner and the ticker's
+    /// `if dirty { ... }` flush verbatim — the exact statements those two
+    /// call sites run, just not through the thread/timer machinery around
+    /// them.
+    #[test]
+    fn dirty_flag_coalesces_two_feeds_into_one_flush_and_then_goes_quiet() {
+        let pty =
+            PtySession::spawn(1, 5, None, None, &[]).expect("failed to spawn pty session for test");
+        let (channel, events) = recording_channel();
+        let mut session = Session {
+            pty,
+            terminal: Terminal::new(1, 5),
+            on_output: channel,
+            dirty: false,
+        };
+        assert!(!session.dirty, "a fresh session has nothing pending");
+
+        // Two PTY reads' worth of bytes, exactly as the reader thread would
+        // feed them one at a time before the ticker ever gets a chance to
+        // run in between.
+        session.terminal.feed(b"a");
+        session.dirty = true;
+        session.terminal.feed(b"b");
+        session.dirty = true;
+        assert!(
+            session.dirty,
+            "still dirty after the second feed, same flag as after the first"
+        );
+
+        // One ticker pass: `spawn_flush_ticker`'s own `if !session.dirty { continue; }`
+        // / `session.dirty = false` / `screen_event` / `send` sequence.
+        if session.dirty {
+            session.dirty = false;
+            let event = screen_event(&mut session.terminal);
+            session
+                .on_output
+                .send(event)
+                .expect("recording channel never fails");
+        }
+        assert!(!session.dirty, "the flush must clear the flag");
+
+        let sent = events.lock().unwrap();
+        assert_eq!(
+            sent.len(),
+            1,
+            "two feeds between two flushes must produce exactly one Screen event, not two"
+        );
+        assert_eq!(sent[0]["type"], "screen");
+        assert_eq!(sent[0]["rows"][0][0]["ch"], "a");
+        assert_eq!(sent[0]["rows"][0][1]["ch"], "b");
+        drop(sent);
+
+        // A second ticker pass with no feed in between must stay quiet —
+        // nothing changed, so there's nothing to coalesce or send.
+        if session.dirty {
+            session.dirty = false;
+            let event = screen_event(&mut session.terminal);
+            session
+                .on_output
+                .send(event)
+                .expect("recording channel never fails");
+        }
+        assert_eq!(
+            events.lock().unwrap().len(),
+            1,
+            "a flush of a clean session must not send another event"
+        );
+    }
+
+    /// The reader thread's exit path (in `terminal_spawn`) forces one last
+    /// flush of a still-`dirty` session before removing it from the registry
+    /// and sending `Exited` — otherwise the frontend's last-seen screen could
+    /// be stale by up to `FLUSH_INTERVAL`. This replays that exact sequence
+    /// (same reasoning as the coalescing test above for why it's replayed
+    /// rather than called: no `AppHandle` to run the real reader thread with)
+    /// against a session with pending, unflushed output, and checks both the
+    /// event *and* its ordering ahead of `Exited`.
+    #[test]
+    fn forced_flush_on_exit_sends_the_pending_screen_before_exited_when_dirty() {
+        let sessions = TerminalSessions::default();
+        let pty =
+            PtySession::spawn(1, 5, None, None, &[]).expect("failed to spawn pty session for test");
+        let (channel, events) = recording_channel();
+        let mut terminal = Terminal::new(1, 5);
+        terminal.feed(b"z");
+        sessions.lock().insert(
+            "term-exit-dirty".to_string(),
+            Session {
+                pty,
+                terminal,
+                on_output: channel.clone(),
+                dirty: true,
+            },
+        );
+
+        // `terminal_spawn`'s reader thread, right before it removes the
+        // session and sends `Exited`.
+        let mut guard = sessions.lock();
+        if let Some(session) = guard.get_mut("term-exit-dirty")
+            && session.dirty
+        {
+            let event = screen_event(&mut session.terminal);
+            let _ = session.on_output.send(event);
+        }
+        guard.remove("term-exit-dirty");
+        drop(guard);
+        let _ = channel.send(TerminalEvent::Exited);
+
+        assert!(
+            sessions.lock().is_empty(),
+            "the session must be gone once the exit path has run"
+        );
+        let sent = events.lock().unwrap();
+        assert_eq!(
+            sent.len(),
+            2,
+            "a dirty session must get its pending screen flushed, then Exited"
+        );
+        assert_eq!(
+            sent[0]["type"], "screen",
+            "the forced flush must go out before Exited"
+        );
+        assert_eq!(sent[0]["rows"][0][0]["ch"], "z");
+        assert_eq!(sent[1]["type"], "exited");
+    }
+
+    /// Mirrors the test above, but for a session that has nothing pending
+    /// (already flushed by the ticker, or never fed anything) at the moment
+    /// the shell exits — the forced flush must be skipped entirely rather
+    /// than sending an extra, redundant Screen event ahead of `Exited`.
+    #[test]
+    fn forced_flush_on_exit_skips_the_extra_screen_event_when_not_dirty() {
+        let sessions = TerminalSessions::default();
+        let pty =
+            PtySession::spawn(1, 5, None, None, &[]).expect("failed to spawn pty session for test");
+        let (channel, events) = recording_channel();
+        sessions.lock().insert(
+            "term-exit-clean".to_string(),
+            Session {
+                pty,
+                terminal: Terminal::new(1, 5),
+                on_output: channel.clone(),
+                dirty: false,
+            },
+        );
+
+        let mut guard = sessions.lock();
+        if let Some(session) = guard.get_mut("term-exit-clean")
+            && session.dirty
+        {
+            let event = screen_event(&mut session.terminal);
+            let _ = session.on_output.send(event);
+        }
+        guard.remove("term-exit-clean");
+        drop(guard);
+        let _ = channel.send(TerminalEvent::Exited);
+
+        let sent = events.lock().unwrap();
+        assert_eq!(
+            sent.len(),
+            1,
+            "a clean session must only produce the Exited event, no extra Screen event"
+        );
+        assert_eq!(sent[0]["type"], "exited");
     }
 }

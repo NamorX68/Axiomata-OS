@@ -95,6 +95,18 @@
   real screen just freezes (no more cursor blink) and a small banner says
   so. Only `terminal_spawn` itself failing (no shell could even be started)
   is a fatal error that replaces the tile's content.
+
+  Checkpoint 6 changed how often `tick()` actually repaints, not any of the
+  above: it now calls `draw()` only when `needsRedraw` is set (see that
+  field's own comment for the full list of what sets it — new PTY output,
+  a cursor-blink toggle, bell flash, resize, theme change, scroll,
+  selection, or a visual-settings change) instead of unconditionally on
+  every `requestAnimationFrame`. The live channel itself also arrives
+  already coalesced: the backend's `spawn_flush_ticker`
+  (`src-tauri/src/terminal.rs`) collapses a whole burst of PTY reads from
+  one full-screen repaint into a single snapshot before `onOutput.onmessage`
+  ever sees it, so a genuinely mid-repaint, incomplete grid state can no
+  longer reach this component at all.
 -->
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
@@ -183,6 +195,21 @@
   let lastRows = 0;
   let lastCols = 0;
   let raf = 0;
+  /** CP6: `tick()` used to call `draw()` on every single
+   *  `requestAnimationFrame` unconditionally, forever — including a tile
+   *  sitting idle at a bare shell prompt, where nothing about the grid,
+   *  cursor, selection, or scroll position had changed since the last paint.
+   *  At a 120Hz display that's 120 full canvas clears-and-redraws a second
+   *  for a tile doing nothing. Every handler that actually changes what
+   *  should be on screen sets this `true`; `tick()` clears it right after
+   *  painting and otherwise skips `draw()` entirely. Starts `true` so the
+   *  very first frame after mount still paints. */
+  let needsRedraw = true;
+  /** The cursor-blink half-period `tick()` last painted with (`null` before
+   *  the first paint) — compared each frame so a blink toggle counts as a
+   *  reason to redraw without needing every other handler to also know
+   *  about `CURSOR_BLINK_MS`. */
+  let lastBlinkOn: boolean | null = null;
   /** Set in `onDestroy` — checked by the `document.fonts.load()` callback in
    *  `measureAndSize` (architecture review, Checkpoint 5j) so a font that's
    *  still loading when the tile is removed doesn't act on a stale
@@ -222,6 +249,11 @@
     defaultBg = v("--ax-surface-1", defaultBg);
     cursorColor = v("--ax-accent", cursorColor);
     selectionColor = v("--ax-accent-muted", selectionColor);
+    // CP6 architecture-review finding (HIGH): these four feed `draw()`
+    // directly, but nothing else re-triggers a paint when only the theme
+    // changed — without this, a live theme swap could sit unpainted
+    // indefinitely (worst case: `cursorBlink` off and an idle shell).
+    needsRedraw = true;
   }
 
   /** Appended as the last fallback to whatever font family is actually
@@ -394,6 +426,16 @@
     metrics = measureChar(context2d, font);
     canvasEl.width = Math.max(1, Math.round(rect.width * dpr));
     canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
+    // CP6 architecture-review finding (CRITICAL): reassigning either
+    // dimension resets the backing store to transparent per the HTML5
+    // canvas spec (the same fact CP5e's `clearRect` fix already relies on)
+    // — without this, `tick()`'s new "skip `draw()` unless something
+    // changed" gate could leave a tile blank through/after a drag-resize
+    // until an unrelated event (new PTY output, a blink toggle) happened to
+    // repaint it. Every caller (the `ResizeObserver` tile-drag callback, the
+    // font-settings `$effect`, this function's own font-load retry above)
+    // goes through here, so one flag here covers all of them.
+    needsRedraw = true;
     // `document.fonts` doesn't exist in every conceivable environment (old
     // WebKit, some embeddings) — treat its absence as "already fine",
     // matching this measurement's own pre-existing fallback behaviour
@@ -431,30 +473,42 @@
       // `false` and the cursor stays continuously visible instead of
       // toggling with `CURSOR_BLINK_MS`.
       const blinkOn = $terminalSettings.cursorBlink === false || Math.floor(now / CURSOR_BLINK_MS) % 2 === 0;
-      // No cursor while scrolled into history (nothing "live" to point at
-      // there) or once the shell has ended.
-      const cursor = !ended && sessionId && scrollOffset === 0 && blinkOn ? liveCursor : null;
-      const selection = selStart && selEnd ? { start: selStart, end: selEnd } : null;
-      const { fg: resolvedDefaultFg, bg: resolvedDefaultBg } = currentDefaultColors();
-      context2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-      draw(context2d, {
-        rows: displayRows(),
-        cursor,
-        selection,
-        metrics,
-        defaultFg: resolvedDefaultFg,
-        defaultBg: resolvedDefaultBg,
-        cursorColor,
-        selectionColor,
-        font: currentFont(),
-        fontWeight,
-        cursorStyle: currentCursorStyle(),
-        palette: currentPalette(),
-        // Owner decision (docs/plans/terminal.md, Checkpoint 5b): on by
-        // default — only `terminalSettings.boldIsBright === false` turns it off.
-        boldIsBright: $terminalSettings.boldIsBright !== false,
-        backgroundOpacity,
-      });
+      // CP6: a blink toggle is a real visual change even though nothing else
+      // set `needsRedraw` — compared unconditionally (not just while a
+      // cursor is actually being drawn) so this stays one simple check
+      // rather than duplicating `cursor`'s own "is a cursor even live right
+      // now" condition a second time here; redrawing every half-period on a
+      // tile with no live cursor to blink is negligible (~2/s).
+      if (blinkOn !== lastBlinkOn) needsRedraw = true;
+      lastBlinkOn = blinkOn;
+
+      if (needsRedraw) {
+        needsRedraw = false;
+        // No cursor while scrolled into history (nothing "live" to point at
+        // there) or once the shell has ended.
+        const cursor = !ended && sessionId && scrollOffset === 0 && blinkOn ? liveCursor : null;
+        const selection = selStart && selEnd ? { start: selStart, end: selEnd } : null;
+        const { fg: resolvedDefaultFg, bg: resolvedDefaultBg } = currentDefaultColors();
+        context2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+        draw(context2d, {
+          rows: displayRows(),
+          cursor,
+          selection,
+          metrics,
+          defaultFg: resolvedDefaultFg,
+          defaultBg: resolvedDefaultBg,
+          cursorColor,
+          selectionColor,
+          font: currentFont(),
+          fontWeight,
+          cursorStyle: currentCursorStyle(),
+          palette: currentPalette(),
+          // Owner decision (docs/plans/terminal.md, Checkpoint 5b): on by
+          // default — only `terminalSettings.boldIsBright === false` turns it off.
+          boldIsBright: $terminalSettings.boldIsBright !== false,
+          backgroundOpacity,
+        });
+      }
     }
     raf = requestAnimationFrame(tick);
   }
@@ -465,9 +519,11 @@
    *  own can of worms, not justified for a backlog item this size). */
   function triggerBellFlash(): void {
     bellFlash = true;
+    needsRedraw = true;
     clearTimeout(bellFlashTimeout);
     bellFlashTimeout = setTimeout(() => {
       bellFlash = false;
+      needsRedraw = true;
     }, BELL_FLASH_MS);
   }
 
@@ -478,6 +534,7 @@
     if (scrollOffset !== 0) {
       scrollOffset = 0;
       historyRows = null;
+      needsRedraw = true;
     }
   }
 
@@ -508,11 +565,13 @@
       if (event.type === "exited") {
         sessionId = null;
         ended = true;
+        needsRedraw = true;
         return;
       }
       liveRows = event.rows;
       liveCursor = { row: event.cursor_row, col: event.cursor_col };
       bracketedPaste = event.bracketed_paste;
+      needsRedraw = true;
       // `terminalSettings.bellEnabled` (Checkpoint 5b) defaults to on; only an
       // explicit `false` suppresses the flash.
       if (event.bell && $terminalSettings.bellEnabled !== false) triggerBellFlash();
@@ -587,7 +646,10 @@
     const seq = scrollFetchGuard.next();
     try {
       const rows = await ctx.invoke<TermCell[][]>("terminal_scrollback", { id: sessionId, offset });
-      if (scrollFetchGuard.isCurrent(seq)) historyRows = rows;
+      if (scrollFetchGuard.isCurrent(seq)) {
+        historyRows = rows;
+        needsRedraw = true;
+      }
     } catch {
       // The session most likely ended mid-fetch — `onOutput`'s `exited`
       // handling already covers telling the owner; nothing more to do here.
@@ -601,6 +663,7 @@
     const next = Math.max(0, scrollOffset + delta);
     if (next === scrollOffset) return;
     scrollOffset = next;
+    needsRedraw = true;
     if (scrollOffset === 0) {
       // Back at the bottom — `liveRows` has been current the whole time,
       // nothing to fetch.
@@ -631,6 +694,7 @@
     dragged = false;
     selStart = pos;
     selEnd = pos;
+    needsRedraw = true;
   }
 
   function handlePointerMove(e: PointerEvent): void {
@@ -639,6 +703,7 @@
     if (!pos) return;
     if (!selEnd || pos.row !== selEnd.row || pos.col !== selEnd.col) dragged = true;
     selEnd = pos;
+    needsRedraw = true;
   }
 
   /** A genuine drag copies the covered text; a plain click (no drag) just
@@ -653,6 +718,7 @@
     } else {
       selStart = null;
       selEnd = null;
+      needsRedraw = true;
     }
   }
 
@@ -720,6 +786,27 @@
     target.value = "";
     if (text) sendBytes(encoder.encode(text));
   }
+
+  /** CP6 architecture-review finding (HIGH): unlike `fontSizePx`/
+   *  `fontFamily`/`fontWeight` below, none of these five settings ever
+   *  change the cell's own pixel footprint or the row/column count, so they
+   *  never ran through the resize effect's `measureAndSize()` call (which
+   *  is what now sets `needsRedraw` as a side effect of clearing the
+   *  canvas) — but they *do* change what `draw()` paints on the next frame
+   *  it actually runs (`currentPalette`/`currentCursorStyle`/`boldIsBright`/
+   *  `backgroundOpacity`, all read fresh inside `tick()`). Before
+   *  `needsRedraw` existed this was harmless (`tick()` redrew every single
+   *  frame regardless); now, without this effect, a settings change here
+   *  could sit unpainted until something unrelated happened to flip
+   *  `needsRedraw` — indefinitely, if `terminalSettings.cursorBlink` is off. */
+  $effect(() => {
+    void $terminalSettings.theme;
+    void $terminalSettings.cursorStyle;
+    void $terminalSettings.cursorBlink;
+    void $terminalSettings.boldIsBright;
+    void $terminalSettings.opacity;
+    needsRedraw = true;
+  });
 
   /** Live-applies a `terminalSettings` change that can move the character
    *  cell's own pixel size from the settings side (`terminal-settings.svelte`):
