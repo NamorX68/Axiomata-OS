@@ -82,7 +82,20 @@ Session wegen eines Umgebungs-Linker-Problems nicht laufen konnte; bei 5s
 lief `cargo test` erstmals wieder durch und deckte dabei nebenbei auch
 einen Bug in einem 5r-eigenen Test auf, siehe 5s) — diese ganze Kette
 entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p/5r, deren
-Chromium-Ersatz), nicht aus automatisierter Verifikation allein.
+Chromium-Ersatz), nicht aus automatisierter Verifikation allein. Checkpoint
+5u (falsche Zeilen-/Spaltenzahl nach App-Neustart) und 5v (Startkachel etwas
+zu breit) sind ebenfalls KOMPLETT (siehe unten). Checkpoint 6 (siehe unten)
+greift das seit CP5t offene "Performance-Tuning bei sehr hohem Output"/
+"nicht smooth"-Thema konkret auf: Owner-Frage nach GPU-Rendering (à la
+Ghostty) führte zur eigentlichen Diagnose — ungedrosselte
+Backend-IPC-Emission pro PTY-`read()` (Flackern bei Full-Screen-Redraws)
+plus unbedingtes 60/120Hz-Frontend-Redraw auch im Leerlauf, beides gefixt,
+GPU/WebGL bewusst zurückgestellt (anderer Bottleneck, unverhältnismäßiger
+Aufwand). Direkt im Live-Test danach ein zweiter, unabhängiger Fund: Claude
+Codes eigene CLI-Ausgabe verlor fast alle Leerzeichen zwischen Wörtern —
+Ursache war ein fehlendes `CSI n G` (CHA) in `Screen::csi_dispatch`, per
+echtem PTY-Capture zweifelsfrei nachgewiesen und gefixt. Checkpoint 6 ist
+KOMPLETT (Owner-Bestätigung: `neovim`/`opencode`/`bpytop` "top").
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -1236,6 +1249,78 @@ jeweiligen Umsetzung noch eine eigene kurze Planungsrunde bekam (gleiche
 Arbeitsweise wie der Rest des Projekts, siehe `docs/architecture.md` und die
 Meilenstein-Historie: ein Teil nach dem anderen, nicht alles vorab im
 Detail) — das gilt unverändert für alles, was noch aussteht.
+
+## Checkpoint 6 — Flackern bei Full-Screen-Redraws + fehlende Leerzeichen in
+Claude Codes CLI-Ausgabe (Owner-Feedback, 2026-09-16) — KOMPLETT
+
+Owner-Feedback nach CP5t/5u/5v: allgemeine Performance-Frage mit Schwerpunkt
+Grafikausgabe — Flackern bei `bpytop`/`neovim`/`opencode`/Claude Code, wenn
+diese den ganzen Bildschirm neu zeichnen, und ein insgesamt nicht "smoothes"
+Scroll-Gefühl in `neovim`; Frage, ob GPU-Rendering (à la Ghostty) nötig wäre.
+
+### Problem 1: Flackern bei Full-Screen-Redraws + unnötiges Idle-Redraw
+
+- **Root Cause**: `terminal_spawn`s Reader-Thread
+  (`apps/dashboard/src-tauri/src/terminal.rs`) sendete pro einzelnem
+  PTY-`read()` (bis 4096 Byte) sofort einen vollständigen Grid-Snapshot per
+  IPC — völlig ungedrosselt. Ein Full-Screen-Redraw verteilt sich über 5-15
+  `read()`-Aufrufe; das Frontend (`terminal.svelte`) überschrieb `liveRows`
+  bei jedem Event unbedingt und `tick()` zeichnete bei jedem
+  `requestAnimationFrame` — dadurch konnte ein echter, unfertiger
+  Zwischenzustand eines mehrteiligen Redraws sichtbar gezeichnet werden,
+  bevor der nächste Chunk ankam. Unabhängig davon: `tick()` zeichnete
+  unbedingt bei jedem einzelnen rAF-Tick, auch im absoluten Leerlauf (leerer
+  Shell-Prompt) — auf dem 120Hz-Monitor des Owners 120 volle
+  Canvas-Neuzeichnungen pro Sekunde für nichts.
+- **Fix (Backend)**: Der Reader-Thread feedet nur noch den Parser und setzt
+  `dirty = true`. Ein einziger globaler Ticker-Thread (`spawn_flush_ticker`,
+  `FLUSH_INTERVAL` = 8ms ≈ 125Hz, passend für 60Hz- und 120Hz-Displays)
+  flusht alle "dirty" Sessions gesammelt — kollabiert einen Redraw-Burst zu
+  einem Snapshot statt vielen Zwischenzuständen. Erzwungener Flush beim
+  Session-Ende, damit der finale Screen-Zustand nicht verloren geht.
+- **Fix (Frontend)**: `tick()` zeichnet nur noch bei echter Änderung
+  (`needsRedraw`-Flag, gesetzt von jedem Handler, der etwas Sichtbares
+  ändert: neue Daten, Cursor-Blink-Wechsel, Bell-Flash, Selection, Scroll,
+  Resize, Theme-Wechsel, visuelle Settings). Architektur-Review deckte dabei
+  einen echten kritischen Bug auf: Resize (Tile-Drag, Font-Settings) leert
+  das Canvas, ohne `needsRedraw` zu setzen — hätte ohne Nachbesserung zu
+  einem dauerhaft leeren Terminal während/nach einem Resize führen können,
+  schlimmer als der Ursprungszustand. Ebenfalls nachgebessert: Theme-Wechsel
+  und generische visuelle Settings (Cursor-Stil/-Blink, Bold-is-Bright,
+  Opacity) lösen jetzt zuverlässig ein Redraw aus.
+- **GPU/WebGL**: bewusst zurückgestellt. Ghosttys eigentlicher Vorteil kommt
+  aus Glyph-Atlas-Caching, nicht aus dem hier gefundenen Bottleneck
+  (IPC-Emissionsrate + unbedingtes Redraw); ein GPU-Rewrite wäre ein
+  mehrwöchiger Umbau, unverhältnismäßig zum Scope dieses Moduls.
+- **Verifiziert**: `cargo build`/`clippy`/`fmt`/`test --workspace` grün (13
+  neue/bestehende Terminal-Glue-Tests inkl. 3 neuer Coalescing-Tests), `npm
+  run check` + `npx vitest run` (392/392) grün. Owner-Live-Test am Mac:
+  `neovim`/`opencode`/`bpytop` bestätigt "top".
+
+### Problem 2: Claude Codes eigene CLI-Ausgabe verlor fast alle Leerzeichen
+
+Owner-Rückmeldung direkt nach dem Live-Test von Problem 1: `neovim`/
+`opencode`/`bpytop` liefen einwandfrei, aber Claude Codes eigene
+CLI-Ausgabe zeigte an vielen Stellen keine Leerzeichen mehr zwischen
+Wörtern ("DieseMeldungkommtvomMCP-Server-Setup...").
+
+- **Root Cause**: per echtem PTY-Capture einer interaktiven Claude-Code-
+  Sitzung (`expect` + `script`, kontrollierte Terminalbreite) reproduziert.
+  Die rohen Bytes zeigten `Die␛[7GMeldung␛[15G„4␛[18GMCP...` — Claude Codes
+  eigene TUI streamt eine Zeile wortweise als `<Wort>` + `CSI nG` (CHA,
+  Cursor Horizontal Absolute) + `<nächstes Wort>`, statt Leerzeichen als
+  literale Zeichen zu drucken (verlässt sich darauf, dass die
+  überstrichenen Zellen bereits leer sind). `screen.rs`s `csi_dispatch`
+  implementierte `G` nicht — fiel durch den `_ => {}`-Catch-all, der Cursor
+  blieb stehen, das nächste Wort klebte direkt am vorherigen. `nvim`/
+  `bpytop`/`opencode` haben diese Sequenz nie zufällig genutzt, daher fiel
+  es nur bei Claude Code auf.
+- **Fix**: `'G'`/`` '`' `` (CHA/HPA — absolute Spalte, 1-indiziert) und `'d'`
+  (VPA — absolute Zeile, dieselbe Familie, proaktiv ergänzt) in
+  `Screen::csi_dispatch` implementiert.
+- **Verifiziert**: Regressionstest mit dem exakten aufgezeichneten Muster
+  (`cursor_horizontal_absolute_g_jumps_to_the_1_indexed_column_leaving_a_real_gap`),
+  alle 49 Screen-Tests + Build/Clippy grün.
 
 ## Context
 

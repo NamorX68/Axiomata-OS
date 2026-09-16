@@ -803,6 +803,34 @@ impl Perform for Screen {
                 self.cursor_row = (row as usize - 1).min(self.rows - 1);
                 self.cursor_col = (col as usize - 1).min(self.cols - 1);
             }
+            // CHA/HPA (`CSI n G` / `CSI n` + backtick) — absolute column on
+            // the current row, 1-indexed. Owner-reported, live-tested: the
+            // Claude Code CLI's own TUI streams a line word-by-word as
+            // `<word>CSI colG<next word>` — jumping straight to each word's
+            // start column instead of printing literal space characters in
+            // between (presumably relying on those cells already being
+            // blank) — so every gap this crate silently dropped (the
+            // catch-all below) rendered as no space at all: consecutive
+            // words glued together with zero whitespace, reproduced by
+            // capturing this CLI's raw PTY output and replaying it against
+            // this exact `match`. `nvim`/`bpytop`/`opencode` never happened
+            // to exercise this particular sequence, which is why only
+            // Claude Code's own output looked broken.
+            'G' | '`' => {
+                self.cursor_col = (Self::first_param_or(params, 1) as usize)
+                    .saturating_sub(1)
+                    .min(self.cols - 1)
+            }
+            // VPA (`CSI n d`) — absolute row, same column. Not yet observed
+            // from a live app the way `G` above was, but it's `G`'s direct
+            // vertical counterpart in the same ECMA-48 family and just as
+            // cheap/safe to support properly rather than leave silently
+            // dropped for whatever the next app to use it turns out to be.
+            'd' => {
+                self.cursor_row = (Self::first_param_or(params, 1) as usize)
+                    .saturating_sub(1)
+                    .min(self.rows - 1)
+            }
             'J' => self.erase_in_display(Self::first_param_or(params, 0)),
             'K' => self.erase_in_line(Self::first_param_or(params, 0)),
             'm' => self.apply_sgr(params),
@@ -928,6 +956,64 @@ mod tests {
         // Clamped, not panicking, when asked to overshoot the grid.
         parser.advance(&mut screen, b"\x1b[100B\x1b[100C");
         assert_eq!(screen.cursor(), (4, 4));
+    }
+
+    /// `CSI n G` (CHA/HPA — absolute column, 1-indexed) was silently
+    /// dropped by the catch-all in `csi_dispatch` until this test's fix —
+    /// reproduced from a real captured PTY transcript of the Claude Code
+    /// CLI's own TUI, which streams a line as `<word>` + `CSI colG` +
+    /// `<next word>` instead of printing literal space characters between
+    /// words (relying on those cells already being blank). Without `G`
+    /// moving the cursor, the next word printed immediately after the
+    /// previous one with no gap at all — owner-reported as "words run
+    /// together with no spaces", specific to this one CLI's output and not
+    /// `nvim`/`bpytop`/`opencode`, which never happened to exercise this
+    /// sequence.
+    #[test]
+    fn cursor_horizontal_absolute_g_jumps_to_the_1_indexed_column_leaving_a_real_gap() {
+        let mut screen = Screen::new(1, 20);
+        let mut parser = vte::Parser::new();
+        // Mirrors the captured transcript exactly: "Die" then CHA to column
+        // 7 (1-indexed, i.e. index 6) before "Meldung" — a real gap of
+        // blank cells must separate the two words, not printed adjacently.
+        parser.advance(&mut screen, b"Die\x1b[7GMeldung");
+        assert_eq!(screen.line_text(0), "Die   Meldung       ");
+        assert_eq!(screen.cursor(), (0, 13));
+
+        // Clamped, not panicking, when asked to overshoot the grid — same
+        // convention as every other cursor-movement sequence above.
+        parser.advance(&mut screen, b"\x1b[100G");
+        assert_eq!(screen.cursor(), (0, 19));
+    }
+
+    /// HPA (`` CSI n ` ``) shares `G`'s exact code path in `csi_dispatch` —
+    /// this is here so that path has its own direct test under its other
+    /// final byte too, not just via `G` above, even though no live app has
+    /// been observed sending it yet (`csi_dispatch`'s own doc comment on the
+    /// `'G' | '`'` arm explains why they're handled together).
+    #[test]
+    fn horizontal_position_absolute_backtick_behaves_exactly_like_cha() {
+        let mut screen = Screen::new(1, 20);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"Die\x1b[7`Meldung");
+        assert_eq!(screen.line_text(0), "Die   Meldung       ");
+        assert_eq!(screen.cursor(), (0, 13));
+    }
+
+    /// VPA (`CSI n d`) — `G`'s vertical counterpart, same absolute-position-
+    /// on-the-current-line-or-column family, added proactively alongside
+    /// `G` rather than left silently dropped for whatever the next app to
+    /// use it turns out to be.
+    #[test]
+    fn vertical_position_absolute_d_jumps_to_the_1_indexed_row_leaving_the_column_put() {
+        let mut screen = Screen::new(5, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[3C\x1b[4d");
+        assert_eq!(screen.cursor(), (3, 3));
+
+        // Clamped, not panicking, when asked to overshoot the grid.
+        parser.advance(&mut screen, b"\x1b[100d");
+        assert_eq!(screen.cursor(), (4, 3));
     }
 
     #[test]
