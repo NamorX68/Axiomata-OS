@@ -131,11 +131,21 @@ export interface CharMetrics {
  *  locally installed font) combined with an unusual weight that doesn't
  *  hold that invariant — a known, accepted gap, not silently assumed to
  *  be impossible. */
-export function measureChar(ctx: CanvasRenderingContext2D, font: string): CharMetrics {
+/** `round` defaults to `true` — the live terminal grid (`terminal.svelte`)
+ *  always wants that (see the block-character reasoning below) and is by
+ *  far the more common caller. `modules/index.ts`'s `computeTerminalDefaultSize`
+ *  passes `false`: it multiplies this single glyph's metrics by
+ *  `TERMINAL_DEFAULT_COLS`/`ROWS` to estimate a whole tile's starting pixel
+ *  size *before* any tile/canvas exists, and rounding one glyph to a whole
+ *  pixel first amplifies that rounding error by the column/row count (e.g.
+ *  a true 8.6px width rounding up to 9px becomes a 48px-too-wide tile at
+ *  120 columns) — rounding only the final total, once, avoids that. */
+export function measureChar(ctx: CanvasRenderingContext2D, font: string, round = true): CharMetrics {
   ctx.font = font;
   const m = ctx.measureText("M");
   const ascent = m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent ?? m.width * 0.8;
   const descent = m.fontBoundingBoxDescent ?? m.actualBoundingBoxDescent ?? m.width * 0.2;
+  if (!round) return { width: m.width, height: ascent + descent, ascent };
   // Rounded to whole CSS pixels (Checkpoint 5k, owner-reported: a TUI's
   // block-character ASCII art — U+2580-259F, e.g. opencode's startup logo —
   // rendered as a "checkered"/gapped pattern instead of solid rectangles).

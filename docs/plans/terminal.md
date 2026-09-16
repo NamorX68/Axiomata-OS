@@ -1164,6 +1164,69 @@ System-Ton.
   Testabdeckung verdient hätte) grün. Owner-Live-Bestätigung am Mac steht
   aus.
 
+## Checkpoint 5u — Falsche Zeilen-/Spaltenzahl nach echtem App-Neustart
+(Owner-Live-Test am Mac, 2026-09-16) — KOMPLETT
+
+Owner-Feedback: "beim neu öffnen hat es eine seltsame Größe" — reproduzierbar
+nur bei einem echten Neustart der App (`cargo tauri dev` neu gestartet),
+nie beim Hot-Reload während der Entwicklung.
+
+- **Root Cause**: Race Condition zwischen dem asynchronen Nachladen eines
+  gebündelten Web-Fonts und dem `terminal_spawn`-IPC-Call in `spawn()`.
+  `measureAndSize()` misst die Zeichenzelle beim ersten Aufruf ggf. gegen
+  einen noch nicht geladenen Font (Checkpoint 5j's eigene
+  `document.fonts.load(...).then(() => scheduleResize(...))`-Korrektur) —
+  `scheduleResize()` bricht aber ab, solange `sessionId` noch `null` ist,
+  und `spawn()` setzt `sessionId` erst *nach* dem `terminal_spawn`-Roundtrip.
+  Bei einem kalten WKWebView-Font-Cache kann das Font-Laden schneller
+  auflösen als dieser IPC-Roundtrip — die Korrektur trifft dann auf
+  `sessionId === null`, wird stillschweigend verworfen, und
+  `attemptedFontLoads` verhindert jeden weiteren Versuch für denselben
+  Font-String. Das Terminal bleibt dauerhaft auf der gegen den
+  Fallback-Font gemessenen Zeilen-/Spaltenzahl stehen, obwohl längst mit
+  dem echten (meist anders bemessenen) Font gezeichnet wird. Bei
+  Hot-Reload ist der Font durch eine frühere Ladung im selben
+  Browser-Prozess schon warm (`document.fonts.check` liefert sofort
+  `true`), weshalb die Race dort nie auftritt.
+- **Fix (`apps/dashboard/src/modules/terminal.svelte`)**: `spawn()` misst
+  direkt nachdem `sessionId` gesetzt ist noch einmal
+  (`measureAndSize()` + `scheduleResize(...)`) — schließt die Race
+  unabhängig davon, in welcher Reihenfolge Font-Laden und IPC-Call
+  fertig werden: sind die Metriken schon aktuell, greift die (gegen
+  `lastRows`/`lastCols` idempotente) Korrektur sofort; lädt der Font noch,
+  findet dessen eigener `.then()`-Handler jetzt ein gesetztes `sessionId`
+  vor und korrigiert beim Auflösen wie vorgesehen.
+- **Verifiziert**: `npm run check` (0 Fehler) + `npx vitest run` (388/388)
+  grün. Owner-Live-Bestätigung am Mac nach echtem App-Neustart: Bug nicht
+  mehr sichtbar.
+
+## Checkpoint 5v — Frisch platzierte Terminal-Kachel etwas zu breit
+(Owner-Live-Test am Mac, 2026-09-16) — KOMPLETT
+
+Owner-Feedback direkt nach Checkpoint 5u: "das Fenster ist nur etwas zu
+breit wenn es das erste Mal geöffnet wird."
+
+- **Root Cause**: `computeTerminalDefaultSize()` (`modules/index.ts`)
+  bestimmt die Start-Pixelbreite einer neuen Terminal-Kachel, indem es die
+  Breite *eines* Zeichens misst und mit `TERMINAL_DEFAULT_COLS` (120)
+  multipliziert. `measureChar()` rundet dieses eine Zeichen aber bewusst
+  auf ganze CSS-Pixel (Checkpoint 5k — nötig, damit Blockzeichen im
+  laufenden Terminal ohne Lücke aneinander anschließen). Dieser
+  Rundungsfehler wird durch die Multiplikation ×120 verstärkt (z. B. eine
+  wahre Breite von 8.6px, gerundet auf 9px, macht die Startkachel bis zu
+  ~48px zu breit); bei der Zeilenzahl (×60) ist derselbe Effekt halb so
+  groß und wird zusätzlich durch `TERMINAL_CHROME_H_PX`s großzügigen,
+  ohnehin ungefähren Puffer verdeckt.
+- **Fix**: `measureChar()` (`modules/TerminalScreen.ts`) bekommt einen
+  optionalen `round`-Parameter (Default `true`, unverändertes Verhalten
+  für `terminal.svelte`s laufendes Grid). `computeTerminalDefaultSize()`
+  ruft es mit `round: false` auf und rundet stattdessen erst einmal, am
+  Ende, auf die Gesamtbreite/-höhe — keine Verstärkung eines einzelnen
+  Rundungsschritts über 120/60 Zeichen mehr.
+- **Verifiziert**: `npm run check` (0 Fehler) + `npx vitest run` (392/392)
+  grün. Owner-Live-Bestätigung am Mac nach echtem App-Neustart: Kachel
+  öffnet sich jetzt korrekt.
+
 Dieses Dokument ist bewusst so detailliert geschrieben, dass einzelne
 Checkpoints auch ohne den ursprünglichen Chat-Kontext umsetzbar sind — z. B.
 über den `opencode`-Harness mit einem günstigeren Modell (DeepSeek Flash),

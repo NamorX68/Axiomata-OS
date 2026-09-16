@@ -115,7 +115,12 @@ function computeTerminalDefaultSize(): { w: number; h: number } {
   // `defaultSize` below is the fallback `createInstance` uses whenever this
   // throws or is absent, so failing loudly here is fine.
   if (!ctx) throw new Error("2D canvas context unavailable");
-  const metrics = measureChar(ctx, `${size} ${family}`);
+  // `round: false` — this multiplies a single glyph's metrics by the whole
+  // target column/row count; rounding it to a whole pixel first (the
+  // default, needed for the live grid's own block-character rendering, see
+  // `measureChar`'s own doc comment) would amplify that rounding error
+  // across all 120/60 of them instead of just the one final total below.
+  const metrics = measureChar(ctx, `${size} ${family}`, false);
   return {
     w: Math.round(TERMINAL_DEFAULT_COLS * metrics.width),
     h: Math.round(TERMINAL_DEFAULT_ROWS * metrics.height) + TERMINAL_CHROME_H_PX,

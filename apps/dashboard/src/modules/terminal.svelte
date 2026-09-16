@@ -538,6 +538,29 @@
         options: { shell, cwd, env, scrollbackLimit },
         onOutput,
       });
+      // Bug found on a genuine app restart (not reproducible via dev
+      // hot-reload, where the bundled font is already warm in
+      // `document.fonts` from a previous load): `measureAndSize()`'s own
+      // `document.fonts.load(...).then(...)` correction above calls
+      // `scheduleResize`, which is a no-op while `sessionId` is still
+      // `null` — and on a cold WKWebView font cache, that load can resolve
+      // *faster* than this very `terminal_spawn` round trip, so the
+      // correction lands before `sessionId` exists and is silently
+      // dropped. `attemptedFontLoads` then never retries the same font
+      // string, so the terminal was permanently spawned at the
+      // fallback-font row/col count while actually drawing with the real
+      // (usually differently-sized) font — grid and glyph width visibly
+      // mismatched until something else (e.g. a tile drag) re-measured.
+      // Re-measuring here, now that `sessionId` is set, closes the race
+      // regardless of which order the font load and this IPC call finish
+      // in: if metrics already changed, `scheduleResize` (idempotent
+      // against `lastRows`/`lastCols`) picks it up immediately; if the
+      // font is still loading, its own `.then()` above will now find
+      // `sessionId` set and apply correctly when it resolves.
+      {
+        const resized = measureAndSize();
+        scheduleResize(resized.rows, resized.cols);
+      }
       // Owner feedback: a freshly spawned terminal should be ready to type
       // into immediately, not require a deliberate click first — the same
       // expectation a real terminal app's newly opened window already
