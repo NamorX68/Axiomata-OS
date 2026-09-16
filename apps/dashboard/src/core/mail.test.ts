@@ -144,8 +144,21 @@ describe("mailNotePath", () => {
     expect(path).toMatch(/^Mail\/2026-09-05-re-enterprise-plan-inquiry-40-seats-[a-zA-Z0-9]+\.md$/);
   });
 
-  it("differs for two emails with different ids on the same day/subject", () => {
+  it("is the same for two entries with different ids but the same sender/subject/day — the duplicate-note fix", () => {
+    // Owner-reported: the same physical email produced two note files. Root
+    // cause: `id` is the *skill's* own transcription of "the mail tool's
+    // identifier", sourced from three separate MCP calls in one run
+    // (`list_inbox_emails`/`get_needs_response`/`search_emails`) with no
+    // guarantee they render the same id shape for the same message, or that
+    // the same message gets the same id across two separate digest runs.
+    // `mailNotePath` no longer keys off `id` for exactly this reason — two
+    // entries that only differ by `id` must collapse onto one note.
     const other = { ...item, id: "ZZZZ-9999" };
+    expect(mailNotePath(item)).toBe(mailNotePath(other));
+  });
+
+  it("differs for two emails from different senders sharing the same day/subject", () => {
+    const other = { ...item, sender: "someone-else@example.com" };
     expect(mailNotePath(item)).not.toBe(mailNotePath(other));
   });
 
@@ -157,13 +170,14 @@ describe("mailNotePath", () => {
     expect(path).not.toMatch(/[üöäß]/);
   });
 
-  it("still differs for structured ids sharing a long common prefix", () => {
-    // A prefix-slice of the raw id (the original implementation) would
-    // collapse these to the same suffix once separators are stripped —
-    // an architecture review found real mail-tool ids are commonly shaped
-    // like this. The hash-based suffix must not repeat the same mistake.
-    const a = { ...item, id: "account1::INBOX::<msg-0001@example.com>" };
-    const b = { ...item, id: "account1::INBOX::<msg-0002@example.com>" };
+  it("still differs for structured senders sharing a long common prefix", () => {
+    // A prefix-slice of the raw sender (rather than hashing the whole
+    // sender+subject pair) would risk collapsing these once separators are
+    // stripped — an architecture review found real mail-tool ids are
+    // commonly shaped like this, and the same risk plausibly applies to
+    // sender addresses. The hash-based suffix must not repeat that mistake.
+    const a = { ...item, sender: "account1::INBOX::<a@example.com>" };
+    const b = { ...item, sender: "account1::INBOX::<b@example.com>" };
     expect(mailNotePath(a)).not.toBe(mailNotePath(b));
   });
 });

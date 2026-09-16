@@ -267,17 +267,36 @@ function fnv1aHex(text: string): string {
 /** Deterministic note path for one email — re-opening the same email's
  *  summary overwrites its own note rather than accumulating duplicates.
  *  The date prefix keeps notes sorted chronologically in a file browser;
- *  the id suffix disambiguates two same-day emails with the same subject.
- *  Hashed rather than a prefix-slice of the raw id: an architecture review
- *  found real mail-tool ids are often structured (`account::mailbox::...`)
- *  with shared prefixes once separators are stripped, which would make a
- *  prefix-slice collide across an entire account/mailbox — a hash spreads
- *  entropy from the whole id instead of depending on where in it the
- *  distinguishing bits happen to live. Collisions are still only a
- *  cosmetic annoyance (two notes merge into one), never a data-loss risk. */
+ *  the suffix disambiguates two same-day emails with the same subject.
+ *
+ *  Hashed from `sender`+`subject`, not `item.id` (owner-reported: real
+ *  duplicate notes for the same physical email showing up under two
+ *  filenames). `id` is the *skill's own* transcription of "the mail tool's
+ *  identifier" (`mail-digest`'s SKILL.md, step 4), not a value this code
+ *  reads directly off one canonical field — the skill builds its candidate
+ *  pool from three separate `apple-mail` MCP calls in one run
+ *  (`list_inbox_emails`, `get_needs_response`, one `search_emails` per
+ *  topic), and there's nothing guaranteeing those return the same id shape
+ *  for the same message, let alone that the same message gets the same id
+ *  across two separate digest runs. `sender`+`subject` are both far more
+ *  likely to be stable across tool calls/runs for the same email than an
+ *  opaque tool-specific id is — so two entries that share them now
+ *  deliberately collapse onto the same note instead of each getting their
+ *  own, which is the fix: a genuine duplicate (same email, different `id`)
+ *  now overwrites in place rather than accumulating a second file. Hashed
+ *  rather than a plain slug/prefix-slice of the sender: an architecture
+ *  review found real mail-tool ids are often structured
+ *  (`account::mailbox::...`) with shared prefixes once separators are
+ *  stripped — the same risk plausibly applies to raw sender addresses, so
+ *  hashing spreads entropy from the whole `sender`+`subject` pair instead
+ *  of depending on where in it the distinguishing bits happen to live.
+ *  Collisions (two genuinely different emails, same sender, same subject,
+ *  same day) are still only a cosmetic annoyance — two notes merge into
+ *  one — never a data-loss risk. */
 export function mailNotePath(item: MailItem): string {
   const day = (Number.isNaN(Date.parse(item.date)) ? new Date() : new Date(item.date)).toISOString().slice(0, 10);
-  return `Mail/${day}-${slugify(item.subject)}-${fnv1aHex(item.id).slice(0, 8)}.md`;
+  const key = `${item.sender} ${item.subject}`;
+  return `Mail/${day}-${slugify(item.subject)}-${fnv1aHex(key).slice(0, 8)}.md`;
 }
 
 /** Collapses embedded newlines to spaces so a hostile subject/sender/topic
