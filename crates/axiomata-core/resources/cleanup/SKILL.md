@@ -1,6 +1,6 @@
 ---
 name: cleanup
-description: "General workspace-maintenance skill for tidying up files/entries the app itself doesn't manage the lifecycle of. Job 1 deletes Mail summary notes older than 5 days (by the email's date in the filename); Job 2 removes ToDo.md Done entries older than 5 days (by their completion-date stamp). Always writes a dated Markdown report of what it did, in addition to its reply. More jobs get their own numbered section as they're added; keep the name generic (cleanup), not tied to any one job."
+description: "General workspace-maintenance skill for tidying up files/entries the app itself doesn't manage the lifecycle of. Job 1 deletes Mail summary notes older than 3 days (by the email's date in the filename); Job 2 removes ToDo.md Done entries older than 3 days (by their completion-date stamp). Always writes a dated Markdown report of what it did, in addition to its reply. More jobs get their own numbered section as they're added; keep the name generic (cleanup), not tied to any one job."
 backend: claude-code
 allowed_tools: Bash(rm:*) Edit Write
 ---
@@ -29,8 +29,8 @@ Do exactly this and nothing more:
    `Mail/2026-09-01-invoice-from-acme-3f9a1b2c.md`. Skip any file in `Mail/`
    that does not match this exact shape (in particular `Mail/.topics.md`,
    and anything without a leading date) — leave those alone entirely.
-2. Compute today's date and the cutoff date 5 days ago, both as
-   `YYYY-MM-DD`, e.g.: `date +%Y-%m-%d` and `date -v-5d +%Y-%m-%d` (this is
+2. Compute today's date and the cutoff date 3 days ago, both as
+   `YYYY-MM-DD`, e.g.: `date +%Y-%m-%d` and `date -v-3d +%Y-%m-%d` (this is
    macOS, so use the `-v` BSD `date` flag, not GNU's `-d`).
 3. For each matching file, compare its `YYYY-MM-DD` date prefix against the
    cutoff from step 2 as plain strings (this works correctly — ISO dates
@@ -65,8 +65,8 @@ Do exactly this and nothing more:
    `- [x] <text> (done: YYYY-MM-DD)` carry a known date. A line
    `- [x] <text>` with **no** `(done: ...)` suffix has no known completion
    date — never remove it, its age can't be judged. Leave it exactly as is.
-4. Compute today's date and the cutoff 5 days ago the same way as Job 1
-   (`date +%Y-%m-%d` / `date -v-5d +%Y-%m-%d`), and compare each dated
+4. Compute today's date and the cutoff 3 days ago the same way as Job 1
+   (`date +%Y-%m-%d` / `date -v-3d +%Y-%m-%d`), and compare each dated
    entry's date against the cutoff the same way (plain `YYYY-MM-DD` string
    comparison).
 5. Remove — delete the entire line — every dated Done entry whose date is
