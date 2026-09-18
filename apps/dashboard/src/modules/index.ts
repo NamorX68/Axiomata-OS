@@ -98,8 +98,26 @@ const TERMINAL_CHROME_H_PX = 44;
  *  already resolved; if it somehow hasn't (a genuinely fast/scripted
  *  first action), this still degrades gracefully to the theme default
  *  rather than blocking or throwing. Thrown errors (`ctx === null` below)
- *  are a separate case, caught by `createInstance` itself, not here. */
-function computeTerminalDefaultSize(): { w: number; h: number } {
+ *  are a separate case, caught by `createInstance` itself, not here.
+ *
+ *  Checkpoint 6b: this function's `ctx.measureText` call (inside
+ *  `measureChar`) is synchronous and, unlike `terminal.svelte`'s own
+ *  `measureAndSize`, has no `document.fonts.check`/`.load()` guard — it
+ *  can't have one without turning `computeDefaultSize` (and its one
+ *  caller, `createInstance`, and *that* function's three call sites) async,
+ *  which is a much bigger change than this bug warrants. On a genuine cold
+ *  app restart the bundled Nerd Font's `@font-face` is declared but not
+ *  yet fetched/rasterized (same underlying browser behaviour CP5u/5j
+ *  document for the live grid) — if the *first* Terminal tile of the
+ *  session gets placed before that finishes, this measures against
+ *  whatever fallback font the browser substitutes instead, baking a wrong
+ *  (observed: too wide) pixel size into that one tile forever; nothing
+ *  ever re-measures a tile's own placed size afterwards; only the grid's
+ *  row/column count inside it self-corrects (CP5u). Fixed the same way as
+ *  the settings-load race just above: `registerBuiltins` also kicks off
+ *  `warmTerminalFont()` speculatively at boot so the font is very likely
+ *  already warm by the time a user reaches "Add module → Terminal". */
+function resolveTerminalFontString(): string {
   const settings = get(terminalSettings);
   const cs = getComputedStyle(document.documentElement);
   const fallbackFamily = cs.getPropertyValue("--ax-font-mono").trim() || "monospace";
@@ -107,7 +125,11 @@ function computeTerminalDefaultSize(): { w: number; h: number } {
   const size = typeof settings.fontSizePx === "number" ? `${settings.fontSizePx}px` : fallbackSizePx;
   const family =
     typeof settings.fontFamily === "string" && settings.fontFamily.trim() ? settings.fontFamily : fallbackFamily;
+  return `${size} ${family}`;
+}
 
+function computeTerminalDefaultSize(): { w: number; h: number } {
+  const font = resolveTerminalFontString();
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   // No 2D context available (shouldn't happen in a real browser/WKWebView,
@@ -120,11 +142,25 @@ function computeTerminalDefaultSize(): { w: number; h: number } {
   // default, needed for the live grid's own block-character rendering, see
   // `measureChar`'s own doc comment) would amplify that rounding error
   // across all 120/60 of them instead of just the one final total below.
-  const metrics = measureChar(ctx, `${size} ${family}`, false);
+  const metrics = measureChar(ctx, font, false);
   return {
     w: Math.round(TERMINAL_DEFAULT_COLS * metrics.width),
     h: Math.round(TERMINAL_DEFAULT_ROWS * metrics.height) + TERMINAL_CHROME_H_PX,
   };
+}
+
+/** Speculative, fire-and-forget font warm-up — see the Checkpoint 6b doc
+ *  comment on `computeTerminalDefaultSize` above for why this exists.
+ *  Mirrors `terminal.svelte`'s own `document.fonts.check`/`.load()` guard
+ *  exactly (same "don't trust a browser that hasn't fetched the face yet"
+ *  fact, same "skip silently if `document.fonts` doesn't exist" fallback);
+ *  intentionally has no `attemptedFontLoads`-style one-shot guard since
+ *  `registerBuiltins` only calls this once, at boot. */
+function warmTerminalFont(): void {
+  if (!document.fonts) return;
+  const font = resolveTerminalFontString();
+  if (document.fonts.check(font)) return;
+  void document.fonts.load(font);
 }
 
 export function registerBuiltins(): void {
@@ -684,7 +720,13 @@ export function registerBuiltins(): void {
   // idempotent (`ensureTerminalSettingsLoaded`'s own doc comment) — by the
   // time a user actually clicks "Add module → Terminal", this IPC round
   // trip has very likely already resolved.
-  void ensureTerminalSettingsLoaded();
+  //
+  // Checkpoint 6b: chained (not fired in parallel) because `warmTerminalFont`
+  // needs the *real* saved `fontFamily`/`fontSizePx` to warm the right font
+  // string — warming before settings resolve would just warm the theme's
+  // CSS fallback font instead, missing the case (a real custom saved font)
+  // this exists for.
+  void ensureTerminalSettingsLoaded().then(() => warmTerminalFont());
 
   if (import.meta.env.DEV) {
     registerModule({

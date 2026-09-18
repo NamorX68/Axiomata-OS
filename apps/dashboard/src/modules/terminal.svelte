@@ -114,6 +114,7 @@
 
   import type { ModuleContext } from "../core/types";
   import {
+    cellFont,
     draw,
     DEFAULT_CURSOR_STYLE,
     measureChar,
@@ -413,8 +414,52 @@
    *  principle keep `document.fonts.check` returning `false` forever even
    *  after `.load()` resolves, and without this guard every later
    *  `measureAndSize()` call (each settings change, each resize) would
-   *  re-issue another `.load()` for the same unsatisfiable descriptor. */
+   *  re-issue another `.load()` for the same unsatisfiable descriptor.
+   *
+   *  Checkpoint 6d (owner-reported, still visible after 6b/6c: correct
+   *  tile size, correct rows/cols, but the *glyphs themselves* stayed
+   *  wrong until a manual window resize): this guard only ever checked/
+   *  loaded the one plain `font` string — but `draw` never actually draws
+   *  with that string. `cellFont` (`TerminalScreen.ts`) prepends `"bold"`
+   *  for every bold cell, and the configured `fontWeight` for every
+   *  non-bold one, so a shell prompt with *any* bold segment (a near-
+   *  universal default in zsh/bash themes) draws its very first frame
+   *  with a font descriptor this guard never loaded and has no `.then()`
+   *  callback watching — the browser lazily fetches that weight on its
+   *  own, several dozen ms later, but nothing here ever finds out, so the
+   *  already-painted canvas bitmap just sits there wrong until some
+   *  unrelated event (a resize) forces a fresh `measureAndSize()`/`draw()`
+   *  pair long after the fetch quietly finished. Fixed below by loading
+   *  every distinct descriptor `draw` can actually reach for this
+   *  instance's current settings, not just the one plain default. */
   const attemptedFontLoads = new Set<string>();
+
+  /** Loads one font descriptor and, once ready, forces the next `tick()`
+   *  to redraw — same one-shot-per-string/`destroyed` guard as the
+   *  original Checkpoint 5j fix, factored out so `measureAndSize` below
+   *  can call it once per distinct descriptor `draw` might use (Checkpoint
+   *  6d) instead of only the one plain string. */
+  function ensureFontLoaded(fontString: string): void {
+    if (!document.fonts || document.fonts.check(fontString) || attemptedFontLoads.has(fontString)) return;
+    attemptedFontLoads.add(fontString);
+    document.fonts
+      .load(fontString)
+      .then(() => {
+        if (destroyed) return; // tile removed while the font was still loading
+        // The settings active now might not be the ones active when this
+        // load was kicked off (the owner could have changed them while it
+        // was in flight) — `measureAndSize` always reads current settings,
+        // so re-running it naturally picks up whatever's current, not
+        // stale data captured in this closure.
+        const resized = measureAndSize();
+        scheduleResize(resized.rows, resized.cols);
+      })
+      .catch(() => {
+        // Font failed to load (offline, corrupt file, …) — whatever was
+        // already drawn with the fallback stays in effect, same as it
+        // always did before this fix existed.
+      });
+  }
 
   function measureAndSize(): { rows: number; cols: number } {
     if (!canvasEl || !root) return { rows: MIN_ROWS, cols: MIN_COLS };
@@ -437,30 +482,16 @@
     // goes through here, so one flag here covers all of them.
     needsRedraw = true;
     // `document.fonts` doesn't exist in every conceivable environment (old
-    // WebKit, some embeddings) — treat its absence as "already fine",
-    // matching this measurement's own pre-existing fallback behaviour
-    // rather than throwing.
-    if (document.fonts && !document.fonts.check(font) && !attemptedFontLoads.has(font)) {
-      attemptedFontLoads.add(font);
-      document.fonts
-        .load(font)
-        .then(() => {
-          if (destroyed) return; // tile removed while the font was still loading
-          // The font that just finished loading might not be the one
-          // configured any more (the owner could have changed it again
-          // while this was in flight) — `measureAndSize`/`currentFont`
-          // both always read the *current* live settings, so re-running
-          // the whole measurement naturally picks up whatever's current,
-          // not stale data captured in this closure.
-          const resized = measureAndSize();
-          scheduleResize(resized.rows, resized.cols);
-        })
-        .catch(() => {
-          // Font failed to load (offline, corrupt file, …) — the
-          // fallback-font measurement already computed above stays in
-          // effect, same as it always did before this fix existed.
-        });
-    }
+    // WebKit, some embeddings) — `ensureFontLoaded` treats its absence as
+    // "already fine", matching this measurement's own pre-existing
+    // fallback behaviour rather than throwing. Checkpoint 6d: every
+    // descriptor `cellFont` can actually hand `draw`'s `ctx.font` — the
+    // plain default, the always-possible bold variant, and the configured
+    // non-bold weight when one is set (identical to `cellFont`'s own
+    // branching, so this can never miss a string `draw` uses).
+    ensureFontLoaded(font);
+    ensureFontLoaded(cellFont(font, true));
+    if (fontWeight !== undefined) ensureFontLoaded(cellFont(font, false, fontWeight));
     return {
       rows: Math.max(MIN_ROWS, Math.floor(rect.height / metrics.height)),
       cols: Math.max(MIN_COLS, Math.floor(rect.width / metrics.width)),
@@ -555,6 +586,28 @@
     // Terminal instance: `ensureTerminalSettingsLoaded` is a no-op once
     // already loaded.
     await ensureTerminalSettingsLoaded();
+
+    // Checkpoint 6c, owner-reported after CP5u/5v/6b: on a genuine app
+    // restart, a freshly placed tile could still spawn its shell against
+    // a too-small `rows`/`cols` count — the tile's own CSS width was
+    // already correct (CP5v/6b), but this measurement runs in the very
+    // first microtask of `onMount` (now that `ensureTerminalSettingsLoaded`
+    // resolves near-instantly, already warmed by `registerBuiltins` —
+    // Checkpoint 6b), which can land before the browser has committed an
+    // actual layout+paint pass for the just-inserted tile. The shell forks
+    // with *that* winsize; `terminal_resize`'s later correction (below,
+    // Checkpoint 5u) does reach the PTY via `SIGWINCH`, but a shell's
+    // already-drawn first prompt line doesn't retroactively redraw itself
+    // to the corrected width — only the *next* one does, which is why a
+    // manual resize (forcing a fresh prompt draw) always looked "fixed".
+    // Two nested `requestAnimationFrame`s is the standard way to wait for
+    // "at least one real paint has now happened" (the first only
+    // guarantees *before* the next paint; the second runs after it) —
+    // cheap (~2 frames, imperceptible) and only delays the very first
+    // measurement, not anything else in this function.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
 
     const { rows, cols } = measureAndSize();
     lastRows = rows;

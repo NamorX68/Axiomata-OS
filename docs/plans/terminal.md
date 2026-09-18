@@ -1297,6 +1297,50 @@ Scroll-Gefühl in `neovim`; Frage, ob GPU-Rendering (à la Ghostty) nötig wäre
   run check` + `npx vitest run` (392/392) grün. Owner-Live-Test am Mac:
   `neovim`/`opencode`/`bpytop` bestätigt "top".
 
+### Checkpoint 6b/6c/6d — App-Neustart-Font-Race, drei Facetten (Owner-Feedback,
+2026-09-18) — KOMPLETT
+
+Owner-Report nach dem CP6-Merge: bei echtem App-Neustart (nicht per Hot-Reload
+reproduzierbar) sah das erste platzierte Terminal-Tile falsch aus — behoben
+erst durch manuelles Fenster-Resize. Drei getrennte, nacheinander gefundene
+Ursachen für denselben Symptomkomplex:
+
+- **6b — Kachel-Zielgröße**: `computeTerminalDefaultSize` (`modules/index.ts`,
+  von `createInstance` beim Platzieren aufgerufen) hat den Font per
+  `ctx.measureText` synchron vermessen, ohne (anders als `terminal.svelte`s
+  eigene `measureAndSize`) auf `document.fonts` zu warten — bei kaltem
+  Font-Cache maß das gegen den Browser-Fallback und backte eine falsche
+  Pixelgröße dauerhaft in die neu platzierte Kachel ein. Fix: `registerBuiltins`
+  wärmt den konfigurierten Font jetzt spekulativ vor (`warmTerminalFont`,
+  verkettet nach `ensureTerminalSettingsLoaded`, damit der wirklich gespeicherte
+  Font gewärmt wird, nicht nur der CSS-Fallback).
+- **6c — rows/cols beim Shell-Spawn**: selbst mit gewärmtem Font konnte die
+  Shell noch mit zu kleinem `rows`/`cols` starten, weil `measureAndSize()` im
+  allerersten `onMount`-Microtask lief — vor dem ersten echten Layout+Paint der
+  frisch eingefügten Kachel. `terminal_resize`s spätere Korrektur erreicht die
+  PTY zwar per `SIGWINCH`, aber die bereits gezeichnete erste Prompt-Zeile
+  zeichnet sich dadurch nicht rückwirkend neu — nur die nächste. Fix: zwei
+  verschachtelte `requestAnimationFrame`s vor der ersten Messung in `spawn()`.
+- **6d — falsche Glyphen bis zum Resize**: nach 6b/6c blieb das eigentlich
+  gemeldete Symptom bestehen — Kachelgröße und rows/cols korrekt, aber die
+  Schrift selbst sah bis zum manuellen Resize falsch aus. Root Cause: die
+  CP5j-Font-Warte-Logik in `measureAndSize()` prüfte/lud immer nur den einen
+  nackten `font`-String — tatsächlich gezeichnet wird aber über `cellFont()`
+  (`TerminalScreen.ts`), die für fette Zellen `"bold " + font` und für ein
+  konfiguriertes Font-Gewicht `"${weight} " + font` an `ctx.font` übergibt,
+  zwei eigene Font-Deskriptoren, für die nie ein `.load()`/`.check()` lief. Da
+  praktisch jeder Shell-Prompt irgendwo fetten Text zeigt, lud der Browser die
+  fette Variante beim ersten Zeichnen lazy im Hintergrund nach, ohne dass
+  irgendetwas das mitbekam — das schon gemalte Canvas-Bitmap blieb bis zum
+  nächsten *unabhängigen* Redraw-Trigger (z. B. Resize) falsch stehen. Fix:
+  `ensureFontLoaded()` extrahiert und in `measureAndSize()` für alle drei
+  Deskriptoren aufgerufen, die `cellFont()` tatsächlich erzeugen kann (normal,
+  fett, konfiguriertes Gewicht), nicht nur für einen.
+- **Verifiziert**: `npm run check` (0 Fehler), `npx vitest run` (390/390 —
+  2 vorbestehende, umgebungsbedingte Fails durch lokales `.env.local`
+  unabhängig von dieser Änderung), `cargo build --workspace` grün.
+  Owner-Live-Test nach App-Neustart bestätigt: behoben.
+
 ### Problem 2: Claude Codes eigene CLI-Ausgabe verlor fast alle Leerzeichen
 
 Owner-Rückmeldung direkt nach dem Live-Test von Problem 1: `neovim`/
