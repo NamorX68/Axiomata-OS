@@ -29,6 +29,7 @@ import Calendar from "./calendar.svelte";
 import CalendarSettings from "./calendar-settings.svelte";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
+import KanbanPreview from "./kanban-preview.svelte";
 import Mail from "./mail.svelte";
 import MailSettings from "./mail-settings.svelte";
 import MdFile from "./md-file.svelte";
@@ -754,6 +755,21 @@ export function registerBuiltins(): void {
       component: Dummy,
       defaultSize: { w: 220, h: 120 },
       singleton: true,
+      dev: true,
+    });
+    // CP-K2-Design: Wegwerfansicht zum Entscheiden der Kartenform. Wird nach
+    // der Entscheidung samt ihrer Komponente wieder entfernt.
+    registerModule({
+      type: "kanban-preview",
+      title: "Kanban (Entwurf)",
+      icon:
+        "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'>" +
+        "<rect x='2' y='3' width='3.2' height='10'/><rect x='6.4' y='3' width='3.2' height='7'/>" +
+        "<rect x='10.8' y='3' width='3.2' height='5'/></svg>",
+      component: KanbanPreview,
+      defaultSize: { w: 560, h: 420 },
+      minSize: { w: 220, h: 200 },
+      stageable: true,
       dev: true,
     });
   }

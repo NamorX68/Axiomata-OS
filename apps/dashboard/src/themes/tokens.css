@@ -111,6 +111,17 @@
   --ax-border-strong: #3d3d45;
   --ax-focus-ring: rgba(255, 122, 26, 0.5);
 
+  /* Behandlung einer "Karte auf einer Fläche" (Kanban-Karte und alles
+     Gleichgeartete). Jedes Thema entscheidet selbst, wie sich eine Karte von
+     ihrer Unterlage abhebt — und das ist kein Geschmack, sondern Physik der
+     jeweiligen Helligkeit: in dunklen Themen tragen weder Schatten noch
+     Haarlinie, dort trennt allein der Tonwert; in hellen Themen liest sich
+     ein Blatt Papier auf einer Unterlage über einen leichten Schatten.
+     Vorgabe hier ist der Tonwert-Fall, weil vier der fünf Themen dunkel sind. */
+  --ax-card-bg: var(--ax-surface-2);
+  --ax-card-border: transparent;
+  --ax-card-shadow: none;
+
   --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.32);
   --ax-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.5);
   --ax-shadow-drag: 0 16px 48px rgba(0, 0, 0, 0.55);
