@@ -74,7 +74,10 @@ entgegen. Damit gilt:
 
 - `axiomata-core` reicht seine bestehende Verbindung herein und nimmt das
   Schema als Migration `0008` in seine `MIGRATIONS`-Liste auf (die Crate stellt
-  das SQL als `pub const SCHEMA_SQL` bereit). Eine Migrationskette, eine
+  das SQL als `pub const SCHEMA_SQL_V1` bereit — der `_V1`-Name sagt an jeder
+  Aufrufstelle, dass die Konstante eingefroren ist, und ein Prüfsummentest
+  bricht, falls jemand `schema.sql` doch nachträglich ändert). Eine
+  Migrationskette, eine
   Verbindung, kein zweiter Datenbank-Handle auf dieselbe Datei.
 - `axiomata-ide` kann später dieselbe Crate nutzen, **ohne** über
   `axiomata-core` zu gehen — genau die Abhängigkeitsrichtung, die den IDE-Schnitt
@@ -86,17 +89,35 @@ Abhängigkeiten: `rusqlite`, `serde`, `chrono`, `thiserror` — alle schon in
 
 ### Datenmodell
 
+So gebaut (vgl. `crates/axiomata-board/src/schema.sql`):
+
 ```sql
-boards  (id, name, created_at, updated_at)
-columns (id, board_id, name, position, is_done_column)
-cards   (id, board_id, column_id, position,
-         title, body, labels,
-         assignee_kind, assignee_id,          -- "human" | "agent" | NULL
-         status,                              -- open | doing | done | verified
-         claimed_by, claimed_at,
-         verified_by, verified_at,
-         due_at, created_at, updated_at)
+boards        (id, name, created_at, updated_at)
+board_columns (id, board_id, name, position, maps_to_status)  -- open|doing|done
+cards         (id, board_id, column_id, position,
+               title, body, labels,            -- labels: JSON-Array
+               assignee,                       -- "human:owner" | "agent:claude-1"
+               claimed_by, claimed_at,
+               verified_by, verified_at,
+               due_at, archived_at, created_at, updated_at)
 ```
+
+Drei Abweichungen vom ersten Entwurf oben, alle bewusst:
+
+- **Die Karte hat kein `status`-Feld.** Der Status *ist* `maps_to_status` der
+  Spalte, in der sie liegt. Zwei Wahrheiten wären lautlos auseinandergelaufen.
+- **Ein einheitlicher Akteur-String** statt `assignee_kind`/`assignee_id`. Die
+  Zwei-Parteien-Regel vergleicht Akteure byteweise — zwei verschieden geformte
+  Identitäten hätten sie bedeutungslos gemacht.
+- **`archived_at`** kam dazu: Erledigtes wird archiviert, nicht gelöscht, sonst
+  wächst die Fertig-Spalte unbegrenzt.
+
+Dazu zwei Dinge, die der Entwurf noch nicht hatte und die die Prüfungen
+verlangt haben: ein **zusammengesetzter Fremdschlüssel** `(column_id, board_id)`,
+damit eine Karte nicht auf die Spalte eines fremden Bretts zeigen kann, und die
+Zwei-Parteien-Regel zusätzlich als **`CHECK`-Constraint** — die `WHERE`-Klausel
+macht daraus ein sauberes `false`, das Constraint fängt jeden künftigen
+Codepfad, der am Store vorbeischreibt.
 
 `position` ist ein `REAL`: Einfügen zwischen zwei Karten ist der Mittelwert der
 Nachbarn, also ein einziges `UPDATE` statt einer Neunummerierung der ganzen
@@ -122,9 +143,14 @@ Oberfläche:
 - `core/kanban.ts` — reine Logik ohne DOM und ohne Tauri: Positionsberechnung
   beim Verschieben, Gruppierung nach Spalte, Filter, Statusübergänge. Unit-getestet
   wie `core/routineInterval.ts` und `core/todo.ts`.
-- Tauri-Befehle nach dem Muster der Routinen (`commands.rs`): `list_boards`,
-  `get_board`, `create_card`, `update_card`, `move_card`, `delete_card`,
-  `claim_card`, `set_card_status`.
+- Tauri-Befehle nach dem Muster der Routinen (`commands.rs`), gebaut als
+  sechzehn dünne Durchreichen: Bretter (`list_boards`, `get_board`,
+  `create_board`, `rename_board`, `delete_board`, `count_board_cards`), Spalten
+  (`list_board_columns`, `create_board_column`, `update_board_column`,
+  `delete_board_column`) und Karten (`list_board_cards`, `create_card`,
+  `update_card`, `move_card`, `delete_card`, `set_card_archived`). `claim` und
+  `verify` bleiben der CLI vorbehalten — mit einem einzigen Menschen kann
+  niemand abnehmen, was er selbst beansprucht hat (K-F2 zu Q1).
 - **Modul-Actions** (`ModuleDefinition.actions`), damit der bestehende
   Agenten-Bridge das Brett ohne jede neue Infrastruktur bedienen kann:
   `add_card`, `move_card`, `list_cards`. Ein früher, billiger Gewinn — der
