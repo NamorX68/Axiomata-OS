@@ -1,9 +1,26 @@
 # Plan: Kanban-Brett (M7.0)
 
-Status: **Detailplan, wartet auf Bestätigung. Noch kein Code.**
-Erster Meilenstein der M7-Kette (`docs/plans/agentic-ide.md`), aber bewusst als
-**eigenständiges Vorhaben** geschnitten: das Brett ist ohne einen einzigen
-Agenten nützlich und soll die App später auch verlassen können.
+Status (2026-09-20): **KOMPLETT.** Alle Checkpoints umgesetzt, live geprüft und
+committet (`e70ca08` bis `6096acd`). Erster Meilenstein der M7-Kette
+(`docs/plans/agentic-ide.md`), bewusst als **eigenständiges Vorhaben**
+geschnitten: das Brett ist ohne einen einzigen Agenten nützlich und soll die App
+später auch verlassen können.
+
+Was steht: die Crate `axiomata-board` (Domänentypen, alle SQL-Anweisungen, das
+initiale Schema als `SCHEMA_SQL_V1`, ohne Abhängigkeit auf `axiomata-core`),
+Migration 0008 samt WAL-Umstellung der ganzen Datenbank, `axiomata-cli board
+…` mit neun Verben, das Dashboard-Modul in drei Betriebsarten (Kachel, großes
+Panel, Kartendetail), Ziehen **und** Tastaturumzug über dieselben reinen
+Funktionen, Spaltenverwaltung am Brett, drei Modul-Actions für den Chat, und der
+einseitige Markdown-Spiegel im Vault. 50 Tests in der Crate, 31 in
+`core/kanban.ts`, 7 in `core/boardStore.ts`.
+
+**Gegenüber diesem Plan geändert** (jeweils weil das Bauen es gezeigt hat):
+Ein zusätzlicher Checkpoint **CP-K2-Design** kam vor CP-K2a — die Kartenform
+wurde an einer Wegwerfansicht entschieden statt beschrieben, und dabei kamen die
+`--ax-card-*`- und `--ax-label-*`-Tokens heraus. CP-K2 wurde in ein lesendes
+(K2a) und ein schreibendes (K2b) geteilt, damit die Gestaltung landet, bevor
+Drag-and-Drop das DOM verkompliziert.
 
 ## 1. Warum zuerst
 
@@ -152,14 +169,38 @@ Oberfläche:
   Workspace-Schreibpfad. Der Memory-Router findet es danach von selbst, weil er
   den Workspace ohnehin abläuft.
 
-## 6. Offene Fragen
+## 6. Entschieden (vormals offene Fragen)
 
-| # | Frage | Empfehlung | Fällig |
-|---|---|---|---|
-| K-F1 | Mehrere Bretter ab v1 oder erst eines? | Modell mehrere, Oberfläche eines pro Kachel mit Auswahl | CP-K1 |
-| K-F2 | Karten-Detail: schwebendes Panel oder Flip-Rückseite? | Panel (Rückseite gehört den Einstellungen) | CP-K2 |
-| K-F3 | Labels und Fälligkeitsdaten schon in v1? | Ja, beides; Swimlanes nein | CP-K2 |
-| K-F4 | Löst das Kanban mittelfristig das `todo`-Modul ab? | Später entscheiden, nicht vorab | nach M7.0 |
+| # | Frage | Entscheidung |
+|---|---|---|
+| K-F1 | Mehrere Bretter ab v1? | Ja. Modell und Oberfläche können mehrere; eine Kachel zeigt eines, gewählt auf der Rückseite |
+| K-F2 | Karten-Detail: Panel oder Flip-Rückseite? | Schwebendes Panel — und es geht **mittig auf der Kachel** auf, nicht in der Bildschirmmitte (`anchor` im Staging) |
+| K-F3 | Labels und Fälligkeitsdaten in v1? | Beides drin, Swimlanes nicht. Labelfarbe aus dem Labeltext gehasht, über `--ax-label-*` |
+| K-F4 | Löst das Kanban das `todo`-Modul ab? | **Nein**, dauerhaft nebeneinander (Owner, 2026-09-20) |
+
+## 6a. Was beim Bauen anders kam als gedacht
+
+Der Vollständigkeit halber, weil jeder dieser Punkte Zeit gekostet hat und beim
+nächsten ähnlichen Modul wieder auftauchen wird:
+
+- **Der Flächen-Tonwertverlauf läuft in den Themen gegenläufig** — in graphite
+  ist `--ax-surface-3` die hellste Fläche, in paper die dunkelste. Eine Karte
+  „eine Stufe heller als ihre Unterlage" gibt es nicht themenübergreifend;
+  tragfähig ist nur Spalte `--ax-bg` (Tischplatte) und Karte `--ax-card-bg`.
+- **In dunklen Themen tragen weder Schatten noch Haarlinie.** Vier der fünf
+  Themen sind dunkel, also ist Tonwerttrennung die Vorgabe und paper die
+  Ausnahme.
+- **Die globale Eingabefeld-Regel in `styles.css` schlägt eine scoped Klasse**
+  (sie hat durch ihre `:not()`-Kette Spezifität 0-2-1). Ein leises,
+  chromloses Feld in einem Modul muss spezifischer selektieren.
+- **Die Dichte hängt an der Spalten-, nicht an der Brettbreite.** Und alles, was
+  in der Spaltenreihe Platz belegt — die „+ Spalte"-Schaltfläche —, kann die
+  Spalten unter die Schwelle drücken, ohne dass es jemand merkt.
+- **`workspace::resolve` weist Verzeichnisse ab.** Wer einen Ordner auflösen
+  will, kommt damit nicht durch.
+- **Entprellung war nicht nötig.** Der Plan sah sie für den Spiegel vor; eine
+  Mutation pro Nutzeraktion schreibt eine wenige Kilobyte große Datei, und ein
+  Timer dafür wäre Mechanik ohne Gegenwert gewesen.
 
 ## 7. Verifikation
 

@@ -165,10 +165,21 @@ verschieden sein.
 
 ## 5. Meilensteinkette
 
-### M7.0 — Kanban (eigenständig, **vor** der IDE)
+### M7.0 — Kanban (eigenständig, **vor** der IDE) — **KOMPLETT** (2026-09-20)
 
 **Eigener Detailplan: [`kanban.md`](kanban.md)** — dort stehen Datenmodell,
-Checkpoints CP-K1 bis CP-K3, Entscheidungen und offene Fragen.
+Checkpoints, Entscheidungen und was beim Bauen anders kam.
+
+Gebaut und committet (`e70ca08`…`6096acd`): die Crate `axiomata-board`, Migration
+0008 samt WAL, `axiomata-cli board …`, das Dashboard-Modul mit Ziehen und
+Tastaturumzug, Spaltenverwaltung, Modul-Actions und der Vault-Spiegel.
+
+⚠️ **Was M7.5 daraus erbt:** Der geteilte Store im Frontend kennt keinen
+Aktualisierungspfad von außen. Er reicht, solange ausschließlich diese App das
+Brett ändert. Sobald Agenten Karten greifen, ändert sich das Brett **ohne Zutun
+des Benutzers**, und die Oberfläche merkt nichts davon — dann braucht es ein
+Ereignis vom Backend oder einen Takt. Das ist der einzige bekannte Punkt, an dem
+M7.0 für die Agenten noch nicht fertig ist.
 
 Kurzfassung: das Brett ist für sich allein nützlich, ist die Datenschicht des
 späteren Agenten-Bretts (M7.5) und wird deshalb zuerst gebaut. Der Kern kommt in
@@ -251,6 +262,10 @@ und ein Projektwechsel, der das Layout wiederherstellt.
 
 ### M7.5 — A2A
 
+- **CP12b** — Aktualisierungspfad fürs Brett (siehe M7.0): sobald Agenten Karten
+  greifen, ändert sich das Brett ohne Zutun des Benutzers und die Oberfläche
+  erfährt es nicht. Ereignis vom Backend oder Takt — zu entscheiden, wenn der
+  erste Agent tatsächlich schreibt.
 - **CP13** — Postfach-Kern in `axiomata-ide`: Adressen, Nachrichten, Aufgaben,
   Zustellung, Persistenz. Drei Eigenschaften sind dabei nicht verhandelbar,
   alle drei aus amux' Erfahrung übernommen (§9):

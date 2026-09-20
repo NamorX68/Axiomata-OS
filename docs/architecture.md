@@ -128,6 +128,31 @@ commands, streaming interpreted `Cell` snapshots — not raw bytes — over a Ta
 `apps/dashboard/src/modules/terminal.svelte` + `TerminalScreen.ts` render it on a `<canvas>`.
 Full phased build log and the current checkpoint: `docs/plans/terminal.md`.
 
+### `axiomata-board`
+
+The Kanban board core backing the dashboard's Kanban module (milestone M7.0):
+domain types, every SQL statement, and the initial schema as `SCHEMA_SQL_V1`. Like
+`axiomata-terminal` it depends on neither Tauri nor `axiomata-core` — and here that is
+load-bearing rather than tidy, because the agentic IDE (`axiomata-ide`, M7.1 onwards) will
+use the same board as its agent task board and must not pull core in. It owns neither the
+database file nor the connection: every operation is a free function taking a `&Connection`,
+the way `routines::store` works. `axiomata-core` supplies the connection, ships the schema as
+migration 8, and re-exports the crate as `axiomata_core::board`.
+
+Two design points worth knowing before touching it. **The column carries the status, the card
+does not** — a card's status is `board_columns.maps_to_status` of the column it sits in, so
+"card says Done, column says Doing" cannot be represented at all, and re-pointing a column
+re-states every card in it for free. **Verification needs a second party**: `verified_by <>
+claimed_by` is enforced in the `WHERE` clause of `verify_card` (so a lost race is a clean
+`false`) *and* as a `CHECK` constraint (so no future caller can route around the store), and
+actor strings are canonicalised before either sees them — without that, `agent:one` could
+claim a card and `Agent:One` could sign it off. Every mutation is a single statement with its
+precondition in the `WHERE` clause; claiming is a compare-and-swap.
+
+`core/board_mirror.rs` writes each board to `<workspace>/Kanban/<id>-<name>.md` after every
+change, one way only — see the trap list in `CLAUDE.md`. Full plan and the list of what came
+out differently in practice: `docs/plans/kanban.md`.
+
 ### `axiomata-cli`
 
 A `clap`-based binary whose job is to exercise `axiomata-core` end to end without the GUI:
@@ -538,14 +563,22 @@ intended end state.
 
 ### M7 — the agentic IDE
 
-The next large body of work, planned in full in [`plans/agentic-ide.md`](plans/agentic-ide.md)
-and not started: an own full-screen IDE view with a dock/split/tab layout, Claude Code and
-Opencode hosted as PTY tiles in the existing terminal engine, agent-to-agent messaging over
-an own MCP server (rather than reading the agents' screens), one git worktree per agent so
-diffs are separable, and an own mini-harness for small, precisely executed tasks — built to
-be extractable into a standalone app the way `axiomata-terminal` is. Git integration of any
-kind is the one genuinely new foundation layer: the repository currently contains no `git2`
-dependency and no `git` subprocess call at all.
+Planned in full in [`plans/agentic-ide.md`](plans/agentic-ide.md): an own full-screen IDE
+view with a dock/split/tab layout, Claude Code and Opencode hosted as PTY tiles in the
+existing terminal engine, agent-to-agent messaging over an own MCP server (rather than
+reading the agents' screens), one git worktree per agent so diffs are separable, and an own
+mini-harness for small, precisely executed tasks — built to be extractable into a standalone
+app the way `axiomata-terminal` is.
+
+**M7.0 (the Kanban board) is done** — see `axiomata-board` in §3 and
+[`plans/kanban.md`](plans/kanban.md). It shipped first on purpose: the board is useful
+without a single agent, and it is exactly the data layer the agents' task board sits on, so
+building it afterwards would have meant designing it twice — once for humans and once
+concurrency-safe.
+
+M7.1 onwards is not started. Git integration of any kind is the one genuinely new foundation
+layer still missing: the repository contains no `git2` dependency and no `git` subprocess
+call at all.
 
 ### `axiomata-macos`
 
