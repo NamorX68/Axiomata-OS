@@ -753,6 +753,101 @@ export function registerBuiltins(): void {
     // The same module serves as the big floating board and as a single card's
     // detail panel — see its own doc comment.
     stageable: true,
+    // These reach the board only while a Kanban tile is actually on the
+    // canvas: the manifest lists mounted instances, not registered types.
+    // Accepted rather than worked around — somebody using the board has it
+    // open — and the proper answer arrives with M7.5's MCP server anyway.
+    actions: [
+      {
+        name: "list_cards",
+        description: "List the cards of a board, with their column and status.",
+        params: {
+          type: "object",
+          properties: { board_id: { type: "number", description: "Board id; the first board if omitted." } },
+        },
+        run: async (params, ctx) => {
+          const p = params as { board_id?: number };
+          const boards = await ctx.invoke<{ id: number }[]>("list_boards");
+          const boardId = p.board_id ?? boards[0]?.id;
+          if (boardId === undefined) return { error: "no boards yet" };
+          const [columns, cards] = await Promise.all([
+            ctx.invoke<{ id: number; name: string; maps_to_status: string }[]>("list_board_columns", { boardId }),
+            ctx.invoke<{ id: number; title: string; column_id: number }[]>("list_board_cards", {
+              boardId,
+              includeArchived: false,
+            }),
+          ]);
+          return cards.map((card) => {
+            const column = columns.find((c) => c.id === card.column_id);
+            return {
+              id: card.id,
+              title: card.title,
+              column: column?.name ?? "?",
+              status: column?.maps_to_status ?? "?",
+            };
+          });
+        },
+      },
+      {
+        name: "add_card",
+        description: "Add a card. Without a column name it goes to the board's first column.",
+        params: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            body: { type: "string" },
+            column: { type: "string", description: "Column name, e.g. \"Offen\"." },
+            board_id: { type: "number" },
+          },
+          required: ["title"],
+        },
+        run: async (params, ctx) => {
+          const p = params as { title: string; body?: string; column?: string; board_id?: number };
+          const boards = await ctx.invoke<{ id: number }[]>("list_boards");
+          const boardId = p.board_id ?? boards[0]?.id;
+          if (boardId === undefined) return { error: "no boards yet" };
+          const columns = await ctx.invoke<{ id: number; name: string }[]>("list_board_columns", { boardId });
+          const target = p.column
+            ? columns.find((c) => c.name.toLowerCase() === p.column!.toLowerCase())
+            : columns[0];
+          if (!target) return { error: `no column named ${p.column}` };
+          return ctx.invoke("create_card", {
+            new: {
+              column_id: target.id,
+              title: p.title,
+              body: p.body ?? "",
+              labels: [],
+              assignee: null,
+              due_at: null,
+            },
+          });
+        },
+      },
+      {
+        name: "move_card",
+        description: "Move a card to a column by name, at the end of it.",
+        params: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            column: { type: "string" },
+            board_id: { type: "number" },
+          },
+          required: ["id", "column"],
+        },
+        run: async (params, ctx) => {
+          const p = params as { id: number; column: string; board_id?: number };
+          const boards = await ctx.invoke<{ id: number }[]>("list_boards");
+          const boardId = p.board_id ?? boards[0]?.id;
+          if (boardId === undefined) return { error: "no boards yet" };
+          const columns = await ctx.invoke<{ id: number; name: string }[]>("list_board_columns", { boardId });
+          const target = columns.find((c) => c.name.toLowerCase() === p.column.toLowerCase());
+          if (!target) return { error: `no column named ${p.column}` };
+          // A large index means "append"; the store clamps it.
+          return ctx.invoke("move_card", { id: p.id, columnId: target.id, index: Number.MAX_SAFE_INTEGER });
+        },
+      },
+    ],
   });
 
   if (import.meta.env.DEV) {

@@ -122,6 +122,89 @@ export function labelColorIndex(label: string, paletteSize: number): number {
   return hash % paletteSize;
 }
 
+/* ------------------------------------------------------------ dragging --- */
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** One column's geometry, measured once when a drag starts. */
+export interface ColumnGeometry {
+  columnId: number;
+  rect: Rect;
+  /** The cards in it, in drawing order, with their boxes. */
+  cards: { id: number; rect: Rect }[];
+}
+
+export interface DropTarget {
+  columnId: number;
+  /**
+   * Where the card goes, counting only the cards it will sit **among** — the
+   * dragged card is excluded. Same meaning as the store's `move_card` index,
+   * so the two cannot disagree about what a drop indicator promised.
+   */
+  index: number;
+}
+
+/**
+ * Which column a pointer is over, and where in it a dragged card would land.
+ *
+ * Takes a snapshot rather than reading the DOM: the snapshot is measured once
+ * at drag start, because the lifted card leaves a hole and re-measuring
+ * mid-drag would chase boxes that move as a result of the very thing being
+ * measured. Vertical position is compared against each card's midpoint, which
+ * is what makes the indicator flip at the moment the eye expects it to.
+ *
+ * `null` when the pointer is outside every column — the caller shows no
+ * indicator and a release there is a cancelled drag, not a drop into whatever
+ * column happens to be nearest.
+ */
+export function dropTarget(
+  snapshot: ColumnGeometry[],
+  x: number,
+  y: number,
+  movingId: number,
+): DropTarget | null {
+  const column = snapshot.find(
+    (c) => x >= c.rect.x && x <= c.rect.x + c.rect.w && y >= c.rect.y && y <= c.rect.y + c.rect.h,
+  );
+  if (!column) return null;
+
+  const others = column.cards.filter((card) => card.id !== movingId);
+  const index = others.findIndex((card) => y < card.rect.y + card.rect.h / 2);
+  return { columnId: column.columnId, index: index === -1 ? others.length : index };
+}
+
+/**
+ * The drop target one step away, for moving a card by keyboard.
+ *
+ * Arrow keys walk the same target type the pointer produces, so both paths end
+ * in exactly the same `move_card` call. Up and down step within the column;
+ * left and right change column, keeping the row as close as the new column
+ * allows.
+ */
+export function stepTarget(
+  snapshot: ColumnGeometry[],
+  from: DropTarget,
+  key: "up" | "down" | "left" | "right",
+  movingId: number,
+): DropTarget {
+  const at = snapshot.findIndex((c) => c.columnId === from.columnId);
+  if (at === -1) return from;
+
+  const countIn = (i: number) => snapshot[i].cards.filter((card) => card.id !== movingId).length;
+
+  if (key === "up") return { ...from, index: Math.max(0, from.index - 1) };
+  if (key === "down") return { ...from, index: Math.min(countIn(at), from.index + 1) };
+
+  const next = key === "left" ? at - 1 : at + 1;
+  if (next < 0 || next >= snapshot.length) return from;
+  return { columnId: snapshot[next].columnId, index: Math.min(from.index, countIn(next)) };
+}
+
 /** An actor string as it should be shown: `"agent:claude-1"` → `"claude-1"`. */
 export function actorLabel(actor: string): string {
   const separator = actor.indexOf(":");

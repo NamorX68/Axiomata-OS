@@ -10,6 +10,9 @@ import type {
   Board,
   BoardCard,
   BoardColumn,
+  CardFields,
+  NewCard,
+  NewColumn,
   ChatReply,
   ConfigUpdate,
   ConfigView,
@@ -367,6 +370,13 @@ function mockCard(card: Partial<BoardCard> & Pick<BoardCard, "id" | "column_id" 
     ...card,
   };
 }
+/** The cards of one column, in drawing order. */
+function cardsIn(columnId: number): BoardCard[] {
+  return boardCards
+    .filter((c) => c.column_id === columnId)
+    .sort((a, b) => a.position - b.position || a.id - b.id);
+}
+
 let boardCards: BoardCard[] = [
   mockCard({ id: 1, column_id: 1, position: 1, title: "Spaltenbreite auf 21:9 pruefen", labels: ["design"], due_at: new Date(Date.now() + 3 * DAY).toISOString() }),
   mockCard({ id: 2, column_id: 1, position: 2, title: "Vault-Spiegel: Dateiname festzurren", labels: ["kanban", "vault"] }),
@@ -662,6 +672,112 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return boardCards.filter(
         (c) => c.board_id === args.boardId && (args.includeArchived === true || c.archived_at === null),
       ) as T;
+    case "create_card": {
+      const n = args.new as NewCard;
+      const column = boardColumns.find((c) => c.id === n.column_id);
+      if (!column) throw new Error(`invalid column_id: no column ${n.column_id}`);
+      const created = mockCard({
+        id: Math.max(0, ...boardCards.map((c) => c.id)) + 1,
+        board_id: column.board_id,
+        column_id: n.column_id,
+        position: Math.max(0, ...cardsIn(n.column_id).map((c) => c.position)) + 1,
+        title: n.title,
+        body: n.body,
+        labels: n.labels,
+        assignee: n.assignee,
+        due_at: n.due_at,
+      });
+      boardCards = [...boardCards, created];
+      return created as T;
+    }
+    case "update_card": {
+      const f = args.fields as CardFields;
+      const target = boardCards.find((c) => c.id === args.id);
+      if (!target) return null as T;
+      const updated: BoardCard = { ...target, ...f, updated_at: new Date().toISOString() };
+      boardCards = boardCards.map((c) => (c.id === updated.id ? updated : c));
+      return updated as T;
+    }
+    case "move_card": {
+      const moved = boardCards.find((c) => c.id === args.id);
+      const column = boardColumns.find((c) => c.id === args.columnId);
+      if (!moved || !column) return false as T;
+      // Mirrors the store: the index counts the cards the moved one will sit
+      // among, so it is excluded from its own neighbour list.
+      const others = cardsIn(column.id).filter((c) => c.id !== moved.id);
+      const index = Math.min(Number(args.index ?? others.length), others.length);
+      const before = others[index - 1]?.position;
+      const after = others[index]?.position;
+      const position =
+        before === undefined && after === undefined
+          ? 1
+          : before === undefined
+            ? after! - 1
+            : after === undefined
+              ? before + 1
+              : (before + after) / 2;
+      const next: BoardCard = {
+        ...moved,
+        column_id: column.id,
+        board_id: column.board_id,
+        position,
+        updated_at: new Date().toISOString(),
+        // Same rule as the store: no longer done, no longer signed off.
+        ...(column.maps_to_status === "done" ? {} : { verified_by: null, verified_at: null }),
+      };
+      boardCards = boardCards.map((c) => (c.id === next.id ? next : c));
+      return true as T;
+    }
+    case "delete_card": {
+      const before = boardCards.length;
+      boardCards = boardCards.filter((c) => c.id !== args.id);
+      return (boardCards.length < before) as T;
+    }
+    case "set_card_archived": {
+      const target = boardCards.find((c) => c.id === args.id);
+      if (!target) return false as T;
+      const stamp = new Date().toISOString();
+      boardCards = boardCards.map((c) =>
+        c.id === target.id ? { ...c, archived_at: args.archived ? stamp : null, updated_at: stamp } : c,
+      );
+      return true as T;
+    }
+    case "create_board_column": {
+      const n = args.new as NewColumn;
+      const created: BoardColumn = {
+        id: Math.max(0, ...boardColumns.map((c) => c.id)) + 1,
+        board_id: Number(args.boardId),
+        name: n.name,
+        position: Math.max(0, ...boardColumns.filter((c) => c.board_id === args.boardId).map((c) => c.position)) + 1,
+        maps_to_status: n.maps_to_status,
+      };
+      boardColumns = [...boardColumns, created];
+      return created as T;
+    }
+    case "update_board_column": {
+      const target = boardColumns.find((c) => c.id === args.id);
+      if (!target) return null as T;
+      const status = args.mapsToStatus as BoardColumn["maps_to_status"];
+      const updated: BoardColumn = { ...target, name: String(args.name), maps_to_status: status };
+      boardColumns = boardColumns.map((c) => (c.id === updated.id ? updated : c));
+      if (status !== "done") {
+        boardCards = boardCards.map((c) =>
+          c.column_id === updated.id ? { ...c, verified_by: null, verified_at: null } : c,
+        );
+      }
+      return updated as T;
+    }
+    case "delete_board_column": {
+      const held = cardsIn(Number(args.id));
+      if (held.length > 0) {
+        if (args.moveCardsTo === undefined || args.moveCardsTo === null) return false as T;
+        const target = Number(args.moveCardsTo);
+        boardCards = boardCards.map((c) => (c.column_id === args.id ? { ...c, column_id: target } : c));
+      }
+      const before = boardColumns.length;
+      boardColumns = boardColumns.filter((c) => c.id !== args.id);
+      return (boardColumns.length < before) as T;
+    }
     case "add_routine": {
       const n = args.new as NewRoutine;
       const created: Routine = {

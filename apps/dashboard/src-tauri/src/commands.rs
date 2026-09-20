@@ -1427,3 +1427,90 @@ pub fn list_board_cards(
     let db = state.db_lock();
     board::store::list_cards(&db, board_id, include_archived).map_err(|err| err.to_string())
 }
+
+// Board mutations (CP-K2b). Same four-line shape; every rule they have to
+// respect lives in the store, not here.
+
+#[tauri::command]
+pub fn create_card(
+    state: State<'_, CoreState>,
+    new: board::NewCard,
+) -> Result<board::Card, String> {
+    let db = state.db_lock();
+    board::store::create_card(&db, &new).map_err(|err| err.to_string())
+}
+
+/// Full replace of a card's writable fields — never its signatures, which move
+/// only through claim/release/verify. Returns `None` if there is no such card.
+#[tauri::command]
+pub fn update_card(
+    state: State<'_, CoreState>,
+    id: i64,
+    fields: board::CardFields,
+) -> Result<Option<board::Card>, String> {
+    let db = state.db_lock();
+    board::store::update_card(&db, id, &fields).map_err(|err| err.to_string())
+}
+
+/// `index` counts the cards the moved one will sit among, excluding itself.
+#[tauri::command]
+pub fn move_card(
+    state: State<'_, CoreState>,
+    id: i64,
+    column_id: i64,
+    index: usize,
+) -> Result<bool, String> {
+    let mut db = state.db_lock();
+    board::store::move_card(&mut db, id, column_id, index).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_card(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db_lock();
+    board::store::delete_card(&db, id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn set_card_archived(
+    state: State<'_, CoreState>,
+    id: i64,
+    archived: bool,
+) -> Result<bool, String> {
+    let db = state.db_lock();
+    board::store::set_card_archived(&db, id, archived).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn create_board_column(
+    state: State<'_, CoreState>,
+    board_id: i64,
+    new: board::NewColumn,
+) -> Result<board::Column, String> {
+    let db = state.db_lock();
+    board::store::create_column(&db, board_id, &new).map_err(|err| err.to_string())
+}
+
+/// Renames a column and/or re-points it at another status. Re-pointing away
+/// from `done` withdraws the sign-off of every card in it — see the store.
+#[tauri::command]
+pub fn update_board_column(
+    state: State<'_, CoreState>,
+    id: i64,
+    name: String,
+    maps_to_status: board::CardStatus,
+) -> Result<Option<board::Column>, String> {
+    let mut db = state.db_lock();
+    board::store::update_column(&mut db, id, &name, maps_to_status).map_err(|err| err.to_string())
+}
+
+/// Returns `false` if the column still holds cards and no destination was
+/// given — the caller is expected to ask where they should go.
+#[tauri::command]
+pub fn delete_board_column(
+    state: State<'_, CoreState>,
+    id: i64,
+    move_cards_to: Option<i64>,
+) -> Result<bool, String> {
+    let mut db = state.db_lock();
+    board::store::delete_column(&mut db, id, move_cards_to).map_err(|err| err.to_string())
+}

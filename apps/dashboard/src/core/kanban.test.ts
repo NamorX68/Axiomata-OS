@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import type { BoardCard, BoardColumn } from "./backend";
+import type { ColumnGeometry } from "./kanban";
 import {
   actorLabel,
   applyFilter,
   collectLabels,
+  dropTarget,
   dueState,
   groupByColumn,
   labelColorIndex,
   showsAssignee,
   statusOf,
+  stepTarget,
 } from "./kanban";
 
 function column(id: number, position: number, maps_to_status: BoardColumn["maps_to_status"]): BoardColumn {
@@ -184,5 +187,74 @@ describe("showsAssignee", () => {
   it("names everyone else, which is what lights up once agents arrive", () => {
     expect(showsAssignee("agent:claude-1")).toBe(true);
     expect(showsAssignee("human:someone-else")).toBe(true);
+  });
+});
+
+/* Two columns side by side, 200 wide, starting at y=0. Column 1 holds three
+ * 100-tall cards; column 2 is empty. */
+const GEOMETRY: ColumnGeometry[] = [
+  {
+    columnId: 1,
+    rect: { x: 0, y: 0, w: 200, h: 600 },
+    cards: [
+      { id: 10, rect: { x: 0, y: 0, w: 200, h: 100 } },
+      { id: 11, rect: { x: 0, y: 100, w: 200, h: 100 } },
+      { id: 12, rect: { x: 0, y: 200, w: 200, h: 100 } },
+    ],
+  },
+  { columnId: 2, rect: { x: 200, y: 0, w: 200, h: 600 }, cards: [] },
+];
+
+describe("dropTarget", () => {
+  it("flips at a card's midpoint, not at its edge", () => {
+    // 49 is still the top half of the first card, 51 the bottom half.
+    expect(dropTarget(GEOMETRY, 100, 49, 99)).toEqual({ columnId: 1, index: 0 });
+    expect(dropTarget(GEOMETRY, 100, 51, 99)).toEqual({ columnId: 1, index: 1 });
+  });
+
+  it("drops below the last card at the end of the column", () => {
+    expect(dropTarget(GEOMETRY, 100, 500, 99)).toEqual({ columnId: 1, index: 3 });
+  });
+
+  it("counts only the cards the dragged one will sit among", () => {
+    // Dragging card 10 itself: below its own midpoint is still index 0,
+    // because card 10 is not among its own neighbours.
+    expect(dropTarget(GEOMETRY, 100, 51, 10)).toEqual({ columnId: 1, index: 0 });
+    expect(dropTarget(GEOMETRY, 100, 151, 10)).toEqual({ columnId: 1, index: 1 });
+  });
+
+  it("lands at index 0 in an empty column", () => {
+    expect(dropTarget(GEOMETRY, 300, 300, 10)).toEqual({ columnId: 2, index: 0 });
+  });
+
+  it("returns null outside every column, so a release there is a cancel", () => {
+    expect(dropTarget(GEOMETRY, 900, 300, 10)).toBeNull();
+    expect(dropTarget(GEOMETRY, 100, -20, 10)).toBeNull();
+  });
+});
+
+describe("stepTarget", () => {
+  const start = { columnId: 1, index: 1 };
+
+  it("steps within the column and stops at its ends", () => {
+    expect(stepTarget(GEOMETRY, start, "up", 99)).toEqual({ columnId: 1, index: 0 });
+    expect(stepTarget(GEOMETRY, { columnId: 1, index: 0 }, "up", 99)).toEqual({ columnId: 1, index: 0 });
+    expect(stepTarget(GEOMETRY, start, "down", 99)).toEqual({ columnId: 1, index: 2 });
+    expect(stepTarget(GEOMETRY, { columnId: 1, index: 3 }, "down", 99)).toEqual({ columnId: 1, index: 3 });
+  });
+
+  it("excludes the moved card when deciding how far down it may go", () => {
+    // Moving card 10: only two others, so index 2 is the end.
+    expect(stepTarget(GEOMETRY, { columnId: 1, index: 2 }, "down", 10)).toEqual({ columnId: 1, index: 2 });
+  });
+
+  it("changes column and keeps the row as close as the new one allows", () => {
+    expect(stepTarget(GEOMETRY, start, "right", 99)).toEqual({ columnId: 2, index: 0 });
+    expect(stepTarget(GEOMETRY, { columnId: 2, index: 0 }, "left", 99)).toEqual({ columnId: 1, index: 0 });
+  });
+
+  it("stays put at the outer columns", () => {
+    expect(stepTarget(GEOMETRY, start, "left", 99)).toEqual(start);
+    expect(stepTarget(GEOMETRY, { columnId: 2, index: 0 }, "right", 99)).toEqual({ columnId: 2, index: 0 });
   });
 });

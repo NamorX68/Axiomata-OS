@@ -16,13 +16,30 @@ export interface DragDelta {
   dy: number;
 }
 
+/**
+ * Viewport position of the pointer, passed alongside the offset.
+ *
+ * A second argument rather than two more fields on `DragDelta`: callers build
+ * `DragDelta` values themselves to represent "a drag in progress, zero so far"
+ * (`Tile.svelte`, `StagingPanel.svelte`), and widening the offset type would
+ * force them to invent a pointer position they do not have. Moving a tile only
+ * needs the offset; a drag that has to know *what it is over* — a Kanban card
+ * looking for its column — needs the absolute point.
+ */
+export interface DragPoint {
+  x: number;
+  y: number;
+}
+
 export interface DragOptions {
-  /** Called once when the threshold is crossed. */
-  onStart?: () => void;
-  /** Called on every move after start, with the total offset since start. */
-  onMove?: (delta: DragDelta) => void;
-  /** Called on release with the final offset. Not called if no drag started. */
-  onEnd?: (delta: DragDelta) => void;
+  /** Called once when the threshold is crossed, with the pointer position. */
+  onStart?: (point: DragPoint) => void;
+  /** Called on every move after start, with the total offset since start
+   *  and the pointer's current viewport position. */
+  onMove?: (delta: DragDelta, point: DragPoint) => void;
+  /** Called on release with the final offset and position. Not called if no
+   *  drag started. */
+  onEnd?: (delta: DragDelta, point: DragPoint) => void;
   /** Movement in px before a press becomes a drag. */
   threshold?: number;
   /** Selector for descendants that must not start a drag. */
@@ -43,6 +60,10 @@ export const draggable: Action<HTMLElement, DragOptions> = (node, options) => {
 
   function delta(e: PointerEvent): DragDelta {
     return { dx: e.clientX - startX, dy: e.clientY - startY };
+  }
+
+  function point(e: PointerEvent): DragPoint {
+    return { x: e.clientX, y: e.clientY };
   }
 
   function onPointerDown(e: PointerEvent) {
@@ -67,10 +88,10 @@ export const draggable: Action<HTMLElement, DragOptions> = (node, options) => {
       if (Math.hypot(d.dx, d.dy) < threshold) return;
       dragging = true;
       node.setPointerCapture(e.pointerId);
-      opts.onStart?.();
+      opts.onStart?.(point(e));
     }
     e.preventDefault();
-    opts.onMove?.(d);
+    opts.onMove?.(d, point(e));
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -80,7 +101,7 @@ export const draggable: Action<HTMLElement, DragOptions> = (node, options) => {
     node.removeEventListener("pointercancel", onPointerUp);
     if (dragging) {
       node.releasePointerCapture(e.pointerId);
-      opts.onEnd?.(delta(e));
+      opts.onEnd?.(delta(e), point(e));
     }
     pointerId = null;
     dragging = false;

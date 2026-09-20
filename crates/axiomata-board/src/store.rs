@@ -608,16 +608,29 @@ pub fn set_card_archived(db: &Connection, id: i64, archived: bool) -> Result<boo
 /// Where a card should land when dropped at `index` within `column_id`, and
 /// the index actually used.
 ///
+/// `index` counts the cards the moved one would sit **among**, which is why
+/// `moving` is excluded from the neighbour list. Counting it would make a move
+/// down within its own column land one place short of where the drop indicator
+/// promised: the card still occupying slot `index` is the card being dragged.
+/// Excluding it also makes the index mean the same thing in both directions
+/// and across columns, which is what a caller can reason about.
+///
 /// An `index` past the end means "append" rather than being an error — that is
 /// what a drop below the last card means, and what the CLI's absent `--index`
 /// means. Returns the position, the clamped index, and whether the column has
 /// to be renumbered first because the gap at that spot is no longer
 /// representable (see [`MIN_GAP`]).
-fn position_for(db: &Connection, column_id: i64, index: usize) -> Result<(f64, usize, bool)> {
-    let mut stmt =
-        db.prepare("SELECT position FROM cards WHERE column_id = ?1 ORDER BY position, id")?;
+fn position_for(
+    db: &Connection,
+    column_id: i64,
+    index: usize,
+    moving: i64,
+) -> Result<(f64, usize, bool)> {
+    let mut stmt = db.prepare(
+        "SELECT position FROM cards WHERE column_id = ?1 AND id <> ?2 ORDER BY position, id",
+    )?;
     let positions: Vec<f64> = stmt
-        .query_map(params![column_id], |row| row.get(0))?
+        .query_map(params![column_id, moving], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;
 
     let index = index.min(positions.len());
@@ -637,11 +650,17 @@ fn position_for(db: &Connection, column_id: i64, index: usize) -> Result<(f64, u
 }
 
 /// Renumbers a column to `1.0, 2.0, 3.0…`, restoring room between every pair.
-fn renumber(tx: &rusqlite::Transaction<'_>, column_id: i64) -> Result<()> {
+///
+/// `exclude` leaves one card out — the one being moved. It is about to be
+/// given a position of its own, and counting it here would shift every slot
+/// after it by one, so the index that `position_for` resolved (which also
+/// excludes it) would no longer point where it meant to.
+fn renumber(tx: &rusqlite::Transaction<'_>, column_id: i64, exclude: i64) -> Result<()> {
     let ids: Vec<i64> = {
-        let mut stmt =
-            tx.prepare("SELECT id FROM cards WHERE column_id = ?1 ORDER BY position, id")?;
-        let rows = stmt.query_map(params![column_id], |row| row.get(0))?;
+        let mut stmt = tx.prepare(
+            "SELECT id FROM cards WHERE column_id = ?1 AND id <> ?2 ORDER BY position, id",
+        )?;
+        let rows = stmt.query_map(params![column_id, exclude], |row| row.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
     // Prepared once rather than per card: the statement text never varies, and
@@ -674,9 +693,9 @@ pub fn move_card(db: &mut Connection, id: i64, column_id: i64, index: usize) -> 
             reason: format!("no column {column_id}"),
         });
     };
-    let (mut position, index, collapsed) = position_for(&tx, column_id, index)?;
+    let (mut position, index, collapsed) = position_for(&tx, column_id, index, id)?;
     if collapsed {
-        renumber(&tx, column_id)?;
+        renumber(&tx, column_id, id)?;
         // Against the fresh 1.0/2.0/3.0 spacing, slot `index` sits at
         // `index + 0.5`: before the first card for 0, between neighbours
         // otherwise, past the last one at the end.
@@ -1130,6 +1149,81 @@ mod tests {
         assert!(get_card(&db, card.id).unwrap().is_none());
         assert!(list_columns(&db, board.id).unwrap().is_empty());
         assert!(get_board(&db, board.id).unwrap().is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Moving a card *down* inside its own column is where an index that
+    /// counts the card itself goes wrong: the slot it is aiming at is still
+    /// occupied by the card doing the aiming, so it lands one place short of
+    /// where the drop indicator promised.
+    #[test]
+    fn a_card_moved_down_its_own_column_lands_exactly_where_it_was_dropped() {
+        let path = temp_db_path();
+        let mut db = fresh(&path);
+        let board = create_board(&mut db, "Test").unwrap();
+        let col = list_columns(&db, board.id).unwrap()[0].id;
+
+        for title in ["a", "b", "c", "d"] {
+            create_card(
+                &db,
+                &NewCard {
+                    column_id: col,
+                    fields: fields(title),
+                },
+            )
+            .unwrap();
+        }
+        let titles = |db: &Connection| -> Vec<String> {
+            list_cards(db, board.id, false)
+                .unwrap()
+                .into_iter()
+                .map(|c| c.title)
+                .collect()
+        };
+        let a_id = list_cards(&db, board.id, false).unwrap()[0].id;
+
+        // "Drop a between c and d" — slot 2 among the cards that are not `a`.
+        assert!(move_card(&mut db, a_id, col, 2).unwrap());
+        assert_eq!(titles(&db), ["b", "c", "a", "d"]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The same, with the gap collapsed so the rebalance path runs: the
+    /// renumbering must leave the moved card out too, or every slot after it
+    /// shifts by one and the index stops meaning what it meant.
+    #[test]
+    fn the_rebalance_path_also_lands_where_it_was_dropped() {
+        let path = temp_db_path();
+        let mut db = fresh(&path);
+        let board = create_board(&mut db, "Test").unwrap();
+        let col = list_columns(&db, board.id).unwrap()[0].id;
+
+        for title in ["a", "b", "c", "d"] {
+            create_card(
+                &db,
+                &NewCard {
+                    column_id: col,
+                    fields: fields(title),
+                },
+            )
+            .unwrap();
+        }
+        // Squeeze b and c together until the midpoint between them collapses.
+        db.execute(
+            "UPDATE cards SET position = 2.0000000001 WHERE title = 'c'",
+            [],
+        )
+        .unwrap();
+
+        let a_id = list_cards(&db, board.id, false).unwrap()[0].id;
+        assert!(move_card(&mut db, a_id, col, 2).unwrap());
+
+        let after: Vec<String> = list_cards(&db, board.id, false)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.title)
+            .collect();
+        assert_eq!(after, ["b", "c", "a", "d"]);
         let _ = std::fs::remove_file(&path);
     }
 

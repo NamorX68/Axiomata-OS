@@ -217,6 +217,24 @@ export interface BoardCard {
   updated_at: string;
 }
 
+/** A card's writable fields. Update is a full replace, like `NewRoutine`. */
+export interface CardFields {
+  title: string;
+  body: string;
+  labels: string[];
+  assignee: string | null;
+  due_at: string | null;
+}
+
+export interface NewCard extends CardFields {
+  column_id: number;
+}
+
+export interface NewColumn {
+  name: string;
+  maps_to_status: CardStatus;
+}
+
 export interface SearchHit {
   path: string;
   line: number;
