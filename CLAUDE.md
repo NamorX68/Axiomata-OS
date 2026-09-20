@@ -64,6 +64,8 @@ cargo run -p axiomata-cli -- routines delete <id>
 cargo run -p axiomata-cli -- routines tick  # run one scheduler poll pass now (no 30s wait)
 cargo run -p axiomata-cli -- board list [--board <id>] [--archived]   # boards, or one board's columns+cards
 cargo run -p axiomata-cli -- board new <name>            # board + its three default columns
+cargo run -p axiomata-cli -- board rename <id> <name>    # mirror follows, old file swept up
+cargo run -p axiomata-cli -- board delete <id> [--force] # --force required once it holds cards
 cargo run -p axiomata-cli -- board add --column <id> <title> [--label …]
 cargo run -p axiomata-cli -- board move <id> --column <id> [--index <n>]
 cargo run -p axiomata-cli -- board claim <id> [--actor human:owner]   # CAS; fails if already held
@@ -136,6 +138,13 @@ from the code itself:
   `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
   WebKit sandboxing wall); don't re-attempt it without reading the postmortem in
   `docs/architecture.md` §5 first.
+- **The Kanban board mirrors itself into the vault, one way only**: every board
+  change rewrites `<workspace>/Kanban/<id>-<name>.md` (`core/board_mirror.rs`), so
+  Obsidian, the Second-Brain search and the memory router can see a board without
+  the app. **Nothing reads that file back** — the database is the board. A rename
+  produces a new file name and the old one is swept up by id prefix; deleting a
+  board removes its mirror. Writing it is best-effort and never fails the edit
+  that triggered it.
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.

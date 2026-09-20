@@ -10,6 +10,7 @@
 use axiomata_core::AxiomataCore;
 use axiomata_core::agents::{self, ChatMode, ChatReply};
 use axiomata_core::board;
+use axiomata_core::board_mirror;
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
 use axiomata_core::config::{Config, ProviderId, ProviderSettings};
 use axiomata_core::dashboard::{self, LoadedState};
@@ -1379,8 +1380,11 @@ pub fn get_board(state: State<'_, CoreState>, id: i64) -> Result<Option<board::B
 /// Creates a board together with its three default columns.
 #[tauri::command]
 pub fn create_board(state: State<'_, CoreState>, name: String) -> Result<board::Board, String> {
+    let config = read_config(&state.config);
     let mut db = state.db_lock();
-    board::store::create_board(&mut db, &name).map_err(|err| err.to_string())
+    let created = board::store::create_board(&mut db, &name).map_err(|err| err.to_string())?;
+    board_mirror::after_change(&db, &config, created.id);
+    Ok(created)
 }
 
 /// Returns `None` if there is no such board.
@@ -1390,16 +1394,26 @@ pub fn rename_board(
     id: i64,
     name: String,
 ) -> Result<Option<board::Board>, String> {
+    let config = read_config(&state.config);
     let db = state.db_lock();
-    board::store::rename_board(&db, id, &name).map_err(|err| err.to_string())
+    let renamed = board::store::rename_board(&db, id, &name).map_err(|err| err.to_string())?;
+    if renamed.is_some() {
+        board_mirror::after_change(&db, &config, id);
+    }
+    Ok(renamed)
 }
 
 /// Deletes a board with its columns and cards. Returns `false` if there is no
 /// such board. The caller is expected to have shown `count_board_cards` first.
 #[tauri::command]
 pub fn delete_board(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let config = read_config(&state.config);
     let mut db = state.db_lock();
-    board::store::delete_board(&mut db, id).map_err(|err| err.to_string())
+    let gone = board::store::delete_board(&mut db, id).map_err(|err| err.to_string())?;
+    if gone {
+        board_mirror::remove(&config, id);
+    }
+    Ok(gone)
 }
 
 #[tauri::command]
@@ -1436,8 +1450,11 @@ pub fn create_card(
     state: State<'_, CoreState>,
     new: board::NewCard,
 ) -> Result<board::Card, String> {
+    let config = read_config(&state.config);
     let db = state.db_lock();
-    board::store::create_card(&db, &new).map_err(|err| err.to_string())
+    let created = board::store::create_card(&db, &new).map_err(|err| err.to_string())?;
+    board_mirror::after_change(&db, &config, created.board_id);
+    Ok(created)
 }
 
 /// Full replace of a card's writable fields — never its signatures, which move
@@ -1448,8 +1465,13 @@ pub fn update_card(
     id: i64,
     fields: board::CardFields,
 ) -> Result<Option<board::Card>, String> {
+    let config = read_config(&state.config);
     let db = state.db_lock();
-    board::store::update_card(&db, id, &fields).map_err(|err| err.to_string())
+    let updated = board::store::update_card(&db, id, &fields).map_err(|err| err.to_string())?;
+    if let Some(card) = &updated {
+        board_mirror::after_change(&db, &config, card.board_id);
+    }
+    Ok(updated)
 }
 
 /// `index` counts the cards the moved one will sit among, excluding itself.
@@ -1460,14 +1482,29 @@ pub fn move_card(
     column_id: i64,
     index: usize,
 ) -> Result<bool, String> {
+    let config = read_config(&state.config);
     let mut db = state.db_lock();
-    board::store::move_card(&mut db, id, column_id, index).map_err(|err| err.to_string())
+    let moved =
+        board::store::move_card(&mut db, id, column_id, index).map_err(|err| err.to_string())?;
+    if moved {
+        board_mirror::after_card_change(&db, &config, id);
+    }
+    Ok(moved)
 }
 
 #[tauri::command]
 pub fn delete_card(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let config = read_config(&state.config);
     let db = state.db_lock();
-    board::store::delete_card(&db, id).map_err(|err| err.to_string())
+    // The board has to be read *before* the card is gone with it.
+    let board_id = board::store::get_card(&db, id)
+        .map_err(|err| err.to_string())?
+        .map(|card| card.board_id);
+    let gone = board::store::delete_card(&db, id).map_err(|err| err.to_string())?;
+    if let Some(board_id) = board_id.filter(|_| gone) {
+        board_mirror::after_change(&db, &config, board_id);
+    }
+    Ok(gone)
 }
 
 #[tauri::command]
@@ -1476,8 +1513,14 @@ pub fn set_card_archived(
     id: i64,
     archived: bool,
 ) -> Result<bool, String> {
+    let config = read_config(&state.config);
     let db = state.db_lock();
-    board::store::set_card_archived(&db, id, archived).map_err(|err| err.to_string())
+    let changed =
+        board::store::set_card_archived(&db, id, archived).map_err(|err| err.to_string())?;
+    if changed {
+        board_mirror::after_card_change(&db, &config, id);
+    }
+    Ok(changed)
 }
 
 #[tauri::command]
@@ -1486,8 +1529,12 @@ pub fn create_board_column(
     board_id: i64,
     new: board::NewColumn,
 ) -> Result<board::Column, String> {
+    let config = read_config(&state.config);
     let db = state.db_lock();
-    board::store::create_column(&db, board_id, &new).map_err(|err| err.to_string())
+    let created =
+        board::store::create_column(&db, board_id, &new).map_err(|err| err.to_string())?;
+    board_mirror::after_change(&db, &config, board_id);
+    Ok(created)
 }
 
 /// Renames a column and/or re-points it at another status. Re-pointing away
@@ -1499,8 +1546,14 @@ pub fn update_board_column(
     name: String,
     maps_to_status: board::CardStatus,
 ) -> Result<Option<board::Column>, String> {
+    let config = read_config(&state.config);
     let mut db = state.db_lock();
-    board::store::update_column(&mut db, id, &name, maps_to_status).map_err(|err| err.to_string())
+    let updated = board::store::update_column(&mut db, id, &name, maps_to_status)
+        .map_err(|err| err.to_string())?;
+    if let Some(column) = &updated {
+        board_mirror::after_change(&db, &config, column.board_id);
+    }
+    Ok(updated)
 }
 
 /// Returns `false` if the column still holds cards and no destination was
@@ -1511,6 +1564,16 @@ pub fn delete_board_column(
     id: i64,
     move_cards_to: Option<i64>,
 ) -> Result<bool, String> {
+    let config = read_config(&state.config);
     let mut db = state.db_lock();
-    board::store::delete_column(&mut db, id, move_cards_to).map_err(|err| err.to_string())
+    // Same as for a card: resolve the board before the column stops existing.
+    let board_id = board::store::get_column(&db, id)
+        .map_err(|err| err.to_string())?
+        .map(|column| column.board_id);
+    let gone =
+        board::store::delete_column(&mut db, id, move_cards_to).map_err(|err| err.to_string())?;
+    if let Some(board_id) = board_id.filter(|_| gone) {
+        board_mirror::after_change(&db, &config, board_id);
+    }
+    Ok(gone)
 }

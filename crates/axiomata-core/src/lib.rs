@@ -12,6 +12,7 @@ pub mod agents;
 /// It is a plain re-export, not a wrapper: the board owns its own types and
 /// error, and adding a translation layer here would only be something else to
 /// keep in sync.
+pub mod board_mirror;
 pub use axiomata_board as board;
 pub mod bridge;
 pub mod config;

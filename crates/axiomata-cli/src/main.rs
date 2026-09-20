@@ -6,6 +6,7 @@
 use anyhow::{Context, Result, bail};
 use axiomata_core::agents::{self, ChatMode};
 use axiomata_core::board;
+use axiomata_core::board_mirror;
 use axiomata_core::bridge::{self, ActionRequest};
 use axiomata_core::config::Config;
 use axiomata_core::importer;
@@ -218,6 +219,15 @@ enum BoardAction {
     },
     /// Create a board (with its three default columns).
     New { name: String },
+    /// Rename a board. Its workspace mirror follows, old file swept up.
+    Rename { id: i64, name: String },
+    /// Delete a board with every column and card on it, and its mirror.
+    Delete {
+        id: i64,
+        /// Required once the board holds cards — they go with it.
+        #[arg(long)]
+        force: bool,
+    },
     /// Add a card to a column.
     Add {
         #[arg(long)]
@@ -996,6 +1006,8 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
     match action {
         BoardAction::List { board, archived } => board_list(core, board, archived),
         BoardAction::New { name } => board_new(core, &name),
+        BoardAction::Rename { id, name } => board_rename(core, id, &name),
+        BoardAction::Delete { id, force } => board_delete(core, id, force),
         BoardAction::Add {
             column,
             title,
@@ -1077,6 +1089,7 @@ fn board_new(core: &AxiomataCore, name: &str) -> Result<()> {
     let mut db = core.db_lock();
     let created = board::store::create_board(&mut db, name)
         .with_context(|| format!("failed to create board {name:?}"))?;
+    board_mirror::after_change(&db, &read_config(core), created.id);
     let columns = board::store::list_columns(&db, created.id)?;
     println!("created board #{} {:?}", created.id, created.name);
     for column in columns {
@@ -1087,6 +1100,33 @@ fn board_new(core: &AxiomataCore, name: &str) -> Result<()> {
             column.maps_to_status.as_str()
         );
     }
+    Ok(())
+}
+
+fn board_rename(core: &AxiomataCore, id: i64, name: &str) -> Result<()> {
+    let db = core.db_lock();
+    let Some(renamed) = board::store::rename_board(&db, id, name)? else {
+        bail!("no board with id {id}");
+    };
+    board_mirror::after_change(&db, &read_config(core), id);
+    println!("board #{id} is now {:?}", renamed.name);
+    Ok(())
+}
+
+fn board_delete(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
+    let mut db = core.db_lock();
+    if board::store::get_board(&db, id)?.is_none() {
+        bail!("no board with id {id}");
+    }
+    // Deleting a board takes its cards with it, so the count has to be said
+    // out loud before it happens rather than reported afterwards.
+    let cards = board::store::count_cards(&db, id)?;
+    if cards > 0 && !force {
+        bail!("board #{id} holds {cards} cards — pass --force to delete it with them");
+    }
+    board::store::delete_board(&mut db, id)?;
+    board_mirror::remove(&read_config(core), id);
+    println!("board #{id} deleted ({cards} cards)");
     Ok(())
 }
 
@@ -1112,6 +1152,7 @@ fn board_add(
         },
     )
     .with_context(|| format!("failed to add a card to column #{column}"))?;
+    board_mirror::after_change(&db, &read_config(core), card.board_id);
     println!("created card #{} {:?}", card.id, card.title);
     Ok(())
 }
@@ -1123,6 +1164,7 @@ fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize) -> Result
     if !board::store::move_card(&mut db, id, column, index)? {
         bail!("no card with id {id}");
     }
+    board_mirror::after_card_change(&db, &read_config(core), id);
     println!("card #{id} moved to column #{column}");
     Ok(())
 }
@@ -1130,6 +1172,7 @@ fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize) -> Result
 fn board_claim(core: &AxiomataCore, id: i64, actor: &str) -> Result<()> {
     let db = core.db_lock();
     if board::store::claim_card(&db, id, actor)? {
+        board_mirror::after_card_change(&db, &read_config(core), id);
         println!("card #{id} claimed by {actor}");
         return Ok(());
     }
@@ -1150,6 +1193,7 @@ fn board_done(core: &AxiomataCore, id: i64) -> Result<()> {
     // dashboard cannot later answer it differently.
     match board::store::move_to_status(&mut db, id, board::CardStatus::Done)? {
         Some(column) => {
+            board_mirror::after_change(&db, &read_config(core), column.board_id);
             println!("card #{id} moved to {:?}", column.name);
             Ok(())
         }
@@ -1161,6 +1205,7 @@ fn board_done(core: &AxiomataCore, id: i64) -> Result<()> {
 fn board_verify(core: &AxiomataCore, id: i64, actor: &str) -> Result<()> {
     let db = core.db_lock();
     if board::store::verify_card(&db, id, actor)? {
+        board_mirror::after_card_change(&db, &read_config(core), id);
         println!("card #{id} verified by {actor}");
         return Ok(());
     }
@@ -1199,6 +1244,7 @@ fn board_archive(core: &AxiomataCore, id: i64, archived: bool) -> Result<()> {
     if !board::store::set_card_archived(&db, id, archived)? {
         bail!("no card with id {id}");
     }
+    board_mirror::after_card_change(&db, &read_config(core), id);
     println!(
         "card #{id} {}",
         if archived { "archived" } else { "restored" }
