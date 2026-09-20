@@ -122,6 +122,18 @@
   --ax-card-border: transparent;
   --ax-card-shadow: none;
 
+  /* Label palette. A label's colour is derived from its own text, so the same
+     word is always the same colour without anybody maintaining a mapping.
+     Six mid-tone hues, chosen to stay legible on both light and dark
+     surfaces and to keep clear of the orange accent — a label that looked
+     like the accent would read as "selected" rather than as a label. */
+  --ax-label-1: #c97b7b;
+  --ax-label-2: #6f9bd1;
+  --ax-label-3: #79ad83;
+  --ax-label-4: #a884b8;
+  --ax-label-5: #c0a13f;
+  --ax-label-6: #5aa8a8;
+
   --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.32);
   --ax-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.5);
   --ax-shadow-drag: 0 16px 48px rgba(0, 0, 0, 0.55);

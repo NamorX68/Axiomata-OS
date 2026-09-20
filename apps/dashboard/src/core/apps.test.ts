@@ -53,6 +53,7 @@ describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
       "reminders",
       "mail",
       "terminal",
+      "kanban",
     ]);
   });
 

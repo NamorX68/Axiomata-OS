@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
-import { bringToFront, closeStaged, openStaged, staged } from "./staging";
+import { bringToFront, closeStaged, openStaged, readAnchor, staged } from "./staging";
 
 beforeAll(() => registerBuiltins());
 beforeEach(() => staged.set([]));
@@ -75,5 +75,22 @@ describe("bringToFront", () => {
     const b = openStaged("md-file", { path: "b.md" })!;
     bringToFront(b.id);
     expect(get(staged).map((p) => p.id)).toEqual([a.id, b.id]);
+  });
+});
+
+describe("readAnchor", () => {
+  it("accepts a complete rect", () => {
+    expect(readAnchor({ x: 10, y: 20, w: 300, h: 200 })).toEqual({ x: 10, y: 20, w: 300, h: 200 });
+  });
+
+  it("refuses anything incomplete or not a rect, so a panel falls back to centred", () => {
+    for (const bad of [null, undefined, 42, "rect", {}, { x: 1, y: 2, w: 3 }, { x: 1, y: 2, w: 3, h: "4" }]) {
+      expect(readAnchor(bad)).toBeNull();
+    }
+  });
+
+  it("refuses NaN and Infinity, which would position a panel nowhere", () => {
+    expect(readAnchor({ x: NaN, y: 0, w: 1, h: 1 })).toBeNull();
+    expect(readAnchor({ x: 0, y: Infinity, w: 1, h: 1 })).toBeNull();
   });
 });

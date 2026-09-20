@@ -43,7 +43,7 @@
   import { resizable, type ResizeDelta } from "../canvas/resize";
   import { getSetting, setSetting } from "../core/persist";
   import { getModule } from "../core/registry";
-  import { bringToFront, type StagedPanel } from "../core/staging";
+  import { bringToFront, readAnchor, type StagedPanel } from "../core/staging";
   import type { ModuleContext } from "../core/types";
 
   let { panel, ctx, onClose }: { panel: StagedPanel; ctx: ModuleContext; onClose: () => void } = $props();
@@ -105,9 +105,33 @@
 
   // ---- move (drag by header) ----
 
-  /** `null` until first dragged — see the component doc comment for why
-   *  this is local/transient rather than persisted or shared. */
-  let pos = $state<{ x: number; y: number } | null>(null);
+  /**
+   * Where the panel should first appear, when its opener said so.
+   *
+   * An anchored panel starts centred on whatever opened it (its tile or
+   * panel) instead of in the middle of the screen. The size is already known
+   * here, so this is computed up front rather than measured after mount —
+   * that keeps `pos` set before the entrance transition reads it, so the
+   * panel animates in at its final spot instead of visibly jumping there.
+   */
+  function anchoredPos(): { x: number; y: number } | null {
+    const anchor = readAnchor(panel.config.anchor);
+    if (!anchor) return null;
+    const w = clampW(panelSize?.w ?? 0);
+    const h = clampH(panelSize?.h ?? 0);
+    const inset = 8;
+    const fit = (value: number, size: number, limit: number) =>
+      Math.round(Math.min(Math.max(value, inset), Math.max(inset, limit - size - inset)));
+    return {
+      x: fit(anchor.x + anchor.w / 2 - w / 2, w, window.innerWidth),
+      y: fit(anchor.y + anchor.h / 2 - h / 2, h, window.innerHeight),
+    };
+  }
+
+  /** `null` until first dragged, unless the opener anchored it — see the
+   *  component doc comment for why this is local/transient rather than
+   *  persisted or shared. */
+  let pos = $state<{ x: number; y: number } | null>(anchoredPos());
   let moving = $state<DragDelta | null>(null);
   let moveBase = { x: 0, y: 0 };
 

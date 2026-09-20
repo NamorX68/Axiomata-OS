@@ -21,6 +21,40 @@ import { get, writable } from "svelte/store";
 
 import { getModule } from "./registry";
 
+/**
+ * Where a panel should come to rest, in viewport coordinates.
+ *
+ * Passed as `config.anchor` by an opener that knows where the user is
+ * looking. A card opened from a Kanban tile belongs over that tile, not
+ * halfway across a 21:9 screen — the eye is already on the tile, and sending
+ * the panel somewhere else makes the user hunt for what they just asked for.
+ * Without an anchor a panel keeps the original behaviour and settles in the
+ * middle of the screen, which is right for a file that has no place it
+ * "came from".
+ */
+export interface StagingAnchor {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Reads a `config.anchor` back, tolerating anything that isn't one. */
+export function readAnchor(raw: unknown): StagingAnchor | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const a = raw as Record<string, unknown>;
+  const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+  return ok(a.x) && ok(a.y) && ok(a.w) && ok(a.h) ? { x: a.x, y: a.y, w: a.w, h: a.h } : null;
+}
+
+/** The rect of the tile or panel an element sits in, for use as an anchor. */
+export function hostAnchor(from: Element | null): StagingAnchor | null {
+  const host = from?.closest(".tile, .panel");
+  if (!host) return null;
+  const rect = host.getBoundingClientRect();
+  return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
+}
+
 export interface StagedPanel {
   id: string;
   type: string;

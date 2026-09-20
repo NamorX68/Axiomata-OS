@@ -172,6 +172,51 @@ export interface NewRoutine {
   enabled: boolean;
 }
 
+/* ---------------------------------------------------------------- board ---
+ * Mirrors `axiomata_board`'s serde output: snake_case fields, `null` (not
+ * `undefined`) for an absent `Option`, RFC 3339 strings for timestamps.
+ *
+ * Note what `BoardCard` does not have: a status. A card's status is the
+ * `maps_to_status` of the column it sits in — see `core/kanban.ts`. Carrying
+ * it on the card too would let the two drift, silently. */
+
+export type CardStatus = "open" | "doing" | "done";
+
+export interface Board {
+  id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BoardColumn {
+  id: number;
+  board_id: number;
+  name: string;
+  position: number;
+  maps_to_status: CardStatus;
+}
+
+export interface BoardCard {
+  id: number;
+  board_id: number;
+  column_id: number;
+  position: number;
+  title: string;
+  body: string;
+  labels: string[];
+  /** Actor string (`"human:owner"`, `"agent:claude-1"`), or unassigned. */
+  assignee: string | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  due_at: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SearchHit {
   path: string;
   line: number;

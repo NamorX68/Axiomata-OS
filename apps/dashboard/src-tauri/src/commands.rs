@@ -9,6 +9,7 @@
 
 use axiomata_core::AxiomataCore;
 use axiomata_core::agents::{self, ChatMode, ChatReply};
+use axiomata_core::board;
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
 use axiomata_core::config::{Config, ProviderId, ProviderSettings};
 use axiomata_core::dashboard::{self, LoadedState};
@@ -1352,4 +1353,77 @@ pub fn routine_history(
 ) -> Result<Vec<RoutineRun>, String> {
     let db = state.db_lock();
     routines::store::list_runs(&db, id, limit).map_err(|err| err.to_string())
+}
+
+// ----------------------------------------------------------------- board ---
+//
+// Thin passthroughs to `axiomata_board::store`, in the same four-line shape as
+// the routines commands above: take the state, lock, delegate, stringify. The
+// board's own error text is what the frontend shows, so nothing is translated
+// here. Card mutations land with CP-K2b; these are what rendering a board and
+// managing the board list need.
+
+#[tauri::command]
+pub fn list_boards(state: State<'_, CoreState>) -> Result<Vec<board::Board>, String> {
+    let db = state.db_lock();
+    board::store::list_boards(&db).map_err(|err| err.to_string())
+}
+
+/// Returns `None` if there is no such board.
+#[tauri::command]
+pub fn get_board(state: State<'_, CoreState>, id: i64) -> Result<Option<board::Board>, String> {
+    let db = state.db_lock();
+    board::store::get_board(&db, id).map_err(|err| err.to_string())
+}
+
+/// Creates a board together with its three default columns.
+#[tauri::command]
+pub fn create_board(state: State<'_, CoreState>, name: String) -> Result<board::Board, String> {
+    let mut db = state.db_lock();
+    board::store::create_board(&mut db, &name).map_err(|err| err.to_string())
+}
+
+/// Returns `None` if there is no such board.
+#[tauri::command]
+pub fn rename_board(
+    state: State<'_, CoreState>,
+    id: i64,
+    name: String,
+) -> Result<Option<board::Board>, String> {
+    let db = state.db_lock();
+    board::store::rename_board(&db, id, &name).map_err(|err| err.to_string())
+}
+
+/// Deletes a board with its columns and cards. Returns `false` if there is no
+/// such board. The caller is expected to have shown `count_board_cards` first.
+#[tauri::command]
+pub fn delete_board(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let mut db = state.db_lock();
+    board::store::delete_board(&mut db, id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn count_board_cards(state: State<'_, CoreState>, board_id: i64) -> Result<i64, String> {
+    let db = state.db_lock();
+    board::store::count_cards(&db, board_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_board_columns(
+    state: State<'_, CoreState>,
+    board_id: i64,
+) -> Result<Vec<board::Column>, String> {
+    let db = state.db_lock();
+    board::store::list_columns(&db, board_id).map_err(|err| err.to_string())
+}
+
+/// Archived cards are left out unless `include_archived` is set.
+#[tauri::command]
+pub fn list_board_cards(
+    state: State<'_, CoreState>,
+    board_id: i64,
+    include_archived: bool,
+) -> Result<Vec<board::Card>, String> {
+    let db = state.db_lock();
+    board::store::list_cards(&db, board_id, include_archived).map_err(|err| err.to_string())
 }

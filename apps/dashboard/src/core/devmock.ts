@@ -7,6 +7,9 @@
 
 import type {
   AppInfo,
+  Board,
+  BoardCard,
+  BoardColumn,
   ChatReply,
   ConfigUpdate,
   ConfigView,
@@ -329,6 +332,68 @@ let runs: RunRecord[] = [
     source: "routine",
   },
 ];
+/* Board fixtures. One board, the three default columns, a handful of cards
+ * that exercise the cases the tile has to survive: an empty column, a long
+ * body, labels, a due date already past, and an assignee that is an agent
+ * rather than the default human (so the assignee line actually shows). */
+const DAY = 86_400_000;
+let boards: Board[] = [
+  {
+    id: 1,
+    name: "Axiomata",
+    created_at: new Date(Date.now() - 9 * DAY).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+let boardColumns: BoardColumn[] = [
+  { id: 1, board_id: 1, name: "Offen", position: 1, maps_to_status: "open" },
+  { id: 2, board_id: 1, name: "In Arbeit", position: 2, maps_to_status: "doing" },
+  { id: 3, board_id: 1, name: "Fertig", position: 3, maps_to_status: "done" },
+];
+function mockCard(card: Partial<BoardCard> & Pick<BoardCard, "id" | "column_id" | "position" | "title">): BoardCard {
+  return {
+    board_id: 1,
+    body: "",
+    labels: [],
+    assignee: null,
+    claimed_by: null,
+    claimed_at: null,
+    verified_by: null,
+    verified_at: null,
+    due_at: null,
+    archived_at: null,
+    created_at: new Date(Date.now() - 3 * DAY).toISOString(),
+    updated_at: new Date().toISOString(),
+    ...card,
+  };
+}
+let boardCards: BoardCard[] = [
+  mockCard({ id: 1, column_id: 1, position: 1, title: "Spaltenbreite auf 21:9 pruefen", labels: ["design"], due_at: new Date(Date.now() + 3 * DAY).toISOString() }),
+  mockCard({ id: 2, column_id: 1, position: 2, title: "Vault-Spiegel: Dateiname festzurren", labels: ["kanban", "vault"] }),
+  mockCard({
+    id: 3,
+    column_id: 1,
+    position: 3,
+    title: "Migration 0008 gegen bestehende DB testen",
+    body: "Auf leerer und auf gewachsener Datenbank, plus der Test in db/mod.rs.",
+    labels: ["rust"],
+    due_at: new Date(Date.now() - 2 * DAY).toISOString(),
+  }),
+  mockCard({
+    id: 4,
+    column_id: 2,
+    position: 1,
+    title: "Drag-and-Drop ohne HTML5-API",
+    body: "canvas/drag.ts als Plumbing, Momentaufnahme bei Drag-Beginn.",
+    labels: ["frontend", "design"],
+    assignee: "agent:claude-1",
+    claimed_by: "agent:claude-1",
+    claimed_at: new Date(Date.now() - DAY).toISOString(),
+  }),
+  mockCard({ id: 5, column_id: 3, position: 1, title: "WAL und busy_timeout entschieden", labels: ["rust"], claimed_by: "agent:claude-1", claimed_at: new Date(Date.now() - 2 * DAY).toISOString(), verified_by: "human:owner", verified_at: new Date(Date.now() - DAY).toISOString() }),
+  mockCard({ id: 6, column_id: 3, position: 2, title: "Alte Notiz, archiviert", archived_at: new Date(Date.now() - 5 * DAY).toISOString() }),
+];
+
 let routines: Routine[] = [
   {
     id: 1,
@@ -549,6 +614,54 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "list_routines":
       return [...routines] as T;
+    // Argument keys are camelCase here because that is what the frontend
+    // sends: Tauri converts them to snake_case on the Rust side, devmock
+    // sees them unconverted.
+    case "list_boards":
+      return boards as T;
+    case "get_board":
+      return (boards.find((b) => b.id === args.id) ?? null) as T;
+    case "create_board": {
+      const created: Board = {
+        id: (boards[boards.length - 1]?.id ?? 0) + 1,
+        name: String(args.name),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      boards = [...boards, created];
+      // A board is never without columns, not even briefly — same rule the
+      // real store enforces in one transaction.
+      const base = (boardColumns[boardColumns.length - 1]?.id ?? 0) + 1;
+      boardColumns = [
+        ...boardColumns,
+        { id: base, board_id: created.id, name: "Offen", position: 1, maps_to_status: "open" },
+        { id: base + 1, board_id: created.id, name: "In Arbeit", position: 2, maps_to_status: "doing" },
+        { id: base + 2, board_id: created.id, name: "Fertig", position: 3, maps_to_status: "done" },
+      ];
+      return created as T;
+    }
+    case "rename_board": {
+      const target = boards.find((b) => b.id === args.id);
+      if (!target) return null as T;
+      const renamed: Board = { ...target, name: String(args.name), updated_at: new Date().toISOString() };
+      boards = boards.map((b) => (b.id === renamed.id ? renamed : b));
+      return renamed as T;
+    }
+    case "delete_board": {
+      const before = boards.length;
+      boards = boards.filter((b) => b.id !== args.id);
+      boardColumns = boardColumns.filter((c) => c.board_id !== args.id);
+      boardCards = boardCards.filter((c) => c.board_id !== args.id);
+      return (boards.length < before) as T;
+    }
+    case "count_board_cards":
+      return boardCards.filter((c) => c.board_id === args.boardId).length as T;
+    case "list_board_columns":
+      return boardColumns.filter((c) => c.board_id === args.boardId) as T;
+    case "list_board_cards":
+      return boardCards.filter(
+        (c) => c.board_id === args.boardId && (args.includeArchived === true || c.archived_at === null),
+      ) as T;
     case "add_routine": {
       const n = args.new as NewRoutine;
       const created: Routine = {
