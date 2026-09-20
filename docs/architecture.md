@@ -16,9 +16,9 @@ top of it. If you have never seen this repo before, this is the place to start a
 ## 1. Vision
 
 Axiomata-OS is a personal "Agentic OS": a single desktop application that acts as
-a command centre / second brain for one user. (The long-term goal is an always-on
-application; the milestones below run it as an ordinary app the user starts and quits —
-see §7, M4.) It is organized around the **ARMS framework**
+a command centre / second brain for one user. (It runs as an ordinary app the user starts
+and quits; an always-on variant was considered and then dropped outright — see §7, M4.)
+It is organized around the **ARMS framework**
 (**A**pplications, **R**outines, **M**emory, **S**kills), the model described in
 [`ARMS-Agentic-OS-Guide.pdf`](../ARMS-Agentic-OS-Guide.pdf) at the repository root. The core
 idea: instead of scattering AI-agent usage across ad-hoc scripts and chat sessions, give it a
@@ -391,7 +391,8 @@ interval picker (every-N-minutes / hourly / daily / weekly, plus a raw-cron esca
 not a bare cron text field; `core/routineInterval.ts` converts between the two and only
 recognises the exact shapes it itself generates, falling back to "custom" (verbatim cron)
 for anything else rather than guessing. Routines only fire while the app or
-`axiomata-cli routines tick` runs — always-on is M4 (deferred, §6).
+`axiomata-cli routines tick` runs — and that is now the intended end state, not a stopgap:
+always-on scheduling (M4) was dropped outright (§6).
 
 ### Errors (`error.rs`)
 
@@ -524,13 +525,27 @@ deliberate choice, since only a few backends are needed and a generic multi-CLI 
 would be premature generalization. A further backend can gain a variant without reworking the
 runner or scheduler.
 
-### M4 — always-on / background scheduling
+### M4 — always-on / background scheduling: dropped
 
-The app still runs as an ordinary desktop app the user starts and quits; closing the window
-ends the process, which also stops the routine scheduler. Autostart
-(`tauri-plugin-autostart`), single-instance guarding (`tauri-plugin-single-instance`),
-close-to-hide window behaviour, and a true background/always-on scheduler are this deferred
-phase — the only milestone from the original M0–M4 plan not yet started.
+The app runs as an ordinary desktop app the user starts and quits; closing the window ends
+the process, which also stops the routine scheduler. Autostart (`tauri-plugin-autostart`),
+single-instance guarding (`tauri-plugin-single-instance`), close-to-hide window behaviour and
+a true background scheduler were this phase — **cancelled outright by the owner on
+2026-09-20**, not merely deferred. The reasoning: either the app is open, or the tiles
+refresh when it is opened, and that is enough. Nothing should be designed around a future
+always-on mode; the scheduler's "fires only while something runs" behaviour (§5) is the
+intended end state.
+
+### M7 — the agentic IDE
+
+The next large body of work, planned in full in [`plans/agentic-ide.md`](plans/agentic-ide.md)
+and not started: an own full-screen IDE view with a dock/split/tab layout, Claude Code and
+Opencode hosted as PTY tiles in the existing terminal engine, agent-to-agent messaging over
+an own MCP server (rather than reading the agents' screens), one git worktree per agent so
+diffs are separable, and an own mini-harness for small, precisely executed tasks — built to
+be extractable into a standalone app the way `axiomata-terminal` is. Git integration of any
+kind is the one genuinely new foundation layer: the repository currently contains no `git2`
+dependency and no `git` subprocess call at all.
 
 ### `axiomata-macos`
 
@@ -549,7 +564,8 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   watcher).
 - **M3 — Routines scheduler: done.** `routines/{model,schedule,store,scheduler}`, at-most-once
   firing via advance-before-execute, startup catch-up rolls forward without re-firing.
-- **M4 — Always-on behaviour: deferred**, not part of the current milestones — see §6.
+- **M4 — Always-on behaviour: dropped** (owner, 2026-09-20). Cancelled outright rather than
+  deferred; see §6 for the reasoning.
 - **M5 — Module-canvas dashboard: done.** The Svelte module canvas (free-form tiles, drag/
   resize/flip, layout persistence), the initial four modules (memory-status, skills-deck,
   routines-board, md-file), the agentic chat bar, the agent ↔ module bridge, themes + custom

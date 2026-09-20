@@ -20,10 +20,24 @@ in several places; `docs/architecture.md` §1 explains how).
 Milestones **M0–M3, M5, M6** are complete (scaffold, skills runner, memory router, routines
 scheduler w/ full CRUD, the Svelte module-canvas dashboard, the particle-graph Second Brain),
 plus ongoing post-M6 feature work (ToDo, Calendar/Reminders/Mail connector modules, themes,
-the `srcdoc` HTML viewer). Only **M4 (always-on/background scheduling)** is still
-unimplemented. Full detail: `docs/architecture.md` §5 (what exists) and §7 (milestone
-history). Detailed step-by-step milestone plans live outside this repo, in the owner's local
-Claude Code planning notes — read them before starting new M0–M6-scale work if available.
+the `srcdoc` HTML viewer, the Terminal module). **M4 (always-on/background scheduling) was
+dropped outright** (owner, 2026-09-20 — the app being open, or tiles refreshing on open, is
+enough); do not plan around it. Full detail: `docs/architecture.md` §5 (what exists) and §7
+(milestone history). Detailed step-by-step milestone plans live outside this repo, in the
+owner's local Claude Code planning notes — read them before starting new M0–M6-scale work if
+available.
+
+**Next up is M7 — the agentic IDE** (`docs/plans/agentic-ide.md`): an own full-screen IDE
+view with a dock/split/tab layout, foreign agent harnesses (Claude Code, Opencode) hosted as
+PTY tiles, A2A over an own MCP server rather than screen-scraping, one git worktree per
+agent, a "Plan" tab per agent showing what it is working on, and an own mini-harness —
+designed from the start to be extractable into a standalone app the way `axiomata-terminal`
+is. Seven milestones (M7.0–M7.6), and **M7.0 is a standalone Kanban module that deliberately
+ships before the IDE** — it is useful on its own and is the data layer the agents' task
+board later sits on. The eight load-bearing decisions are settled in §3 of that plan.
+Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
+(`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
+OpenRouter setup is considered good enough).
 
 ## Commands
 
@@ -48,6 +62,14 @@ cargo run -p axiomata-cli -- routines add --name daily --cron '0 0 9 * * *' --sk
 cargo run -p axiomata-cli -- routines edit <id> --name … --cron … --skill|--prompt … [--backend …] [--disabled]
 cargo run -p axiomata-cli -- routines delete <id>
 cargo run -p axiomata-cli -- routines tick  # run one scheduler poll pass now (no 30s wait)
+cargo run -p axiomata-cli -- board list [--board <id>] [--archived]   # boards, or one board's columns+cards
+cargo run -p axiomata-cli -- board new <name>            # board + its three default columns
+cargo run -p axiomata-cli -- board add --column <id> <title> [--label …]
+cargo run -p axiomata-cli -- board move <id> --column <id> [--index <n>]
+cargo run -p axiomata-cli -- board claim <id> [--actor human:owner]   # CAS; fails if already held
+cargo run -p axiomata-cli -- board done <id>             # move into the board's done column
+cargo run -p axiomata-cli -- board verify <id> [--actor …]  # refused for whoever claimed it
+cargo run -p axiomata-cli -- board archive <id> [--undo]
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard
