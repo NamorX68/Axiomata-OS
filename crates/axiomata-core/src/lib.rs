@@ -7,6 +7,12 @@
 //! `axiomata-macos` crate for the platform integration boundary.
 
 pub mod agents;
+/// The Kanban board core, re-exported so callers reach it as
+/// `axiomata_core::board::…` without taking a direct dependency on the crate.
+/// It is a plain re-export, not a wrapper: the board owns its own types and
+/// error, and adding a translation layer here would only be something else to
+/// keep in sync.
+pub use axiomata_board as board;
 pub mod bridge;
 pub mod config;
 pub mod dashboard;

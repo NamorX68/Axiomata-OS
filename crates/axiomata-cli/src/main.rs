@@ -3,8 +3,9 @@
 //! sync the memory router, send an assistant turn, call a dashboard module
 //! action through the file queue.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use axiomata_core::agents::{self, ChatMode};
+use axiomata_core::board;
 use axiomata_core::bridge::{self, ActionRequest};
 use axiomata_core::config::Config;
 use axiomata_core::importer;
@@ -66,6 +67,11 @@ enum Command {
     Routines {
         #[command(subcommand)]
         action: RoutineAction,
+    },
+    /// Kanban boards: inspect and drive a board without the dashboard.
+    Board {
+        #[command(subcommand)]
+        action: BoardAction,
     },
     /// Send one turn to the dashboard assistant (Claude Code) and print the
     /// Markdown reply plus the session id to continue with `--resume`.
@@ -196,6 +202,64 @@ enum RoutineAction {
     Tick,
 }
 
+/// The board verbs exist so the whole store can be exercised without the
+/// dashboard — including the two that only matter once several actors share a
+/// board: `claim` (compare-and-swap) and `verify` (which refuses to let anyone
+/// sign off their own work).
+#[derive(Debug, Subcommand)]
+enum BoardAction {
+    /// List boards, or one board's columns and cards with `--board`.
+    List {
+        #[arg(long)]
+        board: Option<i64>,
+        /// Include archived cards, which are hidden by default.
+        #[arg(long)]
+        archived: bool,
+    },
+    /// Create a board (with its three default columns).
+    New { name: String },
+    /// Add a card to a column.
+    Add {
+        #[arg(long)]
+        column: i64,
+        title: String,
+        #[arg(long)]
+        body: Option<String>,
+        /// Repeatable: `--label design --label rust`.
+        #[arg(long = "label")]
+        labels: Vec<String>,
+    },
+    /// Move a card to a column, at an optional index within it (default: end).
+    Move {
+        id: i64,
+        #[arg(long)]
+        column: i64,
+        #[arg(long, default_value_t = usize::MAX)]
+        index: usize,
+    },
+    /// Take a card, if nobody else holds it.
+    Claim {
+        id: i64,
+        #[arg(long, default_value = "human:owner")]
+        actor: String,
+    },
+    /// Move a card into this board's first done column.
+    Done { id: i64 },
+    /// Sign a finished card off. Refused for the actor who claimed it.
+    Verify {
+        id: i64,
+        #[arg(long, default_value = "human:owner")]
+        actor: String,
+    },
+    /// Archive or restore a card.
+    Archive {
+        id: i64,
+        /// Restore instead of archiving.
+        #[arg(long)]
+        undo: bool,
+    },
+}
+
 #[derive(Debug, Args)]
 #[command(group(
     ArgGroup::new("target").required(true).args(["skill", "prompt"])
@@ -253,6 +317,7 @@ async fn main() -> Result<()> {
             SkillsAction::Reseed { force } => skills_reseed(force)?,
         },
         Command::Routines { action } => return routines_cmd(&core, action).await,
+        Command::Board { action } => return board_cmd(&core, action),
         Command::Assistant {
             message,
             resume,
@@ -922,5 +987,221 @@ async fn routines_tick(core: &AxiomataCore) -> Result<()> {
     if !report.errors.is_empty() {
         std::process::exit(1);
     }
+    Ok(())
+}
+
+// ----------------------------------------------------------------- board ---
+
+fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
+    match action {
+        BoardAction::List { board, archived } => board_list(core, board, archived),
+        BoardAction::New { name } => board_new(core, &name),
+        BoardAction::Add {
+            column,
+            title,
+            body,
+            labels,
+        } => board_add(core, column, &title, body, labels),
+        BoardAction::Move { id, column, index } => board_move(core, id, column, index),
+        BoardAction::Claim { id, actor } => board_claim(core, id, &actor),
+        BoardAction::Done { id } => board_done(core, id),
+        BoardAction::Verify { id, actor } => board_verify(core, id, &actor),
+        BoardAction::Archive { id, undo } => board_archive(core, id, !undo),
+    }
+}
+
+/// A card's one-line summary. The two signatures are the interesting part on
+/// the command line — they are what a second actor needs to see before
+/// deciding whether to touch the card at all.
+fn card_line(card: &board::Card) -> String {
+    let mut marks = String::new();
+    if let Some(holder) = &card.claimed_by {
+        marks.push_str(&format!("  claimed:{holder}"));
+    }
+    if let Some(signer) = &card.verified_by {
+        marks.push_str(&format!("  verified:{signer}"));
+    }
+    if card.archived_at.is_some() {
+        marks.push_str("  archived");
+    }
+    if !card.labels.is_empty() {
+        marks.push_str(&format!("  [{}]", card.labels.join(", ")));
+    }
+    format!("#{:<4} {}{marks}", card.id, card.title)
+}
+
+fn board_list(core: &AxiomataCore, board_id: Option<i64>, archived: bool) -> Result<()> {
+    let db = core.db_lock();
+    let Some(board_id) = board_id else {
+        let boards = board::store::list_boards(&db)?;
+        if boards.is_empty() {
+            println!("No boards yet. Create one with: axiomata-cli board new <name>");
+            return Ok(());
+        }
+        for entry in boards {
+            let cards = board::store::count_cards(&db, entry.id)?;
+            println!("#{:<4} {}  ({cards} cards)", entry.id, entry.name);
+        }
+        return Ok(());
+    };
+
+    let Some(entry) = board::store::get_board(&db, board_id)? else {
+        bail!("no board with id {board_id}");
+    };
+    println!("{} (#{})", entry.name, entry.id);
+    let columns = board::store::list_columns(&db, board_id)?;
+    let cards = board::store::list_cards(&db, board_id, archived)?;
+    for column in columns {
+        let held: Vec<&board::Card> = cards
+            .iter()
+            .filter(|card| card.column_id == column.id)
+            .collect();
+        println!(
+            "\n  {} [#{} · {}]  {} cards",
+            column.name,
+            column.id,
+            column.maps_to_status.as_str(),
+            held.len()
+        );
+        if held.is_empty() {
+            println!("    —");
+        }
+        for card in held {
+            println!("    {}", card_line(card));
+        }
+    }
+    Ok(())
+}
+
+fn board_new(core: &AxiomataCore, name: &str) -> Result<()> {
+    let mut db = core.db_lock();
+    let created = board::store::create_board(&mut db, name)
+        .with_context(|| format!("failed to create board {name:?}"))?;
+    let columns = board::store::list_columns(&db, created.id)?;
+    println!("created board #{} {:?}", created.id, created.name);
+    for column in columns {
+        println!(
+            "  column #{:<4} {}  ({})",
+            column.id,
+            column.name,
+            column.maps_to_status.as_str()
+        );
+    }
+    Ok(())
+}
+
+fn board_add(
+    core: &AxiomataCore,
+    column: i64,
+    title: &str,
+    body: Option<String>,
+    labels: Vec<String>,
+) -> Result<()> {
+    let db = core.db_lock();
+    let card = board::store::create_card(
+        &db,
+        &board::NewCard {
+            column_id: column,
+            fields: board::CardFields {
+                title: title.to_string(),
+                body: body.unwrap_or_default(),
+                labels,
+                assignee: None,
+                due_at: None,
+            },
+        },
+    )
+    .with_context(|| format!("failed to add a card to column #{column}"))?;
+    println!("created card #{} {:?}", card.id, card.title);
+    Ok(())
+}
+
+fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize) -> Result<()> {
+    let mut db = core.db_lock();
+    // `usize::MAX` is the "no --index given" sentinel; the store clamps an
+    // out-of-range index to the end of the column on its own.
+    if !board::store::move_card(&mut db, id, column, index)? {
+        bail!("no card with id {id}");
+    }
+    println!("card #{id} moved to column #{column}");
+    Ok(())
+}
+
+fn board_claim(core: &AxiomataCore, id: i64, actor: &str) -> Result<()> {
+    let db = core.db_lock();
+    if board::store::claim_card(&db, id, actor)? {
+        println!("card #{id} claimed by {actor}");
+        return Ok(());
+    }
+    // Losing the race is an ordinary outcome, so say who holds it rather than
+    // failing with a bare "no".
+    match board::store::get_card(&db, id)? {
+        None => bail!("no card with id {id}"),
+        Some(card) => {
+            let holder = card.claimed_by.unwrap_or_else(|| "somebody".to_string());
+            bail!("card #{id} is already claimed by {holder}");
+        }
+    }
+}
+
+fn board_done(core: &AxiomataCore, id: i64) -> Result<()> {
+    let mut db = core.db_lock();
+    // "Which column means done" is answered once, in the store, so the
+    // dashboard cannot later answer it differently.
+    match board::store::move_to_status(&mut db, id, board::CardStatus::Done)? {
+        Some(column) => {
+            println!("card #{id} moved to {:?}", column.name);
+            Ok(())
+        }
+        None if board::store::get_card(&db, id)?.is_none() => bail!("no card with id {id}"),
+        None => bail!("card #{id} is on a board with no done column"),
+    }
+}
+
+fn board_verify(core: &AxiomataCore, id: i64, actor: &str) -> Result<()> {
+    let db = core.db_lock();
+    if board::store::verify_card(&db, id, actor)? {
+        println!("card #{id} verified by {actor}");
+        return Ok(());
+    }
+    // Read the reason only *after* the attempt: checking first would reopen
+    // the very race the single-statement rule exists to close.
+    let reason = match board::store::explain_verify_refusal(&db, id, actor)? {
+        Some(board::store::VerifyRefusal::NoSuchCard) => format!("no card with id {id}"),
+        Some(board::store::VerifyRefusal::AlreadyVerified) => {
+            format!("card #{id} is already verified")
+        }
+        Some(board::store::VerifyRefusal::NotClaimed) => {
+            format!("card #{id} has not been claimed by anyone yet")
+        }
+        Some(board::store::VerifyRefusal::SelfVerify) => {
+            // The stored claimant, not the spelling that was typed: actor
+            // strings are canonicalised, so echoing the input back would show
+            // a form that is not what the card actually holds.
+            let holder = board::store::get_card(&db, id)?
+                .and_then(|card| card.claimed_by)
+                .unwrap_or_else(|| actor.to_string());
+            format!("card #{id} is claimed by {holder} — verification needs a second party")
+        }
+        Some(board::store::VerifyRefusal::NotDone) => {
+            format!("card #{id} is not in a done column")
+        }
+        Some(board::store::VerifyRefusal::Archived) => {
+            format!("card #{id} is archived — restore it first with: board archive {id} --undo")
+        }
+        None => format!("card #{id} could not be verified"),
+    };
+    bail!("{reason}");
+}
+
+fn board_archive(core: &AxiomataCore, id: i64, archived: bool) -> Result<()> {
+    let db = core.db_lock();
+    if !board::store::set_card_archived(&db, id, archived)? {
+        bail!("no card with id {id}");
+    }
+    println!(
+        "card #{id} {}",
+        if archived { "archived" } else { "restored" }
+    );
     Ok(())
 }

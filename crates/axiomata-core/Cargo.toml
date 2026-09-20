@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# The Kanban board core. Core owns the migration chain and the connection and
+# hands both to the board crate; the dependency deliberately points this way
+# only, so `axiomata-ide` can use the board later without pulling core in.
+axiomata-board = { path = "../axiomata-board" }
 home.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -19,6 +19,11 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (5, include_str!("migrations/0005_runs_cost.sql")),
     (6, include_str!("migrations/0006_chat_turns.sql")),
     (7, include_str!("migrations/0007_runs_model.sql")),
+    // Owned by the `axiomata-board` crate rather than a local .sql file: the
+    // board is embeddable elsewhere (the agentic IDE's task board, M7.5) and
+    // has to carry its own initial schema. Frozen from here on — a later board
+    // schema change arrives as its own constant and its own migration number.
+    (8, axiomata_board::SCHEMA_SQL_V1),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -37,7 +42,7 @@ pub fn open_and_migrate_at(path: &Path) -> Result<Connection, AxiomataError> {
         })?;
     }
 
-    let conn = Connection::open(path)?;
+    let mut conn = Connection::open(path)?;
 
     // SQLite ignores every `REFERENCES` clause unless this is switched on per
     // connection. Enabling it is process-wide for this one shared connection;
@@ -47,6 +52,26 @@ pub fn open_and_migrate_at(path: &Path) -> Result<Connection, AxiomataError> {
     // transaction is silently ignored).
     conn.pragma_update(None, "foreign_keys", true)?;
 
+    // Write-ahead logging, set before anything else touches the file.
+    //
+    // The app holds one shared `Mutex<Connection>`, which serialises *this
+    // process* and nothing else. `axiomata-cli` is a second process on the
+    // same file, so in the default rollback-journal mode a CLI write while the
+    // app is running fails with SQLITE_BUSY immediately — and rusqlite's
+    // default DEFERRED transaction can hit that on write-upgrade halfway
+    // through, which is not safely retryable. That was already true of
+    // `routines add`; nobody had happened to run one at the wrong moment.
+    // WAL lets a writer and readers coexist, and the busy timeout makes two
+    // writers queue instead of one failing outright.
+    //
+    // Visible consequence: `axiomata.db-wal` and `axiomata.db-shm` appear
+    // alongside the database. `journal_mode` is persistent — it is stored in
+    // the file header, so this is a one-time conversion, not a per-connection
+    // setting. It is queried rather than `pragma_update`d because SQLite
+    // answers with the resulting mode.
+    let _: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+
     // Bookkeeping table for applied migration versions. Created
     // unconditionally (idempotent) rather than as migration 0001 itself,
     // since a migration can't track whether it already ran without it.
@@ -55,21 +80,34 @@ pub fn open_and_migrate_at(path: &Path) -> Result<Connection, AxiomataError> {
         [],
     )?;
 
-    let current_version: u32 = conn.query_row(
-        "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-        [],
-        |row| row.get(0),
-    )?;
-
+    // Each migration runs inside its own IMMEDIATE transaction, and the
+    // version check happens *inside* it rather than once up front.
+    //
+    // This matters because two processes routinely share this file — the app
+    // and `axiomata-cli` — and never more so than right after a new migration
+    // is added, when both may still be at the old version. Reading the version
+    // outside a write lock let both processes decide to apply the same
+    // migration, then both run it. `CREATE TABLE IF NOT EXISTS` survives that;
+    // the `ALTER TABLE ADD COLUMN` and backfill statements in migrations 4, 5
+    // and 7 do not, and without a transaction a half-applied one leaves no way
+    // back. With the lock taken first, the loser blocks on `busy_timeout`,
+    // then sees the version already recorded and skips.
     for &(version, sql) in MIGRATIONS {
-        if version > current_version {
-            conn.execute_batch(sql)
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let applied: u32 = tx.query_row(
+            "SELECT COUNT(*) FROM schema_version WHERE version = ?1",
+            [version],
+            |row| row.get(0),
+        )?;
+        if applied == 0 {
+            tx.execute_batch(sql)
                 .map_err(|source| AxiomataError::Migration { version, source })?;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [version],
             )?;
         }
+        tx.commit()?;
     }
 
     Ok(conn)
@@ -91,7 +129,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 7);
+            assert_eq!(version, 8);
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -170,6 +208,28 @@ mod tests {
                 [],
             )
             .expect("runs.model column should exist");
+
+            // Migration 0008 (the board crate's schema) ran too. Inserting a
+            // card exercises the composite foreign key as well as the tables.
+            conn.execute(
+                "INSERT INTO boards (id, name, created_at, updated_at) \
+                 VALUES (1, 'probe', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("boards table should exist");
+            conn.execute(
+                "INSERT INTO board_columns (id, board_id, name, position, maps_to_status) \
+                 VALUES (1, 1, 'Offen', 1.0, 'open')",
+                [],
+            )
+            .expect("board_columns table should exist");
+            conn.execute(
+                "INSERT INTO cards \
+                 (board_id, column_id, position, title, created_at, updated_at) \
+                 VALUES (1, 1, 1.0, 'probe', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("cards table should exist");
         }
 
         {
@@ -178,7 +238,7 @@ mod tests {
             let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(applied_count, 7);
+            assert_eq!(applied_count, 8);
 
             let probe_value: String = conn
                 .query_row(

@@ -35,6 +35,13 @@ pub enum AxiomataError {
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
 
+    /// The Kanban board core rejected an operation. Kept as its own variant
+    /// rather than flattened: the board lives in a crate that cannot depend on
+    /// this one (see `axiomata_board`'s crate docs), so it carries its own
+    /// error type and this is the seam where it enters.
+    #[error("board: {0}")]
+    Board(#[from] axiomata_board::BoardError),
+
     /// Applying a specific schema migration failed.
     #[error("migration {version} failed: {source}")]
     Migration {
