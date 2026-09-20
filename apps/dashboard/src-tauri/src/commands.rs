@@ -1577,3 +1577,19 @@ pub fn delete_board_column(
     }
     Ok(gone)
 }
+
+/// `index` counts the columns the moved one will sit among, excluding itself.
+#[tauri::command]
+pub fn move_board_column(
+    state: State<'_, CoreState>,
+    id: i64,
+    index: usize,
+) -> Result<bool, String> {
+    let config = read_config(&state.config);
+    let mut db = state.db_lock();
+    let moved = board::store::move_column(&mut db, id, index).map_err(|err| err.to_string())?;
+    if moved {
+        board_mirror::after_column_change(&db, &config, id);
+    }
+    Ok(moved)
+}

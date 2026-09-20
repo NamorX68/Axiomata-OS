@@ -85,6 +85,7 @@ pub fn run() {
             commands::create_board_column,
             commands::update_board_column,
             commands::delete_board_column,
+            commands::move_board_column,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,

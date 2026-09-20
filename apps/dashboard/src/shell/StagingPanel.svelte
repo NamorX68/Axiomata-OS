@@ -10,14 +10,21 @@
   than one can be staged — this split is what avoids that, not just a
   refactor for its own sake.
 
-  Slides in from the bottom, comes to rest centred (both axes) — unchanged
-  from before this split, and always the same regardless of how many other
-  panels are already open or where they've been dragged to (owner request:
-  "neue Fenster verhalten sich beim öffnen wie bisher"). Resizable from all
-  four edges, remembered across restarts via one *shared* setting
-  (`stagingPanelSize` in dashboard.json) — deliberately still one value for
-  every panel, not per-panel, matching the pre-split behaviour the owner
-  asked to keep ("das soll so bleiben").
+  Slides in from the bottom and comes to rest centred (both axes), unless
+  its opener passed an `anchor` — then it settles centred on whatever opened
+  it, which is what a Kanban card does so the detail appears over the tile
+  the eye is already on. Without an anchor the original behaviour stands
+  (owner request: "neue Fenster verhalten sich beim öffnen wie bisher").
+
+  Resizable from all four edges and remembered across restarts. The size used
+  to be one shared value for every panel, which the owner asked to keep while
+  the file viewer was the only staged module. That stopped working when a
+  Kanban board became openable as a panel: it inherited whatever size was last
+  used for a three-line card and opened unusably small. The size is now
+  remembered **per module type** (`stagingPanelSizes`), falling back to the
+  old shared value and then to the module's own declared default, so nothing
+  already saved is lost and a type nobody has resized yet still opens at a
+  size its author thought sensible.
 
   Movable by dragging the header once shown (owner request), via the same
   `use:draggable` action `canvas/Tile.svelte` uses for tiles. Unlike the
@@ -58,7 +65,9 @@
   const SLIDE_MS = 560;
   const MIN_W = 480;
   const MIN_H = 240;
+  /** Legacy single-size setting, still read so an existing one survives. */
   const SETTING_KEY = "stagingPanelSize";
+  const SETTING_KEY_BY_TYPE = "stagingPanelSizes";
 
   function clampW(w: number): number {
     return Math.min(Math.max(MIN_W, w), Math.round(window.innerWidth * 0.9));
@@ -67,15 +76,38 @@
     return Math.min(Math.max(MIN_H, h), Math.round(window.innerHeight * 0.9));
   }
 
-  // Starting size: the shared last-used size (remembered across close/
-  // reopen, one preference for every panel — see the component doc
-  // comment), read once per panel at its own mount, or `null` (this
-  // panel's CSS defaults: min(1000px, viewport−2·space-5) wide, capped at
-  // 80vh tall) if nothing has been saved yet.
-  const saved = getSetting<{ w: number; h: number }>(SETTING_KEY);
-  let panelSize = $state<{ w: number; h: number } | null>(
-    saved && typeof saved.w === "number" && typeof saved.h === "number" ? saved : null,
-  );
+  /**
+   * Remembered size, per module type.
+   *
+   * It used to be one size for every panel, which was fine while the file
+   * viewer was the only one. It stopped being fine the moment a Kanban board
+   * could be opened as a panel: a board inherited the size last used for a
+   * three-line card and opened unusably small. A document and a board simply
+   * do not want the same window.
+   *
+   * Falls back to the older shared value, so the size already saved is not
+   * thrown away, and then to the module's own tile default — a module that
+   * states a reasonable size for itself is the best guess available.
+   */
+  function savedSize(): { w: number; h: number } | null {
+    const ok = (v: unknown): v is { w: number; h: number } =>
+      typeof v === "object" &&
+      v !== null &&
+      typeof (v as { w: unknown }).w === "number" &&
+      typeof (v as { h: unknown }).h === "number";
+
+    const perType = getSetting<Record<string, unknown>>(SETTING_KEY_BY_TYPE);
+    const mine = perType?.[panel.type];
+    if (ok(mine)) return mine;
+
+    const shared = getSetting<unknown>(SETTING_KEY);
+    if (ok(shared)) return shared;
+
+    const fallback = getModule(panel.type)?.defaultSize;
+    return ok(fallback) ? { w: clampW(fallback.w), h: clampH(fallback.h) } : null;
+  }
+
+  let panelSize = $state<{ w: number; h: number } | null>(savedSize());
 
   let panelEl = $state<HTMLElement | null>(null);
   let resizeBase = { w: 0, h: 0 };
@@ -100,7 +132,9 @@
       w: clampW(resizeBase.w + delta.dw),
       h: clampH(resizeBase.h + delta.dh),
     };
-    setSetting(SETTING_KEY, panelSize);
+    const byType = { ...(getSetting<Record<string, unknown>>(SETTING_KEY_BY_TYPE) ?? {}) };
+    byType[panel.type] = panelSize;
+    setSetting(SETTING_KEY_BY_TYPE, byType);
   }
 
   // ---- move (drag by header) ----

@@ -62,6 +62,8 @@
   const isPanel = $derived($config.path !== undefined);
 
   let boardId = $state<number | null>(null);
+  /** Every board, for the switcher in the header. */
+  let boards = $state<{ id: number; name: string }[]>([]);
   let listError = $state("");
   let filterText = $state("");
   let activeLabels = $state<string[]>([]);
@@ -76,12 +78,37 @@
       return;
     }
     try {
-      const boards = await invoke<{ id: number }[]>("list_boards");
+      boards = await invoke<{ id: number; name: string }[]>("list_boards");
       boardId = boards[0]?.id ?? null;
     } catch (err) {
       listError = String(err);
     }
   });
+
+  // The switcher needs every board's name, not just this tile's.
+  $effect(() => {
+    if (boards.length === 0 && boardId !== null) {
+      void invoke<{ id: number; name: string }[]>("list_boards")
+        .then((all) => (boards = all))
+        .catch((err) => (listError = String(err)));
+    }
+  });
+
+  function switchBoard(next: number) {
+    boardId = next;
+    config.update((c) => ({ ...c, boardId: next }));
+  }
+
+  /** Opens this board as a large floating panel — the place to actually work
+   *  in it, as opposed to the tile, which is for glancing at. */
+  function openAsPanel(event: MouseEvent) {
+    if (boardId === null) return;
+    openStaged("kanban", {
+      path: `board:${boardId}`,
+      boardId,
+      anchor: hostAnchor(event.currentTarget as Element),
+    });
+  }
 
   const data = $derived(boardId === null ? null : boardStore(boardId));
 
@@ -143,6 +170,10 @@
   /** The card whose move is in flight — hidden at its old place until the
    *  board comes back with it in its new one. */
   let settling = $state<number | null>(null);
+  /** A column being dragged by its header, and where it would land. */
+  let draggingColumn = $state<{ id: number; x: number } | null>(null);
+  let columnTarget = $state<number | null>(null);
+  let columnBoxes: { id: number; x: number; w: number }[] = [];
   let snapshot: ColumnGeometry[] = [];
 
   /**
@@ -219,6 +250,40 @@
     // Released outside every column: a cancel, not a drop into whichever
     // column happened to be nearest.
     if (to) void commitMove(card.id, to);
+  }
+
+  function startColumnDrag(column: BoardColumn, point: DragPoint) {
+    columnBoxes = (boardEl
+      ? [...boardEl.querySelectorAll<HTMLElement>("[data-column]")]
+      : []
+    ).map((el) => {
+      const r = el.getBoundingClientRect();
+      return { id: Number(el.dataset.column), x: r.left, w: r.width };
+    });
+    draggingColumn = { id: column.id, x: point.x };
+    columnTarget = null;
+  }
+
+  function moveColumnDrag(column: BoardColumn, point: DragPoint) {
+    draggingColumn = { id: column.id, x: point.x };
+    // Same rule as for cards: the index counts the columns it will sit among,
+    // so the dragged one is out of its own list.
+    const others = columnBoxes.filter((box) => box.id !== column.id);
+    const at = others.findIndex((box) => point.x < box.x + box.w / 2);
+    columnTarget = at === -1 ? others.length : at;
+  }
+
+  async function endColumnDrag(column: BoardColumn) {
+    const index = columnTarget;
+    draggingColumn = null;
+    columnTarget = null;
+    if (index === null) return;
+    try {
+      await invoke("move_board_column", { id: column.id, index });
+      if (boardId !== null) await refreshBoard(boardId);
+    } catch (err) {
+      listError = String(err);
+    }
   }
 
   /* Keyboard: the same targets, reached with the keys. Equal standing, not a
@@ -373,23 +438,63 @@
     }
   }
 
-  async function saveDetail(card: BoardCard, fields: Partial<CardFields>) {
-    try {
-      await invoke("update_card", {
-        id: card.id,
-        fields: {
-          title: card.title,
-          body: card.body,
-          labels: card.labels,
-          assignee: card.assignee,
-          due_at: card.due_at,
-          ...fields,
-        },
-      });
-      if (boardId !== null) await refreshBoard(boardId);
-    } catch (err) {
-      listError = String(err);
-    }
+  /** `"rust, design"` ⇄ `["rust", "design"]`. Comma-separated rather than a
+   *  chip editor: a label is one word, and a text field is the fastest way to
+   *  add, rename and remove several at once. */
+  function parseLabels(raw: string): string[] {
+    return [...new Set(raw.split(",").map((l) => l.trim()).filter(Boolean))];
+  }
+
+  /** An `<input type="date">` value ⇄ the RFC 3339 the backend stores. Empty
+   *  clears the date rather than being ignored. */
+  function dueFromInput(value: string): string | null {
+    if (!value) return null;
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(year, month - 1, day, 12).toISOString();
+  }
+
+  function dueToInput(iso: string | null): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  /**
+   * Saves one or more of a card's fields.
+   *
+   * `update_card` is a full replace, so every save has to send the fields it
+   * is *not* changing as well — which makes the snapshot it merges into the
+   * thing that matters. Taking the card as an argument looked fine and was
+   * wrong: tabbing from the labels field to the date field fires two saves in
+   * a row, and the second merged into a snapshot taken before the first had
+   * come back, silently undoing it. So the current card is read here, at call
+   * time, and saves are chained rather than raced.
+   */
+  let savingDetail: Promise<unknown> = Promise.resolve();
+
+  function saveDetail(fields: Partial<CardFields>) {
+    savingDetail = savingDetail.then(async () => {
+      const card = detail;
+      if (!card) return;
+      try {
+        await invoke("update_card", {
+          id: card.id,
+          fields: {
+            title: card.title,
+            body: card.body,
+            labels: card.labels,
+            assignee: card.assignee,
+            due_at: card.due_at,
+            ...fields,
+          },
+        });
+        if (boardId !== null) await refreshBoard(boardId);
+      } catch (err) {
+        listError = String(err);
+      }
+    });
+    return savingDetail;
   }
 </script>
 
@@ -449,7 +554,7 @@
         class="detail-title"
         value={detail.title}
         aria-label="Titel"
-        onblur={(event) => saveDetail(detail, { title: event.currentTarget.value })}
+        onblur={(event) => saveDetail({ title: event.currentTarget.value })}
       />
       {#if detail.labels.length > 0}
         <div class="chips">
@@ -463,17 +568,41 @@
         value={detail.body}
         placeholder="Kein Text."
         aria-label="Text"
-        onblur={(event) => saveDetail(detail, { body: event.currentTarget.value })}
+        onblur={(event) => saveDetail({ body: event.currentTarget.value })}
       ></textarea>
+      <div class="fields">
+        <label>
+          <span>Labels</span>
+          <input
+            value={detail.labels.join(", ")}
+            placeholder="rust, design"
+            onblur={(event) => saveDetail({ labels: parseLabels(event.currentTarget.value) })}
+          />
+        </label>
+        <label>
+          <span>Fällig</span>
+          <input
+            type="date"
+            value={dueToInput(detail.due_at)}
+            onchange={(event) => saveDetail({ due_at: dueFromInput(event.currentTarget.value) })}
+          />
+        </label>
+        <label>
+          <span>Zuständig</span>
+          <input
+            value={detail.assignee ?? ""}
+            placeholder="human:owner oder agent:name"
+            onblur={(event) =>
+              saveDetail({ assignee: event.currentTarget.value.trim() || null })}
+          />
+        </label>
+      </div>
+
       <dl>
         {#if detail.due_at}
           {@const due = dueState(detail.due_at)}
-          <dt>Fällig</dt>
+          <dt>Fällig in</dt>
           <dd class:over={due.overdue}>{due.label}</dd>
-        {/if}
-        {#if showsAssignee(detail.assignee)}
-          <dt>Zuständig</dt>
-          <dd>{actorLabel(detail.assignee)}</dd>
         {/if}
         {#if detail.claimed_by}
           <dt>Übernommen</dt>
@@ -507,6 +636,32 @@
   {/if}
 {:else}
   <div class="kanban" bind:this={rootEl}>
+    <!-- The board says which board it is, and offers the two things you
+         otherwise had to flip the tile to find. Boards are *managed* on the
+         flip side (create, rename, delete — settings); switching between them
+         belongs here, where you can see which one you are looking at. -->
+    <div class="board-head">
+      {#if boards.length > 1}
+        <select
+          class="board-pick"
+          aria-label="Brett wählen"
+          value={boardId}
+          onchange={(event) => switchBoard(Number(event.currentTarget.value))}
+        >
+          {#each boards as entry (entry.id)}
+            <option value={entry.id}>{entry.name}</option>
+          {/each}
+        </select>
+      {:else}
+        <span class="board-name">{$data.board?.name ?? ""}</span>
+      {/if}
+      {#if !isPanel}
+        <button class="expand" onclick={openAsPanel} title="Gross oeffnen" aria-label="Brett gross oeffnen">
+          ⤢
+        </button>
+      {/if}
+    </div>
+
     {#if isPanel}
       <!-- Filters live in the panel only: the tile is for glancing at. -->
       <div class="filters">
@@ -535,8 +690,19 @@
 
     <div class="board" style="--min-col: {MIN_COL_PX}px" bind:this={boardEl}>
       {#each grouped as { column, cards } (column.id)}
-        <section class="col" data-column={column.id}>
-          <header>
+        <section class="col" data-column={column.id} class:col-lifted={draggingColumn?.id === column.id}>
+          <header
+            use:draggable={{
+              handle: ".col-grip",
+              onStart: (point) => startColumnDrag(column, point),
+              onMove: (_delta, point) => moveColumnDrag(column, point),
+              onEnd: () => endColumnDrag(column),
+            }}
+          >
+            <!-- A grip, because the header is almost entirely the name field
+                 and form controls never start a drag — without it there is
+                 nothing to take hold of. Same idea as the tile's own grip. -->
+            <span class="col-grip" aria-hidden="true">⠿</span>
             <input
               class="name"
               value={column.name}
@@ -681,10 +847,7 @@
     <p class="sr-only" aria-live="polite">{announcement}</p>
 
     {#if boardEmpty}
-      <p class="notice">
-        Noch nichts hier. Karten legst du derzeit über
-        <code>axiomata-cli board add</code> an.
-      </p>
+      <p class="notice">Noch nichts hier — leg unten in einer Spalte die erste Karte an.</p>
     {/if}
   </div>
 {/if}
@@ -714,9 +877,49 @@
     color: var(--ax-danger);
     text-align: left;
   }
-  .notice code {
-    font-family: var(--ax-font-mono);
-    font-size: var(--ax-font-size-xs);
+
+  .board-head {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    min-height: 22px;
+  }
+  .board-name {
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .board-head .board-pick {
+    max-width: 60%;
+    padding: 1px var(--ax-space-1);
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-sm);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
+  }
+  .board-head .board-pick:hover {
+    border-color: var(--ax-border);
+  }
+  /* Only shown on the tile — in the panel you are already in the big view. */
+  .expand {
+    margin-left: auto;
+    padding: 0 var(--ax-space-1);
+    border: 0;
+    background: transparent;
+    color: var(--ax-text-muted);
+    font: inherit;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+  .kanban:hover .expand,
+  .expand:focus-visible {
+    opacity: 1;
   }
 
   .filters {
@@ -946,6 +1149,24 @@
     background: var(--ax-accent-muted);
   }
 
+  .col-lifted {
+    opacity: 0.5;
+  }
+  .col-grip {
+    flex: 0 0 auto;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    opacity: 0.35;
+    cursor: grab;
+    user-select: none;
+  }
+  .col:hover .col-grip {
+    opacity: 0.8;
+  }
+  .col-lifted .col-grip {
+    cursor: grabbing;
+  }
+
   /* Gone from its old column while the move is in flight, rather than dimmed:
      the gap closing is what "the card left" looks like. */
   .card.settling {
@@ -1166,6 +1387,31 @@
   .detail .chips {
     margin-bottom: var(--ax-space-3);
   }
+  .fields {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: var(--ax-space-2) var(--ax-space-3);
+    margin-bottom: var(--ax-space-4);
+    font-size: var(--ax-font-size-sm);
+  }
+  .fields label {
+    display: contents;
+  }
+  .fields span {
+    color: var(--ax-text-muted);
+  }
+  .fields input {
+    width: 100%;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    color: inherit;
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
+  }
+
   .detail-actions {
     display: flex;
     gap: var(--ax-space-2);

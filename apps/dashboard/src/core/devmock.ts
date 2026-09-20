@@ -778,6 +778,26 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       boardColumns = boardColumns.filter((c) => c.id !== args.id);
       return (boardColumns.length < before) as T;
     }
+    case "move_board_column": {
+      const moved = boardColumns.find((c) => c.id === args.id);
+      if (!moved) return false as T;
+      const others = boardColumns
+        .filter((c) => c.board_id === moved.board_id && c.id !== moved.id)
+        .sort((a, b) => a.position - b.position || a.id - b.id);
+      const index = Math.min(Number(args.index ?? others.length), others.length);
+      const before = others[index - 1]?.position;
+      const after = others[index]?.position;
+      const position =
+        before === undefined && after === undefined
+          ? 1
+          : before === undefined
+            ? after! - 1
+            : after === undefined
+              ? before + 1
+              : (before + after) / 2;
+      boardColumns = boardColumns.map((c) => (c.id === moved.id ? { ...c, position } : c));
+      return true as T;
+    }
     case "add_routine": {
       const n = args.new as NewRoutine;
       const created: Routine = {

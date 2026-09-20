@@ -114,6 +114,15 @@ pub fn after_card_change(db: &Connection, config: &Config, card_id: i64) {
     }
 }
 
+/// Same, for a call site that holds a column rather than a board.
+pub fn after_column_change(db: &Connection, config: &Config, column_id: i64) {
+    match crate::board::store::get_column(db, column_id) {
+        Ok(Some(column)) => after_change(db, config, column.board_id),
+        Ok(None) => {}
+        Err(err) => tracing::warn!(column_id, %err, "could not resolve the column's board"),
+    }
+}
+
 /// Deletes every `Kanban/<board_id>-*.md` except `keep`.
 ///
 /// Best-effort and deliberately silent: a mirror is a convenience, and failing

@@ -605,6 +605,31 @@ pub fn set_card_archived(db: &Connection, id: i64, archived: bool) -> Result<boo
 
 // ----------------------------------------------------------- positioning ---
 
+/// Which ordered list a positioning call is about.
+///
+/// Cards within a column and columns within a board are ordered by exactly the
+/// same scheme — a `REAL` position, midpoint insertion, renumber when the gap
+/// collapses. Parameterising the two helpers beats keeping a second copy of
+/// that arithmetic in step with this one; the float-exhaustion guard was
+/// subtle enough the first time.
+///
+/// Both fields are compile-time constants interpolated into SQL, never caller
+/// input — the same arrangement as `CARD_COLS` above.
+#[derive(Debug, Clone, Copy)]
+struct Ordering {
+    table: &'static str,
+    parent: &'static str,
+}
+
+const CARDS_IN_COLUMN: Ordering = Ordering {
+    table: "cards",
+    parent: "column_id",
+};
+const COLUMNS_IN_BOARD: Ordering = Ordering {
+    table: "board_columns",
+    parent: "board_id",
+};
+
 /// Where a card should land when dropped at `index` within `column_id`, and
 /// the index actually used.
 ///
@@ -622,15 +647,18 @@ pub fn set_card_archived(db: &Connection, id: i64, archived: bool) -> Result<boo
 /// representable (see [`MIN_GAP`]).
 fn position_for(
     db: &Connection,
-    column_id: i64,
+    ord: Ordering,
+    parent_id: i64,
     index: usize,
     moving: i64,
 ) -> Result<(f64, usize, bool)> {
-    let mut stmt = db.prepare(
-        "SELECT position FROM cards WHERE column_id = ?1 AND id <> ?2 ORDER BY position, id",
-    )?;
+    let sql = format!(
+        "SELECT position FROM {} WHERE {} = ?1 AND id <> ?2 ORDER BY position, id",
+        ord.table, ord.parent
+    );
+    let mut stmt = db.prepare(&sql)?;
     let positions: Vec<f64> = stmt
-        .query_map(params![column_id, moving], |row| row.get(0))?
+        .query_map(params![parent_id, moving], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;
 
     let index = index.min(positions.len());
@@ -655,17 +683,25 @@ fn position_for(
 /// given a position of its own, and counting it here would shift every slot
 /// after it by one, so the index that `position_for` resolved (which also
 /// excludes it) would no longer point where it meant to.
-fn renumber(tx: &rusqlite::Transaction<'_>, column_id: i64, exclude: i64) -> Result<()> {
+fn renumber(
+    tx: &rusqlite::Transaction<'_>,
+    ord: Ordering,
+    parent_id: i64,
+    exclude: i64,
+) -> Result<()> {
     let ids: Vec<i64> = {
-        let mut stmt = tx.prepare(
-            "SELECT id FROM cards WHERE column_id = ?1 AND id <> ?2 ORDER BY position, id",
-        )?;
-        let rows = stmt.query_map(params![column_id, exclude], |row| row.get(0))?;
+        let sql = format!(
+            "SELECT id FROM {} WHERE {} = ?1 AND id <> ?2 ORDER BY position, id",
+            ord.table, ord.parent
+        );
+        let mut stmt = tx.prepare(&sql)?;
+        let rows = stmt.query_map(params![parent_id, exclude], |row| row.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    // Prepared once rather than per card: the statement text never varies, and
+    // Prepared once rather than per row: the statement text never varies, and
     // renumbering is the one place here that issues a write per row.
-    let mut stmt = tx.prepare("UPDATE cards SET position = ?2 WHERE id = ?1")?;
+    let sql = format!("UPDATE {} SET position = ?2 WHERE id = ?1", ord.table);
+    let mut stmt = tx.prepare(&sql)?;
     for (index, id) in ids.iter().enumerate() {
         stmt.execute(params![id, (index + 1) as f64])?;
     }
@@ -693,9 +729,10 @@ pub fn move_card(db: &mut Connection, id: i64, column_id: i64, index: usize) -> 
             reason: format!("no column {column_id}"),
         });
     };
-    let (mut position, index, collapsed) = position_for(&tx, column_id, index, id)?;
+    let (mut position, index, collapsed) =
+        position_for(&tx, CARDS_IN_COLUMN, column_id, index, id)?;
     if collapsed {
-        renumber(&tx, column_id, id)?;
+        renumber(&tx, CARDS_IN_COLUMN, column_id, id)?;
         // Against the fresh 1.0/2.0/3.0 spacing, slot `index` sits at
         // `index + 0.5`: before the first card for 0, between neighbours
         // otherwise, past the last one at the end.
@@ -713,6 +750,30 @@ pub fn move_card(db: &mut Connection, id: i64, column_id: i64, index: usize) -> 
             params![id],
         )?;
     }
+    tx.commit()?;
+    Ok(changed == 1)
+}
+
+/// Moves a column to `index` within its board.
+///
+/// Same index convention as [`move_card`]: it counts the columns the moved one
+/// will sit **among**, excluding itself. Returns `false` if there is no such
+/// column.
+pub fn move_column(db: &mut Connection, id: i64, index: usize) -> Result<bool> {
+    let Some(column) = get_column(db, id)? else {
+        return Ok(false);
+    };
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let (mut position, index, collapsed) =
+        position_for(&tx, COLUMNS_IN_BOARD, column.board_id, index, id)?;
+    if collapsed {
+        renumber(&tx, COLUMNS_IN_BOARD, column.board_id, id)?;
+        position = index as f64 + 0.5;
+    }
+    let changed = tx.execute(
+        "UPDATE board_columns SET position = ?2 WHERE id = ?1",
+        params![id, position],
+    )?;
     tx.commit()?;
     Ok(changed == 1)
 }
@@ -1224,6 +1285,51 @@ mod tests {
             .map(|c| c.title)
             .collect();
         assert_eq!(after, ["b", "c", "a", "d"]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Columns are ordered by the same scheme as cards, through the same two
+    /// helpers — this is the test that catches the parameterisation going
+    /// wrong for one of the two lists.
+    #[test]
+    fn columns_can_be_reordered_and_land_where_they_were_dropped() {
+        let path = temp_db_path();
+        let mut db = fresh(&path);
+        let board = create_board(&mut db, "Test").unwrap();
+        let names = |db: &Connection| -> Vec<String> {
+            list_columns(db, board.id)
+                .unwrap()
+                .into_iter()
+                .map(|c| c.name)
+                .collect()
+        };
+        assert_eq!(names(&db), ["Offen", "In Arbeit", "Fertig"]);
+
+        let fertig = list_columns(&db, board.id).unwrap()[2].id;
+        assert!(move_column(&mut db, fertig, 0).unwrap());
+        assert_eq!(names(&db), ["Fertig", "Offen", "In Arbeit"]);
+
+        // Moving down its own list: the slot counts the *other* columns.
+        assert!(move_column(&mut db, fertig, 2).unwrap());
+        assert_eq!(names(&db), ["Offen", "In Arbeit", "Fertig"]);
+
+        assert!(!move_column(&mut db, 9999, 0).unwrap());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn reordering_columns_leaves_the_cards_in_them_alone() {
+        let path = temp_db_path();
+        let mut db = fresh(&path);
+        let (board, columns, card) = seed(&mut db);
+
+        assert!(move_column(&mut db, columns[2].id, 0).unwrap());
+        let after = get_card(&db, card.id).unwrap().unwrap();
+        assert_eq!(
+            after.column_id, columns[0].id,
+            "the card stays in its column"
+        );
+        assert_eq!(list_cards(&db, board.id, false).unwrap().len(), 1);
         let _ = std::fs::remove_file(&path);
     }
 
