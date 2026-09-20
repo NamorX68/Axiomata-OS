@@ -171,12 +171,15 @@ Oberfläche:
 
 ## 6. Entschieden (vormals offene Fragen)
 
-| # | Frage | Entscheidung |
-|---|---|---|
-| K-F1 | Mehrere Bretter ab v1? | Ja. Modell und Oberfläche können mehrere; eine Kachel zeigt eines, gewählt auf der Rückseite |
-| K-F2 | Karten-Detail: Panel oder Flip-Rückseite? | Schwebendes Panel — und es geht **mittig auf der Kachel** auf, nicht in der Bildschirmmitte (`anchor` im Staging) |
-| K-F3 | Labels und Fälligkeitsdaten in v1? | Beides drin, Swimlanes nicht. Labelfarbe aus dem Labeltext gehasht, über `--ax-label-*` |
-| K-F4 | Löst das Kanban das `todo`-Modul ab? | **Nein**, dauerhaft nebeneinander (Owner, 2026-09-20) |
+- **K-F1 — Mehrere Bretter ab v1?** Ja. Modell und Oberfläche können mehrere;
+  eine Kachel zeigt eines, gewählt auf der Flip-Rückseite.
+- **K-F2 — Karten-Detail: Panel oder Flip-Rückseite?** Schwebendes Panel — und
+  es geht **mittig auf der Kachel** auf, nicht in der Bildschirmmitte
+  (optionaler `anchor` im geteilten Staging-Code).
+- **K-F3 — Labels und Fälligkeitsdaten in v1?** Beides drin, Swimlanes nicht.
+  Die Labelfarbe wird aus dem Labeltext gehasht, über `--ax-label-*`.
+- **K-F4 — Löst das Kanban das `todo`-Modul ab?** **Nein**, die beiden bleiben
+  dauerhaft nebeneinander (Owner, 2026-09-20).
 
 ## 6a. Was beim Bauen anders kam als gedacht
 
