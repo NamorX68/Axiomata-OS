@@ -4,16 +4,29 @@
    * themselves.
    *
    * Board management lives here rather than on the board because you switch
-   * boards rarely — that is a setting. Columns are the opposite and will be
-   * shaped directly on the board in CP-K2b: you rearrange them while looking
-   * at them. The asymmetry is deliberate; the handling follows the use, not
-   * the symmetry.
+   * boards rarely — that is a setting. Columns are the opposite and are shaped
+   * directly on the board: you rearrange them while looking at them. The
+   * asymmetry is deliberate; the handling follows the use, not the symmetry.
+   *
+   * The card treatment is here for the same reason — it is set once and then
+   * left alone — but unlike the board, it applies to the whole application
+   * rather than to this tile (`kanbanPrefs.ts`).
    */
   import { onMount } from "svelte";
 
   import { invokeBackend as invoke, type Board } from "../core/backend";
   import { forgetBoard, refreshBoard } from "../core/boardStore";
   import type { ModuleContext } from "../core/types";
+  import { cardStyle, rememberLastBoard, setCardStyle, type CardStyle } from "./kanbanPrefs";
+
+  /** The card treatments, in the order they are offered. `auto` first because
+   *  it is the default and the right answer unless the eye says otherwise. */
+  const CARD_STYLE_CHOICES: { id: CardStyle; label: string; note: string }[] = [
+    { id: "auto", label: "Automatisch", note: "das Thema entscheidet" },
+    { id: "flat", label: "Flach", note: "nur der Tonwert trennt" },
+    { id: "edge", label: "Kante", note: "eine Haarlinie ringsum" },
+    { id: "raised", label: "Schwebend", note: "ein leichter Schatten" },
+  ];
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // svelte-ignore state_referenced_locally
@@ -46,6 +59,9 @@
 
   function choose(id: number) {
     config.update((c) => ({ ...c, boardId: id }));
+    // Also the application-wide "last used", so the next tile placed opens
+    // this board rather than whichever happens to be first in the list.
+    rememberLastBoard(id);
   }
 
   async function create() {
@@ -157,6 +173,25 @@
     <input placeholder="Neues Brett …" bind:value={newName} aria-label="Name des neuen Bretts" />
     <button type="submit" disabled={busy || newName.trim() === ""}>Anlegen</button>
   </form>
+
+  <h3>Karten</h3>
+  <ul class="styles">
+    {#each CARD_STYLE_CHOICES as choice (choice.id)}
+      <li>
+        <label>
+          <input
+            type="radio"
+            name="card-style-{ctx.instanceId}"
+            checked={$cardStyle === choice.id}
+            onchange={() => setCardStyle(choice.id)}
+          />
+          <span class="label">{choice.label}</span>
+          <span class="note">{choice.note}</span>
+        </label>
+      </li>
+    {/each}
+  </ul>
+  <p class="hint">Gilt für alle Bretter.</p>
 </div>
 
 <style>
@@ -261,5 +296,23 @@
     display: flex;
     gap: var(--ax-space-2);
     margin-top: var(--ax-space-2);
+  }
+  ul.styles {
+    gap: 0;
+  }
+  ul.styles label {
+    align-items: baseline;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) 0;
+    cursor: pointer;
+  }
+  ul.styles .label {
+    flex: 0 0 auto;
+  }
+  ul.styles .note {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
   }
 </style>

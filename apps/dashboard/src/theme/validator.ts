@@ -47,6 +47,7 @@ export const ALLOWED_TOKENS: readonly string[] = [
   "--ax-card-bg",
   "--ax-card-border",
   "--ax-card-shadow",
+  "--ax-card-shadow-raised",
   "--ax-label-1",
   "--ax-label-2",
   "--ax-label-3",

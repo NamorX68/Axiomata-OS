@@ -231,6 +231,108 @@ nächsten ähnlichen Modul wieder auftauchen wird:
   Mutation pro Nutzeraktion schreibt eine wenige Kilobyte große Datei, und ein
   Timer dafür wäre Mechanik ohne Gegenwert gewesen.
 
+## 6b. CP-K4 — was der Live-Test am echten Mac noch gefunden hat
+
+Alles Folgende kam **erst** heraus, als das Modul in `cargo tauri dev` gegen die
+echte Datenbank und den echten Vault lief — im Browser gegen die devmock-
+Fixtures war nichts davon sichtbar. Das ist das eigentliche Ergebnis dieses
+Checkpoints und der Grund, warum die Live-Runde kein Formalismus ist.
+
+**Am Kanban selbst**
+
+- **Das Ziehbild wurde von der Spalte beschnitten.** Der Geist lag in der
+  Spalte, und die Spalte scrollt — also `overflow`. Er hängt jetzt absolut
+  positioniert an der Modulwurzel und übernimmt die echte Kartenbreite.
+- **Der Geist zeigte nur den Titel**, weil er eine eigene, abgemagerte
+  Darstellung war. Jetzt rendern Spalte und Geist dasselbe `{#snippet cardFace}`
+  — eine Karte hat genau eine Vorderseite, nicht zwei.
+- **Die Karte blitzte beim Loslassen an ihrem Ursprung auf**, weil die Ansicht
+  zwischen dem Ende des Ziehens und dem Eintreffen der Aktualisierung kurz den
+  alten Zustand zeigte. Ein `settling`-Zustand blendet sie in dieser Lücke aus.
+- **Verlorene Schreibvorgänge im Kartendetail.** Jedes Feld schickte ein
+  vollständiges Ersetzen auf Basis seiner eigenen, veralteten Momentaufnahme —
+  wer durch drei Felder tabbte, behielt am Ende nur das letzte. Die Speicherungen
+  hängen jetzt an einer Versprechenskette und lesen den Zustand erst beim
+  Aufruf.
+- **Das Spaltenmenü war unerreichbar**, weil dem Spaltenkopf bei einer späteren
+  Überarbeitung `position: relative` abhanden gekommen war und das Menü in der
+  Modulecke landete.
+- **Ein neues Brett zeigte die Karten des alten**, weil die Brett-Kennung einmal
+  beim Mounten gelesen statt aus `$config.boardId` abgeleitet wurde.
+
+**An geteiltem Schalenwerk, ausgelöst vom Kanban**
+
+Drei Funde betrafen gar nicht das Modul, sondern Dinge, die bisher niemandem
+aufgefallen waren — und die jetzt für **alle** Module gelten:
+
+- **Neue Kacheln öffneten oben links versetzt.** Sie gehen jetzt in der
+  Canvas-Mitte auf und weichen nur aus, wenn genau dieser Platz belegt ist
+  (`core/lifecycle.ts`).
+- **Schwebende Panels teilten sich eine einzige gemerkte Größe.** Das
+  Kartendetail erbte dadurch die Größe des großen Bretts. Die Größe hängt jetzt
+  an einem Schlüssel pro Panel-Art (`sizeKey()` in `shell/StagingPanel.svelte`).
+- **Das gewählte Brett wurde nicht gemerkt.** Erster Versuch: pro Kachel — was
+  nichts nützt, weil eine *neue* Kachel keine hat. Richtig ist eine app-weite
+  Einstellung `kanbanLastBoard`, die die Rückseite beim Wählen mitschreibt.
+
+**Aus dem Architektur-Review eingearbeitet** (CP-K4, vor dem Commit):
+
+- *Die Einstellung „zuletzt gewähltes Brett" liegt jetzt im eigenen Namensraum*
+  (`settings.kanban.lastBoard` statt eines flachen `kanbanLastBoard`), nach dem
+  Vorbild von `settings.secondBrain` — die Einstellungsablage ist flach und
+  teilt sich die ganze Schale, ein Modul mit eigenem Schlüssel ist eine
+  Kollision in Wartestellung. Gelesen und geschrieben wird nur noch über
+  `modules/kanbanPrefs.ts`, womit auch der in zwei Komponenten doppelt
+  ausgeschriebene Schlüsselname weg ist. Der alte flache Schlüssel wird beim
+  Lesen noch als Rückfall berücksichtigt, damit eine bestehende Installation
+  ihr Brett behält.
+- *`settling` ist eine Menge statt eines einzelnen Werts.* Zwei kurz
+  hintereinander gezogene Karten: das Eintreffen der ersten Antwort machte die
+  zweite mitten im Flug wieder sichtbar — genau das Aufblitzen, gegen das der
+  Mechanismus gebaut wurde, und zwar im am schwersten zu bemerkenden Fall.
+- *`sizeKey`/`panelSize` sind ein getippter Vertrag* in `core/staging.ts`
+  (`PanelSize`, `readPanelSize`, `readSizeKey`), wie `StagingAnchor`/`readAnchor`
+  — statt verstreuter `typeof`-Prüfungen in `StagingPanel.svelte`. M7.1 stellt
+  deutlich mehr Panel-Formen ins Staging; der Vertrag sollte einmal
+  dokumentiert dastehen, bevor der dritte und vierte Aufrufer ihn nachbaut.
+
+**Bewusst offen gelassen, als Notiz für M7.1:** Es gibt keinen geteilten Store
+für die *Liste* aller Bretter (nur `boardStore` je Brett), deshalb holen sich
+Kachel und Rückseite die Liste unabhängig — eine Umbenennung erreicht eine
+Geschwisterkachel erst, wenn deren Effekt wieder läuft, und der Schalter holt
+die Liste bei jedem Brettwechsel neu. Belanglos bei einer Handvoll Bretter und
+einer trivialen Abfrage; sobald eine dritte Oberfläche die Liste braucht (der
+Brett-Wähler der IDE), gehört sie neben `boardStore` in einen geteilten Store.
+
+**Nach dem Live-Test noch nachgereicht**, weil beim Durchsehen auffiel, dass
+zwei beschlossene Dinge fehlten:
+
+- *Die große Brettansicht war nicht groß.* Sie gab keine eigene Größe an und
+  fiel damit auf die Kachelvorgabe zurück — das „groß öffnen"-Symbol öffnete
+  ein Fenster von der Größe der Kachel, aus der man es angeklickt hatte. Jetzt
+  eigener `sizeKey` und 1920×1080, von `StagingPanel` auf 90 % des Fensters
+  geklemmt.
+- *Die Übersteuerung der Kartenbehandlung gab es noch gar nicht.* Die
+  Thema-Seite war gebaut (`--ax-card-*`), der Umschalter nie. Nachgeholt als
+  „Automatisch (Thema) / Flach / Kante / Schwebend" auf der Flip-Rückseite,
+  dazu `--ax-card-shadow-raised` als eigener Token — „Schwebend" muss auch
+  dort etwas tun, wo das Thema selbst bewusst keinen Schatten setzt, sonst
+  wäre es in vier von fünf Themen dasselbe wie „Flach".
+
+  ⚠️ **Abweichung von der Entscheidungstabelle:** dort stand „Übersteuerung
+  **pro Brett**". Auf Nachfrage entschieden (Owner, 2026-09-21): **app-weit,
+  eine Einstellung** — es ist ein Geschmack der Person, kein Merkmal eines
+  Bretts. Liegt in `settings.kanban.cardStyle`, ausgeliefert als Store
+  (`modules/kanbanPrefs.ts`), weil Vorderseite, Rückseite und ein als Panel
+  geöffnetes Brett drei getrennt gemountete Komponenten sind, die sich
+  gleichzeitig ändern müssen.
+
+**Größen, am Bild entschieden:** Kachel 1024×768. Bei 1024 liegen die drei
+Standardspalten bei rund 330px Innenbreite und damit weit über der 200px-Grenze,
+unter der eine Karte auf die punktbasierte Kompaktform fällt — auch eine vierte
+und fünfte Spalte bleibt lesbar. 768 hoch zeigt drei volle Karten je Spalte statt
+die dritte anzuschneiden.
+
 ## 7. Verifikation
 
 - `cargo build --workspace`, `cargo test --workspace`,

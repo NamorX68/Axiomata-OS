@@ -170,9 +170,12 @@ verschieden sein.
 **Eigener Detailplan: [`kanban.md`](kanban.md)** — dort stehen Datenmodell,
 Checkpoints, Entscheidungen und was beim Bauen anders kam.
 
-Gebaut und committet (`e70ca08`…`6096acd`): die Crate `axiomata-board`, Migration
+Gebaut und committet (`e70ca08`…`1e2ba0b`): die Crate `axiomata-board`, Migration
 0008 samt WAL, `axiomata-cli board …`, das Dashboard-Modul mit Ziehen und
-Tastaturumzug, Spaltenverwaltung, Modul-Actions und der Vault-Spiegel.
+Tastaturumzug, Spaltenverwaltung, Modul-Actions und der Vault-Spiegel. Danach
+CP-K4: die Fixrunden aus dem Live-Test am echten Mac gegen die echte Datenbank
+und den echten Vault (`kanban.md` §6b) — darunter drei Korrekturen am geteilten
+Schalenwerk, die jetzt für alle Module gelten.
 
 ⚠️ **Was M7.5 daraus erbt:** Der geteilte Store im Frontend kennt keinen
 Aktualisierungspfad von außen. Er reicht, solange ausschließlich diese App das

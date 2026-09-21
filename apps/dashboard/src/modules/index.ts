@@ -30,7 +30,6 @@ import CalendarSettings from "./calendar-settings.svelte";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
 import Kanban from "./kanban.svelte";
-import KanbanPreview from "./kanban-preview.svelte";
 import KanbanSettings from "./kanban-settings.svelte";
 import Mail from "./mail.svelte";
 import MailSettings from "./mail-settings.svelte";
@@ -740,12 +739,13 @@ export function registerBuiltins(): void {
       "<rect x='10.8' y='3' width='3.2' height='5'/></svg>",
     component: Kanban,
     settings: KanbanSettings,
-    // 720 wide puts three default columns at about 213px of inner width each
-    // — just over the 200px threshold at which a card drops its label chips,
-    // body excerpt and assignee for the compact dots-only face. So the board
-    // opens legible, but only just: a fourth column tips it into compact, by
-    // design rather than by accident.
-    defaultSize: { w: 720, h: 420 },
+    // 1024×768. Wide enough that the three default columns sit at roughly
+    // 330px of inner width each — far clear of the 200px threshold below
+    // which a card drops its label chips, body excerpt and assignee for the
+    // compact dots-only face, so five columns still open legible. Tall enough
+    // that a column shows three full cards in that wider form rather than
+    // cutting the third off, which 420 did.
+    defaultSize: { w: 1024, h: 768 },
     minSize: { w: 220, h: 200 },
     // Not a singleton: two boards side by side is a reasonable thing to want,
     // and the tile shows one board chosen on its flip side.
@@ -876,21 +876,6 @@ export function registerBuiltins(): void {
       component: Dummy,
       defaultSize: { w: 220, h: 120 },
       singleton: true,
-      dev: true,
-    });
-    // CP-K2-Design: Wegwerfansicht zum Entscheiden der Kartenform. Wird nach
-    // der Entscheidung samt ihrer Komponente wieder entfernt.
-    registerModule({
-      type: "kanban-preview",
-      title: "Kanban (Entwurf)",
-      icon:
-        "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'>" +
-        "<rect x='2' y='3' width='3.2' height='10'/><rect x='6.4' y='3' width='3.2' height='7'/>" +
-        "<rect x='10.8' y='3' width='3.2' height='5'/></svg>",
-      component: KanbanPreview,
-      defaultSize: { w: 560, h: 420 },
-      minSize: { w: 220, h: 200 },
-      stageable: true,
       dev: true,
     });
   }

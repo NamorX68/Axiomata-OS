@@ -47,6 +47,39 @@ export function readAnchor(raw: unknown): StagingAnchor | null {
   return ok(a.x) && ok(a.y) && ok(a.w) && ok(a.h) ? { x: a.x, y: a.y, w: a.w, h: a.h } : null;
 }
 
+/**
+ * How big a panel should open, stated by the opener.
+ *
+ * Passed as `config.panelSize`, alongside `config.sizeKey`. One module can
+ * serve windows of very different shapes — a Kanban board and a single Kanban
+ * card are the same module — so a remembered size filed under the module type
+ * alone made the card inherit the board's. `sizeKey` is what the remembered
+ * size is filed under (the module type when the opener says nothing), and
+ * `panelSize` is where a shape starts before the user has resized it.
+ *
+ * Together with `anchor` and `path`, this is the whole of what an opener may
+ * tell the panel shell about how to present itself. Everything else in
+ * `config` belongs to the module and the shell does not look at it.
+ */
+export interface PanelSize {
+  w: number;
+  h: number;
+}
+
+/** Reads a `config.panelSize` back, tolerating anything that isn't one. */
+export function readPanelSize(raw: unknown): PanelSize | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const s = raw as Record<string, unknown>;
+  const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+  return ok(s.w) && ok(s.h) ? { w: s.w, h: s.h } : null;
+}
+
+/** What a panel's remembered size is filed under: the opener's `config.sizeKey`
+ *  if it stated one, else the module type. */
+export function readSizeKey(config: Record<string, unknown>, type: string): string {
+  return typeof config.sizeKey === "string" && config.sizeKey !== "" ? config.sizeKey : type;
+}
+
 /** The rect of the tile or panel an element sits in, for use as an anchor. */
 export function hostAnchor(from: Element | null): StagingAnchor | null {
   const host = from?.closest(".tile, .panel");

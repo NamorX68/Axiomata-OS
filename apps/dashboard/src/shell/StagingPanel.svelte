@@ -50,7 +50,14 @@
   import { resizable, type ResizeDelta } from "../canvas/resize";
   import { getSetting, setSetting } from "../core/persist";
   import { getModule } from "../core/registry";
-  import { bringToFront, readAnchor, type StagedPanel } from "../core/staging";
+  import {
+    bringToFront,
+    readAnchor,
+    readPanelSize,
+    readSizeKey,
+    type PanelSize,
+    type StagedPanel,
+  } from "../core/staging";
   import type { ModuleContext } from "../core/types";
 
   let { panel, ctx, onClose }: { panel: StagedPanel; ctx: ModuleContext; onClose: () => void } = $props();
@@ -85,29 +92,33 @@
    * three-line card and opened unusably small. A document and a board simply
    * do not want the same window.
    *
-   * Falls back to the older shared value, so the size already saved is not
-   * thrown away, and then to the module's own tile default — a module that
-   * states a reasonable size for itself is the best guess available.
+   * Falls back to what the opener asked for (`config.panelSize`, the typed
+   * contract in `core/staging.ts`), then to the older shared value so a size
+   * already saved is not thrown away, and then to the module's own tile
+   * default — a module that states a reasonable size for itself is the best
+   * guess available.
    */
-  function savedSize(): { w: number; h: number } | null {
-    const ok = (v: unknown): v is { w: number; h: number } =>
-      typeof v === "object" &&
-      v !== null &&
-      typeof (v as { w: unknown }).w === "number" &&
-      typeof (v as { h: unknown }).h === "number";
-
+  function savedSize(): PanelSize | null {
     const perType = getSetting<Record<string, unknown>>(SETTING_KEY_BY_TYPE);
-    const mine = perType?.[panel.type];
-    if (ok(mine)) return mine;
+    const mine = readPanelSize(perType?.[sizeKey()]);
+    if (mine) return mine;
 
-    const shared = getSetting<unknown>(SETTING_KEY);
-    if (ok(shared)) return shared;
+    // An opener that states its own starting size gets it.
+    const asked = readPanelSize(panel.config.panelSize);
+    if (asked) return { w: clampW(asked.w), h: clampH(asked.h) };
 
-    const fallback = getModule(panel.type)?.defaultSize;
-    return ok(fallback) ? { w: clampW(fallback.w), h: clampH(fallback.h) } : null;
+    const shared = readPanelSize(getSetting<unknown>(SETTING_KEY));
+    if (shared) return shared;
+
+    const fallback = readPanelSize(getModule(panel.type)?.defaultSize);
+    return fallback ? { w: clampW(fallback.w), h: clampH(fallback.h) } : null;
   }
 
-  let panelSize = $state<{ w: number; h: number } | null>(savedSize());
+  function sizeKey(): string {
+    return readSizeKey(panel.config, panel.type);
+  }
+
+  let panelSize = $state<PanelSize | null>(savedSize());
 
   let panelEl = $state<HTMLElement | null>(null);
   let resizeBase = { w: 0, h: 0 };
@@ -133,7 +144,7 @@
       h: clampH(resizeBase.h + delta.dh),
     };
     const byType = { ...(getSetting<Record<string, unknown>>(SETTING_KEY_BY_TYPE) ?? {}) };
-    byType[panel.type] = panelSize;
+    byType[sizeKey()] = panelSize;
     setSetting(SETTING_KEY_BY_TYPE, byType);
   }
 

@@ -63,6 +63,7 @@ const GLYPH_CODEPOINTS: Record<string, number> = {
   list: 0xe6b1, // checklist
   group: 0xe5c3, // apps — App-Ring group default
   terminal: 0xeb8e,
+  kanban: 0xeb7f, // view_kanban — the same three bars as the tile icon
   ide: 0xf2e2, // developer_mode
   graphic: 0xe40a, // palette
   calculator: 0xea5f, // calculate

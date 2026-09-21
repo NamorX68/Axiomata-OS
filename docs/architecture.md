@@ -576,6 +576,14 @@ without a single agent, and it is exactly the data layer the agents' task board 
 building it afterwards would have meant designing it twice — once for humans and once
 concurrency-safe.
 
+Its final live-test round (CP-K4, `plans/kanban.md` §6b) also corrected three things in the
+*shared* shell that had gone unnoticed and now apply to every module: a new tile opens
+centred on the canvas and is nudged only when that exact spot is taken (`core/lifecycle.ts`),
+a floating panel's remembered size hangs off a key per panel kind rather than one shared key
+(`shell/StagingPanel.svelte`, which is why a card detail no longer inherits the big board's
+size), and `openStaged`'s anchor lets a panel open over its own tile instead of the screen
+centre.
+
 M7.1 onwards is not started. Git integration of any kind is the one genuinely new foundation
 layer still missing: the repository contains no `git2` dependency and no `git` subprocess
 call at all.

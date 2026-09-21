@@ -14,14 +14,14 @@
    * looking at them); boards themselves are chosen and managed on the flip
    * side (you switch boards rarely, which is a setting).
    *
-   * Appearance follows the decisions taken by looking at a throwaway preview
-   * in every theme (CP-K2-Design): the column body is `--ax-bg`, the desk the
-   * cards lie on, and the card itself asks the theme how it should sit via
-   * `--ax-card-*`. Only labels carry colour. Nothing here is framed — the
-   * tile's front face is frameless, and a column drawn with a border would
-   * fight that.
+   * Appearance follows decisions taken by looking at a preview view in every
+   * theme, since deleted — `docs/plans/kanban.md` §6a records *why* each came
+   * out this way: the column body is `--ax-bg`, the desk the cards lie on, and
+   * the card itself asks the theme how it should sit via `--ax-card-*`. Only
+   * labels carry colour. Nothing here is framed — the tile's front face is
+   * frameless, and a column drawn with a border would fight that.
    */
-  import { onMount } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   import { draggable, type DragDelta, type DragPoint } from "../canvas/drag";
   import type { BoardCard, BoardColumn, CardFields } from "../core/backend";
@@ -43,6 +43,7 @@
   } from "../core/kanban";
   import { closeStaged, hostAnchor, openStaged, staged } from "../core/staging";
   import type { ModuleContext } from "../core/types";
+  import { cardStyle, lastBoard, rememberLastBoard } from "./kanbanPrefs";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // svelte-ignore state_referenced_locally
@@ -71,32 +72,50 @@
 
   // A board id in the config wins; otherwise the first board there is. A board
   // is only created explicitly (flip side), never implicitly by looking.
-  onMount(async () => {
-    const configured = typeof $config.boardId === "number" ? $config.boardId : null;
-    if (configured !== null) {
-      boardId = configured;
+  //
+  // This *follows* the config rather than reading it once at mount: the flip
+  // side writes a new board id there when you create or switch, and a front
+  // face that only looked once kept showing the previous board's cards under
+  // the new board's name.
+  const configuredBoard = $derived(
+    typeof $config.boardId === "number" ? $config.boardId : null,
+  );
+
+  $effect(() => {
+    if (configuredBoard !== null) {
+      boardId = configuredBoard;
       return;
     }
-    try {
-      boards = await invoke<{ id: number; name: string }[]>("list_boards");
-      boardId = boards[0]?.id ?? null;
-    } catch (err) {
-      listError = String(err);
-    }
+    if (boardId !== null) return;
+    void invoke<{ id: number; name: string }[]>("list_boards")
+      .then((all) => {
+        const remembered = lastBoard();
+        const chosen =
+          (remembered !== undefined && all.some((b) => b.id === remembered)
+            ? remembered
+            : all[0]?.id) ?? null;
+        boardId = chosen;
+        // Recorded on the instance too, so this tile keeps showing this board
+        // even after somebody else switches the application-wide default.
+        if (chosen !== null) config.update((c) => ({ ...c, boardId: chosen }));
+      })
+      .catch((err) => (listError = String(err)));
   });
 
-  // The switcher needs every board's name, not just this tile's.
+  /** The switcher needs every board's name, not just this tile's. Re-read
+   *  whenever the chosen board changes, so a board created on the flip side
+   *  appears in the switcher without a reload. */
   $effect(() => {
-    if (boards.length === 0 && boardId !== null) {
-      void invoke<{ id: number; name: string }[]>("list_boards")
-        .then((all) => (boards = all))
-        .catch((err) => (listError = String(err)));
-    }
+    void boardId;
+    void invoke<{ id: number; name: string }[]>("list_boards")
+      .then((all) => (boards = all))
+      .catch((err) => (listError = String(err)));
   });
 
   function switchBoard(next: number) {
     boardId = next;
     config.update((c) => ({ ...c, boardId: next }));
+    rememberLastBoard(next);
   }
 
   /** Opens this board as a large floating panel — the place to actually work
@@ -107,6 +126,15 @@
       path: `board:${boardId}`,
       boardId,
       anchor: hostAnchor(event.currentTarget as Element),
+      // Its own key, so the big board and a single card do not share one
+      // remembered size — they are the same module but not the same window.
+      sizeKey: "kanban-board",
+      // This is *the* place to work in a board, as opposed to the tile, which
+      // is for glancing at. Full HD is the floor for that: at 1024 it was no
+      // roomier than the tile it was opened from, which made the button
+      // pointless. `StagingPanel` clamps this to the window, so a smaller
+      // screen simply gets as much of it as it has.
+      panelSize: { w: 1920, h: 1080 },
     });
   }
 
@@ -144,6 +172,12 @@
       cardId: card.id,
       boardId: card.board_id,
       anchor: hostAnchor(event.currentTarget as Element),
+      // A card is a short form, not a board. Without its own key it would
+      // inherit the board panel's size, which is far too big for five fields.
+      sizeKey: "kanban-card",
+      // Five lines more body than the fields strictly need — a card is
+      // usually a sentence, but the ones that are not deserve room.
+      panelSize: { w: 520, h: 540 },
     });
   }
 
@@ -169,7 +203,17 @@
   let justDragged = false;
   /** The card whose move is in flight — hidden at its old place until the
    *  board comes back with it in its new one. */
-  let settling = $state<number | null>(null);
+  /**
+   * Cards whose move is in flight, hidden at their old position until the
+   * board comes back changed.
+   *
+   * A set rather than one id: two cards can be dragged in quick succession,
+   * and with a single value the first move's round trip finishing would
+   * un-hide the second one mid-flight — bringing back exactly the flash this
+   * exists to prevent, for precisely the case that is hardest to notice
+   * while testing.
+   */
+  const settling = new SvelteSet<number>();
   /** A column being dragged by its header, and where it would land. */
   let draggingColumn = $state<{ id: number; x: number } | null>(null);
   let columnTarget = $state<number | null>(null);
@@ -195,6 +239,20 @@
     }));
   }
 
+  /**
+   * Does the drop marker belong *after* the last card of this column?
+   *
+   * The card being moved is excluded from the count: while it is in the air it
+   * is still in `cards`, so counting it would put "the end" one place beyond
+   * where the user can actually drop.
+   */
+  function marksEndOf(columnId: number, cards: BoardCard[]): boolean {
+    if (!dragging && !carrying) return false;
+    if (target?.columnId !== columnId) return false;
+    const held = dragging?.id ?? carrying?.id;
+    return target.index >= cards.filter((c) => c.id !== held).length;
+  }
+
   function box(el: HTMLElement) {
     const r = el.getBoundingClientRect();
     return { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -205,7 +263,7 @@
     // Without this it snaps back to full opacity at the position it just left
     // and sits there for the length of a round-trip before jumping — a flash
     // that reads as "the move failed" even when it succeeded.
-    settling = id;
+    settling.add(id);
     try {
       await invoke("move_card", { id, columnId: to.columnId, index: to.index });
     } catch (err) {
@@ -214,7 +272,7 @@
       // Whether it worked or not, what is on screen has to match the database
       // again before the card is shown anywhere.
       if (boardId !== null) await refreshBoard(boardId);
-      settling = null;
+      settling.delete(id);
     }
   }
 
@@ -635,7 +693,7 @@
     </article>
   {/if}
 {:else}
-  <div class="kanban" bind:this={rootEl}>
+  <div class="kanban" data-cards={$cardStyle} bind:this={rootEl}>
     <!-- The board says which board it is, and offers the two things you
          otherwise had to flip the tile to find. Boards are *managed* on the
          flip side (create, rename, delete — settings); switching between them
@@ -655,8 +713,9 @@
       {:else}
         <span class="board-name">{$data.board?.name ?? ""}</span>
       {/if}
+      <button class="head-action add-col" onclick={addColumn}>+ Spalte</button>
       {#if !isPanel}
-        <button class="expand" onclick={openAsPanel} title="Gross oeffnen" aria-label="Brett gross oeffnen">
+        <button class="head-action" onclick={openAsPanel} title="Groß öffnen" aria-label="Brett groß öffnen">
           ⤢
         </button>
       {/if}
@@ -766,7 +825,7 @@
                 class="card"
                 class:archived={card.archived_at !== null}
                 class:lifted={dragging?.id === card.id || carrying?.id === card.id}
-                class:settling={settling === card.id}
+                class:settling={settling.has(card.id)}
                 data-card={card.id}
                 use:draggable={{
                   ignore: "[data-no-drag]",
@@ -787,7 +846,7 @@
             {:else}
               <p class="empty">Keine Karten</p>
             {/each}
-            {#if target?.columnId === column.id && target.index >= cards.filter((c) => c.id !== (dragging?.id ?? carrying?.id)).length && (dragging || carrying)}
+            {#if marksEndOf(column.id, cards)}
               <div class="marker" aria-hidden="true"></div>
             {/if}
           </div>
@@ -825,7 +884,6 @@
         </section>
       {/each}
 
-      <button class="add-col" data-no-drag onclick={addColumn} title="Spalte hinzufügen" aria-label="Spalte hinzufügen">+</button>
     </div>
 
     {#if dragging}
@@ -853,6 +911,24 @@
 {/if}
 
 <style>
+  /* How a card sits on its column, when the user overrides the theme's own
+     answer (`modules/kanbanPrefs.ts`). Only the three tokens the card face
+     reads are touched, so the override reaches the drag ghost and the card
+     detail for free — they are the same face. `auto` sets nothing at all and
+     leaves the theme's values standing. */
+  .kanban[data-cards="flat"] {
+    --ax-card-border: transparent;
+    --ax-card-shadow: none;
+  }
+  .kanban[data-cards="edge"] {
+    --ax-card-border: var(--ax-border);
+    --ax-card-shadow: none;
+  }
+  .kanban[data-cards="raised"] {
+    --ax-card-border: transparent;
+    --ax-card-shadow: var(--ax-card-shadow-raised);
+  }
+
   .kanban {
     /* The drag ghost is positioned against this box. */
     position: relative;
@@ -905,22 +981,6 @@
   .board-head .board-pick:hover {
     border-color: var(--ax-border);
   }
-  /* Only shown on the tile — in the panel you are already in the big view. */
-  .expand {
-    margin-left: auto;
-    padding: 0 var(--ax-space-1);
-    border: 0;
-    background: transparent;
-    color: var(--ax-text-muted);
-    font: inherit;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity var(--ax-dur-fast) var(--ax-ease);
-  }
-  .kanban:hover .expand,
-  .expand:focus-visible {
-    opacity: 1;
-  }
 
   .filters {
     display: flex;
@@ -971,6 +1031,12 @@
   }
 
   header {
+    /* The column tools are absolutely positioned against this. Without it
+       they fall through to `.kanban` (positioned for the drag ghost) and land
+       in the corner of the whole module — outside the column, so hovering
+       them ends the `.col:hover` that revealed them and they vanish as you
+       reach for them. */
+    position: relative;
     display: flex;
     align-items: baseline;
     gap: var(--ax-space-2);
@@ -1065,16 +1131,14 @@
     cursor: pointer;
   }
 
-  /* Narrow on purpose: it sits in the column row, so every pixel it takes is
-     a pixel the columns lose — and at the default tile width that is the
-     difference between cards showing their labels as chips and as bare dots. */
-  .add-col {
+  /* Board-wide actions live in the board header, not in the column row: a
+     button in that row costs the columns width, and at the default tile size
+     that is the difference between labels as chips and labels as bare dots. */
+  .head-action {
     flex: 0 0 auto;
-    align-self: flex-start;
-    margin-top: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    border: 0;
-    border-radius: var(--ax-radius-sm);
+    padding: 1px var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
     background: transparent;
     color: var(--ax-text-muted);
     font: inherit;
@@ -1082,9 +1146,12 @@
     white-space: nowrap;
     cursor: pointer;
   }
-  .add-col:hover {
+  .head-action:hover {
     color: var(--ax-accent);
-    background: var(--ax-accent-muted);
+    border-color: var(--ax-accent);
+  }
+  .add-col {
+    margin-left: auto;
   }
   .count {
     color: var(--ax-text-muted);
@@ -1343,7 +1410,12 @@
 
   /* ------------------------------------------------------------ detail --- */
 
+  /* A column, so the body field takes whatever height is left instead of
+     standing at a fixed size with dead space under it. Shrinking the panel
+     shrinks the field; the metadata and the buttons keep their place. */
   .detail {
+    display: flex;
+    flex-direction: column;
     padding: var(--ax-space-4);
     font-family: var(--ax-font-sans);
     color: var(--ax-text);
@@ -1375,13 +1447,21 @@
     outline: none;
   }
   .detail .detail-title {
+    flex: 0 0 auto;
     margin-bottom: var(--ax-space-3);
     font-size: var(--ax-font-size-lg);
   }
+  .detail .chips,
+  .fields,
+  .detail dl,
+  .detail-actions {
+    flex: 0 0 auto;
+  }
   .detail .detail-body {
+    flex: 1 1 auto;
     margin-bottom: var(--ax-space-4);
-    min-height: 6em;
-    resize: vertical;
+    min-height: 9em;
+    resize: none;
     font-size: var(--ax-font-size-sm);
   }
   .detail .chips {
