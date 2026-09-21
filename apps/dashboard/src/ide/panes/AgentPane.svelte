@@ -79,15 +79,29 @@
 
 <div class="agent-pane">
   <div class="body">
-    {#if sideTab === "terminal"}
+    <!-- The terminal is always mounted, and hidden when another side tab is
+         showing — never behind an `{#if}`. Unmounting it closes the PTY and
+         restarts the agent, which is exactly what looking at the Plan tab for
+         a moment must not do (owner report). Same rule, and the same
+         `visibility`-not-`display` reason, as an inactive dock tab. -->
+    <div
+      class="terminal-slot"
+      class:hidden={sideTab !== "terminal"}
+      inert={sideTab !== "terminal"}
+      id="agent-view-terminal"
+      role="tabpanel"
+      aria-labelledby="agent-tab-terminal"
+    >
       {#key restarts}
-        <div class="terminal-slot">
-          <Terminal ctx={terminalContext} initialCommand={command} />
-        </div>
+        <Terminal ctx={terminalContext} initialCommand={command} />
       {/key}
-    {:else}
+    </div>
+
+    {#if sideTab !== "terminal"}
       {@const tab = SIDE_TABS.find((t) => t.id === sideTab)}
-      <p class="waiting">{tab?.waiting}</p>
+      <div class="waiting" id="agent-view-{sideTab}" role="tabpanel" aria-labelledby="agent-tab-{sideTab}">
+        <p>{tab?.waiting}</p>
+      </div>
     {/if}
   </div>
 
@@ -98,7 +112,9 @@
         role="tab"
         class="side-tab"
         class:active={sideTab === tab.id}
+        id="agent-tab-{tab.id}"
         aria-selected={sideTab === tab.id}
+        aria-controls="agent-view-{tab.id}"
         title={tab.waiting ?? tab.label}
         onclick={() => (sideTab = tab.id)}>{tab.label}</button
       >
@@ -141,11 +157,24 @@
     inset: 0;
   }
 
+  /* Not `display: none`: a hidden terminal keeps its measured size, so it does
+     not tell its PTY it has zero rows while a sibling tab is on screen. */
+  .terminal-slot.hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   .waiting {
-    margin: 0;
+    position: absolute;
+    inset: 0;
     padding: var(--ax-space-4);
+    background: var(--ax-surface-1);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-sm);
+  }
+
+  .waiting p {
+    margin: 0;
   }
 
   .side {

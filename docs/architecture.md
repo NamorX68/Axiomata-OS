@@ -670,7 +670,9 @@ would take the pane inside it along: park every pane back in the store in `$effe
 (before Svelte touches the DOM), place them into the new slots in `$effect` (after). The
 store fills the dock area and is hidden with `visibility`, so a pane waiting there still
 measures its real size. `data-ide-mount` on a pane host is what makes "did that drag restart
-it?" answerable from the DOM.
+it?" answerable from the DOM. The same rule holds *inside* an agent pane: its
+side tabs (Plan, Diffs, Inbox) hide the terminal, never unmount it, because
+glancing at a plan must not restart the agent.
 
 **CP3 closes M7.1**: the view works in a *project*. Seven thin passthroughs in
 `src-tauri/src/commands.rs` expose the CP0 store. Above them sit two modules rather than a

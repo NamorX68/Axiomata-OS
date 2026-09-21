@@ -223,7 +223,10 @@ und ein Projektwechsel, der das Layout wiederherstellt.
     Neustarts, gemeldet vom Owner nach CP4. Seitdem liegen die Panes in einem
     flachen Speicher (`ide/paneStore.ts`) und werden nur per `appendChild` in
     die leeren Slots des Baums *verschoben*; geparkt wird in `$effect.pre`,
-    verteilt in `$effect`.
+    verteilt in `$effect`. Dieselbe Regel gilt **innerhalb** der Agent-Pane:
+    der Wechsel auf Plan/Diffs/Inbox versteckt das Terminal, hängt es aber
+    nicht aus — ein Blick auf den Plan darf den Agenten nicht neu starten
+    (Owner-Fund nach CP4).
     Das Terminal schließt seine PTY-Sitzung in `onDestroy`; ein Blick aufs
     Dashboard würde sonst jede laufende Shell töten. `visibility` statt
     `display: none`, weil eine versteckte Pane ihre gemessene Größe behalten
