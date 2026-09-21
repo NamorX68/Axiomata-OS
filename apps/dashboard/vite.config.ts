@@ -17,6 +17,13 @@ export default defineConfig(async () => ({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.ts"],
+    // Vitest loads `.env.local` the same way the dev server does, so a
+    // developer's own dev flag would otherwise decide test outcomes — and
+    // `VITE_AXIOMATA_DISABLE_AUTO_REFRESH=true` (the flag CLAUDE.md suggests
+    // keeping set) made two `core/devFlags` tests fail on that machine alone.
+    // Tests state the environment they want with `vi.stubEnv`; here every dev
+    // flag starts unset, whatever the machine has in `.env.local`.
+    env: { VITE_AXIOMATA_DISABLE_AUTO_REFRESH: "" },
   },
   // Svelte 5 client builds for component imports under vitest.
   resolve: isVitest ? { conditions: ["browser"] } : undefined,
