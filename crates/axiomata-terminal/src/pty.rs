@@ -23,7 +23,8 @@ const FALLBACK_SHELL: &str = "/bin/zsh";
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    child: Box<dyn Child + Send + Sync>,
+    /// `None` only while [`Drop`] is handing it to the reaper thread.
+    child: Option<Box<dyn Child + Send + Sync>>,
 }
 
 impl PtySession {
@@ -126,7 +127,7 @@ impl PtySession {
         Ok(Self {
             master: pair.master,
             writer,
-            child,
+            child: Some(child),
         })
     }
 
@@ -161,17 +162,37 @@ impl PtySession {
 }
 
 impl Drop for PtySession {
+    /// Kills and reaps the child **on a thread of its own**, so dropping a
+    /// session never blocks whoever dropped it.
+    ///
+    /// `kill()` alone only signals the process — on Unix it does not reap it,
+    /// so a `wait()` has to follow or the child sits as a zombie until this
+    /// program exits. But `wait()` blocks until the process is genuinely
+    /// gone, and a process does not always go quickly: a foreign TUI (an
+    /// agent harness, `vim`) may take its time, and a grandchild holding the
+    /// pty open can stretch it further.
+    ///
+    /// That matters because of *where* this runs. The Tauri app drops a
+    /// session from `terminal_close`, a synchronous command — and synchronous
+    /// Tauri commands run on the main thread. A slow child therefore froze the
+    /// entire window, with no way to close the pane that caused it (owner
+    /// report, M7.2: three agents open, dragging a pane, beachball). The same
+    /// blocking wait is the likeliest cause of the "environment-level
+    /// pty-teardown hang" that `with_watchdog` was written to survive.
+    ///
+    /// Handing the child to a short-lived thread keeps the reaping — nothing
+    /// becomes a zombie — while making the drop itself return immediately.
     fn drop(&mut self) {
-        // Best-effort: the shell has very likely already exited on its own
-        // (the normal case). `kill()` alone only signals the process — on
-        // Unix it doesn't reap it, so without the following `wait()` an
-        // already-exited (or now-signalled) child would sit as a zombie
-        // until this program's own process exits and its parent reaps it.
-        // That's negligible for the short-lived `term-poc` binary, but would
-        // accumulate for real once a long-lived host process (Checkpoint 1's
-        // Tauri session registry) repeatedly spawns and drops sessions.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        // `master`/`writer` are dropped right after this, closing the pty,
+        // which by itself makes most children exit. The thread is what
+        // guarantees we do not wait around to watch.
+        std::thread::spawn(move || {
+            let _ = child.kill();
+            let _ = child.wait();
+        });
     }
 }
 
@@ -244,6 +265,38 @@ mod tests {
     /// substring appears, not the exact byte stream, since prompts/rc-file
     /// output vary by shell/config) and independent of any real, externally
     /// attached TTY: the PTY here is one this test opens for itself.
+    /// Dropping a session must return at once, even when the child is in no
+    /// hurry to die.
+    ///
+    /// This is the regression test for a real freeze: the Tauri app drops a
+    /// session from `terminal_close`, which is a synchronous command and
+    /// therefore runs on the main thread, and the old `Drop` called
+    /// `child.wait()` there. With an agent harness in the pane, closing or
+    /// moving it beachballed the whole window. The child here runs `sleep 30`
+    /// and would take half a minute to reap if anything waited for it.
+    #[test]
+    fn dropping_a_session_does_not_wait_for_a_slow_child() {
+        with_watchdog(|| {
+            let mut session = PtySession::spawn(24, 80, Some("/bin/sh"), None, &[])
+                .expect("failed to spawn pty session");
+            session
+                .write(b"sleep 30\n")
+                .expect("failed to write to pty");
+            // Let the shell actually start the sleep before we pull the rug.
+            thread::sleep(Duration::from_millis(200));
+
+            let started = std::time::Instant::now();
+            drop(session);
+            let took = started.elapsed();
+
+            assert!(
+                took < Duration::from_secs(2),
+                "dropping a session blocked for {took:?} — it must hand the \
+                 child to the reaper thread rather than wait on the caller's"
+            );
+        });
+    }
+
     #[test]
     fn spawn_write_read_roundtrip() {
         with_watchdog(|| {
