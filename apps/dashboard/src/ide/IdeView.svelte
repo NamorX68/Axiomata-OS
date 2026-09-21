@@ -130,6 +130,22 @@
     layout = addTab(layout, tab, { nodeId: target, side: "right" });
   }
 
+  /**
+   * Opens a terminal beside what is already there.
+   *
+   * The tab bar's own `+` adds one *into* a group; this one splits, because
+   * the header is where you reach for a second thing to look at rather than a
+   * second tab in the pane you are in. Same target as opening an agent.
+   */
+  function openTerminal() {
+    const project = current;
+    if (!project) return;
+    const groups = allGroups(layout);
+    const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
+    const added = addTab(layout, projectSession.terminalTab(), { nodeId: target, side: "right" });
+    layout = applyProjectCwd(added, project.repo_root);
+  }
+
   async function addAgent(fields: AgentFields) {
     const created = await projectSession.addAgent(fields);
     if (created) openAgent(created);
@@ -353,6 +369,13 @@
         onSetRoot={(id, root) => void changeRoot(id, root)}
         onRemove={(id) => void removeProject(id)}
       />
+      <button
+        class="new-terminal"
+        type="button"
+        disabled={!current}
+        title="Open a terminal beside the others"
+        onclick={openTerminal}>+ Terminal</button
+      >
       <AgentPicker
         {agents}
         disabled={!current}
@@ -444,6 +467,26 @@
     margin: 0;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+  }
+
+  .new-terminal {
+    padding: var(--ax-space-1) var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+
+  .new-terminal:hover:not(:disabled) {
+    border-color: var(--ax-accent);
+  }
+
+  .new-terminal:disabled {
+    opacity: var(--ax-tile-glass-opacity);
+    cursor: default;
   }
 
   .back {

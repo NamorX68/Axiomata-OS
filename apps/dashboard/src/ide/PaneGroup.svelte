@@ -55,8 +55,12 @@
         >
       </div>
     {/each}
-    <button class="add" type="button" aria-label="New terminal in this group" onclick={() => dock.addPane(group.id)}
-      >+</button
+    <button
+      class="add"
+      type="button"
+      aria-label="New terminal in this group"
+      title="New terminal in this group"
+      onclick={() => dock.addPane(group.id)}>+</button
     >
   </div>
 
