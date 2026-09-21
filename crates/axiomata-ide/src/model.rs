@@ -133,14 +133,36 @@ pub struct Agent {
 impl Agent {
     /// Resolves what [`Agent::effective_command`] holds. Used by the store
     /// when it builds one; a caller reads the field.
-    pub fn resolve_command(command: &str, harness: Harness) -> String {
+    ///
+    /// The model is appended as `--model <value>` — both harnesses spell it
+    /// that way (`opencode -m/--model provider/model`, `claude --model`) —
+    /// but **only when the agent has no command of its own**. Somebody who
+    /// wrote their own command line is responsible for it; pushing an extra
+    /// flag into it could easily contradict what they typed.
+    ///
+    /// The value is single-quoted, because this string is written into a
+    /// shell. A model id has no business containing a space or a bracket, but
+    /// "has no business" is not a guarantee, and `(` is a glob character in
+    /// zsh.
+    pub fn resolve_command(command: &str, harness: Harness, model: Option<&str>) -> String {
         let own = command.trim();
-        if own.is_empty() {
-            harness.default_command().to_string()
-        } else {
-            own.to_string()
+        if !own.is_empty() {
+            return own.to_string();
+        }
+        let base = harness.default_command();
+        match model.map(str::trim).filter(|m| !m.is_empty()) {
+            Some(model) => format!("{base} --model {}", shell_quote(model)),
+            None => base.to_string(),
         }
     }
+}
+
+/// Wraps a value in single quotes so a shell takes it verbatim.
+///
+/// The one thing single quotes cannot hold is a single quote, which is why the
+/// closing-reopening dance around `'\''` exists.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 /// What a caller supplies to create an agent. Validated by the store.

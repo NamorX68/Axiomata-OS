@@ -393,7 +393,7 @@ let ideAgents: IdeAgent[] = [
     env: "REVIEW_MODE=strict",
     created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
     updated_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
-    effective_command: "claude",
+    effective_command: "claude --model 'claude-sonnet-5'",
   },
 ];
 
@@ -402,6 +402,15 @@ const HARNESS_DEFAULTS: Record<Harness, string> = {
   claude_code: "claude",
   mini: "axiomata-miniagent",
 };
+
+/** Resolves a command the same way `Agent::resolve_command` does in Rust. */
+function mockEffectiveCommand(fields: AgentFields): string {
+  const own = fields.command.trim();
+  if (own) return own;
+  const base = HARNESS_DEFAULTS[fields.harness];
+  const model = fields.model?.trim();
+  return model ? `${base} --model '${model.replace(/'/g, "'\\''")}'` : base;
+}
 
 function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent {
   const stamp = new Date().toISOString();
@@ -415,7 +424,7 @@ function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent
     env: fields.env,
     created_at: stamp,
     updated_at: stamp,
-    effective_command: fields.command.trim() || HARNESS_DEFAULTS[fields.harness],
+    effective_command: mockEffectiveCommand(fields),
   };
 }
 

@@ -126,10 +126,15 @@
             type="text"
             value={form.model ?? ""}
             oninput={(event) => (form.model = event.currentTarget.value.trim() || null)}
-            placeholder="Model (the harness picks if empty)"
+            placeholder="Model id, e.g. openrouter/deepseek/deepseek-v4-flash-0731"
             spellcheck="false"
           />
           <textarea bind:value={form.env} rows="2" placeholder="KEY=value per line" spellcheck="false"></textarea>
+          <p class="hint">
+            The model is passed as <code>--model</code>, so it must be the id the harness knows —
+            <code>opencode models</code> lists them. A display name will not work. Left empty, the
+            harness picks; with a command of your own, it is yours to pass.
+          </p>
           <div class="form-actions">
             <button type="submit" disabled={!form.name.trim()}>Save</button>
             <button type="button" onclick={() => (editing = undefined)}>Cancel</button>
@@ -255,6 +260,13 @@
     gap: var(--ax-space-2);
     padding-top: var(--ax-space-3);
     border-top: 1px solid var(--ax-border);
+  }
+
+  .hint {
+    margin: 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    line-height: var(--ax-line-height);
   }
 
   .label {

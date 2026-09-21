@@ -87,7 +87,11 @@ impl RawAgent {
             project_id: self.project_id,
             name: self.name,
             harness,
-            effective_command: Agent::resolve_command(&self.command, harness),
+            effective_command: Agent::resolve_command(
+                &self.command,
+                harness,
+                self.model.as_deref(),
+            ),
             command: self.command,
             model: self.model,
             env: self.env,
@@ -329,6 +333,82 @@ mod tests {
         assert_eq!(agent.project_id, project);
         assert_eq!(agent.created_at, agent.updated_at);
         assert_eq!(get_agent(&db, agent.id).unwrap().unwrap().name, "Builder");
+    }
+
+    #[test]
+    fn a_model_reaches_the_command_line() {
+        let (db, project) = fixture();
+        let mut with_model = fields("Deep");
+        with_model.model = Some("openrouter/deepseek/deepseek-v4-flash-0731".into());
+        let agent = create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: with_model,
+            },
+        )
+        .unwrap();
+
+        // Without this the harness starts on whatever its own config says is
+        // the default, and the model on the profile is decoration.
+        assert_eq!(
+            agent.effective_command,
+            "opencode --model 'openrouter/deepseek/deepseek-v4-flash-0731'"
+        );
+    }
+
+    #[test]
+    fn a_model_is_quoted_so_a_shell_cannot_read_it_as_syntax() {
+        let (db, project) = fixture();
+        let mut odd = fields("Odd");
+        // Nobody should name a model like this; the point is that it cannot
+        // become shell syntax if they do. `(` is a glob character in zsh.
+        odd.model = Some("weird (model) name".into());
+        let agent = create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: odd,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            agent.effective_command,
+            "opencode --model 'weird (model) name'"
+        );
+
+        let mut quoted = fields("Quoted");
+        quoted.model = Some("it's".into());
+        let agent = create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: quoted,
+            },
+        )
+        .unwrap();
+        assert_eq!(agent.effective_command, r"opencode --model 'it'\''s'");
+    }
+
+    #[test]
+    fn a_model_is_left_out_of_a_command_somebody_wrote_themselves() {
+        let (db, project) = fixture();
+        let mut own = fields("Own");
+        own.command = "opencode --agent build --model already/chosen".into();
+        own.model = Some("something/else".into());
+        let agent = create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: own,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            agent.effective_command,
+            "opencode --agent build --model already/chosen"
+        );
     }
 
     #[test]

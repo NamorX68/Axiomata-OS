@@ -34,6 +34,17 @@
   // svelte-ignore state_referenced_locally
   const ctx = paneContext(tab, onConfig);
 
+  /**
+   * Identifies *this mount* of the pane, not the tab.
+   *
+   * A tab keeps its id forever; this value changes whenever the component is
+   * destroyed and rebuilt, which is exactly the thing that kills a pane's PTY
+   * session. It exists so that "did dragging this pane restart it?" is a
+   * question anyone can answer from the DOM instead of by reasoning about
+   * Svelte's keyed-each semantics.
+   */
+  const mountId = crypto.randomUUID();
+
   /** An agent pane names its profile by id; the session holds the row. */
   const agentId = $derived(typeof tab.config?.agentId === "number" ? tab.config.agentId : null);
   const agent = $derived(agentId === null ? null : ($session.agents.find((a) => a.id === agentId) ?? null));
@@ -42,7 +53,7 @@
 <!-- `data-ide-pane` is a signal, not styling: a module that behaves differently
      outside a canvas tile asks for it rather than inferring it from a missing
      ancestor (`modules/terminal.svelte`'s `watchFlipBack`). -->
-<div class="pane-host" data-ide-pane>
+<div class="pane-host" data-ide-pane data-ide-mount={mountId}>
   {#if tab.kind === "agent"}
     {#if agent && $session.current}
       <AgentPane {agent} cwd={$session.current.repo_root} tabId={tab.id} />
