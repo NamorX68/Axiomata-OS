@@ -120,12 +120,17 @@
 
   /** Opens this board as a large floating panel — the place to actually work
    *  in it, as opposed to the tile, which is for glancing at. */
-  function openAsPanel(event: MouseEvent) {
+  function openAsPanel() {
     if (boardId === null) return;
     openStaged("kanban", {
       path: `board:${boardId}`,
       boardId,
-      anchor: hostAnchor(event.currentTarget as Element),
+      // Deliberately no anchor, unlike the card detail. A card is small and
+      // belongs where the eye already is; a full-size board is not a reply to
+      // the tile you clicked, it is a place to go. Anchored, a tile parked in
+      // a corner opened its big view in that corner — the one spot where the
+      // panel has least room to be big in.
+      //
       // Its own key, so the big board and a single card do not share one
       // remembered size — they are the same module but not the same window.
       sizeKey: "kanban-board",
