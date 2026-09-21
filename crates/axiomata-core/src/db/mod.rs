@@ -24,6 +24,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
     // has to carry its own initial schema. Frozen from here on — a later board
     // schema change arrives as its own constant and its own migration number.
     (8, axiomata_board::SCHEMA_SQL_V1),
+    // Owned by `axiomata-ide` for the same reason as 0008 above: the agentic
+    // IDE is meant to be extractable, so it carries its own initial schema.
+    // Frozen from here on.
+    (9, axiomata_ide::SCHEMA_SQL_V1),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -129,7 +133,7 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 8);
+            assert_eq!(version, 9);
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -230,6 +234,14 @@ mod tests {
                 [],
             )
             .expect("cards table should exist");
+
+            // Migration 0009 (the IDE crate's schema) ran too.
+            conn.execute(
+                "INSERT INTO projects (name, repo_root, created_at) \
+                 VALUES ('probe', '/tmp/probe', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("projects table should exist");
         }
 
         {
@@ -238,7 +250,7 @@ mod tests {
             let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(applied_count, 8);
+            assert_eq!(applied_count, 9);
 
             let probe_value: String = conn
                 .query_row(

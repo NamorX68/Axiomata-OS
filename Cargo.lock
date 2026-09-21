@@ -356,6 +356,7 @@ name = "axiomata-core"
 version = "0.1.0"
 dependencies = [
  "axiomata-board",
+ "axiomata-ide",
  "base64 0.22.1",
  "chrono",
  "cron",
@@ -370,6 +371,16 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tracing",
+]
+
+[[package]]
+name = "axiomata-ide"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rusqlite",
+ "serde",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

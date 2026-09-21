@@ -70,6 +70,8 @@ Axiomata-OS/
     axiomata-macos/                # boundary for future macOS-specific integration (stub)
     axiomata-cli/                   # headless binary that exercises axiomata-core end to end
     axiomata-terminal/              # standalone PTY + VT100 engine for the Terminal module
+    axiomata-board/                 # standalone Kanban core (M7.0), ships migration 8
+    axiomata-ide/                   # standalone agentic-IDE core (M7.1), ships migration 9
   apps/
     dashboard/
       src/                           # Svelte frontend (core/canvas/shell/modules/themes/graph)
@@ -153,11 +155,34 @@ precondition in the `WHERE` clause; claiming is a compare-and-swap.
 change, one way only — see the trap list in `CLAUDE.md`. Full plan and the list of what came
 out differently in practice: `docs/plans/kanban.md`.
 
+### `axiomata-ide`
+
+The agentic IDE's core (milestone M7.1). Cut exactly like `axiomata-board` and for the same
+reason: the IDE is meant to be extractable into a standalone app, so it depends on neither
+Tauri nor `axiomata-core`, owns neither the database file nor the connection, and ships its
+initial schema as a frozen `SCHEMA_SQL_V1` (migration 9, re-exported as
+`axiomata_core::ide`).
+
+Today it holds **projects** — a name, a folder, and the dock layout the user left behind in
+it. Three things are load-bearing. `repo_root` is `UNIQUE` and canonicalised before it is
+stored, so `~/x`, `./x` and `/Users/me/x` cannot become three projects fighting over the same
+worktrees from M7.2 on. `layout_json` is **opaque to Rust** — the dock tree belongs to
+`apps/dashboard/src/ide/layout.ts`, the way a tile's config belongs to the frontend in
+`dashboard.json` — and `NULL` means "never opened", which is what triggers the starting
+layout. And **deleting a project removes a row, never a folder**: the folder is the user's,
+the row is ours, which is why the UI calls it "remove from the list".
+
+One promise here is per module rather than crate-wide: the projects store looks at the file
+system but never changes it. That will *not* hold for the worktree module in M7.2, which has
+to create and remove real directories — it states its own contract when it lands.
+
 ### `axiomata-cli`
 
 A `clap`-based binary whose job is to exercise `axiomata-core` end to end without the GUI:
 `status`, `list-skills`, `run-skill`, `list-runs`, `memory sync|status`,
-`routines list|add|edit|delete|enable|disable|history|tick`, `assistant` (one chat/instruct
+`routines list|add|edit|delete|enable|disable|history|tick`,
+`board list|new|rename|delete|add|move|claim|done|verify|archive`,
+`ide projects list|new|rename|set-root|delete`, `assistant` (one chat/instruct
 turn, `--allowed-tools` kept for API symmetry — the opencode harness auto-approves tool use),
 `import obsidian`, `graph`, `modules`, `module-action`. Run it with
 `cargo run -p axiomata-cli -- <subcommand>`.
@@ -584,7 +609,19 @@ a floating panel's remembered size hangs off a key per panel kind rather than on
 size), and `openStaged`'s anchor lets a panel open over its own tile instead of the screen
 centre.
 
-M7.1 onwards is not started. Git integration of any kind is the one genuinely new foundation
+**M7.1 is under way.** Its first checkpoint (CP0) exists: the crate `axiomata-ide`, holding
+IDE *projects* — a name, a folder, and the dock layout the user left behind in it — with
+migration 9 and the CLI group `axiomata-cli ide projects …`. It is cut exactly like
+`axiomata-board`: no dependency on `axiomata-core` or Tauri, no owned connection or path,
+and a frozen `SCHEMA_SQL_V1` guarded by a checksum test. Migration 9 deliberately holds
+**only** `projects`; agents, worktrees, plan steps and the mailbox arrive with their own
+migrations in M7.2/M7.4, so a frozen schema carries no guesses. Two rules worth knowing
+before touching it: `repo_root` is UNIQUE and canonicalised on the way in, and deleting a
+project removes a row and **never** a folder. Still to come in M7.1: the dock-layout model
+(CP1), the full-screen IDE view (CP2) and project switching (CP3) — full plan in
+[`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
+
+M7.2 onwards is not started. Git integration of any kind is the one genuinely new foundation
 layer still missing: the repository contains no `git2` dependency and no `git` subprocess
 call at all.
 

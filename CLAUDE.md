@@ -72,6 +72,11 @@ cargo run -p axiomata-cli -- board claim <id> [--actor human:owner]   # CAS; fai
 cargo run -p axiomata-cli -- board done <id>             # move into the board's done column
 cargo run -p axiomata-cli -- board verify <id> [--actor …]  # refused for whoever claimed it
 cargo run -p axiomata-cli -- board archive <id> [--undo]
+cargo run -p axiomata-cli -- ide projects list          # IDE projects, most recently opened first
+cargo run -p axiomata-cli -- ide projects new <name> <path>   # path is stored absolute + canonicalised
+cargo run -p axiomata-cli -- ide projects rename <id> <name>
+cargo run -p axiomata-cli -- ide projects set-root <id> <path>  # "Pfad ändern": keeps id + layout
+cargo run -p axiomata-cli -- ide projects delete <id>   # removes the row only, never the folder
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard

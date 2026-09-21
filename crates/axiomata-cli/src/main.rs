@@ -3,12 +3,15 @@
 //! sync the memory router, send an assistant turn, call a dashboard module
 //! action through the file queue.
 
+use std::path::{Path, PathBuf};
+
 use anyhow::{Context, Result, bail};
 use axiomata_core::agents::{self, ChatMode};
 use axiomata_core::board;
 use axiomata_core::board_mirror;
 use axiomata_core::bridge::{self, ActionRequest};
 use axiomata_core::config::Config;
+use axiomata_core::ide;
 use axiomata_core::importer;
 use axiomata_core::routines::{self, NewRoutine, RoutineTarget};
 use axiomata_core::skills::{self, RunStatus};
@@ -73,6 +76,11 @@ enum Command {
     Board {
         #[command(subcommand)]
         action: BoardAction,
+    },
+    /// Agentic IDE (M7.1): manage the projects the IDE works in.
+    Ide {
+        #[command(subcommand)]
+        action: IdeAction,
     },
     /// Send one turn to the dashboard assistant (Claude Code) and print the
     /// Markdown reply plus the session id to continue with `--resume`.
@@ -203,6 +211,36 @@ enum RoutineAction {
     Tick,
 }
 
+/// The IDE's project verbs, so CP0 is fully exercisable before a single line
+/// of the IDE view exists — the same order the board was built in.
+#[derive(Debug, Subcommand)]
+enum IdeAction {
+    /// Projects: the folders the IDE works in.
+    Projects {
+        #[command(subcommand)]
+        action: ProjectAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectAction {
+    /// List projects, most recently opened first.
+    List,
+    /// Add a project for an existing folder.
+    New {
+        name: String,
+        /// The project's folder. Stored absolute and canonicalised.
+        path: PathBuf,
+    },
+    /// Rename a project. Its folder is untouched.
+    Rename { id: i64, name: String },
+    /// Repoint a project at a different folder, keeping its id and layout —
+    /// what the UI offers as "Pfad ändern…" when a folder has moved.
+    SetRoot { id: i64, path: PathBuf },
+    /// Remove a project from the list. **Never** deletes the folder.
+    Delete { id: i64 },
+}
+
 /// The board verbs exist so the whole store can be exercised without the
 /// dashboard — including the two that only matter once several actors share a
 /// board: `claim` (compare-and-swap) and `verify` (which refuses to let anyone
@@ -328,6 +366,7 @@ async fn main() -> Result<()> {
         },
         Command::Routines { action } => return routines_cmd(&core, action).await,
         Command::Board { action } => return board_cmd(&core, action),
+        Command::Ide { action } => return ide_cmd(&core, action),
         Command::Assistant {
             message,
             resume,
@@ -1020,6 +1059,111 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         BoardAction::Verify { id, actor } => board_verify(core, id, &actor),
         BoardAction::Archive { id, undo } => board_archive(core, id, !undo),
     }
+}
+
+fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
+    match action {
+        IdeAction::Projects { action } => match action {
+            ProjectAction::List => project_list(core),
+            ProjectAction::New { name, path } => project_new(core, &name, &path),
+            ProjectAction::Rename { id, name } => project_rename(core, id, &name),
+            ProjectAction::SetRoot { id, path } => project_set_root(core, id, &path),
+            ProjectAction::Delete { id } => project_delete(core, id),
+        },
+    }
+}
+
+fn project_list(core: &AxiomataCore) -> Result<()> {
+    let db = core.db_lock();
+    let projects = ide::store::list_projects(&db)?;
+    if projects.is_empty() {
+        println!("no projects yet — add one with `ide projects new <name> <path>`");
+        return Ok(());
+    }
+    for project in projects {
+        let opened = match project.last_opened_at {
+            Some(when) => when.format("%Y-%m-%d %H:%M").to_string(),
+            None => "never".to_string(),
+        };
+        // A missing folder is the one thing worth shouting about here: it is
+        // why the list checks at all, rather than finding out at open time.
+        let missing = if project.root_exists { "" } else { "  MISSING" };
+        let layout = if project.layout_json.is_some() {
+            "layout"
+        } else {
+            "no layout"
+        };
+        println!(
+            "#{:<4} {:<28} {}  (opened {opened}, {layout}){missing}",
+            project.id,
+            project.name,
+            project.repo_root.display()
+        );
+    }
+    Ok(())
+}
+
+fn project_new(core: &AxiomataCore, name: &str, path: &Path) -> Result<()> {
+    let db = core.db_lock();
+    let created = ide::store::create_project(
+        &db,
+        ide::NewProject {
+            name: name.to_string(),
+            repo_root: path.to_path_buf(),
+        },
+    )
+    .with_context(|| format!("failed to add project {name:?}"))?;
+    println!(
+        "added project #{} {:?} at {}",
+        created.id,
+        created.name,
+        created.repo_root.display()
+    );
+    Ok(())
+}
+
+fn project_rename(core: &AxiomataCore, id: i64, name: &str) -> Result<()> {
+    let db = core.db_lock();
+    match ide::store::rename_project(&db, id, name)? {
+        Some(project) => {
+            println!("renamed project #{} to {:?}", project.id, project.name);
+            Ok(())
+        }
+        None => bail!("no project #{id}"),
+    }
+}
+
+fn project_set_root(core: &AxiomataCore, id: i64, path: &Path) -> Result<()> {
+    let db = core.db_lock();
+    match ide::store::set_repo_root(&db, id, path)? {
+        Some(project) => {
+            println!(
+                "project #{} now points at {}",
+                project.id,
+                project.repo_root.display()
+            );
+            Ok(())
+        }
+        None => bail!("no project #{id}"),
+    }
+}
+
+/// Removes the row. The folder stays — see `ide::store::delete_project`.
+fn project_delete(core: &AxiomataCore, id: i64) -> Result<()> {
+    let db = core.db_lock();
+    let Some(project) = ide::store::get_project(&db, id)? else {
+        bail!("no project #{id}");
+    };
+    if !ide::store::delete_project(&db, id)? {
+        bail!("no project #{id}");
+    }
+    println!(
+        "removed project #{} {:?} from the list — {} is untouched",
+        id,
+        project.name,
+        project.repo_root.display()
+    );
+    Ok(())
 }
 
 /// A card's one-line summary. The two signatures are the interesting part on

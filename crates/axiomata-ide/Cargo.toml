@@ -1,0 +1,12 @@
+[package]
+name = "axiomata-ide"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Standalone core of the agentic IDE — no Tauri/axiomata-core dependency. Owns neither the database file nor the connection: every operation takes a `&Connection`, the same cut that keeps axiomata-board embeddable. Holds projects today; worktrees, the git layer, the agent supervisor and the mailbox follow in M7.2+."
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+chrono.workspace = true
+thiserror.workspace = true

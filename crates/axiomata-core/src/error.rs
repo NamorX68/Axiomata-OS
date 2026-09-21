@@ -42,6 +42,12 @@ pub enum AxiomataError {
     #[error("board: {0}")]
     Board(#[from] axiomata_board::BoardError),
 
+    /// The agentic IDE's core rejected an operation. Its own variant for the
+    /// same reason as `Board` above: `axiomata_ide` must not depend on this
+    /// crate, so it carries its own error type and this is where it enters.
+    #[error("ide: {0}")]
+    Ide(#[from] axiomata_ide::IdeError),
+
     /// Applying a specific schema migration failed.
     #[error("migration {version} failed: {source}")]
     Migration {
