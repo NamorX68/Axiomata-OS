@@ -1720,3 +1720,38 @@ pub fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, St
     let db = state.db_lock();
     ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())
 }
+
+/// Gives an agent what it needs to run — its own git worktree and a reserved
+/// port — and says where the harness should start (M7.2 CP5).
+///
+/// Idempotent, and called on every start rather than only on creation: an
+/// agent created before worktrees existed, or one whose directory somebody
+/// deleted, is repaired by being started.
+#[tauri::command]
+pub fn prepare_ide_agent(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<ide::provision::Provisioned, String> {
+    let db = state.db_lock();
+    ide::provision::prepare(&db, &axiomata_core::paths::worktrees_dir(), id)
+        .map_err(|err| err.to_string())
+}
+
+/// Whether an agent's worktree holds work that removing it would throw away.
+#[tauri::command]
+pub fn ide_agent_has_changes(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db_lock();
+    ide::provision::worktree_has_changes(&db, id).map_err(|err| err.to_string())
+}
+
+/// Removes an agent's worktree. `force` throws away uncommitted work in it,
+/// which is why the caller has to ask first.
+#[tauri::command]
+pub fn discard_ide_agent_worktree(
+    state: State<'_, CoreState>,
+    id: i64,
+    force: bool,
+) -> Result<bool, String> {
+    let db = state.db_lock();
+    ide::provision::discard_worktree(&db, id, force).map_err(|err| err.to_string())
+}

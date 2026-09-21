@@ -20,9 +20,11 @@
     that grows tabs later would be a bar nobody laid out for four.
 -->
 <script lang="ts">
-  import type { IdeAgent } from "../../core/backend";
+  import type { IdeAgent, ProvisionedAgent } from "../../core/backend";
   import { createContext } from "../../core/registry";
+  import { toast } from "../../core/toast";
   import Terminal from "../../modules/terminal.svelte";
+  import { prepareAgent } from "../agents";
 
   let {
     agent,
@@ -30,7 +32,8 @@
     tabId,
   }: {
     agent: IdeAgent;
-    /** Where the harness starts. CP5 makes this the agent's own worktree. */
+    /** The project folder — where the harness runs when the project is not a
+     *  git repository, and what is shown until the worktree is ready. */
     cwd: string;
     /** The dock tab this pane sits in — the terminal's `instanceId`. */
     tabId: string;
@@ -38,6 +41,34 @@
 
   /** Bumped to remount the terminal, which is what a restart is. */
   let restarts = $state(0);
+
+  /**
+   * The worktree and port, fetched before the harness starts.
+   *
+   * The terminal waits for this rather than starting in the project folder and
+   * being moved later: a shell cannot change the directory it was born in, and
+   * an agent that started in the wrong place would quietly edit the user's own
+   * working copy instead of its branch. Re-fetched on restart, so a repaired
+   * or recreated worktree is picked up.
+   */
+  let ready = $state<ProvisionedAgent | null>(null);
+  let failure = $state<string | null>(null);
+
+  $effect(() => {
+    const id = agent.id;
+    void restarts;
+    ready = null;
+    failure = null;
+    prepareAgent(id)
+      .then((provisioned) => {
+        if (agent.id === id) ready = provisioned;
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        if (agent.id === id) failure = message;
+        toast(`${agent.name}: ${message}`, "danger");
+      });
+  });
 
   type SideTab = { id: string; label: string; waiting?: string };
   const SIDE_TABS: SideTab[] = [
@@ -68,7 +99,9 @@
     void restarts;
     return createContext(
       `${tabId}:${restarts}`,
-      { cwd, env: agent.env },
+      // The worktree, and the identity env that goes with it. Both come from
+      // Rust — `effective_env` already carries AXIOMATA_AGENT_ID and friends.
+      { cwd: ready?.cwd ?? cwd, env: ready?.agent.effective_env ?? agent.effective_env },
       // Config changes go nowhere on purpose: everything in this context is
       // derived from the agent row, so storing a change on the tab would only
       // be overwritten by the next restart. The agent profile is the truth.
@@ -92,9 +125,15 @@
       role="tabpanel"
       aria-labelledby="agent-tab-terminal"
     >
-      {#key restarts}
-        <Terminal ctx={terminalContext} initialCommand={command} />
-      {/key}
+      {#if ready}
+        {#key restarts}
+          <Terminal ctx={terminalContext} initialCommand={command} />
+        {/key}
+      {:else if failure}
+        <p class="pending error">{failure}</p>
+      {:else}
+        <p class="pending">Preparing this agent's worktree…</p>
+      {/if}
     </div>
 
     {#if sideTab !== "terminal"}
@@ -125,6 +164,14 @@
     <span class="name">{agent.name}</span>
     <span class="harness">{agent.harness}</span>
     {#if agent.model}<span class="model">{agent.model}</span>{/if}
+    {#if ready?.shared_folder}
+      <span class="branch" title="The project is not a git repository, so agents share its folder">
+        shared folder
+      </span>
+    {:else if ready?.agent.branch}
+      <span class="branch" title={ready.cwd}>{ready.agent.branch}</span>
+    {/if}
+    {#if ready?.agent.port}<span class="port" title="AXIOMATA_PORT">:{ready.agent.port}</span>{/if}
     <code class="command" title={command}>{command}</code>
     <button type="button" class="restart" onclick={() => (restarts += 1)}>Restart</button>
   </footer>
@@ -234,8 +281,23 @@
     color: var(--ax-text);
   }
 
+  .pending {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: var(--ax-space-4);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  .pending.error {
+    color: var(--ax-danger);
+  }
+
   .harness,
-  .model {
+  .model,
+  .branch,
+  .port {
     padding: 0 var(--ax-space-2);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-pill);

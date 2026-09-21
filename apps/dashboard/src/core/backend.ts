@@ -207,10 +207,30 @@ export interface IdeAgent {
   env: string;
   created_at: string;
   updated_at: string;
+  /** This agent's own git worktree, or `null` when the project is not a
+   *  repository — then its agents share the project folder (M7.2 CP5). */
+  worktree_path: string | null;
+  /** The branch checked out in that worktree. */
+  branch: string | null;
+  /** A port reserved for this agent, passed on as `AXIOMATA_PORT`. */
+  port: number | null;
   /** Computed on read: what actually runs — `command`, or the harness's own
    *  default when it is empty. Sent along so no frontend keeps a second copy
    *  of that table. */
   effective_command: string;
+  /** Computed on read: the profile's `env` plus this agent's identity
+   *  (`AXIOMATA_AGENT_ID`, `_NAME`, `_WORKTREE`, `_BRANCH`, `_PORT`), identity
+   *  last so a profile cannot claim to be a different agent. */
+  effective_env: string;
+}
+
+/** What an agent needs before it can run — `prepare_ide_agent`. */
+export interface ProvisionedAgent {
+  agent: IdeAgent;
+  /** Where the harness starts: its worktree, or the project folder. */
+  cwd: string;
+  /** True when the project is not a git repository, so the folder is shared. */
+  shared_folder: boolean;
 }
 
 /** Everything an agent update sets — a full replace, not a patch. */

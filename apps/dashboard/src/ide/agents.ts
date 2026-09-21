@@ -8,7 +8,13 @@
  * on tmux, recorded as question F7 in the plan.
  */
 
-import { invokeBackend as invoke, type AgentFields, type Harness, type IdeAgent } from "../core/backend";
+import {
+  invokeBackend as invoke,
+  type AgentFields,
+  type Harness,
+  type IdeAgent,
+  type ProvisionedAgent,
+} from "../core/backend";
 
 /** The harnesses, in the order a picker should offer them. */
 export const HARNESSES: { id: Harness; label: string; hint: string }[] = [
@@ -53,4 +59,25 @@ export function updateAgent(id: number, fields: AgentFields): Promise<IdeAgent |
 
 export function deleteAgent(id: number): Promise<boolean> {
   return invoke<boolean>("delete_ide_agent", { id });
+}
+
+/**
+ * Gives an agent its worktree and port, and says where it runs.
+ *
+ * Called before every start, not only on creation: it is idempotent, and it is
+ * what repairs an agent whose worktree was deleted by hand or that predates
+ * worktrees existing.
+ */
+export function prepareAgent(id: number): Promise<ProvisionedAgent> {
+  return invoke<ProvisionedAgent>("prepare_ide_agent", { id });
+}
+
+/** Whether removing this agent's worktree would throw away uncommitted work. */
+export function agentHasChanges(id: number): Promise<boolean> {
+  return invoke<boolean>("ide_agent_has_changes", { id });
+}
+
+/** Removes an agent's worktree. `force` discards uncommitted work in it. */
+export function discardWorktree(id: number, force: boolean): Promise<boolean> {
+  return invoke<boolean>("discard_ide_agent_worktree", { id, force });
 }

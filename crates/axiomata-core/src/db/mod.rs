@@ -31,6 +31,9 @@ const MIGRATIONS: &[(u32, &str)] = &[
     // Agent profiles (M7.2 CP4). A new constant rather than an edit to
     // migration 9: that one has already run everywhere and never runs again.
     (10, axiomata_ide::SCHEMA_SQL_V2),
+    // Worktree, branch and port per agent (M7.2 CP5). An ALTER, which is
+    // exactly why the runner's one-transaction-per-migration matters.
+    (11, axiomata_ide::SCHEMA_SQL_V3),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

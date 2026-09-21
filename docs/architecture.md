@@ -719,10 +719,34 @@ shape; `ide/paneCwd.ts` applies the same rule to `cwd`). An agent name is unique
 And `effective_command` is computed in Rust and sent along, like a project's `root_exists`,
 so no frontend keeps a second copy of the harness-to-command table.
 
-Not yet in the schema, deliberately: the worktree path, branch and port (CP5) and the
-lifecycle status (CP6), each waiting for its own migration. Git integration is still the one
-genuinely new foundation layer missing — the repository contains no `git2` dependency and no
-`git` subprocess call at all.
+**CP5 gives each agent its own git worktree** — and with it, the repository's first git
+integration at all. `crates/axiomata-ide/src/worktree.rs` drives the `git` command line
+(question F3, answered here rather than in M7.3 because worktrees came first): `git worktree`
+is the reference implementation of something libgit2 only partly models, the user's own
+configuration — credential helpers, `includeIf`, hooks — applies for free the moment an agent
+commits, and there is no C dependency in a crate meant to stay extractable. The price is that
+`git` must be installed, which `ensure_available` reports as a sentence.
+
+`provision.rs` is the one place that knows a worktree and a port belong together. It is
+idempotent and runs on **every** start, not only at creation, so an agent that predates CP5
+or whose directory somebody deleted repairs itself by being started. Worktrees live at
+`~/.axiomata/worktrees/<project>/<agent>-<id>` — app-owned runtime data, deliberately outside
+the user's repository so an agent's checkout never shows up in their own `git status`. The id
+is in the path because a slug is not unique: "A B" and "A-B" would otherwise be one directory
+and two agents overwriting each other.
+
+Three rules worth knowing. A project that is **not** a repository is an ordinary case, not a
+failure: its agents share the project folder as they did before, still get a port, and the
+status line says "shared folder". A port is reserved in the database (a partial UNIQUE index,
+since most agents have none) rather than by holding it open — the agent's own process binds
+it, and `AXIOMATA_PORT` is how it learns the number, which is what stops two agents' dev
+servers fighting over 1420. And the **identity env is appended last** — `AXIOMATA_AGENT_ID`,
+`_NAME`, `_WORKTREE`, `_BRANCH`, `_PORT` after the profile's own lines — so a profile cannot
+declare itself to be a different agent: later wins, both in `PtySession::spawn` and in the
+frontend's `mergeEnv`.
+
+Still absent from the schema, deliberately: the lifecycle status (CP6), waiting for its own
+migration.
 
 ### `axiomata-macos`
 

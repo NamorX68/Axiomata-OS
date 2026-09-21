@@ -275,6 +275,16 @@ enum AgentAction {
     },
     /// Remove an agent profile.
     Delete { id: i64 },
+    /// Give an agent its worktree and port, and print where it would run.
+    /// Idempotent — this is what the app does on every start.
+    Prepare { id: i64 },
+    /// Remove an agent's worktree. Refuses to throw away uncommitted work
+    /// unless `--force`.
+    DiscardWorktree {
+        id: i64,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1144,6 +1154,8 @@ fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 env,
             } => agent_edit(core, id, name, harness, command, model, env),
             AgentAction::Delete { id } => agent_delete(core, id),
+            AgentAction::Prepare { id } => agent_prepare(core, id),
+            AgentAction::DiscardWorktree { id, force } => agent_discard_worktree(core, id, force),
         },
     }
 }
@@ -1258,6 +1270,42 @@ fn agent_edit(
         }
         None => anyhow::bail!("no agent #{id}"),
     }
+}
+
+fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
+    let db = core.db_lock();
+    let ready = ide::provision::prepare(&db, &axiomata_core::paths::worktrees_dir(), id)?;
+    println!("agent #{} {}", ready.agent.id, ready.agent.name);
+    println!("  runs in: {}", ready.cwd.display());
+    if ready.shared_folder {
+        println!("  (the project is not a git repository — agents share its folder)");
+    } else {
+        println!(
+            "  branch:  {}",
+            ready.agent.branch.as_deref().unwrap_or("(none)")
+        );
+    }
+    match ready.agent.port {
+        Some(port) => println!("  port:    {port} (AXIOMATA_PORT)"),
+        None => println!("  port:    none free in the range"),
+    }
+    println!("  command: {}", ready.agent.effective_command);
+    Ok(())
+}
+
+fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
+    let db = core.db_lock();
+    if !force && ide::provision::worktree_has_changes(&db, id)? {
+        anyhow::bail!(
+            "agent #{id} has uncommitted work in its worktree — pass --force to discard it"
+        );
+    }
+    if ide::provision::discard_worktree(&db, id, force)? {
+        println!("removed the worktree of agent #{id}");
+    } else {
+        println!("agent #{id} has no worktree");
+    }
+    Ok(())
 }
 
 fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {

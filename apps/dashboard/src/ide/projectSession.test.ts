@@ -208,7 +208,11 @@ describe("agents", () => {
       env: "",
       created_at: "2026-09-01T00:00:00Z",
       updated_at: "2026-09-01T00:00:00Z",
+      worktree_path: null,
+      branch: null,
+      port: null,
       effective_command: "opencode",
+      effective_env: `AXIOMATA_AGENT_ID=${id}\nAXIOMATA_AGENT_NAME=${name}`,
     };
   }
 

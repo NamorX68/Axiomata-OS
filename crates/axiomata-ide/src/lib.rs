@@ -26,7 +26,9 @@
 
 pub mod agent_store;
 pub mod model;
+pub mod provision;
 pub mod store;
+pub mod worktree;
 
 pub use model::{Agent, AgentFields, Harness, NewAgent, NewProject, Project};
 
@@ -54,6 +56,14 @@ pub const SCHEMA_SQL_V1: &str = include_str!("schema.sql");
 /// this file.
 pub const SCHEMA_SQL_V2: &str = include_str!("agents.sql");
 
+/// The IDE's **version 3** schema (worktree, branch and port on an agent),
+/// milestone M7.2 CP5.
+///
+/// An `ALTER TABLE` rather than a `CREATE`, since version 2 shipped and has
+/// rows. Same rule as before: its own constant, its own migration number (11),
+/// frozen once released.
+pub const SCHEMA_SQL_V3: &str = include_str!("agent_worktrees.sql");
+
 /// Everything that can go wrong in the IDE core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant, matching
@@ -79,10 +89,29 @@ pub enum IdeError {
     /// Caller-supplied input was rejected before it reached the database.
     #[error("invalid {field}: {reason}")]
     Invalid { field: &'static str, reason: String },
+
+    /// A `git` invocation failed, or git could not be run at all. Carries the
+    /// command and git's own stderr, which together are what makes a git
+    /// failure diagnosable.
+    #[error("{command} failed: {reason}")]
+    Git { command: String, reason: String },
 }
 
 /// Convenience alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, IdeError>;
+
+/// Applies every schema this crate ships, in order — the one place a test
+/// fixture has to learn about a new migration.
+///
+/// Without it each module's fixture listed the versions it happened to know
+/// about, and adding `SCHEMA_SQL_V3` broke the ones that did not, with an
+/// error ("no such column") that says nothing about the real cause.
+#[cfg(test)]
+pub(crate) fn apply_all_schemas(db: &rusqlite::Connection) {
+    for schema in [SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3] {
+        db.execute_batch(schema).expect("test schema should apply");
+    }
+}
 
 /// Guards the promise in the `SCHEMA_SQL_V*` docs with something more reliable
 /// than a contributor reading it.
@@ -125,7 +154,7 @@ mod schema_is_frozen {
     }
 
     /// The same guard for version 2 (`ide_agents`), which shipped as migration
-    /// 10. CP5 and CP6 add their columns as V3/V4, never as edits here.
+    /// 10. Later columns arrive as V3, V4 … never as edits here.
     #[test]
     fn the_shipped_agents_schema_has_not_been_edited() {
         const EXPECTED: u64 = 0x5db8_a1cb_0f0f_a412;
@@ -140,6 +169,21 @@ mod schema_is_frozen {
              Add a new SCHEMA_SQL_V3 constant and a new migration number \
              instead. If you are deliberately changing the schema before it \
              has ever shipped, update EXPECTED in this test."
+        );
+    }
+
+    /// And for version 3 (worktree columns), which shipped as migration 11.
+    #[test]
+    fn the_shipped_worktree_schema_has_not_been_edited() {
+        const EXPECTED: u64 = 0xbe2a_6f78_c386_f0aa;
+
+        assert_eq!(
+            fnv1a(super::SCHEMA_SQL_V3),
+            EXPECTED,
+            "agent_worktrees.sql changed after it shipped as a numbered \
+             migration. It is an ALTER TABLE, so re-running it is not even \
+             possible — add a SCHEMA_SQL_V4 and a new migration number \
+             instead. If it has never shipped, update EXPECTED here."
         );
     }
 }

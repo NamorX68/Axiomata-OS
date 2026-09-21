@@ -382,6 +382,10 @@ let ideAgents: IdeAgent[] = [
     created_at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
     updated_at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
     effective_command: "opencode",
+    worktree_path: null,
+    branch: null,
+    port: null,
+    effective_env: "AXIOMATA_AGENT_ID=1\nAXIOMATA_AGENT_NAME=Builder",
   },
   {
     id: 2,
@@ -394,6 +398,10 @@ let ideAgents: IdeAgent[] = [
     created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
     updated_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
     effective_command: "claude --model 'claude-sonnet-5'",
+    worktree_path: null,
+    branch: null,
+    port: null,
+    effective_env: "REVIEW_MODE=strict\nAXIOMATA_AGENT_ID=2\nAXIOMATA_AGENT_NAME=Reviewer",
   },
 ];
 
@@ -402,6 +410,22 @@ const HARNESS_DEFAULTS: Record<Harness, string> = {
   claude_code: "claude",
   mini: "axiomata-miniagent",
 };
+
+/** Builds `effective_env` the way `Agent::resolve_env` does in Rust. */
+function mockEffectiveEnv(
+  fields: AgentFields,
+  id: number,
+  worktree: string | null,
+  branch: string | null,
+  port: number | null,
+): string {
+  const lines = fields.env.split("\n").filter((line) => line.trim());
+  lines.push(`AXIOMATA_AGENT_ID=${id}`, `AXIOMATA_AGENT_NAME=${fields.name}`);
+  if (worktree) lines.push(`AXIOMATA_WORKTREE=${worktree}`);
+  if (branch) lines.push(`AXIOMATA_BRANCH=${branch}`);
+  if (port !== null) lines.push(`AXIOMATA_PORT=${port}`);
+  return lines.join("\n");
+}
 
 /** Resolves a command the same way `Agent::resolve_command` does in Rust. */
 function mockEffectiveCommand(fields: AgentFields): string {
@@ -424,7 +448,11 @@ function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent
     env: fields.env,
     created_at: stamp,
     updated_at: stamp,
+    worktree_path: null,
+    branch: null,
+    port: null,
     effective_command: mockEffectiveCommand(fields),
+    effective_env: mockEffectiveEnv(fields, id, null, null, null),
   };
 }
 
@@ -816,6 +844,26 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       ideAgents = ideAgents.filter((a) => a.id !== args.id);
       return (ideAgents.length < before) as T;
     }
+
+    // The mock has no git, so it answers the way a non-repository project
+    // does: agents share the project folder and still get a port.
+    case "prepare_ide_agent": {
+      const agent = ideAgents.find((a) => a.id === args.id);
+      if (!agent) throw new Error(`no agent ${args.id}`);
+      const project = ideProjects.find((p) => p.id === agent.project_id);
+      const port = agent.port ?? 4300 + ideAgents.indexOf(agent);
+      agent.port = port;
+      agent.effective_env = `${agent.effective_env}\nAXIOMATA_PORT=${port}`;
+      return {
+        agent,
+        cwd: project?.repo_root ?? "/",
+        shared_folder: true,
+      } as T;
+    }
+    case "ide_agent_has_changes":
+      return false as T;
+    case "discard_ide_agent_worktree":
+      return false as T;
 
     case "list_boards":
       return boards as T;

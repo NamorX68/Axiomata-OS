@@ -29,7 +29,8 @@ available.
 
 **M7 — the agentic IDE is under way** (`docs/plans/agentic-ide.md`): M7.1 is complete (the
 `axiomata-ide` crate with projects, the dock-layout model, the full-screen IDE view, and
-per-project layouts), and M7.2 has started with agent profiles (CP4). The plan below
+per-project layouts), and M7.2 is under way: agent profiles (CP4) and a git worktree plus reserved port per agent
+(CP5, the repo's first git integration — `git` as a subprocess, not `git2`). The plan below
 describes the whole chain: an own full-screen IDE
 view with a dock/split/tab layout, foreign agent harnesses (Claude Code, Opencode) hosted as
 PTY tiles, A2A over an own MCP server rather than screen-scraping, one git worktree per
@@ -84,6 +85,8 @@ cargo run -p axiomata-cli -- ide agents list <project>  # a project's agent prof
 cargo run -p axiomata-cli -- ide agents new <project> <name> [--harness …] [--command …] [--model …]
 cargo run -p axiomata-cli -- ide agents edit <id> [--name …] [--command …] …  # omitted flags keep their value
 cargo run -p axiomata-cli -- ide agents delete <id>
+cargo run -p axiomata-cli -- ide agents prepare <id>   # worktree + port, idempotent; prints where it runs
+cargo run -p axiomata-cli -- ide agents discard-worktree <id> [--force]  # --force throws away uncommitted work
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard

@@ -293,7 +293,30 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   **reservierter Port pro Agent** (`AXIOMATA_PORT`), damit zwei Agenten, die
   beide `npx vite --port 1420` starten, sich nicht gegenseitig abschießen.
   Geht direkt über den vorhandenen `extra_env`-Parameter von
-  `PtySession::spawn`, kostet also fast nichts.
+  `PtySession::spawn`, kostet also fast nichts. **Erledigt.** Vier
+  Entscheidungen:
+  - **F3 beantwortet: `git` als Unterprozess, nicht `git2`/libgit2.** CP5
+    brauchte Worktrees, bevor M7.3 Diffs braucht, also fiel die Frage hier.
+    Gründe: `git worktree` ist die Referenzimplementierung eines Features, das
+    libgit2 nur teilweise modelliert; die Konfiguration des Nutzers
+    (Credential-Helper, `includeIf`, Hooks) gilt beim Unterprozess umsonst —
+    entscheidend, sobald ein Agent committet; und keine C-Abhängigkeit in einer
+    Crate, die herauslösbar bleiben soll. Preis: `git` muss installiert sein,
+    was `ensure_available` zu einem Satz statt zu einem Rätsel macht.
+  - **Vorbereiten ist idempotent und passiert bei jedem Start**, nicht nur beim
+    Anlegen: ein Agent von vor CP5 oder einer, dessen Verzeichnis jemand
+    gelöscht hat, repariert sich dadurch selbst.
+  - **Kein Repo ist kein Fehler.** Ist der Projektordner kein Git-Repository,
+    teilen sich die Agenten ihn — wie vor CP5 —, bekommen aber trotzdem einen
+    Port. Die Statuszeile sagt „shared folder", statt den Start zu verweigern.
+  - **Die Identität steht am Ende der Env-Liste**, damit ein Profil sich nicht
+    per `AXIOMATA_AGENT_ID=999` zu einem anderen Agenten erklären kann: der
+    letzte Eintrag gewinnt, sowohl in `PtySession::spawn` als auch in
+    `mergeEnv`.
+
+  Der Worktree-Pfad trägt die Agent-Id (`<slug>-<id>`), weil ein Slug nicht
+  eindeutig ist: „A B" und „A-B" wären sonst ein Verzeichnis und damit zwei
+  Agenten, die sich gegenseitig überschreiben.
 - **CP6** — Lebenszyklus-Ereignisse: pro Worktree eine
   `.claude/settings.local.json` mit Hooks, die `axiomata-cli agent-event …`
   aufrufen → echter Status (arbeitet / wartet auf Eingabe / fertig) statt
@@ -373,7 +396,7 @@ und ein Projektwechsel, der das Layout wiederherstellt.
 |---|---|---|
 | F1 | Projekte in der SQLite-DB (Migration) oder als JSON wie `dashboard.json`? | M7.1 CP0 |
 | F2 | Welche strukturierte Schnittstelle bietet Opencode? (Für Status *und* Plan-Tab.) | M7.2 CP6 |
-| F3 | `git2`/libgit2 oder `git` als Unterprozess? (Tendenz: Unterprozess, kein Build-Ballast.) | M7.3 CP7 |
+| ~~F3~~ | ~~`git2` oder Unterprozess?~~ **Beantwortet (CP5):** Unterprozess, Gründe in `worktree.rs`. | erledigt |
 | F4 | Genaue Config-Orte für die MCP-Eintragung pro Harness (Projekt- vs. Benutzerebene). | M7.5 CP14 |
 | F5 | Wie viele Agenten passen auf 21:9 sinnvoll nebeneinander — braucht es Layout-Vorlagen? | M7.2 CP4 |
 | F6 | Übernimmt das Mini-Harness perspektivisch auch Skills/Routinen, oder bleibt es IDE-intern? | nach M7.4 |

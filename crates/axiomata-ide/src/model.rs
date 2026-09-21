@@ -4,7 +4,7 @@
 //! start because M7.2 onwards adds agents, worktrees and a mailbox beside it,
 //! and they must land next to the project rather than inside `axiomata-core`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -120,6 +120,14 @@ pub struct Agent {
     pub env: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Where this agent works: its own git worktree, or `None` when the
+    /// project is not a git repository (then it runs in the project folder,
+    /// sharing it, as agents did before CP5).
+    pub worktree_path: Option<PathBuf>,
+    /// The branch checked out in that worktree.
+    pub branch: Option<String>,
+    /// A port reserved for this agent so two dev servers do not collide.
+    pub port: Option<u16>,
     /// **Computed on read, never stored**: the command line that actually
     /// runs — `command` if it has one, else the harness's default.
     ///
@@ -128,9 +136,52 @@ pub struct Agent {
     /// copy of the harness-to-default table, and a copy that drifts would show
     /// one command in the profile form while starting another.
     pub effective_command: String,
+    /// **Computed on read, never stored**: the profile's own `env` plus the
+    /// identity this agent runs with — `AXIOMATA_AGENT_ID`, `_NAME`,
+    /// `_WORKTREE`, `_BRANCH`, `_PORT`.
+    ///
+    /// Identity lines come **last**, so a profile cannot quietly claim to be a
+    /// different agent by declaring `AXIOMATA_AGENT_ID` itself: later wins,
+    /// both here and in the frontend's `mergeEnv`.
+    pub effective_env: String,
 }
 
 impl Agent {
+    /// Builds what [`Agent::effective_env`] holds.
+    ///
+    /// The identity is what makes an agent addressable from inside its own
+    /// shell — a tool can ask which agent it is running as, and a dev server
+    /// can take `AXIOMATA_PORT` instead of guessing 1420 like every other one
+    /// on the machine (the collision amux hit, recorded in the plan's §9).
+    pub fn resolve_env(
+        profile_env: &str,
+        id: i64,
+        name: &str,
+        worktree: Option<&Path>,
+        branch: Option<&str>,
+        port: Option<u16>,
+    ) -> String {
+        let mut lines: Vec<String> = profile_env
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_string)
+            .collect();
+
+        lines.push(format!("AXIOMATA_AGENT_ID={id}"));
+        lines.push(format!("AXIOMATA_AGENT_NAME={name}"));
+        if let Some(worktree) = worktree {
+            lines.push(format!("AXIOMATA_WORKTREE={}", worktree.display()));
+        }
+        if let Some(branch) = branch {
+            lines.push(format!("AXIOMATA_BRANCH={branch}"));
+        }
+        if let Some(port) = port {
+            lines.push(format!("AXIOMATA_PORT={port}"));
+        }
+        lines.join("\n")
+    }
+
     /// Resolves what [`Agent::effective_command`] holds. Used by the store
     /// when it builds one; a caller reads the field.
     ///

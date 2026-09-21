@@ -106,6 +106,16 @@ pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")
 }
 
+/// Where the agentic IDE puts one git worktree per agent
+/// (`~/.axiomata/worktrees/<project>/<agent>-<id>`, M7.2 CP5).
+///
+/// App-owned runtime data, like everything else under `~/.axiomata` — and
+/// deliberately *not* inside the user's repository, so an agent's checkout
+/// never turns up as an untracked directory in their own `git status`.
+pub fn worktrees_dir() -> PathBuf {
+    axiomata_home().join("worktrees")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

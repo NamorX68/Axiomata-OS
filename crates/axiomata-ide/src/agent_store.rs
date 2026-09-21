@@ -10,6 +10,8 @@
 //! beside this one, and *that* one will create and remove real directories;
 //! the contract is per module, so do not carry this one's over to it.
 
+use std::path::{Path, PathBuf};
+
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -28,8 +30,8 @@ const MAX_COMMAND_LEN: usize = 2000;
 /// Enough for a page of `KEY=value` lines.
 const MAX_ENV_LEN: usize = 8000;
 
-const AGENT_COLS: &str =
-    "id, project_id, name, harness, command, model, env, created_at, updated_at";
+const AGENT_COLS: &str = "id, project_id, name, harness, command, model, env, created_at, \
+                          updated_at, worktree_path, branch, port";
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -56,6 +58,9 @@ struct RawAgent {
     env: String,
     created_at: String,
     updated_at: String,
+    worktree_path: Option<String>,
+    branch: Option<String>,
+    port: Option<i64>,
 }
 
 fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
@@ -69,6 +74,9 @@ fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
         env: row.get(6)?,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
+        worktree_path: row.get(9)?,
+        branch: row.get(10)?,
+        port: row.get(11)?,
     })
 }
 
@@ -82,21 +90,37 @@ impl RawAgent {
             id: self.id,
             reason: format!("unknown harness {:?}", self.harness),
         })?;
+        let worktree_path = self.worktree_path.map(PathBuf::from);
+        // A port outside u16 cannot come from this crate; a hand-edited row is
+        // not worth failing the whole read over, so it is dropped instead.
+        let port = self.port.and_then(|p| u16::try_from(p).ok());
+        let effective_env = Agent::resolve_env(
+            &self.env,
+            self.id,
+            &self.name,
+            worktree_path.as_deref(),
+            self.branch.as_deref(),
+            port,
+        );
         Ok(Agent {
             id: self.id,
             project_id: self.project_id,
-            name: self.name,
-            harness,
             effective_command: Agent::resolve_command(
                 &self.command,
                 harness,
                 self.model.as_deref(),
             ),
+            effective_env,
+            name: self.name,
+            harness,
             command: self.command,
             model: self.model,
             env: self.env,
             created_at: parse_ts(&self.created_at, self.id, "created_at")?,
             updated_at: parse_ts(&self.updated_at, self.id, "updated_at")?,
+            worktree_path,
+            branch: self.branch,
+            port,
         })
     }
 }
@@ -264,6 +288,59 @@ pub fn update_agent(db: &Connection, id: i64, fields: AgentFields) -> Result<Opt
     get_agent(db, id)
 }
 
+/// Records the worktree an agent works in, and the branch checked out there.
+///
+/// Separate from `update_agent` on purpose: that one is the editing form's
+/// full replace of what a *person* typed, and a worktree is not something a
+/// person types. Mixing them would mean the form could clear a worktree path
+/// by not knowing about it.
+pub fn set_worktree(
+    db: &Connection,
+    id: i64,
+    path: Option<&Path>,
+    branch: Option<&str>,
+) -> Result<bool> {
+    let path_text = match path {
+        Some(path) => Some(path.to_str().ok_or_else(|| IdeError::Invalid {
+            field: "worktree_path",
+            reason: "path is not valid UTF-8".into(),
+        })?),
+        None => None,
+    };
+    let changed = db.execute(
+        "UPDATE ide_agents SET worktree_path = ?2, branch = ?3, updated_at = ?4 WHERE id = ?1",
+        params![id, path_text, branch, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// Reserves a port for an agent. The UNIQUE index refuses one already taken.
+pub fn set_port(db: &Connection, id: i64, port: Option<u16>) -> Result<bool> {
+    let changed = db
+        .execute(
+            "UPDATE ide_agents SET port = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, port.map(i64::from), now()],
+        )
+        .map_err(|err| IdeError::Invalid {
+            field: "port",
+            reason: format!("{port:?} is already reserved by another agent ({err})"),
+        })?;
+    Ok(changed == 1)
+}
+
+/// Every port currently reserved, across all projects — they share a machine.
+pub fn reserved_ports(db: &Connection) -> Result<Vec<u16>> {
+    let mut stmt =
+        db.prepare("SELECT port FROM ide_agents WHERE port IS NOT NULL ORDER BY port")?;
+    let ports = stmt
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ports
+        .into_iter()
+        .filter_map(|p| u16::try_from(p).ok())
+        .collect())
+}
+
 /// Removes the profile. From CP5 the caller removes its worktree first — this
 /// function will never do it, for the same reason deleting a project never
 /// removes a folder.
@@ -286,8 +363,7 @@ mod tests {
     fn fixture() -> (Connection, i64) {
         let db = Connection::open_in_memory().expect("open in-memory db");
         db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
-        db.execute_batch(crate::SCHEMA_SQL_V1).unwrap();
-        db.execute_batch(crate::SCHEMA_SQL_V2).unwrap();
+        crate::apply_all_schemas(&db);
 
         let dir = std::env::temp_dir().join(format!(
             "axiomata-agent-test-{}-{}",
