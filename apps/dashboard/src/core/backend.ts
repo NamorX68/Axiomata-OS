@@ -191,6 +191,37 @@ export interface IdeProject {
   root_exists: boolean;
 }
 
+/** Which harness runs an agent. Mirrors `axiomata_ide::model::Harness`. */
+export type Harness = "claude_code" | "opencode" | "mini";
+
+/** An agent *profile* — what to start, not something running (M7.2 CP4). */
+export interface IdeAgent {
+  id: number;
+  project_id: number;
+  name: string;
+  harness: Harness;
+  /** Empty means the harness's own default — see `effective_command`. */
+  command: string;
+  model: string | null;
+  /** `KEY=value` per line, same shape as the Terminal module's env setting. */
+  env: string;
+  created_at: string;
+  updated_at: string;
+  /** Computed on read: what actually runs — `command`, or the harness's own
+   *  default when it is empty. Sent along so no frontend keeps a second copy
+   *  of that table. */
+  effective_command: string;
+}
+
+/** Everything an agent update sets — a full replace, not a patch. */
+export interface AgentFields {
+  name: string;
+  harness: Harness;
+  command: string;
+  model: string | null;
+  env: string;
+}
+
 /* ---------------------------------------------------------------- board ---
  * Mirrors `axiomata_board`'s serde output: snake_case fields, `null` (not
  * `undefined`) for an absent `Option`, RFC 3339 strings for timestamps.

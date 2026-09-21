@@ -22,6 +22,8 @@
   import { getModule } from "../../core/registry";
   import type { PaneTab } from "../layout";
   import { paneContext } from "../moduleAdapter";
+  import { session } from "../projectSession";
+  import AgentPane from "./AgentPane.svelte";
 
   let { tab, onConfig }: { tab: PaneTab; onConfig: (config: Record<string, unknown>) => void } = $props();
 
@@ -31,13 +33,26 @@
   const def = getModule(tab.kind);
   // svelte-ignore state_referenced_locally
   const ctx = paneContext(tab, onConfig);
+
+  /** An agent pane names its profile by id; the session holds the row. */
+  const agentId = $derived(typeof tab.config?.agentId === "number" ? tab.config.agentId : null);
+  const agent = $derived(agentId === null ? null : ($session.agents.find((a) => a.id === agentId) ?? null));
 </script>
 
 <!-- `data-ide-pane` is a signal, not styling: a module that behaves differently
      outside a canvas tile asks for it rather than inferring it from a missing
      ancestor (`modules/terminal.svelte`'s `watchFlipBack`). -->
 <div class="pane-host" data-ide-pane>
-  {#if def}
+  {#if tab.kind === "agent"}
+    {#if agent && $session.current}
+      <AgentPane {agent} cwd={$session.current.repo_root} tabId={tab.id} />
+    {:else}
+      <!-- The profile was deleted, or belongs to a project that is not open.
+           The pane stays rather than closing itself: something may still be
+           running in it, and closing would take that with it. -->
+      <p class="unknown">This agent profile is no longer in the open project.</p>
+    {/if}
+  {:else if def}
     <def.component {ctx} />
   {:else}
     <p class="unknown">No module of kind “{tab.kind}” in this build.</p>

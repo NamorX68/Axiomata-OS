@@ -28,6 +28,9 @@ const MIGRATIONS: &[(u32, &str)] = &[
     // IDE is meant to be extractable, so it carries its own initial schema.
     // Frozen from here on.
     (9, axiomata_ide::SCHEMA_SQL_V1),
+    // Agent profiles (M7.2 CP4). A new constant rather than an edit to
+    // migration 9: that one has already run everywhere and never runs again.
+    (10, axiomata_ide::SCHEMA_SQL_V2),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -122,6 +125,22 @@ mod tests {
     use super::*;
     use crate::test_support::unique_temp_dir;
 
+    /// The one property the whole scheme rests on: a version number, once
+    /// shipped, always means the same migration. A duplicate or a number that
+    /// goes backwards would let a database record a version as applied and
+    /// then never run the statement that actually belongs to it.
+    #[test]
+    fn migrations_are_unique_and_increasing() {
+        let mut previous = 0;
+        for &(version, _) in MIGRATIONS {
+            assert!(
+                version > previous,
+                "migration {version} does not come after {previous} — the list must be strictly increasing"
+            );
+            previous = version;
+        }
+    }
+
     #[test]
     fn open_and_migrate_applies_once_and_is_idempotent_on_reopen() {
         let temp_db = unique_temp_dir("axiomata-test-db").with_extension("db");
@@ -133,7 +152,15 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-            assert_eq!(version, 9);
+            // Derived from the list rather than hard-coded: what this asserts
+            // is "every migration ran", and spelling the number out again here
+            // only meant editing two places each time one was added.
+            // `migrations_are_unique_and_increasing` below is what guards the
+            // list itself.
+            assert_eq!(
+                version,
+                MIGRATIONS.last().expect("migrations must not be empty").0
+            );
 
             // Migration 0001's DDL actually ran, not just the bookkeeping.
             conn.execute(
@@ -250,7 +277,10 @@ mod tests {
             let applied_count: u32 = conn
                 .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(applied_count, 9);
+            // One row per migration and not one more: a second open must not
+            // re-apply anything. Derived from the list for the same reason as
+            // the version assertion above.
+            assert_eq!(applied_count as usize, MIGRATIONS.len());
 
             let probe_value: String = conn
                 .query_row(

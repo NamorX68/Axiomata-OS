@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseEnvLines } from "./terminalEnv";
+import { mergeEnv, parseEnvLines } from "./terminalEnv";
 
 describe("parseEnvLines", () => {
   it("parses KEY=value lines into ordered pairs", () => {
@@ -66,5 +66,47 @@ describe("parseEnvLines", () => {
       ["FOO", "first"],
       ["FOO", "second"],
     ]);
+  });
+});
+
+describe("mergeEnv", () => {
+  it("keeps both sides when nothing overlaps", () => {
+    expect(mergeEnv([["A", "1"]], [["B", "2"]])).toEqual([
+      ["A", "1"],
+      ["B", "2"],
+    ]);
+  });
+
+  it("lets the later layer win — an agent profile over the global setting", () => {
+    expect(mergeEnv([["A", "global"]], [["A", "profile"]])).toEqual([["A", "profile"]]);
+  });
+
+  it("keeps an overridden key in its original position", () => {
+    // `PtySession::spawn` applies pairs in order; moving a key would change
+    // which of two overlapping definitions the process ends up with.
+    expect(
+      mergeEnv(
+        [
+          ["A", "1"],
+          ["B", "2"],
+          ["C", "3"],
+        ],
+        [["B", "new"]],
+      ),
+    ).toEqual([
+      ["A", "1"],
+      ["B", "new"],
+      ["C", "3"],
+    ]);
+  });
+
+  it("does not write into the list it was given", () => {
+    const base: [string, string][] = [["A", "1"]];
+    mergeEnv(base, [["A", "2"]]);
+    expect(base).toEqual([["A", "1"]]);
+  });
+
+  it("survives both sides being empty", () => {
+    expect(mergeEnv([], [])).toEqual([]);
   });
 });

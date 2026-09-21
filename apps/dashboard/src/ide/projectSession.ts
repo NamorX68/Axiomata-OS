@@ -26,8 +26,10 @@
 
 import { get, writable, type Readable } from "svelte/store";
 
-import type { IdeProject } from "../core/backend";
+import type { AgentFields, IdeAgent, IdeProject } from "../core/backend";
 import { toast } from "../core/toast";
+
+import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { emptyLayout, parseLayout, serializeLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
 import { applyProjectCwd } from "./paneCwd";
@@ -45,11 +47,13 @@ import {
 export interface ProjectSession {
   projects: IdeProject[];
   current: IdeProject | null;
+  /** The open project's agent profiles. Empty while no project is open. */
+  agents: IdeAgent[];
   /** True while an open is in flight, so the picker can stop taking clicks. */
   switching: boolean;
 }
 
-const EMPTY: ProjectSession = { projects: [], current: null, switching: false };
+const EMPTY: ProjectSession = { projects: [], current: null, agents: [], switching: false };
 
 const state = writable<ProjectSession>(EMPTY);
 
@@ -114,7 +118,9 @@ export async function open(id: number): Promise<Layout | null> {
       return null;
     }
     const layout = layoutFor(project);
-    state.update((s) => ({ ...s, current: project }));
+    const agents = await listAgents(project.id);
+    if (seq !== sequence) return null;
+    state.update((s) => ({ ...s, current: project, agents }));
     await refresh();
     return seq === sequence ? layout : null;
   } catch (err) {
@@ -184,7 +190,8 @@ export async function remove(id: number): Promise<boolean> {
     cancelLayoutWrite(id);
     await deleteProject(id);
     const wasOpen = get(state).current?.id === id;
-    if (wasOpen) state.update((s) => ({ ...s, current: null }));
+    // The agents went with the project — the foreign key cascades.
+    if (wasOpen) state.update((s) => ({ ...s, current: null, agents: [] }));
     await refresh();
     return wasOpen;
   } catch (err) {
@@ -208,4 +215,63 @@ export function noProjectLayout(): Layout {
 export function resetSessionForTests(): void {
   state.set(EMPTY);
   sequence = 0;
+}
+
+/* ------------------------------------------------------------- agents --- */
+
+/** Reloads the open project's agents. */
+async function refreshAgents(): Promise<void> {
+  const project = get(state).current;
+  if (!project) return;
+  const agents = await listAgents(project.id);
+  state.update((s) => (s.current?.id === project.id ? { ...s, agents } : s));
+}
+
+/** Adds an agent profile to the open project. Returns it, or `null` on failure. */
+export async function addAgent(fields: AgentFields): Promise<IdeAgent | null> {
+  const project = get(state).current;
+  if (!project) return null;
+  try {
+    const created = await createAgent(project.id, fields);
+    await refreshAgents();
+    return created;
+  } catch (err) {
+    report(err);
+    return null;
+  }
+}
+
+/** Replaces an agent's fields. A running pane picks the change up on restart. */
+export async function editAgent(id: number, fields: AgentFields): Promise<IdeAgent | null> {
+  try {
+    const updated = await updateAgent(id, fields);
+    await refreshAgents();
+    return updated;
+  } catch (err) {
+    report(err);
+    return null;
+  }
+}
+
+/**
+ * Removes an agent profile.
+ *
+ * Panes showing it stay open and say the profile is gone rather than vanishing
+ * from under whatever is running in them — closing a pane would take a live
+ * shell with it, and the user did not ask for that.
+ */
+export async function removeAgent(id: number): Promise<boolean> {
+  try {
+    const gone = await deleteAgent(id);
+    await refreshAgents();
+    return gone;
+  } catch (err) {
+    report(err);
+    return false;
+  }
+}
+
+/** An agent by id, or `null` — what a pane asks to know what it is showing. */
+export function agentById(id: number): IdeAgent | null {
+  return get(state).agents.find((agent) => agent.id === id) ?? null;
 }

@@ -93,4 +93,16 @@
 <ChatPanel />
 
 <Canvas />
-<AssistantBar />
+<!-- The assistant bar floats over the bottom of the screen, which is fine over
+     the canvas or the Second Brain but sits squarely on an agent pane's status
+     line in the IDE. Hidden rather than unmounted so a half-typed prompt is
+     still there when the IDE is closed again. -->
+<div class="assistant-host" class:hidden={ideOpen}>
+  <AssistantBar />
+</div>
+
+<style>
+  .assistant-host.hidden {
+    display: none;
+  }
+</style>

@@ -37,3 +37,22 @@ export function parseEnvLines(text: string): [string, string][] {
   }
   return pairs;
 }
+
+/**
+ * Layers one set of `KEY=value` pairs over another, later wins.
+ *
+ * The two layers are the global terminal setting and whatever the host of a
+ * single instance supplies — an IDE agent pane hands over its profile's env
+ * (M7.2 CP4). A duplicate key keeps its **original position** while taking the
+ * new value: `PtySession::spawn` applies pairs in order, so moving a key would
+ * quietly change which of two overlapping definitions ends up in the process.
+ */
+export function mergeEnv(base: [string, string][], over: [string, string][]): [string, string][] {
+  const merged: [string, string][] = base.map((pair) => [...pair] as [string, string]);
+  for (const [key, value] of over) {
+    const existing = merged.findIndex(([k]) => k === key);
+    if (existing === -1) merged.push([key, value]);
+    else merged[existing] = [key, value];
+  }
+  return merged;
+}

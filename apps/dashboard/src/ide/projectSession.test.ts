@@ -5,6 +5,7 @@ import type { IdeProject } from "../core/backend";
 import { toast } from "../core/toast";
 import { allTabs, findTab, singleGroupLayout, type Layout } from "./layout";
 import * as session from "./projectSession";
+import * as agentApi from "./agents";
 import * as projects from "./projects";
 
 vi.mock("./projects", () => ({
@@ -17,9 +18,16 @@ vi.mock("./projects", () => ({
   saveLayoutSoon: vi.fn(),
   cancelLayoutWrite: vi.fn(),
 }));
+vi.mock("./agents", () => ({
+  listAgents: vi.fn(async () => []),
+  createAgent: vi.fn(),
+  updateAgent: vi.fn(),
+  deleteAgent: vi.fn(),
+}));
 vi.mock("../core/toast", () => ({ toast: vi.fn() }));
 
 const api = vi.mocked(projects);
+const agents = vi.mocked(agentApi);
 const toasted = vi.mocked(toast);
 
 function project(id: number, over: Partial<IdeProject> = {}): IdeProject {
@@ -47,6 +55,7 @@ beforeEach(() => {
   session.resetSessionForTests();
   api.listProjects.mockResolvedValue([]);
   api.flushLayout.mockResolvedValue(undefined);
+  agents.listAgents.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -176,6 +185,77 @@ describe("remove", () => {
 
     expect(await session.remove(2)).toBe(false);
     expect(get(session.session).current?.id).toBe(1);
+  });
+});
+
+describe("agents", () => {
+  const profile = {
+    name: "Builder",
+    harness: "opencode" as const,
+    command: "",
+    model: null,
+    env: "",
+  };
+
+  function row(id: number, name = "Builder") {
+    return {
+      id,
+      project_id: 1,
+      name,
+      harness: "opencode" as const,
+      command: "",
+      model: null,
+      env: "",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:00:00Z",
+      effective_command: "opencode",
+    };
+  }
+
+  async function withOpenProject() {
+    api.openProject.mockResolvedValue(project(1));
+    agents.listAgents.mockResolvedValue([row(1)]);
+    await session.open(1);
+  }
+
+  it("loads the open project's agents with it", async () => {
+    await withOpenProject();
+    expect(get(session.session).agents.map((a) => a.name)).toEqual(["Builder"]);
+    expect(agents.listAgents).toHaveBeenCalledWith(1);
+  });
+
+  it("adds an agent to the open project and nothing without one", async () => {
+    expect(await session.addAgent(profile)).toBeNull();
+    expect(agents.createAgent).not.toHaveBeenCalled();
+
+    await withOpenProject();
+    agents.createAgent.mockResolvedValue(row(2, "Reviewer"));
+    agents.listAgents.mockResolvedValue([row(1), row(2, "Reviewer")]);
+
+    expect((await session.addAgent(profile))?.name).toBe("Reviewer");
+    expect(get(session.session).agents).toHaveLength(2);
+  });
+
+  it("reports a refused name instead of throwing at the view", async () => {
+    await withOpenProject();
+    agents.createAgent.mockRejectedValue(new Error('this project already has an agent called "Builder"'));
+
+    expect(await session.addAgent(profile)).toBeNull();
+    expect(toasted).toHaveBeenCalledWith(expect.stringContaining("already has an agent"), "danger");
+  });
+
+  it("finds an agent by id, which is all a pane stores", async () => {
+    await withOpenProject();
+    expect(session.agentById(1)?.name).toBe("Builder");
+    expect(session.agentById(99)).toBeNull();
+  });
+
+  it("forgets the agents when the project holding them is removed", async () => {
+    await withOpenProject();
+    api.deleteProject.mockResolvedValue(true);
+
+    await session.remove(1);
+    expect(get(session.session).agents).toEqual([]);
   });
 });
 

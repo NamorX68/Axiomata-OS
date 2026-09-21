@@ -1,9 +1,10 @@
 # Plan: Agentische IDE (M7)
 
-Status: **Dachplan, bestätigt in den Grundentscheidungen, noch nicht begonnen.**
+Status: **M7.0 und M7.1 komplett, M7.2 begonnen (CP4 steht).**
 Folgt dem schrittweisen Workflow des Owners: dieser Plan legt die Kette und die
 bereits getroffenen Entscheidungen fest; **jeder Meilenstein wird einzeln
-durchgeplant und bestätigt, bevor Code entsteht.**
+durchgeplant und bestätigt, bevor Code entsteht.** Was gebaut ist, steht bei den
+Checkpoints in §5 — inklusive dessen, was beim Bauen anders kam.
 
 Dies ist das bislang ambitionierteste Vorhaben in Axiomata — bewusst in sieben
 Meilensteine geschnitten, von denen jeder für sich genommen einen benutzbaren
@@ -253,7 +254,26 @@ und ein Projektwechsel, der das Layout wiederherstellt.
 - **CP4** — Agent-Profile (Name, Harness, Befehl, Env, Modell) und `AgentPane` =
   Terminal-Pane mit Profil, Statuszeile, Neustart. Dazu die **Tab-Leiste am
   rechten Rand des Agent-Fensters** — einmal gebaut, später nur noch bewohnt:
-  „Plan" jetzt (CP6b), „Diffs" ab M7.3, „Inbox" ab M7.5.
+  „Plan" jetzt (CP6b), „Diffs" ab M7.3, „Inbox" ab M7.5. **Erledigt.** Vier
+  Entscheidungen:
+  - **Das Harness wird in die Shell getippt, nicht direkt gestartet.** Die Pane
+    spawnt eine Shell und schreibt den Befehl hinein. So darf ein Profil eine
+    echte Kommandozeile tragen (Argumente, Pipes), ohne dass das Terminal-Modul
+    parsen lernt — und wenn der Agent endet, steht seine Ausgabe noch da.
+  - **Der Startbefehl ist ein Prop, kein `ctx.config`-Feld** (Security-Audit
+    dieses Checkpoints). Eine Pane-Config wird aus dem gespeicherten
+    `layout_json` zurückgelesen; ein Befehl darauf hieße „ein Projekt zu öffnen
+    führt aus, was im Layout steht". Dieselbe Regel wie bei `cwd`
+    (`ide/paneCwd.ts`), nur schärfer.
+  - **Eindeutig pro Projekt, ohne Rücksicht auf Groß-/Kleinschreibung**
+    (`UNIQUE … COLLATE NOCASE`): CP5 macht aus dem Namen ein Verzeichnis, und
+    macOS-Dateisysteme unterscheiden nicht.
+  - **`effective_command` kommt aus Rust mit** (berechnet beim Lesen, wie
+    `root_exists` beim Projekt) statt einer zweiten Tabelle im Frontend.
+
+  Status („arbeitet / wartet / fertig") steht bewusst noch nicht im Schema — der
+  kommt mit CP6, als eigene Migration. **Noch offen aus F7:** Agenten überleben
+  das Schließen der App nicht; die Pane besitzt die PTY-Sitzung.
 - **CP5** — Worktree-Anbindung: beim Anlegen eines Agenten `git worktree add`
   unter `~/.axiomata/worktrees/<projekt>/<agent>`, Agent startet dort;
   sauberes Entfernen inklusive. Dazu, von amux übernommen (§9): **Identitäts-

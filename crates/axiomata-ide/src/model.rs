@@ -45,3 +45,128 @@ pub struct NewProject {
     pub name: String,
     pub repo_root: PathBuf,
 }
+
+/// Which harness runs an agent.
+///
+/// Stored as text (`schema.sql` says why) and refused rather than defaulted
+/// when it is anything else: a row whose harness nobody recognises is a row
+/// that would otherwise be started with the wrong program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Harness {
+    /// Anthropic's Claude Code CLI.
+    ClaudeCode,
+    /// The Opencode CLI — the same harness skills and routines already run on.
+    Opencode,
+    /// Axiomata's own agent loop, `axiomata-miniagent` (M7.4). A profile can
+    /// name it before it exists; starting one then fails, which is honest.
+    Mini,
+}
+
+impl Harness {
+    /// The stored spelling, and what the CLI accepts.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Harness::ClaudeCode => "claude_code",
+            Harness::Opencode => "opencode",
+            Harness::Mini => "mini",
+        }
+    }
+
+    /// Parses the stored spelling. `None` for anything else — see the type's docs.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "claude_code" => Some(Harness::ClaudeCode),
+            "opencode" => Some(Harness::Opencode),
+            "mini" => Some(Harness::Mini),
+            _ => None,
+        }
+    }
+
+    /// The command line used when an agent's own `command` is empty.
+    ///
+    /// Resolved here rather than written into every row, so changing what
+    /// "the default Opencode agent" means does not need a data migration —
+    /// and so a row can still pin its own command when the default moves.
+    pub fn default_command(self) -> &'static str {
+        match self {
+            Harness::ClaudeCode => "claude",
+            Harness::Opencode => "opencode",
+            // No binary yet (M7.4). Naming the crate rather than an empty
+            // string makes the failure message say what is missing.
+            Harness::Mini => "axiomata-miniagent",
+        }
+    }
+}
+
+/// An agent profile: what to start, not something running.
+///
+/// The running side — a PTY session, whether it is alive, what it is doing —
+/// belongs to the pane showing it and does not survive the app. That is the
+/// deliberate consequence of owning the PTY engine instead of using tmux
+/// (plan question F7).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Agent {
+    pub id: i64,
+    pub project_id: i64,
+    pub name: String,
+    pub harness: Harness,
+    /// Empty means [`Harness::default_command`]; [`Agent::effective_command`]
+    /// is the one place that resolves it.
+    pub command: String,
+    /// `None` = the harness picks.
+    pub model: Option<String>,
+    /// `KEY=value` per line.
+    pub env: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    /// **Computed on read, never stored**: the command line that actually
+    /// runs — `command` if it has one, else the harness's default.
+    ///
+    /// Sent along rather than left to the caller for the same reason
+    /// [`Project::root_exists`] is: otherwise every frontend needs its own
+    /// copy of the harness-to-default table, and a copy that drifts would show
+    /// one command in the profile form while starting another.
+    pub effective_command: String,
+}
+
+impl Agent {
+    /// Resolves what [`Agent::effective_command`] holds. Used by the store
+    /// when it builds one; a caller reads the field.
+    pub fn resolve_command(command: &str, harness: Harness) -> String {
+        let own = command.trim();
+        if own.is_empty() {
+            harness.default_command().to_string()
+        } else {
+            own.to_string()
+        }
+    }
+}
+
+/// What a caller supplies to create an agent. Validated by the store.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewAgent {
+    pub project_id: i64,
+    pub fields: AgentFields,
+}
+
+/// Everything an update sets, all of it.
+///
+/// A **full replace**, not a patch — the same choice `routines::update` made,
+/// and for the same reason: with a patch, "leave this alone" and "set this to
+/// nothing" are the same absent field over IPC, and the two mean opposite
+/// things for `model`. The editing form holds every field anyway.
+///
+/// `project_id` is not in here: an agent does not move between projects. From
+/// CP5 it owns a worktree under its project, so moving it would mean moving a
+/// directory, which is a different operation with a different name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFields {
+    pub name: String,
+    pub harness: Harness,
+    /// Empty for the harness's default.
+    pub command: String,
+    /// `None` = the harness picks.
+    pub model: Option<String>,
+    pub env: String,
+}

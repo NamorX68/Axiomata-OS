@@ -16,8 +16,11 @@ import type {
   ChatReply,
   ConfigUpdate,
   ConfigView,
+  AgentFields,
   GraphFile,
   GraphLink,
+  Harness,
+  IdeAgent,
   IdeProject,
   WorkspaceGraph,
   InstalledAppsResult,
@@ -362,6 +365,59 @@ let ideProjects: IdeProject[] = [
     root_exists: false,
   },
 ];
+
+/* Agent fixtures: two profiles on the first project, one per harness that
+ * actually exists, so the picker and the agent pane both have something real
+ * to show. `effective_command` is computed here exactly the way Rust computes
+ * it, since that is the whole point of the field. */
+let ideAgents: IdeAgent[] = [
+  {
+    id: 1,
+    project_id: 1,
+    name: "Builder",
+    harness: "opencode",
+    command: "",
+    model: null,
+    env: "",
+    created_at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+    effective_command: "opencode",
+  },
+  {
+    id: 2,
+    project_id: 1,
+    name: "Reviewer",
+    harness: "claude_code",
+    command: "",
+    model: "claude-sonnet-5",
+    env: "REVIEW_MODE=strict",
+    created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    effective_command: "claude",
+  },
+];
+
+const HARNESS_DEFAULTS: Record<Harness, string> = {
+  opencode: "opencode",
+  claude_code: "claude",
+  mini: "axiomata-miniagent",
+};
+
+function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent {
+  const stamp = new Date().toISOString();
+  return {
+    id,
+    project_id: projectId,
+    name: fields.name,
+    harness: fields.harness,
+    command: fields.command,
+    model: fields.model,
+    env: fields.env,
+    created_at: stamp,
+    updated_at: stamp,
+    effective_command: fields.command.trim() || HARNESS_DEFAULTS[fields.harness],
+  };
+}
 
 /* Board fixtures. One board, the three default columns, a handful of cards
  * that exercise the cases the tile has to survive: an empty column, a long
@@ -710,6 +766,46 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const before = ideProjects.length;
       ideProjects = ideProjects.filter((p) => p.id !== args.id);
       return (ideProjects.length < before) as T;
+    }
+
+    // ---- ide agents ----
+    case "list_ide_agents":
+      return ideAgents
+        .filter((a) => a.project_id === args.projectId)
+        .sort((a, b) => a.name.localeCompare(b.name)) as T;
+    case "create_ide_agent": {
+      const fields = args.fields as AgentFields;
+      const projectId = Number(args.projectId);
+      if (
+        ideAgents.some(
+          (a) => a.project_id === projectId && a.name.toLowerCase() === fields.name.trim().toLowerCase(),
+        )
+      ) {
+        // The real store's UNIQUE(project_id, name COLLATE NOCASE).
+        throw new Error(`this project already has an agent called "${fields.name.trim()}"`);
+      }
+      const created = mockAgent((ideAgents[ideAgents.length - 1]?.id ?? 0) + 1, projectId, {
+        ...fields,
+        name: fields.name.trim(),
+      });
+      ideAgents = [...ideAgents, created];
+      return created as T;
+    }
+    case "update_ide_agent": {
+      const index = ideAgents.findIndex((a) => a.id === args.id);
+      if (index === -1) return null as T;
+      const fields = args.fields as AgentFields;
+      const replaced = {
+        ...mockAgent(ideAgents[index].id, ideAgents[index].project_id, { ...fields, name: fields.name.trim() }),
+        created_at: ideAgents[index].created_at,
+      };
+      ideAgents[index] = replaced;
+      return replaced as T;
+    }
+    case "delete_ide_agent": {
+      const before = ideAgents.length;
+      ideAgents = ideAgents.filter((a) => a.id !== args.id);
+      return (ideAgents.length < before) as T;
     }
 
     case "list_boards":

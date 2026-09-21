@@ -128,9 +128,30 @@
   import { createSequenceGuard } from "./terminalScrollback";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
   import { DEFAULT_THEME, THEME_DEFAULT_COLORS, THEMES } from "./terminalThemes";
-  import { parseEnvLines } from "./terminalEnv";
+  import { mergeEnv, parseEnvLines } from "./terminalEnv";
 
-  let { ctx }: { ctx: ModuleContext } = $props();
+  let {
+    ctx,
+    initialCommand = "",
+  }: {
+    ctx: ModuleContext;
+    /**
+     * A command to type into the shell once it is up (M7.2 CP4: an agent pane
+     * starts its harness this way).
+     *
+     * A **prop, deliberately not a `ctx.config` field**. A pane's config is
+     * read back out of a project's stored `layout_json`, and that file is
+     * opaque text as far as Rust is concerned — so a config-carried command
+     * would mean "opening a project can run whatever the stored layout says",
+     * with no confirmation and nothing to check it against. Nothing in the app
+     * writes such a value today, but the security audit for this checkpoint
+     * called the shape what it is, and the same rule `ide/paneCwd.ts` already
+     * applies to `cwd` applies harder to a command line. As a prop it can only
+     * come from a component that mounts this one, which no stored layout can
+     * reach.
+     */
+    initialCommand?: string;
+  } = $props();
 
   // Checkpoint 5d moved every *setting* out of here into `terminalSettings`;
   // what stays is the host's own per-instance data, which today is one field
@@ -655,7 +676,13 @@
     const hostCwd = $config.cwd;
     const settingsCwd = typeof $terminalSettings.cwd === "string" ? $terminalSettings.cwd.trim() : "";
     const cwd = typeof hostCwd === "string" && hostCwd.trim() ? hostCwd.trim() : settingsCwd || null;
-    const env = typeof $terminalSettings.env === "string" ? parseEnvLines($terminalSettings.env) : [];
+    // Global env first, then the host's own, so an agent profile's
+    // `KEY=value` lines win over a setting that applies to every terminal.
+    // These go to `CommandBuilder::env` as real process variables, never
+    // through a shell — see `crates/axiomata-terminal/src/pty.rs`.
+    const globalEnv = typeof $terminalSettings.env === "string" ? parseEnvLines($terminalSettings.env) : [];
+    const hostEnv = typeof $config.env === "string" ? parseEnvLines($config.env) : [];
+    const env = mergeEnv(globalEnv, hostEnv);
     const scrollbackLimit =
       typeof $terminalSettings.scrollbackLimit === "number" && $terminalSettings.scrollbackLimit >= 0 ? $terminalSettings.scrollbackLimit : null;
 
@@ -698,6 +725,25 @@
       // above (see `focusInputSoon`'s own doc comment for why it retries
       // instead of a single `.focus()` call).
       focusInputSoon();
+
+      // The opening command, written into the shell as if it had been typed.
+      //
+      // Typed rather than spawned directly, which is the deliberate choice:
+      // the PTY runs a shell, so the command may have arguments, pipes or a
+      // `&&` without this module learning to parse any of it — and when the
+      // agent exits, its shell is still there with the scrollback in it,
+      // instead of the pane going blank. There is no waiting for a prompt: a
+      // PTY buffers input until the shell reads it, so writing immediately is
+      // safe, and the line stays visible in the scrollback as a record of what
+      // was started.
+      if (sessionId && initialCommand.trim()) {
+        const bytes = new TextEncoder().encode(`${initialCommand.trim()}\n`);
+        void ctx
+          .invoke("terminal_write", { id: sessionId, data: Array.from(bytes) })
+          .catch(() => {
+            /* The session is gone; the `exited` event already says so. */
+          });
+      }
     } catch (err) {
       error = String(err);
     }

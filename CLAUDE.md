@@ -27,7 +27,10 @@ enough); do not plan around it. Full detail: `docs/architecture.md` §5 (what ex
 owner's local Claude Code planning notes — read them before starting new M0–M6-scale work if
 available.
 
-**Next up is M7 — the agentic IDE** (`docs/plans/agentic-ide.md`): an own full-screen IDE
+**M7 — the agentic IDE is under way** (`docs/plans/agentic-ide.md`): M7.1 is complete (the
+`axiomata-ide` crate with projects, the dock-layout model, the full-screen IDE view, and
+per-project layouts), and M7.2 has started with agent profiles (CP4). The plan below
+describes the whole chain: an own full-screen IDE
 view with a dock/split/tab layout, foreign agent harnesses (Claude Code, Opencode) hosted as
 PTY tiles, A2A over an own MCP server rather than screen-scraping, one git worktree per
 agent, a "Plan" tab per agent showing what it is working on, and an own mini-harness —
@@ -77,6 +80,10 @@ cargo run -p axiomata-cli -- ide projects new <name> <path>   # path is stored a
 cargo run -p axiomata-cli -- ide projects rename <id> <name>
 cargo run -p axiomata-cli -- ide projects set-root <id> <path>  # "Pfad ändern": keeps id + layout
 cargo run -p axiomata-cli -- ide projects delete <id>   # removes the row only, never the folder
+cargo run -p axiomata-cli -- ide agents list <project>  # a project's agent profiles
+cargo run -p axiomata-cli -- ide agents new <project> <name> [--harness …] [--command …] [--model …]
+cargo run -p axiomata-cli -- ide agents edit <id> [--name …] [--command …] …  # omitted flags keep their value
+cargo run -p axiomata-cli -- ide agents delete <id>
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard

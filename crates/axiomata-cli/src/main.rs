@@ -220,6 +220,61 @@ enum IdeAction {
         #[command(subcommand)]
         action: ProjectAction,
     },
+    /// Agents: the profiles a project can run in its panes.
+    Agents {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+}
+
+/// Agent profiles (M7.2 CP4), on the CLI for the same reason projects are:
+/// the whole store is exercisable before a pane exists to show one in.
+///
+/// Note what is *not* here — starting or stopping an agent. A running agent is
+/// a PTY session owned by the pane showing it, and it does not outlive the
+/// app; the CLI has no window to put one in.
+#[derive(Debug, Subcommand)]
+enum AgentAction {
+    /// List a project's agents, by name.
+    List { project: i64 },
+    /// Add an agent profile to a project.
+    New {
+        project: i64,
+        name: String,
+        /// claude_code | opencode | mini.
+        #[arg(long, default_value = "opencode")]
+        harness: String,
+        /// Command line to run. Empty uses the harness's own default.
+        #[arg(long, default_value = "")]
+        command: String,
+        /// Model to pass on. Omitted lets the harness pick.
+        #[arg(long)]
+        model: Option<String>,
+        /// Extra environment, `KEY=value` per line.
+        #[arg(long, default_value = "")]
+        env: String,
+    },
+    /// Change an agent's fields. A flag left out **keeps its current value**.
+    ///
+    /// Patch semantics here, unlike `AgentFields` itself, which is a full
+    /// replace: on a command line "I did not type --env" means "leave it
+    /// alone", and clearing every field somebody forgot to repeat would be a
+    /// trap. The store still receives every field — this merges first.
+    Edit {
+        id: i64,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        harness: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        env: Option<String>,
+    },
+    /// Remove an agent profile.
+    Delete { id: i64 },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1070,7 +1125,151 @@ fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
             ProjectAction::SetRoot { id, path } => project_set_root(core, id, &path),
             ProjectAction::Delete { id } => project_delete(core, id),
         },
+        IdeAction::Agents { action } => match action {
+            AgentAction::List { project } => agent_list(core, project),
+            AgentAction::New {
+                project,
+                name,
+                harness,
+                command,
+                model,
+                env,
+            } => agent_new(core, project, &name, &harness, &command, model, &env),
+            AgentAction::Edit {
+                id,
+                name,
+                harness,
+                command,
+                model,
+                env,
+            } => agent_edit(core, id, name, harness, command, model, env),
+            AgentAction::Delete { id } => agent_delete(core, id),
+        },
     }
+}
+
+/// Parses a harness name, listing the valid ones when it is not one of them.
+fn parse_harness(raw: &str) -> Result<ide::Harness> {
+    ide::Harness::parse(raw).ok_or_else(|| {
+        anyhow::anyhow!("unknown harness {raw:?} — expected claude_code, opencode or mini")
+    })
+}
+
+fn agent_list(core: &AxiomataCore, project_id: i64) -> Result<()> {
+    let db = core.db_lock();
+    if ide::store::get_project(&db, project_id)?.is_none() {
+        anyhow::bail!("no project #{project_id}");
+    }
+    let agents = ide::agent_store::list_agents(&db, project_id)?;
+    if agents.is_empty() {
+        println!(
+            "no agents in project #{project_id} — add one with `ide agents new <project> <name>`"
+        );
+        return Ok(());
+    }
+    for agent in agents {
+        let model = agent
+            .model
+            .clone()
+            .unwrap_or_else(|| "harness default".into());
+        println!(
+            "#{:<4} {:<20} {:<12} {}  (model: {model})",
+            agent.id,
+            agent.name,
+            agent.harness.as_str(),
+            agent.effective_command,
+        );
+    }
+    Ok(())
+}
+
+fn agent_new(
+    core: &AxiomataCore,
+    project_id: i64,
+    name: &str,
+    harness: &str,
+    command: &str,
+    model: Option<String>,
+    env: &str,
+) -> Result<()> {
+    let db = core.db_lock();
+    let created = ide::agent_store::create_agent(
+        &db,
+        ide::NewAgent {
+            project_id,
+            fields: ide::AgentFields {
+                name: name.to_string(),
+                harness: parse_harness(harness)?,
+                command: command.to_string(),
+                model,
+                env: env.to_string(),
+            },
+        },
+    )?;
+    println!(
+        "added agent #{} {} ({}, runs `{}`)",
+        created.id,
+        created.name,
+        created.harness.as_str(),
+        created.effective_command
+    );
+    Ok(())
+}
+
+/// Merges the given flags over what is stored, then hands the store a
+/// complete `AgentFields`.
+///
+/// The merge is here rather than in the store on purpose: the store's update
+/// is a true full replace, which is what an editing form wants, while a
+/// command line wants "change this one thing". Both end at the same statement.
+fn agent_edit(
+    core: &AxiomataCore,
+    id: i64,
+    name: Option<String>,
+    harness: Option<String>,
+    command: Option<String>,
+    model: Option<String>,
+    env: Option<String>,
+) -> Result<()> {
+    let db = core.db_lock();
+    let Some(existing) = ide::agent_store::get_agent(&db, id)? else {
+        anyhow::bail!("no agent #{id}");
+    };
+    let fields = ide::AgentFields {
+        name: name.unwrap_or(existing.name),
+        harness: match harness {
+            Some(raw) => parse_harness(&raw)?,
+            None => existing.harness,
+        },
+        command: command.unwrap_or(existing.command),
+        model: model.or(existing.model),
+        env: env.unwrap_or(existing.env),
+    };
+    match ide::agent_store::update_agent(&db, id, fields)? {
+        Some(agent) => {
+            println!(
+                "updated agent #{} {} ({}, runs `{}`)",
+                agent.id,
+                agent.name,
+                agent.harness.as_str(),
+                agent.effective_command
+            );
+            Ok(())
+        }
+        None => anyhow::bail!("no agent #{id}"),
+    }
+}
+
+fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
+    let db = core.db_lock();
+    let Some(agent) = ide::agent_store::get_agent(&db, id)? else {
+        anyhow::bail!("no agent #{id}");
+    };
+    if !ide::agent_store::delete_agent(&db, id)? {
+        anyhow::bail!("no agent #{id}");
+    }
+    println!("removed agent #{} {}", id, agent.name);
+    Ok(())
 }
 
 fn project_list(core: &AxiomataCore) -> Result<()> {

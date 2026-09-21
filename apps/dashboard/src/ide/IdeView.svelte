@@ -45,6 +45,7 @@
   import {
     activateTab,
     addTab,
+    allGroups,
     closeTab,
     findNode,
     isSplit,
@@ -53,8 +54,11 @@
     setTabConfig,
     type DockTarget,
     type Layout,
+    type PaneTab,
     type SplitDir,
   } from "./layout";
+  import type { AgentFields, IdeAgent } from "../core/backend";
+  import AgentPicker from "./AgentPicker.svelte";
   import { applyProjectCwd } from "./paneCwd";
   import ProjectPicker from "./ProjectPicker.svelte";
   import * as projectSession from "./projectSession";
@@ -67,6 +71,7 @@
   const sessionState = projectSession.session;
   const projects = $derived($sessionState.projects);
   const current = $derived($sessionState.current);
+  const agents = $derived($sessionState.agents);
 
   let layout = $state<Layout>(projectSession.noProjectLayout());
   let dockEl = $state<HTMLElement | undefined>();
@@ -99,6 +104,32 @@
 
   async function removeProject(id: number) {
     if (await projectSession.remove(id)) layout = projectSession.noProjectLayout();
+  }
+
+  /**
+   * Puts an agent into a pane, beside whatever is already open.
+   *
+   * Docked to the right of the group holding the active pane rather than as
+   * another tab in it: agents are watched, not switched between — the whole
+   * point of the dock is seeing more than one at a time. A tab only carries
+   * the agent's *id*; the profile itself stays in one place, so editing it
+   * does not mean hunting down copies in a stored layout.
+   */
+  function openAgent(agent: IdeAgent) {
+    const tab: PaneTab = {
+      id: crypto.randomUUID(),
+      kind: "agent",
+      title: agent.name,
+      config: { agentId: agent.id },
+    };
+    const groups = allGroups(layout);
+    const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
+    layout = addTab(layout, tab, { nodeId: target, side: "right" });
+  }
+
+  async function addAgent(fields: AgentFields) {
+    const created = await projectSession.addAgent(fields);
+    if (created) openAgent(created);
   }
 
   function rectOf(el: Element): Rect {
@@ -299,6 +330,14 @@
         onCreate={(name, root) => void addProject(name, root)}
         onSetRoot={(id, root) => void changeRoot(id, root)}
         onRemove={(id) => void removeProject(id)}
+      />
+      <AgentPicker
+        {agents}
+        disabled={!current}
+        onOpen={openAgent}
+        onCreate={(fields) => void addAgent(fields)}
+        onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
+        onRemove={(id) => void projectSession.removeAgent(id)}
       />
       {#if current}
         <p class="hint">Drag a tab to an edge to split, to a tab bar to join.</p>

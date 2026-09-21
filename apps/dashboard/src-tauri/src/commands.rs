@@ -1680,3 +1680,43 @@ pub fn delete_ide_project(state: State<'_, CoreState>, id: i64) -> Result<bool, 
     let db = state.db_lock();
     ide::store::delete_project(&db, id).map_err(|err| err.to_string())
 }
+
+// Agents (M7.2 CP4). Profiles only: starting one is a PTY session owned by the
+// pane showing it, which is `terminal_spawn`'s business, not this layer's.
+
+#[tauri::command]
+pub fn list_ide_agents(
+    state: State<'_, CoreState>,
+    project_id: i64,
+) -> Result<Vec<ide::Agent>, String> {
+    let db = state.db_lock();
+    ide::agent_store::list_agents(&db, project_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn create_ide_agent(
+    state: State<'_, CoreState>,
+    project_id: i64,
+    fields: ide::AgentFields,
+) -> Result<ide::Agent, String> {
+    let db = state.db_lock();
+    ide::agent_store::create_agent(&db, ide::NewAgent { project_id, fields })
+        .map_err(|err| err.to_string())
+}
+
+/// A full replace, not a patch — see `AgentFields`. `None` if there is no such agent.
+#[tauri::command]
+pub fn update_ide_agent(
+    state: State<'_, CoreState>,
+    id: i64,
+    fields: ide::AgentFields,
+) -> Result<Option<ide::Agent>, String> {
+    let db = state.db_lock();
+    ide::agent_store::update_agent(&db, id, fields).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db_lock();
+    ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())
+}

@@ -71,7 +71,7 @@ Axiomata-OS/
     axiomata-cli/                   # headless binary that exercises axiomata-core end to end
     axiomata-terminal/              # standalone PTY + VT100 engine for the Terminal module
     axiomata-board/                 # standalone Kanban core (M7.0), ships migration 8
-    axiomata-ide/                   # standalone agentic-IDE core (M7.1), ships migration 9
+    axiomata-ide/                   # standalone agentic-IDE core (M7.1/M7.2), migrations 9+10
   apps/
     dashboard/
       src/                           # Svelte frontend (core/canvas/shell/modules/themes/graph)
@@ -684,9 +684,27 @@ project's folder**: `modules/terminal.svelte` now prefers a host-supplied `cwd` 
 where the pane lives, nothing sets it on the canvas, and M7.2 puts the agent's worktree in
 the same place. Full plan in [`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
 
-M7.2 onwards is not started. Git integration of any kind is the one genuinely new foundation
-layer still missing: the repository contains no `git2` dependency and no `git` subprocess
-call at all.
+**M7.2 has begun.** CP4 adds *agent profiles*: `ide_agents` (migration 10, the crate's frozen
+`SCHEMA_SQL_V2`) holds a name, a harness (`claude_code` | `opencode` | `mini`), a command
+line, a model and an env block, with `axiomata-cli ide agents …` and a menu in the IDE header
+to manage them. `panes/AgentPane.svelte` runs one: the harness in a terminal, a status line,
+a Restart button that remounts the terminal, and the side tab bar the milestone exists to
+build — Terminal today, Plan/Diffs/Inbox showing what they wait for.
+
+Four decisions worth knowing. The harness is **typed into a shell** rather than spawned
+directly, so a profile may hold a real command line and the output survives the agent
+exiting. The opening command travels as a **prop, never through `ctx.config`** — a pane's
+config comes back out of a stored `layout_json`, and a command there would mean opening a
+project runs whatever the layout says (the security audit for this checkpoint named the
+shape; `ide/paneCwd.ts` applies the same rule to `cwd`). An agent name is unique per project
+**ignoring case**, because CP5 turns it into a directory and macOS does not distinguish.
+And `effective_command` is computed in Rust and sent along, like a project's `root_exists`,
+so no frontend keeps a second copy of the harness-to-command table.
+
+Not yet in the schema, deliberately: the worktree path, branch and port (CP5) and the
+lifecycle status (CP6), each waiting for its own migration. Git integration is still the one
+genuinely new foundation layer missing — the repository contains no `git2` dependency and no
+`git` subprocess call at all.
 
 ### `axiomata-macos`
 
