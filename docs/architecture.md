@@ -651,10 +651,26 @@ tree owns the sizes.
 
 Two rules that are not obvious from the code and will bite whoever ignores them: **a pane is
 never unmounted, only hidden** — not on tab switch, not on leaving the view (`App.svelte`
-keeps `IdeView` mounted from the first open) — because the terminal closes its PTY session in
-`onDestroy`, and it is hidden with `visibility`, never `display: none`, so it keeps the size
-its `ResizeObserver` reports to that PTY. And **Escape does not close the IDE**: it belongs to
-whatever runs in the pane.
+keeps `IdeView` mounted from the first open), and not when the layout is rearranged — because
+the terminal closes its PTY session in `onDestroy`, and it is hidden with `visibility`, never
+`display: none`, so it keeps the size its `ResizeObserver` reports to that PTY. And **Escape
+does not close the IDE**: it belongs to whatever runs in the pane.
+
+That first rule needed `ide/paneStore.ts` to actually hold, which arrived after M7.2 CP4 and
+an owner report of three agents restarting mid-drag. Svelte cannot move a component between
+two `{#each}` blocks, and the dock tree is rendered recursively — so every structural change
+(docking to an edge, dragging a tab into another group) changed which block a pane belonged
+to, and Svelte honoured that the only way it can: by destroying the pane and building a new
+one. For a terminal that means a closed PTY and a restarted agent, and it happened to *every*
+pane on screen, because inserting a split moves its neighbours a level deeper too. So panes
+are not rendered in the tree at all: they live in one flat store that is never reordered, the
+tree holds empty slots, and each pane is *moved* into its slot with `appendChild`, which
+relocates a DOM node instead of recreating it. Two steps, because a slot being destroyed
+would take the pane inside it along: park every pane back in the store in `$effect.pre`
+(before Svelte touches the DOM), place them into the new slots in `$effect` (after). The
+store fills the dock area and is hidden with `visibility`, so a pane waiting there still
+measures its real size. `data-ide-mount` on a pane host is what makes "did that drag restart
+it?" answerable from the DOM.
 
 **CP3 closes M7.1**: the view works in a *project*. Seven thin passthroughs in
 `src-tauri/src/commands.rs` expose the CP0 store. Above them sit two modules rather than a

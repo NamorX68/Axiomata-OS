@@ -46,6 +46,7 @@
     activateTab,
     addTab,
     allGroups,
+    allTabs,
     closeTab,
     findNode,
     isSplit,
@@ -60,6 +61,8 @@
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentPicker from "./AgentPicker.svelte";
   import { applyProjectCwd } from "./paneCwd";
+  import PaneHost from "./panes/PaneHost.svelte";
+  import { PANE_ATTR, parkPanes, placePanes } from "./paneStore";
   import ProjectPicker from "./ProjectPicker.svelte";
   import * as projectSession from "./projectSession";
   import { flushLayout } from "./projects";
@@ -303,6 +306,25 @@
   /** The drop highlight for a drag onto the whole layout's edge. */
   const rootHint = $derived(hint && hint.nodeId === ROOT_NODE_ID ? hint.side : null);
 
+  /** Every pane in the layout, flat — the store renders exactly this list. */
+  const panes = $derived(allTabs(layout));
+
+  let storeEl = $state<HTMLElement | undefined>();
+
+  // The two halves of keeping a pane alive across a layout change. Park before
+  // Svelte touches the DOM, because a slot being destroyed would take the pane
+  // inside it along; place after, into whatever slots now exist. Reading
+  // `layout` in both is what ties them to the change. See `ide/paneStore.ts`.
+  $effect.pre(() => {
+    void layout;
+    if (dockEl && storeEl) parkPanes(dockEl, storeEl);
+  });
+
+  $effect(() => {
+    void layout;
+    if (dockEl) placePanes(dockEl);
+  });
+
   // Every change to the tree queues a write of the open project's layout. The
   // write that follows opening a project stores what was just read back, which
   // costs one statement and buys not having to track a dirty flag that could
@@ -347,6 +369,20 @@
   </header>
 
   <div class="dock" class:dragging={draggingTab !== null} bind:this={dockEl}>
+    <!-- Where panes live. They are rendered here once and only ever *moved*
+         into the tree's slots, so that dragging a pane does not destroy and
+         rebuild it — which closed an agent's PTY and restarted it, for every
+         pane on screen, on every structural change. The store fills the dock
+         and is hidden with `visibility` rather than `display: none`, so a pane
+         waiting here still measures its real size. -->
+    <div class="pane-store" bind:this={storeEl} aria-hidden="true">
+      {#each panes as tab (tab.id)}
+        <div class="pane-slot" {...{ [PANE_ATTR]: tab.id }}>
+          <PaneHost {tab} onConfig={(config) => projectSession.save((layout = setTabConfig(layout, tab.id, config)))} />
+        </div>
+      {/each}
+    </div>
+
     {#if current}
       <DockNode node={layout.root} />
       {#if rootHint && rootHint !== "center"}
@@ -431,6 +467,18 @@
     flex: 1 1 auto;
     min-height: 0;
     padding: var(--ax-space-2);
+  }
+
+  .pane-store {
+    position: absolute;
+    inset: var(--ax-space-2);
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .pane-slot {
+    position: absolute;
+    inset: 0;
   }
 
   .empty {

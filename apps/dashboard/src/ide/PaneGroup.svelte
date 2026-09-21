@@ -11,7 +11,7 @@
 <script lang="ts">
   import { getDock } from "./dockContext";
   import type { TabGroup } from "./layout";
-  import PaneHost from "./panes/PaneHost.svelte";
+  import { SLOT_ATTR } from "./paneStore";
 
   let { group }: { group: TabGroup } = $props();
 
@@ -61,10 +61,15 @@
   </div>
 
   <div class="body">
+    <!-- Empty on purpose. The pane itself is rendered once, flat, in the
+         view's pane store and moved in here after every layout change
+         (`ide/paneStore.ts`) — rendering it in this `{#each}` is what used to
+         destroy and rebuild it, and with it the agent's PTY, on every drag.
+
+         `inert` as well as hidden: a mounted-but-invisible terminal calls
+         `focus()` on itself when it starts, and would otherwise take the
+         keyboard away from the pane the user is actually looking at. -->
     {#each group.tabs as tab (tab.id)}
-      <!-- `inert` as well as hidden: a mounted-but-invisible terminal calls
-           `focus()` on itself when it starts, and would otherwise take the
-           keyboard away from the pane the user is actually looking at. -->
       <div
         class="slot"
         class:hidden={tab.id !== group.active}
@@ -72,9 +77,8 @@
         id="ide-pane-{tab.id}"
         role="tabpanel"
         aria-labelledby="ide-tab-{tab.id}"
-      >
-        <PaneHost {tab} onConfig={(config) => dock.setConfig(tab.id, config)} />
-      </div>
+        {...{ [SLOT_ATTR]: tab.id }}
+      ></div>
     {/each}
   </div>
 

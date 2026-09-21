@@ -214,8 +214,16 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   Andocken per Drag (Kante = Split, Mitte = Tab). Erster echter Inhalt ist die
   Terminal-Pane über `moduleAdapter.ts`. **Erledigt.** Vier Entscheidungen, die
   M7.2 erbt:
-  - **Panes werden nie ausgehängt, nur versteckt** — weder beim Tab-Wechsel
-    noch beim Verlassen der Ansicht (`visibility` + `inert`, nicht `{#if}`).
+  - **Panes werden nie ausgehängt, nur versteckt** — weder beim Tab-Wechsel,
+    noch beim Verlassen der Ansicht, noch beim Umbauen des Layouts
+    (`visibility` + `inert`, nicht `{#if}`). Für den dritten Fall reichte das
+    ursprüngliche CP2-Design **nicht**: Svelte kann eine Komponente nicht
+    zwischen zwei `{#each}`-Blöcken verschieben, also wurde bei jeder
+    Struktur­änderung *jede* Pane zerstört und neu gebaut — drei Agenten, drei
+    Neustarts, gemeldet vom Owner nach CP4. Seitdem liegen die Panes in einem
+    flachen Speicher (`ide/paneStore.ts`) und werden nur per `appendChild` in
+    die leeren Slots des Baums *verschoben*; geparkt wird in `$effect.pre`,
+    verteilt in `$effect`.
     Das Terminal schließt seine PTY-Sitzung in `onDestroy`; ein Blick aufs
     Dashboard würde sonst jede laufende Shell töten. `visibility` statt
     `display: none`, weil eine versteckte Pane ihre gemessene Größe behalten
