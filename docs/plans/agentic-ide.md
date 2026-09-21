@@ -202,6 +202,13 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   öffnen auf CLI-Ebene prüfbar machen.
 - **CP1** — `ide/layout.ts` als reines Modell samt Tests: Baum, Split, Tabs,
   Einfügen/Verschieben/Schließen, Größenverteilung, Serialisierung. Kein DOM.
+  **Erledigt.** Drei Dinge, die CP2 wissen muss: Andocken nimmt jeden Knoten als
+  Ziel, auch die Wurzel — das ist das Andocken an den äußeren Rand; ein Tab, der
+  als einziger seiner Gruppe auf eben diese Gruppe fällt, lässt das Layout
+  *identisch* (dieselben Ids, nicht nur dieselbe Form), weil CP2 Zieh- und
+  Übergangszustände an Knoten-Ids hängen wird; und `MIN_PANE_FRACTION` gilt nach
+  jeder Operation, nicht nur nach dem Teiler-Zug, also auch für eine Vorgabe und
+  für ein aus `layout_json` gelesenes Layout.
 - **CP2** — `IdeView.svelte`: Baum rendern, Splitter ziehen, Tab-Leisten,
   Andocken per Drag (Kante = Split, Mitte = Tab). Erster echter Inhalt ist die
   Terminal-Pane über `moduleAdapter.ts`.

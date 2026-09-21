@@ -617,9 +617,25 @@ and a frozen `SCHEMA_SQL_V1` guarded by a checksum test. Migration 9 deliberatel
 **only** `projects`; agents, worktrees, plan steps and the mailbox arrive with their own
 migrations in M7.2/M7.4, so a frozen schema carries no guesses. Two rules worth knowing
 before touching it: `repo_root` is UNIQUE and canonicalised on the way in, and deleting a
-project removes a row and **never** a folder. Still to come in M7.1: the dock-layout model
-(CP1), the full-screen IDE view (CP2) and project switching (CP3) — full plan in
-[`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
+project removes a row and **never** a folder.
+
+**CP1 is done too**: `apps/dashboard/src/ide/layout.ts` is the dock-layout model — a tree of
+`Split { dir, children, sizes }` and `TabGroup { tabs, active }` with docking, moving,
+closing and divider dragging, plus the serialisation that fills CP0's `layout_json`. Pure
+logic with its own vitest file and no DOM, the same cut as `core/kanban.ts`; `IdeView.svelte`
+in CP2 draws what is there and computes pixel geometry, nothing more. Four invariants hold
+after *every* operation, because they all end in the same `finalize` step: empty groups
+disappear, a split left with one child collapses into it, a split nested in a split of the
+same direction is flattened into its parent, and no child falls under
+`MIN_PANE_FRACTION` — without the flattening the stored tree grows deeper with every dock
+while drawing identically, and without the floor a pane can be dragged to a sliver with no
+reachable splitter to drag it back. Sizes are fractions of their split, never pixels, so a
+layout saved on a 21:9 monitor still opens on a 16:9 one. `parseLayout` is tolerant the way
+`core/persist.ts` is — unknown node types, tabs without an id or kind and repeated ids are
+dropped or renamed rather than trusted — and returns `null` when nothing usable survives, so
+a truncated `layout_json` opens the starting layout instead of an empty IDE that looks like
+data loss. Still to come in M7.1: the full-screen IDE view (CP2) and project switching (CP3)
+— full plan in [`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
 
 M7.2 onwards is not started. Git integration of any kind is the one genuinely new foundation
 layer still missing: the repository contains no `git2` dependency and no `git` subprocess
