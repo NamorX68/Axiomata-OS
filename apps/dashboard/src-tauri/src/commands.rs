@@ -15,6 +15,7 @@ use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
 use axiomata_core::config::{Config, ProviderId, ProviderSettings};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::graph::{self, WorkspaceGraph};
+use axiomata_core::ide;
 use axiomata_core::importer;
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::notes;
@@ -1592,4 +1593,90 @@ pub fn move_board_column(
         board_mirror::after_column_change(&db, &config, id);
     }
     Ok(moved)
+}
+
+// ------------------------------------------------------------------- ide ---
+//
+// Thin passthroughs to `axiomata_ide::store`, the same shape as the board
+// commands above: take the state, lock, delegate, stringify. Two rules the
+// store enforces and the frontend depends on: `repo_root` is canonicalised and
+// UNIQUE (a clash names the project already sitting there), and removing a
+// project removes a row and never a folder.
+//
+// Every mutating command takes an id plus the one field it changes, never a
+// whole `Project` — see the `root_exists` warning on the model for why that
+// field must only ever come from the store's own `is_dir`.
+
+#[tauri::command]
+pub fn list_ide_projects(state: State<'_, CoreState>) -> Result<Vec<ide::Project>, String> {
+    let db = state.db_lock();
+    ide::store::list_projects(&db).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn create_ide_project(
+    state: State<'_, CoreState>,
+    name: String,
+    repo_root: String,
+) -> Result<ide::Project, String> {
+    let db = state.db_lock();
+    let new = ide::NewProject {
+        name,
+        repo_root: PathBuf::from(repo_root),
+    };
+    ide::store::create_project(&db, new).map_err(|err| err.to_string())
+}
+
+/// Returns `None` if there is no such project.
+#[tauri::command]
+pub fn rename_ide_project(
+    state: State<'_, CoreState>,
+    id: i64,
+    name: String,
+) -> Result<Option<ide::Project>, String> {
+    let db = state.db_lock();
+    ide::store::rename_project(&db, id, &name).map_err(|err| err.to_string())
+}
+
+/// "Pfad ändern": the project keeps its id, its name and its layout.
+#[tauri::command]
+pub fn set_ide_project_root(
+    state: State<'_, CoreState>,
+    id: i64,
+    repo_root: String,
+) -> Result<Option<ide::Project>, String> {
+    let db = state.db_lock();
+    ide::store::set_repo_root(&db, id, &PathBuf::from(repo_root)).map_err(|err| err.to_string())
+}
+
+/// Stores the frontend's serialised dock tree. `None` clears it, which is what
+/// makes the IDE build its starting layout next time.
+#[tauri::command]
+pub fn set_ide_project_layout(
+    state: State<'_, CoreState>,
+    id: i64,
+    layout: Option<String>,
+) -> Result<bool, String> {
+    let db = state.db_lock();
+    ide::store::set_layout(&db, id, layout.as_deref()).map_err(|err| err.to_string())
+}
+
+/// Marks the project as just opened and returns it — what the project list
+/// sorts by. Returns `None` if there is no such project.
+#[tauri::command]
+pub fn open_ide_project(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<Option<ide::Project>, String> {
+    let db = state.db_lock();
+    ide::store::touch_opened(&db, id).map_err(|err| err.to_string())?;
+    ide::store::get_project(&db, id).map_err(|err| err.to_string())
+}
+
+/// Removes the project **row**. Never the folder — the UI says "remove from
+/// the list" for that reason.
+#[tauri::command]
+pub fn delete_ide_project(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db_lock();
+    ide::store::delete_project(&db, id).map_err(|err| err.to_string())
 }

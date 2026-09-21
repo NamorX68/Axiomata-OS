@@ -172,6 +172,25 @@ export interface NewRoutine {
   enabled: boolean;
 }
 
+/* ------------------------------------------------------------------ ide ---
+ * Mirrors `axiomata_ide::model::Project` (milestone M7.1). */
+
+export interface IdeProject {
+  id: number;
+  name: string;
+  /** Absolute and canonicalised by the store; unique across projects. */
+  repo_root: string;
+  /** The serialised dock tree (`ide/layout.ts`), opaque to Rust. `null` =
+   *  never opened, which is what makes the IDE build its starting layout. */
+  layout_json: string | null;
+  created_at: string;
+  last_opened_at: string | null;
+  /** Computed on every read: does `repo_root` still point at a directory? A
+   *  project whose folder has gone stays in the list, marked — an unmounted
+   *  disk looks exactly like a deleted folder from the inside. */
+  root_exists: boolean;
+}
+
 /* ---------------------------------------------------------------- board ---
  * Mirrors `axiomata_board`'s serde output: snake_case fields, `null` (not
  * `undefined`) for an absent `Option`, RFC 3339 strings for timestamps.

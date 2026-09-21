@@ -18,6 +18,7 @@ import type {
   ConfigView,
   GraphFile,
   GraphLink,
+  IdeProject,
   WorkspaceGraph,
   InstalledAppsResult,
   LoadedDashboardState,
@@ -335,6 +336,33 @@ let runs: RunRecord[] = [
     source: "routine",
   },
 ];
+/* IDE fixtures (M7.1). Two projects so the picker has something to switch
+ * between, and the second one's folder is deliberately "missing" so the
+ * marked-but-kept case is visible without unmounting a disk. `layout_json`
+ * starts `null` on both: that is what makes the view build its starting
+ * layout, and the mock then stores whatever the view saves, so switching back
+ * and forth in a browser exercises the real round trip. */
+let ideProjects: IdeProject[] = [
+  {
+    id: 1,
+    name: "Axiomata-OS",
+    repo_root: "/Users/dev/Development/Axiomata-OS",
+    layout_json: null,
+    created_at: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+    last_opened_at: new Date().toISOString(),
+    root_exists: true,
+  },
+  {
+    id: 2,
+    name: "Auf dem Stick",
+    repo_root: "/Volumes/Stick/experiment",
+    layout_json: null,
+    created_at: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+    last_opened_at: null,
+    root_exists: false,
+  },
+];
+
 /* Board fixtures. One board, the three default columns, a handful of cards
  * that exercise the cases the tile has to survive: an empty column, a long
  * body, labels, a due date already past, and an assignee that is an agent
@@ -627,6 +655,63 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     // Argument keys are camelCase here because that is what the frontend
     // sends: Tauri converts them to snake_case on the Rust side, devmock
     // sees them unconverted.
+    // ---- ide projects ----
+    case "list_ide_projects":
+      // Same order the store gives: most recently opened first, never-opened last.
+      return [...ideProjects].sort((a, b) => {
+        if (!a.last_opened_at && !b.last_opened_at) return a.name.localeCompare(b.name);
+        if (!a.last_opened_at) return 1;
+        if (!b.last_opened_at) return -1;
+        return b.last_opened_at.localeCompare(a.last_opened_at);
+      }) as T;
+    case "create_ide_project": {
+      const repoRoot = String(args.repoRoot);
+      if (ideProjects.some((p) => p.repo_root === repoRoot)) {
+        // The real store's UNIQUE constraint names who is already there.
+        const taken = ideProjects.find((p) => p.repo_root === repoRoot)!;
+        throw new Error(`that folder is already project "${taken.name}"`);
+      }
+      const created: IdeProject = {
+        id: (ideProjects[ideProjects.length - 1]?.id ?? 0) + 1,
+        name: String(args.name),
+        repo_root: repoRoot,
+        layout_json: null,
+        created_at: new Date().toISOString(),
+        last_opened_at: null,
+        root_exists: true,
+      };
+      ideProjects = [...ideProjects, created];
+      return created as T;
+    }
+    case "rename_ide_project": {
+      const project = ideProjects.find((p) => p.id === args.id);
+      if (project) project.name = String(args.name);
+      return (project ?? null) as T;
+    }
+    case "set_ide_project_root": {
+      const project = ideProjects.find((p) => p.id === args.id);
+      if (project) {
+        project.repo_root = String(args.repoRoot);
+        project.root_exists = true;
+      }
+      return (project ?? null) as T;
+    }
+    case "set_ide_project_layout": {
+      const project = ideProjects.find((p) => p.id === args.id);
+      if (project) project.layout_json = args.layout === null ? null : String(args.layout);
+      return (project !== undefined) as T;
+    }
+    case "open_ide_project": {
+      const project = ideProjects.find((p) => p.id === args.id);
+      if (project) project.last_opened_at = new Date().toISOString();
+      return (project ?? null) as T;
+    }
+    case "delete_ide_project": {
+      const before = ideProjects.length;
+      ideProjects = ideProjects.filter((p) => p.id !== args.id);
+      return (ideProjects.length < before) as T;
+    }
+
     case "list_boards":
       return boards as T;
     case "get_board":

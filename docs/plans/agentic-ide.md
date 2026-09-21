@@ -234,6 +234,19 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   kein Teil von CP3.
 - **CP3** — Projektwechsel: Projektliste, Repo-Ordner wählen, Layout pro Projekt
   laden und speichern. Damit ist „die IDE sieht aus wie verlassen" erfüllt.
+  **Erledigt** — und damit **M7.1 komplett**. Drei Entscheidungen:
+  - **Ohne Projekt keine Panes.** Die Ansicht startet leer und verlangt ein
+    Projekt, statt ein Terminal zu öffnen, das nirgendwo hingehört.
+  - **Ein Terminal in einer Pane startet im Projektordner.** `terminal.svelte`
+    bevorzugt dafür ein vom Host geliefertes `cwd` aus `ctx.config` gegenüber
+    der globalen Einstellung. Das ist kein Rückbau von Checkpoint 5d (alle
+    *Einstellungen* raus aus `ctx.config`): `cwd` ist hier keine Einstellung,
+    sondern die Tatsache, wo diese Pane lebt. Auf dem Canvas setzt es niemand,
+    dort ändert sich nichts. M7.2 setzt an derselben Stelle den Worktree ein.
+  - **Der Ordner wird als Text eingegeben**, wie der Workspace-Pfad in den
+    Einstellungen — kein nativer Ordnerdialog, also keine neue Tauri-
+    Abhängigkeit. Ein fehlender Ordner wird markiert, nicht entfernt, und der
+    Pfad ist an Ort und Stelle korrigierbar (Projekt behält Id und Layout).
 
 ### M7.2 — Agent-Fenster samt Tab-Leiste
 

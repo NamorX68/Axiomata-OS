@@ -51,16 +51,24 @@
     moveTab,
     resizeSplit,
     setTabConfig,
-    singleGroupLayout,
     type DockTarget,
     type Layout,
-    type PaneTab,
     type SplitDir,
   } from "./layout";
+  import { applyProjectCwd } from "./paneCwd";
+  import ProjectPicker from "./ProjectPicker.svelte";
+  import * as projectSession from "./projectSession";
+  import { flushLayout } from "./projects";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
-  let layout = $state<Layout>(startingLayout());
+  // Which project is open, and the list, live in `projectSession` — this
+  // component owns the dock tree and the two drag engines, and nothing else.
+  const sessionState = projectSession.session;
+  const projects = $derived($sessionState.projects);
+  const current = $derived($sessionState.current);
+
+  let layout = $state<Layout>(projectSession.noProjectLayout());
   let dockEl = $state<HTMLElement | undefined>();
   let draggingTab = $state<string | null>(null);
   let hint = $state<DockTarget | null>(null);
@@ -71,13 +79,26 @@
   let snapshot: { root: Rect; groups: GroupGeometry[] } | null = null;
   let divider: { splitId: string; boundary: number; pointerId: number; rect: Rect; dir: SplitDir } | null = null;
 
-  /** A fresh terminal pane. Its id is the module's `instanceId` for its lifetime. */
-  function terminalTab(): PaneTab {
-    return { id: crypto.randomUUID(), kind: "terminal", title: "Terminal" };
+  /** Opening a project replaces the tree; its old panes are unmounted, which
+   *  is the one place in this view where destroying a pane is right — those
+   *  terminals were running in a different project's folder. */
+  async function openProjectById(id: number) {
+    const next = await projectSession.open(id);
+    if (next) layout = next;
   }
 
-  function startingLayout(): Layout {
-    return singleGroupLayout([terminalTab()]);
+  async function addProject(name: string, repoRoot: string) {
+    const next = await projectSession.create(name, repoRoot);
+    if (next) layout = next;
+  }
+
+  async function changeRoot(id: number, repoRoot: string) {
+    const next = await projectSession.changeRoot(id, repoRoot, layout);
+    if (next) layout = next;
+  }
+
+  async function removeProject(id: number) {
+    if (await projectSession.remove(id)) layout = projectSession.noProjectLayout();
   }
 
   function rectOf(el: Element): Rect {
@@ -178,10 +199,26 @@
     endDividerDrag();
   }
 
+  /** The last arrangement must not be left in a timer when the app goes away. */
+  function flushOnLeaving() {
+    void flushLayout();
+  }
+
   onMount(() => {
+    // The most recently opened project comes first out of the store, so
+    // reopening the IDE lands where the user left off without a stored
+    // "current project" of its own to drift out of step.
+    void projectSession.start().then((next) => {
+      if (next) layout = next;
+    });
+
     window.addEventListener("blur", abandonDrags);
+    // `pagehide` is what `core/persist.ts` uses for the same job: a quit while
+    // the IDE is still the view on screen would otherwise drop the last write.
+    window.addEventListener("pagehide", flushOnLeaving);
     return () => {
       window.removeEventListener("blur", abandonDrags);
+      window.removeEventListener("pagehide", flushOnLeaving);
       // Today the view is never unmounted, but its correctness must not depend
       // on a caller-side invariant it cannot enforce — HMR alone breaks it.
       abandonDrags();
@@ -196,7 +233,10 @@
       layout = closeTab(layout, tabId);
     },
     addPane: (groupId) => {
-      layout = addTab(layout, terminalTab(), { nodeId: groupId, side: "center" });
+      const project = current;
+      if (!project) return;
+      const added = addTab(layout, projectSession.terminalTab(), { nodeId: groupId, side: "center" });
+      layout = applyProjectCwd(added, project.repo_root);
     },
     startTabDrag: (tabId, event) => {
       // A second pointer must not take over a drag already under way, and a
@@ -231,21 +271,54 @@
 
   /** The drop highlight for a drag onto the whole layout's edge. */
   const rootHint = $derived(hint && hint.nodeId === ROOT_NODE_ID ? hint.side : null);
+
+  // Every change to the tree queues a write of the open project's layout. The
+  // write that follows opening a project stores what was just read back, which
+  // costs one statement and buys not having to track a dirty flag that could
+  // be wrong in the other direction — a layout silently not saved.
+  $effect(() => {
+    projectSession.save(layout);
+  });
+
+  // Leaving the IDE is the last moment anyone is watching, and the app may be
+  // closed from the dashboard next. Don't leave the last arrangement in a timer.
+  $effect(() => {
+    if (!open) void flushLayout();
+  });
 </script>
 
 <section class="ide" class:hidden={!open} inert={!open} aria-label="IDE">
   <header>
     <div class="titles">
       <h1>IDE</h1>
-      <p class="hint">Drag a tab to an edge to split, to a tab bar to join.</p>
+      <ProjectPicker
+        {projects}
+        {current}
+        switching={$sessionState.switching}
+        onOpen={(id) => void openProjectById(id)}
+        onCreate={(name, root) => void addProject(name, root)}
+        onSetRoot={(id, root) => void changeRoot(id, root)}
+        onRemove={(id) => void removeProject(id)}
+      />
+      {#if current}
+        <p class="hint">Drag a tab to an edge to split, to a tab bar to join.</p>
+      {/if}
     </div>
     <button class="back" type="button" onclick={() => (open = false)}>Back to the OS</button>
   </header>
 
   <div class="dock" class:dragging={draggingTab !== null} bind:this={dockEl}>
-    <DockNode node={layout.root} />
-    {#if rootHint && rootHint !== "center"}
-      <div class="root-highlight {rootHint}" transition:fade={{ duration: 80 }}></div>
+    {#if current}
+      <DockNode node={layout.root} />
+      {#if rootHint && rootHint !== "center"}
+        <div class="root-highlight {rootHint}" transition:fade={{ duration: 80 }}></div>
+      {/if}
+    {:else}
+      <!-- No project, no panes: a terminal with nowhere to start is worse than
+           no terminal. The menu above is the only thing to do here. -->
+      <div class="empty">
+        <p>Add a project to work in — a name and the folder of a repository.</p>
+      </div>
     {/if}
   </div>
 </section>
@@ -319,6 +392,15 @@
     flex: 1 1 auto;
     min-height: 0;
     padding: var(--ax-space-2);
+  }
+
+  .empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
   }
 
   /* While a tab is in flight the panes must not react to the pointer passing

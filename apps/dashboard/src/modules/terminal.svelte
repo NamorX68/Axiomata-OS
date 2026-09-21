@@ -132,6 +132,14 @@
 
   let { ctx }: { ctx: ModuleContext } = $props();
 
+  // Checkpoint 5d moved every *setting* out of here into `terminalSettings`;
+  // what stays is the host's own per-instance data, which today is one field
+  // (`cwd`, see `spawn`) and is not a setting but a fact about where this
+  // instance lives. The context belongs to this mounted instance and never
+  // changes under it, the same assumption `Tile.svelte` makes when it builds one.
+  // svelte-ignore state_referenced_locally
+  const config = ctx.config;
+
   const MIN_ROWS = 4;
   const MIN_COLS = 20;
   /** Classic terminal cursor blink period — on/off every half-period. */
@@ -638,7 +646,15 @@
     // here, not watched, since none of them can be applied to an
     // already-running session either.
     const shell = typeof $terminalSettings.shell === "string" && $terminalSettings.shell ? $terminalSettings.shell : null;
-    const cwd = typeof $terminalSettings.cwd === "string" && $terminalSettings.cwd.trim() ? $terminalSettings.cwd.trim() : null;
+    // `cwd` is the one setting a *host* may override, and the only one: an
+    // IDE pane belongs to a project and has to start in that project's folder
+    // (M7.1 CP3), whereas a canvas tile has no folder of its own and reads the
+    // global setting like everything else here. The host passes it through
+    // `ctx.config`, which for a pane is its tab in the dock layout. Nothing
+    // sets it on the canvas, so a tile behaves exactly as before.
+    const hostCwd = $config.cwd;
+    const settingsCwd = typeof $terminalSettings.cwd === "string" ? $terminalSettings.cwd.trim() : "";
+    const cwd = typeof hostCwd === "string" && hostCwd.trim() ? hostCwd.trim() : settingsCwd || null;
     const env = typeof $terminalSettings.env === "string" ? parseEnvLines($terminalSettings.env) : [];
     const scrollbackLimit =
       typeof $terminalSettings.scrollbackLimit === "number" && $terminalSettings.scrollbackLimit >= 0 ? $terminalSettings.scrollbackLimit : null;

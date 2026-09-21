@@ -609,7 +609,7 @@ a floating panel's remembered size hangs off a key per panel kind rather than on
 size), and `openStaged`'s anchor lets a panel open over its own tile instead of the screen
 centre.
 
-**M7.1 is under way.** Its first checkpoint (CP0) exists: the crate `axiomata-ide`, holding
+**M7.1 is done** (CP0–CP3). Its first checkpoint (CP0) is the crate `axiomata-ide`, holding
 IDE *projects* — a name, a folder, and the dock layout the user left behind in it — with
 migration 9 and the CLI group `axiomata-cli ide projects …`. It is cut exactly like
 `axiomata-board`: no dependency on `axiomata-core` or Tauri, no owned connection or path,
@@ -656,8 +656,33 @@ keeps `IdeView` mounted from the first open) — because the terminal closes its
 its `ResizeObserver` reports to that PTY. And **Escape does not close the IDE**: it belongs to
 whatever runs in the pane.
 
-Still to come in M7.1: project switching (CP3) — full plan in
-[`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
+**CP3 closes M7.1**: the view works in a *project*. Seven thin passthroughs in
+`src-tauri/src/commands.rs` expose the CP0 store. Above them sit two modules rather than a
+fatter component: `ide/projectSession.ts` holds which project is open and everything that
+changes that (a `core/boardStore.ts`-shaped store, so the rules are unit-tested rather than
+trapped in a `.svelte` file), while `IdeView.svelte` keeps the dock tree and the two drag
+engines and nothing else — the seam was cut here deliberately, at the end of M7.1, because
+M7.2's agent panes need to hook into project switching too. Two rules in that module are
+ones the checkpoint's reviews put there: an `openProject` answer that a newer switch has
+overtaken is discarded (the same sequence guard `terminal.svelte` uses for scrollback), and
+a pane's `cwd` is recomputed from the project's *current* folder on every open
+(`ide/paneCwd.ts`) instead of trusting the value frozen into the stored layout — "Change
+path" would otherwise leave terminals starting in the folder the project just left.
+`ide/projects.ts` wraps the commands and owns the one rule about timing — a layout is
+written debounced (400 ms, the rhythm `core/persist.ts`
+already uses), but a pending write for a different project is flushed before another is
+queued, because switching projects while one waits is exactly how an arrangement gets lost.
+Opening a project loads its `layout_json`, or builds a starting layout when it has none; the
+old project's panes are unmounted, which is the one place in this view where destroying a
+pane is right, since those terminals were running in a different folder.
+
+Two consequences worth knowing. **Without a project there are no panes** — the IDE asks for
+one rather than opening a terminal with nowhere to be. And **a terminal pane starts in the
+project's folder**: `modules/terminal.svelte` now prefers a host-supplied `cwd` from
+`ctx.config` over the global `terminalSettings.cwd`. That is not a reversal of Checkpoint 5d
+(which moved every *setting* out of `ctx.config`): `cwd` here is not a setting but the fact of
+where the pane lives, nothing sets it on the canvas, and M7.2 puts the agent's worktree in
+the same place. Full plan in [`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
 
 M7.2 onwards is not started. Git integration of any kind is the one genuinely new foundation
 layer still missing: the repository contains no `git2` dependency and no `git` subprocess
