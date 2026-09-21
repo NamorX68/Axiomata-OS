@@ -634,8 +634,30 @@ layout saved on a 21:9 monitor still opens on a 16:9 one. `parseLayout` is toler
 `core/persist.ts` is — unknown node types, tabs without an id or kind and repeated ids are
 dropped or renamed rather than trusted — and returns `null` when nothing usable survives, so
 a truncated `layout_json` opens the starting layout instead of an empty IDE that looks like
-data loss. Still to come in M7.1: the full-screen IDE view (CP2) and project switching (CP3)
-— full plan in [`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
+data loss.
+
+**CP2 is the view.** `apps/dashboard/src/ide/` now holds `IdeView.svelte` (full screen, owns
+the layout and every drag), `DockNode.svelte` (the tree, drawn recursively; a child's
+`flex-grow` *is* its stored fraction, so there is no second place a size lives),
+`PaneGroup.svelte` (tab bar, stacked panes, drop highlight) and `panes/PaneHost.svelte`. The
+entry point is the IDE icon in the icon bar. Two files keep logic out of the components:
+`dock.ts` turns a pointer position into a dock target (edge zone a quarter of a pane, the
+whole layout's outer strip 3 %, a tab bar winning over both) from geometry measured **once**
+per drag, the snapshot approach `core/kanban.ts` already uses for cards; `moduleAdapter.ts`
+hands a pane the same `ModuleContext` a tile gets from `core/registry.ts`, so the Terminal in
+a pane is the very same module the canvas mounts — with its config living in the layout tree
+rather than `dashboard.json`, and `requestResize` deliberately a no-op because in a dock the
+tree owns the sizes.
+
+Two rules that are not obvious from the code and will bite whoever ignores them: **a pane is
+never unmounted, only hidden** — not on tab switch, not on leaving the view (`App.svelte`
+keeps `IdeView` mounted from the first open) — because the terminal closes its PTY session in
+`onDestroy`, and it is hidden with `visibility`, never `display: none`, so it keeps the size
+its `ResizeObserver` reports to that PTY. And **Escape does not close the IDE**: it belongs to
+whatever runs in the pane.
+
+Still to come in M7.1: project switching (CP3) — full plan in
+[`plans/agentic-ide.md`](plans/agentic-ide.md) §5.
 
 M7.2 onwards is not started. Git integration of any kind is the one genuinely new foundation
 layer still missing: the repository contains no `git2` dependency and no `git` subprocess

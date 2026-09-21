@@ -19,6 +19,7 @@ import {
   resizeSplit,
   serializeLayout,
   setSplitSizes,
+  setTabConfig,
   singleGroupLayout,
 } from "./layout";
 
@@ -224,6 +225,29 @@ describe("activateTab", () => {
     expect(shape(activateTab(base, "b").root)).toBe("[a *b]");
     expect(activateTab(base, "a")).toBe(base);
     expect(activateTab(base, "nope")).toBe(base);
+  });
+});
+
+describe("setTabConfig", () => {
+  it("stores a pane's own state on its tab and leaves the rest alone", () => {
+    const base = singleGroupLayout([tab("a"), tab("b")]);
+    const next = setTabConfig(base, "b", { cwd: "/tmp" });
+
+    expect(findTab(next, "b")!.tab.config).toEqual({ cwd: "/tmp" });
+    expect(findTab(next, "a")!.tab.config).toBeUndefined();
+    expect(shape(next.root)).toBe(shape(base.root));
+    expect(findTab(base, "b")!.tab.config).toBeUndefined();
+  });
+
+  it("ignores a tab that is not there", () => {
+    const base = singleGroupLayout([tab("a")]);
+    expect(setTabConfig(base, "nope", { x: 1 })).toBe(base);
+  });
+
+  it("survives the round trip to a stored layout", () => {
+    const base = setTabConfig(singleGroupLayout([tab("a")]), "a", { cwd: "/tmp", lines: 40 });
+    const back = parseLayout(serializeLayout(base))!;
+    expect(findTab(back, "a")!.tab.config).toEqual({ cwd: "/tmp", lines: 40 });
   });
 });
 

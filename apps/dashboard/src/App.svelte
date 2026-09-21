@@ -8,6 +8,7 @@
   import { loadInstances } from "./core/stores";
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
+  import IdeView from "./ide/IdeView.svelte";
   import IconBar from "./shell/IconBar.svelte";
   import ModulePicker from "./shell/ModulePicker.svelte";
   import SecondBrainView from "./shell/SecondBrainView.svelte";
@@ -18,6 +19,14 @@
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
+  // The IDE is mounted from the first time it is opened and never unmounted
+  // again — it hides itself instead. Every pane in it would otherwise be
+  // destroyed on the way back to the dashboard, and a terminal pane closes its
+  // PTY session when destroyed, so a glance at the canvas would kill every
+  // running shell. `ideStarted` is what keeps it out of the tree until it is
+  // wanted at all; `ideOpen` is what it listens to afterwards.
+  let ideStarted = $state(false);
+  let ideOpen = $state(false);
   let brainOpen = $state(false);
   let brainFocus = $state<string | null>(null);
   let brainQuery = $state("");
@@ -32,6 +41,10 @@
         openStaged("md-file", { path: d.path, mode: d.mode === "edit" ? "edit" : "read" });
       }),
       on("shell:settings", () => (settingsOpen = true)),
+      on("shell:ide", () => {
+        ideStarted = true;
+        ideOpen = true;
+      }),
       // The top-bar search icon → the Second Brain, focused on its search
       // box (SecondBrainView autofocuses when opened with no query/target).
       on("shell:search", () => {
@@ -72,6 +85,9 @@
 <Settings bind:open={settingsOpen} />
 {#if brainOpen}
   <SecondBrainView bind:open={brainOpen} focus={brainFocus} initialQuery={brainQuery} />
+{/if}
+{#if ideStarted}
+  <IdeView bind:open={ideOpen} />
 {/if}
 <StagingLayer />
 <ChatPanel />

@@ -245,6 +245,24 @@ export function closeTab(layout: Layout, tabId: string): Layout {
   return root ? { root: finalize(root) } : layout;
 }
 
+/**
+ * Replaces a tab's `config` — the pane's own state on its way to `layout_json`.
+ *
+ * A pane has no row in `dashboard.json` the way a canvas tile does, so this is
+ * where a module's config lands when it is hosted in the IDE (see
+ * `moduleAdapter.ts`). The object is stored as given; the layout never reads
+ * into it.
+ */
+export function setTabConfig(layout: Layout, tabId: string, config: Record<string, unknown>): Layout {
+  const hit = findTab(layout, tabId);
+  if (!hit) return layout;
+  const root = replaceNode(layout.root, hit.group.id, (node) => ({
+    ...(node as TabGroup),
+    tabs: (node as TabGroup).tabs.map((tab) => (tab.id === tabId ? { ...tab, config } : tab)),
+  }));
+  return root ? { root: finalize(root) } : layout;
+}
+
 /** Makes a tab the visible one in its group. Unchanged if there is no such tab. */
 export function activateTab(layout: Layout, tabId: string): Layout {
   const hit = findTab(layout, tabId);

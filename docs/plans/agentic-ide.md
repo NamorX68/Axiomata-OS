@@ -211,7 +211,27 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   für ein aus `layout_json` gelesenes Layout.
 - **CP2** — `IdeView.svelte`: Baum rendern, Splitter ziehen, Tab-Leisten,
   Andocken per Drag (Kante = Split, Mitte = Tab). Erster echter Inhalt ist die
-  Terminal-Pane über `moduleAdapter.ts`.
+  Terminal-Pane über `moduleAdapter.ts`. **Erledigt.** Vier Entscheidungen, die
+  M7.2 erbt:
+  - **Panes werden nie ausgehängt, nur versteckt** — weder beim Tab-Wechsel
+    noch beim Verlassen der Ansicht (`visibility` + `inert`, nicht `{#if}`).
+    Das Terminal schließt seine PTY-Sitzung in `onDestroy`; ein Blick aufs
+    Dashboard würde sonst jede laufende Shell töten. `visibility` statt
+    `display: none`, weil eine versteckte Pane ihre gemessene Größe behalten
+    muss — sonst meldet der `ResizeObserver` 0 Zeilen an die PTY. Für
+    Agenten-Panes gilt das genauso, nur teurer.
+  - **Escape schließt die IDE nicht.** Die Taste gehört dem, was in der Pane
+    läuft (vim im Terminal). Der Weg hinaus ist der Knopf.
+  - **Die Zieh-Geometrie wird einmal beim Dragstart gemessen** (`ide/dock.ts`,
+    Schnappschuss-Muster wie `core/kanban.ts`), nicht bei jeder Bewegung.
+  - **Geometrie ist testbar, nicht in der Komponente**: `dock.ts` rechnet
+    Zeigerposition → Dock-Ziel (Kantenzone 25 %, Wurzelrand 3 %, Tab-Leiste hat
+    Vorrang), die Svelte-Dateien messen nur Rechtecke und mounten Module.
+
+  Bewusst offen geblieben: der Splitter lässt sich nur mit dem Zeiger bewegen,
+  nicht mit der Tastatur (`role="separator"` ohne `tabindex`/Pfeiltasten), und
+  die Tab-Leiste hat kein Roving-Tabindex. Beides ist ein Nachzügler für später,
+  kein Teil von CP3.
 - **CP3** — Projektwechsel: Projektliste, Repo-Ordner wählen, Layout pro Projekt
   laden und speichern. Damit ist „die IDE sieht aus wie verlassen" erfüllt.
 

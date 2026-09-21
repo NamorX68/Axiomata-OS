@@ -1015,16 +1015,15 @@
   function watchFlipBack(): void {
     const tileInner = root?.closest<HTMLElement>(".tile-inner");
     if (!tileInner) {
-      // Today this only happens for a genuine regression — every Terminal
-      // tile is mounted inside a `Tile.svelte` (see its own `.tile-inner`
-      // comment) and there is no other host yet. Warn instead of failing
-      // silently (architecture review, Checkpoint 5f2), dev-only so it
-      // can't spam a real user's console. Once a standalone/out-of-Tile
-      // Terminal use exists (`docs/plans/terminal.md`'s own noted future
-      // goal), this branch stops being an error and the warning below
-      // should be revisited/removed alongside whatever change makes that
-      // legitimate.
-      if (import.meta.env.DEV) {
+      // The out-of-Tile host this branch's warning was written in
+      // anticipation of now exists: an IDE pane (`ide/panes/PaneHost.svelte`,
+      // milestone M7.1 CP2) marks itself with `data-ide-pane`. A pane has no
+      // front and back face, so there is no flip to watch for and nothing is
+      // wrong — saying so would be noise on every terminal in the IDE.
+      // Anywhere else a missing `.tile-inner` is still a real regression, so
+      // the warning stays for that case, dev-only as before (architecture
+      // review, Checkpoint 5f2).
+      if (import.meta.env.DEV && !root?.closest("[data-ide-pane]")) {
         console.warn('terminal.svelte: watchFlipBack() found no ancestor ".tile-inner" — flip-back autofocus is disabled for this instance.');
       }
       return;

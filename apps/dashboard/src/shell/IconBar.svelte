@@ -40,6 +40,12 @@
       onClick: () => emit("shell:new-note"),
     },
     {
+      id: "ide",
+      label: "IDE",
+      path: "M9 8l-4 4 4 4 M15 8l4 4-4 4 M3 4h18v16H3z",
+      onClick: () => emit("shell:ide"),
+    },
+    {
       id: "search",
       label: "Search",
       path: "M11 4a7 7 0 100 14 7 7 0 000-14z M20 20l-4-4",
