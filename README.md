@@ -70,19 +70,25 @@ layout, data locations, and what's implemented vs. planned — see
 
 ## Agent status (in the IDE)
 
-The agentic IDE displays each agent in its own pane: a terminal running the agent's harness
-(Claude Code, Opencode, or the built-in mini harness) alongside a **status line** showing
-the agent's state and a **Restart** button. A tab bar on the right edge of the pane will
-eventually show:
+Each agent runs in its own **pane** with a terminal (PTY/VT100 stream showing the harness's
+live output) and a **status line** across the bottom. The status line displays:
 
-- **Terminal**: the agent's live output (PTY/VT100 stream)
-- **Plan** (planned for M7.2 CP6): what the agent is working on and where in the plan it stands
-- **Diffs** (planned for M7.3): git diffs from the agent's dedicated worktree
-- **Inbox** (planned for M7.5): messages from other agents and the user via MCP
+- The harness type, model (if set), and a **branch chip** showing either:
+  - The agent's git branch name (with tooltip showing the full worktree path), or
+  - **"shared folder"** (if the project is not a git repository, so agents share the project folder)
+- A **port chip** showing the reserved port for this agent
+- The effective command that will be executed
+- A **Restart button** that kills the running PTY session and starts a new one
 
-A planned **lifecycle status** (working / waiting / done) will be added to the schema and
-displayed in the status line once CP6 completes. Until then, the terminal and status line
-alone show whether the agent is running, idle, or finished.
+On the right edge of the pane, a **tab bar** shows four tabs — **Terminal**, **Plan**, **Diffs**, and **Inbox** —
+all clickable but only Terminal currently functional. The other three display a placeholder stating when they will arrive:
+- **Plan** (M7.2 CP6b): what the agent is working on and where in the plan it stands
+- **Diffs** (M7.3): git diffs from the agent's dedicated worktree
+- **Inbox** (M7.5): messages from other agents and the user via MCP
+
+Note: A structured **lifecycle status** (working / waiting / done) is planned for CP6 (separate database migration);
+today, only the pane's load state ("Preparing this agent's worktree…" or error messages) and the branch/shared-folder chip
+reflect the agent's context and readiness.
 
 See [`docs/plans/agentic-ide.md`](./docs/plans/agentic-ide.md) for the full IDE design,
 including details on how agents communicate and share work via MCP.
