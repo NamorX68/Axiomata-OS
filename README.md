@@ -68,6 +68,25 @@ For the full command reference, workspace conventions, and test conventions, see
 layout, data locations, and what's implemented vs. planned — see
 [`docs/architecture.md`](./docs/architecture.md).
 
+## Agent status (in the IDE)
+
+The agentic IDE displays each agent in its own pane: a terminal running the agent's harness
+(Claude Code, Opencode, or the built-in mini harness) alongside a **status line** showing
+the agent's state and a **Restart** button. A tab bar on the right edge of the pane will
+eventually show:
+
+- **Terminal**: the agent's live output (PTY/VT100 stream)
+- **Plan** (planned for M7.2 CP6): what the agent is working on and where in the plan it stands
+- **Diffs** (planned for M7.3): git diffs from the agent's dedicated worktree
+- **Inbox** (planned for M7.5): messages from other agents and the user via MCP
+
+A planned **lifecycle status** (working / waiting / done) will be added to the schema and
+displayed in the status line once CP6 completes. Until then, the terminal and status line
+alone show whether the agent is running, idle, or finished.
+
+See [`docs/plans/agentic-ide.md`](./docs/plans/agentic-ide.md) for the full IDE design,
+including details on how agents communicate and share work via MCP.
+
 ## License
 
 MIT — see [`LICENSE`](./LICENSE).
