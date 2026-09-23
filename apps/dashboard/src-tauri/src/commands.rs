@@ -1715,14 +1715,25 @@ pub fn update_ide_agent(
     ide::agent_store::update_agent(&db, id, fields).map_err(|err| err.to_string())
 }
 
+/// Deletes the profile, then its status channel (M7.2 CP6). The row goes
+/// first: a channel without a row is harmless, a row whose plan vanished is not.
 #[tauri::command]
 pub fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
     let db = state.db_lock();
-    ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())
+    let deleted = ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?;
+    drop(db);
+    if deleted {
+        ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
+            .map_err(|err| {
+                format!("the agent was removed, but its status folder was not: {err}")
+            })?;
+    }
+    Ok(deleted)
 }
 
-/// Gives an agent what it needs to run — its own git worktree and a reserved
-/// port — and says where the harness should start (M7.2 CP5).
+/// Gives an agent what it needs to run — its own git worktree, a reserved
+/// port (M7.2 CP5) and a fresh status channel (CP6) — and says where and with
+/// which command line the harness should start.
 ///
 /// Idempotent, and called on every start rather than only on creation: an
 /// agent created before worktrees existed, or one whose directory somebody
@@ -1733,8 +1744,29 @@ pub fn prepare_ide_agent(
     id: i64,
 ) -> Result<ide::provision::Provisioned, String> {
     let db = state.db_lock();
-    ide::provision::prepare(&db, &axiomata_core::paths::worktrees_dir(), id)
+    ide::provision::prepare(&db, &axiomata_core::paths::ide_locations(), id)
         .map_err(|err| err.to_string())
+}
+
+/// What every agent of a project is doing and planning (M7.2 CP6/CP6b).
+///
+/// One call for the whole project, because the IDE polls it every second
+/// while it is open. Reads small files only.
+#[tauri::command]
+pub fn ide_agent_states(
+    state: State<'_, CoreState>,
+    project_id: i64,
+) -> Result<Vec<ide::lifecycle::AgentStatus>, String> {
+    // List, then let go of the connection before the file reads: this runs
+    // every second, and the connection is shared by every other command.
+    let agents = {
+        let db = state.db_lock();
+        ide::agent_store::list_agents(&db, project_id).map_err(|err| err.to_string())?
+    };
+    Ok(ide::provision::agent_statuses(
+        &agents,
+        &axiomata_core::paths::ide_locations().channels,
+    ))
 }
 
 /// Whether an agent's worktree holds work that removing it would throw away.

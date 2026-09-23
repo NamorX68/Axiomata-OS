@@ -7,10 +7,10 @@
 //! **neither the database file nor the connection** — every operation takes a
 //! `&Connection` supplied by the caller.
 //!
-//! Today it holds projects (M7.1) and agent profiles (M7.2 CP4). The rest of
-//! M7.2 onwards adds worktrees, the git layer, the agent supervisor and the
-//! mailbox beside them; each brings its own schema constant and its own
-//! migration number.
+//! Today it holds projects (M7.1), agent profiles (M7.2 CP4), their worktrees
+//! (CP5) and their status channel (CP6, [`lifecycle`]). Later milestones add
+//! the git layer, the agent supervisor and the mailbox beside them; each that
+//! needs a table brings its own schema constant and its own migration number.
 //!
 //! ⚠️ One promise that is **per module, not crate-wide**: `store`'s "looks at
 //! the file system, never changes it" holds for projects and is what makes
@@ -25,6 +25,7 @@
 //! frozen — see the constant's own docs.
 
 pub mod agent_store;
+pub mod lifecycle;
 pub mod model;
 pub mod provision;
 pub mod store;
@@ -95,6 +96,15 @@ pub enum IdeError {
     /// failure diagnosable.
     #[error("{command} failed: {reason}")]
     Git { command: String, reason: String },
+
+    /// Reading or writing a file under the agent's status channel failed
+    /// (M7.2 CP6). Names the path, because "permission denied" alone does not
+    /// say which of several files it was.
+    #[error("{path}: {source}")]
+    Io {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
 }
 
 /// Convenience alias used throughout the crate.

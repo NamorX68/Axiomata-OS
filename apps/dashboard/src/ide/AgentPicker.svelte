@@ -9,6 +9,10 @@
 <script lang="ts">
   import type { AgentFields, IdeAgent } from "../core/backend";
   import { HARNESSES, blankFields, fieldsOf } from "./agents";
+  import { agentStatus, describeStatus } from "./agentStatus";
+  import StatusDot from "./StatusDot.svelte";
+
+  const statuses = agentStatus.statuses;
 
   let {
     agents,
@@ -77,7 +81,10 @@
                   open = false;
                 }}
               >
-                <span class="name">{agent.name}</span>
+                <span class="name">
+                  <StatusDot view={describeStatus($statuses.byAgent.get(agent.id), agent, $statuses.checkedAt)} />
+                  {agent.name}
+                </span>
                 <span class="meta">{agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
                 <code>{agent.effective_command}</code>
               </button>
@@ -228,6 +235,12 @@
     font-size: var(--ax-font-size-sm);
     text-align: left;
     cursor: pointer;
+  }
+
+  .name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
   }
 
   .meta {

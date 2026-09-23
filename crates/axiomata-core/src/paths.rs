@@ -116,6 +116,51 @@ pub fn worktrees_dir() -> PathBuf {
     axiomata_home().join("worktrees")
 }
 
+/// Where each IDE agent's status channel lives
+/// (`~/.axiomata/agent-events/<id>/`, M7.2 CP6): its state word, its plan and
+/// the hook files its harness is started with. App-owned, and never inside a
+/// worktree, so no agent can commit it.
+pub fn agent_events_dir() -> PathBuf {
+    axiomata_home().join("agent-events")
+}
+
+/// Claude Code's own home: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+///
+/// Not Axiomata's directory. The IDE reads two folders in it (below) and
+/// removes exactly one thing — a deleted agent's own task list
+/// (`axiomata_ide::lifecycle`).
+fn claude_home() -> PathBuf {
+    env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            home::home_dir()
+                .expect("could not determine the current user's home directory")
+                .join(".claude")
+        })
+}
+
+/// Claude Code's task lists, from which a Claude Code agent's plan is read.
+pub fn claude_tasks_dir() -> PathBuf {
+    claude_home().join("tasks")
+}
+
+/// Where Claude Code writes plan-mode plans; read only.
+pub fn claude_plans_dir() -> PathBuf {
+    claude_home().join("plans")
+}
+
+/// Every path the IDE crate needs, bundled the way it takes them.
+pub fn ide_locations() -> axiomata_ide::provision::Locations {
+    axiomata_ide::provision::Locations {
+        worktrees: worktrees_dir(),
+        channels: axiomata_ide::lifecycle::ChannelRoots {
+            events: agent_events_dir(),
+            claude_tasks: claude_tasks_dir(),
+            claude_plans: claude_plans_dir(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

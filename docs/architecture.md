@@ -745,8 +745,49 @@ servers fighting over 1420. And the **identity env is appended last** — `AXIOM
 declare itself to be a different agent: later wins, both in `PtySession::spawn` and in the
 frontend's `mergeEnv`.
 
-Still absent from the schema, deliberately: the lifecycle status (CP6), waiting for its own
-migration.
+**CP6/CP6b give each agent a status and a plan** — and, deliberately, still no schema change
+(`docs/plans/agent-lifecycle.md`, E9–E20). The status is runtime state that dies with the
+PTY, so a database row saying "working" would be a lie after the next restart. Instead
+`crates/axiomata-ide/src/lifecycle.rs` owns a **file channel** per agent at
+`~/.axiomata/agent-events/<id>/`: `state` (one word — `idle`/`working`/`waiting`/`ended` — and
+a Unix timestamp), `started`, and for Opencode `plan.json`. The harness writes, Rust reads:
+
+- **Claude Code** is started with `--settings <channel>/claude-settings.json`, a file of ours
+  whose hooks (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop`,
+  `SessionEnd`) are plain `sh` lines writing the state word — no Axiomata binary is needed on
+  the agent's `PATH`, which matters because the bundled app does not ship the CLI. The
+  `Notification` hook carries no matcher: it `grep`s its own JSON for `notification_type`
+  `permission_prompt`/`elicitation_dialog` before reporting `waiting`, because Claude Code
+  also notifies on a 60-second idle prompt and a login, neither of which is really waiting for
+  an answer (a live test caught an idle agent blinking `waiting` before this). Its **plan** is
+  the one exception to "the harness writes our format":
+  Claude Code's task tools (`TaskCreate`/`TaskUpdate` — `TodoWrite` no longer exists) only
+  report single changes to a hook, so we pin the list with `CLAUDE_CODE_TASK_LIST_ID` and read
+  Claude Code's own `~/.claude/tasks/<list>/*.json`, tolerantly.
+- **Opencode** loads a plugin from `OPENCODE_CONFIG_DIR=<channel>/opencode` (additive to the
+  user's global config), which maps `session.status`, `permission.*`/`question.*` and
+  `todo.updated` and ignores sub-agent sessions (`parentID`).
+
+Nothing is ever written into a worktree, so an agent cannot commit its own hookup, and a
+shared (non-git) folder gets a status too. `prepare` resets the channel on every start and
+returns `launch_command`/`launch_env` — the command gains `--settings` only when it is the
+generated one; an own command still gets the env and can attach itself via
+`$AXIOMATA_CLAUDE_SETTINGS`. The plan survives an agent restart and is flagged
+`from_earlier_session`; deleting an agent removes its channel and exactly its own task list.
+Two additions from the live test. Both harnesses get a short **planning instruction**
+(`<channel>/planning.md`, via `--append-system-prompt-file` and Opencode's `instructions`) so
+the Plan tab has something to show without being asked, and a **plan-mode plan** is shown as
+its own document below the tasks: Claude Code writes it to `<claude-home>/plans/<name>.md`
+(a `Write|Edit` hook records the path; Rust only reads it if the canonical path is inside
+that folder), Opencode's plan agent answers in chat (the plugin keeps that answer as
+`plan-mode.md`). And the app strips **inherited Claude Code session markers**
+(`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, … — `forget_inherited_claude_session` in
+`src-tauri/src/lib.rs`) at startup: launched from inside a Claude Code shell, every agent
+pane otherwise believed it was that session's child and saved no transcript.
+The frontend polls `ide_agent_states(project)` once a second while the IDE is on screen
+(`ide/agentStatus.ts`) and shows the result as one `StatusDot` in three places: the pane's
+status line, its dock tab, and the agent picker. The status is also what M7.5 CP13 will use
+as its delivery condition (a message reaches a TUI agent only when it is `idle`).
 
 ### `axiomata-macos`
 

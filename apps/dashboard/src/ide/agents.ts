@@ -11,6 +11,7 @@
 import {
   invokeBackend as invoke,
   type AgentFields,
+  type AgentStatus,
   type Harness,
   type IdeAgent,
   type ProvisionedAgent,
@@ -80,4 +81,9 @@ export function agentHasChanges(id: number): Promise<boolean> {
 /** Removes an agent's worktree. `force` discards uncommitted work in it. */
 export function discardWorktree(id: number, force: boolean): Promise<boolean> {
   return invoke<boolean>("discard_ide_agent_worktree", { id, force });
+}
+
+/** What every agent of a project is doing and planning — one call per tick. */
+export function agentStates(projectId: number): Promise<AgentStatus[]> {
+  return invoke<AgentStatus[]>("ide_agent_states", { projectId });
 }

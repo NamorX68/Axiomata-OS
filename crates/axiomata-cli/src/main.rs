@@ -275,9 +275,12 @@ enum AgentAction {
     },
     /// Remove an agent profile.
     Delete { id: i64 },
-    /// Give an agent its worktree and port, and print where it would run.
-    /// Idempotent — this is what the app does on every start.
+    /// Give an agent its worktree, port and status channel, and print where and
+    /// how it would run. Idempotent — this is what the app does on every start.
     Prepare { id: i64 },
+    /// What a project's agents are doing and planning, as their harnesses
+    /// last reported it.
+    Status { project: i64 },
     /// Remove an agent's worktree. Refuses to throw away uncommitted work
     /// unless `--force`.
     DiscardWorktree {
@@ -1155,6 +1158,7 @@ fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
             } => agent_edit(core, id, name, harness, command, model, env),
             AgentAction::Delete { id } => agent_delete(core, id),
             AgentAction::Prepare { id } => agent_prepare(core, id),
+            AgentAction::Status { project } => agent_status(core, project),
             AgentAction::DiscardWorktree { id, force } => agent_discard_worktree(core, id, force),
         },
     }
@@ -1274,7 +1278,7 @@ fn agent_edit(
 
 fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
     let db = core.db_lock();
-    let ready = ide::provision::prepare(&db, &axiomata_core::paths::worktrees_dir(), id)?;
+    let ready = ide::provision::prepare(&db, &axiomata_core::paths::ide_locations(), id)?;
     println!("agent #{} {}", ready.agent.id, ready.agent.name);
     println!("  runs in: {}", ready.cwd.display());
     if ready.shared_folder {
@@ -1289,7 +1293,55 @@ fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
         Some(port) => println!("  port:    {port} (AXIOMATA_PORT)"),
         None => println!("  port:    none free in the range"),
     }
-    println!("  command: {}", ready.agent.effective_command);
+    println!("  command: {}", ready.launch_command);
+    if !ready.status_connected {
+        println!("  status:  no channel for this harness yet");
+    }
+    Ok(())
+}
+
+fn agent_status(core: &AxiomataCore, project_id: i64) -> Result<()> {
+    let db = core.db_lock();
+    let agents = ide::agent_store::list_agents(&db, project_id)?;
+    let names: std::collections::HashMap<i64, String> = agents
+        .iter()
+        .map(|agent| (agent.id, agent.name.clone()))
+        .collect();
+    let statuses =
+        ide::provision::agent_statuses(&agents, &axiomata_core::paths::ide_locations().channels);
+    if statuses.is_empty() {
+        println!("project #{project_id} has no agents");
+    }
+    for status in statuses {
+        let name = names.get(&status.agent_id).map_or("?", String::as_str);
+        let since = status
+            .since
+            .map(|t| {
+                format!(
+                    " since {}",
+                    t.with_timezone(&chrono::Local).format("%H:%M:%S")
+                )
+            })
+            .unwrap_or_default();
+        println!(
+            "#{} {name}: {}{since}",
+            status.agent_id,
+            status.state.as_str()
+        );
+        let Some(plan) = status.plan else { continue };
+        if plan.from_earlier_session {
+            println!("  (plan from an earlier session)");
+        }
+        for step in plan.steps {
+            let mark = match step.state {
+                ide::lifecycle::StepState::Done => "✓",
+                ide::lifecycle::StepState::Doing => "▸",
+                ide::lifecycle::StepState::Todo => "○",
+                ide::lifecycle::StepState::Cancelled => "✗",
+            };
+            println!("  {mark} {}", step.text);
+        }
+    }
     Ok(())
 }
 
@@ -1316,6 +1368,8 @@ fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
     if !ide::agent_store::delete_agent(&db, id)? {
         anyhow::bail!("no agent #{id}");
     }
+    ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
+        .context("the agent was removed, but its status folder was not")?;
     println!("removed agent #{} {}", id, agent.name);
     Ok(())
 }

@@ -14,17 +14,24 @@
     `onDestroy`, and a new one spawns and types the command again. A "restart"
     that tried to reuse the session would have to reimplement everything the
     mount path already does.
-  * **The side tab bar is built once and inhabited later.** "Terminal" is the
-    only tab with content today; Plan arrives in CP6b, Diffs in M7.3 and Inbox
-    in M7.5. They are shown, disabled, with what they are waiting for — a bar
-    that grows tabs later would be a bar nobody laid out for four.
+  * **The side tab bar is built once and inhabited later.** Terminal and Plan
+    (CP6b) have content; Diffs arrives in M7.3 and Inbox in M7.5. They are
+    shown with what they are waiting for — a bar that grows tabs later would be
+    a bar nobody laid out for four.
+  * **Status and plan come from the harness, not the screen** (CP6/CP6b):
+    `ide/agentStatus.ts` polls the agent's status channel, and the command and
+    environment this pane starts with are the ones `prepare_ide_agent` built
+    to connect it — `launch_command` / `launch_env`, never the profile's own.
 -->
 <script lang="ts">
   import type { IdeAgent, ProvisionedAgent } from "../../core/backend";
   import { createContext } from "../../core/registry";
   import { toast } from "../../core/toast";
+  import { renderMarkdown } from "../../core/markdown";
   import Terminal from "../../modules/terminal.svelte";
   import { prepareAgent } from "../agents";
+  import { agentStatus, describeStatus } from "../agentStatus";
+  import StatusDot from "../StatusDot.svelte";
 
   let {
     agent,
@@ -73,13 +80,28 @@
   type SideTab = { id: string; label: string; waiting?: string };
   const SIDE_TABS: SideTab[] = [
     { id: "terminal", label: "Terminal" },
-    { id: "plan", label: "Plan", waiting: "Arrives with the plan tab (CP6b)" },
+    { id: "plan", label: "Plan" },
     { id: "diffs", label: "Diffs", waiting: "Arrives with the git layer (M7.3)" },
     { id: "inbox", label: "Inbox", waiting: "Arrives with agent-to-agent messaging (M7.5)" },
   ];
   let sideTab = $state("terminal");
 
-  const command = $derived(agent.effective_command);
+  /** What is typed into the shell — including the status hookup. */
+  const command = $derived(ready?.launch_command ?? agent.effective_command);
+
+  const statuses = agentStatus.statuses;
+  const status = $derived($statuses.byAgent.get(agent.id));
+  // `checkedAt` moves every tick, which is what lets the "own command stayed
+  // silent" rule change its mind without a clock of its own.
+  const statusView = $derived(describeStatus(status, agent, $statuses.checkedAt));
+  const plan = $derived(status?.plan ?? null);
+  const planDocument = $derived(status?.plan_document ?? null);
+  /** Done or dropped — either way no longer ahead of the agent. */
+  const finishedSteps = $derived(
+    plan?.steps.filter((s) => s.state === "done" || s.state === "cancelled").length ?? 0,
+  );
+
+  const STEP_MARK = { todo: "○", doing: "▸", done: "✓", cancelled: "✗" } as const;
 
   /**
    * A context per terminal mount.
@@ -99,9 +121,10 @@
     void restarts;
     return createContext(
       `${tabId}:${restarts}`,
-      // The worktree, and the identity env that goes with it. Both come from
-      // Rust — `effective_env` already carries AXIOMATA_AGENT_ID and friends.
-      { cwd: ready?.cwd ?? cwd, env: ready?.agent.effective_env ?? agent.effective_env },
+      // The worktree, and the env that goes with it. Both come from Rust —
+      // `launch_env` carries the identity (AXIOMATA_AGENT_ID and friends) and
+      // the status channel (AXIOMATA_EVENTS, OPENCODE_CONFIG_DIR, …).
+      { cwd: ready?.cwd ?? cwd, env: ready?.launch_env ?? agent.effective_env },
       // Config changes go nowhere on purpose: everything in this context is
       // derived from the agent row, so storing a change on the tab would only
       // be overwritten by the next restart. The agent profile is the truth.
@@ -136,7 +159,58 @@
       {/if}
     </div>
 
-    {#if sideTab !== "terminal"}
+    {#if sideTab === "plan"}
+      <div class="plan" id="agent-view-plan" role="tabpanel" aria-labelledby="agent-tab-plan">
+        {#if plan || planDocument}
+          <!-- The tasks are the live part — what the agent is doing now — so
+               they sit in their own framed block with a count, above the
+               plan-mode document, and say so when there are none yet
+               (owner, live test: "hard to tell whether there was a task"). -->
+          <section class="tasks" class:stale={plan?.from_earlier_session} aria-label="Tasks">
+            <header>
+              <h3>Tasks</h3>
+              {#if plan}
+                <span class="count">{finishedSteps} / {plan.steps.length} done</span>
+              {/if}
+            </header>
+            {#if plan}
+              <div class="progress" aria-hidden="true">
+                <div class="fill" style:width="{(finishedSteps / plan.steps.length) * 100}%"></div>
+              </div>
+              {#if plan.from_earlier_session}
+                <p class="note">From an earlier session — the agent has not written new tasks since it started.</p>
+              {/if}
+              <ol>
+                {#each plan.steps as step, index (index)}
+                  <li class="step {step.state}" title={step.detail ?? undefined}>
+                    <span class="mark" aria-hidden="true">{STEP_MARK[step.state]}</span>
+                    <span class="text">{step.text}</span>
+                  </li>
+                {/each}
+              </ol>
+            {:else}
+              <p class="note">No tasks yet — they appear once the agent starts working on the plan below.</p>
+            {/if}
+          </section>
+          {#if planDocument}
+            <!-- Open while there is no task list yet, so a fresh plan-mode
+                 plan is what you see; folded away once the tasks carry the
+                 progress. Sanitised by `renderMarkdown` (DOMPurify): the text
+                 comes from the agent. -->
+            <details class="document" class:stale={planDocument.from_earlier_session} open={!plan}>
+              <summary>
+                Plan (plan mode) · {planDocument.name}{planDocument.from_earlier_session ? " · earlier session" : ""}
+              </summary>
+              <div class="md">{@html renderMarkdown(planDocument.markdown)}</div>
+            </details>
+          {/if}
+        {:else if statusView.tone === "none"}
+          <p class="note">{statusView.title}</p>
+        {:else}
+          <p class="note">No plan yet. It appears here as soon as the agent writes one.</p>
+        {/if}
+      </div>
+    {:else if sideTab !== "terminal"}
       {@const tab = SIDE_TABS.find((t) => t.id === sideTab)}
       <div class="waiting" id="agent-view-{sideTab}" role="tabpanel" aria-labelledby="agent-tab-{sideTab}">
         <p>{tab?.waiting}</p>
@@ -161,6 +235,10 @@
   </div>
 
   <footer class="status">
+    <span class="state" title={statusView.title}>
+      <StatusDot view={statusView} />
+      {statusView.label}
+    </span>
     <span class="name">{agent.name}</span>
     <span class="harness">{agent.harness}</span>
     {#if agent.model}<span class="model">{agent.model}</span>{/if}
@@ -224,6 +302,153 @@
     margin: 0;
   }
 
+  .plan {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    padding: var(--ax-space-4);
+    background: var(--ax-surface-1);
+    color: var(--ax-text);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  .plan .note {
+    margin: 0 0 var(--ax-space-3);
+    color: var(--ax-text-muted);
+  }
+
+  .plan ol {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .tasks.stale,
+  .document.stale {
+    opacity: 0.6;
+  }
+
+  .tasks {
+    padding: var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-left: 2px solid var(--ax-accent);
+    border-radius: var(--ax-radius-md);
+  }
+
+  .tasks header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: var(--ax-space-2);
+  }
+
+  .tasks h3 {
+    margin: 0;
+    font-size: var(--ax-font-size-sm);
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
+    color: var(--ax-text);
+  }
+
+  .tasks .count {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .tasks .note {
+    margin: 0 0 var(--ax-space-2);
+  }
+
+  .tasks .note:last-child {
+    margin-bottom: 0;
+  }
+
+  .progress {
+    height: var(--ax-space-1);
+    margin-bottom: var(--ax-space-3);
+    background: var(--ax-surface-3);
+    border-radius: var(--ax-radius-pill);
+    overflow: hidden;
+  }
+
+  .progress .fill {
+    height: 100%;
+    background: var(--ax-accent);
+    transition: width var(--ax-dur-med) var(--ax-ease);
+  }
+
+  .document {
+    margin-top: var(--ax-space-4);
+    padding-top: var(--ax-space-3);
+    border-top: 1px solid var(--ax-border);
+  }
+
+  .document summary {
+    color: var(--ax-text-muted);
+    cursor: pointer;
+  }
+
+  .document .md {
+    margin-top: var(--ax-space-2);
+  }
+
+  .document .md :global(h1),
+  .document .md :global(h2),
+  .document .md :global(h3) {
+    margin: var(--ax-space-3) 0 var(--ax-space-2);
+    font-size: var(--ax-font-size-base);
+  }
+
+  .document .md :global(p),
+  .document .md :global(ul),
+  .document .md :global(ol),
+  .document .md :global(pre) {
+    margin: 0 0 var(--ax-space-2);
+  }
+
+  .document .md :global(code) {
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+    background: var(--ax-surface-3);
+    padding: 0 var(--ax-space-1);
+    border-radius: var(--ax-radius-sm);
+  }
+
+  .step {
+    display: flex;
+    gap: var(--ax-space-2);
+    align-items: baseline;
+  }
+
+  .step .mark {
+    flex: 0 0 auto;
+    width: var(--ax-space-4);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-mono);
+  }
+
+  .step.doing .mark,
+  .step.doing .text {
+    color: var(--ax-accent);
+  }
+
+  .step.done .mark {
+    color: var(--ax-success);
+  }
+
+  .step.done .text,
+  .step.cancelled .text {
+    color: var(--ax-text-muted);
+  }
+
+  .step.cancelled .text {
+    text-decoration: line-through;
+  }
+
   .side {
     grid-area: side;
     display: flex;
@@ -279,6 +504,12 @@
 
   .name {
     color: var(--ax-text);
+  }
+
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
   }
 
   .pending {

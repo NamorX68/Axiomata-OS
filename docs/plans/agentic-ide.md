@@ -323,6 +323,18 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   Bildschirmraten. Für Opencode gibt es Hinweise auf eine strukturierte
   Schnittstelle (§9, F2). Der Status ist nicht nur Anzeige, sondern
   **Zustellbedingung** für das Postfach (CP13).
+
+  **Erledigt (2026-09-23), zusammen mit CP6b** — Detailplan
+  [`agent-lifecycle.md`](agent-lifecycle.md), Entscheidungen E9–E20. Die
+  Abweichungen vom Wortlaut oben, jede dort begründet: kein Datenbankstatus und
+  keine Migration (E9); **im Worktree wird nie etwas geschrieben** — Claude Code
+  bekommt `claude --settings <kanal>/…`, Opencode ein Plugin über
+  `OPENCODE_CONFIG_DIR`, beides unter `~/.axiomata/agent-events/<id>/` (E12);
+  keine Axiomata-CLI in den Hooks, sondern reine `sh`-Zeilen, weil die gebündelte
+  App die CLI nicht mitliefert. Im Live-Test dazugekommen: `waiting` filtert auf
+  den Benachrichtigungstyp (der 60-s-`idle_prompt` ließ untätige Agenten blinken),
+  und die App entfernt beim Start geerbte Claude-Code-Sitzungsmarker, sonst hält
+  sich ein Agent für eine Unter-Sitzung.
 - **CP6b — der Plan-Tab.** Ausdrücklicher Owner-Wunsch, Vorbild ist das, was
   Opencode heute schon zeigt: ein Tab, der **jederzeit den aktuellen Plan des
   Agenten und seinen Stand darin** anzeigt — welche Schritte er sich vorgenommen
@@ -335,6 +347,14 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   befördert werden, und eine beanspruchte Karte erscheint umgekehrt im Plan des
   Agenten, der sie hält. Board = die gemeinsame, bleibende Ebene; Plan-Tab = was
   ein einzelner Agent gerade daraus macht.
+
+  **Erledigt (2026-09-23), mit CP6.** Anders als gedacht: `TodoWrite` gibt es
+  in Claude Code nicht mehr; der Plan kommt aus Claudes eigener Task-Liste
+  (`CLAUDE_CODE_TASK_LIST_ID` pro Agent, E14), bei Opencode aus `todo.updated`.
+  Auf Owner-Wunsch zusätzlich: beide Agenten werden per Anweisung zum sichtbaren
+  Planen angehalten (E19), und der Plan aus dem **Planmodus** beider Harnesses
+  steht als eigenes Dokument unter der Task-Liste (E20). Die Kanban-Beförderung
+  bleibt, wie geplant, für M7.5.
 
 ### M7.3 — Git-Schicht
 
@@ -395,7 +415,7 @@ und ein Projektwechsel, der das Layout wiederherstellt.
 | # | Frage | Fällig |
 |---|---|---|
 | F1 | Projekte in der SQLite-DB (Migration) oder als JSON wie `dashboard.json`? | M7.1 CP0 |
-| F2 | Welche strukturierte Schnittstelle bietet Opencode? (Für Status *und* Plan-Tab.) | M7.2 CP6 |
+| ~~F2~~ | ~~Welche strukturierte Schnittstelle bietet Opencode?~~ **Beantwortet (CP6):** ein Plugin (`event`-Hook: `session.status`, `permission.*`, `question.*`, `todo.updated`, `message.*`), geladen über `OPENCODE_CONFIG_DIR`. Details in `agent-lifecycle.md`. | erledigt |
 | ~~F3~~ | ~~`git2` oder Unterprozess?~~ **Beantwortet (CP5):** Unterprozess, Gründe in `worktree.rs`. | erledigt |
 | F4 | Genaue Config-Orte für die MCP-Eintragung pro Harness (Projekt- vs. Benutzerebene). | M7.5 CP14 |
 | F5 | Wie viele Agenten passen auf 21:9 sinnvoll nebeneinander — braucht es Layout-Vorlagen? | M7.2 CP4 |

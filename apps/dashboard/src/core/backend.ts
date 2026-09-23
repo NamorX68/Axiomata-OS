@@ -231,6 +231,55 @@ export interface ProvisionedAgent {
   cwd: string;
   /** True when the project is not a git repository, so the folder is shared. */
   shared_folder: boolean;
+  /** What to type into the shell: `effective_command`, plus the status hookup
+   *  when the command is the generated one (M7.2 CP6). Start with this, not
+   *  with `agent.effective_command`. */
+  launch_command: string;
+  /** `effective_env` plus the status channel's lines. Start with this. */
+  launch_env: string;
+  /** Whether this harness reports into the status channel at all. */
+  status_connected: boolean;
+}
+
+/** What an agent is doing. Mirrors `axiomata_ide::lifecycle::AgentState`. */
+export type AgentState = "starting" | "idle" | "working" | "waiting" | "ended";
+
+/** Where a plan step stands. Mirrors `axiomata_ide::lifecycle::StepState`. */
+export type StepState = "todo" | "doing" | "done" | "cancelled";
+
+export interface PlanStep {
+  text: string;
+  state: StepState;
+  /** Claude Code's task description — a tooltip, nothing more. */
+  detail: string | null;
+}
+
+export interface PlanSnapshot {
+  steps: PlanStep[];
+  updated_at: string | null;
+  /** The plan is older than the agent's last start: it survived a restart. */
+  from_earlier_session: boolean;
+}
+
+/** One agent's status as `ide_agent_states` reports it (M7.2 CP6/CP6b). */
+export interface AgentStatus {
+  agent_id: number;
+  state: AgentState;
+  /** When it entered `state`; for `starting`, when it was started. */
+  since: string | null;
+  started_at: string | null;
+  plan: PlanSnapshot | null;
+  /** Claude Code's plan-mode plan, as Markdown — shown beside the task list. */
+  plan_document: PlanDocument | null;
+}
+
+/** A plan-mode plan. Mirrors `axiomata_ide::lifecycle::PlanDocument`. */
+export interface PlanDocument {
+  markdown: string;
+  /** The plan file's name, e.g. `gentle-walrus`. */
+  name: string;
+  updated_at: string | null;
+  from_earlier_session: boolean;
 }
 
 /** Everything an agent update sets — a full replace, not a patch. */

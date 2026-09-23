@@ -60,6 +60,7 @@
   } from "./layout";
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentPicker from "./AgentPicker.svelte";
+  import { agentStatus } from "./agentStatus";
   import { applyProjectCwd } from "./paneCwd";
   import PaneHost from "./panes/PaneHost.svelte";
   import { PANE_ATTR, parkPanes, placePanes } from "./paneStore";
@@ -354,6 +355,13 @@
   $effect(() => {
     if (!open) void flushLayout();
   });
+
+  // Agent statuses are polled only while somebody can see them: the IDE is on
+  // screen and a project is open (CP6). Closing the view stops the tick.
+  $effect(() => {
+    agentStatus.watch(open ? (current?.id ?? null) : null);
+  });
+  onMount(() => () => agentStatus.watch(null));
 </script>
 
 <section class="ide" class:hidden={!open} inert={!open} aria-label="IDE">

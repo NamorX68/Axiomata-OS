@@ -262,12 +262,14 @@ export async function editAgent(id: number, fields: AgentFields): Promise<IdeAge
  */
 export async function removeAgent(id: number): Promise<boolean> {
   try {
-    const gone = await deleteAgent(id);
-    await refreshAgents();
-    return gone;
+    return await deleteAgent(id);
   } catch (err) {
     report(err);
     return false;
+  } finally {
+    // Also after an error: the row can be gone while cleaning up its status
+    // folder failed, and the list must not keep showing a deleted agent.
+    await refreshAgents().catch(report);
   }
 }
 

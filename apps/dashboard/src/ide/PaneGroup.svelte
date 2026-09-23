@@ -9,13 +9,29 @@
   `ide/dock.ts`, not decoration.
 -->
 <script lang="ts">
+  import { agentStatus, describeStatus, type StatusView } from "./agentStatus";
   import { getDock } from "./dockContext";
-  import type { TabGroup } from "./layout";
+  import type { PaneTab, TabGroup } from "./layout";
   import { SLOT_ATTR } from "./paneStore";
+  import { session } from "./projectSession";
+  import StatusDot from "./StatusDot.svelte";
 
   let { group }: { group: TabGroup } = $props();
 
   const dock = getDock();
+  const statuses = agentStatus.statuses;
+
+  /**
+   * The status dot for an agent tab, so a waiting agent is noticed even in a
+   * pane nobody is looking at (CP6). `null` for every other kind of tab, and
+   * for an agent tab whose profile has been deleted.
+   */
+  function tabStatus(tab: PaneTab): StatusView | null {
+    const id = tab.kind === "agent" ? tab.config?.agentId : undefined;
+    if (typeof id !== "number") return null;
+    const agent = $session.agents.find((a) => a.id === id);
+    return agent ? describeStatus($statuses.byAgent.get(id), agent, $statuses.checkedAt) : null;
+  }
 
   /** The drop highlight for this group, or `null` when the drag is elsewhere. */
   const highlight = $derived.by(() => {
@@ -27,6 +43,7 @@
 <div class="group" data-ide-group={group.id}>
   <div class="tabbar" data-ide-tabbar role="tablist">
     {#each group.tabs as tab (tab.id)}
+      {@const view = tabStatus(tab)}
       <div
         class="tab"
         class:active={tab.id === group.active}
@@ -45,6 +62,7 @@
           }
         }}
       >
+        {#if view}<StatusDot {view} />{/if}
         <span class="title">{tab.title}</span>
         <button
           class="close"

@@ -854,11 +854,55 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const port = agent.port ?? 4300 + ideAgents.indexOf(agent);
       agent.port = port;
       agent.effective_env = `${agent.effective_env}\nAXIOMATA_PORT=${port}`;
+      const events = `/mock/.axiomata/agent-events/${agent.id}`;
+      const hookup = agent.harness === "claude_code" && !agent.command.trim()
+        ? ` --settings '${events}/claude-settings.json'`
+        : "";
       return {
         agent,
         cwd: project?.repo_root ?? "/",
         shared_folder: true,
+        launch_command: `${agent.effective_command}${hookup}`,
+        launch_env: `${agent.effective_env}\nAXIOMATA_EVENTS=${events}\nOPENCODE_CONFIG_DIR=${events}/opencode`,
+        status_connected: agent.harness !== "mini",
       } as T;
+    }
+    // One status per agent: the first fixture is mid-plan, the second waits
+    // for a permission, anything created in the session is idle — enough for
+    // all three places the dot shows up, and for the plan tab.
+    case "ide_agent_states": {
+      const now = new Date().toISOString();
+      return ideAgents
+        .filter((a) => a.project_id === args.projectId)
+        .map((agent) => ({
+          agent_id: agent.id,
+          state: agent.id === 1 ? "working" : agent.id === 2 ? "waiting" : "idle",
+          since: now,
+          started_at: now,
+          plan:
+            agent.id === 1
+              ? {
+                  steps: [
+                    { text: "Read the dock layout code", state: "done", detail: null },
+                    { text: "Add the status dot to agent tabs", state: "doing", detail: null },
+                    { text: "Write the poller test", state: "todo", detail: null },
+                    { text: "Try a websocket push instead", state: "cancelled", detail: null },
+                  ],
+                  updated_at: now,
+                  from_earlier_session: false,
+                }
+              : null,
+          plan_document:
+            agent.id === 2
+              ? {
+                  markdown:
+                    "# Review the status channel\n\n1. Read `lifecycle.rs`\n2. Check the hook quoting\n3. Report findings",
+                  name: "gentle-walrus",
+                  updated_at: now,
+                  from_earlier_session: false,
+                }
+              : null,
+        })) as T;
     }
     case "ide_agent_has_changes":
       return false as T;

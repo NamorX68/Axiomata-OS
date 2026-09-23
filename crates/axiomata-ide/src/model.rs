@@ -212,7 +212,7 @@ impl Agent {
 ///
 /// The one thing single quotes cannot hold is a single quote, which is why the
 /// closing-reopening dance around `'\''` exists.
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 

@@ -16,8 +16,42 @@ fn init_tracing() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
+/// Variables that mark a process as **part of a running Claude Code session**.
+///
+/// Launched from inside one — `cargo tauri dev` from Claude Code's shell, or
+/// its `!` prefix — the app inherits them, and every agent pane passes them on.
+/// A Claude Code agent then believes it is a child of that session: it saves no
+/// transcript and behaves differently (live test, M7.2 CP6). The app is not a
+/// Claude Code session, so nothing it starts should claim to be one.
+///
+/// A fixed list of session markers, not a `CLAUDE_*` prefix: variables a user
+/// sets on purpose (`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, …) stay.
+const INHERITED_CLAUDE_SESSION_VARS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+];
+
+/// Removes [`INHERITED_CLAUDE_SESSION_VARS`] from this process's environment.
+fn forget_inherited_claude_session() {
+    for name in INHERITED_CLAUDE_SESSION_VARS {
+        // SAFETY: called first thing in `run`, before tracing, Tauri or any
+        // other thread exists, so nothing can read the environment while it
+        // changes — the condition `remove_var`'s safety contract asks for.
+        unsafe { std::env::remove_var(name) };
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    forget_inherited_claude_session();
     init_tracing();
 
     let app = tauri::Builder::default()
@@ -98,6 +132,7 @@ pub fn run() {
             commands::update_ide_agent,
             commands::delete_ide_agent,
             commands::prepare_ide_agent,
+            commands::ide_agent_states,
             commands::ide_agent_has_changes,
             commands::discard_ide_agent_worktree,
             terminal::terminal_spawn,
