@@ -7,7 +7,8 @@
 //! only ever adds and removes directories under the base path it is handed.
 //!
 //! **Driven by the `git` command line, not `git2`/libgit2** (plan question
-//! F3, answered here because CP5 needs worktrees before M7.3 needs a diff):
+//! F3, answered here because CP5 needs worktrees before M7.3's git layer
+//! ([`crate::git`]) needs a diff — the same choice serves both):
 //!
 //! * `git worktree` is the reference implementation of a feature libgit2 only
 //!   partially models; matching its behaviour by hand is a bug farm.
@@ -36,21 +37,45 @@ pub struct Worktree {
 
 /// Runs `git` in `repo`, returning stdout on success.
 ///
-/// Every git call in the crate goes through here so that a failure always
-/// carries the command that failed and git's own stderr — the two things that
-/// make a git error readable.
-fn git(repo: &Path, args: &[&str]) -> Result<String> {
+/// Every git call in the crate goes through here (or [`git_with`]) so that a
+/// failure always carries the command that failed and git's own stderr — the
+/// two things that make a git error readable.
+pub(crate) fn git(repo: &Path, args: &[&str]) -> Result<String> {
+    git_with(repo, args, &[0]).map(|(_, stdout)| stdout)
+}
+
+/// Like [`git`], but any exit code in `ok` counts as success, and the code is
+/// returned with stdout. Needed where git reports an answer through its exit
+/// code: `diff --no-index` exits 1 when the files differ, `diff --quiet`
+/// exits 1 when there is something to report.
+///
+/// Always runs with two variables set:
+///
+/// * `GIT_OPTIONAL_LOCKS=0` — the IDE reads a worktree while the agent in it
+///   runs git itself, and a read that briefly takes the index lock (as
+///   `git status` does by default) can make the agent's own commit fail with
+///   `index.lock: File exists`. It only drops *opportunistic* locks; the
+///   index and `HEAD` locks that `commit`, `merge` and `restore` take for
+///   correctness stay, so it is safe on the project folder's writes too.
+/// * `GIT_LITERAL_PATHSPECS=1` — every path this crate hands git is a file
+///   name, never a pattern. Without it a file the agent called `:(glob)**`
+///   turns "discard this file" into "discard everything that matches", and a
+///   `--` in front does not prevent that (security review, M7.3 CP7).
+pub(crate) fn git_with(repo: &Path, args: &[&str], ok: &[i32]) -> Result<(i32, String)> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .output()
         .map_err(|err| IdeError::Git {
             command: format!("git {}", args.join(" ")),
             reason: format!("could not run git: {err}"),
         })?;
 
-    if !output.status.success() {
+    let code = output.status.code().unwrap_or(-1);
+    if !ok.contains(&code) {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(IdeError::Git {
             command: format!("git {}", args.join(" ")),
@@ -61,7 +86,7 @@ fn git(repo: &Path, args: &[&str]) -> Result<String> {
             },
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok((code, String::from_utf8_lossy(&output.stdout).into_owned()))
 }
 
 /// Compares two paths as the file system sees them, not as they are spelled.
@@ -202,6 +227,14 @@ pub fn add(repo_root: &Path, path: &Path, branch: &str) -> Result<Worktree> {
             command: "git worktree add".into(),
             reason: "git reported success but the worktree is not listed".into(),
         })
+}
+
+/// The branch checked out in `repo`, or `None` for a detached HEAD.
+pub fn current_branch(repo: &Path) -> Option<String> {
+    git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .ok()
+        .map(|out| out.trim().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 /// Whether a local branch of that name exists.

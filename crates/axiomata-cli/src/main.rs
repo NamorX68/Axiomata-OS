@@ -288,6 +288,31 @@ enum AgentAction {
         #[arg(long)]
         force: bool,
     },
+    /// What the agent has changed since its base branch (M7.3); with
+    /// `--file`, that file's diff.
+    Diff {
+        id: i64,
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Commit everything the agent left uncommitted in its worktree.
+    Commit {
+        id: i64,
+        #[arg(long, short)]
+        message: String,
+    },
+    /// Put files back to how they are on the agent's base branch — committed
+    /// changes included.
+    Discard { id: i64, paths: Vec<String> },
+    /// Take the agent's committed work over into the project folder: one
+    /// squash commit, or a merge commit with `--no-ff`. Never pushes.
+    TakeOver {
+        id: i64,
+        #[arg(long, short)]
+        message: String,
+        #[arg(long)]
+        no_ff: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1160,6 +1185,20 @@ fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
             AgentAction::Prepare { id } => agent_prepare(core, id),
             AgentAction::Status { project } => agent_status(core, project),
             AgentAction::DiscardWorktree { id, force } => agent_discard_worktree(core, id, force),
+            AgentAction::Diff { id, file } => agent_diff(core, id, file),
+            AgentAction::Commit { id, message } => {
+                let commit = agent_repo_or_bail(core, id)?.commit_all(&message)?;
+                println!("committed {commit}");
+                Ok(())
+            }
+            AgentAction::Discard { id, paths } => {
+                agent_repo_or_bail(core, id)?.discard(&paths)?;
+                println!("put {} file(s) back to the base", paths.len());
+                Ok(())
+            }
+            AgentAction::TakeOver { id, message, no_ff } => {
+                agent_take_over(core, id, &message, no_ff)
+            }
         },
     }
 }
@@ -1340,6 +1379,103 @@ fn agent_status(core: &AxiomataCore, project_id: i64) -> Result<()> {
                 ide::lifecycle::StepState::Cancelled => "✗",
             };
             println!("  {mark} {}", step.text);
+        }
+    }
+    Ok(())
+}
+
+/// The agent's repository; the database lock is released before git runs.
+fn agent_repo_or_bail(core: &AxiomataCore, id: i64) -> Result<ide::git::AgentRepo> {
+    let db = core.db_lock();
+    Ok(ide::provision::agent_repo(&db, id)?.ready()?)
+}
+
+fn agent_diff(core: &AxiomataCore, id: i64, file: Option<String>) -> Result<()> {
+    let repo = agent_repo_or_bail(core, id)?;
+    let Some(path) = file else {
+        let changes = repo.changes()?;
+        let fallback = if changes.base.fallback {
+            " (not recorded; what the project folder has checked out)"
+        } else {
+            ""
+        };
+        println!(
+            "base: {} @ {}{fallback}",
+            changes.base.branch,
+            &changes.base.commit[..changes.base.commit.len().min(10)]
+        );
+        if changes.files.is_empty() {
+            println!("no changes");
+        }
+        for file in changes.files {
+            let counts = match (file.additions, file.deletions) {
+                (Some(add), Some(del)) => format!("+{add} -{del}"),
+                _ => "binary".into(),
+            };
+            let renamed = file
+                .old_path
+                .map(|old| format!(" (from {old})"))
+                .unwrap_or_default();
+            let open = if file.uncommitted {
+                "  [uncommitted]"
+            } else {
+                ""
+            };
+            println!(
+                "{:<12} {:>12}  {}{renamed}{open}",
+                format!("{:?}", file.kind).to_lowercase(),
+                counts,
+                file.path
+            );
+        }
+        return Ok(());
+    };
+    let diff = repo.file_diff(&path, None)?;
+    if diff.binary {
+        println!("{path}: binary file");
+        return Ok(());
+    }
+    for hunk in diff.hunks {
+        println!("{}", hunk.header);
+        for line in hunk.lines {
+            let mark = match line.kind {
+                ide::git::LineKind::Add => "+",
+                ide::git::LineKind::Remove => "-",
+                ide::git::LineKind::Context => " ",
+                ide::git::LineKind::NoNewline => "",
+            };
+            println!("{mark}{}", line.text);
+        }
+    }
+    if diff.truncated {
+        println!("… (cut off)");
+    }
+    Ok(())
+}
+
+fn agent_take_over(core: &AxiomataCore, id: i64, message: &str, no_ff: bool) -> Result<()> {
+    // Read under the lock, release it, then take over — which refuses while
+    // the agent is working or waiting (G12).
+    let target = {
+        let db = core.db_lock();
+        ide::provision::TakeOverTarget::read(&db, id)?
+    };
+    let mode = if no_ff {
+        ide::git::TakeOverMode::NoFf
+    } else {
+        ide::git::TakeOverMode::Squash
+    };
+    let roots = axiomata_core::paths::ide_locations().channels;
+    match target.run(&roots, mode, message)? {
+        ide::git::TakeOver::Done { commit } => {
+            println!("taken over as {commit}; the agent's branch now starts from there")
+        }
+        ide::git::TakeOver::Conflict { files } => {
+            println!("conflict — undone, the project folder is as it was. Conflicting files:");
+            for file in files {
+                println!("  {file}");
+            }
+            std::process::exit(1);
         }
     }
     Ok(())

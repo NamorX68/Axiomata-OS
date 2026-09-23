@@ -34,6 +34,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     // Worktree, branch and port per agent (M7.2 CP5). An ALTER, which is
     // exactly why the runner's one-transaction-per-migration matters.
     (11, axiomata_ide::SCHEMA_SQL_V3),
+    // The branch an agent's worktree was cut from (M7.3 CP7).
+    (12, axiomata_ide::SCHEMA_SQL_V4),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

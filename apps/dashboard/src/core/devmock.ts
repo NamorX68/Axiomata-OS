@@ -385,6 +385,7 @@ let ideAgents: IdeAgent[] = [
     worktree_path: null,
     branch: null,
     port: null,
+    base_branch: null,
     effective_env: "AXIOMATA_AGENT_ID=1\nAXIOMATA_AGENT_NAME=Builder",
   },
   {
@@ -401,6 +402,7 @@ let ideAgents: IdeAgent[] = [
     worktree_path: null,
     branch: null,
     port: null,
+    base_branch: null,
     effective_env: "REVIEW_MODE=strict\nAXIOMATA_AGENT_ID=2\nAXIOMATA_AGENT_NAME=Reviewer",
   },
 ];
@@ -451,6 +453,7 @@ function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent
     worktree_path: null,
     branch: null,
     port: null,
+    base_branch: null,
     effective_command: mockEffectiveCommand(fields),
     effective_env: mockEffectiveEnv(fields, id, null, null, null),
   };

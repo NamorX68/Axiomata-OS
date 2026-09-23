@@ -214,6 +214,10 @@ export interface IdeAgent {
   branch: string | null;
   /** A port reserved for this agent, passed on as `AXIOMATA_PORT`. */
   port: number | null;
+  /** The branch the worktree was cut from — what its diff is measured against
+   *  (M7.3). `null` for an older worktree: the project folder's branch then
+   *  stands in. */
+  base_branch: string | null;
   /** Computed on read: what actually runs — `command`, or the harness's own
    *  default when it is empty. Sent along so no frontend keeps a second copy
    *  of that table. */

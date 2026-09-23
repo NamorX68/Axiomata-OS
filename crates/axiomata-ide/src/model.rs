@@ -128,6 +128,11 @@ pub struct Agent {
     pub branch: Option<String>,
     /// A port reserved for this agent so two dev servers do not collide.
     pub port: Option<u16>,
+    /// The branch the worktree was cut from — what the agent's diff is
+    /// measured against (M7.3, G1). `None` for a worktree from before M7.3 or
+    /// one cut from a detached HEAD; then the project folder's current branch
+    /// stands in.
+    pub base_branch: Option<String>,
     /// **Computed on read, never stored**: the command line that actually
     /// runs — `command` if it has one, else the harness's default.
     ///

@@ -359,8 +359,9 @@ und ein Projektwechsel, der das Layout wiederherstellt.
 ### M7.3 — Git-Schicht
 
 - **CP7** — Git-Engine in `axiomata-ide`: status, diff, branch, worktree
-  add/list/remove, commit, merge. Entscheidung `git2` vs. `git`-Aufruf steht
-  noch aus (§6).
+  add/list/remove, commit, merge. **Gebaut (2026-09-23)** — Detailplan
+  [`git-layer.md`](git-layer.md) für CP7–CP9, Entscheidungen G1–G13 (gegrillt);
+  `git` als Unterprozess (F3, schon in CP5 entschieden).
 - **CP8** — Diff-Tabs am Fensterrand pro Agent: geänderte Dateien, Diff-Ansicht.
 - **CP9** — Diff → Datei im Betrachter öffnen und bearbeiten; Stage/Verwerfen/
   Commit pro Datei; Merge des Agenten-Branches in den Hauptbaum.

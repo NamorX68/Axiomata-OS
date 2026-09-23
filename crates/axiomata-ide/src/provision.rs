@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::lifecycle::{AgentStatus, Channel, ChannelRoots};
+use crate::git::{AgentRepo, TakeOver, TakeOverMode};
+use crate::lifecycle::{AgentState, AgentStatus, Channel, ChannelRoots};
 use crate::model::Agent;
 use crate::{IdeError, Result, agent_store, store, worktree};
 
@@ -109,8 +110,20 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
         let path =
             worktree::worktree_path(&locations.worktrees, &project.name, &agent.name, agent.id);
         let branch = worktree::branch_name(&agent.name, agent.id);
+        // The base is recorded only when the branch is born (G1): a branch
+        // that already exists was cut earlier, from something nobody wrote
+        // down, and guessing now would be worse than the documented fallback.
+        let fresh_branch = !worktree::branch_exists(&project.repo_root, &branch);
+        let base = worktree::current_branch(&project.repo_root);
         let created = worktree::add(&project.repo_root, &path, &branch)?;
         agent_store::set_worktree(db, agent.id, Some(&created.path), created.branch.as_deref())?;
+        // Two statements, not one transaction: were the app killed between
+        // them, the branch would exist without a recorded base and fall back
+        // to the project folder's branch (G1) — an accepted, visible
+        // degradation, not a corruption.
+        if fresh_branch && agent.base_branch.is_none() {
+            agent_store::set_base_branch(db, agent.id, base.as_deref())?;
+        }
         (created.path, false)
     } else {
         (project.repo_root, true)
@@ -152,26 +165,61 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
 /// and the UI asks first. Returns whether there was one to remove. The port is
 /// released with the row itself when the agent is deleted.
 pub fn discard_worktree(db: &Connection, agent_id: i64, force: bool) -> Result<bool> {
-    let Some(agent) = agent_store::get_agent(db, agent_id)? else {
+    let Some(target) = WorktreeToDiscard::read(db, agent_id)? else {
         return Ok(false);
     };
-    let (Some(path), Some(project)) = (
-        agent.worktree_path.clone(),
-        store::get_project(db, agent.project_id)?,
-    ) else {
-        return Ok(false);
-    };
-
-    let removed = worktree::remove(&project.repo_root, &path, force)?;
-    if removed || !path.exists() {
-        // The second case: the directory was deleted outside the app, so git
-        // has nothing to remove but the row still claims a worktree. Clearing
-        // it here means the next `prepare` starts from "no worktree" rather
-        // than from a path that is not one — which matters, because that is
-        // the moment a branch gets re-attached.
-        agent_store::set_worktree(db, agent_id, None, None)?;
-    }
+    let removed = target.remove(force)?;
+    target.forget(db, removed)?;
     Ok(removed)
+}
+
+/// [`discard_worktree`] in its three steps, so a caller that shares its
+/// database connection can let go of it while `git worktree remove` runs
+/// (performance review, M7.3 CP7): read, remove without the connection,
+/// then record.
+#[derive(Debug, Clone)]
+pub struct WorktreeToDiscard {
+    agent_id: i64,
+    repo_root: PathBuf,
+    path: PathBuf,
+}
+
+impl WorktreeToDiscard {
+    /// The agent's worktree, or `None` when it has none.
+    pub fn read(db: &Connection, agent_id: i64) -> Result<Option<Self>> {
+        let Some(agent) = agent_store::get_agent(db, agent_id)? else {
+            return Ok(None);
+        };
+        let (Some(path), Some(project)) = (
+            agent.worktree_path,
+            store::get_project(db, agent.project_id)?,
+        ) else {
+            return Ok(None);
+        };
+        Ok(Some(WorktreeToDiscard {
+            agent_id,
+            repo_root: project.repo_root,
+            path,
+        }))
+    }
+
+    /// Runs `git worktree remove`. Needs no database.
+    pub fn remove(&self, force: bool) -> Result<bool> {
+        worktree::remove(&self.repo_root, &self.path, force)
+    }
+
+    /// Clears the row once the worktree is gone.
+    pub fn forget(&self, db: &Connection, removed: bool) -> Result<()> {
+        if removed || !self.path.exists() {
+            // The second case: the directory was deleted outside the app, so
+            // git has nothing to remove but the row still claims a worktree.
+            // Clearing it here means the next `prepare` starts from "no
+            // worktree" rather than from a path that is not one — which
+            // matters, because that is the moment a branch gets re-attached.
+            agent_store::set_worktree(db, self.agent_id, None, None)?;
+        }
+        Ok(())
+    }
 }
 
 /// The status of each of these agents — what the UI polls, once per second.
@@ -193,6 +241,122 @@ pub fn agent_statuses(agents: &[Agent], roots: &ChannelRoots) -> Vec<AgentStatus
 /// `agent_store::delete_agent`, which never touches the file system.
 pub fn forget_channel(roots: &ChannelRoots, agent_id: i64) -> Result<()> {
     Channel::for_agent(roots, agent_id).forget()
+}
+
+/// Where an agent's git work happens — or why it has none (M7.3).
+///
+/// Three cases, because the Diffs tab says something different for each
+/// (architecture review, CP7): a project folder that is not a repository will
+/// never give an agent a diff of its own, while an agent that has simply not
+/// been started yet will have one after its first start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentRepoState {
+    /// A worktree and branch exist; [`AgentRepo`] is ready to answer git questions.
+    Ready(AgentRepo),
+    /// The project folder is not a git repository; its agents share it.
+    SharedFolder,
+    /// A repository, but this agent has no worktree yet — start it once.
+    NotStarted,
+}
+
+impl AgentRepoState {
+    /// The repository, or a sentence saying why there is none.
+    pub fn ready(self) -> Result<AgentRepo> {
+        match self {
+            AgentRepoState::Ready(repo) => Ok(repo),
+            AgentRepoState::SharedFolder => Err(IdeError::Invalid {
+                field: "agent",
+                reason: "the project folder is not a git repository, so its agents share it and \
+                         have no worktree of their own"
+                    .into(),
+            }),
+            AgentRepoState::NotStarted => Err(IdeError::Invalid {
+                field: "agent",
+                reason: "this agent has not been started yet, so it has no worktree".into(),
+            }),
+        }
+    }
+}
+
+/// Reads where an agent's git work happens, once, so the caller can let go of
+/// the database connection before running git.
+pub fn agent_repo(db: &Connection, agent_id: i64) -> Result<AgentRepoState> {
+    let agent = agent_store::get_agent(db, agent_id)?.ok_or_else(|| IdeError::Invalid {
+        field: "agent_id",
+        reason: format!("no agent {agent_id}"),
+    })?;
+    repo_state(db, agent)
+}
+
+fn repo_state(db: &Connection, agent: Agent) -> Result<AgentRepoState> {
+    let project = store::get_project(db, agent.project_id)?.ok_or_else(|| IdeError::Invalid {
+        field: "project_id",
+        reason: format!("no project {}", agent.project_id),
+    })?;
+    let (Some(worktree), Some(agent_branch)) = (agent.worktree_path, agent.branch) else {
+        return Ok(if worktree::is_repo(&project.repo_root) {
+            AgentRepoState::NotStarted
+        } else {
+            AgentRepoState::SharedFolder
+        });
+    };
+    Ok(AgentRepoState::Ready(AgentRepo {
+        repo_root: project.repo_root,
+        worktree,
+        agent_branch,
+        base_branch: agent.base_branch,
+    }))
+}
+
+/// Everything a take-over needs, read under one brief database lock.
+///
+/// The only way to take an agent's work over from outside this crate: its
+/// [`run`](Self::run) checks the agent is not mid-turn before anything
+/// happens (G12), so no entry point — Tauri, CLI, a later dock pane — can
+/// skip that check (architecture review, CP7).
+#[derive(Debug, Clone)]
+pub struct TakeOverTarget {
+    agent: Agent,
+    repo: AgentRepo,
+}
+
+impl TakeOverTarget {
+    /// Reads the agent and its repository. Holds `db` only for these reads.
+    pub fn read(db: &Connection, agent_id: i64) -> Result<Self> {
+        let agent = agent_store::get_agent(db, agent_id)?.ok_or_else(|| IdeError::Invalid {
+            field: "agent_id",
+            reason: format!("no agent {agent_id}"),
+        })?;
+        let repo = repo_state(db, agent.clone())?.ready()?;
+        Ok(TakeOverTarget { agent, repo })
+    }
+
+    /// Refuses while the agent is working or waiting, then takes over.
+    pub fn run(&self, roots: &ChannelRoots, mode: TakeOverMode, message: &str) -> Result<TakeOver> {
+        ensure_not_busy(roots, &self.agent)?;
+        self.repo.take_over(mode, message)
+    }
+}
+
+/// Refuses while the agent is in the middle of a turn (G12): taking over
+/// resets its branch, which would pull the ground from under whatever it is
+/// doing. `waiting` counts as busy too — it is mid-turn, blocked on a
+/// permission prompt.
+fn ensure_not_busy(roots: &ChannelRoots, agent: &Agent) -> Result<()> {
+    let state = Channel::for_agent(roots, agent.id)
+        .read_status(agent.harness)
+        .state;
+    if matches!(state, AgentState::Working | AgentState::Waiting) {
+        return Err(IdeError::Invalid {
+            field: "agent",
+            reason: format!(
+                "{} is {} — wait until it has finished before taking its work over",
+                agent.name,
+                state.as_str()
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Whether an agent's worktree holds work that removing it would throw away.
@@ -636,5 +800,130 @@ mod tests {
 
         forget_channel(&base.channels, agent).unwrap();
         assert!(!base.channels.events.join(agent.to_string()).exists());
+    }
+
+    #[test]
+    fn the_base_is_recorded_when_the_branch_is_born_and_found_again() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let agent = add_agent(&db, project, "Builder");
+
+        let ready = prepare(&db, &base, agent).unwrap();
+        assert_eq!(ready.agent.base_branch.as_deref(), Some("main"));
+
+        let repo_of = agent_repo(&db, agent).unwrap().ready().expect("a worktree");
+        assert_eq!(repo_of.base_branch.as_deref(), Some("main"));
+        std::fs::write(ready.cwd.join("new.txt"), "x").unwrap();
+        let changes = repo_of.changes().unwrap();
+        assert_eq!(changes.base.branch, "main");
+        assert_eq!(changes.files.len(), 1);
+
+        // Switching branches in the project folder does not move the base.
+        run_git(&repo, &["switch", "--quiet", "-c", "elsewhere"]);
+        prepare(&db, &base, agent).unwrap();
+        let again = agent_store::get_agent(&db, agent).unwrap().unwrap();
+        assert_eq!(again.base_branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_shared_folder_agent_has_no_repo_of_its_own() {
+        let (db, project) = db_with_project(temp_dir("plain"));
+        let agent = add_agent(&db, project, "Builder");
+        prepare(&db, &locations(), agent).unwrap();
+        assert_eq!(
+            agent_repo(&db, agent).unwrap(),
+            AgentRepoState::SharedFolder
+        );
+    }
+
+    #[test]
+    fn preparing_a_re_attached_branch_does_not_record_a_base() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo);
+        let base = locations();
+        let agent = add_agent(&db, project, "Builder");
+        let ready = prepare(&db, &base, agent).unwrap();
+        assert_eq!(ready.agent.base_branch.as_deref(), Some("main"));
+
+        // Simulate an agent from before base tracking existed: its branch is
+        // still there in git (worktree removal never deletes it), but nothing
+        // was ever recorded for it.
+        discard_worktree(&db, agent, false).unwrap();
+        db.execute(
+            "UPDATE ide_agents SET base_branch = NULL WHERE id = ?1",
+            [agent],
+        )
+        .unwrap();
+
+        let again = prepare(&db, &base, agent).unwrap();
+        assert!(
+            again.agent.base_branch.is_none(),
+            "re-attaching to a branch that already existed must not guess a base"
+        );
+    }
+
+    #[test]
+    fn a_busy_agent_cannot_have_its_work_taken_over() {
+        let (db, project) = db_with_project(temp_dir("plain"));
+        let base = locations();
+        let id = add_agent(&db, project, "Builder");
+        prepare(&db, &base, id).unwrap();
+        let agent = agent_store::get_agent(&db, id).unwrap().unwrap();
+        let state = base.channels.events.join(id.to_string()).join("state");
+
+        assert!(
+            ensure_not_busy(&base.channels, &agent).is_ok(),
+            "starting is not busy"
+        );
+        for (word, busy) in [
+            ("working", true),
+            ("waiting", true),
+            ("idle", false),
+            ("ended", false),
+        ] {
+            std::fs::write(&state, format!("{word} 1\n")).unwrap();
+            assert_eq!(
+                ensure_not_busy(&base.channels, &agent).is_err(),
+                busy,
+                "{word}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_agent_in_a_repository_that_never_started_is_not_a_shared_folder() {
+        let (db, project) = db_with_project(git_repo());
+        let agent = add_agent(&db, project, "Builder");
+        assert_eq!(agent_repo(&db, agent).unwrap(), AgentRepoState::NotStarted);
+        assert!(agent_repo(&db, agent).unwrap().ready().is_err());
+    }
+
+    #[test]
+    fn a_take_over_goes_through_the_busy_check_first() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let id = add_agent(&db, project, "Builder");
+        let ready = prepare(&db, &base, id).unwrap();
+        std::fs::write(ready.cwd.join("feature.txt"), "feature\n").unwrap();
+        run_git(&ready.cwd, &["add", "-A"]);
+        run_git(&ready.cwd, &["commit", "-m", "agent work"]);
+        let state = base.channels.events.join(id.to_string()).join("state");
+
+        std::fs::write(&state, "working 1\n").unwrap();
+        let target = TakeOverTarget::read(&db, id).unwrap();
+        let err = target
+            .run(&base.channels, TakeOverMode::Squash, "Take over")
+            .unwrap_err();
+        assert!(err.to_string().contains("working"), "{err}");
+        assert!(!repo.join("feature.txt").exists(), "nothing was taken over");
+
+        std::fs::write(&state, "idle 1\n").unwrap();
+        let done = target
+            .run(&base.channels, TakeOverMode::Squash, "Take over")
+            .unwrap();
+        assert!(matches!(done, TakeOver::Done { .. }));
+        assert!(repo.join("feature.txt").exists());
     }
 }

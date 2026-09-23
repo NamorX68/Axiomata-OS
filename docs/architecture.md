@@ -789,6 +789,34 @@ The frontend polls `ide_agent_states(project)` once a second while the IDE is on
 status line, its dock tab, and the agent picker. The status is also what M7.5 CP13 will use
 as its delivery condition (a message reaches a TUI agent only when it is `idle`).
 
+**M7.3 CP7 adds the git engine** (`crates/axiomata-ide/src/git.rs`, decisions G1–G13 in
+`docs/plans/git-layer.md`) — still `git` as a subprocess. It answers "what has this agent
+changed?" against the branch its worktree was cut from, now recorded as `base_branch`
+(migration 12) when the branch is born; older agents fall back to the project folder's
+current branch. The diff starts at the **merge base**, not the base's tip, so work that landed
+on `main` meanwhile does not read as the agent reverting it, and it covers committed and
+uncommitted work together, each file marked if part of it is still uncommitted. Diffs are
+parsed in Rust into hunks and numbered lines, capped at 2 MiB / 10 000 lines.
+
+The handgrips: **discard** puts a file back to the base (committed changes included; files
+the agent added are deleted, only inside the worktree), **commit_all** commits what the agent
+left lying around, and **take_over** is the only function that touches the user's own working
+copy — squash by default, `--no-ff` on request, never a push. It refuses rather than guesses
+(another branch checked out in the project folder, anything staged there, uncommitted agent
+work, an agent that is `working`/`waiting`), undoes a conflict before returning it as an
+ordinary outcome, and afterwards moves the agent's branch to the new base so its diff is
+empty. `provision::agent_repo` reads where an agent works under a brief DB lock and hands back
+an `AgentRepo`, so no connection is held while git runs; the Tauri commands (`ide_agent_changes`,
+`_file_diff`, `_discard`, `_commit`, `_take_over`) are async and run git on a blocking thread.
+Every git call runs with `GIT_OPTIONAL_LOCKS=0` (the IDE reads a worktree while the agent in it
+runs git itself) and `GIT_LITERAL_PATHSPECS=1` (a file the agent names `:(glob)*` is that file,
+not a pattern — the security review showed `--` does not prevent pathspec magic). The busy
+check has one owner, `provision::TakeOverTarget::run`, and `AgentRepo::take_over` is
+crate-private so no caller can skip it; `agent_repo` answers `Ready | SharedFolder |
+NotStarted` so the UI can say why an agent has no diff. A hook-rejected `--no-ff` merge is
+rolled back via `MERGE_HEAD`, special files (FIFOs) are never opened, and one refresh costs two
+git calls (`status`, one `diff --raw --numstat`).
+
 ### `axiomata-macos`
 
 Reserved as an integration boundary for macOS-specific features beyond what MCP servers

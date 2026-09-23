@@ -1769,21 +1769,160 @@ pub fn ide_agent_states(
     ))
 }
 
+/* ------------------------------------------------------------ git (M7.3) ---
+ * Every git command below reads where the agent works from the database,
+ * lets go of the connection, and only then runs git — on a blocking thread,
+ * because a sync Tauri command runs on the main thread and `git diff` on a
+ * large repository is not instant. The Diffs tab polls while an agent works,
+ * so neither the UI nor the one shared connection may wait on it. */
+
+/// The agent's repository, looked up under a brief database lock.
+fn agent_repo_of(
+    state: &State<'_, CoreState>,
+    id: i64,
+) -> Result<ide::provision::AgentRepoState, String> {
+    let db = state.db_lock();
+    ide::provision::agent_repo(&db, id).map_err(|err| err.to_string())
+}
+
+/// The agent's repository, or the sentence saying why it has none.
+fn ready_repo_of(state: &State<'_, CoreState>, id: i64) -> Result<ide::git::AgentRepo, String> {
+    agent_repo_of(state, id)?
+        .ready()
+        .map_err(|err| err.to_string())
+}
+
+/// Runs a git operation off the main thread.
+async fn off_main<T: Send + 'static>(
+    work: impl FnOnce() -> ide::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|err| format!("git task failed: {err}"))?
+        .map_err(|err| err.to_string())
+}
+
+/// What the Diffs tab shows: the changes, or why there are none of this
+/// agent's own — a shared folder never has any, an agent not started yet
+/// will after its first start.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AgentDiffState {
+    /// A worktree exists; `changes` is everything the agent has changed (G2).
+    Ready { changes: ide::git::AgentChanges },
+    /// The project folder is not a git repository; its agents share it.
+    SharedFolder,
+    /// A repository, but this agent has no worktree yet — start it once.
+    NotStarted,
+}
+
+/// What an agent has changed since its base (M7.3, G2), or why it has no
+/// diff of its own.
+#[tauri::command]
+pub async fn ide_agent_changes(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<AgentDiffState, String> {
+    match agent_repo_of(&state, id)? {
+        ide::provision::AgentRepoState::Ready(repo) => off_main(move || repo.changes())
+            .await
+            .map(|changes| AgentDiffState::Ready { changes }),
+        ide::provision::AgentRepoState::SharedFolder => Ok(AgentDiffState::SharedFolder),
+        ide::provision::AgentRepoState::NotStarted => Ok(AgentDiffState::NotStarted),
+    }
+}
+
+/// One file's diff against the agent's base, parsed.
+#[tauri::command]
+pub async fn ide_agent_file_diff(
+    state: State<'_, CoreState>,
+    id: i64,
+    path: String,
+    old_path: Option<String>,
+) -> Result<ide::git::FileDiff, String> {
+    let repo = ready_repo_of(&state, id)?;
+    off_main(move || repo.file_diff(&path, old_path.as_deref())).await
+}
+
+/// Puts files back to the agent's base (G13). The UI asks first.
+#[tauri::command]
+pub async fn ide_agent_discard(
+    state: State<'_, CoreState>,
+    id: i64,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    let repo = ready_repo_of(&state, id)?;
+    off_main(move || repo.discard(&paths)).await
+}
+
+/// Commits everything the agent left uncommitted (G3); returns the commit.
+#[tauri::command]
+pub async fn ide_agent_commit(
+    state: State<'_, CoreState>,
+    id: i64,
+    message: String,
+) -> Result<String, String> {
+    let repo = ready_repo_of(&state, id)?;
+    off_main(move || repo.commit_all(&message)).await
+}
+
+/// Takes the agent's committed work over into the project folder (G7–G12).
+/// `TakeOverTarget::run` refuses while the agent is working or waiting (G12).
+#[tauri::command]
+pub async fn ide_agent_take_over(
+    state: State<'_, CoreState>,
+    id: i64,
+    mode: ide::git::TakeOverMode,
+    message: String,
+) -> Result<ide::git::TakeOver, String> {
+    let target = {
+        let db = state.db_lock();
+        ide::provision::TakeOverTarget::read(&db, id).map_err(|err| err.to_string())?
+    };
+    let roots = axiomata_core::paths::ide_locations().channels;
+    off_main(move || target.run(&roots, mode, &message)).await
+}
+
 /// Whether an agent's worktree holds work that removing it would throw away.
 #[tauri::command]
-pub fn ide_agent_has_changes(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
-    let db = state.db_lock();
-    ide::provision::worktree_has_changes(&db, id).map_err(|err| err.to_string())
+pub async fn ide_agent_has_changes(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    // The path under a brief lock, `git status` without it.
+    let path = {
+        let db = state.db_lock();
+        ide::agent_store::get_agent(&db, id)
+            .map_err(|err| err.to_string())?
+            .and_then(|agent| agent.worktree_path)
+    };
+    match path {
+        Some(path) if path.is_dir() => {
+            off_main(move || ide::worktree::has_uncommitted_changes(&path)).await
+        }
+        _ => Ok(false),
+    }
 }
 
 /// Removes an agent's worktree. `force` throws away uncommitted work in it,
-/// which is why the caller has to ask first.
+/// which is why the caller has to ask first. Read, remove without the
+/// connection, record — see `WorktreeToDiscard`.
 #[tauri::command]
-pub fn discard_ide_agent_worktree(
+pub async fn discard_ide_agent_worktree(
     state: State<'_, CoreState>,
     id: i64,
     force: bool,
 ) -> Result<bool, String> {
+    let target = {
+        let db = state.db_lock();
+        ide::provision::WorktreeToDiscard::read(&db, id).map_err(|err| err.to_string())?
+    };
+    let Some(target) = target else {
+        return Ok(false);
+    };
+    let (target, removed) = off_main(move || {
+        let removed = target.remove(force)?;
+        Ok((target, removed))
+    })
+    .await?;
     let db = state.db_lock();
-    ide::provision::discard_worktree(&db, id, force).map_err(|err| err.to_string())
+    target.forget(&db, removed).map_err(|err| err.to_string())?;
+    Ok(removed)
 }

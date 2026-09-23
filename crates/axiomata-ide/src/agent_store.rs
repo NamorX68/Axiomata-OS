@@ -31,7 +31,7 @@ const MAX_COMMAND_LEN: usize = 2000;
 const MAX_ENV_LEN: usize = 8000;
 
 const AGENT_COLS: &str = "id, project_id, name, harness, command, model, env, created_at, \
-                          updated_at, worktree_path, branch, port";
+                          updated_at, worktree_path, branch, port, base_branch";
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -61,6 +61,7 @@ struct RawAgent {
     worktree_path: Option<String>,
     branch: Option<String>,
     port: Option<i64>,
+    base_branch: Option<String>,
 }
 
 fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
@@ -77,6 +78,7 @@ fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
         worktree_path: row.get(9)?,
         branch: row.get(10)?,
         port: row.get(11)?,
+        base_branch: row.get(12)?,
     })
 }
 
@@ -121,6 +123,7 @@ impl RawAgent {
             worktree_path,
             branch: self.branch,
             port,
+            base_branch: self.base_branch,
         })
     }
 }
@@ -310,6 +313,19 @@ pub fn set_worktree(
     let changed = db.execute(
         "UPDATE ide_agents SET worktree_path = ?2, branch = ?3, updated_at = ?4 WHERE id = ?1",
         params![id, path_text, branch, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// Records the branch an agent's worktree was cut from (M7.3, G1).
+///
+/// Written once, when the worktree's branch is first created, and never by
+/// the editing form — like [`set_worktree`], it is not something a person
+/// types.
+pub fn set_base_branch(db: &Connection, id: i64, base_branch: Option<&str>) -> Result<bool> {
+    let changed = db.execute(
+        "UPDATE ide_agents SET base_branch = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, base_branch, now()],
     )?;
     Ok(changed == 1)
 }
@@ -633,6 +649,31 @@ mod tests {
 
         assert!(store::delete_project(&db, project).unwrap());
         assert!(list_agents(&db, project).unwrap().is_empty());
+    }
+
+    #[test]
+    fn set_base_branch_records_it_and_a_missing_agent_reports_not_found() {
+        let (db, project) = fixture();
+        let agent = create_agent(&db, new_agent(project, "Builder")).unwrap();
+        assert!(agent.base_branch.is_none());
+
+        let before = get_agent(&db, agent.id).unwrap().unwrap().updated_at;
+        assert!(set_base_branch(&db, agent.id, Some("main")).unwrap());
+        let updated = get_agent(&db, agent.id).unwrap().unwrap();
+        assert_eq!(updated.base_branch.as_deref(), Some("main"));
+        assert!(updated.updated_at >= before);
+
+        // Clearing it back to None is a legitimate write, not a no-op skip.
+        assert!(set_base_branch(&db, agent.id, None).unwrap());
+        assert!(
+            get_agent(&db, agent.id)
+                .unwrap()
+                .unwrap()
+                .base_branch
+                .is_none()
+        );
+
+        assert!(!set_base_branch(&db, 4242, Some("main")).unwrap());
     }
 
     #[test]

@@ -211,6 +211,7 @@ describe("agents", () => {
       worktree_path: null,
       branch: null,
       port: null,
+      base_branch: null,
       effective_command: "opencode",
       effective_env: `AXIOMATA_AGENT_ID=${id}\nAXIOMATA_AGENT_NAME=${name}`,
     };

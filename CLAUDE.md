@@ -32,7 +32,9 @@ available.
 per-project layouts), and M7.2 is under way: agent profiles (CP4), a git worktree plus reserved port per agent
 (CP5, the repo's first git integration — `git` as a subprocess, not `git2`), and a live status plus Plan tab
 per agent (CP6/CP6b, `docs/plans/agent-lifecycle.md` — a file channel under `~/.axiomata/agent-events/`, no DB
-column; nothing is ever written into a worktree). The plan below
+column; nothing is ever written into a worktree). M7.2 is done; **M7.3 (git layer, `docs/plans/git-layer.md`)** is
+under way: CP7's git engine (diff against the recorded base branch, discard, commit, take-over into the project
+folder — squash by default, never a push) is built; CP8 (Diffs tab) and CP9 (acting from the diff) follow. The plan below
 describes the whole chain: an own full-screen IDE
 view with a dock/split/tab layout, foreign agent harnesses (Claude Code, Opencode) hosted as
 PTY tiles, A2A over an own MCP server rather than screen-scraping, one git worktree per
@@ -90,6 +92,10 @@ cargo run -p axiomata-cli -- ide agents delete <id>
 cargo run -p axiomata-cli -- ide agents prepare <id>   # worktree + port, idempotent; prints where it runs
 cargo run -p axiomata-cli -- ide agents discard-worktree <id> [--force]  # --force throws away uncommitted work
 cargo run -p axiomata-cli -- ide agents status <project>  # state word + plan per agent, as the harness reported it
+cargo run -p axiomata-cli -- ide agents diff <id> [--file <path>]   # what the agent changed since its base branch
+cargo run -p axiomata-cli -- ide agents commit <id> -m "…"          # commit what the agent left uncommitted
+cargo run -p axiomata-cli -- ide agents discard <id> <paths…>        # put files back to the base (committed too)
+cargo run -p axiomata-cli -- ide agents take-over <id> -m "…" [--no-ff]  # into the project folder; squash by default, never pushes
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard

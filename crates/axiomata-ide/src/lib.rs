@@ -8,9 +8,11 @@
 //! `&Connection` supplied by the caller.
 //!
 //! Today it holds projects (M7.1), agent profiles (M7.2 CP4), their worktrees
-//! (CP5) and their status channel (CP6, [`lifecycle`]). Later milestones add
-//! the git layer, the agent supervisor and the mailbox beside them; each that
-//! needs a table brings its own schema constant and its own migration number.
+//! (CP5), their status channel (CP6, [`lifecycle`]) and, since M7.3 CP7, the
+//! git layer that reads what an agent has changed and acts on it ([`git`]).
+//! Later milestones add the agent supervisor and the mailbox beside them; each
+//! that needs a table brings its own schema constant and its own migration
+//! number.
 //!
 //! ⚠️ One promise that is **per module, not crate-wide**: `store`'s "looks at
 //! the file system, never changes it" holds for projects and is what makes
@@ -25,6 +27,7 @@
 //! frozen — see the constant's own docs.
 
 pub mod agent_store;
+pub mod git;
 pub mod lifecycle;
 pub mod model;
 pub mod provision;
@@ -64,6 +67,10 @@ pub const SCHEMA_SQL_V2: &str = include_str!("agents.sql");
 /// rows. Same rule as before: its own constant, its own migration number (11),
 /// frozen once released.
 pub const SCHEMA_SQL_V3: &str = include_str!("agent_worktrees.sql");
+
+/// The IDE's **version 4** schema (`base_branch` on an agent), milestone M7.3
+/// CP7. Its own constant and migration number (12), frozen once released.
+pub const SCHEMA_SQL_V4: &str = include_str!("agent_base_branch.sql");
 
 /// Everything that can go wrong in the IDE core.
 ///
@@ -118,7 +125,7 @@ pub type Result<T> = std::result::Result<T, IdeError>;
 /// error ("no such column") that says nothing about the real cause.
 #[cfg(test)]
 pub(crate) fn apply_all_schemas(db: &rusqlite::Connection) {
-    for schema in [SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3] {
+    for schema in [SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4] {
         db.execute_batch(schema).expect("test schema should apply");
     }
 }
@@ -193,6 +200,20 @@ mod schema_is_frozen {
             "agent_worktrees.sql changed after it shipped as a numbered \
              migration. It is an ALTER TABLE, so re-running it is not even \
              possible — add a SCHEMA_SQL_V4 and a new migration number \
+             instead. If it has never shipped, update EXPECTED here."
+        );
+    }
+
+    /// And for version 4 (`base_branch`), migration 12.
+    #[test]
+    fn the_shipped_base_branch_schema_has_not_been_edited() {
+        const EXPECTED: u64 = 0x85a8_722b_adcc_cbaf;
+
+        assert_eq!(
+            fnv1a(super::SCHEMA_SQL_V4),
+            EXPECTED,
+            "agent_base_branch.sql changed after it shipped as migration 12. It \
+             is an ALTER TABLE — add a SCHEMA_SQL_V5 and a new migration number \
              instead. If it has never shipped, update EXPECTED here."
         );
     }

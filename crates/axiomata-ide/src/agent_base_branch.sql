@@ -1,0 +1,13 @@
+-- The branch an agent's worktree was cut from (milestone M7.3 CP7).
+--
+-- "What has this agent changed?" needs a starting point, and the branch that
+-- happened to be checked out when the worktree was created is not recorded
+-- anywhere else: CP5 simply branched from the project folder's HEAD. Stored
+-- rather than looked up again, so that switching branches in the project
+-- folder does not silently change what an agent's diff is measured against
+-- (docs/plans/git-layer.md, G1).
+--
+-- Nullable: an agent whose worktree predates this migration, one in a project
+-- that is not a repository, and one cut from a detached HEAD have none. The
+-- engine then falls back to whatever the project folder has checked out.
+ALTER TABLE ide_agents ADD COLUMN base_branch TEXT;
