@@ -43,7 +43,10 @@ designed from the start to be extractable into a standalone app the way `axiomat
 is. Seven milestones (M7.0–M7.6), and **M7.0 is a standalone Kanban module that deliberately
 ships before the IDE** — it is useful on its own and is the data layer the agents' task
 board later sits on. The eight load-bearing decisions are settled in §3 of that plan.
-Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
+**Planned, not started:** the file app / own AAA editor (`docs/plans/editor.md`, decisions D1–D19 —
+TS engine + `axiomata-files` crate, tree-sitter WASM, Vi mode, LSP, one App-Ring icon each for Editor and
+IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on it). Starts only on the owner's
+explicit go. Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
 
