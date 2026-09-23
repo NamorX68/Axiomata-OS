@@ -39,7 +39,7 @@
     renameGroup,
     setGroupGlyph,
   } from "../core/appGroups";
-  import { hiddenBuiltins, listBuiltinApps, removeUserApp, setUserAppGlyph, userApps } from "../core/apps";
+  import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import type { WorkspaceGraph } from "../core/backend";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
@@ -214,6 +214,13 @@
       return;
     }
     if (!n.appType) return;
+    // "Ansicht öffnen" (editor plan E12): a view entry opens its full-screen
+    // view through the same shell event as its other entry points.
+    const view = ringViewFor(n.appType);
+    if (view) {
+      ctx.emit(view.event);
+      return;
+    }
     if (getModule(n.appType)?.singleton !== false) {
       const placed = get(instances).find((i) => i.type === n.appType);
       if (placed) {

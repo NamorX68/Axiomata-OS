@@ -199,6 +199,8 @@ export function glyphForModuleType(type: string): string {
       return "terminal";
     case "kanban":
       return "kanban";
+    case "view:ide":
+      return "code-blocks";
     default:
       return "folder";
   }

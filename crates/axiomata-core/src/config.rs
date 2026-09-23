@@ -704,7 +704,6 @@ mod tests {
                 skill_timeout_secs: 120,
                 ..AgentDefaults::default()
             },
-            ..Config::default()
         };
         custom.save().expect("save should succeed");
 

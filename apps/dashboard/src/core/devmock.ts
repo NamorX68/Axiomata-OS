@@ -621,6 +621,41 @@ function mockGraph(): WorkspaceGraph {
   };
 }
 
+/** Files of the non-workspace roots in the file-service mock. */
+const otherRootFiles = new Map<string, string>([["project:1\0README.md", "# Axiomata-OS\n"]]);
+
+function fileArgs(args: Record<string, unknown>): { root: string; rel: string } {
+  const root = String(args.root);
+  const rel = String(args.rel);
+  if (root !== "workspace" && !/^(project|worktree|grant):/.test(root)) {
+    throw fileError("UnknownRoot", `unknown file root \`${root}\``);
+  }
+  if (rel.trim() === "" || rel.startsWith("/") || rel.split("/").includes("..")) {
+    throw fileError("Refused", `refused ${rel}: resolves outside the root`);
+  }
+  return { root, rel };
+}
+
+function fileStore(root: string): Map<string, string> {
+  return root === "workspace" ? files : otherRootFiles;
+}
+
+function fileKey(root: string, rel: string): string {
+  return root === "workspace" ? rel : `${root}\0${rel}`;
+}
+
+function fileError(kind: string, message: string): { kind: string; message: string } {
+  return { kind, message };
+}
+
+/** Same shape as the real `Version` (`<len>-<hash>`); the hash is not FNV,
+ *  it only has to change with the content. */
+function mockVersion(content: string): string {
+  let h = 0;
+  for (const ch of content) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
+  return `${new TextEncoder().encode(content).length}-${h.toString(16).padStart(16, "0")}`;
+}
+
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   await delay();
   switch (cmd) {
@@ -1190,6 +1225,49 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "delete_workspace_file":
       files.delete(String(args.rel));
       return undefined as T;
+    // The file service (editor plan ED0). `workspace` shares the map above;
+    // every other root gets its own entries under `<root>\0<rel>`. Errors are
+    // thrown as the `{ kind, message }` object the Rust side serialises.
+    case "file_roots":
+      return [
+        { id: "workspace", label: "Second Brain", path: "/mock/vault", kind: "workspace" },
+        { id: "project:1", label: "Axiomata-OS", path: "/mock/code/axiomata-os", kind: "project" },
+      ] as T;
+    case "file_read": {
+      const { root, rel } = fileArgs(args);
+      const content = fileStore(root).get(fileKey(root, rel));
+      if (content === undefined) throw fileError("NotFound", `${rel} does not exist`);
+      return { rel, content, version: mockVersion(content), modified: new Date().toISOString(), large: false } as T;
+    }
+    case "file_write": {
+      const { root, rel } = fileArgs(args);
+      const store = fileStore(root);
+      const current = store.get(fileKey(root, rel));
+      const expected = args.expected as string | null | undefined;
+      if (expected != null && (current === undefined || mockVersion(current) !== expected)) {
+        throw fileError("Conflict", `${rel} changed since it was read`);
+      }
+      const content = String(args.content);
+      store.set(fileKey(root, rel), content);
+      return mockVersion(content) as T;
+    }
+    case "file_delete": {
+      const { root, rel } = fileArgs(args);
+      if (!fileStore(root).delete(fileKey(root, rel))) throw fileError("NotFound", `${rel} does not exist`);
+      return undefined as T;
+    }
+    // No file system to watch in a browser; subscribing is accepted and
+    // nothing ever changes underneath.
+    case "file_watch":
+    case "file_unwatch":
+      return undefined as T;
+    case "file_read_image":
+      throw fileError("NotFound", "devmock has no images for the file service");
+    case "file_pick":
+      // No native dialog in a browser: pretend the first vault note was picked.
+      return args.folder
+        ? ({ root: "workspace", rel: "", folder: true, path: "/mock/vault" } as T)
+        : ({ root: "workspace", rel: [...files.keys()][0] ?? "", folder: false, path: "/mock/vault" } as T);
     case "create_note": {
       // No agent to ask in the browser mock — always files into "Inbox",
       // mirroring `notes::write_placed_note`'s dedup-on-collision rule. No

@@ -75,6 +75,12 @@ describe("buildAppNodes", () => {
     expect(a[0].color).toBe(areaColor("/Applications/Foo.app", palette.light));
   });
 
+  it("draws the IDE view entry with its own code_blocks glyph", () => {
+    const nodes = buildAppNodes([{ type: "view:ide", title: "IDE" }], [], [], null, palette);
+    expect(nodes[0]).toMatchObject({ appType: "view:ide", glyph: "code-blocks", label: "IDE" });
+    expect(glyphForModuleType("view:ide")).toBe("code-blocks");
+  });
+
   it("carries a user app's own glyph override, omits it when unset", () => {
     const withGlyph = buildAppNodes(
       [],

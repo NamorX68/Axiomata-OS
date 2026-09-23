@@ -63,6 +63,13 @@ pub fn memory_last_sync_path() -> PathBuf {
     axiomata_home().join("memory-last-sync.json")
 }
 
+/// Path to the file app's grant list (`~/.axiomata/file-grants.json`): the
+/// files and folders the owner picked in the open dialog, which the file
+/// service may then touch. See `crate::files` and `axiomata_files::grants`.
+pub fn file_grants_path() -> PathBuf {
+    axiomata_home().join("file-grants.json")
+}
+
 /// Path to the dashboard layout file (`~/.axiomata/dashboard.json`): module
 /// instances, their positions/sizes/config and UI settings such as the theme.
 /// Hand-editable; see `crate::dashboard`.

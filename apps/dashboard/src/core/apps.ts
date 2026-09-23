@@ -45,14 +45,37 @@ function isRingEligible(def: ModuleDefinition): boolean {
   return !def.background && !def.dev && def.type !== "md-file";
 }
 
+/** A ring entry that opens a full-screen view instead of creating a tile —
+ *  the "Ansicht öffnen" entry type (editor plan §ED0, E12). It sits on the
+ *  builtin side and behaves like a builtin module there (hideable in the
+ *  "Intern" tab, groupable); only a click differs: it emits `event` on the
+ *  shell bus, the same event the view's other entry points use. The `view:`
+ *  prefix keeps its `type` from ever colliding with a registry module's. */
+export interface RingView extends BuiltinApp {
+  type: `view:${string}`;
+  /** Shell-bus event that opens the view (`App.svelte` listens). */
+  event: string;
+}
+
+/** The views the ring offers, in ring order after the modules. The editor
+ *  (`view:editor`, `edit_document`) joins once it has a view to open (ED1). */
+export const RING_VIEWS: readonly RingView[] = [{ type: "view:ide", title: "IDE", event: "shell:ide" }];
+
+/** The view a ring `type` opens, or `undefined` for a module type. */
+export function ringViewFor(type: string): RingView | undefined {
+  return RING_VIEWS.find((v) => v.type === type);
+}
+
 /** Every ring-*eligible* builtin, regardless of whether the owner has hidden
  *  it (`hiddenBuiltins` below) — what the "+" dialog's "Intern" tab lists,
- *  so a hidden one can be found again and shown. Registry order, same as
- *  `listBuiltinApps`. */
+ *  so a hidden one can be found again and shown. Registry order, then the
+ *  views, same as `listBuiltinApps`. */
 export function listAllRingEligibleBuiltins(): BuiltinApp[] {
-  return listModules()
+  const modules = listModules()
     .filter(isRingEligible)
     .map((def) => ({ type: def.type, title: def.title }));
+  const views = RING_VIEWS.map(({ type, title }) => ({ type, title }));
+  return [...modules, ...views];
 }
 
 /** Every builtin module the ring should actually *draw* — ring-eligible

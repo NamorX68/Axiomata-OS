@@ -72,6 +72,7 @@ Axiomata-OS/
     axiomata-terminal/              # standalone PTY + VT100 engine for the Terminal module
     axiomata-board/                 # standalone Kanban core (M7.0), ships migration 8
     axiomata-ide/                   # standalone agentic-IDE core (M7.1/M7.2), migrations 9+10
+    axiomata-files/                 # standalone file service of the file app / editor (ED0)
   apps/
     dashboard/
       src/                           # Svelte frontend (core/canvas/shell/modules/themes/graph)
@@ -176,13 +177,51 @@ One promise here is per module rather than crate-wide: the projects store looks 
 system but never changes it. That will *not* hold for the worktree module in M7.2, which has
 to create and remove real directories — it states its own contract when it lands.
 
+### `axiomata-files`
+
+The file service behind the file app and its own editor (`docs/plans/editor.md`, milestone
+ED0, decisions E1–E12). Standalone like `axiomata-terminal`: no Tauri, no `axiomata-core`.
+Everything a webview may touch on disk goes through a **`Root`** — a canonical directory (or,
+for one picked file, that file) plus a **link policy**: `Strict` (no symlink, no hard link —
+the Second-Brain workspace, which agents write into unattended) or `Contained` (a symlink is
+followed only if its target stays in the root; hard links allowed, because pnpm's
+`node_modules` is made of them). A file is always named as *root id + relative path*, never as
+an absolute path the webview could make up.
+
+Four things are load-bearing:
+
+- **The guard is re-checked at the moment of use** (`pinned.rs`). `Root::resolve` proves a
+  path safe once; every read, write and delete then walks down from the root's directory fd
+  with `openat(O_NOFOLLOW)` and acts relative to the parent fd it holds, so a directory
+  swapped for a symlink in between cannot redirect it (the ED0.1 security audit's TOCTOU
+  finding; `rustix`, no own `unsafe`). The target is re-checked on the open fd too (regular
+  file; no hard link under `Strict`; `O_NONBLOCK` against a swapped-in FIFO).
+- **Content versions, not mtimes** (`file.rs`). Every read returns `<len>-<FNV-1a>`; a write
+  can demand it and fails with `Conflict` otherwise — the basis of "an agent changed the file
+  you have open". FNV-1a is pinned by a test because versions will be persisted (recovery).
+- **Grants** (`grants.rs`, `~/.axiomata/file-grants.json`, `0600`) are the only way a new
+  place becomes reachable: a file or folder picked in the native dialog, which is driven from
+  Rust — the dialog plugin's JS API is deliberately not in `capabilities/default.json`.
+- **The watcher judges by content** (`watch.rs`, `notify`/FSEvents). It watches the parent
+  directory (an atomic rename-over would silence a watch on the file), debounces 150 ms, and
+  reports `modified`/`deleted`/`created` only when the version really changed; reads and
+  hashes run outside its state lock.
+
+Which roots exist is the embedder's business, answered through the `RootResolver` trait:
+`axiomata_core::files::Roots` resolves `workspace` | `project:<id>` | `worktree:<agent id>` |
+`grant:<id>` freshly on every call from config, SQLite and the grant file, so a moved
+project, a discarded worktree or a revoked grant is noticed at the next access. The old
+`*_workspace_file` commands keep their names, 1 MiB cap and string errors but run through
+this crate (`core::workspace` delegates); the new `file_*` commands use the editor's limits
+(read 16 MiB, `large` above 2 MiB, write 2 MiB) and typed `{ kind, message }` errors.
+
 ### `axiomata-cli`
 
 A `clap`-based binary whose job is to exercise `axiomata-core` end to end without the GUI:
 `status`, `list-skills`, `run-skill`, `list-runs`, `memory sync|status`,
 `routines list|add|edit|delete|enable|disable|history|tick`,
 `board list|new|rename|delete|add|move|claim|done|verify|archive`,
-`ide projects list|new|rename|set-root|delete`, `assistant` (one chat/instruct
+`ide projects list|new|rename|set-root|delete`, `files roots|read|write|grants`, `assistant` (one chat/instruct
 turn, `--allowed-tools` kept for API symmetry — the opencode harness auto-approves tool use),
 `import obsidian`, `graph`, `modules`, `module-action`. Run it with
 `cargo run -p axiomata-cli -- <subcommand>`.
@@ -197,8 +236,11 @@ sync on a background thread, starts the routine scheduler
 (`tauri::async_runtime::spawn(routines::serve(…))`, stop handle managed), and stores the
 `AxiomataCore` as managed state. `AxiomataCore` holds `config` unlocked and only `db` behind a
 `Mutex`, wrapped in an `Arc` so the scheduler task can hold its own handle. Plugins:
-`tauri-plugin-opener` and `tauri-plugin-window-state` (the window remembers its geometry
-across restarts). See §5 for the full command surface and the Svelte frontend.
+`tauri-plugin-opener`, `tauri-plugin-window-state` (the window remembers its geometry
+across restarts) and `tauri-plugin-dialog` (the file app's open dialog — called from Rust in
+`files.rs` only, none of its JS permissions granted). `files.rs` holds the `file_*` commands
+and the managed `FileWatch`; `lib.rs`'s `on_page_load` drops every file subscription when the
+page reloads. See §5 for the full command surface and the Svelte frontend.
 
 ### `apps/dashboard/src` (frontend)
 
@@ -235,6 +277,8 @@ workspace the user currently has configured:
   `crate::json_state` machinery.
 - `module-context.md` / `module-actions/{inbox,outbox}/` — the agent → module bridge (§5).
 - `memory-last-sync.json` — the memory router's per-workspace staleness marker.
+- `file-grants.json` — files and folders picked in the file app's open dialog, the only
+  places outside a registered root the file service may touch (`axiomata-files`, §3).
 
 Resolved by `crates/axiomata-core/src/paths.rs::axiomata_home()`. Defaults to `~/.axiomata`,
 deliberately a visible dotfolder rather than a hidden OS-convention path, because
@@ -880,6 +924,11 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   every skill runs through the headless Opencode CLI (`AgentBackend::Opencode`, MCP from
   opencode's own config), which serves cloud *and* local models with one mechanism. Full
   original plan: `docs/plans/stufe2-lean-ollama-agent.md`.
+- **Editor ED0 — the file service: done** (2026-09-23, `docs/plans/editor.md`). The
+  `axiomata-files` crate (§3), root ids and grants, the `file_*` Tauri commands with the
+  Rust-driven open dialog and the `files:changed` watcher event, `axiomata-cli files`, and the
+  App Ring's "Ansicht öffnen" entry type (`core/apps.ts` `RING_VIEWS`; `view:ide` today,
+  `view:editor` with ED1). Next: ED1, the editor core.
 
 Each milestone from M1 onward was broken down into a detailed, step-by-step implementation
 plan shortly before it was actually started, rather than all at once up front — those plans

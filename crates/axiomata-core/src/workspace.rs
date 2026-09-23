@@ -1,22 +1,22 @@
-//! Workspace-scoped file access for the dashboard (the `md-file` module and,
-//! later, the agent's one-shot instructions).
+//! Workspace-scoped file access for the dashboard (the `md-file` module, ToDo,
+//! Mail, the Second-Brain view) and core's own writers (`board_mirror`).
 //!
-//! Every path is *relative to* `config.workspace_root` and is resolved through
-//! one guard: no absolute paths, no `..`, the resolved location must stay
-//! under the canonicalised root (so a symlinked directory can't redirect it),
-//! the file itself must be neither a symlink nor a hard link (a hard link
-//! shares its content with a file that may live anywhere), and content is
-//! capped at [`MAX_FILE_BYTES`]. Writes are atomic through a temp file that is
-//! created with `O_EXCL` (a planted symlink at the temp path is never
-//! followed) and renamed into place. [`write_file`] will create *at most one*
-//! new top-level directory (see [`ensure_immediate_parent_dir`]) — anything
-//! deeper is still left alone, so a write can never conjure a multi-level
-//! chain of directories, symlinked or not.
+//! Every path is *relative to* `config.workspace_root`. The guard itself
+//! lives in `axiomata-files` since ED0 of `docs/plans/editor.md`: the
+//! workspace is an `axiomata_files::Root` with [`LinkPolicy::Strict`] — no
+//! absolute paths, no `..`, the resolved location must stay under the
+//! canonicalised root (so a symlinked directory can't redirect it), the file
+//! itself must be neither a symlink nor a hard link (a hard link shares its
+//! content with a file that may live anywhere). This module keeps what is
+//! specific to the workspace: [`guarded_root`]'s refusal of `/` and the home
+//! directory, the 1 MiB cap of [`MAX_FILE_BYTES`], the single new top-level
+//! directory a write may create, and mapping errors onto [`AxiomataError`].
+//! Writes are atomic through an `O_EXCL` temp file renamed into place.
 
 use std::fs;
-use std::io::{Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
+use axiomata_files::{self as files, FilesError, LinkPolicy, Root};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -28,10 +28,8 @@ use crate::memory::guarded_root;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Hard cap for a single image read via [`read_image`] — larger than
-/// [`MAX_FILE_BYTES`] since photos routinely exceed 1 MiB. Base64-encoding
-/// inflates this by about a third over the Tauri IPC bridge, still small for
-/// a local call.
-pub const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+/// [`MAX_FILE_BYTES`] since photos routinely exceed 1 MiB.
+pub const MAX_IMAGE_BYTES: u64 = files::MAX_IMAGE_BYTES;
 
 /// A file read from the workspace.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,45 +46,13 @@ pub struct WorkspaceFile {
 pub struct WorkspaceImage {
     /// The relative path as requested (normalised to `/` separators).
     pub path: String,
-    /// One of the MIME types [`image_mime`] maps an extension onto —
+    /// One of the raster MIME types `axiomata_files::read_image` knows —
     /// inferred from the file extension; anything else is rejected before a
     /// `WorkspaceImage` is ever constructed.
     pub mime: &'static str,
     /// Base64-encoded file content — the caller wraps this into a
     /// `data:<mime>;base64,<...>` URI itself.
     pub base64: String,
-}
-
-/// Maps a file extension onto the raster MIME types the dashboard's Markdown
-/// renderer allows inline (`core/markdown.ts`'s `DATA_IMAGE_RE`) and that
-/// `md-file.svelte` treats as an image file in its own right — keep all
-/// three lists in lockstep; extend them together if a format is ever added.
-/// SVG is deliberately never included: it can carry `<script>`, unlike a
-/// raster format. BMP/TIFF/HEIC/AVIF decoding happens in the *viewer's* image
-/// stack (WKWebView's `<img>`, via macOS's system ImageIO), not in this app —
-/// this function only decides which bytes get base64-shipped to it as which
-/// MIME type; whether a given format actually renders is a client capability
-/// question, not something this function can guarantee. In particular HEIC
-/// is a known WebKit web-content gap (`<img src="…heic">` typically fails to
-/// decode even though the OS itself — Preview, Quick Look — handles it fine)
-/// and TIFF decoders have a history of memory-safety CVEs upstream; both are
-/// offered because the owner asked for them, not because either is verified
-/// to render — confirm in `cargo tauri dev` before calling this done, and see
-/// the note on [`MAX_IMAGE_BYTES`] if uncompressed TIFF/BMP files turn out to
-/// need a larger cap in practice.
-fn image_mime(rel: &str) -> Option<&'static str> {
-    let ext = Path::new(rel).extension()?.to_str()?.to_ascii_lowercase();
-    Some(match ext.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "bmp" => "image/bmp",
-        "tif" | "tiff" => "image/tiff",
-        "heic" | "heif" => "image/heic",
-        "avif" => "image/avif",
-        _ => return None,
-    })
 }
 
 fn invalid(path: &Path, reason: impl Into<String>) -> AxiomataError {
@@ -101,138 +67,42 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> AxiomataError {
     move |source| AxiomataError::Io { path, source }
 }
 
-/// Rejects an absolute path, a `..` component, or a Windows drive prefix.
-/// Shared by [`resolve`] and [`ensure_immediate_parent_dir`] — the latter
-/// runs *before* a parent directory necessarily exists, so it can't lean on
-/// `resolve`'s own canonicalisation to catch these first.
-fn validate_components(rel_path: &Path) -> Result<(), AxiomataError> {
-    for component in rel_path.components() {
-        match component {
-            Component::Normal(_) => {}
-            Component::CurDir => {}
-            Component::ParentDir => return Err(invalid(rel_path, "`..` is not allowed")),
-            Component::RootDir | Component::Prefix(_) => {
-                return Err(invalid(rel_path, "path must be relative to the workspace"));
-            }
-        }
-    }
-    Ok(())
+/// The workspace as a strict `axiomata-files` root.
+fn workspace_root(config: &Config) -> Result<Root, AxiomataError> {
+    let dir = guarded_root(config)?;
+    Root::dir(&dir, LinkPolicy::Strict).map_err(from_files)
 }
 
-/// If `rel`'s immediate parent directory doesn't exist yet, creates *exactly
-/// that one* directory level — never more, and never through a symlink — so
-/// [`write_file`] can write into a brand-new top-level area (a connector
-/// module's own notes folder, say) without a separate "create this folder
-/// first" step.
-///
-/// Deliberately narrow: `resolve`'s own containment guard needs a directory
-/// to already exist before it can canonicalise and check it, so naively
-/// `create_dir_all`-ing an arbitrary `rel`'s parent chain would create (or
-/// walk through) directories *before* any of them have been proven safe —
-/// exactly the kind of symlinked-ancestor escape the rest of this module
-/// guards against. This function instead only ever creates a directory that
-/// is:
-/// - not already present as *anything* (checked via `symlink_metadata`,
-///   which does not follow a symlink to decide "present"), and
-/// - a single path segment directly under the workspace root, which
-///   [`guarded_root`] has already canonicalised — so there is no unproven
-///   intermediate segment to walk through in the first place.
-///
-/// A `rel` whose parent's *own* parent is also missing (i.e. creating it
-/// would take more than one new directory) is left alone; the follow-up
-/// [`resolve`] call surfaces the real "no such file or directory" error
-/// rather than this function silently building a multi-level chain.
-///
-/// Returns `Err` if `rel` itself fails [`validate_components`] (an absolute
-/// path or a `..` component), if [`guarded_root`] can't resolve the
-/// workspace root, or — the only case expected in practice, since both of
-/// the above would also make the follow-up [`resolve`] call fail the same
-/// way — if the OS-level `create_dir` call itself fails (e.g. a permissions
-/// error). It never returns `Ok` for a `rel` this function declined to
-/// create a directory for; those cases fall through to `Ok(())` and rely on
-/// [`resolve`] to report the real problem.
-fn ensure_immediate_parent_dir(config: &Config, rel: &str) -> Result<(), AxiomataError> {
-    let rel_path = Path::new(rel);
-    validate_components(rel_path)?;
-
-    let Some(parent_rel) = rel_path.parent().filter(|p| !p.as_os_str().is_empty()) else {
-        return Ok(()); // `rel` has no subdirectory at all — nothing to ensure.
-    };
-    // A single path segment has an empty parent (`Path::new("Mail").parent()
-    // == Some(Path::new(""))`) — anything deeper is refused, per the doc
-    // comment above.
-    let is_single_segment = parent_rel
-        .parent()
-        .is_some_and(|gp| gp.as_os_str().is_empty());
-    if !is_single_segment {
-        return Ok(());
+/// Maps the file service's error onto the two variants callers of this
+/// module have always matched on: a guard failure is
+/// [`AxiomataError::InvalidWorkspacePath`], anything the file system itself
+/// reported — a missing file or parent included — is [`AxiomataError::Io`].
+fn from_files(err: FilesError) -> AxiomataError {
+    match err {
+        FilesError::Io { path, source } => AxiomataError::Io { path, source },
+        FilesError::NotFound { path } => AxiomataError::Io {
+            path,
+            source: std::io::ErrorKind::NotFound.into(),
+        },
+        FilesError::Refused { path, reason } => {
+            AxiomataError::InvalidWorkspacePath { path, reason }
+        }
+        FilesError::TooLarge { path, limit } => {
+            invalid(&path, format!("larger than the {limit}-byte limit"))
+        }
+        FilesError::NotUtf8 { path } => invalid(&path, "not valid UTF-8"),
+        FilesError::Conflict { path } => invalid(&path, "changed since it was read"),
+        FilesError::UnknownRoot(id) => invalid(Path::new(&id), "unknown file root"),
     }
-
-    let root = guarded_root(config)?;
-    let parent_full = root.join(parent_rel);
-    if fs::symlink_metadata(&parent_full).is_ok() {
-        return Ok(()); // already exists as *something* — let `resolve` judge it.
-    }
-    fs::create_dir(&parent_full).map_err(io(&parent_full))
 }
 
 /// Resolves `rel` under the guarded workspace root.
 ///
-/// Returns the joined (not necessarily existing) path. The *parent* directory
-/// must exist and canonicalise inside the root; if the file exists it must be
-/// a regular file (not a symlink, not a directory) that also canonicalises
-/// inside the root.
+/// Returns the (not necessarily existing) path, with a canonical parent
+/// directory inside the root; if the file exists it is a regular file that
+/// is neither a symlink nor a hard link.
 pub fn resolve(config: &Config, rel: &str) -> Result<PathBuf, AxiomataError> {
-    let rel_path = Path::new(rel);
-    if rel.trim().is_empty() {
-        return Err(invalid(rel_path, "empty path"));
-    }
-    validate_components(rel_path)?;
-
-    let root = guarded_root(config)?;
-    let full = root.join(rel_path);
-
-    let parent = full
-        .parent()
-        .ok_or_else(|| invalid(rel_path, "path has no parent directory"))?;
-    let parent_canon = parent.canonicalize().map_err(io(parent))?;
-    if !parent_canon.starts_with(&root) {
-        return Err(invalid(rel_path, "resolves outside the workspace"));
-    }
-
-    match fs::symlink_metadata(&full) {
-        Ok(meta) if meta.file_type().is_symlink() => Err(invalid(rel_path, "symlinks are refused")),
-        Ok(meta) if meta.is_dir() => Err(invalid(rel_path, "is a directory")),
-        Ok(meta) if is_hard_linked(&meta) => {
-            Err(invalid(rel_path, "hard-linked files are refused"))
-        }
-        Ok(_) => {
-            let canon = full.canonicalize().map_err(io(&full))?;
-            if canon.starts_with(&root) {
-                Ok(full)
-            } else {
-                Err(invalid(rel_path, "resolves outside the workspace"))
-            }
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(full),
-        Err(source) => Err(AxiomataError::Io {
-            path: full.clone(),
-            source,
-        }),
-    }
-}
-
-/// A regular file with more than one directory entry shares its content with
-/// a path that may be outside the workspace; refuse it like a symlink.
-#[cfg(unix)]
-fn is_hard_linked(meta: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    meta.nlink() > 1
-}
-
-#[cfg(not(unix))]
-fn is_hard_linked(_meta: &fs::Metadata) -> bool {
-    false
+    workspace_root(config)?.resolve(rel).map_err(from_files)
 }
 
 /// One full-text hit.
@@ -370,8 +240,7 @@ fn snippet(line: &str) -> String {
 }
 
 /// Like [`resolve`], but the file must already exist as a regular file; the
-/// returned path is canonical (no symlinked components, no `..`) — what the
-/// dashboard hands to the webview's asset protocol.
+/// returned path is canonical (no symlinked components, no `..`).
 pub fn resolve_existing(config: &Config, rel: &str) -> Result<PathBuf, AxiomataError> {
     let full = resolve(config, rel)?;
     let meta = fs::metadata(&full).map_err(io(&full))?;
@@ -381,26 +250,14 @@ pub fn resolve_existing(config: &Config, rel: &str) -> Result<PathBuf, AxiomataE
     full.canonicalize().map_err(io(&full))
 }
 
-/// Reads a UTF-8 text file from the workspace.
+/// Reads a UTF-8 text file from the workspace, up to [`MAX_FILE_BYTES`].
 pub fn read_file(config: &Config, rel: &str) -> Result<WorkspaceFile, AxiomataError> {
-    let full = resolve(config, rel)?;
-    let meta = fs::metadata(&full).map_err(io(&full))?;
-    if meta.len() > MAX_FILE_BYTES {
-        return Err(invalid(
-            Path::new(rel),
-            format!("larger than the {MAX_FILE_BYTES}-byte limit"),
-        ));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    fs::File::open(&full)
-        .and_then(|f| f.take(MAX_FILE_BYTES).read_to_end(&mut bytes))
-        .map_err(io(&full))?;
-    let content =
-        String::from_utf8(bytes).map_err(|_| invalid(Path::new(rel), "not valid UTF-8"))?;
+    let file =
+        files::read_text(&workspace_root(config)?, rel, MAX_FILE_BYTES).map_err(from_files)?;
     Ok(WorkspaceFile {
-        path: rel.replace('\\', "/"),
-        content,
-        modified: meta.modified().ok().map(DateTime::<Utc>::from),
+        path: file.rel,
+        content: file.content,
+        modified: file.modified,
     })
 }
 
@@ -408,101 +265,57 @@ pub fn read_file(config: &Config, rel: &str) -> Result<WorkspaceFile, AxiomataEr
 /// binary counterpart to [`read_file`]. Used by the Markdown viewer to
 /// inline a note's own relatively-referenced images (`![alt](photo.jpg)`) as
 /// `data:` URIs, since this app has no other image-serving mechanism: an
-/// `asset://` + `<img src=…>` design was considered instead (there's already
-/// a dormant `assetFileUrl` helper on the frontend for exactly this), but
-/// re-adding the Rust-side scope-granting it needs risks the same class of
-/// Tauri asset-protocol failure that broke the HTML lesson viewer's original
-/// design (see `md-file.svelte`'s doc comment) — inlining is simpler and
-/// already proven (DOMPurify's Markdown sanitiser already allow-lists
-/// exactly this `data:image/…;base64,` shape).
+/// `asset://` + `<img src=…>` design would need Rust-side scope-granting
+/// that risks the same class of Tauri asset-protocol failure that broke the
+/// HTML lesson viewer's original design (see `md-file.svelte`'s doc
+/// comment). HEIC and TIFF are offered because the owner asked for them, not
+/// because WebKit is verified to render them (HEIC is a known gap, TIFF
+/// decoders have a CVE history upstream).
 ///
 /// Errors:
 ///     [`AxiomataError::InvalidWorkspacePath`] for a path outside the
 ///     workspace, a symlink/hard link, a file over [`MAX_IMAGE_BYTES`], or
-///     an extension [`image_mime`] doesn't recognise.
+///     an extension that is not a supported raster type.
 ///     [`AxiomataError::Io`] on any other read failure.
 pub fn read_image(config: &Config, rel: &str) -> Result<WorkspaceImage, AxiomataError> {
-    let mime = image_mime(rel).ok_or_else(|| {
-        invalid(
-            Path::new(rel),
-            "not a supported image type (png/jpeg/gif/webp/bmp/tiff/heic/avif)",
-        )
-    })?;
-    let full = resolve(config, rel)?;
-    let meta = fs::metadata(&full).map_err(io(&full))?;
-    if meta.len() > MAX_IMAGE_BYTES {
-        return Err(invalid(
-            Path::new(rel),
-            format!("larger than the {MAX_IMAGE_BYTES}-byte limit"),
-        ));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    fs::File::open(&full)
-        .and_then(|f| f.take(MAX_IMAGE_BYTES).read_to_end(&mut bytes))
-        .map_err(io(&full))?;
+    let image =
+        files::read_image(&workspace_root(config)?, rel, MAX_IMAGE_BYTES).map_err(from_files)?;
     Ok(WorkspaceImage {
-        path: rel.replace('\\', "/"),
-        mime,
-        base64: base64_encode(&bytes),
+        path: image.rel,
+        mime: image.mime,
+        base64: image.base64,
     })
-}
-
-/// `base64` 0.22 dropped the old free-function API in favour of an explicit
-/// `Engine` — this is the standard (not URL-safe) alphabet with padding,
-/// what every `data:` URI expects.
-fn base64_encode(bytes: &[u8]) -> String {
-    use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 /// Atomically writes `content` to a workspace file, creating it if missing.
 /// The parent directory must already exist, with one exception: a missing
 /// parent that is itself a single new top-level directory is created (see
-/// [`ensure_immediate_parent_dir`]) — anything deeper still requires the
-/// parent to already exist.
+/// `axiomata_files::ensure_top_level_dir`) — anything deeper still requires
+/// the parent to already exist. The write is blind (no expected version),
+/// as it always was here.
 pub fn write_file(config: &Config, rel: &str, content: &str) -> Result<(), AxiomataError> {
+    let root = workspace_root(config)?;
     if content.len() as u64 > MAX_FILE_BYTES {
         return Err(invalid(
             Path::new(rel),
             format!("content exceeds the {MAX_FILE_BYTES}-byte limit"),
         ));
     }
-    ensure_immediate_parent_dir(config, rel)?;
-    let full = resolve(config, rel)?;
-    let file_name = full
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| invalid(Path::new(rel), "missing file name"))?;
-    let tmp = full.with_file_name(format!(".{file_name}.axiomata-tmp"));
-    // `create_new` = O_CREAT|O_EXCL: a pre-planted symlink (or leftover) at
-    // the temp path fails the open instead of being followed and overwritten.
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(content.as_bytes()))
-        .map_err(io(&tmp))?;
-    fs::rename(&tmp, &full).map_err(|source| {
-        let _ = fs::remove_file(&tmp);
-        AxiomataError::Io {
-            path: full.clone(),
-            source,
-        }
-    })
+    files::ensure_top_level_dir(&root, rel).map_err(from_files)?;
+    files::write_text(&root, rel, content, None, MAX_FILE_BYTES)
+        .map(|_| ())
+        .map_err(from_files)
 }
 
-/// Deletes a regular file from the workspace. The path is guarded exactly
-/// like [`read_file`] via [`resolve_existing`]: no `..`, no symlink / hard
-/// link, must resolve inside `workspace_root`, and must already exist as a
-/// regular file.
+/// Deletes a regular file from the workspace, guarded exactly like
+/// [`read_file`]: no `..`, no symlink / hard link, must resolve inside
+/// `workspace_root`, and must already exist as a regular file.
 ///
 /// Errors:
-///     [`AxiomataError::InvalidWorkspacePath`] for a guard failure or a path
-///     that isn't an existing regular file; [`AxiomataError::Io`] if the
-///     `unlink` itself fails.
+///     [`AxiomataError::InvalidWorkspacePath`] for a guard failure;
+///     [`AxiomataError::Io`] for a missing file or a failed `unlink`.
 pub fn delete_file(config: &Config, rel: &str) -> Result<(), AxiomataError> {
-    let full = resolve_existing(config, rel)?;
-    fs::remove_file(&full).map_err(io(&full))
+    files::delete(&workspace_root(config)?, rel).map_err(from_files)
 }
 
 #[cfg(test)]
@@ -541,8 +354,14 @@ mod tests {
         assert!(read_file(&config, "notes/inbox.md").is_err());
 
         // A second delete of the same (now missing) path is a clean error,
-        // not a panic (`resolve_existing` reports the missing metadata as Io).
-        assert!(delete_file(&config, "notes/inbox.md").is_err());
+        // not a panic (`resolve_existing` reports the missing metadata as Io)
+        // -- specifically `from_files`'s `FilesError::NotFound` arm, which
+        // maps onto `AxiomataError::Io`, not `InvalidWorkspacePath`: the path
+        // itself was fine, the file just isn't there any more.
+        assert!(matches!(
+            delete_file(&config, "notes/inbox.md").unwrap_err(),
+            AxiomataError::Io { .. }
+        ));
 
         // A directory and a climb-out path are both refused.
         assert!(matches!(
@@ -586,7 +405,7 @@ mod tests {
             "Development\n"
         );
         // Writing a second file into the now-existing directory still works
-        // (the "already exists" branch of ensure_immediate_parent_dir).
+        // (the "already exists" branch of ensure_top_level_dir).
         write_file(&config, "Mail/other.md", "y").unwrap();
         assert_eq!(fs::read_to_string(root.join("Mail/other.md")).unwrap(), "y");
 
@@ -601,11 +420,11 @@ mod tests {
     }
 
     #[test]
-    fn ensure_immediate_parent_dir_is_a_no_op_for_a_bare_top_level_filename() {
+    fn ensure_top_level_dir_is_a_no_op_for_a_bare_top_level_filename() {
         let (root, config) = workspace();
 
         // "root.md" has no subdirectory component at all -- this exercises
-        // `ensure_immediate_parent_dir`'s early `rel_path.parent().filter(...)`
+        // `ensure_top_level_dir`'s early `rel_path.parent().filter(...)`
         // return, not the "already exists" branch (covered by
         // `writes_a_new_top_level_directory_but_not_a_nested_one`'s second
         // write) or the "create it" branch.
@@ -622,7 +441,7 @@ mod tests {
 
         // Both of these would, if `validate_components` were skipped, name a
         // single new top-level directory ("Escape") for `create_dir` to make.
-        // `ensure_immediate_parent_dir` must reject them itself, via its own
+        // `ensure_top_level_dir` must reject them itself, via its own
         // `validate_components` call, *before* computing a parent path or
         // touching the filesystem at all -- not merely rely on the later
         // `resolve()` call inside `write_file` to catch it after the fact.
@@ -645,7 +464,7 @@ mod tests {
 
         // A plain file (not a directory, not a symlink) already sits at the
         // name `write_file` would otherwise treat as "a new top-level
-        // directory to create". `ensure_immediate_parent_dir`'s own doc
+        // directory to create". `ensure_top_level_dir`'s own doc
         // comment says a parent "already present as *anything*" is left
         // alone; this is the non-symlink case of that (the symlink case is
         // `refuses_to_create_a_top_level_directory_through_a_planted_symlink`
@@ -672,7 +491,7 @@ mod tests {
         fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("Escape")).unwrap();
 
-        // `ensure_immediate_parent_dir` must not treat the symlink as "safe
+        // `ensure_top_level_dir` must not treat the symlink as "safe
         // to write through" just because *something* exists at that name —
         // `resolve`'s own containment check is what actually rejects this,
         // by canonicalising the parent and finding it outside the root.
@@ -776,6 +595,22 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn read_file_maps_binary_content_onto_invalid_workspace_path() {
+        // Exercises `from_files`'s `FilesError::NotUtf8` arm, which nothing
+        // else in this module's tests reaches (the size-cap test's `TooLarge`
+        // and the symlink tests' `Refused` are covered separately, but a
+        // plain binary file was not).
+        let (root, config) = workspace();
+        fs::write(root.join("notes/blob.bin"), [0xff, 0xfe, 0x00]).unwrap();
+        let err = read_file(&config, "notes/blob.bin").unwrap_err();
+        assert!(
+            matches!(err, AxiomataError::InvalidWorkspacePath { .. }),
+            "{err}"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

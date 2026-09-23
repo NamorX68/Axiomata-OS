@@ -3,6 +3,7 @@ use tauri::Manager;
 
 mod bootstrap;
 mod commands;
+mod files;
 mod terminal;
 
 /// Initializes `tracing`'s output so `axiomata_core`'s `tracing::info!`/
@@ -56,6 +57,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         // Persist the window's size / position / maximized state across
         // restarts (written to `window-state.json` in the OS app-config dir,
         // restored when the window is created).
@@ -82,6 +84,14 @@ pub fn run() {
             commands::read_workspace_image,
             commands::write_workspace_file,
             commands::delete_workspace_file,
+            files::file_roots,
+            files::file_read,
+            files::file_write,
+            files::file_delete,
+            files::file_read_image,
+            files::file_pick,
+            files::file_watch,
+            files::file_unwatch,
             commands::create_note,
             commands::assistant_send,
             commands::write_module_manifest,
@@ -154,7 +164,17 @@ pub fn run() {
             app.manage(services.core);
             app.manage(services.scheduler);
             app.manage(terminal::TerminalSessions::default());
+            app.manage(files::FileWatch::start(app.handle()));
             Ok(())
+        })
+        // A reload (dev HMR, a crash-reload) leaves the new page with no
+        // knowledge of the old page's file subscriptions: drop them.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started
+                && let Some(watch) = webview.try_state::<files::FileWatch>()
+            {
+                watch.page_reloaded();
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building the tauri application");

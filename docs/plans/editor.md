@@ -1,8 +1,7 @@
 # Plan: Die Datei-App — ein eigener Editor als Single Point of Truth
 
-Status: **gegrillt und bestätigt, Umsetzung noch nicht begonnen** (Stand 2026-09-23).
-Owner-Wunsch: „nicht sofort umsetzen, aber schon einmal planen". Begonnen wird erst auf
-ausdrückliches „los", mit ED0.
+Status: **ED0 fertig** (2026-09-23), als Nächstes ED1 — vorher in Checkpoints zerlegen und
+grillen wie ED0 (§5 „ED0 im Detail" zeigt das Muster).
 
 ## 1. Idee
 
@@ -179,6 +178,75 @@ für die IDE muss auch Projektordner und Agenten-Worktrees öffnen.
 - **ED7 — Herauslösung** als eigenständige App.
 
 Jeder Meilenstein wird vor seinem Start in Checkpoints zerlegt und gegrillt, wie bisher.
+
+### ED0 im Detail (gegrillt 2026-09-23, Q1–Q17, bestätigt; Umsetzung begonnen)
+
+**Entscheidungen**
+
+- **E1 — Datei-Identität** (Q1): Über die IPC kommt nie ein absoluter Pfad, der etwas
+  freigibt, sondern `{ root, rel }`. `root` ist `workspace`, `project:<id>`,
+  `worktree:<agent-id>` oder `grant:<id>`; absolute Pfade gibt Rust nur zur Anzeige zurück.
+- **E2 — Link-Regeln je Wurzel** (Q2): Der Workspace bleibt streng (kein Symlink, kein
+  Hardlink). Projekt-, Worktree- und Grant-Wurzeln erlauben Symlinks, deren Ziel in
+  derselben Wurzel liegt, und Hardlinks (pnpm). Wer nach außen zeigt, wird abgelehnt.
+- **E3 — Größen** (Q3): Lesen bis 16 MiB, ab 2 MiB mit `large: true` (Editor öffnet
+  schreibgeschützt), Schreiben bis 2 MiB. Die alten Workspace-Befehle behalten 1 MiB.
+- **E4 — Version** (Q4): Jedes Lesen liefert eine Version (Länge + FNV-1a-Hash des
+  Inhalts); Schreiben nimmt sie optional mit und scheitert mit `Conflict`, wenn die
+  Datei sich inzwischen geändert hat. Grundlage für D10.
+- **E5 — Beobachten** (Q5, Q15): `notify` (FSEvents), in ED0 nur abonnierte Einzeldateien;
+  entprellt (~150 ms) zu `files:changed { root, rel, kind: modified|deleted|created,
+  version }`, ein Umbenennen-über (atomares Schreiben) zählt als `modified`. Bäume in ED4.
+- **E6 — Öffnen-Dialog** (Q6): `tauri-plugin-dialog`, aber nur aus Rust aufgerufen
+  (`files_pick`); die JS-API des Plugins wird nicht freigeschaltet.
+- **E7 — Grants** (Q11, Q12): dauerhaft in `~/.axiomata/file-grants.json`, widerrufbar
+  (Liste in den Einstellungen ab ED1, vorher CLI). Eine gewählte Datei gibt nur sich frei,
+  ein gewählter Ordner seinen Inhalt; derselbe Pfad nutzt den vorhandenen Grant.
+- **E8 — Wurzeln frisch auflösen** (Q13): bei jedem Aufruf über einen `RootResolver`-Trait,
+  den die Tauri-Schicht aus Config, DB und Grant-Datei umsetzt; `axiomata-files` kennt core
+  nicht. Ein verschwundenes Worktree ist „Wurzel unbekannt".
+- **E9 — Fehler** (Q14): die neuen `file_*`-Befehle liefern `{ kind, message }`
+  (`Conflict`, `TooLarge`, `NotUtf8`, `NotFound`, `UnknownRoot`, `Refused`, `Io`); die alten
+  bleiben beim String.
+- **E10 — Bestand** (Q7): `*_workspace_file`/`read_workspace_image` behalten Namen und
+  Verhalten, laufen aber über `axiomata-files`; die Suche bleibt in core bis ED4.
+- **E11 — CLI** (Q16): `files roots`, `files read <root> <rel>`,
+  `files write <root> <rel> [--expect <version>]` (Inhalt von stdin),
+  `files grants list|revoke <id>`.
+- **E12 — Ring** (Q8–Q10): Eintragstyp „Ansicht öffnen" mit Kennung `view:<name>`,
+  ausblendbar und gruppierbar wie interne Module. ED0 bringt `view:ide` (`code_blocks`);
+  `view:editor` (`edit_document`) kommt mit ED1s minimaler Vollbild-Ansicht. Der
+  IDE-Knopf in der IconBar bleibt.
+
+**Checkpoints**
+
+- **ED0.1** — Crate `axiomata-files`: Wurzel-Prüfung (E2), lesen/schreiben mit Version
+  (E3, E4), löschen, Bild; `core::workspace` delegiert daran (E10). Danach
+  `security-auditor`. **Erledigt 2026-09-23.** Der Audit fand ein TOCTOU-Fenster
+  (Ordner zwischen Prüfung und Zugriff gegen einen Symlink getauscht — gab es schon im
+  alten `workspace::resolve`); geschlossen, indem jede Aktion den Elternordner per
+  `openat(O_NOFOLLOW)` vom Wurzel-Deskriptor aus festhält und relativ dazu liest,
+  umbenennt oder löscht (`pinned.rs`, über `rustix`, kein eigenes `unsafe`).
+- **ED0.2** — `RootResolver` (E8), Grants (E7), `files_pick` (E6), `file_*`-Befehle (E9),
+  `devmock`, CLI (E11). Danach `rust-dependency-auditor`, `security-auditor`.
+  **Erledigt 2026-09-23.** Abhängigkeiten sauber (keine Advisories, `rustix` nicht
+  doppelt). Der Audit fand einen mittleren Befund: Ein gewählter Ordner bekam immer einen
+  neuen `Contained`-Grant, auch wenn er schon im strengen Workspace lag. Jetzt läuft auch
+  ein Ordner über `locate` und kommt unter der vorhandenen Wurzel zurück. Zusätzlich zu
+  E11: `files grants add <path>` zum Testen ohne Dialog.
+- **ED0.3** — Beobachten (E5). **Erledigt 2026-09-23** (`watch.rs`, `notify` 8,
+  `file_watch`/`file_unwatch`, Ereignis `files:changed`, Abos fallen beim Neuladen der
+  Seite weg). Die Performance-Durchsicht fand zwei HIGH-Befunde, beide behoben: Lesen und
+  Hashen liefen unter der Zustands-Sperre, und `file_watch` blockierte die async-Laufzeit.
+  Offen, weil für ein paar offene Dateien unnötig: ein schnellerer Hash als FNV-1a für
+  große Dateien und eine `stat`-Vorprüfung, damit ein Ordner-Ereignis nicht alle
+  Nachbar-Abos neu hasht. Nachziehen, falls ED1 bei großen Dateien stockt.
+- **ED0.4** — Ring-Eintragstyp und IDE-Icon (E12). **Erledigt 2026-09-23** (`RING_VIEWS` in
+  `core/apps.ts`, Glyph `code-blocks` = `code_blocks` U+F84D; `edit_document` ist U+F88C für ED1).
+  `architecture-reviewer`: nichts Kritisches oder Hohes. Mitgenommen für ED4:
+  `Roots::locate` löst jede Wurzel doppelt auf (`list()` und dann `root()`). Beim
+  Dateibaum, der oft nachschlägt, soll `list()` die `Root`s gleich mitliefern. Abschluss: `architecture-reviewer`,
+  `docs/architecture.md`, Commit.
 
 ## 6. Verifikation (pro Meilenstein)
 

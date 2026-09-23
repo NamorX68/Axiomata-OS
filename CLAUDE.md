@@ -43,10 +43,11 @@ designed from the start to be extractable into a standalone app the way `axiomat
 is. Seven milestones (M7.0–M7.6), and **M7.0 is a standalone Kanban module that deliberately
 ships before the IDE** — it is useful on its own and is the data layer the agents' task
 board later sits on. The eight load-bearing decisions are settled in §3 of that plan.
-**Planned, not started:** the file app / own AAA editor (`docs/plans/editor.md`, decisions D1–D19 —
+**Under way:** the file app / own AAA editor (`docs/plans/editor.md`, decisions D1–D19 —
 TS engine + `axiomata-files` crate, tree-sitter WASM, Vi mode, LSP, one App-Ring icon each for Editor and
-IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on it). Starts only on the owner's
-explicit go. Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
+IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on it). **ED0 (file service,
+E1–E12) is done**: `axiomata-files`, root ids + dialog grants, `file_*` commands, the watcher, the ring's
+"Ansicht öffnen" entry; ED1 (editor core) is next and gets grilled first. Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
 
@@ -99,6 +100,10 @@ cargo run -p axiomata-cli -- ide agents diff <id> [--file <path>]   # what the a
 cargo run -p axiomata-cli -- ide agents commit <id> -m "…"          # commit what the agent left uncommitted
 cargo run -p axiomata-cli -- ide agents discard <id> <paths…>        # put files back to the base (committed too)
 cargo run -p axiomata-cli -- ide agents take-over <id> -m "…" [--no-ff]  # into the project folder; squash by default, never pushes
+cargo run -p axiomata-cli -- files roots          # file-service roots: workspace, project:<id>, worktree:<agent>, grant:<id>
+cargo run -p axiomata-cli -- files read <root> <rel>   # through the editor's guard; version on stderr
+cargo run -p axiomata-cli -- files write <root> <rel> [--expect <version>] < content   # Conflict if stale
+cargo run -p axiomata-cli -- files grants list|add <path>|revoke <id>   # dialog grants (~/.axiomata/file-grants.json)
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard
@@ -172,6 +177,11 @@ from the code itself:
   produces a new file name and the old one is swept up by id prefix; deleting a
   board removes its mirror. Writing it is best-effort and never fails the edit
   that triggered it.
+- **File access for the editor goes through `axiomata-files`, never a raw path**: the webview
+  names a file as `{ root, rel }` (`workspace` strict; `project:`/`worktree:`/`grant:` contained),
+  every action walks from the root fd with `openat(O_NOFOLLOW)` (`pinned.rs`), and a new place
+  on disk is reachable only through `file_pick` — the native dialog driven from Rust. Never grant
+  `dialog:*` (or `fs:*`) in `capabilities/default.json`; that would let the webview forge picks.
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.

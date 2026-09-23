@@ -49,3 +49,13 @@ vte = "0.15"
 # CJK/emoji handling (Checkpoint 2) — a lookup-table problem with no
 # terminal-specific insight to gain from reimplementing it.
 unicode-width = "0.2"
+# `openat`/`renameat`/`unlinkat` for `axiomata-files`: every action walks from
+# the root's directory fd with `O_NOFOLLOW`, so a directory swapped for a
+# symlink between the guard's check and the action cannot redirect it (the
+# TOCTOU the ED0.1 security audit found). Safe wrappers — no own `unsafe`.
+# Already in the tree transitively; `fs` is the only module needed.
+rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
+# File-change events for `axiomata-files`' watcher (editor plan E5) —
+# FSEvents on macOS. What an event *means* (modified/deleted/created, judged
+# by content version after a debounce) is our own code in `watch.rs`.
+notify = "8"

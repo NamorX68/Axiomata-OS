@@ -10,6 +10,8 @@ license.workspace = true
 # only, so `axiomata-ide` can use the board later without pulling core in.
 axiomata-board = { path = "../axiomata-board" }
 axiomata-ide = { path = "../axiomata-ide" }
+# The guarded file service (editor plan ED0); `workspace` is its strict root.
+axiomata-files = { path = "../axiomata-files" }
 home.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -23,4 +25,7 @@ gray_matter.workspace = true
 ollama-rs.workspace = true
 ignore.workspace = true
 cron.workspace = true
+
+[dev-dependencies]
+# Only the workspace tests decode images now; encoding moved to axiomata-files.
 base64.workspace = true

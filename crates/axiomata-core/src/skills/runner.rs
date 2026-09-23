@@ -552,9 +552,8 @@ fn failure_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, ProviderId, ProviderSettings};
+    use crate::config::Config;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
-    use std::collections::HashMap;
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};

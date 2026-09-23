@@ -11,6 +11,7 @@ import {
   loadHiddenBuiltins,
   loadUserApps,
   removeUserApp,
+  ringViewFor,
   setUserAppGlyph,
   showBuiltinApp,
   userApps,
@@ -43,7 +44,7 @@ describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
     expect(memoryStatus).toMatchObject({ title: "Memory" });
   });
 
-  it("preserves registry order", () => {
+  it("preserves registry order, with the view entries after the modules", () => {
     expect(listAllRingEligibleBuiltins().map((a) => a.type)).toEqual([
       "memory-status",
       "skills-deck",
@@ -54,7 +55,21 @@ describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
       "mail",
       "terminal",
       "kanban",
+      "view:ide",
     ]);
+  });
+
+  it("maps a view entry to its shell event, and a module type to nothing", () => {
+    expect(ringViewFor("view:ide")).toMatchObject({ title: "IDE", event: "shell:ide" });
+    expect(ringViewFor("terminal")).toBeUndefined();
+    expect(ringViewFor("view:nope")).toBeUndefined();
+  });
+
+  it("a view entry is hideable like a module", () => {
+    hideBuiltinApp("view:ide");
+    expect(listBuiltinApps().map((a) => a.type)).not.toContain("view:ide");
+    expect(listAllRingEligibleBuiltins().map((a) => a.type)).toContain("view:ide");
+    showBuiltinApp("view:ide");
   });
 
   it("listBuiltinApps excludes a hidden type, listAllRingEligibleBuiltins still includes it", () => {

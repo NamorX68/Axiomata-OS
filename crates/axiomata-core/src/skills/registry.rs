@@ -519,24 +519,6 @@ mod tests {
         ));
     }
 
-    /// A bare `Skill` with the backend-relevant field set, everything else
-    /// default.
-    fn skill_with_backend(backend: &str) -> Skill {
-        Skill {
-            name: "s".to_string(),
-            description: "d".to_string(),
-            model: None,
-            effort: None,
-            trigger: None,
-            backend: backend.to_string(),
-            prepend_files: Vec::new(),
-            allowed_tools: None,
-            timeout_secs: None,
-            path: PathBuf::from("/tmp/SKILL.md"),
-            body: "body".to_string(),
-        }
-    }
-
     #[test]
     fn a_skill_without_a_backend_frontmatter_defaults_to_opencode() {
         let home = TestHome::new("default-backend");

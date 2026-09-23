@@ -842,7 +842,7 @@ mod tests {
         make_app(&root, "Alpha.app");
         std::fs::write(root.join("readme.txt"), "not an app").unwrap();
 
-        let result = scan_apps(&[root.clone()], 300);
+        let result = scan_apps(std::slice::from_ref(&root), 300);
         assert_eq!(
             result
                 .apps
@@ -878,7 +878,7 @@ mod tests {
         std::fs::create_dir_all(&frameworks).unwrap();
         make_app(&frameworks, "Helper.app");
 
-        let result = scan_apps(&[root.clone()], 300);
+        let result = scan_apps(std::slice::from_ref(&root), 300);
         assert_eq!(result.apps.len(), 1, "{:?}", result.apps);
         assert_eq!(result.apps[0].name, "Outer");
         std::fs::remove_dir_all(&root).ok();
@@ -903,7 +903,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         make_app(&root, "Visual Studio Code.app");
 
-        let result = scan_apps(&[root.clone()], 300);
+        let result = scan_apps(std::slice::from_ref(&root), 300);
         assert_eq!(result.apps[0].name, "Visual Studio Code");
         assert_eq!(
             result.apps[0].path,
@@ -922,11 +922,11 @@ mod tests {
             make_app(&root, &format!("App{i}.app"));
         }
 
-        let result = scan_apps(&[root.clone()], 3);
+        let result = scan_apps(std::slice::from_ref(&root), 3);
         assert_eq!(result.apps.len(), 3);
         assert!(result.truncated);
 
-        let full = scan_apps(&[root.clone()], 10);
+        let full = scan_apps(std::slice::from_ref(&root), 10);
         assert_eq!(full.apps.len(), 5);
         assert!(!full.truncated);
         std::fs::remove_dir_all(&root).ok();
@@ -941,7 +941,7 @@ mod tests {
         // A plain file happening to be named like a bundle is not one.
         std::fs::write(root.join("Fake.app"), b"not a directory").unwrap();
 
-        let result = scan_apps(&[root.clone()], 300);
+        let result = scan_apps(std::slice::from_ref(&root), 300);
         assert_eq!(result.apps.len(), 1);
         assert_eq!(result.apps[0].name, "Real");
         std::fs::remove_dir_all(&root).ok();
@@ -962,7 +962,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::os::unix::fs::symlink(target_root.join("Real.app"), root.join("Linked.app")).unwrap();
 
-        let result = scan_apps(&[root.clone()], 300);
+        let result = scan_apps(std::slice::from_ref(&root), 300);
         assert_eq!(result.apps.len(), 1, "{:?}", result.apps);
         assert_eq!(result.apps[0].name, "Linked");
 

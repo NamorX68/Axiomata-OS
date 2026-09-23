@@ -22,6 +22,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
+# The native open dialog for the file app (editor plan E6). Driven from Rust
+# only — `capabilities/default.json` deliberately grants none of its JS API.
+tauri-plugin-dialog = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -30,4 +33,6 @@ tracing-subscriber.workspace = true
 home.workspace = true
 axiomata-core = { path = "../../../crates/axiomata-core" }
 axiomata-terminal = { path = "../../../crates/axiomata-terminal" }
+axiomata-files = { path = "../../../crates/axiomata-files" }
+rusqlite.workspace = true
 

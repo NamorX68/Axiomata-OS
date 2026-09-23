@@ -380,6 +380,56 @@ export interface WorkspaceImage {
   base64: string;
 }
 
+/** A root the file service can reach (`file_roots`). The `id` is what every
+ *  `file_*` command takes as `root`; `path` is for display only — nothing on
+ *  the Rust side accepts a path back (editor plan §ED0, E1). */
+export interface FileRootInfo {
+  id: string;
+  label: string;
+  path: string;
+  kind: "workspace" | "project" | "worktree" | "grant-file" | "grant-folder";
+}
+
+/** Opaque content fingerprint (`<len>-<hash>`); hand it back to `file_write`
+ *  as `expected` to refuse a write over someone else's change. */
+export type FileVersion = string;
+
+/** A text file read via `file_read`. `large` (over 2 MiB) means show it, but
+ *  read-only. */
+export interface TextFile {
+  rel: string;
+  content: string;
+  version: FileVersion;
+  modified: string | null;
+  large: boolean;
+}
+
+/** How a `file_*` command fails — branch on `kind`, show `message`. */
+export interface FileError {
+  kind: "UnknownRoot" | "Refused" | "NotFound" | "TooLarge" | "NotUtf8" | "Conflict" | "Io";
+  message: string;
+}
+
+/** Payload of the `files:changed` event for a file subscribed with
+ *  `file_watch`. Judged by content: `version` is what is on disk now (`null`
+ *  once gone). A change carrying the version the page's own `file_write`
+ *  returned is its own save and can be ignored. */
+export interface FileChange {
+  root: string;
+  rel: string;
+  kind: "modified" | "deleted" | "created";
+  version: FileVersion | null;
+}
+
+/** What `file_pick` returns for a pick: the root to use from now on and the
+ *  file or folder within it (`""` when the picked folder is the root). */
+export interface PickedFile {
+  root: string;
+  rel: string;
+  folder: boolean;
+  path: string;
+}
+
 export interface GraphFile {
   path: string;
   area: string | null;

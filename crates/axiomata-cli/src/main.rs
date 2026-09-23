@@ -3,6 +3,8 @@
 //! sync the memory router, send an assistant turn, call a dashboard module
 //! action through the file queue.
 
+mod files_cmd;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -76,6 +78,11 @@ enum Command {
     Board {
         #[command(subcommand)]
         action: BoardAction,
+    },
+    /// File service (editor plan ED0): roots, guarded reads/writes, grants.
+    Files {
+        #[command(subcommand)]
+        action: files_cmd::FilesAction,
     },
     /// Agentic IDE (M7.1): manage the projects the IDE works in.
     Ide {
@@ -459,6 +466,7 @@ async fn main() -> Result<()> {
         },
         Command::Routines { action } => return routines_cmd(&core, action).await,
         Command::Board { action } => return board_cmd(&core, action),
+        Command::Files { action } => files_cmd::run(&core, action)?,
         Command::Ide { action } => return ide_cmd(&core, action),
         Command::Assistant {
             message,
