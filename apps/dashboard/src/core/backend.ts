@@ -295,6 +295,84 @@ export interface AgentFields {
   env: string;
 }
 
+/* ------------------------------------------------------------ git (M7.3) ---
+ * Mirrors `axiomata_ide::git`'s serde output (CP7) and the Tauri commands
+ * around it. `FileChange` is taken by the file watcher, hence `AgentFileChange`.
+ */
+
+/** What an agent's changes are measured against (G1). */
+export interface AgentBase {
+  branch: string;
+  /** The merge base of the branch and the agent's `HEAD`. */
+  commit: string;
+  /** Not recorded for the agent: what the project folder has checked out. */
+  fallback: boolean;
+}
+
+export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "type_changed";
+
+/** One changed file, as the Diffs tab lists it (G2). */
+export interface AgentFileChange {
+  path: string;
+  old_path: string | null;
+  kind: ChangeKind;
+  /** `null` for a binary file. */
+  additions: number | null;
+  deletions: number | null;
+  binary: boolean;
+  /** Some of the change is not committed yet. */
+  uncommitted: boolean;
+}
+
+export interface AgentChanges {
+  base: AgentBase;
+  files: AgentFileChange[];
+}
+
+/** `ide_agent_changes`: the changes, or why this agent has none of its own. */
+export type AgentDiffState =
+  | { state: "ready"; changes: AgentChanges }
+  | { state: "shared_folder" }
+  | { state: "not_started" };
+
+export type GitLineKind = "context" | "add" | "remove" | "no_newline";
+
+export interface GitDiffLine {
+  kind: GitLineKind;
+  old_line: number | null;
+  new_line: number | null;
+  text: string;
+}
+
+export interface GitHunk {
+  header: string;
+  lines: GitDiffLine[];
+}
+
+/** `ide_agent_file_diff`: one file's diff, parsed. */
+export interface FileDiff {
+  path: string;
+  binary: boolean;
+  hunks: GitHunk[];
+  truncated: boolean;
+  /** Bytes on each side; `null` where the side has no such file (H8). */
+  old_size: number | null;
+  new_size: number | null;
+}
+
+/** `ide_agent_base_file`: a file as the agent's base has it (H2, H8). */
+export type BaseFile =
+  | { kind: "absent" }
+  | { kind: "text"; text: string }
+  | { kind: "image"; mime: string; base64: string }
+  | { kind: "binary"; size: number }
+  | { kind: "too_large"; size: number };
+
+export type TakeOverMode = "squash" | "no_ff";
+
+/** `ide_agent_take_over`: done, or a conflict that was undone (G9). */
+export type TakeOverResult = { outcome: "done"; commit: string } | { outcome: "conflict"; files: string[] };
+
 /* ---------------------------------------------------------------- board ---
  * Mirrors `axiomata_board`'s serde output: snake_case fields, `null` (not
  * `undefined`) for an absent `Option`, RFC 3339 strings for timestamps.

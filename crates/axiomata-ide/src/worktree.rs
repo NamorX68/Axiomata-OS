@@ -62,6 +62,18 @@ pub(crate) fn git(repo: &Path, args: &[&str]) -> Result<String> {
 ///   turns "discard this file" into "discard everything that matches", and a
 ///   `--` in front does not prevent that (security review, M7.3 CP7).
 pub(crate) fn git_with(repo: &Path, args: &[&str], ok: &[i32]) -> Result<(i32, String)> {
+    git_raw(repo, args, ok)
+        .map(|(code, stdout)| (code, String::from_utf8_lossy(&stdout).into_owned()))
+}
+
+/// Like [`git`], but stdout comes back as it is — for a blob, which may be
+/// binary (an image the agent changed, M7.3 H8).
+pub(crate) fn git_bytes(repo: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    git_raw(repo, args, &[0]).map(|(_, stdout)| stdout)
+}
+
+/// The one place that runs git; see [`git_with`] for the environment it sets.
+fn git_raw(repo: &Path, args: &[&str], ok: &[i32]) -> Result<(i32, Vec<u8>)> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -86,7 +98,7 @@ pub(crate) fn git_with(repo: &Path, args: &[&str], ok: &[i32]) -> Result<(i32, S
             },
         });
     }
-    Ok((code, String::from_utf8_lossy(&output.stdout).into_owned()))
+    Ok((code, output.stdout))
 }
 
 /// Compares two paths as the file system sees them, not as they are spelled.

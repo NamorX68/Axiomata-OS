@@ -302,6 +302,9 @@ enum AgentAction {
         #[arg(long)]
         file: Option<String>,
     },
+    /// Print a file as the agent's base branch has it (the diff's left side),
+    /// byte for byte.
+    Base { id: i64, path: String },
     /// Commit everything the agent left uncommitted in its worktree.
     Commit {
         id: i64,
@@ -1194,6 +1197,7 @@ fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
             AgentAction::Status { project } => agent_status(core, project),
             AgentAction::DiscardWorktree { id, force } => agent_discard_worktree(core, id, force),
             AgentAction::Diff { id, file } => agent_diff(core, id, file),
+            AgentAction::Base { id, path } => agent_base(core, id, &path),
             AgentAction::Commit { id, message } => {
                 let commit = agent_repo_or_bail(core, id)?.commit_all(&message)?;
                 println!("committed {commit}");
@@ -1457,6 +1461,19 @@ fn agent_diff(core: &AxiomataCore, id: i64, file: Option<String>) -> Result<()> 
     }
     if diff.truncated {
         println!("… (cut off)");
+    }
+    Ok(())
+}
+
+fn agent_base(core: &AxiomataCore, id: i64, path: &str) -> Result<()> {
+    use std::io::Write as _;
+    let limit = ide::git::MAX_DIFF_BYTES as u64;
+    match agent_repo_or_bail(core, id)?.base_blob(path, limit)? {
+        ide::git::BaseBlob::Absent => bail!("{path} is not on the agent's base branch"),
+        ide::git::BaseBlob::TooLarge { size } => {
+            bail!("{path} is {size} bytes, over the {limit}-byte limit")
+        }
+        ide::git::BaseBlob::Bytes(bytes) => std::io::stdout().write_all(&bytes)?,
     }
     Ok(())
 }

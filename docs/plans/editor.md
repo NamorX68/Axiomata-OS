@@ -459,9 +459,9 @@ Jeder Meilenstein wird vor seinem Start in Checkpoints zerlegt und gegrillt, wie
     Block normal bereinigt und erst danach vom Code eingerahmt; die zweite DOMPurify-Instanz
     ist weg. Kleiner Befund, behoben: Tags lassen sich verschieben, deshalb prüft
     `build-grammars.sh` den Commit jeder Grammatik und bricht bei Abweichung ab.
-  - Offene Kleinigkeit für CP8: Der synchrone Bildlauf nutzt zwei verschiedene Echo-Sperren
-    (Zeitfenster in der Ansicht, Frame-Flag in der Vorschau). Vereinheitlichen, wenn die
-    Diff-Ansicht als dritte Stelle dazukommt.
+  - ~~Offene Kleinigkeit für CP8: zwei verschiedene Echo-Sperren beim synchronen Bildlauf~~ —
+    mit M7.3 CP8 erledigt: eine gemeinsame `fileapp/scrollLink.ts` für Markdown-Vorschau und
+    die Diff-Ansicht nebeneinander (git-layer.md, H12).
 
 ## 6. Verifikation (pro Meilenstein)
 

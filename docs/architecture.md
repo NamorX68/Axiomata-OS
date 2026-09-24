@@ -896,6 +896,27 @@ NotStarted` so the UI can say why an agent has no diff. A hook-rejected `--no-ff
 rolled back via `MERGE_HEAD`, special files (FIFOs) are never opened, and one refresh costs two
 git calls (`status`, one `diff --raw --numstat`).
 
+**M7.3 CP8 puts a Diffs tab on every agent, drawn on the editor** (decisions H1–H16 in
+`docs/plans/git-layer.md`). A diff view is a read-only editor with markings (editor plan D15):
+the engine's `editor/diff/` turns git's hunks plus both whole sides into rows — unchanged
+stretches folded, unfoldable 20 lines at a time or entirely, changed words marked inside
+paired lines — and `view.ts` turns the rows into ordinary pane documents with
+`LineDecoration`s (row colour, gutter label, word marks, a label with buttons on an empty
+row). `EditorSurface` draws decorations generically, so the later Git-Gutter uses the same
+hook. **The hunks decide what changed** (git's own, so the view agrees with `+n −m` and a hunk
+shown is exactly the hunk that will be discarded); the whole texts only fill the gaps and
+feed one tree-sitter highlighter **per side**, because a parser reading removed and added
+lines mixed together colours both wrongly. The base side comes from the new
+`ide_agent_base_file` (`ls-tree` for the entry, `cat-file` by object id — never
+`<commit>:<path>`, whose path part git interprets), the worktree side through the guarded
+`file_read` on `worktree:<id>`; pictures show before/after. `fileapp/DiffPanes.svelte` draws
+one surface (unified) or two scrolled in step (split, blank rows opposite a missing line) and
+is shared with the file app's "Compare", which now diffs the disk against the buffer with an
+engine-side Myers (`editor/diff/myers.ts`). One echo guard (`fileapp/scrollLink.ts`) serves
+every pair of synced views. `ide/DiffView.svelte` reloads by G4 (`ide/diffRefresh.ts`: coming
+into view, the agent stopping, every 5 s while visible and working) and keeps the open file's
+folds when its hunks did not change.
+
 ### `axiomata-macos`
 
 Reserved as an integration boundary for macOS-specific features beyond what MCP servers
@@ -968,6 +989,9 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   with injections, colours in all five themes, cursor glide with trail, current line, indent
   guides, bracket colours, smooth scroll, the Markdown preview with scroll sync. Next per D15:
   M7.3 CP8/CP9 on the editor, then ED3 (Vi).
+- **M7.3 CP8 — the Diffs tab: done** (2026-09-24, §3 `axiomata-ide`): the diff on the editor
+  (unified and split, folds, word marks, per-side highlighting, pictures), `ide_agent_base_file`,
+  the file app's "Compare" as a real diff. Next: CP9 (dock panes, acting from the diff).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

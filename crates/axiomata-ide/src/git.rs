@@ -2,9 +2,11 @@
 //!
 //! Every agent works on its own branch in its own worktree (CP5). This module
 //! answers "what has this agent changed?" against the branch it was cut from,
-//! and carries out the few things the IDE lets you do about it: throw a file's
-//! changes away, commit what the agent left uncommitted, and take the agent's
-//! work over into the project's own working copy. Decisions G1–G13 in
+//! reads either side of one file for the Diffs tab — the worktree's own content
+//! via [`file_diff`], the base's via [`base_blob`] (H2, H8) — and carries out
+//! the few things the IDE lets you do about it: throw a file's changes away,
+//! commit what the agent left uncommitted, and take the agent's work over into
+//! the project's own working copy. Decisions G1–G13 and H1–H16 in
 //! `docs/plans/git-layer.md`.
 //!
 //! Driven by the `git` command line like [`crate::worktree`] (question F3), and
@@ -31,14 +33,15 @@
 //!
 //! Nothing here ever pushes.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::worktree::{self, git, git_with};
+use crate::worktree::{self, git, git_bytes, git_with};
 use crate::{IdeError, Result};
 
 /// The most diff output read for one file. Beyond it the diff is cut off and
@@ -147,6 +150,11 @@ pub struct FileDiff {
     pub hunks: Vec<Hunk>,
     /// Cut off at [`MAX_DIFF_BYTES`] / [`MAX_DIFF_LINES`].
     pub truncated: bool,
+    /// Bytes on the base side; `None` when the base has no such file.
+    pub old_size: Option<u64>,
+    /// Bytes in the worktree; `None` when the file is gone. Together with
+    /// `old_size` what a binary file's diff shows (H8).
+    pub new_size: Option<u64>,
 }
 
 /// How to take an agent's work over (G7).
@@ -194,6 +202,20 @@ pub struct AgentChanges {
     pub files: Vec<FileChange>,
 }
 
+/// One file as the base has it — the left side of the diff view (H2, H8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BaseBlob {
+    /// The base has no such file: the agent added it.
+    Absent,
+    /// Larger than the limit the caller gave; not read.
+    TooLarge {
+        /// In bytes, as the base's tree records it.
+        size: u64,
+    },
+    /// The file's content, byte for byte.
+    Bytes(Vec<u8>),
+}
+
 impl AgentRepo {
     /// The base this agent's work is measured against (G1).
     pub fn base(&self) -> Result<Base> {
@@ -210,6 +232,11 @@ impl AgentRepo {
     /// One file's diff against the base.
     pub fn file_diff(&self, path: &str, old_path: Option<&str>) -> Result<FileDiff> {
         file_diff(&self.worktree, &self.base()?.commit, path, old_path)
+    }
+
+    /// `path` as the base has it, if it is at most `max_bytes` (H2).
+    pub fn base_blob(&self, path: &str, max_bytes: u64) -> Result<BaseBlob> {
+        base_blob(&self.worktree, &self.base()?.commit, path, max_bytes)
     }
 
     /// Puts files back to the base (G13).
@@ -296,7 +323,7 @@ pub fn changes(worktree: &Path, base: &str) -> Result<Vec<FileChange>> {
 
     // `git diff` does not see untracked files; list them as added.
     for path in status.untracked {
-        let (lines, binary) = count_lines(&worktree.join(&path));
+        let (lines, binary) = counted_lines(&worktree.join(&path));
         changes.push(FileChange {
             path,
             old_path: None,
@@ -418,19 +445,23 @@ pub fn file_diff(
             binary: true,
             hunks: Vec::new(),
             truncated: false,
+            old_size: None,
+            new_size: None,
         });
     }
-    let too_large = |size: u64| size > MAX_DIFF_BYTES as u64;
+    let too_large = |size: Option<u64>| size.is_some_and(|size| size > MAX_DIFF_BYTES as u64);
     let on_disk = fs::symlink_metadata(worktree.join(path))
-        .map(|m| m.len())
-        .unwrap_or(0);
-    let in_base = base_blob_size(worktree, base, old_path.unwrap_or(path))?.unwrap_or(0);
+        .ok()
+        .map(|m| m.len());
+    let in_base = base_blob_size(worktree, base, old_path.unwrap_or(path))?;
     if too_large(on_disk) || too_large(in_base) {
         return Ok(FileDiff {
             path: path.to_string(),
             binary: false,
             hunks: Vec::new(),
             truncated: true,
+            old_size: in_base,
+            new_size: on_disk,
         });
     }
 
@@ -469,7 +500,11 @@ pub fn file_diff(
         }
         git(worktree, &args)?
     };
-    Ok(parse_diff(path, &raw))
+    Ok(FileDiff {
+        old_size: in_base,
+        new_size: on_disk,
+        ..parse_diff(path, &raw)
+    })
 }
 
 /// Puts files back to how they are in the base (G13): changed files are
@@ -535,24 +570,65 @@ pub fn discard(worktree: &Path, base: &str, paths: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// The size of `path` in `base`, or `None` when the base has no such file.
+/// `path` as `base` has it (H2): absent, too large, or its bytes.
+///
+/// The blob is looked up by `ls-tree` (a literal path, like every path here)
+/// and then read by its object id — never as `<commit>:<path>`, whose path
+/// part git would interpret (`./`, `:/`) instead of taking it as spelled.
+/// A directory or submodule under that name counts as absent: there is no
+/// file to show.
+pub fn base_blob(worktree: &Path, base: &str, path: &str, max_bytes: u64) -> Result<BaseBlob> {
+    checked_path(path)?;
+    let Some(entry) = base_entry(worktree, base, path)? else {
+        return Ok(BaseBlob::Absent);
+    };
+    if entry.kind != "blob" {
+        return Ok(BaseBlob::Absent);
+    }
+    if entry.size > max_bytes {
+        return Ok(BaseBlob::TooLarge { size: entry.size });
+    }
+    git_bytes(worktree, &["cat-file", "blob", &entry.oid]).map(BaseBlob::Bytes)
+}
+
+/// One entry of the base's tree, as `ls-tree --long` lists it.
+struct TreeEntry {
+    /// `blob`, `tree` or `commit` (a submodule).
+    kind: String,
+    /// The object id `cat-file blob` reads the content from.
+    oid: String,
+    /// `0` for a tree, which has no size.
+    size: u64,
+}
+
+/// `path`'s entry in `base`, or `None` when the base has no such path.
 ///
 /// `ls-tree` rather than `cat-file -e`: the latter exits 128 for "no such
 /// path" — the same code as any fatal error, so a real failure would have
 /// read as "the agent added this" and led to a deletion (architecture review).
 /// `ls-tree` exits 0 either way and answers with an empty line for "absent".
-fn base_blob_size(worktree: &Path, base: &str, path: &str) -> Result<Option<u64>> {
+fn base_entry(worktree: &Path, base: &str, path: &str) -> Result<Option<TreeEntry>> {
     let listed = git(worktree, &["ls-tree", "-z", "--long", base, "--", path])?;
     Ok(listed
         .split('\0')
         .find(|entry| !entry.is_empty())
         .and_then(|entry| entry.split('\t').next())
-        .map(|meta| {
-            meta.split_whitespace()
-                .nth(3)
+        .and_then(|meta| {
+            // `<mode> <type> <object> <size>`, the size right-aligned.
+            let mut fields = meta.split_whitespace().skip(1);
+            let kind = fields.next()?.to_string();
+            let oid = fields.next()?.to_string();
+            let size = fields
+                .next()
                 .and_then(|size| size.parse().ok())
-                .unwrap_or(0)
+                .unwrap_or(0);
+            Some(TreeEntry { kind, oid, size })
         }))
+}
+
+/// The size of `path` in `base`, or `None` when the base has no such file.
+fn base_blob_size(worktree: &Path, base: &str, path: &str) -> Result<Option<u64>> {
+    Ok(base_entry(worktree, base, path)?.map(|entry| entry.size))
 }
 /// Commits everything uncommitted in the worktree (G3) — what the agent left
 /// lying around. Returns the new commit.
@@ -818,6 +894,53 @@ fn is_untracked(worktree: &Path, path: &str) -> Result<bool> {
 /// and opening a FIFO for reading blocks until a writer appears — forever,
 /// taking a blocking-pool thread with it on every poll (security review).
 /// Anything that is not a regular file counts as binary, unopened.
+/// The most untracked files whose line counts are remembered; past it the
+/// memory is simply dropped and rebuilt.
+const LINE_COUNT_CACHE_LIMIT: usize = 4096;
+
+/// What a file looked like when its lines were counted: size and mtime.
+type Stamp = (u64, std::time::SystemTime);
+
+/// A file's line count and binary flag, as [`count_lines`] returns them.
+type Counted = (u32, bool);
+
+/// Line counts of untracked files, remembered by what the file looked like
+/// then. The Diffs tab asks every 5 s while an agent works (G4), and an
+/// untracked file is otherwise read whole each time to count its lines —
+/// up to 2 MiB per file per poll for a badge that has not changed
+/// (performance review, CP8).
+static LINE_COUNTS: LazyLock<Mutex<HashMap<PathBuf, (Stamp, Counted)>>> =
+    LazyLock::new(Default::default);
+
+/// [`count_lines`], skipped when the file's size and mtime are unchanged
+/// since it was last counted.
+fn counted_lines(path: &Path) -> (u32, bool) {
+    let stamp = fs::symlink_metadata(path)
+        .ok()
+        .filter(|meta| meta.file_type().is_file())
+        .and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
+    let Some(stamp) = stamp else {
+        return count_lines(path);
+    };
+    if let Some((seen, counted)) = LINE_COUNTS
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(path).copied())
+        && seen == stamp
+    {
+        return counted;
+    }
+    // Counted without the lock held: reading the file is the slow part.
+    let counted = count_lines(path);
+    if let Ok(mut cache) = LINE_COUNTS.lock() {
+        if cache.len() >= LINE_COUNT_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(path.to_path_buf(), (stamp, counted));
+    }
+    counted
+}
+
 fn count_lines(path: &Path) -> (u32, bool) {
     if !is_regular_file(path) {
         return (0, true);
@@ -863,6 +986,8 @@ fn parse_diff(path: &str, raw: &str) -> FileDiff {
         binary: false,
         hunks: Vec::new(),
         truncated: false,
+        old_size: None,
+        new_size: None,
     };
     let raw = if raw.len() > MAX_DIFF_BYTES {
         diff.truncated = true;
@@ -1121,6 +1246,81 @@ mod tests {
                 (LineKind::Context, Some(3), Some(3), "three"),
             ]
         );
+    }
+
+    #[test]
+    fn the_base_side_of_a_file_is_read_as_the_base_has_it() {
+        let f = fixture();
+        f.agent_commits("README.md", "changed\n");
+        let commit = f.base().commit;
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "README.md", 1024).unwrap(),
+            BaseBlob::Bytes(b"one\ntwo\nthree\n".to_vec())
+        );
+        fs::write(f.worktree.join("new.md"), "new").unwrap();
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "new.md", 1024).unwrap(),
+            BaseBlob::Absent
+        );
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "README.md", 4).unwrap(),
+            BaseBlob::TooLarge { size: 14 }
+        );
+        assert!(base_blob(&f.worktree, &commit, "../README.md", 1024).is_err());
+    }
+
+    #[test]
+    fn the_base_side_takes_a_path_literally_and_skips_directories() {
+        let f = fixture();
+        fs::create_dir_all(f.repo.join("src")).unwrap();
+        fs::write(f.repo.join("src/lib.rs"), "fn a() {}\n").unwrap();
+        fs::write(f.repo.join(":colon.txt"), "odd\n").unwrap();
+        fs::write(f.repo.join("image.png"), [0x89, b'P', b'N', b'G', 0, 1, 2]).unwrap();
+        run(&f.repo, &["add", "."]);
+        run(&f.repo, &["commit", "--quiet", "-m", "more"]);
+        let commit = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "src/lib.rs", 1024).unwrap(),
+            BaseBlob::Bytes(b"fn a() {}\n".to_vec())
+        );
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "src", 1024).unwrap(),
+            BaseBlob::Absent
+        );
+        assert_eq!(
+            base_blob(&f.worktree, &commit, ":colon.txt", 1024).unwrap(),
+            BaseBlob::Bytes(b"odd\n".to_vec())
+        );
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "image.png", 1024).unwrap(),
+            BaseBlob::Bytes(vec![0x89, b'P', b'N', b'G', 0, 1, 2])
+        );
+    }
+
+    #[test]
+    fn a_diff_carries_the_size_of_both_sides() {
+        let f = fixture();
+        f.agent_commits("README.md", "one\n");
+        let diff = file_diff(&f.worktree, &f.base().commit, "README.md", None).unwrap();
+        assert_eq!((diff.old_size, diff.new_size), (Some(14), Some(4)));
+        fs::write(f.worktree.join("new.md"), "abc").unwrap();
+        let added = file_diff(&f.worktree, &f.base().commit, "new.md", None).unwrap();
+        assert_eq!((added.old_size, added.new_size), (None, Some(3)));
+    }
+
+    #[test]
+    fn an_untracked_file_is_counted_again_once_it_changes() {
+        let f = fixture();
+        let file = f.worktree.join("draft.md");
+        fs::write(&file, "a\nb\n").unwrap();
+        assert_eq!(counted_lines(&file), (2, false));
+        assert_eq!(counted_lines(&file), (2, false));
+        // A different size is a different stamp, whatever the clock's resolution.
+        fs::write(&file, "a\nb\nc\n").unwrap();
+        assert_eq!(counted_lines(&file), (3, false));
     }
 
     #[test]
@@ -1682,5 +1882,120 @@ mod tests {
             "keep\n"
         );
         assert!(f.changes().is_empty(), "{:?}", f.changes());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_in_the_base_reads_as_its_link_target() {
+        use std::os::unix::fs::symlink;
+        let f = fixture();
+        symlink("README.md", f.repo.join("link.md")).unwrap();
+        run(&f.repo, &["add", "link.md"]);
+        run(&f.repo, &["commit", "--quiet", "-m", "add a symlink"]);
+        let commit = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "link.md", 1024).unwrap(),
+            BaseBlob::Bytes(b"README.md".to_vec()),
+            "a symlink is a blob whose content is its target path, mode 120000"
+        );
+    }
+
+    #[test]
+    fn a_submodule_entry_in_the_base_counts_as_absent() {
+        let f = fixture();
+        let head = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        // A gitlink entry (mode 160000, type `commit`) is what `ls-tree` reports
+        // for a submodule reference — built directly via the index rather than a
+        // real submodule checkout (cheap, and `ls-tree` cannot tell the
+        // difference from a real one).
+        run(
+            &f.repo,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                "160000",
+                &head,
+                "sub",
+            ],
+        );
+        run(
+            &f.repo,
+            &["commit", "--quiet", "-m", "add a submodule reference"],
+        );
+        let commit = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "sub", 1024).unwrap(),
+            BaseBlob::Absent,
+            "a submodule has no file content to show"
+        );
+    }
+
+    #[test]
+    fn the_base_side_of_a_rename_is_read_under_its_old_path_only() {
+        let f = fixture();
+        run(&f.worktree, &["mv", "keep.txt", "kept.txt"]);
+        run(&f.worktree, &["commit", "--quiet", "-m", "rename"]);
+        let commit = f.base().commit;
+
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "keep.txt", 1024).unwrap(),
+            BaseBlob::Bytes(b"keep\n".to_vec()),
+            "the old name still resolves in the base"
+        );
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "kept.txt", 1024).unwrap(),
+            BaseBlob::Absent,
+            "the new name does not exist in the base"
+        );
+    }
+
+    #[test]
+    fn base_blob_at_exactly_the_size_limit_is_still_read() {
+        let f = fixture();
+        // README.md is 14 bytes in the base (see
+        // `the_base_side_of_a_file_is_read_as_the_base_has_it`).
+        let commit = f.base().commit;
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "README.md", 14).unwrap(),
+            BaseBlob::Bytes(b"one\ntwo\nthree\n".to_vec()),
+            "the limit itself must not be treated as too large"
+        );
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "README.md", 13).unwrap(),
+            BaseBlob::TooLarge { size: 14 },
+            "one byte over the limit is too large"
+        );
+    }
+
+    #[test]
+    fn the_base_side_of_a_file_with_spaces_and_umlauts_in_its_name_is_read() {
+        let f = fixture();
+        fs::write(f.repo.join("new file ü.txt"), "a\nb").unwrap();
+        run(&f.repo, &["add", "."]);
+        run(
+            &f.repo,
+            &["commit", "--quiet", "-m", "add a file with an odd name"],
+        );
+        let commit = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+
+        assert_eq!(
+            base_blob(&f.worktree, &commit, "new file ü.txt", 1024).unwrap(),
+            BaseBlob::Bytes(b"a\nb".to_vec())
+        );
     }
 }

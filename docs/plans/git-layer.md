@@ -1,6 +1,7 @@
 # Detailplan: M7.3 — Git-Schicht (CP7–CP9)
 
-Status: **gegrillt und bestätigt; CP7 gebaut und geprüft**, CP8/CP9 offen (Stand 2026-09-23).
+Status: **gegrillt und bestätigt; CP7 und CP8 gebaut und geprüft**; CP8/CP9 auf dem neuen Editor gegrillt
+(H1–H16, 2026-09-24); CP9 in Arbeit.
 Gehört zu [`agentic-ide.md`](agentic-ide.md) §5, M7.3. Vorgänger: M7.2 CP5 (ein
 Worktree pro Agent, `git` als Unterprozess — F3) und CP6 (Status-Kanal, der sagt,
 wann ein Agent fertig ist).
@@ -110,6 +111,87 @@ Ausgabe geraten.
 - **Außerdem festgehalten:** M7.3 **pusht nie**. Commits laufen mit der Git-Identität
   und den Hooks des Nutzers (Unterprozess, F3). Jeder Pfad aus der Oberfläche wird
   relativ zur Worktree-Wurzel geprüft (kein `..`, nicht absolut).
+
+## CP8/CP9 auf dem Editor (gegrillt 2026-09-24, Runden Q1–Q16, alle vom Owner bestätigt)
+
+Seit dem Editor-Plan (`editor.md`, D15) ist die Diff-Ansicht ein schreibgeschützter Editor
+mit Markierungen, und „Datei öffnen" öffnet den Editor statt des FileViewers. Die
+Entscheidungen heißen **H**, weil G schon vergeben ist (hier und im Editor-Plan).
+
+- **H1 — Einspaltig und nebeneinander** (Q1), umschaltbar per Knopf und ⌘⇧D, die Wahl wird
+  gemerkt. Vorgabe im schmalen Seiten-Tab einspaltig, in der Dock-Pane nebeneinander.
+- **H2 — Volltexte beider Seiten** (Q2): die Agenten-Seite über `file_read` auf
+  `worktree:<id>`, die Basis-Seite über den neuen Befehl `ide_agent_base_text`
+  (`git show <merge-base>:<pfad>`, gleiche Grenzen). Jede Seite wird für sich geparst;
+  jede Diff-Zeile nimmt die Farben ihrer Seite. **Was** sich geändert hat, bleibt
+  git's Hunks (passt zu `+n −m`).
+- **H3 — Auf dem Editor, nicht daneben** (Q3): `EditorSurface` bekommt allgemeine
+  Anschlüsse — Zeilenmarkierungen, einen austauschbaren Zeilenrand, Trennzeilen ohne
+  Text. Das Diff-Modell ist reine Logik in `editor/diff/` (vitest). Derselbe Anschluss
+  trägt später den Git-Gutter.
+- **H4 — Wortgenaue Markierung** (Q4) für Paare aus entfernter und hinzugefügter Zeile,
+  mit Obergrenze; Token `--ax-diff-add`, `--ax-diff-remove`, `--ax-diff-add-word`,
+  `--ax-diff-remove-word`, `--ax-diff-hunk` in allen Themes.
+- **H5 — „Datei öffnen" = IDE-Dock-Pane „Datei"** (Q5) auf `worktree:<id>`, an der
+  angeklickten Zeile, mit denselben Balken wie die Datei-App und dem Hinweis aus G6.
+- **H6 — Verwerfen pro Datei und pro Hunk** (Q6). Der Hunk wird per umgekehrtem Patch
+  (`git apply -R`, nur dieser Hunk) zurückgesetzt, als uncommittete Änderung wie G13,
+  mit Rückfrage; passt er nicht mehr, wird abgelehnt.
+- **H7 — F10 „Unterschied ansehen" wird ein echter Diff** (Q7): ein Zeilen-Diff (Myers)
+  in der Engine, derselbe Anzeiger; ersetzt die Platten-Fassung daneben.
+- **H8 — Binär und Bilder** (Q8): Hinweis „Binärdatei geändert" mit beiden Größen;
+  Bilder als Vorher/Nachher.
+- **H9 — Tasten** (Q9): ⌥↓/⌥↑ Hunk, ⌥⌘↓/⌥⌘↑ Datei, ⏎ an der Zeile öffnen, ⌘⇧D
+  Darstellung, ⌘⌫ Hunk verwerfen (Rückfrage), ⌘R aktualisieren; Vi (`]c`/`[c`) mit ED3.
+- **H10 — Vorbelegte Nachrichten** (Q10): Übernehmen mit dem Plan-Titel (CP6b), sonst dem
+  Betreff des letzten Agenten-Commits; Commit mit „wip: <Agentname>". Editierbar.
+- **H11 — Kontext aufklappen** (Q11): Trennzeile „⋯ n unveränderte Zeilen" mit „↑ 20",
+  „↓ 20" und „alle", dazu ein Schalter „ganze Datei".
+- **H12 — Nebeneinander = zwei schreibgeschützte Editoren** auf einem ausgerichteten
+  Zeilenplan (Platzhalterzeilen), synchron gescrollt über **eine** gemeinsame
+  Echo-Sperre, die auch die zwei Sperren aus ED2 ersetzt (Q12).
+- **H13 — Verwerfen während `working`** (Q13): erlaubt; die Rückfrage sagt deutlich, dass
+  der Agent gerade arbeitet. Ein nicht mehr passender Hunk ⇒ Ablehnung, Neuladen, Hinweis.
+- **H14 — Zwei neue Dock-Panes** (Q14): `agent-diff` (`config: { agentId }`, höchstens eine
+  pro Agent, eigene Dateiauswahl) und `file` (`config: { root, rel }`, allgemein, auch für
+  die spätere IDE-Dateiansicht; fehlende Wurzel ⇒ Hinweis statt Verschwinden; dieselbe
+  Datei zweimal ⇒ die bestehende nach vorn). Beide im Projekt-Layout gespeichert.
+- **H15 — Kein „Leerzeichen ignorieren"** (Q15) — die Hunks müssen zum echten Inhalt
+  passen, sonst verwirft H6 etwas anderes, als man sieht. Später-Punkt.
+- **H16 — Checkpoints** (Q16): **CP8a** Grundlagen (Diff-Logik, Surface-Anschlüsse,
+  `ide_agent_base_text`, TS-Typen, devmock, Token) · **CP8b** Diffs-Tab (inkl. H7 und
+  der gemeinsamen Echo-Sperre) · **CP9a** Dock-Panes · **CP9b** Handeln (Verwerfen pro
+  Datei/Hunk, Commit, Übernehmen, Sperren). Commit nach CP8 und nach CP9.
+
+## CP8 — gebaut (2026-09-24) und was die Prüfungen geändert haben
+
+Gebaut wie H1–H16 es sagen: `editor/diff/` (Myers, Hunks, Wort-Diff, Modell mit Faltungen,
+Pane-Dokumente, Färbung je Seite), die Dekorations-Anschlüsse an `EditorSurface`,
+`fileapp/DiffPanes.svelte` (einspaltig oder zwei Editoren nebeneinander), `ide/DiffView.svelte`
+im Seiten-Tab, `ide_agent_base_file` + CLI `ide agents base`, „Compare" der Datei-App als echter
+Diff, eine gemeinsame Echo-Sperre (`fileapp/scrollLink.ts`). Im Browser gegen devmock geprüft
+(Agent 1 hat dort einen Worktree mit allen Änderungsarten, Agent 2 den geteilten Ordner).
+
+- **Beim Testen gefunden:** Ein 5-s-Abruf, der vor einem Dateiwechsel begann, lud danach die
+  alte Datei — jede Ladung prüft jetzt, ob ihre Datei noch die gewählte ist. Beim Dateiwechsel
+  fragte die Anzeige kurz die Highlighter der *alten* Datei nach Zeilen jenseits ihres Endes,
+  tree-sitter warf und die Anzeige blieb stehen — die Highlighter tragen jetzt die Texte, für
+  die sie gebaut sind, und `SyntaxHighlighter.spans` antwortet auf einen Bereich hinter dem
+  Ende leer.
+- **Tests:** Nebeneinander paarte eine geänderte letzte Zeile nicht über git's
+  „No newline"-Hinweis hinweg (der Wort-Diff schon) — jetzt einheitlich.
+- **Performance (HIGH):** Jeder Abruf las jede unversionierte Datei ganz, um ihre Zeilen zu
+  zählen — die Zählung wird jetzt nach Größe und Änderungszeit gemerkt. Bilder beider Seiten
+  laden parallel; ob sich der offene Diff geändert hat, wird Feld für Feld verglichen statt
+  über `JSON.stringify`.
+- **Architektur (HIGH):** „Ist das Text?" hatte zwei Regeln (Worktree: UTF-8; Basis: UTF-8
+  ohne NUL) — jetzt eine, `axiomata_files::text_from_bytes`, für beide Seiten.
+- **Sicherheit:** nur LOW (Symlinks zeigen ihr Ziel als Text, wie `git diff` selbst).
+- **Für CP9 vorgemerkt:** Verwerfen mehrerer Dateien bündeln (ein `ls-tree`, ein `restore`
+  statt zwei Aufrufen pro Pfad); die Lade-Logik von `DiffView` in eine testbare Klasse ziehen,
+  wenn die Handgriffe dazukommen; die Dock-Pane braucht eine eigene Kopfzeile (welcher Agent).
+- **Später:** „Leerzeichen ignorieren" (H15); bessere Paarung geänderter Zeilen nach Ähnlichkeit
+  statt nach Position (heute bleibt eine eingeschobene Kommentarzeile ohne Wortmarken).
 
 ## CP7 — was die Prüfungen geändert haben
 

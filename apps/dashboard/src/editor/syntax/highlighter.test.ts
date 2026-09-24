@@ -115,6 +115,13 @@ describe("SyntaxHighlighter", () => {
     h.dispose();
   });
 
+  it("answers a request past the end with no colours instead of throwing", async () => {
+    const doc = docFrom("|fn a() {}");
+    const h = (await SyntaxHighlighter.create(doc, runtime, "rust"))!;
+    expect(h.spans(40, 60).size).toBe(0);
+    h.dispose();
+  });
+
   it("has no grammar for plain text", async () => {
     expect(await SyntaxHighlighter.create(docFrom("|x"), runtime, "haskell")).toBeNull();
   });

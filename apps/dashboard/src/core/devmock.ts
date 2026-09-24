@@ -35,7 +35,12 @@ import type {
   Skill,
   SpendSummary,
   SyncReport,
+  AgentFileChange,
+  BaseFile,
+  FileDiff,
 } from "./backend";
+import { hunksFromTexts } from "../editor/diff/hunks";
+import { textLines } from "../editor/diff/model";
 
 const LATENCY_MS = 120;
 const delay = () => new Promise((r) => setTimeout(r, LATENCY_MS));
@@ -706,6 +711,125 @@ const otherRootFiles = new Map<string, string>([
   ],
 ]);
 
+// ---- agent 1's worktree (M7.3 CP8) ----
+// The mock has no git: agent 1's "base" is simply project 1's files as they
+// are, and its worktree is a second set under `worktree:1` that differs from it
+// in every way the Diffs tab has to show — a long file changed in two far-apart
+// places (folds), a small edit, a new file, a deleted one, and a picture.
+
+/** A long Rust file, so the diff has gaps worth folding. */
+function demoLines(changed: boolean): string {
+  const out = ["//! The diff view's demo file.", "", "use std::fmt;", ""];
+  for (let i = 1; i <= 30; i++) {
+    out.push(`/// Step ${i}.`, `pub fn step_${i}(x: u32) -> u32 {`);
+    if (changed && i === 4) out.push("    // Doubled since the agent's first pass.", `    x * ${i} * 2`);
+    else if (changed && i === 27) out.push(`    x.saturating_mul(${i})`);
+    else out.push(`    x * ${i}`);
+    out.push("}", "");
+  }
+  return out.join("\n");
+}
+
+otherRootFiles.set("project:1\0src/demo.rs", demoLines(false));
+otherRootFiles.set("worktree:1\0src/demo.rs", demoLines(true));
+otherRootFiles.set(
+  "worktree:1\0src/main.rs",
+  (otherRootFiles.get("project:1\0src/main.rs") ?? "").replace("let n: u32 = 42;", "let n: u32 = 7; // fewer"),
+);
+otherRootFiles.set("worktree:1\0src/App.svelte", otherRootFiles.get("project:1\0src/App.svelte") ?? "");
+otherRootFiles.set(
+  "worktree:1\0src/words.rs",
+  [
+    "/// Splits text into words.",
+    "pub fn words(text: &str) -> Vec<&str> {",
+    "    text.split_whitespace().collect()",
+    "}",
+    "",
+  ].join("\n"),
+);
+
+/** 24×24 squares: the base's orange logo and the agent's green one. */
+const MOCK_IMAGES = {
+  base:
+    "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAH0lEQVR4nGP4XyVFFcQwatCoQaMGjRo0atCoQQNvEACJB4runjWXOAAAAABJ" +
+    "RU5ErkJggg==",
+  worktree:
+    "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAH0lEQVR4nGPwv1ZPFcQwatCoQaMGjRo0atCoQQNvEAAEVrEuaRoBFQAAAABJ" +
+    "RU5ErkJggg==",
+};
+const MOCK_IMAGE_PATH = "assets/logo.png";
+/** Changes the mock pretends are not committed yet. */
+const MOCK_UNCOMMITTED = new Set(["src/words.rs", "src/main.rs"]);
+
+/** Text files of one root, by relative path. */
+function rootFiles(root: string): Map<string, string> {
+  const prefix = `${root}\0`;
+  const out = new Map<string, string>();
+  for (const [key, content] of otherRootFiles) if (key.startsWith(prefix)) out.set(key.slice(prefix.length), content);
+  return out;
+}
+
+/** Agent 1's changes against project 1, the way `changes()` reports them. */
+function mockAgentChanges(): AgentFileChange[] {
+  const base = rootFiles("project:1");
+  const work = rootFiles("worktree:1");
+  const out: AgentFileChange[] = [];
+  for (const path of new Set([...base.keys(), ...work.keys()])) {
+    const before = base.get(path);
+    const after = work.get(path);
+    if (before === after) continue;
+    const hunks = hunksFromTexts(textLines(before ?? ""), textLines(after ?? ""));
+    const count = (kind: string) => hunks.reduce((n, h) => n + h.lines.filter((l) => l.kind === kind).length, 0);
+    out.push({
+      path,
+      old_path: null,
+      kind: before === undefined ? "added" : after === undefined ? "deleted" : "modified",
+      additions: after === undefined ? 0 : before === undefined ? textLines(after).length : count("add"),
+      deletions: before === undefined ? 0 : after === undefined ? textLines(before).length : count("remove"),
+      binary: false,
+      uncommitted: MOCK_UNCOMMITTED.has(path),
+    });
+  }
+  out.push({
+    path: MOCK_IMAGE_PATH,
+    old_path: null,
+    kind: "modified",
+    additions: null,
+    deletions: null,
+    binary: true,
+    uncommitted: false,
+  });
+  return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** One file's diff in the wire shape (`FileDiff`), git's line numbers and all. */
+function mockFileDiff(path: string): FileDiff {
+  if (path === MOCK_IMAGE_PATH) {
+    return { path, binary: true, hunks: [], truncated: false, old_size: 94, new_size: 94 };
+  }
+  const before = rootFiles("project:1").get(path);
+  const after = rootFiles("worktree:1").get(path);
+  const lines = (text: string | undefined) => (text === undefined ? [] : textLines(text));
+  const hunks = hunksFromTexts(lines(before), lines(after));
+  return {
+    path,
+    binary: false,
+    truncated: false,
+    old_size: before?.length ?? null,
+    new_size: after?.length ?? null,
+    hunks: hunks.map((h) => ({
+      header: h.header,
+      lines: h.lines.map((l) => ({ kind: l.kind, old_line: l.oldLine, new_line: l.newLine, text: l.text })),
+    })),
+  };
+}
+
+function mockBaseFile(path: string): BaseFile {
+  if (path === MOCK_IMAGE_PATH) return { kind: "image", mime: "image/png", base64: MOCK_IMAGES.base };
+  const text = rootFiles("project:1").get(path);
+  return text === undefined ? { kind: "absent" } : { kind: "text", text };
+}
+
 /** The file the next mock `file_pick` returns (console: `__ax.mockPickNext`). */
 let nextPick: { root: string; rel: string } | null = null;
 
@@ -1036,6 +1160,23 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
               : null,
         })) as T;
     }
+    // Agent 1 has a worktree with changes, agent 2 shares the folder, every
+    // other agent has not been started yet — the three states of the tab.
+    case "ide_agent_changes":
+      if (args.id === 1) {
+        return {
+          state: "ready",
+          changes: {
+            base: { branch: "main", commit: "4f9c2d1e8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d", fallback: false },
+            files: mockAgentChanges(),
+          },
+        } as T;
+      }
+      return { state: args.id === 2 ? "shared_folder" : "not_started" } as T;
+    case "ide_agent_file_diff":
+      return mockFileDiff(String(args.path)) as T;
+    case "ide_agent_base_file":
+      return mockBaseFile(String(args.path)) as T;
     case "ide_agent_has_changes":
       return false as T;
     case "discard_ide_agent_worktree":
@@ -1326,6 +1467,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return [
         { id: "workspace", label: "Second Brain", path: "/mock/vault", kind: "workspace" },
         { id: "project:1", label: "Axiomata-OS", path: "/mock/code/axiomata-os", kind: "project" },
+        { id: "worktree:1", label: "Builder", path: "/mock/.axiomata/worktrees/builder-1", kind: "worktree" },
       ] as T;
     case "file_read": {
       const { root, rel } = fileArgs(args);
@@ -1372,6 +1514,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       recoveries.delete(`${String(args.root)}\0${String(args.rel)}`);
       return undefined as T;
     case "file_read_image":
+      if (args.root === "worktree:1" && args.rel === MOCK_IMAGE_PATH) {
+        return { rel: MOCK_IMAGE_PATH, mime: "image/png", base64: MOCK_IMAGES.worktree } as T;
+      }
       throw fileError("NotFound", "devmock has no images for the file service");
     case "file_pick":
       if (nextPick && !args.folder) {

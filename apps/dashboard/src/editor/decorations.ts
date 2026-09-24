@@ -91,3 +91,40 @@ export function stepCursor(
     : [];
   return { motion: { x, y, trail }, done: false };
 }
+
+/** A marked stretch of one line (a changed word, H4), `[from, to)` in UTF-16 columns. */
+export interface LineMark {
+  from: number;
+  to: number;
+  /** Drawn with the class `mk-<kind>`. */
+  kind: string;
+}
+
+/** A button drawn on a line (unfold a gap, H11). */
+export interface LineAction {
+  id: string;
+  label: string;
+  title?: string;
+}
+
+/**
+ * What a surface draws for one line beyond its text (`docs/plans/git-layer.md`,
+ * H3): the diff view's colours, gutter and fold rows today, the Git-Gutter later.
+ */
+export interface LineDecoration {
+  /** Drawn with the class `ln-<kind>` across the whole row, gutter included. */
+  kind?: string;
+  /** Replaces the line number. */
+  gutter?: string;
+  marks?: readonly LineMark[];
+  /** Text drawn on a line that has none of its own (a fold, a note). */
+  label?: string;
+  actions?: readonly LineAction[];
+}
+
+/** Decorations for a whole document; with them, the gutter shows their labels, not line numbers. */
+export interface LineDecorations {
+  /** Width of the gutter, in cells. */
+  gutterCells: number;
+  line(line: number): LineDecoration | undefined;
+}

@@ -156,6 +156,9 @@ export class SyntaxHighlighter {
     if (!tree || !this.lang.highlights) return new Map();
     const store = this.doc.store;
     const lastLine = Math.min(last, store.lineCount() - 1);
+    // Lines past the end (a caller still drawing a longer text) have no colours;
+    // tree-sitter would throw on a range that ends before it starts.
+    if (first > lastLine) return new Map();
     const layers = [toCaptures(this.lang.highlights, tree.rootNode, { first, last: lastLine })];
     if (this.lang.injections) layers.push(this.injectedCaptures(tree, first, lastLine));
     if (options.brackets) layers.push(this.bracketCaptures(tree, first, lastLine));

@@ -970,6 +970,61 @@ mod tests {
         std::fs::remove_dir_all(&target_root).ok();
         std::fs::remove_dir_all(&root).ok();
     }
+
+    // ---- M7.3 CP8a: `BaseFile::from_blob` ----
+
+    #[test]
+    fn base_file_from_blob_reports_absence_and_size_without_reading_content() {
+        assert!(matches!(
+            BaseFile::from_blob("x.txt", ide::git::BaseBlob::Absent),
+            BaseFile::Absent
+        ));
+        assert!(matches!(
+            BaseFile::from_blob("x.txt", ide::git::BaseBlob::TooLarge { size: 999 }),
+            BaseFile::TooLarge { size: 999 }
+        ));
+    }
+
+    #[test]
+    fn base_file_from_blob_reads_utf8_bytes_as_text() {
+        let blob = ide::git::BaseBlob::Bytes(b"hello\nworld".to_vec());
+        match BaseFile::from_blob("notes.md", blob) {
+            BaseFile::Text { text } => assert_eq!(text, "hello\nworld"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn base_file_from_blob_treats_nul_bytes_as_binary_even_though_they_are_valid_utf8() {
+        let blob = ide::git::BaseBlob::Bytes(b"a\0b".to_vec());
+        match BaseFile::from_blob("notes.md", blob) {
+            BaseFile::Binary { size } => assert_eq!(size, 3),
+            other => panic!("expected Binary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn base_file_from_blob_treats_non_utf8_bytes_as_binary() {
+        let blob = ide::git::BaseBlob::Bytes(vec![0xff, 0xfe, 0x00, 0x01]);
+        match BaseFile::from_blob("notes.md", blob) {
+            BaseFile::Binary { size } => assert_eq!(size, 4),
+            other => panic!("expected Binary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn base_file_from_blob_reads_a_known_image_extension_as_an_image_even_if_the_bytes_look_like_text()
+     {
+        // The extension decides first; `image_mime` never looks at the bytes.
+        let blob = ide::git::BaseBlob::Bytes(b"not really a png".to_vec());
+        match BaseFile::from_blob("shot.png", blob) {
+            BaseFile::Image { mime, base64 } => {
+                assert_eq!(mime, "image/png");
+                assert!(!base64.is_empty());
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
+    }
 }
 
 /// Reads `~/.axiomata/dashboard.json` (raw text) or the defaults; a corrupt
@@ -1857,6 +1912,69 @@ pub async fn ide_agent_file_diff(
 ) -> Result<ide::git::FileDiff, String> {
     let repo = ready_repo_of(&state, id)?;
     off_main(move || repo.file_diff(&path, old_path.as_deref())).await
+}
+
+/// One file as the agent's base has it — the left side of the diff (M7.3 H2,
+/// H8). Text within the diff limit comes back as text, an image as base64 like
+/// `file_read_image`, anything else only as its size.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BaseFile {
+    /// The base has no such file: the agent added it.
+    Absent,
+    /// UTF-8 content without a NUL byte, as `axiomata_files::text_from_bytes` decides it.
+    Text { text: String },
+    /// One of `axiomata_files::image_mime`'s known extensions.
+    Image { mime: &'static str, base64: String },
+    /// Not text by `axiomata_files::text_from_bytes`, and not an image.
+    Binary { size: u64 },
+    /// Over the diff/image byte limit passed to `AgentRepo::base_blob`; not read.
+    TooLarge { size: u64 },
+}
+
+impl BaseFile {
+    /// Classifies a base-side blob the same way `file_read`/`file_read_image` would: an image
+    /// extension first, then text, otherwise opaque binary.
+    fn from_blob(path: &str, blob: ide::git::BaseBlob) -> Self {
+        let bytes = match blob {
+            ide::git::BaseBlob::Absent => return Self::Absent,
+            ide::git::BaseBlob::TooLarge { size } => return Self::TooLarge { size },
+            ide::git::BaseBlob::Bytes(bytes) => bytes,
+        };
+        if let Some(image) = axiomata_files::image_from_bytes(path, &bytes) {
+            return Self::Image {
+                mime: image.mime,
+                base64: image.base64,
+            };
+        }
+        let size = bytes.len() as u64;
+        // The same rule the worktree side's `file_read` applies (architecture review, CP8).
+        match axiomata_files::text_from_bytes(bytes) {
+            Some(text) => Self::Text { text },
+            None => Self::Binary { size },
+        }
+    }
+}
+
+/// `path` as the agent's base has it (H2). `path` is the base-side name — a
+/// rename's old path.
+#[tauri::command]
+pub async fn ide_agent_base_file(
+    state: State<'_, CoreState>,
+    id: i64,
+    path: String,
+) -> Result<BaseFile, String> {
+    let repo = ready_repo_of(&state, id)?;
+    let limit = if axiomata_files::image_mime(&path).is_some() {
+        axiomata_files::MAX_IMAGE_BYTES
+    } else {
+        ide::git::MAX_DIFF_BYTES as u64
+    };
+    off_main(move || {
+        repo.base_blob(&path, limit)
+            .map(|blob| BaseFile::from_blob(&path, blob))
+    })
+    .await
 }
 
 /// Puts files back to the agent's base (G13). The UI asks first.

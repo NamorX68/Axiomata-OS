@@ -21,19 +21,22 @@
   import { onMount, tick as nextTick } from "svelte";
 
   import { listenBackend, type FileChange, type FileRootInfo } from "../core/backend";
-  import { EditorDocument } from "../editor/document";
+  import { hunksFromTexts } from "../editor/diff/hunks";
+  import { DiffModel, textLines } from "../editor/diff/model";
   import type { Indent } from "../editor/detect";
   import type { Effect } from "../editor/keymap";
   import { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import { detectLanguage } from "../editor/syntax/languages";
   import { fileBackend, listRoots, pickFile } from "./backend";
+  import DiffPanes from "./DiffPanes.svelte";
   import { editorSettings, ensureEditorSettingsLoaded } from "./editorSettings";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import EditorSurface from "./EditorSurface.svelte";
   import MarkdownPreview from "./MarkdownPreview.svelte";
-  import { loadFace, nearestWeight } from "./fonts";
+  import { editorFace } from "./editorFace.svelte";
   import { grammarRuntime } from "./grammars";
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
+  import { ScrollLink } from "./scrollLink";
   import { FileSession } from "./session";
   import { statusParts } from "./status";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
@@ -58,7 +61,8 @@
   let outside = $state(0);
   let error = $state("");
   let wrap = $state(false);
-  let compare = $state.raw<EditorDocument | null>(null);
+  /** "Show difference" (F10, H7): the file on disk against the text being edited, as a diff. */
+  let compare = $state.raw<{ model: DiffModel; disk: string; mine: string } | null>(null);
   let recent = $state<RecentFile[]>([]);
   let roots = $state<FileRootInfo[]>([]);
   let showRecent = $state(false);
@@ -70,15 +74,13 @@
   let mdMode = $state<"source" | "preview" | "split">("source");
   let isMarkdown = $state(false);
   let preview = $state<MarkdownPreview | null>(null);
-  /** Until when the source ignores its own scroll events after the preview led. */
-  let previewLeadsUntil = 0;
-  /** How long one side's scroll is not echoed back by the other. */
-  const SCROLL_ECHO_MS = 120;
+  /** Source and preview scroll in step; whichever is scrolled leads (H12). */
+  const scrollLink = new ScrollLink();
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let hintTimer: ReturnType<typeof setTimeout> | null = null;
   /** The font face the surfaces draw with — switched only once it has loaded. */
-  let face = $state({ family: $editorSettings.fontFamily, weight: 400 });
+  const face = editorFace();
 
   const settings = $derived({
     ...surfaceSettings($editorSettings, wrap),
@@ -92,19 +94,6 @@
     return { kind: s.indentKind, size: s.indentKind === "tabs" ? s.tabSize : s.indentSize };
   }
 
-  $effect(() => {
-    const family = $editorSettings.fontFamily;
-    const weight = nearestWeight(family, $editorSettings.fontWeight);
-    let current = true;
-    void loadFace(family, weight)
-      .catch(() => undefined)
-      .then(() => {
-        if (current) face = { family, weight };
-      });
-    return () => {
-      current = false;
-    };
-  });
   const banner = $derived.by(() => {
     void sessionTick;
     return session?.banner ?? null;
@@ -222,15 +211,13 @@
     mdMode = mdMode === "source" ? "preview" : mdMode === "preview" ? "split" : "source";
   }
 
-  /** The source scrolled: the preview follows, unless it was the one leading. */
+  /** The source scrolled: the preview follows, unless this is the echo of it following. */
   function onSourceTopLine(line: number): void {
-    if (performance.now() < previewLeadsUntil) return;
-    preview?.scrollToLine(line);
+    if (scrollLink.scrolled("source")) preview?.scrollToLine(line);
   }
 
   function onPreviewTopLine(line: number): void {
-    previewLeadsUntil = performance.now() + SCROLL_ECHO_MS;
-    surface?.scrollToLine(line);
+    if (scrollLink.scrolled("preview")) surface?.scrollToLine(line);
   }
 
   const previewText = $derived.by(() => {
@@ -272,7 +259,10 @@
 
   async function showCompare(): Promise<void> {
     if (!session) return;
-    compare = new EditorDocument(await session.diskText(), { indentFallback: indentFallback() });
+    const disk = await session.diskText();
+    const mine = session.doc.store.text();
+    const hunks = hunksFromTexts(textLines(disk), textLines(mine));
+    compare = { model: new DiffModel({ hunks, oldLines: textLines(disk), newLines: textLines(mine) }), disk, mine };
   }
 
   /**
@@ -438,12 +428,21 @@
       {#if compare}
         <div class="pane compare">
           <div class="compare-bar">
-            <span>On disk (read-only)</span>
+            <span>On disk → your text {compare.model.hunkCount === 0 ? "(no difference)" : ""}</span>
             <button type="button" onclick={() => (compare = null)}>Close</button>
           </div>
-          {#key compare}
-            <EditorSurface doc={compare} {settings} fileName={session.fileName} readOnly />
-          {/key}
+          <div class="compare-diff">
+            {#key compare}
+              <DiffPanes
+                model={compare.model}
+                layout="unified"
+                oldText={compare.disk}
+                newText={compare.mine}
+                fileName={session.fileName}
+                onOpen={(line) => surface?.goToLine(line)}
+              />
+            {/key}
+          </div>
         </div>
       {/if}
     {:else}
@@ -688,6 +687,12 @@
   /* Preview only: the source stays mounted (cursor, undo, glide state) but out of sight. */
   .pane.gone {
     display: none;
+  }
+
+  .compare-diff {
+    position: relative;
+    flex: 1;
+    min-height: 0;
   }
 
   .compare-bar {

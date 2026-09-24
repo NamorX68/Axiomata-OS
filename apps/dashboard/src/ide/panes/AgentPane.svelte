@@ -31,6 +31,7 @@
   import Terminal from "../../modules/terminal.svelte";
   import { prepareAgent } from "../agents";
   import { agentStatus, describeStatus } from "../agentStatus";
+  import DiffView from "../DiffView.svelte";
   import StatusDot from "../StatusDot.svelte";
 
   let {
@@ -81,10 +82,15 @@
   const SIDE_TABS: SideTab[] = [
     { id: "terminal", label: "Terminal" },
     { id: "plan", label: "Plan" },
-    { id: "diffs", label: "Diffs", waiting: "Arrives with the git layer (M7.3)" },
+    { id: "diffs", label: "Diffs" },
     { id: "inbox", label: "Inbox", waiting: "Arrives with agent-to-agent messaging (M7.5)" },
   ];
   let sideTab = $state("terminal");
+  /** The Diffs view stays mounted once opened, so its folds and file survive a tab switch. */
+  let diffsOpened = $state(false);
+  $effect(() => {
+    if (sideTab === "diffs") diffsOpened = true;
+  });
 
   /** What is typed into the shell — including the status hookup. */
   const command = $derived(ready?.launch_command ?? agent.effective_command);
@@ -159,6 +165,20 @@
       {/if}
     </div>
 
+    <!-- Like the terminal: hidden, not unmounted, once it has been opened. -->
+    {#if diffsOpened}
+      <div
+        class="diffs-slot"
+        class:hidden={sideTab !== "diffs"}
+        inert={sideTab !== "diffs"}
+        id="agent-view-diffs"
+        role="tabpanel"
+        aria-labelledby="agent-tab-diffs"
+      >
+        <DiffView {agent} agentState={status?.state ?? null} visible={sideTab === "diffs"} place="tab" />
+      </div>
+    {/if}
+
     {#if sideTab === "plan"}
       <div class="plan" id="agent-view-plan" role="tabpanel" aria-labelledby="agent-tab-plan">
         {#if plan || planDocument}
@@ -210,13 +230,14 @@
           <p class="note">No plan yet. It appears here as soon as the agent writes one.</p>
         {/if}
       </div>
-    {:else if sideTab !== "terminal"}
+    {:else if sideTab !== "terminal" && sideTab !== "diffs"}
       {@const tab = SIDE_TABS.find((t) => t.id === sideTab)}
       <div class="waiting" id="agent-view-{sideTab}" role="tabpanel" aria-labelledby="agent-tab-{sideTab}">
         <p>{tab?.waiting}</p>
       </div>
     {/if}
   </div>
+
 
   <div class="side" role="tablist" aria-orientation="vertical" aria-label="{agent.name} views">
     {#each SIDE_TABS as tab (tab.id)}
@@ -287,6 +308,15 @@
   .terminal-slot.hidden {
     visibility: hidden;
     pointer-events: none;
+  }
+
+  .diffs-slot {
+    position: absolute;
+    inset: 0;
+  }
+
+  .diffs-slot.hidden {
+    display: none;
   }
 
   .waiting {

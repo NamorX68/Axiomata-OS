@@ -31,8 +31,6 @@
   let scroller: HTMLDivElement;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
-  /** Set while scrolling on the source's behalf, so it does not echo back. */
-  let following = false;
 
   $effect(() => {
     const source = text;
@@ -61,14 +59,14 @@
       if (Number(block.dataset.line) > line) break;
       target = block;
     }
-    following = true;
     // `.preview` is positioned, so a block's offsetTop is already relative to it.
+    // The scroll event this fires is reported like any other; the owner's
+    // `ScrollLink` tells it apart as an echo (H12).
     scroller.scrollTop = target ? target.offsetTop : 0;
-    requestAnimationFrame(() => (following = false));
   }
 
   function onScroll(): void {
-    if (following || !onTopLine) return;
+    if (!onTopLine) return;
     const top = scroller.scrollTop;
     let line = 0;
     for (const block of blocks()) {
