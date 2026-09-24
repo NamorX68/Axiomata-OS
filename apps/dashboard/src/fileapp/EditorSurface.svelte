@@ -25,13 +25,16 @@
   import { onMount, tick as nextTick, untrack } from "svelte";
 
   import { commentPrefixFor, copyText, cut, paste, run, type ClipboardText, type Command } from "../editor/commands";
+  import { indentGuides } from "../editor/decorations";
   import type { EditorDocument } from "../editor/document";
   import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
   import { gutterDigits, lineLabel } from "../editor/gutter";
   import { keyAction, type Effect } from "../editor/keymap";
   import { pos, selectionRange, type Pos } from "../editor/position";
   import { wordAt } from "../editor/text";
+  import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
+  import { CursorGlide } from "./cursorGlide";
   import type { SurfaceSettings } from "./surfaceSettings";
 
   interface Props {
@@ -50,6 +53,13 @@
      * reload, restoring kept work): the surface only notices its own edits.
      */
     revision?: number;
+    /**
+     * Colours for the lines on screen (ED2, G4) — a `SyntaxHighlighter`, or
+     * anything else that can answer the same question. Without one, plain text.
+     */
+    highlighter?: { spans(first: number, last: number, options?: { brackets?: boolean }): Map<number, Span[]> } | null;
+    /** The first logical line on screen, after every scroll (the preview follows it, G8). */
+    onTopLine?: (line: number) => void;
   }
 
   let {
@@ -61,10 +71,16 @@
     onEffect,
     onChange,
     revision = 0,
+    highlighter = null,
+    onTopLine,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
   const OVERSCAN = 8;
+  /** Space between the line numbers and the text, in cells. */
+  const TEXT_GAP_CELLS = 1;
+  /** A jump further than this many rows scrolls smoothly, if that is on. */
+  const SMOOTH_SCROLL_ROWS = 3;
   /** Commands that only move the selection — the ones a read-only surface allows. */
   const NON_EDITING = new Set<Command["type"]>(["move", "selectAll", "selectLine"]);
 
@@ -88,7 +104,16 @@
     return gutterDigits(doc.store.lineCount(), settings.lineNumbers) + 2;
   });
   const gutterW = $derived(gutterCells * charW);
-  const wrapCells = $derived(Math.max(8, Math.floor((viewW - gutterW - 2 * charW) / charW)));
+  /** Where the text starts, relative to the scroller's left edge. */
+  const textLeft = $derived(gutterW + TEXT_GAP_CELLS * charW);
+  const wrapCells = $derived(Math.max(8, Math.floor((viewW - textLeft - 2 * charW) / charW)));
+
+  // macOS "Reduce motion" turns the glide and smooth scrolling off (G7).
+  const motionQuery = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  let reducedMotion = $state(motionQuery?.matches ?? false);
+  const fx = $derived(
+    reducedMotion ? { ...settings.effects, cursor: "off" as const, smoothScroll: false } : settings.effects,
+  );
 
   // One layout per document (its wrap cache is worth keeping); the options
   // follow the settings and the viewport in the effect below.
@@ -125,14 +150,29 @@
     const total = layout.totalRows;
     const first = Math.max(0, Math.floor(scrollTop / rowH) - OVERSCAN);
     const last = Math.min(total - 1, Math.ceil((scrollTop + viewH) / rowH) + OVERSCAN);
-    const rows = [];
-    for (let row = first; row <= last; row++) rows.push({ row, ...rowSlice(layout, doc.store, row) });
+    const slices = [];
+    for (let row = first; row <= last; row++) slices.push({ row, ...rowSlice(layout, doc.store, row) });
+    const firstLine = slices[0]?.line ?? 0;
+    const lastLine = slices[slices.length - 1]?.line ?? 0;
+    const spans =
+      highlighter && slices.length > 0
+        ? highlighter.spans(firstLine, lastLine, { brackets: fx.bracketColors })
+        : new Map<number, Span[]>();
+    const guides = fx.indentGuides
+      ? indentGuides(doc.store, firstLine, lastLine, doc.indent.size, settings.tabSize)
+      : new Map<number, number[]>();
+    const rows = slices.map((r) => ({
+      ...r,
+      segments: rowSegments(doc.store.line(r.line), spans.get(r.line), r.start, r.end),
+      guides: guides.get(r.line) ?? [],
+    }));
     const sel = doc.selection;
     const runs = selectionRuns(layout, doc.store, selectionRange(sel), first, last, settings.tabSize);
     const caret = cursorCell(layout, doc.store, sel.head, settings.tabSize);
     let widest = 0;
     if (!settings.wrap) for (const r of rows) widest = Math.max(widest, r.text.length);
-    return { total, rows, runs, caret, cursorLine: sel.head.line, widest };
+    const current = { top: layout.firstRow(sel.head.line), rows: layout.rowStarts(sel.head.line).length };
+    return { total, rows, runs, caret, cursorLine: sel.head.line, current, widest };
   });
 
   // ---------------------------------------------------------------- model glue
@@ -160,15 +200,37 @@
     if (!scroller) return;
     const { row, cell } = cursorCell(layout, doc.store, doc.selection.head, settings.tabSize);
     const y = row * rowH;
-    if (y < scroller.scrollTop) scroller.scrollTop = y;
-    else if (y + rowH > scroller.scrollTop + viewH) scroller.scrollTop = y + rowH - viewH;
+    let top = scroller.scrollTop;
+    if (y < top) top = y;
+    else if (y + rowH > top + viewH) top = y + rowH - viewH;
+    let left = scroller.scrollLeft;
     if (!settings.wrap) {
       const x = cell * charW;
-      const room = viewW - gutterW - 4 * charW;
-      if (x < scroller.scrollLeft) scroller.scrollLeft = Math.max(0, x - 4 * charW);
-      else if (x > scroller.scrollLeft + room) scroller.scrollLeft = x - room;
+      const room = viewW - textLeft - 4 * charW;
+      if (x < left) left = Math.max(0, x - 4 * charW);
+      else if (x > left + room) left = x - room;
     }
+    if (top === scroller.scrollTop && left === scroller.scrollLeft) return;
+    const far = Math.abs(top - scroller.scrollTop) > SMOOTH_SCROLL_ROWS * rowH;
+    scroller.scrollTo({ top, left, behavior: fx.smoothScroll && far ? "smooth" : "instant" });
   }
+
+  // ---------------------------------------------------------------- cursor glide
+
+  let canvas: HTMLCanvasElement;
+  let surfaceEl: HTMLDivElement;
+  /** A glide is running: the canvas draws the cursor, the DOM caret hides. */
+  let gliding = $state(false);
+  const glide = new CursorGlide(
+    () => (canvas && scroller ? { canvas, scroller, styles: surfaceEl, textLeft, rowH } : null),
+    (on) => (gliding = on),
+  );
+
+  $effect(() => {
+    const target = { x: view.caret.cell * charW, y: view.caret.row * rowH };
+    const style = fx.cursor === "off" ? null : { trail: fx.cursor === "trail", glow: fx.glow };
+    untrack(() => glide.moveTo(target, style));
+  });
 
   // ---------------------------------------------------------------- keyboard
 
@@ -268,7 +330,7 @@
   function posAt(e: MouseEvent): Pos {
     const rect = scroller.getBoundingClientRect();
     const y = e.clientY - rect.top + scroller.scrollTop;
-    const x = e.clientX - rect.left + scroller.scrollLeft - gutterW;
+    const x = e.clientX - rect.left + scroller.scrollLeft - textLeft;
     return posAtCell(layout, doc.store, Math.floor(y / rowH), x / charW, settings.tabSize);
   }
 
@@ -350,18 +412,31 @@
     });
     observer.observe(scroller);
     if (autofocus) input.focus();
-    return () => observer.disconnect();
+    const onMotion = (e: MediaQueryListEvent) => (reducedMotion = e.matches);
+    motionQuery?.addEventListener("change", onMotion);
+    return () => {
+      observer.disconnect();
+      motionQuery?.removeEventListener("change", onMotion);
+      glide.dispose();
+    };
   });
 
   /** Focuses the surface (the owner calls this after opening a file). */
   export function focus(): void {
     input?.focus();
   }
+
+  /** Scrolls so `line` is the first on screen (the preview leading, G8). */
+  export function scrollToLine(line: number): void {
+    if (scroller) scroller.scrollTop = layout.firstRow(Math.min(line, doc.store.lineCount() - 1)) * rowH;
+  }
 </script>
 
 <div
   class="surface"
   class:focused
+  class:glow={fx.glow}
+  bind:this={surfaceEl}
   style:--cell="{charW}px"
   style:--row="{rowH}px"
   style:font-family={`"${settings.fontFamily}", var(--ax-font-mono)`}
@@ -374,14 +449,17 @@
   <div
     class="scroller"
     bind:this={scroller}
-    onscroll={() => (scrollTop = scroller.scrollTop)}
+    onscroll={() => {
+      scrollTop = scroller.scrollTop;
+      onTopLine?.(layout.lineAt(Math.floor(scrollTop / rowH)).line);
+    }}
     onmousedown={onMousedown}
     role="presentation"
   >
     <div
       class="sizer"
       style:height="{view.total * rowH}px"
-      style:width={settings.wrap ? "100%" : `${gutterW + (view.widest + 8) * charW}px`}
+      style:width={settings.wrap ? "100%" : `${textLeft + (view.widest + 8) * charW}px`}
     >
       <div class="gutter" style:width="{gutterW}px" onmousedown={onGutterMousedown} role="presentation">
         {#each view.rows as r (r.row)}
@@ -392,7 +470,19 @@
           {/if}
         {/each}
       </div>
-      <div class="content" style:left="{gutterW}px">
+      <div class="content" style:left="{textLeft}px">
+        {#if fx.currentLine}
+          <div
+            class="current-line"
+            style:top="{view.current.top * rowH}px"
+            style:height="{view.current.rows * rowH}px"
+          ></div>
+        {/if}
+        {#each view.rows as r (r.row)}
+          {#each r.guides as cell (cell)}
+            <div class="guide" style:top="{r.row * rowH}px" style:left="{cell * charW}px"></div>
+          {/each}
+        {/each}
         {#each view.runs as run (run.row)}
           <div
             class="selection"
@@ -402,12 +492,19 @@
           ></div>
         {/each}
         {#each view.rows as r (r.row)}
-          <div class="row" style:top="{r.row * rowH}px" style:padding-left="{r.indent * charW}px">{r.text}</div>
+          <!-- Line breaks only inside tags: whitespace between the segments would show. -->
+          <div
+            class="row"
+            style:top="{r.row * rowH}px"
+            style:padding-left="{r.indent * charW}px"
+          >{#each r.segments as seg, i (i)}{#if seg.token}<span class="tk-{seg.token}">{seg.text}</span
+              >{:else}{seg.text}{/if}{/each}</div
+          >
         {/each}
         {#key tick}
           <div
             class="caret"
-            class:hidden={!focused || composing}
+            class:hidden={!focused || composing || gliding}
             style:top="{view.caret.row * rowH}px"
             style:left="{view.caret.cell * charW}px"
           ></div>
@@ -436,6 +533,7 @@
       </div>
     </div>
   </div>
+  <canvas class="glide" class:on={gliding} bind:this={canvas} aria-hidden="true"></canvas>
 </div>
 
 <style>
@@ -466,6 +564,8 @@
   .sizer {
     position: relative;
     min-height: 100%;
+    /* At least the viewport: the current-line tint reaches the right edge. */
+    min-width: 100%;
   }
 
   .gutter {
@@ -484,13 +584,14 @@
     right: var(--cell);
     height: var(--row);
     color: var(--ax-text-muted);
-    opacity: 0.6;
+    opacity: 0.55;
     text-align: right;
+    font-variant-numeric: tabular-nums;
     user-select: none;
   }
 
   .number.current {
-    color: var(--ax-text);
+    color: var(--ax-accent);
     opacity: 1;
   }
 
@@ -499,6 +600,68 @@
     top: 0;
     right: 0;
     bottom: 0;
+  }
+
+  /* Syntax colours (G5): one --ax-syntax-* token per class; every theme sets them.
+     Colour only — no bold or italic, which would make the browser fake a face
+     that is not loaded (F13). */
+  .tk-keyword { color: var(--ax-syntax-keyword); }
+  .tk-string { color: var(--ax-syntax-string); }
+  .tk-number { color: var(--ax-syntax-number); }
+  .tk-comment { color: var(--ax-syntax-comment); }
+  .tk-function { color: var(--ax-syntax-function); }
+  .tk-type { color: var(--ax-syntax-type); }
+  .tk-variable { color: var(--ax-syntax-variable); }
+  .tk-constant { color: var(--ax-syntax-constant); }
+  .tk-property { color: var(--ax-syntax-property); }
+  .tk-operator { color: var(--ax-syntax-operator); }
+  .tk-punctuation { color: var(--ax-syntax-punctuation); }
+  .tk-tag { color: var(--ax-syntax-tag); }
+  .tk-attribute { color: var(--ax-syntax-attribute); }
+  .tk-heading { color: var(--ax-syntax-heading); }
+  .tk-link { color: var(--ax-syntax-link); text-decoration: underline; }
+  .tk-emphasis { color: var(--ax-syntax-emphasis); }
+  .tk-code { color: var(--ax-syntax-code); }
+  .tk-bracket-1 { color: var(--ax-editor-bracket-1); }
+  .tk-bracket-2 { color: var(--ax-editor-bracket-2); }
+  .tk-bracket-3 { color: var(--ax-editor-bracket-3); }
+
+  .current-line {
+    position: absolute;
+    left: calc(-1 * var(--cell));
+    right: 0;
+    background: var(--ax-editor-current-line);
+    pointer-events: none;
+  }
+
+  .guide {
+    position: absolute;
+    width: 1px;
+    height: var(--row);
+    background: var(--ax-editor-indent-guide);
+    pointer-events: none;
+  }
+
+  .glide {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 4;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  .glide.on {
+    visibility: visible;
+  }
+
+  .glow .caret {
+    box-shadow: 0 0 8px 1px var(--ax-editor-glow);
+  }
+
+  .glow .number.current {
+    text-shadow: 0 0 8px var(--ax-editor-glow);
   }
 
   .row {

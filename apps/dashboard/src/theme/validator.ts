@@ -59,6 +59,13 @@ export const ALLOWED_TOKENS: readonly string[] = [
   "--ax-shadow-drag",
   "--ax-texture-url",
   "--ax-tracking-wide",
+  ...["keyword", "string", "number", "comment", "function", "type", "variable", "constant", "property"].map(
+    (t) => `--ax-syntax-${t}`,
+  ),
+  ...["operator", "punctuation", "tag", "attribute", "heading", "link", "emphasis", "code"].map(
+    (t) => `--ax-syntax-${t}`,
+  ),
+  ...["current-line", "indent-guide", "bracket-1", "bracket-2", "bracket-3", "glow"].map((t) => `--ax-editor-${t}`),
 ];
 
 const OUTPUT_SELECTOR = ":root[data-theme][data-theme]";

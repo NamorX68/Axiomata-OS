@@ -24,11 +24,15 @@
   import { EditorDocument } from "../editor/document";
   import type { Indent } from "../editor/detect";
   import type { Effect } from "../editor/keymap";
+  import { SyntaxHighlighter } from "../editor/syntax/highlighter";
+  import { detectLanguage } from "../editor/syntax/languages";
   import { fileBackend, listRoots, pickFile } from "./backend";
   import { editorSettings, ensureEditorSettingsLoaded } from "./editorSettings";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import EditorSurface from "./EditorSurface.svelte";
+  import MarkdownPreview from "./MarkdownPreview.svelte";
   import { loadFace, nearestWeight } from "./fonts";
+  import { grammarRuntime } from "./grammars";
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
   import { FileSession } from "./session";
   import { statusParts } from "./status";
@@ -46,7 +50,11 @@
   let session = $state.raw<FileSession | null>(null);
   /** Bumped whenever the session's state changed; the banner and status derive from it. */
   let sessionTick = $state(0);
-  /** Bumped when the document changed outside the surface (reload, restore). */
+  /**
+   * The surface's `revision`: bumped when it must redraw for a reason it cannot
+   * see — the document changed outside it (reload, restore), or an injected
+   * grammar finished loading and the colours changed.
+   */
   let outside = $state(0);
   let error = $state("");
   let wrap = $state(false);
@@ -56,6 +64,16 @@
   let showRecent = $state(false);
   let surface = $state<EditorSurface | null>(null);
   let showSettings = $state(false);
+  /** Syntax colours for the open file (ED2); `null` for plain text or a large file. */
+  let highlighter = $state.raw<SyntaxHighlighter | null>(null);
+  /** Markdown files only (G8): source, the rendered preview, or both side by side. */
+  let mdMode = $state<"source" | "preview" | "split">("source");
+  let isMarkdown = $state(false);
+  let preview = $state<MarkdownPreview | null>(null);
+  /** Until when the source ignores its own scroll events after the preview led. */
+  let previewLeadsUntil = 0;
+  /** How long one side's scroll is not echoed back by the other. */
+  const SCROLL_ECHO_MS = 120;
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let hintTimer: ReturnType<typeof setTimeout> | null = null;
@@ -140,16 +158,38 @@
     await leaveCurrent();
     session = next;
     wrap = wrapsByDefault($editorSettings, next.fileName);
+    isMarkdown = detectLanguage(next.fileName, next.doc.store.line(0)) === "markdown";
+    mdMode = "source";
     compare = null;
     rememberRecent(file);
     recent = recentFiles();
     refresh();
+    void attachHighlighter(next);
     await nextTick();
     surface?.focus();
   }
 
+  /**
+   * Starts highlighting `s` once its grammar has loaded (G4): nothing for plain
+   * text, and nothing for a large read-only file. An injected language that
+   * arrives later redraws through `outside`.
+   */
+  async function attachHighlighter(s: FileSession): Promise<void> {
+    if (s.readOnly) return;
+    const id = detectLanguage(s.fileName, s.doc.store.line(0));
+    if (!id) return;
+    const created = await SyntaxHighlighter.create(s.doc, grammarRuntime, id, () => outside++);
+    if (session !== s) {
+      created?.dispose();
+      return;
+    }
+    highlighter = created;
+  }
+
   /** Keeps unsaved text aside and stops watching the file being left. */
   async function leaveCurrent(): Promise<void> {
+    highlighter?.dispose();
+    highlighter = null;
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;
     if (!session) return;
@@ -176,8 +216,32 @@
     refresh();
   }
 
+  /** ⌘⇧V: source → preview → side by side → source (G8). */
+  function cycleMarkdownMode(): void {
+    if (!isMarkdown) return;
+    mdMode = mdMode === "source" ? "preview" : mdMode === "preview" ? "split" : "source";
+  }
+
+  /** The source scrolled: the preview follows, unless it was the one leading. */
+  function onSourceTopLine(line: number): void {
+    if (performance.now() < previewLeadsUntil) return;
+    preview?.scrollToLine(line);
+  }
+
+  function onPreviewTopLine(line: number): void {
+    previewLeadsUntil = performance.now() + SCROLL_ECHO_MS;
+    surface?.scrollToLine(line);
+  }
+
+  const previewText = $derived.by(() => {
+    void sessionTick;
+    void outside;
+    return isMarkdown && mdMode !== "source" && session ? session.doc.store.text() : "";
+  });
+
   function onEffect(effect: Effect): void {
-    if (effect === "save") void save();
+    if (effect === "togglePreview") cycleMarkdownMode();
+    else if (effect === "save") void save();
     else if (effect === "open") void openPicked();
     else if (effect === "toggleWrap") wrap = !wrap;
   }
@@ -219,10 +283,12 @@
   function onViewKeydown(e: KeyboardEvent): void {
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const key = e.key.toLowerCase();
-    if (key !== "o" && key !== "s") return;
+    const preview = key === "v" && e.shiftKey && isMarkdown;
+    if (key !== "o" && key !== "s" && !preview) return;
     e.preventDefault();
     e.stopPropagation();
-    if (key === "o") void openPicked();
+    if (preview) cycleMarkdownMode();
+    else if (key === "o") void openPicked();
     else void save();
   }
 
@@ -342,7 +408,7 @@
       <EditorSettingsPanel surface={settings} onClose={() => (showSettings = false)} />
     {/if}
     {#if session}
-      <div class="pane">
+      <div class="pane" class:gone={isMarkdown && mdMode === "preview"}>
         {#key session}
           <EditorSurface
             bind:this={surface}
@@ -351,11 +417,24 @@
             fileName={session.fileName}
             readOnly={session.readOnly}
             revision={outside}
+            {highlighter}
+            onTopLine={isMarkdown && mdMode === "split" ? onSourceTopLine : undefined}
             {onEffect}
             {onChange}
           />
         {/key}
       </div>
+      {#if isMarkdown && mdMode !== "source"}
+        <div class="pane preview-pane">
+          <MarkdownPreview
+            bind:this={preview}
+            text={previewText}
+            root={session.root}
+            rel={session.rel}
+            onTopLine={mdMode === "split" ? onPreviewTopLine : undefined}
+          />
+        </div>
+      {/if}
       {#if compare}
         <div class="pane compare">
           <div class="compare-bar">
@@ -392,6 +471,12 @@
       <span>{status.eol}</span>
       <span>{status.indent}</span>
       <span>{wrap ? "Wrap on" : "Wrap off"} <kbd>⌥Z</kbd></span>
+      {#if isMarkdown}
+        <span>
+          {mdMode === "source" ? "Source" : mdMode === "preview" ? "Preview" : "Side by side"}
+          <kbd>⌘⇧V</kbd>
+        </span>
+      {/if}
       {#if session.readOnly}<span class="warn">Read-only (large file)</span>{/if}
     </footer>
   {/if}
@@ -595,8 +680,14 @@
     flex-direction: column;
   }
 
-  .pane.compare {
+  .pane.compare,
+  .pane.preview-pane {
     border-left: 1px solid var(--ax-border);
+  }
+
+  /* Preview only: the source stays mounted (cursor, undo, glide state) but out of sight. */
+  .pane.gone {
+    display: none;
   }
 
   .compare-bar {

@@ -5,10 +5,20 @@
   it shows is exactly what the editor will do.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
+
   import { EditorDocument } from "../editor/document";
+  import { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import EditorSurface from "./EditorSurface.svelte";
-  import { editorSettings, updateEditorSettings, type Autosave } from "./editorSettings";
+  import {
+    editorSettings,
+    updateEditorSettings,
+    type Autosave,
+    type CursorAnimation,
+    type EditorSettings,
+  } from "./editorSettings";
   import { EDITOR_FONTS, nearestWeight, realWeights, weightName } from "./fonts";
+  import { grammarRuntime } from "./grammars";
   import type { SurfaceSettings } from "./surfaceSettings";
 
   interface Props {
@@ -32,9 +42,36 @@
 
   const preview = new EditorDocument(SAMPLE, { indentFallback: { kind: "spaces", size: 4 } });
 
+  // The preview is coloured like a real TypeScript file, so theme colours show too.
+  let highlighter = $state.raw<SyntaxHighlighter | null>(null);
+  let destroyed = false;
+  void SyntaxHighlighter.create(preview, grammarRuntime, "typescript").then((h) => {
+    if (destroyed) h?.dispose();
+    else highlighter = h;
+  });
+  onDestroy(() => {
+    destroyed = true;
+    highlighter?.dispose();
+  });
+
   const s = $derived($editorSettings);
   const weights = $derived(realWeights(s.fontFamily));
   const shownWeight = $derived(nearestWeight(s.fontFamily, s.fontWeight));
+
+  const CURSOR: { value: CursorAnimation; label: string }[] = [
+    { value: "trail", label: "Glide with trail" },
+    { value: "glide", label: "Glide" },
+    { value: "off", label: "Off" },
+  ];
+
+  /** The on/off effects of G7, each its own switch. */
+  const EFFECT_SWITCHES: { key: keyof EditorSettings; label: string }[] = [
+    { key: "smoothScroll", label: "Smooth scrolling" },
+    { key: "currentLine", label: "Highlight current line" },
+    { key: "indentGuides", label: "Indentation guides" },
+    { key: "bracketColors", label: "Coloured bracket pairs" },
+    { key: "glow", label: "Accent glow" },
+  ];
 
   const AUTOSAVE: { value: Autosave; label: string }[] = [
     { value: "off", label: "Off" },
@@ -50,7 +87,13 @@
   </header>
 
   <div class="preview">
-    <EditorSurface doc={preview} settings={{ ...surface, wrap: s.wrapCode }} fileName="preview.ts" readOnly />
+    <EditorSurface
+      doc={preview}
+      settings={{ ...surface, wrap: s.wrapCode }}
+      fileName="preview.ts"
+      readOnly
+      {highlighter}
+    />
   </div>
 
   <div class="fields">
@@ -190,6 +233,32 @@
         onchange={(e) => updateEditorSettings({ tabSize: Number(e.currentTarget.value) })}
       />
     </label>
+
+    <fieldset>
+      <legend>Effects</legend>
+      <label>
+        <span>Cursor</span>
+        <select
+          value={s.cursorAnimation}
+          onchange={(e) => updateEditorSettings({ cursorAnimation: e.currentTarget.value as CursorAnimation })}
+        >
+          {#each CURSOR as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+      {#each EFFECT_SWITCHES as effect (effect.key)}
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={s[effect.key] === true}
+            onchange={(e) => updateEditorSettings({ [effect.key]: e.currentTarget.checked })}
+          />
+          <span>{effect.label}</span>
+        </label>
+      {/each}
+    </fieldset>
+    <p class="note">With macOS "Reduce motion" on, the cursor does not glide and nothing scrolls smoothly.</p>
 
     <label>
       <span>Autosave</span>

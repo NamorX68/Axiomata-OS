@@ -38,4 +38,29 @@
 
   /* faint leaf veins: sparse diagonal strokes in moss green */
   --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cpath fill='none' stroke='%237fd07a' stroke-opacity='0.05' stroke-width='1' d='M0 48C24 40 40 24 48 0M48 96c8-24 24-40 48-48M0 96L96 0'/%3E%3C/svg%3E");
+
+  /* Editor (docs/plans/editor.md G5/G6): syntax colours, then the editor's own. */
+  --ax-syntax-keyword: #e8943f;
+  --ax-syntax-string: #a6d98a;
+  --ax-syntax-number: #d7b0f0;
+  --ax-syntax-comment: #62806a;
+  --ax-syntax-function: #8fd0c8;
+  --ax-syntax-type: #6fc2a8;
+  --ax-syntax-variable: #edf3e6;
+  --ax-syntax-constant: #e3c05a;
+  --ax-syntax-property: #b9d6a8;
+  --ax-syntax-operator: #c7d6c2;
+  --ax-syntax-punctuation: #7f9a86;
+  --ax-syntax-tag: #ee8a6c;
+  --ax-syntax-attribute: #e3c05a;
+  --ax-syntax-heading: #f0a04e;
+  --ax-syntax-link: #8fd0c8;
+  --ax-syntax-emphasis: #d6e79c;
+  --ax-syntax-code: #a6d98a;
+  --ax-editor-current-line: rgba(237, 243, 230, 0.04);
+  --ax-editor-indent-guide: rgba(237, 243, 230, 0.08);
+  --ax-editor-bracket-1: #e3c05a;
+  --ax-editor-bracket-2: #8fd0c8;
+  --ax-editor-bracket-3: #d7b0f0;
+  --ax-editor-glow: rgba(232, 132, 44, 0.35);
 }

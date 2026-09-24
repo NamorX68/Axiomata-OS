@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { excerpt, excerptHtml, renderMarkdown } from "./markdown";
+import { excerpt, excerptHtml, renderMarkdown, renderMarkdownBlocks } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("renders GFM and keeps safe links and raster data images", () => {
@@ -77,5 +77,28 @@ describe("excerptHtml", () => {
     const e = excerptHtml("<html><head><title>T</title><style>body{}</style></head><body><h1>Variablen &amp; Datentypen</h1><p>let &lt;x&gt;</p><script>alert(1)</script></body></html>");
     expect(e).toBe("T\nVariablen & Datentypen\nlet <x>");
     expect(excerptHtml("<title>Same</title><h1>Same</h1><p>body</p>")).toBe("Same\nbody");
+  });
+});
+
+describe("renderMarkdownBlocks", () => {
+  it("marks every top-level block with its source line", () => {
+    const html = renderMarkdownBlocks("# Title\n\nA paragraph\nwrapped.\n\n- one\n- two\n\n```ts\nconst x = 1;\n```\n");
+    const lines = [...html.matchAll(/data-line="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(lines).toEqual([0, 2, 5, 8]);
+    expect(html).toContain("<h1>Title</h1>");
+    expect(html).toContain("hljs");
+  });
+
+  it("keeps the marks but still strips what the plain renderer strips", () => {
+    const html = renderMarkdownBlocks('<img src=x onerror="alert(1)" data-evil="1">\n\n[x](javascript:alert(1))');
+    expect(html).not.toContain("onerror");
+    expect(html).not.toContain("data-evil");
+    expect(html).not.toContain("javascript:");
+    expect(renderMarkdown("# a")).not.toContain("data-line");
+  });
+
+  it("never lets a note forge a line mark of its own", () => {
+    const html = renderMarkdownBlocks('Text with <span data-line="999">forged</span> html.');
+    expect([...html.matchAll(/data-line="(\d+)"/g)].map((m) => m[1])).toEqual(["0"]);
   });
 });

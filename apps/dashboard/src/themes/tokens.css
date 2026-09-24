@@ -146,4 +146,29 @@
   --ax-shadow-drag: 0 16px 48px rgba(0, 0, 0, 0.55);
 
   --ax-texture-url: none;
+
+  /* Editor fallback = graphite (docs/plans/editor.md G5/G6): syntax colours, then the editor's own. */
+  --ax-syntax-keyword: #ff9f5a;
+  --ax-syntax-string: #9ad48a;
+  --ax-syntax-number: #d4a8ff;
+  --ax-syntax-comment: #6e6e78;
+  --ax-syntax-function: #7cb8ff;
+  --ax-syntax-type: #5fd4c4;
+  --ax-syntax-variable: #e8e8ec;
+  --ax-syntax-constant: #f0b860;
+  --ax-syntax-property: #b6c4ff;
+  --ax-syntax-operator: #c8c8d0;
+  --ax-syntax-punctuation: #8a8a94;
+  --ax-syntax-tag: #ff8a70;
+  --ax-syntax-attribute: #e8c27c;
+  --ax-syntax-heading: #ffae6b;
+  --ax-syntax-link: #7cb8ff;
+  --ax-syntax-emphasis: #f2c79c;
+  --ax-syntax-code: #9ad48a;
+  --ax-editor-current-line: rgba(255, 255, 255, 0.035);
+  --ax-editor-indent-guide: rgba(255, 255, 255, 0.07);
+  --ax-editor-bracket-1: #ffb86b;
+  --ax-editor-bracket-2: #7cb8ff;
+  --ax-editor-bracket-3: #d4a8ff;
+  --ax-editor-glow: rgba(255, 122, 26, 0.35);
 }

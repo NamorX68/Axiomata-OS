@@ -32,7 +32,7 @@ export interface KeyInput {
 /** `keyCode` of the Z key, whatever the layout puts on it with ⌥. */
 const KEYCODE_Z = 90;
 
-export type Effect = "copy" | "cut" | "paste" | "save" | "open" | "toggleWrap";
+export type Effect = "copy" | "cut" | "paste" | "save" | "open" | "toggleWrap" | "togglePreview";
 
 export type KeyAction = { command: Command } | { effect: Effect };
 
@@ -95,7 +95,8 @@ export function keyAction(input: KeyInput): KeyAction | null {
     case "c":
       return { effect: "copy" };
     case "v":
-      return { effect: "paste" };
+      // ⌘⇧V cycles the Markdown preview (G8); plain ⌘V pastes.
+      return { effect: shift ? "togglePreview" : "paste" };
     case "s":
       return { effect: "save" };
     case "o":

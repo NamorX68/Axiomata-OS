@@ -4,7 +4,7 @@
  */
 
 import type { LineNumberMode } from "../editor/gutter";
-import type { EditorSettings } from "./editorSettings";
+import type { CursorAnimation, EditorSettings } from "./editorSettings";
 import { nearestWeight } from "./fonts";
 
 export interface SurfaceSettings {
@@ -20,7 +20,28 @@ export interface SurfaceSettings {
   /** Soft wrap for this file (F6: on for prose, off for code; ⌥Z flips it). */
   wrap: boolean;
   tabSize: number;
+  /** The eye candy of D8/G7; the surface switches motion off under "reduce motion". */
+  effects: SurfaceEffects;
 }
+
+export interface SurfaceEffects {
+  cursor: CursorAnimation;
+  smoothScroll: boolean;
+  currentLine: boolean;
+  indentGuides: boolean;
+  bracketColors: boolean;
+  glow: boolean;
+}
+
+/** Every effect off — plain text, for read-only side views. */
+export const NO_EFFECTS: SurfaceEffects = {
+  cursor: "off",
+  smoothScroll: false,
+  currentLine: false,
+  indentGuides: false,
+  bracketColors: false,
+  glow: false,
+};
 
 /** Extensions that count as prose for the wrap default (F6). */
 const PROSE = new Set(["md", "markdown", "txt", "text", ""]);
@@ -46,5 +67,13 @@ export function surfaceSettings(settings: EditorSettings, wrap: boolean): Surfac
     lineNumbers: settings.lineNumbers,
     wrap,
     tabSize: settings.tabSize,
+    effects: {
+      cursor: settings.cursorAnimation,
+      smoothScroll: settings.smoothScroll,
+      currentLine: settings.currentLine,
+      indentGuides: settings.indentGuides,
+      bracketColors: settings.bracketColors,
+      glow: settings.glow,
+    },
   };
 }

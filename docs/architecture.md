@@ -236,6 +236,18 @@ Unsaved text is kept in `~/.axiomata/editor-recovery/` (`core::editor_recovery`,
 256 entries), preferences in `editor-settings.json` (`core::editor_settings`), recent
 files under `settings.editor.recent` in `dashboard.json`.
 
+**Syntax (ED2)** lives in `src/editor/syntax/`: tree-sitter via `web-tree-sitter` (the only
+library the engine uses — for a sub-problem, like `vte` for the terminal), grammars built by
+`apps/dashboard/scripts/build-grammars.sh` from pinned tags and checked in under
+`public/grammars/`, loaded on first use through an injected `GrammarSource`. The tree follows
+every edit incrementally via `EditorDocument.onTextChange`; only visible lines are queried;
+injected languages (Markdown fences, Svelte `<script>`) are parsed apart and cached by text.
+Two traps: never read `node.text` (web-tree-sitter re-calls the parse callback with a stale
+position — slice the store), and the CSP carries `'wasm-unsafe-eval'` for tree-sitter. Colours
+are 17 `--ax-syntax-*` plus six `--ax-editor-*` tokens per theme; the Markdown preview reuses
+`core/markdown.ts` (`renderMarkdownBlocks`, `data-line` per block) and `core/markdown-prose.css`,
+shared with the FileViewer.
+
 ### `axiomata-cli`
 
 A `clap`-based binary whose job is to exercise `axiomata-core` end to end without the GUI:
@@ -952,6 +964,10 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   Rust-driven open dialog and the `files:changed` watcher event, `axiomata-cli files`, and the
   App Ring's "Ansicht öffnen" entry type (`core/apps.ts` `RING_VIEWS`; `view:ide` today,
   `view:editor` with ED1). Next: ED1, the editor core.
+- **Editor ED2 — appearance: done** (2026-09-24): tree-sitter highlighting for 15 languages
+  with injections, colours in all five themes, cursor glide with trail, current line, indent
+  guides, bracket colours, smooth scroll, the Markdown preview with scroll sync. Next per D15:
+  M7.3 CP8/CP9 on the editor, then ED3 (Vi).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

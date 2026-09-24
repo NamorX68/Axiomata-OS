@@ -48,7 +48,8 @@ TS engine + `axiomata-files` crate, tree-sitter WASM, Vi mode, LSP, one App-Ring
 IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on it). **ED0 (file service,
 E1–E12) and ED1 (editor core, F1–F13) are done**: `axiomata-files`, root ids + dialog grants, `file_*`
 commands, the watcher, the ring's "Ansicht öffnen" entries; the TS engine in `src/editor/` and the file
-app in `src/fileapp/` (full-screen view, recovery, settings). ED2 is next and gets grilled first. Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
+app in `src/fileapp/` (full-screen view, recovery, settings); **ED2** (tree-sitter highlighting, themes,
+effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor come next, then ED3 (Vi). Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
 
@@ -187,6 +188,10 @@ from the code itself:
   `core/`; `src/fileapp/` depends on it, never the reverse (D1, extractable for ED7). Its
   `EditorDocument` is a mutable class: a Svelte component redraws via its own counter after
   every `doc.*` call, not via Svelte reactivity (`EditorSurface.svelte`'s header).
+- **tree-sitter grammars are built, not downloaded at runtime**: `apps/dashboard/scripts/build-grammars.sh
+  [name…]` (pinned tags, pinned `tree-sitter-cli`) writes `public/grammars/`, which is checked in. Never read
+  a tree-sitter `node.text` — `web-tree-sitter` re-calls the parse callback with a stale position; slice the
+  `TextStore` instead (`syntax/highlighter.ts`). The CSP's `'wasm-unsafe-eval'` exists for tree-sitter.
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.

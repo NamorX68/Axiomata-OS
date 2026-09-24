@@ -81,6 +81,7 @@
           loadInstances,
           setMockCustomCss: m.setMockCustomCss,
           mockExternalWrite: m.mockExternalWrite,
+          mockPickNext: m.mockPickNext,
         };
       });
     }

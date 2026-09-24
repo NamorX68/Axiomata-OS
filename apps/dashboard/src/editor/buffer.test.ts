@@ -46,6 +46,14 @@ describe.each(stores())("%s", (_name, make) => {
     expect(() => s.line(2)).toThrow(RangeError);
   });
 
+  it("turns a position into an offset into the joined text", () => {
+    const s = make("ab\ncdé\n");
+    expect(s.offsetAt(pos(0, 0))).toBe(0);
+    expect(s.offsetAt(pos(1, 2))).toBe(5);
+    expect(s.offsetAt(pos(2, 0))).toBe(7);
+    expect(s.text().slice(s.offsetAt(pos(1, 0)), s.offsetAt(pos(1, 3)))).toBe("cdé");
+  });
+
   it("clamps a position into the text", () => {
     const s = make("ab\ncdef");
     expect(clampPos(s, pos(-1, 5))).toEqual(pos(0, 2));

@@ -52,4 +52,29 @@
 
   /* fine paper grain: a low-contrast turbulence noise tile */
   --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.15 0 0 0 0 0.1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  /* Editor (docs/plans/editor.md G5/G6): syntax colours, then the editor's own. */
+  --ax-syntax-keyword: #b0521c;
+  --ax-syntax-string: #3f7d4e;
+  --ax-syntax-number: #7a4fa0;
+  --ax-syntax-comment: #8f8578;
+  --ax-syntax-function: #2b5f9e;
+  --ax-syntax-type: #1f7a70;
+  --ax-syntax-variable: #1f1b17;
+  --ax-syntax-constant: #9a6a12;
+  --ax-syntax-property: #45609a;
+  --ax-syntax-operator: #4a4238;
+  --ax-syntax-punctuation: #7a7064;
+  --ax-syntax-tag: #a8432a;
+  --ax-syntax-attribute: #8a5a12;
+  --ax-syntax-heading: #b0521c;
+  --ax-syntax-link: #2b5f9e;
+  --ax-syntax-emphasis: #8a4f2a;
+  --ax-syntax-code: #3f7d4e;
+  --ax-editor-current-line: rgba(31, 27, 23, 0.045);
+  --ax-editor-indent-guide: rgba(31, 27, 23, 0.1);
+  --ax-editor-bracket-1: #b0521c;
+  --ax-editor-bracket-2: #2b5f9e;
+  --ax-editor-bracket-3: #7a4fa0;
+  --ax-editor-glow: rgba(208, 100, 44, 0.3);
 }

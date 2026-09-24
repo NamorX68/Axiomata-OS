@@ -1,7 +1,7 @@
 # Plan: Die Datei-App — ein eigener Editor als Single Point of Truth
 
-Status: **ED0 und ED1 fertig** (2026-09-23/24; ED1 wartet noch auf den Live-Test am Mac).
-Als Nächstes ED2 — vorher in Checkpoints zerlegen und grillen wie ED0/ED1 (§5).
+Status: **ED0, ED1 und ED2 fertig** (2026-09-23/24; ED2 wartet auf die Farbabnahme und den
+Live-Test). Laut D15 kommt als Nächstes **M7.3 CP8/CP9** auf dem Editor, dann ED3 (Vi).
 
 ## 1. Idee
 
@@ -374,6 +374,94 @@ Jeder Meilenstein wird vor seinem Start in Checkpoints zerlegt und gegrillt, wie
   Cursor. Behoben: ⌥-Kürzel werden zusätzlich über `keyCode` erkannt (WebKit meldet die
   Grundtaste des Layouts), eine Komposition endet auch ohne `compositionend` bzw. beim
   Fokusverlust, und die Vorschau in den Einstellungen ist höher.
+
+### ED2 im Detail (gegrillt 2026-09-24, Q1–Q15, bestätigt; Umsetzung begonnen)
+
+**Entscheidungen**
+
+- **G1 — Grammatiken selbst gebaut** (Q1, Q14): `scripts/build-grammars.sh` holt jede
+  Grammatik auf einem festen Git-Tag und baut sie mit `tree-sitter-cli` 0.27 zu WASM
+  (die CLI lädt WASI-SDK und `wasm-opt` selbst nach, kein emscripten, kein Docker).
+  Quellen: `tree-sitter` (Rust, TypeScript/TSX, JavaScript, JSON, CSS, HTML, Python, Bash),
+  `tree-sitter-grammars` (Markdown, TOML, YAML, Lua, Svelte), `alex-pinkus` (Swift),
+  `DerekStride` (SQL). Lizenzhinweise liegen daneben.
+- **G2 — Sprachen** (Q2): die 15 oben; alles andere ist Klartext.
+- **G3 — CSP** (Q3): `'wasm-unsafe-eval'` in `script-src`, nur WebAssembly, kein JS-`eval`.
+- **G4 — Parsen im Haupt-Thread, inkrementell** (Q4); das erste Parsen einer großen Datei
+  zeigt bis dahin ungefärbten Text; über 2 MiB (schreibgeschützt) keine Hervorhebung. Ein
+  Worker folgt nur, wenn der Live-Test ruckelt.
+- **G5 — 17 Syntax-Token** (Q5): `--ax-syntax-{keyword,string,number,comment,function,type,
+  variable,constant,property,operator,punctuation,tag,attribute,heading,link,emphasis,code}`,
+  Fangnamen fallen auf ihren Oberbegriff zurück (`function.method` → `function`).
+- **G6 — Farben** (Q6): von Claude aus jeder Theme-Palette abgeleitet (Orange bleibt
+  Akzent) und dem Owner per Screenshot aller fünf Themes zur Abnahme gezeigt.
+- **G7 — Hingucker** (Q7, Q8): gleitender Cursor mit Spur (Canvas-Ebene nach D3; aus /
+  gleiten / gleiten mit Spur, Vorgabe mit Spur), sanftes Scrollen bei Sprüngen, aktuelle
+  Zeile, Einrückungslinien, farbige Klammerpaare, dezentes Akzent-Leuchten, schönere
+  Zeilennummern; jeder mit Schalter im Zahnrad; „Bewegung reduzieren" von macOS schaltet
+  Animation und sanftes Scrollen ab.
+- **G8 — Markdown-Vorschau** (Q9): ⌘⇧V schaltet Quelltext / Vorschau / nebeneinander;
+  Renderer ist `core/markdown.ts`; relative Bilder über den Dateidienst mit der Wurzel der
+  Datei; synchroner Bildlauf über `data-line`-Marken je Block.
+- **G9 — Ablage** (Q11): gebaute Grammatiken und Abfragen eingecheckt unter
+  `apps/dashboard/public/grammars/`, geladen per `fetch` erst beim ersten Bedarf.
+- **G10 — Eingebettete Sprachen** (Q12): `injections.scm` in ED2 (Markdown-Codeblöcke,
+  `<script>`/`<style>` in Svelte und HTML).
+- **G11 — Spracherkennung** (Q13): Endung, einige Dateinamen, sonst Shebang; ein manueller
+  Umschalter kommt mit ED4.
+- **G12 — Abfragen** (Q15): die `highlights.scm` der Grammatiken selbst plus je Sprache eine
+  kleine eigene Ergänzung, wo etwas fehlt; keine nvim-treesitter-Abfragen (Lua-Prädikate).
+
+**Checkpoints** (Q10)
+
+- **ED2.1** — Grammatik-Skript, gebaute Grammatiken, CSP, tree-sitter laden, inkrementelles
+  Parsen (Test: Baum und Text stimmen nach jeder Änderung überein). **Erledigt 2026-09-24.**
+  17 Grammatiken (die 15 Sprachen plus TSX und Markdown-Inline), zusammen 13 MB statt der
+  geschätzten 5–10; die größten sind Swift, SQL und TypeScript. `web-tree-sitter` 0.27 zählt
+  Spalten in UTF-16 wie der Editor, es wird also nichts umgerechnet. Gefunden: `node.text`
+  liest über den Parse-Rückruf mit veralteter Position. Deshalb schneidet der Highlighter
+  Texte aus dem Puffer, und der Test vergleicht den nachgeführten Baum mit einem frisch
+  geparsten. `EditorDocument.onTextChange` meldet jede Änderung; `TextStore.offsetAt` ist neu.
+- **ED2.2** — Hervorhebung und die Farben aller fünf Themes (Screenshots zur Abnahme).
+  **Erledigt 2026-09-24**, die Abnahme durch den Owner steht noch aus.
+  - TypeScript nutzt die JavaScript-Abfragen plus die eigenen, Svelte die HTML-Abfragen plus
+    die eigenen (deren `; inherits:` ist eine nvim-Eigenheit).
+  - Eingebettete Sprachen werden getrennt geparst und nach Text zwischengespeichert.
+  - Die Token-Tabelle ist eine `Map`, weil `"constructor" in {}` über den Prototyp wahr ist.
+  - Nur Farbe, kein Fett oder Kursiv, damit der Browser keinen Schnitt vortäuscht (F13).
+  - Hervorhebung hat pro Theme einen eigenen Ton.
+  - `theme/validator.ts` kennt die neuen Token.
+- **ED2.3** — Hingucker samt Schaltern. **Erledigt 2026-09-24.**
+  - Das Gleiten des Cursors zeichnet eine Canvas-Ebene nur während der Bewegung, im
+    Ruhezustand blinkt der DOM-Cursor. Gerechnet wird in Dokument-Koordinaten, damit beim
+    Scrollen nichts nachgleitet.
+  - Klammerfarben ergeben sich aus der Tiefe im Syntaxbaum, Klammern in Strings stören also
+    nicht.
+  - Leere Zeilen übernehmen die Einrückungslinien ihrer Nachbarn.
+  - Sanftes Scrollen erst ab drei Zeilen Sprung.
+  - „Bewegung reduzieren“ schaltet Gleiten und sanftes Scrollen ab.
+  - Die aktuelle Zeilennummer ist in Akzentfarbe, mit etwas mehr Abstand zum Text.
+- **ED2.4** — Markdown-Vorschau. **Erledigt 2026-09-24.**
+  - `renderMarkdownBlocks` markiert jeden Block mit `data-line`. Dafür gibt es eine zweite
+    DOMPurify-Instanz, die nur `data-line` durchlässt.
+  - Die Stile liegen gemeinsam mit dem FileViewer in `core/markdown-prose.css`.
+  - Bilder werden über `file_read_image` mit der Wurzel der Notiz gelesen.
+  - ⌘⇧V schaltet Quelltext / Vorschau / nebeneinander; der synchrone Bildlauf hat eine kurze
+    Echo-Sperre.
+- **Abschluss** — Live-Test, Prüfer, Commit.
+  Die Prüfer sind durch (2026-09-24).
+  - `architecture-reviewer`: nichts Kritisches oder Hohes; die D1-Grenze hält. Der mittlere
+    Punkt ist umgesetzt: Das Gleiten des Cursors ist aus der Oberfläche nach
+    `fileapp/cursorGlide.ts` gezogen, bevor ED3 dort weiter anbaut.
+  - `security-auditor`: Die CSP-Freigabe ist eng, und der Sanitizer hält alles, was er vorher
+    hielt (vom Prüfer empirisch nachgeprüft). Mittlerer Befund, behoben: `data-line` war auf
+    jedem Element erlaubt, eine Notiz konnte also eine Zeilenmarke fälschen. Jetzt wird jeder
+    Block normal bereinigt und erst danach vom Code eingerahmt; die zweite DOMPurify-Instanz
+    ist weg. Kleiner Befund, behoben: Tags lassen sich verschieben, deshalb prüft
+    `build-grammars.sh` den Commit jeder Grammatik und bricht bei Abweichung ab.
+  - Offene Kleinigkeit für CP8: Der synchrone Bildlauf nutzt zwei verschiedene Echo-Sperren
+    (Zeitfenster in der Ansicht, Frame-Flag in der Vorschau). Vereinheitlichen, wenn die
+    Diff-Ansicht als dritte Stelle dazukommt.
 
 ## 6. Verifikation (pro Meilenstein)
 

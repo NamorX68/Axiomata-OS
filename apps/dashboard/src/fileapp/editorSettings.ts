@@ -18,6 +18,7 @@ import { fontFamily } from "./fonts";
 
 export type EditorMode = "normal" | "vi";
 export type Autosave = "off" | "delay" | "leave";
+export type CursorAnimation = "off" | "glide" | "trail";
 
 export interface EditorSettings {
   /** Vi arrives with ED3; until then the setting exists but only "normal" is offered. */
@@ -39,6 +40,18 @@ export interface EditorSettings {
   tabSize: number;
   /** F9: off, 1 s after the last change, or when the view is left. */
   autosave: Autosave;
+  /** G7: the cursor glides to its new place, with or without a trail. */
+  cursorAnimation: CursorAnimation;
+  /** G7: jumps (page, ⌘↓, a far click) scroll smoothly. */
+  smoothScroll: boolean;
+  /** G7: the cursor's line is tinted. */
+  currentLine: boolean;
+  /** G7: guides at every indentation level. */
+  indentGuides: boolean;
+  /** G7: bracket pairs coloured by depth. */
+  bracketColors: boolean;
+  /** G7: a faint accent glow on the cursor and its line number. */
+  glow: boolean;
 }
 
 /** F12's defaults, confirmed by the owner. */
@@ -56,6 +69,12 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   indentSize: 4,
   tabSize: 4,
   autosave: "off",
+  cursorAnimation: "trail",
+  smoothScroll: true,
+  currentLine: true,
+  indentGuides: true,
+  bracketColors: true,
+  glow: true,
 };
 
 const SETTINGS_VERSION = 1;
@@ -91,6 +110,12 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     indentSize: Math.round(number(r.indentSize, 1, 8, d.indentSize)),
     tabSize: Math.round(number(r.tabSize, 1, 8, d.tabSize)),
     autosave: pick(r.autosave, ["off", "delay", "leave"] as const, d.autosave),
+    cursorAnimation: pick(r.cursorAnimation, ["off", "glide", "trail"] as const, d.cursorAnimation),
+    smoothScroll: bool(r.smoothScroll, d.smoothScroll),
+    currentLine: bool(r.currentLine, d.currentLine),
+    indentGuides: bool(r.indentGuides, d.indentGuides),
+    bracketColors: bool(r.bracketColors, d.bracketColors),
+    glow: bool(r.glow, d.glow),
   };
 }
 

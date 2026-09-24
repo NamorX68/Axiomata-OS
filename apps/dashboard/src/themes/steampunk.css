@@ -45,4 +45,29 @@
 
   /* riveted plate: a faint grid of brass-coloured rivet heads */
   --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'%3E%3Cpath fill='none' stroke='%23d9932e' stroke-opacity='0.06' d='M0 .5h72M.5 0v72'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%23d9932e' fill-opacity='0.12'/%3E%3Ccircle cx='64' cy='64' r='2' fill='%23d9932e' fill-opacity='0.12'/%3E%3C/svg%3E");
+
+  /* Editor (docs/plans/editor.md G5/G6): syntax colours, then the editor's own. */
+  --ax-syntax-keyword: #e0a14a;
+  --ax-syntax-string: #a9c46c;
+  --ax-syntax-number: #d98f6c;
+  --ax-syntax-comment: #806b56;
+  --ax-syntax-function: #e8c47e;
+  --ax-syntax-type: #7fb3a6;
+  --ax-syntax-variable: #f1e4cf;
+  --ax-syntax-constant: #d9932e;
+  --ax-syntax-property: #cbb491;
+  --ax-syntax-operator: #cdb899;
+  --ax-syntax-punctuation: #9c8670;
+  --ax-syntax-tag: #d4735a;
+  --ax-syntax-attribute: #e0a83c;
+  --ax-syntax-heading: #e8b35c;
+  --ax-syntax-link: #7fb3a6;
+  --ax-syntax-emphasis: #f0cf9a;
+  --ax-syntax-code: #a9c46c;
+  --ax-editor-current-line: rgba(241, 228, 207, 0.04);
+  --ax-editor-indent-guide: rgba(241, 228, 207, 0.08);
+  --ax-editor-bracket-1: #e0a83c;
+  --ax-editor-bracket-2: #7fb3a6;
+  --ax-editor-bracket-3: #d98f6c;
+  --ax-editor-glow: rgba(217, 147, 46, 0.35);
 }

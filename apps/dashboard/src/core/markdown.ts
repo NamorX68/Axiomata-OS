@@ -92,14 +92,21 @@ const ALLOWED_ATTR = ["href", "title", "alt", "src", "align", "start", "type", "
  *  lockstep, same as `md-file.svelte`'s own copy of this list. */
 const DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp|bmp|tiff|heic|avif);base64,[a-z0-9+/=]+$/i;
 
-const purify = DOMPurify();
-purify.setConfig({
-  ALLOWED_TAGS,
-  ALLOWED_ATTR,
-  ALLOW_DATA_ATTR: false,
-  FORBID_ATTR: ["style"],
-  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#|\/|\.|data:image\/(?:png|jpe?g|gif|webp|bmp|tiff|heic|avif);base64,)/i,
-});
+/** The one configured DOMPurify instance. */
+function sanitizer() {
+  const instance = DOMPurify();
+  instance.setConfig({
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    ALLOW_DATA_ATTR: false,
+    FORBID_ATTR: ["style"],
+    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|#|\/|\.|data:image\/(?:png|jpe?g|gif|webp|bmp|tiff|heic|avif);base64,)/i,
+  });
+  addHooks(instance);
+  return instance;
+}
+
+function addHooks(purify: ReturnType<typeof DOMPurify>): void {
 purify.addHook("uponSanitizeAttribute", (node, data) => {
   const value = data.attrValue.trim();
   if (data.attrName === "href" && /^data:/i.test(value)) {
@@ -121,10 +128,35 @@ purify.addHook("afterSanitizeAttributes", (node) => {
     node.setAttribute("disabled", "");
   }
 });
+}
+
+const purify = sanitizer();
 
 export function renderMarkdown(source: string): string {
   const html = marked.parse(source) as string;
   return purify.sanitize(html);
+}
+
+/**
+ * Like `renderMarkdown`, but every top-level block is wrapped in
+ * `<div data-line="n">` with its zero-based source line — what the editor's
+ * preview (`docs/plans/editor.md`, G8) scrolls in step with the source by.
+ * Each block is sanitised on its own with the ordinary rules and wrapped only
+ * afterwards, so `data-line` is never something a note's own HTML can produce:
+ * every `[data-line]` in the result is one of these wrappers (ED2 audit).
+ */
+export function renderMarkdownBlocks(source: string): string {
+  const tokens = marked.lexer(source);
+  let line = 0;
+  const parts: string[] = [];
+  for (const token of tokens) {
+    if (token.type !== "space") {
+      const one = Object.assign([token], { links: tokens.links });
+      parts.push(`<div data-line="${line}">${purify.sanitize(marked.parser(one))}</div>`);
+    }
+    line += (token.raw.match(/\n/g) ?? []).length;
+  }
+  return parts.join("");
 }
 
 /** Plain-text preview of a Markdown note: frontmatter and the first `#`

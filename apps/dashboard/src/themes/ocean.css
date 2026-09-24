@@ -38,4 +38,29 @@
 
   /* low-contrast wave crests in teal */
   --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='40' viewBox='0 0 120 40'%3E%3Cpath fill='none' stroke='%234fd6b8' stroke-opacity='0.06' stroke-width='1' d='M0 20c15-12 30-12 45 0s30 12 45 0 30-12 45 0'/%3E%3C/svg%3E");
+
+  /* Editor (docs/plans/editor.md G5/G6): syntax colours, then the editor's own. */
+  --ax-syntax-keyword: #ff9a6e;
+  --ax-syntax-string: #8fdcb5;
+  --ax-syntax-number: #c9a6ff;
+  --ax-syntax-comment: #5a7c8e;
+  --ax-syntax-function: #6ec6ff;
+  --ax-syntax-type: #4fd6c8;
+  --ax-syntax-variable: #e9f3f7;
+  --ax-syntax-constant: #e8c46a;
+  --ax-syntax-property: #a9cde0;
+  --ax-syntax-operator: #bcd2dd;
+  --ax-syntax-punctuation: #7896a6;
+  --ax-syntax-tag: #ff8a70;
+  --ax-syntax-attribute: #e8c46a;
+  --ax-syntax-heading: #ffa37a;
+  --ax-syntax-link: #6ec6ff;
+  --ax-syntax-emphasis: #bfe0f2;
+  --ax-syntax-code: #8fdcb5;
+  --ax-editor-current-line: rgba(233, 243, 247, 0.04);
+  --ax-editor-indent-guide: rgba(233, 243, 247, 0.08);
+  --ax-editor-bracket-1: #e8c46a;
+  --ax-editor-bracket-2: #6ec6ff;
+  --ax-editor-bracket-3: #c9a6ff;
+  --ax-editor-glow: rgba(255, 138, 91, 0.35);
 }

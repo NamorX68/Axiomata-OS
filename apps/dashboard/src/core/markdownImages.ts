@@ -33,6 +33,20 @@ function isAlreadyResolvable(target: string): boolean {
  * referenced twice in one note) and all fetches run in parallel.
  */
 export async function resolveMarkdownImages(source: string, notePath: string, invoke: Invoke): Promise<string> {
+  return resolveMarkdownImagesWith(source, notePath, (rel) => invoke<WorkspaceImage>("read_workspace_image", { rel }));
+}
+
+/**
+ * `resolveMarkdownImages` with the image reader passed in — the file app reads
+ * through the file service with the note's own root (`file_read_image`), so a
+ * note in a project folder finds its images too, not only one in the
+ * workspace.
+ */
+export async function resolveMarkdownImagesWith(
+  source: string,
+  notePath: string,
+  read: (rel: string) => Promise<{ mime: string; base64: string }>,
+): Promise<string> {
   const targets = new Set<string>();
   for (const m of source.matchAll(IMAGE_RE)) {
     const target = m[2];
@@ -45,7 +59,7 @@ export async function resolveMarkdownImages(source: string, notePath: string, in
     [...targets].map(async (target) => {
       const rel = resolveRelativeLink(notePath, target);
       try {
-        const img = await invoke<WorkspaceImage>("read_workspace_image", { rel });
+        const img = await read(rel);
         dataUris.set(target, `data:${img.mime};base64,${img.base64}`);
       } catch {
         // Left unresolved on purpose — see the doc comment above.

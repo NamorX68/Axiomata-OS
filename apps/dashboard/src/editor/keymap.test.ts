@@ -38,6 +38,7 @@ describe("keyAction", () => {
     expect(keyAction(key("Z", { meta: true, shift: true }))).toEqual({ command: { type: "redo" } });
     expect(keyAction(key("s", { meta: true }))).toEqual({ effect: "save" });
     expect(keyAction(key("v", { meta: true }))).toEqual({ effect: "paste" });
+    expect(keyAction(key("V", { meta: true, shift: true }))).toEqual({ effect: "togglePreview" });
     expect(keyAction(key("l", { meta: true }))).toEqual({ command: { type: "selectLine" } });
     expect(keyAction(key("/", { meta: true, shift: true }))).toEqual({ command: { type: "toggleComment" } });
   });

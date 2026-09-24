@@ -662,7 +662,56 @@ export function mockExternalWrite(root: string, rel: string, content: string | n
 const recoveries = new Map<string, unknown>();
 
 /** Files of the non-workspace roots in the file-service mock. */
-const otherRootFiles = new Map<string, string>([["project:1\0README.md", "# Axiomata-OS\n"]]);
+const otherRootFiles = new Map<string, string>([
+  ["project:1\0README.md", "# Axiomata-OS\n\nSee `src/main.rs`.\n\n```rust\nfn main() {}\n```\n"],
+  [
+    "project:1\0src/main.rs",
+    [
+      "//! A sample for the editor's highlighting.",
+      "use std::collections::HashMap;",
+      "",
+      "/// Counts words.",
+      "pub fn count(text: &str) -> HashMap<&str, usize> {",
+      "    let mut seen = HashMap::new();",
+      "    for word in text.split_whitespace() {",
+      "        *seen.entry(word).or_insert(0) += 1; // tally",
+      "    }",
+      "    seen",
+      "}",
+      "",
+      "fn main() {",
+      '    let n: u32 = 42;',
+      '    println!("{n} words: {:?}", count("a b a"));',
+      "}",
+      "",
+    ].join("\n"),
+  ],
+  [
+    "project:1\0src/App.svelte",
+    [
+      '<script lang="ts">',
+      "  let count = $state(0);",
+      "  const double = $derived(count * 2);",
+      "</script>",
+      "",
+      '<button class="pill" onclick={() => count++}>',
+      "  {count} × 2 = {double}",
+      "</button>",
+      "",
+      "<style>",
+      "  .pill { color: var(--ax-accent); }",
+      "</style>",
+      "",
+    ].join("\n"),
+  ],
+]);
+
+/** The file the next mock `file_pick` returns (console: `__ax.mockPickNext`). */
+let nextPick: { root: string; rel: string } | null = null;
+
+export function mockPickNext(root: string, rel: string): void {
+  nextPick = { root, rel };
+}
 
 function fileArgs(args: Record<string, unknown>): { root: string; rel: string } {
   const root = String(args.root);
@@ -1325,6 +1374,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "file_read_image":
       throw fileError("NotFound", "devmock has no images for the file service");
     case "file_pick":
+      if (nextPick && !args.folder) {
+        const picked = { ...nextPick, folder: false, path: `/mock/${nextPick.rel}` };
+        nextPick = null;
+        return picked as T;
+      }
       // No native dialog in a browser: pretend the first vault note was picked.
       return args.folder
         ? ({ root: "workspace", rel: "", folder: true, path: "/mock/vault" } as T)

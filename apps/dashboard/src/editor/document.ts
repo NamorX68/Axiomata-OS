@@ -28,6 +28,19 @@ export type EditKind = "typing" | "deleting" | "other";
 /** Longest pause that still continues a typing (or deleting) step. */
 export const MERGE_WINDOW_MS = 1000;
 
+/**
+ * One replacement as it hit the text, in both coordinate systems a syntax tree
+ * needs (`tree-sitter`'s `Edit`): positions and offsets, before and after.
+ */
+export interface TextChange {
+  start: Pos;
+  oldEnd: Pos;
+  newEnd: Pos;
+  startIndex: number;
+  oldEndIndex: number;
+  newEndIndex: number;
+}
+
 /** One replacement, in the coordinates of the text at the moment it is applied. */
 export interface Change {
   range: Range;
@@ -83,6 +96,8 @@ export class EditorDocument {
   private savedTop: Step | null = null;
   /** Set when the next step must not merge into the current top. */
   private sealed = true;
+  /** Told about every replacement — edits, undo, redo, reloads alike. */
+  private listeners = new Set<(change: TextChange) => void>();
 
   constructor(fileText: string, options: DocumentOptions) {
     this.shape = detectShape(fileText);
@@ -143,7 +158,7 @@ export class EditorDocument {
       // `endAfter` disagree with what the store did, and undo miss its range.
       const inserted = change.text.replace(/\r\n?/g, "\n");
       const removed = this.store.slice(change.range);
-      this.store.replace(change.range, inserted);
+      this.replaceText(change.range, inserted);
       applied.push({ start: change.range.start, removed, inserted });
     }
     this.redoStack = [];
@@ -172,7 +187,7 @@ export class EditorDocument {
     const step = this.undoStack.pop();
     if (!step) return false;
     for (const change of [...step.changes].reverse()) {
-      this.store.replace(range(change.start, endAfter(change.start, change.inserted)), change.removed);
+      this.replaceText(range(change.start, endAfter(change.start, change.inserted)), change.removed);
     }
     this.redoStack.push(step);
     this.afterHistoryMove(step.before);
@@ -183,7 +198,7 @@ export class EditorDocument {
     const step = this.redoStack.pop();
     if (!step) return false;
     for (const change of step.changes) {
-      this.store.replace(range(change.start, endAfter(change.start, change.removed)), change.inserted);
+      this.replaceText(range(change.start, endAfter(change.start, change.removed)), change.inserted);
     }
     this.undoStack.push(step);
     this.afterHistoryMove(step.after);
@@ -208,7 +223,7 @@ export class EditorDocument {
   reset(fileText: string): void {
     this.shape = detectShape(fileText);
     const whole = range(pos(0, 0), clampPos(this.store, pos(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)));
-    this.store.replace(whole, bodyForStore(fileText, this.shape));
+    this.replaceText(whole, bodyForStore(fileText, this.shape));
     this.undoStack = [];
     this.redoStack = [];
     this.savedTop = null;
@@ -216,6 +231,37 @@ export class EditorDocument {
     this.selection = cursor(clampPos(this.store, this.selection.head));
     this.goalColumn = null;
     this.revision++;
+  }
+
+  /**
+   * Subscribes to every replacement of the text (a syntax tree follows them
+   * incrementally). Returns the unsubscribe function.
+   */
+  onTextChange(listener: (change: TextChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** The one place the store is written: replaces, then tells the listeners. */
+  private replaceText(r: Range, raw: string): void {
+    // The store splits any line break; offsets must count what it keeps.
+    const text = raw.replace(/\r\n?/g, "\n");
+    if (this.listeners.size === 0) {
+      this.store.replace(r, text);
+      return;
+    }
+    const startIndex = this.store.offsetAt(r.start);
+    const oldEndIndex = this.store.offsetAt(r.end);
+    const newEnd = this.store.replace(r, text);
+    const change: TextChange = {
+      start: r.start,
+      oldEnd: r.end,
+      newEnd,
+      startIndex,
+      oldEndIndex,
+      newEndIndex: startIndex + text.length,
+    };
+    for (const listener of this.listeners) listener(change);
   }
 
   private afterHistoryMove(sel: Selection): void {

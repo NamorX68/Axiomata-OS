@@ -330,7 +330,7 @@
     {:else if kind === "text"}
       <pre class="code-view">{file.content}</pre>
     {:else}
-      <div class="rendered">{@html html}</div>
+      <div class="rendered ax-prose">{@html html}</div>
     {/if}
   {/if}
 </div>
@@ -469,93 +469,6 @@
     padding: var(--ax-space-3) var(--ax-space-4);
     user-select: text;
   }
-  .rendered :global(h1),
-  .rendered :global(h2),
-  .rendered :global(h3) {
-    margin: var(--ax-space-3) 0 var(--ax-space-2);
-  }
-  .rendered :global(h1) {
-    font-size: var(--ax-font-size-xl);
-    padding-bottom: var(--ax-space-2);
-    border-bottom: 1px solid var(--ax-border);
-  }
-  .rendered :global(h2) {
-    font-size: var(--ax-font-size-lg);
-    color: var(--ax-accent);
-  }
-  .rendered :global(hr) {
-    margin: var(--ax-space-3) 0;
-    border: none;
-    border-top: 1px solid var(--ax-border);
-  }
-  .rendered :global(kbd) {
-    font-family: var(--ax-font-mono);
-    font-size: 0.85em;
-    padding: 1px 5px;
-    border: 1px solid var(--ax-border-strong);
-    border-bottom-width: 2px;
-    border-radius: var(--ax-radius-sm);
-    background: var(--ax-surface-2);
-  }
-  .rendered :global(li::marker) {
-    color: var(--ax-accent);
-  }
-  .rendered :global(p),
-  .rendered :global(ul),
-  .rendered :global(ol),
-  .rendered :global(pre),
-  .rendered :global(table),
-  .rendered :global(blockquote) {
-    margin: 0 0 var(--ax-space-3);
-  }
-  .rendered :global(code) {
-    font-family: var(--ax-font-mono);
-    font-size: 0.92em;
-    background: var(--ax-surface-3);
-    padding: 1px 4px;
-    border-radius: var(--ax-radius-sm);
-  }
-  .rendered :global(pre) {
-    padding: var(--ax-space-3);
-    background: var(--ax-surface-3);
-    border-radius: var(--ax-radius-md);
-    overflow: auto;
-  }
-  .rendered :global(pre code) {
-    background: none;
-    padding: 0;
-  }
-  .rendered :global(blockquote) {
-    padding: var(--ax-space-2) var(--ax-space-3);
-    border-left: 3px solid var(--ax-accent);
-    border-radius: 0 var(--ax-radius-sm) var(--ax-radius-sm) 0;
-    background: var(--ax-accent-muted);
-    color: var(--ax-text-muted);
-  }
-  .rendered :global(table) {
-    border-collapse: collapse;
-  }
-  .rendered :global(th),
-  .rendered :global(td) {
-    padding: var(--ax-space-1) var(--ax-space-2);
-    border: 1px solid var(--ax-border);
-  }
-  .rendered :global(th) {
-    background: var(--ax-surface-3);
-    color: var(--ax-accent);
-    text-align: left;
-  }
-  .rendered :global(a) {
-    color: var(--ax-accent);
-  }
-  .rendered :global(input[type="checkbox"]) {
-    accent-color: var(--ax-accent);
-    margin-right: var(--ax-space-1);
-  }
-  .rendered :global(img) {
-    max-width: 100%;
-  }
-
   p {
     margin: 0;
     padding: var(--ax-space-3);

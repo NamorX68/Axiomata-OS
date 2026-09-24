@@ -29,6 +29,8 @@ export interface TextStore {
   replace(r: Range, text: string): Pos;
   /** The whole text, lines joined with `\n`. */
   text(): string;
+  /** `p` as an offset into `text()` (UTF-16 units, each line break one unit). */
+  offsetAt(p: Pos): number;
 }
 
 /** Splits text into lines on LF, CRLF or a lone CR. */
@@ -78,6 +80,13 @@ export class LineStore implements TextStore {
 
   text(): string {
     return this.lines.join("\n");
+  }
+
+  /** Linear in the line number — a rope (ED5) answers this in log time. */
+  offsetAt(p: Pos): number {
+    let offset = 0;
+    for (let i = 0; i < p.line; i++) offset += this.lines[i].length + 1;
+    return offset + p.col;
   }
 
   /** Throws on a range that is reversed or points outside the text. */
