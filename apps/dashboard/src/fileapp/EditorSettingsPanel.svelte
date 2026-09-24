@@ -245,7 +245,7 @@
   }
 
   .preview {
-    height: 200px;
+    height: clamp(280px, 38vh, 440px);
     flex: 0 0 auto;
     border-bottom: 1px solid var(--ax-border);
   }

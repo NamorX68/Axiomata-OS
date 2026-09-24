@@ -174,7 +174,14 @@
 
   function onKeydown(e: KeyboardEvent): void {
     if (e.isComposing || composing) return;
-    const action = keyAction({ key: e.key, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey, ctrl: e.ctrlKey });
+    const action = keyAction({
+      key: e.key,
+      meta: e.metaKey,
+      alt: e.altKey,
+      shift: e.shiftKey,
+      ctrl: e.ctrlKey,
+      keyCode: e.keyCode,
+    });
     if (!action) return;
     if ("command" in action) {
       e.preventDefault();
@@ -226,17 +233,33 @@
   }
 
   function onInput(e: Event): void {
-    if (composing || (e as InputEvent).isComposing) return;
+    if ((e as InputEvent).isComposing) return;
+    // WebKit sometimes ends a composition (a cancelled dead key, say) with a
+    // plain input event and no compositionend; the flag must not stay stuck,
+    // or every key the editor owns would be ignored from then on.
+    composing = false;
+    commitInput();
+  }
+
+  function onCompositionEnd(): void {
+    composing = false;
+    commitInput();
+  }
+
+  /** Inserts whatever the textarea holds and empties it. */
+  function commitInput(): void {
     const text = input.value;
     input.value = "";
     if (text) exec({ type: "insert", text });
   }
 
-  function onCompositionEnd(): void {
-    composing = false;
-    const text = input.value;
-    input.value = "";
-    if (text) exec({ type: "insert", text });
+  /** Leaving mid-composition drops the unfinished marked text (a lone dead key). */
+  function onBlur(): void {
+    focused = false;
+    if (composing) {
+      composing = false;
+      input.value = "";
+    }
   }
 
   // ---------------------------------------------------------------- mouse
@@ -408,7 +431,7 @@
           oncut={onCut}
           onpaste={onPaste}
           onfocus={() => (focused = true)}
-          onblur={() => (focused = false)}
+          onblur={onBlur}
         ></textarea>
       </div>
     </div>

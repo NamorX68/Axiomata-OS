@@ -20,7 +20,17 @@ export interface KeyInput {
   alt: boolean;
   shift: boolean;
   ctrl: boolean;
+  /**
+   * The legacy `KeyboardEvent.keyCode`. On a Mac WebKit reports the layout's
+   * unmodified letter there even when ⌥ turns the key into a dead key (`key`
+   * is then just "Dead") — the one way to recognise an ⌥ shortcut on every
+   * layout. Optional: only ⌥ shortcuts look at it.
+   */
+  keyCode?: number;
 }
+
+/** `keyCode` of the Z key, whatever the layout puts on it with ⌥. */
+const KEYCODE_Z = 90;
 
 export type Effect = "copy" | "cut" | "paste" | "save" | "open" | "toggleWrap";
 
@@ -38,9 +48,11 @@ function command(c: Command): KeyAction {
 export function keyAction(input: KeyInput): KeyAction | null {
   const { meta, alt, shift, ctrl } = input;
   if (ctrl) return null;
-  // ⌥Z types "Ω" on a Mac keyboard, "z" elsewhere; checked before lowercasing,
-  // since "Ω".toLowerCase() is "ω".
-  if (alt && !meta && (input.key === "Ω" || input.key === "z" || input.key === "Z")) return { effect: "toggleWrap" };
+  // ⌥Z types "Ω" on a US Mac layout, "z" off the Mac, and on some layouts it is a
+  // dead key ("Dead", e.g. ¨) — `keyCode` catches that last case. Checked before
+  // lowercasing, since "Ω".toLowerCase() is "ω".
+  const isZ = input.key === "Ω" || input.key === "z" || input.key === "Z" || input.keyCode === KEYCODE_Z;
+  if (alt && !meta && isZ) return { effect: "toggleWrap" };
   const key = input.key.length === 1 ? input.key.toLowerCase() : input.key;
 
   switch (key) {

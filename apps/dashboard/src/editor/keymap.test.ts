@@ -46,6 +46,9 @@ describe("keyAction", () => {
     expect(keyAction(key("Ω", { alt: true }))).toEqual({ effect: "toggleWrap" });
     expect(keyAction(key("z", { alt: true }))).toEqual({ effect: "toggleWrap" });
     expect(keyAction(key("Ω"))).toBeNull();
+    // A layout where ⌥Z is a dead key (¨): only keyCode tells it apart.
+    expect(keyAction(key("Dead", { alt: true, keyCode: 90 }))).toEqual({ effect: "toggleWrap" });
+    expect(keyAction(key("Dead", { alt: true, keyCode: 85 }))).toBeNull();
   });
 
   it("leaves plain typing, ⌃ and unknown ⌘ keys alone", () => {

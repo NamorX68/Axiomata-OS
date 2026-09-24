@@ -368,6 +368,12 @@ Jeder Meilenstein wird vor seinem Start in Checkpoints zerlegt und gegrillt, wie
   herauslösbar; `src/fileapp/` hängt an drei App-Stellen (`invokeBackend`, `getSetting` aus
   `dashboard.json`, Toasts), die eine eigenständige App ersetzen muss. Der Commit folgt
   vor dem Live-Test; Befunde aus dem Test kommen als eigener Commit.
+  **Live-Test 2026-09-24** (Owner, ZSA Voyager mit Modifikatoren als Halte-Tasten): das
+  meiste funktioniert. Befund: ⌥Z ist auf dem Owner-Layout eine tote Taste (`¨`), meldet also
+  `key = "Dead"`, und das hängengebliebene Kompositionsfeld zeigte ein nicht löschbares `¨` am
+  Cursor. Behoben: ⌥-Kürzel werden zusätzlich über `keyCode` erkannt (WebKit meldet die
+  Grundtaste des Layouts), eine Komposition endet auch ohne `compositionend` bzw. beim
+  Fokusverlust, und die Vorschau in den Einstellungen ist höher.
 
 ## 6. Verifikation (pro Meilenstein)
 
