@@ -311,3 +311,48 @@ pub async fn file_pick(
     })
     .await
 }
+
+// ------------------------------------------------------------ editor recovery
+//
+// Unsaved editor work kept aside (`axiomata_core::editor_recovery`, plan F8).
+// Keyed by root id + path as strings only: an entry never grants access to the
+// file, it only holds text the editor itself had; restoring it is an ordinary
+// save through the guard above.
+
+/// Keeps the unsaved text of `root` + `rel`, based on file version `base`.
+#[tauri::command]
+pub async fn editor_recovery_save(
+    root: String,
+    rel: String,
+    base: Option<String>,
+    content: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        axiomata_core::editor_recovery::save(&root, &rel, base, &content)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(|err| err.to_string())
+}
+
+/// The unsaved text kept for `root` + `rel`, if any.
+#[tauri::command]
+pub async fn editor_recovery_load(
+    root: String,
+    rel: String,
+) -> Result<Option<axiomata_core::editor_recovery::Recovery>, String> {
+    tauri::async_runtime::spawn_blocking(move || axiomata_core::editor_recovery::load(&root, &rel))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Forgets the unsaved text kept for `root` + `rel`.
+#[tauri::command]
+pub async fn editor_recovery_delete(root: String, rel: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        axiomata_core::editor_recovery::delete(&root, &rel)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(|err| err.to_string())
+}

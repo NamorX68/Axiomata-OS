@@ -39,6 +39,11 @@ pub fn bootstrap() -> Services {
         if let Err(err) = axiomata_core::memory::sync(&sync_config) {
             tracing::warn!(%err, "startup memory sync failed");
         }
+        // Unsaved editor work nobody came back for in 30 days (plan F8).
+        let swept = axiomata_core::editor_recovery::sweep();
+        if swept > 0 {
+            tracing::info!(swept, "removed stale editor recovery entries");
+        }
     });
 
     // `.setup()` is not itself inside a Tokio runtime, so the loop is handed

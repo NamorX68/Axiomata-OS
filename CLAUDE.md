@@ -46,8 +46,9 @@ board later sits on. The eight load-bearing decisions are settled in §3 of that
 **Under way:** the file app / own AAA editor (`docs/plans/editor.md`, decisions D1–D19 —
 TS engine + `axiomata-files` crate, tree-sitter WASM, Vi mode, LSP, one App-Ring icon each for Editor and
 IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on it). **ED0 (file service,
-E1–E12) is done**: `axiomata-files`, root ids + dialog grants, `file_*` commands, the watcher, the ring's
-"Ansicht öffnen" entry; ED1 (editor core) is next and gets grilled first. Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
+E1–E12) and ED1 (editor core, F1–F13) are done**: `axiomata-files`, root ids + dialog grants, `file_*`
+commands, the watcher, the ring's "Ansicht öffnen" entries; the TS engine in `src/editor/` and the file
+app in `src/fileapp/` (full-screen view, recovery, settings). ED2 is next and gets grilled first. Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
 
@@ -182,6 +183,10 @@ from the code itself:
   every action walks from the root fd with `openat(O_NOFOLLOW)` (`pinned.rs`), and a new place
   on disk is reachable only through `file_pick` — the native dialog driven from Rust. Never grant
   `dialog:*` (or `fs:*`) in `capabilities/default.json`; that would let the webview forge picks.
+- **The editor engine (`src/editor/`) imports nothing from the app** — no DOM, no Svelte, no
+  `core/`; `src/fileapp/` depends on it, never the reverse (D1, extractable for ED7). Its
+  `EditorDocument` is a mutable class: a Svelte component redraws via its own counter after
+  every `doc.*` call, not via Svelte reactivity (`EditorSurface.svelte`'s header).
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.

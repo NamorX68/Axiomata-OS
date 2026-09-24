@@ -1,0 +1,58 @@
+import { describe, expect, it } from "vitest";
+
+import { DEFAULT_EDITOR_SETTINGS, parseEditorSettings } from "./editorSettings";
+import { nearestWeight, realWeights, weightName } from "./fonts";
+
+describe("parseEditorSettings", () => {
+  it("defaults everything for an empty or broken file", () => {
+    expect(parseEditorSettings({})).toEqual(DEFAULT_EDITOR_SETTINGS);
+    expect(parseEditorSettings(null)).toEqual(DEFAULT_EDITOR_SETTINGS);
+    expect(parseEditorSettings("nonsense")).toEqual(DEFAULT_EDITOR_SETTINGS);
+  });
+
+  it("keeps good fields and replaces bad ones one by one", () => {
+    const s = parseEditorSettings({
+      fontFamily: "Fira Code",
+      fontWeight: 250,
+      fontSize: 99,
+      lineNumbers: "roman",
+      autosave: "delay",
+      mode: "vi",
+      ligatures: "yes",
+    });
+    expect(s).toMatchObject({
+      fontFamily: "Fira Code",
+      fontWeight: 300,
+      fontSize: 32,
+      lineNumbers: "hybrid",
+      autosave: "delay",
+      mode: "vi",
+      ligatures: true,
+    });
+  });
+
+  it("refuses a font that is not bundled", () => {
+    expect(parseEditorSettings({ fontFamily: "Comic Sans MS" }).fontFamily).toBe("JetBrains Mono");
+  });
+});
+
+describe("font weights (F13)", () => {
+  it("lists only the weights a family really has", () => {
+    expect(realWeights("Space Mono")).toEqual([400, 700]);
+    expect(realWeights("Source Code Pro")).toEqual([200, 300, 400, 500, 600, 700, 800, 900]);
+    expect(realWeights("JetBrains Mono")[0]).toBe(100);
+  });
+
+  it("draws the nearest real face, the lighter one on a tie", () => {
+    expect(nearestWeight("Space Mono", 100)).toBe(400);
+    expect(nearestWeight("Space Mono", 550)).toBe(400);
+    expect(nearestWeight("Fira Code", 100)).toBe(300);
+    expect(nearestWeight("JetBrains Mono", 900)).toBe(800);
+    expect(nearestWeight("JetBrains Mono", 300)).toBe(300);
+  });
+
+  it("names weights the way font menus do", () => {
+    expect(weightName(100)).toBe("Thin 100");
+    expect(weightName(600)).toBe("SemiBold 600");
+  });
+});

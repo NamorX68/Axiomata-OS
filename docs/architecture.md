@@ -215,6 +215,27 @@ project, a discarded worktree or a revoked grant is noticed at the next access. 
 this crate (`core::workspace` delegates); the new `file_*` commands use the editor's limits
 (read 16 MiB, `large` above 2 MiB, write 2 MiB) and typed `{ kind, message }` errors.
 
+### The editor (`apps/dashboard/src/editor/` + `src/fileapp/`, ED1)
+
+The file app's own editor, split along the D1 line: **`src/editor/` is the engine** —
+plain TypeScript with no DOM, no Svelte and no imports from the rest of the app, tested
+with vitest (`buffer` behind the `TextStore` interface, which a rope replaces in ED5 on one
+constructor line; `document` with linear undo and step grouping; `commands` + `keymap`
+for the Mac key map; `wrap`/`visual`/`geometry` for soft wrap, visual rows and every pixel
+rule in cells). **`src/fileapp/` is the app around it**: `EditorSurface.svelte` renders
+only the visible rows and takes input through a hidden textarea (IME, dead keys, the
+native clipboard events); `FileAppView.svelte` is the full-screen view (hidden, never
+unmounted, like the IDE); `session.ts` holds every file flow — expected-version saves,
+external changes judged by version, recovery — behind a `FileBackend` interface and is
+tested with a fake one. Three load-bearing facts: geometry is arithmetic because every
+bundled font is monospace (one measured cell width; wide characters take two cells); word
+boundaries use their own character classes, not `Intl.Segmenter` (which treats `bar.baz`
+as one word); and `EditorDocument` is a mutable class, so the surface redraws on its own
+`tick` after every `doc.*` call and on the `revision` prop for changes made behind its back.
+Unsaved text is kept in `~/.axiomata/editor-recovery/` (`core::editor_recovery`, at most
+256 entries), preferences in `editor-settings.json` (`core::editor_settings`), recent
+files under `settings.editor.recent` in `dashboard.json`.
+
 ### `axiomata-cli`
 
 A `clap`-based binary whose job is to exercise `axiomata-core` end to end without the GUI:
@@ -277,6 +298,8 @@ workspace the user currently has configured:
   `crate::json_state` machinery.
 - `module-context.md` / `module-actions/{inbox,outbox}/` — the agent → module bridge (§5).
 - `memory-last-sync.json` — the memory router's per-workspace staleness marker.
+- `editor-settings.json` / `editor-recovery/` — the editor's preferences and its kept
+  unsaved text (one entry per file, at most 256, swept after 30 days).
 - `file-grants.json` — files and folders picked in the file app's open dialog, the only
   places outside a registered root the file service may touch (`axiomata-files`, §3).
 
@@ -929,6 +952,10 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   Rust-driven open dialog and the `files:changed` watcher event, `axiomata-cli files`, and the
   App Ring's "Ansicht öffnen" entry type (`core/apps.ts` `RING_VIEWS`; `view:ide` today,
   `view:editor` with ED1). Next: ED1, the editor core.
+- **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
+  soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
+  settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the
+  eye-candy of D8, Markdown preview).
 
 Each milestone from M1 onward was broken down into a detailed, step-by-step implementation
 plan shortly before it was actually started, rather than all at once up front — those plans

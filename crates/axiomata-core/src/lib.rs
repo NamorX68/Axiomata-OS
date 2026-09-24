@@ -18,6 +18,8 @@ pub mod bridge;
 pub mod config;
 pub mod dashboard;
 pub mod db;
+pub mod editor_recovery;
+pub mod editor_settings;
 pub mod error;
 pub mod files;
 pub mod graph;

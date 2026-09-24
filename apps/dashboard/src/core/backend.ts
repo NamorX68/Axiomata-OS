@@ -421,6 +421,16 @@ export interface FileChange {
   version: FileVersion | null;
 }
 
+/** Unsaved editor work kept aside (`editor_recovery_load`, plan F8). */
+export interface EditorRecovery {
+  root: string;
+  rel: string;
+  /** The file version the text was based on; `null` for a file that did not exist. */
+  base_version: FileVersion | null;
+  content: string;
+  saved_at: string;
+}
+
 /** What `file_pick` returns for a pick: the root to use from now on and the
  *  file or folder within it (`""` when the picked folder is the root). */
 export interface PickedFile {
@@ -543,6 +553,24 @@ export function assetFileUrl(absPath: string): string {
 }
 
 let devMock: InvokeFn | null = null;
+
+/**
+ * Subscribes to a backend event (`files:changed`, …) and returns the
+ * unsubscribe function. Inside Tauri this is the event API; in the DEV
+ * browser the mock backend delivers events it raises itself (`devmock.ts`'s
+ * `mockEmit`), so code that reacts to them is exercisable without the app.
+ */
+export async function listenBackend<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  if (insideTauri()) {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<T>(event, (e) => handler(e.payload));
+  }
+  if (import.meta.env.DEV) {
+    const { mockListen } = await import("./devmock");
+    return mockListen(event, (payload) => handler(payload as T));
+  }
+  return () => {};
+}
 
 /** `invoke` with the DEV browser fallback. */
 export const invokeBackend: InvokeFn = async <T>(

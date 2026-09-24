@@ -55,6 +55,7 @@ describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
       "mail",
       "terminal",
       "kanban",
+      "view:editor",
       "view:ide",
     ]);
   });

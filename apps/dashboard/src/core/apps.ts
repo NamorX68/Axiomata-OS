@@ -57,9 +57,11 @@ export interface RingView extends BuiltinApp {
   event: string;
 }
 
-/** The views the ring offers, in ring order after the modules. The editor
- *  (`view:editor`, `edit_document`) joins once it has a view to open (ED1). */
-export const RING_VIEWS: readonly RingView[] = [{ type: "view:ide", title: "IDE", event: "shell:ide" }];
+/** The views the ring offers, in ring order after the modules. */
+export const RING_VIEWS: readonly RingView[] = [
+  { type: "view:editor", title: "Editor", event: "shell:editor" },
+  { type: "view:ide", title: "IDE", event: "shell:ide" },
+];
 
 /** The view a ring `type` opens, or `undefined` for a module type. */
 export function ringViewFor(type: string): RingView | undefined {

@@ -66,6 +66,7 @@ const GLYPH_CODEPOINTS: Record<string, number> = {
   kanban: 0xeb7f, // view_kanban — the same three bars as the tile icon
   ide: 0xf2e2, // developer_mode
   "code-blocks": 0xf84d, // code_blocks — the IDE's App-Ring view entry
+  "edit-document": 0xf88c, // edit_document — the editor's App-Ring view entry
   graphic: 0xe40a, // palette
   calculator: 0xea5f, // calculate
   browser: 0xe80b, // public

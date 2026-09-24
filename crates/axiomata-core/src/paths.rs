@@ -70,6 +70,20 @@ pub fn file_grants_path() -> PathBuf {
     axiomata_home().join("file-grants.json")
 }
 
+/// Path to the editor's preferences (`~/.axiomata/editor-settings.json`):
+/// font, line numbers, wrapping, indentation, autosave. See
+/// `crate::editor_settings`.
+pub fn editor_settings_path() -> PathBuf {
+    axiomata_home().join("editor-settings.json")
+}
+
+/// Directory of the editor's unsaved-work entries (`~/.axiomata/editor-recovery/`),
+/// one JSON file per open file with changes not yet saved. See
+/// `crate::editor_recovery`.
+pub fn editor_recovery_dir() -> PathBuf {
+    axiomata_home().join("editor-recovery")
+}
+
 /// Path to the dashboard layout file (`~/.axiomata/dashboard.json`): module
 /// instances, their positions/sizes/config and UI settings such as the theme.
 /// Hand-editable; see `crate::dashboard`.

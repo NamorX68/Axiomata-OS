@@ -621,6 +621,46 @@ function mockGraph(): WorkspaceGraph {
   };
 }
 
+/** `editor-settings.json` in the mock. */
+let editorSettingsJson = '{"version":1}';
+
+/** Handlers registered through `listenBackend` in the browser. */
+const mockListeners = new Map<string, Set<(payload: unknown) => void>>();
+
+/** The mock side of `listenBackend`. */
+export function mockListen(event: string, handler: (payload: unknown) => void): () => void {
+  const set = mockListeners.get(event) ?? new Set();
+  set.add(handler);
+  mockListeners.set(event, set);
+  return () => set.delete(handler);
+}
+
+/** Raises a backend event in the browser (console: `__ax.mockEmit(...)`). */
+export function mockEmit(event: string, payload: unknown): void {
+  for (const handler of mockListeners.get(event) ?? []) handler(payload);
+}
+
+/**
+ * Changes a mock file "from outside" and raises `files:changed`, the way an
+ * agent writing into an open file would (console: `__ax.mockExternalWrite`).
+ */
+export function mockExternalWrite(root: string, rel: string, content: string | null): void {
+  const store = fileStore(root);
+  const key = fileKey(root, rel);
+  const existed = store.has(key);
+  if (content === null) store.delete(key);
+  else store.set(key, content);
+  mockEmit("files:changed", {
+    root,
+    rel,
+    kind: content === null ? "deleted" : existed ? "modified" : "created",
+    version: content === null ? null : mockVersion(content),
+  });
+}
+
+/** Unsaved editor work in the mock, keyed by `<root>\0<rel>`. */
+const recoveries = new Map<string, unknown>();
+
 /** Files of the non-workspace roots in the file-service mock. */
 const otherRootFiles = new Map<string, string>([["project:1\0README.md", "# Axiomata-OS\n"]]);
 
@@ -715,6 +755,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       } satisfies LoadedDashboardState as T;
     case "save_dashboard_state":
       dashboardJson = String(args.json);
+      return undefined as T;
+    case "get_editor_settings":
+      return { json: editorSettingsJson, recovered_backup: null } as T;
+    case "save_editor_settings":
+      editorSettingsJson = String(args.json);
       return undefined as T;
     case "get_terminal_settings":
       return {
@@ -1260,6 +1305,22 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     // nothing ever changes underneath.
     case "file_watch":
     case "file_unwatch":
+      return undefined as T;
+    case "editor_recovery_save": {
+      const key = `${String(args.root)}\0${String(args.rel)}`;
+      recoveries.set(key, {
+        root: args.root,
+        rel: args.rel,
+        base_version: args.base ?? null,
+        content: args.content,
+        saved_at: new Date().toISOString(),
+      });
+      return undefined as T;
+    }
+    case "editor_recovery_load":
+      return (recoveries.get(`${String(args.root)}\0${String(args.rel)}`) ?? null) as T;
+    case "editor_recovery_delete":
+      recoveries.delete(`${String(args.root)}\0${String(args.rel)}`);
       return undefined as T;
     case "file_read_image":
       throw fileError("NotFound", "devmock has no images for the file service");

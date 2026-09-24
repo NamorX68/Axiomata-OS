@@ -14,6 +14,7 @@ use axiomata_core::board_mirror;
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
 use axiomata_core::config::{Config, ProviderId, ProviderSettings};
 use axiomata_core::dashboard::{self, LoadedState};
+use axiomata_core::editor_settings::{self, LoadedEditorSettings};
 use axiomata_core::graph::{self, WorkspaceGraph};
 use axiomata_core::ide;
 use axiomata_core::importer;
@@ -1002,6 +1003,20 @@ pub fn get_terminal_settings() -> Result<LoadedTerminalSettings, String> {
 #[tauri::command]
 pub fn save_terminal_settings(json: String) -> Result<(), String> {
     terminal_settings::save_settings(&json).map_err(|err| err.to_string())
+}
+
+/// Reads the editor's preferences (`editor-settings.json`), or the defaults.
+/// Same contract as [`get_terminal_settings`].
+#[tauri::command]
+pub fn get_editor_settings() -> Result<LoadedEditorSettings, String> {
+    editor_settings::load_settings().map_err(|err| err.to_string())
+}
+
+/// Validates and atomically writes the editor's preferences; the core only
+/// checks "object with numeric `version`".
+#[tauri::command]
+pub fn save_editor_settings(json: String) -> Result<(), String> {
+    editor_settings::save_settings(&json).map_err(|err| err.to_string())
 }
 
 /// One `*.app` bundle found by [`list_installed_apps`]'s scan.

@@ -1,7 +1,7 @@
 # Plan: Die Datei-App — ein eigener Editor als Single Point of Truth
 
-Status: **ED0 fertig** (2026-09-23), als Nächstes ED1 — vorher in Checkpoints zerlegen und
-grillen wie ED0 (§5 „ED0 im Detail" zeigt das Muster).
+Status: **ED0 und ED1 fertig** (2026-09-23/24; ED1 wartet noch auf den Live-Test am Mac).
+Als Nächstes ED2 — vorher in Checkpoints zerlegen und grillen wie ED0/ED1 (§5).
 
 ## 1. Idee
 
@@ -247,6 +247,127 @@ Jeder Meilenstein wird vor seinem Start in Checkpoints zerlegt und gegrillt, wie
   `Roots::locate` löst jede Wurzel doppelt auf (`list()` und dann `root()`). Beim
   Dateibaum, der oft nachschlägt, soll `list()` die `Root`s gleich mitliefern. Abschluss: `architecture-reviewer`,
   `docs/architecture.md`, Commit.
+
+### ED1 im Detail (gegrillt 2026-09-24, Q1–Q18, bestätigt; Umsetzung begonnen)
+
+**Entscheidungen**
+
+- **F1 — Puffer** (Q1, Q15): jetzt eine Zeilenliste hinter einer schmalen Schnittstelle
+  (`lineCount`, `line`, `replace`, `slice`). **Ein Rope wird Pflicht** und kommt als
+  erster Checkpoint von ED5; die ED1-Tests laufen dann unverändert gegen ihn.
+- **F2 — Eingabe** (Q2): ein verstecktes `<textarea>` folgt dem Cursor und nimmt Tippen,
+  tote Tasten, IME und Einfügen an; die Zeilen sind reine Anzeige, das Modell ist die
+  einzige Wahrheit.
+- **F3 — Positionen** (Q3): `{ line, col }` in UTF-16 gespeichert; Bewegen, Löschen und
+  Wortwahl über Grapheme (`Intl.Segmenter`); die Statuszeile zählt Grapheme mit Tabs.
+- **F4 — Undo** (Q4): linear, unbegrenzt pro geöffneter Datei. Tippen bleibt ein Schritt
+  bis 1 s Pause, Cursor-Sprung oder Wechsel Tippen/Löschen; Einfügen, Ausschneiden,
+  Einrücken, Zeile verschieben je ein Schritt; Undo stellt die Auswahl wieder her.
+- **F5 — Tasten** (Q5): Pfeile (+⌥ Wort, +⌘ Zeile/Datei), Pos1/Ende, Bild↑/↓, alles mit ⇧
+  als Auswahl, ⌘A; ⌫/⌦ (+⌥ Wort, +⌘ bis Zeilenanfang); ⌘Z/⇧⌘Z; ⌘X/C/V (ohne Auswahl die
+  ganze Zeile); ⇥/⇧⇥; ↩ mit Einrückung; ⌥↑/↓ verschieben, ⇧⌥↑/↓ duplizieren; ⌘/ Kommentar;
+  ⌘L Zeile wählen; ⌘S, ⌘O. Nicht in ED1: ⌘F, mehrere Cursor (ED5), Klammer-Paare (ED2).
+- **F6 — Umbruch** (Q6, Q16): schon in ED1, an für `.md`/`.txt`, aus für Code, ⌥Z schaltet.
+  Nummer nur an der ersten sichtbaren Zeile, relative Nummern zählen logische Zeilen,
+  ↑/↓ wandern durch sichtbare Zeilen, ⌘←/→ erst sichtbare, dann logische Zeile; Umbruch an
+  Wortgrenzen, Fortsetzungen behalten die Einrückung.
+- **F7 — Ansicht** (Q7): eine Datei zur Zeit; Kopfzeile mit Wurzel/Pfad, Ungespeichert-Punkt,
+  Öffnen… (⌘O), Zuletzt-Liste, Zahnrad, Zurück zum OS; Statuszeile (Zeile:Spalte,
+  Zeilenende, Einrückung, schreibgeschützt). Versteckt statt abgebaut. Ring-Icon
+  `view:editor` (`edit_document`, U+F88C).
+- **F8 — Wiederherstellung** (Q8): 2 s nach der letzten Änderung nach
+  `~/.axiomata/editor-recovery/<hash>.json` (Wurzel, Pfad, Basis-Version, Inhalt, Zeit,
+  0600); gelöscht beim Speichern oder Verwerfen; Balken *Wiederherstellen/Verwerfen* beim
+  Öffnen, mit Hinweis, wenn die Datei sich inzwischen geändert hat; älter als 30 Tage wird
+  beim Start aufgeräumt.
+- **F9 — Autospeichern** (Q9): aus (Vorgabe) / nach 1 s Pause / beim Verlassen; immer mit
+  erwarteter Version, bei Konflikt nie überschreiben, sondern der Balken aus F10.
+- **F10 — Externe Änderungen** (Q10): sauber → still neu laden mit Hinweis; mit eigenen
+  Änderungen ein Balken *Neu laden* (Rückfrage) / *Meine behalten* (nächstes ⌘S fragt) /
+  *Unterschied ansehen* (bis CP8: die Platten-Fassung schreibgeschützt daneben). Gelöscht:
+  *Schließen* / *Neu anlegen*.
+- **F11 — Einrückung, Zeilenenden** (Q11): aus der Datei erkannt (erste 200 Zeilen), sonst
+  Einstellung (4 Leerzeichen, Tab-Breite 4); LF/CRLF beibehalten, gemischt → LF mit Hinweis;
+  fehlender Schluss-Umbruch bleibt fehlend.
+- **F12 — Einstellungen** (Q12, Q18): `editor-settings.json` über `core::json_state`: Modus
+  (Vi ausgegraut bis ED3), Schrift, Schnitt, Größe, Zeilenhöhe, Ligaturen, Zeilennummern,
+  Umbruch-Vorgaben, Einrückung/Tab-Breite, Autospeichern. Live-Vorschau ist ein echter
+  schreibgeschützter Editor. Vorgaben: JetBrains Mono Regular 14 px, Zeilenhöhe 1,5,
+  Ligaturen an, Zeilennummern hybrid, Umbruch wie F6, 4 Leerzeichen, Autospeichern aus.
+- **F13 — Schnitte** (Q13, Q17): alle Schnitte jedes Pakets, erst bei Bedarf geladen
+  (umgesetzt als ein wörtliches `import()` je Schnitt statt `import.meta.glob`: typgeprüft,
+  und Vite baut trotzdem jeden Schnitt als eigenes Stück); der Regler zeigt nur echte Schnitte mit Namen. Hat eine Schrift den
+  gewählten Schnitt nicht, bleibt er gespeichert und der nächstliegende echte wird gezeigt
+  (mit Hinweis) — nie ein künstlicher. Das Terminal behält seine drei festen Schnitte.
+
+**Checkpoints** (Q14)
+
+- **ED1.1** — Modell: Puffer, Positionen, Auswahl, Befehle, Tastenbelegung, Undo,
+  Einrückung/Zeilenenden erkennen. Reines TS in `src/editor/`, alles mit `vitest`.
+  **Erledigt 2026-09-24** (73 Tests). Zwei Erkenntnisse: Wortgrenzen laufen über eigene
+  Zeichenklassen, weil `Intl.Segmenter` nach Prosa-Regeln `bar.baz` als ein Wort sieht.
+  Und der Puffer hält den Schluss-Umbruch nie, `joinForSave` hängt ihn immer an. Beides
+  ist in den Kopfkommentaren begründet. ↑/↓ und ⌘←/→ fragen schon ein `RowLayout`, sodass
+  ED1.2 den Umbruch liefert, ohne die Befehle anzufassen.
+- **ED1.2** — Darstellung: virtualisierte Zeilen mit Umbruch, textarea-Eingabe, Cursor und
+  Auswahl, Gutter, Maus (Klick, Ziehen, Doppel-/Dreifachklick). Browser über `devmock`.
+  **Erledigt 2026-09-24.** Die reine Rechnung liegt in `src/editor/` und ist getestet:
+  `wrap.ts` (Umbruch), `visual.ts` (sichtbare Zeilen mit einem Cache nach Zeilentext),
+  `geometry.ts` (Cursor, Auswahl-Streifen, Klick zu Position) und `gutter.ts`. Das
+  Svelte-Bauteil ist `src/fileapp/EditorSurface.svelte`. Die Geometrie ist reine Rechnung
+  mit einer einmal gemessenen Zeichenbreite, alle Schriften sind Monospace; CJK und Emoji
+  zählen zwei Zellen. Die Zwischenablage läuft über die nativen `copy`/`cut`/`paste`-Ereignisse
+  und braucht deshalb keine Berechtigung. Im Browser geprüft über `__ax.editorDemo()` (nur
+  DEV, verschwindet mit ED1.3): Rendern, Tippen, Auswahl, Ziehen, Doppelklick, ⌥Z, Scrollen
+  (54 Zeilen im DOM statt 212). Eingabemethode, tote Tasten und die echte Zwischenablage
+  prüft erst der Live-Test.
+- **ED1.3** — Vollbild-Ansicht und Dateien: `view:editor`, Öffnen, Speichern, Autospeichern,
+  externe Änderungen, Wiederherstellung (Rust-Befehle dazu), große Dateien schreibgeschützt.
+  **Erledigt 2026-09-24**, bis auf das Autospeichern (F9). Das kommt mit seiner Einstellung
+  in ED1.4.
+  - `src/fileapp/`: `session.ts` enthält alle Datei-Abläufe aus F8–F10 und ist mit einem
+    Fake-Backend getestet (14 Tests). `FileAppView.svelte` ist die Vollbild-Ansicht, versteckt
+    statt abgebaut wie die IDE. Die Zuletzt-Liste liegt in `recent.ts`, gespeichert unter
+    `settings.editor.recent` in `dashboard.json`.
+  - Rust: `core::editor_recovery` mit den drei `editor_recovery_*`-Befehlen; das Aufräumen
+    läuft beim Start im Hintergrund.
+  - `listenBackend` ist neu in `core/backend.ts`, der erste Tauri-Ereignis-Abonnent, mit
+    Mock-Ereignissen für den Browser (`__ax.mockExternalWrite`).
+  - Ring: `view:editor` (Symbol `edit_document`). Das DEV-Vorführfenster aus ED1.2 ist entfernt.
+  - Oberflächentexte auf Englisch wie im Rest der App (IDE: „Back to the OS“), also „Reload /
+    Keep mine / Compare“ statt der deutschen Arbeitsnamen aus F10.
+  - Im Browser geprüft: Öffnen, Tippen, externe Änderung mit Balken, Vergleich, Keep mine
+    mit Rückfrage und Überschreiben, stilles Neuladen mit Hinweis, Löschen. Dabei gefunden
+    und behoben: Die Oberfläche merkte ein Neuladen von außen nicht (neue Eigenschaft
+    `revision`), und ⌘S hätte doppelt gespeichert.
+  - `security-auditor`: ein mittlerer Befund, behoben. Die Zahl der Recovery-Einträge war
+    unbegrenzt; jetzt sind es höchstens 256, und ein neuer Eintrag verdrängt den ältesten.
+    Das Aufräumen erfasst jetzt auch liegengebliebene `*.axiomata-tmp`-Dateien.
+- **ED1.4** — Einstellungen: `editor-settings.json`, Zahnrad, Live-Vorschau, alle Schnitte.
+  **Erledigt 2026-09-24.**
+  - Rust: `core::editor_settings` mit `get/save_editor_settings`, dasselbe
+    `json_state`-Muster wie beim Terminal.
+  - Frontend: `fileapp/editorSettings.ts` bereinigt Feld für Feld und fällt auf die Vorgaben
+    aus F12 zurück. `fonts.ts` listet alle echten Schnitte; die Lader sind wörtliche
+    `import()`-Aufrufe, Vite baut also jeden Schnitt als eigenes Stück.
+  - `EditorSettingsPanel.svelte` mit echter, schreibgeschützter Vorschau.
+  - Das Autospeichern (F9) ist hier mit eingebaut: nach 1 s Pause oder beim Verlassen
+    (Ansicht zu, Fenster verliert den Fokus, Wechsel zu einer anderen Datei).
+  - Die Ansicht lädt einen Schnitt, bevor die Oberfläche ihn bekommt, sonst würde sie an
+    der Ersatzschrift messen.
+  - Im Browser geprüft: Vorschau mit Ligaturen, der Hinweis bei fehlendem Schnitt (Space Mono
+    Thin → Regular 400), ExtraLight 200 nachgeladen, Autospeichern nach 1 s.
+- **Abschluss** — Live-Test mit dem Owner am Mac (Tippen, Umlaute, IME, Scrollen; keine
+  UI-Änderungen währenddessen), Prüfer, Commit.
+  Die Prüfer sind durch (2026-09-24). `architecture-reviewer`: nichts Kritisches oder Hohes.
+  Ein mittlerer Punkt ist behoben: `onMount` der Oberfläche setzte die Auswahl, ohne neu zu
+  zeichnen, und hätte eine vorgewählte Auswahl (CP8) zerstört; die Zeile ist entfernt.
+  Kleinigkeiten ebenfalls behoben: neutraler Typ `LoadedJsonState` statt des Terminal-Typs,
+  `sessionTick` statt `tick` in der Ansicht, Zeilen über 120 Zeichen. `refactoring-specialist`:
+  drei kleine Doppelungen herausgezogen. Für ED7 notiert: `src/editor/` ist ohne Änderung
+  herauslösbar; `src/fileapp/` hängt an drei App-Stellen (`invokeBackend`, `getSetting` aus
+  `dashboard.json`, Toasts), die eine eigenständige App ersetzen muss. Der Commit folgt
+  vor dem Live-Test; Befunde aus dem Test kommen als eigener Commit.
 
 ## 6. Verifikation (pro Meilenstein)
 
