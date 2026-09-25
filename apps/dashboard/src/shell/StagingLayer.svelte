@@ -12,7 +12,7 @@
 -->
 <script lang="ts">
   import { createContext } from "../core/registry";
-  import { closeStaged, staged, type StagedPanel } from "../core/staging";
+  import { requestClose, staged, type StagedPanel } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import StagingPanel from "./StagingPanel.svelte";
 
@@ -44,7 +44,7 @@
     if (e.key === "Escape" && !e.defaultPrevented && $staged.length > 0) {
       // Consumed: later Escape handlers (chat, Second Brain) leave it alone.
       e.preventDefault();
-      closeStaged($staged[$staged.length - 1].id);
+      void requestClose($staged[$staged.length - 1].id);
     }
   }
 </script>
@@ -52,5 +52,5 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#each $staged as panel (panel.id)}
-  <StagingPanel {panel} ctx={contextFor(panel)} onClose={() => closeStaged(panel.id)} />
+  <StagingPanel {panel} ctx={contextFor(panel)} onClose={() => void requestClose(panel.id)} />
 {/each}

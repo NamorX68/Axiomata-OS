@@ -15,6 +15,10 @@
   * **Autosave (F9)** saves 1 s after the last change, or when the editor is
     hidden or the window loses focus — always with the expected version, so it
     stops at a conflict instead of overwriting.
+  * **Every kind of file the file app shows** (ED4, W1, W3): text and code in the
+    editor; Markdown, HTML and SVG with a rendered view beside or instead of
+    the source (⌘⇧V), opened on it when the owner opens to read; raster images
+    as a picture; and a new note (`newNote`) that ⌘S files with `create_note`.
 -->
 <script lang="ts" module>
   /** What the owner shows about the open file (a title, the unsaved dot). */
@@ -22,6 +26,8 @@
     root: string;
     rel: string;
     dirty: boolean;
+    /** A new note, not filed yet (W4). */
+    untitled: boolean;
   }
 
   /** How `open` went; a failure keeps the file that was open before. */
@@ -31,7 +37,7 @@
 <script lang="ts">
   import { onMount, tick as nextTick, type Snippet } from "svelte";
 
-  import { listenBackend, type FileChange } from "../core/backend";
+  import { invokeBackend, listenBackend, type FileChange } from "../core/backend";
   import { messageOf } from "../core/errors";
   import { hunksFromTexts } from "../editor/diff/hunks";
   import { DiffModel, textLines } from "../editor/diff/model";
@@ -45,12 +51,16 @@
   import { editorSettings, ensureEditorSettingsLoaded } from "./editorSettings";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import EditorSurface from "./EditorSurface.svelte";
+  import { isImagePath, previewKindFor, startsInPreview, type OpenIntent, type PreviewKind } from "./fileKinds";
+  import HtmlPreview from "./HtmlPreview.svelte";
+  import ImageView from "./ImageView.svelte";
   import { grammarRuntime } from "./grammars";
   import MarkdownPreview from "./MarkdownPreview.svelte";
   import { ScrollLink } from "./scrollLink";
-  import { FileSession } from "./session";
+  import { DRAFT_REL, DRAFT_ROOT, FileSession } from "./session";
   import { statusParts } from "./status";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
+  import SvgPreview from "./SvgPreview.svelte";
   import { applySet } from "./viOptions";
   import ViStatusLine from "./ViStatusLine.svelte";
   import type { ViStatus } from "./viSurface";
@@ -114,10 +124,15 @@
   let list = $state(false);
   /** Syntax colours for the open file (ED2); `null` for plain text or a large file. */
   let highlighter = $state.raw<SyntaxHighlighter | null>(null);
-  /** Markdown files only (G8): source, the rendered preview, or both side by side. */
-  let mdMode = $state<"source" | "preview" | "split">("source");
-  let isMarkdown = $state(false);
+  /** A file with a rendered view (G8, W3): the source, the rendered view, or both side by side. */
+  let viewMode = $state<"source" | "preview" | "split">("source");
+  /** What the open file renders as, if anything. */
+  let previewKind = $state<PreviewKind | null>(null);
   let preview = $state<MarkdownPreview | null>(null);
+  /** A raster image open instead of a text session (W3). */
+  let image = $state<{ root: string; rel: string } | null>(null);
+  /** A new note is being filed (`create_note` asks the agent where it goes). */
+  let filing = $state(false);
   /** Source and preview scroll in step; whichever is scrolled leads (H12). */
   const scrollLink = new ScrollLink();
   let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,7 +167,8 @@
   $effect(() => {
     void sessionTick;
     const s = session;
-    onState?.(s ? { root: s.root, rel: s.rel, dirty: s.doc.dirty } : null);
+    if (s) onState?.({ root: s.root, rel: s.rel, dirty: s.doc.dirty, untitled: s.untitled });
+    else onState?.(image ? { ...image, dirty: false, untitled: false } : null);
   });
 
   /** After a session action or an external change — both may replace the text. */
@@ -170,9 +186,21 @@
 
   /**
    * Opens `file` in place of the one open now — which is kept aside and left
-   * only once the new one has opened — and puts the cursor on `line`.
+   * only once the new one has opened — and puts the cursor on `line`. `intent`
+   * "read" opens Markdown and HTML on their rendered view (W1).
    */
-  export async function open(file: { root: string; rel: string }, line: number | null = null): Promise<OpenResult> {
+  export async function open(
+    file: { root: string; rel: string },
+    line: number | null = null,
+    intent: OpenIntent = "edit",
+  ): Promise<OpenResult> {
+    if (isImagePath(file.rel)) {
+      await leaveCurrent();
+      session = null;
+      image = { root: file.root, rel: file.rel };
+      refresh();
+      return { ok: true };
+    }
     if (session && session.root === file.root && session.rel === file.rel) {
       if (line !== null) goToLine(line);
       return { ok: true };
@@ -183,21 +211,56 @@
     } catch (err) {
       return { ok: false, kind: (err as { kind?: string }).kind ?? null, message: messageOf(err) };
     }
+    await adopt(next, intent, line);
+    return { ok: true };
+  }
+
+  /** A new note (W4): an untitled Markdown draft, filed by ⌘S. Only one at a time. */
+  export async function newNote(): Promise<void> {
+    if (session?.untitled) {
+      surface?.focus();
+      return;
+    }
+    await adopt(await FileSession.untitled(fileBackend, indentFallback()), "edit", null);
+  }
+
+  /** Makes `next` the open session, leaving the one before. */
+  async function adopt(next: FileSession, intent: OpenIntent, line: number | null): Promise<void> {
     await leaveCurrent();
+    image = null;
     session = next;
     wrap = wrapsByDefault($editorSettings, next.fileName);
     // Vi's `:set` holds for the file it was typed in, as the wrap toggle does (V6).
     numbersOverride = null;
     list = false;
-    isMarkdown = detectLanguage(next.fileName, next.doc.store.line(0)) === "markdown";
-    mdMode = "source";
+    previewKind = previewKindFor(next.fileName);
+    viewMode = startsInPreview(previewKind, intent) ? "preview" : "source";
     compare = null;
     refresh();
     void attachHighlighter(next);
     await nextTick();
     if (line !== null) goToLine(line);
     else surface?.focus();
-    return { ok: true };
+  }
+
+  /** Whether closing now would leave unsaved text (or an unfiled note) behind. */
+  export function hasUnsaved(): boolean {
+    return !!session && session.doc.dirty && !session.readOnly;
+  }
+
+  /** Saves (or files the note); whether nothing unsaved is left. */
+  export async function saveNow(): Promise<boolean> {
+    await save();
+    return !hasUnsaved();
+  }
+
+  /** Closing without saving: the kept-aside copy goes too, nothing is offered back next time. */
+  export async function discard(): Promise<void> {
+    const s = session;
+    if (!s) return;
+    s.doc.markSaved();
+    await s.persistRecovery();
+    sessionTick++;
   }
 
   /** Puts the cursor on `line` (zero-based) and focuses the text. */
@@ -241,14 +304,38 @@
 
   async function save(confirmed = false): Promise<void> {
     if (!session) return;
+    if (session.untitled) return fileNote();
     await session.save(confirmed);
     refresh();
   }
 
-  /** ⌘⇧V: source → preview → side by side → source (G8). */
-  function cycleMarkdownMode(): void {
-    if (!isMarkdown) return;
-    mdMode = mdMode === "source" ? "preview" : mdMode === "preview" ? "split" : "source";
+  /**
+   * Files the new note (W4, D19): the agent picks the area and the name, the
+   * draft's kept-aside copy goes, and the editor opens the note it became.
+   */
+  async function fileNote(): Promise<void> {
+    const draft = session;
+    if (!draft?.untitled || filing) return;
+    const content = draft.doc.textForSave();
+    if (!content.trim()) return;
+    filing = true;
+    try {
+      const rel = await invokeBackend<string>("create_note", { content });
+      draft.doc.markSaved();
+      await fileBackend.recoveryDelete(DRAFT_ROOT, DRAFT_REL).catch(() => undefined);
+      await open({ root: "workspace", rel }, null, "read");
+    } catch (err) {
+      draft.banner = { kind: "error", message: `Could not file the note: ${messageOf(err)}` };
+      refresh();
+    } finally {
+      filing = false;
+    }
+  }
+
+  /** ⌘⇧V: source → rendered → side by side → source (G8, W3). */
+  function cyclePreview(): void {
+    if (!previewKind) return;
+    viewMode = viewMode === "source" ? "preview" : viewMode === "preview" ? "split" : "source";
   }
 
   /** The source scrolled: the preview follows, unless this is the echo of it following. */
@@ -263,11 +350,11 @@
   const previewText = $derived.by(() => {
     void sessionTick;
     void outside;
-    return isMarkdown && mdMode !== "source" && session ? session.doc.store.text() : "";
+    return previewKind && viewMode !== "source" && session ? session.doc.store.text() : "";
   });
 
   function onEffect(effect: Effect): void {
-    if (effect === "togglePreview") cycleMarkdownMode();
+    if (effect === "togglePreview") cyclePreview();
     else if (effect === "save") void save();
     else if (effect === "open") onOpenRequest?.();
     else if (effect === "toggleWrap") wrap = !wrap;
@@ -335,11 +422,11 @@
   function onKeydownCapture(e: KeyboardEvent): void {
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const key = e.key.toLowerCase();
-    const previewKey = key === "v" && e.shiftKey && isMarkdown;
+    const previewKey = key === "v" && e.shiftKey && previewKind !== null;
     if (key !== "s" && !previewKey) return;
     e.preventDefault();
     e.stopPropagation();
-    if (previewKey) cycleMarkdownMode();
+    if (previewKey) cyclePreview();
     else void save();
   }
 
@@ -411,8 +498,12 @@
     {#if showSettings}
       <EditorSettingsPanel surface={settings} onClose={() => onCloseSettings?.()} />
     {/if}
-    {#if session}
-      <div class="pane" class:gone={isMarkdown && mdMode === "preview"}>
+    {#if image}
+      {#key image}
+        <ImageView root={image.root} rel={image.rel} />
+      {/key}
+    {:else if session}
+      <div class="pane" class:gone={previewKind !== null && viewMode === "preview"}>
         {#key session}
           <EditorSurface
             bind:this={surface}
@@ -422,7 +513,7 @@
             readOnly={session.readOnly}
             revision={outside}
             {highlighter}
-            onTopLine={isMarkdown && mdMode === "split" ? onSourceTopLine : undefined}
+            onTopLine={previewKind === "markdown" && viewMode === "split" ? onSourceTopLine : undefined}
             {onEffect}
             {onChange}
             {onViEffect}
@@ -431,15 +522,25 @@
           />
         {/key}
       </div>
-      {#if isMarkdown && mdMode !== "source"}
+      {#if previewKind && viewMode !== "source"}
         <div class="pane preview-pane">
-          <MarkdownPreview
-            bind:this={preview}
-            text={previewText}
-            root={session.root}
-            rel={session.rel}
-            onTopLine={mdMode === "split" ? onPreviewTopLine : undefined}
-          />
+          {#if previewKind === "markdown"}
+            <MarkdownPreview
+              bind:this={preview}
+              text={previewText}
+              root={session.root}
+              rel={session.rel}
+              onTopLine={viewMode === "split" ? onPreviewTopLine : undefined}
+            />
+          {:else if previewKind === "html"}
+            <HtmlPreview
+              text={previewText}
+              rel={session.rel}
+              onOpenLink={(rel) => void open({ root: session!.root, rel }, null, "read")}
+            />
+          {:else}
+            <SvgPreview text={previewText} rel={session.rel} />
+          {/if}
         </div>
       {/if}
       {#if compare}
@@ -474,11 +575,14 @@
       <span>{status.eol}</span>
       <span>{status.indent}</span>
       <span>{wrap ? "Wrap on" : "Wrap off"} <kbd>⌥Z</kbd></span>
-      {#if isMarkdown}
+      {#if previewKind}
         <span>
-          {mdMode === "source" ? "Source" : mdMode === "preview" ? "Preview" : "Side by side"}
+          {viewMode === "source" ? "Source" : viewMode === "preview" ? "Preview" : "Side by side"}
           <kbd>⌘⇧V</kbd>
         </span>
+      {/if}
+      {#if session.untitled}
+        <span class="note">{filing ? "Filing the note…" : "New note — ⌘S files it"}</span>
       {/if}
       {#if session.readOnly}<span class="warn">Read-only (large file)</span>{/if}
     </footer>
@@ -603,6 +707,10 @@
 
   .warn {
     color: var(--ax-warning);
+  }
+
+  .note {
+    color: var(--ax-accent);
   }
 
   /* Vi's mode pill (V8): one colour per mode, Normal in the accent. */

@@ -35,6 +35,9 @@ export function createInstance(
   if (!def) {
     return { ok: false, reason: `unknown module type "${type}"` };
   }
+  if (def.stageOnly) {
+    return { ok: false, reason: `"${def.title}" opens as a panel, not a tile` };
+  }
   if (isPlacedSingleton(type)) {
     return { ok: false, reason: `"${def.title}" allows only one instance` };
   }

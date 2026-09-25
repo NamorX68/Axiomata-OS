@@ -3,7 +3,8 @@
 Status: **ED0, ED1 und ED2 fertig** (2026-09-23/24; ED2 wartet auf die Farbabnahme und den
 Live-Test); **M7.3 CP8/CP9 auf dem Editor fertig** (2026-09-25, `git-layer.md`); **ED3 (Vi)
 (V1–V12) fertig** (2026-09-25: Automat, Anbindung, Suche/Ex, tree-sitter-Textobjekte und
-`editor-vi.json`); wartet auf den Live-Test. Als Nächstes laut §5: ED4.
+`editor-vi.json`); wartet auf den Live-Test. **ED4 (Single Point of Truth) gegrillt (W1–W17), in
+Arbeit.**
 
 ## 1. Idee
 
@@ -632,6 +633,94 @@ sind jetzt für alle Sprachen mit Funktionen getestet (Rust, JS, TS, Python, Lua
 
 **ED3 ist damit fertig.** Offen für den Owner: Live-Test von Vi in der echten App (tote Tasten, die
 Mac-Zwischenablage, `:w`/`:q` in Datei-App und IDE-Pane, Suche in einem Diff).
+
+### ED4 im Detail (gegrillt 2026-09-25, Q1–Q17, bestätigt; Umsetzung begonnen)
+
+Die Entscheidungen heißen **W**.
+
+- **W1 — Womit eine Datei öffnet** (Q1): nach Herkunft. Second Brain, Chat und Agent zeigen
+  Markdown (und HTML) in der **Vorschau**, `/newfile` und „Bearbeiten“ im Editor; Code immer im
+  Editor. ⌘⇧V schaltet überall um.
+- **W2 — Die Kachel „Document“ entfällt** (Q2): ein neuer, schlanker Panel-Typ um `FileEditor`;
+  `md-file.svelte` wird gelöscht, die Agenten-Aktion `open` öffnet das Panel.
+- **W3 — HTML, SVG, Bilder** (Q3): HTML-Vorschau ist das sandboxed `srcdoc`-iframe von heute (mit
+  der Link-Navigation zwischen Lektionen), bearbeitet wird im Editor; SVG öffnet als Quelltext mit
+  Vorschau per ⌘⇧V (als `<img>` aus einer `data:`-URL, kein Skript); Bilder bekommen eine reine
+  Bildansicht (Einpassen/100 %, Abmessungen, Größe).
+- **W4 — Neue Notiz** (Q4): ein unbenannter Puffer; ⌘S/`:w` ruft `create_note` (der Agent wählt
+  den Bereich, D19), danach zeigt die Ansicht auf die geschriebene Datei. Bis dahin sichert die
+  Wiederherstellung den Entwurf; Schließen mit Inhalt fragt „Verwerfen?“. Auch in der
+  Vollbild-Ansicht über ⌘N.
+- **W5 — Second-Brain-Vorschau** (Q5): gerendertes Markdown (`MarkdownPreview`), Code als
+  schreibgeschützte Editorfläche mit Farben; „Open“ öffnet das Panel.
+- **W6 — Dateibaum** (Q6): Wurzeln Workspace, IDE-Projekte, Dialog-Freigaben (keine Worktrees);
+  neuer Befehl `file_list(root, rel)` für genau einen Ordner, durch den Schutz des Datei-Dienstes,
+  nachgeladen beim Aufklappen; `.git`, `node_modules`, `target` und Punkt-Dateien ausgeblendet
+  (Schalter „Versteckte zeigen“), `.gitignore` in Projekten ausgegraut. Aktionen: Öffnen, Neue
+  Datei, Neuer Ordner, Umbenennen, Löschen mit Rückfrage.
+- **W7 — Tabs** (Q7): je Tab ein versteckt weiterlebender `FileEditor`; ein Vorschau-Tab wie in
+  VS Code (Einfachklick ersetzt ihn, Bearbeiten oder Doppelklick macht ihn fest); die Tabs
+  überstehen einen Neustart; kein Teilen (dafür das IDE-Dock).
+- **W8 — Schnellöffnen ⌘P jetzt** (Q8): unscharf über die Dateinamen aller Wurzeln aus W6; ein
+  Rust-Index (mit `.gitignore`, Obergrenze um 50 000 Dateien), den ⌘K später mitbenutzt.
+- **W9 — IDE-Pane „Files“** (Q9): derselbe Baum, auf die Projektwurzel beschränkt; ein Klick
+  öffnet im Datei-Pane (in der Datei-Gruppe), ⌘P im Projekt.
+- **W10 — Alte Workspace-Befehle** (Q10): `/open`, `/newfile`, `open-file` und die
+  Agenten-Aktion geben weiter workspace-relative Pfade (→ `{root: "workspace", rel}`); die
+  `*_workspace_file`-Befehle bleiben für Suche, Graph und Skills.
+- **W11 — Panels** (Q11): je Datei ein Panel wie heute (eine offene Datei kommt nach vorn), jedes
+  ein eigener `FileEditor`; Knopf „In der Datei-App öffnen“ übergibt die Sitzung samt
+  ungespeicherter Arbeit als Tab und schließt das Panel. ⌘W/× schließt, mit Rückfrage bei
+  Ungespeichertem.
+- **W12 — Vollbild-Aufbau und Tasten** (Q12): Baum links (Breite ziehbar, ⌘B), Tab-Leiste oben,
+  Kopfzeile wie heute; ⌘P, ⌘N, ⌘W, ⌃Tab/⌃⇧Tab, ⌘1–9. Tabs und Baum-Einstellungen unter
+  `settings.editor` in `dashboard.json`.
+- **W13 — Baum-Aktionen** (Q13): neue Befehle `file_rename`, `file_mkdir`; ein offener Tab folgt
+  dem neuen Namen, eine gelöschte offene Datei behält ihren Tab mit dem bekannten Balken; Ordner
+  werden rekursiv mit Rückfrage („N Dateien löschen?“) gelöscht; Verschieben per Ziehen in ED5.
+- **W14 — Schnellöffnen im Detail** (Q14): Treffer im Dateinamen zählen mehr, zuletzt Geöffnetes
+  vorn, die Wurzel als Etikett; Index je Wurzel beim ersten ⌘P, neu gebaut wenn älter als 30 s
+  (die alten Treffer sofort); ⏎ fester Tab, ⌥⏎ Vorschau-Tab, `:12` springt zur Zeile.
+- **W15 — Second-Brain-Vorschau für Nicht-Markdown** (Q15): Bilder als Bild, HTML als Quelltext
+  mit Farben, nur der Anfang langer Dateien (etwa 200 Zeilen).
+- **W16 — „Files“ im IDE-Layout** (Q16): im Standard-Layout neuer Projekte (links, schmal) und im
+  „+“-Menü des Docks; bestehende Layouts bleiben.
+- **W17 — Checkpoints** (Q17): **ED4.1** Datei-Panel (W1–W4, W10, `md-file` weg) · **ED4.2**
+  Second-Brain-Vorschau · **ED4.3** Tabs in der Vollbild-Ansicht samt Übergabe aus dem Panel ·
+  **ED4.4** Dateibaum mit `file_list`/`file_mkdir`/`file_rename` · **ED4.5** Schnellöffnen ·
+  **ED4.6** IDE-Pane „Files“. Ein Commit je Checkpoint.
+
+**ED4.1 — gebaut (2026-09-25):** `fileapp/FilePanel.svelte` ist ein reines Panel-Modul `file`
+(neues Flag `stageOnly`: nicht in der Modulauswahl, nicht im Ring, `createInstance` lehnt ab);
+`md-file.svelte` samt Kachel ist gelöscht. `FileEditor` zeigt jetzt jede Dateiart:
+`fileKinds.ts` entscheidet (Markdown/HTML/SVG mit gerenderter Ansicht, Rasterbilder), beim
+Öffnen „zum Lesen“ beginnen Markdown und HTML gerendert (W1). `HtmlPreview` (sandboxed `srcdoc`,
+Links zwischen Lektionen öffnen im selben Editor), `SvgPreview` (`<img>` aus `data:`),
+`ImageView` (`file_read_image`, Einpassen/100 %, Pixel- und Dateigröße). „New note“ ist eine
+`FileSession` ohne Datei (`FileSession.untitled`, Entwurf unter eigenem Wiederherstellungs-
+Schlüssel, nie geschrieben oder beobachtet); ⌘S/`:w` ruft `create_note`, danach zeigt das
+Panel die abgelegte Notiz gerendert. Alle Öffner gehen über `openFilePanel`/`openNewNote`
+(`core/staging.ts`); ein Panel folgt dem Editor zu einer neuen Datei (`panelSync.ts`). Schließen
+per ×, ⌘W (und Esc außerhalb des Editors) fragt über einen Schließ-Wächter bei Ungespeichertem
+bzw. einer nicht abgelegten Notiz nach (Speichern/Ablegen, Verwerfen, Abbrechen); Esc im Editor
+gehört dem Editor (D16).
+
+**Nebenbefund zu W2:** Eine Agenten-Aktion zum Öffnen gab es bisher nur an einer Dokument-
+*Kachel* (und `open-file` hatte keinen Sender) — der Agent konnte dir praktisch nie eine Datei
+öffnen. Jetzt gibt es Aktionen der Shell selbst (`registerShellAction`, Instanz `shell` im
+Manifest), die erste ist `openFile`: eine workspace-relative Datei im Panel, gerendert.
+
+Die Prüfungen von ED4.1: Ein Link `..%2f..%2f` überstand die Auflösung in `htmllink.ts` als
+`../` — erst der Datei-Dienst hätte ihn abgewiesen (Sicherheit, MEDIUM); jetzt liefert
+`resolveRelativeLink` für so einen Pfad `null`, und nichts wird geöffnet. `closeAllStaged`
+umging die Schließ-Wächter (Architektur, MEDIUM) — ungenutzt, gelöscht. Der Abgleich „Config
+folgt dem Editor“ ist eine reine, getestete Funktion (`panelSync.ts`). Nebenbei: Aufgaben-
+Kästchen in gerendertem Markdown waren Textfelder (DOMPurify ließ `type` fallen) — jetzt echte,
+schreibgeschützte Kästchen, auch im Chat. Und `/help` nannte unter `/add` nie ein Modul — der
+Text wurde beim Laden gebaut, bevor die Module registriert waren (Testlücken-Prüfung); jetzt wird
+er beim Aufruf gebaut. **Vorgemerkt für den Anfang von ED4.3:** `FileEditor`
+(~720 Zeilen) verschlanken, bevor Tabs viele davon halten — ein Zustand „Sitzung oder Bild“ statt
+zweier Variablen, die Vorschau-Steuerung als eigenes kleines Modul.
 
 ## 6. Verifikation (pro Meilenstein)
 

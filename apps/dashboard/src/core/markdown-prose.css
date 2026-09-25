@@ -1,7 +1,7 @@
 /*
- * Rendered Markdown, the same everywhere a note is shown: the FileViewer
- * (`modules/md-file.svelte`) and the editor's preview (`fileapp/
- * MarkdownPreview.svelte`, docs/plans/editor.md G8). Scoped to `.ax-prose`;
+ * Rendered Markdown, the same everywhere a note is shown: the editor's
+ * preview (`fileapp/MarkdownPreview.svelte`, docs/plans/editor.md G8), in
+ * the file panel and the file app alike. Scoped to `.ax-prose`;
  * code colours come from `markdown-syntax.css`. Tokens only, per the theme rule.
  */
 

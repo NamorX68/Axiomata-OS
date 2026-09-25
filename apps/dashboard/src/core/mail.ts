@@ -15,7 +15,7 @@
 import type { RunSummary } from "./backend";
 import { cut } from "./markdown";
 import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
-import { openStaged } from "./staging";
+import { openFilePanel } from "./staging";
 
 /** Why one message made it into the digest at all. */
 export type MailReason = "important" | "topic";
@@ -295,7 +295,7 @@ function fnv1aHex(text: string): string {
  *  one — never a data-loss risk. */
 export function mailNotePath(item: MailItem): string {
   const day = (Number.isNaN(Date.parse(item.date)) ? new Date() : new Date(item.date)).toISOString().slice(0, 10);
-  const key = `${item.sender} ${item.subject}`;
+  const key = `${item.sender}\0${item.subject}`;
   return `Mail/${day}-${slugify(item.subject)}-${fnv1aHex(key).slice(0, 8)}.md`;
 }
 
@@ -361,5 +361,5 @@ export async function writeAllMailSummaries(invoke: Invoke, items: readonly Mail
  *  `summaryPreview`. */
 export async function openMailSummary(invoke: Invoke, item: MailItem): Promise<void> {
   const path = await writeMailSummary(invoke, item);
-  openStaged("md-file", { path, mode: "read" });
+  openFilePanel(path, "read");
 }

@@ -12,7 +12,8 @@
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
-  const modules = listModules();
+  // A panel-only type (the file panel) is opened from what it shows, never placed.
+  const modules = listModules().filter((m) => !m.stageOnly);
   // Re-evaluated whenever the instance list changes.
   const placed = $derived.by(() => {
     void $instances;

@@ -1,8 +1,8 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
-import { isCommand, route, runCommand } from "./commands";
+import { helpText, isCommand, route, runCommand } from "./commands";
 import { activeTheme, instances, loadInstances } from "./stores";
 import { staged } from "./staging";
 
@@ -66,7 +66,29 @@ describe("runCommand", () => {
   it("/open stages a markdown panel", async () => {
     expect((await runCommand("open", [])).ok).toBe(false);
     expect((await runCommand("open", ["notes/inbox.md"])).ok).toBe(true);
-    expect(get(staged)).toMatchObject([{ type: "md-file", config: { path: "notes/inbox.md" } }]);
+    expect(get(staged)).toMatchObject([{ type: "file", config: { path: "notes/inbox.md", mode: "read" } }]);
+  });
+
+  it("/newfile creates an empty file and opens it in edit mode, not read mode", async () => {
+    expect((await runCommand("newfile", [])).ok).toBe(false);
+    const r = await runCommand("newfile", ["notes/new.md"]);
+    expect(r.ok).toBe(true);
+    expect(get(staged)).toMatchObject([{ type: "file", config: { path: "notes/new.md", mode: "edit" } }]);
+  });
+
+  it("/newfile reports the backend's failure instead of opening a panel", async () => {
+    const spy = vi.spyOn(await import("./backend"), "invokeBackend").mockRejectedValueOnce(new Error("disk full"));
+    const r = await runCommand("newfile", ["notes/broken.md"]);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/disk full/);
+    expect(get(staged)).toHaveLength(0);
+    spy.mockRestore();
+  });
+
+  it("/help's /add <type> list names every placeable module type, read when asked", () => {
+    // Built when `/help` runs, not when the module loads — the builtins register after it is imported.
+    expect(helpText()).toContain("`memory-status`");
+    expect(helpText()).not.toContain("`file`");
   });
 
   it("module actions need a mounted instance and valid JSON params", async () => {

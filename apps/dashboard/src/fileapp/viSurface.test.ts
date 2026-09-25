@@ -267,7 +267,7 @@ describe("ViSurface on the command line (ED3.3)", () => {
     const { surface } = setup("|foo bar");
     surface.typed("/");
     surface.pasted("ba");
-    expect(surface.keydown({ key: "Enter", meta: false, alt: false, shift: false, ctrl: false })).toEqual({ handled: true });
+    expect(surface.keydown(press("Enter"))).toEqual({ handled: true });
     expect(surface.status().cmdline).toBeNull();
     expect(surface.machine.cursor).toEqual({ line: 0, col: 4 });
   });
@@ -278,7 +278,7 @@ describe("ViSurface on the command line (ED3.3)", () => {
     surface.typed("bar");
     expect(surface.revealTarget()).toEqual({ line: 1, col: 0 });
     expect(surface.searchHighlights(0, 1).current).toEqual({ start: { line: 1, col: 0 }, end: { line: 1, col: 3 } });
-    surface.keydown({ key: "Escape", meta: false, alt: false, shift: false, ctrl: false });
+    surface.keydown(press("Escape"));
     expect(surface.revealTarget()).toEqual({ line: 0, col: 0 });
   });
 });

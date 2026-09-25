@@ -20,7 +20,7 @@ import { get } from "svelte/store";
 import { emit } from "./bus";
 import { createInstance, destroyInstance } from "./lifecycle";
 import { getModule, invokeAction, listModules } from "./registry";
-import { openStaged } from "./staging";
+import { openFilePanel } from "./staging";
 import { instances } from "./stores";
 import { THEMES, applyTheme, isTheme } from "./themes";
 import { invokeBackend } from "./backend";
@@ -55,7 +55,13 @@ export function isCommand(name: string): boolean {
   return SHELL_COMMANDS.includes(name) || getModule(name) !== undefined;
 }
 
-export const HELP = `**Commands**
+/**
+ * The `/help` text. A function, not a constant: the `/add` line lists the
+ * registered module types, and this module is imported before the builtins
+ * register (`main.ts`), so a constant would always list none.
+ */
+export function helpText(): string {
+  return `**Commands**
 
 - \`/add <type>\` — place a module (${listTypes()})
 - \`/remove <type|id>\` — remove the first matching tile
@@ -67,9 +73,11 @@ export const HELP = `**Commands**
 - \`/<type> <action> [json]\` — call a module action, e.g. \`/memory-status sync\`
 - anything else after \`/\` — one-shot agent instruction
 - no slash — chat with the agent`;
+}
 
 function listTypes(): string {
   return listModules()
+    .filter((m) => !m.stageOnly)
     .map((m) => `\`${m.type}\``)
     .join(", ");
 }
@@ -77,7 +85,7 @@ function listTypes(): string {
 export async function runCommand(name: string, args: string[]): Promise<CommandResult> {
   switch (name) {
     case "help":
-      return { ok: true, message: "See the chat panel.", detail: HELP };
+      return { ok: true, message: "See the chat panel.", detail: helpText() };
 
     case "add": {
       const type = args[0] ?? "";
@@ -105,7 +113,7 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
     case "open": {
       const path = args[0];
       if (!path) return { ok: false, message: "usage: /open <path>" };
-      openStaged("md-file", { path, mode: "read" });
+      openFilePanel(path, "read");
       return { ok: true, message: `Opened ${path}.` };
     }
 
@@ -117,7 +125,7 @@ export async function runCommand(name: string, args: string[]): Promise<CommandR
       } catch (err) {
         return { ok: false, message: String(err) };
       }
-      openStaged("md-file", { path, mode: "edit" });
+      openFilePanel(path, "edit");
       return { ok: true, message: `Created ${path}.` };
     }
 

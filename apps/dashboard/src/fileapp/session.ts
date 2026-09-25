@@ -17,6 +17,10 @@
  *   view shows; a destructive choice (reload over unsaved edits, overwrite an
  *   external change) takes a second, explicit click.
  *
+ * * **A new note is a session without a file** (`untitled`, W4): its draft is
+ *   kept aside under its own recovery key, it is never written or watched, and
+ *   the view files it with `create_note` instead of saving.
+ *
  * No DOM and no Svelte: the backend is passed in, so every flow is tested with
  * a fake one (`session.test.ts`).
  */
@@ -50,6 +54,11 @@ export type Banner =
   | { kind: "reloaded" }
   | { kind: "error"; message: string };
 
+/** The recovery key a new note's draft is kept under — a key, not a place on disk. */
+export const DRAFT_ROOT = "new-note";
+/** `.md`, so the draft gets Markdown's colours and preview like the note it becomes. */
+export const DRAFT_REL = "Untitled.md";
+
 export type SaveResult = "saved" | "unchanged" | "conflict" | "readOnly" | "needsConfirm" | "error";
 
 interface FileErrorShape {
@@ -71,6 +80,8 @@ export class FileSession {
   /** The version on disk the document is based on; `null` if the file is gone. */
   version: FileVersion | null;
   readonly readOnly: boolean;
+  /** A new note not filed yet: no file behind it (W4). */
+  readonly untitled: boolean;
   banner: Banner | null = null;
   /** Set by "keep mine": the next save must be confirmed, then overwrites. */
   private overwriteArmed = false;
@@ -80,12 +91,32 @@ export class FileSession {
     private readonly backend: FileBackend,
     readonly root: string,
     readonly rel: string,
-    file: TextFile,
+    file: Pick<TextFile, "content" | "large"> & { version: FileVersion | null },
     indentFallback: Indent,
+    untitled = false,
   ) {
     this.doc = new EditorDocument(file.content, { indentFallback });
     this.version = file.version;
     this.readOnly = file.large;
+    this.untitled = untitled;
+  }
+
+  /**
+   * A new note: an empty document, or — with the recovery banner — the draft
+   * kept from last time. Nothing is read or watched; there is no file yet.
+   */
+  static async untitled(backend: FileBackend, indentFallback: Indent): Promise<FileSession> {
+    const session = new FileSession(
+      backend,
+      DRAFT_ROOT,
+      DRAFT_REL,
+      { content: "", version: null, large: false },
+      indentFallback,
+      true,
+    );
+    const entry = await backend.recoveryLoad(DRAFT_ROOT, DRAFT_REL).catch(() => null);
+    if (entry?.content) session.banner = { kind: "recovery", entry, changedSince: false };
+    return session;
   }
 
   /**
@@ -122,6 +153,8 @@ export class FileSession {
    */
   async save(confirmed = false): Promise<SaveResult> {
     if (this.readOnly) return "readOnly";
+    // A new note is filed by the view (`create_note`), never written here — not even by autosave.
+    if (this.untitled) return "unchanged";
     if (!this.doc.dirty && this.version !== null && !this.overwriteArmed) return "unchanged";
     if (this.overwriteArmed && !confirmed) {
       this.banner = { kind: "confirmOverwrite" };
@@ -189,6 +222,7 @@ export class FileSession {
 
   /** What is on disk now, for the read-only side view (F10, until CP8). */
   async diskText(): Promise<string> {
+    if (this.untitled) return "";
     return (await this.backend.read(this.root, this.rel)).content;
   }
 
@@ -219,7 +253,8 @@ export class FileSession {
 
   /** Discards unsaved edits for good (the view asked first). */
   async discardChanges(): Promise<void> {
-    await this.reload();
+    if (this.untitled) this.doc.reset("");
+    else await this.reload();
     await this.backend.recoveryDelete(this.root, this.rel).catch(() => undefined);
     this.banner = null;
   }
@@ -232,7 +267,7 @@ export class FileSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.backend.unwatch(this.root, this.rel).catch(() => undefined);
+    if (!this.untitled) await this.backend.unwatch(this.root, this.rel).catch(() => undefined);
   }
 
   private async reload(): Promise<void> {

@@ -1,6 +1,6 @@
 /**
  * A tiny in-process event bus for module → shell and shell → module messages
- * (e.g. a module emits `"open-file"` with a path; md-file listens). Not
+ * (e.g. a module emits `"open-file"` with a path; the shell opens the file panel). Not
  * persisted, not cross-window.
  */
 

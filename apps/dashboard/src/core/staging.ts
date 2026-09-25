@@ -120,8 +120,25 @@ export function openStaged(type: string, config: Record<string, unknown> = {}): 
   return panel;
 }
 
+/** The file panel's module type (`fileapp/FilePanel.svelte`, editor plan ED4). */
+export const FILE_PANEL = "file";
+
+/**
+ * Opens a workspace file in the file panel — `"read"` on its rendered view
+ * for Markdown and HTML, `"edit"` on the source (editor plan W1, W10).
+ */
+export function openFilePanel(path: string, mode: "read" | "edit" = "read"): StagedPanel | null {
+  return openStaged(FILE_PANEL, { path, mode });
+}
+
+/** A new note in the file panel (W4); only one at a time. */
+export function openNewNote(): StagedPanel | null {
+  return openStaged(FILE_PANEL, { path: "", mode: "edit", isNew: true });
+}
+
+/** The same file: the same `path` under the same `root` (both unset for the workspace). */
 function samePath(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
-  return typeof a.path === "string" && a.path === b.path;
+  return typeof a.path === "string" && a.path === b.path && a.root === b.root;
 }
 
 /** Moves a panel to the end of the stack, i.e. visually on top — the same
@@ -141,9 +158,29 @@ export function bringToFront(id: string): void {
 }
 
 export function closeStaged(id: string): void {
+  closeGuards.delete(id);
   staged.update((list) => list.filter((p) => p.id !== id));
 }
 
-export function closeAllStaged(): void {
-  if (get(staged).length > 0) staged.set([]);
+/**
+ * Asked before a panel closes by the owner's hand (×, Escape, ⌘W): resolves
+ * `true` to let it go. The file panel asks about unsaved text this way
+ * (`docs/plans/editor.md`, ED4, W11). `closeStaged` itself never asks.
+ */
+export type CloseGuard = () => Promise<boolean>;
+
+const closeGuards = new Map<string, CloseGuard>();
+
+/** Registers (or with `null` removes) the guard of panel `id`. */
+export function setCloseGuard(id: string, guard: CloseGuard | null): void {
+  if (guard) closeGuards.set(id, guard);
+  else closeGuards.delete(id);
 }
+
+/** Closes panel `id` once its guard, if any, agrees. */
+export async function requestClose(id: string): Promise<void> {
+  const guard = closeGuards.get(id);
+  if (guard && !(await guard())) return;
+  closeStaged(id);
+}
+

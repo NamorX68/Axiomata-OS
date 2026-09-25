@@ -2,7 +2,7 @@
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
   labels, search (dims non-matches), layout Rings / Circle / Hex, grouping
   by areas or folders, spin + file-name toggles, and a detail panel for the
-  selected node (file → view in md-file / copy path / fly to / connections;
+  selected node (file → open in the file panel / copy path / fly to / connections;
   skill → run; routine → toggle; hub → open). "Back to the OS" closes.
   Hex tiles every note into its own honeycomb cell, same area wedges as
   Rings/Circle. Orbit (the dashboard-centre widget's 3-D cloud) lives only
@@ -16,7 +16,7 @@
   import { absoluteTime, formatBytes, relativeTime, untilTime } from "../core/format";
   import { excerpt, excerptHtml } from "../core/markdown";
   import { getSetting, setSetting } from "../core/persist";
-  import { openStaged } from "../core/staging";
+  import { openFilePanel } from "../core/staging";
   import { toast } from "../core/toast";
   import { applyLayout, type LayoutKind } from "../graph/layout";
   import {
@@ -369,7 +369,7 @@
   }
 
   function viewFile(path: string) {
-    openStaged("md-file", { path, mode: "read" });
+    openFilePanel(path, "read");
   }
 
   // --- delete (two-step, destructive) ---

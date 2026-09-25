@@ -9,7 +9,7 @@
   - Polls every POLL_MS and reloads; a write is skipped when the serialised
     result is byte-identical to what was last read (so a hand-edit to the
     file is not clobbered by an idle poll). No conflict detection beyond that
-    — same trade-off as `md-file`.
+    — same trade-off as the old Document viewer had.
   - Config (flip side): `showDone` — whether the Done section starts open.
 -->
 <script lang="ts">

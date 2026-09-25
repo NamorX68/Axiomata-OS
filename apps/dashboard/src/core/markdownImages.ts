@@ -23,7 +23,7 @@ function isAlreadyResolvable(target: string): boolean {
  * Rewrites every `![alt](relative/path.jpg)` in `source` whose target isn't
  * already an `http(s):`/`data:` URI into `![alt](data:<mime>;base64,...)`,
  * resolved relative to `notePath`'s own folder (the same
- * `core/htmllink.ts` `resolveRelativeLink` md-file.svelte already uses for
+ * `core/htmllink.ts` `resolveRelativeLink` the HTML preview already uses for
  * HTML same-folder links). A target that fails to resolve (missing file,
  * unsupported type, over the size cap) is left exactly as written — the
  * same "broken image" outcome as before this existed, not a
@@ -58,6 +58,7 @@ export async function resolveMarkdownImagesWith(
   await Promise.all(
     [...targets].map(async (target) => {
       const rel = resolveRelativeLink(notePath, target);
+      if (rel === null) return;
       try {
         const img = await read(rel);
         dataUris.set(target, `data:${img.mime};base64,${img.base64}`);

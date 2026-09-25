@@ -28,7 +28,7 @@ export interface ModuleContext {
   config: Writable<Record<string, unknown>>;
   /** Thin passthrough to `@tauri-apps/api/core` `invoke`. */
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-  /** Fire a shell-bus event (e.g. `"open-file"` to hand a path to md-file). */
+  /** Fire a shell-bus event (e.g. `"open-file"` to hand a path to the file panel). */
   emit: (event: string, detail?: unknown) => void;
   /** Ask the shell to resize this tile. */
   requestResize: (size: { w: number; h: number }) => void;
@@ -73,6 +73,9 @@ export interface ModuleDefinition {
   singleton?: boolean;
   /** May be opened as a slide-in staged panel, not just a canvas tile. */
   stageable?: boolean;
+  /** Only ever a staged panel, never a tile: the file panel (editor plan ED4, W2).
+   *  Kept out of the module picker, the App Ring and `createInstance`. */
+  stageOnly?: boolean;
   /** Renders full-size behind the tiles (in `#particle-slot`) instead of as
    *  a tile — the particle graph. Implies one instance at a time. */
   background?: boolean;

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveRelativeLink, withNavIntercept } from "./htmllink";
+import { PAGE_MESSAGE_SOURCE, resolveRelativeLink, withNavIntercept } from "./htmllink";
 
 describe("withNavIntercept", () => {
   it("inserts the script before </body>", () => {
@@ -56,14 +56,18 @@ describe("the injected click handler (run for real in jsdom)", () => {
     expect(() => document.getElementById("link")!.click()).not.toThrow();
   });
 
-  it("posts same-folder links to the parent instead of navigating", () => {
+  it("posts same-folder links to the parent instead of navigating, tagged with the shared message source", () => {
     document.body.innerHTML = '<a id="link" href="0003-next.html">next</a>';
     const post = vi.fn();
     window.parent.postMessage = post;
 
     document.getElementById("link")!.click();
 
-    expect(post).toHaveBeenCalledWith({ source: "ax-md-file", href: "0003-next.html" }, "*");
+    // The literal source string is exercised here (what the injected script
+    // actually posts) and matched against the exported constant `HtmlPreview`
+    // filters incoming messages by — a drift between the two would silently
+    // break link navigation without either side raising an error.
+    expect(post).toHaveBeenCalledWith({ source: PAGE_MESSAGE_SOURCE, href: "0003-next.html" }, "*");
   });
 
   it("leaves scheme'd links (http:, mailto:, javascript:) alone", () => {
@@ -78,6 +82,15 @@ describe("the injected click handler (run for real in jsdom)", () => {
 });
 
 describe("resolveRelativeLink", () => {
+  it("refuses a link that still climbs out after decoding (..%2f), instead of handing on ../", () => {
+    expect(resolveRelativeLink("Learning/Rust/lessons/0002-x.html", "..%2f..%2f..%2fetc%2fpasswd")).toBeNull();
+    expect(resolveRelativeLink("a/b.html", "%2e%2e%2fsecret.md")).toBeNull();
+    // A malformed escape names no file either.
+    expect(resolveRelativeLink("a/b.html", "%E0%A4%A")).toBeNull();
+    // An encoded name that stays inside is fine.
+    expect(resolveRelativeLink("a/b.html", "c%2fd.html")).toBe("a/c/d.html");
+  });
+
   it("resolves a same-folder link against the current file's folder", () => {
     expect(resolveRelativeLink("Learning/Rust/lessons/0002-variablen.html", "0003-funktionen.html")).toBe(
       "Learning/Rust/lessons/0003-funktionen.html",
@@ -98,5 +111,20 @@ describe("resolveRelativeLink", () => {
     expect(resolveRelativeLink("Learning/lessons/a.html", "Lektion%20zwei.html")).toBe(
       "Learning/lessons/Lektion zwei.html",
     );
+  });
+
+  it("cannot be made to escape above the workspace root with excess ../ segments", () => {
+    // `URL`'s own relative-resolution algorithm clamps a `..` that would
+    // walk past the root, rather than producing a negative/escaped path —
+    // e.g. four levels of "../" from a two-level-deep file still lands on
+    // "escape.html" at the root, never something like "../../escape.html".
+    // This is what makes the result safe to hand to `openFilePanel`/the file
+    // service unchecked: the file service's own root containment then only
+    // has to refuse an absolute-looking path, never undo an already-escaped
+    // relative one.
+    expect(resolveRelativeLink("Learning/Rust/lessons/0002-x.html", "../../../../escape.html")).toBe(
+      "escape.html",
+    );
+    expect(resolveRelativeLink("a.html", "../../escape.html")).toBe("escape.html");
   });
 });

@@ -5,7 +5,7 @@
  * pure-logic-plus-vitest convention (`core/snap.ts`, `core/htmllink.ts`).
  *
  * On-disk format — standard GitHub-flavoured Markdown task lists, so the file
- * also renders correctly in the `md-file` module and in Obsidian:
+ * also renders correctly in the file panel's preview and in Obsidian:
  *
  *     # ToDo
  *

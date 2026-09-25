@@ -49,21 +49,27 @@ describe("createInstance", () => {
   });
 
   it("uses the definition's default size and cascades positions", () => {
-    // `md-file` is one of the few non-singleton modules — every dashboard
-    // tool (memory, skills, routines, mail, calendar, reminders, todo) is now
+    // The dev-only `dummy` is a plain non-singleton tile — every dashboard
+    // tool (memory, skills, routines, mail, calendar, reminders, todo) is
     // limited to a single instance.
-    const a = createInstance("md-file");
-    const b = createInstance("md-file");
+    const a = createInstance("dummy");
+    const b = createInstance("dummy");
     expect(a.ok && b.ok).toBe(true);
     if (!a.ok || !b.ok) return;
-    expect(a.instance).toMatchObject({ x: ORIGIN.x, y: ORIGIN.y, w: 480, h: 420, z: 1 });
+    expect(a.instance).toMatchObject({ x: ORIGIN.x, y: ORIGIN.y, w: 260, h: 160, z: 1 });
     expect(b.instance).toMatchObject({ x: ORIGIN.x + CASCADE_PX, y: ORIGIN.y + CASCADE_PX, z: 2 });
     expect(get(instances)).toHaveLength(2);
   });
 
   it("honours overrides", () => {
-    const r = createInstance("md-file", { x: 5, y: 6, config: { path: "a.md" } });
+    const r = createInstance("dummy", { x: 5, y: 6, config: { path: "a.md" } });
     expect(r.ok && r.instance).toMatchObject({ x: 5, y: 6, config: { path: "a.md" } });
+  });
+
+  it("refuses a panel-only type (the file panel is never a tile)", () => {
+    const r = createInstance("file");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/opens as a panel/);
   });
 
   it("blocks a second singleton until the first is removed", () => {

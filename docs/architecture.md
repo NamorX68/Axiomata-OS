@@ -250,7 +250,7 @@ Two traps: never read `node.text` (web-tree-sitter re-calls the parse callback w
 position — slice the store), and the CSP carries `'wasm-unsafe-eval'` for tree-sitter. Colours
 are 17 `--ax-syntax-*` plus six `--ax-editor-*` tokens per theme; the Markdown preview reuses
 `core/markdown.ts` (`renderMarkdownBlocks`, `data-line` per block) and `core/markdown-prose.css`,
-shared with the FileViewer.
+shared with the chat.
 
 ### `axiomata-cli`
 
@@ -605,7 +605,8 @@ carrying its own config.
   time and has no way to take a form's runtime parameters, so the instruction spells out the
   exact MCP tool call in the instruction text itself and the caller updates its already-loaded
   digest locally (no full re-run) from the reply.
-- **HTML pages** (courses): rendered read-only via `<iframe sandbox="allow-scripts" srcdoc=…>`
+- **HTML pages** (courses): rendered via `<iframe sandbox="allow-scripts" srcdoc=…>`
+  (`fileapp/HtmlPreview.svelte`, the editor's rendered view of an HTML file)
   — **not** an `asset://` URL. An earlier `asset://` + `<iframe src=…>` design looked correct
   (even reported `is_allowed == true` on the Rust side) but every lesson rendered a blank
   white frame — "403 (Forbidden)" / sandboxing refusal in the WebKit console, matching known
@@ -614,8 +615,9 @@ carrying its own config.
   handling same-folder links and same-page anchors by hand (a `srcdoc` document's *base URL*
   for resolving relative `href`s is the embedding app, not the lesson's real location, per the
   HTML living standard).
-- **Modules shipped today**: memory-status, skills-deck, routines-board (§5 above), md-file
-  (Markdown + HTML viewer, also used as the compose surface for "New note"), todo (a flat
+- **Modules shipped today**: memory-status, skills-deck, routines-board (§5 above), the file
+  panel (`file`, panel-only since ED4: the editor opened from the Second Brain, the chat or an
+  agent — Markdown and HTML rendered, code, images, "New note"), todo (a flat
   `ToDo.md` checklist, GFM task lists, inline-editable), calendar, reminders, mail (connector
   modules per the pattern above), terminal (a self-built PTY/VT100 emulator, `axiomata-terminal`
   — see §3), and second-brain (below) — each with a front and, where relevant, a settings face.
@@ -1027,6 +1029,12 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `ViStatusLine.svelte` in the file app's footer and over diffs. ED3.4: tree-sitter text objects
   `if/af ic/ac ia/aa` from one node-type table across the grammars (`editor/syntax/objects.ts`),
   and `editor-vi.json` (`core::editor_vi`, `fileapp/viPersist.ts`). Next: ED4.
+- **Editor ED4 — single point of truth: under way** (2026-09-25, W1–W17). ED4.1: the file
+  panel (`fileapp/FilePanel.svelte`, a panel-only module `file`) replaced the Document tile
+  and viewer (`md-file`): `FileEditor` now shows every file kind (rendered Markdown/HTML/SVG
+  beside the source, images, a new note filed with `create_note`), panels ask before closing
+  over unsaved text (`core/staging.ts` close guards), and the agent opens a file for the owner
+  through the shell-level action `openFile` (`core/registry.ts`, instance id `shell`).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

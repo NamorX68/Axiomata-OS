@@ -8,7 +8,8 @@
 
 import { get } from "svelte/store";
 
-import { registerModule } from "../core/registry";
+import { registerModule, registerShellAction } from "../core/registry";
+import { FILE_PANEL, openFilePanel } from "../core/staging";
 import type { Routine, RunRecord, WorkspaceFile } from "../core/backend";
 import { CALENDAR_SKILL_NAME, createCalendarEvent, deleteCalendarEvent, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
 import { todayIso as calendarToday, weekRange } from "../core/monthGrid";
@@ -31,10 +32,9 @@ import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
 import Kanban from "./kanban.svelte";
 import KanbanSettings from "./kanban-settings.svelte";
+import FilePanel from "../fileapp/FilePanel.svelte";
 import Mail from "./mail.svelte";
 import MailSettings from "./mail-settings.svelte";
-import MdFile from "./md-file.svelte";
-import MdFileSettings from "./md-file-settings.svelte";
 import MemoryStatus from "./memory-status.svelte";
 import MemoryStatusSettings from "./memory-status-settings.svelte";
 import Reminders from "./reminders.svelte";
@@ -355,47 +355,33 @@ export function registerBuiltins(): void {
     ],
   });
 
+  // The file panel (editor plan ED4, W2): the editor where a file is opened
+  // from somewhere — the Second Brain, the chat, an agent. A panel only; the
+  // Document tile it replaced is gone.
   registerModule({
-    type: "md-file",
-    title: "Document",
-    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><rect x='1.5' y='3.5' width='13' height='9' rx='1.5'/><path d='M4 10V6l2 2 2-2v4M11 6v4m-1.5-1.5L11 10l1.5-1.5'/></svg>",
-    component: MdFile,
-    settings: MdFileSettings,
-    defaultSize: { w: 480, h: 420 },
-    minSize: { w: 260, h: 160 },
+    type: FILE_PANEL,
+    title: "File",
+    icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linejoin='round'><path d='M4 1.5h5.5L13 5v9.5H4z'/><path d='M9.5 1.5V5H13'/></svg>",
+    component: FilePanel,
+    defaultSize: { w: 900, h: 640 },
     stageable: true,
-    actions: [
-      {
-        name: "open",
-        description: "Open a workspace-relative file in this instance (read mode) — Markdown, HTML, any UTF-8 text file, or an image.",
-        params: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-        run: async (params, ctx) => {
-          const path = String((params as { path: string }).path);
-          ctx.config.update((c) => ({ ...c, path, mode: "read" }));
-          return { path };
-        },
-      },
-      {
-        name: "setMode",
-        description: 'Switch between "read" and "edit" (edit works for Markdown, HTML and any text file — not images).',
-        params: { type: "object", properties: { mode: { type: "string", enum: ["read", "edit"] } }, required: ["mode"] },
-        run: async (params, ctx) => {
-          const mode = (params as { mode: string }).mode === "edit" ? "edit" : "read";
-          ctx.config.update((c) => ({ ...c, mode }));
-          return { mode };
-        },
-      },
-      {
-        name: "getContent",
-        description: "Return the file's current on-disk content.",
-        params: { type: "object", properties: {} },
-        run: (_params, ctx) => {
-          let path = "";
-          ctx.config.subscribe((c) => (path = typeof c.path === "string" ? c.path : ""))();
-          return ctx.invoke("read_workspace_file", { rel: path });
-        },
-      },
-    ],
+    stageOnly: true,
+  });
+
+  // What the Document tile's `open` action did, for the agent, without a tile:
+  // open a workspace file for the owner in the file panel (W2).
+  registerShellAction({
+    name: "openFile",
+    description:
+      "Open a workspace-relative file for the owner in a floating file panel — Markdown and HTML rendered, " +
+      "any text or code in the editor, images as pictures.",
+    params: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    run: async (params) => {
+      const path = String((params as { path: string }).path ?? "").trim();
+      if (!path) throw new Error("openFile needs a path");
+      openFilePanel(path, "read");
+      return { path };
+    },
   });
 
   registerModule({

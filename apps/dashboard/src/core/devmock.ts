@@ -1598,6 +1598,10 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (args.root === "worktree:1" && args.rel === MOCK_IMAGE_PATH) {
         return { rel: MOCK_IMAGE_PATH, mime: "image/png", base64: MOCK_IMAGES.worktree } as T;
       }
+      // The workspace has the same picture, for the file panel's image view.
+      if (args.root === "workspace" && args.rel === MOCK_IMAGE_PATH) {
+        return { rel: MOCK_IMAGE_PATH, mime: "image/png", base64: MOCK_IMAGES.worktree } as T;
+      }
       throw fileError("NotFound", "devmock has no images for the file service");
     case "file_pick":
       if (nextPick && !args.folder) {

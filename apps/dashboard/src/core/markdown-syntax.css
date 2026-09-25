@@ -2,7 +2,7 @@
  * Syntax-highlight colours for `highlight.js`-tokenised code blocks, keyed to
  * the `hljs-*` classes `core/markdown.ts`'s renderer produces. Global rather
  * than scoped in a `.svelte` file's `<style>` on purpose: `renderMarkdown` is
- * shared by the md-file module and the chat panel (see its own doc comment),
+ * shared by the file preview and the chat panel (see its own doc comment),
  * so this is one contract with two consumers — a scoped copy in each would
  * just be the same ~15 rules duplicated and free to drift apart. Every colour
  * still comes from a `--ax-*` token, so it re-themes exactly like everything

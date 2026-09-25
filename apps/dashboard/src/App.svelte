@@ -4,7 +4,7 @@
 
   import Canvas from "./canvas/Canvas.svelte";
   import { emit, on } from "./core/bus";
-  import { openStaged } from "./core/staging";
+  import { openFilePanel, openNewNote, openStaged } from "./core/staging";
   import { loadInstances } from "./core/stores";
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
@@ -43,7 +43,7 @@
       on("open-file", (detail) => {
         const d = (detail ?? {}) as { path?: string; mode?: string };
         if (typeof d.path !== "string") return;
-        openStaged("md-file", { path: d.path, mode: d.mode === "edit" ? "edit" : "read" });
+        openFilePanel(d.path, d.mode === "edit" ? "edit" : "read");
       }),
       on("shell:settings", () => (settingsOpen = true)),
       on("shell:ide", () => {
@@ -63,7 +63,7 @@
       }),
       // Reuses the Document module's own compose mode instead of a bespoke
       // dialog — same viewer, same Save-picks-the-folder agent flow.
-      on("shell:new-note", () => openStaged("md-file", { path: "", mode: "edit", isNew: true })),
+      on("shell:new-note", () => openNewNote()),
       // The background graph (or /brain) → full-screen Second Brain.
       on("open-second-brain", (detail) => {
         const d = (detail ?? {}) as { focus?: string | null; query?: string };

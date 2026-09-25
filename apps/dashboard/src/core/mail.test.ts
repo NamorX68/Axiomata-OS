@@ -170,6 +170,18 @@ describe("mailNotePath", () => {
     expect(path).not.toMatch(/[üöäß]/);
   });
 
+  it("differs for a sender/subject split that would collide under a plain space-joined key", () => {
+    // The fix this checkpoint carries (`\0`-joined key, not space-joined):
+    // sender "a" + subject "b c" and sender "a b" + subject "c" produced the
+    // identical space-joined string "a b c" under the old key, colliding two
+    // genuinely different emails onto the same note file. A NUL byte never
+    // occurs in real sender/subject text, so joining with it instead keeps
+    // the two apart.
+    const a = { ...item, sender: "a", subject: "b c" };
+    const b = { ...item, sender: "a b", subject: "c" };
+    expect(mailNotePath(a)).not.toBe(mailNotePath(b));
+  });
+
   it("still differs for structured senders sharing a long common prefix", () => {
     // A prefix-slice of the raw sender (rather than hashing the whole
     // sender+subject pair) would risk collapsing these once separators are
@@ -362,7 +374,7 @@ describe("openMailSummary", () => {
 
     const panels = get(staged);
     expect(panels).toHaveLength(1);
-    expect(panels[0].type).toBe("md-file");
+    expect(panels[0].type).toBe("file");
     expect(panels[0].config.path).toBe(writes[0].rel);
   });
 

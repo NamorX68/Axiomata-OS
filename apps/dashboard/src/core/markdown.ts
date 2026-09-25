@@ -1,5 +1,5 @@
 /**
- * Markdown → sanitised HTML, shared by the md-file module and the chat panel.
+ * Markdown → sanitised HTML, shared by the editor's preview and the chat panel.
  * `marked` (GFM) renders — fenced code blocks go through `highlight.js` for
  * syntax colouring first; DOMPurify scrubs the result to an allowlist (the
  * `hljs-*` `<span>`s highlighting produces are plain elements + `class`, both
@@ -89,7 +89,7 @@ const ALLOWED_ATTR = ["href", "title", "alt", "src", "align", "start", "type", "
 /** Inline raster images only — never SVG (it can carry script) and never
  *  as a link target (a top-level `data:` navigation would run it). Extension
  *  list mirrors the Rust `image_mime` (`workspace.rs`) — keep them in
- *  lockstep, same as `md-file.svelte`'s own copy of this list. */
+ *  lockstep, same as `fileapp/fileKinds.ts`'s own copy of this list. */
 const DATA_IMAGE_RE = /^data:image\/(?:png|jpe?g|gif|webp|bmp|tiff|heic|avif);base64,[a-z0-9+/=]+$/i;
 
 /** The one configured DOMPurify instance. */
@@ -124,7 +124,10 @@ purify.addHook("afterSanitizeAttributes", (node) => {
     node.setAttribute("target", "_blank");
   }
   if (node.tagName === "INPUT") {
-    // Task-list checkboxes render read-only.
+    // Task-list checkboxes render read-only. DOMPurify drops `type` on an
+    // input even when allowed, which left a text field in the checkbox's
+    // place; Markdown makes no other input, so every one is a checkbox.
+    node.setAttribute("type", "checkbox");
     node.setAttribute("disabled", "");
   }
 });

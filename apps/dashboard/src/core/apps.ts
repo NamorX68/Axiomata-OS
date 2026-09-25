@@ -29,8 +29,8 @@ export interface BuiltinApp {
  *  has no way to bring these back — see `hiddenBuiltins` below for the
  *  ones they *can* toggle): `background` (the Second Brain canvas itself,
  *  not a launchable tile), `dev` scaffolding (the `dummy*` modules), and
- *  `md-file` — it needs a `path` a blank ring click has no way to supply,
- *  so `createInstance("md-file")` would just produce a broken tile.
+ *  `stageOnly` types (the file panel) — they open from a file, never as a
+ *  tile a ring click could create.
  *
  *  `terminal` (or any other `singleton: false` builtin) is otherwise
  *  ring-eligible like everything else — `second-brain.svelte`'s
@@ -42,7 +42,7 @@ export interface BuiltinApp {
  *  Checkpoint 1's original exclusion, superseded by the App Ring's
  *  Checkpoint 5c "Tools und Apps verwaltbar machen"). */
 function isRingEligible(def: ModuleDefinition): boolean {
-  return !def.background && !def.dev && def.type !== "md-file";
+  return !def.background && !def.dev && !def.stageOnly;
 }
 
 /** A ring entry that opens a full-screen view instead of creating a tile —

@@ -1,6 +1,6 @@
 /**
  * Relative-link navigation for HTML course pages framed via `srcdoc` (see
- * `modules/md-file.svelte`). A `srcdoc` document's own URL is `about:srcdoc`,
+ * `fileapp/HtmlPreview.svelte`). A `srcdoc` document's own URL is `about:srcdoc`,
  * but its *base URL* — what a relative `href` resolves against — is
  * inherited from the **embedding page**, per the HTML living standard. Two
  * consequences `withNavIntercept`'s injected script has to handle itself,
@@ -27,7 +27,10 @@
  * standing in for the "page URL".
  */
 
-const NAV_SCRIPT = `<script>document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(!a)return;var href=a.getAttribute("href");if(!href)return;if(href.charAt(0)==="#"){e.preventDefault();var id=href.slice(1);var el=id?document.getElementById(id):null;if(el)el.scrollIntoView({behavior:"smooth",block:"start"});return;}if(/^[a-z][a-z0-9+.-]*:/i.test(href))return;e.preventDefault();parent.postMessage({source:"ax-md-file",href:href},"*");});</script>`;
+/** The `source` of the message the framed page posts for a clicked link. */
+export const PAGE_MESSAGE_SOURCE = "ax-page";
+
+const NAV_SCRIPT = `<script>document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(!a)return;var href=a.getAttribute("href");if(!href)return;if(href.charAt(0)==="#"){e.preventDefault();var id=href.slice(1);var el=id?document.getElementById(id):null;if(el)el.scrollIntoView({behavior:"smooth",block:"start"});return;}if(/^[a-z][a-z0-9+.-]*:/i.test(href))return;e.preventDefault();parent.postMessage({source:"ax-page",href:href},"*");});</script>`;
 
 /** Appends the click-intercept script just before `</body>` (or at the end
  *  if the page has none — course pages always do, but don't assume it). */
@@ -39,9 +42,19 @@ export function withNavIntercept(html: string): string {
  *  (the workspace-relative path of the page that contains the link), e.g.
  *  `resolveRelativeLink("Learning/Rust/lessons/0002-x.html", "0003-y.html")`
  *  → `"Learning/Rust/lessons/0003-y.html"`. Handles `../` the same way a
- *  real browser would, via `URL`'s own relative-resolution algorithm. */
-export function resolveRelativeLink(currentPath: string, href: string): string {
+ *  real browser would, via `URL`'s own relative-resolution algorithm.
+ *
+ *  `null` for a link that still climbs out after decoding: `URL` collapses a
+ *  literal `../`, but not one spelled `..%2f`, which decodes into `../`. The
+ *  file service refuses such a path too; this refuses it where it is made. */
+export function resolveRelativeLink(currentPath: string, href: string): string | null {
   const dir = currentPath.includes("/") ? currentPath.slice(0, currentPath.lastIndexOf("/") + 1) : "";
   const resolved = new URL(href, `file:///${dir}`);
-  return decodeURIComponent(resolved.pathname).replace(/^\/+/, "");
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(resolved.pathname).replace(/^\/+/, "");
+  } catch {
+    return null; // A malformed escape (`%E0%A4%A`) names no file.
+  }
+  return decoded.split("/").some((segment) => segment === "..") ? null : decoded;
 }

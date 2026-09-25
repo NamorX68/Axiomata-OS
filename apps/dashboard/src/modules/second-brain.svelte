@@ -11,7 +11,7 @@
   view (bus `open-second-brain`, step 4) — *unless* the hit node is an "app"
   node (launches/focuses it instead) or a "file" node sitting on the inner
   ring (`onOrbit` — a recent file with its own icon slot, not just a cloud
-  point; opens it directly in the staged viewer via `openStaged`, the same
+  point; opens it directly in the file panel via `openFilePanel`, the same
   one-click-to-content experience `core/mail.ts`'s `openMailSummary` already
   gives a mail item), or a context menu is open, which the click just
   closes. A "file" hit inside the general point cloud (every file, dense,
@@ -43,7 +43,7 @@
   import type { WorkspaceGraph } from "../core/backend";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
-  import { openStaged } from "../core/staging";
+  import { openFilePanel } from "../core/staging";
   import { bringToFront, instances } from "../core/stores";
   import { toast } from "../core/toast";
   import type { ModuleContext } from "../core/types";
@@ -275,7 +275,7 @@
       return;
     }
     if (hover?.kind === "file" && hover.path && hover.onOrbit) {
-      openStaged("md-file", { path: hover.path, mode: "read" });
+      openFilePanel(hover.path, "read");
       return;
     }
     if (wasExpanded) return;

@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest";
 import { excerpt, excerptHtml, renderMarkdown, renderMarkdownBlocks } from "./markdown";
 
 describe("renderMarkdown", () => {
+  it("renders task-list items as read-only checkboxes, not text fields", () => {
+    const html = renderMarkdown("- [x] done\n- [ ] open\n");
+    const box = new DOMParser().parseFromString(html, "text/html").querySelectorAll("input");
+    expect(box).toHaveLength(2);
+    expect([...box].map((b) => [b.type, b.checked, b.disabled])).toEqual([
+      ["checkbox", true, true],
+      ["checkbox", false, true],
+    ]);
+  });
+
   it("renders GFM and keeps safe links and raster data images", () => {
     const html = renderMarkdown("# T\n\n- [x] done\n\n[ok](https://example.com)\n\n![p](data:image/png;base64,iVBOR)");
     expect(html).toContain("<h1>T</h1>");

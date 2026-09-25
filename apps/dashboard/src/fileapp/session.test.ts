@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EditorRecovery, FileVersion, TextFile } from "../core/backend";
 import { run } from "../editor/commands";
 import { ctx } from "../editor/testing";
-import { FileSession, type FileBackend } from "./session";
+import { DRAFT_REL, DRAFT_ROOT, FileSession, type FileBackend } from "./session";
 
 const INDENT = { kind: "spaces" as const, size: 4 };
 
@@ -13,6 +13,11 @@ class FakeBackend implements FileBackend {
   recoveries = new Map<string, EditorRecovery>();
   watched = new Set<string>();
   writes = 0;
+  /** Every `unwatch` call, even a no-op one (nothing watched under that key) —
+   *  `watched.size` alone can't tell "never watched" apart from "watched,
+   *  then unwatched", which is exactly what the untitled-session guarantee
+   *  ("never watched") needs to distinguish. */
+  unwatchCalls = 0;
 
   static version(content: string): FileVersion {
     return `${content.length}-${[...content].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)}`;
@@ -39,6 +44,7 @@ class FakeBackend implements FileBackend {
   }
 
   async unwatch(root: string, rel: string): Promise<void> {
+    this.unwatchCalls++;
     this.watched.delete(`${root}:${rel}`);
   }
 
@@ -111,6 +117,7 @@ describe("opening and saving", () => {
     const { backend, session } = await opened();
     await session.close();
     expect(backend.watched.size).toBe(0);
+    expect(backend.unwatchCalls).toBe(1);
   });
 });
 
@@ -221,5 +228,64 @@ describe("recovery (F8)", () => {
     await again.discardRecovery();
     expect(backend.recoveries.size).toBe(0);
     expect(again.banner).toBeNull();
+  });
+});
+
+describe("a new note's untitled session (ED4, W4)", () => {
+  it("starts empty, is never written or watched, and keeps its draft aside under its own key", async () => {
+    const backend = new FakeBackend();
+    const s = await FileSession.untitled(backend, INDENT);
+    expect(s.untitled).toBe(true);
+    expect(s.doc.store.text()).toBe("");
+    expect(backend.watched.size).toBe(0);
+    run(s.doc, { type: "insert", text: "# Idea" }, ctx());
+    expect(await s.save()).toBe("unchanged");
+    expect(backend.writes).toBe(0);
+    await s.persistRecovery();
+    expect(backend.recoveries.get(`${DRAFT_ROOT}:${DRAFT_REL}`)?.content).toBe("# Idea");
+    await s.close();
+  });
+
+  it("offers last time's draft back", async () => {
+    const backend = new FakeBackend();
+    await backend.recoverySave(DRAFT_ROOT, DRAFT_REL, null, "draft text");
+    const s = await FileSession.untitled(backend, INDENT);
+    expect(s.banner).toMatchObject({ kind: "recovery", changedSince: false });
+    await s.restoreRecovery();
+    expect(s.doc.store.text()).toBe("draft text");
+  });
+
+  it("empties the draft on :e! instead of reading a file that is not there", async () => {
+    const backend = new FakeBackend();
+    const s = await FileSession.untitled(backend, INDENT);
+    run(s.doc, { type: "insert", text: "gone" }, ctx());
+    await s.discardChanges();
+    expect(s.doc.store.text()).toBe("");
+    expect(await s.diskText()).toBe("");
+  });
+
+  it("persistRecovery on a clean document deletes an earlier draft that was offered but never restored", async () => {
+    const backend = new FakeBackend();
+    await backend.recoverySave(DRAFT_ROOT, DRAFT_REL, null, "leftover draft");
+    const s = await FileSession.untitled(backend, INDENT);
+    expect(s.doc.dirty).toBe(false);
+    expect(backend.recoveries.size).toBe(1);
+    await s.persistRecovery();
+    expect(backend.recoveries.size).toBe(0);
+  });
+
+  it("close() never unwatches, since an untitled session was never watched", async () => {
+    const backend = new FakeBackend();
+    const s = await FileSession.untitled(backend, INDENT);
+    await s.close();
+    expect(backend.unwatchCalls).toBe(0);
+  });
+
+  it("never reacts to a change for a real workspace file that happens to share the draft's name", async () => {
+    const backend = new FakeBackend();
+    const s = await FileSession.untitled(backend, INDENT);
+    const collision = { root: "workspace", rel: DRAFT_REL, kind: "modified" as const, version: "v1" };
+    expect(await s.onExternalChange(collision)).toBe(false);
+    expect(s.banner).toBeNull();
   });
 });

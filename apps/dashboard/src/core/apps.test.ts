@@ -26,10 +26,10 @@ beforeEach(() => {
 });
 
 describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
-  it("excludes background, dev, and md-file modules", () => {
+  it("excludes background, dev, and panel-only modules", () => {
     const types = listAllRingEligibleBuiltins().map((a) => a.type);
     expect(types).not.toContain("second-brain");
-    expect(types).not.toContain("md-file");
+    expect(types).not.toContain("file");
     expect(types).not.toContain("dummy");
     expect(types).not.toContain("dummy-singleton");
   });

@@ -7,7 +7,7 @@
 import { get, writable } from "svelte/store";
 
 import { invokeBackend } from "./backend";
-import type { ModuleContext, ModuleDefinition, CanvasInstance } from "./types";
+import type { ModuleAction, ModuleContext, ModuleDefinition, CanvasInstance } from "./types";
 import { instances, updateInstance } from "./stores";
 import { emit } from "./bus";
 
@@ -28,6 +28,22 @@ export function listModules(): ModuleDefinition[] {
   return [...registry.values()];
 }
 
+/**
+ * The shell's own actions, reached like a module instance's under the id
+ * `shell` — for what belongs to no tile: opening a file for the owner in the
+ * file panel (`docs/plans/editor.md`, ED4, W2), which no longer has a tile of
+ * its own to carry the action.
+ */
+export const SHELL_INSTANCE = "shell";
+const shellActions: ModuleAction[] = [];
+
+export function registerShellAction(action: ModuleAction): void {
+  if (shellActions.some((a) => a.name === action.name)) {
+    throw new Error(`shell action "${action.name}" is already registered`);
+  }
+  shellActions.push(action);
+}
+
 /** One entry per mounted instance that declares at least one action. This is
  *  the exact payload rendered into `~/.axiomata/module-context.md` for the
  *  agent (step 12). */
@@ -39,6 +55,17 @@ export interface ManifestEntry {
 }
 
 export function manifest(): ManifestEntry[] {
+  const shell: ManifestEntry[] = shellActions.length
+    ? [{ instance_id: SHELL_INSTANCE, type: "shell", title: "Shell", actions: shellActions.map(describe) }]
+    : [];
+  return shell.concat(moduleEntries());
+}
+
+function describe(a: ModuleAction): ManifestEntry["actions"][number] {
+  return { name: a.name, description: a.description, params: a.params };
+}
+
+function moduleEntries(): ManifestEntry[] {
   return get(instances).flatMap((inst): ManifestEntry[] => {
     const def = registry.get(inst.type);
     if (!def?.actions?.length) return [];
@@ -47,11 +74,7 @@ export function manifest(): ManifestEntry[] {
         instance_id: inst.id,
         type: inst.type,
         title: def.title,
-        actions: def.actions.map((a) => ({
-          name: a.name,
-          description: a.description,
-          params: a.params,
-        })),
+        actions: def.actions.map(describe),
       },
     ];
   });
@@ -95,6 +118,11 @@ export async function invokeAction(
   action: string,
   params: unknown,
 ): Promise<unknown> {
+  if (instanceId === SHELL_INSTANCE) {
+    const act = shellActions.find((a) => a.name === action);
+    if (!act) throw new Error(`the shell has no action "${action}"`);
+    return act.run(params, createContext(SHELL_INSTANCE, {}, () => {}));
+  }
   const inst = get(instances).find((i) => i.id === instanceId);
   if (!inst) {
     throw new Error(`no module instance "${instanceId}"`);

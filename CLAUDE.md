@@ -53,7 +53,10 @@ app in `src/fileapp/` (full-screen view, recovery, settings); **ED2** (tree-sitt
 effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor are done, and so is **ED3 (Vi, V1–V12)**: the machine in
 `src/editor/vi/` (the `:` line lives inside it — `vi/cmdmode.ts`), wired to every surface, the Mac pasteboard
 via `axiomata-macos::clipboard`, tree-sitter text objects (`editor/syntax/objects.ts`), and
-`~/.axiomata/editor-vi.json` for registers, file marks and histories. ED4 is next (`docs/plans/editor.md` §5).
+`~/.axiomata/editor-vi.json` for registers, file marks and histories. **ED4 (single point of truth, W1–W17)** is
+under way: ED4.1 replaced the Document tile/viewer (`md-file`) with the panel-only file panel
+(`fileapp/FilePanel.svelte` around `FileEditor`, opened via `core/staging.ts` `openFilePanel`), and the agent
+opens files for the owner through the shell action `openFile` (`core/registry.ts`, instance id `shell`).
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
