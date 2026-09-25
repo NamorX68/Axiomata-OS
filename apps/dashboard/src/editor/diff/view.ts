@@ -28,8 +28,42 @@ export interface DiffPane {
   decorations: LineDecorations;
   /** Per document line; `null` for a fold, note or blank row. */
   sources: readonly (LineSource | null)[];
-  /** The first document line of each hunk, in order (H9: ⌥↓/⌥↑). */
+  /** The first document line of each hunk, in order (H9: ⌥↓/⌥↑) — its header row, when there is one. */
   hunkStarts: readonly number[];
+  /** Per document line, the hunk it belongs to (H9: ⌘⌫ takes back the one under the cursor). */
+  hunkOf: readonly (number | null)[];
+}
+
+/**
+ * A header row above each hunk (H6): git's `@@ … @@` line and, where
+ * `discard` is set, a button to take the hunk back. Only for diffs that can be
+ * acted on — an agent's, not the file app's "Compare".
+ */
+export interface HunkHeaders {
+  /** Git's header line of every hunk, by hunk index. */
+  headers: readonly string[];
+  discard: boolean;
+}
+
+/** A hunk button's action id, and back. */
+export function hunkActionId(hunk: number, action: "discard"): string {
+  return `hunk:${hunk}:${action}`;
+}
+
+export function parseHunkActionId(id: string): { hunk: number; action: "discard" } | null {
+  const m = /^hunk:(\d+):(discard)$/.exec(id);
+  return m ? { hunk: Number(m[1]), action: "discard" } : null;
+}
+
+function hunkDecoration(hunk: number, header: string, discard: boolean): LineDecoration {
+  return {
+    kind: "hunk",
+    gutter: "@@",
+    label: header,
+    actions: discard
+      ? [{ id: hunkActionId(hunk, "discard"), label: "Discard", title: "Put this change back to the base (⌘⌫)" }]
+      : [],
+  };
 }
 
 const ACTION_LABELS: Record<FoldAction, (step: number) => LineAction["label"]> = {
@@ -95,16 +129,27 @@ class PaneBuilder {
   private readonly decos: LineDecoration[] = [];
   private readonly sources: (LineSource | null)[] = [];
   private readonly hunkStarts: number[] = [];
+  private readonly hunkOf: (number | null)[] = [];
   private lastHunk: number | null = null;
+
+  /** `headers`: a header row before each hunk, with the discard button if `discard`. */
+  constructor(private readonly headers: HunkHeaders | null = null) {}
 
   push(text: string, deco: LineDecoration, source: LineSource | null, hunk: number | null): void {
     if (hunk !== null && hunk !== this.lastHunk) {
       this.hunkStarts.push(this.lines.length);
       this.lastHunk = hunk;
+      const header = this.headers?.headers[hunk];
+      if (header !== undefined) this.row("", hunkDecoration(hunk, header, this.headers!.discard), null, hunk);
     }
+    this.row(text, deco, source, hunk);
+  }
+
+  private row(text: string, deco: LineDecoration, source: LineSource | null, hunk: number | null): void {
     this.lines.push(text);
     this.decos.push(deco);
     this.sources.push(source);
+    this.hunkOf.push(hunk);
   }
 
   build(gutterCells: number): DiffPane {
@@ -114,14 +159,15 @@ class PaneBuilder {
       decorations: { gutterCells, line: (line) => decos[line] },
       sources: this.sources,
       hunkStarts: this.hunkStarts,
+      hunkOf: this.hunkOf,
     };
   }
 }
 
 /** The unified layout (H1): both line numbers and the sign in the gutter. */
-export function unifiedPane(rows: readonly UnifiedRow[], step: number): DiffPane {
+export function unifiedPane(rows: readonly UnifiedRow[], step: number, headers: HunkHeaders | null = null): DiffPane {
   const width = numberDigits(rows.map((r) => (r.type === "line" ? r : null)));
-  const pane = new PaneBuilder();
+  const pane = new PaneBuilder(headers);
   for (const row of rows) {
     if (row.type === "fold") pane.push("", foldDecoration(row, step), null, null);
     else if (row.type === "note") pane.push("", noteDecoration(row), null, null);
@@ -141,11 +187,16 @@ export function unifiedPane(rows: readonly UnifiedRow[], step: number): DiffPane
 }
 
 /** The split layout (H12): the base's lines left, the change's right, row for row. */
-export function splitPanes(rows: readonly SplitRow[], step: number): { left: DiffPane; right: DiffPane } {
+export function splitPanes(
+  rows: readonly SplitRow[],
+  step: number,
+  headers: HunkHeaders | null = null,
+): { left: DiffPane; right: DiffPane } {
   const all = rows.flatMap((r) => (r.type === "pair" ? [r.left, r.right] : []));
   const width = numberDigits(all);
-  const left = new PaneBuilder();
-  const right = new PaneBuilder();
+  // Both sides get the header rows, so they stay row for row; the button once, on the change's side.
+  const left = new PaneBuilder(headers && { ...headers, discard: false });
+  const right = new PaneBuilder(headers);
   const side = (pane: PaneBuilder, row: LineRow | null, which: "old" | "new", hunk: number | null) => {
     if (!row) {
       pane.push("", { kind: "blank" }, null, hunk);

@@ -14,7 +14,7 @@
 
 import { getContext, setContext } from "svelte";
 
-import type { DockTarget } from "./layout";
+import type { DockTarget, PaneTab } from "./layout";
 
 export interface IdeDock {
   /** Make a tab the visible one in its group. */
@@ -23,6 +23,12 @@ export interface IdeDock {
   close: (tabId: string) => void;
   /** Open a new pane in that group — the tab bar's `+`. */
   addPane: (groupId: string) => void;
+  /**
+   * Opens `tab` beside the pane `fromTabId`, or brings forward the open tab
+   * `match` finds (`paneKinds.ts`'s `openOrFocus`) — a file from a diff, an
+   * agent's diff in a pane of its own (H5, H14).
+   */
+  open: (tab: PaneTab, match: (t: PaneTab) => boolean, fromTabId: string | null) => void;
   /** A pane's module changed its config; it belongs on that pane's tab. */
   setConfig: (tabId: string, config: Record<string, unknown>) => void;
   /** A pointer went down on a tab: maybe a click, maybe the start of a drag. */

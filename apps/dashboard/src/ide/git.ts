@@ -13,6 +13,8 @@ import {
   type AgentFileChange,
   type BaseFile,
   type FileDiff,
+  type TakeOverMode,
+  type TakeOverResult,
 } from "../core/backend";
 import type { DiffHunk } from "../editor/diff/hunks";
 import { textLines, type DiffSource } from "../editor/diff/model";
@@ -28,6 +30,37 @@ export function agentFileDiff(id: number, path: string, oldPath: string | null):
 
 export function agentBaseFile(id: number, path: string): Promise<BaseFile> {
   return invoke<BaseFile>("ide_agent_base_file", { id, path });
+}
+
+/** Puts files back to the base (G13) — committed changes included. */
+export function agentDiscard(id: number, paths: string[]): Promise<void> {
+  return invoke<void>("ide_agent_discard", { id, paths });
+}
+
+/** Puts one hunk back (H6); refused unless the file's `index`-th hunk still reads `header`. */
+export function agentDiscardHunk(
+  id: number,
+  path: string,
+  oldPath: string | null,
+  index: number,
+  header: string,
+): Promise<void> {
+  return invoke<void>("ide_agent_discard_hunk", { id, path, oldPath, index, header });
+}
+
+/** Commits everything the agent left uncommitted (G3); resolves to the commit. */
+export function agentCommit(id: number, message: string): Promise<string> {
+  return invoke<string>("ide_agent_commit", { id, message });
+}
+
+/** Takes the agent's committed work over into the project folder (G7–G12). */
+export function agentTakeOver(id: number, mode: TakeOverMode, message: string): Promise<TakeOverResult> {
+  return invoke<TakeOverResult>("ide_agent_take_over", { id, mode, message });
+}
+
+/** The subject of the agent's latest own commit (H10), or `null`. */
+export function agentLastSubject(id: number): Promise<string | null> {
+  return invoke<string | null>("ide_agent_last_subject", { id });
 }
 
 /** The file-service root of an agent's worktree (ED0, E1). */

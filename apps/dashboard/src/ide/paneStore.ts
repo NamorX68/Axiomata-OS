@@ -22,11 +22,31 @@
  * area and is hidden with `visibility`, exactly as an inactive tab is.
  */
 
+import { KEEP_SCROLL_ATTR } from "../fileapp/keepScroll";
+
 /** The attribute a rendered pane carries, holding its tab id. */
 export const PANE_ATTR = "data-ide-pane-for";
 
 /** The attribute an empty slot in the tree carries, holding the same id. */
 export const SLOT_ATTR = "data-ide-slot";
+
+/** Elements inside a pane that keep their scroll position across a move (`fileapp/keepScroll.ts`). */
+export { KEEP_SCROLL_ATTR };
+
+const keptScroll = new WeakMap<Element, { top: number; left: number }>();
+
+/** Moves `pane` under `parent`, carrying the scroll positions it asked to keep. */
+function moveKeepingScroll(pane: Element, parent: Element): void {
+  const marked = [...pane.querySelectorAll(`[${KEEP_SCROLL_ATTR}]`)];
+  for (const el of marked) keptScroll.set(el, { top: el.scrollTop, left: el.scrollLeft });
+  parent.appendChild(pane);
+  for (const el of marked) {
+    const at = keptScroll.get(el);
+    if (!at) continue;
+    if (el.scrollTop !== at.top) el.scrollTop = at.top;
+    if (el.scrollLeft !== at.left) el.scrollLeft = at.left;
+  }
+}
 
 /**
  * Parks every pane back in the store, to be called **before** the tree is
@@ -47,7 +67,7 @@ export function parkPanes(root: ParentNode, store: Element): number {
   let parked = 0;
   for (const pane of root.querySelectorAll(`[${PANE_ATTR}]`)) {
     if (pane.parentElement === store) continue;
-    store.appendChild(pane);
+    moveKeepingScroll(pane, store);
     parked += 1;
   }
   return parked;
@@ -93,7 +113,7 @@ export function placePanes(root: ParentNode): PanePlacement[] {
       continue;
     }
     const moved = pane.parentElement !== slot;
-    if (moved) slot.appendChild(pane);
+    if (moved) moveKeepingScroll(pane, slot);
     placements.push({ paneId, moved, orphaned: false });
   }
   return placements;

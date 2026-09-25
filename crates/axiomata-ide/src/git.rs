@@ -4,9 +4,10 @@
 //! answers "what has this agent changed?" against the branch it was cut from,
 //! reads either side of one file for the Diffs tab — the worktree's own content
 //! via [`file_diff`], the base's via [`base_blob`] (H2, H8) — and carries out
-//! the few things the IDE lets you do about it: throw a file's changes away,
-//! commit what the agent left uncommitted, and take the agent's work over into
-//! the project's own working copy. Decisions G1–G13 and H1–H16 in
+//! the few things the IDE lets you do about it: throw a file's changes away —
+//! whole ([`discard`]) or one hunk at a time ([`discard_hunk`], H6) — commit
+//! what the agent left uncommitted, and take the agent's work over into the
+//! project's own working copy. Decisions G1–G13 and H1–H16 in
 //! `docs/plans/git-layer.md`.
 //!
 //! Driven by the `git` command line like [`crate::worktree`] (question F3), and
@@ -41,7 +42,7 @@ use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::worktree::{self, git, git_bytes, git_with};
+use crate::worktree::{self, git, git_bytes, git_with, git_with_input};
 use crate::{IdeError, Result};
 
 /// The most diff output read for one file. Beyond it the diff is cut off and
@@ -257,6 +258,29 @@ impl AgentRepo {
             }
         }
         discard(&self.worktree, &base.commit, &targets)
+    }
+
+    /// Puts one hunk back to the base (H6); see [`discard_hunk`].
+    pub fn discard_hunk(
+        &self,
+        path: &str,
+        old_path: Option<&str>,
+        index: usize,
+        header: &str,
+    ) -> Result<()> {
+        discard_hunk(
+            &self.worktree,
+            &self.base()?.commit,
+            path,
+            old_path,
+            index,
+            header,
+        )
+    }
+
+    /// The subject of the agent's latest own commit (H10); see [`last_subject`].
+    pub fn last_subject(&self) -> Result<Option<String>> {
+        last_subject(&self.worktree, &self.base()?.commit)
     }
 
     /// Commits everything uncommitted in the worktree (G3).
@@ -521,30 +545,30 @@ pub fn discard(worktree: &Path, base: &str, paths: &[String]) -> Result<()> {
         source,
     })?;
     for path in paths {
+        checked_path(path)?;
+    }
+    // One lookup, one restore and one index removal for all paths together
+    // rather than two git calls per path (performance review, CP8).
+    let in_base = base_paths(worktree, base, paths)?;
+    let (restore, added): (Vec<&String>, Vec<&String>) =
+        paths.iter().partition(|path| in_base.contains(*path));
+    if !restore.is_empty() {
+        let mut args = vec!["restore", "--source", base, "--staged", "--worktree", "--"];
+        args.extend(restore.iter().map(|path| path.as_str()));
+        git(worktree, &args)?;
+    }
+    if added.is_empty() {
+        return Ok(());
+    }
+    // Not in the base: the agent added them. Drop them from the index if they
+    // are there, then from the disk — but only files that really live inside
+    // the worktree, so a symlinked directory cannot turn this into a deletion
+    // somewhere else.
+    let mut args = vec!["rm", "--cached", "--quiet", "--ignore-unmatch", "--"];
+    args.extend(added.iter().map(|path| path.as_str()));
+    git(worktree, &args)?;
+    for path in added {
         let relative = checked_path(path)?;
-        if base_blob_size(worktree, base, path)?.is_some() {
-            git(
-                worktree,
-                &[
-                    "restore",
-                    "--source",
-                    base,
-                    "--staged",
-                    "--worktree",
-                    "--",
-                    path,
-                ],
-            )?;
-            continue;
-        }
-        // Not in the base: the agent added it. Drop it from the index if it
-        // is there, then from the disk — but only a file that really lives
-        // inside the worktree, so a symlinked directory cannot turn this into
-        // a deletion somewhere else.
-        git(
-            worktree,
-            &["rm", "--cached", "--quiet", "--ignore-unmatch", "--", path],
-        )?;
         let target = worktree.join(&relative);
         if fs::symlink_metadata(&target).is_err() {
             // Already gone from the disk (it was only in the index): done.
@@ -624,6 +648,129 @@ fn base_entry(worktree: &Path, base: &str, path: &str) -> Result<Option<TreeEntr
                 .unwrap_or(0);
             Some(TreeEntry { kind, oid, size })
         }))
+}
+
+/// Which of `paths` the base has an entry for — one `ls-tree` for all of them.
+///
+/// Not type-aware: a path that is a tree (directory) or a submodule in the
+/// base still counts as "in the base", so [`discard`] restores it rather than
+/// deleting it. Left that way on purpose for now — noted, not fixed, in
+/// `docs/plans/git-layer.md`'s CP9 section.
+fn base_paths(worktree: &Path, base: &str, paths: &[String]) -> Result<HashSet<String>> {
+    let mut args = vec!["ls-tree", "-z", "--long", "--full-tree", base, "--"];
+    args.extend(paths.iter().map(|path| path.as_str()));
+    let listed = git(worktree, &args)?;
+    Ok(listed
+        .split('\0')
+        .filter_map(|entry| entry.split_once('\t').map(|(_, path)| path.to_string()))
+        .collect())
+}
+
+/// Puts one hunk of a file back to the base (H6): the hunk at `index` of the
+/// file's diff as it is *now*, which must still read `header` — what the
+/// user saw and confirmed. If the agent has changed the file since, the hunk
+/// is refused rather than a different one taken back (H13).
+///
+/// Reverse-applies just that hunk to the worktree (`git apply -R`), so the
+/// result is an uncommitted change like any discard (G13), committed work
+/// included. A new or deleted file is one hunk that is the whole file; it
+/// goes back the way [`discard`] puts a whole file back.
+pub fn discard_hunk(
+    worktree: &Path,
+    base: &str,
+    path: &str,
+    old_path: Option<&str>,
+    index: usize,
+    header: &str,
+) -> Result<()> {
+    let diff = file_diff(worktree, base, path, old_path)?;
+    if diff.binary || diff.truncated {
+        return Err(IdeError::Invalid {
+            field: "hunk",
+            reason: format!(
+                "{path} has no hunks to take back one by one; discard the whole file instead"
+            ),
+        });
+    }
+    let hunk = diff
+        .hunks
+        .get(index)
+        .filter(|hunk| hunk.header == header)
+        .ok_or_else(|| IdeError::Invalid {
+            field: "hunk",
+            reason: format!("{path} changed since its diff was shown; reload it and try again"),
+        })?;
+    if diff.old_size.is_none() || diff.new_size.is_none() {
+        // Added or deleted as a whole: the one hunk is the file.
+        let mut targets = vec![path.to_string()];
+        targets.extend(old_path.map(str::to_string));
+        return discard(worktree, base, &targets);
+    }
+    let patch = hunk_patch(path, hunk);
+    git_with_input(
+        worktree,
+        &["apply", "-R", "--whitespace=nowarn", "-"],
+        patch.as_bytes(),
+    )
+    .map(drop)
+}
+
+/// A patch of one hunk of `path`, as `git apply` reads it. The names are
+/// always C-quoted, so no file name — spaces, quotes, a leading dash — can
+/// be misread as something else.
+fn hunk_patch(path: &str, hunk: &Hunk) -> String {
+    let mut patch = format!(
+        "--- {}\n+++ {}\n{}\n",
+        quote_c(&format!("a/{path}")),
+        quote_c(&format!("b/{path}")),
+        hunk.header
+    );
+    for line in &hunk.lines {
+        let prefix = match line.kind {
+            LineKind::Context => " ",
+            LineKind::Add => "+",
+            LineKind::Remove => "-",
+            LineKind::NoNewline => "",
+        };
+        patch.push_str(prefix);
+        patch.push_str(&line.text);
+        patch.push('\n');
+    }
+    patch
+}
+
+/// `name` in git's C-style quotes: `"` and `\` escaped, `\n`/`\t` as git's own
+/// letter shortcuts, any other control character as octal. Other characters
+/// (UTF-8 included) are taken as they are.
+fn quote_c(name: &str) -> String {
+    let mut out = String::from("\"");
+    for c in name.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                let mut buf = [0u8; 4];
+                for byte in c.encode_utf8(&mut buf).bytes() {
+                    out.push_str(&format!("\\{byte:03o}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The subject of the agent's latest commit beyond `base`, or `None` when it
+/// has none — what "take over" suggests as its message when there is no plan
+/// title (H10).
+pub fn last_subject(worktree: &Path, base: &str) -> Result<Option<String>> {
+    let range = format!("{base}..HEAD");
+    let subject = git(worktree, &["log", "-1", "--format=%s", &range, "--"])?;
+    let subject = subject.trim();
+    Ok((!subject.is_empty()).then(|| subject.to_string()))
 }
 
 /// The size of `path` in `base`, or `None` when the base has no such file.
@@ -1002,7 +1149,9 @@ fn parse_diff(path: &str, raw: &str) -> FileDiff {
 
     let (mut old_line, mut new_line) = (0u32, 0u32);
     let mut lines_seen = 0usize;
-    for line in raw.lines() {
+    // Split on `\n` only, not `lines()`: a CRLF file's `\r` stays part of the
+    // line, so a hunk rebuilt into a patch (H6) still matches the file.
+    for line in raw.strip_suffix('\n').unwrap_or(raw).split('\n') {
         if line.starts_with("Binary files ") || line == "GIT binary patch" {
             diff.binary = true;
             continue;
@@ -1321,6 +1470,153 @@ mod tests {
         // A different size is a different stamp, whatever the clock's resolution.
         fs::write(&file, "a\nb\nc\n").unwrap();
         assert_eq!(counted_lines(&file), (3, false));
+    }
+
+    /// The fixture's README with twenty lines, and the agent's copy changed
+    /// at line 2 and line 18 — far enough apart for two hunks.
+    fn two_hunk_fixture() -> (Fixture, String) {
+        let f = fixture();
+        let base: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+        fs::write(f.repo.join("README.md"), &base).unwrap();
+        run(&f.repo, &["commit", "--quiet", "-am", "twenty lines"]);
+        run(&f.worktree, &["merge", "--quiet", "--ff-only", "main"]);
+        let changed = base
+            .replace("line 2\n", "LINE TWO\n")
+            .replace("line 18\n", "LINE EIGHTEEN\n");
+        fs::write(f.worktree.join("README.md"), &changed).unwrap();
+        (f, base)
+    }
+
+    #[test]
+    fn discarding_one_hunk_leaves_the_other() {
+        let (f, _) = two_hunk_fixture();
+        let commit = f.base().commit;
+        let diff = file_diff(&f.worktree, &commit, "README.md", None).unwrap();
+        assert_eq!(diff.hunks.len(), 2);
+        discard_hunk(
+            &f.worktree,
+            &commit,
+            "README.md",
+            None,
+            0,
+            &diff.hunks[0].header,
+        )
+        .unwrap();
+        let text = fs::read_to_string(f.worktree.join("README.md")).unwrap();
+        assert!(text.contains("line 2\n") && text.contains("LINE EIGHTEEN\n"));
+    }
+
+    #[test]
+    fn a_hunk_that_changed_since_it_was_shown_is_refused() {
+        let (f, _) = two_hunk_fixture();
+        let commit = f.base().commit;
+        let err = discard_hunk(
+            &f.worktree,
+            &commit,
+            "README.md",
+            None,
+            0,
+            "@@ -1,5 +1,5 @@ stale",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("changed since"), "{err}");
+        assert!(discard_hunk(&f.worktree, &commit, "README.md", None, 7, "@@ x @@").is_err());
+        let text = fs::read_to_string(f.worktree.join("README.md")).unwrap();
+        assert!(
+            text.contains("LINE TWO"),
+            "nothing may have been taken back"
+        );
+    }
+
+    #[test]
+    fn a_committed_hunk_comes_back_as_an_uncommitted_change() {
+        let (f, _) = two_hunk_fixture();
+        run(&f.worktree, &["commit", "--quiet", "-am", "agent work"]);
+        let commit = f.base().commit;
+        let diff = file_diff(&f.worktree, &commit, "README.md", None).unwrap();
+        discard_hunk(
+            &f.worktree,
+            &commit,
+            "README.md",
+            None,
+            1,
+            &diff.hunks[1].header,
+        )
+        .unwrap();
+        let file = f
+            .changes()
+            .into_iter()
+            .find(|c| c.path == "README.md")
+            .unwrap();
+        assert!(file.uncommitted);
+        assert_eq!((file.additions, file.deletions), (Some(1), Some(1)));
+    }
+
+    #[test]
+    fn a_hunk_of_a_crlf_file_with_an_odd_name_goes_back_too() {
+        let f = fixture();
+        let name = "notes \"odd\" -name.txt";
+        fs::write(f.repo.join(name), "one\r\ntwo\r\nthree\r\n").unwrap();
+        run(&f.repo, &["add", "."]);
+        run(&f.repo, &["commit", "--quiet", "-m", "crlf"]);
+        run(&f.worktree, &["merge", "--quiet", "--ff-only", "main"]);
+        fs::write(f.worktree.join(name), "one\r\nTWO\r\nthree\r\n").unwrap();
+        let commit = f.base().commit;
+        let diff = file_diff(&f.worktree, &commit, name, None).unwrap();
+        discard_hunk(&f.worktree, &commit, name, None, 0, &diff.hunks[0].header).unwrap();
+        assert_eq!(
+            fs::read(f.worktree.join(name)).unwrap(),
+            b"one\r\ntwo\r\nthree\r\n"
+        );
+    }
+
+    #[test]
+    fn discarding_the_hunk_of_an_added_file_removes_the_file() {
+        let f = fixture();
+        fs::write(f.worktree.join("new.md"), "fresh\n").unwrap();
+        let commit = f.base().commit;
+        let diff = file_diff(&f.worktree, &commit, "new.md", None).unwrap();
+        discard_hunk(
+            &f.worktree,
+            &commit,
+            "new.md",
+            None,
+            0,
+            &diff.hunks[0].header,
+        )
+        .unwrap();
+        assert!(!f.worktree.join("new.md").exists());
+    }
+
+    #[test]
+    fn discarding_several_files_at_once_restores_and_deletes_as_needed() {
+        let f = fixture();
+        fs::write(f.worktree.join("README.md"), "changed\n").unwrap();
+        fs::write(f.worktree.join("keep.txt"), "changed too\n").unwrap();
+        fs::write(f.worktree.join("added.md"), "new\n").unwrap();
+        let paths = ["README.md", "keep.txt", "added.md"].map(String::from);
+        discard(&f.worktree, &f.base().commit, &paths).unwrap();
+        assert!(f.changes().is_empty());
+    }
+
+    #[test]
+    fn the_last_subject_is_the_agents_own_latest_commit() {
+        let f = fixture();
+        assert_eq!(last_subject(&f.worktree, &f.base().commit).unwrap(), None);
+        f.agent_commits("README.md", "x\n");
+        assert_eq!(
+            last_subject(&f.worktree, &f.base().commit)
+                .unwrap()
+                .as_deref(),
+            Some("agent work")
+        );
+    }
+
+    #[test]
+    fn quote_c_escapes_what_git_would() {
+        assert_eq!(quote_c("a/plain.rs"), "\"a/plain.rs\"");
+        assert_eq!(quote_c("a/\"q\"\\x\ty"), "\"a/\\\"q\\\"\\\\x\\ty\"");
+        assert_eq!(quote_c("a/\u{1}"), "\"a/\\001\"");
     }
 
     #[test]
@@ -1996,6 +2292,356 @@ mod tests {
         assert_eq!(
             base_blob(&f.worktree, &commit, "new file ü.txt", 1024).unwrap(),
             BaseBlob::Bytes(b"a\nb".to_vec())
+        );
+    }
+
+    #[test]
+    fn discard_hunk_on_a_renamed_and_edited_file_uses_the_old_path() {
+        let f = fixture();
+        // A big enough file that a one-line edit still keeps the similarity
+        // git's `-M` rename detection needs (default threshold 50%) — unlike
+        // a tiny file, where a small edit can drop below it (see the pinning
+        // test below for what happens then).
+        let original: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+        fs::write(f.repo.join("notes.txt"), &original).unwrap();
+        run(&f.repo, &["add", "."]);
+        run(&f.repo, &["commit", "--quiet", "-m", "add notes.txt"]);
+        run(&f.worktree, &["merge", "--quiet", "--ff-only", "main"]);
+
+        run(&f.worktree, &["mv", "notes.txt", "renamed-notes.txt"]);
+        let edited = original.replace("line 10\n", "LINE TEN\n");
+        fs::write(f.worktree.join("renamed-notes.txt"), &edited).unwrap();
+        run(&f.worktree, &["add", "-A"]);
+        run(
+            &f.worktree,
+            &["commit", "--quiet", "-m", "rename and edit notes.txt"],
+        );
+
+        let commit = f.base().commit;
+        // Confirm this really is one rename, not a delete and an add — the
+        // situation discard_hunk's old_path parameter exists for.
+        let change = changes(&f.worktree, &commit)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.path == "renamed-notes.txt")
+            .unwrap();
+        assert_eq!(
+            (change.kind, change.old_path.as_deref()),
+            (ChangeKind::Renamed, Some("notes.txt"))
+        );
+
+        let diff = file_diff(&f.worktree, &commit, "renamed-notes.txt", Some("notes.txt")).unwrap();
+        assert_eq!(diff.hunks.len(), 1, "{diff:?}");
+        discard_hunk(
+            &f.worktree,
+            &commit,
+            "renamed-notes.txt",
+            Some("notes.txt"),
+            0,
+            &diff.hunks[0].header,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(f.worktree.join("renamed-notes.txt")).unwrap(),
+            original,
+            "the edit must have been taken back, under the renamed file's own name"
+        );
+    }
+
+    /// **Suspected production bug, pinned rather than fixed (test-engineer
+    /// constraint: production code is not to be touched).**
+    ///
+    /// `file_diff`'s docs promise that passing `old_path` alongside `path`
+    /// lets git "pair the two" as one rename. That only holds while git's own
+    /// `-M` rename detection agrees the pair is similar enough (default
+    /// threshold 50%) — the same threshold `tracked_changes` uses to decide
+    /// whether to hand out an `old_path` at all, so in the ordinary flow the
+    /// two agree. But `discard_hunk`'s `old_path` argument is not re-verified
+    /// against that threshold — it comes straight from the webview
+    /// (`ide_agent_discard_hunk` in `commands.rs`) — and if the file changes
+    /// again after the UI last listed it, `changes()` and a *stale* `old_path`
+    /// can disagree with what a fresh `file_diff` call would pair. When they
+    /// disagree, git's `diff -- path old_path` call emits **two independent**
+    /// `diff --git` sections (a deletion of `old_path`, an addition of
+    /// `path`) instead of one rename section, and `parse_diff` — which never
+    /// looks at `diff --git`/`---`/`+++` lines to notice a new file has
+    /// started — merges both sections' hunks into one `FileDiff`, misreading
+    /// the second section's own `--- /dev/null` / `+++ b/…` header lines as
+    /// ordinary content lines. The result is a `FileDiff` that not only mixes
+    /// two unrelated files' hunks together but also inserts real diff-header
+    /// text into `DiffLine::text` — data that would go straight into a
+    /// `git apply -R` patch (`hunk_patch`) if a hunk from it were discarded.
+    #[test]
+    fn discard_hunk_pins_a_parser_gap_when_the_rename_pair_falls_below_the_similarity_threshold() {
+        let f = fixture();
+        // keep.txt is 5 bytes; adding one more line drops well under the 50%
+        // similarity `-M` needs, so git does NOT pair this as a rename.
+        run(&f.worktree, &["mv", "keep.txt", "kept.txt"]);
+        fs::write(f.worktree.join("kept.txt"), "keep\nadded line\n").unwrap();
+        run(&f.worktree, &["add", "-A"]);
+        run(
+            &f.worktree,
+            &[
+                "commit",
+                "--quiet",
+                "-m",
+                "rename and edit, below the threshold",
+            ],
+        );
+        let commit = f.base().commit;
+
+        // `changes()` agrees: this is not a rename, so a real caller would
+        // never have an `old_path` to pass here in the first place.
+        let change = changes(&f.worktree, &commit)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.path == "kept.txt")
+            .unwrap();
+        assert_ne!(
+            change.kind,
+            ChangeKind::Renamed,
+            "not a rename by git's own count"
+        );
+
+        // A caller that (through a stale UI state) still passes the old
+        // `old_path` anyway gets back a `FileDiff` with hunks bled together
+        // from two unrelated `diff --git` sections — pinned here as today's
+        // actual behaviour, not as the intended one.
+        let diff = file_diff(&f.worktree, &commit, "kept.txt", Some("keep.txt")).unwrap();
+        assert_eq!(
+            diff.hunks.len(),
+            2,
+            "one file's worth of change parsed as two unrelated hunks: {diff:?}"
+        );
+        let second_hunk_texts: Vec<_> = diff.hunks[0]
+            .lines
+            .iter()
+            .map(|line| line.text.as_str())
+            .collect();
+        assert!(
+            second_hunk_texts.contains(&"-- /dev/null"),
+            "the second file section's own `--- /dev/null` header line was misread as content: \
+             {second_hunk_texts:?}"
+        );
+    }
+
+    #[test]
+    fn discard_hunk_handles_no_newline_markers_on_both_sides() {
+        let f = fixture();
+        // Neither the base nor the agent's copy ends in a newline.
+        fs::write(f.repo.join("no-newline.txt"), "one\ntwo").unwrap();
+        run(&f.repo, &["add", "."]);
+        run(
+            &f.repo,
+            &[
+                "commit",
+                "--quiet",
+                "-m",
+                "add a file without a trailing newline",
+            ],
+        );
+        run(&f.worktree, &["merge", "--quiet", "--ff-only", "main"]);
+        fs::write(f.worktree.join("no-newline.txt"), "one\nTWO").unwrap();
+        run(
+            &f.worktree,
+            &[
+                "commit",
+                "--quiet",
+                "-am",
+                "agent edit, still no trailing newline",
+            ],
+        );
+
+        let commit = f.base().commit;
+        let diff = file_diff(&f.worktree, &commit, "no-newline.txt", None).unwrap();
+        assert_eq!(diff.hunks.len(), 1, "{diff:?}");
+        let kinds: Vec<_> = diff.hunks[0].lines.iter().map(|l| l.kind).collect();
+        assert_eq!(
+            kinds.iter().filter(|k| **k == LineKind::NoNewline).count(),
+            2,
+            "one marker on the base side, one on the agent's side: {kinds:?}"
+        );
+
+        discard_hunk(
+            &f.worktree,
+            &commit,
+            "no-newline.txt",
+            None,
+            0,
+            &diff.hunks[0].header,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(f.worktree.join("no-newline.txt")).unwrap(),
+            b"one\ntwo".to_vec(),
+            "back to the base, still without a trailing newline"
+        );
+    }
+
+    #[test]
+    fn discard_hunk_on_a_deleted_file_brings_it_back() {
+        let f = fixture();
+        run(&f.worktree, &["rm", "--quiet", "keep.txt"]);
+        run(&f.worktree, &["commit", "--quiet", "-m", "delete keep.txt"]);
+
+        let commit = f.base().commit;
+        let diff = file_diff(&f.worktree, &commit, "keep.txt", None).unwrap();
+        assert_eq!(diff.hunks.len(), 1, "{diff:?}");
+        assert!(diff.new_size.is_none(), "gone from the worktree");
+        discard_hunk(
+            &f.worktree,
+            &commit,
+            "keep.txt",
+            None,
+            0,
+            &diff.hunks[0].header,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(f.worktree.join("keep.txt")).unwrap(),
+            "keep\n",
+            "the whole-file hunk of a deleted file routes through discard"
+        );
+    }
+
+    #[test]
+    fn discard_hunk_refuses_an_out_of_range_index_even_with_a_real_header() {
+        let (f, _) = two_hunk_fixture();
+        let commit = f.base().commit;
+        let diff = file_diff(&f.worktree, &commit, "README.md", None).unwrap();
+        // A header that is byte-for-byte one of the diff's real headers, but
+        // at an index past the end — the bounds check must run before the
+        // header is ever compared, so this must not panic.
+        let real_header = diff.hunks[0].header.clone();
+        let err =
+            discard_hunk(&f.worktree, &commit, "README.md", None, 99, &real_header).unwrap_err();
+        assert!(err.to_string().contains("changed since"), "{err}");
+        let text = fs::read_to_string(f.worktree.join("README.md")).unwrap();
+        assert!(text.contains("LINE TWO"), "nothing was taken back");
+    }
+
+    #[test]
+    fn discard_with_a_directory_path_reaches_everything_under_it() {
+        let f = fixture();
+        fs::create_dir_all(f.repo.join("docs")).unwrap();
+        fs::write(f.repo.join("docs/a.md"), "a\n").unwrap();
+        fs::write(f.repo.join("docs/b.md"), "b\n").unwrap();
+        run(&f.repo, &["add", "."]);
+        run(
+            &f.repo,
+            &["commit", "--quiet", "-m", "add a docs directory"],
+        );
+        run(&f.worktree, &["merge", "--quiet", "--ff-only", "main"]);
+
+        fs::write(f.worktree.join("docs/a.md"), "changed a\n").unwrap();
+        fs::write(f.worktree.join("docs/b.md"), "changed b\n").unwrap();
+        run(
+            &f.worktree,
+            &["commit", "--quiet", "-am", "agent edits the docs directory"],
+        );
+
+        let base = f.base().commit;
+        discard(&f.worktree, &base, &["docs".to_string()]).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(f.worktree.join("docs/a.md")).unwrap(),
+            "a\n"
+        );
+        assert_eq!(
+            fs::read_to_string(f.worktree.join("docs/b.md")).unwrap(),
+            "b\n"
+        );
+    }
+
+    #[test]
+    fn git_with_input_fails_cleanly_when_git_rejects_the_patch() {
+        let f = fixture();
+        let err =
+            git_with_input(&f.worktree, &["apply", "--check", "-"], b"not a patch\n").unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("apply"),
+            "should name the command: {message}"
+        );
+    }
+
+    #[test]
+    fn hunk_patch_builds_a_c_quoted_single_hunk_patch() {
+        let hunk = Hunk {
+            header: "@@ -1,2 +1,2 @@".to_string(),
+            lines: vec![
+                DiffLine {
+                    kind: LineKind::Context,
+                    old_line: Some(1),
+                    new_line: Some(1),
+                    text: "one".to_string(),
+                },
+                DiffLine {
+                    kind: LineKind::Remove,
+                    old_line: Some(2),
+                    new_line: None,
+                    text: "two".to_string(),
+                },
+                DiffLine {
+                    kind: LineKind::Add,
+                    old_line: None,
+                    new_line: Some(2),
+                    text: "TWO".to_string(),
+                },
+            ],
+        };
+        assert_eq!(
+            hunk_patch("a \"weird\" name.txt", &hunk),
+            "--- \"a/a \\\"weird\\\" name.txt\"\n\
+             +++ \"b/a \\\"weird\\\" name.txt\"\n\
+             @@ -1,2 +1,2 @@\n \
+             one\n\
+             -two\n\
+             +TWO\n"
+        );
+    }
+
+    #[test]
+    fn parse_diff_keeps_the_carriage_return_in_a_crlf_lines_text() {
+        let raw =
+            "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\r\n one\r\n-two\r\n+TWO\r\n";
+        let diff = parse_diff("x", raw);
+        assert_eq!(diff.hunks.len(), 1);
+        let texts: Vec<_> = diff.hunks[0]
+            .lines
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
+        assert_eq!(
+            texts,
+            ["one\r", "two\r", "TWO\r"],
+            "the trailing \\r must stay part of the line's text, not be stripped"
+        );
+    }
+
+    #[test]
+    fn the_last_subject_is_only_the_most_recent_of_several_commits() {
+        let f = fixture();
+        f.agent_commits("README.md", "first change\n");
+        f.agent_commits("README.md", "second change\n");
+        assert_eq!(
+            last_subject(&f.worktree, &f.base().commit)
+                .unwrap()
+                .as_deref(),
+            Some("agent work"),
+            "there is only one most-recent subject to report"
+        );
+        // A distinct message on the latest commit must be the one reported.
+        fs::write(f.worktree.join("README.md"), "third change\n").unwrap();
+        run(&f.worktree, &["add", "-A"]);
+        run(&f.worktree, &["commit", "--quiet", "-m", "final touch-up"]);
+        assert_eq!(
+            last_subject(&f.worktree, &f.base().commit)
+                .unwrap()
+                .as_deref(),
+            Some("final touch-up")
         );
     }
 }

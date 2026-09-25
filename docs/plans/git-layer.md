@@ -1,7 +1,7 @@
 # Detailplan: M7.3 — Git-Schicht (CP7–CP9)
 
-Status: **gegrillt und bestätigt; CP7 und CP8 gebaut und geprüft**; CP8/CP9 auf dem neuen Editor gegrillt
-(H1–H16, 2026-09-24); CP9 in Arbeit.
+Status: **M7.3 fertig** — CP7, CP8 und CP9 gebaut und geprüft (CP8/CP9 auf dem neuen Editor, H1–H16,
+2026-09-24).
 Gehört zu [`agentic-ide.md`](agentic-ide.md) §5, M7.3. Vorgänger: M7.2 CP5 (ein
 Worktree pro Agent, `git` als Unterprozess — F3) und CP6 (Status-Kanal, der sagt,
 wann ein Agent fertig ist).
@@ -192,6 +192,45 @@ Diff, eine gemeinsame Echo-Sperre (`fileapp/scrollLink.ts`). Im Browser gegen de
   wenn die Handgriffe dazukommen; die Dock-Pane braucht eine eigene Kopfzeile (welcher Agent).
 - **Später:** „Leerzeichen ignorieren" (H15); bessere Paarung geänderter Zeilen nach Ähnlichkeit
   statt nach Position (heute bleibt eine eingeschobene Kommentarzeile ohne Wortmarken).
+
+## CP9 — gebaut (2026-09-24)
+
+- **CP9a — Dock-Panes:** `file` und `agent-diff` (`ide/paneKinds.ts`, `openOrFocus`); die
+  Bearbeitung ist `fileapp/FileEditor.svelte`, aus der Datei-App herausgelöst, damit Vollbild
+  und Pane gleich bearbeiten; ⏎ oder „Open" im Diff öffnet die Datei des Agenten an der Zeile,
+  ein zweites Öffnen holt die Pane nach vorn und springt; „⧉ Dock" im Seiten-Tab; der Hinweis
+  aus G6, solange der Agent arbeitet; schmale Panes stapeln Liste über Diff.
+- **Beim Testen gefunden:** Der Dock verschiebt Panes bei jeder Layout-Änderung im DOM, was
+  Scrollpositionen still auf 0 setzt — eine Editor-Oberfläche zeichnete dann die falschen
+  Zeilen über einen leeren Streifen. Elemente mit `data-keep-scroll` bekommen ihre Position
+  zurück (`ide/paneStore.ts`). `goToLine` scrollt erst nach dem nächsten Render (vorher war
+  die Fläche einer frisch geöffneten Datei noch nicht hoch genug).
+- **CP9b — Handeln:** Verwerfen pro Datei (gebündelt: ein `ls-tree`, ein `restore`, ein
+  `rm --cached`) und pro Hunk (`discard_hunk`: der Hunk wird als Patch mit C-gequoteten Namen
+  gebaut und über stdin rückwärts angewandt; ein Hunk, der nicht mehr so aussieht wie gezeigt,
+  wird verweigert, H13); Kopfzeile mit „Discard" über jedem Hunk, ⌘⌫ im Hunk; Commit- und
+  Übernehmen-Dialog (`ide/GitActionDialog.svelte`) mit Vorbelegung (H10: Überschrift des
+  Plan-Dokuments, sonst `ide_agent_last_subject`; die Aufgabenliste hat keinen Titel);
+  „Take over" gesperrt mit Grund, solange der Agent arbeitet oder Uncommittetes da ist (G12).
+  Die Lade- und Handgriff-Logik steckt in `ide/diffSession.svelte.ts` (Architektur-Befund CP8).
+  `parse_diff` behält jetzt ein `\r` am Zeilenende, sonst passte ein Hunk-Patch nicht auf
+  CRLF-Dateien.
+
+### CP9 — was die Prüfungen geändert haben
+
+- **Sicherheit (LOW):** Der Patch für `git apply` wird jetzt auf einem eigenen Thread in stdin
+  geschrieben, während stdout/stderr gelesen werden — ein Hunk kann bis 2 MiB groß sein und
+  jeden Pipe-Puffer übersteigen. Experimentell bestätigt: `git apply` ohne `--unsafe-paths`
+  weist `..`, absolute Pfade und Pfade hinter Symlinks selbst ab.
+- **Architektur (MEDIUM):** `data-keep-scroll` war ein Textvertrag über die Schichtgrenze; jetzt
+  eine Konstante in `fileapp/keepScroll.ts` (die Datei-App darf die IDE nicht importieren),
+  gesetzt per `{...KEEP_SCROLL}`. Dazu: nur Dateien sammeln sich in einer Gruppe, eine
+  Diff-Pane dockt neben ihrem Agenten; ein gemeinsames `core/errors.ts` `messageOf`; der
+  G6-Hinweis liest den Agentennamen reaktiv.
+- **Vorgemerkt:** Seiten-Tab und Dock-Pane desselben Agenten haben je eine eigene Sitzung und
+  fragen beide alle 5 s ab, wenn beide sichtbar sind — bei Bedarf eine Sitzung pro Agent teilen.
+  `base_paths` unterscheidet nicht nach Eintragsart: Ein Pfad, der in der Basis ein Ordner ist,
+  wird beim Verwerfen wiederhergestellt statt gelöscht (so gewollt, wie vor CP9).
 
 ## CP7 — was die Prüfungen geändert haben
 

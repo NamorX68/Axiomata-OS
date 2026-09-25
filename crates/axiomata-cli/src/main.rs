@@ -314,6 +314,9 @@ enum AgentAction {
     /// Put files back to how they are on the agent's base branch — committed
     /// changes included.
     Discard { id: i64, paths: Vec<String> },
+    /// Put one hunk of a file back to the base — the `index`-th (from 0) of
+    /// `ide agents diff <id> --file <path>`.
+    DiscardHunk { id: i64, path: String, index: usize },
     /// Take the agent's committed work over into the project folder: one
     /// squash commit, or a merge commit with `--no-ff`. Never pushes.
     TakeOver {
@@ -1206,6 +1209,19 @@ fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
             AgentAction::Discard { id, paths } => {
                 agent_repo_or_bail(core, id)?.discard(&paths)?;
                 println!("put {} file(s) back to the base", paths.len());
+                Ok(())
+            }
+            AgentAction::DiscardHunk { id, path, index } => {
+                let repo = agent_repo_or_bail(core, id)?;
+                let diff = repo.file_diff(&path, None)?;
+                let Some(hunk) = diff.hunks.get(index) else {
+                    bail!(
+                        "{path} has {} hunk(s); there is no hunk {index}",
+                        diff.hunks.len()
+                    );
+                };
+                repo.discard_hunk(&path, None, index, &hunk.header)?;
+                println!("put hunk {index} of {path} back to the base");
                 Ok(())
             }
             AgentAction::TakeOver { id, message, no_ff } => {

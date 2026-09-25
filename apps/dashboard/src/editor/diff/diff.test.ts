@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 import { DiffHighlight } from "./highlight";
 import { hunksFromTexts, parseHunkHeader, type DiffHunk } from "./hunks";
 import { DiffModel, NO_NEWLINE_NOTE, textLines, TRUNCATED_NOTE, UNFOLD_STEP, type FoldRow, type LineRow } from "./model";
-import { changedLineNear, foldActionId, parseFoldActionId, splitPanes, unifiedPane } from "./view";
+import {
+  changedLineNear,
+  foldActionId,
+  hunkActionId,
+  parseFoldActionId,
+  parseHunkActionId,
+  splitPanes,
+  unifiedPane,
+} from "./view";
 import { tokenize, wordChanges } from "./words";
 
 const lines = (n: number, prefix = "l") => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
@@ -397,9 +405,88 @@ describe("diff panes", () => {
     expect(changedLineNear(unifiedPane(deleted.unified(), UNFOLD_STEP), 0)).toBeNull();
   });
 
+  it("puts a header row with a discard button above each hunk when asked", () => {
+    const model = new DiffModel({ hunks: [midFileHunk()], ...thirtyLines() });
+    const plain = unifiedPane(model.unified(), UNFOLD_STEP);
+    const pane = unifiedPane(model.unified(), UNFOLD_STEP, { headers: ["@@ -12,7 +12,7 @@ fn middle"], discard: true });
+    expect(pane.text.split("\n")).toHaveLength(plain.text.split("\n").length + 1);
+    expect(pane.decorations.line(1)).toMatchObject({ kind: "hunk", label: "@@ -12,7 +12,7 @@ fn middle" });
+    expect(pane.decorations.line(1)?.actions?.map((a) => a.id)).toEqual([hunkActionId(0, "discard")]);
+    expect(pane.hunkStarts).toEqual([1]);
+    expect(pane.hunkOf[1]).toBe(0);
+    expect(pane.hunkOf[5]).toBe(0);
+    expect(pane.hunkOf[0]).toBeNull();
+    const { left, right } = splitPanes(model.split(), UNFOLD_STEP, { headers: ["@@ h @@"], discard: true });
+    expect(left.decorations.line(1)?.actions).toEqual([]);
+    expect(right.decorations.line(1)?.actions).toHaveLength(1);
+    expect(parseHunkActionId(hunkActionId(3, "discard"))).toEqual({ hunk: 3, action: "discard" });
+  });
+
   it("round-trips fold action ids", () => {
     expect(parseFoldActionId(foldActionId(3, "up"))).toEqual({ gap: 3, action: "up" });
     expect(parseFoldActionId("something else")).toBeNull();
+  });
+
+  it("shows a header with no discard button for a read-only diff (the file app's Compare)", () => {
+    const model = new DiffModel({ hunks: [midFileHunk()], ...thirtyLines() });
+    const pane = unifiedPane(model.unified(), UNFOLD_STEP, { headers: ["@@ -12,7 +12,7 @@ fn middle"], discard: false });
+    expect(pane.decorations.line(1)).toMatchObject({ kind: "hunk", label: "@@ -12,7 +12,7 @@ fn middle" });
+    expect(pane.decorations.line(1)?.actions).toEqual([]);
+  });
+
+  it("skips a header row for a hunk the headers array has nothing for, but still starts a new hunk", () => {
+    const oldLines = lines(60);
+    const newLines = [...oldLines];
+    newLines[4] = "changed near the top";
+    newLines[54] = "changed near the bottom";
+    const hunks = hunksFromTexts(oldLines, newLines);
+    expect(hunks).toHaveLength(2);
+    const model = new DiffModel({ hunks, oldLines, newLines });
+    const plain = unifiedPane(model.unified(), UNFOLD_STEP);
+    // Only the first hunk has a header to show; the second's index is out of
+    // range for a one-element `headers` array.
+    const pane = unifiedPane(model.unified(), UNFOLD_STEP, { headers: [hunks[0].header], discard: true });
+    // Only one header row is added.
+    expect(pane.text.split("\n")).toHaveLength(plain.text.split("\n").length + 1);
+    expect(pane.hunkStarts).toHaveLength(2);
+    // The second hunk's start line has no header decoration — it goes
+    // straight to the hunk's own first line rather than an empty header row.
+    const secondStartDeco = pane.decorations.line(pane.hunkStarts[1]);
+    expect(secondStartDeco?.kind).not.toBe("hunk");
+    expect(pane.hunkOf[pane.hunkStarts[1]]).toBe(1);
+  });
+
+  it("gives a blank row (the missing side of a pure insertion) the same hunk index as its partner", () => {
+    // "x" is a pure insertion inside the change block: the left (old) side has
+    // no matching line there, only a blank row — it must still carry the
+    // hunk index so ⌘⌫ (discard the hunk under the cursor) works from it too.
+    const model = new DiffModel({ hunks: hunksFromTexts(["a", "b"], ["a", "x", "b"]), oldLines: ["a", "b"] });
+    const { left, right } = splitPanes(model.split(), UNFOLD_STEP);
+    const insertedRow = right.text.split("\n").indexOf("x");
+    expect(insertedRow).toBeGreaterThanOrEqual(0);
+    expect(left.decorations.line(insertedRow)).toMatchObject({ kind: "blank" });
+    expect(left.hunkOf[insertedRow]).not.toBeNull();
+    expect(left.hunkOf[insertedRow]).toBe(right.hunkOf[insertedRow]);
+  });
+
+  it("lines up hunkStarts and hunkOf on both sides of the split layout", () => {
+    const oldLines = lines(60);
+    const newLines = [...oldLines];
+    newLines[4] = "changed near the top";
+    newLines[54] = "changed near the bottom";
+    const hunks = hunksFromTexts(oldLines, newLines);
+    const model = new DiffModel({ hunks, oldLines, newLines });
+    const { left, right } = splitPanes(model.split(), UNFOLD_STEP, {
+      headers: [hunks[0].header, hunks[1].header],
+      discard: true,
+    });
+    expect(left.hunkStarts).toEqual(right.hunkStarts);
+    expect(left.hunkStarts).toHaveLength(2);
+    expect(left.hunkOf).toEqual(right.hunkOf);
+    // Only the change's (right) side gets the discard button, per hunk.
+    expect(left.decorations.line(left.hunkStarts[0])?.actions).toEqual([]);
+    expect(right.decorations.line(right.hunkStarts[0])?.actions).toHaveLength(1);
+    expect(right.decorations.line(right.hunkStarts[1])?.actions).toHaveLength(1);
   });
 });
 

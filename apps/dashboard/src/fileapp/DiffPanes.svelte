@@ -19,10 +19,12 @@
   import {
     changedLineNear,
     parseFoldActionId,
+    parseHunkActionId,
     splitPanes,
     unifiedPane,
     type DiffLayout,
     type DiffPane,
+    type HunkHeaders,
   } from "../editor/diff/view";
   import { detectLanguage } from "../editor/syntax/languages";
   import { SyntaxHighlighter } from "../editor/syntax/highlighter";
@@ -47,9 +49,24 @@
     onOpen?: (line: number) => void;
     /** Sees every key first; `true` means it was handled. */
     interceptKey?: (e: KeyboardEvent) => boolean;
+    /** A header row above each hunk, with a discard button (H6); none for "Compare". */
+    hunkHeaders?: HunkHeaders | null;
+    /** "Discard" on a hunk's header, or ⌘⌫ inside it (H9). */
+    onDiscardHunk?: (hunk: number) => void;
   }
 
-  let { model, layout, revision = 0, oldText, newText, fileName, onOpen, interceptKey }: Props = $props();
+  let {
+    model,
+    layout,
+    revision = 0,
+    oldText,
+    newText,
+    fileName,
+    onOpen,
+    interceptKey,
+    hunkHeaders = null,
+    onDiscardHunk,
+  }: Props = $props();
 
   const face = editorFace();
   const settings = $derived({
@@ -68,8 +85,8 @@
   const panes = $derived.by((): DiffPane[] => {
     void revision;
     void unfolds;
-    if (layout === "unified") return [unifiedPane(model.unified(), UNFOLD_STEP)];
-    const { left, right } = splitPanes(model.split(), UNFOLD_STEP);
+    if (layout === "unified") return [unifiedPane(model.unified(), UNFOLD_STEP, hunkHeaders)];
+    const { left, right } = splitPanes(model.split(), UNFOLD_STEP, hunkHeaders);
     return [left, right];
   });
 
@@ -143,6 +160,11 @@
   }
 
   function onLineAction(action: string): void {
+    const hunk = parseHunkActionId(action);
+    if (hunk) {
+      onDiscardHunk?.(hunk.hunk);
+      return;
+    }
     const fold = parseFoldActionId(action);
     if (!fold) return;
     model.unfold(fold.gap, fold.action);
@@ -174,6 +196,11 @@
   function onKey(e: KeyboardEvent): boolean {
     if (e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       goToHunk(e.key === "ArrowDown" ? 1 : -1);
+      return true;
+    }
+    if (e.key === "Backspace" && e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+      const hunk = panes[active]?.hunkOf[cursorLine()];
+      if (hunk !== null && hunk !== undefined && hunkHeaders?.discard) onDiscardHunk?.(hunk);
       return true;
     }
     if (e.key === "Enter" && !e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {

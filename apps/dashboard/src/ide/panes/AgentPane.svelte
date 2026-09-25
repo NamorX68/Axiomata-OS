@@ -32,12 +32,16 @@
   import { prepareAgent } from "../agents";
   import { agentStatus, describeStatus } from "../agentStatus";
   import DiffView from "../DiffView.svelte";
+  import { getDock } from "../dockContext";
+  import { agentDiffOf, agentDiffTab } from "../paneKinds";
+  import { openFileBeside } from "./openFile";
   import StatusDot from "../StatusDot.svelte";
 
   let {
     agent,
     cwd,
     tabId,
+    visible = true,
   }: {
     agent: IdeAgent;
     /** The project folder — where the harness runs when the project is not a
@@ -45,6 +49,8 @@
     cwd: string;
     /** The dock tab this pane sits in — the terminal's `instanceId`. */
     tabId: string;
+    /** The pane is on screen (the Diffs tab only polls then, G4). */
+    visible?: boolean;
   } = $props();
 
   /** Bumped to remount the terminal, which is what a restart is. */
@@ -86,6 +92,14 @@
     { id: "inbox", label: "Inbox", waiting: "Arrives with agent-to-agent messaging (M7.5)" },
   ];
   let sideTab = $state("terminal");
+  const dock = getDock();
+  const openFile = openFileBeside(() => tabId);
+
+  /** The agent's diffs in a dock pane of their own (H14) — at most one per agent. */
+  function dockDiffs(): void {
+    dock.open(agentDiffTab(agent.id, agent.name), (t) => agentDiffOf(t) === agent.id, tabId);
+  }
+
   /** The Diffs view stays mounted once opened, so its folds and file survive a tab switch. */
   let diffsOpened = $state(false);
   $effect(() => {
@@ -175,7 +189,14 @@
         role="tabpanel"
         aria-labelledby="agent-tab-diffs"
       >
-        <DiffView {agent} agentState={status?.state ?? null} visible={sideTab === "diffs"} place="tab" />
+        <DiffView
+          {agent}
+          agentState={status?.state ?? null}
+          visible={visible && sideTab === "diffs"}
+          place="tab"
+          onOpenFile={(rel, line) => openFile(agent.id, rel, line)}
+          onDock={dockDiffs}
+        />
       </div>
     {/if}
 

@@ -2,7 +2,7 @@ import { get } from "svelte/store";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentStatus, IdeAgent } from "../core/backend";
-import { createStatusPoller, describeStatus, POLL_INTERVAL_MS, SILENT_OWN_COMMAND_MS } from "./agentStatus";
+import { createStatusPoller, describeStatus, planTitle, POLL_INTERVAL_MS, SILENT_OWN_COMMAND_MS } from "./agentStatus";
 
 vi.mock("./agents", () => ({ agentStates: vi.fn(async () => []) }));
 
@@ -140,5 +140,26 @@ describe("createStatusPoller", () => {
     timers.fire();
     await flush();
     expect(get(poller.statuses).byAgent.get(1)?.state).toBe("working");
+  });
+});
+
+describe("planTitle (H10)", () => {
+  const base = { agent_id: 1, state: "idle" as const, since: null, started_at: null, plan: null, plan_document: null };
+
+  it("takes the plan document's heading, never a task", () => {
+    const markdown = "Intro\n\n# Review the status channel\n\n1. Read";
+    const doc = { markdown, name: "x", updated_at: null, from_earlier_session: false };
+    expect(planTitle({ ...base, plan_document: doc })).toBe("Review the status channel");
+    const steps = [{ text: "Add the dot", state: "doing" as const, detail: null }];
+    const plan = { steps, updated_at: null, from_earlier_session: false };
+    expect(planTitle({ ...base, plan })).toBeNull();
+    expect(planTitle({ ...base })).toBeNull();
+    expect(planTitle(undefined)).toBeNull();
+  });
+
+  it("skips a `##` subheading and a task line that only mentions '#', picking the first true `# ` heading", () => {
+    const markdown = "## Not the title\n\n1. Fix #42\n\n# The real title\n\n# A later heading, ignored";
+    const doc = { markdown, name: "x", updated_at: null, from_earlier_session: false };
+    expect(planTitle({ ...base, plan_document: doc })).toBe("The real title");
   });
 });

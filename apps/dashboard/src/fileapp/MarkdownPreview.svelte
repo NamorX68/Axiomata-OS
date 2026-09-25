@@ -9,6 +9,7 @@
   every keystroke.
 -->
 <script lang="ts">
+  import { KEEP_SCROLL } from "./keepScroll";
   import { invokeBackend } from "../core/backend";
   import { renderMarkdownBlocks } from "../core/markdown";
   import { resolveMarkdownImagesWith } from "../core/markdownImages";
@@ -77,7 +78,7 @@
   }
 </script>
 
-<div class="preview ax-prose" bind:this={scroller} onscroll={onScroll}>
+<div class="preview ax-prose" {...KEEP_SCROLL} bind:this={scroller} onscroll={onScroll}>
   {@html html}
 </div>
 

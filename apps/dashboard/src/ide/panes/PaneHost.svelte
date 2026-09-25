@@ -23,9 +23,23 @@
   import type { PaneTab } from "../layout";
   import { paneContext } from "../moduleAdapter";
   import { session } from "../projectSession";
+  import DiffView from "../DiffView.svelte";
+  import { agentStatus } from "../agentStatus";
+  import { AGENT_DIFF_PANE, agentDiffOf, FILE_PANE, filePaneConfig } from "../paneKinds";
   import AgentPane from "./AgentPane.svelte";
+  import FilePane from "./FilePane.svelte";
+  import { openFileBeside } from "./openFile";
 
-  let { tab, onConfig }: { tab: PaneTab; onConfig: (config: Record<string, unknown>) => void } = $props();
+  let {
+    tab,
+    visible = true,
+    onConfig,
+  }: {
+    tab: PaneTab;
+    /** On screen: the active tab of its group, in an open IDE view. */
+    visible?: boolean;
+    onConfig: (config: Record<string, unknown>) => void;
+  } = $props();
 
   // A tab's id and kind never change while it is mounted — the group keys on
   // the id — so capturing both, and the context built from them, is intended.
@@ -45,9 +59,12 @@
    */
   const mountId = crypto.randomUUID();
 
-  /** An agent pane names its profile by id; the session holds the row. */
+  /** An agent pane (and an agent's diff pane) names its profile by id; the session holds the row. */
   const agentId = $derived(typeof tab.config?.agentId === "number" ? tab.config.agentId : null);
   const agent = $derived(agentId === null ? null : ($session.agents.find((a) => a.id === agentId) ?? null));
+  const statuses = agentStatus.statuses;
+  const fileConfig = $derived(filePaneConfig(tab));
+  const openFile = openFileBeside(() => tab.id);
 </script>
 
 <!-- `data-ide-pane` is a signal, not styling: a module that behaves differently
@@ -56,12 +73,31 @@
 <div class="pane-host" data-ide-pane data-ide-mount={mountId}>
   {#if tab.kind === "agent"}
     {#if agent && $session.current}
-      <AgentPane {agent} cwd={$session.current.repo_root} tabId={tab.id} />
+      <AgentPane {agent} cwd={$session.current.repo_root} tabId={tab.id} {visible} />
     {:else}
       <!-- The profile was deleted, or belongs to a project that is not open.
            The pane stays rather than closing itself: something may still be
            running in it, and closing would take that with it. -->
       <p class="unknown">This agent profile is no longer in the open project.</p>
+    {/if}
+  {:else if tab.kind === AGENT_DIFF_PANE}
+    {#if agent && agentDiffOf(tab) !== null}
+      <DiffView
+        {agent}
+        agentState={$statuses.byAgent.get(agent.id)?.state ?? null}
+        {visible}
+        place="dock"
+        heading={agent.name}
+        onOpenFile={(rel, line) => openFile(agent.id, rel, line)}
+      />
+    {:else}
+      <p class="unknown">This agent profile is no longer in the open project.</p>
+    {/if}
+  {:else if tab.kind === FILE_PANE}
+    {#if fileConfig}
+      <FilePane config={fileConfig} {visible} />
+    {:else}
+      <p class="unknown">This file pane lost its file.</p>
     {/if}
   {:else if def}
     <def.component {ctx} />

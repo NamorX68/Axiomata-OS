@@ -917,6 +917,23 @@ every pair of synced views. `ide/DiffView.svelte` reloads by G4 (`ide/diffRefres
 into view, the agent stopping, every 5 s while visible and working) and keeps the open file's
 folds when its hunks did not change.
 
+**M7.3 CP9 lets you act from the diff.** Two new dock panes (H14, `ide/paneKinds.ts`): `file`
+(`{root, rel, line, jump}` — the editor on any root, opened from a diff at the clicked line on
+`worktree:<id>`, with a hint while the agent works, G6) and `agent-diff` (`{agentId}`, at most
+one per agent). `IdeDock.open` places a new pane beside the one it came from, gathers files in
+the group that already holds one, and brings an open one forward instead of doubling it. The
+editing itself is `fileapp/FileEditor.svelte`, extracted from the file app so the full-screen
+view and the pane edit the same way. Panes are moved in the DOM on every layout change
+(`ide/paneStore.ts`), which resets scroll positions silently; elements marked
+`data-keep-scroll` get theirs back. The handgrips live in `ide/diffSession.svelte.ts`
+(`AgentDiffSession`, a runes class with an injectable backend, tested without a DOM): discard
+a file or one hunk (`git.rs` `discard_hunk` rebuilds that hunk as a patch — C-quoted names —
+and reverse-applies it through stdin, refusing if the file's diff no longer has that hunk,
+H13), commit (G3), take over (G7–G12, blocked in the UI with the reason while the agent works
+or has uncommitted work, and refused again in Rust). Messages come prefilled: the plan-mode
+heading, else the agent's last commit subject (H10). Discarding several files costs one
+`ls-tree`, one `restore` and one `rm --cached`.
+
 ### `axiomata-macos`
 
 Reserved as an integration boundary for macOS-specific features beyond what MCP servers
@@ -991,7 +1008,10 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
   M7.3 CP8/CP9 on the editor, then ED3 (Vi).
 - **M7.3 CP8 — the Diffs tab: done** (2026-09-24, §3 `axiomata-ide`): the diff on the editor
   (unified and split, folds, word marks, per-side highlighting, pictures), `ide_agent_base_file`,
-  the file app's "Compare" as a real diff. Next: CP9 (dock panes, acting from the diff).
+  the file app's "Compare" as a real diff.
+- **M7.3 CP9 — acting from the diff: done** (2026-09-24): the `file` and `agent-diff` dock
+  panes, discard per file and per hunk, commit, take over with prefilled messages. M7.3 is
+  complete; next per editor plan D15: ED3 (Vi mode).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

@@ -61,6 +61,7 @@
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentPicker from "./AgentPicker.svelte";
   import { agentStatus } from "./agentStatus";
+  import { openOrFocus } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import PaneHost from "./panes/PaneHost.svelte";
   import { PANE_ATTR, parkPanes, placePanes } from "./paneStore";
@@ -313,6 +314,9 @@
       window.addEventListener("pointercancel", endDividerDrag);
       event.preventDefault();
     },
+    open: (tab, match, fromTabId) => {
+      layout = openOrFocus(layout, tab, match, fromTabId);
+    },
     setConfig: (tabId, config) => {
       layout = setTabConfig(layout, tabId, config);
     },
@@ -325,6 +329,8 @@
 
   /** Every pane in the layout, flat — the store renders exactly this list. */
   const panes = $derived(allTabs(layout));
+  /** The panes on screen: the active tab of every group, while the view is open. */
+  const visibleTabs = $derived(new Set(open ? allGroups(layout).map((g) => g.active) : []));
 
   let storeEl = $state<HTMLElement | undefined>();
 
@@ -409,7 +415,11 @@
     <div class="pane-store" bind:this={storeEl} aria-hidden="true">
       {#each panes as tab (tab.id)}
         <div class="pane-slot" {...{ [PANE_ATTR]: tab.id }}>
-          <PaneHost {tab} onConfig={(config) => projectSession.save((layout = setTabConfig(layout, tab.id, config)))} />
+          <PaneHost
+            {tab}
+            visible={visibleTabs.has(tab.id)}
+            onConfig={(config) => projectSession.save((layout = setTabConfig(layout, tab.id, config)))}
+          />
         </div>
       {/each}
     </div>

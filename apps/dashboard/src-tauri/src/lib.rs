@@ -151,6 +151,8 @@ pub fn run() {
             commands::ide_agent_changes,
             commands::ide_agent_file_diff,
             commands::ide_agent_base_file,
+            commands::ide_agent_discard_hunk,
+            commands::ide_agent_last_subject,
             commands::ide_agent_discard,
             commands::ide_agent_commit,
             commands::ide_agent_take_over,

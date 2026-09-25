@@ -39,6 +39,7 @@
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
   import { CursorGlide } from "./cursorGlide";
+  import { KEEP_SCROLL } from "./keepScroll";
   import type { SurfaceSettings } from "./surfaceSettings";
 
   interface Props {
@@ -489,10 +490,14 @@
     layout.refresh();
     tick++;
     onChange?.();
-    if (!scroller) return;
-    const top = Math.max(0, (layout.firstRow(target) - GO_TO_MARGIN_ROWS) * rowH);
-    const far = Math.abs(top - scroller.scrollTop) > SMOOTH_SCROLL_ROWS * rowH;
-    scroller.scrollTo({ top, behavior: fx.smoothScroll && far ? "smooth" : "instant" });
+    // After the next render: a freshly opened file's sizer is not yet as tall
+    // as the text, and a scroll past its end would be cut short to 0.
+    void nextTick().then(() => {
+      if (!scroller) return;
+      const top = Math.max(0, (layout.firstRow(target) - GO_TO_MARGIN_ROWS) * rowH);
+      const far = Math.abs(top - scroller.scrollTop) > SMOOTH_SCROLL_ROWS * rowH;
+      scroller.scrollTo({ top, behavior: fx.smoothScroll && far ? "smooth" : "instant" });
+    });
   }
 </script>
 
@@ -510,8 +515,11 @@
   style:tab-size={settings.tabSize}
 >
   <span class="measure" bind:this={measurer} aria-hidden="true">{"0".repeat(64)}</span>
+  <!-- `KEEP_SCROLL`: an IDE dock moves panes around in the DOM, which resets
+       this position without a scroll event (`fileapp/keepScroll.ts`). -->
   <div
     class="scroller"
+    {...KEEP_SCROLL}
     bind:this={scroller}
     onscroll={() => {
       scrollTop = scroller.scrollTop;
@@ -742,7 +750,8 @@
   }
 
   .ln-fold,
-  .ln-note {
+  .ln-note,
+  .ln-hunk {
     background: var(--ax-diff-hunk);
   }
 

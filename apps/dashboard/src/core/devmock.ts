@@ -36,10 +36,11 @@ import type {
   SpendSummary,
   SyncReport,
   AgentFileChange,
+  AgentState,
   BaseFile,
   FileDiff,
 } from "./backend";
-import { hunksFromTexts } from "../editor/diff/hunks";
+import { hunksFromTexts, parseHunkHeader } from "../editor/diff/hunks";
 import { textLines } from "../editor/diff/model";
 
 const LATENCY_MS = 120;
@@ -760,6 +761,43 @@ const MOCK_IMAGES = {
 const MOCK_IMAGE_PATH = "assets/logo.png";
 /** Changes the mock pretends are not committed yet. */
 const MOCK_UNCOMMITTED = new Set(["src/words.rs", "src/main.rs"]);
+/** The picture's change was discarded or taken over. */
+let mockImageSettled = false;
+
+/** Status overrides by agent id (console: `__ax.mockAgentState(1, "idle")`). */
+const mockStates = new Map<number, AgentState>();
+
+export function mockAgentState(id: number, state: AgentState): void {
+  mockStates.set(id, state);
+}
+
+/** Puts `path` in agent 1's worktree back to the base (G13). */
+function mockDiscard(path: string): void {
+  if (path === MOCK_IMAGE_PATH) {
+    mockImageSettled = true;
+    return;
+  }
+  // Through `mockExternalWrite`, so an open file pane hears about it as it would from the watcher.
+  mockExternalWrite("worktree:1", path, otherRootFiles.get(`project:1\0${path}`) ?? null);
+  MOCK_UNCOMMITTED.add(path);
+}
+
+/** Puts one hunk of agent 1's `path` back (H6), refusing a stale header like Rust does. */
+function mockDiscardHunk(path: string, index: number, header: string): void {
+  const hunk = mockFileDiff(path).hunks[index];
+  if (!hunk || hunk.header !== header) throw new Error(`${path} changed since its diff was shown; reload it and try again`);
+  const range = parseHunkHeader(header);
+  const text = otherRootFiles.get(`worktree:1\0${path}`);
+  if (!range || text === undefined || range.oldCount === 0 || range.newCount === 0) {
+    mockDiscard(path);
+    return;
+  }
+  const lines = textLines(text);
+  const before = hunk.lines.filter((l) => l.kind !== "add" && l.kind !== "no_newline").map((l) => l.text);
+  lines.splice(range.newStart - 1, range.newCount, ...before);
+  mockExternalWrite("worktree:1", path, `${lines.join("\n")}\n`);
+  MOCK_UNCOMMITTED.add(path);
+}
 
 /** Text files of one root, by relative path. */
 function rootFiles(root: string): Map<string, string> {
@@ -790,15 +828,17 @@ function mockAgentChanges(): AgentFileChange[] {
       uncommitted: MOCK_UNCOMMITTED.has(path),
     });
   }
-  out.push({
-    path: MOCK_IMAGE_PATH,
-    old_path: null,
-    kind: "modified",
-    additions: null,
-    deletions: null,
-    binary: true,
-    uncommitted: false,
-  });
+  if (!mockImageSettled) {
+    out.push({
+      path: MOCK_IMAGE_PATH,
+      old_path: null,
+      kind: "modified",
+      additions: null,
+      deletions: null,
+      binary: true,
+      uncommitted: false,
+    });
+  }
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -1132,7 +1172,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         .filter((a) => a.project_id === args.projectId)
         .map((agent) => ({
           agent_id: agent.id,
-          state: agent.id === 1 ? "working" : agent.id === 2 ? "waiting" : "idle",
+          state: mockStates.get(agent.id) ?? (agent.id === 1 ? "working" : agent.id === 2 ? "waiting" : "idle"),
           since: now,
           started_at: now,
           plan:
@@ -1177,6 +1217,32 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return mockFileDiff(String(args.path)) as T;
     case "ide_agent_base_file":
       return mockBaseFile(String(args.path)) as T;
+    case "ide_agent_discard":
+      for (const path of args.paths as string[]) mockDiscard(path);
+      return undefined as T;
+    case "ide_agent_discard_hunk":
+      mockDiscardHunk(String(args.path), Number(args.index), String(args.header));
+      return undefined as T;
+    case "ide_agent_commit":
+      if (MOCK_UNCOMMITTED.size === 0) throw new Error("there is nothing uncommitted to commit");
+      MOCK_UNCOMMITTED.clear();
+      return "c0ffee1d2e3f" as T;
+    case "ide_agent_last_subject":
+      return "Double step 4 and saturate step 27" as T;
+    // Taking over lands the agent's files on the base: its diff is then empty.
+    case "ide_agent_take_over": {
+      const state = mockStates.get(Number(args.id)) ?? (args.id === 1 ? "working" : "idle");
+      if (state === "working" || state === "waiting") {
+        throw new Error(`Builder is ${state} — wait until it has finished before taking its work over`);
+      }
+      if (MOCK_UNCOMMITTED.size > 0) throw new Error("the agent has uncommitted work; commit it first");
+      for (const key of [...otherRootFiles.keys()].filter((k) => k.startsWith("project:1\0"))) otherRootFiles.delete(key);
+      for (const [key, content] of [...otherRootFiles]) {
+        if (key.startsWith("worktree:1\0")) otherRootFiles.set(key.replace("worktree:1", "project:1"), content);
+      }
+      mockImageSettled = true;
+      return { outcome: "done", commit: "facade1234567" } as T;
+    }
     case "ide_agent_has_changes":
       return false as T;
     case "discard_ide_agent_worktree":

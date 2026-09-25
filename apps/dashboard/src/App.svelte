@@ -82,6 +82,7 @@
           setMockCustomCss: m.setMockCustomCss,
           mockExternalWrite: m.mockExternalWrite,
           mockPickNext: m.mockPickNext,
+          mockAgentState: m.mockAgentState,
         };
       });
     }

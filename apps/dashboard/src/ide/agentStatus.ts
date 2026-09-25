@@ -98,6 +98,15 @@ export interface StatusPoller {
 const EMPTY: StatusSnapshot = { projectId: null, byAgent: new Map(), checkedAt: 0 };
 
 /** Builds a poller. The deps are injectable so a test needs no real time. */
+/**
+ * A plan's title, for the take-over message (`docs/plans/git-layer.md`, H10):
+ * the first `# ` heading of Claude Code's plan-mode plan, or `null`. The task
+ * list has no title — its first task is a step, not what the work was.
+ */
+export function planTitle(status: AgentStatus | undefined): string | null {
+  return status?.plan_document?.markdown.match(/^#\s+(.+?)\s*$/m)?.[1] ?? null;
+}
+
 export function createStatusPoller(deps: PollerDeps): StatusPoller {
   const state = writable<StatusSnapshot>(EMPTY);
   let watching: number | null = null;

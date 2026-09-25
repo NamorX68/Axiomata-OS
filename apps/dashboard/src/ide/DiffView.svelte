@@ -15,14 +15,18 @@
 <script lang="ts">
   import { onDestroy, tick, untrack } from "svelte";
 
-  import type { AgentDiffState, AgentFileChange, AgentState, IdeAgent } from "../core/backend";
+  import type { AgentFileChange, AgentState, IdeAgent } from "../core/backend";
   import { formatBytes } from "../core/format";
-  import { DiffModel } from "../editor/diff/model";
+  import { toast } from "../core/toast";
   import type { DiffLayout } from "../editor/diff/view";
   import DiffPanes from "../fileapp/DiffPanes.svelte";
+  import { KEEP_SCROLL } from "../fileapp/keepScroll";
+  import { agentStatus, planTitle } from "./agentStatus";
   import { diffLayout, rememberDiffLayout, type DiffPlace } from "./diffPrefs";
   import { DiffRefresh } from "./diffRefresh";
-  import { agentChanges, agentFileDiff, loadFileDiff, sameFileDiff, type LoadedDiff } from "./git";
+  import { messageOf } from "../core/errors";
+  import { AgentDiffSession } from "./diffSession.svelte";
+  import GitActionDialog, { type GitAction } from "./GitActionDialog.svelte";
 
   interface Props {
     agent: IdeAgent;
@@ -33,137 +37,113 @@
     place: DiffPlace;
     /** Open the agent's copy of `rel` at the zero-based `line` (H5, CP9). */
     onOpenFile?: (rel: string, line: number) => void;
+    /** Shown first in the bar — in a dock pane, which agent this is (H14). */
+    heading?: string;
+    /** Move this view into a dock pane of its own (the side tab's "⧉ Dock"). */
+    onDock?: () => void;
   }
 
-  let { agent, agentState, visible, place, onOpenFile }: Props = $props();
+  let { agent, agentState, visible, place, onOpenFile, heading, onDock }: Props = $props();
 
-  let diffState = $state.raw<AgentDiffState | null>(null);
-  let listError = $state("");
-  let selected = $state<string | null>(null);
-  let loaded = $state.raw<LoadedDiff | null>(null);
-  let model = $state.raw<DiffModel | null>(null);
-  let diffError = $state("");
-  /** Bumped when the model changed outside `DiffPanes` (a new file, whole file on/off). */
-  let revision = $state(0);
-  let wholeFile = $state(false);
+  // An agent's view stays with its agent for as long as it is mounted.
+  const session = new AgentDiffSession(untrack(() => agent.id));
   // `place` never changes for a mounted view (a tab stays a tab), so reading it once is right.
   let layout = $state<DiffLayout>(diffLayout(untrack(() => place)));
-  let refreshing = $state(false);
   let panes = $state<DiffPanes | null>(null);
-  /** Guards against an older request answering after a newer one. */
-  let listGeneration = 0;
-  let fileGeneration = 0;
+  session.onLoaded = () => void tick().then(() => panes?.showFirstChange());
 
-  const files = $derived(diffState?.state === "ready" ? diffState.changes.files : []);
-  const base = $derived(diffState?.state === "ready" ? diffState.changes.base : null);
+  /** The question being asked, and how answering it went (G3, G7, G13, H6). */
+  let pending = $state<GitAction | null>(null);
+  let busy = $state(false);
+  let problem = $state<string | null>(null);
+  let conflictFiles = $state<string[] | null>(null);
+
+  const statuses = agentStatus.statuses;
+  const files = $derived(session.files);
+  const base = $derived(session.base);
+  const loaded = $derived(session.loaded);
+  const model = $derived(session.model);
   const totals = $derived(
     files.reduce((t, f) => ({ add: t.add + (f.additions ?? 0), del: t.del + (f.deletions ?? 0) }), { add: 0, del: 0 }),
   );
+  const working = $derived(agentState === "working");
+  /** Why "Take over" is not possible right now (G12), or `null`. */
+  const takeOverBlocked = $derived(
+    agentState === "working" || agentState === "waiting"
+      ? `Wait until ${agent.name} is idle`
+      : session.hasUncommitted
+        ? "Commit the uncommitted changes first"
+        : files.length === 0
+          ? "Nothing to take over"
+          : null,
+  );
 
-  const refresher = new DiffRefresh(() => void refresh(false));
+  const refresher = new DiffRefresh(() => void session.refresh(false));
   $effect(() => refresher.update(visible, agentState));
   onDestroy(() => refresher.dispose());
-
-  /** Reloads the list, then the open file if it changed (or always, when `force`). */
-  export async function refresh(force: boolean): Promise<void> {
-    const mine = ++listGeneration;
-    refreshing = true;
-    try {
-      const next = await agentChanges(agent.id);
-      if (mine !== listGeneration) return;
-      diffState = next;
-      listError = "";
-    } catch (err) {
-      if (mine === listGeneration) listError = messageOf(err);
-      return;
-    } finally {
-      if (mine === listGeneration) refreshing = false;
-    }
-    const current = files.find((f) => f.path === selected);
-    if (current) await reloadIfChanged(current, force);
-    else await select(files[0] ?? null);
-  }
-
-  /** Reloads the open file, unless its diff is exactly what is shown already. */
-  async function reloadIfChanged(change: AgentFileChange, force: boolean): Promise<void> {
-    if (!force && loaded && loaded.change.path === change.path) {
-      try {
-        const diff = await agentFileDiff(agent.id, change.path, change.old_path);
-        // Another file was picked meanwhile: that pick has its own load.
-        if (selected !== change.path) return;
-        if (sameFileDiff(diff, loaded.diff)) return;
-      } catch {
-        // Fall through to a full load, which reports the error.
-      }
-    }
-    await load(change);
-  }
-
-  async function select(change: AgentFileChange | null): Promise<void> {
-    selected = change?.path ?? null;
-    if (change) await load(change);
-    else {
-      loaded = null;
-      model = null;
-    }
-  }
-
-  async function load(change: AgentFileChange): Promise<void> {
-    const mine = ++fileGeneration;
-    diffError = "";
-    try {
-      const next = await loadFileDiff(agent.id, change);
-      // A newer load, or a poll that started before another file was picked.
-      if (mine !== fileGeneration || selected !== change.path) return;
-      const nextModel = new DiffModel(next.source);
-      if (wholeFile) nextModel.setWholeFile(true);
-      loaded = next;
-      model = nextModel;
-      revision++;
-      await tick();
-      panes?.showFirstChange();
-    } catch (err) {
-      if (mine === fileGeneration) diffError = messageOf(err);
-    }
-  }
-
-  function messageOf(err: unknown): string {
-    if (typeof err === "string") return err;
-    if (err instanceof Error) return err.message;
-    return (err as { message?: string })?.message ?? String(err);
-  }
-
-  function stepFile(step: 1 | -1): void {
-    if (files.length === 0) return;
-    const at = files.findIndex((f) => f.path === selected);
-    const next = files[Math.max(0, Math.min(files.length - 1, at + step))];
-    if (next && next.path !== selected) void select(next);
-  }
 
   function toggleLayout(): void {
     layout = layout === "unified" ? "split" : "unified";
     rememberDiffLayout(place, layout);
   }
 
-  function toggleWholeFile(): void {
-    wholeFile = !wholeFile;
-    model?.setWholeFile(wholeFile);
-    revision++;
-  }
-
   function open(line: number): void {
     if (loaded && loaded.change.kind !== "deleted") onOpenFile?.(loaded.change.path, line);
+  }
+
+  function ask(action: GitAction): void {
+    pending = action;
+    problem = null;
+    conflictFiles = null;
+  }
+
+  function askDiscardHunk(hunk: number): void {
+    const header = loaded?.diff.hunks[hunk]?.header;
+    if (loaded && header !== undefined) ask({ kind: "discard-hunk", path: loaded.change.path, hunk, header });
+  }
+
+  async function askTakeOver(): Promise<void> {
+    if (takeOverBlocked || !base) return;
+    const fromPlan = planTitle($statuses.byAgent.get(agent.id));
+    const message = fromPlan ?? (await session.lastSubject().catch(() => null)) ?? "";
+    ask({ kind: "take-over", message, mode: "squash", branch: base.branch });
+  }
+
+  /** Runs what the dialog confirmed; the dialog stays open with the reason if it fails. */
+  async function run(action: GitAction): Promise<void> {
+    busy = true;
+    problem = null;
+    try {
+      if (action.kind === "discard-file") await session.discardFile();
+      else if (action.kind === "discard-hunk") await session.discardHunk(action.hunk);
+      else if (action.kind === "commit") {
+        const commit = await session.commit(action.message);
+        toast(`${agent.name}: committed ${commit.slice(0, 7)}`);
+      } else {
+        const result = await session.takeOver(action.mode, action.message);
+        if (result.outcome === "conflict") {
+          conflictFiles = result.files;
+          return;
+        }
+        toast(`${agent.name}'s work is on ${action.branch} as ${result.commit.slice(0, 7)}`);
+      }
+      pending = null;
+    } catch (err) {
+      problem = messageOf(err);
+    } finally {
+      busy = false;
+    }
   }
 
   /** ⌥⌘↓/⌥⌘↑ file, ⌘R reload, ⌘⇧D layout (H9) — wherever the focus is in the view. */
   function onKey(e: KeyboardEvent): boolean {
     const key = e.key.toLowerCase();
     if (e.metaKey && e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-      stepFile(e.key === "ArrowDown" ? 1 : -1);
+      session.stepFile(e.key === "ArrowDown" ? 1 : -1);
       return true;
     }
     if (e.metaKey && !e.altKey && !e.shiftKey && key === "r") {
-      void refresh(true);
+      void session.refresh(true);
       return true;
     }
     if (e.metaKey && e.shiftKey && key === "d") {
@@ -175,7 +155,7 @@
 
   function onKeydown(e: KeyboardEvent): void {
     // The diff's own surface already had its turn (`interceptKey`) and marked it.
-    if (!e.defaultPrevented && onKey(e)) e.preventDefault();
+    if (!e.defaultPrevented && !pending && onKey(e)) e.preventDefault();
   }
 
   const KIND_MARK: Record<AgentFileChange["kind"], { mark: string; title: string }> = {
@@ -196,11 +176,14 @@
   const showsLines = $derived(
     !!loaded && !!model && !loaded.images && !loaded.diff.binary && !loaded.change.binary && model.hunkCount > 0,
   );
+  /** Git's header of every hunk of the open file, for the header rows and their Discard (H6). */
+  const hunkHeaders = $derived(loaded ? { headers: loaded.diff.hunks.map((h) => h.header), discard: true } : null);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="diffs" onkeydown={onKeydown}>
   <header class="bar">
+    {#if heading}<span class="heading">{heading}</span>{/if}
     {#if base}
       <span class="base" title="Compared with the merge base {base.commit}">
         against <strong>{base.branch}</strong> @ {base.commit.slice(0, 7)}{base.fallback ? " (not recorded)" : ""}
@@ -209,7 +192,12 @@
     {/if}
     <span class="spacer"></span>
     {#if showsLines}
-      <button type="button" class:on={wholeFile} onclick={toggleWholeFile} title="Show the whole file">Whole file</button>
+      <button
+        type="button"
+        class:on={session.wholeFile}
+        onclick={() => session.toggleWholeFile()}
+        title="Show the whole file">Whole file</button
+      >
       <button type="button" onclick={toggleLayout} title="One column or two (⌘⇧D)">
         {layout === "unified" ? "Split" : "Unified"}
       </button>
@@ -217,21 +205,51 @@
         <button type="button" onclick={() => open(panes?.openLine() ?? 0)} title="Open the agent's copy (⏎)">Open</button>
       {/if}
     {/if}
-    <button type="button" class="reload" class:spinning={refreshing} onclick={() => refresh(true)} title="Reload (⌘R)"
-      >↻</button
+    {#if session.current}
+      <button
+        type="button"
+        class="danger"
+        onclick={() => ask({ kind: "discard-file", path: session.current!.path })}
+        title="Put this file back to how {base?.branch} has it">Discard file</button
+      >
+    {/if}
+    {#if base}
+      <button
+        type="button"
+        disabled={!session.hasUncommitted}
+        onclick={() => ask({ kind: "commit", message: `wip: ${agent.name}` })}
+        title={session.hasUncommitted ? "Commit what the agent left uncommitted" : "Nothing uncommitted"}
+        >Commit…</button
+      >
+      <button
+        type="button"
+        disabled={takeOverBlocked !== null}
+        onclick={() => void askTakeOver()}
+        title={takeOverBlocked ?? `Take the committed work over into ${base.branch}`}>Take over…</button
+      >
+    {/if}
+    {#if onDock}
+      <button type="button" onclick={onDock} title="Open these diffs in a dock pane of their own">⧉ Dock</button>
+    {/if}
+    <button
+      type="button"
+      class="reload"
+      class:spinning={session.refreshing}
+      onclick={() => session.refresh(true)}
+      title="Reload (⌘R)">↻</button
     >
   </header>
 
-  {#if listError}
-    <p class="note error">{listError}</p>
-  {:else if !diffState}
+  {#if session.listError}
+    <p class="note error">{session.listError}</p>
+  {:else if !session.diffState}
     <p class="note">Loading…</p>
-  {:else if diffState.state === "shared_folder"}
+  {:else if session.diffState.state === "shared_folder"}
     <p class="note">
       This project folder is not a git repository, so its agents work in it together and there is no diff per agent.
       Make it a git repository to give every agent a worktree of its own.
     </p>
-  {:else if diffState.state === "not_started"}
+  {:else if session.diffState.state === "not_started"}
     <p class="note">
       This agent has not been started yet. Its worktree and branch are made on the first start; what it changes shows up
       here.
@@ -240,15 +258,15 @@
     <p class="note">No changes against {base?.branch} yet.</p>
   {:else}
     <div class="body">
-      <ul class="files" aria-label="Changed files">
+      <ul class="files" aria-label="Changed files" {...KEEP_SCROLL}>
         {#each files as file (file.path)}
           {@const part = splitPath(file.path)}
           <li>
             <button
               type="button"
               class="file"
-              class:selected={file.path === selected}
-              onclick={() => select(file)}
+              class:selected={file.path === session.selected}
+              onclick={() => session.select(file)}
               title={file.old_path ? `${file.old_path} → ${file.path}` : file.path}
             >
               <span class="kind {file.kind}" title={KIND_MARK[file.kind].title}>{KIND_MARK[file.kind].mark}</span>
@@ -264,8 +282,8 @@
         {/each}
       </ul>
       <div class="diff">
-        {#if diffError}
-          <p class="note error">{diffError}</p>
+        {#if session.diffError}
+          <p class="note error">{session.diffError}</p>
         {:else if !loaded || !model}
           <p class="note">Loading…</p>
         {:else if loaded.images}
@@ -297,16 +315,31 @@
             bind:this={panes}
             {model}
             {layout}
-            {revision}
+            revision={session.revision}
             oldText={loaded.oldText}
             newText={loaded.newText}
             {fileName}
+            {hunkHeaders}
             onOpen={open}
+            onDiscardHunk={askDiscardHunk}
             interceptKey={onKey}
           />
         {/if}
       </div>
     </div>
+  {/if}
+
+  {#if pending}
+    <GitActionDialog
+      action={pending}
+      agentName={agent.name}
+      {working}
+      {busy}
+      {problem}
+      {conflictFiles}
+      onConfirm={(action) => void run(action)}
+      onCancel={() => (pending = null)}
+    />
   {/if}
 </div>
 
@@ -314,6 +347,8 @@
   .diffs {
     position: absolute;
     inset: 0;
+    /* The body stacks list over diff when the pane is narrow (below). */
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -325,8 +360,9 @@
 
   .bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--ax-space-2);
+    gap: var(--ax-space-1) var(--ax-space-2);
     padding: var(--ax-space-1) var(--ax-space-2);
     border-bottom: 1px solid var(--ax-border);
     color: var(--ax-text-muted);
@@ -342,6 +378,10 @@
     flex: 1;
   }
 
+  .heading {
+    color: var(--ax-text);
+  }
+
   .bar button {
     padding: 0 var(--ax-space-2);
     border: 1px solid var(--ax-border);
@@ -352,10 +392,20 @@
     cursor: pointer;
   }
 
-  .bar button:hover,
+  .bar button:hover:not(:disabled),
   .bar button.on {
     border-color: var(--ax-accent);
     color: var(--ax-accent);
+  }
+
+  .bar button.danger:hover {
+    border-color: var(--ax-danger);
+    color: var(--ax-danger);
+  }
+
+  .bar button:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .reload.spinning {
@@ -393,6 +443,19 @@
     list-style: none;
     overflow-y: auto;
     border-right: 1px solid var(--ax-border);
+  }
+
+  /* A narrow pane (a third of a split, a side tab): the list goes on top. */
+  @container (max-width: 520px) {
+    .body {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(0, 30%) 1fr;
+    }
+
+    .files {
+      border-right: none;
+      border-bottom: 1px solid var(--ax-border);
+    }
   }
 
   .file {

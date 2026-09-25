@@ -1988,6 +1988,31 @@ pub async fn ide_agent_discard(
     off_main(move || repo.discard(&paths)).await
 }
 
+/// Puts one hunk back to the agent's base (H6) — the `index`-th of the file's
+/// current diff, refused unless it still reads `header`. The UI asks first.
+#[tauri::command]
+pub async fn ide_agent_discard_hunk(
+    state: State<'_, CoreState>,
+    id: i64,
+    path: String,
+    old_path: Option<String>,
+    index: usize,
+    header: String,
+) -> Result<(), String> {
+    let repo = ready_repo_of(&state, id)?;
+    off_main(move || repo.discard_hunk(&path, old_path.as_deref(), index, &header)).await
+}
+
+/// The subject of the agent's latest own commit, for the take-over message (H10).
+#[tauri::command]
+pub async fn ide_agent_last_subject(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<Option<String>, String> {
+    let repo = ready_repo_of(&state, id)?;
+    off_main(move || repo.last_subject()).await
+}
+
 /// Commits everything the agent left uncommitted (G3); returns the commit.
 #[tauri::command]
 pub async fn ide_agent_commit(

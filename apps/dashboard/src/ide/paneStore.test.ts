@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { PANE_ATTR, SLOT_ATTR, parkPanes, placePanes } from "./paneStore";
+import { KEEP_SCROLL } from "../fileapp/keepScroll";
+import { KEEP_SCROLL_ATTR, PANE_ATTR, SLOT_ATTR, parkPanes, placePanes } from "./paneStore";
 
 /**
  * Builds a dock: a store holding panes, and slots wherever the tree wants one.
@@ -153,5 +154,102 @@ describe("placePanes", () => {
     broken.setAttribute(PANE_ATTR, "");
     root.appendChild(broken);
     expect(placePanes(root)).toEqual([]);
+  });
+});
+
+describe("scroll positions across a move", () => {
+  it("carries both scrollTop and scrollLeft, for every marked element in the pane independently", () => {
+    const root = dock(["a"], ["a"]);
+    placePanes(root);
+    const pane = root.querySelector(`[${PANE_ATTR}="a"]`)!;
+    const first = document.createElement("div");
+    first.setAttribute(KEEP_SCROLL_ATTR, "");
+    const second = document.createElement("div");
+    second.setAttribute(KEEP_SCROLL_ATTR, "");
+    pane.appendChild(first);
+    pane.appendChild(second);
+    first.scrollTop = 100;
+    first.scrollLeft = 20;
+    second.scrollTop = 7;
+    second.scrollLeft = 3;
+    // A browser resets both axes on every element it moves; stand in for that.
+    const append = Element.prototype.appendChild;
+    const spy = function (this: Element, node: Node) {
+      const out = append.call(this, node);
+      if (node === pane) {
+        first.scrollTop = 0;
+        first.scrollLeft = 0;
+        second.scrollTop = 0;
+        second.scrollLeft = 0;
+      }
+      return out;
+    };
+    Element.prototype.appendChild = spy as typeof append;
+    try {
+      parkPanes(root, root.querySelector(".store")!);
+      placePanes(root);
+      expect(first.scrollTop).toBe(100);
+      expect(first.scrollLeft).toBe(20);
+      expect(second.scrollTop).toBe(7);
+      expect(second.scrollLeft).toBe(3);
+    } finally {
+      Element.prototype.appendChild = append;
+    }
+  });
+
+  it("carries the scroll position of an element marked exactly as markup does, with {...KEEP_SCROLL}", () => {
+    // `fileapp/keepScroll.ts`'s `KEEP_SCROLL` is spread onto markup as
+    // `{...KEEP_SCROLL}`; this applies it the same way (via its object keys,
+    // not the `KEEP_SCROLL_ATTR` string constant) to prove the two modules
+    // actually agree on the attribute — not just that both import one constant.
+    const root = dock(["a"], ["a"]);
+    placePanes(root);
+    const pane = root.querySelector(`[${PANE_ATTR}="a"]`)!;
+    const scroller = document.createElement("div");
+    for (const [key, value] of Object.entries(KEEP_SCROLL)) scroller.setAttribute(key, value);
+    pane.appendChild(scroller);
+    scroller.scrollTop = 315;
+    // A browser resets it when the node moves; stand in for that.
+    const append = Element.prototype.appendChild;
+    const spy = function (this: Element, node: Node) {
+      const out = append.call(this, node);
+      if (node === pane) scroller.scrollTop = 0;
+      return out;
+    };
+    Element.prototype.appendChild = spy as typeof append;
+    try {
+      parkPanes(root, root.querySelector(".store")!);
+      expect(scroller.scrollTop).toBe(315);
+      placePanes(root);
+      expect(scroller.scrollTop).toBe(315);
+    } finally {
+      Element.prototype.appendChild = append;
+    }
+  });
+
+  it("carries the scroll position of a marked element through park and place", () => {
+    const root = dock(["a"], ["a"]);
+    placePanes(root);
+    const pane = root.querySelector(`[${PANE_ATTR}="a"]`)!;
+    const scroller = document.createElement("div");
+    scroller.setAttribute(KEEP_SCROLL_ATTR, "");
+    pane.appendChild(scroller);
+    scroller.scrollTop = 315;
+    // A browser resets it when the node moves; stand in for that.
+    const append = Element.prototype.appendChild;
+    const spy = function (this: Element, node: Node) {
+      const out = append.call(this, node);
+      if (node === pane) scroller.scrollTop = 0;
+      return out;
+    };
+    Element.prototype.appendChild = spy as typeof append;
+    try {
+      parkPanes(root, root.querySelector(".store")!);
+      expect(scroller.scrollTop).toBe(315);
+      placePanes(root);
+      expect(scroller.scrollTop).toBe(315);
+    } finally {
+      Element.prototype.appendChild = append;
+    }
   });
 });
