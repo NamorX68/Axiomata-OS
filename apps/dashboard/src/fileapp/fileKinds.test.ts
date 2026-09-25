@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { headOf, isImagePath, previewKindFor, startsInPreview } from "./fileKinds";
+import {
+  headOf,
+  initialViewMode,
+  isImagePath,
+  nextViewMode,
+  previewKindFor,
+  startsInPreview,
+  viewModeLabel,
+} from "./fileKinds";
 
 describe("fileKinds (W1, W3)", () => {
   it("knows raster images, and leaves SVG to the text path", () => {
@@ -91,5 +99,19 @@ describe("headOf (W15)", () => {
   it("returns an empty head for maxLines 0, not the text minus its last character", () => {
     expect(headOf("abc", 0)).toEqual({ text: "", cut: true });
     expect(headOf("", 0)).toEqual({ text: "", cut: false });
+  });
+});
+
+describe("view modes (G8, W1)", () => {
+  it("cycles source → rendered → side by side → source", () => {
+    expect(nextViewMode("source")).toBe("preview");
+    expect(nextViewMode("preview")).toBe("split");
+    expect(nextViewMode("split")).toBe("source");
+  });
+
+  it("starts where startsInPreview says, and names each mode", () => {
+    expect(initialViewMode("markdown", "read")).toBe("preview");
+    expect(initialViewMode("markdown", "edit")).toBe("source");
+    expect(viewModeLabel("split")).toBe("Side by side");
   });
 });

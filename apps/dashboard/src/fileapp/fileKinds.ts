@@ -32,6 +32,24 @@ export function previewKindFor(fileName: string): PreviewKind | null {
   return null;
 }
 
+/** Source only, the rendered view only, or both side by side (G8, W3). */
+export type ViewMode = "source" | "preview" | "split";
+
+/** ⌘⇧V: source → rendered → side by side → source. */
+export function nextViewMode(mode: ViewMode): ViewMode {
+  return mode === "source" ? "preview" : mode === "preview" ? "split" : "source";
+}
+
+/** What a file of `kind` opened with `intent` shows first (W1). */
+export function initialViewMode(kind: PreviewKind | null, intent: OpenIntent): ViewMode {
+  return startsInPreview(kind, intent) ? "preview" : "source";
+}
+
+/** The footer's word for `mode`. */
+export function viewModeLabel(mode: ViewMode): string {
+  return mode === "source" ? "Source" : mode === "preview" ? "Preview" : "Side by side";
+}
+
 /**
  * Whether a file opened with `intent` starts on its rendered view: reading
  * (from the Second Brain, the chat, an agent) shows Markdown and HTML rendered;

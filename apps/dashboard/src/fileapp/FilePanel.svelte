@@ -17,11 +17,13 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
 
-  import { requestClose, setCloseGuard } from "../core/staging";
+  import { closeStaged, requestClose, setCloseGuard } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import FileEditor, { type OpenFileState } from "./FileEditor.svelte";
   import type { OpenIntent } from "./fileKinds";
+  import { handToFileApp } from "./handoff";
   import { panelTarget } from "./panelSync";
+  import UnsavedQuestion from "./UnsavedQuestion.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // `ctx` is created once per panel and never swapped.
@@ -68,6 +70,18 @@
     current = state;
     const patch = panelTarget($config, state);
     if (patch) config.update((old) => ({ ...old, ...patch }));
+  }
+
+  /**
+   * "Open in the file app" (W11): the file moves into a tab there, unsaved
+   * text and undo included, and this panel closes — nothing is left to ask about.
+   */
+  function handOver(): void {
+    const state = current;
+    if (!state) return;
+    const handed = editor?.detach() ?? null;
+    handToFileApp({ file: state.untitled ? null : { root: state.root, rel: state.rel }, handed });
+    closeStaged(ctx.instanceId);
   }
 
   function ask(): Promise<boolean> {
@@ -123,21 +137,18 @@
       {/if}
     </span>
     {#if current?.dirty}<span class="dot" title="Unsaved changes"></span>{/if}
+    <span class="spacer"></span>
+    <button type="button" class="hand-over" disabled={!current} onclick={handOver}>Open in the file app</button>
   </div>
 
   {#if asking}
-    <div class="ask" role="alertdialog" aria-label="Unsaved changes">
-      {#if current?.untitled}
-        <span>This note is not filed yet.</span>
-        <button type="button" class="strong" onclick={() => void saveAndClose()}>File it</button>
-        <button type="button" onclick={() => void discardAndClose()}>Discard</button>
-      {:else}
-        <span>{current?.rel ?? "This file"} has unsaved changes.</span>
-        <button type="button" class="strong" onclick={() => void saveAndClose()}>Save</button>
-        <button type="button" onclick={() => void discardAndClose()}>Discard</button>
-      {/if}
-      <button type="button" onclick={() => asking?.(false)}>Cancel</button>
-    </div>
+    <UnsavedQuestion
+      name={current?.rel ?? "This file"}
+      untitled={current?.untitled ?? false}
+      onSave={() => void saveAndClose()}
+      onDiscard={() => void discardAndClose()}
+      onCancel={() => asking?.(false)}
+    />
   {/if}
 
   {#if failure}
@@ -172,42 +183,32 @@
     white-space: nowrap;
   }
 
+  .spacer {
+    flex: 1;
+  }
+
+  .hand-over {
+    padding: 0 var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-xs);
+    cursor: pointer;
+  }
+
+  .hand-over:hover:not(:disabled) {
+    border-color: var(--ax-accent);
+    color: var(--ax-text);
+  }
+
   .dot {
     width: var(--ax-space-2);
     height: var(--ax-space-2);
     border-radius: var(--ax-radius-pill);
     background: var(--ax-accent);
     flex-shrink: 0;
-  }
-
-  .ask {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-3);
-    padding: var(--ax-space-2) var(--ax-space-5);
-    background: var(--ax-accent-muted);
-    border-bottom: 1px solid var(--ax-border);
-    font-size: var(--ax-font-size-sm);
-  }
-
-  .ask span {
-    flex: 1;
-  }
-
-  .ask button {
-    padding: var(--ax-space-1) var(--ax-space-3);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-    color: var(--ax-text);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-xs);
-    cursor: pointer;
-  }
-
-  .ask button.strong {
-    border-color: var(--ax-accent);
-    color: var(--ax-accent);
   }
 
   .failure {

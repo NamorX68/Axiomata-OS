@@ -50,7 +50,16 @@
   import { editorSettings, ensureEditorSettingsLoaded } from "./editorSettings";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import EditorSurface from "./EditorSurface.svelte";
-  import { isImagePath, previewKindFor, startsInPreview, type OpenIntent, type PreviewKind } from "./fileKinds";
+  import {
+    initialViewMode,
+    isImagePath,
+    nextViewMode,
+    previewKindFor,
+    viewModeLabel,
+    type OpenIntent,
+    type PreviewKind,
+    type ViewMode,
+  } from "./fileKinds";
   import HtmlPreview from "./HtmlPreview.svelte";
   import ImageView from "./ImageView.svelte";
   import { highlightFor } from "./highlighting";
@@ -102,7 +111,12 @@
   /** Quiet time before "autosave after a pause" saves (F9). */
   const AUTOSAVE_DELAY_MS = 1000;
 
-  let session = $state.raw<FileSession | null>(null);
+  /** What is open: a text session, a picture, or nothing — one value, so the two can never both be set. */
+  type Opened = { kind: "session"; session: FileSession } | { kind: "image"; root: string; rel: string } | null;
+  let opened = $state.raw<Opened>(null);
+  const session = $derived(opened?.kind === "session" ? opened.session : null);
+  /** A raster image open instead of a text session (W3). */
+  const image = $derived(opened?.kind === "image" ? opened : null);
   /** Bumped whenever the session's state changed; the banner and status derive from it. */
   let sessionTick = $state(0);
   /**
@@ -124,12 +138,10 @@
   /** Syntax colours for the open file (ED2); `null` for plain text or a large file. */
   let highlighter = $state.raw<SyntaxHighlighter | null>(null);
   /** A file with a rendered view (G8, W3): the source, the rendered view, or both side by side. */
-  let viewMode = $state<"source" | "preview" | "split">("source");
+  let viewMode = $state<ViewMode>("source");
   /** What the open file renders as, if anything. */
   let previewKind = $state<PreviewKind | null>(null);
   let preview = $state<MarkdownPreview | null>(null);
-  /** A raster image open instead of a text session (W3). */
-  let image = $state<{ root: string; rel: string } | null>(null);
   /** A new note is being filed (`create_note` asks the agent where it goes). */
   let filing = $state(false);
   /** Source and preview scroll in step; whichever is scrolled leads (H12). */
@@ -195,8 +207,7 @@
   ): Promise<OpenResult> {
     if (isImagePath(file.rel)) {
       await leaveCurrent();
-      session = null;
-      image = { root: file.root, rel: file.rel };
+      opened = { kind: "image", root: file.root, rel: file.rel };
       refresh();
       return { ok: true };
     }
@@ -226,20 +237,46 @@
   /** Makes `next` the open session, leaving the one before. */
   async function adopt(next: FileSession, intent: OpenIntent, line: number | null): Promise<void> {
     await leaveCurrent();
-    image = null;
-    session = next;
+    opened = { kind: "session", session: next };
     wrap = wrapsByDefault($editorSettings, next.fileName);
     // Vi's `:set` holds for the file it was typed in, as the wrap toggle does (V6).
     numbersOverride = null;
     list = false;
     previewKind = previewKindFor(next.fileName);
-    viewMode = startsInPreview(previewKind, intent) ? "preview" : "source";
+    viewMode = initialViewMode(previewKind, intent);
     compare = null;
     refresh();
     void attachHighlighter(next);
     await nextTick();
     if (line !== null) goToLine(line);
     else surface?.focus();
+  }
+
+  /**
+   * Hands the open session to another editor (W11: from the panel to a tab)
+   * without leaving it — nothing is saved, kept aside or unwatched, the undo
+   * history goes along. This editor is empty afterwards. What moves is the text
+   * and the rendered/source view (W11); this editor's own view state — an open
+   * Compare, `:set` options, the wrap toggle — starts afresh in the new one.
+   */
+  export function detach(): { session: FileSession; viewMode: ViewMode } | null {
+    const s = session;
+    if (!s) return null;
+    highlighter?.dispose();
+    highlighter = null;
+    if (recoveryTimer) clearTimeout(recoveryTimer);
+    recoveryTimer = null;
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    opened = null;
+    refresh();
+    return { session: s, viewMode };
+  }
+
+  /** Takes over a session another editor let go of (`detach`), on the view it had there. */
+  export async function adoptSession(handed: { session: FileSession; viewMode: ViewMode }): Promise<void> {
+    await adopt(handed.session, "edit", null);
+    if (previewKind) viewMode = handed.viewMode;
   }
 
   /** Whether closing now would leave unsaved text (or an unfiled note) behind. */
@@ -329,7 +366,7 @@
   /** ⌘⇧V: source → rendered → side by side → source (G8, W3). */
   function cyclePreview(): void {
     if (!previewKind) return;
-    viewMode = viewMode === "source" ? "preview" : viewMode === "preview" ? "split" : "source";
+    viewMode = nextViewMode(viewMode);
   }
 
   /** The source scrolled: the preview follows, unless this is the echo of it following. */
@@ -571,7 +608,7 @@
       <span>{wrap ? "Wrap on" : "Wrap off"} <kbd>⌥Z</kbd></span>
       {#if previewKind}
         <span>
-          {viewMode === "source" ? "Source" : viewMode === "preview" ? "Preview" : "Side by side"}
+          {viewModeLabel(viewMode)}
           <kbd>⌘⇧V</kbd>
         </span>
       {/if}

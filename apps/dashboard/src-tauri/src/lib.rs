@@ -4,6 +4,8 @@ use tauri::Manager;
 mod bootstrap;
 mod commands;
 mod files;
+#[cfg(target_os = "macos")]
+mod menu;
 mod terminal;
 
 /// Initializes `tracing`'s output so `axiomata_core`'s `tracing::info!`/
@@ -56,6 +58,8 @@ pub fn run() {
     init_tracing();
 
     let app = tauri::Builder::default()
+        // Our own menu goes in at setup (`menu`): the default one closes the window on ⌘W.
+        .enable_macos_default_menu(false)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         // Persist the window's size / position / maximized state across
@@ -177,6 +181,8 @@ pub fn run() {
             app.manage(services.scheduler);
             app.manage(terminal::TerminalSessions::default());
             app.manage(files::FileWatch::start(app.handle()));
+            #[cfg(target_os = "macos")]
+            app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())
         })
         // A reload (dev HMR, a crash-reload) leaves the new page with no

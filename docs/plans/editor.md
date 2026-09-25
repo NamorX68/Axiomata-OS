@@ -737,6 +737,36 @@ Lesen ist ein lokaler Aufruf, und ein Cache zeigte eine Datei veraltet, die ein 
 geändert hat. Dass `shell/` den Peek direkt einbindet, ist gewollt — der Editor ist über das
 Datei-Panel ohnehin im Start-Bundle. `headOf` mit 0 Zeilen schnitt ein Zeichen ab — behoben.
 
+**ED4.3 — gebaut (2026-09-25):** Zuerst wie vorgemerkt `FileEditor` verschlankt: ein Zustand
+`opened` (Sitzung, Bild oder nichts) statt zweier Variablen, die Vorschau-Modi als kleine reine
+Funktionen in `fileKinds.ts`. Dann die Tabs: `fileapp/tabs.ts` ist das reine Modell (eine Datei,
+ein Tab; der eine wiederverwendbare Vorschau-Tab; Schließen geht zum rechten, sonst linken
+Nachbarn; Speichern unter `settings.editor.tabs`), `FileTab.svelte` ein `FileEditor` je Tab —
+die hinteren bleiben gemountet und gestapelt (unsichtbar und `inert`, nicht `display: none`, das
+die Scroll-Position verlöre). Tab-Leiste mit Punkt für Ungespeichertes und ×, Vorschau-Tab
+kursiv (Doppelklick oder Bearbeiten macht ihn fest). Tasten in der Capture-Phase: ⌘O, ⌘N (neue
+Notiz als Tab), ⌘W, ⌃Tab/⌃⇧Tab, ⌘1–⌘9; `:q` schließt den Tab. Schließen fragt über
+`UnsavedQuestion.svelte` nach (dieselbe Frage wie im Panel). „Open in the file app“ im Panel
+übergibt die lebende Sitzung (`FileEditor.detach` → `adoptSession`, `handoff.ts`): der Tab hat
+den ungespeicherten Text und die Undo-Geschichte.
+
+**⌘W und das macOS-Menü:** Tauri gibt einer macOS-App ein Standardmenü, dessen File- und
+Window-Menü „Close Window“ auf ⌘W legen — das hätte die eine App-Fenster geschlossen statt eines
+Tabs oder Panels. `src-tauri/src/menu.rs` baut jetzt dasselbe Menü ohne diesen Eintrag (das
+Edit-Menü bleibt, es trägt ⌘C/⌘V in Textfelder; ⌘Q beendet weiter). **Nur in der echten App zu
+prüfen** (Live-Test): ⌘W schließt Tab bzw. Panel und nie das Fenster.
+
+Die Prüfungen von ED4.3: Ein zweites × während einer offenen Schließ-Frage überschrieb die erste,
+deren Frage nie mehr beantwortet wurde (Architektur, MEDIUM) — jetzt wird es ignoriert, solange
+eine Frage steht. Das Speichern der Tabs hing an der Reihenfolge der Effekte (MEDIUM) — jetzt
+wartet es auf einen beobachteten Zustand. Ein Tab ohne gültigen aktiven Nachbarn kam vorn statt
+hinten dazu (Testlücken). Kleinkram: die Liste der Tab-Ansichten räumt auf, eine übergebene
+Sitzung, die kein Tab mehr übernahm, wird geschlossen, ein leeres Help-Menü hält die
+Menü-Suche von macOS. **Vorgemerkt:** ein offener Tab soll einem Umbenennen folgen — der
+Datei-Beobachter kennt kein „umbenannt“, also braucht ED4.4 einen ausdrücklichen Weg vom Baum
+in die Sitzung (`retarget`); und ob Tabs im Hintergrund ihren Highlighter abgeben, entscheidet
+sich vor ED4.5, wenn ⌘P viele Tabs leicht macht.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

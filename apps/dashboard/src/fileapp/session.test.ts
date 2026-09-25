@@ -191,6 +191,19 @@ describe("recovery (F8)", () => {
     expect(backend.recoveries.size).toBe(0);
   });
 
+  it("keeps a persisted draft when the session is then closed (a hand-over to another editor)", async () => {
+    // `FileEditor.detach()`'s hand-over calls `persistRecovery()` then `close()` on a
+    // session another editor is about to adopt; neither step may be the one that drops
+    // the just-kept-aside draft, since it is not being discarded, only moved.
+    const { backend, session } = await opened();
+    typeInto(session, " draft");
+    await session.persistRecovery();
+    expect(backend.recoveries.get("workspace:a.md")?.content).toBe("hello draft\n");
+    await session.close();
+    expect(backend.recoveries.get("workspace:a.md")?.content).toBe("hello draft\n");
+    expect(backend.unwatchCalls).toBe(1);
+  });
+
   it("offers kept text back on the next open, and restores it undoably", async () => {
     const backend = new FakeBackend();
     backend.files.set("workspace:a.md", "hello\n");
