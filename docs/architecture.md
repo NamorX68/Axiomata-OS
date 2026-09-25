@@ -235,8 +235,10 @@ boundaries use their own character classes, not `Intl.Segmenter` (which treats `
 as one word); and `EditorDocument` is a mutable class, so the surface redraws on its own
 `tick` after every `doc.*` call and on the `revision` prop for changes made behind its back.
 Unsaved text is kept in `~/.axiomata/editor-recovery/` (`core::editor_recovery`, at most
-256 entries), preferences in `editor-settings.json` (`core::editor_settings`), recent
-files under `settings.editor.recent` in `dashboard.json`.
+256 entries), preferences in `editor-settings.json` (`core::editor_settings`), what Vi
+remembers (named registers, file marks, histories) in `editor-vi.json` (`core::editor_vi`,
+schema owned by `fileapp/viPersist.ts`), recent files under `settings.editor.recent` in
+`dashboard.json`.
 
 **Syntax (ED2)** lives in `src/editor/syntax/`: tree-sitter via `web-tree-sitter` (the only
 library the engine uses — for a sub-problem, like `vte` for the terminal), grammars built by
@@ -314,6 +316,8 @@ workspace the user currently has configured:
 - `memory-last-sync.json` — the memory router's per-workspace staleness marker.
 - `editor-settings.json` / `editor-recovery/` — the editor's preferences and its kept
   unsaved text (one entry per file, at most 256, swept after 30 days).
+- `editor-vi.json` — Vi's named registers (so macros), file marks `A`–`Z`, command and
+  search histories and last search (0600; a register over 256 KiB is not written).
 - `file-grants.json` — files and folders picked in the file app's open dialog, the only
   places outside a registered root the file service may touch (`axiomata-files`, §3).
 
@@ -1014,14 +1018,15 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **M7.3 CP9 — acting from the diff: done** (2026-09-24): the `file` and `agent-diff` dock
   panes, discard per file and per hunk, commit, take over with prefilled messages. M7.3 is
   complete; next per editor plan D15: ED3 (Vi mode).
-- **Editor ED3 — Vi mode: under way** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
+- **Editor ED3 — Vi mode: done** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
   ED3.1: the Vi machine in `src/editor/vi/` (pure TS, table-tested). ED3.2: wired to every
   editor surface (`fileapp/viKeys`, `viSurface`, `viScroll`, `viShared`), cursor shapes, the
   mode pill, the Mac pasteboard through `axiomata-macos`. ED3.3: search (incsearch, hlsearch,
   `n N * #`) and the ex line (`:w :q :s :set …`), the command line living inside the machine so
   macros and `.` replay it (`vi/cmdline`, `vi/cmdmode`, `vi/search`, `vi/ex`, `vi/substitute`);
-  `ViStatusLine.svelte` in the file app's footer and over diffs. Next: ED3.4 (tree-sitter text
-  objects, `editor-vi.json`).
+  `ViStatusLine.svelte` in the file app's footer and over diffs. ED3.4: tree-sitter text objects
+  `if/af ic/ac ia/aa` from one node-type table across the grammars (`editor/syntax/objects.ts`),
+  and `editor-vi.json` (`core::editor_vi`, `fileapp/viPersist.ts`). Next: ED4.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

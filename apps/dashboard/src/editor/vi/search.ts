@@ -164,7 +164,7 @@ function stepBackward(store: TextStore, re: RegExp, from: Pos): Found | null {
   return null;
 }
 
-/** Matches on lines `first`–`last` for hlsearch, at most `perLine` on each (a one-character pattern on a long line). */
+/** Matches on lines `first`–`last` for hlsearch, at most `perLine` on each (a one-letter pattern, a long line). */
 export function matchesIn(
   store: TextStore,
   re: RegExp,

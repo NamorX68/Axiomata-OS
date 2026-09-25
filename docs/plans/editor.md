@@ -2,8 +2,8 @@
 
 Status: **ED0, ED1 und ED2 fertig** (2026-09-23/24; ED2 wartet auf die Farbabnahme und den
 Live-Test); **M7.3 CP8/CP9 auf dem Editor fertig** (2026-09-25, `git-layer.md`); **ED3 (Vi)
-gegrillt (V1–V12), in Arbeit** — ED3.1 (Automat), ED3.2 (Anbindung) und ED3.3 (Suche, Ex) fertig,
-ED3.4 (tree-sitter-Textobjekte, `editor-vi.json`, Feinschliff) als Nächstes.
+(V1–V12) fertig** (2026-09-25: Automat, Anbindung, Suche/Ex, tree-sitter-Textobjekte und
+`editor-vi.json`); wartet auf den Live-Test. Als Nächstes laut §5: ED4.
 
 ## 1. Idee
 
@@ -596,6 +596,42 @@ wurden. `;` in Bereichen zählt die zweite Adresse von der ersten aus, wie in Vi
 Testlücken-Prüfung fand, dass es wie `,` wirkte). Refactoring: ein gemeinsames `isWordChar`,
 `substituteInLine`, `applySubstitution`, `parseSubstituteCommand`, ein Helfer für Markierungsläufe
 in `EditorSurface`. Gut 50 weitere Testfälle.
+
+**ED3.4 — gebaut (2026-09-25):** `editor/syntax/objects.ts` liefert `if/af` (Funktion), `ic/ac`
+(Klasse, Struct, Impl, Trait, Interface, Enum, Modul) und `ia/aa` (Argument, Parameter,
+Typparameter) aus dem tree-sitter-Baum des Highlighters. Statt einer Abfragedatei je Sprache ist
+es **eine Tabelle von Knotentypen** über alle gebündelten Grammatiken — sie teilen sich die
+meisten Namen (`function_declaration`, `class_declaration`, `arguments` …); eine Sprache, deren
+Typen fehlen, hat das Objekt schlicht nicht. `af` ist der ganze Knoten (ganze Zeilen, wenn er sie
+allein belegt), `if` der Rumpf zwischen den Klammern (ganze Zeilen, wenn die Klammern allein
+stehen) oder der Block/Ausdruck selbst (Python, `x => x + 1`), `aa` nimmt ein trennendes Komma
+mit. Die Oberfläche fragt den Baum erst im Moment der Taste ab (der Highlighter kommt nach ihr).
+Diffs haben keinen Baum und damit keine dieser Objekte.
+
+**`~/.axiomata/editor-vi.json`** (V4): benannte Register `a`–`z` (also Makros), Datei-Marken
+`A`–`Z`, Befehls- und Suchhistorie (je 100) und die letzte Suche — nach dem Muster von
+`editor-settings.json`: Rust (`core::editor_vi`, `get_/save_editor_vi_state`) prüft nur „Objekt mit
+Version“ und schreibt atomar mit 0600, das Frontend (`fileapp/viPersist`) prüft Feld für Feld und
+verwirft nur, was kaputt ist. Ein Register über 256 KiB wird nicht geschrieben. Gelesen wird beim
+ersten Gebrauch von `viShared`, geschrieben eine Sekunde, nachdem die Tasten ruhen — nie bevor
+gelesen wurde. Die letzte Suche kommt ohne Hervorhebung zurück (wie nach `:noh`), `n` findet sie.
+
+Nebenbei gefunden: Visual `vip` (und jetzt `vif`) ließ die letzte Zeile eines zeilenweisen
+Objekts weg — seit ED3.1; behoben.
+
+Die Prüfungen von ED3.4: Swift hängt Parameter ohne Listenknoten direkt an die Funktion, `ia`/`aa`
+griff dort nie (Testlücken-Prüfung) — jetzt zählt ein bloßer `parameter` einer Funktion mit; eine
+Swift-Closure hat kein `body`-Feld, ihr Inneres sind die `statements` (Architektur, MEDIUM). Kam
+ein Speichern vor dem ersten Lesen der Datei, ging die Änderung verloren (MEDIUM) — jetzt wird es
+neu eingeplant, ein gescheitertes Speichern meldet sich als Toast. Sicherheit (LOW, beide
+übernommen): alle Register zusammen höchstens 2 MiB und Historien-Einträge höchstens 4 KiB, damit
+die Datei nie über die 4 MiB wächst, die `json_state` beim Lesen annimmt (sonst würde sie beim
+nächsten Start als kaputt beiseitegelegt); dieselben Grenzen beim Lesen. Eine manipulierte
+Datei-Marke öffnet nur, was der Datei-Dienst ohnehin erlaubt (`axiomata-files`). Die Knotentypen
+sind jetzt für alle Sprachen mit Funktionen getestet (Rust, JS, TS, Python, Lua, Bash, Swift).
+
+**ED3 ist damit fertig.** Offen für den Owner: Live-Test von Vi in der echten App (tote Tasten, die
+Mac-Zwischenablage, `:w`/`:q` in Datei-App und IDE-Pane, Suche in einem Diff).
 
 ## 6. Verifikation (pro Meilenstein)
 

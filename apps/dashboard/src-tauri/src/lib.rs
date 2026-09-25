@@ -81,6 +81,8 @@ pub fn run() {
             commands::save_terminal_settings,
             commands::get_editor_settings,
             commands::save_editor_settings,
+            commands::get_editor_vi_state,
+            commands::save_editor_vi_state,
             commands::list_installed_apps,
             commands::read_workspace_file,
             commands::read_workspace_image,

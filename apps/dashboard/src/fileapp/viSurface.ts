@@ -148,7 +148,7 @@ export class ViSurface {
   }
 
   /** Search matches on lines `first`–`last` to draw (hlsearch), and the one incsearch would go to. */
-  searchHighlights(first: number, last: number): { matches: Map<number, Array<[number, number]>>; current: Range | null } {
+  searchHighlights(first: number, last: number): ReturnType<ViMachine["searchHighlights"]> {
     return this.machine.searchHighlights(first, last);
   }
 

@@ -15,9 +15,11 @@ use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
 use axiomata_core::config::{Config, ProviderId, ProviderSettings};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::editor_settings::{self, LoadedEditorSettings};
+use axiomata_core::editor_vi;
 use axiomata_core::graph::{self, WorkspaceGraph};
 use axiomata_core::ide;
 use axiomata_core::importer;
+use axiomata_core::json_state::LoadedJsonState;
 use axiomata_core::memory::{self, MemoryStatus, SyncReport};
 use axiomata_core::notes;
 use axiomata_core::routines::{self, NewRoutine, Routine, RoutineRun};
@@ -1072,6 +1074,20 @@ pub fn get_editor_settings() -> Result<LoadedEditorSettings, String> {
 #[tauri::command]
 pub fn save_editor_settings(json: String) -> Result<(), String> {
     editor_settings::save_settings(&json).map_err(|err| err.to_string())
+}
+
+/// Reads what Vi remembers across restarts (`editor-vi.json`), or an empty
+/// default. Same contract as [`get_editor_settings`].
+#[tauri::command]
+pub fn get_editor_vi_state() -> Result<LoadedJsonState, String> {
+    editor_vi::load_vi_state().map_err(|err| err.to_string())
+}
+
+/// Validates and atomically writes Vi's remembered state (0600); the core
+/// only checks "object with numeric `version`".
+#[tauri::command]
+pub fn save_editor_vi_state(json: String) -> Result<(), String> {
+    editor_vi::save_vi_state(&json).map_err(|err| err.to_string())
 }
 
 /// One `*.app` bundle found by [`list_installed_apps`]'s scan.

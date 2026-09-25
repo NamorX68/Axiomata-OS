@@ -77,6 +77,12 @@ pub fn editor_settings_path() -> PathBuf {
     axiomata_home().join("editor-settings.json")
 }
 
+/// Path to what Vi remembers across restarts (`~/.axiomata/editor-vi.json`):
+/// named registers, file marks, histories. See `crate::editor_vi`.
+pub fn editor_vi_path() -> PathBuf {
+    axiomata_home().join("editor-vi.json")
+}
+
 /// Directory of the editor's unsaved-work entries (`~/.axiomata/editor-recovery/`),
 /// one JSON file per open file with changes not yet saved. See
 /// `crate::editor_recovery`.

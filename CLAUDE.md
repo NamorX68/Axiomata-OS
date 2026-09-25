@@ -50,10 +50,10 @@ IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on 
 E1–E12) and ED1 (editor core, F1–F13) are done**: `axiomata-files`, root ids + dialog grants, `file_*`
 commands, the watcher, the ring's "Ansicht öffnen" entries; the TS engine in `src/editor/` and the file
 app in `src/fileapp/` (full-screen view, recovery, settings); **ED2** (tree-sitter highlighting, themes,
-effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor are done; **ED3 (Vi, V1–V12)** is under way — ED3.1 (the machine,
-`src/editor/vi/`), ED3.2 (wired to the surfaces, Mac pasteboard via `axiomata-macos::clipboard`) and ED3.3
-(search, the `:` line inside the machine — `vi/cmdmode.ts`) are done, ED3.4 (tree-sitter objects,
-`editor-vi.json`) is next.
+effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor are done, and so is **ED3 (Vi, V1–V12)**: the machine in
+`src/editor/vi/` (the `:` line lives inside it — `vi/cmdmode.ts`), wired to every surface, the Mac pasteboard
+via `axiomata-macos::clipboard`, tree-sitter text objects (`editor/syntax/objects.ts`), and
+`~/.axiomata/editor-vi.json` for registers, file marks and histories. ED4 is next (`docs/plans/editor.md` §5).
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

@@ -31,6 +31,7 @@
 -->
 <script lang="ts">
   import { onMount, tick as nextTick, untrack } from "svelte";
+  import type { Tree } from "web-tree-sitter";
 
   import { commentPrefixFor, copyText, cut, paste, run, type ClipboardText, type Command } from "../editor/commands";
   import { indentGuides, type LineDecoration, type LineDecorations } from "../editor/decorations";
@@ -40,13 +41,14 @@
   import { keyAction, type Effect, type KeyInput } from "../editor/keymap";
   import { pos, range, selectionRange, type Pos, type Range } from "../editor/position";
   import { nextGrapheme, wordAt } from "../editor/text";
+  import { syntaxObject, type SyntaxObjectName } from "../editor/syntax/objects";
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
   import type { ViEffect } from "../editor/vi/machine";
   import { CursorGlide } from "./cursorGlide";
   import { KEEP_SCROLL } from "./keepScroll";
   import type { SurfaceSettings } from "./surfaceSettings";
-  import { viShared } from "./viShared";
+  import { viShared, viStateChanged } from "./viShared";
   import { ViSurface, type ViStatus } from "./viSurface";
   import { scrollTopFor, visibleLines } from "./viScroll";
 
@@ -70,7 +72,11 @@
      * Colours for the lines on screen (ED2, G4) — a `SyntaxHighlighter`, or
      * anything else that can answer the same question. Without one, plain text.
      */
-    highlighter?: { spans(first: number, last: number, options?: { brackets?: boolean }): Map<number, Span[]> } | null;
+    highlighter?: {
+      spans(first: number, last: number, options?: { brackets?: boolean }): Map<number, Span[]>;
+      /** The syntax tree, for Vi's `if`/`ac`/`ia` (V9); a highlighter without one has no such objects. */
+      syntaxTree?(): Tree | null;
+    } | null;
     /** The first logical line on screen, after every scroll (the preview follows it, G8). */
     onTopLine?: (line: number) => void;
     /** Pixel scroll position after every scroll — for a second surface kept in step (H12). */
@@ -218,10 +224,20 @@
       ctx: () => ({ ...ctxNow(), viewport: viewport() }),
       changed,
       effect: viEffect,
-      status: (s) => onViStatus?.(s),
+      status: (s) => {
+        onViStatus?.(s);
+        // After every key: registers, marks and histories may have changed (saved once they settle).
+        viStateChanged();
+      },
       readOnly,
       fileName,
       fileKey,
+      syntaxObjects: (at, name, inner, count) => {
+        // Read at the moment it is asked: the highlighter arrives after the surface, and changes with the file.
+        const tree = highlighter?.syntaxTree?.();
+        if (!tree || !"fca".includes(name)) return null;
+        return syntaxObject(tree.rootNode, doc.store, at, name as SyntaxObjectName, inner, count);
+      },
     });
     vi = attached;
     untrack(() => {
@@ -310,7 +326,9 @@
     const out: MarkRun[] = [];
     for (const r of rows) {
       if (r.sub !== 0 || !r.deco.marks) continue;
-      for (const m of r.deco.marks) pushMarkRuns(out, range(pos(r.line, m.from), pos(r.line, m.to)), m.kind, first, last);
+      for (const m of r.deco.marks) {
+        pushMarkRuns(out, range(pos(r.line, m.from), pos(r.line, m.to)), m.kind, first, last);
+      }
     }
     return out;
   }

@@ -1131,8 +1131,12 @@ export class ViMachine {
         if (!obj) return false;
         if (obj.linewise && this.mode === "visual") this.mode = "visualLine";
         this.visualAnchor = obj.start;
-        const end = obj.linewise ? pos(obj.end.line, 0) : obj.end;
-        const last = comparePos(end, obj.start) > 0 ? prevChar(store, end) : obj.start;
+        // A linewise object's `end` is its last line's end — that line is in; a characterwise one's is exclusive.
+        const last = obj.linewise
+          ? pos(obj.end.line, 0)
+          : comparePos(obj.end, obj.start) > 0
+            ? prevChar(store, obj.end)
+            : obj.start;
         this.setCursorRaw(last);
         return true;
       }

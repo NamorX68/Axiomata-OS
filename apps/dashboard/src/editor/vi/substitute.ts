@@ -40,7 +40,11 @@ export function parseSubstitute(args: string, last: SubstituteSpec | null): Subs
   return withFlags({ pattern, replacement, global: false, caseMode: "smart" }, flags, last);
 }
 
-function withFlags(spec: SubstituteSpec, flags: string, last: SubstituteSpec | null): SubstituteSpec | { error: string } {
+function withFlags(
+  spec: SubstituteSpec,
+  flags: string,
+  last: SubstituteSpec | null,
+): SubstituteSpec | { error: string } {
   let out = { ...spec };
   for (let i = 0; i < flags.length; i++) {
     const f = flags[i];

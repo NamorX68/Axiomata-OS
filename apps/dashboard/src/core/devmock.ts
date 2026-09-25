@@ -629,6 +629,7 @@ function mockGraph(): WorkspaceGraph {
 
 /** `editor-settings.json` in the mock. */
 let editorSettingsJson = '{"version":1}';
+let editorViJson = '{"version":1}';
 
 /** Handlers registered through `listenBackend` in the browser. */
 const mockListeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -976,6 +977,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return { json: editorSettingsJson, recovered_backup: null } as T;
     case "save_editor_settings":
       editorSettingsJson = String(args.json);
+      return undefined as T;
+    case "get_editor_vi_state":
+      return { json: editorViJson, recovered_backup: null } as T;
+    case "save_editor_vi_state":
+      editorViJson = String(args.json);
       return undefined as T;
     case "get_terminal_settings":
       return {

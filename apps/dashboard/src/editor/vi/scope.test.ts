@@ -73,3 +73,25 @@ describe("a read-only view on the command line (V1)", () => {
     expect(m.searchHighlights(0, 1).matches.size).toBe(0);
   });
 });
+
+describe("Visual text objects that are whole lines", () => {
+  it("vip selects every line of the paragraph, the last one included", () => {
+    const { doc, m } = machine("|a\nb\nc\n\nd", new ViShared(null), {});
+    m.feedKeys("vip");
+    expect(m.visualRegion()).toEqual({ kind: "line", first: 0, last: 2 });
+    m.feedKeys("d");
+    expect(show(doc)).toBe("|\nd");
+  });
+
+  it("vif takes a syntax object's last line too", () => {
+    const shared = new ViShared(null);
+    const doc = docFrom("fn f() {\n    |a;\n    b;\n}");
+    const m = new ViMachine(doc, shared, {
+      ctx: () => ({ ...ctx(), viewport: { top: 0, bottom: 9 } }),
+      effect: () => undefined,
+      syntaxObjects: () => ({ start: { line: 1, col: 0 }, end: { line: 2, col: 6 }, linewise: true }),
+    });
+    m.feedKeys("vif");
+    expect(m.visualRegion()).toEqual({ kind: "line", first: 1, last: 2 });
+  });
+});

@@ -13,7 +13,9 @@ const spec = (over: Partial<SubstituteSpec> = {}): SubstituteSpec => ({
 
 describe("parseSubstitute", () => {
   it("reads pattern, replacement and flags with any delimiter", () => {
-    expect(parseSubstitute("/foo/bar/gi", null)).toEqual(spec({ pattern: "foo", replacement: "bar", global: true, caseMode: "ignore" }));
+    expect(parseSubstitute("/foo/bar/gi", null)).toEqual(
+      spec({ pattern: "foo", replacement: "bar", global: true, caseMode: "ignore" }),
+    );
     expect(parseSubstitute("#a/b#c#", null)).toEqual(spec({ pattern: "a/b", replacement: "c" }));
   });
 
@@ -84,7 +86,8 @@ describe("substituteLines", () => {
   });
 
   it("handles empty matches with g without looping", () => {
-    expect(substituteLines(new LineStore("ab"), { first: 0, last: 0 }, spec({ pattern: "x*", replacement: "-", global: true }), "")).toMatchObject({
+    const everyGap = spec({ pattern: "x*", replacement: "-", global: true });
+    expect(substituteLines(new LineStore("ab"), { first: 0, last: 0 }, everyGap, "")).toMatchObject({
       lines: [{ line: 0, text: "-a-b-" }],
     });
   });

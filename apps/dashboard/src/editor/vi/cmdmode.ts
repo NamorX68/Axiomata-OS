@@ -93,7 +93,8 @@ export interface CommandHost {
 /** Whether `cmd` moves by a pattern still to be typed: `/`, `?`, `d/`, `c?` … */
 export function waitsForSearch(cmd: Parsed): "/" | "?" | null {
   const b = cmd.body;
-  const name = b.kind === "motion" ? b.name : b.kind === "operator" && b.target.kind === "motion" ? b.target.name : null;
+  const target = b.kind === "operator" && b.target.kind === "motion" ? b.target.name : null;
+  const name = b.kind === "motion" ? b.name : target;
   return name === "/" || name === "?" ? name : null;
 }
 
@@ -190,7 +191,8 @@ export class CommandMode {
     }
     const re = this.regexFor(line.text);
     const count = this.waiting?.count ?? 1;
-    this.preview = re ? (findMatch(this.host.doc.store, re, this.origin, line.kind === "?", count)?.range ?? null) : null;
+    const found = re ? findMatch(this.host.doc.store, re, this.origin, line.kind === "?", count) : null;
+    this.preview = found?.range ?? null;
   }
 
   /** A compiled pattern, kept while the same pattern is asked for again (every redraw asks). */
