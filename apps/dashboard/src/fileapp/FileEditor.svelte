@@ -43,8 +43,7 @@
   import { DiffModel, textLines } from "../editor/diff/model";
   import type { Indent } from "../editor/detect";
   import type { Effect } from "../editor/keymap";
-  import { SyntaxHighlighter } from "../editor/syntax/highlighter";
-  import { detectLanguage } from "../editor/syntax/languages";
+  import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import { fileBackend } from "./backend";
   import DiffPanes from "./DiffPanes.svelte";
   import { editorFace } from "./editorFace.svelte";
@@ -54,7 +53,7 @@
   import { isImagePath, previewKindFor, startsInPreview, type OpenIntent, type PreviewKind } from "./fileKinds";
   import HtmlPreview from "./HtmlPreview.svelte";
   import ImageView from "./ImageView.svelte";
-  import { grammarRuntime } from "./grammars";
+  import { highlightFor } from "./highlighting";
   import MarkdownPreview from "./MarkdownPreview.svelte";
   import { ScrollLink } from "./scrollLink";
   import { DRAFT_REL, DRAFT_ROOT, FileSession } from "./session";
@@ -280,14 +279,9 @@
    */
   async function attachHighlighter(s: FileSession): Promise<void> {
     if (s.readOnly) return;
-    const id = detectLanguage(s.fileName, s.doc.store.line(0));
-    if (!id) return;
-    const created = await SyntaxHighlighter.create(s.doc, grammarRuntime, id, () => outside++);
-    if (session !== s) {
-      created?.dispose();
-      return;
-    }
-    highlighter = created;
+    const stale = () => session !== s;
+    const created = await highlightFor(s.doc, { fileName: s.fileName, onColours: () => outside++, stale });
+    if (created) highlighter = created;
   }
 
   /** Keeps unsaved text aside and stops watching the file being left. */

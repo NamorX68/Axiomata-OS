@@ -722,6 +722,21 @@ er beim Aufruf gebaut. **Vorgemerkt für den Anfang von ED4.3:** `FileEditor`
 (~720 Zeilen) verschlanken, bevor Tabs viele davon halten — ein Zustand „Sitzung oder Bild“ statt
 zweier Variablen, die Vorschau-Steuerung als eigenes kleines Modul.
 
+**ED4.2 — gebaut (2026-09-25):** `fileapp/FilePeek.svelte` ist der Blick in eine Datei im
+Detailpanel des Second Brain (W5, W15): Markdown gerendert wie in der Vorschau des Editors,
+Code und HTML als schreibgeschützte Editorfläche mit Farben (Umbruch an, absolute Zeilennummern,
+ohne Vi und ohne Effekte), Bilder als Bild — gelesen über den Datei-Dienst, nur die ersten 200
+Zeilen (`headOf` in `fileKinds.ts`), mit einem Hinweis, wenn mehr da ist. Die eigene
+Auszugslogik des Second Brain (`excerpt`/`excerptHtml` in `core/markdown.ts`, ein Cache) ist
+weg; „Open“ öffnet wie bisher das Panel.
+
+Die Prüfungen von ED4.2: Wie ein Highlighter angelegt und bei einem Wechsel verworfen wird, stand
+viermal von Hand da (Architektur, HIGH) — jetzt einmal, `fileapp/highlighting.ts` (`highlightFor`),
+für Editor, Diff, Einstellungs-Vorschau und Peek. Bewusst **ohne Cache** (MEDIUM, abgelehnt): das
+Lesen ist ein lokaler Aufruf, und ein Cache zeigte eine Datei veraltet, die ein Agent gerade
+geändert hat. Dass `shell/` den Peek direkt einbindet, ist gewollt — der Editor ist über das
+Datei-Panel ohnehin im Start-Bundle. `headOf` mit 0 Zeilen schnitt ein Zeichen ab — behoben.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

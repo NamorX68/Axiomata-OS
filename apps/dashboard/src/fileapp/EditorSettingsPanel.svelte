@@ -8,7 +8,7 @@
   import { onDestroy } from "svelte";
 
   import { EditorDocument } from "../editor/document";
-  import { SyntaxHighlighter } from "../editor/syntax/highlighter";
+  import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import EditorSurface from "./EditorSurface.svelte";
   import {
     editorSettings,
@@ -18,7 +18,7 @@
     type EditorSettings,
   } from "./editorSettings";
   import { EDITOR_FONTS, nearestWeight, realWeights, weightName } from "./fonts";
-  import { grammarRuntime } from "./grammars";
+  import { highlightFor } from "./highlighting";
   import type { SurfaceSettings } from "./surfaceSettings";
 
   interface Props {
@@ -45,9 +45,8 @@
   // The preview is coloured like a real TypeScript file, so theme colours show too.
   let highlighter = $state.raw<SyntaxHighlighter | null>(null);
   let destroyed = false;
-  void SyntaxHighlighter.create(preview, grammarRuntime, "typescript").then((h) => {
-    if (destroyed) h?.dispose();
-    else highlighter = h;
+  void highlightFor(preview, { language: "typescript", stale: () => destroyed }).then((h) => {
+    if (h) highlighter = h;
   });
   onDestroy(() => {
     destroyed = true;

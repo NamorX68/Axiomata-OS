@@ -12,9 +12,8 @@
   import { onMount, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
-  import { invokeBackend, type RunSummary, type SearchHit, type WorkspaceFile, type WorkspaceGraph } from "../core/backend";
+  import { invokeBackend, type RunSummary, type SearchHit, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime, untilTime } from "../core/format";
-  import { excerpt, excerptHtml } from "../core/markdown";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel } from "../core/staging";
   import { toast } from "../core/toast";
@@ -29,6 +28,7 @@
     type GraphNode,
     type Grouping,
   } from "../graph/model";
+  import FilePeek from "../fileapp/FilePeek.svelte";
   import Legend from "../graph/Legend.svelte";
   import { GraphRenderer, type RenderMode } from "../graph/render";
 
@@ -72,9 +72,6 @@
   let fileNames = $state(prefs.fileNames === true);
   let helpOpen = $state(prefs.help !== false);
   let areaFilter = $state("");
-  let preview = $state<{ path: string; text: string } | null>(null);
-  let previewState = $state<"idle" | "loading" | "none" | "error">("idle");
-  const previewCache = new Map<string, string>();
 
   /** Full-text hits from the workspace for the current query (debounced). */
   let contentHits = $state<SearchHit[]>([]);
@@ -423,46 +420,6 @@
     prefsReady = true;
   });
 
-  // Content preview for the selected file / hub.
-  $effect(() => {
-    const node = selected;
-    const path = node && (node.kind === "file" || node.kind === "hub") ? node.path : undefined;
-    if (!path) {
-      preview = null;
-      previewState = "idle";
-      return;
-    }
-    const isHtml = /\.html?$/i.test(path);
-    // Preview any text file (notes, HTML, source code, …); only images have
-    // no text to show. A binary that slips through fails the read below and
-    // shows "Preview unavailable."
-    if (/\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif|ico|icns)$/i.test(path)) {
-      preview = null;
-      previewState = "none";
-      return;
-    }
-    const cached = previewCache.get(path);
-    if (cached !== undefined) {
-      preview = { path, text: cached };
-      previewState = "idle";
-      return;
-    }
-    previewState = "loading";
-    void invokeBackend<WorkspaceFile>("read_workspace_file", { rel: path })
-      .then((f) => {
-        const text = isHtml ? excerptHtml(f.content) : excerpt(f.content);
-        previewCache.set(path, text);
-        if (previewCache.size > 50) previewCache.delete(previewCache.keys().next().value!);
-        if (selected?.path === path) {
-          preview = { path, text };
-          previewState = "idle";
-        }
-      })
-      .catch(() => {
-        if (selected?.path === path) previewState = "error";
-      });
-  });
-
   function openFolder() {
     if (!folderOf) return;
     grouping = "folders";
@@ -661,16 +618,10 @@
           <dt>Path</dt><dd class="mono">{selected.path}</dd>
           <dt>Links</dt><dd>{linksOut.length} out · {linksIn.length} in</dd>
         </dl>
-        <div class="preview" class:empty={previewState !== "idle" || !preview}>
-          {#if previewState === "loading"}
-            <span class="dim">Loading preview…</span>
-          {:else if previewState === "none"}
-            <span class="dim">No preview for this file type.</span>
-          {:else if previewState === "error"}
-            <span class="dim">Preview unavailable.</span>
-          {:else if preview}
-            {preview.text || "(empty file)"}
-          {/if}
+        <div class="preview">
+          {#key selected.path}
+            <FilePeek root="workspace" rel={selected.path!} />
+          {/key}
         </div>
         <div class="actions">
           <button type="button" class="primary" onclick={() => viewFile(selected!.path!)}>Open</button>
@@ -1129,23 +1080,14 @@
     cursor: pointer;
   }
 
+  /* W5: the file as the editor shows it — a fixed window onto its start, never the whole panel. */
   .preview {
-    max-height: 190px;
+    height: 260px;
     overflow: hidden;
     margin: 0 0 var(--ax-space-4);
-    padding: var(--ax-space-3) var(--ax-space-4);
     background: var(--ax-surface-2);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-md);
-    font-size: var(--ax-font-size-sm);
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
-    mask-image: linear-gradient(to bottom, #000 78%, transparent);
-  }
-  .preview.empty {
-    mask-image: none;
-    color: var(--ax-text-muted);
   }
   .body {
     margin: 0 0 var(--ax-space-3);

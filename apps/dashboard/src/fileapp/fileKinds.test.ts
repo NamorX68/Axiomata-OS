@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isImagePath, previewKindFor, startsInPreview } from "./fileKinds";
+import { headOf, isImagePath, previewKindFor, startsInPreview } from "./fileKinds";
 
 describe("fileKinds (W1, W3)", () => {
   it("knows raster images, and leaves SVG to the text path", () => {
@@ -44,5 +44,52 @@ describe("fileKinds (W1, W3)", () => {
     expect(previewKindFor("README")).toBeNull();
     expect(previewKindFor("Makefile")).toBeNull();
     expect(isImagePath("README")).toBe(false);
+  });
+});
+
+describe("headOf (W15)", () => {
+  it("keeps a short text whole", () => {
+    expect(headOf("a\nb", 3)).toEqual({ text: "a\nb", cut: false });
+    expect(headOf("", 3)).toEqual({ text: "", cut: false });
+  });
+
+  it("cuts after the last line kept, and says so", () => {
+    expect(headOf("1\n2\n3\n4", 2)).toEqual({ text: "1\n2", cut: true });
+  });
+
+  it("does not call a trailing line break a cut", () => {
+    expect(headOf("1\n2\n", 2)).toEqual({ text: "1\n2", cut: false });
+  });
+
+  it("keeps a text that is exactly maxLines lines, with no trailing newline", () => {
+    expect(headOf("1\n2", 2)).toEqual({ text: "1\n2", cut: false });
+  });
+
+  it("keeps a text that is exactly maxLines lines, with a trailing newline", () => {
+    expect(headOf("1\n2\n", 2)).toEqual({ text: "1\n2", cut: false });
+  });
+
+  it("keeps one line whole when maxLines is 1", () => {
+    expect(headOf("only", 1)).toEqual({ text: "only", cut: false });
+  });
+
+  it("cuts after the first line when maxLines is 1 and more follows", () => {
+    expect(headOf("1\n2\n3", 1)).toEqual({ text: "1", cut: true });
+  });
+
+  it("treats CRLF line endings as ordinary text around the \\n it splits on", () => {
+    // headOf only looks for "\n"; a "\r" immediately before it is kept as part
+    // of the returned text, same as it is part of the source line itself.
+    expect(headOf("1\r\n2\r\n3", 2)).toEqual({ text: "1\r\n2\r", cut: true });
+  });
+
+  it("keeps a very long single line whole when it is under maxLines", () => {
+    const longLine = "x".repeat(10_000);
+    expect(headOf(longLine, 3)).toEqual({ text: longLine, cut: false });
+  });
+
+  it("returns an empty head for maxLines 0, not the text minus its last character", () => {
+    expect(headOf("abc", 0)).toEqual({ text: "", cut: true });
+    expect(headOf("", 0)).toEqual({ text: "", cut: false });
   });
 });

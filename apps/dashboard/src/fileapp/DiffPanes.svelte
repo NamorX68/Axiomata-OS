@@ -27,14 +27,13 @@
     type DiffPane,
     type HunkHeaders,
   } from "../editor/diff/view";
-  import { detectLanguage } from "../editor/syntax/languages";
-  import { SyntaxHighlighter } from "../editor/syntax/highlighter";
+  import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import { editorFace } from "./editorFace.svelte";
   import { editorSettings } from "./editorSettings";
   import EditorSurface from "./EditorSurface.svelte";
   import ViStatusLine from "./ViStatusLine.svelte";
   import type { ViStatus } from "./viSurface";
-  import { grammarRuntime } from "./grammars";
+  import { highlightFor } from "./highlighting";
   import { ScrollLink } from "./scrollLink";
   import { NO_EFFECTS, surfaceSettings } from "./surfaceSettings";
 
@@ -121,22 +120,19 @@
     };
   });
 
-  async function highlighterFor(text: string | null, name: string): Promise<SyntaxHighlighter | null> {
+  async function highlighterFor(text: string | null, name: string, stale: () => boolean) {
     if (text === null) return null;
-    const id = detectLanguage(name, text.split("\n", 1)[0]);
-    if (!id) return null;
     const doc = new EditorDocument(text, { indentFallback: { kind: "spaces", size: 4 } });
-    return SyntaxHighlighter.create(doc, grammarRuntime, id, () => coloured++);
+    return highlightFor(doc, { fileName: name, onColours: () => coloured++, stale });
   }
 
   async function attachSides(texts: { old: string | null; new: string | null }, name: string, mine: number) {
-    const [old, now] = await Promise.all([highlighterFor(texts.old, name), highlighterFor(texts.new, name)]);
-    if (mine !== sideGeneration) {
-      old?.dispose();
-      now?.dispose();
-      return;
-    }
-    sides = { old, new: now, texts };
+    const stale = () => mine !== sideGeneration;
+    const [old, now] = await Promise.all([
+      highlighterFor(texts.old, name, stale),
+      highlighterFor(texts.new, name, stale),
+    ]);
+    if (!stale()) sides = { old, new: now, texts };
   }
 
   function disposeSides(): void {

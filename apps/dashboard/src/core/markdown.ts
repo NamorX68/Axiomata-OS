@@ -162,53 +162,9 @@ export function renderMarkdownBlocks(source: string): string {
   return parts.join("");
 }
 
-/** Plain-text preview of a Markdown note: frontmatter and the first `#`
- *  heading removed, Markdown syntax reduced to text, cut at a word boundary. */
-export function excerpt(source: string, max = 600): string {
-  let text = source.replace(/^\ufeff/, "");
-  text = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
-  text = text.replace(/^\s*#\s+[^\n]*\n/, "");
-  text = text
-    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```\w*\n?/g, "").trim())
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*+]\s+\[[ xX]\]\s*/gm, "• ")
-    .replace(/^\s*[-*+]\s+/gm, "• ")
-    .replace(/^\s*>\s?/gm, "")
-    .replace(/(\*\*|__|\*|_|`)/g, "")
-    .replace(/\|/g, " ")
-    .replace(/^[-:| ]+$/gm, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  return cut(text, max);
-}
-
-/** Plain-text preview of an HTML page: style/script blocks and tags removed,
- *  entities decoded, whitespace collapsed. */
-export function excerptHtml(source: string, max = 600): string {
-  const text = source
-    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<\/(title|p|div|h[1-6]|li|br|tr|section|article)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e: string) =>
-      ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " })[e] ?? "",
-    )
-    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
-    .replace(/[ \t]+/g, " ")
-    .replace(/\s*\n\s*/g, "\n")
-    .replace(/\n{2,}/g, "\n")
-    .trim();
-  // <title> and the page's h1 are usually the same line — keep one.
-  const lines = text.split("\n").filter((line, i, all) => i === 0 || line !== all[i - 1]);
-  return cut(lines.join("\n"), max);
-}
-
-/** Word/line-boundary truncation shared by every plain-text preview in this
- *  module — also used by `core/mail.ts`'s `summaryPreview` (a tile-preview
- *  need, not a document-excerpt one, but the same truncation shape). */
+/** Word/line-boundary truncation for a plain-text preview — `core/mail.ts`'s
+ *  `summaryPreview` (the Second Brain's own excerpts gave way to the editor's
+ *  file peek in ED4.2). */
 export function cut(text: string, max: number): string {
   if (text.length <= max) return text;
   const slice = text.slice(0, max);

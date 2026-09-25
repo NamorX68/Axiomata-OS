@@ -41,3 +41,14 @@ export function previewKindFor(fileName: string): PreviewKind | null {
 export function startsInPreview(kind: PreviewKind | null, intent: OpenIntent): boolean {
   return intent === "read" && (kind === "markdown" || kind === "html");
 }
+
+/** The first `maxLines` lines of `text`, and whether anything was left off (W15: a preview shows the start). */
+export function headOf(text: string, maxLines: number): { text: string; cut: boolean } {
+  if (maxLines <= 0) return { text: "", cut: text.length > 0 };
+  let at = -1;
+  for (let line = 0; line < maxLines; line++) {
+    at = text.indexOf("\n", at + 1);
+    if (at < 0) return { text, cut: false };
+  }
+  return { text: text.slice(0, at), cut: at < text.length - 1 };
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { excerpt, excerptHtml, renderMarkdown, renderMarkdownBlocks } from "./markdown";
+import { cut, renderMarkdown, renderMarkdownBlocks } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("renders task-list items as read-only checkboxes, not text fields", () => {
@@ -67,29 +67,6 @@ describe("renderMarkdown", () => {
   });
 });
 
-describe("excerpt", () => {
-  it("drops frontmatter and the title, flattens syntax, cuts at a word", () => {
-    const e = excerpt("---\ntags: [a]\n---\n# Title\n\nSome **bold** and a [[Wiki Link|alias]] and [x](y.md).\n\n- [ ] task\n- item\n\n```ts\nconst x = 1;\n```\n", 80);
-    expect(e.startsWith("Some bold and a Wiki Link and x.")).toBe(true);
-    expect(e).toContain("• task");
-    expect(e).not.toContain("```");
-    expect(e).not.toContain("# Title");
-  });
-  it("cuts long text at a word boundary with an ellipsis", () => {
-    const e = excerpt("word ".repeat(300), 100);
-    expect(e.endsWith("…")).toBe(true);
-    expect(e.length).toBeLessThanOrEqual(101);
-  });
-});
-
-describe("excerptHtml", () => {
-  it("strips style/script/tags and decodes entities", () => {
-    const e = excerptHtml("<html><head><title>T</title><style>body{}</style></head><body><h1>Variablen &amp; Datentypen</h1><p>let &lt;x&gt;</p><script>alert(1)</script></body></html>");
-    expect(e).toBe("T\nVariablen & Datentypen\nlet <x>");
-    expect(excerptHtml("<title>Same</title><h1>Same</h1><p>body</p>")).toBe("Same\nbody");
-  });
-});
-
 describe("renderMarkdownBlocks", () => {
   it("marks every top-level block with its source line", () => {
     const html = renderMarkdownBlocks("# Title\n\nA paragraph\nwrapped.\n\n- one\n- two\n\n```ts\nconst x = 1;\n```\n");
@@ -110,5 +87,35 @@ describe("renderMarkdownBlocks", () => {
   it("never lets a note forge a line mark of its own", () => {
     const html = renderMarkdownBlocks('Text with <span data-line="999">forged</span> html.');
     expect([...html.matchAll(/data-line="(\d+)"/g)].map((m) => m[1])).toEqual(["0"]);
+  });
+});
+
+describe("cut", () => {
+  it("returns text at or under the limit unchanged", () => {
+    expect(cut("short", 20)).toBe("short");
+    expect(cut("12345", 5)).toBe("12345");
+  });
+
+  it("breaks at the last space before the limit and adds an ellipsis", () => {
+    expect(cut("hello world foo", 9)).toBe("hello wor…");
+  });
+
+  it("breaks at the last newline before the limit, same as a space", () => {
+    expect(cut("hello\nworld foo bar", 9)).toBe("hello\nwor…");
+  });
+
+  it("hard-cuts at the limit when the nearest break is too far back", () => {
+    // No space/newline at all within the slice: falls back to a hard cut.
+    expect(cut("abcdefghijklmnopqrst", 10)).toBe("abcdefghij…");
+  });
+
+  it("hard-cuts when the nearest break is before 60% of the limit", () => {
+    // The only space is at index 2, well under 0.6 * 10 = 6, so it is ignored.
+    expect(cut("hi 12345678901234", 10)).toBe("hi 1234567…");
+  });
+
+  it("trims trailing whitespace left by the break before adding the ellipsis", () => {
+    expect(cut("word ".repeat(40).trim(), 20)).not.toContain("  ");
+    expect(cut("word ".repeat(40).trim(), 20).endsWith("…")).toBe(true);
   });
 });
