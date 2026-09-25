@@ -245,10 +245,40 @@ describe("ViSurface.pasted (Mac paste)", () => {
 describe("ViSurface status and cursor shape (V8)", () => {
   it("mirrors the machine's status and shape", () => {
     const { surface } = setup("|foo");
-    expect(surface.status()).toEqual({ mode: "normal", pending: "", recording: null });
+    expect(surface.status()).toEqual({ mode: "normal", pending: "", recording: null, cmdline: null, message: null });
     expect(surface.cursorShape()).toBe("block");
     surface.typed("i");
     expect(surface.cursorShape()).toBe("bar");
     expect(surface.status().mode).toBe("insert" satisfies ViMode);
+  });
+});
+
+describe("ViSurface on the command line (ED3.3)", () => {
+  it("counts the command line as typing, so text and dead keys go into it", () => {
+    const { surface } = setup("|foo bar");
+    surface.typed("/");
+    expect(surface.typing).toBe(true);
+    expect(surface.deadKey("^")).toBe(false);
+    surface.typed("bä");
+    expect(surface.status().cmdline?.text).toBe("bä");
+  });
+
+  it("sends Enter as <CR> and a paste into the line", () => {
+    const { surface } = setup("|foo bar");
+    surface.typed("/");
+    surface.pasted("ba");
+    expect(surface.keydown({ key: "Enter", meta: false, alt: false, shift: false, ctrl: false })).toEqual({ handled: true });
+    expect(surface.status().cmdline).toBeNull();
+    expect(surface.machine.cursor).toEqual({ line: 0, col: 4 });
+  });
+
+  it("reveals the incsearch match while typing, the cursor otherwise", () => {
+    const { surface } = setup("|foo\nbar");
+    surface.typed("/");
+    surface.typed("bar");
+    expect(surface.revealTarget()).toEqual({ line: 1, col: 0 });
+    expect(surface.searchHighlights(0, 1).current).toEqual({ start: { line: 1, col: 0 }, end: { line: 1, col: 3 } });
+    surface.keydown({ key: "Escape", meta: false, alt: false, shift: false, ctrl: false });
+    expect(surface.revealTarget()).toEqual({ line: 0, col: 0 });
   });
 });

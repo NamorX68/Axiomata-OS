@@ -3,7 +3,7 @@
  * derived from the owner's `EditorSettings` for one particular file.
  */
 
-import type { LineNumberMode } from "../editor/gutter";
+import type { GutterMode } from "../editor/gutter";
 import type { CursorAnimation, EditorSettings } from "./editorSettings";
 import { nearestWeight } from "./fonts";
 
@@ -16,7 +16,9 @@ export interface SurfaceSettings {
   /** Multiple of the font size. */
   lineHeight: number;
   ligatures: boolean;
-  lineNumbers: LineNumberMode;
+  lineNumbers: GutterMode;
+  /** Tabs and trailing spaces shown as `→` and `·` (Vi's `:set list`). */
+  list: boolean;
   /** Soft wrap for this file (F6: on for prose, off for code; ⌥Z flips it). */
   wrap: boolean;
   tabSize: number;
@@ -67,6 +69,7 @@ export function surfaceSettings(settings: EditorSettings, wrap: boolean): Surfac
     lineHeight: settings.lineHeight,
     ligatures: settings.ligatures,
     lineNumbers: settings.lineNumbers,
+    list: false,
     wrap,
     tabSize: settings.tabSize,
     vi: settings.mode === "vi",

@@ -77,5 +77,7 @@ describe("gutter labels", () => {
   it("reserves room for the largest number", () => {
     expect(gutterDigits(9, "absolute")).toBe(2);
     expect(gutterDigits(12345, "hybrid")).toBe(5);
+    expect(gutterDigits(12345, "off")).toBe(0);
+    expect(lineLabel(4, 2, "off")).toBe("");
   });
 });

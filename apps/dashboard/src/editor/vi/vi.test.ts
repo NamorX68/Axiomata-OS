@@ -306,15 +306,15 @@ describe("modes and status", () => {
     expect(effects.filter((e) => e.type === "bell").length).toBeGreaterThan(0);
   });
 
-  it("hands ]c, [c, : and scrolling to the view", () => {
+  it("hands ]c, [c and scrolling to the view; : opens the machine's own command line", () => {
     const { m, effects } = setup("|a\nb");
     m.feedKeys("]c[czz:");
     expect(effects).toEqual([
       { type: "hunk", dir: 1 },
       { type: "hunk", dir: -1 },
       { type: "scroll", line: 0, to: "center" },
-      { type: "commandLine", kind: ":", initial: undefined },
     ]);
+    expect(m.status().cmdline).toEqual({ kind: ":", text: "", cursor: 0, register: false });
   });
 });
 

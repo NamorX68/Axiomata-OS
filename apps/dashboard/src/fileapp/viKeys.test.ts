@@ -92,6 +92,36 @@ describe("viKeyFor (V5, V12)", () => {
     expect(viKeyFor(press("Escape", { ctrl: true }), "normal")).toBeNull();
   });
 
+  it("edits the command line: Escape, Enter, arrows and Tab/S-Tab become its own Vi keys", () => {
+    expect(viKeyFor(press("Escape"), "normal", true)).toEqual({ kind: "key", key: "<Esc>" });
+    expect(viKeyFor(press("Enter"), "normal", true)).toEqual({ kind: "key", key: "<CR>" });
+    expect(viKeyFor(press("ArrowLeft"), "normal", true)).toEqual({ kind: "key", key: "<Left>" });
+    expect(viKeyFor(press("ArrowRight"), "normal", true)).toEqual({ kind: "key", key: "<Right>" });
+    expect(viKeyFor(press("ArrowUp"), "normal", true)).toEqual({ kind: "key", key: "<Up>" });
+    expect(viKeyFor(press("ArrowDown"), "normal", true)).toEqual({ kind: "key", key: "<Down>" });
+    expect(viKeyFor(press("Tab"), "normal", true)).toEqual({ kind: "key", key: "<Tab>" });
+    expect(viKeyFor(press("Tab", { shift: true }), "normal", true)).toEqual({ kind: "key", key: "<S-Tab>" });
+  });
+
+  it("takes ⌥⌫ (delete word) as a Mac command on the command line, like in Insert mode", () => {
+    expect(viKeyFor(press("Backspace", { alt: true }), "normal", true)).toEqual({
+      kind: "key",
+      key: { command: { type: "deleteBackward", unit: "word" } },
+    });
+  });
+
+  it("turns ⌘V into a paste effect on the command line, and leaves other ⌘ shortcuts to it", () => {
+    expect(viKeyFor(press("v", { meta: true }), "normal", true)).toEqual({ kind: "effect", effect: "paste" });
+    // ⌘C is not "paste" and not a Mac editing command either: the command line has no use for it.
+    expect(viKeyFor(press("c", { meta: true }), "normal", true)).toBeNull();
+  });
+
+  it("types characters and Ctrl-r on the command line like it does everywhere else", () => {
+    expect(viKeyFor(press("x"), "normal", true)).toEqual({ kind: "text" });
+    expect(viKeyFor(press("ä"), "normal", true)).toEqual({ kind: "text" });
+    expect(viKeyFor(press("r", { ctrl: true }), "normal", true)).toEqual({ kind: "key", key: "<C-r>" });
+  });
+
   it("⌘A selects the whole file from Visual mode too, dropping into Normal first", () => {
     expect(viKeyFor(press("a", { meta: true }), "visual")).toEqual({ kind: "keys", notation: "<Esc>ggVG" });
     expect(viKeyFor(press("a", { meta: true }), "visualLine")).toEqual({ kind: "keys", notation: "<Esc>ggVG" });

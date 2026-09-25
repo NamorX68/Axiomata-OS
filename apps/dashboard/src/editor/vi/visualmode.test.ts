@@ -108,7 +108,8 @@ describe(": in Visual mode seeds the command line with '<,'>", () => {
   it("opens the command line with the Visual range and leaves Visual mode", () => {
     const { m, effects } = setup("|a\nb\nc");
     m.feedKeys("Vj:");
-    expect(effects).toContainEqual({ type: "commandLine", kind: ":", initial: "'<,'>" });
+    expect(m.status().cmdline?.text).toBe("'<,'>");
     expect(m.status().mode).toBe("normal");
+    expect(effects).toEqual([]);
   });
 });

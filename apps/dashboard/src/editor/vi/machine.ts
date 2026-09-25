@@ -17,8 +17,10 @@
  */
 
 import type { EditorDocument } from "../document";
+import type { SetOption } from "./ex";
 import { comparePos, cursor, pos, range, type Pos } from "../position";
 import { displayColumn, leadingWhitespace, nextGrapheme, prevGrapheme } from "../text";
+import { CommandMode, SearchMemory, waitsForSearch, type CmdlineStatus, type ViMessage } from "./cmdmode";
 import { InsertMode, type InsertHost } from "./insert";
 import { isEscape, keysToText, parseKeys, type ViKey } from "./keys";
 import { isLinewiseMotion, landing, motion, type FindState, type MotionResult, type ViContext } from "./motions";
@@ -68,9 +70,10 @@ export type ViEffect =
   | { type: "save" }
   | { type: "quit"; force: boolean }
   | { type: "saveQuit" }
-  /** Open the command line (`:`), a search (`/` `?`), or repeat `:s` (`&`) — ED3.3. */
-  | { type: "commandLine"; kind: ":" | "/" | "?"; initial?: string }
-  | { type: "repeatSubstitute" }
+  /** `:e!`: the file as it is on disk, dropping the changes. */
+  | { type: "reload" }
+  /** `:set wrap`, `:set nu` … — the view's own options, for this editor only (V6). */
+  | { type: "set"; option: SetOption; value: boolean | "toggle" }
   /** `]c`/`[c` in a diff (H9), `gf` there or on a path. */
   | { type: "hunk"; dir: 1 | -1 }
   | { type: "openFile" }
@@ -91,16 +94,31 @@ export interface ViEnv {
   syntaxObjects?: SyntaxObjects;
 }
 
-/** What all documents' machines share: registers, the last `f`/`t`, file marks, the last macro. */
+/**
+ * What all documents' machines share: registers, the last `f`/`t`, file marks,
+ * the last macro, and the last search, substitution and command lines.
+ */
 export class ViShared {
   readonly registers: Registers;
   lastFind: FindState | null = null;
   readonly fileMarks = new Map<string, { file: string; at: Pos }>();
   lastMacro: string | null = null;
+  readonly search = new SearchMemory();
 
   constructor(clipboard: ClipboardPort | null, shareClipboard = true) {
     this.registers = new Registers(clipboard, shareClipboard);
+    this.registers.readOnly["/"] = () => this.search.last?.pattern ?? "";
+    this.registers.readOnly[":"] = () => this.search.lastEx ?? "";
   }
+}
+
+/** What the mode pill shows (V8): the mode, a half-typed command, a recording, the command line, a message. */
+export interface ViStatus {
+  mode: ViMode;
+  pending: string;
+  recording: string | null;
+  cmdline: CmdlineStatus | null;
+  message: ViMessage | null;
 }
 
 /** A queued key, and whether it is replayed (`.`, a macro) rather than typed. */
@@ -146,6 +164,9 @@ export class ViMachine {
   private oneShot = false;
   private recording: { register: string; keys: ViKey[] } | null = null;
   private readonly insertMode: InsertMode;
+  private readonly commands: CommandMode;
+  /** The last message (`E486: Pattern not found`), shown until the next key. */
+  private message: ViMessage | null = null;
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -154,9 +175,27 @@ export class ViMachine {
     private readonly env: ViEnv,
   ) {
     this.unsubscribe = doc.onTextChange((change) => this.marks.follow(change));
-    shared.registers.readOnly["%"] = () => env.fileName ?? "";
     this.doc.setSelection(cursor(clampNormal(doc.store, doc.selection.head)));
     this.insertMode = new InsertMode(this.insertHost());
+    this.commands = new CommandMode({
+      doc,
+      memory: shared.search,
+      registers: shared.registers,
+      readOnly: () => env.readOnly ?? false,
+      cursor: () => this.cursor,
+      jumpTo: (at) => {
+        this.pushJump(this.cursor);
+        this.setCursor(at);
+      },
+      mark: (name) => this.getMark(name),
+      effect: (e) => env.effect(e),
+      message: (m) => {
+        this.message = m;
+        if (m.error) this.bell();
+      },
+      resume: (cmd) => this.execute(cmd),
+      closed: () => this.afterCommand(),
+    });
   }
 
   /** The seam `InsertMode` uses to reach the mode field, the change being recorded, `<C-o>`, etc. */
@@ -205,7 +244,11 @@ export class ViMachine {
     this.queue.unshift(...keys.map((key) => ({ key, replay: true })));
   }
 
+  /** `"%` for the machine at work: the one `Registers` is shared, the file name is each machine's own. */
+  private readonly fileName = (): string => this.env.fileName ?? "";
+
   private drain(): void {
+    this.shared.registers.readOnly["%"] = this.fileName;
     while (!this.blocked && this.queue.length > 0) {
       const next = this.queue.shift()!;
       if (!next.replay && this.recording) this.recording.keys.push(next.key);
@@ -214,6 +257,11 @@ export class ViMachine {
   }
 
   private step(key: ViKey): void {
+    this.message = null;
+    if (this.commands.active) {
+      this.guard(() => this.commands.key(key), [key]);
+      return;
+    }
     if (this.mode === "insert" || this.mode === "replace") {
       this.guard(() => this.insertMode.key(key), [key]);
       return;
@@ -263,8 +311,29 @@ export class ViMachine {
   }
 
   /** What the mode pill shows (V8). */
-  status(): { mode: ViMode; pending: string; recording: string | null } {
-    return { mode: this.mode, pending: keysToText(this.pending), recording: this.recording?.register ?? null };
+  status(): ViStatus {
+    return {
+      mode: this.mode,
+      pending: keysToText(this.pending),
+      recording: this.recording?.register ?? null,
+      cmdline: this.commands.status(),
+      message: this.message,
+    };
+  }
+
+  /** Whether the command line (`:`, `/`, `?`) is open: typed text goes there. */
+  get inCommandLine(): boolean {
+    return this.commands.active;
+  }
+
+  /** hlsearch and incsearch matches on lines `first`–`last`, for drawing. */
+  searchHighlights(first: number, last: number): ReturnType<CommandMode["highlights"]> {
+    return this.commands.highlights(first, last);
+  }
+
+  /** Where the view should scroll to: an incsearch match while one is showing, else the cursor. */
+  revealTarget(): Pos {
+    return this.commands.revealTarget() ?? this.cursor;
   }
 
   /** The Visual selection, for drawing; `null` outside Visual mode. */
@@ -330,6 +399,13 @@ export class ViMachine {
   }
 
   private execute(cmd: Parsed): void {
+    const search = waitsForSearch(cmd);
+    if (search) {
+      // `/`, `?`, `d/` …: the command runs once its pattern is typed (`CommandMode.resume`).
+      if (this.isChange(cmd) && this.env.readOnly) return this.bell();
+      this.commands.open(search, "", cmd);
+      return;
+    }
     if (this.isVisual()) {
       this.executeVisual(cmd);
       return;
@@ -344,14 +420,20 @@ export class ViMachine {
       if (!this.doc.inUndoGroup) this.doc.beginUndoGroup();
     }
     this.executeNormal(cmd);
+    // `:` opened the command line: Ctrl-o's way back to Insert waits until it closes.
+    if (this.commands.active) return;
     if (this.mode !== "insert" && this.mode !== "replace") {
       if (change) this.finishChange();
       if (this.doc.inUndoGroup) this.doc.endUndoGroup();
-      if (this.oneShot) {
-        this.oneShot = false;
-        this.insertMode.enter(this.cursor, 1, false);
-      }
+      this.afterCommand();
     }
+  }
+
+  /** After a Normal command (or a command line) done from Insert with Ctrl-o: back to Insert. */
+  private afterCommand(): void {
+    if (!this.oneShot || this.mode === "insert" || this.mode === "replace") return;
+    this.oneShot = false;
+    this.insertMode.enter(this.cursor, 1, false);
   }
 
   private finishChange(): void {
@@ -389,6 +471,8 @@ export class ViMachine {
   }
 
   private runMotion(spec: { name: string; char?: string }, count: number | null, from: Pos): MotionResult | null {
+    if (spec.name === "n" || spec.name === "N") return this.commands.searchMotion(spec.name === "N", count, from);
+    if (spec.name === "*" || spec.name === "#") return this.commands.starMotion(spec.name === "#", count, from);
     if (spec.name === "f" || spec.name === "F" || spec.name === "t" || spec.name === "T") {
       if (spec.char) this.shared.lastFind = { kind: spec.name, char: spec.char };
     }
@@ -780,20 +864,16 @@ export class ViMachine {
         this.env.effect({ type: "openFile" });
         return true;
       case "ZZ":
-        this.env.effect({ type: "saveQuit" });
-        return true;
       case "ZQ":
-        this.env.effect({ type: "quit", force: true });
+        // A read-only view (a diff) is left the way it was opened, not with Vi's quit (V1).
+        if (this.env.readOnly) return false;
+        this.env.effect(b.name === "ZZ" ? { type: "saveQuit" } : { type: "quit", force: true });
         return true;
       case ":":
-        this.env.effect({ type: "commandLine", kind: ":", initial: cmd.count ? `.,.+${cmd.count - 1}` : undefined });
-        return true;
-      case "/":
-      case "?":
-        this.env.effect({ type: "commandLine", kind: b.name });
+        this.commands.open(":", cmd.count ? `.,.+${cmd.count - 1}` : "");
         return true;
       case "&":
-        this.env.effect({ type: "repeatSubstitute" });
+        this.commands.repeatSubstitute();
         return true;
       default:
         return false;
@@ -1059,11 +1139,7 @@ export class ViMachine {
       case ":":
         this.exitVisualFor(region);
         this.setCursor(this.cursor);
-        this.env.effect({ type: "commandLine", kind: ":", initial: "'<,'>" });
-        return true;
-      case "/":
-      case "?":
-        this.env.effect({ type: "commandLine", kind: b.name });
+        this.commands.open(":", "'<,'>");
         return true;
       case "zt":
       case "zz":
@@ -1188,7 +1264,8 @@ export class ViMachine {
     const name = register === "@" ? this.shared.lastMacro : register;
     if (!name) return this.bell();
     if (name === ":") {
-      this.env.effect({ type: "commandLine", kind: ":", initial: "@:" });
+      this.shared.lastMacro = ":";
+      for (let i = 0; i < count; i++) this.commands.repeatEx();
       return;
     }
     const content = this.shared.registers.get(name);
@@ -1218,7 +1295,8 @@ export class ViMachine {
       const mark = this.shared.fileMarks.get(name);
       if (!mark) return null;
       if (mark.file === this.env.fileKey) return mark.at;
-      this.env.effect({ type: "fileMark", file: mark.file, at: mark.at });
+      // A read-only view cannot open another file; the motion fails and rings.
+      if (!this.env.readOnly) this.env.effect({ type: "fileMark", file: mark.file, at: mark.at });
       return null;
     }
     return this.marks.get(name);

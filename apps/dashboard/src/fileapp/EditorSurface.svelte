@@ -38,7 +38,7 @@
   import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
   import { gutterDigits, lineLabel } from "../editor/gutter";
   import { keyAction, type Effect, type KeyInput } from "../editor/keymap";
-  import { pos, selectionRange, type Pos } from "../editor/position";
+  import { pos, range, selectionRange, type Pos, type Range } from "../editor/position";
   import { nextGrapheme, wordAt } from "../editor/text";
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
@@ -281,7 +281,8 @@
     const viRanges = vi?.visualRanges(doc, settings.tabSize) ?? null;
     const ranges = viRanges ?? (vi ? [] : [selectionRange(sel)]);
     const runs = ranges.flatMap((r) => selectionRuns(layout, doc.store, r, first, last, settings.tabSize));
-    const marks = markRuns(rows, first, last);
+    const marks = [...markRuns(rows, first, last), ...searchRuns(firstLine, lastLine, first, last)];
+    const whitespace = settings.list ? whitespaceMarks(rows, first, last) : [];
     const caret = cursorCell(layout, doc.store, sel.head, settings.tabSize);
     const shape = vi?.cursorShape() ?? "bar";
     // A block cursor is as wide as the character under it (two cells for a wide one).
@@ -292,18 +293,52 @@
     let widest = 0;
     if (!settings.wrap) for (const r of rows) widest = Math.max(widest, r.text.length);
     const current = { top: layout.firstRow(sel.head.line), rows: layout.rowStarts(sel.head.line).length };
-    return { total, rows, runs, marks, caret, shape, cells, cursorLine: sel.head.line, current, widest };
+    return { total, rows, runs, marks, whitespace, caret, shape, cells, cursorLine: sel.head.line, current, widest };
   });
+
+  type MarkRun = { key: string; row: number; from: number; to: number; kind: string };
+
+  /** Adds the visual runs of `r` on rows `first`–`last` to `out` as marks of `kind`. */
+  function pushMarkRuns(out: MarkRun[], r: Range, kind: string, first: number, last: number): void {
+    for (const run of selectionRuns(layout, doc.store, r, first, last, settings.tabSize)) {
+      out.push({ key: `${run.row}:${run.from}:${kind}`, row: run.row, from: run.from, to: run.to, kind });
+    }
+  }
 
   /** Where the word marks of the lines on screen fall, as runs per visual row. */
   function markRuns(rows: { line: number; sub: number; deco: LineDecoration }[], first: number, last: number) {
-    const out: { key: string; row: number; from: number; to: number; kind: string }[] = [];
+    const out: MarkRun[] = [];
     for (const r of rows) {
       if (r.sub !== 0 || !r.deco.marks) continue;
-      for (const m of r.deco.marks) {
-        const markRange = { start: pos(r.line, m.from), end: pos(r.line, m.to) };
-        for (const run of selectionRuns(layout, doc.store, markRange, first, last, settings.tabSize)) {
-          out.push({ key: `${run.row}:${run.from}:${m.kind}`, row: run.row, from: run.from, to: run.to, kind: m.kind });
+      for (const m of r.deco.marks) pushMarkRuns(out, range(pos(r.line, m.from), pos(r.line, m.to)), m.kind, first, last);
+    }
+    return out;
+  }
+
+  /** Vi's search matches (hlsearch) and the one incsearch would go to, as marks. */
+  function searchRuns(firstLine: number, lastLine: number, first: number, last: number) {
+    const out: MarkRun[] = [];
+    if (!vi) return out;
+    const { matches, current } = vi.searchHighlights(firstLine, lastLine);
+    for (const [line, found] of matches) {
+      for (const [s, e] of found) pushMarkRuns(out, range(pos(line, s), pos(line, e)), "search", first, last);
+    }
+    if (current) pushMarkRuns(out, current, "search-current", first, last);
+    return out;
+  }
+
+  /** `:set list`: a `→` on every tab and a `·` on every space that ends a line. */
+  function whitespaceMarks(rows: { line: number }[], first: number, last: number) {
+    const out: { key: string; row: number; from: number; glyph: string }[] = [];
+    for (const line of new Set(rows.map((r) => r.line))) {
+      const text = doc.store.line(line);
+      const trailing = text.length - (/[ \t]*$/.exec(text)?.[0].length ?? 0);
+      for (let col = 0; col < text.length; col++) {
+        const ch = text[col];
+        if (ch !== "\t" && !(ch === " " && col >= trailing)) continue;
+        const cell = range(pos(line, col), pos(line, col + 1));
+        for (const run of selectionRuns(layout, doc.store, cell, first, last, settings.tabSize)) {
+          out.push({ key: `${run.row}:${run.from}`, row: run.row, from: run.from, glyph: ch === "\t" ? "→" : "·" });
         }
       }
     }
@@ -333,7 +368,9 @@
 
   function revealCursor(): void {
     if (!scroller) return;
-    const { row, cell } = cursorCell(layout, doc.store, doc.selection.head, settings.tabSize);
+    // In Vi, an incsearch match being typed towards is what must be seen.
+    const target = vi?.revealTarget() ?? doc.selection.head;
+    const { row, cell } = cursorCell(layout, doc.store, target, settings.tabSize);
     const y = row * rowH;
     let top = scroller.scrollTop;
     if (y < top) top = y;
@@ -381,7 +418,8 @@
 
   function onKeydown(e: KeyboardEvent): void {
     if (e.isComposing || composing) return;
-    if (interceptKey?.(e)) {
+    // The owner's keys (⏎ opens the file in a diff) wait while Vi takes typed text — a search being typed.
+    if (!vi?.typing && interceptKey?.(e)) {
       e.preventDefault();
       return;
     }
@@ -440,7 +478,8 @@
 
   function onPaste(e: ClipboardEvent): void {
     e.preventDefault();
-    if (readOnly) return;
+    // A read-only surface still takes a paste into Vi's command line (a search).
+    if (readOnly && !vi?.typing) return;
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (!text) return;
     if (vi) {
@@ -725,6 +764,11 @@
             <div class="guide" style:top="{r.row * rowH}px" style:left="{cell * charW}px"></div>
           {/each}
         {/each}
+        {#each view.whitespace as w (w.key)}
+          <div class="ws" style:top="{w.row * rowH}px" style:left="{w.from * charW}px" style:width="{charW}px">
+            {w.glyph}
+          </div>
+        {/each}
         {#each view.runs as run (run.row)}
           <div
             class="selection"
@@ -800,6 +844,8 @@
 <style>
   .surface {
     position: relative;
+    /* The layers inside (gutter, caret, glide) stack here, not over the owner's own overlays. */
+    isolation: isolate;
     width: 100%;
     height: 100%;
     overflow: hidden;
@@ -941,6 +987,25 @@
     height: var(--row);
     pointer-events: none;
     border-radius: var(--ax-radius-sm);
+  }
+
+  /* Vi's search (ED3.3): every match, and the one a search being typed goes to. */
+  .mk-search {
+    background: var(--ax-search-match);
+  }
+
+  .mk-search-current {
+    background: var(--ax-search-current);
+  }
+
+  /* `:set list`: tabs and trailing spaces, faint, under the text's own layer. */
+  .ws {
+    position: absolute;
+    height: var(--row);
+    line-height: var(--row);
+    text-align: center;
+    color: var(--ax-editor-whitespace);
+    pointer-events: none;
   }
 
   .mk-add-word {

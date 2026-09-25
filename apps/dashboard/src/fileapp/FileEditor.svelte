@@ -51,7 +51,10 @@
   import { FileSession } from "./session";
   import { statusParts } from "./status";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
+  import { applySet } from "./viOptions";
+  import ViStatusLine from "./ViStatusLine.svelte";
   import type { ViStatus } from "./viSurface";
+  import type { GutterMode } from "../editor/gutter";
   import type { ViEffect } from "../editor/vi/machine";
 
   interface Props {
@@ -105,6 +108,10 @@
   let surface = $state<EditorSurface | null>(null);
   /** Vi's mode pill (V8); `null` in the normal key map. */
   let viStatus = $state<ViStatus | null>(null);
+  /** `:set nu`/`:set rnu` for this editor (V6); `null` follows the settings. */
+  let numbersOverride = $state<GutterMode | null>(null);
+  /** `:set list`: tabs and trailing spaces shown. */
+  let list = $state(false);
   /** Syntax colours for the open file (ED2); `null` for plain text or a large file. */
   let highlighter = $state.raw<SyntaxHighlighter | null>(null);
   /** Markdown files only (G8): source, the rendered preview, or both side by side. */
@@ -123,6 +130,8 @@
     ...surfaceSettings($editorSettings, wrap),
     fontFamily: face.family,
     fontWeight: face.weight,
+    lineNumbers: numbersOverride ?? $editorSettings.lineNumbers,
+    list,
   });
 
   /** Indentation for a file that shows none (F11). */
@@ -177,6 +186,9 @@
     await leaveCurrent();
     session = next;
     wrap = wrapsByDefault($editorSettings, next.fileName);
+    // Vi's `:set` holds for the file it was typed in, as the wrap toggle does (V6).
+    numbersOverride = null;
+    list = false;
     isMarkdown = detectLanguage(next.fileName, next.doc.store.line(0)) === "markdown";
     mdMode = "source";
     compare = null;
@@ -272,17 +284,16 @@
     } else if (effect.type === "fileMark") {
       const [root, rel] = effect.file.split("\0");
       if (root && rel) void open({ root, rel }, effect.at.line);
+    } else if (effect.type === "reload") {
+      // `:e!` — the `!` is the confirmation the Reload button would ask for.
+      void act((s) => s.discardChanges());
+    } else if (effect.type === "set") {
+      const next = applySet({ wrap, lineNumbers: settings.lineNumbers, list }, effect.option, effect.value);
+      wrap = next.wrap;
+      numbersOverride = next.lineNumbers;
+      list = next.list;
     }
   }
-
-  const VI_LABELS: Record<ViStatus["mode"], string> = {
-    normal: "NORMAL",
-    insert: "INSERT",
-    replace: "REPLACE",
-    visual: "VISUAL",
-    visualLine: "V-LINE",
-    visualBlock: "V-BLOCK",
-  };
 
   function onChange(): void {
     sessionTick++;
@@ -458,11 +469,7 @@
 
   {#if session && status}
     <footer>
-      {#if viStatus}
-        <span class="vi-pill {viStatus.mode}">{VI_LABELS[viStatus.mode]}</span>
-        {#if viStatus.recording}<span class="vi-rec">● REC {viStatus.recording}</span>{/if}
-        {#if viStatus.pending}<span class="vi-pending">{viStatus.pending}</span>{/if}
-      {/if}
+      {#if viStatus}<ViStatusLine status={viStatus} />{/if}
       <span>{status.position}</span>
       <span>{status.eol}</span>
       <span>{status.indent}</span>
@@ -599,38 +606,4 @@
   }
 
   /* Vi's mode pill (V8): one colour per mode, Normal in the accent. */
-  .vi-pill {
-    padding: 0 var(--ax-space-2);
-    border-radius: var(--ax-radius-pill);
-    color: var(--ax-bg);
-    font-family: var(--ax-font-sans);
-    letter-spacing: var(--ax-tracking-wide);
-  }
-
-  .vi-pill.normal {
-    background: var(--ax-vi-normal);
-  }
-
-  .vi-pill.insert {
-    background: var(--ax-vi-insert);
-  }
-
-  .vi-pill.visual,
-  .vi-pill.visualLine,
-  .vi-pill.visualBlock {
-    background: var(--ax-vi-visual);
-  }
-
-  .vi-pill.replace {
-    background: var(--ax-vi-replace);
-  }
-
-  .vi-rec {
-    color: var(--ax-danger);
-  }
-
-  .vi-pending {
-    font-family: var(--ax-font-mono);
-    color: var(--ax-text);
-  }
 </style>

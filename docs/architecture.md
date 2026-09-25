@@ -1017,8 +1017,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **Editor ED3 — Vi mode: under way** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
   ED3.1: the Vi machine in `src/editor/vi/` (pure TS, table-tested). ED3.2: wired to every
   editor surface (`fileapp/viKeys`, `viSurface`, `viScroll`, `viShared`), cursor shapes, the
-  mode pill, the Mac pasteboard through `axiomata-macos`. Next: ED3.3 (search and ex), ED3.4
-  (tree-sitter text objects, `editor-vi.json`).
+  mode pill, the Mac pasteboard through `axiomata-macos`. ED3.3: search (incsearch, hlsearch,
+  `n N * #`) and the ex line (`:w :q :s :set …`), the command line living inside the machine so
+  macros and `.` replay it (`vi/cmdline`, `vi/cmdmode`, `vi/search`, `vi/ex`, `vi/substitute`);
+  `ViStatusLine.svelte` in the file app's footer and over diffs. Next: ED3.4 (tree-sitter text
+  objects, `editor-vi.json`).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

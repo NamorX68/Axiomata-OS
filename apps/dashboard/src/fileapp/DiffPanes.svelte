@@ -32,6 +32,8 @@
   import { editorFace } from "./editorFace.svelte";
   import { editorSettings } from "./editorSettings";
   import EditorSurface from "./EditorSurface.svelte";
+  import ViStatusLine from "./ViStatusLine.svelte";
+  import type { ViStatus } from "./viSurface";
   import { grammarRuntime } from "./grammars";
   import { ScrollLink } from "./scrollLink";
   import { NO_EFFECTS, surfaceSettings } from "./surfaceSettings";
@@ -153,6 +155,8 @@
   let surfaces = $state<(EditorSurface | null)[]>([null, null]);
   /** The pane the cursor was last in — where ⌥↓ and ⏎ act. */
   let active = $state(0);
+  /** Each pane's Vi status (V8), shown in a bar under the active one while Vi is on. */
+  let viStatuses = $state<(ViStatus | null)[]>([null, null]);
   const scrollLink = new ScrollLink();
 
   function onScrollPos(index: number, top: number, left: number): void {
@@ -249,7 +253,11 @@
         onScrollPos={(top, left) => onScrollPos(index, top, left)}
         interceptKey={onKey}
         onViEffect={onViEffect}
+        onViStatus={(s) => (viStatuses[index] = s)}
       />
+      {#if active === index && viStatuses[index]}
+        <div class="vi-bar"><ViStatusLine status={viStatuses[index]!} /></div>
+      {/if}
     </div>
   {/each}
 </div>
@@ -274,5 +282,21 @@
     position: relative;
     min-width: 0;
     min-height: 0;
+  }
+
+  /* No footer of its own here: Vi's status floats over the pane's bottom edge. */
+  .vi-bar {
+    position: absolute;
+    left: var(--ax-space-3);
+    right: var(--ax-space-3);
+    bottom: var(--ax-space-2);
+    display: flex;
+    padding: var(--ax-space-1) var(--ax-space-3);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    pointer-events: none;
   }
 </style>

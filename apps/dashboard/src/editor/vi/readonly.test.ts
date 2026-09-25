@@ -108,16 +108,14 @@ describe("a read-only surface still allows moving, selecting, yanking and search
     expect(show(doc)).toBe("|foo bar");
   });
 
-  it("hands ]c, [c, gf, : and / straight to the view", () => {
+  it("hands ]c, [c and gf straight to the view, and opens the command line", () => {
     const { m, effects } = setup("|a\nb");
-    m.feedKeys("]c[cgf:/");
+    m.feedKeys("]c[cgf");
+    expect(effects).toEqual([{ type: "hunk", dir: 1 }, { type: "hunk", dir: -1 }, { type: "openFile" }]);
+    m.feedKeys(":");
+    expect(m.status().cmdline?.kind).toBe(":");
+    m.feedKeys("<Esc>/b<CR>");
     expect(effects.filter((e) => e.type === "bell")).toEqual([]);
-    expect(effects).toEqual([
-      { type: "hunk", dir: 1 },
-      { type: "hunk", dir: -1 },
-      { type: "openFile" },
-      { type: "commandLine", kind: ":", initial: undefined },
-      { type: "commandLine", kind: "/" },
-    ]);
+    expect(m.cursor).toEqual({ line: 1, col: 0 });
   });
 });

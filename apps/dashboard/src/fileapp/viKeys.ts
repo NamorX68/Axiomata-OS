@@ -10,6 +10,8 @@
  *   Mac clipboard (`"+`); ⌘A selects everything; ⌘/ comments.
  * * **In Insert mode the whole Mac map applies** (V5): ⌥⌫, ⌘←, ⇧→ … are
  *   resolved to commands and handed to the machine, which runs and records them.
+ * * **On the command line** (`:`, `/`, `?`, ED3.3) characters are typed text
+ *   again, special keys edit the line, ⌘V pastes into it.
  */
 
 import { keyAction, type Effect, type KeyInput } from "../editor/keymap";
@@ -71,8 +73,20 @@ function commandKeys(key: string, shift: boolean, mode: ViMode): string | null {
   return null;
 }
 
-/** What a key press means in Vi mode `mode`. */
-export function viKeyFor(input: KeyInput, mode: ViMode): ViKeyDecision {
+/** A key on the command line: text, the line's own editing keys, the Mac's word/line keys, ⌘V. */
+function commandLineKey(input: KeyInput, mac: ReturnType<typeof keyAction>): ViKeyDecision {
+  const { key, meta, alt, shift } = input;
+  if (key === "Escape") return { kind: "key", key: "<Esc>" };
+  if (!meta && !alt && !shift && SPECIAL[key]) return { kind: "key", key: SPECIAL[key] };
+  if (key === "Tab" && !meta && !alt) return { kind: "key", key: shift ? "<S-Tab>" : "<Tab>" };
+  if (mac && "command" in mac) return { kind: "key", key: { command: mac.command } };
+  if (mac && "effect" in mac && mac.effect === "paste") return { kind: "effect", effect: "paste" };
+  if (meta) return null;
+  return key.length === 1 || key === "Dead" ? { kind: "text" } : null;
+}
+
+/** What a key press means in Vi mode `mode`; `cmdline` while the command line is open. */
+export function viKeyFor(input: KeyInput, mode: ViMode, cmdline = false): ViKeyDecision {
   const { key, meta, alt, shift, ctrl } = input;
   const insert = isInsert(mode);
 
@@ -87,6 +101,8 @@ export function viKeyFor(input: KeyInput, mode: ViMode): ViKeyDecision {
   if (mac && "effect" in mac && ["save", "open", "togglePreview", "toggleWrap"].includes(mac.effect)) {
     return { kind: "effect", effect: mac.effect };
   }
+
+  if (cmdline) return commandLineKey(input, mac);
 
   if (insert) {
     if (key === "Escape") return { kind: "key", key: "<Esc>" };

@@ -51,8 +51,9 @@ E1–E12) and ED1 (editor core, F1–F13) are done**: `axiomata-files`, root ids
 commands, the watcher, the ring's "Ansicht öffnen" entries; the TS engine in `src/editor/` and the file
 app in `src/fileapp/` (full-screen view, recovery, settings); **ED2** (tree-sitter highlighting, themes,
 effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor are done; **ED3 (Vi, V1–V12)** is under way — ED3.1 (the machine,
-`src/editor/vi/`) and ED3.2 (wired to the surfaces, Mac pasteboard via `axiomata-macos::clipboard`) are done,
-ED3.3 (search, ex) is next.
+`src/editor/vi/`), ED3.2 (wired to the surfaces, Mac pasteboard via `axiomata-macos::clipboard`) and ED3.3
+(search, the `:` line inside the machine — `vi/cmdmode.ts`) are done, ED3.4 (tree-sitter objects,
+`editor-vi.json`) is next.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

@@ -12,18 +12,13 @@
 import type { KeyInput, Effect } from "../editor/keymap";
 import type { EditorDocument } from "../editor/document";
 import { parseKeys, type ViKey } from "../editor/vi/keys";
-import { ViMachine, type ViEffect, type ViMode, type ViShared, type SyntaxObjects } from "../editor/vi/machine";
+import { ViMachine, type ViEffect, type ViShared, type ViStatus, type SyntaxObjects } from "../editor/vi/machine";
 import type { ViContext } from "../editor/vi/motions";
 import { blockCols } from "../editor/vi/ops";
 import { pos, range, type Pos, type Range } from "../editor/position";
 import { viKeyFor } from "./viKeys";
 
-/** What the mode pill shows (V8). */
-export interface ViStatus {
-  mode: ViMode;
-  pending: string;
-  recording: string | null;
-}
+export type { ViStatus };
 
 export interface ViSurfaceHost {
   ctx(): ViContext;
@@ -65,9 +60,9 @@ export class ViSurface {
     this.machine.dispose();
   }
 
-  /** Insert or Replace mode: typed text is text, and an input method may compose. */
+  /** Insert or Replace mode, or the command line: typed text is text, and an input method may compose. */
   get typing(): boolean {
-    return this.machine.mode === "insert" || this.machine.mode === "replace";
+    return this.machine.mode === "insert" || this.machine.mode === "replace" || this.machine.inCommandLine;
   }
 
   private feed(keys: readonly ViKey[]): void {
@@ -79,7 +74,7 @@ export class ViSurface {
   /** A key press. Characters are left to the textarea (V12) and come back through `typed`. */
   keydown(input: KeyInput): ViKeyResult {
     this.swallowComposition = false;
-    const decision = viKeyFor(input, this.machine.mode);
+    const decision = viKeyFor(input, this.machine.mode, this.machine.inCommandLine);
     if (decision === null || decision.kind === "text") return { handled: false };
     if (decision.kind === "effect") return { handled: true, effect: decision.effect };
     this.feed(decision.kind === "key" ? [decision.key] : parseKeys(decision.notation));
@@ -150,5 +145,15 @@ export class ViSurface {
 
   status(): ViStatus {
     return this.machine.status();
+  }
+
+  /** Search matches on lines `first`–`last` to draw (hlsearch), and the one incsearch would go to. */
+  searchHighlights(first: number, last: number): { matches: Map<number, Array<[number, number]>>; current: Range | null } {
+    return this.machine.searchHighlights(first, last);
+  }
+
+  /** Where the view keeps its eye: an incsearch match while one shows, else the cursor. */
+  revealTarget(): Pos {
+    return this.machine.revealTarget();
   }
 }

@@ -2,8 +2,8 @@
 
 Status: **ED0, ED1 und ED2 fertig** (2026-09-23/24; ED2 wartet auf die Farbabnahme und den
 Live-Test); **M7.3 CP8/CP9 auf dem Editor fertig** (2026-09-25, `git-layer.md`); **ED3 (Vi)
-gegrillt (V1–V12), in Arbeit** — ED3.1 (Automat) und ED3.2 (Anbindung) fertig, ED3.3 (Suche, Ex) als
-Nächstes.
+gegrillt (V1–V12), in Arbeit** — ED3.1 (Automat), ED3.2 (Anbindung) und ED3.3 (Suche, Ex) fertig,
+ED3.4 (tree-sitter-Textobjekte, `editor-vi.json`, Feinschliff) als Nächstes.
 
 ## 1. Idee
 
@@ -557,6 +557,45 @@ jede Änderung selbst (dreifach geprüft). **Vorgemerkt (App-weit, nicht ED3):**
 Tauri-Befehle haben keine ACL — ohne App-Manifest in `build.rs` prüft Tauri sie für lokale
 Aufrufe gar nicht gegen `capabilities/`. Heute erreicht kein Fremdinhalt (srcdoc-iframe,
 DOMPurify-Markdown) die IPC; eine eigene Allow-List wäre Tiefenverteidigung für alle Befehle.
+
+**ED3.3 — gebaut (2026-09-25):** Die Befehlszeile lebt **im Automaten**, nicht in der Ansicht:
+Ihre Tasten laufen durch dieselbe Schlange wie alle anderen, also spielen Makros `:s/a/b/⏎` und
+`.` ein `d/foo⏎` genau nach. `vi/cmdline` ist die eine Zeile (Bearbeiten, ⌥⌫/⌘←, Historie mit
+Präfix-Filter, Tab-Ergänzung, Ctrl-r {Register}); `vi/cmdmode` arbeitet mit ihr hinter einem
+kleinen Host wie `insert.ts`: incsearch (der Treffer, zu dem die Suche ginge, wird gezeigt und
+angesteuert, der Cursor bleibt), hlsearch bis `:noh`, `n N * #` als Bewegungen (auch für
+Operatoren: `dn`, `d/x⏎`, `c?y⏎`), `@:`, `&`. `/` und `?` sind jetzt Bewegungen der Grammatik; der
+wartende Befehl läuft nach ⏎ mit „letzte Suche“ als Ziel weiter. `vi/search`: JavaScript-RegExp
+mit `u`-Flag, `\<` `\>` `\c` `\C`, smartcase, Treffer zeilenweise (ein Muster überspannt keinen
+Zeilenumbruch), wrapscan mit Meldung; ein Escape, das der Unicode-Modus ablehnt (`\=`, `\<` in
+einer Klasse), meint das Zeichen selbst. `vi/ex`: `:w :q :q! :wq :x :e! :{n} :s :& :&& :noh :set`
+mit Bereichen `% . $ n 'm` samt `+n/-n`, Fehlertexte wie Vim (`E486`, `E492` …).
+`vi/substitute`: beliebiger Trenner, Flags `g i I &`, Ersetzung mit `& \0–\9 ~ \r \n \t \u \l \U
+\L \E`, ein Undo-Schritt, Cursor auf die zuletzt entstandene Zeile. Meldungen stehen in der Pille
+bis zur nächsten Taste, Fehler in `--ax-danger` mit Glocke.
+
+Anbindung: `ViStatusLine.svelte` (Pille, Aufnahme, Befehlszeile mit Cursor, Meldung) im Footer
+der Datei-App und als schwebende Leiste über Diffs. `:set wrap nu rnu list` gilt nur für diesen
+Editor und wird nie gespeichert (`fileapp/viOptions`, wie in Vim; die Einstellungen bleiben beim
+Zahnrad); `nonu nornu` blendet die Nummern aus (`GutterMode "off"`), `list` zeigt `→` für Tabs und
+`·` für Leerzeichen am Zeilenende. `:e!` verwirft ungespeicherte Änderungen ohne Rückfrage (das `!`
+ist sie). Suchtreffer über den `.mark`-Mechanismus, Token `--ax-search-match`,
+`--ax-search-current`, `--ax-editor-whitespace` in allen Themes. Während Vi Text tippt (Suche in
+einem Diff), nimmt `interceptKey` dem Editor ⏎ nicht mehr weg; `EditorSurface` ist ein eigener
+Stapelkontext (`isolation`), damit ihre Ebenen nicht über Overlays des Besitzers liegen.
+**Bekannt:** Ein Muster mit katastrophalem Backtracking (`(a+)+$` auf langer Zeile) kann die
+Ansicht beim Tippen einfrieren — JavaScript-RegExp kennt keine Zeitgrenze (Vim hat `redrawtime`).
+
+Die Prüfungen von ED3.3: `"%` hing als eine Funktion am geteilten Registerspeicher, und der zuletzt
+gebaute Automat gewann für alle — zwei Panes nebeneinander setzten den falschen Dateinamen ein
+(Architektur, HIGH); jetzt trägt jeder Automat seinen eigenen ein, bevor er Tasten abarbeitet.
+Schreibgeschützte Flächen schluckten `:q`, `ZZ`/`ZQ`, `:e!`, `:set` und fremde Datei-Marken still
+(MEDIUM) — jetzt „Not available in a read-only view“ mit Glocke. `:set nu`/`list` blieben beim
+Dateiwechsel stehen, `wrap` nicht (LOW) — alle drei gelten jetzt für die Datei, in der sie getippt
+wurden. `;` in Bereichen zählt die zweite Adresse von der ersten aus, wie in Vim (die
+Testlücken-Prüfung fand, dass es wie `,` wirkte). Refactoring: ein gemeinsames `isWordChar`,
+`substituteInLine`, `applySubstitution`, `parseSubstituteCommand`, ein Helfer für Markierungsläufe
+in `EditorSurface`. Gut 50 weitere Testfälle.
 
 ## 6. Verifikation (pro Meilenstein)
 

@@ -35,6 +35,8 @@ const MOTIONS = new Set([
   "h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ", "<C-n>", "<C-p>", "w", "W", "b", "B", "e",
   "E", "ge", "gE", "0", "^", "$", "g_", "|", "gg", "G", "{", "}", "(", ")", "%", ";", ",", "H", "M", "L", "+", "-",
   "_", "<CR>", "<Home>", "<End>", "gj", "gk", "n", "N", "*", "#",
+  // A search: the pattern is typed on the command line before the motion runs (`cmdmode.ts`).
+  "/", "?",
 ]);
 
 /** Motions that take one more character: `f t F T` and the marks `' \``. */
@@ -52,13 +54,13 @@ const NORMAL_COMMANDS = new Set([
   "x", "X", "s", "S", "D", "C", "Y", "p", "P", "gp", "gP", "J", "gJ", "~", "i", "a", "I", "A", "gi", "gI", "o", "O",
   "R", "u", "<C-r>", ".", "v", "V", "<C-v>", "gv", "<C-a>", "<C-x>", "<C-o>", "<C-i>", "<Tab>", "zt", "zz", "zb",
   "z<CR>", "z.", "z-", "<C-e>", "<C-y>", "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>", "]c", "[c",
-  "gf", "ZZ", "ZQ", ":", "/", "?", "@@", "&", "<Esc>", "<C-[>", "<C-c>",
+  "gf", "ZZ", "ZQ", ":", "@@", "&", "<Esc>", "<C-[>", "<C-c>",
 ]);
 
 /** Commands that exist only in Visual mode, or mean something else there. */
 const VISUAL_COMMANDS = new Set([
   "o", "O", "I", "A", "x", "X", "D", "Y", "C", "S", "R", "s", "J", "gJ", "u", "U", "~", "p", "P", "v", "V", "<C-v>",
-  "gv", ":", "<C-a>", "<C-x>", "<Esc>", "<C-[>", "<C-c>", "/", "?", "zt", "zz", "zb", "<C-e>", "<C-y>", "<C-d>",
+  "gv", ":", "<C-a>", "<C-x>", "<Esc>", "<C-[>", "<C-c>", "zt", "zz", "zb", "<C-e>", "<C-y>", "<C-d>",
   "<C-u>", "<C-f>", "<C-b>",
 ]);
 
