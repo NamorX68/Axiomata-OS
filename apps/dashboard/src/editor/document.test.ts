@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { run } from "./commands";
 import { EditorDocument } from "./document";
-import { cursor, pos } from "./position";
+import { cursor, pos, range } from "./position";
 import { ctx, docFrom, show } from "./testing";
 
 function type(doc: EditorDocument, text: string, now: number): void {
@@ -157,5 +157,30 @@ describe("saving and reloading", () => {
     const prose = new EditorDocument("prose", { indentFallback: { kind: "spaces", size: 2 } });
     expect(prose.indent).toEqual({ kind: "spaces", size: 2 });
     expect(prose.indentDetected).toBe(false);
+  });
+});
+
+describe("undo groups (ED3, V5)", () => {
+  it("joins every edit until the group ends into one step, kinds and pauses regardless", () => {
+    const doc = new EditorDocument("abc", { indentFallback: { kind: "spaces", size: 4 } });
+    doc.beginUndoGroup();
+    doc.edit([{ range: range(pos(0, 0), pos(0, 1)), text: "" }], cursor(pos(0, 0)), "other", 0);
+    doc.edit([{ range: range(pos(0, 0), pos(0, 0)), text: "X" }], cursor(pos(0, 1)), "typing", 5000);
+    doc.edit([{ range: range(pos(0, 1), pos(0, 1)), text: "Y" }], cursor(pos(0, 2)), "deleting", 9000);
+    doc.endUndoGroup();
+    expect(doc.store.text()).toBe("XYbc");
+    doc.undo();
+    expect(doc.store.text()).toBe("abc");
+    expect(doc.canUndo).toBe(false);
+  });
+
+  it("starts a new step after the group", () => {
+    const doc = new EditorDocument("", { indentFallback: { kind: "spaces", size: 4 } });
+    doc.beginUndoGroup();
+    doc.edit([{ range: range(pos(0, 0), pos(0, 0)), text: "a" }], cursor(pos(0, 1)), "typing", 0);
+    doc.endUndoGroup();
+    doc.edit([{ range: range(pos(0, 1), pos(0, 1)), text: "b" }], cursor(pos(0, 2)), "typing", 1);
+    doc.undo();
+    expect(doc.store.text()).toBe("a");
   });
 });

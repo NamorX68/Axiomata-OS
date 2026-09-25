@@ -236,9 +236,9 @@ function stepRow(doc: EditorDocument, ctx: CommandContext, dir: -1 | 1, at: RowP
 /**
  * ↑/↓ and Bild↑/↓: walk visual rows, keeping the goal display column the first
  * vertical move set. Past the first or last row the cursor goes to the very
- * start or end of the text.
+ * start or end of the text. Also Vi's `gj`/`gk` (ED3).
  */
-function verticalTarget(doc: EditorDocument, motion: Motion, ctx: CommandContext): Pos {
+export function verticalTarget(doc: EditorDocument, motion: Motion, ctx: CommandContext): Pos {
   const head = doc.selection.head;
   const dir = motion === "up" || motion === "pageUp" ? -1 : 1;
   const steps = motion === "pageUp" || motion === "pageDown" ? Math.max(1, ctx.pageRows) : 1;

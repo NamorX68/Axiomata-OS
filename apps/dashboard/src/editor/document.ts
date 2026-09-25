@@ -96,6 +96,13 @@ export class EditorDocument {
   private savedTop: Step | null = null;
   /** Set when the next step must not merge into the current top. */
   private sealed = true;
+  /**
+   * An open undo group: every edit until `endUndoGroup` joins one step,
+   * whatever its kind and however long it takes. Vi is the first user (ED3,
+   * V5: `cw` plus the typing after it is one change). `null` while none is
+   * open; holds the step once the group's first edit made one.
+   */
+  private group: { step: Step | null } | null = null;
   /** Told about every replacement — edits, undo, redo, reloads alike. */
   private listeners = new Set<(change: TextChange) => void>();
 
@@ -163,19 +170,22 @@ export class EditorDocument {
     }
     this.redoStack = [];
     const top = this.top();
+    const grouped = this.group !== null && this.group.step !== null && top === this.group.step;
     const merges =
-      top !== null &&
-      !this.sealed &&
-      kind !== "other" &&
-      top.kind === kind &&
-      now - top.time <= MERGE_WINDOW_MS &&
-      top !== this.savedTop;
-    if (merges) {
+      grouped ||
+      (top !== null &&
+        !this.sealed &&
+        kind !== "other" &&
+        top.kind === kind &&
+        now - top.time <= MERGE_WINDOW_MS &&
+        top !== this.savedTop);
+    if (merges && top) {
       top.changes.push(...applied);
       top.after = after;
       top.time = now;
     } else {
       this.undoStack.push({ changes: applied, before, after, kind, time: now });
+      if (this.group) this.group.step = this.top();
     }
     this.sealed = kind === "other";
     this.selection = after;
@@ -183,7 +193,27 @@ export class EditorDocument {
     this.revision++;
   }
 
+  /**
+   * Opens an undo group: the edits until {@link endUndoGroup} become one step,
+   * and undoing it returns to the selection before its first edit.
+   */
+  beginUndoGroup(): void {
+    this.group = { step: null };
+    this.sealed = true;
+  }
+
+  endUndoGroup(): void {
+    this.group = null;
+    this.sealed = true;
+  }
+
+  /** Whether an undo group is open. */
+  get inUndoGroup(): boolean {
+    return this.group !== null;
+  }
+
   undo(): boolean {
+    this.group = null;
     const step = this.undoStack.pop();
     if (!step) return false;
     for (const change of [...step.changes].reverse()) {
@@ -195,6 +225,7 @@ export class EditorDocument {
   }
 
   redo(): boolean {
+    this.group = null;
     const step = this.redoStack.pop();
     if (!step) return false;
     for (const change of step.changes) {

@@ -1,7 +1,8 @@
 # Plan: Die Datei-App — ein eigener Editor als Single Point of Truth
 
 Status: **ED0, ED1 und ED2 fertig** (2026-09-23/24; ED2 wartet auf die Farbabnahme und den
-Live-Test). Laut D15 kommt als Nächstes **M7.3 CP8/CP9** auf dem Editor, dann ED3 (Vi).
+Live-Test); **M7.3 CP8/CP9 auf dem Editor fertig** (2026-09-25, `git-layer.md`); **ED3 (Vi)
+gegrillt (V1–V12), in Arbeit.**
 
 ## 1. Idee
 
@@ -462,6 +463,69 @@ Jeder Meilenstein wird vor seinem Start in Checkpoints zerlegt und gegrillt, wie
   - ~~Offene Kleinigkeit für CP8: zwei verschiedene Echo-Sperren beim synchronen Bildlauf~~ —
     mit M7.3 CP8 erledigt: eine gemeinsame `fileapp/scrollLink.ts` für Markdown-Vorschau und
     die Diff-Ansicht nebeneinander (git-layer.md, H12).
+
+### ED3 im Detail (gegrillt 2026-09-25, Q1–Q12, bestätigt; Umsetzung begonnen)
+
+Die Entscheidungen heißen **V** (D bis G und H sind vergeben).
+
+- **V1 — Vi überall, wo der Editor ist** (Q1): Datei-App, Datei-Pane und die schreibgeschützten
+  Flächen (Diff, Compare) — dort nur Bewegen, Visual, Yank, Suche, `]c`/`[c` (nächster/voriger
+  Hunk, H9) und `gf`/⏎ (öffnen).
+- **V2 — Visual-Block als eigene Auswahlart** (Q2) `{anchor, head, block}`: als Rechteck
+  gezeichnet, `d c y r I A > <` zeilenweise in einem Undo-Schritt; `I`/`A` tippen in die erste
+  Zeile und verteilen den Text beim Esc, wie Vim. Echte Mehrfach-Cursor bleiben ED5.
+- **V3 — Mac-Zwischenablage über `pbcopy`/`pbpaste`** (Q3) als eigene Rust-Befehle in
+  `axiomata-macos`, lesen und schreiben — ohne neue Abhängigkeit, ohne Paste-Popup.
+- **V4 — Register und Gedächtnis** (Q4): `"` (= Mac-Zwischenablage, solange geteilt), `"0`–`"9`,
+  `"-`, `"a`–`"z` (Großbuchstabe hängt an), `"_`, `"+`/`"*` (immer Mac), lesbar `". "% ": "/`.
+  Über einen Neustart bleiben benannte Register (damit Makros), Datei-Marken `A`–`Z` und die
+  Such-/Befehlshistorie, in `~/.axiomata/editor-vi.json`.
+- **V5 — Tasten** (Q5): ⌘-Kombinationen behalten ihre Mac-Bedeutung (⌘S ⌘O ⌘C/⌘X/⌘V auf der
+  Visual-Auswahl, ⌘Z/⌘⇧Z = `u`/Ctrl-r, ⌘/, ⌘⇧V); Ctrl gehört Vi (r v d u f b e y o i a x [).
+  Insert-Modus = die ganze Mac-Belegung aus ED1 plus Ctrl-w/u, Ctrl-r {Register},
+  Ctrl-o {Befehl}, Ctrl-t/d. Ein Insert-Durchgang ist ein Undo-Schritt.
+- **V6 — Ex** (Q6): `:w :q` (Pane schließen / Vollbild verlassen) `:wq :x :q! :e! :{n}`,
+  `:s`/`:%s` mit Bereichen `'<,'>` und `n,m` und Flags `g i I`, `:noh`, `:set wrap nu rnu list`;
+  Historie und Tab-Ergänzung. Nicht: `:g`, `:normal`, Flag `c`.
+- **V7 — Suche** (Q7): JavaScript-RegExp plus übersetzte Vim-Atome (`\<` `\>` `\c` `\C`,
+  smartcase), incsearch und hlsearch. Dieselbe Suche trägt später ED5.
+- **V8 — Modus-Pille und Cursor** (Q8): Block in Normal/Visual, Balken in Insert, Unterstrich in
+  Replace; Pille in der Statuszeile mit Aufnahme („● REC q"), angefangener Eingabe und der
+  `:`-Zeile; Token `--ax-vi-normal/insert/visual/replace`, Normal im Akzent-Orange.
+- **V9 — Textobjekte** (Q9): klassisch `w W s p " ' \` ( [ { < t`, dazu über tree-sitter
+  `if/af` (Funktion), `ic/ac` (Klasse/Struct/Impl/Interface), `ia/aa` (Argument/Parameter) —
+  eigene kleine Abfragen pro Sprache, wo es passt.
+- **V10 — Checkpoints** (Q10): **ED3.1** Automat im Kern (`editor/vi/`, Tabellen-Tests) ·
+  **ED3.2** Anbindung (Tasten, Cursor-Formen, Block-Rechteck, Pille, Einstellung frei, Diff/
+  Compare, Zwischenablage) · **ED3.3** Suche und Ex · **ED3.4** tree-sitter-Textobjekte,
+  `editor-vi.json`, Token, Feinschliff. Ein Commit pro Checkpoint.
+- **V11 — `gc` und Surround** (Q11): `gcc`/`gc{Bewegung}`/Visual-`gc` über das vorhandene
+  Kommentieren; `ys{Objekt}{Zeichen}`, `cs`, `ds`, Visual-`S`.
+- **V12 — Tasten als Zeichen** (Q12): Im Normal-Modus liest der Editor Vi-Tasten als Zeichen,
+  nicht als Tastencodes — jedes Layout geht; eine tote Taste (`^` `` ` `` `~` im deutschen
+  Layout) wirkt sofort (Komposition abbrechen, ihr Zeichen nehmen). Insert bleibt wie heute.
+
+**ED3.1 — gebaut (2026-09-25):** `editor/vi/` — `keys` (Tasten als Zeichen, Sondertasten in
+Vim-Notation, getippter Text und aufgelöste Mac-Befehle als eigene Arten), `parse` (Grammatik
+`["x][count]` + Operator/Bewegung/Textobjekt/Befehl, liefert die Tasten ohne Zähler für `.`),
+`motions`, `textobjects`, `ops` (Löschen, Einfügen, Verschieben, Groß/Klein, `=`-Heuristik,
+Verbinden, Kommentieren, Surround, Ctrl-a/x), `registers` (Mac-Zwischenablage als `"`, die ihre
+Textart für eigenes Geschriebenes behält), `marks` (Marken, Sprungliste, folgen dem Text),
+`regions`, `machine` (Modi, Punkt-Wiederholung, Makros, Visual inkl. Block mit `I`/`A`/`c`/`$`,
+Insert/Replace). Eine späte Zwischenablage hält den Befehl an und führt ihn aus, sobald der Text
+da ist; währenddessen getippte Tasten warten in der Schlange. Dazu `EditorDocument` mit
+Undo-Gruppen (ein Insert-Durchgang = ein Schritt). Getestet als Tabelle „Tasten → Text und
+Cursor“ (über 180 Fälle).
+
+Die Prüfungen von ED3.1: Die Maschine war zu groß (Architektur, HIGH) — Insert/Replace liegen
+jetzt in `vi/insert.ts`, die Befehls-Schalter sind nach Themen geteilt. Die Undo-Grenzen stimmten
+nicht (Architektur HIGH, Tests): eine Pfeiltaste im Insert teilte den Schritt nie, und Ctrl-o
+fasste seinen einen Befehl mit dem Getippten davor zusammen — jetzt ist, was vor einer Pfeiltaste
+oder vor Ctrl-o getippt wurde, ein Schritt, der eine Befehl ein eigener. Ein Schreiben in ein
+Nur-lese-Register (`".yiw`) landete still in `"0` — jetzt verweigert. `gj`/`gk` stellen die
+Zielspalte des Dokuments wieder her. Die Testlücken-Prüfung brachte gut 200 weitere Fälle.
+**Vorgemerkt:** `ViKey` bekommt eine Art-Kennung (`{ kind: … }`), sobald eine weitere Tastenart
+dazukommt — heute unterscheiden `typeof`/`"text" in` die drei Arten.
 
 ## 6. Verifikation (pro Meilenstein)
 
