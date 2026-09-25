@@ -389,3 +389,39 @@ describe("a late clipboard while a macro records", () => {
     expect(show(doc)).toBe("aZ\nb|Z");
   });
 });
+
+describe("dispose (ED3.2)", () => {
+  it("closes an undo group an Insert session left open, so a later machine's edit is its own step", () => {
+    const doc = docFrom("|foo");
+    const shared = new ViShared(null);
+    const env = { ctx: () => ({ ...ctx(), viewport: { top: 0, bottom: 9 } }), effect: () => {} };
+    const m1 = new ViMachine(doc, shared, env);
+    // "iX" without an Escape: the Insert session's undo group is never closed by `finish()`.
+    m1.feedKeys("iX");
+    expect(show(doc)).toBe("X|foo");
+    expect(doc.inUndoGroup).toBe(true);
+    m1.dispose();
+    expect(doc.inUndoGroup).toBe(false);
+
+    // A fresh machine on the same document: its own edit must not join the abandoned group.
+    const m2 = new ViMachine(doc, shared, env);
+    m2.feedKeys("x");
+    expect(show(doc)).toBe("X|oo");
+
+    // Undoing the second machine's edit alone leaves the first machine's typing in place.
+    expect(doc.undo()).toBe(true);
+    expect(show(doc)).toBe("X|foo");
+    expect(doc.undo()).toBe(true);
+    expect(show(doc)).toBe("|foo");
+  });
+
+  it("is a no-op when no undo group is open", () => {
+    const doc = docFrom("|foo");
+    const shared = new ViShared(null);
+    const env = { ctx: () => ({ ...ctx(), viewport: { top: 0, bottom: 9 } }), effect: () => {} };
+    const m = new ViMachine(doc, shared, env);
+    expect(doc.inUndoGroup).toBe(false);
+    expect(() => m.dispose()).not.toThrow();
+    expect(doc.inUndoGroup).toBe(false);
+  });
+});

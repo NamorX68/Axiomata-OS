@@ -22,6 +22,8 @@ export interface SurfaceSettings {
   tabSize: number;
   /** The eye candy of D8/G7; the surface switches motion off under "reduce motion". */
   effects: SurfaceEffects;
+  /** Vi's keys instead of the Mac's (ED3). */
+  vi: boolean;
 }
 
 export interface SurfaceEffects {
@@ -67,6 +69,7 @@ export function surfaceSettings(settings: EditorSettings, wrap: boolean): Surfac
     lineNumbers: settings.lineNumbers,
     wrap,
     tabSize: settings.tabSize,
+    vi: settings.mode === "vi",
     effects: {
       cursor: settings.cursorAnimation,
       smoothScroll: settings.smoothScroll,

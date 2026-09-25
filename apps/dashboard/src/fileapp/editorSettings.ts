@@ -21,8 +21,10 @@ export type Autosave = "off" | "delay" | "leave";
 export type CursorAnimation = "off" | "glide" | "trail";
 
 export interface EditorSettings {
-  /** Vi arrives with ED3; until then the setting exists but only "normal" is offered. */
+  /** Mac-style keys, or Vi (ED3). */
   mode: EditorMode;
+  /** Vi's unnamed register is the Mac clipboard, or kept apart from it (D17, V4). */
+  viClipboard: "shared" | "separate";
   fontFamily: string;
   /** The owner's choice, 100–900; drawn with the nearest real face (F13). */
   fontWeight: number;
@@ -57,6 +59,7 @@ export interface EditorSettings {
 /** F12's defaults, confirmed by the owner. */
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   mode: "normal",
+  viClipboard: "shared",
   fontFamily: "JetBrains Mono",
   fontWeight: 400,
   fontSize: 14,
@@ -98,6 +101,7 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
   const d = DEFAULT_EDITOR_SETTINGS;
   return {
     mode: pick(r.mode, ["normal", "vi"] as const, d.mode),
+    viClipboard: pick(r.viClipboard, ["shared", "separate"] as const, d.viClipboard),
     fontFamily: typeof r.fontFamily === "string" && fontFamily(r.fontFamily) ? r.fontFamily : d.fontFamily,
     fontWeight: Math.round(number(r.fontWeight, 100, 900, d.fontWeight) / 100) * 100,
     fontSize: Math.round(number(r.fontSize, 9, 32, d.fontSize)),

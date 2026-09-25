@@ -28,6 +28,7 @@
   import { AGENT_DIFF_PANE, agentDiffOf, FILE_PANE, filePaneConfig } from "../paneKinds";
   import AgentPane from "./AgentPane.svelte";
   import FilePane from "./FilePane.svelte";
+  import { getDock } from "../dockContext";
   import { openFileBeside } from "./openFile";
 
   let {
@@ -65,6 +66,7 @@
   const statuses = agentStatus.statuses;
   const fileConfig = $derived(filePaneConfig(tab));
   const openFile = openFileBeside(() => tab.id);
+  const dock = getDock();
 </script>
 
 <!-- `data-ide-pane` is a signal, not styling: a module that behaves differently
@@ -95,7 +97,7 @@
     {/if}
   {:else if tab.kind === FILE_PANE}
     {#if fileConfig}
-      <FilePane config={fileConfig} {visible} />
+      <FilePane config={fileConfig} {visible} onQuit={() => dock.close(tab.id)} />
     {:else}
       <p class="unknown">This file pane lost its file.</p>
     {/if}

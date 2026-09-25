@@ -182,8 +182,10 @@ export class ViMachine {
     };
   }
 
+  /** Detaches from the document; an Insert session's open undo group is closed, not left behind. */
   dispose(): void {
     this.unsubscribe();
+    if (this.doc.inUndoGroup) this.doc.endUndoGroup();
   }
 
   // ------------------------------------------------------------------ feeding
@@ -278,6 +280,25 @@ export class ViMachine {
 
   get cursor(): Pos {
     return this.doc.selection.head;
+  }
+
+  /**
+   * A click: the cursor goes to `at` (on a character in Normal mode), leaving
+   * Visual mode; a pending command is dropped. Insert mode stays Insert.
+   */
+  placeCursor(at: Pos): void {
+    this.pending = [];
+    if (this.isVisual()) this.mode = "normal";
+    this.setCursor(at);
+  }
+
+  /** A mouse drag from `anchor` to `head`: characterwise Visual mode over it. */
+  selectVisual(anchor: Pos, head: Pos): void {
+    this.pending = [];
+    if (this.mode === "insert" || this.mode === "replace") return;
+    this.visualAnchor = clampNormal(this.store, anchor);
+    if (!this.isVisual()) this.mode = "visual";
+    this.setCursor(head, true);
   }
 
   // ------------------------------------------------------------------ execution

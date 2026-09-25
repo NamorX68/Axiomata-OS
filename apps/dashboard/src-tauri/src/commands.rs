@@ -1977,6 +1977,25 @@ pub async fn ide_agent_base_file(
     .await
 }
 
+/// The Mac pasteboard's text, for the editor's Vi mode (`p`, ED3 V3). Runs
+/// `pbpaste` off the main thread.
+#[tauri::command]
+pub async fn clipboard_read() -> Result<String, String> {
+    tokio::task::spawn_blocking(axiomata_macos::clipboard::read_text)
+        .await
+        .map_err(|err| format!("clipboard task failed: {err}"))?
+        .map_err(|err| err.to_string())
+}
+
+/// Puts `text` on the Mac pasteboard (Vi's `y`, ED3 V3).
+#[tauri::command]
+pub async fn clipboard_write(text: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || axiomata_macos::clipboard::write_text(&text))
+        .await
+        .map_err(|err| format!("clipboard task failed: {err}"))?
+        .map_err(|err| err.to_string())
+}
+
 /// Puts files back to the agent's base (G13). The UI asks first.
 #[tauri::command]
 pub async fn ide_agent_discard(

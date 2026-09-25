@@ -36,6 +36,11 @@ export interface GlideHost {
 export interface GlideStyle {
   trail: boolean;
   glow: boolean;
+  /**
+   * The cursor's shape (Vi, ED3 V8): a bar by default; a block is a cell wide
+   * and see-through, an underline sits at the row's foot.
+   */
+  shape?: { width: number; height: number; alpha: number };
 }
 
 export class CursorGlide {
@@ -116,17 +121,20 @@ export class CursorGlide {
     const dx = host.textLeft - scroller.scrollLeft;
     const dy = -scroller.scrollTop;
     ctx.fillStyle = accent;
+    const shape = this.style.shape ?? { width: CARET_WIDTH_PX, height: host.rowH, alpha: 1 };
+    const foot = host.rowH - shape.height;
     const trail = this.motion.trail;
     trail.forEach((p, i) => {
-      ctx.globalAlpha = ((i + 1) / (trail.length + 1)) * TRAIL_ALPHA;
-      ctx.fillRect(p.x + dx, p.y + dy, CARET_WIDTH_PX, host.rowH);
+      ctx.globalAlpha = ((i + 1) / (trail.length + 1)) * TRAIL_ALPHA * shape.alpha;
+      ctx.fillRect(p.x + dx, p.y + dy + foot, shape.width, shape.height);
     });
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = shape.alpha;
     if (this.style.glow) {
       ctx.shadowColor = styles.getPropertyValue("--ax-editor-glow").trim() || accent;
       ctx.shadowBlur = GLOW_BLUR_PX;
     }
-    ctx.fillRect(this.motion.x + dx, this.motion.y + dy, CARET_WIDTH_PX, host.rowH);
+    ctx.fillRect(this.motion.x + dx, this.motion.y + dy + foot, shape.width, shape.height);
     ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
   }
 }

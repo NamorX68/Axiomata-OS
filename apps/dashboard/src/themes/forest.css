@@ -68,4 +68,8 @@
   --ax-diff-add-word: rgba(127, 208, 122, 0.3);
   --ax-diff-remove-word: rgba(238, 111, 92, 0.3);
   --ax-diff-hunk: rgba(156, 199, 232, 0.08);
+  --ax-vi-normal: var(--ax-accent);
+  --ax-vi-insert: var(--ax-syntax-function);
+  --ax-vi-visual: var(--ax-syntax-keyword);
+  --ax-vi-replace: var(--ax-danger);
 }

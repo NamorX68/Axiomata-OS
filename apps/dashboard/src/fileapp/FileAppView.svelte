@@ -133,6 +133,7 @@
     {showSettings}
     onCloseSettings={() => (showSettings = false)}
     onOpenRequest={() => void openPicked()}
+    onQuit={() => (open = false)}
     onState={(state) => (current = state)}
   >
     {#snippet empty()}

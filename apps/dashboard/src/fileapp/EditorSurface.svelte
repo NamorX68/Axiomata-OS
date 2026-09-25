@@ -20,6 +20,10 @@
     `decorations` prop the gutter shows their labels instead of line numbers, and
     each line can carry a colour, word marks, and a label with buttons on an
     empty line — what the diff view (and later the Git-Gutter) is drawn with.
+  * **Vi mode (ED3) is a `ViSurface`** attached while the settings say so: it
+    takes the keys, typed text and dead keys, and tells the surface the cursor's
+    shape and the Visual selection to draw; scrolling and the bell it asks for
+    are done here, the rest (`:w`, `]c` …) goes to the owner.
   * **`tick` is the one redraw signal.** `EditorDocument` is a plain mutable
     class, not Svelte state, so every `doc.*` call in this file is followed by
     `changed()` (which bumps `tick`); a change the owner makes behind the
@@ -33,14 +37,18 @@
   import type { EditorDocument } from "../editor/document";
   import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
   import { gutterDigits, lineLabel } from "../editor/gutter";
-  import { keyAction, type Effect } from "../editor/keymap";
+  import { keyAction, type Effect, type KeyInput } from "../editor/keymap";
   import { pos, selectionRange, type Pos } from "../editor/position";
-  import { wordAt } from "../editor/text";
+  import { nextGrapheme, wordAt } from "../editor/text";
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
+  import type { ViEffect } from "../editor/vi/machine";
   import { CursorGlide } from "./cursorGlide";
   import { KEEP_SCROLL } from "./keepScroll";
   import type { SurfaceSettings } from "./surfaceSettings";
+  import { viShared } from "./viShared";
+  import { ViSurface, type ViStatus } from "./viSurface";
+  import { scrollTopFor, visibleLines } from "./viScroll";
 
   interface Props {
     doc: EditorDocument;
@@ -73,6 +81,12 @@
     onLineAction?: (line: number, action: string) => void;
     /** Sees every key first; returning `true` means it was handled and the surface ignores it. */
     interceptKey?: (e: KeyboardEvent) => boolean;
+    /** Vi effects the surface cannot carry out itself (`:`, `ZZ`, `]c`, `gf` …). */
+    onViEffect?: (effect: ViEffect) => void;
+    /** Vi's mode, pending keys and recording, after every key (the mode pill, V8). */
+    onViStatus?: (status: ViStatus | null) => void;
+    /** Where the file lives (`root\0rel`), for Vi's file marks. */
+    fileKey?: string;
   }
 
   let {
@@ -90,6 +104,9 @@
     decorations = null,
     onLineAction,
     interceptKey,
+    onViEffect,
+    onViStatus,
+    fileKey,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -144,8 +161,14 @@
       untrack(() => ({ wrap: settings.wrap, width: 80, tabSize: settings.tabSize })),
     ),
   );
+  // Single values, not the `settings` object: it is new on every settings change,
+  // and these effects need only rerun when what they use changed (architecture review, ED3.2).
+  const wrapOn = $derived(settings.wrap);
+  const tabSize = $derived(settings.tabSize);
+  const fontSpec = $derived(`${settings.fontWeight} ${settings.fontSize}px "${settings.fontFamily}"`);
+
   $effect(() => {
-    layout.setOptions({ wrap: settings.wrap, width: wrapCells, tabSize: settings.tabSize });
+    layout.setOptions({ wrap: wrapOn, width: wrapCells, tabSize });
     // `untrack`: reading `tick` here would make this effect re-run itself.
     untrack(() => tick++);
   });
@@ -165,6 +188,70 @@
     pageRows: Math.max(1, Math.floor(viewH / rowH) - 1),
     commentPrefix: commentPrefixFor(fileName),
   });
+
+  // ---------------------------------------------------------------- vi
+
+  /** The Vi machine for this document while Vi mode is on (ED3). */
+  let vi = $state.raw<ViSurface | null>(null);
+  /** A short flash when Vi refuses a key (its bell). */
+  let bell = $state(false);
+  let bellTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** The logical lines on screen, for `H M L` and Vi's scrolling. */
+  function viewport(): { top: number; bottom: number } {
+    return visibleLines(layout, { scrollTop, viewH, rowH });
+  }
+
+  /**
+   * Vi on or off, as its own value: `settings` is a new object on every
+   * settings change (a font size, ⌥Z), and the machine must not be rebuilt —
+   * losing its mode, Visual selection and recording — for any of those.
+   */
+  const viOn = $derived(settings.vi);
+
+  $effect(() => {
+    if (!viOn) {
+      untrack(() => onViStatus?.(null));
+      return;
+    }
+    const attached = new ViSurface(doc, viShared(), {
+      ctx: () => ({ ...ctxNow(), viewport: viewport() }),
+      changed,
+      effect: viEffect,
+      status: (s) => onViStatus?.(s),
+      readOnly,
+      fileName,
+      fileKey,
+    });
+    vi = attached;
+    untrack(() => {
+      tick++;
+      onViStatus?.(attached.status());
+    });
+    return () => {
+      attached.dispose();
+      vi = null;
+    };
+  });
+
+  /** What Vi asks for: scrolling and the bell are the surface's; everything else the owner's. */
+  function viEffect(effect: ViEffect): void {
+    if (effect.type === "bell") {
+      bell = true;
+      clearTimeout(bellTimer);
+      bellTimer = setTimeout(() => (bell = false), 150);
+      return;
+    }
+    if (effect.type === "scrollLines") {
+      if (scroller) scroller.scrollTop += effect.delta * rowH;
+      return;
+    }
+    if (effect.type === "scroll") {
+      if (scroller) scroller.scrollTop = scrollTopFor(layout, { scrollTop, viewH, rowH }, effect.line, effect.to);
+      return;
+    }
+    onViEffect?.(effect);
+  }
 
   const view = $derived.by(() => {
     void tick;
@@ -189,13 +276,23 @@
       deco: decorations?.line(r.line) ?? NO_DECORATION,
     }));
     const sel = doc.selection;
-    const runs = selectionRuns(layout, doc.store, selectionRange(sel), first, last, settings.tabSize);
+    // In Vi mode the selection drawn is the Visual one (inclusive, lines, a block);
+    // otherwise the document's own.
+    const viRanges = vi?.visualRanges(doc, settings.tabSize) ?? null;
+    const ranges = viRanges ?? (vi ? [] : [selectionRange(sel)]);
+    const runs = ranges.flatMap((r) => selectionRuns(layout, doc.store, r, first, last, settings.tabSize));
     const marks = markRuns(rows, first, last);
     const caret = cursorCell(layout, doc.store, sel.head, settings.tabSize);
+    const shape = vi?.cursorShape() ?? "bar";
+    // A block cursor is as wide as the character under it (two cells for a wide one).
+    const lineText = doc.store.line(sel.head.line);
+    const after = pos(sel.head.line, nextGrapheme(lineText, sel.head.col));
+    const next = sel.head.col < lineText.length ? cursorCell(layout, doc.store, after, settings.tabSize) : null;
+    const cells = next && next.row === caret.row ? Math.max(1, next.cell - caret.cell) : 1;
     let widest = 0;
     if (!settings.wrap) for (const r of rows) widest = Math.max(widest, r.text.length);
     const current = { top: layout.firstRow(sel.head.line), rows: layout.rowStarts(sel.head.line).length };
-    return { total, rows, runs, marks, caret, cursorLine: sel.head.line, current, widest };
+    return { total, rows, runs, marks, caret, shape, cells, cursorLine: sel.head.line, current, widest };
   });
 
   /** Where the word marks of the lines on screen fall, as runs per visual row. */
@@ -266,11 +363,21 @@
 
   $effect(() => {
     const target = { x: view.caret.cell * charW, y: view.caret.row * rowH };
-    const style = fx.cursor === "off" ? null : { trail: fx.cursor === "trail", glow: fx.glow };
+    const shape =
+      view.shape === "block"
+        ? { width: view.cells * charW, height: rowH, alpha: 0.45 }
+        : view.shape === "underline"
+          ? { width: view.cells * charW, height: 2, alpha: 1 }
+          : undefined;
+    const style = fx.cursor === "off" ? null : { trail: fx.cursor === "trail", glow: fx.glow, shape };
     untrack(() => glide.moveTo(target, style));
   });
 
   // ---------------------------------------------------------------- keyboard
+
+  function keyInputFrom(e: KeyboardEvent): KeyInput {
+    return { key: e.key, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey, ctrl: e.ctrlKey, keyCode: e.keyCode };
+  }
 
   function onKeydown(e: KeyboardEvent): void {
     if (e.isComposing || composing) return;
@@ -278,14 +385,17 @@
       e.preventDefault();
       return;
     }
-    const action = keyAction({
-      key: e.key,
-      meta: e.metaKey,
-      alt: e.altKey,
-      shift: e.shiftKey,
-      ctrl: e.ctrlKey,
-      keyCode: e.keyCode,
-    });
+    if (vi) {
+      const result = vi.keydown(keyInputFrom(e));
+      if (!result.handled) return;
+      // The Mac's copy/cut/paste in Insert mode go through the native events below.
+      const native = "effect" in result && ["copy", "cut", "paste"].includes(result.effect);
+      if (native) return;
+      e.preventDefault();
+      if ("effect" in result) onEffect?.(result.effect);
+      return;
+    }
+    const action = keyAction(keyInputFrom(e));
     if (!action) return;
     if ("command" in action) {
       e.preventDefault();
@@ -312,6 +422,8 @@
 
   function onCopy(e: ClipboardEvent): void {
     e.preventDefault();
+    // Outside Insert mode ⌘C is a yank (`"+y`) and never reaches here; in Insert it copies as on a Mac (V5).
+    if (vi && !vi.typing) return;
     lastClip = copyText(doc);
     e.clipboardData?.setData("text/plain", lastClip.text);
     input.value = "";
@@ -319,7 +431,7 @@
 
   function onCut(e: ClipboardEvent): void {
     e.preventDefault();
-    if (readOnly) return;
+    if (readOnly || (vi && !vi.typing)) return;
     lastClip = cut(doc, ctxNow());
     e.clipboardData?.setData("text/plain", lastClip.text);
     input.value = "";
@@ -331,6 +443,10 @@
     if (readOnly) return;
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (!text) return;
+    if (vi) {
+      vi.pasted(text);
+      return;
+    }
     const wholeLine = lastClip !== null && lastClip.wholeLine && lastClip.text === text;
     paste(doc, { text, wholeLine }, ctxNow());
     changed();
@@ -350,11 +466,26 @@
     commitInput();
   }
 
-  /** Inserts whatever the textarea holds and empties it. */
+  /** Inserts whatever the textarea holds and empties it (in Vi mode: keys, or Insert-mode text). */
   function commitInput(): void {
     const text = input.value;
     input.value = "";
-    if (text) exec({ type: "insert", text });
+    if (!text) return;
+    if (vi) vi.typed(text);
+    else exec({ type: "insert", text });
+  }
+
+  /**
+   * A composition began: in Vi's Normal and Visual modes a dead key (`^`, `\``
+   * on a German keyboard) is a command, taken at once and the composition
+   * cancelled (V12); in Insert mode it composes as usual.
+   */
+  function onCompositionUpdate(e: CompositionEvent): void {
+    if (!vi || !vi.deadKey(e.data)) return;
+    composing = false;
+    input.value = "";
+    input.blur();
+    input.focus();
   }
 
   /** Leaving mid-composition drops the unfinished marked text (a lone dead key). */
@@ -396,6 +527,7 @@
     input.focus();
     const unit = e.detail >= 3 ? lineRange : e.detail === 2 ? wordRange : null;
     const start = posAt(e);
+    if (vi) return viMousedown(start);
     const origin = unit ? unit(start) : { start, end: start };
     if (e.shiftKey && !unit) doc.setSelection({ anchor: doc.selection.anchor, head: start });
     else doc.setSelection({ anchor: origin.start, head: origin.end });
@@ -406,6 +538,26 @@
       const hit = unit ? unit(at) : { start: at, end: at };
       const forward = at.line > origin.start.line || (at.line === origin.start.line && at.col >= origin.start.col);
       doc.setSelection(forward ? { anchor: origin.start, head: hit.end } : { anchor: origin.end, head: hit.start });
+      changed();
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /** Vi mode: a click puts the cursor there; a drag selects in Visual mode. */
+  function viMousedown(start: Pos): void {
+    vi?.placeCursor(start);
+    changed();
+    let dragged = false;
+    const onMove = (ev: MouseEvent) => {
+      const at = posAt(ev);
+      if (!dragged && at.line === start.line && at.col === start.col) return;
+      dragged = true;
+      vi?.selectVisual(start, at);
       changed();
     };
     const onUp = () => {
@@ -436,9 +588,8 @@
 
   // Re-measure whenever the font changes, once the face has loaded.
   $effect(() => {
-    const font = `${settings.fontWeight} ${settings.fontSize}px "${settings.fontFamily}"`;
     void document.fonts
-      .load(font)
+      .load(fontSpec)
       .catch(() => [])
       .then(() => {
         measure();
@@ -503,6 +654,7 @@
 
 <div
   class="surface"
+  class:bell
   class:focused
   class:glow={fx.glow}
   bind:this={surfaceEl}
@@ -608,12 +760,15 @@
         {/each}
         {#key tick}
           <div
-            class="caret"
+            class="caret {view.shape}"
             class:hidden={!focused || composing || gliding}
             style:top="{view.caret.row * rowH}px"
             style:left="{view.caret.cell * charW}px"
+            style:--cells={view.cells}
           ></div>
         {/key}
+        <!-- In Vi mode a read-only surface still takes typed keys (`j`, `]c`) through the
+             textarea (V12); the machine refuses every change there itself. -->
         <textarea
           class="input"
           class:composing
@@ -624,10 +779,11 @@
           autocapitalize="off"
           autocomplete="off"
           aria-label="Editor"
-          readonly={readOnly}
+          readonly={readOnly && !vi}
           onkeydown={onKeydown}
           oninput={onInput}
           oncompositionstart={() => (composing = true)}
+          oncompositionupdate={onCompositionUpdate}
           oncompositionend={onCompositionEnd}
           oncopy={onCopy}
           oncut={onCut}
@@ -892,6 +1048,23 @@
 
   .caret.hidden {
     display: none;
+  }
+
+  /* Vi's cursors (V8): a see-through block over the character, an underline in Replace. */
+  .caret.block {
+    width: calc(var(--cells, 1) * var(--cell));
+    opacity: 0.45;
+  }
+
+  .caret.underline {
+    width: calc(var(--cells, 1) * var(--cell));
+    height: 2px;
+    margin-top: calc(var(--row) - 2px);
+  }
+
+  /* Vi's bell: a brief outline instead of a sound. */
+  .surface.bell {
+    box-shadow: inset 0 0 0 1px var(--ax-accent);
   }
 
   @keyframes blink {

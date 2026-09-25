@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "axiomata-core",
  "axiomata-files",
+ "axiomata-macos",
  "axiomata-terminal",
  "home",
  "rusqlite",
@@ -405,6 +406,9 @@ dependencies = [
 [[package]]
 name = "axiomata-macos"
 version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "axiomata-terminal"

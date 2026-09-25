@@ -34,6 +34,18 @@ describe("parseEditorSettings", () => {
   it("refuses a font that is not bundled", () => {
     expect(parseEditorSettings({ fontFamily: "Comic Sans MS" }).fontFamily).toBe("JetBrains Mono");
   });
+
+  it("defaults viClipboard to 'shared' (D17) and keeps a good value", () => {
+    expect(parseEditorSettings({}).viClipboard).toBe("shared");
+    expect(parseEditorSettings({ viClipboard: "separate" }).viClipboard).toBe("separate");
+    expect(parseEditorSettings({ viClipboard: "shared" }).viClipboard).toBe("shared");
+  });
+
+  it("falls back to 'shared' for an unknown viClipboard value", () => {
+    expect(parseEditorSettings({ viClipboard: "nonsense" }).viClipboard).toBe("shared");
+    expect(parseEditorSettings({ viClipboard: null }).viClipboard).toBe("shared");
+    expect(parseEditorSettings({ viClipboard: 1 }).viClipboard).toBe("shared");
+  });
 });
 
 describe("font weights (F13)", () => {

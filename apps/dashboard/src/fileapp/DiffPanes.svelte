@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
   import { EditorDocument } from "../editor/document";
+  import type { ViEffect } from "../editor/vi/machine";
   import { pos } from "../editor/position";
   import { DiffHighlight } from "../editor/diff/highlight";
   import { UNFOLD_STEP, type DiffModel } from "../editor/diff/model";
@@ -193,6 +194,15 @@
     return pane ? changedLineNear(pane, cursorLine()) : null;
   }
 
+  /** Vi in a diff (V1): `]c`/`[c` go from hunk to hunk (H9), `gf` opens the changed file. */
+  function onViEffect(effect: ViEffect): void {
+    if (effect.type === "hunk") goToHunk(effect.dir);
+    else if (effect.type === "openFile") {
+      const line = openLine();
+      if (line !== null) onOpen?.(line);
+    }
+  }
+
   function onKey(e: KeyboardEvent): boolean {
     if (e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       goToHunk(e.key === "ArrowDown" ? 1 : -1);
@@ -238,6 +248,7 @@
         onLineAction={(_line, action) => onLineAction(action)}
         onScrollPos={(top, left) => onScrollPos(index, top, left)}
         interceptKey={onKey}
+        onViEffect={onViEffect}
       />
     </div>
   {/each}

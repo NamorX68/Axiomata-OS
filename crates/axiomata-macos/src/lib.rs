@@ -1,14 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! What Axiomata needs from macOS itself, without an extra dependency.
+//!
+//! Today the general pasteboard for the editor's Vi mode (`docs/plans/editor.md`,
+//! ED3, V3): `p` pastes what was last copied anywhere, `y` copies for every other
+//! app — which the webview cannot do on its own without a paste event, and
+//! `navigator.clipboard` would show a "Paste" confirmation on every read. The
+//! system's own `pbcopy`/`pbpaste` do it, as subprocesses, text only.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod clipboard;

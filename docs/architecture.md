@@ -67,7 +67,7 @@ Axiomata-OS/
   Cargo.toml                     # workspace manifest; shared deps under [workspace.dependencies]
   crates/
     axiomata-core/                # the actual "OS" engine — no Tauri or macOS dependency
-    axiomata-macos/                # boundary for future macOS-specific integration (stub)
+    axiomata-macos/                # macOS integration boundary; today only the pasteboard (pbcopy/pbpaste)
     axiomata-cli/                   # headless binary that exercises axiomata-core end to end
     axiomata-terminal/              # standalone PTY + VT100 engine for the Terminal module
     axiomata-board/                 # standalone Kanban core (M7.0), ships migration 8
@@ -112,10 +112,12 @@ milestone plan (see §7).
 
 ### `axiomata-macos`
 
-A boundary crate reserved for future macOS-specific integration beyond what MCP servers
-(Apple Mail / Reminders / Calendar, used today via opencode's own MCP tool-calling — see
-§5 "Connector modules") already cover. Currently an untouched template stub with no
-Axiomata-specific code.
+A boundary crate for macOS-specific integration beyond what MCP servers (Apple Mail /
+Reminders / Calendar, used today via opencode's own MCP tool-calling — see §5 "Connector
+modules") already cover. Its one module so far is `clipboard` (editor ED3.2, V3): the
+general pasteboard as text through `/usr/bin/pbpaste` and `/usr/bin/pbcopy` (absolute paths,
+`LC_CTYPE=UTF-8`, 16 MiB each way, killed after a 5 s deadline), behind the
+`clipboard_read`/`clipboard_write` Tauri commands that Vi's `"`/`"+` registers use.
 
 ### `axiomata-terminal`
 
@@ -936,9 +938,9 @@ heading, else the agent's last commit subject (H10). Discarding several files co
 
 ### `axiomata-macos`
 
-Reserved as an integration boundary for macOS-specific features beyond what MCP servers
-already cover (§5's connector modules currently reach Apple Mail/Calendar/Reminders that
-way). No design or implementation exists yet beyond the empty crate scaffold.
+The integration boundary for macOS-specific features beyond what MCP servers already cover
+(§5's connector modules reach Apple Mail/Calendar/Reminders that way). So far only the
+pasteboard (`clipboard`, §3), for the editor's Vi registers.
 
 ## 7. Milestone status
 
@@ -1012,6 +1014,11 @@ way). No design or implementation exists yet beyond the empty crate scaffold.
 - **M7.3 CP9 — acting from the diff: done** (2026-09-24): the `file` and `agent-diff` dock
   panes, discard per file and per hunk, commit, take over with prefilled messages. M7.3 is
   complete; next per editor plan D15: ED3 (Vi mode).
+- **Editor ED3 — Vi mode: under way** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
+  ED3.1: the Vi machine in `src/editor/vi/` (pure TS, table-tested). ED3.2: wired to every
+  editor surface (`fileapp/viKeys`, `viSurface`, `viScroll`, `viShared`), cursor shapes, the
+  mode pill, the Mac pasteboard through `axiomata-macos`. Next: ED3.3 (search and ex), ED3.4
+  (tree-sitter text objects, `editor-vi.json`).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

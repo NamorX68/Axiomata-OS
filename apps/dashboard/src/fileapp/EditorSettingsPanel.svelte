@@ -99,11 +99,27 @@
   <div class="fields">
     <label>
       <span>Keys</span>
-      <select value={s.mode} onchange={(e) => updateEditorSettings({ mode: e.currentTarget.value as "normal" })}>
+      <select
+        value={s.mode}
+        onchange={(e) => updateEditorSettings({ mode: e.currentTarget.value as "normal" | "vi" })}
+      >
         <option value="normal">Normal (Mac)</option>
-        <option value="vi" disabled>Vi — comes with ED3</option>
+        <option value="vi">Vi</option>
       </select>
     </label>
+
+    {#if s.mode === "vi"}
+      <label>
+        <span>Vi clipboard</span>
+        <select
+          value={s.viClipboard}
+          onchange={(e) => updateEditorSettings({ viClipboard: e.currentTarget.value as "shared" | "separate" })}
+        >
+          <option value="shared">Shared with the Mac (y and p use ⌘C/⌘V's clipboard)</option>
+          <option value="separate">Separate ("+y and "+p reach the Mac)</option>
+        </select>
+      </label>
+    {/if}
 
     <label>
       <span>Font</span>

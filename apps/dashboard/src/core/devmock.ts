@@ -664,6 +664,9 @@ export function mockExternalWrite(root: string, rel: string, content: string | n
   });
 }
 
+/** The Mac clipboard of the mock (`clipboard_read` / `clipboard_write`). */
+let mockClipboard = "";
+
 /** Unsaved editor work in the mock, keyed by `<root>\0<rel>`. */
 const recoveries = new Map<string, unknown>();
 
@@ -1578,6 +1581,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return (recoveries.get(`${String(args.root)}\0${String(args.rel)}`) ?? null) as T;
     case "editor_recovery_delete":
       recoveries.delete(`${String(args.root)}\0${String(args.rel)}`);
+      return undefined as T;
+    // The Mac clipboard for Vi (ED3, V3): a string in the mock.
+    case "clipboard_read":
+      return mockClipboard as T;
+    case "clipboard_write":
+      mockClipboard = String(args.text);
       return undefined as T;
     case "file_read_image":
       if (args.root === "worktree:1" && args.rel === MOCK_IMAGE_PATH) {

@@ -21,7 +21,16 @@
   import { worktreeAgent, type FilePaneConfig } from "../paneKinds";
   import { session } from "../projectSession";
 
-  let { config, visible }: { config: FilePaneConfig; visible: boolean } = $props();
+  let {
+    config,
+    visible,
+    onQuit,
+  }: {
+    config: FilePaneConfig;
+    visible: boolean;
+    /** Vi's `ZZ`/`ZQ`: close this pane's tab. */
+    onQuit?: () => void;
+  } = $props();
 
   let editor = $state<FileEditor | null>(null);
   let failure = $state<string | null>(null);
@@ -63,7 +72,7 @@
   {#if failure}
     <p class="failure">{failure}</p>
   {:else}
-    <FileEditor bind:this={editor} {visible} {notice} />
+    <FileEditor bind:this={editor} {visible} {notice} {onQuit} />
   {/if}
 </div>
 

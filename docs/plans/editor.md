@@ -2,7 +2,8 @@
 
 Status: **ED0, ED1 und ED2 fertig** (2026-09-23/24; ED2 wartet auf die Farbabnahme und den
 Live-Test); **M7.3 CP8/CP9 auf dem Editor fertig** (2026-09-25, `git-layer.md`); **ED3 (Vi)
-gegrillt (V1–V12), in Arbeit.**
+gegrillt (V1–V12), in Arbeit** — ED3.1 (Automat) und ED3.2 (Anbindung) fertig, ED3.3 (Suche, Ex) als
+Nächstes.
 
 ## 1. Idee
 
@@ -526,6 +527,36 @@ Nur-lese-Register (`".yiw`) landete still in `"0` — jetzt verweigert. `gj`/`gk
 Zielspalte des Dokuments wieder her. Die Testlücken-Prüfung brachte gut 200 weitere Fälle.
 **Vorgemerkt:** `ViKey` bekommt eine Art-Kennung (`{ kind: … }`), sobald eine weitere Tastenart
 dazukommt — heute unterscheiden `typeof`/`"text" in` die drei Arten.
+
+**ED3.2 — gebaut (2026-09-25):** Die Maschine hängt an jeder Editor-Fläche. `fileapp/viKeys`
+entscheidet pro Taste (V5, V12): Zeichen kommen durchs Textfeld, Sondertasten und Ctrl werden
+Vi-Tasten, ⌘ bleibt Mac (⌘Z → `u`, ⌘C → `"+y`/`"+yy`, ⌘V → `"+P`, ⌘A → `ggVG`, ⌘/ → `gc`), im
+Insert gilt die ganze Mac-Belegung. `fileapp/viSurface` übersetzt zwischen Fläche und Maschine
+(getippter Text, tote Tasten über `compositionupdate`, Cursor-Form, Visual-Bereiche — ein Block
+als ein Streifen pro Zeile), `fileapp/viScroll` rechnet die sichtbaren Zeilen und `zt zz zb`,
+`fileapp/viShared` ist die eine geteilte Register-/Markenbank, die der Einstellung
+„Zwischenablage: geteilt/getrennt“ folgt. Die Mac-Zwischenablage läuft über `clipboard_read`/
+`clipboard_write` (`axiomata-macos::clipboard`, `pbpaste`/`pbcopy`, UTF-8, höchstens 16 MiB).
+Block-, Balken- und Unterstrich-Cursor, die Modus-Pille in der Statuszeile (Token
+`--ax-vi-*` in allen Themes), die Glocke als kurzer Rahmen. `EditorSurface` behält Bell und
+Scrollen, alles andere reicht sie an den Besitzer: `FileEditor` speichert (`:w`-Effekte,
+`ZZ`), schließt (Datei-App verlassen / Pane schließen, nicht bei ungespeicherten Änderungen) und
+öffnet Datei-Marken; das Diff springt mit `]c`/`[c` zum Hunk und öffnet mit `gf`/⏎ die Datei.
+Die Einstellung „Modus: Vi“ ist frei.
+
+Die Prüfungen von ED3.2: Die Maschine wurde bei jeder Einstellungsänderung (Schriftgröße, ⌥Z)
+neu gebaut und verlor Modus, Visual und Aufnahme (Architektur, CRITICAL) — jetzt hängt sie nur
+am An/Aus von Vi, und `dispose()` schließt eine offene Undo-Gruppe. ⌘C/⌘X taten im Insert
+nichts (HIGH) — jetzt wie am Mac. Scroll-Geometrie aus der Komponente in `viScroll` gezogen.
+Sicherheit (MEDIUM): `pbpaste`/`pbcopy` konnten einen Thread für immer halten und das Schreiben
+war unbegrenzt — jetzt läuft das Pipe-I/O auf einem Hilfsthread, das Werkzeug wird nach 5 s
+beendet und immer abgeräumt, geschrieben werden höchstens 16 MiB; beide werden über ihren
+absoluten Pfad gestartet (LOW). Dass das Textfeld in Vi auch auf schreibgeschützten Flächen nicht
+`readonly` ist, bleibt so: Die Vi-Tasten kommen dort über das Textfeld (V12), die Maschine sperrt
+jede Änderung selbst (dreifach geprüft). **Vorgemerkt (App-weit, nicht ED3):** Die eigenen
+Tauri-Befehle haben keine ACL — ohne App-Manifest in `build.rs` prüft Tauri sie für lokale
+Aufrufe gar nicht gegen `capabilities/`. Heute erreicht kein Fremdinhalt (srcdoc-iframe,
+DOMPurify-Markdown) die IPC; eine eigene Allow-List wäre Tiefenverteidigung für alle Befehle.
 
 ## 6. Verifikation (pro Meilenstein)
 

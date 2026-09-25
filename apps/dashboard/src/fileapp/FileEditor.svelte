@@ -51,6 +51,8 @@
   import { FileSession } from "./session";
   import { statusParts } from "./status";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
+  import type { ViStatus } from "./viSurface";
+  import type { ViEffect } from "../editor/vi/machine";
 
   interface Props {
     /** On screen: leaving it is a moment for "autosave when leaving". */
@@ -62,6 +64,8 @@
     notice?: string | null;
     /** ⌘O — the owner decides what opening another file means. */
     onOpenRequest?: () => void;
+    /** Vi's `ZZ`/`ZQ` (and `:q` with ED3.3): close this editor — the pane, or the full-screen view. */
+    onQuit?: () => void;
     /** After every change of the open file or its state. */
     onState?: (state: OpenFileState | null) => void;
     /** Shown while no file is open. */
@@ -74,6 +78,7 @@
     onCloseSettings,
     notice = null,
     onOpenRequest,
+    onQuit,
     onState,
     empty,
   }: Props = $props();
@@ -98,6 +103,8 @@
   /** "Compare" (F10, H7): the file on disk against the text being edited, as a diff. */
   let compare = $state.raw<{ model: DiffModel; disk: string; mine: string } | null>(null);
   let surface = $state<EditorSurface | null>(null);
+  /** Vi's mode pill (V8); `null` in the normal key map. */
+  let viStatus = $state<ViStatus | null>(null);
   /** Syntax colours for the open file (ED2); `null` for plain text or a large file. */
   let highlighter = $state.raw<SyntaxHighlighter | null>(null);
   /** Markdown files only (G8): source, the rendered preview, or both side by side. */
@@ -254,6 +261,29 @@
     else if (effect === "toggleWrap") wrap = !wrap;
   }
 
+  /** What Vi asks of the editor around the surface: save, close, another file's mark. */
+  function onViEffect(effect: ViEffect): void {
+    if (effect.type === "save") void save();
+    else if (effect.type === "saveQuit") void save().then(() => onQuit?.());
+    else if (effect.type === "quit") {
+      // Unsaved text is kept aside either way (F8); only a forced quit leaves it unsaved.
+      if (!effect.force && session?.doc.dirty) return;
+      onQuit?.();
+    } else if (effect.type === "fileMark") {
+      const [root, rel] = effect.file.split("\0");
+      if (root && rel) void open({ root, rel }, effect.at.line);
+    }
+  }
+
+  const VI_LABELS: Record<ViStatus["mode"], string> = {
+    normal: "NORMAL",
+    insert: "INSERT",
+    replace: "REPLACE",
+    visual: "VISUAL",
+    visualLine: "V-LINE",
+    visualBlock: "V-BLOCK",
+  };
+
   function onChange(): void {
     sessionTick++;
     if (recoveryTimer) clearTimeout(recoveryTimer);
@@ -384,6 +414,9 @@
             onTopLine={isMarkdown && mdMode === "split" ? onSourceTopLine : undefined}
             {onEffect}
             {onChange}
+            {onViEffect}
+            onViStatus={(s) => (viStatus = s)}
+            fileKey={`${session.root}\0${session.rel}`}
           />
         {/key}
       </div>
@@ -425,6 +458,11 @@
 
   {#if session && status}
     <footer>
+      {#if viStatus}
+        <span class="vi-pill {viStatus.mode}">{VI_LABELS[viStatus.mode]}</span>
+        {#if viStatus.recording}<span class="vi-rec">● REC {viStatus.recording}</span>{/if}
+        {#if viStatus.pending}<span class="vi-pending">{viStatus.pending}</span>{/if}
+      {/if}
       <span>{status.position}</span>
       <span>{status.eol}</span>
       <span>{status.indent}</span>
@@ -558,5 +596,41 @@
 
   .warn {
     color: var(--ax-warning);
+  }
+
+  /* Vi's mode pill (V8): one colour per mode, Normal in the accent. */
+  .vi-pill {
+    padding: 0 var(--ax-space-2);
+    border-radius: var(--ax-radius-pill);
+    color: var(--ax-bg);
+    font-family: var(--ax-font-sans);
+    letter-spacing: var(--ax-tracking-wide);
+  }
+
+  .vi-pill.normal {
+    background: var(--ax-vi-normal);
+  }
+
+  .vi-pill.insert {
+    background: var(--ax-vi-insert);
+  }
+
+  .vi-pill.visual,
+  .vi-pill.visualLine,
+  .vi-pill.visualBlock {
+    background: var(--ax-vi-visual);
+  }
+
+  .vi-pill.replace {
+    background: var(--ax-vi-replace);
+  }
+
+  .vi-rec {
+    color: var(--ax-danger);
+  }
+
+  .vi-pending {
+    font-family: var(--ax-font-mono);
+    color: var(--ax-text);
   }
 </style>
