@@ -32,6 +32,7 @@ import { toast } from "../core/toast";
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { emptyLayout, parseLayout, serializeLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
+import { withFilesPane } from "./paneKinds";
 import { applyProjectCwd } from "./paneCwd";
 import {
   cancelLayoutWrite,
@@ -71,9 +72,9 @@ export function terminalTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: "terminal", title: "Terminal" };
 }
 
-/** What a project gets the first time it is opened: one terminal in it. */
+/** What a project gets the first time it is opened: its Files pane on the left, a terminal beside it (W16). */
 function startingLayout(project: IdeProject): Layout {
-  return applyProjectCwd(singleGroupLayout([terminalTab()]), project.repo_root);
+  return applyProjectCwd(withFilesPane(singleGroupLayout([terminalTab()]), project.id), project.repo_root);
 }
 
 /**

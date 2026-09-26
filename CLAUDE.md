@@ -53,13 +53,14 @@ app in `src/fileapp/` (full-screen view, recovery, settings); **ED2** (tree-sitt
 effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor are done, and so is **ED3 (Vi, V1–V12)**: the machine in
 `src/editor/vi/` (the `:` line lives inside it — `vi/cmdmode.ts`), wired to every surface, the Mac pasteboard
 via `axiomata-macos::clipboard`, tree-sitter text objects (`editor/syntax/objects.ts`), and
-`~/.axiomata/editor-vi.json` for registers, file marks and histories. **ED4 (single point of truth, W1–W17)** is
-under way: ED4.1 replaced the Document tile/viewer (`md-file`) with the panel-only file panel
+`~/.axiomata/editor-vi.json` for registers, file marks and histories. **ED4 (single point of truth, W1–W17)**: ED4.1 replaced the Document tile/viewer (`md-file`) with the panel-only file panel
 (`fileapp/FilePanel.svelte` around `FileEditor`, opened via `core/staging.ts` `openFilePanel`), and the agent
 opens files for the owner through the shell action `openFile` (`core/registry.ts`, instance id `shell`).
-ED4.2–ED4.5 are done too: the Second Brain shows files through `FilePeek`, tabs in the file app (`fileapp/tabs.ts`;
-`src-tauri/src/menu.rs` drops the menu's ⌘W "Close Window"), the file tree on `axiomata-files::dir` (renames and
-deletes are broadcast as `files:renamed`/`files:removed`), and ⌘P quick open (`axiomata-files::index`). Next: ED4.6.
+ED4.2–ED4.6 are done too — **ED4 is complete**: the Second Brain shows files through `FilePeek`, tabs in the file
+app (`fileapp/tabs.ts`; `src-tauri/src/menu.rs` drops the menu's ⌘W "Close Window"), the file tree on
+`axiomata-files::dir` (renames and deletes are broadcast as `files:renamed`/`files:removed`), ⌘P quick open
+(`axiomata-files::index`), and the IDE's Files pane (`ide/panes/FilesPane.svelte`, ⌘P over the project). ED5 is next
+(needs grilling; the rope comes first).
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

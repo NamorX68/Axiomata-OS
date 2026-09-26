@@ -25,9 +25,10 @@
   import { session } from "../projectSession";
   import DiffView from "../DiffView.svelte";
   import { agentStatus } from "../agentStatus";
-  import { AGENT_DIFF_PANE, agentDiffOf, FILE_PANE, filePaneConfig } from "../paneKinds";
+  import { AGENT_DIFF_PANE, agentDiffOf, FILE_PANE, FILES_PANE, filePaneConfig, filesPaneConfig } from "../paneKinds";
   import AgentPane from "./AgentPane.svelte";
   import FilePane from "./FilePane.svelte";
+  import FilesPane from "./FilesPane.svelte";
   import { getDock } from "../dockContext";
   import { openFileBeside } from "./openFile";
 
@@ -100,6 +101,18 @@
       <FilePane config={fileConfig} {visible} onQuit={() => dock.close(tab.id)} />
     {:else}
       <p class="unknown">This file pane lost its file.</p>
+    {/if}
+  {:else if tab.kind === FILES_PANE}
+    {#if $session.current}
+      <FilesPane
+        project={$session.current}
+        config={filesPaneConfig(tab)}
+        tabId={tab.id}
+        active={dock.activeFile()}
+        onConfig={(c) => onConfig({ expanded: c.expanded, showHidden: c.showHidden })}
+      />
+    {:else}
+      <p class="unknown">No project is open for this file tree.</p>
     {/if}
   {:else if def}
     <def.component {ctx} />

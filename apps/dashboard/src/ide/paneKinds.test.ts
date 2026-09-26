@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { allGroups, findTab, singleGroupLayout, type PaneTab } from "./layout";
+import { addTab, allGroups, allTabs, findTab, isSplit, singleGroupLayout, type PaneTab } from "./layout";
 import {
   agentDiffOf,
   agentDiffTab,
+  FILES_PANE,
+  FILES_PANE_FRACTION,
   filePaneConfig,
+  filesPaneConfig,
+  filesTab,
   fileTab,
+  frontFile,
   openOrFocus,
+  projectRoot,
   showsFile,
+  withFilesPane,
   worktreeAgent,
 } from "./paneKinds";
 
@@ -127,5 +134,62 @@ describe("openOrFocus (H5, H14)", () => {
     // Docked beside the tab it was opened from, not merged into its group.
     expect(secondEntry?.group.id).not.toBe(firstGroupId);
     expect(secondEntry?.group.tabs.map((t) => t.id)).toEqual([secondDiff.id]);
+  });
+});
+
+describe("the Files pane (W9, W16)", () => {
+  const terminal: PaneTab = { id: "t", kind: "terminal", title: "Terminal" };
+
+  it("starts with the project's top folder open and dotfiles hidden", () => {
+    const tab = filesTab(7);
+    expect(tab.kind).toBe(FILES_PANE);
+    expect(filesPaneConfig(tab)).toEqual({ expanded: [`${projectRoot(7)}\0`], showHidden: false });
+  });
+
+  it("reads a malformed stored config as closed and not hidden", () => {
+    const config = { expanded: [1, "a\0"], showHidden: "yes" };
+    const tab: PaneTab = { id: "f", kind: FILES_PANE, title: "Files", config };
+    expect(filesPaneConfig(tab)).toEqual({ expanded: ["a\0"], showHidden: false });
+    expect(filesPaneConfig({ id: "g", kind: FILES_PANE, title: "Files" })).toEqual({ expanded: [], showHidden: false });
+  });
+
+  it("puts a new project's Files pane down the left side, narrow", () => {
+    const layout = withFilesPane(singleGroupLayout([terminal]), 3);
+    const root = layout.root;
+    expect(isSplit(root)).toBe(true);
+    if (!isSplit(root)) return;
+    expect(root.dir).toBe("row");
+    expect(root.sizes[0]).toBeCloseTo(FILES_PANE_FRACTION);
+    expect(allTabs(layout).map((t) => t.kind)).toEqual([FILES_PANE, "terminal"]);
+  });
+
+  it("opens a file from the tree beside the Files pane, then gathers files in that group", () => {
+    let layout = withFilesPane(singleGroupLayout([terminal]), 3);
+    const files = allTabs(layout)[0];
+    const a = fileTab("project:3", "a.rs", null);
+    layout = openOrFocus(layout, a, (t) => showsFile(t, "project:3", "a.rs"), files.id);
+    expect(allTabs(layout).map((t) => t.kind)).toEqual([FILES_PANE, "file", "terminal"]);
+    // It shares the terminal's room, not the tree's narrow column.
+    const root = layout.root;
+    expect(isSplit(root) && root.sizes[0]).toBeCloseTo(FILES_PANE_FRACTION);
+    const b = fileTab("project:3", "b.rs", null);
+    layout = openOrFocus(layout, b, (t) => showsFile(t, "project:3", "b.rs"), files.id);
+    expect(findTab(layout, b.id)?.group.id).toBe(findTab(layout, a.id)?.group.id);
+  });
+
+  it("names the file in the file group's front tab, and nothing when that tab is not a file", () => {
+    let layout = withFilesPane(singleGroupLayout([terminal]), 3);
+    expect(frontFile(layout)).toBeNull();
+    const a = fileTab("project:3", "a.rs", null);
+    layout = openOrFocus(layout, a, (t) => showsFile(t, "project:3", "a.rs"), allTabs(layout)[0].id);
+    expect(frontFile(layout)).toEqual({ root: "project:3", rel: "a.rs" });
+    const b = fileTab("project:3", "b.rs", null);
+    layout = openOrFocus(layout, b, (t) => showsFile(t, "project:3", "b.rs"), null);
+    expect(frontFile(layout)).toEqual({ root: "project:3", rel: "b.rs" });
+    const terminal2: PaneTab = { id: "t2", kind: "terminal", title: "Terminal" };
+    const group = findTab(layout, a.id)?.group.id ?? "";
+    layout = addTab(layout, terminal2, { nodeId: group, side: "center" });
+    // The file group's front tab is now a terminal: no file to highlight.
+    expect(frontFile(layout)).toBeNull();
   });
 });

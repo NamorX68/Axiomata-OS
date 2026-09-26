@@ -1029,7 +1029,7 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `ViStatusLine.svelte` in the file app's footer and over diffs. ED3.4: tree-sitter text objects
   `if/af ic/ac ia/aa` from one node-type table across the grammars (`editor/syntax/objects.ts`),
   and `editor-vi.json` (`core::editor_vi`, `fileapp/viPersist.ts`). Next: ED4.
-- **Editor ED4 — single point of truth: under way** (2026-09-25, W1–W17). ED4.1: the file
+- **Editor ED4 — single point of truth: done** (2026-09-26, W1–W17). ED4.1: the file
   panel (`fileapp/FilePanel.svelte`, a panel-only module `file`) replaced the Document tile
   and viewer (`md-file`): `FileEditor` now shows every file kind (rendered Markdown/HTML/SVG
   beside the source, images, a new note filed with `create_note`), panels ask before closing
@@ -1042,7 +1042,9 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `axiomata-files::dir` — list, create, rename (no replace), count, delete a tree — with
   `files:renamed`/`files:removed` events every open editor follows. ED4.5: quick open ⌘P
   (`axiomata-files::index` over the `ignore` walker, `fileapp/quickOpen.ts` ranking,
-  `QuickOpen.svelte`).
+  `QuickOpen.svelte`). ED4.6: the IDE's Files pane (`ide/panes/FilesPane.svelte`, the same tree on
+  the project root; new projects start with it on the left), a Terminal/Files `+` menu per tab
+  group, and ⌘P over the open project. Next: ED5.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

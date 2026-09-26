@@ -61,7 +61,18 @@
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentPicker from "./AgentPicker.svelte";
   import { agentStatus } from "./agentStatus";
-  import { openOrFocus } from "./paneKinds";
+  import QuickOpen from "../fileapp/QuickOpen.svelte";
+  import type { FileRef } from "../fileapp/tabs";
+  import {
+    FILES_PANE,
+    fileTab,
+    filePaneConfig,
+    filesTab,
+    frontFile,
+    openOrFocus,
+    projectRoot,
+    showsFile,
+  } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import PaneHost from "./panes/PaneHost.svelte";
   import { PANE_ATTR, parkPanes, placePanes } from "./paneStore";
@@ -82,6 +93,42 @@
   let dockEl = $state<HTMLElement | undefined>();
   let draggingTab = $state<string | null>(null);
   let hint = $state<DockTarget | null>(null);
+  /** ⌘P over the open project's files (W9). */
+  let quickOpen = $state(false);
+
+  /** The open project as quick open's only root. */
+  const projectRoots = $derived(
+    current
+      ? [{ id: projectRoot(current.id), label: current.name, path: current.repo_root, kind: "project" as const }]
+      : [],
+  );
+  /** The files open in the dock, for quick open to rank first. */
+  const openFiles = $derived(
+    allTabs(layout).flatMap((t): FileRef[] => {
+      const c = filePaneConfig(t);
+      return c ? [{ root: c.root, rel: c.rel }] : [];
+    }),
+  );
+
+  /**
+   * Opens a file from quick open in the dock's file group, at `line` if given —
+   * or, with no file open yet, beside the Files pane, as a click in it would.
+   */
+  function openFromQuickOpen(file: FileRef, line: number | null): void {
+    const beside = allTabs(layout).find((t) => t.kind === FILES_PANE)?.id ?? null;
+    layout = openOrFocus(layout, fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), beside);
+  }
+
+  /**
+   * The view's one key of its own, in the capture phase so a focused terminal
+   * does not get it first. Only ⌘P: everything else belongs to the panes.
+   */
+  function onViewKeydown(e: KeyboardEvent): void {
+    if (!e.metaKey || e.altKey || e.ctrlKey || e.shiftKey || e.key.toLowerCase() !== "p" || !current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    quickOpen = !quickOpen;
+  }
 
   /** Set on pointerdown, promoted to a drag once the pointer has moved far enough. */
   let pending: { tabId: string; pointerId: number; x: number; y: number } | null = null;
@@ -284,10 +331,11 @@
     close: (tabId) => {
       layout = closeTab(layout, tabId);
     },
-    addPane: (groupId) => {
+    addPane: (groupId, kind) => {
       const project = current;
       if (!project) return;
-      const added = addTab(layout, projectSession.terminalTab(), { nodeId: groupId, side: "center" });
+      const tab = kind === "files" ? filesTab(project.id) : projectSession.terminalTab();
+      const added = addTab(layout, tab, { nodeId: groupId, side: "center" });
       layout = applyProjectCwd(added, project.repo_root);
     },
     startTabDrag: (tabId, event) => {
@@ -320,6 +368,7 @@
     setConfig: (tabId, config) => {
       layout = setTabConfig(layout, tabId, config);
     },
+    activeFile: () => frontFile(layout),
     draggingTab: () => draggingTab,
     hint: () => hint,
   });
@@ -370,7 +419,7 @@
   onMount(() => () => agentStatus.watch(null));
 </script>
 
-<section class="ide" class:hidden={!open} inert={!open} aria-label="IDE">
+<section class="ide" class:hidden={!open} inert={!open} aria-label="IDE" onkeydowncapture={onViewKeydown}>
   <header>
     <div class="titles">
       <h1>IDE</h1>
@@ -437,6 +486,14 @@
       </div>
     {/if}
   </div>
+  {#if quickOpen && open}
+    <QuickOpen
+      roots={projectRoots}
+      recent={openFiles}
+      onOpen={(file, _preview, line) => openFromQuickOpen(file, line)}
+      onClose={() => (quickOpen = false)}
+    />
+  {/if}
 </section>
 
 <style>

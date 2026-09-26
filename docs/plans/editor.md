@@ -821,6 +821,21 @@ Modul-Cache in `QuickOpen.svelte` ist keine Svelte-Reaktivität; ein Kommentar w
 `$derived` den `arrived`-Zähler mitlesen muss. Tests ergänzt: verschachtelte und negierte
 `.gitignore`, Zeilenangaben, camelCase, dieselbe Datei aus zwei Wurzeln.
 
+**ED4.6 — gebaut (2026-09-26):** das IDE-Pane „Files“ (W9, W16). `ide/panes/FilesPane.svelte` ist
+der `FileTree` der Datei-App mit genau einer Wurzel, `project:<id>` des offenen Projekts; offene
+Ordner und der Schalter „hidden“ liegen im Tab (`FilesPaneConfig`) und damit im gespeicherten
+Layout des Projekts. Ein Klick öffnet die Datei über `openOrFocus` in der Datei-Gruppe; gibt es
+noch keine, dockt die Datei links an das Pane neben dem Baum (sie nimmt ihm den Platz, nicht der
+schmalen Baumspalte). Der Baum markiert die Datei im vordersten Tab der Datei-Gruppe
+(`frontFile`). Neue Projekte beginnen mit Files links (16 % der Breite) und einem Terminal
+(`withFilesPane`); bestehende Layouts bleiben, wie sie sind. Das „+“ der Tab-Leiste ist jetzt ein
+kleines Menü „Terminal / Files“. ⌘P in der IDE öffnet das Schnellöffnen nur über das Projekt, die im
+Dock offenen Dateien zuerst; ⌘P ist die einzige eigene Taste der IDE-Ansicht, alles andere bleibt
+bei den Panes. Architektur-Review ohne CRITICAL/HIGH; nachgezogen: ein offenes „+“-Menü schließt, wenn
+das einer anderen Gruppe aufgeht, die Nachbar-Regel sagt, dass sie auf der flachen Reihe beruht, die
+`layout.ts` beim Normalisieren herstellt, und ein Files-Pane ohne offenes Projekt zeigt einen Hinweis
+statt nichts. Mehrere Files-Panes sind erlaubt wie mehrere Terminals. Damit ist **ED4 komplett**.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

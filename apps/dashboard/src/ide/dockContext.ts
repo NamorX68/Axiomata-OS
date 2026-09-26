@@ -14,15 +14,19 @@
 
 import { getContext, setContext } from "svelte";
 
+import type { FileRef } from "../fileapp/tabs";
 import type { DockTarget, PaneTab } from "./layout";
+
+/** What the tab bar's `+` menu offers. */
+export type NewPaneKind = "terminal" | "files";
 
 export interface IdeDock {
   /** Make a tab the visible one in its group. */
   activate: (tabId: string) => void;
   /** Close a tab, and with it the pane inside. */
   close: (tabId: string) => void;
-  /** Open a new pane in that group — the tab bar's `+`. */
-  addPane: (groupId: string) => void;
+  /** Open a new pane of that kind in that group — the tab bar's `+` menu. */
+  addPane: (groupId: string, kind: NewPaneKind) => void;
   /**
    * Opens `tab` beside the pane `fromTabId`, or brings forward the open tab
    * `match` finds (`paneKinds.ts`'s `openOrFocus`) — a file from a diff, an
@@ -35,6 +39,8 @@ export interface IdeDock {
   startTabDrag: (tabId: string, event: PointerEvent) => void;
   /** A pointer went down on the divider after child `boundary` of a split. */
   startDividerDrag: (splitId: string, boundary: number, event: PointerEvent) => void;
+  /** The file in the front tab of the file group, or `null`. Reactive. */
+  activeFile: () => FileRef | null;
   /** The tab being dragged right now, or `null`. Reactive. */
   draggingTab: () => string | null;
   /** Where the current drag would land, or `null`. Reactive. */

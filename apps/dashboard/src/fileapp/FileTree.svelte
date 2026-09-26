@@ -4,7 +4,8 @@
   loaded when opened (`file_list`), never all at once.
 
   * **A click opens a file in the preview tab, a double click for good** (W7);
-    a click on a folder opens or closes it.
+    a click on a folder opens or closes it. The IDE's Files pane has no preview
+    tab and opens a dock pane either way (`onOpen`'s `preview` is a hint).
   * **Hidden by default**: dotfiles, `.git`, `node_modules`, `target` (W6);
     what a `.gitignore` ignores is shown greyed out.
   * **Acting on entries** (right click or ⋯): New file, New folder, Rename,
