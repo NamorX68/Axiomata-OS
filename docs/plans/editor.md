@@ -836,6 +836,68 @@ das einer anderen Gruppe aufgeht, die Nachbar-Regel sagt, dass sie auf der flach
 `layout.ts` beim Normalisieren herstellt, und ein Files-Pane ohne offenes Projekt zeigt einen Hinweis
 statt nichts. Mehrere Files-Panes sind erlaubt wie mehrere Terminals. Damit ist **ED4 komplett**.
 
+### ED5 im Detail (gegrillt 2026-09-26, Q1–Q19, bestätigt; Umsetzung begonnen)
+
+**Entscheidungen**
+
+- **T1 — Rope** (Q1): ein **unveränderliches Rope aus Zeilenblöcken** hinter `TextStore` — ein
+  balancierter Baum, die Blätter halten Folgen von Zeilen, jeder Knoten kennt Zeilenzahl und
+  UTF-16-Länge; `line(i)`, `offsetAt` und der Weg zurück in O(log n). Knoten werden geteilt, jede
+  Fassung ist ein billiger Schnappschuss (für die Suche im Worker, später ein Undo-Baum).
+- **T2 — Große Dateien** (Q2): bis 16 MB bearbeitbar (Schreibgrenze in `axiomata-files` mit);
+  über 2 MB ein **leichter Modus** — kein tree-sitter, keine Minimap, kein Sticky Scroll, ein
+  Hinweis in der Statuszeile.
+- **T3 — Undo** (Q3): bleibt linear (D19); der Baum kommt später auf T1 auf.
+- **T4 — Suchen/Ersetzen, Umfang** (Q4): eine Such-Leiste in der Datei (⌘F, ⌥⌘F mit Ersetzen,
+  Regex/Groß-klein/ganzes Wort, „3/17“, ⏎/⇧⏎, ⌘G/⇧⌘G, ⌘E, „Alle ersetzen“ als ein Undo-Schritt)
+  **und** eine Projektsuche (⇧⌘F) in Rust; dateiübergreifendes Ersetzen später, eigener Punkt.
+- **T5 — Such-Maschine** (Q5): ein **Web Worker** auf einem Rope-Schnappschuss mit Zeitgrenze
+  (um 1 s, dann beendet: „Muster zu teuer“), für den normalen Modus und Vi gemeinsam; Treffer
+  dürfen über Zeilen gehen, sobald das Muster `\n` enthält. Die Rust-Projektsuche nutzt das
+  `regex`-Crate (ohne Backtracking) und braucht keine Zeitgrenze.
+- **T6 — Mehrere Cursor** (Q6): nur im normalen Modus. ⌥-Klick, ⌥⌘↑/↓, ⌘D, ⌘U (letzten
+  zurücknehmen — ⌘K ist app-weit reserviert), ⇧⌘L, ⌥-Ziehen als Spaltenauswahl, Esc zurück zu
+  einem. Jede Aktion an jedem Cursor, als ein Undo-Schritt; Einfügen verteilt Zeilen, wenn die
+  Zahl passt. Vi behält den Visual-Block; Mehrfach-Cursor in Vi später.
+- **T7 — Faltung** (Q7): Bereiche aus tree-sitter (dieselbe Knotentabelle wie die Textobjekte),
+  Markdown-Überschriften, sonst Einrückung. Pfeile im Gutter, ⌥⌘[ / ⌥⌘], ⌥⌘0 / ⌥⌘J, Vi
+  `zc zo za zR zM`, „⋯ N Zeilen“, ein Treffer darin klappt auf, Animation abschaltbar. Gemerkt je
+  Datei für offene Tabs/Panes (`dashboard.json`), mit den Tabs aufgeräumt.
+- **T8 — Minimap** (Q8): winzige Zeichen in Token-Farben auf einem Canvas, ziehbares Sichtfenster,
+  Marken für Treffer, Diff/Git und später Diagnosen. An in Vollbild und IDE, aus im Panel.
+- **T9 — Sticky Scroll** (Q9): bis 5 Kopfzeilen aus der Knotentabelle, Klick springt, weicher
+  Schatten; an außer im Panel, abschaltbar.
+- **T10 — Installierte Mac-Schriften** (Q10): CoreText in `axiomata-macos`, alle Familien mit
+  ihren echten Schnitten, Filter „nur Monospace“ als Vorgabe; eine fehlende Schrift fällt still auf
+  die Vorgabe zurück, mit Hinweis in den Einstellungen.
+- **T11 — Verschieben im Baum** (Q11): Ziehen auf einen Ordner derselben Wurzel (`file_rename`
+  ohne Ersetzen, Tabs folgen), zugeklappte Ordner öffnen sich nach einer halben Sekunde; über
+  Wurzeln hinweg abgelehnt.
+- **T12 — Vi-Zugaben** (Q12): `:g`/`:v`, `:s///c` (y/n/a/q), `gn`/`cgn` — mit der Such-Maschine.
+- **T13 — Wo die Projektsuche lebt** (Q13): in der Datei-App Reiter **Files | Search** in der
+  linken Spalte (⇧⌘F; Wurzel-Filter über die Baum-Wurzeln); in der IDE ein Dock-Pane „Search“
+  (im „+“-Menü, ⇧⌘F), aufs Projekt beschränkt; ein Klick öffnet an der Zeile. Eine Komponente.
+- **T14 — Projektsuche im Detail** (Q14): Regex/Groß-klein/ganzes Wort, Globs „einschließen“ und
+  „ausschließen“; `.gitignore`/Index-Regeln, Binärdateien und Dateien über 16 MB bleiben draußen;
+  Treffer kommen fortlaufend per Event, neue Eingabe bricht ab; höchstens 10 000 Treffer mit
+  Hinweis; gruppiert nach Datei, zuklappbar, Ausschnitt markiert; offene ungespeicherte Tabs
+  zeigen den Stand der Platte mit ●.
+- **T15 — Such-Leiste im Detail** (Q15): „nur in der Auswahl“, `$1`/`$&`, Groß/klein beim Ersetzen
+  erhalten. In jeder Editor-Fläche; in Diffs und schreibgeschützten Dateien nur Suchen. In Vi
+  öffnet ⌘F dieselbe Leiste, `/` bleibt die Vi-Zeile; beide teilen den letzten Suchbegriff.
+- **T16 — Schriften fürs Terminal** (Q16): dieselbe Liste, fest „nur Monospace“.
+- **T17 — Diffs** (Q17): Faltung, Minimap (Hunks farbig) und Sticky Scroll auch dort, dazu der
+  Schalter „unveränderte Bereiche falten“.
+- **T18 — Zusammenspiel mit Vi** (Q18): Wechsel nach Vi oder Esc macht aus mehreren Cursorn den
+  zuletzt gesetzten; `j`/`k` überspringen eine Faltung, `dd` löscht sie ganz; Suchen und `gn`
+  klappen auf; Sticky-Scroll-Zeilen verdecken nie den Cursor (`zt`, Scrollen rechnen mit ihnen).
+- **T19 — Checkpoints** (Q19), ein Commit je Checkpoint: **ED5.1** Rope (ED1-Tests unverändert,
+  Zufallstest gegen `LineStore`, 16 MB, leichter Modus) · **ED5.2** Such-Maschine (Worker, Vi
+  zieht um, T12) · **ED5.3** Mehrere Cursor · **ED5.4** Such-Leiste (⌥⏎ macht alle Treffer zu
+  Cursorn) · **ED5.5** Faltung · **ED5.6** Sticky Scroll und Minimap · **ED5.7** Projektsuche ·
+  **ED5.8** Installierte Schriften · **ED5.9** Verschieben im Baum. Sicherheitsprüfung bei ED5.1,
+  ED5.7, ED5.9; Abhängigkeitsprüfung bei neuen Crates (ED5.7/5.8).
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später
