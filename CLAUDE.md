@@ -62,7 +62,9 @@ app (`fileapp/tabs.ts`; `src-tauri/src/menu.rs` drops the menu's ⌘W "Close Win
 (`axiomata-files::index`), and the IDE's Files pane (`ide/panes/FilesPane.svelte`, ⌘P over the project). **ED5
 (tools, T1–T19)** is under way: ED5.1 put documents on an immutable rope (`editor/rope.ts`; `LineStore` stays as the
 tests' reference) and made files up to 16 MiB editable, over 2 MiB in a "light mode" (`FileSession.light`, no
-tree-sitter). Next: ED5.2, the search worker.
+tree-sitter). ED5.2: every search pattern is first run by a worker with a 1 s limit (`editor/search/guard.ts`
+`SearchGuard`, a verdict per rope version; Vi's key queue pauses on `SearchPending` like on the clipboard), plus Vi's
+`:g`/`:v`/`:d`/`:normal`, `:s///c`, `gn`/`cgn`. Next: ED5.3, multiple cursors.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

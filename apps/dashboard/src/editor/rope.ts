@@ -198,6 +198,33 @@ function charsBefore(node: Node, i: number): number {
   return chars;
 }
 
+/**
+ * The line holding UTF-16 offset `offset` (at most the text's length) of the
+ * joined text, and how far into the text that line starts. A line break
+ * belongs to the line it ends; the last child or line takes anything beyond.
+ */
+function lineAtOffset(node: Node, offset: number): { line: number; start: number } {
+  let current = node;
+  let line = 0;
+  let start = 0;
+  while (current.kind === "branch") {
+    const children = current.children;
+    let k = 0;
+    // Every line in a child plus one break after each.
+    for (; k < children.length - 1; k++) {
+      const span = children[k].chars + linesIn(children[k]);
+      if (offset < start + span) break;
+      start += span;
+      line += linesIn(children[k]);
+    }
+    current = children[k];
+  }
+  const lines = current.lines;
+  let k = 0;
+  for (; k < lines.length - 1 && offset > start + lines[k].length; k++) start += lines[k].length + 1;
+  return { line: line + k, start };
+}
+
 /** Calls `visit` with every line in `[from, to]`, in order. */
 function eachLine(node: Node, from: number, to: number, visit: (line: string) => void): void {
   if (node.kind === "leaf") {
@@ -289,6 +316,13 @@ export class Rope {
 
   offsetAt(p: Pos): number {
     return charsBefore(this.root, p.line) + p.line + p.col;
+  }
+
+  /** The position of UTF-16 offset `offset` into {@link text}, clamped into the text. */
+  posAt(offset: number): Pos {
+    const at = Math.min(Math.max(offset, 0), this.length());
+    const { line, start } = lineAtOffset(this.root, at);
+    return pos(line, Math.min(at - start, this.line(line).length));
   }
 
   /** Throws on a range that is reversed or points outside the text. */

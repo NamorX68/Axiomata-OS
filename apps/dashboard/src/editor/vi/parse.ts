@@ -54,14 +54,14 @@ const NORMAL_COMMANDS = new Set([
   "x", "X", "s", "S", "D", "C", "Y", "p", "P", "gp", "gP", "J", "gJ", "~", "i", "a", "I", "A", "gi", "gI", "o", "O",
   "R", "u", "<C-r>", ".", "v", "V", "<C-v>", "gv", "<C-a>", "<C-x>", "<C-o>", "<C-i>", "<Tab>", "zt", "zz", "zb",
   "z<CR>", "z.", "z-", "<C-e>", "<C-y>", "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>", "]c", "[c",
-  "gf", "ZZ", "ZQ", ":", "@@", "&", "<Esc>", "<C-[>", "<C-c>",
+  "gf", "ZZ", "ZQ", ":", "@@", "&", "<Esc>", "<C-[>", "<C-c>", "gn", "gN",
 ]);
 
 /** Commands that exist only in Visual mode, or mean something else there. */
 const VISUAL_COMMANDS = new Set([
   "o", "O", "I", "A", "x", "X", "D", "Y", "C", "S", "R", "s", "J", "gJ", "u", "U", "~", "p", "P", "v", "V", "<C-v>",
   "gv", ":", "<C-a>", "<C-x>", "<Esc>", "<C-[>", "<C-c>", "zt", "zz", "zb", "<C-e>", "<C-y>", "<C-d>",
-  "<C-u>", "<C-f>", "<C-b>",
+  "<C-u>", "<C-f>", "<C-b>", "gn", "gN",
 ]);
 
 /** Commands followed by one character: `r m q @` (and Visual `r`, surround `S`). */
@@ -70,6 +70,8 @@ const CHAR_COMMANDS = new Set(["r", "m", "q", "@"]);
 export type Target =
   | { kind: "motion"; name: string; char?: string }
   | { kind: "object"; inner: boolean; name: string }
+  /** `gn` / `gN`: the last search's match under or after (before) the cursor (ED5, T12). */
+  | { kind: "match"; backward: boolean }
   /** The doubled operator: `dd`, `gUU` — the current line (and count - 1 more). */
   | { kind: "line" };
 
@@ -239,6 +241,15 @@ function parseOperator(
     if (key === "s") {
       r.i++;
       return surroundCommand(r, register, total, op === "c" ? "cs" : "ds");
+    }
+  }
+  // `dgn`, `cgN`: the next (previous) match of the last search.
+  if (key === "g") {
+    if (r.i + 1 >= r.keys.length) return INCOMPLETE;
+    const second = charOf(r.peek(1));
+    if (second === "n" || second === "N") {
+      r.i += 2;
+      return withSurroundChar(r, register, total, op, { kind: "match", backward: second === "N" });
     }
   }
   const target = motionTarget(r);

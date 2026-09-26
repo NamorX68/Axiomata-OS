@@ -80,6 +80,31 @@ describe("parseEx (V6)", () => {
     expect(parseEx("e foo", ctx)).toHaveProperty("error");
   });
 
+  it("reads :g, :g!, :v with any delimiter, over the whole file unless given a range (T12)", () => {
+    expect(parseEx("g/a/d", ctx)).toEqual({
+      name: "global",
+      range: { first: 0, last: 9 },
+      pattern: "a",
+      invert: false,
+      command: "d",
+    });
+    expect(parseEx("g!#a#d", ctx)).toMatchObject({ invert: true, pattern: "a" });
+    expect(parseEx("v/a/d", ctx)).toMatchObject({ invert: true });
+    expect(parseEx("2,3global/x\\/y/s//z/", ctx)).toMatchObject({
+      range: { first: 1, last: 2 },
+      pattern: "x/y",
+      command: "s//z/",
+    });
+    expect(parseEx("g/a/", ctx)).toHaveProperty("error");
+  });
+
+  it("reads :d with a register and :normal keeping its trailing space", () => {
+    expect(parseEx("2,3d a", ctx)).toEqual({ name: "delete", range: { first: 1, last: 2 }, register: "a" });
+    expect(parseEx("d", ctx)).toEqual({ name: "delete", range: { first: 4, last: 4 }, register: null });
+    expect(parseEx("%norm A; ", ctx)).toEqual({ name: "normal", range: { first: 0, last: 9 }, keys: "A; " });
+    expect(parseEx("normal", ctx)).toEqual({ error: "E471: Argument required" });
+  });
+
   it("does nothing for an empty line", () => {
     expect(parseEx("", ctx)).toEqual({ error: "" });
   });
@@ -87,7 +112,7 @@ describe("parseEx (V6)", () => {
 
 describe("completeEx (Tab)", () => {
   it("completes command names, keeping a range in front", () => {
-    expect(completeEx("no")).toEqual(["nohlsearch"]);
+    expect(completeEx("no")).toEqual(["nohlsearch", "normal"]);
     expect(completeEx("%su")).toEqual(["%substitute"]);
     expect(completeEx("w")).toEqual(["write", "wq"]);
   });

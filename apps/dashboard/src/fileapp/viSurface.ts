@@ -40,12 +40,17 @@ export class ViSurface {
   readonly machine: ViMachine;
   /** A dead key's composition was taken as a key; its end must not type it again. */
   private swallowComposition = false;
+  private readonly unsubscribeVerdicts: () => void;
 
   constructor(
     doc: EditorDocument,
     shared: ViShared,
     private readonly host: ViSurfaceHost,
   ) {
+    const redraw = () => {
+      host.changed();
+      host.status(this.machine.status());
+    };
     this.machine = new ViMachine(doc, shared, {
       ctx: () => host.ctx(),
       effect: (e) => host.effect(e),
@@ -53,10 +58,14 @@ export class ViSurface {
       fileName: host.fileName,
       fileKey: host.fileKey,
       syntaxObjects: host.syntaxObjects,
+      settled: redraw,
     });
+    // A verdict can make matches appear that are drawn without a key (hlsearch, incsearch; ED5, T5).
+    this.unsubscribeVerdicts = shared.guard?.onVerdict(redraw) ?? (() => undefined);
   }
 
   dispose(): void {
+    this.unsubscribeVerdicts();
     this.machine.dispose();
   }
 

@@ -169,3 +169,47 @@ describe("Rope", () => {
     expect(before.text()).toBe("alpha\nbeta");
   });
 });
+
+describe("Rope.posAt", () => {
+  it("is offsetAt's inverse everywhere, across leaves and line breaks", () => {
+    const rope = Rope.of(numbered(3000).replace(/line 7/g, "léne 7"));
+    const store = new LineStore(rope.text());
+    const rnd = random(9);
+    for (let i = 0; i < 2000; i++) {
+      const p = somePos(store, rnd);
+      expect(rope.posAt(rope.offsetAt(p))).toEqual(p);
+    }
+    expect(rope.posAt(0)).toEqual(pos(0, 0));
+    expect(rope.posAt(-5)).toEqual(pos(0, 0));
+    const last = rope.lineCount() - 1;
+    expect(rope.posAt(rope.length())).toEqual(pos(last, rope.line(last).length));
+    expect(rope.posAt(rope.length() + 99)).toEqual(pos(last, rope.line(last).length));
+  });
+
+  it("puts the offset of a line break at the end of the line it ends", () => {
+    const rope = Rope.of("ab\ncd");
+    expect(rope.posAt(2)).toEqual(pos(0, 2));
+    expect(rope.posAt(3)).toEqual(pos(1, 0));
+  });
+
+  it("resolves offsets right at a leaf boundary to the line either side of it, deterministically", () => {
+    // Each line is "line N" (6-7 chars) with MAX_LEAF_LINES = 64: three leaves' worth of lines,
+    // so line 63/64 and 127/128 fall exactly on a leaf boundary rather than by random chance.
+    const n = MAX_LEAF_LINES * 3;
+    const rope = Rope.of(numbered(n));
+    rope.checkInvariants();
+    for (const boundaryLine of [MAX_LEAF_LINES - 1, MAX_LEAF_LINES, 2 * MAX_LEAF_LINES - 1, 2 * MAX_LEAF_LINES]) {
+      // The offset right after the boundary line's own last character (before its line break)
+      // resolves to that line's end, not the next line's start.
+      const endOfLine = rope.offsetAt(pos(boundaryLine, rope.line(boundaryLine).length));
+      expect(rope.posAt(endOfLine)).toEqual(pos(boundaryLine, rope.line(boundaryLine).length));
+      // One offset further (past the line break) is the next line's very start.
+      expect(rope.posAt(endOfLine + 1)).toEqual(pos(boundaryLine + 1, 0));
+      // offsetAt/posAt agree on every column of the boundary line itself.
+      for (let col = 0; col <= rope.line(boundaryLine).length; col++) {
+        const p = pos(boundaryLine, col);
+        expect(rope.posAt(rope.offsetAt(p))).toEqual(p);
+      }
+    }
+  });
+});

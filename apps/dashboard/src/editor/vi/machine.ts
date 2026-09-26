@@ -13,7 +13,8 @@
  * * **Macros** are keys in a register (`q`/`@`), in Vim's notation.
  * * **The clipboard** may answer late (it lives in Rust, V3): a command that
  *   reads it is paused, and runs again once the text is there. Keys typed
- *   meanwhile wait in the queue, so nothing overtakes it.
+ *   meanwhile wait in the queue, so nothing overtakes it. A search waits the
+ *   same way for the worker to vouch for its pattern (ED5, T5).
  */
 
 import type { EditorDocument } from "../document";
@@ -44,6 +45,7 @@ import {
 } from "./ops";
 import { parse, type Body, type Parsed, type Target } from "./parse";
 import { ClipboardPending, Registers, type ClipboardPort } from "./registers";
+import { SearchPending, type SearchGuard } from "../search/guard";
 import { Marks } from "./marks";
 import {
   headForSize,
@@ -57,7 +59,7 @@ import {
   type VisualMode,
   type VisualSize,
 } from "./regions";
-import { clampNormal, firstNonBlank, nextPos } from "./scan";
+import { clampNormal, firstNonBlank, nextPos, prevPos } from "./scan";
 import { isClassicObject, textObject, type ObjectRange } from "./textobjects";
 
 export type ViMode = "normal" | "insert" | "replace" | "visual" | "visualLine" | "visualBlock";
@@ -92,6 +94,12 @@ export interface ViEnv {
   fileName?: string;
   fileKey?: string;
   syntaxObjects?: SyntaxObjects;
+  /**
+   * Keys that waited (for the clipboard, a search verdict) have run now, after
+   * the `feed` that queued them returned: the view draws again and reads the
+   * status afresh.
+   */
+  settled?: () => void;
 }
 
 /**
@@ -104,6 +112,11 @@ export class ViShared {
   readonly fileMarks = new Map<string, { file: string; at: Pos }>();
   lastMacro: string | null = null;
   readonly search = new SearchMemory();
+  /**
+   * Runs every pattern in a worker first (ED5, T5). `null` — tests, and a
+   * machine with no worker at hand — runs patterns straight away, as before.
+   */
+  guard: SearchGuard | null = null;
 
   constructor(clipboard: ClipboardPort | null, shareClipboard = true) {
     this.registers = new Registers(clipboard, shareClipboard);
@@ -151,6 +164,9 @@ export class ViMachine {
   private pending: ViKey[] = [];
   private queue: Queued[] = [];
   private blocked = false;
+  /** Inside `:normal`, and whether a key there had to wait (and so stopped it). */
+  private nested = false;
+  private stalled = false;
   private visualAnchor: Pos = pos(0, 0);
   /** Visual block after `$`: every line to its end. */
   private blockToEnd = false;
@@ -195,6 +211,9 @@ export class ViMachine {
       },
       resume: (cmd) => this.execute(cmd),
       closed: () => this.afterCommand(),
+      guard: () => shared.guard,
+      moveTo: (at) => this.setCursor(at),
+      normal: (keys) => this.runNormal(keys),
     });
   }
 
@@ -278,23 +297,68 @@ export class ViMachine {
     this.guard(() => this.execute(parsed.command), keys);
   }
 
-  /** Runs `work`; if it has to wait for the clipboard, puts `keys` back and runs them again later. */
+  /**
+   * Runs `work`; if it has to wait — for the clipboard, or for the search
+   * worker's verdict on a pattern (T5) — puts `keys` back and runs them again
+   * once the answer is there. Keys typed meanwhile wait behind them.
+   */
   private guard(work: () => void, keys: ViKey[]): void {
     try {
       work();
       this.shared.registers.settle();
     } catch (err) {
-      if (!(err instanceof ClipboardPending)) throw err;
-      this.replay(keys);
-      this.blocked = true;
-      void err.text
-        .catch(() => "")
-        .then((text) => {
-          this.shared.registers.provide(text);
-          this.blocked = false;
-          this.drain();
-        });
+      if (err instanceof ClipboardPending) {
+        this.waitThenReplay(
+          keys,
+          err.text.catch(() => "").then((text) => this.shared.registers.provide(text)),
+        );
+      } else if (err instanceof SearchPending) {
+        this.waitThenReplay(keys, err.done);
+      } else {
+        throw err;
+      }
     }
+  }
+
+  /**
+   * `:normal` (T12): `keys` straight through the machine, now, from the
+   * cursor — not queued, not recorded. Whatever they leave open (Insert mode,
+   * a half-typed command, the command line) is ended as Vim does. A key that
+   * would have to wait (the clipboard, a search verdict) stops the run.
+   */
+  private runNormal(keys: string): void {
+    if (this.nested) return;
+    this.nested = true;
+    try {
+      for (const key of parseKeys(keys)) {
+        this.step(key);
+        if (this.stalled) break;
+      }
+      if (this.commands.active) this.step("<Esc>");
+      if (this.mode === "insert" || this.mode === "replace") this.step("<Esc>");
+      if (this.isVisual()) this.leaveVisual();
+      this.pending = [];
+    } finally {
+      this.nested = false;
+      if (this.stalled)
+        this.message = { text: "E: :normal stopped: a key had to wait (clipboard or search)", error: true };
+      this.stalled = false;
+    }
+  }
+
+  private waitThenReplay(keys: ViKey[], answer: Promise<void>): void {
+    if (this.nested) {
+      // Inside `:normal` nothing may wait: the rest of the keys would run on another line.
+      this.stalled = true;
+      return;
+    }
+    this.replay(keys);
+    this.blocked = true;
+    void answer.then(() => {
+      this.blocked = false;
+      this.drain();
+      this.env.settled?.();
+    });
   }
 
   // ------------------------------------------------------------------ status
@@ -497,6 +561,10 @@ export class ViMachine {
         return { kind: "char", start, end: pos(last, store.line(last).length) };
       }
       return { kind: "line", first: from.line, last };
+    }
+    if (target.kind === "match") {
+      const m = this.commands.matchAt(from, target.backward);
+      return m ? { kind: "char", start: m.start, end: m.end } : null;
     }
     if (target.kind === "object") {
       const obj = this.objectAt(from, target.name, target.inner, count ?? 1);
@@ -835,6 +903,10 @@ export class ViMachine {
       case "gv":
         this.reselect();
         return true;
+      case "gn":
+      case "gN":
+        this.selectMatch(b.name === "gN");
+        return true;
       case "q":
         this.toggleRecording(b.char);
         return true;
@@ -878,6 +950,7 @@ export class ViMachine {
       default:
         return false;
     }
+
   }
 
   /** `count` characters from the cursor to the right (not past the line's end), as a region. */
@@ -949,7 +1022,6 @@ export class ViMachine {
     this.mode = this.lastVisual.mode;
     this.setCursor(this.lastVisual.head, true);
   }
-
 
   private executeVisual(cmd: Parsed): void {
     const b = cmd.body;
@@ -1034,9 +1106,41 @@ export class ViMachine {
       }
       case "gv":
         return true;
+      case "gn":
+      case "gN":
+        this.selectMatch(b.name === "gN");
+        return true;
       default:
         return false;
     }
+  }
+
+  /**
+   * `gn` / `gN` (T12): Visual over the last search's match under the cursor,
+   * else the next (previous) one; in Visual mode already, the selection is
+   * stretched to take in that match.
+   */
+  private selectMatch(backward: boolean): void {
+    // Stretching an existing selection looks from just past its head.
+    const step = backward ? prevPos(this.store, this.cursor) : nextPos(this.store, this.cursor);
+    const from = this.isVisual() ? (step ?? this.cursor) : this.cursor;
+    const m = this.commands.matchAt(from, backward);
+    if (!m) return this.bell();
+    // Visual is inclusive: the selection ends on the match's last character.
+    const endLine = this.store.line(m.end.line);
+    const last =
+      comparePos(m.end, m.start) <= 0
+        ? m.start
+        : m.end.col > 0
+          ? pos(m.end.line, prevGrapheme(endLine, m.end.col))
+          : (prevPos(this.store, m.end) ?? m.start);
+    if (!this.isVisual()) {
+      // Clamped like the cursor: an empty match past a line's end is not a place Normal mode can be.
+      this.visualAnchor = clampNormal(this.store, backward ? last : m.start);
+      this.mode = "visual";
+      this.blockToEnd = false;
+    }
+    this.setCursor(backward ? m.start : last, true);
   }
 
   /** Visual's edits: delete/change/replace/case/shift/put/increment, and surround (`S`). */
@@ -1269,7 +1373,7 @@ export class ViMachine {
     if (!name) return this.bell();
     if (name === ":") {
       this.shared.lastMacro = ":";
-      for (let i = 0; i < count; i++) this.commands.repeatEx();
+      this.commands.repeatEx(count);
       return;
     }
     const content = this.shared.registers.get(name);

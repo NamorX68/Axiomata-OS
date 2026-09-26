@@ -5,13 +5,18 @@
  * a pattern in lower case matches either case, one with a capital matches
  * exactly.
  *
- * Matches are found line by line: a pattern never spans a line break (`\n`
- * matches nothing). Searching wraps around the end of the file (Vim's
- * `wrapscan`), and says so.
+ * Matches are found line by line here; a pattern that names a line break
+ * (`\n`) is searched over the whole text instead, from the worker's verdict
+ * (`search/guard.ts`, ED5, T5). Searching wraps around the end of the file
+ * (Vim's `wrapscan`), and says so.
  */
 
 import type { TextStore } from "../buffer";
 import { comparePos, pos, range, type Pos, type Range } from "../position";
+import { lineMatches } from "../search/matches";
+
+// Shared with the find bar and the worker (ED5, T5); re-exported for Vi's own callers.
+export { lineMatches };
 
 /** A pattern ready to search with. */
 export interface Compiled {
@@ -95,21 +100,6 @@ export function compilePattern(pattern: string, mode: CaseMode = "smart"): Compi
 export function wordPattern(word: string): string {
   const escaped = word.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
   return /^[\p{L}\p{N}_]/u.test(word) ? `\\<${escaped}\\>\\C` : `${escaped}\\C`;
-}
-
-/** Every match on one line, as `[start, end)` columns. Empty matches count once per position. */
-export function lineMatches(line: string, re: RegExp, limit = Infinity): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  re.lastIndex = 0;
-  while (out.length < limit) {
-    const m = re.exec(line);
-    if (!m) break;
-    out.push([m.index, m.index + m[0].length]);
-    // An empty match must not match at the same place forever.
-    if (m[0].length === 0) re.lastIndex = m.index + (line.codePointAt(m.index)! > 0xffff ? 2 : 1);
-    if (re.lastIndex > line.length) break;
-  }
-  return out;
 }
 
 /**

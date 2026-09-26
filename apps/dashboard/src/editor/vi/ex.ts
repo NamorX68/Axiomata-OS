@@ -3,12 +3,14 @@
  * a line range and a command. What exists — deliberately short:
  *
  * `:w` `:q` `:q!` `:wq` `:x` `:e!` `:{n}` `:s` (and `:&`, `:&&`) `:noh`
- * `:set wrap nu rnu list` (and their `no` forms and `!` toggles).
+ * `:set wrap nu rnu list` (and their `no` forms and `!` toggles); since ED5
+ * (T12) `:g`/`:g!`/`:v` with a command for each matching line, `:d` and
+ * `:norm[al]`.
  *
  * Ranges: `%`, `.`, `$`, a number, a mark (`'a`, `'<`, `'>`), each with
  * `+n`/`-n` offsets, one or two joined by `,` (both from the cursor) or `;`
- * (the second from the first). Not there: `:g`, `:normal`, the `c` flag,
- * search addresses (`/pat/`).
+ * (the second from the first). Not there: search addresses (`/pat/`), `:m`,
+ * `:t`, `:j`.
  */
 
 /** Lines `first`–`last`, zero-based and in order. */
@@ -29,7 +31,13 @@ export type ExCommand =
   /** `:&` repeats the last `:s` without its flags, `:&&` with them. */
   | { name: "repeatSubstitute"; range: LineRange; keepFlags: boolean }
   | { name: "nohlsearch" }
-  | { name: "set"; option: SetOption; value: boolean | "toggle" };
+  | { name: "set"; option: SetOption; value: boolean | "toggle" }
+  /** `:g/pat/cmd` runs `command` on each line matching `pattern` (`invert`: each one not matching — `:v`, `:g!`). */
+  | { name: "global"; range: LineRange; pattern: string; invert: boolean; command: string }
+  /** `:d [x]`: the lines, into register `x` (the unnamed one without). */
+  | { name: "delete"; range: LineRange; register: string | null }
+  /** `:norm[al] {keys}`: the keys in Normal mode, on each line of the range (the cursor's line without one). */
+  | { name: "normal"; range: LineRange | null; keys: string };
 
 /** What a range address can refer to. */
 export interface ExContext {
@@ -50,6 +58,8 @@ const COMMANDS: ReadonlyArray<{ name: string; min: number }> = [
   { name: "substitute", min: 1 },
   { name: "nohlsearch", min: 3 },
   { name: "set", min: 2 },
+  { name: "delete", min: 1 },
+  { name: "normal", min: 4 },
 ];
 
 const OPTIONS: ReadonlyArray<{ name: SetOption; short: string }> = [
@@ -67,26 +77,31 @@ function commandName(typed: string): string | null {
 
 /** Parses one `:` line. An error is Vim-style text for the status line. */
 export function parseEx(line: string, ctx: ExContext): ExCommand | { error: string } {
-  const text = line.trim().replace(/^:+/, "");
+  // Only the start: a trailing space can be part of `:normal`'s keys.
+  const text = line.trimStart().replace(/^:+/, "");
   const ranged = parseRange(text, ctx);
   if ("error" in ranged) return ranged;
   const { range, rest } = ranged;
-  const body = rest.trim();
+  const body = rest.trimStart();
   // `:{n}` alone: go to that line.
-  if (body === "") {
+  if (body.trim() === "") {
     if (!range) return { error: "" };
     return { name: "goto", line: range.last };
   }
   const current = range ?? { first: ctx.line, last: ctx.line };
   const substitute = parseSubstituteCommand(body, current);
   if (substitute) return substitute;
+  const global = parseGlobal(body, range ?? { first: 0, last: ctx.lineCount - 1 });
+  if (global) return global;
 
   const m = /^([a-zA-Z]+)(!?)\s*(.*)$/.exec(body);
   if (!m) return { error: `E492: Not an editor command: ${body}` };
   const [, typed, bang, arg] = m;
   const name = commandName(typed);
   if (!name) return { error: `E492: Not an editor command: ${body}` };
-  if (range && name !== "substitute") return { error: "E481: No range allowed" };
+  if (range && name !== "substitute" && name !== "delete" && name !== "normal") {
+    return { error: "E481: No range allowed" };
+  }
   switch (name) {
     case "write":
       // Writing elsewhere (`:w other.txt`) is not the editor's; the file app has Save As.
@@ -104,6 +119,14 @@ export function parseEx(line: string, ctx: ExContext): ExCommand | { error: stri
       return { name: "nohlsearch" };
     case "set":
       return parseSet(arg);
+    case "delete": {
+      const register = arg.trim();
+      if (register !== "" && !/^[a-zA-Z0-9"_+*-]$/.test(register)) return badArg(arg);
+      return { name: "delete", range: current, register: register || null };
+    }
+    case "normal":
+      if (!arg) return { error: "E471: Argument required" };
+      return { name: "normal", range, keys: arg };
   }
   return { error: `E492: Not an editor command: ${body}` };
 }
@@ -119,6 +142,36 @@ function parseSubstituteCommand(body: string, range: LineRange): ExCommand | nul
   if (sub) return { name: "substitute", range, args: body.slice(sub[0].length) };
   if (body === "&" || body === "&&") return { name: "repeatSubstitute", range, keepFlags: body === "&&" };
   return null;
+}
+
+/** `:g` … `:global`, `:v` … `:vglobal`, an optional `!`, then the delimiter (not a letter, digit, space). */
+const GLOBAL = /^(g(?:l(?:o(?:b(?:a(?:l)?)?)?)?)?|v(?:g(?:l(?:o(?:b(?:a(?:l)?)?)?)?)?)?)(!?)(?=[^a-zA-Z0-9\s"|])/;
+
+/**
+ * `:g/pat/cmd`, `:g!/pat/cmd`, `:v/pat/cmd` (any non-letter delimiter, as for
+ * `:s`); the range is the whole file unless one was given. `null` when `body`
+ * is not one of them.
+ */
+function parseGlobal(body: string, range: LineRange): ExCommand | { error: string } | null {
+  const m = GLOBAL.exec(body);
+  if (!m) return null;
+  const invert = m[1].startsWith("v") || m[2] === "!";
+  const text = body.slice(m[0].length);
+  const delim = text[0];
+  let pattern = "";
+  let i = 1;
+  for (; i < text.length && text[i] !== delim; i++) {
+    // `\{delim}` is the delimiter itself; every other escape is the pattern's.
+    if (text[i] === "\\" && i + 1 < text.length) {
+      pattern += text[i + 1] === delim ? delim : text.slice(i, i + 2);
+      i++;
+    } else pattern += text[i];
+  }
+  const command = text.slice(i + 1).trimStart();
+  if (!command.trim()) {
+    return { error: "E471: Argument required: :g needs a command (:g/pat/d, :g/pat/s//x/, :g/pat/normal …)" };
+  }
+  return { name: "global", range, pattern, invert, command };
 }
 
 function badArg(arg: string): { error: string } {

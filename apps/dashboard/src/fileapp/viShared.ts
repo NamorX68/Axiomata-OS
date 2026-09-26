@@ -3,6 +3,8 @@
  * V4): one set of registers, the last `f`/`t`, the file marks and the last
  * macro — `yy` in the file app and `p` in an IDE pane meet in the same `"`.
  *
+ * Its patterns go through the app's search guard (`searchWorker.ts`, ED5, T5).
+ *
  * The unnamed register is the Mac clipboard while the setting says "shared"
  * (the default, D17); reading and writing it go through Rust (`pbpaste`/
  * `pbcopy`), so a read answers later and the machine waits for it.
@@ -17,6 +19,7 @@ import { toast } from "../core/toast";
 import type { ClipboardPort } from "../editor/vi/registers";
 import { ViShared } from "../editor/vi/machine";
 import { editorSettings } from "./editorSettings";
+import { searchGuard } from "./searchWorker";
 import { restoreVi, snapshotVi } from "./viPersist";
 
 /** How long after the last key the remembered state is written. */
@@ -38,6 +41,7 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 export function viShared(): ViShared {
   if (shared) return shared;
   const created = new ViShared(macClipboard);
+  created.guard = searchGuard();
   editorSettings.subscribe((s) => {
     created.registers.shared = s.viClipboard === "shared";
   });

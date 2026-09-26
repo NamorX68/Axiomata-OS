@@ -18,7 +18,7 @@
  * undoing past it and typing something else is dirty until the next save.
  */
 
-import { clampPos, endOfText, type TextStore } from "./buffer";
+import { clampPos, endOfText } from "./buffer";
 import { bodyForStore, detectIndent, detectShape, joinForSave, type FileShape, type Indent } from "./detect";
 import { cursor, pos, posEqual, range, type Pos, type Range, type Selection } from "./position";
 import { RopeStore } from "./rope";
@@ -76,7 +76,7 @@ export function endAfter(start: Pos, text: string): Pos {
 }
 
 export class EditorDocument {
-  readonly store: TextStore;
+  readonly store: RopeStore;
   shape: FileShape;
   indent: Indent;
   /** `true` if the indentation came from the file, `false` if from the setting. */

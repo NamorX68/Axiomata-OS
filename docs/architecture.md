@@ -1048,7 +1048,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **Editor ED5 — tools: under way** (2026-09-26, T1–T19 in `docs/plans/editor.md`). ED5.1: the
   rope (`editor/rope.ts`, an immutable B-tree of line blocks behind `TextStore`, snapshots for the
   coming search worker); files up to 16 MiB editable, over 2 MiB in a light mode without
-  tree-sitter; the recovery folder capped at 256 MiB in total (`MAX_TOTAL_BYTES`).
+  tree-sitter; the recovery folder capped at 256 MiB in total (`MAX_TOTAL_BYTES`). ED5.2: the
+  search guard (`editor/search/`): a worker runs every pattern first on a fixed rope with a 1 s
+  limit, the main thread only after an ok verdict (or answers from its offsets); Vi pauses its key
+  queue for a verdict; loops (`:g`, `3@:`) are vouched for once up front. Vi gained `:g`/`:v`,
+  `:d`, `:normal`, `:s///c` (`vi/confirm.ts`), line-spanning `:s`, `gn`/`cgn`.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

@@ -918,6 +918,36 @@ zurücklesen würde (JSON über 64 MiB), wird gar nicht erst geschrieben. Veralt
 Löschen über ganze Teilbäume, `text()`-Cache je Fassung, die 16-MiB-Kante in Rust); der nie erreichte
 Anhänge-Zweig in `splice` ist entfernt.
 
+**ED5.2 — gebaut (2026-09-26):** die Such-Maschine (T5, T12). Umsetzung von T5 im Detail: der Worker ist
+ein **Prüfer**. `editor/search/guard.ts` (`SearchGuard`) lässt jedes Muster zuerst im Worker
+(`search/worker.ts`) auf einer festen Rope-Fassung laufen, mit 1 s Zeitgrenze — danach wird der Worker
+beendet und neu gestartet, das Urteil heißt „Pattern too expensive“. Urteile gelten je Fassung und Muster
+(`WeakMap<Rope, …>`) und tragen alle Treffer (bis 100 000) als Offsets mit; `n`/`N`, hlsearch und `gn`
+antworten daraus per Binärsuche (`search/jump.ts`), ohne das Muster im Haupt-Thread noch einmal
+auszuführen. Wo das Muster doch im Haupt-Thread läuft (`:s`, `:g`), dann erst nach dem Urteil —
+es kostet dort nicht mehr als im Worker. Solange das Urteil unterwegs ist, **pausiert Vis Tasten-
+schlange** wie beim Warten auf die Zwischenablage (`SearchPending`) und spielt die Tasten danach ab —
+Makros und `.` bleiben damit genau; ein `<CR>` der Befehlszeile wird geprüft, *bevor* sie schließt.
+Vorschau und hlsearch zeichnen bis dahin nichts und kommen mit dem Urteil (`onVerdict`, `settled`).
+Ohne Worker (Tests, jsdom) läuft alles wie vorher sofort. Muster mit `\n` treffen über Zeilen
+(`search/matches.ts` `spansLines`), auch in `:s` (`substituteSpanning`). Dazu T12: `:g`/`:g!`/`:v`
+mit `:d`, `:s`, `:normal` als Befehl (`vi/global.ts`: Zeilen erst markieren, dann besuchen,
+`LineAnchors` folgen den Änderungen; ein Undo-Schritt), `:d [x]`, `:norm[al]`, `:s///c` mit
+y/n/a/q/l (ein Undo-Schritt), `gn`/`gN`/`cgn`/`dgn` (mit `.` wiederholbar). Browser-Test mit echtem
+Worker: `/fn s` markiert und springt; `/(x+x+)+y` auf einer langen x-Zeile — die Seite antwortet
+währenddessen in 6 ms, nach 1 s die Meldung, `j` geht sofort weiter.
+Reviews (Architektur CRITICAL, Tests drei Fehler) — behoben: (1) `:g` mit `:s` hielt mit echtem Worker nach
+der ersten Zeile still an und `2@:` mit einem `:g` darin lief endlos, weil jede eigene Änderung eine neue,
+ungeprüfte Fassung erzeugt; jetzt gilt: eine **Schleife** (`:g`, ein `:normal` über Zeilen, gezähltes `@:`)
+lässt alle ihre Muster *vorab* prüfen und wartet innerhalb nicht mehr — das einzige Mal, dass ein Muster
+auf Text läuft, den der Worker nicht gesehen hat, und der unterscheidet sich nur um die Änderungen der
+Schleife selbst. (2) Der Worker durchläuft jetzt immer den *ganzen* Text und meldet nur die ersten 100 000
+Treffer — ein Urteil beweist so die ganze Datei; Markierungen eines zeilenübergreifenden Musters mit mehr
+Treffern suchen nur im sichtbaren Ausschnitt. (3) `gn` auf einem leeren Treffer am Zeilenende setzte den
+Visual-Anker hinter den Cursor — jetzt wie der Cursor begrenzt. Außerdem ist die Rückfrage von `:s///c` in
+ein eigenes Modul gezogen (`vi/confirm.ts`), `cmdmode.ts` bleibt beim Verteilen der Befehle. Für ED5.4
+vorgemerkt: „Alle ersetzen“ der Such-Leiste prüft einmal und ersetzt dann aus den Offsets des Urteils.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

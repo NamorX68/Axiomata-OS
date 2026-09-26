@@ -346,3 +346,107 @@ describe("a read-only surface", () => {
     expect(effects.filter((e) => e.type !== "bell")).toEqual([]);
   });
 });
+
+table(":g, :v, :d and :normal (ED5, T12)", [
+  // The cursor stays where the last line was deleted.
+  ["|a1\nb\na2\nc", ":g/a/d<CR>", "b\n|c"],
+  ["|a1\nb\na2\nc", ":v/a/d<CR>", "a1\n|a2"],
+  ["|a1\nb\na2\nc", ":g!/a/d<CR>", "a1\n|a2"],
+  // Marked first, then visited: deleting one line does not skip the next.
+  ["|x\nx\nx\ny", ":g/x/d<CR>", "|y"],
+  ["|a1\nb\na2", ":g/a/s/\\d/N/<CR>", "aN\nb\n|aN"],
+  ["|a\nb\na", ":g/a/normal Ax<CR>", "ax\nb\na|x"],
+  // `:normal` joining lines shrinks the line count as `:g` visits them: the anchors must follow.
+  ["|a1\nx\na2\ny\na3\nz", ":g/a/normal J<CR>", "a1 x\na2 y\na3| z"],
+  // A replacement that inserts a real line break (`\r`) grows the line count as `:g` runs.
+  ["|a,b\na,c", ":g/a/s/,/\\r/<CR>", "a\nb\na\n|c"],
+  ["|one\ntwo\nthree", ":2,3d<CR>", "|one"],
+  ["|one\ntwo\nthree", ":d<CR>", "|two\nthree"],
+  ["|one\ntwo", ":%normal I- <CR>", "- one\n-| two"],
+  // A pattern on no line says so and changes nothing.
+  ["|a\nb", ":g/z/d<CR>", "|a\nb"],
+  // `:v` on the one empty line of an empty file: it is marked (it does not contain the pattern),
+  // but deleting the file's only line is a no-op — there is always at least one line left.
+  ["|", ":v/x/d<CR>", "|"],
+]);
+
+table(":s across lines and with c (ED5, T5, T12)", [
+  ["|a,\nb,\nc", ":%s/,\\n/ /<CR>", "|a b c"],
+  ["|x x\nx", ":%s/x/y/gc<CR>yny", "y x\n|y"],
+  ["|x x\nx", ":%s/x/y/gc<CR>a", "y y\n|y"],
+  ["|x x\nx", ":%s/x/y/gc<CR>yq", "|y x\nx"],
+  ["|x x\nx", ":%s/x/y/gc<CR>nl", "|x y\nx"],
+  // Without g, one match a line.
+  ["|x x\nx", ":%s/x/y/c<CR>yy", "y x\n|y"],
+]);
+
+describe(":g and :s///c as one undo step", () => {
+  it("undoes a whole :g at once", () => {
+    const { doc, m } = setup("|a\nb\na\nb");
+    m.feedKeys(":g/a/d<CR>u");
+    expect(show(doc)).toBe("|a\nb\na\nb");
+  });
+
+  it("undoes a whole :s///c at once", () => {
+    const { doc, m } = setup("|x x");
+    m.feedKeys(":s/x/y/gc<CR>yyu");
+    expect(show(doc)).toBe("|x x");
+  });
+
+  it("asks with the replacement and shows the match it asks about", () => {
+    const { m } = setup("|ab ab");
+    m.feedKeys(":s/b/Z/gc<CR>");
+    expect(m.status().message?.text).toBe("replace with Z (y/n/a/q/l)?");
+    expect(m.searchHighlights(0, 0).current).toEqual({ start: { line: 0, col: 1 }, end: { line: 0, col: 2 } });
+  });
+
+  it("refuses a :g inside a :g", () => {
+    const { doc, m } = setup("|a");
+    m.feedKeys(":g/a/g/a/d<CR>");
+    expect(show(doc)).toBe("|a");
+    expect(m.status().message?.text).toMatch(/E147/);
+  });
+});
+
+describe(":s///c edge cases (ED5, T12)", () => {
+  it("'a' after some 'n's replaces only the matches from there on", () => {
+    const { doc, m } = setup("|x x x x");
+    m.feedKeys(":s/x/y/gc<CR>nnay");
+    // The first two are skipped (n n), the rest replaced at once (a); the cursor lands at
+    // the substitution's line start, and the trailing 'y' is just a no-op yank waiting for a motion.
+    expect(show(doc)).toBe("|x x y y");
+  });
+
+  it("asks again at each line for an empty-match pattern, instead of looping on one spot", () => {
+    const { doc, m } = setup("|ab\ncd");
+    m.feedKeys(":%s/^/> /gc<CR>");
+    expect(m.status().message?.text).toBe("replace with >  (y/n/a/q/l)?");
+    m.feedKeys("y");
+    // Still asking — now about the second line's empty match, not stuck on the first.
+    expect(m.status().message?.text).toBe("replace with >  (y/n/a/q/l)?");
+    m.feedKeys("y");
+    expect(show(doc)).toBe("> ab\n|> cd");
+    expect(m.status().message?.text).toBe("2 substitutions");
+  });
+
+  it("re-finds a spanning pattern's next match on the text as edited so far", () => {
+    const { doc, m } = setup("|a,\nb,\nc");
+    m.feedKeys(":%s/,\\n/ /gc<CR>y");
+    // One join done; the next match is asked about on the now-joined text, not the original.
+    expect(m.status().message?.text).toBe("replace with   (y/n/a/q/l)?");
+    m.feedKeys("y");
+    expect(show(doc)).toBe("|a b c");
+  });
+
+  it("undoes only what was confirmed so far when the round is cut short with Esc", () => {
+    const { doc, m } = setup("|x x x");
+    m.feedKeys(":s/x/y/gc<CR>y");
+    // Still mid-round: the second and third x are still to be asked about.
+    expect(m.status().message?.text).toBe("replace with y (y/n/a/q/l)?");
+    m.feedKeys("<Esc>");
+    expect(show(doc)).toBe("|y x x");
+    m.feedKeys("u");
+    // The one replacement made before Esc is undone as a single step.
+    expect(show(doc)).toBe("|x x x");
+  });
+});
