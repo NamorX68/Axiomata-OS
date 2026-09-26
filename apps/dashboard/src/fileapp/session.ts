@@ -87,14 +87,18 @@ export class FileSession {
   private overwriteArmed = false;
   private closed = false;
 
+  /** Where the file is; a rename in the file app moves it (`moved`). */
+  private relPath: string;
+
   private constructor(
     private readonly backend: FileBackend,
     readonly root: string,
-    readonly rel: string,
+    rel: string,
     file: Pick<TextFile, "content" | "large"> & { version: FileVersion | null },
     indentFallback: Indent,
     untitled = false,
   ) {
+    this.relPath = rel;
     this.doc = new EditorDocument(file.content, { indentFallback });
     this.version = file.version;
     this.readOnly = file.large;
@@ -139,6 +143,29 @@ export class FileSession {
       await backend.recoveryDelete(root, rel).catch(() => undefined);
     }
     return session;
+  }
+
+  /** The file's path, relative to its root. */
+  get rel(): string {
+    return this.relPath;
+  }
+
+  /**
+   * The file was renamed or moved inside its root by the file app itself
+   * (W13): the session follows it — watching the new path, keeping its text,
+   * version and undo — instead of taking the old path's disappearance for a
+   * deletion. The kept-aside copy moves along.
+   */
+  async moved(rel: string): Promise<void> {
+    if (this.untitled || this.closed || rel === this.relPath) return;
+    const old = this.relPath;
+    this.relPath = rel;
+    // The watcher may already have taken the old path's disappearance for a deletion.
+    if (this.banner?.kind === "deleted") this.banner = null;
+    await this.backend.unwatch(this.root, old).catch(() => undefined);
+    await this.backend.recoveryDelete(this.root, old).catch(() => undefined);
+    await this.backend.watch(this.root, rel).catch(() => undefined);
+    await this.persistRecovery();
   }
 
   /** The file's name, for titles and the comment prefix. */

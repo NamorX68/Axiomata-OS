@@ -767,6 +767,36 @@ Datei-Beobachter kennt kein „umbenannt“, also braucht ED4.4 einen ausdrückl
 in die Sitzung (`retarget`); und ob Tabs im Hintergrund ihren Highlighter abgeben, entscheidet
 sich vor ED4.5, wenn ⌘P viele Tabs leicht macht.
 
+**ED4.4 — gebaut (2026-09-26):** Der Datei-Dienst kann Ordner (`axiomata-files::dir`): `list_dir`
+(Ordner zuerst, höchstens 5 000 Einträge, `.gitignore`-Treffer markiert — auch ein verschachteltes
+`.gitignore` mit `!` zählt, und was in einem ignorierten Ordner liegt, gilt als ignoriert),
+`make_dir`, `rename_entry` (nie überschreibend, `renameat` mit `NOREPLACE`), `count_tree` und
+`delete_tree` (rekursiv, nie die Wurzel, ein Symlink wird entfernt, nie verfolgt). Alles geht wie
+bisher Komponente für Komponente mit `openat(O_NOFOLLOW)` vom Wurzelverzeichnis aus; ein
+verlinkter Ordner erscheint als Link und lässt sich nicht als Ordner öffnen. Befehle
+`file_list`/`file_mkdir`/`file_rename`/`file_count`/`file_delete_tree`. Im Frontend
+`FileTree.svelte`: die Wurzeln ohne Worktrees (W6), Ordner werden beim Aufklappen gelesen, Punkt-
+Dateien, `.git`, `node_modules` und `target` ausgeblendet („hidden“ zeigt sie), Ignoriertes
+ausgegraut; Klick öffnet im Vorschau-Tab, Doppelklick fest; Rechtsklick oder ⋯: Neue Datei, Neuer
+Ordner, Umbenennen (in der Zeile), Löschen (mit „… und N Einträge darin?“). Offene Tabs folgen
+einem Umbenennen — auch eines Ordners, in dem sie liegen — über `FileSession.moved` (beobachtet
+den neuen Pfad, nimmt den beiseitegelegten Text mit, lädt nicht neu). Die Regeln stehen rein in
+`treeModel.ts`; Breite (gezogen), Sichtbarkeit (⌘B), „hidden“ und offene Ordner unter
+`settings.editor.tree`. Die Tab-Leiste steht jetzt in der Spalte rechts vom Baum.
+
+Die Prüfungen von ED4.4: Umbenennen erreichte nur die Tabs der Datei-App — ein Panel mit derselben
+Datei bekam vom Beobachter ein falsches „gelöscht“, und die Kette im Frontend lief nicht im Takt
+mit dem Beobachter (Architektur, CRITICAL/HIGH). Jetzt meldet der Rust-Befehl selbst
+`files:renamed` (und `files:removed` nach dem Löschen), sobald er fertig ist, und **jeder**
+`FileEditor` folgt — Tab, Panel, später das IDE-Pane; der Tab folgt seinem Editor, die Datei-App
+pflegt nur noch „Recent“. `.git`, `.hg` und `.jj` ändert der Baum nie (Sicherheit, HIGH: die
+Git-Ebene der Agenten steht darauf). „Neue Datei“ war Lesen-dann-Schreiben und hätte eine eben
+entstandene Datei überschreiben können (HIGH/MEDIUM) — jetzt `file_create` mit `O_CREAT|O_EXCL`.
+`pin` lehnt `..` selbst ab, statt sich auf den Aufrufer zu verlassen (MEDIUM). Das Zählen hört auf
+allen Ebenen an der Grenze auf, ein Ordner, in den beim Löschen geschrieben wird, sagt das, der ⋯
+ist ein eigener Knopf (kein Knopf im Knopf), und das Umschreiben der offenen Ordner ist rein und
+getestet (`expandedAfterRename`/`expandedAfterDelete`). Gut 20 weitere Rust-Tests.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

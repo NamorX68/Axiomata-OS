@@ -302,3 +302,47 @@ describe("a new note's untitled session (ED4, W4)", () => {
     expect(s.banner).toBeNull();
   });
 });
+
+describe("following a rename in the file app (ED4.4, W13)", () => {
+  it("watches the new path, keeps text and version, and moves the kept-aside copy", async () => {
+    const backend = new FakeBackend();
+    backend.files.set("workspace:old.md", "hello");
+    const s = await FileSession.open(backend, "workspace", "old.md", INDENT);
+    run(s.doc, { type: "insert", text: "x" }, ctx());
+    await s.persistRecovery();
+    const version = s.version;
+    await s.moved("new/name.md");
+    expect(s.rel).toBe("new/name.md");
+    expect(s.fileName).toBe("name.md");
+    expect(s.version).toBe(version);
+    expect(backend.watched.has("workspace:old.md")).toBe(false);
+    expect(backend.watched.has("workspace:new/name.md")).toBe(true);
+    expect(backend.recoveries.has("workspace:old.md")).toBe(false);
+    expect(backend.recoveries.get("workspace:new/name.md")?.content).toBe("xhello");
+    // The old path disappearing is no longer this session's business.
+    expect(await s.onExternalChange({ root: "workspace", rel: "old.md", kind: "deleted", version: null })).toBe(false);
+  });
+
+  it("does not leave a stale recovery entry behind when a clean document is moved", async () => {
+    const backend = new FakeBackend();
+    backend.files.set("workspace:clean.md", "hello");
+    const s = await FileSession.open(backend, "workspace", "clean.md", INDENT);
+    expect(s.doc.dirty).toBe(false);
+    await s.moved("moved.md");
+    expect(s.rel).toBe("moved.md");
+    expect(backend.watched.has("workspace:moved.md")).toBe(true);
+    expect(backend.recoveries.size).toBe(0);
+  });
+
+  it("does nothing for a new note, a closed session or the same path", async () => {
+    const backend = new FakeBackend();
+    const draft = await FileSession.untitled(backend, INDENT);
+    await draft.moved("x.md");
+    expect(draft.rel).not.toBe("x.md");
+    backend.files.set("workspace:a.md", "a");
+    const s = await FileSession.open(backend, "workspace", "a.md", INDENT);
+    await s.close();
+    await s.moved("b.md");
+    expect(s.rel).toBe("a.md");
+  });
+});

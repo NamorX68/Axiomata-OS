@@ -59,6 +59,30 @@ impl From<FilesError> for FileError {
 /// The event every settled change to a watched file is emitted as.
 pub const FILES_CHANGED: &str = "files:changed";
 
+/// Emitted the moment [`file_rename`] succeeded: every open copy of that file
+/// (a tab, a panel, an IDE pane) follows it, before the watcher, which only
+/// sees the old path go, could call it deleted (editor plan W13).
+pub const FILES_RENAMED: &str = "files:renamed";
+
+/// Emitted when [`file_delete_tree`] removed something: open files at or under
+/// it learn at once, without waiting for the watcher's settle.
+pub const FILES_REMOVED: &str = "files:removed";
+
+/// Payload of [`FILES_RENAMED`].
+#[derive(Debug, Clone, Serialize)]
+pub struct Renamed {
+    pub root: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// Payload of [`FILES_REMOVED`].
+#[derive(Debug, Clone, Serialize)]
+pub struct Removed {
+    pub root: String,
+    pub rel: String,
+}
+
 /// The app's one file watcher, managed by Tauri. `None` if the OS watcher
 /// could not be started — the app still runs, `file_watch` then says why.
 pub struct FileWatch(Option<Arc<FileWatcher>>);
@@ -196,6 +220,107 @@ pub async fn file_delete(
         service::delete(&self::root(config, db, &root)?, &rel)
     })
     .await
+}
+
+/// One folder of a root for the file app's tree (`""`: the root itself) —
+/// folders first, `.gitignore`d entries marked (editor plan W6).
+#[tauri::command]
+pub async fn file_list(
+    state: State<'_, CoreState>,
+    root: String,
+    rel: String,
+) -> Result<service::Listing, FileError> {
+    blocking(&state, move |config, db| {
+        service::list_dir(&self::root(config, db, &root)?, &rel)
+    })
+    .await
+}
+
+/// Makes a folder; its parent must exist (W13).
+#[tauri::command]
+pub async fn file_mkdir(
+    state: State<'_, CoreState>,
+    root: String,
+    rel: String,
+) -> Result<(), FileError> {
+    blocking(&state, move |config, db| {
+        service::make_dir(&self::root(config, db, &root)?, &rel)
+    })
+    .await
+}
+
+/// Renames or moves an entry inside one root; never overwrites (W13). Tells
+/// every open copy of the file where it went ([`FILES_RENAMED`]).
+#[tauri::command]
+pub async fn file_rename(
+    app: AppHandle,
+    state: State<'_, CoreState>,
+    root: String,
+    from: String,
+    to: String,
+) -> Result<(), FileError> {
+    let renamed = Renamed {
+        root: root.clone(),
+        from: from.clone(),
+        to: to.clone(),
+    };
+    blocking(&state, move |config, db| {
+        service::rename_entry(&self::root(config, db, &root)?, &from, &to)
+    })
+    .await?;
+    if let Err(err) = app.emit(FILES_RENAMED, &renamed) {
+        tracing::warn!(%err, "could not emit a rename");
+    }
+    Ok(())
+}
+
+/// Makes a new, empty text file; never over something already there (W13).
+#[tauri::command]
+pub async fn file_create(
+    state: State<'_, CoreState>,
+    root: String,
+    rel: String,
+) -> Result<Version, FileError> {
+    blocking(&state, move |config, db| {
+        service::create_text(&self::root(config, db, &root)?, &rel)
+    })
+    .await
+}
+
+/// How many entries a folder holds, for the question before deleting it (W13).
+#[tauri::command]
+pub async fn file_count(
+    state: State<'_, CoreState>,
+    root: String,
+    rel: String,
+) -> Result<usize, FileError> {
+    blocking(&state, move |config, db| {
+        service::count_tree(&self::root(config, db, &root)?, &rel)
+    })
+    .await
+}
+
+/// Deletes a folder with everything in it, or a file; never the root (W13).
+/// The view asks first.
+#[tauri::command]
+pub async fn file_delete_tree(
+    app: AppHandle,
+    state: State<'_, CoreState>,
+    root: String,
+    rel: String,
+) -> Result<(), FileError> {
+    let removed = Removed {
+        root: root.clone(),
+        rel: rel.clone(),
+    };
+    blocking(&state, move |config, db| {
+        service::delete_tree(&self::root(config, db, &root)?, &rel)
+    })
+    .await?;
+    if let Err(err) = app.emit(FILES_REMOVED, &removed) {
+        tracing::warn!(%err, "could not emit a removal");
+    }
+    Ok(())
 }
 
 /// Reads a raster image (≤ 8 MiB), base64-encoded.

@@ -13,16 +13,20 @@
     ⌃Tab/⌃⇧Tab and ⌘1–⌘9 switch. Editing in the preview tab fixes it.
   * **A panel hands its file over** (`handoff.ts`, W11): the tab takes the
     panel's live session, unsaved text and undo included.
+  * **The tree** (`FileTree`, W6, W13) on the left — the workspace, projects,
+    picked folders; ⌘B shows or hides it, its width is dragged; a rename there
+    moves open tabs along (`FileSession.moved`).
   * **A file that cannot be opened is forgotten** from the recent list when it
     is gone or its root is; any other failure only says so. Its tab closes.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { FileRootInfo } from "../core/backend";
-  import { listRoots, pickFile } from "./backend";
+  import { listenBackend, type FileRootInfo } from "../core/backend";
+  import { listRoots, pickFile, type FileRenamed } from "./backend";
   import type { OpenFileState, OpenResult } from "./FileEditor.svelte";
   import FileTab from "./FileTab.svelte";
+  import FileTree from "./FileTree.svelte";
   import { handoffs, takeHandoffs, type Handoff } from "./handoff";
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
   import {
@@ -39,6 +43,7 @@
     type Tab,
     type TabsState,
   } from "./tabs";
+  import { clampWidth, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
   import UnsavedQuestion from "./UnsavedQuestion.svelte";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -59,7 +64,12 @@
   let roots = $state<FileRootInfo[]>([]);
   let showRecent = $state(false);
   let showSettings = $state(false);
-
+  let tree = $state<TreePrefs>(loadTreePrefs());
+  let treeView = $state<FileTree | null>(null);
+  /** The tree's width while its edge is being dragged. */
+  let dragging = $state<{ startX: number; startWidth: number } | null>(null);
+  /** The tree shows the workspace, projects and picked folders — agents' worktrees are the IDE's (W6). */
+  const treeRoots = $derived(roots.filter((r) => r.kind !== "worktree"));
   const newId = () => crypto.randomUUID();
   const active = $derived(tabs.tabs.find((t) => t.id === tabs.active) ?? null);
   const current = $derived(active ? (states[active.id] ?? null) : null);
@@ -167,6 +177,26 @@
     c.answer(true);
   }
 
+  /** A rename (W13): the recent list follows. Open tabs follow on their own — their editors hear it too. */
+  function onRenamed(renamed: FileRenamed): void {
+    for (const file of recentFiles()) {
+      const rel = file.root === renamed.root ? renamedPath(file.rel, renamed.from, renamed.to) : null;
+      if (rel === null) continue;
+      forgetRecent(file);
+      rememberRecent({ root: file.root, rel });
+    }
+    recent = recentFiles();
+  }
+
+  function startDrag(e: PointerEvent): void {
+    dragging = { startX: e.clientX, startWidth: tree.width };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onDrag(e: PointerEvent): void {
+    if (dragging) tree = { ...tree, width: clampWidth(dragging.startWidth + e.clientX - dragging.startX) };
+  }
+
   /**
    * The view's own keys (W12), in the capture phase so they work with the
    * editor focused or not — and stopped there, like the editor's own ⌘S.
@@ -193,6 +223,9 @@
     } else if (key === "w") {
       take(e);
       if (tabs.active) void requestCloseTab(tabs.active);
+    } else if (key === "b") {
+      take(e);
+      tree = { ...tree, visible: !tree.visible };
     }
   }
 
@@ -210,15 +243,26 @@
     tabs = loadTabs(newId);
     restored = true;
     takeWaiting();
-    return handoffs.subscribe((list) => {
+    const unlistenRenamed = listenBackend<FileRenamed>("files:renamed", onRenamed);
+    const unsubscribe = handoffs.subscribe((list) => {
       if (list.length > 0) takeWaiting();
     });
+    return () => {
+      unsubscribe();
+      void unlistenRenamed.then((off) => off());
+    };
   });
 
   $effect(() => {
     const snapshot = tabs;
     if (!restored) return;
     saveTabs(snapshot);
+  });
+
+  $effect(() => {
+    const snapshot = tree;
+    // Not while dragging: once, when the edge is let go.
+    if (!dragging) saveTreePrefs(snapshot);
   });
 
   $effect(() => {
@@ -272,6 +316,40 @@
     </div>
   </header>
 
+  <div class="main">
+  {#if tree.visible}
+    <aside class="side" style:width="{tree.width}px">
+      <div class="side-bar">
+        <span>Files</span>
+        <label title="Show dotfiles, .git, node_modules, target">
+          <input type="checkbox" bind:checked={tree.showHidden} /> hidden
+        </label>
+        <button type="button" class="icon" aria-label="Read the folders again" onclick={() => treeView?.refresh()}
+          >↻</button
+        >
+      </div>
+      <FileTree
+        bind:this={treeView}
+        roots={treeRoots}
+        bind:expanded={tree.expanded}
+        showHidden={tree.showHidden}
+        active={active?.file ?? null}
+        onOpen={(file, preview) => openTab(file, preview)}
+        onError={(message) => (error = message)}
+      />
+    </aside>
+    <div
+      class="edge"
+      class:dragging={dragging !== null}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Tree width"
+      onpointerdown={startDrag}
+      onpointermove={onDrag}
+      onpointerup={() => (dragging = null)}
+    ></div>
+  {/if}
+  <div class="column">
   {#if tabs.tabs.length > 0}
     <div class="tabbar" role="tablist" aria-label="Open files">
       {#each tabs.tabs as tab (tab.id)}
@@ -349,6 +427,8 @@
         {/if}
       </div>
     {/each}
+  </div>
+  </div>
   </div>
 </section>
 
@@ -527,6 +607,76 @@
 
   .gear[aria-pressed="true"] {
     border-color: var(--ax-accent);
+  }
+
+  /* The tree beside the tabs. */
+  .main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
+
+  .side {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    min-height: 0;
+    background: var(--ax-surface-1);
+  }
+
+  .side-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-3);
+    border-bottom: 1px solid var(--ax-border);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .side-bar span {
+    flex: 1;
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
+  }
+
+  .side-bar label {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+  }
+
+  .icon {
+    padding: 0 var(--ax-space-1);
+    background: none;
+    border: 0;
+    color: var(--ax-text-muted);
+    cursor: pointer;
+  }
+
+  .icon:hover {
+    color: var(--ax-text);
+  }
+
+  /* The tree's right edge, dragged for its width. */
+  .edge {
+    width: var(--ax-space-1);
+    flex-shrink: 0;
+    background: var(--ax-border);
+    cursor: col-resize;
+  }
+
+  .edge:hover,
+  .edge.dragging {
+    background: var(--ax-accent);
+  }
+
+  /* Tab bar, banners and the tabs, beside the tree. */
+  .column {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   /* The tabs lie on top of each other here; only the front one is visible (FileTab). */

@@ -901,6 +901,61 @@ function fileKey(root: string, rel: string): string {
   return root === "workspace" ? rel : `${root}\0${rel}`;
 }
 
+/** Folders made with `file_mkdir` that hold no file yet (the mock's files make their folders implicitly). */
+const mockDirs = new Set<string>();
+
+/** Every file key of `root`, as `rel` paths. */
+function relsOf(root: string): string[] {
+  const prefix = root === "workspace" ? "" : `${root}\0`;
+  const out: string[] = [];
+  for (const key of fileStore(root).keys()) {
+    if (root === "workspace" ? !key.includes("\0") : key.startsWith(prefix)) out.push(key.slice(prefix.length));
+  }
+  for (const key of mockDirs) if (key.startsWith(`${root}\0`)) out.push(`${key.slice(root.length + 1)}/`);
+  return out;
+}
+
+/** The mock's `file_list`: the direct children of `rel`, folders first; `target`/`node_modules` count as ignored. */
+function mockListing(root: string, rel: string) {
+  const base = rel ? `${rel.replace(/\/+$/, "")}/` : "";
+  const children = new Map<string, "file" | "dir">();
+  for (const path of relsOf(root)) {
+    if (!path.startsWith(base) || path === base) continue;
+    const rest = path.slice(base.length);
+    const slash = rest.indexOf("/");
+    const name = slash < 0 ? rest : rest.slice(0, slash);
+    if (name) children.set(name, slash < 0 ? (children.get(name) ?? "file") : "dir");
+  }
+  if (base && children.size === 0 && !mockDirs.has(`${root}\0${rel}`)) throw fileError("NotFound", `${rel} does not exist`);
+  const entries = [...children].map(([name, kind]) => ({
+    name,
+    kind,
+    size: kind === "file" ? (fileStore(root).get(fileKey(root, base + name))?.length ?? 0) : null,
+    ignored: root !== "workspace" && /^(target|node_modules)$/.test(name),
+  }));
+  entries.sort((a, b) => (a.kind === b.kind ? a.name.toLowerCase().localeCompare(b.name.toLowerCase()) : a.kind === "dir" ? -1 : 1));
+  return { entries, truncated: false };
+}
+
+/** Moves (or with `to` null, deletes) `rel` and everything under it; the number of entries affected. */
+function mockMoveTree(root: string, rel: string, to: string | null): number {
+  const store = fileStore(root);
+  let n = 0;
+  for (const path of relsOf(root)) {
+    if (path !== rel && !path.startsWith(`${rel}/`)) continue;
+    n++;
+    if (path.endsWith("/")) {
+      mockDirs.delete(`${root}\0${path.slice(0, -1)}`);
+      if (to !== null) mockDirs.add(`${root}\0${to}${path.slice(rel.length, -1)}`);
+      continue;
+    }
+    const content = store.get(fileKey(root, path)) ?? "";
+    store.delete(fileKey(root, path));
+    if (to !== null) store.set(fileKey(root, to + path.slice(rel.length)), content);
+  }
+  return n;
+}
+
 function fileError(kind: string, message: string): { kind: string; message: string } {
   return { kind, message };
 }
@@ -1565,6 +1620,48 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "file_delete": {
       const { root, rel } = fileArgs(args);
       if (!fileStore(root).delete(fileKey(root, rel))) throw fileError("NotFound", `${rel} does not exist`);
+      return undefined as T;
+    }
+    case "file_list": {
+      const root = String(args.root);
+      return mockListing(root, String(args.rel ?? "")) as T;
+    }
+    case "file_mkdir": {
+      const { root, rel } = fileArgs(args);
+      if (relsOf(root).some((p) => p === rel || p.startsWith(`${rel}/`))) {
+        throw fileError("Refused", `${rel}: something with this name is already there`);
+      }
+      mockDirs.add(`${root}\0${rel}`);
+      return undefined as T;
+    }
+    case "file_rename": {
+      const root = String(args.root);
+      const from = String(args.from);
+      const to = String(args.to);
+      if (relsOf(root).some((p) => p === to || p.startsWith(`${to}/`))) {
+        throw fileError("Refused", `${to}: something with this name is already there`);
+      }
+      if (mockMoveTree(root, from, to) === 0) throw fileError("NotFound", `${from} does not exist`);
+      mockEmit("files:renamed", { root, from, to });
+      return undefined as T;
+    }
+    case "file_create": {
+      const { root, rel } = fileArgs(args);
+      if (relsOf(root).some((p) => p === rel || p.startsWith(`${rel}/`))) {
+        throw fileError("Refused", `${rel}: something with this name is already there`);
+      }
+      fileStore(root).set(fileKey(root, rel), "");
+      return mockVersion("") as T;
+    }
+    case "file_count": {
+      const { root, rel } = fileArgs(args);
+      return relsOf(root).filter((p) => p.startsWith(`${rel}/`)).length as T;
+    }
+    case "file_delete_tree": {
+      const { root, rel } = fileArgs(args);
+      if (!rel) throw fileError("Refused", "the root itself cannot be changed");
+      if (mockMoveTree(root, rel, null) === 0) throw fileError("NotFound", `${rel} does not exist`);
+      mockEmit("files:removed", { root, rel });
       return undefined as T;
     }
     // No file system to watch in a browser; subscribing is accepted and

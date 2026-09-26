@@ -44,7 +44,7 @@
   import type { Indent } from "../editor/detect";
   import type { Effect } from "../editor/keymap";
   import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
-  import { fileBackend } from "./backend";
+  import { fileBackend, type FileRemoved, type FileRenamed } from "./backend";
   import DiffPanes from "./DiffPanes.svelte";
   import { editorFace } from "./editorFace.svelte";
   import { editorSettings, ensureEditorSettingsLoaded } from "./editorSettings";
@@ -69,6 +69,7 @@
   import { statusParts } from "./status";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
   import SvgPreview from "./SvgPreview.svelte";
+  import { isUnder, renamedPath } from "./treeModel";
   import { applySet } from "./viOptions";
   import ViStatusLine from "./ViStatusLine.svelte";
   import type { ViStatus } from "./viSurface";
@@ -470,10 +471,25 @@
     const unlisten = listenBackend<FileChange>("files:changed", (change) => {
       void session?.onExternalChange(change).then((shown) => shown && refresh());
     });
+    // A rename or delete made in the file app reaches every copy of the file this way (W13) —
+    // before the watcher, which only sees the old path go, could call a rename a deletion.
+    const unlistenRenamed = listenBackend<FileRenamed>("files:renamed", (renamed) => {
+      const s = session;
+      const rel = s && s.root === renamed.root ? renamedPath(s.rel, renamed.from, renamed.to) : null;
+      if (s && rel !== null) void s.moved(rel).then(refresh);
+    });
+    const unlistenRemoved = listenBackend<FileRemoved>("files:removed", (removed) => {
+      const s = session;
+      if (!s || s.root !== removed.root || !isUnder(s.rel, removed.rel)) return;
+      const gone = { root: s.root, rel: s.rel, kind: "deleted" as const, version: null };
+      void s.onExternalChange(gone).then((shown) => shown && refresh());
+    });
     window.addEventListener("blur", saveOnLeave);
     return () => {
       window.removeEventListener("blur", saveOnLeave);
       void unlisten.then((off) => off());
+      void unlistenRenamed.then((off) => off());
+      void unlistenRemoved.then((off) => off());
       if (hintTimer) clearTimeout(hintTimer);
       if (autosaveTimer) clearTimeout(autosaveTimer);
       // Going away is leaving the file: keep unsaved text aside, stop watching.
