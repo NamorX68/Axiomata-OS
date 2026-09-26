@@ -20,6 +20,8 @@
     file: FileRef | null;
     /** A panel's session to take over instead of opening the file (once). */
     handed?: Handoff["handed"];
+    /** The line to put the cursor on when the file first opens (quick open's `:12`). */
+    line?: number | null;
     visible: boolean;
     showSettings?: boolean;
     onCloseSettings?: () => void;
@@ -37,6 +39,7 @@
   let {
     file,
     handed = null,
+    line = null,
     visible,
     showSettings = false,
     onCloseSettings,
@@ -74,7 +77,7 @@
       await e.newNote();
       return;
     }
-    const result = await e.open(target);
+    const result = await e.open(target, line);
     if (!result.ok) onFailed?.(result);
   }
 
@@ -97,6 +100,11 @@
 
   export function discard(): Promise<void> {
     return editor?.discard() ?? Promise.resolve();
+  }
+
+  /** Puts the cursor on `line` (zero-based) of the file this tab already shows. */
+  export function goToLine(target: number): void {
+    editor?.goToLine(target);
   }
 
   export function focus(): void {

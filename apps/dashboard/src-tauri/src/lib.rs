@@ -97,6 +97,7 @@ pub fn run() {
             files::file_write,
             files::file_delete,
             files::file_list,
+            files::file_index,
             files::file_mkdir,
             files::file_rename,
             files::file_create,

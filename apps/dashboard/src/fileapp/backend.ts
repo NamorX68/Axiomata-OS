@@ -87,3 +87,8 @@ export interface FileRemoved {
   root: string;
   rel: string;
 }
+
+/** Every file of `root` by path, for quick open (`file_index`, W8). */
+export function indexFiles(root: string): Promise<{ files: string[]; truncated: boolean }> {
+  return invokeBackend<{ files: string[]; truncated: boolean }>("file_index", { root });
+}

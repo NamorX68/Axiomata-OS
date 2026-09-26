@@ -1035,6 +1035,14 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   beside the source, images, a new note filed with `create_note`), panels ask before closing
   over unsaved text (`core/staging.ts` close guards), and the agent opens a file for the owner
   through the shell-level action `openFile` (`core/registry.ts`, instance id `shell`).
+  ED4.2: the Second Brain's detail panel shows files through `FilePeek.svelte`. ED4.3: tabs in
+  the file app (`fileapp/tabs.ts`, one `FileTab`/`FileEditor` per tab, hidden ones stay mounted;
+  a panel hands its open session over, `handoff.ts`), and an own app menu (`src-tauri/src/menu.rs`)
+  so ⌘W closes a tab, not the window. ED4.4: the file tree (`FileTree.svelte`, `treeModel.ts`) on
+  `axiomata-files::dir` — list, create, rename (no replace), count, delete a tree — with
+  `files:renamed`/`files:removed` events every open editor follows. ED4.5: quick open ⌘P
+  (`axiomata-files::index` over the `ignore` walker, `fileapp/quickOpen.ts` ranking,
+  `QuickOpen.svelte`).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

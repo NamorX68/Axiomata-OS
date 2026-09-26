@@ -57,6 +57,9 @@ via `axiomata-macos::clipboard`, tree-sitter text objects (`editor/syntax/object
 under way: ED4.1 replaced the Document tile/viewer (`md-file`) with the panel-only file panel
 (`fileapp/FilePanel.svelte` around `FileEditor`, opened via `core/staging.ts` `openFilePanel`), and the agent
 opens files for the owner through the shell action `openFile` (`core/registry.ts`, instance id `shell`).
+ED4.2–ED4.5 are done too: the Second Brain shows files through `FilePeek`, tabs in the file app (`fileapp/tabs.ts`;
+`src-tauri/src/menu.rs` drops the menu's ⌘W "Close Window"), the file tree on `axiomata-files::dir` (renames and
+deletes are broadcast as `files:renamed`/`files:removed`), and ⌘P quick open (`axiomata-files::index`). Next: ED4.6.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

@@ -27,6 +27,7 @@
   import type { OpenFileState, OpenResult } from "./FileEditor.svelte";
   import FileTab from "./FileTab.svelte";
   import FileTree from "./FileTree.svelte";
+  import QuickOpen from "./QuickOpen.svelte";
   import { handoffs, takeHandoffs, type Handoff } from "./handoff";
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
   import {
@@ -54,6 +55,9 @@
   let views = $state<Record<string, FileTab | null>>({});
   /** A panel's session waiting for the tab it was handed to (read once, when the tab loads). */
   const handedTo = new Map<string, Handoff["handed"]>();
+  /** The line a new tab opens its file at (quick open's `:12`). */
+  const lineFor = new Map<string, number>();
+  let quickOpen = $state(false);
   /** The tab being closed while it asks about unsaved text. */
   let closing = $state<{ id: string; answer: (close: boolean) => void } | null>(null);
   /** Tabs are saved only once the saved ones were read back, never over them (tracked: the save waits for it). */
@@ -84,12 +88,19 @@
   }
 
   /** Opens `file` (`null`: a new note) in a tab — the preview tab when only looking (W7). */
-  function openTab(file: FileRef | null, preview = false, handed: Handoff["handed"] = null): void {
+  function openTab(
+    file: FileRef | null,
+    preview = false,
+    handed: Handoff["handed"] = null,
+    line: number | null = null,
+  ): void {
     showRecent = false;
     error = "";
     const result = openInTabs(tabs, file, { preview }, newId);
     if (handed && result.load) handedTo.set(result.target, handed);
     else if (handed) void keepAside(handed);
+    if (line !== null && result.load) lineFor.set(result.target, line);
+    else if (line !== null) views[result.target]?.goToLine(line);
     tabs = result.state;
     if (file) {
       rememberRecent(file);
@@ -139,6 +150,7 @@
     // watched; one that was taken belongs to that editor, which keeps its text aside itself.
     if (!views[id]) void handedTo.get(id)?.session.close();
     handedTo.delete(id);
+    lineFor.delete(id);
     tabs = closeTab(tabs, id);
     delete states[id];
     delete views[id];
@@ -226,6 +238,9 @@
     } else if (key === "b") {
       take(e);
       tree = { ...tree, visible: !tree.visible };
+    } else if (key === "p") {
+      take(e);
+      quickOpen = !quickOpen;
     }
   }
 
@@ -400,6 +415,7 @@
         bind:this={views[tab.id]}
         file={tab.file}
         handed={handedTo.get(tab.id) ?? null}
+        line={lineFor.get(tab.id) ?? null}
         visible={open && tab.id === tabs.active}
         {showSettings}
         onCloseSettings={() => (showSettings = false)}
@@ -430,6 +446,14 @@
   </div>
   </div>
   </div>
+  {#if quickOpen}
+    <QuickOpen
+      roots={treeRoots}
+      {recent}
+      onOpen={(file, preview, line) => openTab(file, preview, null, line)}
+      onClose={() => (quickOpen = false)}
+    />
+  {/if}
 </section>
 
 <style>

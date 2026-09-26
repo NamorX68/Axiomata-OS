@@ -1645,6 +1645,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       mockEmit("files:renamed", { root, from, to });
       return undefined as T;
     }
+    case "file_index": {
+      const root = String(args.root);
+      const files = relsOf(root)
+        .filter((p) => !p.endsWith("/") && !p.split("/").some((part) => part.startsWith(".")))
+        .sort();
+      return { files, truncated: false } as T;
+    }
     case "file_create": {
       const { root, rel } = fileArgs(args);
       if (relsOf(root).some((p) => p === rel || p.startsWith(`${rel}/`))) {

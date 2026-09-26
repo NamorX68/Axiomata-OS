@@ -797,6 +797,30 @@ allen Ebenen an der Grenze auf, ein Ordner, in den beim Löschen geschrieben wir
 ist ein eigener Knopf (kein Knopf im Knopf), und das Umschreiben der offenen Ordner ist rein und
 getestet (`expandedAfterRename`/`expandedAfterDelete`). Gut 20 weitere Rust-Tests.
 
+Entschieden (aus ED4.3 vorgemerkt): **Tabs im Hintergrund geben nichts ab.** Ein verborgener Tab
+zeichnet nicht neu und rechnet nichts; er hält nur Text und Syntaxbaum. Eine Obergrenze oder ein
+Schlafmodus wäre Aufwand ohne spürbaren Gewinn — erst wenn es sich im Gebrauch anders zeigt.
+
+**ED4.5 — gebaut (2026-09-26):** Schnellöffnen mit ⌘P (W8, W14). Rust `axiomata-files::index`
+(`file_index`): ein Durchgang über eine Wurzel mit dem `ignore`-Walker — `.gitignore` gilt (auch
+ohne Git-Repo), Punkt-Dateien und -Ordner, `node_modules` und `target` bleiben draußen, Links
+werden nicht verfolgt, höchstens 50 000 Dateien. Nur Namen, kein Inhalt; geöffnet wird wie immer
+über den Datei-Dienst. `fileapp/quickOpen.ts` rechnet rein: Buchstaben in Reihenfolge,
+Treffer im Dateinamen deutlich vorn, Wortanfänge (auch camelCase) und zusammenhängende Treffer
+zählen mehr, kürzere Pfade gewinnen Gleichstände, zuletzt Geöffnetes kommt nach vorn; `name:12`
+springt zu Zeile 12. `QuickOpen.svelte`: Treffer markiert, die Wurzel als Etikett, ↑/↓, ⏎ fester
+Tab, ⌥⏎ Vorschau-Tab, Esc. Der Index je Wurzel lebt für die Sitzung und wird nach 30 s im
+Hintergrund neu gelesen — die alten Treffer sind sofort da (W14). Der Index ist so gebaut, dass
+⌘K ihn später mitbenutzen kann (W8).
+Reviews: Sicherheit LOW — Links werden nie gelistet (auch nicht auf Ziele in der Wurzel), und jedes
+Öffnen prüft der Wächter ohnehin neu. Nachgezogen: der Durchgang bricht zusätzlich nach 500 000
+angesehenen Einträgen ab (`MAX_VISITED`, ein Worktree voller ignoriertem Ballast hält ihn nicht
+auf), und das Modul-Doc sagt, dass `.gitignore`-Dateien *über* der Wurzel nicht gelesen werden
+(wie ein Editor, der einen Ordner durchsucht — bewusst, ein Test hält es fest). Der
+Modul-Cache in `QuickOpen.svelte` ist keine Svelte-Reaktivität; ein Kommentar warnt, dass jede
+`$derived` den `arrived`-Zähler mitlesen muss. Tests ergänzt: verschachtelte und negierte
+`.gitignore`, Zeilenangaben, camelCase, dieselbe Datei aus zwei Wurzeln.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

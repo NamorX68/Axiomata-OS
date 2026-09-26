@@ -236,6 +236,19 @@ pub async fn file_list(
     .await
 }
 
+/// Every file of a root by path, for quick open (W8): `.gitignore`d,
+/// hidden and build folders left out, at most 50 000.
+#[tauri::command]
+pub async fn file_index(
+    state: State<'_, CoreState>,
+    root: String,
+) -> Result<service::FileIndex, FileError> {
+    blocking(&state, move |config, db| {
+        service::index_files(&self::root(config, db, &root)?)
+    })
+    .await
+}
+
 /// Makes a folder; its parent must exist (W13).
 #[tauri::command]
 pub async fn file_mkdir(
