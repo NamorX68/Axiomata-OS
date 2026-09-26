@@ -282,7 +282,7 @@
 
   /** Whether closing now would leave unsaved text (or an unfiled note) behind. */
   export function hasUnsaved(): boolean {
-    return !!session && session.doc.dirty && !session.readOnly;
+    return !!session && session.doc.dirty;
   }
 
   /** Saves (or files the note); whether nothing unsaved is left. */
@@ -312,11 +312,11 @@
 
   /**
    * Starts highlighting `s` once its grammar has loaded (G4): nothing for plain
-   * text, and nothing for a large read-only file. An injected language that
+   * text, and nothing for a file in the light mode (T2). An injected language that
    * arrives later redraws through `outside`.
    */
   async function attachHighlighter(s: FileSession): Promise<void> {
-    if (s.readOnly) return;
+    if (s.light) return;
     const stale = () => session !== s;
     const created = await highlightFor(s.doc, { fileName: s.fileName, onColours: () => outside++, stale });
     if (created) highlighter = created;
@@ -557,7 +557,6 @@
             doc={session.doc}
             {settings}
             fileName={session.fileName}
-            readOnly={session.readOnly}
             revision={outside}
             {highlighter}
             onTopLine={previewKind === "markdown" && viewMode === "split" ? onSourceTopLine : undefined}
@@ -631,7 +630,7 @@
       {#if session.untitled}
         <span class="note">{filing ? "Filing the note…" : "New note — ⌘S files it"}</span>
       {/if}
-      {#if session.readOnly}<span class="warn">Read-only (large file)</span>{/if}
+      {#if session.light}<span class="warn" title="Over 2 MB: no syntax colours">Large file — light mode</span>{/if}
     </footer>
   {/if}
 </div>

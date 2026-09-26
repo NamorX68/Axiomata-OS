@@ -18,9 +18,10 @@
  * undoing past it and typing something else is dirty until the next save.
  */
 
-import { LineStore, clampPos, endOfText, type TextStore } from "./buffer";
+import { clampPos, endOfText, type TextStore } from "./buffer";
 import { bodyForStore, detectIndent, detectShape, joinForSave, type FileShape, type Indent } from "./detect";
 import { cursor, pos, posEqual, range, type Pos, type Range, type Selection } from "./position";
+import { RopeStore } from "./rope";
 
 /** How a step may merge with the one before it. */
 export type EditKind = "typing" | "deleting" | "other";
@@ -111,7 +112,7 @@ export class EditorDocument {
     const detected = detectIndent(fileText);
     this.indent = detected ?? options.indentFallback;
     this.indentDetected = detected !== null;
-    this.store = new LineStore(bodyForStore(fileText, this.shape));
+    this.store = new RopeStore(bodyForStore(fileText, this.shape));
   }
 
   /** The text to save, in the file's own line endings. */

@@ -171,8 +171,8 @@ pub async fn file_roots(state: State<'_, CoreState>) -> Result<Vec<RootInfo>, Fi
     .await
 }
 
-/// Reads a text file (≤ 16 MiB; `large` over 2 MiB, which the editor opens
-/// read-only) together with its version.
+/// Reads a text file (≤ 16 MiB; `large` over 2 MiB, which the editor edits in
+/// its light mode) together with its version.
 #[tauri::command]
 pub async fn file_read(
     state: State<'_, CoreState>,
@@ -185,7 +185,7 @@ pub async fn file_read(
     .await
 }
 
-/// Writes a text file (≤ 2 MiB) and returns its new version. With
+/// Writes a text file (≤ 16 MiB, `MAX_WRITE_BYTES`) and returns its new version. With
 /// `expected`, fails with kind `Conflict` if the file changed since that
 /// version was read (E4).
 #[tauri::command]

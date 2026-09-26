@@ -88,7 +88,7 @@ fn read(core: &AxiomataCore, root_id: &str, rel: &str) -> Result<()> {
         "version {}{}",
         file.version,
         if file.large {
-            " (large: read-only)"
+            " (large: the editor's light mode)"
         } else {
             ""
         }

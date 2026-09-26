@@ -107,10 +107,11 @@ describe("opening and saving", () => {
     expect(backend.files.get("workspace:a.md")).toBe("agent wrote this\n");
   });
 
-  it("keeps a large file read-only", async () => {
+  it("saves a large file like any other, in the light mode (T2)", async () => {
     const { session } = await opened("x".repeat(2000));
+    expect(session.light).toBe(true);
     typeInto(session, "y");
-    expect(await session.save()).toBe("readOnly");
+    expect(await session.save()).toBe("saved");
   });
 
   it("stops watching when closed", async () => {

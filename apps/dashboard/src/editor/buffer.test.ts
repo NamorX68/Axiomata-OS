@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { LineStore, clampPos, endOfText, splitLines, type TextStore } from "./buffer";
 import { pos, range } from "./position";
+import { RopeStore } from "./rope";
 
-// Written against `TextStore`, not `LineStore`: the rope that replaces it in ED5
-// must pass the same suite (F1).
+// Written against `TextStore`, not `LineStore`: the rope that replaced it in ED5
+// passes the same suite unchanged (F1, T1).
 function stores(): [string, (text: string) => TextStore][] {
-  return [["LineStore", (text) => new LineStore(text)]];
+  return [
+    ["LineStore", (text) => new LineStore(text)],
+    ["RopeStore", (text) => new RopeStore(text)],
+  ];
 }
 
 describe.each(stores())("%s", (_name, make) => {

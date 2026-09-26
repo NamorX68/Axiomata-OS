@@ -59,7 +59,7 @@ export const DRAFT_ROOT = "new-note";
 /** `.md`, so the draft gets Markdown's colours and preview like the note it becomes. */
 export const DRAFT_REL = "Untitled.md";
 
-export type SaveResult = "saved" | "unchanged" | "conflict" | "readOnly" | "needsConfirm" | "error";
+export type SaveResult = "saved" | "unchanged" | "conflict" | "needsConfirm" | "error";
 
 interface FileErrorShape {
   kind?: string;
@@ -79,7 +79,11 @@ export class FileSession {
   readonly doc: EditorDocument;
   /** The version on disk the document is based on; `null` if the file is gone. */
   version: FileVersion | null;
-  readonly readOnly: boolean;
+  /**
+   * Over 2 MiB (T2): edited like any file, but in the light mode — no
+   * tree-sitter, no minimap, no sticky scroll.
+   */
+  readonly light: boolean;
   /** A new note not filed yet: no file behind it (W4). */
   readonly untitled: boolean;
   banner: Banner | null = null;
@@ -101,7 +105,7 @@ export class FileSession {
     this.relPath = rel;
     this.doc = new EditorDocument(file.content, { indentFallback });
     this.version = file.version;
-    this.readOnly = file.large;
+    this.light = file.large;
     this.untitled = untitled;
   }
 
@@ -179,7 +183,6 @@ export class FileSession {
    * `save(true)` then overwrites.
    */
   async save(confirmed = false): Promise<SaveResult> {
-    if (this.readOnly) return "readOnly";
     // A new note is filed by the view (`create_note`), never written here — not even by autosave.
     if (this.untitled) return "unchanged";
     if (!this.doc.dirty && this.version !== null && !this.overwriteArmed) return "unchanged";
@@ -270,7 +273,7 @@ export class FileSession {
 
   /** Keeps the unsaved text aside (F8); called by the view after 2 s of quiet. */
   async persistRecovery(): Promise<void> {
-    if (this.closed || this.readOnly) return;
+    if (this.closed) return;
     if (!this.doc.dirty) {
       await this.backend.recoveryDelete(this.root, this.rel).catch(() => undefined);
       return;

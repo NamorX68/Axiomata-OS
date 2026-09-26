@@ -472,8 +472,8 @@ export interface FileRootInfo {
  *  as `expected` to refuse a write over someone else's change. */
 export type FileVersion = string;
 
-/** A text file read via `file_read`. `large` (over 2 MiB) means show it, but
- *  read-only. */
+/** A text file read via `file_read`. `large` (over 2 MiB) means edit it in the
+ *  light mode (`docs/plans/editor.md`, ED5, T2). */
 export interface TextFile {
   rel: string;
   content: string;

@@ -1,12 +1,12 @@
 /**
  * The text store (`docs/plans/editor.md`, ED1, F1).
  *
- * Everything else in the editor talks to text through `TextStore` only — five
- * operations, nothing about how lines are kept. `LineStore` keeps them as a plain
- * array of strings, which is easy to reason about and fast enough for the 2 MiB
- * the editor edits (and the 16 MiB it shows read-only). A rope replaces it as the
- * first checkpoint of ED5, behind this same interface; `buffer.test.ts` is written
- * against the interface so it can run against both.
+ * Everything else in the editor talks to text through `TextStore` only — six
+ * operations, nothing about how lines are kept. Documents use the rope
+ * (`rope.ts`, ED5, T1), which answers every one of them in log time for the
+ * 16 MiB the editor edits. `LineStore` keeps lines as a plain array of strings:
+ * easy to reason about, and what small tests and the rope's own random test
+ * compare against. `buffer.test.ts` runs the same suite against both.
  *
  * Lines never contain a line break. The document's line ending (LF or CRLF) is
  * metadata of the document (`detect.ts`), applied only when the text is joined
@@ -82,7 +82,7 @@ export class LineStore implements TextStore {
     return this.lines.join("\n");
   }
 
-  /** Linear in the line number — a rope (ED5) answers this in log time. */
+  /** Linear in the line number — the rope answers this in log time. */
   offsetAt(p: Pos): number {
     let offset = 0;
     for (let i = 0; i < p.line; i++) offset += this.lines[i].length + 1;

@@ -34,6 +34,11 @@ const MAX_ENTRY_BYTES: u64 = 4 * MAX_CONTENT_BYTES as u64;
 /// is there so a caller inventing ever new keys cannot fill the disk (ED1.3
 /// security audit) — a new entry beyond it pushes out the oldest.
 pub const MAX_ENTRIES: usize = 256;
+/// Most bytes all entries together may take on disk. With 16 MiB files
+/// editable (ED5, T2) the entry count alone would allow gigabytes; this keeps
+/// the total bounded whatever the write limit is (ED5.1 security audit) —
+/// saving pushes out the oldest entries until the new one fits.
+pub const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 
 /// One file's unsaved text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -95,14 +100,19 @@ pub fn save_in(
         saved_at: Utc::now(),
     };
     let json = serde_json::to_string(&entry).map_err(|err| invalid(&path, err.to_string()))?;
-    if fs::symlink_metadata(&path).is_err() {
-        make_room(dir);
+    // An entry `load_in` would refuse to read back is not worth writing.
+    if json.len() as u64 > MAX_ENTRY_BYTES {
+        return Err(invalid(
+            &path,
+            "unsaved content escapes to more than an entry holds",
+        ));
     }
+    make_room(dir, &path, json.len() as u64, MAX_TOTAL_BYTES);
     json_state::save(&path, &json)
 }
 
-/// Entry files in `dir` with their modification times (regular files only).
-fn entries(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime)> {
+/// Entry files in `dir` with their modification times and sizes (regular files only).
+fn entries(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime, u64)> {
     let Ok(read) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -113,20 +123,31 @@ fn entries(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime)> {
             let meta = fs::symlink_metadata(&p)
                 .ok()
                 .filter(fs::Metadata::is_file)?;
-            Some((p, meta.modified().ok()?))
+            Some((p, meta.modified().ok()?, meta.len()))
         })
         .collect()
 }
 
-/// Removes the oldest entries until one more fits under [`MAX_ENTRIES`].
-fn make_room(dir: &Path) {
-    let mut all = entries(dir);
-    if all.len() < MAX_ENTRIES {
-        return;
-    }
-    all.sort_by_key(|(_, modified)| *modified);
-    for (path, _) in all.iter().take(all.len() + 1 - MAX_ENTRIES) {
-        let _ = fs::remove_file(path);
+/// Removes the oldest entries until one of `incoming` bytes, written at
+/// `target`, fits under both [`MAX_ENTRIES`] and `budget` bytes in total
+/// ([`MAX_TOTAL_BYTES`]; a parameter so a test need not write 256 MiB). The
+/// entry at `target` itself is about to be replaced, so it counts for neither.
+fn make_room(dir: &Path, target: &Path, incoming: u64, budget: u64) {
+    let mut others: Vec<_> = entries(dir)
+        .into_iter()
+        .filter(|(p, _, _)| p != target)
+        .collect();
+    others.sort_by_key(|(_, modified, _)| *modified);
+    let mut count = others.len();
+    let mut total: u64 = others.iter().map(|(_, _, len)| len).sum();
+    for (path, _, len) in &others {
+        if count < MAX_ENTRIES && total + incoming <= budget {
+            break;
+        }
+        if fs::remove_file(path).is_ok() {
+            count -= 1;
+            total -= len;
+        }
     }
 }
 
@@ -170,7 +191,7 @@ pub fn delete_in(dir: &Path, root: &str, rel: &str) -> Result<(), AxiomataError>
 pub fn sweep_in(dir: &Path, now: DateTime<Utc>) -> usize {
     let cutoff = now - Duration::days(MAX_AGE_DAYS);
     let mut removed = 0;
-    for (path, modified) in entries(dir) {
+    for (path, modified, _) in entries(dir) {
         if DateTime::<Utc>::from(modified) < cutoff && fs::remove_file(&path).is_ok() {
             removed += 1;
         }
@@ -223,6 +244,15 @@ pub fn sweep() -> usize {
 mod tests {
     use super::*;
     use crate::test_support::unique_temp_dir;
+
+    #[test]
+    fn the_content_cap_stays_wired_to_the_file_service_write_limit() {
+        // Recovery must never hold more than the editor can ever save (T2:
+        // large files are edited, not read-only, up to 16 MiB) — pinned so a
+        // future change to one side does not silently drift from the other.
+        assert_eq!(MAX_CONTENT_BYTES, 16 * 1024 * 1024);
+        assert_eq!(MAX_CONTENT_BYTES as u64, axiomata_files::MAX_WRITE_BYTES);
+    }
 
     #[test]
     fn saves_loads_and_deletes_one_entry_per_file() {
@@ -346,6 +376,43 @@ mod tests {
         assert!(load_in(&dir, "workspace", "f0.md").is_none());
         assert!(load_in(&dir, "workspace", "new.md").is_some());
         assert_eq!(entries(&dir).len(), MAX_ENTRIES);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn keeps_the_total_under_the_byte_budget_by_pushing_out_the_oldest() {
+        let dir = unique_temp_dir("editor-recovery-total");
+        let content = "x".repeat(1000);
+        for i in 0..6u64 {
+            save_in(&dir, "workspace", &format!("f{i}.md"), None, &content).unwrap();
+            let path = entry_path(&dir, "workspace", &format!("f{i}.md"));
+            let at = std::time::SystemTime::now() - std::time::Duration::from_secs(600 - i * 60);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(at)
+                .unwrap();
+        }
+        let each = entries(&dir)[0].2;
+        let budget = 6 * each;
+        // Replacing an entry frees its own bytes first: nothing else goes.
+        make_room(&dir, &entry_path(&dir, "workspace", "f3.md"), each, budget);
+        assert_eq!(entries(&dir).len(), 6);
+        // A new entry of the same size needs one old one out — the oldest.
+        make_room(&dir, &entry_path(&dir, "workspace", "new.md"), each, budget);
+        assert_eq!(entries(&dir).len(), 5);
+        assert!(load_in(&dir, "workspace", "f0.md").is_none());
+        assert!(load_in(&dir, "workspace", "f1.md").is_some());
+        // One twice the size pushes out the next oldest as well.
+        make_room(
+            &dir,
+            &entry_path(&dir, "workspace", "big.md"),
+            2 * each,
+            budget,
+        );
+        assert_eq!(entries(&dir).len(), 4);
+        assert!(load_in(&dir, "workspace", "f1.md").is_none());
         let _ = fs::remove_dir_all(dir);
     }
 

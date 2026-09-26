@@ -898,6 +898,26 @@ statt nichts. Mehrere Files-Panes sind erlaubt wie mehrere Terminals. Damit ist 
   **ED5.8** Installierte Schriften · **ED5.9** Verschieben im Baum. Sicherheitsprüfung bei ED5.1,
   ED5.7, ED5.9; Abhängigkeitsprüfung bei neuen Crates (ED5.7/5.8).
 
+**ED5.1 — gebaut (2026-09-26):** das Rope (T1, T2). `editor/rope.ts`: `Rope` ist ein unveränderlicher
+B-Baum aus Zeilenblöcken (Blätter bis 64 Zeilen, Äste bis 16 Kinder, alle Blätter gleich tief; ein
+unterfülltes Geschwister wird auf dem Rückweg eingemischt), `RopeStore` der veränderliche `TextStore`
+darum, `snapshot()` gibt die aktuelle Fassung fest heraus (für den Such-Worker in ED5.2). `text()` wird
+je Fassung einmal gebaut. `EditorDocument` benutzt `RopeStore`; `LineStore` bleibt als einfacher
+Vergleich für Tests. Die ED1-Suite läuft unverändert gegen beide, dazu ein Zufallstest mit 4500
+Änderungen gegen `LineStore` und Invarianten-Prüfung nach jeder. Gemessen an 16 MB (242 000 Zeilen):
+1000 Einfügungen 4,6 ms, 1000 `offsetAt` 0,6 ms (Zeilenliste: 69 ms), Öffnen 17 ms. Große Dateien:
+`MAX_WRITE_BYTES` = `MAX_READ_BYTES` (16 MiB), über 2 MiB `FileSession.light` statt schreibgeschützt —
+kein tree-sitter, ein Hinweis „Large file — light mode“ in der Statuszeile; die Wiederherstellung
+folgt der Schreibgrenze.
+Reviews: Sicherheit fand einen HIGH-Punkt — mit 16 MiB je Eintrag hätten 256 Wiederherstellungs-Einträge
+bis 16 GiB belegen können. Jetzt begrenzt `MAX_TOTAL_BYTES` (256 MiB) den ganzen Ordner, das Speichern
+schiebt die ältesten Einträge hinaus, bis der neue passt, und ein Eintrag, den `load_in` nicht mehr
+zurücklesen würde (JSON über 64 MiB), wird gar nicht erst geschrieben. Veraltete „read-only“-Texte in
+`file_read`/`file_write` und der CLI korrigiert. Offen fürs Live-Testen: Speicherbedarf mit mehreren
+16-MiB-Tabs (IPC geht als JSON). Tests ergänzt (sehr lange Zeile, Anhängen am Ende eines tiefen Baums,
+Löschen über ganze Teilbäume, `text()`-Cache je Fassung, die 16-MiB-Kante in Rust); der nie erreichte
+Anhänge-Zweig in `splice` ist entfernt.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später
