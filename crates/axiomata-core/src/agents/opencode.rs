@@ -18,14 +18,19 @@
 //! [`chat_model_id`] in the runner, and travels as the request's `model`.
 //!
 //! ```text
-//! opencode run --dir <workspace_root> --model <provider/model> \
-//!              --format json --auto [--session <id>]   (prompt on stdin)
+//! opencode run --model <provider/model> --format json --auto [--session <id>]
+//!              (prompt on stdin, working directory = the workspace root)
 //! ```
 //!
 //! `--format json` makes the CLI emit NDJSON events on stdout; the reply is
-//! the concatenation of the `text` parts, the final step's `reason` / token
-//! counts / cost ride on the `step_finish` events, and a root `error` event
-//! is a failed run. `--auto` auto-approves tool use (the opencode equivalent
+//! the concatenation of the `text` parts, and a root `error` event is a failed
+//! run. Opencode 1 put each step's `reason` / token counts / cost on
+//! `step_finish` events; **Opencode 2 emits none** (only `step_start` and
+//! `text`), so the counts are read back afterwards from
+//! `opencode session export <id>` ([`export_usage`]) — without them a paid
+//! run would be metered as free and the daily cap would never trip.
+//! Opencode 2 also dropped `run --dir`; the child's working directory is the
+//! only place the workspace root is given. `--auto` auto-approves tool use (the opencode equivalent
 //! of a permission bypass) so an unattended run never stalls asking a question
 //! nobody will answer — the exact hang `claude -p` demonstrated live.
 
@@ -141,7 +146,7 @@ pub(crate) fn chat_model_id(config: &Config) -> Result<String, AxiomataError> {
 /// Runs a skill's prompt through the headless Opencode CLI.
 ///
 /// `request.model` must be the full `provider/<model>` id [`model_id`]
-/// produces; `request.cwd` becomes opencode's working directory (`--dir`).
+/// produces; `request.cwd` becomes opencode's working directory.
 /// The child's environment is the shared allowlist (see
 /// [`agent_child_env`]) with no provider env layered on — opencode resolves
 /// providers and auth from its own config/credential store.
@@ -157,6 +162,8 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
             reason: format!("the model {model:?} is not a valid opencode model id"),
         });
     }
+    let (cwd, env) = (request.cwd.clone(), request.env.clone());
+    let since_ms = now_ms();
     let raw = spawn_and_collect(SpawnSpec {
         prompt: request.prompt,
         cwd: request.cwd,
@@ -167,7 +174,8 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         env: request.env,
     })
     .await?;
-    Ok(parse_event_stream(raw))
+    let usage = usage_for(&raw, &cwd, &env, since_ms).await;
+    Ok(parse_event_stream(raw, usage.as_ref()))
 }
 
 /// Runs one assistant-bar turn: a session-continuing `opencode run`.
@@ -218,6 +226,8 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         // Open-code already auto-approves tool use via `--auto`; the field is
         // purely for API symmetry. Nothing to do here.
     }
+    let (cwd, env) = (request.cwd.clone(), request.env.clone());
+    let since_ms = now_ms();
     let raw = spawn_and_collect(SpawnSpec {
         prompt: std::mem::take(&mut message),
         cwd: request.cwd,
@@ -228,7 +238,8 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         env: request.env,
     })
     .await?;
-    parse_chat_output(raw)
+    let usage = usage_for(&raw, &cwd, &env, since_ms).await;
+    parse_chat_output(raw, usage.as_ref())
 }
 
 /// What the shared spawn harness needs, decoupled from the requesting use
@@ -263,8 +274,6 @@ async fn spawn_and_collect(spec: SpawnSpec) -> Result<AgentRunResult, AxiomataEr
     let mut command = Command::new(resolve_opencode_binary()?);
     command
         .arg("run")
-        .arg("--dir")
-        .arg(&spec.cwd)
         .arg("--model")
         .arg(&spec.model)
         .arg("--format")
@@ -353,6 +362,117 @@ async fn spawn_and_collect(spec: SpawnSpec) -> Result<AgentRunResult, AxiomataEr
     ))
 }
 
+/// How long reading a session's usage back may take before the run is recorded without it.
+const EXPORT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Largest session export read: a long chat session's history grows, the counts are all that is needed.
+const MAX_EXPORT_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Milliseconds since the Unix epoch — what Opencode stamps its messages with.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// One run's token counts and cost, as `opencode session export` has them (Opencode 2).
+#[derive(Debug, Default, PartialEq)]
+struct ExportUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    cost: f64,
+    turns: u32,
+    /// The last answering message's `finish` (`"stop"` for a normal end).
+    reason: Option<String>,
+}
+
+/// The usage of the messages a run added to a session: those created at or
+/// after `since_ms` that carry `tokens`. A resumed chat session exports its
+/// whole history; the earlier turns were counted when they ran. `None` when
+/// the export is not readable or holds no such message.
+fn usage_from_export(json: &str, since_ms: i64) -> Option<ExportUsage> {
+    let value: Value = serde_json::from_str(json).ok()?;
+    let mut usage = ExportUsage::default();
+    let mut any = false;
+    for message in value.get("messages")?.as_array()? {
+        let Some(tokens) = message.get("tokens") else {
+            continue;
+        };
+        let created = message
+            .pointer("/time/created")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        if created < since_ms {
+            continue;
+        }
+        any = true;
+        usage.turns += 1;
+        usage.input_tokens += tokens.get("input").and_then(Value::as_u64).unwrap_or(0);
+        usage.output_tokens += tokens.get("output").and_then(Value::as_u64).unwrap_or(0);
+        usage.cost += message.get("cost").and_then(Value::as_f64).unwrap_or(0.0);
+        if let Some(finish) = message.get("finish").and_then(Value::as_str) {
+            usage.reason = Some(finish.to_string());
+        }
+    }
+    any.then_some(usage)
+}
+
+/// The run's usage read back from its session, when the event stream did
+/// not carry it (Opencode 2). `None` — and a warning in the log — if it
+/// cannot be had; the run is then recorded without token counts, as a run
+/// whose CLI reported none always was.
+async fn usage_for(
+    raw: &AgentRunResult,
+    cwd: &std::path::Path,
+    env: &[(String, String)],
+    since_ms: i64,
+) -> Option<ExportUsage> {
+    let events = parse_events(&raw.stdout);
+    if events.saw_tokens {
+        return None;
+    }
+    let session_id = events.session_id.filter(|s| super::valid_session_id(s))?;
+    let usage = export_usage(&session_id, cwd, env, since_ms).await;
+    if usage.is_none() {
+        tracing::warn!(
+            session_id,
+            "opencode: no token counts for this run (session export gave none)"
+        );
+    }
+    usage
+}
+
+/// Runs `opencode session export <id>` and reads the run's usage out of it.
+async fn export_usage(
+    session_id: &str,
+    cwd: &std::path::Path,
+    env: &[(String, String)],
+    since_ms: i64,
+) -> Option<ExportUsage> {
+    let mut command = Command::new(resolve_opencode_binary().ok()?);
+    command
+        .args(["session", "export", session_id])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .env_clear();
+    for (key, value) in agent_child_env(env) {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().ok()?;
+    let mut stdout = child.stdout.take()?.take(MAX_EXPORT_BYTES);
+    let read = async {
+        let mut buf = Vec::new();
+        stdout.read_to_end(&mut buf).await?;
+        child.wait().await?;
+        Ok::<_, std::io::Error>(buf)
+    };
+    let buf = timeout(EXPORT_TIMEOUT, read).await.ok()?.ok()?;
+    usage_from_export(&into_string_lossy(buf), since_ms)
+}
+
 /// The parts of the `--format json` NDJSON event stream a use case lifts out.
 #[derive(Default)]
 struct ParsedEvents {
@@ -366,6 +486,22 @@ struct ParsedEvents {
     saw_tokens: bool,
     turns: u32,
     session_id: Option<String>,
+}
+
+impl ParsedEvents {
+    /// Takes the counts read back from the session export (Opencode 2), which
+    /// the event stream no longer carries.
+    fn absorb(&mut self, usage: &ExportUsage) {
+        self.saw_tokens = true;
+        self.input_tokens += usage.input_tokens;
+        self.output_tokens += usage.output_tokens;
+        self.saw_cost = true;
+        self.cost += usage.cost;
+        self.turns += usage.turns;
+        if let Some(reason) = &usage.reason {
+            self.reason = reason.clone();
+        }
+    }
 }
 
 /// Replay the NDJSON `--format json` event stream, accumulating the assistant
@@ -445,8 +581,11 @@ fn parse_events(stdout: &str) -> ParsedEvents {
 /// Un-parses the NDJSON event stream into an [`AgentRunResult`] for a skill
 /// run: reply = joined `text` parts, failure ticked by an `error` event, a
 /// non-`stop` `reason`, or a non-zero process exit.
-fn parse_event_stream(raw: AgentRunResult) -> AgentRunResult {
-    let e = parse_events(&raw.stdout);
+fn parse_event_stream(raw: AgentRunResult, usage: Option<&ExportUsage>) -> AgentRunResult {
+    let mut e = parse_events(&raw.stdout);
+    if let Some(usage) = usage {
+        e.absorb(usage);
+    }
     let failed = !e.errors.is_empty() || e.reason != "stop";
     let exit_code = if raw.exit_code != 0 {
         raw.exit_code
@@ -482,12 +621,18 @@ fn parse_event_stream(raw: AgentRunResult) -> AgentRunResult {
 /// turn: session id is required, a failed/empty turn or a non-zero process
 /// exit is an [`AxiomataError::AgentApi`] error (so the caller can tell the
 /// user the turn actually went wrong, not just that it "returned nothing").
-fn parse_chat_output(raw: AgentRunResult) -> Result<ChatReply, AxiomataError> {
+fn parse_chat_output(
+    raw: AgentRunResult,
+    usage: Option<&ExportUsage>,
+) -> Result<ChatReply, AxiomataError> {
     let api_err = |message: String| AxiomataError::AgentApi {
         backend: BACKEND_OPENCODE,
         message,
     };
-    let e = parse_events(&raw.stdout);
+    let mut e = parse_events(&raw.stdout);
+    if let Some(usage) = usage {
+        e.absorb(usage);
+    }
     if raw.exit_code != 0 {
         let detail = if raw.stderr.trim().is_empty() {
             e.errors.join("; ")
@@ -541,7 +686,7 @@ mod tests {
 {"type":"text","part":{"type":"text","text":"1}"}}
 {"type":"step_finish","part":{"reason":"stop","tokens":{"input":100,"output":2},"cost":0.0012}}
 "#;
-        let out = parse_event_stream(bare(stream, 0));
+        let out = parse_event_stream(bare(stream, 0), None);
         // Parts are joined with a newline (each is a separate assistant
         // message part); the typical digest arrives as a single part.
         assert_eq!(out.stdout, "{\"a\":\n1}");
@@ -555,7 +700,7 @@ mod tests {
     #[test]
     fn a_root_error_event_fails_the_run() {
         let stream = "{\"type\":\"error\",\"error\":{\"name\":\"UnknownError\",\"data\":{\"message\":\"Unexpected server error\"}}}\n";
-        let out = parse_event_stream(bare(stream, 0));
+        let out = parse_event_stream(bare(stream, 0), None);
         assert_ne!(out.exit_code, 0);
         assert!(out.stdout.is_empty());
         assert!(out.stderr.contains("Unexpected server error"));
@@ -564,13 +709,13 @@ mod tests {
     #[test]
     fn a_step_finish_error_reason_fails_the_run() {
         let stream = "{\"type\":\"step_finish\",\"part\":{\"reason\":\"error\",\"tokens\":{\"input\":1,\"output\":1}}}\n";
-        let out = parse_event_stream(bare(stream, 0));
+        let out = parse_event_stream(bare(stream, 0), None);
         assert_ne!(out.exit_code, 0);
     }
 
     #[test]
     fn non_zero_process_exit_is_preserved() {
-        let out = parse_event_stream(bare("", 3));
+        let out = parse_event_stream(bare("", 3), None);
         assert_eq!(out.exit_code, 3);
         assert!(!out.is_success());
     }
@@ -581,7 +726,7 @@ mod tests {
         // everything into tool calls and never answered) is an empty success,
         // exactly like the old Claude Code empty-`result` case — the connector
         // layers decide what an empty digest means.
-        let out = parse_event_stream(bare("", 0));
+        let out = parse_event_stream(bare("", 0), None);
         assert_eq!(out.exit_code, 0);
         assert_eq!(out.cost_usd, None);
         assert_eq!(out.input_tokens, None);
@@ -594,7 +739,7 @@ mod tests {
 {"type":"text","part":{"type":"text","text":"**hi**"}}
 {"type":"step_finish","part":{"reason":"stop","tokens":{"input":10,"output":4},"cost":0.0001}}
 "#;
-        let reply = parse_chat_output(bare(stream, 0)).unwrap();
+        let reply = parse_chat_output(bare(stream, 0), None).unwrap();
         assert_eq!(reply.session_id, "ses_f69ee4e6fffewcQksbhPtIRCDc");
         assert_eq!(reply.reply_markdown, "**hi**");
         assert!(!reply.is_error);
@@ -605,29 +750,35 @@ mod tests {
 
     #[test]
     fn chat_errors_on_non_zero_exit_and_on_error_events() {
-        let err = parse_chat_output(bare("boom", 1)).unwrap_err();
+        let err = parse_chat_output(bare("boom", 1), None).unwrap_err();
         assert!(err.to_string().contains("code 1"), "{err}");
-        let err = parse_chat_output(bare(
-            "{\"type\":\"error\",\"error\":{\"name\":\"E\",\"data\":{\"message\":\"denied\"}}}",
-            0,
-        ))
+        let err = parse_chat_output(
+            bare(
+                "{\"type\":\"error\",\"error\":{\"name\":\"E\",\"data\":{\"message\":\"denied\"}}}",
+                0,
+            ),
+            None,
+        )
         .unwrap_err();
         assert!(err.to_string().contains("denied"), "{err}");
     }
 
     #[test]
     fn chat_requires_a_session_id_and_a_nonempty_reply() {
-        let err = parse_chat_output(bare(
-            "{\"type\":\"text\",\"part\":{\"type\":\"text\",\"text\":\"hi\"}}",
-            0,
-        ))
+        let err = parse_chat_output(
+            bare(
+                "{\"type\":\"text\",\"part\":{\"type\":\"text\",\"text\":\"hi\"}}",
+                0,
+            ),
+            None,
+        )
         .unwrap_err();
         assert!(err.to_string().contains("session id"), "{err}");
 
         let err = parse_chat_output(bare(
             "{\"type\":\"step_start\",\"sessionID\":\"ses_x\",\"part\":{\"type\":\"step-start\"}}",
             0,
-        ))
+        ), None)
         .unwrap_err();
         assert!(err.to_string().contains("empty"), "{err}");
     }
@@ -690,5 +841,162 @@ mod tests {
             chat_model_id(&config).unwrap(),
             "anthropic/claude-haiku-4-5"
         );
+    }
+
+    /// An Opencode 2 session export, as `opencode session export <id>` prints it
+    /// (trimmed): a user message, then the answer carrying the counts.
+    fn v2_export(created_answer: i64) -> String {
+        format!(
+            r#"{{"info":{{"id":"ses_a","cost":0,"tokens":{{"input":7117,"output":185}}}},
+               "messages":[
+                 {{"id":"msg_1","time":{{"created":1000}},"type":"user"}},
+                 {{"id":"msg_0","time":{{"created":500}},"model":{{"id":"m","providerID":"p"}},
+                   "finish":"stop","cost":0.5,"tokens":{{"input":900,"output":90}}}},
+                 {{"id":"msg_2","time":{{"created":{created_answer}}},"model":{{"id":"m","providerID":"p"}},
+                   "finish":"stop","cost":0.0012,"tokens":{{"input":7116,"output":30,"cache":{{"read":4062}}}}}}
+               ]}}"#
+        )
+    }
+
+    #[test]
+    fn reads_a_runs_usage_from_the_session_export_leaving_out_earlier_turns() {
+        // The 900/90 answer is from before the run started (a resumed chat): not counted again.
+        let usage = usage_from_export(&v2_export(2000), 1000).unwrap();
+        assert_eq!(
+            usage,
+            ExportUsage {
+                input_tokens: 7116,
+                output_tokens: 30,
+                cost: 0.0012,
+                turns: 1,
+                reason: Some("stop".into()),
+            }
+        );
+        assert_eq!(usage_from_export(&v2_export(2000), 5000), None);
+        assert_eq!(usage_from_export("not json", 0), None);
+    }
+
+    #[test]
+    fn an_opencode_2_stream_takes_its_counts_from_the_export() {
+        // Opencode 2 prints only step_start and text: no step_finish, no tokens.
+        let stream = r#"{"type":"step_start","sessionID":"ses_f2026429dffe6yymqjcBvS6cN0","part":{"type":"step-start"}}
+{"type":"text","part":{"type":"text","text":"OK"}}"#;
+        let usage = usage_from_export(&v2_export(2000), 1000);
+        let out = parse_event_stream(bare(stream, 0), usage.as_ref());
+        assert_eq!(out.stdout, "OK");
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.input_tokens, Some(7116));
+        assert_eq!(out.output_tokens, Some(30));
+        assert_eq!(out.cost_usd, Some(0.0012));
+
+        let reply = parse_chat_output(bare(stream, 0), usage.as_ref()).unwrap();
+        assert_eq!(reply.input_tokens, Some(7116));
+        assert_eq!(reply.session_id, "ses_f2026429dffe6yymqjcBvS6cN0");
+    }
+
+    #[test]
+    fn an_export_ending_in_an_error_finish_fails_the_run() {
+        let usage = ExportUsage {
+            reason: Some("error".into()),
+            ..ExportUsage::default()
+        };
+        let stream = r#"{"type":"text","part":{"type":"text","text":"half"}}"#;
+        assert_ne!(
+            parse_event_stream(bare(stream, 0), Some(&usage)).exit_code,
+            0
+        );
+    }
+
+    #[test]
+    fn a_message_missing_time_created_defaults_to_epoch_zero_and_is_only_counted_since_zero() {
+        // No `time.created` at all: `usage_from_export` must not panic or skip
+        // it via a missing field — it falls back to 0, so it is only picked
+        // up by a `since_ms` at or below zero (the "run started at process
+        // start" baseline, not a resumed-session cutoff in the future).
+        let json = r#"{"messages":[
+            {"id":"msg_1","tokens":{"input":5,"output":1},"cost":0.1,"finish":"stop"}
+        ]}"#;
+        let usage = usage_from_export(json, 0).unwrap();
+        assert_eq!(usage.input_tokens, 5);
+        assert_eq!(usage.output_tokens, 1);
+        assert_eq!(usage.turns, 1);
+        // With a positive cutoff the same message (created = 0) falls before
+        // it and is excluded, exactly like an earlier turn in a resumed chat.
+        assert_eq!(usage_from_export(json, 1), None);
+    }
+
+    #[test]
+    fn sums_and_keeps_the_last_reason_across_several_answering_messages() {
+        // A tool-using run answers in more than one message (e.g. a partial
+        // answer, a tool call, then the final answer) — all of them at/after
+        // `since_ms` must be summed, and `reason` must end up as the *last*
+        // message's finish, not the first, even when an earlier one reports
+        // something other than "stop".
+        let json = r#"{"messages":[
+            {"id":"msg_1","time":{"created":1000}},
+            {"id":"msg_2","time":{"created":1100},"tokens":{"input":10,"output":1},
+             "cost":0.01,"finish":"tool-calls"},
+            {"id":"msg_3","time":{"created":1200},"tokens":{"input":20,"output":5},
+             "cost":0.02,"finish":"stop"}
+        ]}"#;
+        let usage = usage_from_export(json, 1000).unwrap();
+        assert_eq!(
+            usage,
+            ExportUsage {
+                input_tokens: 30,
+                output_tokens: 6,
+                cost: 0.03,
+                turns: 2,
+                reason: Some("stop".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_cost_of_exactly_zero_is_not_reported_as_some_zero_cost_usd() {
+        // `cost_usd` must stay `None` when the model genuinely reported a
+        // zero cost, not `Some(0.0)` — the spend-metering layer treats
+        // `Some(_)` as "billed", so a zero-cost run must look free, the same
+        // as a run that never reported a cost at all.
+        let stream = r#"{"type":"step_finish","part":{"reason":"stop","tokens":{"input":1,"output":1},"cost":0.0}}"#;
+        let out = parse_event_stream(bare(stream, 0), None);
+        assert_eq!(out.cost_usd, None);
+
+        // Same via the export path (Opencode 2): a zero-cost export must not
+        // resurrect a `Some(0.0)` through `absorb`.
+        let usage = ExportUsage {
+            input_tokens: 1,
+            output_tokens: 1,
+            cost: 0.0,
+            turns: 1,
+            reason: Some("stop".into()),
+        };
+        let out = parse_event_stream(bare("", 0), Some(&usage));
+        assert_eq!(out.cost_usd, None);
+
+        let reply = parse_chat_output(
+            bare(
+                r#"{"type":"step_start","sessionID":"ses_x","part":{"type":"step-start"}}
+{"type":"text","part":{"type":"text","text":"hi"}}"#,
+                0,
+            ),
+            Some(&usage),
+        )
+        .unwrap();
+        assert_eq!(reply.cost_usd, None);
+    }
+
+    #[tokio::test]
+    async fn usage_for_skips_the_export_when_the_stream_already_had_tokens() {
+        // An Opencode 1 stream carries `step_finish` tokens directly; passing
+        // an export on top must not double-count them — `usage_for` must
+        // short-circuit to `None` (so `absorb` is never called) before it
+        // would ever try to run `opencode session export`, which is why this
+        // is safe to assert without a real opencode binary on PATH.
+        let stream = r#"{"type":"step_start","sessionID":"ses_x","part":{"type":"step-start"}}
+{"type":"step_finish","part":{"reason":"stop","tokens":{"input":10,"output":2},"cost":0.001}}"#;
+        let raw = bare(stream, 0);
+        let usage = usage_for(&raw, std::path::Path::new("."), &[], 0).await;
+        assert_eq!(usage, None);
     }
 }

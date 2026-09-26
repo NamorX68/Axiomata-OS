@@ -372,9 +372,11 @@ deliberately not a trait/registry (see §6). `AgentRequest` carries `prompt`, `c
 `env`, `system_prompt_file` (the module bridge manifest, appended to **chat turns only** —
 skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see below).
 
-- `opencode.rs` (Stufe 2 CP5) is the single agent harness: it spawns `opencode run --dir
-  <workspace_root> --model <provider/model> --format json --auto [--session <id>]` with the
-  prompt on **stdin** (a positional would read the YAML `---` frontmatter as a flag and make
+- `opencode.rs` (Stufe 2 CP5) is the single agent harness: it spawns `opencode run --model
+  <provider/model> --format json --auto [--session <id>]` in `<workspace_root>` with the
+  prompt on **stdin** (Opencode 2, 2026-09-27: no `run --dir` any more, and the JSON events no
+  longer carry token counts — they are read back from `opencode session export <id>`, only the
+  messages created during the run, so metering and the daily cap keep working) (a positional would read the YAML `---` frontmatter as a flag and make
   opencode print its help and exit). It hands the prompt to whichever provider
   `skill_provider` (skills) / `chat_provider` (assistant bar) routes to using that provider's
   own native tool-calling protocol — so a non-Anthropic model (Deepseek via OpenRouter, or a

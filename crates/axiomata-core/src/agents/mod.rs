@@ -463,7 +463,8 @@ pub struct AgentRequest {
     /// prompt.
     pub prompt: String,
     /// Working directory for the agent. Opencode treats this as its project
-    /// root (`--dir`, so workspace context / opencode config load).
+    /// root, so workspace context and opencode config load from here (the
+    /// child's working directory — Opencode 2 has no `run --dir`).
     pub cwd: PathBuf,
     /// Hard wall-clock limit. On expiry the run fails with
     /// [`AxiomataError::AgentTimeout`] and the child process (if any) is
