@@ -61,9 +61,11 @@ export function keyAction(input: KeyInput): KeyAction | null {
     case "ArrowRight":
       return motion(meta ? "lineEnd" : alt ? "wordRight" : "charRight", shift);
     case "ArrowUp":
+      if (alt && meta && !shift) return command({ type: "addCursorVertical", dir: -1 });
       if (alt && !meta) return command(shift ? { type: "duplicateLines", dir: -1 } : { type: "moveLines", dir: -1 });
       return motion(meta ? "docStart" : "up", shift);
     case "ArrowDown":
+      if (alt && meta && !shift) return command({ type: "addCursorVertical", dir: 1 });
       if (alt && !meta) return command(shift ? { type: "duplicateLines", dir: 1 } : { type: "moveLines", dir: 1 });
       return motion(meta ? "docEnd" : "down", shift);
     case "Home":
@@ -82,6 +84,9 @@ export function keyAction(input: KeyInput): KeyAction | null {
       return meta || alt ? null : command({ type: shift ? "outdent" : "indent" });
     case "Enter":
       return meta || alt ? null : command({ type: "newline" });
+    case "Escape":
+      // With several cursors, back to one (T6); the editor owns Esc either way (D16).
+      return meta || alt || shift ? null : command({ type: "singleCursor" });
   }
 
   if (!meta || alt) return null;
@@ -102,7 +107,11 @@ export function keyAction(input: KeyInput): KeyAction | null {
     case "o":
       return { effect: "open" };
     case "l":
-      return command({ type: "selectLine" });
+      return command({ type: shift ? "selectAllOccurrences" : "selectLine" });
+    case "d":
+      return shift ? null : command({ type: "addNextOccurrence" });
+    case "u":
+      return shift ? null : command({ type: "removeLastCursor" });
     // ⌘/ on a US keyboard, ⌘⇧7 on a German one — both report "/".
     case "/":
       return command({ type: "toggleComment" });

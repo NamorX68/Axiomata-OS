@@ -14,6 +14,17 @@
 
 import { endOfText } from "./buffer";
 import { endAfter, type Change, type EditKind, type EditorDocument } from "./document";
+import {
+  addCursorVertical,
+  addNextOccurrence,
+  allSelections,
+  eachCursor,
+  eachLineBlock,
+  removeLastCursor,
+  selectAllOccurrences,
+  selectionTexts,
+  singleCursor,
+} from "./multicursor";
 import { comparePos, cursor, isCursor, pos, range, selectionRange, type Pos, type Selection } from "./position";
 import {
   colForDisplayColumn,
@@ -71,10 +82,64 @@ export type Command =
   | { type: "duplicateLines"; dir: -1 | 1 }
   | { type: "toggleComment" }
   | { type: "undo" }
-  | { type: "redo" };
+  | { type: "redo" }
+  // More cursors (ED5, T6, `multicursor.ts`).
+  | { type: "addCursorVertical"; dir: -1 | 1 }
+  | { type: "addNextOccurrence" }
+  | { type: "removeLastCursor" }
+  | { type: "selectAllOccurrences" }
+  | { type: "singleCursor" };
 
-/** Runs `cmd` against `doc`. */
+/** What a command does to the text at each cursor, for merging into the undo step before it. */
+function editKindOf(cmd: Command): EditKind | null {
+  switch (cmd.type) {
+    case "move":
+    case "selectLine":
+      return null;
+    case "insert":
+      return cmd.kind ?? "typing";
+    case "deleteBackward":
+    case "deleteForward":
+      return "deleting";
+    default:
+      return "other";
+  }
+}
+
+/**
+ * Commands that act on whole lines: with several cursors on one line, the
+ * line is taken once. Not ⇥ — at a bare cursor it puts indentation there.
+ */
+const LINE_COMMANDS = new Set<Command["type"]>(["outdent", "duplicateLines", "toggleComment"]);
+
+/**
+ * Runs `cmd` against `doc` — at every cursor when there are several (ED5,
+ * T6, `multicursor.ts`). ⌘A, undo and redo act on the document as a whole.
+ */
 export function run(doc: EditorDocument, cmd: Command, ctx: CommandContext): void {
+  switch (cmd.type) {
+    case "addCursorVertical":
+      return addCursorVertical(doc, cmd.dir, ctx.tabSize);
+    case "addNextOccurrence":
+      return addNextOccurrence(doc);
+    case "removeLastCursor":
+      return removeLastCursor(doc);
+    case "selectAllOccurrences":
+      return selectAllOccurrences(doc);
+    case "singleCursor":
+      singleCursor(doc);
+      return;
+  }
+  if (doc.extra.length > 0 && cmd.type !== "undo" && cmd.type !== "redo") {
+    if (cmd.type === "selectAll") return doc.setSelection({ anchor: pos(0, 0), head: endOfText(doc.store) });
+    // Moving lines takes each block of touching lines as a whole; copying gives each line its own copy.
+    if (cmd.type === "moveLines") return eachLineBlock(doc, () => runOne(doc, cmd, ctx));
+    return eachCursor(doc, editKindOf(cmd), () => runOne(doc, cmd, ctx), LINE_COMMANDS.has(cmd.type));
+  }
+  runOne(doc, cmd, ctx);
+}
+
+function runOne(doc: EditorDocument, cmd: Command, ctx: CommandContext): void {
   switch (cmd.type) {
     case "move":
       return move(doc, cmd.motion, cmd.extend, ctx);
@@ -473,10 +538,22 @@ export interface ClipboardText {
   text: string;
   /** Copied without a selection: the whole line, pasted back as a line. */
   wholeLine: boolean;
+  /**
+   * Copied from several cursors (ED5, T6): each one's text, in text order —
+   * pasted back one per cursor when the count matches.
+   */
+  parts?: string[];
 }
 
 /** ⌘C: the selection, or without one the whole current line (with its break). */
 export function copyText(doc: EditorDocument): ClipboardText {
+  if (doc.extra.length > 0) {
+    const parts = selectionTexts(doc);
+    if (parts.some((t) => t !== "")) return { text: parts.join("\n"), wholeLine: false, parts };
+    // Only bare cursors: their lines, as one whole-line copy each.
+    const lines = [...new Set(allSelections(doc).map((s) => s.head.line))].sort((a, b) => a - b);
+    return { text: lines.map((l) => `${doc.store.line(l)}\n`).join(""), wholeLine: true };
+  }
   const sel = doc.selection;
   if (!isCursor(sel)) return { text: doc.store.slice(selectionRange(sel)), wholeLine: false };
   return { text: `${doc.store.line(sel.head.line)}\n`, wholeLine: true };
@@ -485,11 +562,21 @@ export function copyText(doc: EditorDocument): ClipboardText {
 /** ⌘X: `copyText`, and then the selection — or the whole line — is gone. */
 export function cut(doc: EditorDocument, ctx: CommandContext): ClipboardText {
   const copied = copyText(doc);
-  const sel = doc.selection;
-  if (!copied.wholeLine) {
-    const r = selectionRange(sel);
-    doc.edit([{ range: r, text: "" }], cursor(r.start), "other", ctx.now);
+  if (doc.extra.length > 0) {
+    eachCursor(doc, "other", () => cutOne(doc, copied.wholeLine, ctx), copied.wholeLine);
     return copied;
+  }
+  cutOne(doc, copied.wholeLine, ctx);
+  return copied;
+}
+
+/** One cursor's part of ⌘X: its selection, or its whole line. */
+function cutOne(doc: EditorDocument, wholeLine: boolean, ctx: CommandContext): void {
+  const sel = doc.selection;
+  if (!wholeLine) {
+    const r = selectionRange(sel);
+    if (!isCursor(sel)) doc.edit([{ range: r, text: "" }], cursor(r.start), "other", ctx.now);
+    return;
   }
   // The line goes with its break; the cursor lands in the line that takes its
   // place (the next one, or for the last line the one before), same column.
@@ -502,7 +589,6 @@ export function cut(doc: EditorDocument, ctx: CommandContext): ClipboardText {
     landing = line > 0 ? pos(line - 1, Math.min(sel.head.col, doc.store.line(line - 1).length)) : pos(0, 0);
   }
   doc.edit([{ range: r, text: "" }], cursor(landing), "other", ctx.now);
-  return copied;
 }
 
 /**
@@ -510,6 +596,31 @@ export function cut(doc: EditorDocument, ctx: CommandContext): ClipboardText {
  * the cursor keeping its column; anything else replaces the selection.
  */
 export function paste(doc: EditorDocument, clip: ClipboardText, ctx: CommandContext): void {
+  if (doc.extra.length > 0) return pasteAtEach(doc, clip, ctx);
+  pasteOne(doc, clip, ctx);
+}
+
+/**
+ * ⌘V with several cursors (T6): one piece per cursor, in text order, when
+ * the copy had as many pieces (or the text as many lines) as there are
+ * cursors; otherwise the whole text at every one.
+ */
+function pasteAtEach(doc: EditorDocument, clip: ClipboardText, ctx: CommandContext): void {
+  const all = allSelections(doc);
+  const lines = clip.text.replace(/\n$/, "").split("\n");
+  const pieces = clip.parts?.length === all.length ? clip.parts : !clip.wholeLine && lines.length === all.length ? lines : null;
+  // Which piece each cursor gets: by its place in the text, not in the adding order.
+  const rank = all
+    .map((s, i) => ({ i, at: selectionRange(s).start }))
+    .sort((a, b) => comparePos(a.at, b.at))
+    .reduce((m, { i }, k) => m.set(i, k), new Map<number, number>());
+  eachCursor(doc, "other", (i) => {
+    const piece = pieces ? pieces[rank.get(i) ?? 0] : null;
+    pasteOne(doc, piece === null ? clip : { text: piece, wholeLine: false }, ctx);
+  });
+}
+
+function pasteOne(doc: EditorDocument, clip: ClipboardText, ctx: CommandContext): void {
   const sel = doc.selection;
   if (clip.wholeLine && isCursor(sel)) {
     const at = pos(sel.head.line, 0);

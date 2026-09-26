@@ -1054,7 +1054,10 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   search guard (`editor/search/`): a worker runs every pattern first on a fixed rope with a 1 s
   limit, the main thread only after an ok verdict (or answers from its offsets); Vi pauses its key
   queue for a verdict; loops (`:g`, `3@:`) are vouched for once up front. Vi gained `:g`/`:v`,
-  `:d`, `:normal`, `:s///c` (`vi/confirm.ts`), line-spanning `:s`, `gn`/`cgn`.
+  `:d`, `:normal`, `:s///c` (`vi/confirm.ts`), line-spanning `:s`, `gn`/`cgn`. ED5.3: multiple
+  cursors (`editor/multicursor.ts`): `EditorDocument.extra` beside the main `selection`, undo steps
+  keep all of them; a command runs at each cursor last-to-first as one step (⌥↑/↓ per block of
+  touching lines); ⌥-click/-drag, ⌥⌘↑/↓, ⌘D/⌘U, ⇧⌘L, Esc; multi-aware copy/cut/paste.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

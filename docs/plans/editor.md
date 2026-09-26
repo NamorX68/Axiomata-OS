@@ -948,6 +948,25 @@ Visual-Anker hinter den Cursor — jetzt wie der Cursor begrenzt. Außerdem ist 
 ein eigenes Modul gezogen (`vi/confirm.ts`), `cmdmode.ts` bleibt beim Verteilen der Befehle. Für ED5.4
 vorgemerkt: „Alle ersetzen“ der Such-Leiste prüft einmal und ersetzt dann aus den Offsets des Urteils.
 
+**ED5.3 — gebaut (2026-09-27):** mehrere Cursor (T6). `EditorDocument` hält neben `selection` (dem Haupt-
+Cursor, zuletzt gesetzt) `extra` in der Reihenfolge des Hinzufügens; Undo-Schritte merken sich alle Cursor
+davor und danach. `editor/multicursor.ts` führt einen Befehl an jedem Cursor aus — von hinten nach vorn, mit
+dem unveränderten Ein-Cursor-Befehl, alle anderen Cursor folgen jeder Textänderung (`onTextChange`) —, als
+*ein* Undo-Schritt; Tippen mit mehreren Cursorn verschmilzt wie mit einem, bis zur Pause oder einem Sprung.
+Sich berührende Cursor werden eins; zeilenweise Befehle (⇧⇥, ⌥↑/↓, ⌘/) nehmen eine Zeile nur einmal, ⇥ an
+nackten Cursorn setzt Einrückung an jedem. Dazu ⌥-Klick (setzen/wegnehmen), ⌥-Ziehen (Spalte), ⌥⌘↑/↓ (in der
+Spalte des Ausgangs-Cursors), ⌘D (Wort, dann nächstes Vorkommen, rundherum; das neue ist der Haupt-Cursor),
+⌘U, ⇧⌘L, Esc. Kopieren nimmt jede Auswahl, Einfügen verteilt die Stücke, wenn die Zahl passt, sonst den
+ganzen Text an jeden Cursor. Vi bleibt bei einem Cursor (T18: seine erste Bewegung nimmt die anderen weg).
+Browser-Test: dreimal ⌘D auf `fn`, „func“ getippt — alle drei ersetzt, ⌘Z nimmt alle in einem Schritt zurück.
+Reviews (Tests: ein Fehler, Architektur: zwei CRITICAL) — behoben: ⌥↑/↓ mit Cursorn auf benachbarten Zeilen
+verschluckte eine Bewegung und ließ Cursor springen; Zeilen verschieben geht jetzt **je Block** berührender
+Zeilen (`eachLineBlock`), die Cursor behalten ihre Lage im Block, ⇧⌥↓ dupliziert weiter jede Zeile für sich.
+Die Zielspalte für ↑/↓ hat jetzt jeder Cursor selbst (`extraGoals`), vorher verrutschten die Spalten schon
+beim ersten ↓. ⌥-Ziehen fügt seine Spalte zu schon vorhandenen Cursorn hinzu, statt sie zu verwerfen.
+Für ED5.4: ⌥⏎ der Such-Leiste setzt die Cursor direkt aus den Treffern des Urteils (`setSelections`), nicht
+über `occurrences` (das sucht nur wörtlich).
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

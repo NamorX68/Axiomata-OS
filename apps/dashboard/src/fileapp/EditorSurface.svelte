@@ -37,6 +37,7 @@
   import { indentGuides, type LineDecoration, type LineDecorations } from "../editor/decorations";
   import type { EditorDocument } from "../editor/document";
   import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
+  import { allSelections, columnSelection, toggleCursor } from "../editor/multicursor";
   import { gutterDigits, lineLabel } from "../editor/gutter";
   import { keyAction, type Effect, type KeyInput } from "../editor/keymap";
   import { pos, range, selectionRange, type Pos, type Range } from "../editor/position";
@@ -124,7 +125,16 @@
   /** Rows kept above a line jumped to with `goToLine`. */
   const GO_TO_MARGIN_ROWS = 3;
   /** Commands that only move the selection — the ones a read-only surface allows. */
-  const NON_EDITING = new Set<Command["type"]>(["move", "selectAll", "selectLine"]);
+  const NON_EDITING = new Set<Command["type"]>([
+    "move",
+    "selectAll",
+    "selectLine",
+    "addCursorVertical",
+    "addNextOccurrence",
+    "removeLastCursor",
+    "selectAllOccurrences",
+    "singleCursor",
+  ]);
   const NO_DECORATION: LineDecoration = {};
 
   let scroller: HTMLDivElement;
@@ -295,7 +305,9 @@
     // In Vi mode the selection drawn is the Visual one (inclusive, lines, a block);
     // otherwise the document's own.
     const viRanges = vi?.visualRanges(doc, settings.tabSize) ?? null;
-    const ranges = viRanges ?? (vi ? [] : [selectionRange(sel)]);
+    // Several cursors (ED5, T6): every one's selection, and a caret for each besides the main one.
+    const others = vi ? [] : doc.extra;
+    const ranges = viRanges ?? (vi ? [] : [sel, ...others].map(selectionRange));
     const runs = ranges.flatMap((r) => selectionRuns(layout, doc.store, r, first, last, settings.tabSize));
     const marks = [...markRuns(rows, first, last), ...searchRuns(firstLine, lastLine, first, last)];
     const whitespace = settings.list ? whitespaceMarks(rows, first, last) : [];
@@ -309,7 +321,23 @@
     let widest = 0;
     if (!settings.wrap) for (const r of rows) widest = Math.max(widest, r.text.length);
     const current = { top: layout.firstRow(sel.head.line), rows: layout.rowStarts(sel.head.line).length };
-    return { total, rows, runs, marks, whitespace, caret, shape, cells, cursorLine: sel.head.line, current, widest };
+    const extraCarets = others
+      .map((s) => cursorCell(layout, doc.store, s.head, settings.tabSize))
+      .filter((c) => c.row >= first && c.row <= last);
+    return {
+      total,
+      rows,
+      runs,
+      marks,
+      whitespace,
+      caret,
+      extraCarets,
+      shape,
+      cells,
+      cursorLine: sel.head.line,
+      current,
+      widest,
+    };
   });
 
   type MarkRun = { key: string; row: number; from: number; to: number; kind: string };
@@ -504,8 +532,9 @@
       vi.pasted(text);
       return;
     }
-    const wholeLine = lastClip !== null && lastClip.wholeLine && lastClip.text === text;
-    paste(doc, { text, wholeLine }, ctxNow());
+    // Our own last copy: it knows whether it was a whole line, and each cursor's piece (T6).
+    const ours = lastClip !== null && lastClip.text === text ? lastClip : null;
+    paste(doc, { text, wholeLine: ours?.wholeLine ?? false, parts: ours?.parts }, ctxNow());
     changed();
   }
 
@@ -585,6 +614,7 @@
     const unit = e.detail >= 3 ? lineRange : e.detail === 2 ? wordRange : null;
     const start = posAt(e);
     if (vi) return viMousedown(start);
+    if (e.altKey && !unit) return altMousedown(start);
     const origin = unit ? unit(start) : { start, end: start };
     if (e.shiftKey && !unit) doc.setSelection({ anchor: doc.selection.anchor, head: start });
     else doc.setSelection({ anchor: origin.start, head: origin.end });
@@ -595,6 +625,31 @@
       const hit = unit ? unit(at) : { start: at, end: at };
       const forward = at.line > origin.start.line || (at.line === origin.start.line && at.col >= origin.start.col);
       doc.setSelection(forward ? { anchor: origin.start, head: hit.end } : { anchor: origin.end, head: hit.start });
+      changed();
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /**
+   * ⌥-click adds a cursor there, or takes away the one that is there (ED5,
+   * T6); ⌥-drag draws a column of selections from where it began.
+   */
+  function altMousedown(start: Pos): void {
+    // The cursors from before this click: a drag adds its column to them.
+    const before = allSelections(doc);
+    toggleCursor(doc, start);
+    changed();
+    let dragged = false;
+    const onMove = (ev: MouseEvent) => {
+      const at = posAt(ev);
+      if (!dragged && at.line === start.line && at.col === start.col) return;
+      dragged = true;
+      columnSelection(doc, start, at, settings.tabSize, before.length > 1 ? before : []);
       changed();
     };
     const onUp = () => {
@@ -787,7 +842,7 @@
             {w.glyph}
           </div>
         {/each}
-        {#each view.runs as run (run.row)}
+        {#each view.runs as run, i (i)}
           <div
             class="selection"
             style:top="{run.row * rowH}px"
@@ -819,6 +874,14 @@
               {/each}
             </div>
           {/if}
+        {/each}
+        {#each view.extraCarets as c, i (i)}
+          <div
+            class="caret extra"
+            class:hidden={!focused || composing}
+            style:top="{c.row * rowH}px"
+            style:left="{c.cell * charW}px"
+          ></div>
         {/each}
         {#key tick}
           <div
@@ -1131,6 +1194,11 @@
 
   .caret.hidden {
     display: none;
+  }
+
+  /* The cursors besides the main one (T6): the same bar, a touch fainter. */
+  .caret.extra {
+    opacity: 0.7;
   }
 
   /* Vi's cursors (V8): a see-through block over the character, an underline in Replace. */

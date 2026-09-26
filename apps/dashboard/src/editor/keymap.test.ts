@@ -66,3 +66,21 @@ describe("keyAction", () => {
     expect(keyAction(key("Enter"))).toEqual({ command: { type: "newline" } });
   });
 });
+
+describe("more cursors (ED5, T6)", () => {
+  it("binds ⌥⌘↑/↓, ⌘D, ⌘U, ⇧⌘L and Esc", () => {
+    expect(keyAction(key("ArrowUp", { alt: true, meta: true }))).toEqual({
+      command: { type: "addCursorVertical", dir: -1 },
+    });
+    expect(keyAction(key("ArrowDown", { alt: true, meta: true }))).toEqual({
+      command: { type: "addCursorVertical", dir: 1 },
+    });
+    expect(keyAction(key("d", { meta: true }))).toEqual({ command: { type: "addNextOccurrence" } });
+    expect(keyAction(key("u", { meta: true }))).toEqual({ command: { type: "removeLastCursor" } });
+    expect(keyAction(key("l", { meta: true, shift: true }))).toEqual({ command: { type: "selectAllOccurrences" } });
+    expect(keyAction(key("l", { meta: true }))).toEqual({ command: { type: "selectLine" } });
+    expect(keyAction(key("Escape"))).toEqual({ command: { type: "singleCursor" } });
+    // ⌥↑ still moves the line.
+    expect(keyAction(key("ArrowUp", { alt: true }))).toEqual({ command: { type: "moveLines", dir: -1 } });
+  });
+});

@@ -59,6 +59,9 @@ interface Step {
   changes: AppliedChange[];
   before: Selection;
   after: Selection;
+  /** The other cursors before and after (ED5, T6); empty with one cursor. */
+  extraBefore: Selection[];
+  extraAfter: Selection[];
   kind: EditKind;
   time: number;
 }
@@ -81,7 +84,16 @@ export class EditorDocument {
   indent: Indent;
   /** `true` if the indentation came from the file, `false` if from the setting. */
   indentDetected: boolean;
+  /** The main cursor: with several, the one added last (ED5, T6). */
   selection: Selection = cursor(pos(0, 0));
+  /**
+   * The other cursors, in the order they were added (so ⌘U can take back the
+   * last one). Empty for the usual single cursor; a plain `setSelection`
+   * clears them.
+   */
+  extra: Selection[] = [];
+  /** Each other cursor's own `goalColumn`, parallel to `extra` (↑/↓ with several cursors). */
+  extraGoals: Array<number | null> = [];
   /**
    * The display column ↑/↓ try to keep, set by the first vertical move and
    * cleared by anything else — so the cursor returns to column 40 after
@@ -103,7 +115,7 @@ export class EditorDocument {
    * V5: `cw` plus the typing after it is one change). `null` while none is
    * open; holds the step once the group's first edit made one.
    */
-  private group: { step: Step | null } | null = null;
+  private group: { step: Step | null; before: Selection; extraBefore: Selection[]; merges: boolean } | null = null;
   /** Told about every replacement — edits, undo, redo, reloads alike. */
   private listeners = new Set<(change: TextChange) => void>();
 
@@ -150,7 +162,41 @@ export class EditorDocument {
       this.sealed = true;
     }
     this.selection = next;
+    this.extra = [];
+    this.extraGoals = [];
     if (!keepGoalColumn) this.goalColumn = null;
+  }
+
+  /**
+   * Sets every cursor at once (ED5, T6): `main` and the others, which are
+   * kept in the order given. Seals the typing step like a cursor jump unless
+   * `continues` — the multi-cursor runner putting back what its own edits made.
+   */
+  setSelections(main: Selection, others: readonly Selection[], continues = false): void {
+    const clamp = (sel: Selection) => ({ anchor: clampPos(this.store, sel.anchor), head: clampPos(this.store, sel.head) });
+    if (!continues) this.sealed = true;
+    this.selection = clamp(main);
+    this.extra = others.map(clamp);
+    this.extraGoals = others.map(() => null);
+    this.goalColumn = null;
+    // The step just made should undo back to, and redo to, all of them.
+    const top = this.top();
+    if (continues && top) {
+      top.after = this.selection;
+      top.extraAfter = this.extra;
+    }
+  }
+
+  /**
+   * For a multi-cursor run (`multicursor.ts`): `sel` as the only cursor for
+   * the moment, with its own goal column, without sealing the typing step.
+   * The runner puts every cursor back afterwards.
+   */
+  focusCursor(sel: Selection, goalColumn: number | null = null): void {
+    this.selection = sel;
+    this.extra = [];
+    this.extraGoals = [];
+    this.goalColumn = goalColumn;
   }
 
   /**
@@ -172,6 +218,7 @@ export class EditorDocument {
     this.redoStack = [];
     const top = this.top();
     const grouped = this.group !== null && this.group.step !== null && top === this.group.step;
+    const extraBefore = this.group?.extraBefore ?? this.extra;
     const merges =
       grouped ||
       (top !== null &&
@@ -183,11 +230,14 @@ export class EditorDocument {
     if (merges && top) {
       top.changes.push(...applied);
       top.after = after;
+      top.extraAfter = this.extra;
       top.time = now;
     } else {
-      this.undoStack.push({ changes: applied, before, after, kind, time: now });
-      if (this.group) this.group.step = this.top();
+      const first = this.group?.before ?? before;
+      this.undoStack.push({ changes: applied, before: first, after, extraBefore, extraAfter: this.extra, kind, time: now });
     }
+    // A group's edits all join the step its first edit made (or merged into).
+    if (this.group) this.group.step = this.top();
     this.sealed = kind === "other";
     this.selection = after;
     this.goalColumn = null;
@@ -198,14 +248,17 @@ export class EditorDocument {
    * Opens an undo group: the edits until {@link endUndoGroup} become one step,
    * and undoing it returns to the selection before its first edit.
    */
-  beginUndoGroup(): void {
-    this.group = { step: null };
-    this.sealed = true;
+  beginUndoGroup(merge: EditKind | null = null): void {
+    const merges = merge === "typing" || merge === "deleting";
+    this.group = { step: null, before: this.selection, extraBefore: this.extra, merges };
+    // A multi-cursor keystroke (`merge` = its kind) may still join the typing step before it.
+    if (!merges) this.sealed = true;
   }
 
   endUndoGroup(): void {
+    // A typing group leaves the step open for the next keystroke, as a single typed character does.
+    if (!this.group?.merges) this.sealed = true;
     this.group = null;
-    this.sealed = true;
   }
 
   /** Whether an undo group is open. */
@@ -221,7 +274,7 @@ export class EditorDocument {
       this.replaceText(range(change.start, endAfter(change.start, change.inserted)), change.removed);
     }
     this.redoStack.push(step);
-    this.afterHistoryMove(step.before);
+    this.afterHistoryMove(step.before, step.extraBefore);
     return true;
   }
 
@@ -233,7 +286,7 @@ export class EditorDocument {
       this.replaceText(range(change.start, endAfter(change.start, change.removed)), change.inserted);
     }
     this.undoStack.push(step);
-    this.afterHistoryMove(step.after);
+    this.afterHistoryMove(step.after, step.extraAfter);
     return true;
   }
 
@@ -261,6 +314,8 @@ export class EditorDocument {
     this.savedTop = null;
     this.sealed = true;
     this.selection = cursor(clampPos(this.store, this.selection.head));
+    this.extra = [];
+    this.extraGoals = [];
     this.goalColumn = null;
     this.revision++;
   }
@@ -296,8 +351,11 @@ export class EditorDocument {
     for (const listener of this.listeners) listener(change);
   }
 
-  private afterHistoryMove(sel: Selection): void {
-    this.selection = { anchor: clampPos(this.store, sel.anchor), head: clampPos(this.store, sel.head) };
+  private afterHistoryMove(sel: Selection, extra: readonly Selection[]): void {
+    const clamp = (s: Selection) => ({ anchor: clampPos(this.store, s.anchor), head: clampPos(this.store, s.head) });
+    this.selection = clamp(sel);
+    this.extra = extra.map(clamp);
+    this.extraGoals = extra.map(() => null);
     this.sealed = true;
     this.goalColumn = null;
     this.revision++;
