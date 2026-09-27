@@ -97,6 +97,23 @@ impl Service {
         Ok(service)
     }
 
+    /// Connects to the service only if it is already running — for a watcher
+    /// that must not start Opencode just to look (nothing runs on a service
+    /// that is not there). Checks the version like [`Service::connect`].
+    ///
+    /// Errors:
+    ///     [`OpencodeError::Unavailable`] when no service is running; the
+    ///     other errors as for [`Service::connect`].
+    pub async fn find(
+        opencode: &Path,
+        child_env: &[(String, String)],
+    ) -> Result<Self, OpencodeError> {
+        let state = state_dir(opencode, child_env).await?;
+        let service = Self::from_discovery(&state.join(DISCOVERY_FILE)).await?;
+        check_version(&service.version)?;
+        Ok(service)
+    }
+
     /// Reads the discovery file and asks the service who it is.
     async fn from_discovery(file: &Path) -> Result<Self, OpencodeError> {
         let text = tokio::fs::read_to_string(file)

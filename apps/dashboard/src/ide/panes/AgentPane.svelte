@@ -160,7 +160,7 @@
       `${tabId}:${restarts}`,
       // The worktree, and the env that goes with it. Both come from Rust —
       // `launch_env` carries the identity (AXIOMATA_AGENT_ID and friends) and
-      // the status channel (AXIOMATA_EVENTS, OPENCODE_CONFIG_DIR, …).
+      // Claude Code's status channel (AXIOMATA_EVENTS, AXIOMATA_CLAUDE_SETTINGS, …).
       { cwd: ready?.cwd ?? cwd, env: ready?.launch_env ?? agent.effective_env },
       // Config changes go nowhere on purpose: everything in this context is
       // derived from the agent row, so storing a change on the tab would only

@@ -28,6 +28,7 @@ pub mod graph;
 /// reason as `board` above — a plain re-export, not a wrapper.
 pub use axiomata_ide as ide;
 pub mod ide_start;
+pub mod ide_status;
 pub mod importer;
 pub mod json_state;
 pub mod memory;

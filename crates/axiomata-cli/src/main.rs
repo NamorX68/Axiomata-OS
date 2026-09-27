@@ -1208,7 +1208,7 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                     anyhow::bail!("no agent #{id}")
                 }
             }
-            AgentAction::Status { project } => agent_status(core, project),
+            AgentAction::Status { project } => agent_status(core, project).await,
             AgentAction::DiscardWorktree { id, force } => agent_discard_worktree(core, id, force),
             AgentAction::Diff { id, file } => agent_diff(core, id, file),
             AgentAction::Base { id, path } => agent_base(core, id, &path),
@@ -1380,15 +1380,16 @@ async fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
     Ok(())
 }
 
-fn agent_status(core: &AxiomataCore, project_id: i64) -> Result<()> {
-    let db = core.db_lock();
-    let agents = ide::agent_store::list_agents(&db, project_id)?;
+async fn agent_status(core: &AxiomataCore, project_id: i64) -> Result<()> {
+    let agents = ide::agent_store::list_agents(&core.db_lock(), project_id)?;
     let names: std::collections::HashMap<i64, String> = agents
         .iter()
         .map(|agent| (agent.id, agent.name.clone()))
         .collect();
-    let statuses =
+    let mut statuses =
         ide::provision::agent_statuses(&agents, &axiomata_core::paths::ide_locations().channels);
+    // Opencode agents report through the Opencode service, not the channel.
+    axiomata_core::ide_status::overlay_once(&mut statuses, &agents).await;
     if statuses.is_empty() {
         println!("project #{project_id} has no agents");
     }
@@ -1408,6 +1409,17 @@ fn agent_status(core: &AxiomataCore, project_id: i64) -> Result<()> {
             status.agent_id,
             status.state.as_str()
         );
+        if let Some(document) = &status.plan_document {
+            let earlier = if document.from_earlier_session {
+                ", earlier session"
+            } else {
+                ""
+            };
+            println!("  plan ({}{earlier}):", document.name);
+            for line in document.markdown.lines().take(12) {
+                println!("    {line}");
+            }
+        }
         let Some(plan) = status.plan else { continue };
         if plan.from_earlier_session {
             println!("  (plan from an earlier session)");

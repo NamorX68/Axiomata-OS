@@ -334,6 +334,18 @@ pub fn set_base_branch(db: &Connection, id: i64, base_branch: Option<&str>) -> R
     Ok(changed == 1)
 }
 
+/// The Opencode sessions the IDE keeps for its agents: those of Opencode
+/// agents on the generated command (an own command gets none, E13).
+pub fn opencode_sessions(db: &Connection) -> Result<Vec<String>> {
+    let mut stmt = db.prepare(
+        "SELECT opencode_session FROM ide_agents \
+         WHERE harness = 'opencode' AND trim(command) = '' AND opencode_session IS NOT NULL \
+         ORDER BY id",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Records the Opencode session an agent runs in; `None` forgets it, so the
 /// next start creates a fresh one ("New session").
 pub fn set_opencode_session(db: &Connection, id: i64, session: Option<&str>) -> Result<bool> {
@@ -501,6 +513,24 @@ mod tests {
         assert!(!set_opencode_session(&db, 4242, Some("ses_x")).unwrap());
         assert!(set_opencode_session(&db, agent.id, Some(&"s".repeat(129))).is_err());
         assert!(set_opencode_session(&db, agent.id, Some("ses_x; rm -rf ~")).is_err());
+
+        // Only Opencode agents on the generated command are listed.
+        let mut own = fields("Own");
+        own.command = "opencode --agent plan".into();
+        let own = create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: own,
+            },
+        )
+        .unwrap();
+        set_opencode_session(&db, own.id, Some("ses_own")).unwrap();
+        set_opencode_session(&db, agent.id, Some("ses_mine")).unwrap();
+        assert_eq!(
+            opencode_sessions(&db).unwrap(),
+            vec!["ses_mine".to_string()]
+        );
     }
 
     #[test]

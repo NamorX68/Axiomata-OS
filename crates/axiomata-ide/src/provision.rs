@@ -60,7 +60,7 @@ pub struct Provisioned {
     /// never from a stored layout (the CP4 rule).
     pub launch_command: String,
     /// The environment to start with: [`Agent::effective_env`] plus the
-    /// channel's lines (`AXIOMATA_EVENTS`, `OPENCODE_CONFIG_DIR`, …). Ours come
+    /// channel's lines (`AXIOMATA_EVENTS`, `AXIOMATA_CLAUDE_SETTINGS`, …). Ours come
     /// last, like the identity, so a profile cannot redirect them.
     pub launch_env: String,
     /// Whether the harness reports into the status channel at all.
@@ -778,13 +778,10 @@ mod tests {
         let identity = env.find("AXIOMATA_AGENT_ID=").unwrap();
         let channel = env.find("AXIOMATA_EVENTS=").unwrap();
         assert!(channel > identity, "{env}");
-        assert!(env.contains(&format!(
-                "OPENCODE_CONFIG_DIR={}",
-                base.channels.events
-                    .join(agent.to_string())
-                    .join("opencode")
-                    .display()
-            )));
+        assert!(
+            !env.contains("OPENCODE_CONFIG_DIR="),
+            "gone with OC3: {env}"
+        );
         // Nothing of ours lands in the worktree (E12).
         assert!(!ready.cwd.join(".opencode").exists());
         assert!(!ready.cwd.join(".claude").exists());

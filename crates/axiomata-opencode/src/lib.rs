@@ -11,6 +11,8 @@
 //!   methods ([`session`]).
 //! - [`Service::run_turn`] puts those together into one agent turn: a prompt,
 //!   its execution, and what it produced ([`turn`]).
+//! - [`Tracker`] follows what each session is doing from the event stream,
+//!   for the IDE's agent status ([`status`]).
 //!
 //! The documented surface is <https://opencode.ai/v2/docs>. The one piece that
 //! is not documented is how a local client logs in; it lives in
@@ -25,10 +27,12 @@ pub mod error;
 pub mod events;
 pub mod service;
 pub mod session;
+pub mod status;
 pub mod turn;
 
 pub use error::OpencodeError;
 pub use events::{Event, EventStream};
 pub use service::Service;
 pub use session::{ModelRef, NewSession, PermissionRule};
+pub use status::{PlanAnswer, SessionSnapshot, SessionState, SessionStatus, Tracker};
 pub use turn::{TurnOutcome, TurnRequest, TurnSession, unattended_permissions};

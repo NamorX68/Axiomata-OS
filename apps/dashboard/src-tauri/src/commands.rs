@@ -1846,21 +1846,26 @@ pub fn ide_agent_new_session(state: State<'_, CoreState>, id: i64) -> Result<boo
 ///
 /// One call for the whole project, because the IDE polls it every second
 /// while it is open. Reads small files only.
+///
+/// Claude Code agents report through their file channel; Opencode agents
+/// through the Opencode service, whose watcher starts on the first call
+/// (opencode2.md OC3). Async so that watcher starts inside the runtime.
 #[tauri::command]
-pub fn ide_agent_states(
+pub async fn ide_agent_states(
     state: State<'_, CoreState>,
     project_id: i64,
 ) -> Result<Vec<ide::lifecycle::AgentStatus>, String> {
+    axiomata_core::ide_status::ensure_running(std::sync::Arc::clone(&state.db));
     // List, then let go of the connection before the file reads: this runs
     // every second, and the connection is shared by every other command.
     let agents = {
         let db = state.db_lock();
         ide::agent_store::list_agents(&db, project_id).map_err(|err| err.to_string())?
     };
-    Ok(ide::provision::agent_statuses(
-        &agents,
-        &axiomata_core::paths::ide_locations().channels,
-    ))
+    let mut statuses =
+        ide::provision::agent_statuses(&agents, &axiomata_core::paths::ide_locations().channels);
+    axiomata_core::ide_status::overlay(&mut statuses, &agents);
+    Ok(statuses)
 }
 
 /* ------------------------------------------------------------ git (M7.3) ---

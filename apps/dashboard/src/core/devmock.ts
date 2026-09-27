@@ -1239,7 +1239,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         cwd: project?.repo_root ?? "/",
         shared_folder: true,
         launch_command: `${agent.effective_command}${hookup}`,
-        launch_env: `${agent.effective_env}\nAXIOMATA_EVENTS=${events}\nOPENCODE_CONFIG_DIR=${events}/opencode`,
+        launch_env: `${agent.effective_env}\nAXIOMATA_EVENTS=${events}\nAXIOMATA_CLAUDE_SETTINGS=${events}/claude-settings.json`,
         status_connected: agent.harness !== "mini",
       } as T;
     }

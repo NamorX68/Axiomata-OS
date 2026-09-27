@@ -10,16 +10,20 @@
 //! How it is wired, and why (`docs/plans/agent-lifecycle.md`, E9–E20):
 //!
 //! * **The harness writes, we read.** Claude Code gets a settings file of our
-//!   own via `claude --settings`, whose hooks are plain `sh` lines. Opencode
-//!   gets a plugin via `OPENCODE_CONFIG_DIR`. Both write the finished state word
-//!   into a file; Rust reads one line (E11). Nothing here depends on an Axiomata
-//!   binary being on the agent's `PATH` — the bundled app does not ship the CLI.
+//!   own via `claude --settings`, whose hooks are plain `sh` lines writing the
+//!   finished state word into a file; Rust reads one line (E11). Nothing here
+//!   depends on an Axiomata binary being on the agent's `PATH` — the bundled
+//!   app does not ship the CLI.
+//! * **Opencode is not on this channel any more** (`docs/plans/opencode2.md`,
+//!   OC3): Opencode 2 runs its sessions on a shared service, and the embedder
+//!   reads their state from that service's event stream and lays it over what
+//!   this module reports. The v1 plugin that used to write here is gone.
 //! * **Nothing is ever written into a worktree** (E12). Both hookups live in the
 //!   channel directory, so an agent can never commit them by accident, and an
 //!   agent sharing a plain project folder gets a status too.
 //! * **Current state, not a history** (E10): `state` holds one word and a Unix
-//!   timestamp, `started` when the agent was last started, `plan.json` the
-//!   latest Opencode plan. Every write is a temporary file plus a rename.
+//!   timestamp, `started` when the agent was last started. Every write is a
+//!   temporary file plus a rename.
 //! * **One named exception to "the harness writes our format"** (E14): Claude
 //!   Code's plan is read from Claude Code's own task directory
 //!   (`<claude-home>/tasks/<list>/`), because its task tools only report single
@@ -27,20 +31,17 @@
 //!   through `CLAUDE_CODE_TASK_LIST_ID`. That format is Claude Code's internal
 //!   one, so it is read tolerantly: anything unexpected is skipped, never an
 //!   error that could take a pane down.
-//! * **Both harnesses are nudged to keep a visible plan** (E19): a shared
-//!   `planning.md` instruction goes to Claude Code via
-//!   `--append-system-prompt-file` and to Opencode via its config's
-//!   `instructions`, additive to whatever the user already has. Without it, a
-//!   small task never got a task list at all, and the Plan tab stayed empty.
+//! * **Claude Code is nudged to keep a visible plan** (E19): a `planning.md`
+//!   instruction goes to it via `--append-system-prompt-file`, additive to
+//!   whatever the user already has. Without it, a small task never got a task
+//!   list at all, and the Plan tab stayed empty.
 //! * **Claude Code's plan-mode plan gets its own document, not just tasks**
 //!   (E20): it writes that plan as Markdown to `<claude-home>/plans/<name>.md`,
 //!   which a `Write`/`Edit` hook merely notices and points at
 //!   (`Channel::plan_pointer_line`); Rust only reads the file the pointer
 //!   names, and only after confirming its *canonical* path really lies inside
 //!   the plan folder (`Channel::read_plan_document`) — the pointer comes from
-//!   a foreign process's payload, so it is never trusted outright. Opencode has
-//!   no separate plan mode; its plan agent's reply is kept the same way instead
-//!   (`plan-mode.md`, written by the plugin).
+//!   a foreign process's payload, so it is never trusted outright.
 //!
 //! The status is runtime state and deliberately **not** in the database (E9):
 //! a row saying "working" that survived a restart of the app would be a lie
@@ -64,29 +65,21 @@ use crate::{IdeError, Result};
 const STATE_FILE: &str = "state";
 /// The file holding when the agent was last started (Unix seconds).
 const STARTED_FILE: &str = "started";
-/// The latest plan snapshot, in our own format. Written by the Opencode plugin.
-const PLAN_FILE: &str = "plan.json";
 /// The settings file handed to `claude --settings`.
 const CLAUDE_SETTINGS_FILE: &str = "claude-settings.json";
-/// Opencode's extra config directory. Opencode also installs `node_modules/`
-/// into it, which is why [`Channel::reset`] never touches it.
-const OPENCODE_DIR: &str = "opencode";
-/// The plugin file inside [`OPENCODE_DIR`].
-const OPENCODE_PLUGIN: &str = "plugin/axiomata-lifecycle.js";
+/// Where the v1 Opencode plugin and its `node_modules/` used to live; removed
+/// on the next start of an agent that still has it (OC3).
+const LEGACY_OPENCODE_DIR: &str = "opencode";
 /// The instruction that asks an agent to keep a visible plan (M7.2 CP6, (b)).
 const PLANNING_FILE: &str = "planning.md";
-/// Opencode's config inside [`OPENCODE_DIR`]: points at [`PLANNING_FILE`].
-const OPENCODE_CONFIG: &str = "opencode.json";
-/// Opencode's plan-agent answer, written by the plugin (Markdown).
-const OPENCODE_PLAN_FILE: &str = "plan-mode.md";
 /// The last `Write`/`Edit` payload that touched Claude Code's plan folder.
 const PLAN_MODE_POINTER: &str = "plan-mode.json";
-/// What [`PLANNING_FILE`] says. Harness-neutral on purpose: one text, both
-/// harnesses, each with its own name for the tool.
+/// What [`PLANNING_FILE`] says (Claude Code's task tools; Opencode 2 has no
+/// todo tool — its step list comes with Axiomata's MCP server, opencode2.md Q3).
 const PLANNING_TEXT: &str = "\
-When a task takes more than one step, keep a task list with your task/todo tool \
-(TaskCreate/TaskUpdate in Claude Code, todowrite in Opencode) from the start, \
-and update it as you go, so the user can follow your progress in the IDE's Plan tab.
+When a task takes more than one step, keep a task list with your task tools \
+(TaskCreate/TaskUpdate) from the start, and update it as you go, so the user \
+can follow your progress in the IDE's Plan tab.
 ";
 /// The most we read of any one channel file. Everything in it is written by a
 /// foreign process and read every second; a real plan is a few kilobytes.
@@ -161,13 +154,13 @@ pub enum StepState {
     Todo,
     Doing,
     Done,
-    /// Only Opencode has this; shown struck through.
+    /// A dropped step; shown struck through.
     Cancelled,
 }
 
 impl StepState {
-    /// Maps either harness's status spelling onto ours. Both use `pending` /
-    /// `in_progress` / `completed`; our own `plan.json` uses our own words.
+    /// Maps Claude Code's task status spelling (`pending` / `in_progress` /
+    /// `completed`) — or our own words — onto ours.
     /// Unknown ⇒ `None`, and the caller decides what that means.
     fn parse(raw: &str) -> Option<Self> {
         match raw {
@@ -269,48 +262,33 @@ impl Channel {
     /// Prepares the channel for a new start: drops the old state word and
     /// records the start time.
     ///
-    /// The plan is deliberately left alone (E16) — and so is Opencode's config
-    /// directory, which holds the `node_modules/` Opencode installed there.
+    /// The plan is deliberately left alone (E16). What the v1 Opencode plugin
+    /// left here (its config directory with `node_modules/`) is removed.
     pub fn reset(&self) -> Result<()> {
         ensure_plain_dir(&self.dir)?;
         remove_file(&self.dir.join(STATE_FILE))?;
+        remove_dir(&self.dir.join(LEGACY_OPENCODE_DIR))?;
         write_atomic(&self.dir.join(STARTED_FILE), &format!("{}\n", unix_now()))
     }
 
-    /// Writes both harnesses' hookups into the channel and says how to use them.
+    /// Writes Claude Code's hookup into the channel and says how to use it.
     ///
-    /// Both are always written, whatever the profile's harness: an own command
-    /// may well start the other one, and the env this returns points at both.
-    /// Each file is only rewritten when its content changed, so a restart does
-    /// not make Opencode reinstall its plugin dependencies.
+    /// Always written, whatever the profile's harness: an own command may well
+    /// start Claude Code, and the env this returns points at it. Each file is
+    /// only rewritten when its content changed. Opencode needs nothing here —
+    /// its state comes from the Opencode service (OC3) — but reports its
+    /// status all the same, so it counts as connected.
     pub fn install(&self, harness: Harness) -> Result<Hookup> {
         let settings = self.dir.join(CLAUDE_SETTINGS_FILE);
-        let opencode = self.dir.join(OPENCODE_DIR);
-        // Each level on its own: `create_dir_all` would follow a link at any
-        // of them.
-        for dir in [self.dir.clone(), opencode.clone(), opencode.join("plugin")] {
-            ensure_plain_dir(&dir)?;
-        }
+        ensure_plain_dir(&self.dir)?;
         let planning = self.dir.join(PLANNING_FILE);
         write_if_changed(&settings, &self.claude_settings())?;
         write_if_changed(&planning, PLANNING_TEXT)?;
-        write_if_changed(&opencode.join(OPENCODE_PLUGIN), &self.opencode_plugin())?;
-        // `instructions` is additive to the user's own config (checked with
-        // `opencode debug config`); nothing else is set here.
-        let opencode_config = json!({ "instructions": [planning.display().to_string()] });
-        write_if_changed(
-            &opencode.join(OPENCODE_CONFIG),
-            &format!(
-                "{}\n",
-                serde_json::to_string_pretty(&opencode_config).unwrap_or_default()
-            ),
-        )?;
 
         let env = vec![
             format!("AXIOMATA_EVENTS={}", self.dir.display()),
             format!("AXIOMATA_CLAUDE_SETTINGS={}", settings.display()),
             format!("CLAUDE_CODE_TASK_LIST_ID={}", self.claude_list_id),
-            format!("OPENCODE_CONFIG_DIR={}", opencode.display()),
         ];
         let args = match harness {
             Harness::ClaudeCode => Some(format!(
@@ -345,12 +323,10 @@ impl Channel {
             since,
             started_at,
             plan: self.read_plan(harness, started_at),
+            // Opencode's plan agent answer comes from the service (OC3).
             plan_document: match harness {
                 Harness::ClaudeCode => self.read_plan_document(started_at),
-                Harness::Opencode => {
-                    read_document(&self.dir.join(OPENCODE_PLAN_FILE), "plan agent", started_at)
-                }
-                Harness::Mini => None,
+                Harness::Opencode | Harness::Mini => None,
             },
         }
     }
@@ -369,8 +345,7 @@ impl Channel {
     ) -> Option<PlanSnapshot> {
         let (steps, updated_at) = match harness {
             Harness::ClaudeCode => read_claude_tasks(&self.claude_list_dir)?,
-            Harness::Opencode => read_plan_file(&self.dir.join(PLAN_FILE))?,
-            Harness::Mini => return None,
+            Harness::Opencode | Harness::Mini => return None,
         };
         if steps.is_empty() {
             return None;
@@ -481,110 +456,7 @@ impl Channel {
             self.state_line(AgentState::Waiting)
         )
     }
-
-    /// The Opencode plugin: the same states from Opencode's own events, plus
-    /// the plan from `todo.updated`, normalised into our format.
-    fn opencode_plugin(&self) -> String {
-        // A JSON string literal is a valid JavaScript string literal, so this is
-        // the whole of the escaping.
-        let dir = Value::String(self.dir.display().to_string()).to_string();
-        OPENCODE_PLUGIN_TEMPLATE
-            .replace("__AGENT_ID__", &self.agent_id.to_string())
-            .replace("__DIR__", &dir)
-    }
 }
-
-/// The plugin source. `__DIR__` and `__AGENT_ID__` are filled in by
-/// [`Channel::opencode_plugin`]; everything else is fixed.
-///
-/// Only the main session counts (E15): Opencode's sub-agents run in sessions
-/// with a `parentID`, and their `idle` would otherwise report the main agent as
-/// finished while it is still working.
-const OPENCODE_PLUGIN_TEMPLATE: &str = r#"// Written by Axiomata-OS for agent __AGENT_ID__ on every start; edits are overwritten.
-// Reports this agent's state and plan into its status channel (M7.2 CP6).
-import { renameSync, writeFileSync } from "node:fs";
-
-const DIR = __DIR__;
-const STEP = { pending: "todo", in_progress: "doing", completed: "done", cancelled: "cancelled" };
-const children = new Set();
-// Opencode's plan agent writes no todos: its plan is its answer. Text parts of
-// the plan agent's replies are kept per message until the reply finishes.
-const planReplies = new Map();
-
-function put(name, text) {
-  const tmp = `${DIR}/${name}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, `${DIR}/${name}`);
-}
-
-function state(word) {
-  try {
-    put("state", `${word} ${Math.floor(Date.now() / 1000)}\n`);
-  } catch {}
-}
-
-export const AxiomataLifecycle = async () => {
-  state("idle");
-  process.on("exit", () => state("ended"));
-  return {
-    event: async ({ event }) => {
-      const props = event.properties ?? {};
-      const info = props.info ?? {};
-      if (event.type === "session.created" && info.parentID) {
-        children.add(info.id);
-        return;
-      }
-      const session =
-        props.sessionID ?? info.sessionID ?? props.part?.sessionID ?? (event.type.startsWith("session.") ? info.id : undefined);
-      if (session && children.has(session)) return;
-      switch (event.type) {
-        case "session.status":
-          if (props.status?.type === "idle") state("idle");
-          else if (props.status?.type) state("working");
-          break;
-        case "permission.asked":
-        case "question.asked":
-          state("waiting");
-          break;
-        case "permission.replied":
-        case "question.replied":
-        case "question.rejected":
-          state("working");
-          break;
-        case "message.updated":
-          if (info.role === "assistant" && info.agent === "plan") {
-            if (!planReplies.has(info.id)) planReplies.set(info.id, new Map());
-            if (info.finish === "stop") {
-              const text = [...planReplies.get(info.id).values()].join("\n\n").trim();
-              planReplies.delete(info.id);
-              if (text) {
-                try {
-                  put("plan-mode.md", text + "\n");
-                } catch {}
-              }
-            }
-          }
-          break;
-        case "message.part.updated": {
-          const part = props.part ?? {};
-          const reply = planReplies.get(part.messageID);
-          if (reply && part.type === "text") reply.set(part.id, String(part.text ?? ""));
-          break;
-        }
-        case "todo.updated":
-          try {
-            const steps = (props.todos ?? []).map((todo) => ({
-              text: String(todo.content ?? ""),
-              state: STEP[todo.status] ?? "todo",
-            }));
-            put("plan.json", JSON.stringify({ steps }));
-          } catch {}
-          break;
-      }
-    },
-  };
-};
-"#;
 
 /// The task list id for an agent: its id plus a short checksum of the channel
 /// root, so agent #1 of a scratch `AXIOMATA_HOME` and agent #1 of the real
@@ -658,32 +530,6 @@ fn read_claude_tasks(dir: &Path) -> Option<(Vec<PlanStep>, Option<DateTime<Utc>>
         tasks.into_iter().map(|(_, step)| step).collect(),
         newest.map(DateTime::<Utc>::from),
     ))
-}
-
-/// Reads our own `plan.json`, as the Opencode plugin writes it.
-fn read_plan_file(path: &Path) -> Option<(Vec<PlanStep>, Option<DateTime<Utc>>)> {
-    let value: Value = serde_json::from_str(&read_to_string(path)?).ok()?;
-    let steps = value
-        .get("steps")?
-        .as_array()?
-        .iter()
-        .filter_map(|step| {
-            Some(PlanStep {
-                text: step.get("text")?.as_str()?.to_string(),
-                state: step
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .and_then(StepState::parse)
-                    .unwrap_or(StepState::Todo),
-                detail: None,
-            })
-        })
-        .collect();
-    let updated_at = fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .map(DateTime::<Utc>::from);
-    Some((steps, updated_at))
 }
 
 /// Reads a plan document; empty or missing ⇒ `None`.
@@ -954,10 +800,11 @@ mod tests {
         let opencode = channel.install(Harness::Opencode).unwrap();
         assert!(
             opencode.args.is_none(),
-            "opencode is hooked up through env only"
+            "opencode's state comes from its service (OC3)"
         );
+        assert!(opencode.connected, "…and it reports all the same");
         assert!(
-            opencode
+            !opencode
                 .env
                 .iter()
                 .any(|l| l.starts_with("OPENCODE_CONFIG_DIR="))
@@ -968,39 +815,38 @@ mod tests {
                 .iter()
                 .any(|l| l.starts_with("CLAUDE_CODE_TASK_LIST_ID=axiomata-agent-4-"))
         );
-        assert!(
-            channel
-                .dir()
-                .join(OPENCODE_DIR)
-                .join(OPENCODE_PLUGIN)
-                .is_file()
-        );
+        assert!(!channel.dir().join(LEGACY_OPENCODE_DIR).exists());
 
         assert!(!channel.install(Harness::Mini).unwrap().connected);
     }
 
+    /// A Claude Code task file, as the task tools write it.
+    fn claude_task(id: &str, subject: &str, status: &str) -> String {
+        json!({ "id": id, "subject": subject, "description": "why", "status": status, "blocks": [], "blockedBy": [] })
+            .to_string()
+    }
+
     #[test]
-    fn reset_clears_the_state_but_keeps_the_plan_and_opencodes_folder() {
+    fn reset_clears_the_state_keeps_the_plan_and_drops_the_old_opencode_plugin() {
         let channel = Channel::for_agent(&locations(), 5);
-        channel.install(Harness::Opencode).unwrap();
+        channel.install(Harness::ClaudeCode).unwrap();
         fs::write(channel.dir().join(STATE_FILE), "working 1\n").unwrap();
+        fs::create_dir_all(&channel.claude_list_dir).unwrap();
         fs::write(
-            channel.dir().join(PLAN_FILE),
-            r#"{"steps":[{"text":"a","state":"doing"}]}"#,
+            channel.claude_list_dir.join("1.json"),
+            claude_task("1", "a", "in_progress"),
         )
         .unwrap();
-        let modules = channel.dir().join(OPENCODE_DIR).join("node_modules");
+        // What the v1 Opencode plugin left behind before OC3.
+        let modules = channel.dir().join(LEGACY_OPENCODE_DIR).join("node_modules");
         fs::create_dir_all(&modules).unwrap();
 
         channel.reset().unwrap();
-        let status = channel.read_status(Harness::Opencode);
+        let status = channel.read_status(Harness::ClaudeCode);
         assert_eq!(status.state, AgentState::Starting);
         assert!(status.started_at.is_some());
         assert_eq!(status.since, status.started_at);
-        assert!(
-            modules.is_dir(),
-            "opencode's own install must survive a restart"
-        );
+        assert!(!channel.dir().join(LEGACY_OPENCODE_DIR).exists());
         let plan = status.plan.expect("the plan survives a restart");
         assert_eq!(plan.steps[0].state, StepState::Doing);
     }
@@ -1009,9 +855,10 @@ mod tests {
     fn a_plan_older_than_the_last_start_is_marked_as_such() {
         let channel = Channel::for_agent(&locations(), 6);
         fs::create_dir_all(channel.dir()).unwrap();
+        fs::create_dir_all(&channel.claude_list_dir).unwrap();
         fs::write(
-            channel.dir().join(PLAN_FILE),
-            r#"{"steps":[{"text":"a","state":"todo"}]}"#,
+            channel.claude_list_dir.join("1.json"),
+            claude_task("1", "a", "pending"),
         )
         .unwrap();
         // Started "in the future" relative to the plan's mtime.
@@ -1022,7 +869,7 @@ mod tests {
         .unwrap();
         assert!(
             channel
-                .read_status(Harness::Opencode)
+                .read_status(Harness::ClaudeCode)
                 .plan
                 .unwrap()
                 .from_earlier_session
@@ -1031,11 +878,20 @@ mod tests {
         fs::write(channel.dir().join(STARTED_FILE), "1\n").unwrap();
         assert!(
             !channel
-                .read_status(Harness::Opencode)
+                .read_status(Harness::ClaudeCode)
                 .plan
                 .unwrap()
                 .from_earlier_session
         );
+    }
+
+    #[test]
+    fn an_opencode_agent_reads_no_plan_from_the_channel() {
+        // Its plan-agent answer comes from the Opencode service (OC3).
+        let channel = Channel::for_agent(&locations(), 7);
+        channel.reset().unwrap();
+        let status = channel.read_status(Harness::Opencode);
+        assert!(status.plan.is_none() && status.plan_document.is_none());
     }
 
     #[test]
@@ -1044,10 +900,7 @@ mod tests {
         let channel = Channel::for_agent(&locations, 8);
         let list = &channel.claude_list_dir;
         fs::create_dir_all(list).unwrap();
-        let task = |id: &str, subject: &str, status: &str| {
-            json!({ "id": id, "subject": subject, "description": "why", "status": status, "blocks": [], "blockedBy": [] })
-                .to_string()
-        };
+        let task = claude_task;
         fs::write(list.join("10.json"), task("10", "last", "pending")).unwrap();
         fs::write(list.join("2.json"), task("2", "second", "in_progress")).unwrap();
         fs::write(list.join("1.json"), task("1", "first", "completed")).unwrap();
@@ -1070,19 +923,6 @@ mod tests {
             ]
         );
         assert_eq!(plan.steps[0].detail.as_deref(), Some("why"));
-    }
-
-    #[test]
-    fn a_garbled_plan_file_is_no_plan_not_an_error() {
-        let channel = Channel::for_agent(&locations(), 9);
-        fs::create_dir_all(channel.dir()).unwrap();
-        for garbage in ["", "null", "{\"steps\":7}", "{\"steps\":[]}", "[1,2]"] {
-            fs::write(channel.dir().join(PLAN_FILE), garbage).unwrap();
-            assert!(
-                channel.read_status(Harness::Opencode).plan.is_none(),
-                "{garbage:?}"
-            );
-        }
     }
 
     #[test]
@@ -1133,29 +973,14 @@ mod tests {
             "the mini harness has no CLI to extend yet"
         );
         assert!(!hookup.connected);
-        // Both harnesses' hookups are always written (E13), whatever the
-        // profile's own harness is — an own command could still start either.
+        // Claude Code's hookup is always written (E13), whatever the
+        // profile's own harness is — an own command could still start it.
         assert!(channel.dir().join(CLAUDE_SETTINGS_FILE).is_file());
-        assert!(
-            channel
-                .dir()
-                .join(OPENCODE_DIR)
-                .join(OPENCODE_PLUGIN)
-                .is_file()
-        );
         assert!(
             hookup
                 .env
                 .iter()
                 .any(|l| l.starts_with("AXIOMATA_CLAUDE_SETTINGS=")),
-            "{:?}",
-            hookup.env
-        );
-        assert!(
-            hookup
-                .env
-                .iter()
-                .any(|l| l.starts_with("OPENCODE_CONFIG_DIR=")),
             "{:?}",
             hookup.env
         );
@@ -1194,81 +1019,6 @@ mod tests {
         );
     }
 
-    /// Runs the generated plugin under Node, when Node is installed, and feeds
-    /// it the events Opencode sends. Skipped (not failed) without Node: the
-    /// plugin's runtime is Opencode's own Bun, which a test cannot assume.
-    #[test]
-    fn the_generated_opencode_plugin_maps_events_and_ignores_sub_agents() {
-        if Command::new("node").arg("--version").output().is_err() {
-            eprintln!("node not installed — skipping the plugin test");
-            return;
-        }
-        let channel = Channel::for_agent(&locations(), 13);
-        channel.reset().unwrap();
-        channel.install(Harness::Opencode).unwrap();
-        let plugin = channel.dir().join(OPENCODE_DIR).join(OPENCODE_PLUGIN);
-        let driver = format!(
-            r#"
-            const {{ pathToFileURL }} = await import("node:url");
-            const {{ AxiomataLifecycle }} = await import(pathToFileURL({plugin}).href);
-            const hooks = await AxiomataLifecycle({{}});
-            const send = (type, properties) => hooks.event({{ event: {{ type, properties }} }});
-            const fs = await import("node:fs");
-            const read = () => fs.readFileSync({state}, "utf8").split(" ")[0];
-            const out = [read()];
-            await send("session.created", {{ info: {{ id: "main" }} }});
-            await send("session.status", {{ sessionID: "main", status: {{ type: "busy" }} }}); out.push(read());
-            await send("permission.asked", {{ sessionID: "main" }}); out.push(read());
-            await send("permission.replied", {{ sessionID: "main" }}); out.push(read());
-            await send("session.created", {{ info: {{ id: "child", parentID: "main" }} }});
-            await send("session.status", {{ sessionID: "child", status: {{ type: "idle" }} }}); out.push(read());
-            await send("todo.updated", {{ sessionID: "main", todos: [
-              {{ content: "alpha", status: "in_progress", priority: "high" }},
-              {{ content: "beta", status: "pending" }} ] }});
-            await send("session.status", {{ sessionID: "main", status: {{ type: "idle" }} }}); out.push(read());
-            // A plan-agent reply: its text becomes the plan document once it finishes.
-            await send("message.updated", {{ info: {{ id: "m1", sessionID: "main", role: "assistant", agent: "plan" }} }});
-            await send("message.part.updated", {{ part: {{ id: "p1", messageID: "m1", sessionID: "main", type: "text", text: "1. Read" }} }});
-            await send("message.part.updated", {{ part: {{ id: "p1", messageID: "m1", sessionID: "main", type: "text", text: "1. Read\n2. Write" }} }});
-            await send("message.updated", {{ info: {{ id: "m1", sessionID: "main", role: "assistant", agent: "plan", finish: "stop" }} }});
-            // A build-agent reply is not a plan.
-            await send("message.updated", {{ info: {{ id: "m2", sessionID: "main", role: "assistant", agent: "build" }} }});
-            await send("message.part.updated", {{ part: {{ id: "p2", messageID: "m2", sessionID: "main", type: "text", text: "done" }} }});
-            await send("message.updated", {{ info: {{ id: "m2", sessionID: "main", role: "assistant", agent: "build", finish: "stop" }} }});
-            console.log(out.join(","));
-            "#,
-            plugin = Value::String(plugin.display().to_string()),
-            state = Value::String(channel.dir().join(STATE_FILE).display().to_string()),
-        );
-        let output = Command::new("node")
-            .args(["--input-type=module", "-e", &driver])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout).trim(),
-            // A sub-agent going idle must not report the main agent idle.
-            "idle,working,waiting,working,working,idle"
-        );
-        let status = channel.read_status(Harness::Opencode);
-        let document = status
-            .plan_document
-            .expect("the plan agent's reply is the plan");
-        assert_eq!(document.markdown, "1. Read\n2. Write\n");
-        let plan = status.plan.unwrap();
-        assert_eq!(plan.steps.len(), 2);
-        assert_eq!(plan.steps[0].state, StepState::Doing);
-        // The exit handler writes `ended` when the process goes away.
-        assert_eq!(
-            channel.read_status(Harness::Opencode).state,
-            AgentState::Ended
-        );
-    }
-
     #[test]
     fn a_channel_swapped_for_a_symlink_is_replaced_not_followed() {
         let roots = locations();
@@ -1292,18 +1042,6 @@ mod tests {
             0,
             "nothing may be written where the link pointed"
         );
-    }
-
-    #[test]
-    fn an_oversized_plan_file_is_no_plan() {
-        let channel = Channel::for_agent(&locations(), 16);
-        fs::create_dir_all(channel.dir()).unwrap();
-        let huge = format!(
-            r#"{{"steps":[{{"text":"{}","state":"todo"}}]}}"#,
-            "x".repeat(MAX_READ_BYTES as usize)
-        );
-        fs::write(channel.dir().join(PLAN_FILE), huge).unwrap();
-        assert!(channel.read_status(Harness::Opencode).plan.is_none());
     }
 
     #[test]
@@ -1418,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn both_harnesses_are_asked_to_keep_a_visible_plan() {
+    fn claude_code_is_asked_to_keep_a_visible_plan() {
         let channel = Channel::for_agent(&locations(), 20);
         let hookup = channel.install(Harness::ClaudeCode).unwrap();
         let planning = channel.dir().join(PLANNING_FILE);
@@ -1427,10 +1165,5 @@ mod tests {
             "--append-system-prompt-file {}",
             shell_quote(&planning.display().to_string())
         )));
-        let config: Value = serde_json::from_str(
-            &fs::read_to_string(channel.dir().join(OPENCODE_DIR).join(OPENCODE_CONFIG)).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(config["instructions"][0], planning.display().to_string());
     }
 }

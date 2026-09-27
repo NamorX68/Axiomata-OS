@@ -1,6 +1,6 @@
 # Plan: Opencode 2 sauber anbinden (OC1–OC4)
 
-Status: **gegrillt 2026-09-27** (Q1–Q10, alle vom Owner bestätigt). **OC1 und OC2 erledigt** (2026-09-27); weiter mit OC3.
+Status: **gegrillt 2026-09-27** (Q1–Q10, alle vom Owner bestätigt). **OC1–OC3 erledigt** (2026-09-27/28); weiter mit OC4.
 Kommt vor ED6 (LSP) aus [`editor.md`](editor.md); betrifft die Skill-Läufe, den Assistenten-Chat
 und die IDE-Agenten aus [`agentic-ide.md`](agentic-ide.md) / [`agent-lifecycle.md`](agent-lifecycle.md).
 
@@ -141,13 +141,26 @@ eigenen MCP-Server (Q3). Live geprüft per CLI: Anlegen, Fortsetzen, „New sess
 verschwundenen Session (404), TUI öffnet `--session` mit dem Modell der Session. Offen: Live-Test in
 `cargo tauri dev` durch den Owner.
 
-### OC3 — Status aus dem Event-Stream
+### OC3 — Status aus dem Event-Stream (erledigt)
 
 Ein Beobachter pro App über `/api/event` → Statuswort je Agent (`working` bei
 `session.execution.started`, `waiting` bei `permission.asked`/Formular, `idle` bei
 `succeeded|failed`), Neu-Lesen nach Wiederverbinden. Plugin-Vorlage, `OPENCODE_CONFIG_DIR` und der
 Opencode-Teil des Dateikanals unter `~/.axiomata/agent-events/` fliegen raus; Claude Code bleibt beim
 Dateikanal. Plan-Tab für Opencode: Status + Antwort des Plan-Agenten (Q3).
+
+Umgesetzt (2026-09-28): `axiomata-opencode::status` (`Tracker`, ein reiner Zustandsautomat;
+`Service::active_sessions`/`session_snapshot`/`find`), `axiomata_core::ide_status` (ein Beobachter pro
+Prozess, gestartet vom ersten `ide_agent_states`, startet den Dienst nie selbst; Stream zuerst öffnen,
+dann alle Agenten-Sessions neu einlesen; Wiederverbinden nach 2 s bis 30 s; `overlay` für Opencode-Agenten
+mit generiertem Befehl, `overlay_once` für die CLI). Gemessen beim Bau: eine Rückfrage des Agenten ist
+`form.created` (Session unter `data.form.sessionID`), ihr Abbruch `form.cancelled`. Plan-Tab: die
+**letzte** Antwort des Plan-Agenten eines Turns (ein Live-Test zeigte zwei Plan-Schritte in einem Turn —
+das Neu-Einlesen nimmt ebenfalls die letzte). Plugin, `OPENCODE_CONFIG_DIR`, `plan.json`/`plan-mode.md`
+und der Opencode-Teil der Planungs-Anweisung sind entfernt; `reset` löscht den alten Plugin-Ordner. Ein
+Opencode-Agent meldet nie `ended` (der Dienst weiß nicht, wann eine TUI endet). Live geprüft:
+`ide agents status` über den Dienst; `tests/live.rs` folgt einem Plan-Agenten-Turn (working → idle) und
+vergleicht den Plan mit dem Neu-Einlesen.
 
 ### OC4 — Anweisungen und Doku
 

@@ -445,3 +445,40 @@ async fn a_service_that_stays_unreachable_is_a_clear_error() {
         Err(OpencodeError::Unavailable(_))
     ));
 }
+
+#[tokio::test]
+async fn find_connects_to_a_running_service() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("find");
+    let bin = fake_opencode(&dir);
+    write_discovery(&dir, &discovery(mock.port, "pw"));
+    assert_eq!(
+        Service::find(&bin, &env()).await.expect("found").version(),
+        "2.0.18"
+    );
+}
+
+#[tokio::test]
+async fn find_never_starts_a_service_that_is_not_running() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("find-down");
+    let bin = fake_opencode(&dir);
+    // `service start` would put a working discovery file in place — `find` must not call it.
+    std::fs::write(dir.join("pending.json"), discovery(mock.port, "pw")).unwrap();
+    assert!(matches!(
+        Service::find(&bin, &env()).await,
+        Err(OpencodeError::Unavailable(_))
+    ));
+    assert!(
+        !dir.join("state/service.json").exists(),
+        "the service was started"
+    );
+}

@@ -145,6 +145,22 @@ async fn connect() -> Result<Service, AxiomataError> {
         .map_err(into_axiomata)
 }
 
+/// Finds the Opencode service without starting it — for the IDE's status
+/// watcher, which has nothing to watch on a service that is not running.
+/// Under `cfg(test)` it never connects, like [`connect`].
+pub(crate) async fn find() -> Result<Service, AxiomataError> {
+    if cfg!(test) {
+        return Err(AxiomataError::AgentApi {
+            backend: BACKEND_OPENCODE,
+            message: "unit tests never reach the real Opencode service".to_string(),
+        });
+    }
+    let binary = resolve_opencode_binary()?;
+    Service::find(binary, &agent_child_env())
+        .await
+        .map_err(into_axiomata)
+}
+
 /// The session's location must be a directory that exists — checked before
 /// the service is asked, with the same error opening it gives (`ENOENT`,
 /// `ENOTDIR`), so a bad workspace root fails the way it always did.

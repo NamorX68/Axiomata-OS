@@ -127,3 +127,68 @@ async fn without_auto_approval_a_permission_request_fails_the_turn() {
     }
     panic!("the model never called the shell tool in three attempts");
 }
+
+#[tokio::test]
+#[ignore = "talks to the real Opencode service"]
+async fn the_tracker_follows_a_plan_agent_turn_and_seeding_finds_its_plan() {
+    use axiomata_opencode::{EventStream, SessionState, Tracker};
+
+    let (bin, env) = opencode();
+    let service = Service::connect(&bin, &env).await.expect("connect");
+    let dir = scratch_dir("tracker");
+    let session = service
+        .create_session(&NewSession {
+            directory: dir.display().to_string(),
+            title: Some("axiomata-opencode live test (tracker)".into()),
+            model: Some(live_model()),
+            agent: Some("plan".into()),
+            permissions: unattended_permissions(false),
+        })
+        .await
+        .expect("session");
+    let mut events = EventStream::open(&service).await.expect("stream");
+    service
+        .prompt(
+            &session,
+            "Give a two-step plan for printing hello world in Rust. Do not use any tools.",
+        )
+        .await
+        .expect("prompt");
+
+    let mut tracker = Tracker::default();
+    let mut seen = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(240);
+    while let Ok(Ok(Some(event))) = tokio::time::timeout_at(deadline, events.next()).await {
+        tracker.apply(&event, 0);
+        if event.session_id() == Some(session.as_str()) {
+            let state = tracker.get(&session).map(|s| s.state);
+            if seen.last() != Some(&state) {
+                seen.push(state);
+            }
+            if event.kind.starts_with("session.execution.")
+                && event.kind != "session.execution.started"
+            {
+                break;
+            }
+        }
+    }
+    println!("states: {seen:?}");
+    assert!(seen.contains(&Some(SessionState::Working)));
+    assert_eq!(tracker.get(&session).unwrap().state, SessionState::Idle);
+    let plan = tracker
+        .get(&session)
+        .unwrap()
+        .plan
+        .clone()
+        .expect("the plan agent's answer");
+    println!("plan: {}", plan.markdown);
+
+    let active = service.active_sessions().await.expect("active");
+    let snapshot = service
+        .session_snapshot(&session, &active)
+        .await
+        .expect("snapshot");
+    assert_eq!(snapshot.state, SessionState::Idle);
+    assert_eq!(snapshot.plan.map(|p| p.markdown), Some(plan.markdown));
+    service.delete_session(&session).await.expect("delete");
+}

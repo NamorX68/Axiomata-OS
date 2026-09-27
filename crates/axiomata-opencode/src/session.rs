@@ -98,7 +98,7 @@ fn data(value: Value, what: &str) -> Result<Value, OpencodeError> {
 }
 
 /// A session id as a path segment: only what the service itself hands out.
-fn session_path(session_id: &str, rest: &str) -> Result<String, OpencodeError> {
+pub(crate) fn session_path(session_id: &str, rest: &str) -> Result<String, OpencodeError> {
     let valid = session_id.starts_with("ses")
         && session_id.len() <= 128
         && session_id
@@ -205,6 +205,24 @@ impl Service {
     pub async fn interrupt(&self, session_id: &str) -> Result<(), OpencodeError> {
         let path = session_path(session_id, "/interrupt")?;
         self.post(&path, &Value::Null).await.map(|_| ())
+    }
+
+    /// The session's newest `limit` messages, newest first.
+    pub async fn recent_messages(
+        &self,
+        session_id: &str,
+        limit: u32,
+    ) -> Result<Vec<Value>, OpencodeError> {
+        let path = format!(
+            "{}?order=desc&limit={limit}",
+            session_path(session_id, "/message")?
+        );
+        let page = self.get(&path).await?;
+        Ok(page
+            .get("data")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
     }
 
     /// The messages after `after_message_id`, oldest first. Walks the

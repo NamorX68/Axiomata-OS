@@ -866,7 +866,7 @@ frontend's `mergeEnv`.
 PTY, so a database row saying "working" would be a lie after the next restart. Instead
 `crates/axiomata-ide/src/lifecycle.rs` owns a **file channel** per agent at
 `~/.axiomata/agent-events/<id>/`: `state` (one word — `idle`/`working`/`waiting`/`ended` — and
-a Unix timestamp), `started`, and for Opencode `plan.json`. The harness writes, Rust reads:
+a Unix timestamp) and `started`. For Claude Code the harness writes, Rust reads:
 
 - **Claude Code** is started with `--settings <channel>/claude-settings.json`, a file of ours
   whose hooks (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop`,
@@ -880,12 +880,22 @@ a Unix timestamp), `started`, and for Opencode `plan.json`. The harness writes, 
   Claude Code's task tools (`TaskCreate`/`TaskUpdate` — `TodoWrite` no longer exists) only
   report single changes to a hook, so we pin the list with `CLAUDE_CODE_TASK_LIST_ID` and read
   Claude Code's own `~/.claude/tasks/<list>/*.json`, tolerantly.
-- **Opencode** loads a plugin from `OPENCODE_CONFIG_DIR=<channel>/opencode` (additive to the
-  user's global config), which maps `session.status`, `permission.*`/`question.*` and
-  `todo.updated` and ignores sub-agent sessions (`parentID`). **Dead under Opencode 2** (v1
-  plugin format, config key and event names all changed; the service ignores
-  `OPENCODE_CONFIG_DIR`): OC3 of `docs/plans/opencode2.md` replaces it with the service's
-  event stream.
+- **Opencode** reports through its own service since OC3 (`docs/plans/opencode2.md`): the v1
+  plugin under `OPENCODE_CONFIG_DIR` died with Opencode 2 (plugin format, config key and event
+  names all changed, and the service ignores that variable) and is gone; `reset` removes what
+  it left in a channel. `axiomata_core::ide_status` runs one watcher per process — started by
+  the first `ide_agent_states` call, never starting the Opencode service itself — that opens
+  `/api/event`, then seeds an `axiomata_opencode::Tracker` for every agent session from the
+  service (`/api/session/active`, pending permissions and forms, the newest finished
+  plan-agent answer), and applies each event: `session.execution.started` / `permission.replied`
+  / a closed `form.*` → `working`, `permission.asked` / `form.created` → `waiting`,
+  `session.execution.succeeded|failed|interrupted` → `idle`. The plan agent's answer (its
+  newest step's `session.text.ended` text when the turn ends) is the agent's plan document.
+  `overlay` lays that over the channel's status for Opencode agents on the generated command;
+  a session nothing happened in since the watcher connected reads `idle`, and without a
+  connection the channel's `starting` stands. On losing the stream it looks again after 2 s,
+  doubling to 30 s. The CLI's `ide agents status` takes one fresh look (`overlay_once`). An
+  Opencode agent never reports `ended` — the service does not know when a terminal UI exits.
 
 **Opencode agents run in a session the IDE keeps for them** (`docs/plans/opencode2.md`, OC2,
 migration 13 `ide_agents.opencode_session`). Opencode 2's terminal UI takes no `--model`, so
@@ -908,13 +918,13 @@ returns `launch_command`/`launch_env` — the command gains `--settings` only wh
 generated one; an own command still gets the env and can attach itself via
 `$AXIOMATA_CLAUDE_SETTINGS`. The plan survives an agent restart and is flagged
 `from_earlier_session`; deleting an agent removes its channel and exactly its own task list.
-Two additions from the live test. Both harnesses get a short **planning instruction**
-(`<channel>/planning.md`, via `--append-system-prompt-file` and Opencode's `instructions`) so
+Two additions from the live test. Claude Code gets a short **planning instruction**
+(`<channel>/planning.md`, via `--append-system-prompt-file`) so
 the Plan tab has something to show without being asked, and a **plan-mode plan** is shown as
 its own document below the tasks: Claude Code writes it to `<claude-home>/plans/<name>.md`
 (a `Write|Edit` hook records the path; Rust only reads it if the canonical path is inside
-that folder), Opencode's plan agent answers in chat (the plugin keeps that answer as
-`plan-mode.md`). And the app strips **inherited Claude Code session markers**
+that folder), Opencode's plan agent answers in chat (the watcher keeps that answer, see
+above). And the app strips **inherited Claude Code session markers**
 (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, … — `forget_inherited_claude_session` in
 `src-tauri/src/lib.rs`) at startup: launched from inside a Claude Code shell, every agent
 pane otherwise believed it was that session's child and saved no transcript.
