@@ -145,6 +145,26 @@ export function worktreeAgent(root: string): number | null {
 }
 
 /**
+ * Where a file opened from `fromTabId` should count as coming from: a click in
+ * the Files tree, a search hit or ⌘P (`fromTabId` the tree, the Search pane or
+ * nothing) comes from the pane the user last **worked** in — `lastWorkTabId`,
+ * the terminal or agent that had the focus before — so a first file becomes a
+ * tab there rather than beside whatever group happens to follow the tree
+ * (owner, after the first IDE test). Anything else keeps its own origin.
+ */
+export function fileOrigin(layout: Layout, fromTabId: string | null, lastWorkTabId: string | null): string | null {
+  const from = fromTabId ? findTab(layout, fromTabId) : null;
+  const helper = !from || from.tab.kind === FILES_PANE || from.tab.kind === SEARCH_PANE;
+  const lastWork = lastWorkTabId ? findTab(layout, lastWorkTabId) : null;
+  return helper && lastWork ? lastWork.tab.id : fromTabId;
+}
+
+/** Whether focusing `tab` makes it the pane the user works in (not a helper). */
+export function isWorkPane(tab: PaneTab): boolean {
+  return tab.kind !== FILES_PANE && tab.kind !== SEARCH_PANE;
+}
+
+/**
  * Opens `tab`, or brings forward the open tab `match` finds (taking over
  * `tab`'s config, so a file pane jumps to the new line). A new file joins a
  * group that already holds a file — files gather in one place rather than

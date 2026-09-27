@@ -69,8 +69,11 @@
     FILES_PANE,
     fileTab,
     filePaneConfig,
+    fileOrigin,
     filesTab,
     frontFile,
+    FILE_PANE,
+    isWorkPane,
     openOrFocus,
     projectRoot,
     SEARCH_PANE,
@@ -120,7 +123,26 @@
    */
   function openFromQuickOpen(file: FileRef, line: number | null): void {
     const beside = allTabs(layout).find((t) => t.kind === FILES_PANE)?.id ?? null;
-    layout = openOrFocus(layout, fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), beside);
+    const from = fileOrigin(layout, beside, lastWorkTab);
+    layout = openOrFocus(layout, fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), from);
+  }
+
+  /**
+   * The pane the user last worked in — a terminal, an agent, a file; never
+   * the Files tree or the Search pane. A first file opened from those helpers
+   * becomes a tab in its group (`fileOrigin`). Followed by focus and by
+   * pointer, since a terminal's canvas takes clicks without moving focus.
+   */
+  let lastWorkTab = $state<string | null>(null);
+
+  function noteWorkPane(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    const id =
+      target?.closest(`[${PANE_ATTR}]`)?.getAttribute(PANE_ATTR) ??
+      target?.closest("[data-ide-tab]")?.getAttribute("data-ide-tab") ??
+      null;
+    const tab = id ? allTabs(layout).find((t) => t.id === id) : undefined;
+    if (tab && isWorkPane(tab)) lastWorkTab = tab.id;
   }
 
   /**
@@ -396,7 +418,8 @@
       event.preventDefault();
     },
     open: (tab, match, fromTabId) => {
-      layout = openOrFocus(layout, tab, match, fromTabId);
+      const from = tab.kind === FILE_PANE ? fileOrigin(layout, fromTabId, lastWorkTab) : fromTabId;
+      layout = openOrFocus(layout, tab, match, from);
     },
     setConfig: (tabId, config) => {
       layout = setTabConfig(layout, tabId, config);
@@ -487,7 +510,13 @@
     <button class="back" type="button" onclick={() => (open = false)}>Back to the OS</button>
   </header>
 
-  <div class="dock" class:dragging={draggingTab !== null} bind:this={dockEl}>
+  <div
+    class="dock"
+    class:dragging={draggingTab !== null}
+    bind:this={dockEl}
+    onfocusin={noteWorkPane}
+    onpointerdowncapture={noteWorkPane}
+  >
     <!-- Where panes live. They are rendered here once and only ever *moved*
          into the tree's slots, so that dragging a pane does not destroy and
          rebuild it — which closed an agent's PTY and restarted it, for every

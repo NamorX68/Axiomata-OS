@@ -6,11 +6,13 @@ import {
   agentDiffTab,
   FILES_PANE,
   FILES_PANE_FRACTION,
+  fileOrigin,
   filePaneConfig,
   filesPaneConfig,
   filesTab,
   fileTab,
   frontFile,
+  isWorkPane,
   openOrFocus,
   projectRoot,
   showsFile,
@@ -91,6 +93,26 @@ describe("openOrFocus (H5, H14)", () => {
     const second = fileTab("worktree:1", "b.rs", null);
     layout = openOrFocus(layout, second, () => false, "term");
     expect(findTab(layout, second.id)?.group.id).toBe(findTab(layout, first.id)?.group.id);
+  });
+
+  it("counts a file from the tree, the search or quick open as coming from the last work pane", () => {
+    const term: PaneTab = { id: "term", kind: "terminal", title: "Terminal" };
+    let layout = withFilesPane(singleGroupLayout([agent]), 3);
+    layout = addTab(layout, term, { nodeId: findTab(layout, "agent")!.group.id, side: "right" });
+    const files = allTabs(layout).find((t) => t.kind === FILES_PANE)!;
+    // From the tree, with the terminal last worked in: the terminal's group.
+    expect(fileOrigin(layout, files.id, "term")).toBe("term");
+    // Quick open (no origin) likewise; a gone work pane falls back.
+    expect(fileOrigin(layout, null, "term")).toBe("term");
+    expect(fileOrigin(layout, files.id, "vanished")).toBe(files.id);
+    // A file opened from a work pane itself keeps that pane.
+    expect(fileOrigin(layout, "agent", "term")).toBe("agent");
+
+    const file = fileTab("project:3", "a.rs", null);
+    layout = openOrFocus(layout, file, () => false, fileOrigin(layout, files.id, "term"));
+    expect(findTab(layout, file.id)?.group.id).toBe(findTab(layout, "term")?.group.id);
+    expect(isWorkPane(files)).toBe(false);
+    expect(isWorkPane(term)).toBe(true);
   });
 
   it("still docks an agent's diffs beside the pane they were opened from", () => {
