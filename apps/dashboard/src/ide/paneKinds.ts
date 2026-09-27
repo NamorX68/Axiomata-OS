@@ -148,9 +148,12 @@ export function worktreeAgent(root: string): number | null {
  * Opens `tab`, or brings forward the open tab `match` finds (taking over
  * `tab`'s config, so a file pane jumps to the new line). A new file joins a
  * group that already holds a file — files gather in one place rather than
- * splitting the dock again for each; anything else (an agent's diffs) docks to
- * the right of the pane it was opened from (`fromTabId`), beside its agent (H5).
- * A first file opened from the Files pane goes left of the pane beside the tree.
+ * splitting the dock again for each. A first file never splits the dock
+ * either (owner, after the first IDE test): it becomes a tab in the group it
+ * was opened from — the terminal's, the agent's — or, from the Files pane, in
+ * the group beside the tree; dragging it out makes it a pane of its own, and
+ * later files then gather there. Anything else (an agent's diffs) docks to the
+ * right of the pane it was opened from (`fromTabId`), beside its agent (H5).
  */
 export function openOrFocus(
   layout: Layout,
@@ -168,14 +171,19 @@ export function openOrFocus(
   if (sameKind) return addTab(layout, tab, { nodeId: sameKind.id, side: "center" });
   const from = fromTabId ? findTab(layout, fromTabId) : null;
   const groups = allGroups(layout);
-  // From the Files pane, the file takes its room from the pane next to the
-  // tree, not from the tree's narrow column: it docks left of the neighbour.
-  // "Next in reading order" is "next on screen" while the dock is one row —
-  // what `layout.ts` flattening same-direction splits keeps it; after a drag
-  // into a column the file still lands beside a pane, just maybe not the tree.
-  if (from?.tab.kind === FILES_PANE) {
-    const next = groups[groups.findIndex((g) => g.id === from.group.id) + 1];
-    if (next) return addTab(layout, tab, { nodeId: next.id, side: "left" });
+  if (tab.kind === FILE_PANE) {
+    // From the Files pane, the file joins the group next to the tree, not the
+    // tree's own narrow column. "Next in reading order" is "next on screen"
+    // while the dock is one row — what `layout.ts` flattening same-direction
+    // splits keeps it; with nothing beside the tree it docks to its right.
+    if (from?.tab.kind === FILES_PANE) {
+      const next = groups[groups.findIndex((g) => g.id === from.group.id) + 1];
+      return next
+        ? addTab(layout, tab, { nodeId: next.id, side: "center" })
+        : addTab(layout, tab, { nodeId: from.group.id, side: "right" });
+    }
+    const home = from?.group.id ?? groups[groups.length - 1]?.id ?? layout.root.id;
+    return addTab(layout, tab, { nodeId: home, side: "center" });
   }
   const target = from?.group.id ?? groups[groups.length - 1]?.id ?? layout.root.id;
   return addTab(layout, tab, { nodeId: target, side: "right" });

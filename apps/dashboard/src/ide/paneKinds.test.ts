@@ -73,8 +73,28 @@ describe("pane kinds (H14)", () => {
 describe("openOrFocus (H5, H14)", () => {
   const agent: PaneTab = { id: "agent", kind: "agent", title: "Builder", config: { agentId: 1 } };
 
-  it("docks a new pane beside the one it was opened from", () => {
-    const layout = openOrFocus(singleGroupLayout([agent]), fileTab("worktree:1", "a.rs", 3), () => false, "agent");
+  it("opens a first file as a tab in the group it was opened from, not as a split", () => {
+    const file = fileTab("worktree:1", "a.rs", 3);
+    const layout = openOrFocus(singleGroupLayout([agent]), file, () => false, "agent");
+    expect(allGroups(layout)).toHaveLength(1);
+    expect(findTab(layout, file.id)?.group.tabs.map((t) => t.id)).toEqual(["agent", file.id]);
+    expect(findTab(layout, file.id)?.group.active).toBe(file.id);
+  });
+
+  it("gathers files in a group they were dragged out into", () => {
+    const first = fileTab("worktree:1", "a.rs", null);
+    const other: PaneTab = { id: "term", kind: "terminal", title: "Terminal" };
+    // Two groups: the agent's, and one holding a file the user dragged out.
+    let layout = openOrFocus(singleGroupLayout([agent]), agentDiffTab(1, "Builder"), () => false, "agent");
+    layout = addTab(layout, first, { nodeId: findTab(layout, "agent")!.group.id, side: "right" });
+    layout = addTab(layout, other, { nodeId: findTab(layout, "agent")!.group.id, side: "center" });
+    const second = fileTab("worktree:1", "b.rs", null);
+    layout = openOrFocus(layout, second, () => false, "term");
+    expect(findTab(layout, second.id)?.group.id).toBe(findTab(layout, first.id)?.group.id);
+  });
+
+  it("still docks an agent's diffs beside the pane they were opened from", () => {
+    const layout = openOrFocus(singleGroupLayout([agent]), agentDiffTab(1, "Builder"), () => false, "agent");
     expect(allGroups(layout)).toHaveLength(2);
   });
 
@@ -83,8 +103,8 @@ describe("openOrFocus (H5, H14)", () => {
     let layout = openOrFocus(singleGroupLayout([agent]), first, () => false, "agent");
     const second = fileTab("worktree:1", "b.rs", null);
     layout = openOrFocus(layout, second, (t) => showsFile(t, "worktree:1", "b.rs"), "agent");
-    expect(allGroups(layout)).toHaveLength(2);
-    expect(findTab(layout, second.id)?.group.tabs.map((t) => t.id)).toEqual([first.id, second.id]);
+    expect(allGroups(layout)).toHaveLength(1);
+    expect(findTab(layout, second.id)?.group.tabs.map((t) => t.id)).toEqual(["agent", first.id, second.id]);
   });
 
   it("brings an open file forward and hands it the new line", () => {
@@ -163,13 +183,15 @@ describe("the Files pane (W9, W16)", () => {
     expect(allTabs(layout).map((t) => t.kind)).toEqual([FILES_PANE, "terminal"]);
   });
 
-  it("opens a file from the tree beside the Files pane, then gathers files in that group", () => {
+  it("opens a file from the tree as a tab beside the terminal, then gathers files there", () => {
     let layout = withFilesPane(singleGroupLayout([terminal]), 3);
     const files = allTabs(layout)[0];
     const a = fileTab("project:3", "a.rs", null);
     layout = openOrFocus(layout, a, (t) => showsFile(t, "project:3", "a.rs"), files.id);
-    expect(allTabs(layout).map((t) => t.kind)).toEqual([FILES_PANE, "file", "terminal"]);
-    // It shares the terminal's room, not the tree's narrow column.
+    expect(allTabs(layout).map((t) => t.kind)).toEqual([FILES_PANE, "terminal", "file"]);
+    // A tab in the terminal's group, not a split, and not in the tree's narrow column.
+    expect(allGroups(layout)).toHaveLength(2);
+    expect(findTab(layout, a.id)?.group.id).toBe(findTab(layout, terminal.id)?.group.id);
     const root = layout.root;
     expect(isSplit(root) && root.sizes[0]).toBeCloseTo(FILES_PANE_FRACTION);
     const b = fileTab("project:3", "b.rs", null);

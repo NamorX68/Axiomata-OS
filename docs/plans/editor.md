@@ -825,8 +825,10 @@ Modul-Cache in `QuickOpen.svelte` ist keine Svelte-Reaktivität; ein Kommentar w
 der `FileTree` der Datei-App mit genau einer Wurzel, `project:<id>` des offenen Projekts; offene
 Ordner und der Schalter „hidden“ liegen im Tab (`FilesPaneConfig`) und damit im gespeicherten
 Layout des Projekts. Ein Klick öffnet die Datei über `openOrFocus` in der Datei-Gruppe; gibt es
-noch keine, dockt die Datei links an das Pane neben dem Baum (sie nimmt ihm den Platz, nicht der
-schmalen Baumspalte). Der Baum markiert die Datei im vordersten Tab der Datei-Gruppe
+noch keine, wird sie ein neuer Reiter in der Gruppe neben dem Baum — seit dem ersten IDE-Test des
+Owners (2026-09-27) kein Split mehr, auch nicht beim Öffnen aus einem Terminal- oder Agenten-Pane:
+dort wird die Datei Reiter derselben Gruppe. Wer sie als eigenes Pane will, zieht sie heraus; weitere
+Dateien sammeln sich dann dort. Der Baum markiert die Datei im vordersten Tab der Datei-Gruppe
 (`frontFile`). Neue Projekte beginnen mit Files links (16 % der Breite) und einem Terminal
 (`withFilesPane`); bestehende Layouts bleiben, wie sie sind. Das „+“ der Tab-Leiste ist jetzt ein
 kleines Menü „Terminal / Files“. ⌘P in der IDE öffnet das Schnellöffnen nur über das Projekt, die im
