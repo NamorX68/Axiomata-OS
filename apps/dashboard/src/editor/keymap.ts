@@ -31,8 +31,36 @@ export interface KeyInput {
 
 /** `keyCode` of the Z key, whatever the layout puts on it with ⌥. */
 const KEYCODE_Z = 90;
+/** `keyCode` of the F key: ⌥⌘F types `ƒ` on a US layout and something else elsewhere. */
+const KEYCODE_F = 70;
 
-export type Effect = "copy" | "cut" | "paste" | "save" | "open" | "toggleWrap" | "togglePreview";
+/**
+ * The find bar's keys (ED5, T4): ⌘F opens it, ⌥⌘F with the replace field,
+ * ⌘G / ⇧⌘G go to the next / previous match, ⌘E makes the selection the query.
+ * The surface handles them itself, in Vi mode too (T15). ⇧⌘F is the project
+ * search's (T13), not the bar's.
+ */
+export type FindEffect = "find" | "findReplace" | "findNext" | "findPrevious" | "useSelectionForFind";
+
+export type Effect = "copy" | "cut" | "paste" | "save" | "open" | "toggleWrap" | "togglePreview" | FindEffect;
+
+const FIND_EFFECTS = new Set<Effect>(["find", "findReplace", "findNext", "findPrevious", "useSelectionForFind"]);
+
+export function isFindEffect(effect: Effect): effect is FindEffect {
+  return FIND_EFFECTS.has(effect);
+}
+
+/** The find bar's key `input` is, or `null`. */
+export function findKeyAction(input: KeyInput): FindEffect | null {
+  const { meta, alt, shift, ctrl } = input;
+  if (!meta || ctrl) return null;
+  const key = input.key.length === 1 ? input.key.toLowerCase() : input.key;
+  if (alt) return !shift && (key === "f" || key === "ƒ" || input.keyCode === KEYCODE_F) ? "findReplace" : null;
+  if (key === "f") return shift ? null : "find";
+  if (key === "g") return shift ? "findPrevious" : "findNext";
+  if (key === "e") return shift ? null : "useSelectionForFind";
+  return null;
+}
 
 export type KeyAction = { command: Command } | { effect: Effect };
 
@@ -48,6 +76,8 @@ function command(c: Command): KeyAction {
 export function keyAction(input: KeyInput): KeyAction | null {
   const { meta, alt, shift, ctrl } = input;
   if (ctrl) return null;
+  const find = findKeyAction(input);
+  if (find) return { effect: find };
   // ⌥Z types "Ω" on a US Mac layout, "z" off the Mac, and on some layouts it is a
   // dead key ("Dead", e.g. ¨) — `keyCode` catches that last case. Checked before
   // lowercasing, since "Ω".toLowerCase() is "ω".

@@ -1058,6 +1058,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   cursors (`editor/multicursor.ts`): `EditorDocument.extra` beside the main `selection`, undo steps
   keep all of them; a command runs at each cursor last-to-first as one step (⌥↑/↓ per block of
   touching lines); ⌥-click/-drag, ⌥⌘↑/↓, ⌘D/⌘U, ⇧⌘L, Esc; multi-aware copy/cut/paste.
+  ED5.4: the find bar (`fileapp/FindBar.svelte` over every surface; logic in
+  `editor/search/findModel.ts`, language in `editor/search/find.ts` — Vi's pattern language):
+  ⌘F/⌥⌘F/⌘G/⌘E (also in Vi), regex/case/whole word, in selection, `$1`/`$&`, preserve case,
+  replace all as one step, ⌥⏎ matches → cursors; replace only where the surface is editable and
+  not a diff; the last search is shared between bars and Vi (`fileapp/findShared.ts`).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

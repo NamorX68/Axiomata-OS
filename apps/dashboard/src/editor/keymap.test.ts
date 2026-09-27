@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { keyAction, type KeyInput } from "./keymap";
+import { findKeyAction, keyAction, type KeyInput } from "./keymap";
 
 function key(k: string, mods: Partial<Omit<KeyInput, "key">> = {}): KeyInput {
   return { key: k, meta: false, alt: false, shift: false, ctrl: false, ...mods };
@@ -82,5 +82,30 @@ describe("more cursors (ED5, T6)", () => {
     expect(keyAction(key("Escape"))).toEqual({ command: { type: "singleCursor" } });
     // ⌥↑ still moves the line.
     expect(keyAction(key("ArrowUp", { alt: true }))).toEqual({ command: { type: "moveLines", dir: -1 } });
+  });
+});
+
+describe("findKeyAction", () => {
+  it("maps ⌘F, ⌥⌘F, ⌘G, ⇧⌘G and ⌘E", () => {
+    expect(findKeyAction(key("f", { meta: true }))).toBe("find");
+    expect(findKeyAction(key("ƒ", { meta: true, alt: true }))).toBe("findReplace");
+    // A layout where ⌥F is something else: the key code still says F.
+    expect(findKeyAction(key("Dead", { meta: true, alt: true, keyCode: 70 }))).toBe("findReplace");
+    expect(findKeyAction(key("g", { meta: true }))).toBe("findNext");
+    expect(findKeyAction(key("G", { meta: true, shift: true }))).toBe("findPrevious");
+    expect(findKeyAction(key("e", { meta: true }))).toBe("useSelectionForFind");
+    expect(keyAction(key("f", { meta: true }))).toEqual({ effect: "find" });
+  });
+
+  it("leaves ⇧⌘F to the project search and plain letters to typing", () => {
+    expect(findKeyAction(key("F", { meta: true, shift: true }))).toBeNull();
+    expect(findKeyAction(key("f"))).toBeNull();
+    expect(findKeyAction(key("f", { meta: true, ctrl: true }))).toBeNull();
+  });
+
+  it("leaves every other ⌥⌘ combination alone, and ⇧⌘E too", () => {
+    expect(findKeyAction(key("g", { meta: true, alt: true }))).toBeNull();
+    expect(findKeyAction(key("e", { meta: true, alt: true }))).toBeNull();
+    expect(findKeyAction(key("E", { meta: true, shift: true }))).toBeNull();
   });
 });

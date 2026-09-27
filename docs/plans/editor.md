@@ -967,6 +967,31 @@ beim ersten ↓. ⌥-Ziehen fügt seine Spalte zu schon vorhandenen Cursorn hinz
 Für ED5.4: ⌥⏎ der Such-Leiste setzt die Cursor direkt aus den Treffern des Urteils (`setSelections`), nicht
 über `occurrences` (das sucht nur wörtlich).
 
+**ED5.4 — gebaut (2026-09-27):** die Such-Leiste (T4, T15). `fileapp/FindBar.svelte` schwebt oben rechts über
+jeder Editor-Fläche; die Logik ist `editor/search/findModel.ts` (ohne DOM), die Sprache `editor/search/find.ts`:
+dieselbe Muster-Sprache wie Vis `/` (JS-Regex plus `\<` `\>` `\c` `\C`), wörtliche Eingaben sind einfach
+maskiert, „ganzes Wort“ ist `\<(?:…)\>`. ⌘F (eine Auswahl in einer Zeile wird der Begriff, eine über mehrere
+Zeilen der Bereich), ⌥⌘F mit Ersetzen, ⌘G/⇧⌘G, ⌘E, in Vi genauso — die Fläche nimmt die Tasten vor dem Automaten.
+Im Feld: ⏎/⇧⏎, ⌥⏎ (alle Treffer zu Cursorn, höchstens 10 000, nicht in Vi), ⌥⌘C/W/R/L/P, im Ersetzen-Feld ⏎
+und ⌥⌘⏎. Treffer kommen nur aus dem Urteil des Prüfers; eine Aktion, die auf ein Urteil wartet, läuft danach,
+eine neuere ersetzt sie. „Alle ersetzen“ ist *eine* Änderung über den Bereich vom ersten bis zum letzten Treffer
+(ein Undo-Schritt, schnell auch bei 100 000 Treffern); bei abgeschnittenem Urteil läuft das Muster einmal ganz im
+Haupt-Thread (der Prüfer hat den ganzen Text abgenommen). Gruppen holt ein haftender `exec` genau an der
+Trefferstelle — auf der Zeile, wenn das Muster zeilenweise sucht, damit `^` und Lookbehind dasselbe sehen.
+`$&`/`$0`, `$1`–`$99`, `$<name>`, `$$`, `\n` `\t`; „Groß/klein erhalten“ für GROSS, klein und Wortanfang.
+Der Bereich „nur in der Auswahl“ folgt jeder Änderung (`onTextChange`), neues Token `--ax-search-scope`.
+In Vi ist ein Treffer „der aktuelle“, wenn der Cursor auf seinem Anfang steht. Leiste und Vi teilen den letzten
+Suchbegriff (`fileapp/findShared.ts`): die Leiste schreibt ihn Vi mit ausgeschriebener Groß/klein-Regel
+(`\C`/`\c`) in `SearchMemory` und die Historie, ein neueres `/` übernimmt die Leiste als Regex.
+In Diffs und schreibgeschützten Dateien nur Suchen. Browser-Test mit echtem Worker: Zähler, Ersetzen mit
+foo/Foo/FOO → qux/Qux/QUX, Alle ersetzen, ⌥⏎ → drei Cursor.
+Reviews (Architektur: ein CRITICAL, ein HIGH, ein MEDIUM; Tests: keine Fehler, viele Fälle ergänzt) — behoben:
+(1) schon das Tippen eines Begriffs warf Mehrfach-Cursor weg — jetzt hebt die Suche beim Tippen nur hervor,
+solange mehrere Cursor stehen; erst ein Sprung oder Ersetzen geht zu einem Treffer. (2) Ein zweites ⌘F bei
+offener Leiste überschrieb einen noch nicht benutzten Begriff mit dem geteilten. (3) In Vi schloss Esc aus dem
+Text die Leiste nie — jetzt, sobald Esc nichts mehr abzubrechen hat. Vorgemerkt (LOW): der Prüfer verwirft beim
+Tippen nur wartende Aufträge desselben Musters; bei sehr teuren Mustern könnten sich Zwischenstände stauen.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

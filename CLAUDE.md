@@ -65,7 +65,9 @@ tests' reference) and made files up to 16 MiB editable, over 2 MiB in a "light m
 tree-sitter). ED5.2: every search pattern is first run by a worker with a 1 s limit (`editor/search/guard.ts`
 `SearchGuard`, a verdict per rope version; Vi's key queue pauses on `SearchPending` like on the clipboard), plus Vi's
 `:g`/`:v`/`:d`/`:normal`, `:s///c`, `gn`/`cgn`. ED5.3: multiple cursors in normal mode (`editor/multicursor.ts`:
-a command runs at each cursor as one undo step; `EditorDocument.extra` + `extraGoals`). Next: ED5.4, the find bar.
+a command runs at each cursor as one undo step; `EditorDocument.extra` + `extraGoals`). ED5.4: the find bar
+(`fileapp/FindBar.svelte`, logic in `editor/search/findModel.ts`; the bar and Vi share the last search via
+`fileapp/findShared.ts`). Next: ED5.5, folding.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

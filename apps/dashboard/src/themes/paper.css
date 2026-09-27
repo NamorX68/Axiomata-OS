@@ -88,5 +88,6 @@
   --ax-vi-replace: var(--ax-danger);
   --ax-search-match: color-mix(in srgb, var(--ax-accent) 26%, transparent);
   --ax-search-current: color-mix(in srgb, var(--ax-accent) 62%, transparent);
+  --ax-search-scope: color-mix(in srgb, var(--ax-accent) 9%, transparent);
   --ax-editor-whitespace: color-mix(in srgb, var(--ax-text-muted) 55%, transparent);
 }

@@ -24,6 +24,9 @@
     takes the keys, typed text and dead keys, and tells the surface the cursor's
     shape and the Visual selection to draw; scrolling and the bell it asks for
     are done here, the rest (`:w`, `]c` …) goes to the owner.
+  * **The find bar (ED5.4) floats over the text** (`FindBar.svelte`): ⌘F, ⌥⌘F,
+    ⌘G/⇧⌘G and ⌘E are taken here before anything else, in Vi mode too (T15);
+    its matches and the "in selection" scope are drawn with the other marks.
   * **`tick` is the one redraw signal.** `EditorDocument` is a plain mutable
     class, not Svelte state, so every `doc.*` call in this file is followed by
     `changed()` (which bumps `tick`); a change the owner makes behind the
@@ -39,7 +42,8 @@
   import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
   import { allSelections, columnSelection, toggleCursor } from "../editor/multicursor";
   import { gutterDigits, lineLabel } from "../editor/gutter";
-  import { keyAction, type Effect, type KeyInput } from "../editor/keymap";
+  import { findKeyAction, keyAction, type Effect, type FindEffect, type KeyInput } from "../editor/keymap";
+  import { FindModel } from "../editor/search/findModel";
   import { pos, range, selectionRange, type Pos, type Range } from "../editor/position";
   import { nextGrapheme, wordAt } from "../editor/text";
   import { syntaxObject, type SyntaxObjectName } from "../editor/syntax/objects";
@@ -47,7 +51,10 @@
   import { VisualLayout } from "../editor/visual";
   import type { ViEffect } from "../editor/vi/machine";
   import { CursorGlide } from "./cursorGlide";
+  import FindBar from "./FindBar.svelte";
+  import { lastFind, rememberFind } from "./findShared";
   import { KEEP_SCROLL } from "./keepScroll";
+  import { searchGuard } from "./searchWorker";
   import type { SurfaceSettings } from "./surfaceSettings";
   import { viShared, viStateChanged } from "./viShared";
   import { ViSurface, type ViStatus } from "./viSurface";
@@ -279,6 +286,80 @@
     onViEffect?.(effect);
   }
 
+  // ---------------------------------------------------------------- find bar
+
+  /** The find bar's model for this document (ED5.4); it lives as long as the document is shown. */
+  let find = $state.raw<FindModel | null>(null);
+  let findOpen = $state(false);
+  let findReplace = $state(false);
+  let findBar = $state<FindBar | null>(null);
+  /** Diffs and read-only files only search (T15). */
+  const canReplace = $derived(!readOnly && !decorations);
+
+  $effect(() => {
+    const model = new FindModel({
+      doc,
+      guard: searchGuard,
+      vi: () => vi !== null,
+      place: (r) => {
+        if (vi) vi.placeCursor(r.start);
+        else doc.setSelection({ anchor: r.start, head: r.end });
+      },
+      changed,
+      commit: rememberFind,
+    });
+    find = model;
+    return () => {
+      model.dispose();
+      find = null;
+    };
+  });
+
+  /** Takes the last search (any bar's, or Vi's) into this bar before it is used. */
+  function adoptLastFind(model: FindModel): void {
+    const shared = lastFind();
+    if (!shared) return;
+    model.query = shared.query;
+    model.options = { ...model.options, ...shared.options };
+  }
+
+  function runFind(effect: FindEffect): void {
+    const model = find;
+    if (!model) return;
+    if (effect === "find" || effect === "findReplace") {
+      void openFind(effect === "findReplace");
+      return;
+    }
+    if (effect === "useSelectionForFind") {
+      model.useSelection();
+      return;
+    }
+    if (!findOpen) adoptLastFind(model);
+    model.next(effect === "findPrevious");
+  }
+
+  /** ⌘F / ⌥⌘F: opens (or refocuses) the bar, with the selection as its query or scope. */
+  async function openFind(withReplace: boolean): Promise<void> {
+    const model = find;
+    if (!model) return;
+    // Open already: the query being typed stays, even if it was never used.
+    if (!findOpen) adoptLastFind(model);
+    model.open();
+    findOpen = true;
+    if (withReplace && canReplace) findReplace = true;
+    tick++;
+    await nextTick();
+    if (withReplace && canReplace) findBar?.focusReplace();
+    else findBar?.focusQuery();
+  }
+
+  function closeFind(): void {
+    find?.close();
+    findOpen = false;
+    tick++;
+    input?.focus();
+  }
+
   const view = $derived.by(() => {
     void tick;
     const total = layout.totalRows;
@@ -361,9 +442,22 @@
     return out;
   }
 
-  /** Vi's search matches (hlsearch) and the one incsearch would go to, as marks. */
+  /**
+   * Search matches as marks: the find bar's while it is open (with its scope
+   * underneath), else Vi's (hlsearch) and the one incsearch would go to.
+   */
   function searchRuns(firstLine: number, lastLine: number, first: number, last: number) {
     const out: MarkRun[] = [];
+    const bar = findOpen ? find : null;
+    if (bar) {
+      const { matches, current, scope } = bar.highlights(firstLine, lastLine);
+      if (scope) pushMarkRuns(out, scope, "find-scope", first, last);
+      for (const [line, found] of matches) {
+        for (const [s, e] of found) pushMarkRuns(out, range(pos(line, s), pos(line, e)), "search", first, last);
+      }
+      if (current) pushMarkRuns(out, current, "search-current", first, last);
+      return out;
+    }
     if (!vi) return out;
     const { matches, current } = vi.searchHighlights(firstLine, lastLine);
     for (const [line, found] of matches) {
@@ -464,6 +558,22 @@
 
   function onKeydown(e: KeyboardEvent): void {
     if (e.isComposing || composing) return;
+    // The find bar's keys come first, in Vi mode as well (T15).
+    const findKey = findKeyAction(keyInputFrom(e));
+    if (findKey) {
+      e.preventDefault();
+      runFind(findKey);
+      return;
+    }
+    // Esc back in the text closes the bar, once there is only one cursor left to go back to —
+    // in Vi, once Esc has nothing left to cancel (Normal mode, no pending keys, no command line).
+    const plainEsc = e.key === "Escape" && !e.metaKey && !e.altKey && !e.shiftKey && !e.ctrlKey;
+    const viIdle = (s: ViStatus) => s.mode === "normal" && !s.pending && !s.cmdline;
+    if (plainEsc && findOpen && (vi ? viIdle(vi.status()) : doc.extra.length === 0)) {
+      e.preventDefault();
+      closeFind();
+      return;
+    }
     // The owner's keys (⏎ opens the file in a diff) wait while Vi takes typed text — a search being typed.
     if (!vi?.typing && interceptKey?.(e)) {
       e.preventDefault();
@@ -920,6 +1030,17 @@
     </div>
   </div>
   <canvas class="glide" class:on={gliding} bind:this={canvas} aria-hidden="true"></canvas>
+  {#if findOpen && find}
+    <FindBar
+      bind:this={findBar}
+      model={find}
+      version={tick}
+      {canReplace}
+      showReplace={findReplace}
+      onToggleReplace={() => (findReplace = !findReplace)}
+      onClose={closeFind}
+    />
+  {/if}
 </div>
 
 <style>
@@ -1077,6 +1198,12 @@
 
   .mk-search-current {
     background: var(--ax-search-current);
+  }
+
+  /* The find bar's "in selection" range (ED5.4): a faint wash under its matches. */
+  .mk-find-scope {
+    background: var(--ax-search-scope);
+    border-radius: 0;
   }
 
   /* `:set list`: tabs and trailing spaces, faint, under the text's own layer. */
