@@ -44,6 +44,7 @@
     type Tab,
     type TabsState,
   } from "./tabs";
+  import { foldKey, forgetFolds } from "./foldMemory";
   import { clampWidth, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
   import UnsavedQuestion from "./UnsavedQuestion.svelte";
 
@@ -151,6 +152,9 @@
     if (!views[id]) void handedTo.get(id)?.session.close();
     handedTo.delete(id);
     lineFor.delete(id);
+    const file = tabs.tabs.find((t) => t.id === id)?.file;
+    // Folds are kept for the files in open tabs only (T7).
+    if (file) forgetFolds(foldKey(file.root, file.rel));
     tabs = closeTab(tabs, id);
     delete states[id];
     delete views[id];

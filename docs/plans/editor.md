@@ -992,6 +992,42 @@ offener Leiste überschrieb einen noch nicht benutzten Begriff mit dem geteilten
 Text die Leiste nie — jetzt, sobald Esc nichts mehr abzubrechen hat. Vorgemerkt (LOW): der Prüfer verwirft beim
 Tippen nur wartende Aufträge desselben Musters; bei sehr teuren Mustern könnten sich Zwischenstände stauen.
 
+**ED5.5 — gebaut (2026-09-27):** die Faltung (T7, T17, T18). `editor/fold/ranges.ts` bestimmt, *wo* der Text falten
+kann, `editor/fold/state.ts` (`FoldState`), *was* gefaltet ist — geschlossene Faltungen sind reine Zeilenbereiche,
+die jeder Änderung folgen: Zeilen darüber verschieben sie, Änderungen unter der Kopfzeile dehnen/stauchen sie,
+Tippen auf der Kopfzeile lässt sie stehen, eine Änderung über Kopf- oder Endzeile hinweg öffnet sie. Verschachtelte
+Faltungen behalten ihren Zustand. Umsetzung von T7 im Detail: **Einrückung gilt immer** (auch im leichten Modus und im
+Diff), tree-sitter gewinnt auf den Zeilen, wo es selbst einen Bereich hat — die Knotentabelle der Textobjekte
+(`FUNCTIONS`/`CLASSES`, jetzt exportiert), dazu jeder Klammerknoten (`{ … }`, `[ … ]`, `( … )`) und mehrzeilige
+Kommentare (Erweiterung gegenüber T7: nur Funktionen/Klassen hätten `if`-Blöcke und Objekte nicht gefaltet). Eine
+schließende Zeile (`}`, `)`, `]`, `end`) bleibt sichtbar, damit eine Faltung nie das `} else {` des nächsten Blocks
+verschluckt. Markdown faltet nach Überschriften (Code-Zäune ausgenommen). Gefaltete Zeilen haben in `VisualLayout`
+keine Zeilen; ↑/↓, ←/→ an der Zeilengrenze und ⌘↓ gehen über eine Faltung hinweg, Vis `j`/`k` zählen sie als eine
+Zeile, zeilenweise Operatoren (`dd`, `yj`, `>>`, `cc`) nehmen sie ganz (T18); relative Zeilennummern zählen gefaltete
+Zeilen nicht mit. Nach jedem Befehl öffnet die Fläche, was einen Cursor verdeckt (Suche, `n`, `gn`, Undo, Sprung) —
+außer bei ⌘A. Chevron im Gutter (beim Überfahren, bei gefalteten Zeilen immer), „⋯ N lines“ hinter der Kopfzeile
+(Klick öffnet), ⌥⌘[ ⌥⌘] ⌥⌘0 ⌥⌘J (auch als physische Taste für andere Layouts), Vi `zc zo za zM zR`. Die Zeilen
+darunter gleiten an ihren Platz, neu gezeigte blenden ein — abschaltbar („Animated folding“, aus bei „Bewegung
+reduzieren“). Jede `FileSession` besitzt ihre Faltungen (sie gehen mit vom Panel in den Tab);
+`fileapp/foldMemory.ts` merkt sie je Datei in `settings.editor.folds` (`dashboard.json`), vergessen beim Schließen des
+Tabs oder IDE-Panes, höchstens 100 Dateien. T17: im Diff faltet die Einrückung, die beiden Seiten der geteilten Ansicht
+teilen *einen* `FoldState` (ihre Zeilen sind gepaart, sie bleiben im Gleichschritt); der Schalter „unveränderte
+Bereiche falten“ ist der schon vorhandene „Whole file“-Schalter (H11). Gemessen: Bereiche für 10 500 Zeilen
+TypeScript 11 ms (Baum) + 8 ms (Einrückung), nur 150 ms nach der letzten Änderung neu; ab 50 000 Zeilen fragt der
+Gutter Zeile für Zeile (`near`, höchstens 5000 Zeilen nach unten), weil der ganze Durchgang bei 242 000 Zeilen 263 ms
+kostet. Browser-Test: Chevron, Pill, ⌥⌘0/⌥⌘J, ⌘F in eine Faltung, Vi `zM`/`j`/`zo`/`zc`/`dd`; dabei gefunden:
+ein Zeilenkommentar nimmt seinen Zeilenumbruch mit (endet in Spalte 0 der nächsten Zeile) und faltete so die `fn`-Zeile
+darunter weg — ein Knoten, der am Zeilenanfang endet, endet jetzt auf der Zeile davor.
+Reviews (Architektur: ein HIGH, drei MEDIUM; Tests: ~50 Fälle ergänzt, kein Fehler, drei Vim-Abweichungen) — behoben:
+(1) Vis `H`/`M`/`L`, ein bloßes `G` und `Ctrl-D/U/F/B/E/Y` landeten in Faltungen und öffneten sie damit; jetzt landen
+sie auf der Kopfzeile (`motions.ts` `shown`), `H`/`L` zählen eine Faltung als eine Zeile; `12G` nennt eine Zeile und
+öffnet weiterhin. (2) Schloss sich eine Faltung über einem Extra-Cursor, fielen *alle* Extra-Cursor weg — jetzt rückt
+nur der verdeckte auf die Kopfzeile. (3) Die Gleitdauer liest `--ax-dur-med` aus dem Theme statt einer Zahl daneben.
+(4) `o` und `p` auf einer gefalteten Kopfzeile setzen unter die ganze Faltung, die geschlossen bleibt. Bekannt und
+gelassen: `J` auf einer gefalteten Kopfzeile verbindet mit der ersten verborgenen Zeile (Vim: mit der Zeile danach);
+eine Datei, die in Tab und IDE-Pane zugleich offen ist, verliert beim Schließen des einen nur die Erinnerung; im
+Split-Diff kann eine Faltung an einer Hunk-Grenze drüben Zeilen verdecken, die dort kein Block sind.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

@@ -24,7 +24,7 @@ import { displayColumn, leadingWhitespace, nextGrapheme, prevGrapheme } from "..
 import { CommandMode, SearchMemory, waitsForSearch, type CmdlineStatus, type ViMessage } from "./cmdmode";
 import { InsertMode, type InsertHost } from "./insert";
 import { isEscape, keysToText, parseKeys, type ViKey } from "./keys";
-import { isLinewiseMotion, landing, motion, type FindState, type MotionResult, type ViContext } from "./motions";
+import { isLinewiseMotion, landing, motion, shown, type FindState, type MotionResult, type ViContext } from "./motions";
 import {
   blockCols,
   caseRegion,
@@ -80,7 +80,20 @@ export type ViEffect =
   | { type: "hunk"; dir: 1 | -1 }
   | { type: "openFile" }
   /** A file mark (`'A`) that belongs to another file. */
-  | { type: "fileMark"; file: string; at: Pos };
+  | { type: "fileMark"; file: string; at: Pos }
+  /** `zc zo za zR zM` (ED5, T7): folds are the view's. */
+  | { type: "fold"; action: FoldAction };
+
+/** What a `z` fold command asks for. */
+export type FoldAction = "close" | "open" | "toggle" | "closeAll" | "openAll";
+
+const FOLD_COMMANDS: Record<string, FoldAction> = {
+  zc: "close",
+  zo: "open",
+  za: "toggle",
+  zM: "closeAll",
+  zR: "openAll",
+};
 
 /** A tree-sitter text object (`if af ic ac ia aa`, V9) — the view supplies it (ED3.4). */
 export type SyntaxObjects = (at: Pos, name: string, inner: boolean, count: number) => ObjectRange | null;
@@ -629,10 +642,23 @@ export class ViMachine {
     this.applyOperator(op, region, register, target.kind === "line" ? 1 : (count ?? 1), char);
   }
 
+  /**
+   * A linewise region grown to whole closed folds at both ends (T18): `dd` on
+   * a fold's header takes the fold, `yj` over one yanks all of it.
+   */
+  private withFolds(region: Region): Region {
+    const folds = this.ctx.folds;
+    if (region.kind !== "line" || !folds) return region;
+    const first = folds.closedAround(region.first)?.start ?? region.first;
+    const last = folds.closedAround(region.last)?.end ?? region.last;
+    return { kind: "line", first, last };
+  }
+
   /** Applies operator `op` to `region`. `levels` is how far `>`/`<` shift. */
-  private applyOperator(op: string, region: Region, register: string | null, levels: number, char?: string): void {
+  private applyOperator(op: string, at: Region, register: string | null, levels: number, char?: string): void {
     const ctx = this.ctx;
     const store = this.store;
+    const region = this.withFolds(at);
     this.setMarks(region);
     const lines = regionLines(region);
     switch (op) {
@@ -677,7 +703,8 @@ export class ViMachine {
   }
 
   /** `c`: the region goes (into the register) and Insert mode begins where it was. */
-  private change(region: Region, register: string | null): void {
+  private change(at: Region, register: string | null): void {
+    const region = this.withFolds(at);
     const ctx = this.ctx;
     const store = this.store;
     this.shared.registers.put(register, regionContent(store, region, ctx.tabSize), "delete");
@@ -923,6 +950,11 @@ export class ViMachine {
 
   /** No-op escapes, file/diff effects (hunks, `gf`, quitting), and the ex/search/`&` lines. */
   private commandEffect(b: Extract<Body, { kind: "command" }>, cmd: Parsed): boolean {
+    const fold = FOLD_COMMANDS[b.name];
+    if (fold) {
+      this.env.effect({ type: "fold", action: fold });
+      return true;
+    }
     switch (b.name) {
       case "<Esc>":
       case "<C-[>":
@@ -973,7 +1005,15 @@ export class ViMachine {
   private put(at: Pos, register: string | null, count: number, after: boolean, cursorAfter: boolean): void {
     const content = this.shared.registers.get(register ?? '"');
     if (!content) return this.bell();
-    this.setCursor(putRegister(this.doc, at, content, { after, count, cursorAfter }, this.ctx));
+    // Lines put below a closed fold go after all of it, as in Vim (T18).
+    const from = content.kind === "line" && after ? this.foldEnd(at) : at;
+    this.setCursor(putRegister(this.doc, from, content, { after, count, cursorAfter }, this.ctx));
+  }
+
+  /** `at` moved to the last line of the closed fold it is the header of (itself if none). */
+  private foldEnd(at: Pos): Pos {
+    const end = this.ctx.folds?.closedAround(at.line)?.end;
+    return end === undefined ? at : pos(end, 0);
   }
 
   /** `o`/`O`: a new line below/above with the current line's indentation, and Insert mode on it. */
@@ -981,9 +1021,16 @@ export class ViMachine {
     const store = this.store;
     const indent = leadingWhitespace(store.line(at.line));
     if (below) {
-      const end = pos(at.line, store.line(at.line).length);
-      const at2 = pos(at.line + 1, indent.length);
-      this.doc.edit([{ range: range(end, end), text: `\n${indent}` }], cursor(at2), "other");
+      // Below a closed fold means after all of it (T18).
+      const last = this.foldEnd(at).line;
+      const at2 = pos(last + 1, indent.length);
+      const endOfLine = pos(last, store.line(last).length);
+      // Put in at the next line's start where there is one: a fold ending on `last` then stays as it was.
+      const edit =
+        last + 1 < store.lineCount()
+          ? { range: range(pos(last + 1, 0), pos(last + 1, 0)), text: `${indent}\n` }
+          : { range: range(endOfLine, endOfLine), text: `\n${indent}` };
+      this.doc.edit([edit], cursor(at2), "other");
       this.insertMode.enter(at2, count, false);
     } else {
       const start = pos(at.line, 0);
@@ -1442,7 +1489,7 @@ export class ViMachine {
     this.env.effect({ type: "scrollLines", delta });
     const top = Math.max(0, view.top + delta);
     const bottom = Math.min(this.store.lineCount() - 1, view.bottom + delta);
-    const line = Math.max(top, Math.min(bottom, this.cursor.line));
+    const line = shown(this.ctx, Math.max(top, Math.min(bottom, this.cursor.line)));
     if (line !== this.cursor.line) this.setCursor(pos(line, this.cursor.col), true);
   }
 
@@ -1461,7 +1508,8 @@ export class ViMachine {
 
   private moveLinesAndScroll(delta: number): void {
     const store = this.store;
-    const line = Math.max(0, Math.min(store.lineCount() - 1, this.cursor.line + delta));
+    // Into a closed fold: its header (T18) — paging must not open it.
+    const line = shown(this.ctx, Math.max(0, Math.min(store.lineCount() - 1, this.cursor.line + delta)));
     if (line === this.cursor.line) return this.bell();
     this.env.effect({ type: "scrollLines", delta });
     this.setCursor(pos(line, firstNonBlank(store, line)));

@@ -61,6 +61,7 @@
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentPicker from "./AgentPicker.svelte";
   import { agentStatus } from "./agentStatus";
+  import { foldKey, forgetFolds } from "../fileapp/foldMemory";
   import QuickOpen from "../fileapp/QuickOpen.svelte";
   import type { FileRef } from "../fileapp/tabs";
   import {
@@ -329,6 +330,10 @@
       layout = activateTab(layout, tabId);
     },
     close: (tabId) => {
+      // A file pane's folds are kept only while it is open (T7).
+      const file = allTabs(layout).find((t) => t.id === tabId);
+      const config = file ? filePaneConfig(file) : null;
+      if (config) forgetFolds(foldKey(config.root, config.rel));
       layout = closeTab(layout, tabId);
     },
     addPane: (groupId, kind) => {

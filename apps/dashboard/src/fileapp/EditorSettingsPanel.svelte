@@ -70,6 +70,7 @@
     { key: "indentGuides", label: "Indentation guides" },
     { key: "bracketColors", label: "Coloured bracket pairs" },
     { key: "glow", label: "Accent glow" },
+    { key: "foldAnimation", label: "Animated folding" },
   ];
 
   const AUTOSAVE: { value: Autosave; label: string }[] = [

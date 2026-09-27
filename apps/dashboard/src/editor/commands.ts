@@ -39,6 +39,16 @@ import {
 /** Where a line's visual rows start (UTF-16 columns); `[0]` for an unwrapped line. */
 export interface RowLayout {
   rowStarts(line: number): readonly number[];
+  /**
+   * Folding (ED5, T7): the nearest line at `line` or past it in `dir` that is
+   * not folded away — `null` past the end. Without it no line is folded.
+   */
+  visibleLine?(line: number, dir: -1 | 1): number | null;
+}
+
+/** `line` if shown, else the nearest shown line in `dir` (`null`: none that way). */
+function shownLine(layout: RowLayout, line: number, dir: -1 | 1): number | null {
+  return layout.visibleLine ? layout.visibleLine(line, dir) : line;
 }
 
 export const UNWRAPPED: RowLayout = { rowStarts: () => [0] };
@@ -197,13 +207,13 @@ function move(doc: EditorDocument, motion: Motion, extend: boolean, ctx: Command
 function target(doc: EditorDocument, p: Pos, motion: Motion, ctx: CommandContext): Pos {
   switch (motion) {
     case "charLeft":
-      return leftWithinLine(doc, p, prevGrapheme);
+      return leftWithinLine(doc, p, prevGrapheme, ctx.layout);
     case "charRight":
-      return rightWithinLine(doc, p, nextGrapheme);
+      return rightWithinLine(doc, p, nextGrapheme, ctx.layout);
     case "wordLeft":
-      return leftWithinLine(doc, p, prevWordStart);
+      return leftWithinLine(doc, p, prevWordStart, ctx.layout);
     case "wordRight":
-      return rightWithinLine(doc, p, nextWordEnd);
+      return rightWithinLine(doc, p, nextWordEnd, ctx.layout);
     case "lineStart":
       return lineStartTarget(doc, p, ctx);
     case "lineEnd":
@@ -211,7 +221,7 @@ function target(doc: EditorDocument, p: Pos, motion: Motion, ctx: CommandContext
     case "docStart":
       return pos(0, 0);
     case "docEnd":
-      return endOfText(doc.store);
+      return lastShownEnd(doc, ctx);
     default:
       return p;
   }
@@ -221,18 +231,31 @@ function target(doc: EditorDocument, p: Pos, motion: Motion, ctx: CommandContext
  * charLeft/wordLeft share the same line-crossing rule: step within the line
  * while there is room, otherwise land at the end of the previous line (or stay
  * put at the very start of the document). `withinLine` picks the grapheme or
- * word boundary that differs between the two motions.
+ * word boundary that differs between the two motions. A fold is stepped over
+ * as a whole: from the line after it to the end of its header.
  */
-function leftWithinLine(doc: EditorDocument, p: Pos, withinLine: (line: string, col: number) => number): Pos {
+function leftWithinLine(
+  doc: EditorDocument,
+  p: Pos,
+  withinLine: (line: string, col: number) => number,
+  layout: RowLayout,
+): Pos {
   if (p.col > 0) return pos(p.line, withinLine(doc.store.line(p.line), p.col));
-  return p.line > 0 ? lineEndPos(doc, p.line - 1) : p;
+  const prev = p.line > 0 ? shownLine(layout, p.line - 1, -1) : null;
+  return prev === null ? p : lineEndPos(doc, prev);
 }
 
 /** charRight/wordRight's mirror of {@link leftWithinLine}. */
-function rightWithinLine(doc: EditorDocument, p: Pos, withinLine: (line: string, col: number) => number): Pos {
+function rightWithinLine(
+  doc: EditorDocument,
+  p: Pos,
+  withinLine: (line: string, col: number) => number,
+  layout: RowLayout,
+): Pos {
   const line = doc.store.line(p.line);
   if (p.col < line.length) return pos(p.line, withinLine(line, p.col));
-  return p.line < doc.store.lineCount() - 1 ? pos(p.line + 1, 0) : p;
+  const next = p.line < doc.store.lineCount() - 1 ? shownLine(layout, p.line + 1, 1) : null;
+  return next === null ? p : pos(next, 0);
 }
 
 function lineEndPos(doc: EditorDocument, line: number): Pos {
@@ -282,20 +305,28 @@ interface RowPosition {
 
 /**
  * One visual row step in `dir` from `at`, wrapping onto the previous/next
- * line's rows; `null` past the first or last row of the whole document. Up and
- * down are mirror images of each other, which is what {@link verticalTarget}'s
- * loop relies on.
+ * line's rows and over folded lines; `null` past the first or last row of the
+ * whole document. Up and down are mirror images of each other, which is what
+ * {@link verticalTarget}'s loop relies on.
  */
 function stepRow(doc: EditorDocument, ctx: CommandContext, dir: -1 | 1, at: RowPosition): RowPosition | null {
   if (dir < 0) {
     if (at.row > 0) return { ...at, row: at.row - 1 };
-    if (at.line === 0) return null;
-    const starts = ctx.layout.rowStarts(at.line - 1);
-    return { line: at.line - 1, row: starts.length - 1, starts };
+    const line = at.line === 0 ? null : shownLine(ctx.layout, at.line - 1, -1);
+    if (line === null) return null;
+    const starts = ctx.layout.rowStarts(line);
+    return { line, row: starts.length - 1, starts };
   }
   if (at.row < at.starts.length - 1) return { ...at, row: at.row + 1 };
-  if (at.line === doc.store.lineCount() - 1) return null;
-  return { line: at.line + 1, row: 0, starts: ctx.layout.rowStarts(at.line + 1) };
+  const line = at.line === doc.store.lineCount() - 1 ? null : shownLine(ctx.layout, at.line + 1, 1);
+  if (line === null) return null;
+  return { line, row: 0, starts: ctx.layout.rowStarts(line) };
+}
+
+/** Where ↓ past the last row goes: the end of the text, or of the last shown line when a fold hides the end. */
+function lastShownEnd(doc: EditorDocument, ctx: CommandContext): Pos {
+  const last = doc.store.lineCount() - 1;
+  return lineEndPos(doc, shownLine(ctx.layout, last, -1) ?? last);
 }
 
 /**
@@ -316,7 +347,7 @@ export function verticalTarget(doc: EditorDocument, motion: Motion, ctx: Command
     const next = stepRow(doc, ctx, dir, at);
     if (!next) {
       doc.goalColumn = goal;
-      return dir < 0 ? pos(0, 0) : endOfText(doc.store);
+      return dir < 0 ? pos(0, 0) : lastShownEnd(doc, ctx);
     }
     at = next;
   }

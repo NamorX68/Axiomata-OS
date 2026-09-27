@@ -54,6 +54,8 @@ export interface EditorSettings {
   bracketColors: boolean;
   /** G7: a faint accent glow on the cursor and its line number. */
   glow: boolean;
+  /** ED5 (T7): folding and unfolding slide the lines below. */
+  foldAnimation: boolean;
 }
 
 /** F12's defaults, confirmed by the owner. */
@@ -78,6 +80,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   indentGuides: true,
   bracketColors: true,
   glow: true,
+  foldAnimation: true,
 };
 
 const SETTINGS_VERSION = 1;
@@ -120,6 +123,7 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     indentGuides: bool(r.indentGuides, d.indentGuides),
     bracketColors: bool(r.bracketColors, d.bracketColors),
     glow: bool(r.glow, d.glow),
+    foldAnimation: bool(r.foldAnimation, d.foldAnimation),
   };
 }
 

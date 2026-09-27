@@ -45,6 +45,7 @@
   import type { Effect } from "../editor/keymap";
   import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import { fileBackend, type FileRemoved, type FileRenamed } from "./backend";
+  import { foldKey, rememberedFolds, rememberFolds, updateRememberedFolds } from "./foldMemory";
   import DiffPanes from "./DiffPanes.svelte";
   import { editorFace } from "./editorFace.svelte";
   import { editorSettings, ensureEditorSettingsLoaded } from "./editorSettings";
@@ -238,6 +239,10 @@
   /** Makes `next` the open session, leaving the one before. */
   async function adopt(next: FileSession, intent: OpenIntent, line: number | null): Promise<void> {
     await leaveCurrent();
+    // Folds kept from last time (T7) — unless the session brings its own (a hand-over).
+    if (!next.untitled && next.folds.closed.length === 0) {
+      next.folds.restore(rememberedFolds(foldKey(next.root, next.rel)), next.doc.store.lineCount());
+    }
     opened = { kind: "session", session: next };
     wrap = wrapsByDefault($editorSettings, next.fileName);
     // Vi's `:set` holds for the file it was typed in, as the wrap toggle does (V6).
@@ -263,6 +268,7 @@
   export function detach(): { session: FileSession; viewMode: ViewMode } | null {
     const s = session;
     if (!s) return null;
+    keepFolds(s);
     highlighter?.dispose();
     highlighter = null;
     if (recoveryTimer) clearTimeout(recoveryTimer);
@@ -322,6 +328,17 @@
     if (created) highlighter = created;
   }
 
+  /** The folds of `s` as they are now (edits moved them), if they are kept at all. */
+  function keepFolds(s: FileSession): void {
+    if (!s.untitled) updateRememberedFolds(foldKey(s.root, s.rel), s.folds.serialize());
+  }
+
+  /** Folds were opened or closed: keep them for next time (T7). */
+  function onFolds(): void {
+    const s = session;
+    if (s && !s.untitled) rememberFolds(foldKey(s.root, s.rel), s.folds.serialize());
+  }
+
   /** Keeps unsaved text aside and stops watching the file being left. */
   async function leaveCurrent(): Promise<void> {
     highlighter?.dispose();
@@ -329,6 +346,7 @@
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;
     if (!session) return;
+    keepFolds(session);
     if ($editorSettings.autosave !== "off") await session.save();
     await session.persistRecovery();
     await session.close();
@@ -565,6 +583,8 @@
             {onViEffect}
             onViStatus={(s) => (viStatus = s)}
             fileKey={`${session.root}\0${session.rel}`}
+            folds={session.folds}
+            {onFolds}
           />
         {/key}
       </div>

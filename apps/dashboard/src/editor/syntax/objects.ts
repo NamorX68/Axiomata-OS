@@ -29,7 +29,8 @@ export type SyntaxObjectRange = ObjectRange;
 /** `f`, `c`, `a` — the letters after `i`/`a` (V9). */
 export type SyntaxObjectName = "f" | "c" | "a";
 
-const FUNCTIONS = new Set([
+/** Function-like nodes — `if`/`af`, and the folds of ED5.5 (T7). */
+export const FUNCTIONS: ReadonlySet<string> = new Set([
   // Rust
   "function_item",
   "closure_expression",
@@ -46,7 +47,8 @@ const FUNCTIONS = new Set([
   "lambda",
 ]);
 
-const CLASSES = new Set([
+/** Class-like nodes — `ic`/`ac`, and the folds of ED5.5 (T7). */
+export const CLASSES: ReadonlySet<string> = new Set([
   "class_declaration",
   "abstract_class_declaration",
   "class_definition",

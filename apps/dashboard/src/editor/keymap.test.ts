@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findKeyAction, keyAction, type KeyInput } from "./keymap";
+import { findKeyAction, foldKeyAction, keyAction, type KeyInput } from "./keymap";
 
 function key(k: string, mods: Partial<Omit<KeyInput, "key">> = {}): KeyInput {
   return { key: k, meta: false, alt: false, shift: false, ctrl: false, ...mods };
@@ -107,5 +107,34 @@ describe("findKeyAction", () => {
     expect(findKeyAction(key("g", { meta: true, alt: true }))).toBeNull();
     expect(findKeyAction(key("e", { meta: true, alt: true }))).toBeNull();
     expect(findKeyAction(key("E", { meta: true, shift: true }))).toBeNull();
+  });
+});
+
+describe("foldKeyAction (ED5, T7)", () => {
+  const fold = { meta: true, alt: true };
+
+  it("reads ⌥⌘[ ⌥⌘] ⌥⌘0 ⌥⌘J as typed, and as ⌥ turns them on a US layout", () => {
+    expect(foldKeyAction(key("[", fold))).toBe("fold");
+    expect(foldKeyAction(key("“", fold))).toBe("fold");
+    expect(foldKeyAction(key("‘", fold))).toBe("unfold");
+    expect(foldKeyAction(key("º", fold))).toBe("foldAll");
+    expect(foldKeyAction(key("∆", fold))).toBe("unfoldAll");
+  });
+
+  it("recognises the physical key when the layout puts something else there", () => {
+    expect(foldKeyAction(key("ü", { ...fold, code: "BracketLeft" }))).toBe("fold");
+    expect(foldKeyAction(key("+", { ...fold, code: "BracketRight" }))).toBe("unfold");
+  });
+
+  it("needs ⌥⌘ and nothing else", () => {
+    expect(foldKeyAction(key("[", { meta: true }))).toBeNull();
+    expect(foldKeyAction(key("[", { ...fold, shift: true }))).toBeNull();
+    expect(foldKeyAction(key("j", { ...fold, ctrl: true }))).toBeNull();
+    expect(foldKeyAction(key("x", fold))).toBeNull();
+  });
+
+  it("reads a capital J (Caps Lock) as unfold all, and needs ⌘ as well as ⌥", () => {
+    expect(foldKeyAction(key("J", fold))).toBe("unfoldAll");
+    expect(foldKeyAction(key("[", { alt: true, code: "BracketLeft" }))).toBeNull();
   });
 });

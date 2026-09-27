@@ -54,7 +54,7 @@ const NORMAL_COMMANDS = new Set([
   "x", "X", "s", "S", "D", "C", "Y", "p", "P", "gp", "gP", "J", "gJ", "~", "i", "a", "I", "A", "gi", "gI", "o", "O",
   "R", "u", "<C-r>", ".", "v", "V", "<C-v>", "gv", "<C-a>", "<C-x>", "<C-o>", "<C-i>", "<Tab>", "zt", "zz", "zb",
   "z<CR>", "z.", "z-", "<C-e>", "<C-y>", "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>", "]c", "[c",
-  "gf", "ZZ", "ZQ", ":", "@@", "&", "<Esc>", "<C-[>", "<C-c>", "gn", "gN",
+  "gf", "ZZ", "ZQ", ":", "@@", "&", "<Esc>", "<C-[>", "<C-c>", "gn", "gN", "zc", "zo", "za", "zR", "zM",
 ]);
 
 /** Commands that exist only in Visual mode, or mean something else there. */

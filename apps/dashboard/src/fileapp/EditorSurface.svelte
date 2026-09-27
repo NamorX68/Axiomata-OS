@@ -27,6 +27,11 @@
   * **The find bar (ED5.4) floats over the text** (`FindBar.svelte`): ⌘F, ⌥⌘F,
     ⌘G/⇧⌘G and ⌘E are taken here before anything else, in Vi mode too (T15);
     its matches and the "in selection" scope are drawn with the other marks.
+  * **Folding (ED5.5, T7)**: where the text can fold is `editor/fold/ranges.ts`,
+    what is folded a `FoldState` (the owner's, kept per file, or the surface's
+    own); folded lines simply have no rows in the layout. A chevron in the
+    gutter, "⋯ N lines" after a folded header, ⌥⌘[ ⌥⌘] ⌥⌘0 ⌥⌘J and Vi's
+    `zc zo za zM zR`. After every command whatever hides a cursor opens.
   * **`tick` is the one redraw signal.** `EditorDocument` is a plain mutable
     class, not Svelte state, so every `doc.*` call in this file is followed by
     `changed()` (which bumps `tick`); a change the owner makes behind the
@@ -42,14 +47,24 @@
   import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
   import { allSelections, columnSelection, toggleCursor } from "../editor/multicursor";
   import { gutterDigits, lineLabel } from "../editor/gutter";
-  import { findKeyAction, keyAction, type Effect, type FindEffect, type KeyInput } from "../editor/keymap";
+  import { FoldRanges } from "../editor/fold/ranges";
+  import { FoldState } from "../editor/fold/state";
+  import {
+    findKeyAction,
+    foldKeyAction,
+    keyAction,
+    type Effect,
+    type FindEffect,
+    type FoldKey,
+    type KeyInput,
+  } from "../editor/keymap";
   import { FindModel } from "../editor/search/findModel";
-  import { pos, range, selectionRange, type Pos, type Range } from "../editor/position";
+  import { cursor, pos, range, selectionRange, type Pos, type Range } from "../editor/position";
   import { nextGrapheme, wordAt } from "../editor/text";
   import { syntaxObject, type SyntaxObjectName } from "../editor/syntax/objects";
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
-  import type { ViEffect } from "../editor/vi/machine";
+  import type { FoldAction, ViEffect } from "../editor/vi/machine";
   import { CursorGlide } from "./cursorGlide";
   import FindBar from "./FindBar.svelte";
   import { lastFind, rememberFind } from "./findShared";
@@ -101,6 +116,13 @@
     onViStatus?: (status: ViStatus | null) => void;
     /** Where the file lives (`root\0rel`), for Vi's file marks. */
     fileKey?: string;
+    /**
+     * What is folded (ED5.5): the owner's, to keep it per file or share it
+     * between the two panes of a split diff. Without one the surface keeps its own.
+     */
+    folds?: FoldState | null;
+    /** The owner's folds were opened or closed (to remember them). */
+    onFolds?: () => void;
   }
 
   let {
@@ -121,6 +143,8 @@
     onViEffect,
     onViStatus,
     fileKey,
+    folds = null,
+    onFolds,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -131,6 +155,12 @@
   const SMOOTH_SCROLL_ROWS = 3;
   /** Rows kept above a line jumped to with `goToLine`. */
   const GO_TO_MARGIN_ROWS = 3;
+  /** Cells at the gutter's left edge for the fold chevrons. */
+  const FOLD_CELLS = 2;
+  /** Quiet time after a change before the gutter learns the new fold ranges. */
+  const FOLD_RANGES_DELAY_MS = 150;
+  /** How long the lines below a fold slide when the theme's `--ax-dur-med` cannot be read. */
+  const FOLD_SLIDE_FALLBACK_MS = 260;
   /** Commands that only move the selection — the ones a read-only surface allows. */
   const NON_EDITING = new Set<Command["type"]>([
     "move",
@@ -164,7 +194,7 @@
     void tick; // the line count changes with edits
     return gutterDigits(doc.store.lineCount(), settings.lineNumbers) + 2;
   });
-  const gutterW = $derived(gutterCells * charW);
+  const gutterW = $derived((gutterCells + FOLD_CELLS) * charW);
   /** Where the text starts, relative to the scroller's left edge. */
   const textLeft = $derived(gutterW + TEXT_GAP_CELLS * charW);
   const wrapCells = $derived(Math.max(8, Math.floor((viewW - textLeft - 2 * charW) / charW)));
@@ -238,7 +268,7 @@
       return;
     }
     const attached = new ViSurface(doc, viShared(), {
-      ctx: () => ({ ...ctxNow(), viewport: viewport() }),
+      ctx: () => ({ ...ctxNow(), viewport: viewport(), folds: foldState }),
       changed,
       effect: viEffect,
       status: (s) => {
@@ -281,6 +311,10 @@
     }
     if (effect.type === "scroll") {
       if (scroller) scroller.scrollTop = scrollTopFor(layout, { scrollTop, viewH, rowH }, effect.line, effect.to);
+      return;
+    }
+    if (effect.type === "fold") {
+      foldAction(effect.action);
       return;
     }
     onViEffect?.(effect);
@@ -360,6 +394,154 @@
     input?.focus();
   }
 
+  // ---------------------------------------------------------------- folding
+
+  /** What is folded: the owner's, or this surface's own (disposed with it). */
+  const foldState = $derived(folds ?? new FoldState(doc));
+  $effect(() => {
+    const own = folds ? null : foldState;
+    return () => own?.dispose();
+  });
+  $effect(() => {
+    layout.setFolds(foldState);
+    untrack(() => tick++);
+  });
+
+  /** Where the text can fold (T7): the tree, Markdown headings, indentation. */
+  const foldRanges = $derived(
+    new FoldRanges(doc.store, () => doc.revision, {
+      tree: () => highlighter?.syntaxTree?.() ?? null,
+      markdown: /\.(md|markdown)$/i.test(fileName),
+      tabSize: settings.tabSize,
+    }),
+  );
+  /**
+   * The ranges the gutter offers a chevron for — caught up a moment after the
+   * last change, not on every key: working them out walks the whole text.
+   */
+  let foldStarts = $state.raw<Map<number, number>>(new Map());
+  let foldStartsTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function scheduleFoldStarts(): void {
+    clearTimeout(foldStartsTimer);
+    // A very long text is asked line by line (`foldableAt`), never passed over whole for the gutter.
+    if (foldRanges.local) return;
+    foldStartsTimer = setTimeout(() => (foldStarts = foldRanges.starts()), FOLD_RANGES_DELAY_MS);
+  }
+
+  /** Whether the gutter shows a chevron at `line` — from ranges a moment old, so drawing never waits for them. */
+  function foldableAt(line: number): boolean {
+    return foldRanges.local ? foldRanges.near(line) !== null : foldStarts.has(line);
+  }
+
+  // A new document, grammar or tab size: the chevrons follow soon after.
+  $effect(() => {
+    void foldRanges;
+    void highlighter;
+    untrack(scheduleFoldStarts);
+    return () => clearTimeout(foldStartsTimer);
+  });
+
+  /** The lines below a fold that just closed or opened slide from where they were (T7). */
+  let foldSlide = $state.raw<{ row: number; header: number; end: number; shift: number } | null>(null);
+  let foldSlideTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** ⌥⌘[ ⌥⌘] ⌥⌘0 ⌥⌘J, as the fold actions Vi's `z` commands are. */
+  const FOLD_KEY_ACTIONS: Record<FoldKey, FoldAction> = {
+    fold: "close",
+    unfold: "open",
+    foldAll: "closeAll",
+    unfoldAll: "openAll",
+  };
+
+  /** Runs a fold action at the cursor's line. */
+  function foldAction(action: FoldAction): void {
+    const line = doc.selection.head.line;
+    if (action === "closeAll") return foldsChanged(null, () => foldState.closeAll(foldRanges.all()));
+    if (action === "openAll") return foldsChanged(null, () => foldState.openAll());
+    const closed = foldState.closedAround(line);
+    if (action === "open" || (action === "toggle" && closed)) {
+      if (!closed) return;
+      return foldsChanged(closed.start, () => foldState.open(closed.start));
+    }
+    // Close: the innermost range around the line not closed yet — on a folded header, the one around it.
+    const open = foldRanges.around(line).find((r) => !foldState.closedAt(r.start));
+    if (open) foldsChanged(open.start, () => foldState.close(open));
+  }
+
+  /** Opens or closes the fold with its header on `line` (a chevron, the "⋯" pill). */
+  function toggleFoldAt(line: number): void {
+    if (foldState.closedAt(line)) return foldsChanged(line, () => foldState.open(line));
+    const r = foldRanges.local ? foldRanges.near(line) : foldRanges.at(line);
+    if (r) foldsChanged(line, () => foldState.close(r));
+  }
+
+  /**
+   * Carries out a change of the folds: the cursor leaves lines that are now
+   * hidden (for the header of their fold), the layout is redone, and the lines
+   * below `header` slide into place if the animation is on.
+   */
+  function foldsChanged(header: number | null, change: () => void): void {
+    const rowsBefore = layout.totalRows;
+    // What an opening fold hid: those lines fade in rather than slide.
+    const wasHidden = header === null ? null : foldState.closedAround(header);
+    change();
+    const hidden = foldState.hiddenAt(doc.selection.head.line);
+    if (hidden) {
+      const to = hidden.from - 1;
+      const at = pos(to, Math.min(doc.selection.head.col, doc.store.line(to).length));
+      if (vi) vi.placeCursor(at);
+      else doc.setSelection(cursor(at));
+    }
+    // Other cursors in a fold that closed move to its header too (one per place); the rest stay as they are.
+    if (doc.extra.some((s) => foldState.hiddenAt(s.head.line))) {
+      const seen = new Set([`${doc.selection.head.line}:${doc.selection.head.col}`]);
+      const others = doc.extra.flatMap((s) => {
+        const h = foldState.hiddenAt(s.head.line);
+        const moved = h ? cursor(pos(h.from - 1, Math.min(s.head.col, doc.store.line(h.from - 1).length))) : s;
+        const key = `${moved.head.line}:${moved.head.col}`;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [moved];
+      });
+      doc.setSelections(doc.selection, others);
+    }
+    layout.refresh();
+    const rowsAdded = layout.totalRows - rowsBefore;
+    if (header !== null && fx.foldAnimation && rowsAdded !== 0) {
+      const row = layout.firstRow(header) + layout.rowStarts(header).length - 1;
+      foldSlide = { row, header, end: rowsAdded > 0 ? (wasHidden?.end ?? header) : header, shift: -rowsAdded * rowH };
+      clearTimeout(foldSlideTimer);
+      foldSlideTimer = setTimeout(() => (foldSlide = null), slideMs());
+    }
+    tick++;
+    void nextTick().then(revealCursor);
+    onFolds?.();
+    // The cursor may have moved to a header: the status line follows.
+    onChange?.();
+  }
+
+  /** How long the slide lasts: the theme's `--ax-dur-med`, which the CSS animation runs for too. */
+  function slideMs(): number {
+    const value = surfaceEl ? getComputedStyle(surfaceEl).getPropertyValue("--ax-dur-med").trim() : "";
+    const ms = value.endsWith("ms") ? parseFloat(value) : value.endsWith("s") ? parseFloat(value) * 1000 : NaN;
+    return Number.isFinite(ms) ? ms : FOLD_SLIDE_FALLBACK_MS;
+  }
+
+  /** How a row takes part in a fold's slide: moving up or down into place, or fading in (just shown). */
+  function slideOf(row: number, line: number): "slide" | "reveal" | null {
+    const s = foldSlide;
+    if (!s || row <= s.row) return null;
+    return line > s.header && line <= s.end ? "reveal" : "slide";
+  }
+
+  /** After a command: whatever fold hides a cursor opens (a search match, an undo, a jump). */
+  function revealCursors(): void {
+    let opened = false;
+    for (const s of [doc.selection, ...doc.extra]) opened = foldState.reveal(s.head.line) || opened;
+    if (opened) onFolds?.();
+  }
+
   const view = $derived.by(() => {
     void tick;
     const total = layout.totalRows;
@@ -381,6 +563,10 @@
       segments: rowSegments(doc.store.line(r.line), spans.get(r.line), r.start, r.end),
       guides: guides.get(r.line) ?? [],
       deco: decorations?.line(r.line) ?? NO_DECORATION,
+      fold: foldMark(r),
+      slide: slideOf(r.row, r.line),
+      // A relative line number leaves folded lines out (T18).
+      hiddenToCursor: foldState.hiddenBetween(r.line, doc.selection.head.line),
     }));
     const sel = doc.selection;
     // In Vi mode the selection drawn is the Visual one (inclusive, lines, a block);
@@ -420,6 +606,19 @@
       widest,
     };
   });
+
+  /**
+   * A row's part in folding: on a line's first row the chevron (`open` if the
+   * line can fold, `closed` if it is folded), and on a folded line's last row
+   * the "⋯ N lines" pill, placed a cell after the text.
+   */
+  function foldMark(r: { line: number; sub: number; last: boolean }) {
+    const closed = foldState.closedAt(r.line) ? foldState.closedAround(r.line) : null;
+    const chevron = r.sub !== 0 ? null : closed ? "closed" : foldableAt(r.line) ? "open" : null;
+    if (!closed || !r.last) return { chevron, pill: null };
+    const end = cursorCell(layout, doc.store, pos(r.line, doc.store.line(r.line).length), settings.tabSize);
+    return { chevron, pill: { cell: end.cell + 1, lines: closed.end - closed.start } };
+  }
 
   type MarkRun = { key: string; row: number; from: number; to: number; kind: string };
 
@@ -487,9 +686,11 @@
 
   // ---------------------------------------------------------------- model glue
 
-  /** After a command: redraw, keep the cursor in view, tell the owner. */
-  function changed(): void {
+  /** After a command: open folds hiding a cursor, redraw, keep the cursor in view, tell the owner. */
+  function changed(reveal = true): void {
+    if (reveal) revealCursors();
     layout.refresh();
+    scheduleFoldStarts();
     tick++;
     void nextTick().then(revealCursor);
     onChange?.();
@@ -503,7 +704,8 @@
   function exec(cmd: Command): void {
     if (readOnly && !NON_EDITING.has(cmd.type)) return;
     run(doc, cmd, ctxNow());
-    changed();
+    // ⌘A reaches the end of the text, which may be folded; that is no reason to open it.
+    changed(cmd.type !== "selectAll");
   }
 
   function revealCursor(): void {
@@ -553,7 +755,15 @@
   // ---------------------------------------------------------------- keyboard
 
   function keyInputFrom(e: KeyboardEvent): KeyInput {
-    return { key: e.key, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey, ctrl: e.ctrlKey, keyCode: e.keyCode };
+    return {
+      key: e.key,
+      meta: e.metaKey,
+      alt: e.altKey,
+      shift: e.shiftKey,
+      ctrl: e.ctrlKey,
+      keyCode: e.keyCode,
+      code: e.code,
+    };
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -563,6 +773,13 @@
     if (findKey) {
       e.preventDefault();
       runFind(findKey);
+      return;
+    }
+    // The fold keys too (T7): Vi has its own `z` commands besides.
+    const foldKey = foldKeyAction(keyInputFrom(e));
+    if (foldKey) {
+      e.preventDefault();
+      foldAction(FOLD_KEY_ACTIONS[foldKey]);
       return;
     }
     // Esc back in the text closes the bar, once there is only one cursor left to go back to —
@@ -882,10 +1099,12 @@
   bind:this={surfaceEl}
   style:--cell="{charW}px"
   style:--row="{rowH}px"
+  style:--fold-shift="{foldSlide?.shift ?? 0}px"
   style:font-family={`"${settings.fontFamily}", var(--ax-font-mono)`}
   style:font-weight={settings.fontWeight}
   style:font-size="{settings.fontSize}px"
   style:font-variant-ligatures={settings.ligatures ? "normal" : "none"}
+  style:--fold-cells={FOLD_CELLS}
   style:tab-size={settings.tabSize}
 >
   <span class="measure" bind:this={measurer} aria-hidden="true">{"0".repeat(64)}</span>
@@ -911,20 +1130,44 @@
       <div class="gutter" style:width="{gutterW}px" onmousedown={onGutterMousedown} role="presentation">
         {#each view.rows as r (r.row)}
           {#if decorations}
-            <div class="number decorated ln-{r.deco.kind ?? 'none'}" style:top="{r.row * rowH}px">
+            <div
+              class="number decorated ln-{r.deco.kind ?? 'none'} {r.slide ?? ''}"
+              style:top="{r.row * rowH}px"
+            >
               {r.sub === 0 ? (r.deco.gutter ?? "") : ""}
             </div>
           {:else if r.sub === 0}
-            <div class="number" class:current={r.line === view.cursorLine} style:top="{r.row * rowH}px">
-              {lineLabel(r.line, view.cursorLine, settings.lineNumbers)}
+            <div
+              class="number {r.slide ?? ''}"
+              class:current={r.line === view.cursorLine}
+              style:top="{r.row * rowH}px"
+            >
+              {lineLabel(r.line, view.cursorLine, settings.lineNumbers, r.hiddenToCursor)}
             </div>
+          {/if}
+          {#if r.fold.chevron}
+            <button
+              type="button"
+              tabindex="-1"
+              class="fold-chevron"
+              class:closed={r.fold.chevron === "closed"}
+              style:top="{r.row * rowH}px"
+              title={r.fold.chevron === "closed" ? "Unfold (⌥⌘])" : "Fold (⌥⌘[)"}
+              aria-label={r.fold.chevron === "closed" ? "Unfold" : "Fold"}
+              onmousedown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleFoldAt(r.line);
+                input.focus();
+              }}>›</button
+            >
           {/if}
         {/each}
       </div>
       <div class="content" style:left="{textLeft}px">
         {#each view.rows as r (r.row)}
           {#if r.deco.kind}
-            <div class="line-bg ln-{r.deco.kind}" style:top="{r.row * rowH}px"></div>
+            <div class="line-bg ln-{r.deco.kind} {r.slide ?? ''}" style:top="{r.row * rowH}px"></div>
           {/if}
         {/each}
         {#each view.marks as m (m.key)}
@@ -944,7 +1187,7 @@
         {/if}
         {#each view.rows as r (r.row)}
           {#each r.guides as cell (cell)}
-            <div class="guide" style:top="{r.row * rowH}px" style:left="{cell * charW}px"></div>
+            <div class="guide {r.slide ?? ''}" style:top="{r.row * rowH}px" style:left="{cell * charW}px"></div>
           {/each}
         {/each}
         {#each view.whitespace as w (w.key)}
@@ -963,12 +1206,28 @@
         {#each view.rows as r (r.row)}
           <!-- Line breaks only inside tags: whitespace between the segments would show. -->
           <div
-            class="row"
+            class="row {r.slide ?? ''}"
             style:top="{r.row * rowH}px"
             style:padding-left="{r.indent * charW}px"
           >{#each r.segments as seg, i (i)}{#if seg.token}<span class="tk-{seg.token}">{seg.text}</span
               >{:else}{seg.text}{/if}{/each}</div
           >
+          {#if r.fold.pill}
+            <button
+              type="button"
+              tabindex="-1"
+              class="fold-pill {r.slide ?? ''}"
+              style:top="{r.row * rowH}px"
+              style:left="{r.fold.pill.cell * charW}px"
+              title="Unfold (⌥⌘])"
+              onmousedown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleFoldAt(r.line);
+                input.focus();
+              }}>⋯ {r.fold.pill.lines} {r.fold.pill.lines === 1 ? "line" : "lines"}</button
+            >
+          {/if}
           {#if r.sub === 0 && (r.deco.label || r.deco.actions)}
             <!-- A fold or a note: the label, and buttons the mouse can reach. -->
             <div class="line-label" style:top="{r.row * rowH}px">
@@ -1164,7 +1423,7 @@
   }
 
   .number.decorated {
-    left: 0;
+    left: calc(var(--fold-cells) * var(--cell));
     right: 0;
     padding-right: var(--cell);
     opacity: 0.8;
@@ -1251,6 +1510,85 @@
   .line-action:hover {
     border-color: var(--ax-accent);
     color: var(--ax-accent);
+  }
+
+  /* Folding (ED5.5): a chevron at the gutter's left edge — shown while the gutter is
+     hovered, always on a folded line — and the "⋯ N lines" pill after a folded header. */
+  .fold-chevron {
+    position: absolute;
+    left: 0;
+    width: calc(var(--fold-cells) * var(--cell));
+    height: var(--row);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--ax-text-muted);
+    font: inherit;
+    line-height: var(--row);
+    text-align: center;
+    cursor: pointer;
+    opacity: 0;
+    transform: rotate(90deg);
+    transition:
+      opacity var(--ax-dur-fast) var(--ax-ease),
+      transform var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  .gutter:hover .fold-chevron,
+  .fold-chevron.closed {
+    opacity: 1;
+  }
+
+  .fold-chevron.closed {
+    color: var(--ax-accent);
+    transform: none;
+  }
+
+  .fold-chevron:hover {
+    color: var(--ax-accent);
+  }
+
+  .fold-pill {
+    position: absolute;
+    height: calc(var(--row) - 4px);
+    margin-top: 2px;
+    padding: 0 var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-xs);
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .fold-pill:hover {
+    border-color: var(--ax-accent);
+    color: var(--ax-accent);
+  }
+
+  /* The slide (T7): the lines below a fold start where they were and move into place;
+     the lines an opening fold shows fade in. */
+  .slide {
+    animation: fold-slide var(--ax-dur-med) var(--ax-ease);
+  }
+
+  .reveal {
+    animation: fold-reveal var(--ax-dur-med) var(--ax-ease);
+  }
+
+  @keyframes fold-slide {
+    from {
+      transform: translateY(var(--fold-shift));
+    }
+  }
+
+  @keyframes fold-reveal {
+    from {
+      opacity: 0;
+    }
   }
 
   .current-line {

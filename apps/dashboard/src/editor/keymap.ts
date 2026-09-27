@@ -27,6 +27,8 @@ export interface KeyInput {
    * layout. Optional: only ⌥ shortcuts look at it.
    */
   keyCode?: number;
+  /** The physical key (`KeyboardEvent.code`), for ⌥ shortcuts on keys ⌥ turns into other characters. */
+  code?: string;
 }
 
 /** `keyCode` of the Z key, whatever the layout puts on it with ⌥. */
@@ -60,6 +62,32 @@ export function findKeyAction(input: KeyInput): FindEffect | null {
   if (key === "g") return shift ? "findPrevious" : "findNext";
   if (key === "e") return shift ? null : "useSelectionForFind";
   return null;
+}
+
+/**
+ * Folding (ED5, T7): ⌥⌘[ folds the innermost open range around the cursor,
+ * ⌥⌘] opens the fold there, ⌥⌘0 folds everything and ⌥⌘J opens everything.
+ * The surface handles them itself, in Vi mode too (beside `zc zo zM zR`).
+ */
+export type FoldKey = "fold" | "unfold" | "foldAll" | "unfoldAll";
+
+/**
+ * Per fold key: the characters it may arrive as — the plain one, what ⌥
+ * makes of it on a US layout — and the physical key, for layouts that put
+ * the character elsewhere (`[` is ⌥5 on a German keyboard).
+ */
+const FOLD_KEYS: { key: FoldKey; chars: string[]; code: string }[] = [
+  { key: "fold", chars: ["[", "“"], code: "BracketLeft" },
+  { key: "unfold", chars: ["]", "‘"], code: "BracketRight" },
+  { key: "foldAll", chars: ["0", "º"], code: "Digit0" },
+  { key: "unfoldAll", chars: ["j", "∆"], code: "KeyJ" },
+];
+
+/** The fold key `input` is (⌥⌘ and one of `[ ] 0 J`), or `null`. */
+export function foldKeyAction(input: KeyInput): FoldKey | null {
+  if (!input.meta || !input.alt || input.ctrl || input.shift) return null;
+  const key = input.key.toLowerCase();
+  return FOLD_KEYS.find((f) => f.chars.includes(key) || f.code === input.code)?.key ?? null;
 }
 
 export type KeyAction = { command: Command } | { effect: Effect };

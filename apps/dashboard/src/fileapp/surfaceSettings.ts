@@ -35,6 +35,8 @@ export interface SurfaceEffects {
   indentGuides: boolean;
   bracketColors: boolean;
   glow: boolean;
+  /** Folding slides the lines below (T7). */
+  foldAnimation: boolean;
 }
 
 /** Every effect off — plain text, for read-only side views. */
@@ -45,6 +47,7 @@ export const NO_EFFECTS: SurfaceEffects = {
   indentGuides: false,
   bracketColors: false,
   glow: false,
+  foldAnimation: false,
 };
 
 /** Extensions that count as prose for the wrap default (F6). */
@@ -80,6 +83,7 @@ export function surfaceSettings(settings: EditorSettings, wrap: boolean): Surfac
       indentGuides: settings.indentGuides,
       bracketColors: settings.bracketColors,
       glow: settings.glow,
+      foldAnimation: settings.foldAnimation,
     },
   };
 }

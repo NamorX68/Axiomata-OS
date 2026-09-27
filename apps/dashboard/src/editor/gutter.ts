@@ -9,11 +9,15 @@ export type LineNumberMode = "absolute" | "relative" | "hybrid";
 /** What the gutter shows: a numbering, or none (Vi's `:set nonu nornu`, ED3.3) — a setting never says "off". */
 export type GutterMode = LineNumberMode | "off";
 
-/** The label for logical line `line` (zero-based) with the cursor on `cursorLine`. */
-export function lineLabel(line: number, cursorLine: number, mode: GutterMode): string {
+/**
+ * The label for logical line `line` (zero-based) with the cursor on
+ * `cursorLine`. `hidden` lines folded away between the two (ED5, T18) do not
+ * count: a relative number is what `j`/`k` take to get there.
+ */
+export function lineLabel(line: number, cursorLine: number, mode: GutterMode, hidden = 0): string {
   if (mode === "off") return "";
   if (mode === "absolute" || (mode === "hybrid" && line === cursorLine)) return String(line + 1);
-  return String(Math.abs(line - cursorLine));
+  return String(Math.abs(line - cursorLine) - hidden);
 }
 
 /** Characters the gutter must fit, so it does not jump while scrolling. */

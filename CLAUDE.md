@@ -67,7 +67,9 @@ tree-sitter). ED5.2: every search pattern is first run by a worker with a 1 s li
 `:g`/`:v`/`:d`/`:normal`, `:s///c`, `gn`/`cgn`. ED5.3: multiple cursors in normal mode (`editor/multicursor.ts`:
 a command runs at each cursor as one undo step; `EditorDocument.extra` + `extraGoals`). ED5.4: the find bar
 (`fileapp/FindBar.svelte`, logic in `editor/search/findModel.ts`; the bar and Vi share the last search via
-`fileapp/findShared.ts`). Next: ED5.5, folding.
+`fileapp/findShared.ts`). ED5.5: folding (`editor/fold/`: `ranges.ts` where the text folds, `FoldState` what is
+folded; folded lines have no rows in `VisualLayout`; kept per file in `settings.editor.folds`,
+`fileapp/foldMemory.ts`). Next: ED5.6, sticky scroll and minimap.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

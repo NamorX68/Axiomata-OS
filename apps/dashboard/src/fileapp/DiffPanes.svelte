@@ -10,9 +10,15 @@
   * **Keys**: ⌥↓/⌥↑ go to the next/previous hunk, ⏎ asks the owner to open the
     changed file at the cursor's line; every other key the owner may take first
     (`interceptKey`), the rest is the surface's (moving, selecting, copying).
+  * **Folding (ED5.5, T17)** by indentation, with one `FoldState` for both panes
+    of the split layout: its rows are paired, so a fold hides the same rows on
+    each side and the two stay in step. Rebuilt panes (a gap opened) start unfolded.
+    A fold is taken from the pane it was made in: right at a hunk boundary it may
+    hide rows on the other side that are no block there (known, accepted).
 -->
 <script lang="ts">
   import { EditorDocument } from "../editor/document";
+  import { FoldState } from "../editor/fold/state";
   import type { ViEffect } from "../editor/vi/machine";
   import { pos } from "../editor/position";
   import { DiffHighlight } from "../editor/diff/highlight";
@@ -96,6 +102,14 @@
   const docs = $derived(
     panes.map((p) => new EditorDocument(`${p.text}\n`, { indentFallback: { kind: "spaces", size: 4 } })),
   );
+
+  /** What is folded, for every pane at once; new with the panes. */
+  const folds = $derived.by(() => {
+    void docs;
+    return new FoldState(null);
+  });
+  /** Bumped when one pane changed the folds: the other redraws. */
+  let folded = $state(0);
 
   // Each side's whole text, highlighted on its own (H2) — tagged with the texts
   // they were made for: until the next pair is ready, a new file must not be
@@ -242,7 +256,9 @@
         {settings}
         {fileName}
         readOnly
-        revision={coloured}
+        revision={coloured + folded}
+        {folds}
+        onFolds={() => folded++}
         decorations={pane.decorations}
         highlighter={highlights[index]}
         onLineAction={(_line, action) => onLineAction(action)}

@@ -12,6 +12,7 @@
 import { endOfText, type TextStore } from "../buffer";
 import { verticalTarget, type CommandContext } from "../commands";
 import type { EditorDocument } from "../document";
+import type { FoldLookup } from "../fold/state";
 import { comparePos, cursor, pos, type Pos } from "../position";
 import { colForDisplayColumn, displayColumn, nextGrapheme, prevGrapheme } from "../text";
 import {
@@ -30,6 +31,8 @@ import {
 export interface ViContext extends CommandContext {
   /** The first and last line on screen, for `H M L` and scrolling. */
   viewport: { top: number; bottom: number };
+  /** Closed folds (ED5, T18): `j`/`k` step over one as a line, `dd` takes it whole. */
+  folds?: FoldLookup;
 }
 
 export interface MotionSpec {
@@ -143,7 +146,9 @@ export function motion(
     case "gg":
       return lineResult(clampLine(store, (count ?? 1) - 1), -1, { jump: true });
     case "G":
-      return lineResult(clampLine(store, count === null ? store.lineCount() - 1 : count - 1), -1, { jump: true });
+      // A bare `G` goes to the last shown line; `12G` names a line, and opens a fold hiding it.
+      if (count === null) return lineResult(shown(ctx, store.lineCount() - 1), -1, { jump: true });
+      return lineResult(clampLine(store, count - 1), -1, { jump: true });
     case "+":
     case "<CR>":
     case "<C-m>":
@@ -153,11 +158,13 @@ export function motion(
     case "_":
       return lineResult(clampLine(store, from.line + n - 1), -1);
     case "H":
-      return lineResult(clampLine(store, Math.min(ctx.viewport.top + n - 1, ctx.viewport.bottom)), -1, { jump: true });
+      return lineResult(shownFrom(store, ctx, ctx.viewport.top, n - 1, ctx.viewport.bottom), -1, { jump: true });
     case "L":
-      return lineResult(clampLine(store, Math.max(ctx.viewport.bottom - n + 1, ctx.viewport.top)), -1, { jump: true });
-    case "M":
-      return lineResult(clampLine(store, Math.floor((ctx.viewport.top + ctx.viewport.bottom) / 2)), -1, { jump: true });
+      return lineResult(shownFrom(store, ctx, ctx.viewport.bottom, 1 - n, ctx.viewport.top), -1, { jump: true });
+    case "M": {
+      const middle = shown(ctx, clampLine(store, Math.floor((ctx.viewport.top + ctx.viewport.bottom) / 2)));
+      return lineResult(middle, -1, { jump: true });
+    }
     case "}":
       return result(repeat(n, from, (p) => paragraphForward(store, p)), false, { jump: true });
     case "{":
@@ -242,16 +249,48 @@ function wrapStep(store: TextStore, from: Pos, n: number): MotionResult | null {
 
 /** `j`/`k`: whole lines, keeping the goal display column (`$` keeps the end). */
 function vertical(store: TextStore, from: Pos, n: number, ctx: ViContext, state: MotionState): MotionResult | null {
-  const target = from.line + n;
-  if (target < 0 || target >= store.lineCount()) {
-    // Vim moves as far as it can with a count, and fails without one.
-    if (Math.abs(n) === 1) return null;
-  }
-  const line = clampLine(store, target);
+  const line = ctx.folds ? foldedStep(store, from.line, n, ctx.folds) : stepLines(store, from.line, n);
+  if (line === null) return null;
   const goal = state.goal ?? displayColumn(store.line(from.line), from.col, ctx.tabSize);
   const text = store.line(line);
   const col = goal === Infinity ? lastCharCol(store, line) : colForDisplayColumn(text, goal, ctx.tabSize);
   return { pos: pos(line, Math.min(col, lastCharCol(store, line))), linewise: true, inclusive: false, goal };
+}
+
+/** `line`, or the header of the closed fold hiding it (ED5, T18): a motion never lands in a fold. */
+export function shown(ctx: ViContext, line: number): number {
+  return ctx.folds?.closedAround(line)?.start ?? line;
+}
+
+/** `H`/`L`: `n` shown lines from the screen edge `from` (a fold counts as one), not past `limit`. */
+function shownFrom(store: TextStore, ctx: ViContext, from: number, n: number, limit: number): number {
+  const start = shown(ctx, clampLine(store, from));
+  if (n === 0) return start;
+  const line = ctx.folds ? (foldedStep(store, start, n, ctx.folds) ?? start) : clampLine(store, start + n);
+  return n > 0 ? Math.min(line, shown(ctx, limit)) : Math.max(line, limit);
+}
+
+/** `n` lines from `from` (clamped with a count; `null` when a single step would leave the text, as in Vim). */
+function stepLines(store: TextStore, from: number, n: number): number | null {
+  const target = from + n;
+  if ((target < 0 || target >= store.lineCount()) && Math.abs(n) === 1) return null;
+  return clampLine(store, target);
+}
+
+/** {@link stepLines}, with a closed fold counting as one line — landing on its header (T18). */
+function foldedStep(store: TextStore, from: number, n: number, folds: FoldLookup): number | null {
+  const dir = n < 0 ? -1 : 1;
+  let line = folds.closedAround(from)?.start ?? from;
+  for (let i = 0; i < Math.abs(n); i++) {
+    const edge = dir > 0 ? (folds.closedAround(line)?.end ?? line) : line;
+    const next = edge + dir;
+    if (next < 0 || next >= store.lineCount()) {
+      if (Math.abs(n) === 1) return null;
+      break;
+    }
+    line = folds.closedAround(next)?.start ?? next;
+  }
+  return line;
 }
 
 /**

@@ -1063,6 +1063,15 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   ⌘F/⌥⌘F/⌘G/⌘E (also in Vi), regex/case/whole word, in selection, `$1`/`$&`, preserve case,
   replace all as one step, ⌥⏎ matches → cursors; replace only where the surface is editable and
   not a diff; the last search is shared between bars and Vi (`fileapp/findShared.ts`).
+  ED5.5: folding (`editor/fold/`): `ranges.ts` works out where the text folds (indentation always,
+  the tree — the text-object node table plus bracketed nodes and multi-line comments — or Markdown
+  headings), `state.ts` (`FoldState`) holds the closed folds as line ranges that follow every edit;
+  `VisualLayout` gives folded lines no rows, ↑/↓/←/→ and Vi's `j`/`k` step over a fold, linewise Vi
+  operators take it whole. The surface draws a gutter chevron and "⋯ N lines", takes ⌥⌘[ ⌥⌘] ⌥⌘0
+  ⌥⌘J and Vi's `zc zo za zM zR`, and opens whatever hides a cursor after every command (search,
+  undo, jumps). Each `FileSession` owns its folds; `fileapp/foldMemory.ts` keeps them per file in
+  `settings.editor.folds` of `dashboard.json`, forgotten when the tab or IDE pane closes. A split
+  diff's panes share one `FoldState`.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

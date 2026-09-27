@@ -74,6 +74,15 @@ describe("gutter labels", () => {
     expect(lineLabel(0, 2, "hybrid")).toBe("2");
   });
 
+  it("leaves folded lines out of a relative number (ED5, T18)", () => {
+    expect(lineLabel(9, 2, "relative", 4)).toBe("3");
+    expect(lineLabel(9, 2, "absolute", 4)).toBe("10");
+    // Hybrid numbers the cursor's own line absolutely and the others by what j/k take.
+    expect(lineLabel(2, 2, "hybrid", 0)).toBe("3");
+    expect(lineLabel(0, 9, "hybrid", 4)).toBe("5");
+    expect(lineLabel(9, 2, "off", 4)).toBe("");
+  });
+
   it("reserves room for the largest number", () => {
     expect(gutterDigits(9, "absolute")).toBe(2);
     expect(gutterDigits(12345, "hybrid")).toBe(5);

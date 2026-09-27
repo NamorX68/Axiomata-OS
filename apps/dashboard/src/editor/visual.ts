@@ -8,11 +8,21 @@
  * thousand are map lookups. The row offsets (a prefix sum over rows per line)
  * are rebuilt by `refresh`, which the view calls once per document revision or
  * width change — linear, but a few milliseconds even for large files.
+ *
+ * Folded lines (ED5, T7) have no rows at all: the fold's header keeps its own,
+ * and the row after it belongs to the first line past the fold.
  */
 
 import type { TextStore } from "./buffer";
 import type { RowLayout } from "./commands";
+import type { HiddenLines } from "./fold/state";
 import { SINGLE_ROW, wrapLine, type WrappedLine } from "./wrap";
+
+/** What the layout needs to know about folds (a `FoldState`). */
+export interface HiddenSource {
+  hidden(): readonly HiddenLines[];
+  visibleLine(line: number, dir: -1 | 1, lineCount: number): number | null;
+}
 
 export interface VisualOptions {
   wrap: boolean;
@@ -26,12 +36,19 @@ export class VisualLayout implements RowLayout {
   /** `offsets[i]` is the first visual row of line `i`; one extra entry at the end. */
   private offsets: number[] = [0];
   private options: VisualOptions;
+  private folds: HiddenSource | null = null;
 
   constructor(
     private readonly store: TextStore,
     options: VisualOptions,
   ) {
     this.options = { ...options };
+    this.refresh();
+  }
+
+  /** Lets `folds` hide lines from now on (`null`: none hidden). */
+  setFolds(folds: HiddenSource | null): void {
+    this.folds = folds;
     this.refresh();
   }
 
@@ -53,8 +70,23 @@ export class VisualLayout implements RowLayout {
     if (this.cache.size > count * 4 + 1024) this.cache.clear();
     const offsets = new Array<number>(count + 1);
     offsets[0] = 0;
-    for (let i = 0; i < count; i++) offsets[i + 1] = offsets[i] + this.wrapped(i).starts.length;
+    const hidden = this.folds?.hidden() ?? [];
+    let next = 0;
+    for (let i = 0; i < count; i++) {
+      while (next < hidden.length && hidden[next].to < i) next++;
+      const folded = next < hidden.length && hidden[next].from <= i;
+      offsets[i + 1] = offsets[i] + (folded ? 0 : this.wrapped(i).starts.length);
+    }
     this.offsets = offsets;
+  }
+
+  /**
+   * The nearest line at `line` or past it in `dir` that is not folded away
+   * (`RowLayout`): going up a folded line is its fold's header, going down
+   * the line after the fold — `null` if the fold reaches the end of the text.
+   */
+  visibleLine(line: number, dir: -1 | 1): number | null {
+    return this.folds ? this.folds.visibleLine(line, dir, this.store.lineCount()) : line;
   }
 
   wrapped(line: number): WrappedLine {
@@ -81,7 +113,12 @@ export class VisualLayout implements RowLayout {
     return this.offsets[line];
   }
 
-  /** The logical line and its sub-row that visual row `row` shows (clamped). */
+  /**
+   * The logical line and its sub-row that visual row `row` shows (clamped).
+   * Folded lines share their offset with the line after them, so the search
+   * — which takes the last line starting at or before the row — never lands
+   * on one.
+   */
   lineAt(row: number): { line: number; sub: number } {
     const last = this.offsets.length - 2;
     const target = Math.min(Math.max(row, 0), this.totalRows - 1);

@@ -28,6 +28,7 @@
 import type { EditorRecovery, FileChange, FileVersion, TextFile } from "../core/backend";
 import { EditorDocument } from "../editor/document";
 import type { Indent } from "../editor/detect";
+import { FoldState } from "../editor/fold/state";
 
 /** The backend calls a session needs; the real one is `invokeBackend`. */
 export interface FileBackend {
@@ -77,6 +78,8 @@ function errorText(err: unknown): string {
 
 export class FileSession {
   readonly doc: EditorDocument;
+  /** What is folded (ED5, T7) — goes with the session from the panel into a tab. */
+  readonly folds: FoldState;
   /** The version on disk the document is based on; `null` if the file is gone. */
   version: FileVersion | null;
   /**
@@ -104,6 +107,7 @@ export class FileSession {
   ) {
     this.relPath = rel;
     this.doc = new EditorDocument(file.content, { indentFallback });
+    this.folds = new FoldState(this.doc);
     this.version = file.version;
     this.light = file.large;
     this.untitled = untitled;
@@ -297,6 +301,7 @@ export class FileSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.folds.dispose();
     if (!this.untitled) await this.backend.unwatch(this.root, this.rel).catch(() => undefined);
   }
 
