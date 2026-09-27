@@ -10,7 +10,14 @@
  * A weight a family does not have is never faked by the browser: the editor
  * keeps the owner's choice in its settings and draws the nearest real face,
  * saying so next to the slider (F13).
+ *
+ * Besides the bundled families, every font installed on the Mac (ED5, T10,
+ * `core/installedFonts.ts`) with the weights CoreText reports; those need no
+ * loading — the webview has them. A family that is neither (uninstalled
+ * since it was chosen) is drawn with the default instead (`drawnFamily`).
  */
+
+import { installedFont } from "../core/installedFonts";
 
 type Loader = () => Promise<unknown>;
 
@@ -135,10 +142,24 @@ export function fontFamily(family: string): FontFamily | undefined {
   return EDITOR_FONTS.find((f) => f.family === family);
 }
 
-/** The weights `family` really has, ascending; `[400]` for an unknown family. */
+/** The default family, drawn when the chosen one is not there. */
+export const DEFAULT_FONT_FAMILY = "JetBrains Mono";
+
+/** The weights `family` really has, ascending — bundled or installed; `[400]` for an unknown family. */
 export function realWeights(family: string): number[] {
   const known = fontFamily(family);
-  return known ? Object.keys(known.faces).map(Number).sort((a, b) => a - b) : [400];
+  if (known) return Object.keys(known.faces).map(Number).sort((a, b) => a - b);
+  const installed = installedFont(family);
+  return installed && installed.weights.length > 0 ? installed.weights : [400];
+}
+
+/**
+ * The family to draw with for the chosen `family`: itself if it is bundled or
+ * installed (or the installed list has not arrived yet), else the default.
+ */
+export function drawnFamily(family: string, installedLoaded: boolean): string {
+  if (fontFamily(family) || !installedLoaded || installedFont(family)) return family;
+  return DEFAULT_FONT_FAMILY;
 }
 
 /** The real weight nearest to `wanted`; on a tie the lighter one. */

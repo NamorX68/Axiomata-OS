@@ -1684,6 +1684,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "file_search_cancel":
       return undefined as T;
+    case "installed_fonts":
+      return [
+        { family: "Andale Mono", weights: [400], monospace: true },
+        { family: "Helvetica Neue", weights: [100, 200, 300, 400, 500, 700], monospace: false },
+        { family: "Menlo", weights: [400, 700], monospace: true },
+        { family: "SF Mono", weights: [300, 400, 500, 600, 700, 800], monospace: true },
+      ] as T;
     case "file_create": {
       const { root, rel } = fileArgs(args);
       if (relsOf(root).some((p) => p === rel || p.startsWith(`${rel}/`))) {

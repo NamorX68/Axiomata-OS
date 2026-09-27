@@ -17,7 +17,8 @@
     type CursorAnimation,
     type EditorSettings,
   } from "./editorSettings";
-  import { EDITOR_FONTS, nearestWeight, realWeights, weightName } from "./fonts";
+  import { ensureInstalledFonts, installedFonts } from "../core/installedFonts";
+  import { DEFAULT_FONT_FAMILY, drawnFamily, EDITOR_FONTS, nearestWeight, realWeights, weightName } from "./fonts";
   import { highlightFor } from "./highlighting";
   import type { SurfaceSettings } from "./surfaceSettings";
 
@@ -54,8 +55,21 @@
   });
 
   const s = $derived($editorSettings);
-  const weights = $derived(realWeights(s.fontFamily));
-  const shownWeight = $derived(nearestWeight(s.fontFamily, s.fontWeight));
+  // Both depend on the installed list too (an installed family's weights), which arrives later.
+  const weights = $derived((void $installedFonts, realWeights(s.fontFamily)));
+  const shownWeight = $derived((void $installedFonts, nearestWeight(s.fontFamily, s.fontWeight)));
+
+  void ensureInstalledFonts();
+  /** The installed fonts offered: monospaced ones only unless this is unticked (T10). */
+  let monospaceOnly = $state(true);
+  const bundledNames = new Set(EDITOR_FONTS.map((f) => f.family));
+  const installedChoices = $derived(
+    $installedFonts.fonts.filter(
+      (f) => !bundledNames.has(f.family) && (!monospaceOnly || f.monospace || f.family === s.fontFamily),
+    ),
+  );
+  /** The chosen family is not on this Mac (any more): the editor draws the default. */
+  const missing = $derived(drawnFamily(s.fontFamily, $installedFonts.loaded) !== s.fontFamily);
 
   const CURSOR: { value: CursorAnimation; label: string }[] = [
     { value: "trail", label: "Glide with trail" },
@@ -126,11 +140,30 @@
     <label>
       <span>Font</span>
       <select value={s.fontFamily} onchange={(e) => updateEditorSettings({ fontFamily: e.currentTarget.value })}>
-        {#each EDITOR_FONTS as font (font.family)}
-          <option value={font.family}>{font.family}</option>
-        {/each}
+        <optgroup label="Bundled">
+          {#each EDITOR_FONTS as font (font.family)}
+            <option value={font.family}>{font.family}</option>
+          {/each}
+        </optgroup>
+        {#if installedChoices.length > 0}
+          <optgroup label="Installed on this Mac">
+            {#each installedChoices as font (font.family)}
+              <option value={font.family}>{font.family}</option>
+            {/each}
+          </optgroup>
+        {/if}
+        {#if missing}
+          <option value={s.fontFamily}>{s.fontFamily} (not installed)</option>
+        {/if}
       </select>
     </label>
+    <label class="check">
+      <input type="checkbox" bind:checked={monospaceOnly} />
+      <span>Only monospaced fonts</span>
+    </label>
+    {#if missing}
+      <p class="note">{s.fontFamily} is not installed on this Mac — the editor shows {DEFAULT_FONT_FAMILY}.</p>
+    {/if}
 
     <label>
       <span>Weight</span>

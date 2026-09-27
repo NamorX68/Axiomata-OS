@@ -72,7 +72,9 @@ folded; folded lines have no rows in `VisualLayout`; kept per file in `settings.
 `fileapp/foldMemory.ts`). ED5.6: sticky scroll (`editor/sticky.ts`) and the minimap (`editor/minimap.ts`,
 `fileapp/Minimap.svelte`), off in the floating panel (`FileEditor` `compact`). ED5.7: the project search
 (`axiomata-files::search`, Tauri `file_search` over an `ipc::Channel`, `fileapp/ProjectSearch.svelte` in the file
-app's Files | Search column and the IDE's `search` pane, ⇧⌘F). Next: ED5.8, installed Mac fonts.
+app's Files | Search column and the IDE's `search` pane, ⇧⌘F). ED5.8: installed Mac fonts
+(`axiomata-macos::fonts`, CoreText through raw `unsafe extern` FFI; `core/installedFonts.ts`). Next: ED5.9, moving in
+the tree.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

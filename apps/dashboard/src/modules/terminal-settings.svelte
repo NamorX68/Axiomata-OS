@@ -52,6 +52,7 @@
   import type { AppInfo } from "../core/backend";
   import type { ModuleContext } from "../core/types";
   import { DEFAULT_CURSOR_STYLE } from "./TerminalScreen";
+  import { ensureInstalledFonts, installedFonts } from "../core/installedFonts";
   import { BUNDLED_FONTS } from "./terminalFonts";
   import { DEFAULT_THEME, THEMES } from "./terminalThemes";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
@@ -87,6 +88,12 @@
    *  setting — picking a locally installed font (or clearing it back to
    *  the theme default) still goes through that same field. */
   const bundledFontNames = BUNDLED_FONTS.map((f) => f.family);
+
+  /** The Mac's installed monospaced families (editor plan T16: the editor's list, monospace only). */
+  void ensureInstalledFonts();
+  const installedMonoNames = $derived(
+    $installedFonts.fonts.filter((f) => f.monospace && !bundledFontNames.includes(f.family)).map((f) => f.family),
+  );
 
   function pickBundledFont(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement).value;
@@ -300,12 +307,26 @@
     <section>
       <h3>Font</h3>
       <label class="field">
-        <span>Bundled font</span>
-        <select value={bundledFontNames.includes(fontFamilyText) ? fontFamilyText : ""} onchange={pickBundledFont}>
+        <span>Font</span>
+        <select
+          value={bundledFontNames.includes(fontFamilyText) || installedMonoNames.includes(fontFamilyText)
+            ? fontFamilyText
+            : ""}
+          onchange={pickBundledFont}
+        >
           <option value="">Custom…</option>
-          {#each bundledFontNames as name (name)}
-            <option value={name}>{name}</option>
-          {/each}
+          <optgroup label="Bundled">
+            {#each bundledFontNames as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
+          </optgroup>
+          {#if installedMonoNames.length > 0}
+            <optgroup label="Installed on this Mac (monospaced)">
+              {#each installedMonoNames as name (name)}
+                <option value={name}>{name}</option>
+              {/each}
+            </optgroup>
+          {/if}
         </select>
       </label>
       <label class="field">

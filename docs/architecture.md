@@ -1081,6 +1081,9 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `file_search` streaming batches over an `ipc::Channel` (a newer query per `owner` stops the older),
   CLI `files search`; `fileapp/ProjectSearch.svelte` in the file app's Files | Search column (⇧⌘F)
   and as the IDE's `search` pane; `fileapp/dirtyFiles.ts` marks files with unsaved changes.
+  ED5.8: installed Mac fonts: `axiomata-macos::fonts` (CoreText via raw FFI, no crate), Tauri
+  `installed_fonts` (cached per run), `core/installedFonts.ts`; the editor's and the terminal's font
+  pickers offer them (the terminal monospaced only), a missing chosen font draws the default.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

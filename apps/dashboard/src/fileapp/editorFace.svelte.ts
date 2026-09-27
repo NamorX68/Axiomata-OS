@@ -7,8 +7,9 @@
 
 import { fromStore } from "svelte/store";
 
+import { ensureInstalledFonts, installedFonts } from "../core/installedFonts";
 import { editorSettings } from "./editorSettings";
-import { loadFace, nearestWeight } from "./fonts";
+import { drawnFamily, loadFace, nearestWeight } from "./fonts";
 
 export interface EditorFace {
   readonly family: string;
@@ -17,9 +18,12 @@ export interface EditorFace {
 
 export function editorFace(): EditorFace {
   const settings = fromStore(editorSettings);
+  const installed = fromStore(installedFonts);
+  void ensureInstalledFonts();
   let face = $state({ family: settings.current.fontFamily, weight: 400 });
   $effect(() => {
-    const family = settings.current.fontFamily;
+    // An installed family that is gone (uninstalled) quietly draws the default (T10).
+    const family = drawnFamily(settings.current.fontFamily, installed.current.loaded);
     const weight = nearestWeight(family, settings.current.fontWeight);
     let current = true;
     void loadFace(family, weight)

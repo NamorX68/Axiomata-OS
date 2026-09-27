@@ -32,8 +32,11 @@ describe("parseEditorSettings", () => {
     });
   });
 
-  it("refuses a font that is not bundled", () => {
-    expect(parseEditorSettings({ fontFamily: "Comic Sans MS" }).fontFamily).toBe("JetBrains Mono");
+  it("keeps an installed font's name (T10), but refuses one that could break out of CSS", () => {
+    expect(parseEditorSettings({ fontFamily: "Comic Sans MS" }).fontFamily).toBe("Comic Sans MS");
+    for (const bad of ['Evil"; x', ".SF NS", "", "a\\b", "x".repeat(129)]) {
+      expect(parseEditorSettings({ fontFamily: bad }).fontFamily).toBe("JetBrains Mono");
+    }
   });
 
   it("defaults viClipboard to 'shared' (D17) and keeps a good value", () => {

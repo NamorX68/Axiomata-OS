@@ -1084,6 +1084,23 @@ nicht belegt. (3) Ein aus dem Layout wiederhergestellter IDE-Search-Pane holte s
 10 000 Treffer hießen „abgeschnitten“ — jetzt erst, wenn ein weiterer Treffer es beweist. (5) Ein kaputter Glob wird als
 Glob benannt, nicht als Muster; Glob-Fehler tragen keinen Pfad.
 
+**ED5.8 — gebaut (2026-09-27):** installierte Mac-Schriften (T10, T16). `axiomata-macos::fonts` fragt CoreText nach
+allen Schnitten (`CTFontCollectionCreateFromAvailableFonts`), direkt über `unsafe extern "C"` gegen die System-Frameworks
+— kein neues Crate, wie der Rest von `axiomata-macos`; jedes Create/Copy-Objekt wird genau einmal freigegeben
+(`Owned`). Je Familie die CSS-Gewichte ihrer aufrechten Schnitte (CoreTexts -1…1 auf den nächsten von Apples benannten
+Schnitten, wie WebKit) und ob sie monospaced ist; Kursive, private Systemschriften (`.`-Namen) und Namen, die aus
+einem CSS-String ausbrechen könnten, fallen heraus (`usable_name`, im Frontend dieselbe Regel `usableFamilyName`).
+Tauri `installed_fonts` rechnet einmal je App-Lauf (CoreText braucht im Debug-Build ~2,6 s; neu installierte
+Schriften nach Neustart). Frontend: `core/installedFonts.ts` (Store, einmal gefragt), `fileapp/fonts.ts` kennt die
+Gewichte installierter Familien, `drawnFamily` zeichnet eine nicht (mehr) installierte gewählte Schrift still mit
+der Vorgabe; die Einstellungen nehmen jede sichere Familie an. Einstellungen: Gruppen „Bundled“ / „Installed on this
+Mac“, „Only monospaced fonts“ (an), Hinweis bei fehlender Schrift. Terminal (T16): dieselbe Liste, nur monospaced, als
+weitere Gruppe im Schnellwahl-Menü über dem freien Feld. Browser-Test (Mock): Gruppen, Auswahl, Rückfall auf die
+Vorgabe; der Hinweistext selbst nur per Unit-Test (`drawnFamily`).
+Review (kombiniert, Sonnet): FFI ohne Befund (jedes Create/Copy genau einmal freigegeben, Typprüfung vor jedem Lesen,
+Zahlentypen passend). Behoben: die TS-Regel ließ C1-Steuerzeichen (U+0080–U+009F) durch, die Rusts `is_control`
+abweist, und zählte die Länge in UTF-16 statt in UTF-8-Bytes — jetzt dieselbe Regel auf beiden Seiten, mit Test.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

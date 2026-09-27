@@ -14,7 +14,7 @@ import { writable, type Writable } from "svelte/store";
 import { invokeBackend, type LoadedJsonState } from "../core/backend";
 import type { LineNumberMode } from "../editor/gutter";
 import { toast } from "../core/toast";
-import { fontFamily } from "./fonts";
+import { usableFamilyName } from "../core/installedFonts";
 
 export type EditorMode = "normal" | "vi";
 export type Autosave = "off" | "delay" | "leave";
@@ -111,7 +111,8 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
   return {
     mode: pick(r.mode, ["normal", "vi"] as const, d.mode),
     viClipboard: pick(r.viClipboard, ["shared", "separate"] as const, d.viClipboard),
-    fontFamily: typeof r.fontFamily === "string" && fontFamily(r.fontFamily) ? r.fontFamily : d.fontFamily,
+    // Any family whose name is safe to draw with: a bundled one, or one installed on the Mac (T10).
+    fontFamily: typeof r.fontFamily === "string" && usableFamilyName(r.fontFamily) ? r.fontFamily : d.fontFamily,
     fontWeight: Math.round(number(r.fontWeight, 100, 900, d.fontWeight) / 100) * 100,
     fontSize: Math.round(number(r.fontSize, 9, 32, d.fontSize)),
     lineHeight: number(r.lineHeight, 1, 2.5, d.lineHeight),

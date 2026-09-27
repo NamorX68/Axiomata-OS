@@ -2012,6 +2012,42 @@ pub async fn clipboard_write(text: String) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
+/// One installed font family, as the font pickers see it (ED5, T10).
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledFont {
+    family: String,
+    /// CSS weights of its upright faces, ascending.
+    weights: Vec<u16>,
+    monospace: bool,
+}
+
+/// The installed families, looked up once per run: CoreText takes a moment
+/// over a Mac's thousand-odd faces. A font installed later shows after a restart.
+static INSTALLED_FONTS: std::sync::OnceLock<Vec<InstalledFont>> = std::sync::OnceLock::new();
+
+/// Every font family installed on the Mac, with its real weights and whether
+/// it is monospaced (ED5, T10, T16) — for the editor's and the terminal's
+/// font pickers.
+#[tauri::command]
+pub async fn installed_fonts() -> Result<Vec<InstalledFont>, String> {
+    tokio::task::spawn_blocking(|| {
+        INSTALLED_FONTS
+            .get_or_init(|| {
+                axiomata_macos::fonts::installed_families()
+                    .into_iter()
+                    .map(|f| InstalledFont {
+                        family: f.family,
+                        weights: f.weights,
+                        monospace: f.monospace,
+                    })
+                    .collect()
+            })
+            .clone()
+    })
+    .await
+    .map_err(|err| format!("font lookup failed: {err}"))
+}
+
 /// Puts files back to the agent's base (G13). The UI asks first.
 #[tauri::command]
 pub async fn ide_agent_discard(
