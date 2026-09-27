@@ -1076,6 +1076,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   pinned over the text; the cursor, `zt` and `H` stay below them) and the minimap (`editor/minimap.ts`
   geometry, `fileapp/Minimap.svelte` canvas right of the scroller: token-coloured ink, slider, search and
   diff marks). Both are settings (on), off in the floating panel, `FilePeek` and the light mode.
+  ED5.7: the project search: `axiomata-files::search` (the quick-open walk plus include/exclude globs,
+  every file read through the guarded `read_text`, `regex` crate, ≤ 10 000 matches), Tauri
+  `file_search` streaming batches over an `ipc::Channel` (a newer query per `owner` stops the older),
+  CLI `files search`; `fileapp/ProjectSearch.svelte` in the file app's Files | Search column (⇧⌘F)
+  and as the IDE's `search` pane; `fileapp/dirtyFiles.ts` marks files with unsaved changes.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

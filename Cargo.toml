@@ -21,6 +21,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 gray_matter = "0.3"
 ignore = "0.4"
+regex = "1"
+globset = "0.4"
 # Cron expression parser. Native format is 6-7 fields (seconds required),
 # not the 5-field crontab format. Deliberately not `tokio-cron-scheduler`:
 # routine firing state has to survive restarts, so Axiomata owns the poll

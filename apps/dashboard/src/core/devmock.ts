@@ -1652,6 +1652,38 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         .sort();
       return { files, truncated: false } as T;
     }
+    case "file_search": {
+      // A plain JS search over the fixture files — enough to see the view work.
+      const root = String(args.root);
+      const q = args.query as { pattern: string; regex: boolean; caseSensitive: boolean; wholeWord: boolean };
+      const onBatch = args.onBatch as { onmessage: (b: { files: unknown[] }) => void };
+      let body = q.regex ? q.pattern : q.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (q.wholeWord) body = `\\b(?:${body})\\b`;
+      let re: RegExp;
+      try {
+        re = new RegExp(body, q.caseSensitive ? "g" : "gi");
+      } catch (err) {
+        // The shape the Rust side sends (`FilesError::BadPattern`'s text).
+        throw fileError("BadPattern", `bad search pattern: ${(err as Error).message}`);
+      }
+      const summary = { files: 0, matches: 0, searched: 0, truncated: false, cancelled: false };
+      for (const rel of relsOf(root).filter((p) => !p.endsWith("/")).sort()) {
+        summary.searched++;
+        const matches: unknown[] = [];
+        (fileStore(root).get(fileKey(root, rel)) ?? "").split("\n").forEach((text, line) => {
+          for (const m of text.matchAll(re)) {
+            if (m[0]) matches.push({ line, col: m.index, end: m.index + m[0].length, text, from: 0 });
+          }
+        });
+        if (matches.length === 0) continue;
+        summary.files++;
+        summary.matches += matches.length;
+        onBatch.onmessage({ files: [{ rel, matches }] });
+      }
+      return summary as T;
+    }
+    case "file_search_cancel":
+      return undefined as T;
     case "file_create": {
       const { root, rel } = fileArgs(args);
       if (relsOf(root).some((p) => p === rel || p.startsWith(`${rel}/`))) {

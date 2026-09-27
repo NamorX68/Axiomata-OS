@@ -49,6 +49,7 @@
     allTabs,
     closeTab,
     findNode,
+    findTab,
     isSplit,
     moveTab,
     resizeSplit,
@@ -72,6 +73,8 @@
     frontFile,
     openOrFocus,
     projectRoot,
+    SEARCH_PANE,
+    searchTab,
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
@@ -121,14 +124,38 @@
   }
 
   /**
-   * The view's one key of its own, in the capture phase so a focused terminal
-   * does not get it first. Only ⌘P: everything else belongs to the panes.
+   * The view's own keys, in the capture phase so a focused terminal does not
+   * get them first: ⌘P (quick open) and ⇧⌘F (the Search pane, T13).
+   * Everything else belongs to the panes.
    */
   function onViewKeydown(e: KeyboardEvent): void {
-    if (!e.metaKey || e.altKey || e.ctrlKey || e.shiftKey || e.key.toLowerCase() !== "p" || !current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    quickOpen = !quickOpen;
+    if (!e.metaKey || e.altKey || e.ctrlKey || !current) return;
+    const key = e.key.toLowerCase();
+    if (!e.shiftKey && key === "p") {
+      e.preventDefault();
+      e.stopPropagation();
+      quickOpen = !quickOpen;
+    } else if (e.shiftKey && (key === "f" || e.code === "KeyF")) {
+      e.preventDefault();
+      e.stopPropagation();
+      showSearch();
+    }
+  }
+
+  /**
+   * ⇧⌘F: brings the Search pane forward with its field focused, or opens one
+   * — in the Files pane's group, where a column for it already is.
+   */
+  function showSearch(): void {
+    const existing = allTabs(layout).find((t) => t.kind === SEARCH_PANE);
+    if (existing) {
+      layout = activateTab(setTabConfig(layout, existing.id, { ...existing.config, focus: Date.now() }), existing.id);
+      return;
+    }
+    const files = allTabs(layout).find((t) => t.kind === FILES_PANE);
+    const group = files ? findTab(layout, files.id)?.group.id : undefined;
+    const target: DockTarget = group ? { nodeId: group, side: "center" } : { nodeId: layout.root.id, side: "left" };
+    layout = addTab(layout, searchTab(), target);
   }
 
   /** Set on pointerdown, promoted to a drag once the pointer has moved far enough. */
@@ -339,7 +366,8 @@
     addPane: (groupId, kind) => {
       const project = current;
       if (!project) return;
-      const tab = kind === "files" ? filesTab(project.id) : projectSession.terminalTab();
+      const tab =
+        kind === "files" ? filesTab(project.id) : kind === "search" ? searchTab() : projectSession.terminalTab();
       const added = addTab(layout, tab, { nodeId: groupId, side: "center" });
       layout = applyProjectCwd(added, project.repo_root);
     },

@@ -45,6 +45,7 @@
   import type { Effect } from "../editor/keymap";
   import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
   import { fileBackend, type FileRemoved, type FileRenamed } from "./backend";
+  import { markDirty } from "./dirtyFiles";
   import { foldKey, rememberedFolds, rememberFolds, updateRememberedFolds } from "./foldMemory";
   import DiffPanes from "./DiffPanes.svelte";
   import { editorFace } from "./editorFace.svelte";
@@ -183,11 +184,15 @@
     return session ? statusParts(session.doc, settings.tabSize) : null;
   });
 
+  /** This editor's own id, for the shared list of files with unsaved changes. */
+  const editorId = crypto.randomUUID();
+
   $effect(() => {
     void sessionTick;
     const s = session;
     if (s) onState?.({ root: s.root, rel: s.rel, dirty: s.doc.dirty, untitled: s.untitled });
     else onState?.(image ? { ...image, dirty: false, untitled: false } : null);
+    markDirty(editorId, s && !s.untitled && s.doc.dirty ? { root: s.root, rel: s.rel } : null);
   });
 
   /** After a session action or an external change — both may replace the text. */
@@ -517,6 +522,7 @@
       if (hintTimer) clearTimeout(hintTimer);
       if (autosaveTimer) clearTimeout(autosaveTimer);
       // Going away is leaving the file: keep unsaved text aside, stop watching.
+      markDirty(editorId, null);
       void leaveCurrent();
     };
   });

@@ -1,14 +1,18 @@
 //! `axiomata-cli files …` — the file service without the app (editor plan
 //! §ED0, E11): list the roots, read and write through the same guard the
-//! editor uses, and manage the dialog grants.
+//! editor uses, search a root like the project search does (ED5.7), and manage
+//! the dialog grants.
 
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::{Context, Result};
 use axiomata_core::AxiomataCore;
 use axiomata_core::files::{self, Roots};
-use axiomata_files::{self as service, MAX_READ_BYTES, MAX_WRITE_BYTES, RootResolver, Version};
+use axiomata_files::{
+    self as service, MAX_READ_BYTES, MAX_WRITE_BYTES, RootResolver, SearchQuery, Version,
+};
 use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
@@ -29,6 +33,26 @@ pub enum FilesAction {
         /// Refuse the write if the file is no longer at this version.
         #[arg(long)]
         expect: Option<String>,
+    },
+    /// Search a root's files, as the project search does: `rel:line:col: text` per match.
+    Search {
+        root: String,
+        pattern: String,
+        /// The pattern is a regular expression (the `regex` crate's syntax).
+        #[arg(long)]
+        regex: bool,
+        /// Match case exactly.
+        #[arg(long)]
+        case: bool,
+        /// Whole words only.
+        #[arg(long)]
+        word: bool,
+        /// Only files matching this glob (repeatable).
+        #[arg(long)]
+        include: Vec<String>,
+        /// No file matching this glob (repeatable).
+        #[arg(long)]
+        exclude: Vec<String>,
     },
     /// Dialog grants: the files and folders picked in the open dialog.
     Grants {
@@ -52,8 +76,54 @@ pub fn run(core: &AxiomataCore, action: FilesAction) -> Result<()> {
         FilesAction::Roots => roots(core),
         FilesAction::Read { root, rel } => read(core, &root, &rel),
         FilesAction::Write { root, rel, expect } => write(core, &root, &rel, expect),
+        FilesAction::Search {
+            root,
+            pattern,
+            regex,
+            case,
+            word,
+            include,
+            exclude,
+        } => {
+            let query = SearchQuery {
+                pattern,
+                regex,
+                case_sensitive: case,
+                whole_word: word,
+                include,
+                exclude,
+            };
+            search(core, &root, &query)
+        }
         FilesAction::Grants { action } => grants(action),
     }
+}
+
+fn search(core: &AxiomataCore, root_id: &str, query: &SearchQuery) -> Result<()> {
+    let root = root(core, root_id)?;
+    let summary = service::search(&root, query, &AtomicBool::new(false), |file| {
+        for m in file.matches {
+            println!(
+                "{}:{}:{}: {}",
+                file.rel,
+                m.line + 1,
+                m.col + 1,
+                m.text.trim()
+            );
+        }
+    })?;
+    eprintln!(
+        "{} matches in {} files ({} searched){}",
+        summary.matches,
+        summary.files,
+        summary.searched,
+        if summary.truncated {
+            ", stopped early"
+        } else {
+            ""
+        }
+    );
+    Ok(())
 }
 
 fn roots(core: &AxiomataCore) -> Result<()> {

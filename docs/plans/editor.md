@@ -1057,6 +1057,33 @@ Schieber nicht hell hängen. Bekannt und gelassen: im Split-Diff pinnt jede Seit
 evtl. verschieden viele); eine Datei ab 50 000 Zeilen unter 2 MB hat keine Sticky-Köpfe (der Gutter fragt dort
 zeilenweise), ohne Hinweis.
 
+**ED5.7 — gebaut (2026-09-27):** die Projektsuche (T4, T5, T13, T14). Rust: `axiomata-files::search` — dieselben
+Dateien wie ⌘P (`index::walk_files`, jetzt geteilt: keine Dotfiles, `node_modules`/`target`, `.gitignore`), eingeengt
+durch „include“/„exclude“-Globs (`ignore`-Overrides); gelesen wird jede Datei über `read_text`, also durch den Wächter
+mit gepinntem Elternordner, binäre Dateien und solche über 16 MiB fallen heraus. Das Muster ist das des `regex`-Crates
+(ohne Backtracking, Größengrenze 16 MiB; wörtliche Eingabe maskiert, „ganzes Wort“ `\b…\b`, schon über Tauri im
+Lockfile, kein neues Crate). Treffer über Zeilen hinweg werden an ihrer ersten Zeile gemeldet; Spalten in UTF-16,
+eine lange Zeile als 240-Einheiten-Fenster um den Treffer. Höchstens 10 000 Treffer (`truncated`), neue Fehlerart
+`BadPattern`. Tauri `file_search` streamt über einen `ipc::Channel` in Bündeln (32 Dateien oder 50 ms), `Searches`
+merkt je Suchfeld (`owner`) die laufende Suche, eine neue bricht die alte ab; `file_search_cancel`. CLI `files search`.
+Frontend: `fileapp/projectSearch.ts` (Modell mit Generationen, spätere Bündel einer alten Suche werden verworfen),
+`fileapp/ProjectSearch.svelte` (eine Komponente für beide Orte: Suchfeld mit Aa/ab/.*, einklappbare Globs, Wurzelwahl,
+Ergebnisse nach Datei gruppiert und einklappbar, Treffer markiert; sucht beim Tippen nach 250 ms, ⏎ sofort; ein Klick
+öffnet an der Zeile). Datei-App: linke Spalte mit Reitern **Files | Search**, ⇧⌘F; Wurzelwahl über die Baum-Wurzeln
+(eine Wurzel je Suche — Umsetzung von „Wurzel-Filter“). IDE: Pane-Art `search` im „+“-Menü, ⇧⌘F holt ihn nach vorn
+oder öffnet ihn in der Gruppe des Files-Panes, aufs Projekt beschränkt; ein Treffer öffnet einen Datei-Pane daneben.
+„●“ für ungespeicherte Dateien kommt aus `fileapp/dirtyFiles.ts`, das jeder `FileEditor` pflegt (Tab, Panel,
+IDE-Pane). Browser-Test (Mock): Datei-App und IDE, ⇧⌘F, Treffer öffnet an der Zeile; CLI auf dem echten Workspace.
+Reviews (erstmals schlank: volle Sicherheitsprüfung + ein kombiniertes Sonnet-Review) — behoben: (1) **HIGH, Sicherheit**:
+die Globs liefen als `ignore`-Overrides in den Durchlauf, und ein Override *erlaubt*, was er trifft, an Dotfile- und
+`.gitignore`-Regeln vorbei — `include: [".env"]` hätte Geheimnisse gelesen. Jetzt filtern die Globs (`globset`, schon
+über `ignore` im Lockfile) nur, was der Durchlauf liefert, und können ihn nur einengen; `walk_files` nimmt gar keine
+Overrides mehr an; Regressionstest. Ein Glob ohne `/` trifft den Namen in jedem Ordner. (2) Höchstens drei Suchen lesen
+gleichzeitig (Semaphore in `Searches`), damit eine Flut aus dem Webview die Blocking-Threads der anderen Datei-Befehle
+nicht belegt. (3) Ein aus dem Layout wiederhergestellter IDE-Search-Pane holte sich beim Start den Fokus. (4) Genau
+10 000 Treffer hießen „abgeschnitten“ — jetzt erst, wenn ein weiterer Treffer es beweist. (5) Ein kaputter Glob wird als
+Glob benannt, nicht als Muster; Glob-Fehler tragen keinen Pfad.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

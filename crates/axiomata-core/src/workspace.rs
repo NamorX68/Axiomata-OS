@@ -93,6 +93,7 @@ fn from_files(err: FilesError) -> AxiomataError {
         FilesError::NotUtf8 { path } => invalid(&path, "not valid UTF-8"),
         FilesError::Conflict { path } => invalid(&path, "changed since it was read"),
         FilesError::UnknownRoot(id) => invalid(Path::new(&id), "unknown file root"),
+        FilesError::BadPattern(message) => invalid(Path::new(""), &message),
     }
 }
 

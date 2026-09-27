@@ -18,7 +18,7 @@ import type { FileRef } from "../fileapp/tabs";
 import type { DockTarget, PaneTab } from "./layout";
 
 /** What the tab bar's `+` menu offers. */
-export type NewPaneKind = "terminal" | "files";
+export type NewPaneKind = "terminal" | "files" | "search";
 
 export interface IdeDock {
   /** Make a tab the visible one in its group. */

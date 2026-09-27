@@ -20,13 +20,14 @@
     is gone or its root is; any other failure only says so. Its tab closes.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   import { listenBackend, type FileRootInfo } from "../core/backend";
   import { listRoots, pickFile, type FileRenamed } from "./backend";
   import type { OpenFileState, OpenResult } from "./FileEditor.svelte";
   import FileTab from "./FileTab.svelte";
   import FileTree from "./FileTree.svelte";
+  import ProjectSearch from "./ProjectSearch.svelte";
   import QuickOpen from "./QuickOpen.svelte";
   import { handoffs, takeHandoffs, type Handoff } from "./handoff";
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
@@ -59,6 +60,9 @@
   /** The line a new tab opens its file at (quick open's `:12`). */
   const lineFor = new Map<string, number>();
   let quickOpen = $state(false);
+  /** The left column's tab (T13): the file tree, or the project search (⇧⌘F). */
+  let sideTab = $state<"files" | "search">("files");
+  let searchView = $state<ProjectSearch | null>(null);
   /** The tab being closed while it asks about unsaved text. */
   let closing = $state<{ id: string; answer: (close: boolean) => void } | null>(null);
   /** Tabs are saved only once the saved ones were read back, never over them (tracked: the save waits for it). */
@@ -228,6 +232,9 @@
     if (!e.shiftKey && /^[1-9]$/.test(key)) {
       take(e);
       tabs = nthTab(tabs, Number(key));
+    } else if (e.shiftKey && (key === "f" || e.code === "KeyF")) {
+      take(e);
+      void showSearch();
     } else if (e.shiftKey) {
       return;
     } else if (key === "o") {
@@ -246,6 +253,14 @@
       take(e);
       quickOpen = !quickOpen;
     }
+  }
+
+  /** ⇧⌘F: the left column shows the project search, its field focused (T13). */
+  async function showSearch(): Promise<void> {
+    tree = { ...tree, visible: true };
+    sideTab = "search";
+    await tick();
+    await searchView?.focus();
   }
 
   function take(e: KeyboardEvent): void {
@@ -339,14 +354,33 @@
   {#if tree.visible}
     <aside class="side" style:width="{tree.width}px">
       <div class="side-bar">
-        <span>Files</span>
-        <label title="Show dotfiles, .git, node_modules, target">
-          <input type="checkbox" bind:checked={tree.showHidden} /> hidden
-        </label>
-        <button type="button" class="icon" aria-label="Read the folders again" onclick={() => treeView?.refresh()}
-          >↻</button
-        >
+        <div class="side-tabs" role="tablist" aria-label="Left column">
+          <button type="button" role="tab" aria-selected={sideTab === "files"} onclick={() => (sideTab = "files")}
+            >Files</button
+          >
+          <button type="button" role="tab" aria-selected={sideTab === "search"} onclick={() => void showSearch()}
+            >Search</button
+          >
+        </div>
+        {#if sideTab === "files"}
+          <label title="Show dotfiles, .git, node_modules, target">
+            <input type="checkbox" bind:checked={tree.showHidden} /> hidden
+          </label>
+          <button type="button" class="icon" aria-label="Read the folders again" onclick={() => treeView?.refresh()}
+            >↻</button
+          >
+        {/if}
       </div>
+      <!-- Both stay mounted: the tree keeps what is open, the search its results. -->
+      <div class="side-pane" class:gone={sideTab !== "search"}>
+        <ProjectSearch
+          bind:this={searchView}
+          roots={treeRoots}
+          initialRoot={active?.file?.root ?? null}
+          onOpen={(root, rel, line) => openTab({ root, rel }, true, null, line)}
+        />
+      </div>
+      <div class="side-pane" class:gone={sideTab !== "files"}>
       <FileTree
         bind:this={treeView}
         roots={treeRoots}
@@ -356,6 +390,7 @@
         onOpen={(file, preview) => openTab(file, preview)}
         onError={(message) => (error = message)}
       />
+      </div>
     </aside>
     <div
       class="edge"
@@ -662,10 +697,38 @@
     font-size: var(--ax-font-size-xs);
   }
 
-  .side-bar span {
+  .side-tabs {
     flex: 1;
+    display: flex;
+    gap: var(--ax-space-2);
+  }
+
+  .side-tabs button {
+    padding: 0;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    color: var(--ax-text-muted);
+    font: inherit;
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .side-tabs button[aria-selected="true"] {
+    border-bottom-color: var(--ax-accent);
+    color: var(--ax-text);
+  }
+
+  .side-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .side-pane.gone {
+    display: none;
   }
 
   .side-bar label {

@@ -22,17 +22,21 @@
 //! lock is held only while a root id is being turned into a `Root`, never
 //! during the I/O itself.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use axiomata_core::config::Config;
 use axiomata_core::files::{RootInfo, Roots};
 use axiomata_files::{
-    self as service, FileWatcher, FilesError, Image, MAX_IMAGE_BYTES, MAX_READ_BYTES,
-    MAX_WRITE_BYTES, Root, RootResolver, TextFile, Version,
+    self as service, FileMatches, FileWatcher, FilesError, Image, MAX_IMAGE_BYTES, MAX_READ_BYTES,
+    MAX_WRITE_BYTES, Root, RootResolver, SearchQuery, SearchSummary, TextFile, Version,
 };
 use rusqlite::Connection;
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -247,6 +251,135 @@ pub async fn file_index(
         service::index_files(&self::root(config, db, &root)?)
     })
     .await
+}
+
+/// Files with matches handed to the page at once, at most.
+const SEARCH_BATCH_FILES: usize = 32;
+/// Longest a found file waits before its batch goes out anyway.
+const SEARCH_BATCH_WAIT: Duration = Duration::from_millis(50);
+
+/// Searches reading files at the same time, at most; more wait their turn.
+const MAX_RUNNING_SEARCHES: usize = 3;
+
+/// The running project searches (ED5.7, T14), one per search field of the
+/// page (`owner`): a new query from the same field stops the one before.
+/// At most [`MAX_RUNNING_SEARCHES`] read files at once, so a burst of
+/// searches (the webview is not trusted to pace itself) cannot take every
+/// blocking thread the other file commands need.
+pub struct Searches {
+    running: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    slots: tokio::sync::Semaphore,
+}
+
+impl Default for Searches {
+    fn default() -> Self {
+        Self {
+            running: Mutex::default(),
+            slots: tokio::sync::Semaphore::new(MAX_RUNNING_SEARCHES),
+        }
+    }
+}
+
+impl Searches {
+    /// Registers a search for `owner`, stopping the one it replaces.
+    fn start(&self, owner: &str) -> Arc<AtomicBool> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut running = self
+            .running
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(old) = running.insert(owner.to_owned(), cancel.clone()) {
+            old.store(true, Ordering::Relaxed);
+        }
+        cancel
+    }
+
+    /// Forgets `owner`'s search once it ended — unless a newer one took its place.
+    fn finish(&self, owner: &str, cancel: &Arc<AtomicBool>) {
+        let mut running = self
+            .running
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if running.get(owner).is_some_and(|c| Arc::ptr_eq(c, cancel)) {
+            running.remove(owner);
+        }
+    }
+
+    fn cancel(&self, owner: &str) {
+        let running = self
+            .running
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(cancel) = running.get(owner) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// One message on a search's channel: the next files with matches.
+#[derive(Debug, Serialize)]
+pub struct SearchBatch {
+    files: Vec<FileMatches>,
+}
+
+/// Searches the files of `root` (T14): matches stream in batches on
+/// `on_batch`, the summary comes back when the search ends. `owner` names
+/// the search field asking — its previous search, if still running, stops.
+#[tauri::command]
+pub async fn file_search(
+    state: State<'_, CoreState>,
+    searches: State<'_, Searches>,
+    root: String,
+    query: SearchQuery,
+    owner: String,
+    on_batch: Channel<SearchBatch>,
+) -> Result<SearchSummary, FileError> {
+    let cancel = searches.start(&owner);
+    let flag = cancel.clone();
+    // Waiting for a slot; a newer query from the same field may stop this one meanwhile.
+    let Ok(_slot) = searches.slots.acquire().await else {
+        return Err(FileError {
+            kind: "Io",
+            message: "the search service is shutting down".into(),
+        });
+    };
+    if cancel.load(Ordering::Relaxed) {
+        searches.finish(&owner, &cancel);
+        return Ok(SearchSummary {
+            cancelled: true,
+            ..SearchSummary::default()
+        });
+    }
+    let result = blocking(&state, move |config, db| {
+        let root = self::root(config, db, &root)?;
+        let mut batch = Vec::new();
+        let mut sent = Instant::now();
+        let flush = |batch: &mut Vec<FileMatches>| {
+            let files = std::mem::take(batch);
+            // The page is gone or navigated away: nobody to stop, the flag is set by the next query.
+            let _ = on_batch.send(SearchBatch { files });
+        };
+        let summary = service::search(&root, &query, &flag, |found| {
+            batch.push(found);
+            if batch.len() >= SEARCH_BATCH_FILES || sent.elapsed() >= SEARCH_BATCH_WAIT {
+                flush(&mut batch);
+                sent = Instant::now();
+            }
+        })?;
+        if !batch.is_empty() {
+            flush(&mut batch);
+        }
+        Ok(summary)
+    })
+    .await;
+    searches.finish(&owner, &cancel);
+    result
+}
+
+/// Stops `owner`'s running search (the field was cleared or closed).
+#[tauri::command]
+pub fn file_search_cancel(searches: State<'_, Searches>, owner: String) {
+    searches.cancel(&owner);
 }
 
 /// Makes a folder; its parent must exist (W13).

@@ -3,7 +3,10 @@
  * (`src-tauri/src/files.rs`), with the DEV browser mock behind `invokeBackend`.
  */
 
+import { Channel } from "@tauri-apps/api/core";
+
 import {
+  insideTauri,
   invokeBackend,
   type EditorRecovery,
   type FileRootInfo,
@@ -91,4 +94,61 @@ export interface FileRemoved {
 /** Every file of `root` by path, for quick open (`file_index`, W8). */
 export function indexFiles(root: string): Promise<{ files: string[]; truncated: boolean }> {
   return invokeBackend<{ files: string[]; truncated: boolean }>("file_index", { root });
+}
+
+/** What the project search looks for (`file_search`, ED5.7, T14). */
+export interface SearchQuery {
+  pattern: string;
+  regex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  include: string[];
+  exclude: string[];
+}
+
+/** One match, on the line it starts on; columns in UTF-16 units. */
+export interface LineMatch {
+  line: number;
+  col: number;
+  end: number;
+  /** The line, or a window of a long one starting at column `from`. */
+  text: string;
+  from: number;
+}
+
+export interface FileMatches {
+  rel: string;
+  matches: LineMatch[];
+}
+
+export interface SearchSummary {
+  files: number;
+  matches: number;
+  searched: number;
+  truncated: boolean;
+  cancelled: boolean;
+}
+
+/**
+ * Searches `root` (`file_search`): files with matches arrive in batches on
+ * `onFiles` while it runs, the summary when it ends. `owner` names the
+ * search field — its previous search, if still running, stops.
+ */
+export function searchFiles(
+  root: string,
+  query: SearchQuery,
+  owner: string,
+  onFiles: (files: FileMatches[]) => void,
+): Promise<SearchSummary> {
+  // The browser mock has no Tauri channel; it calls the same `onmessage` on a plain object.
+  const onBatch = insideTauri()
+    ? new Channel<{ files: FileMatches[] }>()
+    : { onmessage: (_: { files: FileMatches[] }) => {} };
+  onBatch.onmessage = (batch) => onFiles(batch.files);
+  return invokeBackend<SearchSummary>("file_search", { root, query, owner, onBatch });
+}
+
+/** Stops `owner`'s running search. */
+export function cancelSearch(owner: string): Promise<void> {
+  return invokeBackend<void>("file_search_cancel", { owner });
 }

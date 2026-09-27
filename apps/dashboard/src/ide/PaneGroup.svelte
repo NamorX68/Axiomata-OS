@@ -119,6 +119,7 @@
     <div class="add-menu" role="menu" style:left="{adding.x}px" style:top="{adding.y}px">
       <button type="button" role="menuitem" onclick={() => add("terminal")}>Terminal</button>
       <button type="button" role="menuitem" onclick={() => add("files")}>Files</button>
+      <button type="button" role="menuitem" onclick={() => add("search")}>Search</button>
     </div>
   {/if}
 

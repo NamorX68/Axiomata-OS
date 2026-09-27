@@ -27,6 +27,14 @@ export const AGENT_DIFF_PANE = "agent-diff";
 /** The project's file tree (`docs/plans/editor.md`, ED4, W9). */
 export const FILES_PANE = "files";
 
+/** The project search (`docs/plans/editor.md`, ED5, T13): one per project layout, ⇧⌘F. */
+export const SEARCH_PANE = "search";
+
+/** A Search pane; `focus` is bumped to put the cursor in its field (⇧⌘F on an open one). */
+export function searchTab(): PaneTab {
+  return { id: crypto.randomUUID(), kind: SEARCH_PANE, title: "Search", config: { focus: Date.now() } };
+}
+
 /** The file-service root of an IDE project (`axiomata-files`' `project:<id>`). */
 export function projectRoot(projectId: number): string {
   return `project:${projectId}`;

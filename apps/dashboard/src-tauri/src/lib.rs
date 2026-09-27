@@ -98,6 +98,8 @@ pub fn run() {
             files::file_delete,
             files::file_list,
             files::file_index,
+            files::file_search,
+            files::file_search_cancel,
             files::file_mkdir,
             files::file_rename,
             files::file_create,
@@ -188,6 +190,7 @@ pub fn run() {
             app.manage(services.scheduler);
             app.manage(terminal::TerminalSessions::default());
             app.manage(files::FileWatch::start(app.handle()));
+            app.manage(files::Searches::default());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

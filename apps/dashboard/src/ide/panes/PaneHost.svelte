@@ -25,10 +25,19 @@
   import { session } from "../projectSession";
   import DiffView from "../DiffView.svelte";
   import { agentStatus } from "../agentStatus";
-  import { AGENT_DIFF_PANE, agentDiffOf, FILE_PANE, FILES_PANE, filePaneConfig, filesPaneConfig } from "../paneKinds";
+  import {
+    AGENT_DIFF_PANE,
+    agentDiffOf,
+    FILE_PANE,
+    FILES_PANE,
+    filePaneConfig,
+    filesPaneConfig,
+    SEARCH_PANE,
+  } from "../paneKinds";
   import AgentPane from "./AgentPane.svelte";
   import FilePane from "./FilePane.svelte";
   import FilesPane from "./FilesPane.svelte";
+  import SearchPane from "./SearchPane.svelte";
   import { getDock } from "../dockContext";
   import { openFileBeside } from "./openFile";
 
@@ -113,6 +122,12 @@
       />
     {:else}
       <p class="unknown">No project is open for this file tree.</p>
+    {/if}
+  {:else if tab.kind === SEARCH_PANE}
+    {#if $session.current}
+      <SearchPane project={$session.current} tabId={tab.id} focusAt={Number(tab.config?.focus ?? 0)} />
+    {:else}
+      <p class="unknown">No project is open to search.</p>
     {/if}
   {:else if def}
     <def.component {ctx} />

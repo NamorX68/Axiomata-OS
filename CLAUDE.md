@@ -70,7 +70,9 @@ a command runs at each cursor as one undo step; `EditorDocument.extra` + `extraG
 `fileapp/findShared.ts`). ED5.5: folding (`editor/fold/`: `ranges.ts` where the text folds, `FoldState` what is
 folded; folded lines have no rows in `VisualLayout`; kept per file in `settings.editor.folds`,
 `fileapp/foldMemory.ts`). ED5.6: sticky scroll (`editor/sticky.ts`) and the minimap (`editor/minimap.ts`,
-`fileapp/Minimap.svelte`), off in the floating panel (`FileEditor` `compact`). Next: ED5.7, the project search.
+`fileapp/Minimap.svelte`), off in the floating panel (`FileEditor` `compact`). ED5.7: the project search
+(`axiomata-files::search`, Tauri `file_search` over an `ipc::Channel`, `fileapp/ProjectSearch.svelte` in the file
+app's Files | Search column and the IDE's `search` pane, ⇧⌘F). Next: ED5.8, installed Mac fonts.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
@@ -130,6 +132,7 @@ cargo run -p axiomata-cli -- files roots          # file-service roots: workspac
 cargo run -p axiomata-cli -- files read <root> <rel>   # through the editor's guard; version on stderr
 cargo run -p axiomata-cli -- files write <root> <rel> [--expect <version>] < content   # Conflict if stale
 cargo run -p axiomata-cli -- files grants list|add <path>|revoke <id>   # dialog grants (~/.axiomata/file-grants.json)
+cargo run -p axiomata-cli -- files search <root> <pattern> [--regex] [--case] [--word] [--include g] [--exclude g]
 cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
 cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
 cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard
