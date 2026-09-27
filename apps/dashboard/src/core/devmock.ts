@@ -392,6 +392,7 @@ let ideAgents: IdeAgent[] = [
     branch: null,
     port: null,
     base_branch: null,
+    opencode_session: null,
     effective_env: "AXIOMATA_AGENT_ID=1\nAXIOMATA_AGENT_NAME=Builder",
   },
   {
@@ -409,6 +410,7 @@ let ideAgents: IdeAgent[] = [
     branch: null,
     port: null,
     base_branch: null,
+    opencode_session: null,
     effective_env: "REVIEW_MODE=strict\nAXIOMATA_AGENT_ID=2\nAXIOMATA_AGENT_NAME=Reviewer",
   },
 ];
@@ -441,7 +443,9 @@ function mockEffectiveCommand(fields: AgentFields): string {
   if (own) return own;
   const base = HARNESS_DEFAULTS[fields.harness];
   const model = fields.model?.trim();
-  return model ? `${base} --model '${model.replace(/'/g, "'\\''")}'` : base;
+  // Opencode 2's terminal UI takes no --model: the model rides on the session.
+  if (!model || fields.harness === "opencode") return base;
+  return `${base} --model '${model.replace(/'/g, "'\\''")}'`;
 }
 
 function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent {
@@ -460,6 +464,7 @@ function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent
     branch: null,
     port: null,
     base_branch: null,
+    opencode_session: null,
     effective_command: mockEffectiveCommand(fields),
     effective_env: mockEffectiveEnv(fields, id, null, null, null),
   };
@@ -1207,6 +1212,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
 
     // The mock has no git, so it answers the way a non-repository project
     // does: agents share the project folder and still get a port.
+    case "ide_agent_new_session": {
+      const agent = ideAgents.find((a) => a.id === args.id);
+      if (agent) agent.opencode_session = null;
+      return Boolean(agent) as T;
+    }
     case "prepare_ide_agent": {
       const agent = ideAgents.find((a) => a.id === args.id);
       if (!agent) throw new Error(`no agent ${args.id}`);
@@ -1215,9 +1225,15 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       agent.port = port;
       agent.effective_env = `${agent.effective_env}\nAXIOMATA_PORT=${port}`;
       const events = `/mock/.axiomata/agent-events/${agent.id}`;
-      const hookup = agent.harness === "claude_code" && !agent.command.trim()
+      const generated = !agent.command.trim();
+      if (agent.harness === "opencode" && generated && !agent.opencode_session) {
+        agent.opencode_session = `ses_mock${agent.id}`;
+      }
+      const hookup = agent.harness === "claude_code" && generated
         ? ` --settings '${events}/claude-settings.json'`
-        : "";
+        : agent.harness === "opencode" && generated
+          ? ` --session ${agent.opencode_session}`
+          : "";
       return {
         agent,
         cwd: project?.repo_root ?? "/",

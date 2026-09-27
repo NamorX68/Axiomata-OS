@@ -18,8 +18,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use axiomata_opencode::{
-    ModelRef, NewSession, OpencodeError, Service, TurnOutcome, TurnRequest, TurnSession,
-    unattended_permissions,
+    ModelRef, NewSession, OpencodeError, PermissionRule, Service, TurnOutcome, TurnRequest,
+    TurnSession, unattended_permissions,
 };
 
 use super::{
@@ -287,6 +287,129 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
     chat_reply(outcome)
 }
 
+/// The rules every IDE agent session gets on top of the user's own opencode
+/// config (plan Q7): a push never leaves the machine from an agent — the M7.3
+/// rule "never a push". Everything else is Opencode's `build` agent as usual.
+fn ide_permissions() -> Vec<PermissionRule> {
+    vec![
+        PermissionRule::new("shell", "git push", "deny"),
+        PermissionRule::new("shell", "git push *", "deny"),
+    ]
+}
+
+/// The Opencode session an IDE agent runs in (`docs/plans/opencode2.md`, OC2).
+///
+/// Continues `existing` when the service still has it and it works in
+/// `directory` (switching its model first when the profile's changed);
+/// otherwise creates one there with the profile's model and
+/// [`ide_permissions`]. The terminal UI is then started on it with
+/// `opencode --session <id>`.
+///
+/// Errors:
+///     A missing `directory` as [`AxiomataError::AgentSpawn`], a malformed
+///     model as [`AxiomataError::InvalidAgentModel`], anything the service
+///     refuses as [`AxiomataError::AgentApi`].
+pub async fn ide_session(
+    existing: Option<&str>,
+    directory: &std::path::Path,
+    title: &str,
+    model: Option<&str>,
+) -> Result<String, AxiomataError> {
+    check_cwd(directory)?;
+    let model = model
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(|m| model_ref(Some(m.to_string()), "agent"))
+        .transpose()?;
+    let service = connect().await?;
+    if let Some(id) = existing.filter(|id| super::valid_session_id(id)) {
+        let found = match service.session(id).await {
+            Ok(info) => Some(info),
+            Err(OpencodeError::Http { status: 404, .. }) => None,
+            Err(err) => return Err(into_axiomata(err)),
+        };
+        let current_model = found
+            .as_ref()
+            .and_then(|info| info.get("model"))
+            .and_then(ModelRef::from_value);
+        let found_dir = found.as_ref().and_then(session_directory);
+        match reuse(found_dir, directory, current_model.as_ref(), model.as_ref()) {
+            Reuse::Continue => return Ok(id.to_string()),
+            Reuse::SwitchModel => {
+                if let Some(model) = &model {
+                    service
+                        .switch_model(id, model)
+                        .await
+                        .map_err(into_axiomata)?;
+                }
+                return Ok(id.to_string());
+            }
+            Reuse::Replace => {}
+        }
+    }
+    let created = service
+        .create_session(&NewSession {
+            directory: directory.display().to_string(),
+            title: Some(title.to_string()),
+            model,
+            permissions: ide_permissions(),
+            ..NewSession::default()
+        })
+        .await
+        .map_err(into_axiomata)?;
+    // The id is typed into a shell by the IDE: take only what a session id
+    // can look like, whatever the service answered.
+    if !super::valid_session_id(&created) {
+        return Err(AxiomataError::AgentApi {
+            backend: BACKEND_OPENCODE,
+            message: format!("the Opencode service returned a malformed session id {created:?}"),
+        });
+    }
+    Ok(created)
+}
+
+/// What to do with a stored session, given what the service knows of it.
+#[derive(Debug, PartialEq, Eq)]
+enum Reuse {
+    /// Same place, same model: start on it as it is.
+    Continue,
+    /// Same place, but the profile's model changed: switch, then start on it.
+    SwitchModel,
+    /// Gone, or working elsewhere (the worktree moved): create a fresh one.
+    Replace,
+}
+
+/// Decides what happens to a stored session. `found_dir` is the session's
+/// directory as the service reports it, `None` when the service no longer has
+/// the session. Directories are compared canonically where both exist, so a
+/// symlink or a different spelling of the same folder is still the same place.
+fn reuse(
+    found_dir: Option<&str>,
+    directory: &std::path::Path,
+    current_model: Option<&ModelRef>,
+    wanted_model: Option<&ModelRef>,
+) -> Reuse {
+    let Some(found_dir) = found_dir else {
+        return Reuse::Replace;
+    };
+    let canonical =
+        |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if canonical(std::path::Path::new(found_dir)) != canonical(directory) {
+        return Reuse::Replace;
+    }
+    match wanted_model {
+        Some(wanted) if current_model != Some(wanted) => Reuse::SwitchModel,
+        _ => Reuse::Continue,
+    }
+}
+
+/// Where a session works (`location.directory`), without a trailing slash.
+fn session_directory(info: &serde_json::Value) -> Option<&str> {
+    info.pointer("/location/directory")
+        .and_then(serde_json::Value::as_str)
+        .map(|d| d.trim_end_matches('/'))
+}
+
 /// Prepends the module manifest to a chat message, marked as data.
 fn with_module_context(path: Option<&PathBuf>, message: String) -> String {
     let Some(path) = path else {
@@ -448,6 +571,77 @@ mod tests {
         assert!(
             matches!(connect().await, Err(AxiomataError::AgentApi { message, .. }) if message.contains("never"))
         );
+    }
+
+    #[test]
+    fn ide_sessions_never_allow_a_push() {
+        let rules = ide_permissions();
+        assert!(
+            rules
+                .iter()
+                .all(|r| r.action == "shell" && r.effect == "deny")
+        );
+        assert!(rules.iter().any(|r| r.resource == "git push"));
+        assert!(rules.iter().any(|r| r.resource == "git push *"));
+    }
+
+    #[test]
+    fn a_stored_session_is_continued_switched_or_replaced() {
+        let base = std::env::temp_dir().join(format!("axiomata-reuse-{}", std::process::id()));
+        let (here, there) = (base.join("here"), base.join("there"));
+        std::fs::create_dir_all(&here).unwrap();
+        std::fs::create_dir_all(&there).unwrap();
+        let link = base.join("link");
+        let _ = std::os::unix::fs::symlink(&here, &link);
+        let (qwen, deep) = (
+            ModelRef::parse("ollama/qwen"),
+            ModelRef::parse("openrouter/deepseek"),
+        );
+        let here_str = here.display().to_string();
+
+        assert_eq!(
+            reuse(None, &here, None, qwen.as_ref()),
+            Reuse::Replace,
+            "gone"
+        );
+        let there_str = there.display().to_string();
+        assert_eq!(
+            reuse(Some(&there_str), &here, qwen.as_ref(), qwen.as_ref()),
+            Reuse::Replace
+        );
+        assert_eq!(
+            reuse(Some(&here_str), &here, qwen.as_ref(), qwen.as_ref()),
+            Reuse::Continue
+        );
+        assert_eq!(
+            reuse(Some(&here_str), &here, qwen.as_ref(), None),
+            Reuse::Continue,
+            "no model wanted"
+        );
+        assert_eq!(
+            reuse(Some(&here_str), &here, qwen.as_ref(), deep.as_ref()),
+            Reuse::SwitchModel
+        );
+        let slash = format!("{here_str}/");
+        assert_eq!(
+            reuse(Some(&slash), &here, None, None),
+            Reuse::Continue,
+            "trailing slash"
+        );
+        let link_str = link.display().to_string();
+        assert_eq!(
+            reuse(Some(&link_str), &here, None, None),
+            Reuse::Continue,
+            "through a symlink"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_sessions_directory_is_read_without_a_trailing_slash() {
+        let info = serde_json::json!({"location": {"directory": "/tmp/wt/"}});
+        assert_eq!(session_directory(&info), Some("/tmp/wt"));
+        assert_eq!(session_directory(&serde_json::json!({})), None);
     }
 
     #[test]

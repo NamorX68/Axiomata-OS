@@ -1,0 +1,13 @@
+-- The Opencode session an agent runs in (docs/plans/opencode2.md, OC2).
+--
+-- Opencode 2 keeps sessions on its shared background service; the IDE creates
+-- an agent's session there itself (worktree, model, permission rules) and
+-- starts the terminal UI on it with `opencode --session <id>`. The id is kept
+-- so reopening the agent continues that conversation (Q9) — a property of the
+-- agent, not volatile state, which is why it is a column (unlike the CP6
+-- status, which lives in files).
+--
+-- Nullable: no session yet, a Claude Code agent, or one reset with "New
+-- session". A stored id whose session no longer exists is replaced on the
+-- next start.
+ALTER TABLE ide_agents ADD COLUMN opencode_session TEXT;

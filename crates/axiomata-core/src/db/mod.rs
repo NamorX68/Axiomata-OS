@@ -36,6 +36,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (11, axiomata_ide::SCHEMA_SQL_V3),
     // The branch an agent's worktree was cut from (M7.3 CP7).
     (12, axiomata_ide::SCHEMA_SQL_V4),
+    // The Opencode session an IDE agent runs in (opencode2.md, OC2).
+    (13, axiomata_ide::SCHEMA_SQL_V5),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

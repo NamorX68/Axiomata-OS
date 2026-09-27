@@ -218,6 +218,10 @@ export interface IdeAgent {
    *  (M7.3). `null` for an older worktree: the project folder's branch then
    *  stands in. */
   base_branch: string | null;
+  /** The Opencode session this agent runs in, created by the IDE on the shared
+   *  Opencode service and continued on every start (opencode2.md OC2). `null`
+   *  before the first start, for other harnesses, and after "New session". */
+  opencode_session: string | null;
   /** Computed on read: what actually runs — `command`, or the harness's own
    *  default when it is empty. Sent along so no frontend keeps a second copy
    *  of that table. */

@@ -31,7 +31,8 @@ const MAX_COMMAND_LEN: usize = 2000;
 const MAX_ENV_LEN: usize = 8000;
 
 const AGENT_COLS: &str = "id, project_id, name, harness, command, model, env, created_at, \
-                          updated_at, worktree_path, branch, port, base_branch";
+                          updated_at, worktree_path, branch, port, base_branch, \
+                          opencode_session";
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -62,6 +63,7 @@ struct RawAgent {
     branch: Option<String>,
     port: Option<i64>,
     base_branch: Option<String>,
+    opencode_session: Option<String>,
 }
 
 fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
@@ -79,6 +81,7 @@ fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
         branch: row.get(10)?,
         port: row.get(11)?,
         base_branch: row.get(12)?,
+        opencode_session: row.get(13)?,
     })
 }
 
@@ -124,6 +127,7 @@ impl RawAgent {
             branch: self.branch,
             port,
             base_branch: self.base_branch,
+            opencode_session: self.opencode_session,
         })
     }
 }
@@ -330,6 +334,29 @@ pub fn set_base_branch(db: &Connection, id: i64, base_branch: Option<&str>) -> R
     Ok(changed == 1)
 }
 
+/// Records the Opencode session an agent runs in; `None` forgets it, so the
+/// next start creates a fresh one ("New session").
+pub fn set_opencode_session(db: &Connection, id: i64, session: Option<&str>) -> Result<bool> {
+    if let Some(session) = session {
+        check_len(session, "opencode_session", 128)?;
+        // The id ends up typed into a shell; only what Opencode hands out.
+        if !session
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err(IdeError::Invalid {
+                field: "opencode_session",
+                reason: "not a session id".into(),
+            });
+        }
+    }
+    let changed = db.execute(
+        "UPDATE ide_agents SET opencode_session = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, session, now()],
+    )?;
+    Ok(changed == 1)
+}
+
 /// Reserves a port for an agent. The UNIQUE index refuses one already taken.
 pub fn set_port(db: &Connection, id: i64, port: Option<u16>) -> Result<bool> {
     let changed = db
@@ -428,7 +455,9 @@ mod tests {
     }
 
     #[test]
-    fn a_model_reaches_the_command_line() {
+    fn an_opencode_model_stays_off_the_command_line() {
+        // Opencode 2's terminal UI refuses `--model`; the model goes onto the
+        // session the IDE creates (OC2), and the start adds `--session`.
         let (db, project) = fixture();
         let mut with_model = fields("Deep");
         with_model.model = Some("openrouter/deepseek/deepseek-v4-flash-0731".into());
@@ -440,19 +469,65 @@ mod tests {
             },
         )
         .unwrap();
+        assert_eq!(agent.effective_command, "opencode");
+        assert_eq!(
+            agent.model.as_deref(),
+            Some("openrouter/deepseek/deepseek-v4-flash-0731")
+        );
+    }
+
+    #[test]
+    fn set_opencode_session_records_and_forgets_it() {
+        let (db, project) = fixture();
+        let agent = create_agent(&db, new_agent(project, "Sess")).unwrap();
+        assert!(agent.opencode_session.is_none());
+        assert!(set_opencode_session(&db, agent.id, Some("ses_abc")).unwrap());
+        assert_eq!(
+            get_agent(&db, agent.id)
+                .unwrap()
+                .unwrap()
+                .opencode_session
+                .as_deref(),
+            Some("ses_abc")
+        );
+        assert!(set_opencode_session(&db, agent.id, None).unwrap());
+        assert!(
+            get_agent(&db, agent.id)
+                .unwrap()
+                .unwrap()
+                .opencode_session
+                .is_none()
+        );
+        assert!(!set_opencode_session(&db, 4242, Some("ses_x")).unwrap());
+        assert!(set_opencode_session(&db, agent.id, Some(&"s".repeat(129))).is_err());
+        assert!(set_opencode_session(&db, agent.id, Some("ses_x; rm -rf ~")).is_err());
+    }
+
+    #[test]
+    fn a_model_reaches_the_command_line() {
+        let (db, project) = fixture();
+        let mut with_model = fields("Deep");
+        with_model.harness = Harness::ClaudeCode;
+        with_model.model = Some("claude-sonnet-5".into());
+        let agent = create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: with_model,
+            },
+        )
+        .unwrap();
 
         // Without this the harness starts on whatever its own config says is
         // the default, and the model on the profile is decoration.
-        assert_eq!(
-            agent.effective_command,
-            "opencode --model 'openrouter/deepseek/deepseek-v4-flash-0731'"
-        );
+        assert_eq!(agent.effective_command, "claude --model 'claude-sonnet-5'");
     }
 
     #[test]
     fn a_model_is_quoted_so_a_shell_cannot_read_it_as_syntax() {
         let (db, project) = fixture();
         let mut odd = fields("Odd");
+        odd.harness = Harness::ClaudeCode;
         // Nobody should name a model like this; the point is that it cannot
         // become shell syntax if they do. `(` is a glob character in zsh.
         odd.model = Some("weird (model) name".into());
@@ -466,10 +541,11 @@ mod tests {
         .unwrap();
         assert_eq!(
             agent.effective_command,
-            "opencode --model 'weird (model) name'"
+            "claude --model 'weird (model) name'"
         );
 
         let mut quoted = fields("Quoted");
+        quoted.harness = Harness::ClaudeCode;
         quoted.model = Some("it's".into());
         let agent = create_agent(
             &db,
@@ -479,7 +555,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(agent.effective_command, r"opencode --model 'it'\''s'");
+        assert_eq!(agent.effective_command, r"claude --model 'it'\''s'");
     }
 
     #[test]

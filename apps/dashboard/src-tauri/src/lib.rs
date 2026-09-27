@@ -162,6 +162,7 @@ pub fn run() {
             commands::update_ide_agent,
             commands::delete_ide_agent,
             commands::prepare_ide_agent,
+            commands::ide_agent_new_session,
             commands::ide_agent_states,
             commands::ide_agent_changes,
             commands::ide_agent_file_diff,

@@ -122,7 +122,8 @@ cargo run -p axiomata-cli -- ide agents list <project>  # a project's agent prof
 cargo run -p axiomata-cli -- ide agents new <project> <name> [--harness …] [--command …] [--model …]
 cargo run -p axiomata-cli -- ide agents edit <id> [--name …] [--command …] …  # omitted flags keep their value
 cargo run -p axiomata-cli -- ide agents delete <id>
-cargo run -p axiomata-cli -- ide agents prepare <id>   # worktree + port, idempotent; prints where it runs
+cargo run -p axiomata-cli -- ide agents prepare <id>   # worktree + port (+ Opencode session), idempotent; prints where it runs
+cargo run -p axiomata-cli -- ide agents new-session <id>  # an Opencode agent opens a fresh session on its next start
 cargo run -p axiomata-cli -- ide agents discard-worktree <id> [--force]  # --force throws away uncommitted work
 cargo run -p axiomata-cli -- ide agents status <project>  # state word + plan per agent, as the harness reported it
 cargo run -p axiomata-cli -- ide agents diff <id> [--file <path>]   # what the agent changed since its base branch

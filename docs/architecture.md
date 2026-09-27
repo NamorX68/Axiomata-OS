@@ -447,7 +447,7 @@ selected per skill by `SKILL.md`'s `backend: ollama`.
 - **Model selection.** `agents::default_chat_model()` reads
   `providers[chat_provider].chat_model`, `default_skill_model()` reads
   `providers[skill_provider].skill_model` (shared `provider_model()` helper), both feeding the
-  opencode `--model` `provider/<model>` id. `chat()` uses the chat model; the skills runner uses
+  `provider/<model>` model of the Opencode session. `chat()` uses the chat model; the skills runner uses
   the skill model as its fallback when a `SKILL.md` has no own `model:` frontmatter (per-skill
   frontmatter still wins). No provider-specific model env var anywhere — both non-Anthropic
   providers route
@@ -882,7 +882,25 @@ a Unix timestamp), `started`, and for Opencode `plan.json`. The harness writes, 
   Claude Code's own `~/.claude/tasks/<list>/*.json`, tolerantly.
 - **Opencode** loads a plugin from `OPENCODE_CONFIG_DIR=<channel>/opencode` (additive to the
   user's global config), which maps `session.status`, `permission.*`/`question.*` and
-  `todo.updated` and ignores sub-agent sessions (`parentID`).
+  `todo.updated` and ignores sub-agent sessions (`parentID`). **Dead under Opencode 2** (v1
+  plugin format, config key and event names all changed; the service ignores
+  `OPENCODE_CONFIG_DIR`): OC3 of `docs/plans/opencode2.md` replaces it with the service's
+  event stream.
+
+**Opencode agents run in a session the IDE keeps for them** (`docs/plans/opencode2.md`, OC2,
+migration 13 `ide_agents.opencode_session`). Opencode 2's terminal UI takes no `--model`, so
+`Agent::resolve_command` never appends one for Opencode; instead
+`axiomata_core::ide_start::start_agent` — the one start path of the dashboard
+(`prepare_ide_agent`) and the CLI (`ide agents prepare`) — runs `provision::prepare`, then
+`agents::opencode::ide_session`: the stored session is continued when the service still has it
+in the agent's directory (its model switched when the profile's changed), otherwise a new one
+is created there with the profile's model, the agent's name as title and the rules
+`shell: git push` / `git push *` → `deny` (Q7, "never a push"). The launch command becomes
+`opencode --session <id>`; an agent with its own command line gets no session (E13). "New
+session" (`ide_agent_new_session`) forgets the id, so the next start creates a fresh one; the
+old stays in Opencode's list. No planning instruction for Opencode yet: the text asks for a
+todo tool v2 no longer has, and the session-instructions endpoint is experimental — the step
+list comes with Axiomata's own MCP server (Q3).
 
 Nothing is ever written into a worktree, so an agent cannot commit its own hookup, and a
 shared (non-git) folder gets a status too. `prepare` resets the channel on every start and

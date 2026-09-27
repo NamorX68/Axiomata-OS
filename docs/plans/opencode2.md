@@ -1,6 +1,6 @@
 # Plan: Opencode 2 sauber anbinden (OC1–OC4)
 
-Status: **gegrillt 2026-09-27** (Q1–Q10, alle vom Owner bestätigt). **OC1 erledigt** (2026-09-27); weiter mit OC2.
+Status: **gegrillt 2026-09-27** (Q1–Q10, alle vom Owner bestätigt). **OC1 und OC2 erledigt** (2026-09-27); weiter mit OC3.
 Kommt vor ED6 (LSP) aus [`editor.md`](editor.md); betrifft die Skill-Läufe, den Assistenten-Chat
 und die IDE-Agenten aus [`agentic-ide.md`](agentic-ide.md) / [`agent-lifecycle.md`](agent-lifecycle.md).
 
@@ -123,11 +123,23 @@ Umgesetzt und geprüft (2026-09-27):
   `tests/live.rs` (`#[ignore]`, echter Dienst mit lokalem Modell). Live: Chat mit Fortsetzung,
   `reminders-digest`, `calendar-digest`, `mail-digest`.
 
-### OC2 — IDE-Sessions über die API
+### OC2 — IDE-Sessions über die API (erledigt)
 
 Agentenstart für Opencode: Session per API im Worktree (Modell, Agent, Q7-Regeln, Planungs-Anweisung
 als Session-Anweisung), dann `opencode --session <id>` in der PTY-Kachel. Session-ID als Spalte am
 Agenten (Migration), Fortsetzen beim Wiederöffnen, „Neue Session“ (Q9). `--model` am TUI-Befehl entfällt.
+
+Umgesetzt (2026-09-27): Migration 13 (`ide_agents.opencode_session`, `SCHEMA_SQL_V5`);
+`Agent::resolve_command` hängt für Opencode kein `--model` mehr an; `axiomata_core::ide_start::start_agent`
+ist der eine Startweg für Dashboard und CLI (`provision::prepare`, dann `agents::opencode::ide_session`:
+fortsetzen, wenn der Dienst die Session im selben Ordner noch hat — Modell ggf. umschalten —, sonst neu
+anlegen; Regeln `shell: git push`/`git push *` → `deny`). „New session“ in der Agentenkachel
+(`ide_agent_new_session`, CLI `ide agents new-session`). **Abweichung vom Plan:** keine
+Planungs-Anweisung für Opencode — der Text verlangt ein Todo-Werkzeug, das v2 nicht hat, und der
+Endpunkt für Session-Anweisungen ist `experimental`; die Anweisung kommt mit der Schrittliste über den
+eigenen MCP-Server (Q3). Live geprüft per CLI: Anlegen, Fortsetzen, „New session“, Ersatz einer
+verschwundenen Session (404), TUI öffnet `--session` mit dem Modell der Session. Offen: Live-Test in
+`cargo tauri dev` durch den Owner.
 
 ### OC3 — Status aus dem Event-Stream
 

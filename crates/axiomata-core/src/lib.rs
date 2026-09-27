@@ -27,6 +27,7 @@ pub mod graph;
 /// The agentic IDE's core, re-exported as `axiomata_core::ide::…` for the same
 /// reason as `board` above — a plain re-export, not a wrapper.
 pub use axiomata_ide as ide;
+pub mod ide_start;
 pub mod importer;
 pub mod json_state;
 pub mod memory;

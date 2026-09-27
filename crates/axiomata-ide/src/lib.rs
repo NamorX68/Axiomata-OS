@@ -72,6 +72,11 @@ pub const SCHEMA_SQL_V3: &str = include_str!("agent_worktrees.sql");
 /// CP7. Its own constant and migration number (12), frozen once released.
 pub const SCHEMA_SQL_V4: &str = include_str!("agent_base_branch.sql");
 
+/// The IDE's **version 5** schema (`opencode_session` on an agent),
+/// `docs/plans/opencode2.md` OC2. Its own constant and migration number (13),
+/// frozen once released.
+pub const SCHEMA_SQL_V5: &str = include_str!("agent_opencode_session.sql");
+
 /// Everything that can go wrong in the IDE core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant, matching
@@ -125,7 +130,13 @@ pub type Result<T> = std::result::Result<T, IdeError>;
 /// error ("no such column") that says nothing about the real cause.
 #[cfg(test)]
 pub(crate) fn apply_all_schemas(db: &rusqlite::Connection) {
-    for schema in [SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4] {
+    for schema in [
+        SCHEMA_SQL_V1,
+        SCHEMA_SQL_V2,
+        SCHEMA_SQL_V3,
+        SCHEMA_SQL_V4,
+        SCHEMA_SQL_V5,
+    ] {
         db.execute_batch(schema).expect("test schema should apply");
     }
 }
@@ -215,6 +226,20 @@ mod schema_is_frozen {
             "agent_base_branch.sql changed after it shipped as migration 12. It \
              is an ALTER TABLE — add a SCHEMA_SQL_V5 and a new migration number \
              instead. If it has never shipped, update EXPECTED here."
+        );
+    }
+
+    /// And for version 5 (`opencode_session`), migration 13.
+    #[test]
+    fn the_shipped_opencode_session_schema_has_not_been_edited() {
+        const EXPECTED: u64 = 0x94a9_29cc_484d_d23b;
+
+        assert_eq!(
+            fnv1a(super::SCHEMA_SQL_V5),
+            EXPECTED,
+            "agent_opencode_session.sql changed after it shipped as migration \
+             13. It is an ALTER TABLE — add a SCHEMA_SQL_V6 and a new migration \
+             number instead. If it has never shipped, update EXPECTED here."
         );
     }
 }

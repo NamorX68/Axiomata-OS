@@ -29,7 +29,7 @@
   import { toast } from "../../core/toast";
   import { renderMarkdown } from "../../core/markdown";
   import Terminal from "../../modules/terminal.svelte";
-  import { prepareAgent } from "../agents";
+  import { newAgentSession, prepareAgent } from "../agents";
   import { agentStatus, describeStatus } from "../agentStatus";
   import DiffView from "../DiffView.svelte";
   import { getDock } from "../dockContext";
@@ -108,6 +108,23 @@
 
   /** What is typed into the shell — including the status hookup. */
   const command = $derived(ready?.launch_command ?? agent.effective_command);
+
+  /**
+   * An Opencode agent on the generated command runs in a session the IDE
+   * keeps for it (opencode2.md OC2); a restart continues it. "New session"
+   * forgets it, so the restart that follows opens a fresh one — the old one
+   * stays in Opencode's own list.
+   */
+  const keepsSession = $derived(agent.harness === "opencode" && !agent.command.trim());
+
+  async function startNewSession(): Promise<void> {
+    try {
+      await newAgentSession(agent.id);
+      restarts += 1;
+    } catch (err) {
+      toast(`${agent.name}: ${err instanceof Error ? err.message : String(err)}`, "danger");
+    }
+  }
 
   const statuses = agentStatus.statuses;
   const status = $derived($statuses.byAgent.get(agent.id));
@@ -293,6 +310,16 @@
     {/if}
     {#if ready?.agent.port}<span class="port" title="AXIOMATA_PORT">:{ready.agent.port}</span>{/if}
     <code class="command" title={command}>{command}</code>
+    {#if keepsSession}
+      <button
+        type="button"
+        class="restart"
+        title={ready?.agent.opencode_session
+          ? `Leave session ${ready.agent.opencode_session} and start a fresh one`
+          : "Start a fresh Opencode session"}
+        onclick={startNewSession}>New session</button
+      >
+    {/if}
     <button type="button" class="restart" onclick={() => (restarts += 1)}>Restart</button>
   </footer>
 </div>

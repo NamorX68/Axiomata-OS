@@ -73,6 +73,14 @@ export function prepareAgent(id: number): Promise<ProvisionedAgent> {
   return invoke<ProvisionedAgent>("prepare_ide_agent", { id });
 }
 
+/**
+ * Forgets an Opencode agent's session, so its next start opens a fresh one
+ * ("New session", opencode2.md Q9). The old session stays in Opencode's list.
+ */
+export function newAgentSession(id: number): Promise<boolean> {
+  return invoke<boolean>("ide_agent_new_session", { id });
+}
+
 /** Whether removing this agent's worktree would throw away uncommitted work. */
 export function agentHasChanges(id: number): Promise<boolean> {
   return invoke<boolean>("ide_agent_has_changes", { id });

@@ -21,6 +21,7 @@ function agent(over: Partial<IdeAgent> = {}): IdeAgent {
     branch: null,
     port: null,
     base_branch: null,
+    opencode_session: null,
     effective_command: "opencode",
     effective_env: "",
     ...over,

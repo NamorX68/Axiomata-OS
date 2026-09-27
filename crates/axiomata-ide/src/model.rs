@@ -133,6 +133,11 @@ pub struct Agent {
     /// one cut from a detached HEAD; then the project folder's current branch
     /// stands in.
     pub base_branch: Option<String>,
+    /// The Opencode session this agent runs in (`docs/plans/opencode2.md`,
+    /// OC2): created by the IDE on the shared Opencode service and continued
+    /// on every start. `None` before the first start, for other harnesses,
+    /// and after "New session".
+    pub opencode_session: Option<String>,
     /// **Computed on read, never stored**: the command line that actually
     /// runs — `command` if it has one, else the harness's default.
     ///
@@ -190,11 +195,15 @@ impl Agent {
     /// Resolves what [`Agent::effective_command`] holds. Used by the store
     /// when it builds one; a caller reads the field.
     ///
-    /// The model is appended as `--model <value>` — both harnesses spell it
-    /// that way (`opencode -m/--model provider/model`, `claude --model`) —
-    /// but **only when the agent has no command of its own**. Somebody who
-    /// wrote their own command line is responsible for it; pushing an extra
-    /// flag into it could easily contradict what they typed.
+    /// For Claude Code the model is appended as `--model <value>`, but **only
+    /// when the agent has no command of its own**. Somebody who wrote their
+    /// own command line is responsible for it; pushing an extra flag into it
+    /// could easily contradict what they typed.
+    ///
+    /// Opencode 2's terminal UI takes no `--model`: an Opencode agent's model
+    /// travels on the session the IDE creates for it on the shared service,
+    /// and the start adds `--session <id>` instead (`docs/plans/opencode2.md`,
+    /// OC2).
     ///
     /// The value is single-quoted, because this string is written into a
     /// shell. A model id has no business containing a space or a bracket, but
@@ -207,8 +216,10 @@ impl Agent {
         }
         let base = harness.default_command();
         match model.map(str::trim).filter(|m| !m.is_empty()) {
-            Some(model) => format!("{base} --model {}", shell_quote(model)),
-            None => base.to_string(),
+            Some(model) if harness != Harness::Opencode => {
+                format!("{base} --model {}", shell_quote(model))
+            }
+            _ => base.to_string(),
         }
     }
 }

@@ -282,9 +282,12 @@ enum AgentAction {
     },
     /// Remove an agent profile.
     Delete { id: i64 },
-    /// Give an agent its worktree, port and status channel, and print where and
-    /// how it would run. Idempotent — this is what the app does on every start.
+    /// Give an agent its worktree, port and status channel — and an Opencode
+    /// agent its session on the Opencode service — and print where and how it
+    /// would run. Idempotent — this is what the app does on every start.
     Prepare { id: i64 },
+    /// Forget an Opencode agent's session, so its next start opens a fresh one.
+    NewSession { id: i64 },
     /// What a project's agents are doing and planning, as their harnesses
     /// last reported it.
     Status { project: i64 },
@@ -473,7 +476,7 @@ async fn main() -> Result<()> {
         Command::Routines { action } => return routines_cmd(&core, action).await,
         Command::Board { action } => return board_cmd(&core, action),
         Command::Files { action } => files_cmd::run(&core, action)?,
-        Command::Ide { action } => return ide_cmd(&core, action),
+        Command::Ide { action } => return ide_cmd(&core, action).await,
         Command::Assistant {
             message,
             resume,
@@ -1168,7 +1171,7 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
     }
 }
 
-fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
+async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
     match action {
         IdeAction::Projects { action } => match action {
             ProjectAction::List => project_list(core),
@@ -1196,7 +1199,15 @@ fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 env,
             } => agent_edit(core, id, name, harness, command, model, env),
             AgentAction::Delete { id } => agent_delete(core, id),
-            AgentAction::Prepare { id } => agent_prepare(core, id),
+            AgentAction::Prepare { id } => agent_prepare(core, id).await,
+            AgentAction::NewSession { id } => {
+                if axiomata_core::ide_start::new_session(&core.db, id)? {
+                    println!("agent #{id} starts a fresh Opencode session next time");
+                    Ok(())
+                } else {
+                    anyhow::bail!("no agent #{id}")
+                }
+            }
             AgentAction::Status { project } => agent_status(core, project),
             AgentAction::DiscardWorktree { id, force } => agent_discard_worktree(core, id, force),
             AgentAction::Diff { id, file } => agent_diff(core, id, file),
@@ -1343,9 +1354,8 @@ fn agent_edit(
     }
 }
 
-fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
-    let db = core.db_lock();
-    let ready = ide::provision::prepare(&db, &axiomata_core::paths::ide_locations(), id)?;
+async fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
+    let ready = axiomata_core::ide_start::start_agent(&core.db, id).await?;
     println!("agent #{} {}", ready.agent.id, ready.agent.name);
     println!("  runs in: {}", ready.cwd.display());
     if ready.shared_folder {
@@ -1359,6 +1369,9 @@ fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
     match ready.agent.port {
         Some(port) => println!("  port:    {port} (AXIOMATA_PORT)"),
         None => println!("  port:    none free in the range"),
+    }
+    if let Some(session) = &ready.agent.opencode_session {
+        println!("  session: {session}");
     }
     println!("  command: {}", ready.launch_command);
     if !ready.status_connected {

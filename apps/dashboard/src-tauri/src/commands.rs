@@ -1818,20 +1818,28 @@ pub fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, St
 }
 
 /// Gives an agent what it needs to run — its own git worktree, a reserved
-/// port (M7.2 CP5) and a fresh status channel (CP6) — and says where and with
+/// port (M7.2 CP5), a fresh status channel (CP6) and, for Opencode, its
+/// session on the shared service (opencode2.md OC2) — and says where and with
 /// which command line the harness should start.
 ///
 /// Idempotent, and called on every start rather than only on creation: an
 /// agent created before worktrees existed, or one whose directory somebody
 /// deleted, is repaired by being started.
 #[tauri::command]
-pub fn prepare_ide_agent(
+pub async fn prepare_ide_agent(
     state: State<'_, CoreState>,
     id: i64,
 ) -> Result<ide::provision::Provisioned, String> {
-    let db = state.db_lock();
-    ide::provision::prepare(&db, &axiomata_core::paths::ide_locations(), id)
+    axiomata_core::ide_start::start_agent(&state.db, id)
+        .await
         .map_err(|err| err.to_string())
+}
+
+/// Forgets an Opencode agent's session so its next start opens a fresh one
+/// ("New session", opencode2.md Q9). The old session stays in Opencode.
+#[tauri::command]
+pub fn ide_agent_new_session(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    axiomata_core::ide_start::new_session(&state.db, id).map_err(|err| err.to_string())
 }
 
 /// What every agent of a project is doing and planning (M7.2 CP6/CP6b).
