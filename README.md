@@ -7,31 +7,32 @@ described in [`ARMS-Agentic-OS-Guide.pdf`](./ARMS-Agentic-OS-Guide.pdf) at the r
 repository, though the actual design has since diverged from that guide in several places —
 see [`docs/architecture.md`](./docs/architecture.md) for the current, authoritative design.
 
-The long-term vision: a single always-on desktop app that lets you run reusable "skills"
-(headless AI agent tasks), keeps a `CLAUDE.md`-based memory index of a freely-chosen
-"Second Brain" workspace folder in sync, and fires scheduled routines against that same
-tooling — all visible in one dashboard.
+One desktop app that runs reusable "skills" (headless AI agent tasks), keeps a
+`CLAUDE.md`-based memory index of a freely-chosen "Second Brain" workspace folder in sync,
+fires scheduled routines against the same tooling, and hosts its own IDE and editor for
+working alongside coding agents — all in one dashboard.
 
 ## Project status
 
-Axiomata-OS is early-stage software under active, incremental development.
+Axiomata-OS is a working personal tool under active, incremental development (Rust + Tauri,
+Svelte front end, macOS first). What exists today:
 
-**Milestone M0 ("workspace scaffold") is complete.** Today the repository is a working
-Rust + Tauri desktop app skeleton: on every start it initializes its own app data directory
-(`~/.axiomata/`), loads or creates its config file, and opens a migrated SQLite database —
-end to end, verified both from a headless CLI and from the Tauri desktop shell.
+- **Skills and routines** — headless agent tasks (`~/.axiomata/skills/`) run on the Opencode
+  CLI against a per-role model provider (Anthropic, OpenRouter, Ollama), with a daily cost cap;
+  a cron scheduler with full CRUD.
+- **Memory router** — keeps the `CLAUDE.md` router blocks of the Second-Brain workspace in sync.
+- **Dashboard** — a module canvas (Calendar, Reminders, Mail, ToDo, Kanban board, Terminal, …),
+  themes, and the particle-graph Second Brain.
+- **Agentic IDE** (M7) — projects with a dock layout, agent harnesses (Claude Code, Opencode)
+  in PTY panes, one git worktree per agent with a live status and plan, and a git layer for
+  diffs, commits and take-over.
+- **Own editor** (ED0–ED5) — a file service guarded per root, a TypeScript editor engine on a
+  rope, tree-sitter highlighting, Vi mode, multiple cursors, find bar and project search,
+  folding, sticky scroll, minimap, installed Mac fonts, file tree with tabs and quick open.
 
-**Everything past that is not yet implemented:**
-
-- Agent execution (Claude Code / Ollama backends)
-- Skills discovery and running
-- The memory router that keeps `CLAUDE.md` files in sync with the workspace
-- The routines scheduler
-- The real dashboard UI (today's window is the unmodified Tauri template)
-
-These exist today only as module stubs with design-intent doc comments. See
-[`docs/architecture.md`](./docs/architecture.md) for what's implemented vs. planned, and for
-the milestone-by-milestone roadmap (M1–M4).
+Next: language servers in the editor (ED6). M4 (always-on background scheduling) was dropped.
+See [`docs/architecture.md`](./docs/architecture.md) for the full design and milestone history,
+and `docs/plans/` for the detailed plans.
 
 ## Quick start
 
