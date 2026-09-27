@@ -1,6 +1,6 @@
 # Plan: Opencode 2 sauber anbinden (OC1–OC4)
 
-Status: **gegrillt 2026-09-27** (Q1–Q10, alle vom Owner bestätigt). **OC1–OC3 erledigt** (2026-09-27/28); weiter mit OC4.
+Status: **gegrillt 2026-09-27** (Q1–Q10, alle vom Owner bestätigt). **OC1–OC4 erledigt** (2026-09-27/28) — der Umbau ist abgeschlossen.
 Kommt vor ED6 (LSP) aus [`editor.md`](editor.md); betrifft die Skill-Läufe, den Assistenten-Chat
 und die IDE-Agenten aus [`agentic-ide.md`](agentic-ide.md) / [`agent-lifecycle.md`](agent-lifecycle.md).
 
@@ -162,7 +162,13 @@ Opencode-Agent meldet nie `ended` (der Dienst weiß nicht, wann eine TUI endet).
 `ide agents status` über den Dienst; `tests/live.rs` folgt einem Plan-Agenten-Turn (working → idle) und
 vergleicht den Plan mit dem Neu-Einlesen.
 
-### OC4 — Anweisungen und Doku
+### OC4 — Anweisungen und Doku (erledigt)
 
 `AGENTS.md` als Quelle dieses Repos, `CLAUDE.md` mit `@AGENTS.md`; `docs/architecture.md`,
 `CLAUDE.md`-Zusammenfassung, Memory-Notizen (u. a. die vorgemerkte „CLAUDE.md → AGENTS.md“-Notiz).
+
+Umgesetzt (2026-09-28): `AGENTS.md` trägt jetzt, was jeder Coding-Agent braucht (Stand, Befehle, Fallen —
+der bisherige Inhalt der `CLAUDE.md`, harness-neutral eingeleitet; die alte, auf M3 stehengebliebene
+`AGENTS.md` ist ersetzt). `CLAUDE.md` importiert sie per `@AGENTS.md` und behält nur, was Claude Code allein
+betrifft (die Sub-Agenten-Regeln). Die Vault-Seite (Memory-Router, `CLAUDE.md` im Workspace) bleibt ein
+eigenes Vorhaben (Owner-Notiz „CLAUDE.md → AGENTS.md“).

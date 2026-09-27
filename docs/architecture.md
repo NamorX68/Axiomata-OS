@@ -5,13 +5,14 @@ repository today, and — clearly separated — the design that later milestones
 top of it. If you have never seen this repo before, this is the place to start after the
 [README](../README.md).
 
-> **Maintenance note:** this file is *not* auto-loaded into every Claude Code turn the way
-> the repo's `CLAUDE.md` is — that's deliberate, so the detailed walkthrough below can live
-> here without inflating every single request. It also means it only stays accurate if it is
-> updated by hand. Between M3 and M6 it was not (the milestone summaries went into `CLAUDE.md`
-> instead, since that file is what's guaranteed to be read, and this one quietly went stale).
-> When a milestone or major feature lands, update **this file's** §5/§7, not just
-> `CLAUDE.md`'s "Project status" paragraph.
+> **Maintenance note:** this file is *not* auto-loaded into every agent turn the way the
+> repo's `AGENTS.md` is (Claude Code reads it through `CLAUDE.md`, which imports it) —
+> that's deliberate, so the detailed walkthrough below can live here without inflating every
+> single request. It also means it only stays accurate if it is updated by hand. Between M3
+> and M6 it was not (the milestone summaries went into `CLAUDE.md` instead, since that file
+> is what's guaranteed to be read, and this one quietly went stale). When a milestone or major
+> feature lands, update **this file's** §5/§7, not just `AGENTS.md`'s "Project status"
+> paragraph.
 
 ## 1. Vision
 
@@ -155,7 +156,7 @@ claim a card and `Agent:One` could sign it off. Every mutation is a single state
 precondition in the `WHERE` clause; claiming is a compare-and-swap.
 
 `core/board_mirror.rs` writes each board to `<workspace>/Kanban/<id>-<name>.md` after every
-change, one way only — see the trap list in `CLAUDE.md`. Full plan and the list of what came
+change, one way only — see the trap list in `AGENTS.md`. Full plan and the list of what came
 out differently in practice: `docs/plans/kanban.md`.
 
 ### `axiomata-ide`
