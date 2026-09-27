@@ -71,6 +71,8 @@
     { key: "bracketColors", label: "Coloured bracket pairs" },
     { key: "glow", label: "Accent glow" },
     { key: "foldAnimation", label: "Animated folding" },
+    { key: "minimap", label: "Minimap" },
+    { key: "stickyScroll", label: "Sticky scroll" },
   ];
 
   const AUTOSAVE: { value: Autosave; label: string }[] = [
@@ -89,7 +91,7 @@
   <div class="preview">
     <EditorSurface
       doc={preview}
-      settings={{ ...surface, wrap: s.wrapCode }}
+      settings={{ ...surface, wrap: s.wrapCode, minimap: false, stickyScroll: false }}
       fileName="preview.ts"
       readOnly
       {highlighter}

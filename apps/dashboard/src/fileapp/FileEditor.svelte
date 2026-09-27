@@ -93,6 +93,8 @@
     onState?: (state: OpenFileState | null) => void;
     /** Shown while no file is open. */
     empty?: Snippet;
+    /** The floating panel (T8, T9): too small for the minimap and sticky scroll. */
+    compact?: boolean;
   }
 
   let {
@@ -104,6 +106,7 @@
     onQuit,
     onState,
     empty,
+    compact = false,
   }: Props = $props();
 
   /** Quiet time after the last change before unsaved text is kept aside (F8). */
@@ -160,6 +163,9 @@
     fontWeight: face.weight,
     lineNumbers: numbersOverride ?? $editorSettings.lineNumbers,
     list,
+    // Not in the panel, and not in the light mode (T2).
+    minimap: $editorSettings.minimap && !compact && !session?.light,
+    stickyScroll: $editorSettings.stickyScroll && !compact && !session?.light,
   });
 
   /** Indentation for a file that shows none (F11). */

@@ -50,6 +50,9 @@
     // No cursor to count from: plain line numbers.
     lineNumbers: "absolute" as const,
     vi: false,
+    // A glance at a file: no room for the minimap, and no scrolling that would pin headers.
+    minimap: false,
+    stickyScroll: false,
   });
 
   $effect(() => {

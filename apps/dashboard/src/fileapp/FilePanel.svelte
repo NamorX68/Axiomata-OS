@@ -155,7 +155,7 @@
     <p class="failure" role="alert">{failure}</p>
   {/if}
 
-  <FileEditor bind:this={editor} {onState} onQuit={() => void requestClose(ctx.instanceId)} />
+  <FileEditor bind:this={editor} compact {onState} onQuit={() => void requestClose(ctx.instanceId)} />
 </div>
 
 <style>

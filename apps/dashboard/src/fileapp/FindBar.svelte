@@ -243,7 +243,8 @@
   .find-bar {
     position: absolute;
     top: var(--ax-space-1);
-    right: var(--ax-space-4);
+    /* Left of the minimap, when the surface has one (ED5.6). */
+    right: calc(var(--ax-space-4) + var(--minimap-w, 0px));
     z-index: 5;
     display: flex;
     flex-direction: column;

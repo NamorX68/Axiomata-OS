@@ -56,6 +56,10 @@ export interface EditorSettings {
   glow: boolean;
   /** ED5 (T7): folding and unfolding slide the lines below. */
   foldAnimation: boolean;
+  /** ED5 (T8): the minimap beside the text (not in the floating panel, not in the light mode). */
+  minimap: boolean;
+  /** ED5 (T9): the headers of the blocks around the top line stay pinned above the text. */
+  stickyScroll: boolean;
 }
 
 /** F12's defaults, confirmed by the owner. */
@@ -81,6 +85,8 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   bracketColors: true,
   glow: true,
   foldAnimation: true,
+  minimap: true,
+  stickyScroll: true,
 };
 
 const SETTINGS_VERSION = 1;
@@ -124,6 +130,8 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     bracketColors: bool(r.bracketColors, d.bracketColors),
     glow: bool(r.glow, d.glow),
     foldAnimation: bool(r.foldAnimation, d.foldAnimation),
+    minimap: bool(r.minimap, d.minimap),
+    stickyScroll: bool(r.stickyScroll, d.stickyScroll),
   };
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_EDITOR_SETTINGS, parseEditorSettings } from "./editorSettings";
 import { nearestWeight, realWeights, weightName } from "./fonts";
+import { surfaceSettings } from "./surfaceSettings";
 
 describe("parseEditorSettings", () => {
   it("defaults everything for an empty or broken file", () => {
@@ -66,5 +67,54 @@ describe("font weights (F13)", () => {
   it("names weights the way font menus do", () => {
     expect(weightName(100)).toBe("Thin 100");
     expect(weightName(600)).toBe("SemiBold 600");
+  });
+});
+
+describe("minimap and sticky scroll settings (ED5, T8/T9)", () => {
+  it("defaults both to on", () => {
+    expect(DEFAULT_EDITOR_SETTINGS).toMatchObject({
+      minimap: true,
+      stickyScroll: true,
+    });
+    expect(parseEditorSettings({})).toMatchObject({
+      minimap: true,
+      stickyScroll: true,
+    });
+  });
+
+  it("keeps each switched off on its own", () => {
+    expect(parseEditorSettings({ minimap: false })).toMatchObject({
+      minimap: false,
+      stickyScroll: true,
+    });
+    expect(parseEditorSettings({ stickyScroll: false })).toMatchObject({
+      minimap: true,
+      stickyScroll: false,
+    });
+  });
+
+  it("falls back to on for a value that is not a boolean", () => {
+    const s = parseEditorSettings({ minimap: "no", stickyScroll: 0 });
+    expect(s).toMatchObject({ minimap: true, stickyScroll: true });
+    expect(parseEditorSettings({ minimap: null, stickyScroll: "false" })).toMatchObject({
+      minimap: true,
+      stickyScroll: true,
+    });
+  });
+
+  it("passes both through to the surface settings", () => {
+    const off = {
+      ...DEFAULT_EDITOR_SETTINGS,
+      minimap: false,
+      stickyScroll: false,
+    };
+    expect(surfaceSettings(off, false)).toMatchObject({
+      minimap: false,
+      stickyScroll: false,
+    });
+    expect(surfaceSettings(DEFAULT_EDITOR_SETTINGS, true)).toMatchObject({
+      minimap: true,
+      stickyScroll: true,
+    });
   });
 });

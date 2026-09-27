@@ -69,7 +69,8 @@ a command runs at each cursor as one undo step; `EditorDocument.extra` + `extraG
 (`fileapp/FindBar.svelte`, logic in `editor/search/findModel.ts`; the bar and Vi share the last search via
 `fileapp/findShared.ts`). ED5.5: folding (`editor/fold/`: `ranges.ts` where the text folds, `FoldState` what is
 folded; folded lines have no rows in `VisualLayout`; kept per file in `settings.editor.folds`,
-`fileapp/foldMemory.ts`). Next: ED5.6, sticky scroll and minimap.
+`fileapp/foldMemory.ts`). ED5.6: sticky scroll (`editor/sticky.ts`) and the minimap (`editor/minimap.ts`,
+`fileapp/Minimap.svelte`), off in the floating panel (`FileEditor` `compact`). Next: ED5.7, the project search.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
@@ -258,6 +259,13 @@ second-pass gap check over the accumulated diff, not the first pass. The same ov
 to Claude's own verification loop: batch `cargo build`/`clippy`/`fmt`/`test` per unit of work,
 and run the full set only when the work is done, before handing off to a sub-agent, and before
 a commit.
+
+**Lean review cadence (owner, 2026-09-27, to save resources; reversible):** reviews run only
+before a commit, and small checkpoints may be bundled into one commit. Instead of separate
+architecture + test-gap agents, **one** combined review agent (model `sonnet`, narrow brief:
+defects and convention breaks only, short report) covers design and missing tests; Claude keeps
+writing the tests inline. `security-auditor` still runs in full where a plan asks for it or the
+global trigger applies (auth, external paths, new endpoints, …).
 
 `architecture-reviewer`, `security-auditor`, `docs-writer`, and `refactoring-specialist` are
 already language-agnostic as globally defined and apply here unchanged. When

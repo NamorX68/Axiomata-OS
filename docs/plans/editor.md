@@ -1028,6 +1028,35 @@ gelassen: `J` auf einer gefalteten Kopfzeile verbindet mit der ersten verborgene
 eine Datei, die in Tab und IDE-Pane zugleich offen ist, verliert beim Schließen des einen nur die Erinnerung; im
 Split-Diff kann eine Faltung an einer Hunk-Grenze drüben Zeilen verdecken, die dort kein Block sind.
 
+**ED5.6 — gebaut (2026-09-27):** Sticky Scroll und Minimap (T8, T9, T17, T18). **Sticky Scroll**
+(`editor/sticky.ts`): bis zu fünf Kopfzeilen der Blöcke um die oberste Zeile bleiben über dem Text stehen. Umsetzung
+von T9 im Detail: die Blöcke sind die **Faltbereiche** (`fold/ranges.ts`) — mit Baum Funktionen, Klassen und
+Klammerblöcke, sonst Einrückung —, *eine* Vorstellung von „Block“ für Faltung und Sticky Scroll (Erweiterung gegenüber
+„aus der Knotentabelle“, wie bei ED5.5). Slot für Slot nennt die Zeile unter dem Slot den Block ihrer Tiefe, gepinnt
+wird ein Kopf erst, wenn seine eigene Zeile hinausgescrollt ist; der innerste wird von der Zeile nach seinem Block
+hinausgeschoben. Die Köpfe decken den Text darunter ab (T18): der Cursor bleibt darunter (`clearOfSticky` in
+`revealCursor` und `goToLine`), `zt` setzt die Zeile unter sie, Vis `H`/Viewport beginnt unter ihnen. Klick springt
+zum Kopf (mit seinen äußeren Köpfen darüber), Mausrad darüber scrollt den Text; Zeilennummern absolut, Farben wie im
+Text, weicher Schatten (`--ax-sticky-shadow`). Die Bereiche sind die des Gutters (150 ms nach der letzten Änderung
+frisch). **Minimap** (`editor/minimap.ts` Geometrie, `fileapp/Minimap.svelte` Canvas, 110 px rechts vom Scroller):
+jede sichtbare Zeile als 3-px-Streifen, Zeichen als 1-px-Blöcke in Token-Farben (T8: „winzige Zeichen“ — in dieser
+Größe ist ein Glyph ein Block), über die Farben der Theme-Tokens (über ein Probe-Element aufgelöst, neu bei jedem
+Theme-Wechsel). Ein längerer Text scrollt die Minimap im Verhältnis mit, der Schieber (`--ax-minimap-slider`) läuft
+über ihre ganze Höhe; Ziehen scrollt, ein Klick daneben zentriert dort. Marken: Treffer der Such-Leiste oder Vis,
+im Diff hinzugefügte/entfernte Zeilen mit Randbalken (T17), die Cursorzeile; Diagnosen später. Gezeichnet wird nur
+der sichtbare Teil, einmal je Animations-Frame. Die Such-Leiste rückt links neben die Minimap. Einstellungen
+„Minimap“ und „Sticky scroll“ (an); aus im Panel (`FileEditor` `compact`), in `FilePeek`, in der Vorschau der
+Einstellungen und im leichten Modus (T2). Browser-Test: vier gepinnte Köpfe in verschachteltem Rust, ↑ unter die
+Köpfe scrollt mit, `zt` setzt unter sie, Minimap-Klick und -Ziehen.
+Reviews (Architektur: ein HIGH, zwei MEDIUM; Tests: 27 Fälle ergänzt, kein Fehler) — behoben: (1) ein umbrochener
+Kopf (bei Markdown mit Umbruch der Normalfall) wurde gepinnt, solange seine letzte Zeile noch zu sehen war, und stand
+dann doppelt da — gepinnt wird jetzt erst, wenn alle seine Zeilen hinaus sind. (2) Die Minimap bekam die Klammerfarben
+nie. (3) `clearOfSticky` sucht nur noch aufwärts und hält damit auch eine Pixelposition mitten in einer Zeile frei.
+Dazu: Mausrad über Köpfen/Minimap rechnet Zeilen- und Seiten-Modus um, ein Ziehen, das außerhalb endet, lässt den
+Schieber nicht hell hängen. Bekannt und gelassen: im Split-Diff pinnt jede Seite ihre eigenen Köpfe (nahe einem Hunk
+evtl. verschieden viele); eine Datei ab 50 000 Zeilen unter 2 MB hat keine Sticky-Köpfe (der Gutter fragt dort
+zeilenweise), ohne Hinweis.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

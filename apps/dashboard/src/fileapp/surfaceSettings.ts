@@ -26,6 +26,10 @@ export interface SurfaceSettings {
   effects: SurfaceEffects;
   /** Vi's keys instead of the Mac's (ED3). */
   vi: boolean;
+  /** The minimap beside the text (T8); the owner turns it off where there is no room. */
+  minimap: boolean;
+  /** Headers of the blocks around the top line pinned above the text (T9). */
+  stickyScroll: boolean;
 }
 
 export interface SurfaceEffects {
@@ -76,6 +80,8 @@ export function surfaceSettings(settings: EditorSettings, wrap: boolean): Surfac
     wrap,
     tabSize: settings.tabSize,
     vi: settings.mode === "vi",
+    minimap: settings.minimap,
+    stickyScroll: settings.stickyScroll,
     effects: {
       cursor: settings.cursorAnimation,
       smoothScroll: settings.smoothScroll,

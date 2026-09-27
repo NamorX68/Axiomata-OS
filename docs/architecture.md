@@ -1072,6 +1072,10 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   undo, jumps). Each `FileSession` owns its folds; `fileapp/foldMemory.ts` keeps them per file in
   `settings.editor.folds` of `dashboard.json`, forgotten when the tab or IDE pane closes. A split
   diff's panes share one `FoldState`.
+  ED5.6: sticky scroll (`editor/sticky.ts`: up to five headers of the fold ranges around the top line,
+  pinned over the text; the cursor, `zt` and `H` stay below them) and the minimap (`editor/minimap.ts`
+  geometry, `fileapp/Minimap.svelte` canvas right of the scroller: token-coloured ink, slider, search and
+  diff marks). Both are settings (on), off in the floating panel, `FilePeek` and the light mode.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

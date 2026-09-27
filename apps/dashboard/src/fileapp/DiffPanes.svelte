@@ -14,7 +14,9 @@
     of the split layout: its rows are paired, so a fold hides the same rows on
     each side and the two stay in step. Rebuilt panes (a gap opened) start unfolded.
     A fold is taken from the pane it was made in: right at a hunk boundary it may
-    hide rows on the other side that are no block there (known, accepted).
+    hide rows on the other side that are no block there (known, accepted). Sticky
+    scroll pins each side's own headers, so near a hunk the two may pin a different
+    number of rows (also accepted: the rows themselves stay paired).
 -->
 <script lang="ts">
   import { EditorDocument } from "../editor/document";

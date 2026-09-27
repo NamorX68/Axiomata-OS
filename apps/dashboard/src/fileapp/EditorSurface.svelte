@@ -27,6 +27,10 @@
   * **The find bar (ED5.4) floats over the text** (`FindBar.svelte`): ⌘F, ⌥⌘F,
     ⌘G/⇧⌘G and ⌘E are taken here before anything else, in Vi mode too (T15);
     its matches and the "in selection" scope are drawn with the other marks.
+  * **Sticky scroll and the minimap (ED5.6, T8, T9)**: the headers of the
+    blocks around the top line stay pinned over the text (`editor/sticky.ts`);
+    they count as covering it, so the cursor, `zt` and `H` stay below them.
+    The minimap (`Minimap.svelte`) sits to the right of the scroller.
   * **Folding (ED5.5, T7)**: where the text can fold is `editor/fold/ranges.ts`,
     what is folded a `FoldState` (the owner's, kept per file, or the surface's
     own); folded lines simply have no rows in the layout. A chevron in the
@@ -47,7 +51,7 @@
   import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
   import { allSelections, columnSelection, toggleCursor } from "../editor/multicursor";
   import { gutterDigits, lineLabel } from "../editor/gutter";
-  import { FoldRanges } from "../editor/fold/ranges";
+  import { FoldRanges, type FoldRange } from "../editor/fold/ranges";
   import { FoldState } from "../editor/fold/state";
   import {
     findKeyAction,
@@ -60,6 +64,7 @@
   } from "../editor/keymap";
   import { FindModel } from "../editor/search/findModel";
   import { cursor, pos, range, selectionRange, type Pos, type Range } from "../editor/position";
+  import { clearOfSticky, NO_STICKY, stickyAt } from "../editor/sticky";
   import { nextGrapheme, wordAt } from "../editor/text";
   import { syntaxObject, type SyntaxObjectName } from "../editor/syntax/objects";
   import { rowSegments, type Span } from "../editor/syntax/paint";
@@ -67,6 +72,7 @@
   import type { FoldAction, ViEffect } from "../editor/vi/machine";
   import { CursorGlide } from "./cursorGlide";
   import FindBar from "./FindBar.svelte";
+  import Minimap from "./Minimap.svelte";
   import { lastFind, rememberFind } from "./findShared";
   import { KEEP_SCROLL } from "./keepScroll";
   import { searchGuard } from "./searchWorker";
@@ -159,6 +165,8 @@
   const FOLD_CELLS = 2;
   /** Quiet time after a change before the gutter learns the new fold ranges. */
   const FOLD_RANGES_DELAY_MS = 150;
+  /** The minimap's width, in pixels (T8). */
+  const MINIMAP_W = 110;
   /** How long the lines below a fold slide when the theme's `--ax-dur-med` cannot be read. */
   const FOLD_SLIDE_FALLBACK_MS = 260;
   /** Commands that only move the selection — the ones a read-only surface allows. */
@@ -182,6 +190,7 @@
   let tick = $state(0);
   let charW = $state(8);
   let scrollTop = $state(0);
+  let scrollLeft = $state(0);
   let viewW = $state(800);
   let viewH = $state(600);
   let composing = $state(false);
@@ -252,7 +261,9 @@
 
   /** The logical lines on screen, for `H M L` and Vi's scrolling. */
   function viewport(): { top: number; bottom: number } {
-    return visibleLines(layout, { scrollTop, viewH, rowH });
+    // The pinned headers cover the lines under them: `H` starts below them (T18).
+    const covered = sticky.height;
+    return visibleLines(layout, { scrollTop: scrollTop + covered, viewH: viewH - covered, rowH });
   }
 
   /**
@@ -310,7 +321,12 @@
       return;
     }
     if (effect.type === "scroll") {
-      if (scroller) scroller.scrollTop = scrollTopFor(layout, { scrollTop, viewH, rowH }, effect.line, effect.to);
+      if (!scroller) return;
+      // `zt` puts the line just under the headers pinned there (T18).
+      scroller.scrollTop =
+        effect.to === "top"
+          ? clearOfSticky(layout.firstRow(effect.line) * rowH, stickyHeight)
+          : scrollTopFor(layout, { scrollTop, viewH, rowH }, effect.line, effect.to);
       return;
     }
     if (effect.type === "fold") {
@@ -542,6 +558,64 @@
     if (opened) onFolds?.();
   }
 
+  // ---------------------------------------------------------------- sticky scroll
+
+  /** The fold ranges in order, for the pinned headers — as fresh as the gutter's chevrons. */
+  const stickyRanges = $derived(
+    [...foldStarts].map(([start, end]): FoldRange => ({ start, end })).sort((a, b) => a.start - b.start),
+  );
+
+  /** The pinned headers' height with the view scrolled to `top`. */
+  function stickyHeight(top: number): number {
+    return settings.stickyScroll ? stickyAt(stickyRanges, layout, top, rowH).height : 0;
+  }
+
+  const sticky = $derived.by(() => {
+    void tick;
+    return settings.stickyScroll ? stickyAt(stickyRanges, layout, scrollTop, rowH) : NO_STICKY;
+  });
+
+  /** The pinned header rows as drawn: their text in colour, and the line number. */
+  const stickyRows = $derived.by(() =>
+    sticky.headers.map((h, i) => {
+      const text = doc.store.line(h.start);
+      const end = layout.rowStarts(h.start)[1] ?? text.length;
+      const spans = highlighter?.spans(h.start, h.start, { brackets: fx.bracketColors }).get(h.start);
+      return {
+        line: h.start,
+        top: i * rowH + (i === sticky.headers.length - 1 ? sticky.push : 0),
+        segments: rowSegments(text, spans, 0, end),
+      };
+    }),
+  );
+
+  /** A click on a pinned header: to its line, with the headers around it pinned above. */
+  function jumpToHeader(index: number): void {
+    const header = sticky.headers[index];
+    if (!header || !scroller) return;
+    const text = doc.store.line(header.start);
+    const at = pos(header.start, text.length - text.trimStart().length);
+    scroller.scrollTop = Math.max(0, (layout.firstRow(header.start) - index) * rowH);
+    if (vi) vi.placeCursor(at);
+    else doc.setSelection(cursor(at));
+    changed();
+    input.focus();
+  }
+
+  /** Wheel over the pinned headers or the minimap scrolls the text, as it would over the text. */
+  function forwardWheel(e: WheelEvent): void {
+    // A wheel that counts lines (`deltaMode` 1) or pages (2), not pixels.
+    const unitY = e.deltaMode === 1 ? rowH : e.deltaMode === 2 ? viewH : 1;
+    const unitX = e.deltaMode === 1 ? charW : e.deltaMode === 2 ? viewW : 1;
+    scroller?.scrollBy({ left: e.deltaX * unitX, top: e.deltaY * unitY });
+  }
+
+  /** Matches for the minimap: the find bar's while it is open, else Vi's. */
+  function minimapMatches(first: number, last: number): Map<number, [number, number][]> {
+    if (findOpen && find) return find.highlights(first, last).matches;
+    return vi?.searchHighlights(first, last).matches ?? new Map();
+  }
+
   const view = $derived.by(() => {
     void tick;
     const total = layout.totalRows;
@@ -715,7 +789,8 @@
     const { row, cell } = cursorCell(layout, doc.store, target, settings.tabSize);
     const y = row * rowH;
     let top = scroller.scrollTop;
-    if (y < top) top = y;
+    // Above the view, or under the headers pinned at its top (T18): just below them.
+    if (y < top + stickyHeight(top)) top = clearOfSticky(y, stickyHeight);
     else if (y + rowH > top + viewH) top = y + rowH - viewH;
     let left = scroller.scrollLeft;
     if (!settings.wrap) {
@@ -1084,7 +1159,9 @@
     // as the text, and a scroll past its end would be cut short to 0.
     void nextTick().then(() => {
       if (!scroller) return;
-      const top = Math.max(0, (layout.firstRow(target) - GO_TO_MARGIN_ROWS) * rowH);
+      const y = layout.firstRow(target) * rowH;
+      // A few rows of what leads up to it — but never with the line under the pinned headers.
+      const top = Math.min(Math.max(0, y - GO_TO_MARGIN_ROWS * rowH), clearOfSticky(y, stickyHeight));
       const far = Math.abs(top - scroller.scrollTop) > SMOOTH_SCROLL_ROWS * rowH;
       scroller.scrollTo({ top, behavior: fx.smoothScroll && far ? "smooth" : "instant" });
     });
@@ -1105,6 +1182,7 @@
   style:font-size="{settings.fontSize}px"
   style:font-variant-ligatures={settings.ligatures ? "normal" : "none"}
   style:--fold-cells={FOLD_CELLS}
+  style:--minimap-w="{settings.minimap ? MINIMAP_W : 0}px"
   style:tab-size={settings.tabSize}
 >
   <span class="measure" bind:this={measurer} aria-hidden="true">{"0".repeat(64)}</span>
@@ -1116,6 +1194,7 @@
     bind:this={scroller}
     onscroll={() => {
       scrollTop = scroller.scrollTop;
+      scrollLeft = scroller.scrollLeft;
       onTopLine?.(layout.lineAt(Math.floor(scrollTop / rowH)).line);
       onScrollPos?.(scroller.scrollTop, scroller.scrollLeft);
     }}
@@ -1288,6 +1367,51 @@
       </div>
     </div>
   </div>
+  {#if stickyRows.length > 0}
+    <!-- The headers of the blocks around the top line (T9); a click goes to one. -->
+    <div class="sticky" style:height="{sticky.height}px" onwheel={forwardWheel} role="presentation">
+      {#each stickyRows as h, i (h.line)}
+        <button
+          type="button"
+          tabindex="-1"
+          class="sticky-row"
+          style:top="{h.top}px"
+          title="Go to line {h.line + 1}"
+          onmousedown={(e) => {
+            e.preventDefault();
+            jumpToHeader(i);
+          }}
+        >
+          <span class="sticky-gutter" style:width="{gutterW}px">
+            {#if !decorations && settings.lineNumbers !== "off"}{h.line + 1}{/if}
+          </span>
+          <span class="sticky-text" style:left="{textLeft - (settings.wrap ? 0 : scrollLeft)}px"
+            >{#each h.segments as seg, k (k)}{#if seg.token}<span class="tk-{seg.token}">{seg.text}</span
+                >{:else}{seg.text}{/if}{/each}</span
+          >
+        </button>
+      {/each}
+    </div>
+  {/if}
+  {#if settings.minimap}
+    <div class="minimap-slot" style:width="{MINIMAP_W}px" onwheel={forwardWheel} role="presentation">
+      <Minimap
+        {layout}
+        store={doc.store}
+        version={tick}
+        {rowH}
+        {viewH}
+        {scrollTop}
+        tabSize={settings.tabSize}
+        cursorLine={view.cursorLine}
+        {highlighter}
+        brackets={fx.bracketColors}
+        matches={minimapMatches}
+        {decorations}
+        onScroll={(top) => scroller?.scrollTo({ top, behavior: "instant" })}
+      />
+    </div>
+  {/if}
   <canvas class="glide" class:on={gliding} bind:this={canvas} aria-hidden="true"></canvas>
   {#if findOpen && find}
     <FindBar
@@ -1325,6 +1449,7 @@
   .scroller {
     position: absolute;
     inset: 0;
+    right: var(--minimap-w);
     overflow: auto;
     cursor: text;
   }
@@ -1605,6 +1730,62 @@
     height: var(--row);
     background: var(--ax-editor-indent-guide);
     pointer-events: none;
+  }
+
+  /* Sticky scroll (T9): the pinned headers, over the text and below the cursor's glide. */
+  .sticky {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: var(--minimap-w);
+    z-index: 3;
+    overflow: hidden;
+    background: var(--ax-surface-1);
+    box-shadow: var(--ax-sticky-shadow);
+  }
+
+  .sticky-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: var(--row);
+    padding: 0;
+    border: 0;
+    background: var(--ax-surface-1);
+    color: var(--ax-text);
+    font: inherit;
+    line-height: var(--row);
+    text-align: left;
+    white-space: pre;
+    cursor: pointer;
+  }
+
+  .sticky-row:hover {
+    background: var(--ax-surface-2);
+  }
+
+  .sticky-gutter {
+    position: absolute;
+    left: 0;
+    z-index: 1;
+    height: var(--row);
+    padding-right: var(--cell);
+    box-sizing: border-box;
+    background: inherit;
+    color: var(--ax-text-muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sticky-text {
+    position: absolute;
+  }
+
+  .minimap-slot {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
   }
 
   .glide {
