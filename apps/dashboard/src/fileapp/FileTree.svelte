@@ -14,6 +14,11 @@
     backend (`files:renamed`, `files:removed`), not from the tree.
   * **No tree watcher** (W14): a folder is read again when opened, after an
     action in it, and with ↻.
+  * **Dragging moves** (ED5, T11): a file or folder dropped on a folder of the
+    same root moves there (`file_rename`, never replacing; open copies follow
+    through `files:renamed`); a closed folder hovered for half a second opens.
+    Pointer events, not HTML drag and drop, which the Tauri window may take for
+    dropping files from Finder.
 -->
 <script lang="ts">
   import type { FileRootInfo } from "../core/backend";
@@ -27,6 +32,7 @@
     folderKey,
     isHidden,
     joinRel,
+    moveTarget,
     nameProblem,
     parentOf,
   } from "./treeModel";
@@ -59,6 +65,115 @@
   let menu = $state<{ root: string; rel: string; kind: "root" | "dir" | "file"; x: number; y: number } | null>(null);
 
   const isOpen = (root: string, rel: string) => expanded.includes(folderKey(root, rel));
+
+  /** Pixels the pointer moves with the button down before it is a drag, not a click. */
+  const DRAG_THRESHOLD_PX = 5;
+  /** How long a closed folder is hovered during a drag before it opens (T11). */
+  const OPEN_ON_HOVER_MS = 500;
+
+  /** A drag in progress: what is dragged, where the pointer is, and the folder under it. */
+  interface Drag {
+    root: string;
+    rel: string;
+    name: string;
+    x: number;
+    y: number;
+    over: { root: string; rel: string } | null;
+  }
+  let drag = $state<Drag | null>(null);
+  /** The click that ends a drag must not open or toggle the row it ends on. */
+  let swallowClick = false;
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The closed folder the open-on-hover timer runs for. */
+  let hoverKey: string | null = null;
+
+  /** What the drop would do, for the ghost and the highlight. */
+  const dropping = $derived(drag?.over ? moveTarget(drag, drag.over) : null);
+
+  /** The folder a drop at `x`/`y` goes into — a folder row, a file row's folder, a root — and that row. */
+  function dropAt(x: number, y: number): { dir: { root: string; rel: string }; row: HTMLElement } | null {
+    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-root]");
+    const root = row?.dataset.dropRoot;
+    if (!row || root === undefined) return null;
+    return { dir: { root, rel: row.dataset.dropDir ?? "" }, row };
+  }
+
+  /** A closed folder under the pointer opens after a moment; another one restarts the wait. */
+  function openOnHover(row: HTMLElement | null): void {
+    const folder = row?.dataset.folder;
+    const root = row?.dataset.dropRoot;
+    const key = folder !== undefined && root !== undefined && !isOpen(root, folder) ? folderKey(root, folder) : null;
+    if (key === hoverKey) return;
+    clearTimeout(hoverTimer);
+    hoverKey = key;
+    if (key === null || root === undefined || folder === undefined) return;
+    hoverTimer = setTimeout(() => {
+      if (drag && !isOpen(root, folder)) toggle(root, folder);
+    }, OPEN_ON_HOVER_MS);
+  }
+
+  /** A pointer went down on an entry: past a few pixels of movement it is a drag. */
+  function onEntryPointerDown(e: PointerEvent, root: string, rel: string, name: string): void {
+    if (e.button !== 0 || editing) return;
+    const start = { x: e.clientX, y: e.clientY };
+    let started = false;
+    const onMove = (ev: PointerEvent) => {
+      if (!started && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < DRAG_THRESHOLD_PX) return;
+      started = true;
+      menu = null;
+      const at = dropAt(ev.clientX, ev.clientY);
+      drag = { root, rel, name, x: ev.clientX, y: ev.clientY, over: at?.dir ?? null };
+      openOnHover(at?.row ?? null);
+    };
+    const end = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("keydown", onKey, true);
+      clearTimeout(hoverTimer);
+      hoverKey = null;
+    };
+    const onUp = () => {
+      end();
+      if (!started) return;
+      swallowClick = true;
+      const done = drag;
+      drag = null;
+      if (done?.over) void moveInto(done, done.over);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      end();
+      if (started) swallowClick = true;
+      drag = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("keydown", onKey, true);
+  }
+
+  /** Moves the dragged entry into `dir` (T11); a refusal or a failure is said, not thrown. */
+  async function moveInto(from: Drag, dir: { root: string; rel: string }): Promise<void> {
+    const target = moveTarget(from, dir);
+    if (target === null) return;
+    if ("refused" in target) {
+      onError(target.refused);
+      return;
+    }
+    try {
+      await renameEntry(from.root, from.rel, target.to);
+      expanded = expandedAfterRename(expanded, from.root, from.rel, target.to);
+      if (!isOpen(dir.root, dir.rel)) expanded = [...expanded, folderKey(dir.root, dir.rel)];
+    } catch (err) {
+      onError(messageOf(err));
+    }
+    await Promise.all([load(from.root, parentOf(from.rel)), load(dir.root, dir.rel)]);
+  }
+
+  /** Whether the folder `root`/`rel` is where the drag would drop. */
+  const isDropTarget = (root: string, rel: string) =>
+    drag?.over?.root === root && drag.over.rel === rel && dropping !== null && !("refused" in dropping);
 
   async function load(root: string, rel: string): Promise<void> {
     const key = folderKey(root, rel);
@@ -225,13 +340,22 @@
       {#if editing?.kind === "rename" && editing.root === root && editing.rel === path}
         {@render nameInput(depth)}
       {:else}
-        <div class="line" class:active={isActive(root, path)}>
+        <div
+          class="line"
+          class:active={isActive(root, path)}
+          class:drop-target={entry.kind === "dir" && isDropTarget(root, path)}
+          class:dragged={drag?.root === root && drag.rel === path}
+          data-drop-root={root}
+          data-drop-dir={entry.kind === "dir" ? path : rel}
+          data-folder={entry.kind === "dir" ? path : undefined}
+        >
           <button
             type="button"
             class="row"
             class:ignored={entry.ignored}
             style:--depth={depth}
             title={entry.kind === "link" ? `${path} (a link)` : path}
+            onpointerdown={(e) => onEntryPointerDown(e, root, path, entry.name)}
             onclick={() =>
               entry.kind === "dir" ? toggle(root, path) : entry.kind === "file" && onOpen({ root, rel: path }, true)}
             ondblclick={() => entry.kind === "file" && onOpen({ root, rel: path }, false)}
@@ -269,9 +393,24 @@
   {/if}
 {/snippet}
 
-<nav class="tree" aria-label="Files">
+<nav
+  class="tree"
+  aria-label="Files"
+  onclickcapture={(e) => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }}
+>
   {#each roots as root (root.id)}
-    <div class="line">
+    <div
+      class="line"
+      class:drop-target={isDropTarget(root.id, "")}
+      data-drop-root={root.id}
+      data-drop-dir=""
+      data-folder=""
+    >
       <button
         type="button"
         class="row root"
@@ -295,6 +434,19 @@
     {/if}
   {/each}
 </nav>
+
+{#if drag}
+  <!-- What is being dragged, beside the pointer; struck through where it cannot go. -->
+  <div
+    class="ghost"
+    class:refused={dropping !== null && "refused" in dropping}
+    style:left="{drag.x + 12}px"
+    style:top="{drag.y + 8}px"
+    aria-hidden="true"
+  >
+    {drag.name}
+  </div>
+{/if}
 
 {#if menu}
   {@const m = menu}
@@ -462,5 +614,34 @@
 
   .menu button:hover {
     background: var(--ax-accent-muted);
+  }
+
+  /* Moving (T11): the folder a drop goes into, the entry being dragged, and the ghost at the pointer. */
+  .line.drop-target {
+    background: var(--ax-accent-muted);
+    box-shadow: inset 0 0 0 1px var(--ax-accent);
+    border-radius: var(--ax-radius-sm);
+  }
+
+  .line.dragged {
+    opacity: 0.5;
+  }
+
+  .ghost {
+    position: fixed;
+    z-index: var(--ax-z-dialog);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: var(--ax-surface-3);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    color: var(--ax-text);
+    font-size: var(--ax-font-size-xs);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .ghost.refused {
+    color: var(--ax-text-muted);
+    text-decoration: line-through;
   }
 </style>

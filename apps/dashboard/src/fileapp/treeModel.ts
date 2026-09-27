@@ -49,6 +49,21 @@ export function renamedPath(rel: string, from: string, to: string): string | nul
   return rel.startsWith(`${from}/`) ? to + rel.slice(from.length) : null;
 }
 
+/** What dropping `from` onto the folder `dir` means (ED5, T11). */
+export type MoveTarget = { to: string } | { refused: string } | null;
+
+/**
+ * Moving `from` (a file or folder) into the folder `dir`: where it lands, why
+ * it cannot (another root, into itself), or `null` when it is already there.
+ */
+export function moveTarget(from: { root: string; rel: string }, dir: { root: string; rel: string }): MoveTarget {
+  if (from.root !== dir.root) return { refused: "Moving between roots is not possible — only within one." };
+  // Where it is already — or dropped back on itself, a drag let go where it began.
+  if (parentOf(from.rel) === dir.rel || from.rel === dir.rel) return null;
+  if (isUnder(dir.rel, from.rel)) return { refused: "A folder cannot be moved into itself." };
+  return { to: joinRel(dir.rel, baseName(from.rel)) };
+}
+
 /** Whether `rel` is `gone` or lies inside the folder `gone`. */
 export function isUnder(rel: string, gone: string): boolean {
   return rel === gone || rel.startsWith(`${gone}/`);

@@ -1047,7 +1047,7 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `QuickOpen.svelte`). ED4.6: the IDE's Files pane (`ide/panes/FilesPane.svelte`, the same tree on
   the project root; new projects start with it on the left), a Terminal/Files `+` menu per tab
   group, and ⌘P over the open project. Next: ED5.
-- **Editor ED5 — tools: under way** (2026-09-26, T1–T19 in `docs/plans/editor.md`). ED5.1: the
+- **Editor ED5 — tools: done** (2026-09-26/27, T1–T19 in `docs/plans/editor.md`). ED5.1: the
   rope (`editor/rope.ts`, an immutable B-tree of line blocks behind `TextStore`, snapshots for the
   coming search worker); files up to 16 MiB editable, over 2 MiB in a light mode without
   tree-sitter; the recovery folder capped at 256 MiB in total (`MAX_TOTAL_BYTES`). ED5.2: the
@@ -1084,6 +1084,8 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   ED5.8: installed Mac fonts: `axiomata-macos::fonts` (CoreText via raw FFI, no crate), Tauri
   `installed_fonts` (cached per run), `core/installedFonts.ts`; the editor's and the terminal's font
   pickers offer them (the terminal monospaced only), a missing chosen font draws the default.
+  ED5.9: moving in the tree: drag a file or folder onto a folder of the same root (pointer events,
+  `treeModel.moveTarget`, the existing `file_rename`); a closed folder opens after half a second.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

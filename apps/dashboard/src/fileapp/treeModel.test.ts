@@ -12,6 +12,7 @@ import {
   isUnder,
   joinRel,
   loadTreePrefs,
+  moveTarget,
   nameProblem,
   parentOf,
   parseTreePrefs,
@@ -127,5 +128,27 @@ describe("open folders after a rename or delete (W13)", () => {
   it("are forgotten with a deleted folder, only in that root", () => {
     const expanded = [k("w", "notes"), k("w", "notes/sub"), k("w", "other"), k("p", "notes")];
     expect(expandedAfterDelete(expanded, "w", "notes")).toEqual([k("w", "other"), k("p", "notes")]);
+  });
+});
+
+describe("moveTarget (T11)", () => {
+  const a = (rel: string) => ({ root: "project:1", rel });
+
+  it("lands in the folder under its own name", () => {
+    expect(moveTarget(a("src/a.rs"), a("lib"))).toEqual({ to: "lib/a.rs" });
+    expect(moveTarget(a("src/deep"), a(""))).toEqual({ to: "deep" });
+  });
+
+  it("does nothing where it already is", () => {
+    expect(moveTarget(a("src/a.rs"), a("src"))).toBeNull();
+    expect(moveTarget(a("a.rs"), a(""))).toBeNull();
+  });
+
+  it("refuses another root and a folder into itself", () => {
+    expect(moveTarget(a("a.rs"), { root: "workspace", rel: "" })).toHaveProperty("refused");
+    expect(moveTarget(a("src"), a("src/deep"))).toHaveProperty("refused");
+    expect(moveTarget(a("src"), a("src"))).toBeNull();
+    // A sibling whose name starts the same is not inside it.
+    expect(moveTarget(a("src"), a("src2"))).toEqual({ to: "src2/src" });
   });
 });

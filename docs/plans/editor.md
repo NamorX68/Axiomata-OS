@@ -836,7 +836,7 @@ das einer anderen Gruppe aufgeht, die Nachbar-Regel sagt, dass sie auf der flach
 `layout.ts` beim Normalisieren herstellt, und ein Files-Pane ohne offenes Projekt zeigt einen Hinweis
 statt nichts. Mehrere Files-Panes sind erlaubt wie mehrere Terminals. Damit ist **ED4 komplett**.
 
-### ED5 im Detail (gegrillt 2026-09-26, Q1–Q19, bestätigt; Umsetzung begonnen)
+### ED5 im Detail (gegrillt 2026-09-26, Q1–Q19, bestätigt; umgesetzt 2026-09-26/27 — ED5 komplett)
 
 **Entscheidungen**
 
@@ -1100,6 +1100,21 @@ Vorgabe; der Hinweistext selbst nur per Unit-Test (`drawnFamily`).
 Review (kombiniert, Sonnet): FFI ohne Befund (jedes Create/Copy genau einmal freigegeben, Typprüfung vor jedem Lesen,
 Zahlentypen passend). Behoben: die TS-Regel ließ C1-Steuerzeichen (U+0080–U+009F) durch, die Rusts `is_control`
 abweist, und zählte die Länge in UTF-16 statt in UTF-8-Bytes — jetzt dieselbe Regel auf beiden Seiten, mit Test.
+
+**ED5.9 — gebaut (2026-09-27):** Verschieben im Baum (T11). `FileTree.svelte` (damit auch der IDE-Files-Pane): eine
+Datei oder ein Ordner, gezogen und auf einen Ordner derselben Wurzel losgelassen, zieht dorthin um — über das schon
+vorhandene `file_rename` (gepinnte Elternordner, `RENAME_NOREPLACE`, `.git` nie), offene Kopien folgen über
+`files:renamed`. Ziehen mit Pointer-Events statt HTML-Drag-and-drop, das Tauris Fenster fürs Ablegen aus dem Finder
+abfangen kann (dieselbe Wahl wie bei den IDE-Tabs); ab 5 px Bewegung ist es ein Ziehen, der Klick danach wird
+geschluckt, Esc bricht ab. Ziel ist die Zeile unter dem Zeiger (`data-drop-root`/`data-drop-dir`): ein Ordner, der
+Ordner einer Datei oder eine Wurzel; ein zugeklappter Ordner öffnet sich nach 500 ms. `treeModel.moveTarget` entscheidet
+(Ziel, schon dort / auf sich selbst → nichts, andere Wurzel oder in sich selbst → abgelehnt mit Meldung); der Geist am
+Zeiger ist durchgestrichen, wo es nicht geht. Rust: `rename_entry` lehnt einen Ordner in sich selbst ausdrücklich ab
+(statt `EINVAL`). Browser-Test (Mock): `README.md` → `src/`, Ablehnung über Wurzeln, Aufklappen beim Verweilen.
+Sicherheitsprüfung (voll): nur LOW. Über Wurzeln hinweg ist ein Verschieben schon im Befehl unmöglich (ein `root` für
+beide Pfade), „in sich selbst“ verhindert ohnehin der Kernel; die Meldung dafür vergleicht jetzt Pfad-Komponenten statt
+roher Zeichenketten (`./src/x`, `src//x`). Kein zusätzliches Sonnet-Review: der Diff ist klein, die Sicherheitsprüfung
+deckt ihn ab.
 
 ## 6. Verifikation (pro Meilenstein)
 
