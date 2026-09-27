@@ -375,8 +375,9 @@ skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see
 - `opencode.rs` (Stufe 2 CP5) is the single agent harness: it spawns `opencode run --model
   <provider/model> --format json --auto [--session <id>]` in `<workspace_root>` with the
   prompt on **stdin** (Opencode 2, 2026-09-27: no `run --dir` any more, and the JSON events no
-  longer carry token counts — they are read back from `opencode session export <id>`, only the
-  messages created during the run, so metering and the daily cap keep working) (a positional would read the YAML `---` frontmatter as a flag and make
+  longer carry reliable token counts — 2.0.17 sent none, 2.0.18 sends a `step_finish` for every
+  step but the last — so they are read back from `opencode session export <id>`, which replaces
+  the stream's, only the messages created during the run, so metering and the daily cap keep working) (a positional would read the YAML `---` frontmatter as a flag and make
   opencode print its help and exit). It hands the prompt to whichever provider
   `skill_provider` (skills) / `chat_provider` (assistant bar) routes to using that provider's
   own native tool-calling protocol — so a non-Anthropic model (Deepseek via OpenRouter, or a

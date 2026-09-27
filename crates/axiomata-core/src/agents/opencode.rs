@@ -25,10 +25,13 @@
 //! `--format json` makes the CLI emit NDJSON events on stdout; the reply is
 //! the concatenation of the `text` parts, and a root `error` event is a failed
 //! run. Opencode 1 put each step's `reason` / token counts / cost on
-//! `step_finish` events; **Opencode 2 emits none** (only `step_start` and
-//! `text`), so the counts are read back afterwards from
-//! `opencode session export <id>` ([`export_usage`]) — without them a paid
-//! run would be metered as free and the daily cap would never trip.
+//! `step_finish` events. **Opencode 2 cannot be trusted with them**: 2.0.17
+//! emitted none, 2.0.18 emits them for every step but the last — whose
+//! `step_finish` never arrives, so the run looked like it ended on a tool call.
+//! The counts are therefore read back afterwards from
+//! `opencode session export <id>` ([`export_usage`]), which wins over the
+//! stream whenever it can be had — without it a paid run would be metered as
+//! free (or short) and the daily cap would not trip.
 //! Opencode 2 also dropped `run --dir`; the child's working directory is the
 //! only place the workspace root is given. `--auto` auto-approves tool use (the opencode equivalent
 //! of a permission bypass) so an unattended run never stalls asking a question
@@ -417,10 +420,10 @@ fn usage_from_export(json: &str, since_ms: i64) -> Option<ExportUsage> {
     any.then_some(usage)
 }
 
-/// The run's usage read back from its session, when the event stream did
-/// not carry it (Opencode 2). `None` — and a warning in the log — if it
-/// cannot be had; the run is then recorded without token counts, as a run
-/// whose CLI reported none always was.
+/// The run's usage read back from its session (Opencode 2), which replaces
+/// whatever the event stream carried. `None` — and a warning in the log — if
+/// it cannot be had; the run is then recorded with the stream's counts, or
+/// without any if the stream had none.
 async fn usage_for(
     raw: &AgentRunResult,
     cwd: &std::path::Path,
@@ -428,9 +431,6 @@ async fn usage_for(
     since_ms: i64,
 ) -> Option<ExportUsage> {
     let events = parse_events(&raw.stdout);
-    if events.saw_tokens {
-        return None;
-    }
     let session_id = events.session_id.filter(|s| super::valid_session_id(s))?;
     let usage = export_usage(&session_id, cwd, env, since_ms).await;
     if usage.is_none() {
@@ -489,18 +489,19 @@ struct ParsedEvents {
 }
 
 impl ParsedEvents {
-    /// Takes the counts read back from the session export (Opencode 2), which
-    /// the event stream no longer carries.
+    /// Replaces the stream's counts with those read back from the session
+    /// export (Opencode 2), which covers every step of the run — the stream
+    /// may lack some or all of them.
     fn absorb(&mut self, usage: &ExportUsage) {
         self.saw_tokens = true;
-        self.input_tokens += usage.input_tokens;
-        self.output_tokens += usage.output_tokens;
+        self.input_tokens = usage.input_tokens;
+        self.output_tokens = usage.output_tokens;
         self.saw_cost = true;
-        self.cost += usage.cost;
-        self.turns += usage.turns;
-        if let Some(reason) = &usage.reason {
-            self.reason = reason.clone();
-        }
+        self.cost = usage.cost;
+        self.turns = usage.turns;
+        // The stream's reason may be a step before the last; an export
+        // without any `finish` gives no sign of a failure.
+        self.reason = usage.reason.clone().unwrap_or_else(|| "stop".to_string());
     }
 }
 
@@ -986,17 +987,42 @@ mod tests {
         assert_eq!(reply.cost_usd, None);
     }
 
-    #[tokio::test]
-    async fn usage_for_skips_the_export_when_the_stream_already_had_tokens() {
-        // An Opencode 1 stream carries `step_finish` tokens directly; passing
-        // an export on top must not double-count them — `usage_for` must
-        // short-circuit to `None` (so `absorb` is never called) before it
-        // would ever try to run `opencode session export`, which is why this
-        // is safe to assert without a real opencode binary on PATH.
+    #[test]
+    fn the_export_replaces_a_stream_that_lacks_the_last_step() {
+        // Opencode 2.0.18: a `step_finish` for the tool-call step, none for
+        // the final answer. The export has both steps and must win — not be
+        // added on top, and not leave the run ending on `tool-calls`.
         let stream = r#"{"type":"step_start","sessionID":"ses_x","part":{"type":"step-start"}}
-{"type":"step_finish","part":{"reason":"stop","tokens":{"input":10,"output":2},"cost":0.001}}"#;
-        let raw = bare(stream, 0);
-        let usage = usage_for(&raw, std::path::Path::new("."), &[], 0).await;
-        assert_eq!(usage, None);
+{"type":"step_finish","part":{"reason":"tool-calls","tokens":{"input":10,"output":2},"cost":0.001}}
+{"type":"text","part":{"type":"text","text":"6"}}"#;
+        let usage = ExportUsage {
+            input_tokens: 30,
+            output_tokens: 5,
+            cost: 0.003,
+            turns: 2,
+            reason: Some("stop".into()),
+        };
+        let out = parse_event_stream(bare(stream, 0), Some(&usage));
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.stdout, "6");
+        assert_eq!(out.input_tokens, Some(30));
+        assert_eq!(out.output_tokens, Some(5));
+        assert_eq!(out.cost_usd, Some(0.003));
+        assert_eq!(out.num_turns, Some(2));
+
+        let reply = parse_chat_output(bare(stream, 0), Some(&usage)).unwrap();
+        assert_eq!(reply.input_tokens, Some(30));
+        assert_eq!(reply.cost_usd, Some(0.003));
+
+        // An export whose messages carry no `finish` must not leave the
+        // stream's `tool-calls` in place.
+        let no_finish = ExportUsage {
+            reason: None,
+            ..usage
+        };
+        assert_eq!(
+            parse_event_stream(bare(stream, 0), Some(&no_finish)).exit_code,
+            0
+        );
     }
 }
