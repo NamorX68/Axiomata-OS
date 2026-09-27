@@ -363,6 +363,7 @@ dependencies = [
  "axiomata-board",
  "axiomata-files",
  "axiomata-ide",
+ "axiomata-opencode",
  "base64 0.22.1",
  "chrono",
  "cron",
@@ -411,6 +412,19 @@ name = "axiomata-macos"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "axiomata-opencode"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "rustix",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

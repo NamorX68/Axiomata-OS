@@ -179,6 +179,21 @@ One promise here is per module rather than crate-wide: the projects store looks 
 system but never changes it. That will *not* hold for the worktree module in M7.2, which has
 to create and remove real directories — it states its own contract when it lands.
 
+### `axiomata-opencode`
+
+The client for Opencode 2's shared background service (`docs/plans/opencode2.md`, OC1).
+Standalone like `axiomata-terminal`: no Tauri, no `axiomata-core` — the skill runner (in
+core) and the agentic IDE (`axiomata-ide`, OC2/OC3) both use it. `service` finds the
+service (`opencode debug paths state` → `service.json`), logs in (the one undocumented
+detail: HTTP Basic, user `opencode`), refuses a non-loopback URL and a major version other
+than 2, and starts the service when it is not running. `events` reads `GET /api/event`
+(server-sent events; volatile by contract). `session` creates, prompts, reads (backwards,
+page by page, up to a turn's prompt), steers and deletes sessions. `turn` puts them together
+into one unattended turn (see "Agent backends" below). The event payloads are not in
+Opencode's OpenAPI document; the ones used were measured against 2.0.18 and are listed in
+the plan. `tests/live.rs` holds `#[ignore]`d checks against the real service with a local
+model.
+
 ### `axiomata-files`
 
 The file service behind the file app and its own editor (`docs/plans/editor.md`, milestone
@@ -369,29 +384,40 @@ pending migrations.
 
 Execution dispatches through a small `enum`, `AgentBackend { Opencode, Ollama { model } }` —
 deliberately not a trait/registry (see §6). `AgentRequest` carries `prompt`, `cwd`, `timeout`,
-`env`, `system_prompt_file` (the module bridge manifest, appended to **chat turns only** —
+`system_prompt_file` (the module bridge manifest, appended to **chat turns only** —
 skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see below).
 
-- `opencode.rs` (Stufe 2 CP5) is the single agent harness: it spawns `opencode run --model
-  <provider/model> --format json --auto [--session <id>]` in `<workspace_root>` with the
-  prompt on **stdin** (Opencode 2, 2026-09-27: no `run --dir` any more, and the JSON events no
-  longer carry reliable token counts — 2.0.17 sent none, 2.0.18 sends a `step_finish` for every
-  step but the last — so they are read back from `opencode session export <id>`, which replaces
-  the stream's, only the messages created during the run, so metering and the daily cap keep working) (a positional would read the YAML `---` frontmatter as a flag and make
-  opencode print its help and exit). It hands the prompt to whichever provider
-  `skill_provider` (skills) / `chat_provider` (assistant bar) routes to using that provider's
-  own native tool-calling protocol — so a non-Anthropic model (Deepseek via OpenRouter, or a
-  local Ollama model) executes its skills the way it does inside opencode itself. The old
-  `claude -p` Anthropic framing was the root cause of the digests' off-topic prose /
-  empty-results / 10-minute-timeout runs, and was retired along with the Stufe 2
-  `ollama-agent` tool loop: one harness for everything. It inherits the user's opencode
+- `opencode.rs` is the single agent harness. Since OC1 (`docs/plans/opencode2.md`,
+  2026-09-27) it is a **client of Opencode 2's shared background service** through the
+  `axiomata-opencode` crate, not a spawner of `opencode run`: a skill run is a fresh session
+  (`POST /api/session` with `location.directory = <workspace_root>`, the `provider/model` as
+  a `Model.Ref`, a title, and permission rules), an assistant turn a fresh or continued one
+  (switching the model first when the chat provider changed). `Service::run_turn` opens the
+  event stream, sends the prompt, waits for `session.execution.succeeded|failed|interrupted`,
+  and then reads the turn's messages back — reply text, tokens, cost, turns, `finish` and the
+  `idle` entry's outcome all come from there, so an Opencode update can no longer change the
+  result format underneath (the 2.0.17 → 2.0.18 stream change failed every run until
+  `1b6dbfb`). Unattended permission rules (`unattended_permissions`): with
+  `auto_approve_tools` everything not explicitly denied is allowed (the former `--auto`),
+  without it every `permission.asked` is rejected — which interrupts the turn — and the
+  `question` tool is always denied, so a turn never waits for an answer nobody gives. A bad
+  `cwd` fails before the service is asked (same `ENOENT`/`ENOTDIR` as the old spawn), and
+  under `cfg(test)` the backend never connects, so no unit test can reach the owner's real,
+  possibly billed service. Discovery is `opencode debug paths state` → `service.json`
+  (`url`, `password`); the service is started with `opencode service start` when it is not
+  running, and a major version other than 2 is refused. The login (HTTP Basic, user
+  `opencode`) is the one undocumented piece, kept in `axiomata-opencode::service` alone
+  (upstream issue anomalyco/opencode#51724). The prompt reaches whichever provider
+  `skill_provider` (skills) / `chat_provider` (assistant bar) routes to using that
+  provider's own native tool-calling protocol — so a non-Anthropic model (Deepseek via
+  OpenRouter, or a local Ollama model) executes its skills the way it does inside opencode
+  itself. The old `claude -p` Anthropic framing was the root cause of the digests' off-topic
+  prose / empty-results / 10-minute-timeout runs, and was retired along with the Stufe 2
+  `ollama-agent` tool loop: one harness for everything. The service uses the user's opencode
   config (`~/.config/opencode`, MCP servers incl. `apple-mail`/`apple-reminders`, credential
-  store) and needs no provider env. `--model` is built by `opencode::model_id` /
+  store); Axiomata passes no provider env. The model id is built by `opencode::model_id` /
   `opencode::chat_model_id` as `provider/<model>` from the role's provider + its model (or a
-  skill's `model:`); the shared tokio harness streams NDJSON `--format json` events and joins
-  the `text` parts into the reply (`cost`/`tokens`/`reason` ride on `step_finish`). `--auto`
-  auto-approves tool use, so an unattended run never stalls on a permission question nobody
-  will answer. `allowed_tools` frontmatter is now documentation only — there is no runtime
+  skill's `model:`). `allowed_tools` frontmatter is documentation only — there is no runtime
   allow-list (that was the Claude Code `--allowedTools` mechanism, which silently refused MCP
   calls headless and is gone with it).
 - `ollama.rs` makes one non-streaming `POST /api/generate` call to the local daemon — the
@@ -400,7 +426,7 @@ skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
-`opencode run` `--model` id points at (`openrouter/deepseek/…`, `anthropic/claude-haiku-4-5`,
+session's model points at (`openrouter/deepseek/…`, `anthropic/claude-haiku-4-5`,
 `ollama/qwen3.8:27b-mlx`). Opencode resolves the provider's auth/keys itself from its own
 credential store, so Axiomata carries no `ANTHROPIC_*` env plumbing. Not to be confused with
 `AgentBackend::Ollama` (`agents/ollama.rs`), the separate raw/tool-free completion backend
@@ -434,8 +460,8 @@ selected per skill by `SKILL.md`'s `backend: ollama`.
   local `skill_provider = ollama` records ~0 spend and always passes.
 - **Metered cost (CP5).** The daily cap meters recorded spend from token counts × an
   owner-configured per-model price table, `config.agents.costs` (`ModelCost` — USD per million
-  input/output tokens, keyed by the *bare* model id, no `provider/` prefix): the opencode
-  `step_finish` cost for a non-Anthropic model can be an order of magnitude too high, which
+  input/output tokens, keyed by the *bare* model id, no `provider/` prefix): the cost opencode
+  reports for a non-Anthropic model can be an order of magnitude too high, which
   made the cap fire on spend never incurred. `spend::metered_cost_usd` computes the figure and
   the runner substitutes it for the recorded `cost_usd` when the model is priced. The `model`
   column on `runs` (migration 0007) records which model a run used, and
@@ -454,7 +480,7 @@ selected per skill by `SKILL.md`'s `backend: ollama`.
   (memory router, particle graph, module manifests, every open note assume it is fixed for the
   process lifetime), so a changed `workspace_root` is written to disk immediately but *not*
   applied in memory — `save_config` returns `true` so the UI can prompt for a restart. Every
-  other field (owner, providers, models) applies live, effective on the next `opencode run`.
+  other field (owner, providers, models) applies live, effective on the next agent turn.
 - **Migration.** Two on-load upgrades run in sequence: (1)
   `migrate_legacy_model_if_needed()` seeds every `ProviderId::ALL` member with its defaults and
   folds a flat pre-`providers` `agents.claude_model` into Anthropic's model fields; (2)
@@ -592,7 +618,7 @@ carrying its own config.
   tools and replies with one JSON object; **there is no live poll** — data sits behind an
   MCP tool only an agent can reach, so every refresh is a real agent turn (whichever run
   happened most recently: by hand, on a schedule via a Routine, or the tile's own ↻, all the
-  same `run_skill` mechanism). Since Stufe 2 CP5 a digest's refresh is an `opencode run`
+  same `run_skill` mechanism). Since Stufe 2 CP5 a digest's refresh is an Opencode turn
   against whichever model `skill_provider` routes to — cloud (Deepseek via OpenRouter,
   Anthropic) or local (`ollama/<model>`) alike, no backend switch needed (§"Agent backends").
   The Calendar tile goes further on the client: a Monday-first

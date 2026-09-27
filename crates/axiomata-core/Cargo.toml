@@ -10,6 +10,7 @@ license.workspace = true
 # only, so `axiomata-ide` can use the board later without pulling core in.
 axiomata-board = { path = "../axiomata-board" }
 axiomata-ide = { path = "../axiomata-ide" }
+axiomata-opencode = { path = "../axiomata-opencode" }
 # The guarded file service (editor plan ED0); `workspace` is its strict root.
 axiomata-files = { path = "../axiomata-files" }
 home.workspace = true

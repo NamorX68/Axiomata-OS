@@ -174,10 +174,19 @@ from the code itself:
 - **Skills live in one place only**, `~/.axiomata/skills/<name>/SKILL.md` — there is no
   workspace-local skill location (dropped deliberately; `docs/architecture.md` §4 explains
   why).
-- **Connector skills reach MCP through opencode's own config, not Axiomata's** — skills run
-  on the headless Opencode CLI (`opencode run`, `AgentBackend::Opencode`), which resolves the
+- **Opencode 2 is a service, and Axiomata is its API client** (`docs/plans/opencode2.md`,
+  crate `axiomata-opencode`; docs: https://opencode.ai/v2/docs, *not* `/docs`, that is v1).
+  Skills and chat are sessions on the one shared background service (`POST /api/session`,
+  prompt, wait on `/api/event`, read the messages back) — never parse a CLI's output again,
+  never `--standalone` (it deadlocks on the shared database and starts its own MCP servers,
+  apple-mail opening Mail.app each time). Unit tests cannot reach the real service
+  (`cfg(test)` guard in `agents/opencode.rs`); live checks are `#[ignore]`d in
+  `crates/axiomata-opencode/tests/live.rs`. After every Opencode update, check one real skill run.
+- **Connector skills reach MCP through opencode's own config, not Axiomata's** — skill
+  sessions run on the service (`AgentBackend::Opencode`), which resolves the
   MCP servers from `~/.config/opencode/opencode.json` (the same `apple-mail` /
-  `apple-reminders` servers) and auto-approves their tool use via `--auto`. There is no
+  `apple-reminders` servers); tool use is pre-approved by the session's permission rules
+  (`auto_approve_tools`, the former `--auto`). There is no
   `allowed_tools` allow-listing at runtime anymore (that was a Claude Code `--allowedTools`
   trap, §5 of `docs/architecture.md`); the frontmatter field is kept as documentation only.
 - **Routines**: cron is the `cron` crate's **6–7 field, seconds-first** format
@@ -188,7 +197,7 @@ from the code itself:
   an MCP-backed `*-digest` skill, no live poll (every refresh is a real agent turn), writes
   go through a silent one-shot instruct turn, not the skill. Follow this pattern for the next
   integration rather than hand-rolling Tauri commands for it (`docs/architecture.md` §5).
-  The digests run on the single agent harness — `opencode run` against whatever
+  The digests run on the single agent harness — an Opencode session on whatever
   `skill_provider` routes to (`openrouter/deepseek/...`, `anthropic/claude-haiku-4-5`, or a
   local `ollama/<model>`), the same way opencode itself would run them; that harness is what
   replaced both the Claude Code CLI and the Stufe 2 `ollama-agent` tool loop.
@@ -232,8 +241,8 @@ from the code itself:
   `effective_backend` mechanism and the `ollama-agent` backend are gone.
 - **Model / provider**: the provider is chosen **per role** — `agents.chat_provider` for
   interactive chat, `agents.skill_provider` for skill/routine runs — resolved via
-  `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. Every `opencode run` is told
-  `--model provider/<model>` from *its role's* provider (`providers[chat_provider].chat_model`
+  `AgentDefaults::provider_for(ProviderRole::{Chat,Skill})`. Every Opencode session gets
+  the model `provider/<model>` from *its role's* provider (`providers[chat_provider].chat_model`
   / `providers[skill_provider].skill_model`; a skill's own `model:` frontmatter still wins),
   and opencode resolves the provider's auth/keys itself from its own credential store — there
   is no `ANTHROPIC_*` env plumbing anymore. `guard_redirected_turn(db, config, role)` still

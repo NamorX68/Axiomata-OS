@@ -430,9 +430,6 @@ fn agent_request(
         timeout: Duration::from_secs(
             timeout_override_secs.unwrap_or(config.agents.skill_timeout_secs),
         ),
-        // Opencode resolves providers/auth from its own config store; no
-        // provider env is layered on.
-        env: Vec::new(),
         // Skill and routine runs do NOT get the dashboard module manifest
         // (`module-context.md`). No current skill calls a module action — the
         // digests only read via MCP and emit JSON, `cleanup` edits files — so

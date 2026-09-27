@@ -1,5 +1,6 @@
-//! Agent backends: `Opencode` (the headless Opencode CLI — the single agent
-//! harness for every model Axiomata runs, cloud or local) and `Ollama` (a
+//! Agent backends: `Opencode` (turns on Opencode 2's shared background
+//! service — the single agent harness for every model Axiomata runs, cloud or
+//! local) and `Ollama` (a
 //! single raw completion against a local model for simple, tool-free tasks).
 //!
 //! Skill and routine execution dispatches through the [`AgentBackend`] enum
@@ -10,7 +11,7 @@
 //! or scheduler.
 //!
 //! The interactive assistant-bar chat also runs through opencode (a
-//! session-continuing `opencode run`), not a separate backend: one harness for
+//! continued Opencode session), not a separate backend: one harness for
 //! everything means a provider/model that works in skills works in chat too.
 //! Foreign agents (Claude Code, the M1-era `ollama-agent` tool loop) were
 //! removed in Stufe 2 CP5 in favour of this single harness.
@@ -50,81 +51,15 @@ pub(crate) fn truncate_utf8(mut text: String, max_bytes: usize) -> String {
     text
 }
 
-/// Converts captured child output to a `String`, reusing the buffer directly
-/// when it is already valid UTF-8 (the common case) and only allocating a
-/// replacement string on the lossy path.
-pub(crate) fn into_string_lossy(bytes: Vec<u8>) -> String {
-    match String::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
-    }
-}
-
-/// Strips ANSI/VT100 escape sequences (colour, cursor movement, terminal
-/// title-setting, …) from captured child output. `opencode run` does not
-/// reliably detect a non-terminal target and suppress them, and once output is
-/// stored in a run record or shown in a non-terminal UI panel (the Skills Deck
-/// tile, `axiomata-cli get-run --json`) a raw escape code is just noise.
-/// Recognises CSI sequences (`ESC '[' … <letter>`, e.g. colour codes) and OSC
-/// sequences (`ESC ']' … (BEL | ESC '\')`, e.g. a terminal title); any other
-/// escape is dropped on its own so one stray `ESC` byte can't swallow the rest
-/// of the output.
-///
-/// Args:
-///     input: Text as captured from the child's stdout or stderr.
-///
-/// Returns:
-///     The same text with every recognised escape sequence removed.
-pub(crate) fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\u{1b}' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            Some('[') => {
-                chars.next(); // consume '['
-                // CSI: parameter/intermediate bytes, terminated by a byte
-                // in the 0x40..=0x7E range (here, any ASCII letter or one
-                // of the less common terminator symbols).
-                for c in chars.by_ref() {
-                    if c.is_ascii_alphabetic() || "@{|}~".contains(c) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                chars.next(); // consume ']'
-                // OSC: runs until BEL, or ESC '\' (String Terminator).
-                while let Some(c) = chars.next() {
-                    if c == '\u{7}' {
-                        break;
-                    }
-                    if c == '\u{1b}' && chars.peek() == Some(&'\\') {
-                        chars.next();
-                        break;
-                    }
-                }
-            }
-            _ => {
-                // Unrecognised or truncated escape — drop just the ESC byte.
-            }
-        }
-    }
-    out
-}
-
-/// Process-environment variables inherited by an agent child process by exact
-/// name. The CLI needs a working process environment — `PATH` to find `node`
-/// and the tools it shells out to, `HOME` to locate its own config/state,
+/// Process-environment variables the `opencode` commands Axiomata runs
+/// (`debug paths`, `service start`) inherit by exact name. A service started
+/// from here keeps this environment for every session it runs. The CLI needs
+/// a working process environment — `PATH` to find the tools it shells out to, `HOME` to locate its own config/state,
 /// locale for correct text handling — but must **not** inherit an ambient
 /// `ANTHROPIC_*` / `CLAUDE_CODE_*` / `OPENAI_API_KEY` export from the shell
 /// Axiomata itself was launched from (see
 /// `docs/plans/provider-hardening.md` checkpoint 3 — the question "does
-/// launching from my configured shell change billing?"). Everything the child
-/// gets beyond this list comes through `request.env`, applied last.
+/// launching from my configured shell change billing?").
 const INHERITED_ENV_ALLOWLIST: &[&str] =
     &["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "TMPDIR"];
 
@@ -134,20 +69,15 @@ const INHERITED_ENV_ALLOWLIST: &[&str] =
 /// e.g. `__CF_USER_TEXT_ENCODING`; absent on other platforms).
 const INHERITED_ENV_PREFIXES: &[&str] = &["LC_", "XDG_", "SSL_CERT_", "__CF"];
 
-/// The complete environment for an agent child, applied on top of a
-/// [`tokio::process::Command::env_clear`]: the allowlisted subset of this
-/// process's environment first, then `request_env` layered over it so a
-/// caller's override still wins.
-pub(crate) fn agent_child_env(request_env: &[(String, String)]) -> Vec<(String, String)> {
-    agent_child_env_from(std::env::vars(), request_env)
+/// The complete environment for an `opencode` command, applied on top of an
+/// `env_clear`: the allowlisted subset of this process's environment.
+pub(crate) fn agent_child_env() -> Vec<(String, String)> {
+    agent_child_env_from(std::env::vars())
 }
 
 /// [`agent_child_env`] with the ambient environment injected, so it is
 /// unit-testable without touching the real process environment.
-pub(crate) fn agent_child_env_from<I>(
-    ambient: I,
-    request_env: &[(String, String)],
-) -> Vec<(String, String)>
+pub(crate) fn agent_child_env_from<I>(ambient: I) -> Vec<(String, String)>
 where
     I: IntoIterator<Item = (String, String)>,
 {
@@ -155,24 +85,19 @@ where
         INHERITED_ENV_ALLOWLIST.contains(&key)
             || INHERITED_ENV_PREFIXES.iter().any(|p| key.starts_with(p))
     };
-    let mut env: Vec<(String, String)> = ambient
+    ambient
         .into_iter()
         .filter(|(key, _)| inherited(key))
-        .collect();
-    for (key, value) in request_env {
-        // `request.env` wins over anything inherited under the same key.
-        env.retain(|(k, _)| k != key);
-        env.push((key.clone(), value.clone()));
-    }
-    env
+        .collect()
 }
 
-/// Caps how many `opencode` child processes may be running at once, across
-/// *every* caller — a manual "run now" click, a routine firing, and a chat
-/// turn all funnel through the shared spawn harness. Without this, several due
+/// Caps how many Opencode turns may be running at once, across *every*
+/// caller — a manual "run now" click, a routine firing, and a chat turn all
+/// funnel through the same backend. Without this, several due
 /// routines firing in the same tick (see [`crate::routines::scheduler::tick`],
 /// which fires them concurrently) plus a stray UI click could start
-/// unboundedly many `opencode` processes at once (each a Node CLI). A modest,
+/// unboundedly many agent loops on the service at once (each with its own
+/// model calls and MCP tool use). A modest,
 /// fixed cap rather than a config knob: this is a resource-safety floor, not a
 /// tuning surface.
 const MAX_CONCURRENT_AGENT_RUNS: usize = 4;
@@ -227,13 +152,13 @@ pub fn valid_session_id(id: &str) -> bool {
 /// Which agent runs a given skill or routine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentBackend {
-    /// The headless Opencode CLI (`opencode run`). A model-agnostic agent
-    /// harness: talks to whatever provider/model you point `--model` at with
-    /// the provider's own native tool-calling protocol, loads the user's
-    /// existing opencode config (MCP servers, auth) — so a non-Anthropic model
-    /// like deepseek-v4-flash runs its skills the same way it runs in opencode
-    /// itself. Model travels via [`AgentRequest::model`] as the full
-    /// `provider/model` id the CLI expects, e.g.
+    /// A session on Opencode 2's shared background service. A model-agnostic
+    /// agent harness: talks to whatever provider/model the session is created
+    /// with, using the provider's own native tool-calling protocol and the
+    /// user's existing opencode config (MCP servers, auth) — so a
+    /// non-Anthropic model like deepseek-v4-flash runs its skills the same way
+    /// it runs in opencode itself. Model travels via [`AgentRequest::model`] as
+    /// the full `provider/model` id, e.g.
     /// `openrouter/deepseek/deepseek-v4-flash-0731`.
     Opencode,
     /// A single completion call against a local Ollama model — no tools, no
@@ -310,11 +235,10 @@ impl AgentBackend {
     }
 }
 
-/// How an assistant-bar turn may act. Opencode has no per-mode permission
-/// switch in headless `run` — both modes are spawned with `--auto`
-/// (auto-approve tool use) so the turn never stalls waiting for a permission
-/// prompt nobody will answer; the mode still records in the spend log and the
-/// dashboard.
+/// How an assistant-bar turn may act. Both modes run with the same
+/// unattended permission rules (see `opencode`'s module doc), so a turn never
+/// stalls waiting for a permission prompt nobody will answer; the mode still
+/// records in the spend log and the dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChatMode {
@@ -332,7 +256,7 @@ impl ChatMode {
     }
 }
 
-/// The parsed `--format json` result of a chat turn.
+/// The result of a chat turn, read back from the session's messages.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ChatReply {
     pub session_id: String,
@@ -340,9 +264,9 @@ pub struct ChatReply {
     pub is_error: bool,
     pub cost_usd: Option<f64>,
     pub usage: Option<serde_json::Value>,
-    /// `input_tokens` from the NDJSON `step_finish` events.
+    /// Input tokens across the turn's answers.
     pub input_tokens: Option<u64>,
-    /// `output_tokens` from the NDJSON `step_finish` events.
+    /// Output tokens across the turn's answers.
     pub output_tokens: Option<u64>,
     /// How many assistant steps the turn took.
     pub num_turns: Option<u32>,
@@ -358,20 +282,18 @@ pub struct ChatRequest {
     pub mode: ChatMode,
     pub cwd: PathBuf,
     pub timeout: Duration,
-    pub env: Vec<(String, String)>,
     /// A workspace file whose contents are prepended to the message (the
-    /// dashboard's module manifest when it exists) — opencode has no
-    /// `--append-system-prompt-file`, so the context becomes part of the task.
+    /// dashboard's module manifest when it exists), marked as data.
     pub system_prompt_file: Option<PathBuf>,
     /// The full opencode `provider/model` id this turn runs on.
     pub model: Option<String>,
-    /// Whether the harness may auto-approve tool use (`--auto`); see
+    /// Whether tool use is pre-approved for the turn; see
     /// [`crate::config::AgentDefaults::auto_approve_tools`]. `false` makes a
     /// tool-using turn fail on unapproved calls instead of executing them —
     /// the prompt-injection guard for prompts that embed untrusted content.
     pub auto_approve_tools: bool,
-    /// Ignored by opencode (it auto-approves via `--auto` and resolves MCP
-    /// servers from its own config); kept on the request for API stability.
+    /// Ignored by opencode (MCP servers come from its own config); kept on
+    /// the request for API stability.
     pub allowed_tools: Option<String>,
 }
 
@@ -392,7 +314,6 @@ pub async fn chat(
         mode,
         cwd: config.workspace_root.clone(),
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
-        env: Vec::new(),
         system_prompt_file: module_context_if_present(),
         // The provider-specific reading happens inside `opencode::chat_model_id`;
         // `None` fails the turn with a clear config error rather than silently
@@ -462,19 +383,12 @@ pub struct AgentRequest {
     /// stdin and becomes the task message; for Ollama it is the raw completion
     /// prompt.
     pub prompt: String,
-    /// Working directory for the agent. Opencode treats this as its project
-    /// root, so workspace context and opencode config load from here (the
-    /// child's working directory — Opencode 2 has no `run --dir`).
+    /// Working directory for the agent: the session's location, so workspace
+    /// context and project opencode config load from here.
     pub cwd: PathBuf,
     /// Hard wall-clock limit. On expiry the run fails with
-    /// [`AxiomataError::AgentTimeout`] and the child process (if any) is
-    /// killed.
+    /// [`AxiomataError::AgentTimeout`] and the turn is interrupted.
     pub timeout: Duration,
-    /// Extra environment variables for the agent process. Opencode resolves
-    /// providers/auth from its own config store and gets none (and nothing
-    /// leaks in — see `agent_child_env`'s allowlist); kept on the request for
-    /// future backends.
-    pub env: Vec<(String, String)>,
     /// A workspace file whose contents are prepended to the prompt (the module
     /// bridge manifest); opencode has no `--append-system-prompt-file`, so the
     /// backend does the prepending itself.
@@ -483,14 +397,14 @@ pub struct AgentRequest {
     /// [`opencode::model_id`]. Ignored by Ollama (its model lives in the
     /// backend enum).
     pub model: Option<String>,
-    /// Whether the harness may auto-approve tool use (`--auto`); see
+    /// Whether tool use is pre-approved for the run; see
     /// [`crate::config::AgentDefaults::auto_approve_tools`]. `false` makes a
     /// tool-using run fail on unapproved calls instead of executing them —
     /// the prompt-injection guard for prompts that embed untrusted content.
     pub auto_approve_tools: bool,
     /// Carried over from `SKILL.md` frontmatter for symmetry; the opencode
-    /// backend ignores it (MCP servers come from opencode's own config, tool
-    /// use is auto-approved). Kept so callers don't lose the declared tools.
+    /// backend ignores it (MCP servers come from opencode's own config). Kept
+    /// so callers don't lose the declared tools.
     pub allowed_tools: Option<String>,
 }
 
@@ -536,28 +450,25 @@ pub fn module_context_if_present() -> Option<PathBuf> {
 /// The outcome of an [`AgentRequest`] that actually ran.
 #[derive(Debug, Clone)]
 pub struct AgentRunResult {
-    /// Captured standard output. For opencode this is the joined `text` parts
-    /// of the `--format json` NDJSON event stream — byte-for-byte what the
-    /// model replied, so a connector skill's digest JSON is what lands here.
+    /// The reply. For opencode the joined `text` parts of the turn's answers —
+    /// byte-for-byte what the model replied, so a connector skill's digest
+    /// JSON is what lands here.
     pub stdout: String,
-    /// Captured standard error (opencode diagnostics) or empty (Ollama).
+    /// Why an opencode turn failed, or empty (success, Ollama).
     pub stderr: String,
-    /// Process exit code for opencode. Synthetic for Ollama: always `0` here,
-    /// since Ollama failures surface as `Err` rather than a run result.
+    /// `0` for success, `1` for an opencode turn that ran but failed.
+    /// Always `0` for Ollama, whose failures surface as `Err` instead.
     pub exit_code: i32,
     /// Wall-clock duration of the run, in milliseconds.
     pub duration_ms: u64,
-    /// Estimated cost from the opencode `step_finish` events, when the run went
-    /// through a provider that reported it. `None` for Ollama and whenever the
-    /// event stream carried no cost.
+    /// The cost Opencode computed for the turn, when the provider reported
+    /// one. `None` for Ollama and for a free turn.
     pub cost_usd: Option<f64>,
-    /// Total `tokens.input` across the `step_finish` events. `None` when the
-    /// stream didn't carry them.
+    /// Input tokens across the turn's answers. `None` when none carried counts.
     pub input_tokens: Option<u64>,
-    /// Total `tokens.output` across the `step_finish` events. `None` when the
-    /// stream didn't carry them.
+    /// Output tokens across the turn's answers. `None` when none carried counts.
     pub output_tokens: Option<u64>,
-    /// How many assistant steps the agent loop took (`step_finish` count).
+    /// How many answering messages (model steps) the agent loop took.
     pub num_turns: Option<u32>,
 }
 
@@ -567,9 +478,8 @@ impl AgentRunResult {
         self.exit_code == 0
     }
 
-    /// A result carrying only the process-level fields (no cost/token data
-    /// parsed yet). Used by the opencode spawn harness before the NDJSON event
-    /// stream is inspected, and by the Ollama backend (which has no envelope).
+    /// A result without cost/token data — the Ollama backend's (it has no
+    /// usage envelope).
     pub(crate) fn bare(stdout: String, stderr: String, exit_code: i32, duration_ms: u64) -> Self {
         Self {
             stdout,

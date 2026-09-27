@@ -28,6 +28,11 @@ globset = "0.4"
 # routine firing state has to survive restarts, so Axiomata owns the poll
 # loop and persists `next_fire_at` itself (see `routines::scheduler`).
 cron = "0.17"
+# HTTP client for `axiomata-opencode`, which talks to Opencode 2's local
+# background service (plain HTTP on the loopback, so no TLS stack). Already in
+# the tree through `ollama-rs`; no extra features — the event stream is read
+# chunk by chunk (`Response::chunk`), JSON goes through `serde_json`.
+reqwest = { version = "0.12", default-features = false }
 # Only ever talks to a local Ollama daemon over plain HTTP, so the default
 # native-tls stack (and, on macOS, the Security.framework link) is dead weight.
 # Add `features = ["rustls"]` if a remote HTTPS endpoint is ever needed.
