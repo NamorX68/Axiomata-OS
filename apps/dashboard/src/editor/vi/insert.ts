@@ -132,7 +132,9 @@ export class InsertMode {
       session.keys = [];
       return;
     }
-    session.keys.push(key);
+    // A taken completion repeats (`.`) as its text at the cursor — not its import a second time.
+    const taken = typeof key === "object" && "command" in key && key.command.type === "complete" ? key.command : null;
+    session.keys.push(taken ? { command: { type: "complete", edit: { ...taken.edit, extra: [] } } } : key);
     this.applyKey(key);
   }
 

@@ -1212,6 +1212,20 @@ Die IDE reicht sie über `pendingLocations` an ihr Search-Pane (`IdeDock.showLoc
 Bedarf). Der Vi-Parser liest jetzt Befehle beliebiger Länge (`Reader.token`). Live gegen `rust-analyzer`:
 Verwendungen von `helper` (2) und die Implementierung von `Speak`.
 
+**ED6.4 umgesetzt (2026-09-28):** Vervollständigung nach dem Vorbild von blink.cmp in der nvim-Konfiguration
+des Owners: das Menü öffnet sich beim Tippen eines Worts und nach den Trigger-Zeichen des Servers (`.`, `::`)
+von selbst, dazu ⌃Space; der erste Eintrag ist gewählt, daneben Signatur und Doku (per
+`completionItem/resolve` nachgeladen, gerendert über `renderMarkdown`). Tasten: ↓/↑ und ⌃N/⌃P wählen, ⌃Y
+nimmt, ⌃E schließt, Esc schließt (in Vi verlässt es zugleich Insert); ohne Vi nehmen auch ⏎ und ⇥, in Vi
+bleiben sie Zeilenumbruch und Einrückung. Gefiltert wird im Editor (unscharf, `editor/lsp/completion.ts`
+`filterItems`), neu gefragt nur bei unvollständiger Liste. Snippets nach L9 (`expandSnippet`); mehrzeilige
+Einfügungen bekommen die Einrückung der Zeile. Das Nehmen ist der Befehl `complete` (ein Undo-Schritt, das
+Wort ersetzt, Zusatz-Änderungen wie ein Auto-Import angewendet — vorher bis 400 ms `resolve`, weil
+`rust-analyzer` den Import erst dort liefert); in Vi läuft er in der Insert-Sitzung, `.` wiederholt ihn ohne
+den Import. Nur mit einem Cursor. Logik des Menüs in `fileapp/completionMenu.ts`, Zeichnen in
+`CompletionPopup.svelte`. Live gegen `rust-analyzer`: Methoden nach `v.`, Auto-Import von `HashMap`.
+Offen: Signaturhilfe und Wörter aus der Datei als zweite Quelle (blink hat beide) — bei Bedarf später.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

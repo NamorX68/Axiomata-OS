@@ -72,6 +72,8 @@
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
   import type { FoldAction, ViEffect } from "../editor/vi/machine";
+  import { CompletionMenu, type CompletionPort } from "./completionMenu";
+  import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
   import FindBar from "./FindBar.svelte";
   import Minimap from "./Minimap.svelte";
@@ -142,6 +144,8 @@
     hoverAt?: (at: Pos) => Promise<string | null>;
     /** ⌘-click (ED6.2, L7): go to the definition of the symbol there. */
     onDefinitionAt?: (at: Pos) => void;
+    /** The language server's completion (ED6.4); without it there is no menu. */
+    completion?: CompletionPort | null;
   }
 
   let {
@@ -168,6 +172,7 @@
     diagnosticsInline = false,
     hoverAt,
     onDefinitionAt,
+    completion = null,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -893,6 +898,16 @@
   function onKeydown(e: KeyboardEvent): void {
     if (e.isComposing || composing) return;
     endHover();
+    if (completionKey(e)) {
+      e.preventDefault();
+      return;
+    }
+    handleKeydown(e);
+    // A ⌫, an arrow, Esc leaving Insert: the open menu follows the word, or closes.
+    if (menu?.isOpen) followMenu();
+  }
+
+  function handleKeydown(e: KeyboardEvent): void {
     // The find bar's keys come first, in Vi mode as well (T15).
     const findKey = findKeyAction(keyInputFrom(e));
     if (findKey) {
@@ -1011,6 +1026,8 @@
     if (!text) return;
     if (vi) vi.typed(text);
     else exec({ type: "insert", text });
+    if (menu && canComplete()) menu.typed(doc, text);
+    else menu?.close();
   }
 
   /**
@@ -1029,6 +1046,7 @@
   /** Leaving mid-composition drops the unfinished marked text (a lone dead key). */
   function onBlur(): void {
     focused = false;
+    menu?.close();
     if (composing) {
       composing = false;
       input.value = "";
@@ -1043,6 +1061,104 @@
     const y = e.clientY - rect.top + scroller.scrollTop;
     const x = e.clientX - rect.left + scroller.scrollLeft - textLeft;
     return posAtCell(layout, doc.store, Math.floor(y / rowH), x / charW, settings.tabSize);
+  }
+
+  // ---------------------------------------------------------------- completion (ED6.4)
+
+  /** Bumped when the menu changed, so what is drawn follows it. */
+  let menuTick = $state(0);
+  /** The menu for this surface's server; replaced (and the old one closed) with the server. */
+  const menu = $derived(completion ? new CompletionMenu(completion, () => menuTick++) : null);
+  $effect(() => {
+    const current = menu;
+    return () => current?.close();
+  });
+
+  /** Where the menu shows: below the start of the word, in the surface's pixels. */
+  const menuView = $derived.by(() => {
+    void menuTick;
+    void tick;
+    const view = menu?.view;
+    if (!view) return null;
+    const cell = cursorCell(layout, doc.store, view.anchor, settings.tabSize);
+    const x = textLeft + cell.cell * charW - (settings.wrap ? 0 : scrollLeft);
+    const y = (cell.row + 1) * rowH - scrollTop;
+    return { ...view, x, y };
+  });
+
+  /** The chosen item's detail and documentation, fetched from the server as it is chosen. */
+  let menuDoc = $state<{ detail: string; html: string | null }>({ detail: "", html: null });
+  $effect(() => {
+    const item = menuView?.items[menuView.selected];
+    const m = menu;
+    if (!item || !m) return;
+    menuDoc = { detail: item.detail, html: item.documentation ? renderMarkdown(item.documentation) : null };
+    let stale = false;
+    void m.details(item).then((full) => {
+      if (stale) return;
+      menuDoc = { detail: full.detail, html: full.documentation ? renderMarkdown(full.documentation) : null };
+    });
+    return () => {
+      stale = true;
+    };
+  });
+
+  /** Typing may complete: an editable text, and in Vi only in Insert mode. */
+  function canComplete(): boolean {
+    return !readOnly && (!vi || vi.status().mode === "insert");
+  }
+
+  function followMenu(): void {
+    if (canComplete()) menu?.follow(doc);
+    else menu?.close();
+  }
+
+  /**
+   * The menu's keys, before anything else (as blink.cmp's defaults in the
+   * owner's Neovim): ⌃Space opens it; while open ↓/↑ and ⌃N/⌃P choose, ⌃Y
+   * takes, ⌃E closes, Esc closes (in Vi it also leaves Insert). Without Vi
+   * ⏎ and ⇥ take too; in Vi they stay a new line and indentation.
+   */
+  function completionKey(e: KeyboardEvent): boolean {
+    const m = menu;
+    if (!m) return false;
+    const ctrlOnly = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    if (ctrlOnly && e.code === "Space") {
+      if (!canComplete()) return false;
+      m.invoke(doc);
+      return true;
+    }
+    if (!m.isOpen) return false;
+    if ((plain && e.key === "ArrowDown") || (ctrlOnly && e.key === "n")) m.move(1);
+    else if ((plain && e.key === "ArrowUp") || (ctrlOnly && e.key === "p")) m.move(-1);
+    else if ((ctrlOnly && e.key === "y") || (plain && !vi && (e.key === "Enter" || e.key === "Tab")))
+      void takeCompletion();
+    else if (ctrlOnly && e.key === "e") m.close();
+    else if (plain && e.key === "Escape") {
+      m.close();
+      return !vi;
+    } else return false;
+    return true;
+  }
+
+  /** Takes the chosen item: one step, through Vi's Insert session when Vi is on. */
+  async function takeCompletion(): Promise<void> {
+    const m = menu;
+    if (!m) return;
+    const edit = await m.take(doc);
+    if (!edit || menu !== m) return;
+    const cmd: Command = { type: "complete", edit };
+    if (vi) vi.command(cmd);
+    else exec(cmd);
+  }
+
+  function pickCompletion(index: number): void {
+    const m = menu;
+    const view = m?.view;
+    if (!m || !view) return;
+    m.move(index - view.selected);
+    void takeCompletion();
   }
 
   // ---------------------------------------------------------------- hover (ED6)
@@ -1117,6 +1233,7 @@
    * triple click a line; dragging then extends by the same unit it started with.
    */
   function onMousedown(e: MouseEvent): void {
+    menu?.close();
     if (e.button !== 0) return;
     e.preventDefault();
     input.focus();
@@ -1551,6 +1668,17 @@
         <div class="hover-doc">{@html hover.html}</div>
       {/if}
     </div>
+  {/if}
+  {#if menuView}
+    <CompletionPopup
+      items={menuView.items}
+      selected={menuView.selected}
+      x={menuView.x}
+      y={menuView.y}
+      detail={menuDoc.detail}
+      docHtml={menuDoc.html}
+      onPick={pickCompletion}
+    />
   {/if}
   {#if findOpen && find}
     <FindBar

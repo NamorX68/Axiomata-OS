@@ -9,6 +9,7 @@
  * the bell) come back to it through `host`; the rest go to the owner.
  */
 
+import type { Command } from "../editor/commands";
 import type { KeyInput, Effect } from "../editor/keymap";
 import type { EditorDocument } from "../editor/document";
 import { parseKeys, type ViKey } from "../editor/vi/keys";
@@ -145,6 +146,11 @@ export class ViSurface {
   selectVisual(anchor: Pos, head: Pos): void {
     this.machine.selectVisual(anchor, head);
     this.host.status(this.machine.status());
+  }
+
+  /** An editor command inside the Insert session — a taken completion (ED6.4); ignored outside Insert. */
+  command(cmd: Command): void {
+    if (this.machine.mode === "insert" || this.machine.mode === "replace") this.feed([{ command: cmd }]);
   }
 
   /** Text pasted with the Mac's paste (⌘V in Insert, Edit ▸ Paste). */

@@ -255,7 +255,9 @@ with each checkpoint's requests. Every message, open and close must carry the pa
 the server's starter; outgoing messages are capped like incoming ones and written through a
 per-server `stdin` lock, never the host's; at most `MAX_SERVERS` (8) run, and another page
 restarts one at most every 2 s. ED6.2 adds `textDocument/hover` and `/definition` to the list (ED6.3: `/implementation`,
-`/typeDefinition`, `/references` — every request of `LOCATION_METHODS` is tracked like a definition)
+`/typeDefinition`, `/references` — every request of `LOCATION_METHODS` is tracked like a definition;
+ED6.4: `/completion` and `completionItem/resolve` — their answers free nothing, and an item's `command`
+is never run)
 and makes one answer readable in Rust (L11): the ids of definition requests are noted, their
 answers are parsed in the pump thread, and the files they name (`uri`/`targetUri`, at most
 4096 per server) become readable through `LspHost::read_foreign` — but only when they lie under
@@ -1210,7 +1212,14 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   type definition (`grt`) and uses (⇧F12, `grr`) through `LspClient.locations`; one place is gone to like
   a definition, several become a `LocationList` (`fileapp/locationList.ts`) that the project search's result
   list shows (`ProjectSearch.showLocations`) — in the file app's Search column, or in the IDE's Search pane,
-  reached through `IdeDock.showLocations` and the `pendingLocations` store.
+  reached through `IdeDock.showLocations` and the `pendingLocations` store. ED6.4: completion — the
+  engine's `editor/lsp/completion.ts` parses answers, filters fuzzily, expands snippets (L9) and turns a
+  taken item into the `complete` command (the word replaced plus extra edits such as an auto-import, one
+  undo step; in Vi it runs inside the Insert session, and `.` repeats it without the import);
+  `fileapp/completionMenu.ts` is the menu's behaviour (opens while typing a word or after a trigger
+  character, follows the word, drops late answers, resolves an item before taking it) and
+  `CompletionPopup.svelte` draws it; `EditorSurface` owns the keys (⌃Space, ↓/↑, ⌃N/⌃P, ⌃Y, ⌃E, Esc; ⏎/⇥
+  only without Vi).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

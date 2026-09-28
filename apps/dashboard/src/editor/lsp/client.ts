@@ -14,6 +14,7 @@
 
 import type { EditorDocument, TextChange } from "../document";
 import { range, type Pos } from "../position";
+import { type CompletionAnswer, type CompletionItem, parseCompletion, parseItem } from "./completion";
 import { type Diagnostic, parseDiagnostics } from "./diagnostics";
 import { Rpc, type Transport } from "./rpc";
 
@@ -97,6 +98,10 @@ export class LspClient {
   private readonly rpc: Rpc;
   private readonly ready: Promise<boolean>;
   private syncKind = SYNC_FULL;
+  /** Whether the server completes at all, and the characters after which it offers (`.`, `:`). */
+  completes = false;
+  completionTriggers: readonly string[] = [];
+  private resolvesCompletion = false;
   private readonly docs = new Map<string, OpenDocument>();
   private readonly diagnostics = new Map<string, Diagnostic[]>();
   private readonly diagnosticListeners = new Set<(uri: string) => void>();
@@ -226,6 +231,47 @@ export class LspClient {
     }
   }
 
+  /**
+   * What the server offers at `at` (ED6.4). `trigger` is the character just
+   * typed when it is one of the server's trigger characters; `again` when the
+   * last answer was incomplete. Nothing when the request failed.
+   */
+  async completion(uri: string, at: Pos, trigger: string | null, again = false): Promise<CompletionAnswer> {
+    // The protocol's trigger kinds: invoked, a trigger character, re-asked for an incomplete list.
+    const context = trigger ? { triggerKind: 2, triggerCharacter: trigger } : { triggerKind: again ? 3 : 1 };
+    try {
+      const result = await this.request<unknown>("textDocument/completion", {
+        textDocument: { uri },
+        position: { line: at.line, character: at.col },
+        context,
+      });
+      return parseCompletion(result);
+    } catch {
+      return { items: [], incomplete: false };
+    }
+  }
+
+  /**
+   * An item with what the server fills in only when asked (documentation, an
+   * auto-import's edits); the item as it was when it has nothing more.
+   */
+  async resolveCompletion(item: CompletionItem): Promise<CompletionItem> {
+    if (!this.resolvesCompletion) return item;
+    try {
+      const resolved = parseItem(await this.request<unknown>("completionItem/resolve", item.raw));
+      if (!resolved) return item;
+      // The edit decided when the list came stays; what the resolve adds is taken.
+      return {
+        ...item,
+        detail: item.detail || resolved.detail,
+        documentation: resolved.documentation ?? item.documentation,
+        additionalEdits: resolved.additionalEdits.length > 0 ? resolved.additionalEdits : item.additionalEdits,
+      };
+    } catch {
+      return item;
+    }
+  }
+
   /** Stops following every document; the server itself is Rust's to stop. */
   dispose(): void {
     for (const open of this.docs.values()) {
@@ -239,7 +285,9 @@ export class LspClient {
   private async initialize(): Promise<boolean> {
     const rootUri = fileUri(this.options.rootPath);
     try {
-      const result = await this.rpc.request<{ capabilities?: { textDocumentSync?: unknown } }>("initialize", {
+      const result = await this.rpc.request<{
+        capabilities?: { textDocumentSync?: unknown; completionProvider?: unknown };
+      }>("initialize", {
         processId: null,
         clientInfo: { name: "Axiomata-OS" },
         rootUri,
@@ -255,12 +303,31 @@ export class LspClient {
             implementation: { linkSupport: true },
             typeDefinition: { linkSupport: true },
             references: {},
+            completion: {
+              contextSupport: true,
+              completionItem: {
+                snippetSupport: true,
+                documentationFormat: ["markdown", "plaintext"],
+                labelDetailsSupport: true,
+                insertReplaceSupport: true,
+                resolveSupport: { properties: ["documentation", "detail", "additionalTextEdits"] },
+              },
+              completionList: { itemDefaults: ["editRange", "insertTextFormat"] },
+            },
           },
           workspace: { workspaceFolders: true, configuration: false },
           window: { workDoneProgress: false },
         },
       });
       this.syncKind = syncKindOf(result?.capabilities?.textDocumentSync);
+      const provider = result?.capabilities?.completionProvider as
+        | { triggerCharacters?: unknown; resolveProvider?: unknown }
+        | undefined;
+      this.completes = typeof provider === "object" && provider !== null;
+      this.completionTriggers = Array.isArray(provider?.triggerCharacters)
+        ? provider.triggerCharacters.filter((c): c is string => typeof c === "string")
+        : [];
+      this.resolvesCompletion = provider?.resolveProvider === true;
       this.rpc.notify("initialized", {});
       this.setState("ready");
       return true;

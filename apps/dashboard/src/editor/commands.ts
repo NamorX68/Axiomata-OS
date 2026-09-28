@@ -25,6 +25,7 @@ import {
   selectionTexts,
   singleCursor,
 } from "./multicursor";
+import type { CompletionEdit } from "./lsp/completion";
 import { comparePos, cursor, isCursor, pos, range, selectionRange, type Pos, type Selection } from "./position";
 import {
   colForDisplayColumn,
@@ -98,7 +99,9 @@ export type Command =
   | { type: "addNextOccurrence" }
   | { type: "removeLastCursor" }
   | { type: "selectAllOccurrences" }
-  | { type: "singleCursor" };
+  | { type: "singleCursor" }
+  /** Taking a completion (ED6.4): the typed word replaced, extra edits (an import) applied, one step. */
+  | { type: "complete"; edit: CompletionEdit };
 
 /** What a command does to the text at each cursor, for merging into the undo step before it. */
 function editKindOf(cmd: Command): EditKind | null {
@@ -140,6 +143,8 @@ export function run(doc: EditorDocument, cmd: Command, ctx: CommandContext): voi
       singleCursor(doc);
       return;
   }
+  // A completion is taken at the main cursor only; the menu is not offered with several.
+  if (cmd.type === "complete") return complete(doc, cmd.edit, ctx);
   if (doc.extra.length > 0 && cmd.type !== "undo" && cmd.type !== "redo") {
     if (cmd.type === "selectAll") return doc.setSelection({ anchor: pos(0, 0), head: endOfText(doc.store) });
     // Moving lines takes each block of touching lines as a whole; copying gives each line its own copy.
@@ -365,6 +370,36 @@ function insert(doc: EditorDocument, text: string, kind: EditKind, ctx: CommandC
   const r = selectionRange(doc.selection);
   const normalised = text.replace(/\r\n?/g, "\n");
   doc.edit([{ range: r, text: normalised }], cursor(endAfter(r.start, normalised)), kind, ctx.now);
+}
+
+/**
+ * Takes a completion: replaces `before`/`after` characters around the cursor
+ * with `text` and applies the extra edits, as one change from the last in the
+ * text to the first — so each is still in the coordinates it was given in.
+ */
+function complete(doc: EditorDocument, edit: CompletionEdit, ctx: CommandContext): void {
+  const at = doc.selection.head;
+  const lineLength = doc.store.line(at.line).length;
+  const main: Change = {
+    range: range(pos(at.line, Math.max(0, at.col - edit.before)), pos(at.line, Math.min(lineLength, at.col + edit.after))),
+    text: edit.text,
+  };
+  const changes = [main, ...edit.extra].sort((a, b) => comparePos(b.range.start, a.range.start));
+  let caret = endAfter(main.range.start, edit.text.slice(0, edit.cursor));
+  // Edits before the completion move where it ends up — nearest first, so each is applied in
+  // coordinates the ones after it have not touched.
+  const before = edit.extra
+    .filter((e) => comparePos(e.range.end, main.range.start) <= 0)
+    .sort((a, b) => comparePos(b.range.start, a.range.start));
+  for (const extra of before) caret = shiftedBy(caret, extra);
+  doc.edit(changes, cursor(caret), "other", ctx.now);
+}
+
+/** Where `p` (after `change`'s range) is once `change` is applied. */
+function shiftedBy(p: Pos, change: Change): Pos {
+  const newEnd = endAfter(change.range.start, change.text);
+  if (p.line !== change.range.end.line) return pos(p.line + newEnd.line - change.range.end.line, p.col);
+  return pos(newEnd.line, newEnd.col + (p.col - change.range.end.col));
 }
 
 /** ↩: a new line that keeps the current line's indentation (up to the cursor). */

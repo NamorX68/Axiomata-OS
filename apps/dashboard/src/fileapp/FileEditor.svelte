@@ -73,6 +73,7 @@
   import { detectLanguage } from "../editor/syntax/languages";
   import { definitionFile, openOnServer, type LspDocument } from "./lsp";
   import { buildLocationList, type LocationList } from "./locationList";
+  import type { CompletionPort } from "./completionMenu";
   import type { Location, LocationKind } from "../editor/lsp/client";
   import { toast } from "../core/toast";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
@@ -426,6 +427,24 @@
     e.preventDefault();
     return true;
   }
+
+  /**
+   * The open file's completion (ED6.4), for the surface's menu: asked of its
+   * server once the server is up — one that does not complete offers nothing.
+   */
+  const completionPort = $derived.by((): CompletionPort | null => {
+    const found = lspDoc;
+    if (!found) return null;
+    const { client } = found.connection;
+    return {
+      ask: async (at, trigger, again) =>
+        (await client.whenReady()) && client.completes
+          ? client.completion(found.uri, at, trigger, again)
+          : { items: [], incomplete: false },
+      resolve: (item) => client.resolveCompletion(item),
+      triggers: () => client.completionTriggers,
+    };
+  });
 
   /** What the language server says about the symbol at `at` (the surface's hover, Vi's `K`). */
   function hoverAt(at: { line: number; col: number }): Promise<string | null> {
@@ -789,6 +808,7 @@
             readOnly={session.readOnly}
             hoverAt={lspDoc ? hoverAt : undefined}
             onDefinitionAt={lspDoc ? (at) => void goToDefinition(at) : undefined}
+            completion={completionPort}
           />
         {/key}
       </div>

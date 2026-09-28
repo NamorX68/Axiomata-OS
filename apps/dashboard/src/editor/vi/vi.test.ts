@@ -10,6 +10,7 @@ import { show, docFrom, ctx } from "../testing";
 import { parseKeys, keysToText } from "./keys";
 import { ViMachine, ViShared, type ViEffect } from "./machine";
 import { parse } from "./parse";
+import { pos, range } from "../position";
 
 function setup(marked: string, shared = new ViShared(null)) {
   const doc = docFrom(marked);
@@ -336,6 +337,19 @@ describe("modes and status", () => {
       { type: "locations", kind: "typeDefinition" },
       { type: "locations", kind: "references" },
     ]);
+  });
+
+  it("takes a completion inside Insert as one change, and . repeats its text without the import (ED6.4)", () => {
+    const { doc, m } = setup("|x\ny");
+    m.feedKeys("jAfo");
+    const import_ = { range: range(pos(0, 0), pos(0, 0)), text: "use foo;\n" };
+    m.feed({ command: { type: "complete", edit: { before: 2, after: 0, text: "foobar", cursor: 6, extra: [import_] } } });
+    m.feedKeys("<Esc>");
+    expect(show(doc)).toBe("use foo;\nx\nyfooba|r");
+    m.feedKeys("k.");
+    expect(show(doc)).toBe("use foo;\nxfooba|r\nyfoobar");
+    m.feedKeys("uu");
+    expect(doc.store.text()).toBe("x\ny");
   });
 
   it("still takes a two-key g command and rings for an unknown gr", () => {
