@@ -105,6 +105,14 @@ Teiler mit der Maus verschieben — Ziehgeometrie aus `ide/dock.ts`. Die Editore
 ihre Gruppe umgehängt (`ide/paneStore.ts`): ein Reiterumzug behält Cursor, Undo und ungespeicherten Text (im Browser
 geprüft). Neu: `FileDockNode.svelte`, `FileGroup.svelte`, `fileDockContext.ts`; `tabs.ts` liest nur noch alte Stände.
 
+**LK3 umgesetzt (2026-09-28):** Reiter als schwebende Pillen in Datei-App und IDE (`FileGroup.svelte`,
+`ide/PaneGroup.svelte`), jede mit dem Farbton ihrer Sprache (K14): `core/languageColors.ts` (Sprache → Token,
+TSX = TypeScript), Tokens `--ax-lang-*` in `themes/tokens.css`, für eigene Themes freigegeben (`theme/validator.ts`);
+abschaltbar („Tabs coloured by language“, `tabColors`). Stärke nach Browser-Blick erhöht (20 % / aktiv 36 %), die
+fokussierte Gruppe trägt den Akzentrand. Icon-Knöpfe statt Text: Datei-App-Kopf (öffnen, zuletzt, Einstellungen,
+Kürzel, zurück zum OS), Baumkopf (Dateien | Suche, versteckte Dateien, neu lesen), IDE-Kopf (Terminal, zurück),
+IDE-Files-Pane, × und + in den Tab-Leisten. Drei Lucide-Icons nachgeladen (history, layout-grid, eye-off).
+
 **K4 präzisiert (Owner, beim Bau von LK2):** Dieselbe Datei in zwei Gruppen hätte einen gemeinsamen Cursor, weil die
 Auswahl im Dokument liegt, nicht in der Ansicht. Entscheid: jede Datei nur einmal. „Dieselbe Datei zweimal mit eigenem
 Cursor“ ist vorgemerkt — es braucht Auswahl, Mehrfach-Cursor, Undo-Auswahl und Vi-Zustand pro Ansicht.

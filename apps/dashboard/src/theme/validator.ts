@@ -11,6 +11,8 @@
  * inspect is what would apply.
  */
 
+import { LANGUAGE_COLOR_IDS } from "../core/languageColors";
+
 export interface CssError {
   rule: string;
   property: string;
@@ -66,6 +68,7 @@ export const ALLOWED_TOKENS: readonly string[] = [
     (t) => `--ax-syntax-${t}`,
   ),
   ...["current-line", "indent-guide", "bracket-1", "bracket-2", "bracket-3", "glow"].map((t) => `--ax-editor-${t}`),
+  ...LANGUAGE_COLOR_IDS.map((id) => `--ax-lang-${id}`),
 ];
 
 const OUTPUT_SELECTOR = ":root[data-theme][data-theme]";

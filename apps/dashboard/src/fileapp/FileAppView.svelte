@@ -532,11 +532,15 @@
       {/if}
     </div>
     <div class="actions">
-      <button type="button" class="pill" onclick={() => void openPicked()}>Open… <kbd>⌘O</kbd></button>
+      <IconButton icon="folder-open" label="Open a file… (⌘O)" onclick={() => void openPicked()} />
       <div class="recent-anchor">
-        <button type="button" class="pill" disabled={recent.length === 0} onclick={() => (showRecent = !showRecent)}>
-          Recent ▾
-        </button>
+        <IconButton
+          icon="history"
+          label="Recent files"
+          pressed={showRecent}
+          disabled={recent.length === 0}
+          onclick={() => (showRecent = !showRecent)}
+        />
         {#if showRecent}
           <ul class="recent" role="menu">
             {#each recent as file (file.root + file.rel)}
@@ -562,7 +566,8 @@
         pressed={inspector === "shortcuts"}
         onclick={() => toggleInspector("shortcuts")}
       />
-      <button type="button" class="pill back" onclick={() => (open = false)}>Back to the OS</button>
+      <span class="separator" aria-hidden="true"></span>
+      <IconButton icon="layout-grid" label="Back to the OS" onclick={() => (open = false)} />
     </div>
   </header>
 
@@ -571,20 +576,24 @@
     <aside class="side" style:width="{tree.width * $uiScale}px">
       <div class="side-bar">
         <div class="side-tabs" role="tablist" aria-label="Left column">
-          <button type="button" role="tab" aria-selected={sideTab === "files"} onclick={() => (sideTab = "files")}
-            >Files</button
-          >
-          <button type="button" role="tab" aria-selected={sideTab === "search"} onclick={() => void showSearch()}
-            >Search</button
-          >
+          <IconButton icon="files" label="Files" tab pressed={sideTab === "files"} onclick={() => (sideTab = "files")} />
+          <IconButton
+            icon="text-search"
+            tab
+            label="Search the project (⇧⌘F)"
+            pressed={sideTab === "search"}
+            onclick={() => void showSearch()}
+          />
         </div>
         {#if sideTab === "files"}
-          <label title="Show dotfiles, .git, node_modules, target">
-            <input type="checkbox" bind:checked={tree.showHidden} /> hidden
-          </label>
-          <button type="button" class="icon" aria-label="Read the folders again" onclick={() => treeView?.refresh()}
-            >↻</button
-          >
+          <IconButton
+            icon={tree.showHidden ? "eye" : "eye-off"}
+            label={tree.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
+            pressed={tree.showHidden}
+            size="sm"
+            onclick={() => (tree = { ...tree, showHidden: !tree.showHidden })}
+          />
+          <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => treeView?.refresh()} />
         {/if}
       </div>
       <!-- Both stay mounted: the tree keeps what is open, the search its results. -->
@@ -792,8 +801,12 @@
     cursor: default;
   }
 
-  .back {
-    color: var(--ax-text-muted);
+  /* Between the view's own buttons and the way back to the OS. */
+  .separator {
+    width: 1px;
+    height: var(--ax-icon-md);
+    margin: 0 var(--ax-space-1);
+    background: var(--ax-border);
   }
 
   kbd {
@@ -899,24 +912,7 @@
   .side-tabs {
     flex: 1;
     display: flex;
-    gap: var(--ax-space-2);
-  }
-
-  .side-tabs button {
-    padding: 0;
-    background: none;
-    border: 0;
-    border-bottom: 1px solid transparent;
-    color: var(--ax-text-muted);
-    font: inherit;
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
-    cursor: pointer;
-  }
-
-  .side-tabs button[aria-selected="true"] {
-    border-bottom-color: var(--ax-accent);
-    color: var(--ax-text);
+    gap: var(--ax-space-1);
   }
 
   .side-pane {
@@ -930,23 +926,6 @@
     display: none;
   }
 
-  .side-bar label {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-1);
-  }
-
-  .icon {
-    padding: 0 var(--ax-space-1);
-    background: none;
-    border: 0;
-    color: var(--ax-text-muted);
-    cursor: pointer;
-  }
-
-  .icon:hover {
-    color: var(--ax-text);
-  }
 
   /* The tree's right edge, dragged for its width. */
   .edge {

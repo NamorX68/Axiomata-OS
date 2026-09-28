@@ -66,6 +66,8 @@ export interface EditorSettings {
   formatOnSave: boolean;
   /** ED6.5 (L14): languages (editor ids, `python`, `markdown`) saved as they are. */
   formatOnSaveExcept: string[];
+  /** editor-look K14: tabs tinted with their language's colour. */
+  tabColors: boolean;
 }
 
 /** F12's defaults, confirmed by the owner. */
@@ -95,6 +97,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   stickyScroll: true,
   diagnosticsInline: false,
   formatOnSave: true,
+  tabColors: true,
   formatOnSaveExcept: [],
 };
 
@@ -156,6 +159,7 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     stickyScroll: bool(r.stickyScroll, d.stickyScroll),
     diagnosticsInline: bool(r.diagnosticsInline, d.diagnosticsInline),
     formatOnSave: bool(r.formatOnSave, d.formatOnSave),
+    tabColors: bool(r.tabColors, d.tabColors),
     formatOnSaveExcept: languageList(r.formatOnSaveExcept),
   };
 }

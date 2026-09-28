@@ -13,6 +13,7 @@
   import { getDock } from "../dockContext";
   import type { FilesPaneConfig } from "../paneKinds";
   import { fileTab, projectRoot, showsFile } from "../paneKinds";
+  import IconButton from "../../ui/IconButton.svelte";
 
   interface Props {
     project: { id: number; name: string; repo_root: string };
@@ -45,14 +46,14 @@
 <div class="files-pane">
   <div class="bar">
     <span>Files</span>
-    <label title="Show dotfiles, .git, node_modules, target">
-      <input
-        type="checkbox"
-        checked={config.showHidden}
-        onchange={(e) => onConfig({ ...config, showHidden: e.currentTarget.checked })}
-      /> hidden
-    </label>
-    <button type="button" class="icon" aria-label="Read the folders again" onclick={() => tree?.refresh()}>↻</button>
+    <IconButton
+      icon={config.showHidden ? "eye" : "eye-off"}
+      label={config.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
+      pressed={config.showHidden}
+      size="sm"
+      onclick={() => onConfig({ ...config, showHidden: !config.showHidden })}
+    />
+    <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => tree?.refresh()} />
   </div>
   <FileTree
     bind:this={tree}
@@ -94,21 +95,4 @@
     text-transform: uppercase;
   }
 
-  .bar label {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-1);
-  }
-
-  .icon {
-    padding: 0 var(--ax-space-1);
-    background: none;
-    border: 0;
-    color: var(--ax-text-muted);
-    cursor: pointer;
-  }
-
-  .icon:hover {
-    color: var(--ax-text);
-  }
 </style>

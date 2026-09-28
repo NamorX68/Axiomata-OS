@@ -10,7 +10,10 @@
   geometry (`ide/dock.ts`) is measured from.
 -->
 <script lang="ts">
+  import { languageColor } from "../core/languageColors";
   import { SLOT_ATTR } from "../ide/paneStore";
+  import Icon from "../ui/Icon.svelte";
+  import { editorSettings } from "./editorSettings";
   import type { TabGroup } from "../ide/layout";
   import { tabOf } from "./fileDock";
   import { getFileDock } from "./fileDockContext";
@@ -20,6 +23,11 @@
   const view = getFileDock();
   const tabs = $derived(group.tabs.map(tabOf));
   const focused = $derived(view.focusedGroup() === group.id);
+
+  /** A tab's tint (K14): its language's colour, or none when that is off or it is a new note. */
+  function tint(file: { rel: string } | null): string | undefined {
+    return $editorSettings.tabColors && file ? languageColor(file.rel) : undefined;
+  }
 
   /** The drop highlight for this group, or `null` when the drag is elsewhere. */
   const highlight = $derived.by(() => {
@@ -37,6 +45,7 @@
         class:active={tab.id === group.active}
         class:preview={tab.preview}
         class:dragging={view.draggingTab() === tab.id}
+        style:--lang={tint(tab.file)}
         data-ide-tab={tab.id}
       >
         <button
@@ -57,7 +66,7 @@
           class="tab-close"
           aria-label="Close {view.title(tab)}"
           onpointerdown={(event) => event.stopPropagation()}
-          onclick={() => view.requestClose(tab.id)}>×</button
+          onclick={() => view.requestClose(tab.id)}><Icon name="x" size="sm" /></button
         >
       </div>
     {/each}
@@ -84,34 +93,48 @@
     min-height: 0;
   }
 
+  /* The tab bar (K7): tabs as floating pills, each tinted with its language (K14). */
   .tabbar {
     display: flex;
     flex: 0 0 auto;
-    gap: 1px;
+    align-items: center;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-1) var(--ax-space-2);
     overflow-x: auto;
     scrollbar-width: none;
-    background: var(--ax-border);
+    background: var(--ax-surface-1);
     border-bottom: 1px solid var(--ax-border);
   }
 
   .tab {
+    /* The tab's colour; no tint (a new note, or tints off) falls back to the plain surface. */
+    --tint: var(--lang, transparent);
     display: flex;
     align-items: center;
     flex-shrink: 0;
     max-width: calc(240px * var(--ax-ui-scale));
-    background: var(--ax-surface-1);
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-pill);
+    background: color-mix(in srgb, var(--tint) 20%, var(--ax-surface-2));
+    transition:
+      background var(--ax-dur-fast) var(--ax-ease),
+      border-color var(--ax-dur-fast) var(--ax-ease);
     /* A tab is a drag handle: a fast drag must not start selecting its title (as in the IDE). */
     user-select: none;
   }
 
+  .tab:hover {
+    background: color-mix(in srgb, var(--tint) 28%, var(--ax-surface-3));
+  }
+
   .tab.active {
-    background: var(--ax-bg);
-    box-shadow: inset 0 -2px 0 var(--ax-border-strong);
+    background: color-mix(in srgb, var(--tint) 36%, var(--ax-surface-3));
+    border-color: color-mix(in srgb, var(--tint) 60%, var(--ax-border));
   }
 
   /* The focused group's visible tab carries the accent: the one the keys are about. */
   .focused .tab.active {
-    box-shadow: inset 0 -2px 0 var(--ax-accent);
+    border-color: var(--ax-accent);
   }
 
   .tab.dragging {
@@ -120,6 +143,8 @@
 
   .tab-title,
   .tab-close {
+    display: flex;
+    align-items: center;
     background: none;
     border: 0;
     color: var(--ax-text-muted);
@@ -130,7 +155,7 @@
 
   .tab-title {
     overflow: hidden;
-    padding: var(--ax-space-2) var(--ax-space-2) var(--ax-space-2) var(--ax-space-4);
+    padding: var(--ax-space-1) var(--ax-space-1) var(--ax-space-1) var(--ax-space-3);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -144,11 +169,21 @@
     font-style: italic;
   }
 
+  /* The ×: quiet until the tab is hovered or visible, then a small round button. */
   .tab-close {
-    padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-2) var(--ax-space-1);
+    margin-right: var(--ax-space-1);
+    padding: 2px;
+    border-radius: var(--ax-radius-pill);
+    opacity: 0;
+  }
+
+  .tab:hover .tab-close,
+  .tab.active .tab-close {
+    opacity: 1;
   }
 
   .tab-close:hover {
+    background: var(--ax-surface-3);
     color: var(--ax-text);
   }
 

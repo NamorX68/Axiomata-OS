@@ -30,6 +30,7 @@ ICONS=(
   ellipsis
   external-link
   eye
+  eye-off
   file
   file-plus
   files
@@ -38,8 +39,10 @@ ICONS=(
   folder-plus
   git-branch
   git-commit-horizontal
+  history
   info
   keyboard
+  layout-grid
   list
   map
   maximize-2

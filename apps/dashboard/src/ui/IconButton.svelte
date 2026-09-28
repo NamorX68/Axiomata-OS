@@ -3,6 +3,8 @@
   `--ax-hit-min` square, whatever the icon size, so it is easy to hit on any
   display; quiet at rest, a soft fill on hover, the accent when `pressed`.
   `label` is required — it is the tooltip and what assistive technology reads.
+  As a tab (`tab`, inside a `role="tablist"`) it reports `aria-selected` instead
+  of `aria-pressed`.
 -->
 <script lang="ts">
   import Icon from "./Icon.svelte";
@@ -11,14 +13,16 @@
   interface Props {
     icon: IconName;
     label: string;
-    /** A toggle that is on (a panel that is open). */
+    /** A toggle that is on (a panel that is open) — or, as a tab, the selected one. */
     pressed?: boolean;
+    /** One tab of a tab list: `role="tab"` and `aria-selected` from `pressed`. */
+    tab?: boolean;
     disabled?: boolean;
     size?: "sm" | "md" | "lg";
     onclick?: (e: MouseEvent) => void;
   }
 
-  let { icon, label, pressed, disabled = false, size = "md", onclick }: Props = $props();
+  let { icon, label, pressed, tab = false, disabled = false, size = "md", onclick }: Props = $props();
 </script>
 
 <button
@@ -27,7 +31,9 @@
   class:pressed
   title={label}
   aria-label={label}
-  aria-pressed={pressed}
+  role={tab ? "tab" : undefined}
+  aria-selected={tab ? (pressed ?? false) : undefined}
+  aria-pressed={tab ? undefined : pressed}
   {disabled}
   {onclick}
 >

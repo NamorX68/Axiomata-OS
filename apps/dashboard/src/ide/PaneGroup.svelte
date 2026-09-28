@@ -15,6 +15,10 @@
   import { SLOT_ATTR } from "./paneStore";
   import { session } from "./projectSession";
   import StatusDot from "./StatusDot.svelte";
+  import { languageColor } from "../core/languageColors";
+  import { editorSettings } from "../fileapp/editorSettings";
+  import Icon from "../ui/Icon.svelte";
+  import { filePaneConfig } from "./paneKinds";
 
   let { group }: { group: TabGroup } = $props();
 
@@ -31,6 +35,12 @@
     if (typeof id !== "number") return null;
     const agent = $session.agents.find((a) => a.id === id);
     return agent ? describeStatus($statuses.byAgent.get(id), agent, $statuses.checkedAt) : null;
+  }
+
+  /** A file tab's tint (editor-look K14): its language's colour, as in the file app. */
+  function tint(tab: PaneTab): string | undefined {
+    const file = filePaneConfig(tab);
+    return $editorSettings.tabColors && file ? languageColor(file.rel) : undefined;
   }
 
   /** The `+` menu, open at these viewport coordinates (W16). */
@@ -77,6 +87,7 @@
         class="tab"
         class:active={tab.id === group.active}
         class:dragging={dock.draggingTab() === tab.id}
+        style:--lang={tint(tab)}
         data-ide-tab={tab.id}
         id="ide-tab-{tab.id}"
         role="tab"
@@ -98,7 +109,7 @@
           type="button"
           aria-label="Close {tab.title}"
           onpointerdown={(event) => event.stopPropagation()}
-          onclick={() => dock.close(tab.id)}>×</button
+          onclick={() => dock.close(tab.id)}><Icon name="x" size="sm" /></button
         >
       </div>
     {/each}
@@ -110,7 +121,7 @@
       aria-haspopup="menu"
       bind:this={addButton}
       aria-expanded={adding !== null}
-      onclick={toggleAddMenu}>+</button
+      onclick={toggleAddMenu}><Icon name="plus" size="sm" /></button
     >
   </div>
 
@@ -164,12 +175,13 @@
     overflow: hidden;
   }
 
+  /* The tab bar (editor-look K7): tabs as floating pills; a file tab tinted with its language (K14). */
   .tabbar {
     display: flex;
-    align-items: stretch;
+    align-items: center;
     gap: var(--ax-space-1);
-    padding: var(--ax-space-1);
-    background: var(--ax-surface-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: var(--ax-surface-1);
     border-bottom: 1px solid var(--ax-border);
     /* The bar is a drop target of its own; it must not shrink away. */
     flex: 0 0 auto;
@@ -178,28 +190,34 @@
   }
 
   .tab {
+    --tint: var(--lang, transparent);
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    border-radius: var(--ax-radius-sm);
+    padding: var(--ax-space-1) var(--ax-space-1) var(--ax-space-1) var(--ax-space-3);
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-pill);
+    background: color-mix(in srgb, var(--tint) 20%, var(--ax-surface-2));
     color: var(--ax-text-muted);
     font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-sm);
     white-space: nowrap;
     cursor: grab;
     user-select: none;
+    transition:
+      background var(--ax-dur-fast) var(--ax-ease),
+      border-color var(--ax-dur-fast) var(--ax-ease);
   }
 
   .tab:hover {
     color: var(--ax-text);
-    background: var(--ax-surface-3);
+    background: color-mix(in srgb, var(--tint) 28%, var(--ax-surface-3));
   }
 
   .tab.active {
     color: var(--ax-text);
-    background: var(--ax-surface-1);
-    box-shadow: inset 0 -2px 0 var(--ax-accent);
+    background: color-mix(in srgb, var(--tint) 36%, var(--ax-surface-3));
+    border-color: color-mix(in srgb, var(--tint) 60%, var(--ax-accent));
   }
 
   .tab.dragging {
@@ -213,21 +231,23 @@
 
   .close,
   .add {
-    padding: 0 var(--ax-space-1);
+    display: flex;
+    align-items: center;
+    padding: 2px;
     background: none;
     border: none;
+    border-radius: var(--ax-radius-pill);
     color: var(--ax-text-muted);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-sm);
-    line-height: 1;
     cursor: pointer;
   }
 
   .close:hover {
+    background: var(--ax-surface-3);
     color: var(--ax-danger);
   }
 
   .add:hover {
+    background: var(--ax-surface-3);
     color: var(--ax-accent);
   }
 

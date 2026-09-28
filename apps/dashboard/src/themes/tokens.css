@@ -102,6 +102,25 @@
   --ax-terminal-font-size: 12px;
   --ax-line-height: 1.5;
 
+  /* Language colours (editor-look K14): tab tints and file icons. Recognisable
+     at a glance, as the languages present themselves; a theme may retune them. */
+  --ax-lang-rust: #dea584;
+  --ax-lang-javascript: #f1e05a;
+  --ax-lang-typescript: #4c8fd8;
+  --ax-lang-json: #cbcb41;
+  --ax-lang-css: #a57fd1;
+  --ax-lang-html: #e8663d;
+  --ax-lang-python: #5b9bd5;
+  --ax-lang-bash: #89e051;
+  --ax-lang-markdown: #9aa0aa;
+  --ax-lang-toml: #c27c3a;
+  --ax-lang-yaml: #e0556a;
+  --ax-lang-lua: #6f82e6;
+  --ax-lang-svelte: #ff5a2a;
+  --ax-lang-swift: #f05138;
+  --ax-lang-sql: #e8a33a;
+  --ax-lang-other: var(--ax-text-muted);
+
   /* ---------- neutral fallback palette (themes override) ---------- */
 
   /* `light` or `dark`: drives native form controls and scrollbars. */

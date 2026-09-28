@@ -43,6 +43,7 @@
   import { setDock } from "./dockContext";
   import { pendingLocations } from "../fileapp/locationList";
   import DockNode from "./DockNode.svelte";
+  import IconButton from "../ui/IconButton.svelte";
   import {
     activateTab,
     addTab,
@@ -512,13 +513,7 @@
         onSetRoot={(id, root) => void changeRoot(id, root)}
         onRemove={(id) => void removeProject(id)}
       />
-      <button
-        class="new-terminal"
-        type="button"
-        disabled={!current}
-        title="Open a terminal beside the others"
-        onclick={openTerminal}>+ Terminal</button
-      >
+      <IconButton icon="terminal" label="Open a terminal beside the others" disabled={!current} onclick={openTerminal} />
       <AgentPicker
         {agents}
         disabled={!current}
@@ -531,7 +526,7 @@
         <p class="hint">Drag a tab to an edge to split, to a tab bar to join.</p>
       {/if}
     </div>
-    <button class="back" type="button" onclick={() => (open = false)}>Back to the OS</button>
+    <IconButton icon="layout-grid" label="Back to the OS" onclick={() => (open = false)} />
   </header>
 
   <div
@@ -628,42 +623,6 @@
     margin: 0;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-  }
-
-  .new-terminal {
-    padding: var(--ax-space-1) var(--ax-space-3);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-    color: var(--ax-text);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-sm);
-    cursor: pointer;
-  }
-
-  .new-terminal:hover:not(:disabled) {
-    border-color: var(--ax-accent);
-  }
-
-  .new-terminal:disabled {
-    opacity: var(--ax-tile-glass-opacity);
-    cursor: default;
-  }
-
-  .back {
-    padding: var(--ax-space-1) var(--ax-space-3);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-    color: var(--ax-text-muted);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-sm);
-    cursor: pointer;
-  }
-
-  .back:hover {
-    color: var(--ax-accent);
-    border-color: var(--ax-accent);
   }
 
   .dock {
