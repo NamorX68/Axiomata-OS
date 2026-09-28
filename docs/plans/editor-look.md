@@ -161,6 +161,33 @@ Reiter-Tönung (I7), Diff und Dialoge (I6).
 erst beim ersten Öffnen des Reiters entsteht und nur abfragt, solange sie sichtbar ist — vorher kein Abzeichen, danach
 kann es veralten. Ein immer aktuelles Abzeichen bräuchte eine eigene Abfrage je Agent; offen zum Entscheiden.
 
+## 6. Die Optik im Kanban (gegrillt 2026-09-28, B1–B7) — noch nicht gebaut
+
+Zweites Modul nach der IDE. Heutiger Stand (Browser-Blick): flache Karten mit umrandeten Label-Chips, Fälligkeit und
+Zuständiger als Mono-Text; Spalten mit Griff, Name und Zahl, beim Überfahren ein rohes Auswahlfeld (Rolle) und ×; das
+Karten-Detail als Kasten über der mittleren Spalte; „+ Spalte“, „+ Karte“ und die Archiv-Checkbox als Text.
+
+- **B1 — Karten** (Linear/Zed): abgerundet mit Haarlinie, beim Überfahren leicht, beim Ziehen deutlich abgehoben; Labels
+  als gefüllte, zart getönte Chips (Farben weiter aus `--ax-label-*`); Fälligkeit mit Kalender-Icon — gedämpft, bald
+  fällig gelb, überfällig rot; der Zuständige als kleines Abzeichen mit Bot-Icon (Agent) bzw. Personen-Icon (Owner).
+- **B2 — Spalten** als abgerundete, leicht abgesetzte Bahnen mit Abstand; im Kopf ein Punkt für die Rolle (offen grau,
+  in Arbeit Akzent, fertig grün), der Name, die Zahl als Pille; Rolle, Umbenennen und Entfernen hinter einem
+  „…“-Menü statt Auswahlfeld und ×.
+- **B3 — Knöpfe**: „+ Spalte“ als Plus-Icon im Kopf, „+ Karte“ als ruhige Zeile mit Plus am Spaltenende, Lupe im
+  Filterfeld, Archiv als Icon-Umschalter, im Detail „Archivieren“/„Löschen“ als `ax-btn` (Löschen `danger`).
+- **B4 — Karten-Detail als Seitenleiste rechts im großen Brett** (wie Linear): das Brett bleibt sichtbar, ein Klick auf
+  eine andere Karte wechselt den Inhalt. In der kleinen Kachel öffnet ein Klick die Karte im großen Brett.
+- **B5 — Brett-Kopf als eine Werkzeugleiste**: links der Brettname (Umschalter bei mehreren Brettern), Mitte das
+  Filterfeld, rechts die Label-Filter-Chips, Archiv und „+ Spalte“ als Icons.
+- **B6 — Farbstreifen links an der Karte** in der Farbe ihres ersten Labels; abschaltbar in den Kanban-Einstellungen.
+- **B7 — Ein Kartenstil statt vier** (Owner): die Wahl „Auto / Flach / Kante / Schwebend“ (`kanbanPrefs.ts`
+  `cardStyle`, `kanban-settings.svelte`, `data-cards`) fällt weg; es bleibt der Stil aus B1. Die Theme-Tokens
+  `--ax-card-bg/border/shadow` bleiben, damit helle und dunkle Themes passen; ein gespeichertes `cardStyle` wird
+  ignoriert.
+
+Checkpoints (Vorschlag): **KB1** Karten + ein Stil + Farbstreifen (B1, B6, B7); **KB2** Spalten + Knöpfe + Kopfleiste
+(B2, B3, B5); **KB3** Detail als Seitenleiste (B4).
+
 ## 4. Offen beim Bau
 
 - Welche Icon-Themes Zed anbietet und was dort „Git“ heißt (K5).
