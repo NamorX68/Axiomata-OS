@@ -254,7 +254,8 @@ webview cannot make a server run its commands (`workspace/executeCommand`); the 
 with each checkpoint's requests. Every message, open and close must carry the page token of
 the server's starter; outgoing messages are capped like incoming ones and written through a
 per-server `stdin` lock, never the host's; at most `MAX_SERVERS` (8) run, and another page
-restarts one at most every 2 s. ED6.2 adds `textDocument/hover` and `/definition` to the list
+restarts one at most every 2 s. ED6.2 adds `textDocument/hover` and `/definition` to the list (ED6.3: `/implementation`,
+`/typeDefinition`, `/references` — every request of `LOCATION_METHODS` is tracked like a definition)
 and makes one answer readable in Rust (L11): the ids of definition requests are noted, their
 answers are parsed in the pump thread, and the files they name (`uri`/`targetUri`, at most
 4096 per server) become readable through `LspHost::read_foreign` — but only when they lie under
@@ -1205,7 +1206,11 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   the cursor moves, in another file of the root the host opens a tab (`onOpenFile` —
   `FileAppView`'s tabs, the IDE's dock), outside every root a read-only tab on
   `lsp:<handle>` (`definitionFile`; `FileSession.readOnly` never saves or keeps text aside,
-  and such files stay out of "recently opened").
+  and such files stay out of "recently opened"). ED6.3 (L12): implementation (⌘F12, Vi `gri`),
+  type definition (`grt`) and uses (⇧F12, `grr`) through `LspClient.locations`; one place is gone to like
+  a definition, several become a `LocationList` (`fileapp/locationList.ts`) that the project search's result
+  list shows (`ProjectSearch.showLocations`) — in the file app's Search column, or in the IDE's Search pane,
+  reached through `IdeDock.showLocations` and the `pendingLocations` store.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

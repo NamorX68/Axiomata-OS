@@ -54,7 +54,7 @@ const NORMAL_COMMANDS = new Set([
   "x", "X", "s", "S", "D", "C", "Y", "p", "P", "gp", "gP", "J", "gJ", "~", "i", "a", "I", "A", "gi", "gI", "o", "O",
   "R", "u", "<C-r>", ".", "v", "V", "<C-v>", "gv", "<C-a>", "<C-x>", "<C-o>", "<C-i>", "<Tab>", "zt", "zz", "zb",
   "z<CR>", "z.", "z-", "<C-e>", "<C-y>", "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>", "]c", "[c",
-  "]d", "[d", "gd", "K", "gf",
+  "]d", "[d", "gd", "K", "gf", "gri", "grr", "grt",
   "ZZ", "ZQ", ":", "@@", "&", "<Esc>", "<C-[>", "<C-c>", "gn", "gN", "zc", "zo", "za", "zR", "zM",
 ]);
 
@@ -124,29 +124,29 @@ class Reader {
 
   /**
    * The longest token from `table` here, or `"incomplete"` when the keys so
-   * far are only the start of one (`g` of `gu`), or `null` when none matches.
+   * far are only the start of one (`g` of `gu`, `gr` of `grr`) and none is
+   * whole yet, or `null` when none matches.
    */
   token(table: ReadonlySet<string> | Record<string, unknown>): string | "incomplete" | null {
     const has = (t: string) => (table instanceof Set ? table.has(t) : t in table);
-    const one = this.keyText(0);
-    const two = one !== null && this.i + 1 < this.keys.length ? one + (this.keyText(1) ?? "\u0000") : null;
-    if (two !== null && has(two)) {
-      this.i += 2;
-      return two;
+    const tokens = [...(table instanceof Set ? table : Object.keys(table))];
+    let text = "";
+    let best: { text: string; keys: number } | null = null;
+    let longer = false;
+    for (let n = 0; this.i + n < this.keys.length; n++) {
+      const key = this.keyText(n);
+      if (key === null) break;
+      text += key;
+      if (has(text)) best = { text, keys: n + 1 };
+      longer = tokens.some((t) => t.length > text.length && t.startsWith(text));
+      if (!longer) break;
     }
-    if (one === null) return null;
-    const startsLonger = [...(table instanceof Set ? table : Object.keys(table))].some(
-      (t) => t.length > one.length && t.startsWith(one),
-    );
-    if (startsLonger && this.i + 1 >= this.keys.length) {
-      // `g` alone: wait — unless `g` itself is a whole token too.
-      if (!has(one)) return "incomplete";
+    if (best) {
+      this.i += best.keys;
+      return best.text;
     }
-    if (has(one)) {
-      this.i += 1;
-      return one;
-    }
-    return startsLonger && this.i + 1 >= this.keys.length ? "incomplete" : null;
+    // Every key read and still the start of a longer token: wait for more.
+    return longer ? "incomplete" : null;
   }
 
   private keyText(offset: number): string | null {

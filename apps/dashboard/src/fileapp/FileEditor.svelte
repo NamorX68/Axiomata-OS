@@ -72,6 +72,8 @@
   import { DiagnosticSet } from "../editor/lsp/diagnostics";
   import { detectLanguage } from "../editor/syntax/languages";
   import { definitionFile, openOnServer, type LspDocument } from "./lsp";
+  import { buildLocationList, type LocationList } from "./locationList";
+  import type { Location, LocationKind } from "../editor/lsp/client";
   import { toast } from "../core/toast";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
   import SvgPreview from "./SvgPreview.svelte";
@@ -105,6 +107,12 @@
      * where the host has tabs. Without it the file opens in this editor.
      */
     onOpenFile?: (file: { root: string; rel: string }, line: number) => void;
+    /**
+     * Shows a language server's list of places (ED6.3: uses, several
+     * implementations) — in the host's search list. Without it the editor
+     * goes to the first place.
+     */
+    onShowLocations?: (list: LocationList) => void;
   }
 
   let {
@@ -118,6 +126,7 @@
     empty,
     compact = false,
     onOpenFile,
+    onShowLocations,
   }: Props = $props();
 
   /** Quiet time after the last change before unsaved text is kept aside (F8). */
@@ -404,12 +413,15 @@
   }
 
   function interceptKey(e: KeyboardEvent): boolean {
-    if (e.metaKey || e.ctrlKey || e.altKey) return false;
-    if (e.key === "F12" && !e.shiftKey && lspDoc) {
+    if (e.key === "F12" && !e.ctrlKey && !e.altKey && lspDoc) {
+      // F12 definition, ⌘F12 implementation, ⇧F12 uses (L7, ED6.3).
+      const kind: LocationKind = e.metaKey ? "implementation" : e.shiftKey ? "references" : "definition";
+      if (e.metaKey && e.shiftKey) return false;
       e.preventDefault();
-      void goToDefinition(session?.doc.selection.head ?? null);
+      void goToLocations(kind, session?.doc.selection.head ?? null);
       return true;
     }
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
     if (e.key !== "F8" || !goToProblem(e.shiftKey ? -1 : 1)) return false;
     e.preventDefault();
     return true;
@@ -421,20 +433,58 @@
     return found ? found.connection.client.hover(found.uri, at) : Promise.resolve(null);
   }
 
+  /** What each kind of place is called, for the list's title and "none found". */
+  const LOCATION_WORDS: Record<LocationKind, { title: string; none: string }> = {
+    definition: { title: "Definitions of", none: "No definition found" },
+    implementation: { title: "Implementations of", none: "No implementation found" },
+    typeDefinition: { title: "Type definitions of", none: "No type definition found" },
+    references: { title: "References to", none: "No references found" },
+  };
+
   /**
    * F12, ⌘-click and Vi's `gd` (ED6.2, L7): the definition of the symbol at
    * `at` — here, in another file of the root (a tab where the host has them),
    * or read-only outside every root (L11).
    */
-  async function goToDefinition(at: { line: number; col: number } | null): Promise<void> {
+  function goToDefinition(at: { line: number; col: number } | null): Promise<void> {
+    return goToLocations("definition", at);
+  }
+
+  /**
+   * The places of `kind` for the symbol at `at` (ED6.2/ED6.3): one is gone to
+   * as a definition is; several are listed (`onShowLocations`), or the first
+   * is gone to where the host has no list. Uses are always listed.
+   */
+  async function goToLocations(kind: LocationKind, at: { line: number; col: number } | null): Promise<void> {
     const s = session;
     const found = lspDoc;
     if (!s || !found || !at) return;
-    const location = await found.connection.client.definition(found.uri, at);
+    const places = await found.connection.client.locations(kind, found.uri, at);
     if (session !== s) return;
-    const file = location ? definitionFile(s.root, found, location) : null;
-    if (!location || !file) {
-      toast("No definition found", "info");
+    const words = LOCATION_WORDS[kind];
+    if (places.length === 0) {
+      toast(words.none, "info");
+      return;
+    }
+    if (onShowLocations && (places.length > 1 || kind === "references")) {
+      const title = `${words.title} ${symbolAt(s, at) ?? "the symbol"}`;
+      const list = await buildLocationList(
+        title,
+        places,
+        (location) => definitionFile(s.root, found, location),
+        async (root, rel) => (await fileBackend.read(root, rel)).content,
+      );
+      if (session === s) onShowLocations(list);
+      return;
+    }
+    goToPlace(s, found, places[0]);
+  }
+
+  /** Goes to one place: here, in another file of the root, or read-only outside every root. */
+  function goToPlace(s: FileSession, found: LspDocument, location: Location): void {
+    const file = definitionFile(s.root, found, location);
+    if (!file) {
+      toast("That place is not a file", "info");
       return;
     }
     if (file.root === s.root && file.rel === s.rel) {
@@ -443,6 +493,18 @@
     }
     if (onOpenFile) onOpenFile(file, location.at.line);
     else void open(file, location.at.line);
+  }
+
+  /** The word at `at` in quotes (the list's title), `null` on no word. */
+  function symbolAt(s: FileSession, at: { line: number; col: number }): string | null {
+    if (at.line >= s.doc.store.lineCount()) return null;
+    const line = s.doc.store.line(at.line);
+    const word = /[\p{L}\p{N}_$]/u;
+    let from = at.col;
+    let to = at.col;
+    while (from > 0 && word.test(line[from - 1])) from--;
+    while (to < line.length && word.test(line[to])) to++;
+    return to > from ? `\`${line.slice(from, to)}\`` : null;
   }
 
   /** The folds of `s` as they are now (edits moved them), if they are kept at all. */
@@ -541,10 +603,12 @@
       if (root && rel) void open({ root, rel }, effect.at.line);
     } else if (effect.type === "problem") {
       goToProblem(effect.dir);
-    } else if (effect.type === "definition" || effect.type === "hover") {
+    } else if (effect.type === "definition" || effect.type === "hover" || effect.type === "locations") {
       // Vi's keys exist for every file; say why nothing happens where no server runs.
+      const head = session?.doc.selection.head ?? null;
       if (!lspDoc) toast("No language server for this file", "info");
-      else if (effect.type === "definition") void goToDefinition(session?.doc.selection.head ?? null);
+      else if (effect.type === "definition") void goToDefinition(head);
+      else if (effect.type === "locations") void goToLocations(effect.kind, head);
       else surface?.showHoverAtCursor();
     } else if (effect.type === "reload") {
       // `:e!` — the `!` is the confirmation the Reload button would ask for.

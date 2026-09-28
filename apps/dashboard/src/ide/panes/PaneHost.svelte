@@ -115,6 +115,7 @@
         onQuit={() => dock.close(tab.id)}
         onOpenFile={(file, line) =>
           dock.open(fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), tab.id)}
+        onShowLocations={(list) => dock.showLocations(list)}
       />
     {:else}
       <p class="unknown">This file pane lost its file.</p>

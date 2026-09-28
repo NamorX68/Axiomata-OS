@@ -13,6 +13,9 @@
     state (T14).
   * **A click opens the file at the match** (`onOpen`); a file's heading folds
     its matches away.
+  * **A language server's list takes the same place** (ED6.3,
+    `locationList.ts`): the uses of a symbol, or its implementations, shown
+    with `showLocations` until the owner searches again or closes it.
 -->
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
@@ -20,6 +23,7 @@
   import type { FileRootInfo } from "../core/backend";
   import { cancelSearch, searchFiles, type FileMatches, type LineMatch } from "./backend";
   import { dirtyFiles, isDirty } from "./dirtyFiles";
+  import type { LocationList } from "./locationList";
   import {
     DEFAULT_OPTIONS,
     ProjectSearchModel,
@@ -56,6 +60,8 @@
   let chosenRoot = $state<string | null>(null);
   let view = $state.raw<SearchView>({ status: "idle", files: [], matches: 0, truncated: false, error: null });
   let collapsed = $state(new Set<string>());
+  /** A language server's list shown instead of the search's results. */
+  let list = $state.raw<LocationList | null>(null);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const root = $derived(
@@ -69,6 +75,7 @@
   function run(): void {
     clearTimeout(timer);
     collapsed = new Set();
+    list = null;
     if (root) void model.start(root, pattern, options);
   }
 
@@ -82,10 +89,10 @@
     run();
   }
 
-  function toggleFile(rel: string): void {
+  function toggleFile(key: string): void {
     const next = new Set(collapsed);
-    if (next.has(rel)) next.delete(rel);
-    else next.add(rel);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
     collapsed = next;
   }
 
@@ -105,9 +112,21 @@
     return i < 0 ? "" : rel.slice(0, i);
   }
 
-  function open(file: FileMatches, m: LineMatch): void {
-    if (root) onOpen(root, file.rel, m.line, m.col);
+  /** Shows a language server's list (ED6.3) in place of the search's results. */
+  export function showLocations(next: LocationList): void {
+    clearTimeout(timer);
+    collapsed = new Set();
+    list = next;
   }
+
+  /** What the list shows: the language server's places, or the search's files (in the chosen root). */
+  const shown = $derived(
+    list
+      ? list.files
+      : root
+        ? view.files.map((f: FileMatches) => ({ root, rel: f.rel, matches: f.matches }))
+        : [],
+  );
 
   /** Focuses the query field (⇧⌘F), taking `text` as the query if given. */
   export async function focus(text?: string): Promise<void> {
@@ -188,22 +207,23 @@
     />
   {/if}
 
-  {#if view.status !== "idle"}
+  {#if list}
+    <div class="list-head">
+      <p class="status" role="status">{list.title} — {list.count} {list.count === 1 ? "place" : "places"}</p>
+      <button type="button" class="link" aria-label="Close the list" onclick={() => (list = null)}>✕</button>
+    </div>
+  {:else if view.status !== "idle"}
     <p class="status" class:error={view.status === "error"} role="status">{statusText(view)}</p>
   {/if}
 
   <div class="results">
-    {#each view.files as file (file.rel)}
+    {#each shown as file (`${file.root}\0${file.rel}`)}
+      {@const key = `${file.root}\0${file.rel}`}
       <div class="file">
-        <button
-          type="button"
-          class="file-head"
-          aria-expanded={!collapsed.has(file.rel)}
-          onclick={() => toggleFile(file.rel)}
-        >
-          <span class="chevron">{collapsed.has(file.rel) ? "▸" : "▾"}</span>
+        <button type="button" class="file-head" aria-expanded={!collapsed.has(key)} onclick={() => toggleFile(key)}>
+          <span class="chevron">{collapsed.has(key) ? "▸" : "▾"}</span>
           <span class="name">{fileName(file.rel)}</span>
-          {#if root && isDirty($dirtyFiles, root, file.rel)}
+          {#if isDirty($dirtyFiles, file.root, file.rel)}
             <span class="unsaved" title="Unsaved changes in an editor — these results are the file on disk"
               >●</span
             >
@@ -211,10 +231,15 @@
           <span class="folder">{folderOf(file.rel)}</span>
           <span class="count">{file.matches.length}</span>
         </button>
-        {#if !collapsed.has(file.rel)}
+        {#if !collapsed.has(key)}
           {#each file.matches as m, i (i)}
             {@const [before, hit, after] = parts(m)}
-            <button type="button" class="hit" title="{file.rel}:{m.line + 1}" onclick={() => open(file, m)}>
+            <button
+              type="button"
+              class="hit"
+              title="{file.rel}:{m.line + 1}"
+              onclick={() => onOpen(file.root, file.rel, m.line, m.col)}
+            >
               <span class="line">{m.line + 1}</span>
               <span class="text">{before.trimStart()}<mark>{hit}</mark>{after}</span>
             </button>
@@ -328,6 +353,13 @@
     margin: 0;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+  }
+
+  .list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ax-space-2);
   }
 
   .status.error {

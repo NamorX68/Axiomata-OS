@@ -327,6 +327,23 @@ describe("modes and status", () => {
       { type: "hover" },
     ]);
   });
+
+  it("hands gri, grt and grr to the view, one key at a time as typed (ED6.3)", () => {
+    const { m, effects } = setup("|a\nb");
+    for (const key of "grigrtgrr") m.feedKeys(key);
+    expect(effects).toEqual([
+      { type: "locations", kind: "implementation" },
+      { type: "locations", kind: "typeDefinition" },
+      { type: "locations", kind: "references" },
+    ]);
+  });
+
+  it("still takes a two-key g command and rings for an unknown gr", () => {
+    expect(vi("|ab", "gvx")).toBe("|b");
+    const { m, effects } = setup("|ab");
+    m.feedKeys("grx");
+    expect(effects.some((e) => e.type === "locations")).toBe(false);
+  });
 });
 
 describe("the Mac clipboard", () => {

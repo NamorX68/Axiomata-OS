@@ -28,6 +28,7 @@
   import FileTab from "./FileTab.svelte";
   import FileTree from "./FileTree.svelte";
   import ProjectSearch from "./ProjectSearch.svelte";
+  import type { LocationList } from "./locationList";
   import QuickOpen from "./QuickOpen.svelte";
   import { handoffs, takeHandoffs, type Handoff } from "./handoff";
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
@@ -265,6 +266,14 @@
     await searchView?.focus();
   }
 
+  /** A language server's list (ED6.3): the left column's search shows it. */
+  async function showLocations(list: LocationList): Promise<void> {
+    tree = { ...tree, visible: true };
+    sideTab = "search";
+    await tick();
+    searchView?.showLocations(list);
+  }
+
   function take(e: KeyboardEvent): void {
     e.preventDefault();
     e.stopPropagation();
@@ -466,6 +475,7 @@
         onMoved={(file) => (tabs = retargetTab(tabs, tab.id, file))}
         onFailed={(result) => onTabFailed(tab, result)}
         onOpenFile={(file, line) => openTab(file, false, null, line)}
+        onShowLocations={(list) => void showLocations(list)}
       />
     {:else}
       <div class="empty">

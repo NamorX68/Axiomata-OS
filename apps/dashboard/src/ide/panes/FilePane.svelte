@@ -20,12 +20,14 @@
   import { agentStatus } from "../agentStatus";
   import { worktreeAgent, type FilePaneConfig } from "../paneKinds";
   import { session } from "../projectSession";
+  import type { LocationList } from "../../fileapp/locationList";
 
   let {
     config,
     visible,
     onQuit,
     onOpenFile,
+    onShowLocations,
   }: {
     config: FilePaneConfig;
     visible: boolean;
@@ -33,6 +35,8 @@
     onQuit?: () => void;
     /** A definition in another file (ED6.2): the dock opens it as a tab. */
     onOpenFile?: (file: { root: string; rel: string }, line: number) => void;
+    /** A language server's list of places (ED6.3): the IDE's Search pane shows it. */
+    onShowLocations?: (list: LocationList) => void;
   } = $props();
 
   let editor = $state<FileEditor | null>(null);
@@ -75,7 +79,7 @@
   {#if failure}
     <p class="failure">{failure}</p>
   {:else}
-    <FileEditor bind:this={editor} {visible} {notice} {onQuit} {onOpenFile} />
+    <FileEditor bind:this={editor} {visible} {notice} {onQuit} {onOpenFile} {onShowLocations} />
   {/if}
 </div>
 

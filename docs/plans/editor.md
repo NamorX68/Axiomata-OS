@@ -1144,15 +1144,18 @@ Formatieren/Umbenennen); D6 wird in einem Punkt geändert (L2).
   seiner Sprache in dieser Wurzel, beendet nach 10 Minuten ohne offene Datei der Wurzel. Workspace,
   Projekt und Worktree gleich behandelt (jeder Worktree hat seinen Stand); `grant:`-Einzeldateien
   bekommen keinen.
-- **L5 — Checkpoints** (Q5): **ED6.1** Server-Verwaltung + Protokoll-Basis + **Diagnosen**; **ED6.2**
-  **Hover** + **Definition** (auch in andere Dateien, als Reiter); **ED6.3** **Vervollständigung**;
-  **ED6.4** **Formatieren** + **Umbenennen** (Änderungen über mehrere Dateien; nicht offene Dateien über
-  den geschützten Datei-Dienst).
+- **L5 — Checkpoints** (Q5, ergänzt 2026-09-28 durch L12): **ED6.1** Server-Verwaltung + Protokoll-Basis +
+  **Diagnosen**; **ED6.2** **Hover** + **Definition** (auch in andere Dateien, als Reiter); **ED6.3**
+  **Implementierung**, **Typdefinition**, **Verwendungen** (L12); **ED6.4** **Vervollständigung**; **ED6.5**
+  **Formatieren** + **Umbenennen** (Änderungen über mehrere Dateien; nicht offene Dateien über den geschützten
+  Datei-Dienst).
 - **L6 — Diagnosen** (Q6): Wellenlinie je Schwere (Farben über `--ax-*`), Marke am Zeilenrand, Meldung
   beim Überfahren; Einstellung „Meldung am Zeilenende“, Vorgabe aus.
-- **L7 — Tasten** (Q7): normal F12/⌘-Klick Definition, Überfahren Hover, F8/⇧F8 Probleme, ⌃Space
-  Vervollständigung, ⇧⌥F Formatieren, F2 Umbenennen; Vi `gd`, `K`, `]d`/`[d`, ⌃Space im Insert,
-  `:format`, `:rename <name>`.
+- **L7 — Tasten** (Q7, ergänzt durch L12): normal F12/⌘-Klick Definition, ⌘F12 Implementierung, ⇧F12
+  Verwendungen, Überfahren Hover, F8/⇧F8 Probleme, ⌃Space Vervollständigung, ⇧⌥F Formatieren, F2 Umbenennen;
+  Vi `gd`, `K`, `]d`/`[d`, `gri`/`grt`/`grr` (Implementierung/Typdefinition/Verwendungen), `grn` Umbenennen,
+  ⌃Space im Insert, `:format`, `:rename <name>` — die `gr*`-Tasten wie in Neovim 0.11 und der nvim-Konfiguration
+  des Owners (`~/.config/nvim`, bei Bedarf Vorbild für weitere Tasten).
 - **L8 — Formatieren beim Speichern** (Q8): Einstellung, Vorgabe aus.
 - **L9 — Snippets** (Q9): Platzhalter werden als ihr Vorgabetext eingesetzt, der Cursor steht auf dem
   ersten; Tab-Springen durch Platzhalter folgt später.
@@ -1163,6 +1166,14 @@ Formatieren/Umbenennen); D6 wird in einem Punkt geändert (L2).
 - **L11 — Definition außerhalb der Wurzeln** (Q11): schreibgeschützt öffnen, aber nur Pfade, die der
   Server selbst in einer Definitions-Antwort genannt hat (Rust liest diese eine Antwortart mit — eine
   gezielte Ausnahme von L1), reguläre Datei, keine Verknüpfung. Der Webview kann keinen Pfad unterschieben.
+  Verengt in ED6.2 (Security-Review): nur unter den Werkzeug-Ordnern des Servers; ab ED6.3 gilt es für jede
+  Orts-Antwort (Definition, Implementierung, Typdefinition, Verwendungen).
+- **L12 — Implementierung und Verwendungen** (2026-09-28, Owner-Nachtrag): eigener Checkpoint ED6.3 direkt
+  nach der Definition. Eine Stelle → hinspringen wie bei der Definition; mehrere → als Liste in der
+  Trefferliste der Projektsuche (Datei-App-Spalte Files | Search, IDE-Search-Pane), nach Datei gruppiert mit
+  Zeile — wie Trouble in der nvim-Konfiguration des Owners; Verwendungen immer als Liste. **Code-Aktionen**
+  (`gra`, ⌘L) vorgemerkt als eigener späterer Punkt: sie können Serverbefehle ausführen
+  (`workspace/executeCommand`), die ED6.1 aus Sicherheitsgründen sperrt — eigene Prüfung nötig.
 
 **ED6.1 umgesetzt (2026-09-28):** `axiomata-files::lsp` (Tabelle + `lsp.json`, `LspHost` mit Framing,
 Seitenkennung — dieselbe Seite teilt einen Server, eine neu geladene startet ihn neu —, 10-Minuten-Leerlauf),
@@ -1191,6 +1202,15 @@ geöffnete fd (kein TOCTOU); höchstens 256 offene Definitions-Anfragen je Serve
 nicht über den Neustart gerettet; `gd`/`K` ohne Server geben einen Hinweis. Der Client kündigt
 Markdown für den Hover an. Live gegen `rust-analyzer` geprüft: Hover, Definition im Projekt und in die
 Standardbibliothek (`/opt/homebrew/Cellar/rust/…/string.rs`), dort gelesen.
+
+**ED6.3 umgesetzt (2026-09-28, L12):** Implementierung (⌘F12, Vi `gri`), Typdefinition (Vi `grt`),
+Verwendungen (⇧F12, Vi `grr`). `LspClient.locations(kind, …)` für alle vier Orts-Anfragen (`parseLocations`
+liest auch das Ende des Symbols); Rust merkt sich alle vier (`LOCATION_METHODS`) wie bisher die Definition.
+Mehrere Stellen baut `fileapp/locationList.ts` zur Liste (je Datei einmal gelesen, höchstens 200 Dateien mit
+Text), `ProjectSearch.showLocations` zeigt sie statt der Suchtreffer, bis neu gesucht oder ✕ gedrückt wird.
+Die IDE reicht sie über `pendingLocations` an ihr Search-Pane (`IdeDock.showLocations`, öffnet es bei
+Bedarf). Der Vi-Parser liest jetzt Befehle beliebiger Länge (`Reader.token`). Live gegen `rust-analyzer`:
+Verwendungen von `helper` (2) und die Implementierung von `Speak`.
 
 ## 6. Verifikation (pro Meilenstein)
 

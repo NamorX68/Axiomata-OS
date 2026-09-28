@@ -67,11 +67,16 @@ export function uriPath(uri: string): string | null {
   }
 }
 
-/** Where a definition is: a file and a position in it. */
+/** A place a server names: a file and a position in it. */
 export interface Location {
   uri: string;
   at: Pos;
+  /** Where the named symbol ends, when the server says. */
+  end?: Pos;
 }
+
+/** The requests that answer with places (the method is `textDocument/<kind>`). */
+export type LocationKind = "definition" | "implementation" | "typeDefinition" | "references";
 
 /** A path under a root as a `file://` URI. */
 export function documentUri(rootPath: string, rel: string): string {
@@ -199,14 +204,25 @@ export class LspClient {
    * names, `null` when it names none or the request failed.
    */
   async definition(uri: string, at: Pos): Promise<Location | null> {
+    return (await this.locations("definition", uri, at))[0] ?? null;
+  }
+
+  /**
+   * The places a location request names for the symbol at `at` (ED6.2/ED6.3):
+   * its definition, its implementations, its type's definition, or every use
+   * (`references`, the declaration included). Empty when there are none, the
+   * server does not answer this request, or it failed.
+   */
+  async locations(kind: LocationKind, uri: string, at: Pos): Promise<Location[]> {
+    const params: Record<string, unknown> = {
+      textDocument: { uri },
+      position: { line: at.line, character: at.col },
+    };
+    if (kind === "references") params.context = { includeDeclaration: true };
     try {
-      const result = await this.request<unknown>("textDocument/definition", {
-        textDocument: { uri },
-        position: { line: at.line, character: at.col },
-      });
-      return firstLocation(result);
+      return parseLocations(await this.request<unknown>(`textDocument/${kind}`, params));
     } catch {
-      return null;
+      return [];
     }
   }
 
@@ -236,6 +252,9 @@ export class LspClient {
             publishDiagnostics: { relatedInformation: false, versionSupport: true },
             hover: { contentFormat: ["markdown", "plaintext"] },
             definition: { linkSupport: true },
+            implementation: { linkSupport: true },
+            typeDefinition: { linkSupport: true },
+            references: {},
           },
           workspace: { workspaceFolders: true, configuration: false },
           window: { workDoneProgress: false },
@@ -351,18 +370,32 @@ export function hoverMarkdown(contents: unknown): string {
   return "";
 }
 
-/** The first place of a definition answer: a `Location`, a list of them, or `LocationLink`s. */
-export function firstLocation(result: unknown): Location | null {
-  const item = Array.isArray(result) ? result[0] : result;
-  if (typeof item !== "object" || item === null) return null;
-  const r = item as {
-    uri?: unknown;
-    range?: { start?: { line?: unknown; character?: unknown } };
-    targetUri?: unknown;
-    targetSelectionRange?: { start?: { line?: unknown; character?: unknown } };
-  };
-  const uri = typeof r.uri === "string" ? r.uri : typeof r.targetUri === "string" ? r.targetUri : null;
-  const start = typeof r.uri === "string" ? r.range?.start : r.targetSelectionRange?.start;
-  if (!uri || typeof start?.line !== "number" || typeof start.character !== "number") return null;
-  return { uri, at: { line: start.line, col: start.character } };
+/** The places of a location answer: a `Location`, a list of them, or `LocationLink`s; malformed ones skipped. */
+export function parseLocations(result: unknown): Location[] {
+  const items = Array.isArray(result) ? result : result == null ? [] : [result];
+  const out: Location[] = [];
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) continue;
+    const r = item as {
+      uri?: unknown;
+      range?: { start?: RawPos; end?: RawPos };
+      targetUri?: unknown;
+      targetSelectionRange?: { start?: RawPos; end?: RawPos };
+    };
+    const uri = typeof r.uri === "string" ? r.uri : typeof r.targetUri === "string" ? r.targetUri : null;
+    const range = typeof r.uri === "string" ? r.range : r.targetSelectionRange;
+    const at = posOf(range?.start);
+    if (!uri || !at) continue;
+    const end = posOf(range?.end);
+    out.push(end ? { uri, at, end } : { uri, at });
+  }
+  return out;
+}
+
+type RawPos = { line?: unknown; character?: unknown };
+
+function posOf(raw: RawPos | undefined): Pos | null {
+  return typeof raw?.line === "number" && typeof raw.character === "number"
+    ? { line: raw.line, col: raw.character }
+    : null;
 }

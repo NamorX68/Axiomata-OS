@@ -41,6 +41,7 @@
     type Rect,
   } from "./dock";
   import { setDock } from "./dockContext";
+  import { pendingLocations } from "../fileapp/locationList";
   import DockNode from "./DockNode.svelte";
   import {
     activateTab,
@@ -185,10 +186,11 @@
    * ⇧⌘F: brings the Search pane forward with its field focused, or opens one
    * — in the Files pane's group, where a column for it already is.
    */
-  function showSearch(): void {
+  function showSearch(focus = true): void {
     const existing = allTabs(layout).find((t) => t.kind === SEARCH_PANE);
     if (existing) {
-      layout = activateTab(setTabConfig(layout, existing.id, { ...existing.config, focus: Date.now() }), existing.id);
+      const config = focus ? { ...existing.config, focus: Date.now() } : existing.config;
+      layout = activateTab(setTabConfig(layout, existing.id, config ?? {}), existing.id);
       return;
     }
     const files = allTabs(layout).find((t) => t.kind === FILES_PANE);
@@ -394,6 +396,11 @@
   setDock({
     activate: (tabId) => {
       layout = activateTab(layout, tabId);
+    },
+    showLocations: (list) => {
+      // The Search pane takes the list from here once it is there (`SearchPane.svelte`).
+      pendingLocations.set(list);
+      showSearch(false);
     },
     close: (tabId) => {
       // A file pane's folds are kept only while it is open (T7).

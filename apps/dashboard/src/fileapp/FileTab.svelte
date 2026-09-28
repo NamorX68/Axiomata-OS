@@ -10,6 +10,7 @@
 -->
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
+  import type { LocationList } from "./locationList";
 
   import FileEditor, { type OpenFileState, type OpenResult } from "./FileEditor.svelte";
   import type { Handoff } from "./handoff";
@@ -35,6 +36,8 @@
     onFailed?: (result: Extract<OpenResult, { ok: false }>) => void;
     /** A definition in another file (ED6.2): the view opens it in a tab. */
     onOpenFile?: (file: FileRef, line: number) => void;
+    /** A language server's list of places (ED6.3): the view shows it in its search column. */
+    onShowLocations?: (list: LocationList) => void;
     empty?: Snippet;
   }
 
@@ -51,6 +54,7 @@
     onMoved,
     onFailed,
     onOpenFile,
+    onShowLocations,
     empty,
   }: Props = $props();
 
@@ -126,6 +130,7 @@
     onState={reportState}
     {empty}
     {onOpenFile}
+    {onShowLocations}
   />
 </div>
 

@@ -83,6 +83,8 @@ export type ViEffect =
   /** `gd` / `K` (ED6.2, L7): the language server's definition / hover for the symbol under the cursor. */
   | { type: "definition" }
   | { type: "hover" }
+  /** `gri` / `grt` / `grr` (ED6.3, as Neovim 0.11): implementations, type definition, uses. */
+  | { type: "locations"; kind: "implementation" | "typeDefinition" | "references" }
   | { type: "openFile" }
   /** A file mark (`'A`) that belongs to another file. */
   | { type: "fileMark"; file: string; at: Pos }
@@ -979,6 +981,13 @@ export class ViMachine {
       case "K":
         this.env.effect({ type: "hover" });
         return true;
+      case "gri":
+      case "grt":
+      case "grr": {
+        const kind = b.name === "gri" ? "implementation" : b.name === "grt" ? "typeDefinition" : "references";
+        this.env.effect({ type: "locations", kind });
+        return true;
+      }
       case "gf":
         this.env.effect({ type: "openFile" });
         return true;

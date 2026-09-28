@@ -2,7 +2,9 @@
   The IDE's Search pane (`docs/plans/editor.md`, ED5, T13): the project search
   over the open project's folder, the same component as the file app's Search
   tab. A match opens the file in a file pane beside it, at the match's line;
-  ⇧⌘F on an open pane puts the cursor back in its field (`focusAt`).
+  ⇧⌘F on an open pane puts the cursor back in its field (`focusAt`). A
+  language server's list (ED6.3) arrives through `pendingLocations` and is
+  taken by the pane that is there first.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -10,6 +12,7 @@
   import type { IdeProject } from "../../core/backend";
   import ProjectSearch from "../../fileapp/ProjectSearch.svelte";
   import { getDock } from "../dockContext";
+  import { pendingLocations } from "../../fileapp/locationList";
   import { fileTab, projectRoot, showsFile } from "../paneKinds";
 
   let { project, tabId, focusAt }: { project: IdeProject; tabId: string; focusAt: number } = $props();
@@ -40,9 +43,15 @@
   const FRESH_MS = 2000;
 
   onMount(() => {
+    const unsubscribe = pendingLocations.subscribe((list) => {
+      if (!list || !search) return;
+      search.showLocations(list);
+      pendingLocations.set(null);
+    });
     focused = focusAt;
     // A layout restored at start-up must not take the focus from where the owner is.
     if (Date.now() - focusAt < FRESH_MS) void search?.focus();
+    return unsubscribe;
   });
 </script>
 

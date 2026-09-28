@@ -7,9 +7,9 @@ import {
   documentUri,
   EXITED,
   fileUri,
-  firstLocation,
   hoverMarkdown,
   LspClient,
+  parseLocations,
   uriPath,
 } from "./client";
 import { DiagnosticSet, parseDiagnostics } from "./diagnostics";
@@ -300,15 +300,20 @@ describe("hover and definition", () => {
     expect(hoverMarkdown({ language: "md", value: "a ``` b" })).toBe("````md\na ``` b\n````");
   });
 
-  it("reads the first place of any definition answer", () => {
+  it("reads every place of any location answer", () => {
     const range = { start: { line: 4, character: 2 }, end: { line: 4, character: 9 } };
-    expect(firstLocation({ uri: "file:///a.rs", range })).toEqual({ uri: "file:///a.rs", at: { line: 4, col: 2 } });
-    expect(firstLocation([{ uri: "file:///b.rs", range }, { uri: "file:///c.rs", range }])?.uri).toBe("file:///b.rs");
-    expect(
-      firstLocation([{ targetUri: "file:///d.rs", targetRange: range, targetSelectionRange: range }]),
-    ).toEqual({ uri: "file:///d.rs", at: { line: 4, col: 2 } });
-    expect(firstLocation([])).toBeNull();
-    expect(firstLocation(null)).toBeNull();
+    expect(parseLocations({ uri: "file:///a.rs", range })).toEqual([
+      { uri: "file:///a.rs", at: { line: 4, col: 2 }, end: { line: 4, col: 9 } },
+    ]);
+    expect(parseLocations([{ uri: "file:///b.rs", range }, { uri: "file:///c.rs", range }]).map((l) => l.uri)).toEqual([
+      "file:///b.rs",
+      "file:///c.rs",
+    ]);
+    expect(parseLocations([{ targetUri: "file:///d.rs", targetRange: range, targetSelectionRange: range }])).toEqual([
+      { uri: "file:///d.rs", at: { line: 4, col: 2 }, end: { line: 4, col: 9 } },
+    ]);
+    expect(parseLocations([{ uri: "file:///e.rs" }, 3, null])).toEqual([]);
+    expect(parseLocations(null)).toEqual([]);
   });
 
   it("decodes file URIs back to paths", () => {
@@ -333,5 +338,22 @@ describe("hover and definition", () => {
     const def = server.of("textDocument/definition")[0];
     server.push({ jsonrpc: "2.0", id: def.id, error: { code: -32603, message: "no" } });
     expect(await defining).toBeNull();
+  });
+
+  it("asks for uses with the declaration, and for implementations and type definitions", async () => {
+    const server = new FakeServer();
+    const client = new LspClient(server, { rootPath: "/r", server: "x" });
+    await client.whenReady();
+    const range = { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } };
+    for (const kind of ["references", "implementation", "typeDefinition"] as const) {
+      const asking = client.locations(kind, "file:///r/a", pos(2, 5));
+      await settle();
+      const asked = server.of(`textDocument/${kind}`)[0];
+      const params = asked.params as Record<string, unknown>;
+      expect(params.position).toEqual({ line: 2, character: 5 });
+      expect(params.context).toEqual(kind === "references" ? { includeDeclaration: true } : undefined);
+      server.reply(asked.id as number, [{ uri: "file:///r/b", range }]);
+      expect((await asking).map((l) => l.uri)).toEqual(["file:///r/b"]);
+    }
   });
 });
