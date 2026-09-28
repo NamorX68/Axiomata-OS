@@ -1128,7 +1128,7 @@ Formatieren/Umbenennen); D6 wird in einem Punkt geändert (L2).
 - **L0 — Vorlauf `$HOME`** (Q0): `normalize_root` lehnt als IDE-Projektwurzel `$HOME` selbst und alles
   darüber (`/Users`, `/`) ab, mit klarer Meldung. Alles *innerhalb* des Home-Ordners bleibt erlaubt
   (`~/Documents`, …). Grund: ein Projekt „Home“ gäbe dem Webview das ganze Home, und ein Sprachserver
-  würde es indizieren. Erledigt damit die Owner-Notiz zur `$HOME`-Wurzel.
+  würde es indizieren. Erledigt damit die Owner-Notiz zur `$HOME`-Wurzel. **Umgesetzt** (`store::too_wide`).
 - **L1 — Aufgeteilt** (Q1): Rust (`axiomata-files`) startet/beendet die Server, macht das
   `Content-Length`-Framing und reicht ganze JSON-Nachrichten über einen Tauri-Kanal durch; das Protokoll
   (Initialisierung, Dokument-Synchronisation mit Rope-Versionen, UTF-16-Positionen, Antworten) lebt in
