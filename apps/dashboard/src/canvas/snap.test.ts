@@ -60,6 +60,29 @@ describe("magnetResize", () => {
     const tiny = magnetResize({ x: 0, y: 100, w: 10, h: 50 }, [], "se", { w: 40, h: 40 });
     expect(tiny).toMatchObject({ w: 40, h: 48 });
   });
+
+  // A = { x: 100, y: 100, w: 200, h: 100 }: its right edge is at 300.
+  it("from the left keeps the right edge and snaps the left one to the grid", () => {
+    const r = magnetResize({ x: 507, y: 500, w: 293, h: 100 }, [A], "w", { w: 40, h: 40 });
+    expect(r).toMatchObject({ x: 512, w: 288, h: 100 });
+    expect(r.x + r.w).toBe(800);
+  });
+
+  it("from the left sticks to a neighbour's edge, and the lower-left corner snaps the height too", () => {
+    const r = magnetResize({ x: 305, y: 120, w: 295, h: 84 }, [A], "sw", { w: 40, h: 40 });
+    expect(r.x).toBe(300);
+    expect(r.x + r.w).toBe(600);
+    expect(r.guides).toContainEqual({ axis: "x", at: 300 });
+    // The bottom edge (204) is pulled to A's bottom (200).
+    expect(r.h).toBe(80);
+  });
+
+  it("from the left never goes past the canvas edge nor below the minimum width", () => {
+    const past = magnetResize({ x: -30, y: 500, w: 230, h: 100 }, [], "w", { w: 40, h: 40 });
+    expect(past).toMatchObject({ x: 0, w: 200 });
+    const narrow = magnetResize({ x: 190, y: 500, w: 10, h: 100 }, [], "w", { w: 40, h: 40 });
+    expect(narrow).toMatchObject({ x: 160, w: 40 });
+  });
 });
 
 describe("alignmentGuides", () => {

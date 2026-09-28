@@ -1,8 +1,9 @@
 /**
  * `use:resizable` — attach to a resize handle. The handle's `dir` says which
  * edge(s) move: `"e"`/`"w"` (width, growing right/left), `"s"`/`"n"`
- * (height, growing down/up), or `"se"` (both, growing right+down — the
- * canvas tile corner handle). `"w"`/`"n"` are for an edge anchored on the
+ * (height, growing down/up), `"se"` (both, growing right+down — the
+ * canvas tile corner handle) or `"sw"` (both, growing left+down — the tile's
+ * other lower corner, for a tile at the screen's right edge). `"w"`/`"n"` are for an edge anchored on the
  * opposite side (e.g. `StagingLayer`'s staged panel: dragging its *left*
  * edge left, or its *top* edge up, both grow it, so those two report a
  * positive delta for a *negative* pointer movement). Unlike drag there is no
@@ -12,7 +13,7 @@
 
 import type { Action } from "svelte/action";
 
-export type ResizeDir = "e" | "s" | "se" | "w" | "n";
+export type ResizeDir = "e" | "s" | "se" | "w" | "n" | "sw";
 
 export interface ResizeDelta {
   dw: number;
@@ -35,8 +36,8 @@ export const resizable: Action<HTMLElement, ResizeOptions> = (node, options) => 
   function delta(e: PointerEvent): ResizeDelta {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    const dw = opts.dir === "e" || opts.dir === "se" ? dx : opts.dir === "w" ? -dx : 0;
-    const dh = opts.dir === "s" || opts.dir === "se" ? dy : opts.dir === "n" ? -dy : 0;
+    const dw = opts.dir === "e" || opts.dir === "se" ? dx : opts.dir === "w" || opts.dir === "sw" ? -dx : 0;
+    const dh = opts.dir === "s" || opts.dir === "se" || opts.dir === "sw" ? dy : opts.dir === "n" ? -dy : 0;
     return { dw, dh };
   }
 

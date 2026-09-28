@@ -121,19 +121,48 @@ export function magnetMove(rect: Rect, others: Rect[], opts: MagnetOptions = {})
   return { x: Math.max(0, x), y: Math.max(0, y), guides };
 }
 
-/** Snapped size for a tile being resized from its right / bottom edges. */
+/** The edges a tile can be resized from: right, bottom, left and the two lower corners. */
+export type TileResizeDir = "e" | "s" | "se" | "w" | "sw";
+
+/**
+ * Snapped rect for a tile being resized. From the right / bottom the left and
+ * top edges stay; from the left (`w`, `sw`) the right edge stays and the left
+ * one snaps to the grid and to its neighbours' edges — the tile's `x` moves.
+ */
 export function magnetResize(
   rect: Rect,
   others: Rect[],
-  dir: "e" | "s" | "se",
+  dir: TileResizeDir,
   min: Size,
   opts: MagnetOptions = {},
-): { w: number; h: number; guides: Guide[] } {
+): { x: number; w: number; h: number; guides: Guide[] } {
   const grid = opts.grid ?? GRID;
   const magnet = opts.magnet ?? MAGNET_PX;
   const guides: Guide[] = [];
+  const fromLeft = dir === "w" || dir === "sw";
+  const right = rect.x + rect.w;
+  let h = dir === "e" || dir === "w" ? rect.h : snapToGrid(rect.h, grid);
+  if (fromLeft) {
+    let left = snapToGrid(rect.x, grid);
+    if (opts.edges !== false) {
+      const cands: Candidate[] = [];
+      others.forEach((o, index) => {
+        if (!nearOnAxis(rect, o, "x", magnet)) return;
+        cands.push({ delta: o.x + o.w - rect.x, touch: true, at: o.x + o.w, index });
+        cands.push({ delta: o.x - rect.x, touch: false, at: o.x, index });
+      });
+      const b = best(cands, magnet);
+      if (b) {
+        left = rect.x + b.delta;
+        guides.push({ axis: "x", at: b.at });
+      }
+    }
+    // Never past the canvas's left edge, never narrower than allowed: the right edge holds.
+    const w = Math.max(min.w, right - Math.max(0, left));
+    h = snapBottom(rect, others, dir, h, magnet, guides, opts);
+    return { x: right - w, w, h: Math.max(min.h, h), guides };
+  }
   let w = dir === "s" ? rect.w : snapToGrid(rect.w, grid);
-  let h = dir === "e" ? rect.h : snapToGrid(rect.h, grid);
   if (opts.edges !== false) {
     if (dir !== "s") {
       const cands: Candidate[] = [];
@@ -148,21 +177,32 @@ export function magnetResize(
         guides.push({ axis: "x", at: b.at });
       }
     }
-    if (dir !== "e") {
-      const cands: Candidate[] = [];
-      others.forEach((o, index) => {
-        if (!nearOnAxis(rect, o, "y", magnet)) return;
-        cands.push({ delta: o.y - (rect.y + rect.h), touch: true, at: o.y, index });
-        cands.push({ delta: o.y + o.h - (rect.y + rect.h), touch: false, at: o.y + o.h, index });
-      });
-      const b = best(cands, magnet);
-      if (b) {
-        h = rect.h + b.delta;
-        guides.push({ axis: "y", at: b.at });
-      }
-    }
+    h = snapBottom(rect, others, dir, h, magnet, guides, opts);
   }
-  return { w: Math.max(min.w, w), h: Math.max(min.h, h), guides };
+  return { x: rect.x, w: Math.max(min.w, w), h: Math.max(min.h, h), guides };
+}
+
+/** The bottom edge of a tile resized downwards, pulled to a neighbour's edge within `magnet`. */
+function snapBottom(
+  rect: Rect,
+  others: Rect[],
+  dir: TileResizeDir,
+  h: number,
+  magnet: number,
+  guides: Guide[],
+  opts: MagnetOptions,
+): number {
+  if (dir === "e" || dir === "w" || opts.edges === false) return h;
+  const cands: Candidate[] = [];
+  others.forEach((o, index) => {
+    if (!nearOnAxis(rect, o, "y", magnet)) return;
+    cands.push({ delta: o.y - (rect.y + rect.h), touch: true, at: o.y, index });
+    cands.push({ delta: o.y + o.h - (rect.y + rect.h), touch: false, at: o.y + o.h, index });
+  });
+  const b = best(cands, magnet);
+  if (!b) return h;
+  guides.push({ axis: "y", at: b.at });
+  return rect.h + b.delta;
 }
 
 /** Figma-style alignment hints: a guide wherever the moved rect shares an

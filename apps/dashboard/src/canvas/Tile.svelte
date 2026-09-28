@@ -28,6 +28,7 @@
     magnetResize,
     resolveOverlap,
     type Rect,
+    type TileResizeDir,
   } from "./snap";
 
   const FALLBACK_MIN = { w: 160, h: 100 };
@@ -47,11 +48,12 @@
       .filter((i) => i.id !== inst.id && getModule(i.type)?.background !== true)
       .map(shown);
   }
-  // A canvas tile only ever resizes from its right/bottom edges — a
-  // narrower local type than `resize.ts`'s shared `ResizeDir` (which also
-  // covers "w"/"n" for StagingLayer's right-anchored panel).
-  type TileResizeDir = "e" | "s" | "se";
-  const HANDLES: TileResizeDir[] = ["e", "s", "se"];
+  // A canvas tile resizes from its right, bottom and left edges and both lower
+  // corners — never from the top, where the header is the drag handle. From the
+  // left the right edge holds and the tile's x moves (a tile at the screen's
+  // right edge could otherwise not grow at all).
+  const HANDLES: TileResizeDir[] = ["e", "s", "se", "w", "sw"];
+  const fromLeft = (dir: TileResizeDir) => dir === "w" || dir === "sw";
 
   let { inst }: { inst: CanvasInstance } = $props();
 
@@ -66,6 +68,8 @@
 
   let drag = $state<DragDelta | null>(null);
   let resize = $state<ResizeDelta | null>(null);
+  /** The edge or corner being dragged, while a resize runs. */
+  let resizeDir = $state<TileResizeDir>("se");
 
   /** Merge the magnet's own guides with the wider-reaching alignment hints,
    *  deduped by axis + rounded position. */
@@ -105,10 +109,11 @@
   }
   function snappedResize(d: ResizeDelta, dir: TileResizeDir): ResizeDelta {
     const base = shown(inst);
-    const r = magnetResize({ x: base.x, y: base.y, w: base.w + d.dw, h: base.h + d.dh }, others(), dir, min, {
+    const x = fromLeft(dir) ? base.x - d.dw : base.x;
+    const r = magnetResize({ x, y: base.y, w: base.w + d.dw, h: base.h + d.dh }, others(), dir, min, {
       edges: get(snapEdges),
     });
-    showGuides({ x: base.x, y: base.y, w: r.w, h: r.h }, r.guides);
+    showGuides({ x: r.x, y: base.y, w: r.w, h: r.h }, r.guides);
     return { dw: r.w - base.w, dh: r.h - base.h };
   }
 
@@ -130,6 +135,8 @@
   const disp = $derived(displayRect({ x: inst.x, y: inst.y, w: inst.w, h: inst.h }, inst.anchor, $canvasSize, min));
   const liveW = $derived(Math.max(min.w, disp.w + (resize?.dw ?? 0)));
   const liveH = $derived(Math.max(min.h, disp.h + (resize?.dh ?? 0)));
+  /** Resized from the left, the right edge holds: the left one follows the width. */
+  const liveX = $derived(resize && fromLeft(resizeDir) ? disp.x + disp.w - liveW : disp.x);
 
   function onDragEnd(d: DragDelta) {
     const base = shown(inst);
@@ -139,13 +146,14 @@
     commit(resolveOverlap({ x: base.x + sd.dx, y: base.y + sd.dy, w: base.w, h: base.h }, others(), bounds()));
   }
 
-  let resizeDir: TileResizeDir = "se";
   function onResizeEnd() {
     const base = shown(inst);
     const sr = snappedResize(resize ?? { dw: 0, dh: 0 }, resizeDir);
     resize = null;
     guides.set([]);
-    commit(resolveOverlap({ x: base.x, y: base.y, w: base.w + sr.dw, h: base.h + sr.dh }, others(), bounds()));
+    const w = base.w + sr.dw;
+    const x = fromLeft(resizeDir) ? base.x + base.w - w : base.x;
+    commit(resolveOverlap({ x, y: base.y, w, h: base.h + sr.dh }, others(), bounds()));
   }
 
   function flip() {
@@ -164,7 +172,7 @@
   class:dragging={drag !== null}
   class:resizing={resize !== null}
   data-instance={inst.id}
-  style:left="{disp.x * $uiScale}px"
+  style:left="{liveX * $uiScale}px"
   style:top="{disp.y * $uiScale}px"
   style:width="{liveW * $uiScale}px"
   style:height="{liveH * $uiScale}px"
@@ -505,6 +513,25 @@
     height: 7px;
     cursor: ns-resize;
   }
+  .resize-w {
+    top: var(--ax-space-3);
+    bottom: var(--ax-space-3);
+    left: -3px;
+    width: 7px;
+    cursor: ew-resize;
+  }
+  .resize-sw {
+    left: -2px;
+    bottom: -2px;
+    width: calc(16px * var(--ax-ui-scale));
+    height: calc(16px * var(--ax-ui-scale));
+    cursor: nesw-resize;
+    border-left: 2px solid var(--ax-border-strong);
+    border-bottom: 2px solid var(--ax-border-strong);
+    border-bottom-left-radius: var(--ax-radius-lg);
+    opacity: 0;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
   .resize-se {
     right: -2px;
     bottom: -2px;
@@ -518,7 +545,9 @@
     transition: opacity var(--ax-dur-fast) var(--ax-ease);
   }
   .tile:hover .resize-se,
-  .tile.resizing .resize-se {
+  .tile.resizing .resize-se,
+  .tile:hover .resize-sw,
+  .tile.resizing .resize-sw {
     opacity: 1;
   }
 </style>
