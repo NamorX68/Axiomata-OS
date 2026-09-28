@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_EDITOR_SETTINGS, parseEditorSettings } from "./editorSettings";
+import { formatsOnSave, languageList, DEFAULT_EDITOR_SETTINGS, parseEditorSettings } from "./editorSettings";
 import { nearestWeight, realWeights, weightName } from "./fonts";
 import { surfaceSettings } from "./surfaceSettings";
+
+describe("format on save (L14)", () => {
+  it("is on by default, and a language on the list is saved as it is", () => {
+    const d = parseEditorSettings({});
+    expect(formatsOnSave(d, "rust")).toBe(true);
+    expect(formatsOnSave(d, null)).toBe(false);
+    const except = parseEditorSettings({ formatOnSaveExcept: [" Markdown", "python", "python", 3, "bad id!"] });
+    expect(except.formatOnSaveExcept).toEqual(["markdown", "python"]);
+    expect(formatsOnSave(except, "markdown")).toBe(false);
+    expect(formatsOnSave(parseEditorSettings({ formatOnSave: false }), "rust")).toBe(false);
+    expect(languageList("x")).toEqual([]);
+  });
+});
 
 describe("parseEditorSettings", () => {
   it("defaults everything for an empty or broken file", () => {

@@ -1174,6 +1174,23 @@ Formatieren/Umbenennen); D6 wird in einem Punkt geändert (L2).
   Zeile — wie Trouble in der nvim-Konfiguration des Owners; Verwendungen immer als Liste. **Code-Aktionen**
   (`gra`, ⌘L) vorgemerkt als eigener späterer Punkt: sie können Serverbefehle ausführen
   (`workspace/executeCommand`), die ED6.1 aus Sicherheitsgründen sperrt — eigene Prüfung nötig.
+- **L13 — Formatieren mit eigenen Formatierern** (2026-09-28, ändert L5/L8 für ED6.5): eine Formatierer-Tabelle
+  in Rust nach dem Muster der conform-Konfiguration des Owners — `ruff` (Fix, Importe sortieren, Format),
+  `rustfmt`, `prettier` (JS/TS/CSS/HTML/JSON/YAML/Markdown), `stylua`, `shfmt`, überall Breite 120 (Markdown:
+  Prettiers Vorgabe). Text über stdin, Ergebnis über stdout. Wo keiner passt, formatiert der Sprachserver
+  (`textDocument/formatting`). Welches Programm läuft, entscheidet Rust; überschreiben nur in
+  `~/.axiomata/lsp.json`.
+- **L14 — Formatieren beim Speichern** (ändert L8): Vorgabe **an**, mit einer Ausnahmeliste pro Sprache in den
+  Editor-Einstellungen (wie im nvim des Owners). Gilt für ausdrückliches Speichern (⌘S, `:w`), nicht fürs
+  automatische Speichern nach einer Pause.
+- **L15 — Mason-Werkzeuge mitbenutzen**: `~/.local/share/nvim/mason/bin` ist der letzte Ordner der Suche für
+  Formatierer und Sprachserver; `PATH` und Homebrew gehen vor.
+- **L16 — Umbenennen über mehrere Dateien**: offene Dateien werden im Editor geändert (ungespeichert, mit
+  Undo); nicht offene über den geschützten Datei-Dienst geschrieben (mit Versionsprüfung, ohne Undo), mit
+  einer Meldung, wie viele Dateien es waren. Dateioperationen (ein Modul verschieben) werden dem Server als
+  nicht unterstützt gemeldet — er lehnt solche Umbenennungen dann selbst ab.
+- **L17 — Eingabe des neuen Namens**: F2 und Vi `grn` öffnen ein kleines Feld am Symbol, mit dem alten Namen
+  vorbelegt (⏎ benennt um, Esc bricht ab); `:rename <name>` ohne Feld.
 
 **ED6.1 umgesetzt (2026-09-28):** `axiomata-files::lsp` (Tabelle + `lsp.json`, `LspHost` mit Framing,
 Seitenkennung — dieselbe Seite teilt einen Server, eine neu geladene startet ihn neu —, 10-Minuten-Leerlauf),
@@ -1225,6 +1242,21 @@ Wort ersetzt, Zusatz-Änderungen wie ein Auto-Import angewendet — vorher bis 4
 den Import. Nur mit einem Cursor. Logik des Menüs in `fileapp/completionMenu.ts`, Zeichnen in
 `CompletionPopup.svelte`. Live gegen `rust-analyzer`: Methoden nach `v.`, Auto-Import von `HashMap`.
 Offen: Signaturhilfe und Wörter aus der Datei als zweite Quelle (blink hat beide) — bei Bedarf später.
+
+**ED6.5 umgesetzt (2026-09-28, L13–L17) — ED6 ist damit komplett:** Formatieren (⇧⌥F, Vi `:format`, beim
+Speichern mit ⌘S/`:w`): `axiomata-files::format` mit der Formatierer-Tabelle (ruff in drei Schritten, rustfmt mit der
+Edition der Crate, prettier, stylua, shfmt; Text über stdin, 10 s Grenze), Tauri `file_format`; wo keiner passt,
+`textDocument/formatting`. Das Ergebnis geht als geänderte Zeilen hinein (`editor/textEdits.ts`, Befehl
+`replaceText`), ein Undo-Schritt, der Cursor bleibt auf seiner Zeile. Einstellungen `formatOnSave` (an) und
+`formatOnSaveExcept`. Mason-Ordner in `servers::search_path`. Umbenennen (F2, Vi `grn`, `:rename <name>`):
+`prepareRename`, dann `rename`; `fileapp/renameApply.ts` ändert offene Dokumente (dieses über seine Oberfläche,
+andere direkt + `docTouched`) und schreibt geschlossene Dateien mit Versionsprüfung; Dateien außerhalb der Wurzeln
+bleiben unangetastet. Security-Review: Prettiers Suche nach seiner Konfiguration (die sonst bis `/` hinaufgeht und
+`prettier.config.js` ausführt) macht Rust selbst und nur bis zur Wurzel (`--config <datei>` oder `--no-config`);
+höchstens 4 Formatierer laufen gleichzeitig. Der Client meldet `resourceOperations: []` — `rust-analyzer` lehnt ein Modul-Umbenennen dann
+ab, der Editor sagt es verständlich. Live geprüft: ruff (Importe + Format, Syntaxfehler gemeldet), rustfmt
+(Edition 2024), prettier (aus Mason), Umbenennen über zwei Dateien mit `rust-analyzer`. Offen: Live-Test in der App;
+Code-Aktionen (vorgemerkt).
 
 ## 6. Verifikation (pro Meilenstein)
 

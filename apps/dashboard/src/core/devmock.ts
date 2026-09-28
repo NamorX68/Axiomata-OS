@@ -1670,6 +1670,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     // No language servers in the browser mock: the editor runs without them.
     case "lsp_start":
+    case "file_format":
       return { kind: "none" } as T;
     case "lsp_send":
     case "lsp_opened":

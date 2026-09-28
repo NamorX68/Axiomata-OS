@@ -257,7 +257,8 @@ per-server `stdin` lock, never the host's; at most `MAX_SERVERS` (8) run, and an
 restarts one at most every 2 s. ED6.2 adds `textDocument/hover` and `/definition` to the list (ED6.3: `/implementation`,
 `/typeDefinition`, `/references` — every request of `LOCATION_METHODS` is tracked like a definition;
 ED6.4: `/completion` and `completionItem/resolve` — their answers free nothing, and an item's `command`
-is never run)
+is never run; ED6.5: `/formatting`, `/prepareRename`, `/rename` — a rename's files are written by the page
+through the file service, never by this host)
 and makes one answer readable in Rust (L11): the ids of definition requests are noted, their
 answers are parsed in the pump thread, and the files they name (`uri`/`targetUri`, at most
 4096 per server) become readable through `LspHost::read_foreign` — but only when they lie under
@@ -1219,7 +1220,17 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `fileapp/completionMenu.ts` is the menu's behaviour (opens while typing a word or after a trigger
   character, follows the word, drops late answers, resolves an item before taking it) and
   `CompletionPopup.svelte` draws it; `EditorSurface` owns the keys (⌃Space, ↓/↑, ⌃N/⌃P, ⌃Y, ⌃E, Esc; ⏎/⇥
-  only without Vi).
+  only without Vi). ED6.5: formatting — `axiomata-files::format` runs the formatter table (after the owner's
+  conform.nvim: ruff, rustfmt with the crate's edition, prettier, stylua, shfmt; stdin/stdout, 10 s limit;
+  overridable only in `lsp.json` `"formatters"`; Prettier's configuration is looked up by Rust between the
+  file and its root only — `--config`/`--no-config` — so no `prettier.config.js` above the project runs; at
+  most 4 formatters at once) behind Tauri `file_format`, the language server's
+  `textDocument/formatting` as the fallback; the result goes in as the lines that differ (`editor/textEdits.ts`,
+  the `replaceText` command), and ⌘S/`:w` format first unless off (`formatOnSave`, `formatOnSaveExcept`). Rename
+  (F2, `grn`, `:rename`): `prepareRename` + `rename`, applied by `fileapp/renameApply.ts` — open documents as one
+  step each (another editor's surface redraws on `docTouched`), closed files through the file service with a
+  version check, nothing outside the roots; the client declares no resource operations, so a rename that would
+  move files is refused by the server. The search path ends in `~/.local/share/nvim/mason/bin` (L15).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

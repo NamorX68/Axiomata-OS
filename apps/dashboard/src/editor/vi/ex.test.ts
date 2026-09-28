@@ -19,6 +19,11 @@ describe("parseEx (V6)", () => {
     ["e!", { name: "reload" }],
     ["noh", { name: "nohlsearch" }],
     ["nohlsearch", { name: "nohlsearch" }],
+    ["format", { name: "format" }],
+    ["for", { name: "format" }],
+    ["rename new_name", { name: "rename", newName: "new_name" }],
+    ["ren  x ", { name: "rename", newName: "x" }],
+    ["rename", { error: "E471: Argument required" }],
   ])(":%s", (line, expected) => {
     expect(parseEx(line, ctx)).toEqual(expected);
   });

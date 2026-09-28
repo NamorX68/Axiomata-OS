@@ -84,8 +84,9 @@ servers from Rust (`axiomata-files::lsp` — which program, only from a built-in
 the methods the client speaks pass) with the protocol in `src/editor/lsp/`, and shows diagnostics; ED6.2 adds hover
 and go-to-definition (a definition outside every root opens read-only on the root `lsp:<handle>`, readable only for
 files the server named); ED6.3 adds implementation, type definition and uses (a list in the project search's
-results); ED6.4 completion (a menu while typing, as blink.cmp in the owner's Neovim). Next: ED6.5 (formatting
-and rename).
+results); ED6.4 completion (a menu while typing, as blink.cmp in the owner's Neovim); ED6.5 formatting (own
+formatter table in `axiomata-files::format`, after the owner's conform.nvim) and rename — **ED6 is complete**.
+Next: the owner's live test of ED6; code actions are noted for later.
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

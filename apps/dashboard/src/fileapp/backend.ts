@@ -116,6 +116,13 @@ export interface LineMatch {
   from: number;
 }
 
+/** What `file_format` did (`axiomata_files::format::Formatted`, ED6.5). */
+export type Formatted =
+  | { kind: "done"; formatter: string; text: string }
+  | { kind: "none" }
+  | { kind: "missing"; formatter: string }
+  | { kind: "failed"; formatter: string; message: string };
+
 export interface FileMatches {
   rel: string;
   matches: LineMatch[];

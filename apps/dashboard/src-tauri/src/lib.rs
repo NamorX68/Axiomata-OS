@@ -114,6 +114,7 @@ pub fn run() {
             lsp::lsp_send,
             lsp::lsp_opened,
             lsp::lsp_closed,
+            lsp::file_format,
             files::editor_recovery_save,
             files::editor_recovery_load,
             files::editor_recovery_delete,

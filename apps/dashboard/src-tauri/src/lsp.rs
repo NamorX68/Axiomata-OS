@@ -10,6 +10,10 @@
 
 use std::sync::Arc;
 
+use std::path::PathBuf;
+
+use axiomata_files::format::{self, Formatted};
+use axiomata_files::lsp::servers::Overrides;
 use axiomata_files::lsp::{self, LspHost, Started};
 use tauri::State;
 use tauri::ipc::Channel;
@@ -21,8 +25,9 @@ use crate::files::{self, FileError};
 /// (`lsp:<handle>`, read-only — `files::file_read`).
 pub const FOREIGN_ROOT: &str = "lsp:";
 
-/// The app's one language-server host.
-pub struct LspState(Arc<LspHost>);
+/// The app's one language-server host, and where it and the formatters look
+/// for programs and overrides.
+pub struct LspState(Arc<LspHost>, Vec<PathBuf>, PathBuf);
 
 impl LspState {
     /// The host, for the file commands that read a server's foreign files.
@@ -32,12 +37,43 @@ impl LspState {
 
     /// A host reading `~/.axiomata/lsp.json` and looking on `PATH` and in the usual install places.
     pub fn new() -> Self {
-        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let home = std::env::var_os("HOME").map(PathBuf::from);
         let search =
             lsp::servers::search_path(std::env::var_os("PATH").as_deref(), home.as_deref());
         let overrides = lsp::overrides_path(&axiomata_core::paths::axiomata_home());
-        Self(Arc::new(LspHost::new(overrides, search)))
+        Self(
+            Arc::new(LspHost::new(overrides.clone(), search.clone())),
+            search,
+            overrides,
+        )
     }
+}
+
+/// Formats `text` — the content of `rel` in `root` — with its language's
+/// formatter (editor plan L13); Rust picks the program. `None` (and `Missing`)
+/// tell the page to ask the language server instead. The override file is
+/// read on every call, so an edit to it applies at once.
+#[tauri::command]
+pub async fn file_format(
+    state: State<'_, CoreState>,
+    lsp: State<'_, LspState>,
+    root: String,
+    rel: String,
+    language: String,
+    text: String,
+) -> Result<Formatted, FileError> {
+    if text.len() > axiomata_files::format::MAX_OUTPUT_BYTES {
+        return Ok(Formatted::None);
+    }
+    let search = lsp.1.clone();
+    let overrides_path = lsp.2.clone();
+    files::blocking(&state, move |config, db| {
+        let found = files::root(config, db, &root)?;
+        // An unreadable override file formats with the table, as the servers start with it.
+        let overrides = Overrides::load(&overrides_path).unwrap_or_default();
+        format::format(&found, &rel, &language, &text, &overrides, &search)
+    })
+    .await
 }
 
 /// Starts the server for `language` in `root` — or returns the one this

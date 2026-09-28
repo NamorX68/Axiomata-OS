@@ -91,6 +91,8 @@ export type CommandEffect =
   | { type: "quit"; force: boolean }
   | { type: "saveQuit" }
   | { type: "reload" }
+  | { type: "format" }
+  | { type: "rename"; name: string | null }
   | { type: "set"; option: SetOption; value: boolean | "toggle" };
 
 export interface CommandHost {
@@ -550,6 +552,10 @@ export class CommandMode {
         return host.effect({ type: "quit", force: cmd.force });
       case "reload":
         return host.readOnly() ? this.error(NOT_HERE) : host.effect({ type: "reload" });
+      case "format":
+        return host.readOnly() ? this.error(NOT_HERE) : host.effect({ type: "format" });
+      case "rename":
+        return host.readOnly() ? this.error(NOT_HERE) : host.effect({ type: "rename", name: cmd.newName });
       case "goto":
         return host.jumpTo(pos(cmd.line, firstNonBlank(doc.store, cmd.line)));
       case "substitute":

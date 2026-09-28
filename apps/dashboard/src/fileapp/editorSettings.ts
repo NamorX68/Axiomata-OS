@@ -62,6 +62,10 @@ export interface EditorSettings {
   stickyScroll: boolean;
   /** ED6 (L6): a line's worst language-server message also written after its text. */
   diagnosticsInline: boolean;
+  /** ED6.5 (L14): ⌘S and `:w` format the file first. */
+  formatOnSave: boolean;
+  /** ED6.5 (L14): languages (editor ids, `python`, `markdown`) saved as they are. */
+  formatOnSaveExcept: string[];
 }
 
 /** F12's defaults, confirmed by the owner. */
@@ -90,6 +94,8 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   minimap: true,
   stickyScroll: true,
   diagnosticsInline: false,
+  formatOnSave: true,
+  formatOnSaveExcept: [],
 };
 
 const SETTINGS_VERSION = 1;
@@ -105,6 +111,18 @@ function number(value: unknown, min: number, max: number, fallback: number): num
 
 function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+/** A list of language ids: strings only, trimmed, lower-case, no doubles. */
+export function languageList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids = value.filter((v): v is string => typeof v === "string").map((v) => v.trim().toLowerCase());
+  return [...new Set(ids.filter((v) => /^[a-z0-9_+-]+$/.test(v)))];
+}
+
+/** Whether saving `language` formats first (L14). */
+export function formatsOnSave(settings: EditorSettings, language: string | null): boolean {
+  return settings.formatOnSave && language !== null && !settings.formatOnSaveExcept.includes(language);
 }
 
 /** The settings in `raw` (a parsed file), every missing or bad field defaulted. */
@@ -137,6 +155,8 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     minimap: bool(r.minimap, d.minimap),
     stickyScroll: bool(r.stickyScroll, d.stickyScroll),
     diagnosticsInline: bool(r.diagnosticsInline, d.diagnosticsInline),
+    formatOnSave: bool(r.formatOnSave, d.formatOnSave),
+    formatOnSaveExcept: languageList(r.formatOnSaveExcept),
   };
 }
 

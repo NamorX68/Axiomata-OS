@@ -26,6 +26,10 @@ export type ExCommand =
   | { name: "write"; quit: boolean; onlyIfChanged: boolean }
   | { name: "quit"; force: boolean }
   | { name: "reload" }
+  /** `:format` (ED6.5, L7): the file through its formatter. */
+  | { name: "format" }
+  /** `:rename {name}` (ED6.5, L17): the symbol under the cursor, through the language server. */
+  | { name: "rename"; newName: string }
   | { name: "goto"; line: number }
   | { name: "substitute"; range: LineRange; args: string }
   /** `:&` repeats the last `:s` without its flags, `:&&` with them. */
@@ -60,6 +64,8 @@ const COMMANDS: ReadonlyArray<{ name: string; min: number }> = [
   { name: "set", min: 2 },
   { name: "delete", min: 1 },
   { name: "normal", min: 4 },
+  { name: "format", min: 3 },
+  { name: "rename", min: 3 },
 ];
 
 const OPTIONS: ReadonlyArray<{ name: SetOption; short: string }> = [
@@ -127,6 +133,13 @@ export function parseEx(line: string, ctx: ExContext): ExCommand | { error: stri
     case "normal":
       if (!arg) return { error: "E471: Argument required" };
       return { name: "normal", range, keys: arg };
+    case "format":
+      return arg === "" ? { name: "format" } : badArg(arg);
+    case "rename": {
+      const newName = arg.trim();
+      if (!newName) return { error: "E471: Argument required" };
+      return { name: "rename", newName };
+    }
   }
   return { error: `E492: Not an editor command: ${body}` };
 }

@@ -74,6 +74,10 @@ export type ViEffect =
   | { type: "saveQuit" }
   /** `:e!`: the file as it is on disk, dropping the changes. */
   | { type: "reload" }
+  /** `:format` (ED6.5): the view formats the file. */
+  | { type: "format" }
+  /** `grn` (no name: the view asks for one) or `:rename {name}` (ED6.5, L17). */
+  | { type: "rename"; name: string | null }
   /** `:set wrap`, `:set nu` … — the view's own options, for this editor only (V6). */
   | { type: "set"; option: SetOption; value: boolean | "toggle" }
   /** `]c`/`[c` in a diff (H9), `gf` there or on a path. */
@@ -980,6 +984,9 @@ export class ViMachine {
         return true;
       case "K":
         this.env.effect({ type: "hover" });
+        return true;
+      case "grn":
+        this.env.effect({ type: "rename", name: null });
         return true;
       case "gri":
       case "grt":

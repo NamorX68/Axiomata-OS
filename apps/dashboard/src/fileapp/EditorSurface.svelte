@@ -73,6 +73,7 @@
   import { VisualLayout } from "../editor/visual";
   import type { FoldAction, ViEffect } from "../editor/vi/machine";
   import { CompletionMenu, type CompletionPort } from "./completionMenu";
+  import { docTouched } from "./renameApply";
   import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
   import FindBar from "./FindBar.svelte";
@@ -1062,6 +1063,34 @@
     const x = e.clientX - rect.left + scroller.scrollLeft - textLeft;
     return posAtCell(layout, doc.store, Math.floor(y / rowH), x / charW, settings.tabSize);
   }
+
+  /**
+   * Runs an editor command handed in by the owner (ED6.5: a formatter's
+   * changes), as a key would — then Vi's cursor follows the text.
+   */
+  export function applyCommand(cmd: Command): void {
+    exec(cmd);
+    vi?.placeCursor(doc.selection.head);
+  }
+
+  /** Where the cursor is drawn, in the surface's pixels: below its row (the rename field, L17). */
+  export function cursorPoint(): { x: number; y: number } {
+    const cell = cursorCell(layout, doc.store, doc.selection.head, settings.tabSize);
+    return {
+      x: textLeft + cell.cell * charW - (settings.wrap ? 0 : scrollLeft),
+      y: (cell.row + 1) * rowH - scrollTop,
+    };
+  }
+
+  // A rename changed this document from another editor (`renameApply.ts`): redraw, tell the owner.
+  let seenRevision = untrack(() => doc.revision);
+  $effect(() =>
+    docTouched.subscribe(() => {
+      if (doc.revision === seenRevision) return;
+      seenRevision = doc.revision;
+      changed(false);
+    }),
+  );
 
   // ---------------------------------------------------------------- completion (ED6.4)
 

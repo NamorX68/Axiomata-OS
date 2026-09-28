@@ -12,6 +12,7 @@
   import EditorSurface from "./EditorSurface.svelte";
   import {
     editorSettings,
+    languageList,
     updateEditorSettings,
     type Autosave,
     type CursorAnimation,
@@ -324,6 +325,27 @@
       </select>
     </label>
     <p class="note">Autosave never overwrites a change made on disk; it stops and asks instead.</p>
+
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={s.formatOnSave}
+        onchange={(e) => updateEditorSettings({ formatOnSave: e.currentTarget.checked })}
+      />
+      <span>Format on save (⌘S, <code>:w</code>)</span>
+    </label>
+    {#if s.formatOnSave}
+      <label>
+        <span>Except</span>
+        <input
+          type="text"
+          placeholder="e.g. markdown, python"
+          spellcheck="false"
+          value={s.formatOnSaveExcept.join(", ")}
+          onchange={(e) => updateEditorSettings({ formatOnSaveExcept: languageList(e.currentTarget.value.split(",")) })}
+        />
+      </label>
+    {/if}
   </div>
 </aside>
 
@@ -398,7 +420,8 @@
   }
 
   select,
-  input[type="number"] {
+  input[type="number"],
+  input[type="text"] {
     padding: var(--ax-space-1) var(--ax-space-2);
     background: var(--ax-surface-1);
     border: 1px solid var(--ax-border);
@@ -409,6 +432,11 @@
 
   input[type="number"] {
     width: 64px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    min-width: 0;
   }
 
   input[type="range"] {

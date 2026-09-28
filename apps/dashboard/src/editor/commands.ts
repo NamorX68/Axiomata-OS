@@ -26,6 +26,7 @@ import {
   singleCursor,
 } from "./multicursor";
 import type { CompletionEdit } from "./lsp/completion";
+import { mapPosition } from "./textEdits";
 import { comparePos, cursor, isCursor, pos, range, selectionRange, type Pos, type Selection } from "./position";
 import {
   colForDisplayColumn,
@@ -101,7 +102,13 @@ export type Command =
   | { type: "selectAllOccurrences" }
   | { type: "singleCursor" }
   /** Taking a completion (ED6.4): the typed word replaced, extra edits (an import) applied, one step. */
-  | { type: "complete"; edit: CompletionEdit };
+  | { type: "complete"; edit: CompletionEdit }
+  /**
+   * Changes made elsewhere and handed in (ED6.5: a formatter's output, a
+   * rename's edits), non-overlapping and in the current text's coordinates —
+   * one step; the cursor keeps its place in the text around them.
+   */
+  | { type: "replaceText"; changes: Change[] };
 
 /** What a command does to the text at each cursor, for merging into the undo step before it. */
 function editKindOf(cmd: Command): EditKind | null {
@@ -145,6 +152,7 @@ export function run(doc: EditorDocument, cmd: Command, ctx: CommandContext): voi
   }
   // A completion is taken at the main cursor only; the menu is not offered with several.
   if (cmd.type === "complete") return complete(doc, cmd.edit, ctx);
+  if (cmd.type === "replaceText") return replaceText(doc, cmd.changes, ctx);
   if (doc.extra.length > 0 && cmd.type !== "undo" && cmd.type !== "redo") {
     if (cmd.type === "selectAll") return doc.setSelection({ anchor: pos(0, 0), head: endOfText(doc.store) });
     // Moving lines takes each block of touching lines as a whole; copying gives each line its own copy.
@@ -385,21 +393,30 @@ function complete(doc: EditorDocument, edit: CompletionEdit, ctx: CommandContext
     text: edit.text,
   };
   const changes = [main, ...edit.extra].sort((a, b) => comparePos(b.range.start, a.range.start));
-  let caret = endAfter(main.range.start, edit.text.slice(0, edit.cursor));
-  // Edits before the completion move where it ends up — nearest first, so each is applied in
-  // coordinates the ones after it have not touched.
-  const before = edit.extra
-    .filter((e) => comparePos(e.range.end, main.range.start) <= 0)
-    .sort((a, b) => comparePos(b.range.start, a.range.start));
-  for (const extra of before) caret = shiftedBy(caret, extra);
+  // Where the cursor lands inside the completion, moved by the edits before it (the caret is in the
+  // completion's own coordinates, so only edits wholly before the replaced word count).
+  const before = edit.extra.filter((e) => comparePos(e.range.end, main.range.start) <= 0);
+  const caret = mapPosition(endAfter(main.range.start, edit.text.slice(0, edit.cursor)), before);
   doc.edit(changes, cursor(caret), "other", ctx.now);
 }
 
-/** Where `p` (after `change`'s range) is once `change` is applied. */
-function shiftedBy(p: Pos, change: Change): Pos {
-  const newEnd = endAfter(change.range.start, change.text);
-  if (p.line !== change.range.end.line) return pos(p.line + newEnd.line - change.range.end.line, p.col);
-  return pos(newEnd.line, newEnd.col + (p.col - change.range.end.col));
+/** Applies `changes` last to first (so each is where it was given) and keeps the cursor in its text. */
+function replaceText(doc: EditorDocument, changes: Change[], ctx: CommandContext): void {
+  if (changes.length === 0) return;
+  const head = mapPosition(doc.selection.head, changes);
+  const line = Math.min(head.line, lineCountAfter(doc, changes) - 1);
+  const ordered = [...changes].sort((a, b) => comparePos(b.range.start, a.range.start));
+  doc.edit(ordered, cursor(pos(line, head.col)), "other", ctx.now);
+  // The column may now lie past its line's end.
+  const at = doc.selection.head;
+  const length = doc.store.line(at.line).length;
+  if (at.col > length) doc.setSelection(cursor(pos(at.line, length)));
+}
+
+function lineCountAfter(doc: EditorDocument, changes: readonly Change[]): number {
+  let count = doc.store.lineCount();
+  for (const c of changes) count += endAfter(c.range.start, c.text).line - c.range.end.line;
+  return Math.max(1, count);
 }
 
 /** ↩: a new line that keeps the current line's indentation (up to the cursor). */

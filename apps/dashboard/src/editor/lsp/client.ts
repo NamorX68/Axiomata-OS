@@ -16,6 +16,7 @@ import type { EditorDocument, TextChange } from "../document";
 import { range, type Pos } from "../position";
 import { type CompletionAnswer, type CompletionItem, parseCompletion, parseItem } from "./completion";
 import { type Diagnostic, parseDiagnostics } from "./diagnostics";
+import type { TextEdit } from "../textEdits";
 import { Rpc, type Transport } from "./rpc";
 
 /** Quiet time after the last keystroke before the server hears about the edits. */
@@ -102,6 +103,9 @@ export class LspClient {
   completes = false;
   completionTriggers: readonly string[] = [];
   private resolvesCompletion = false;
+  /** Whether the server renames, and checks a place first (`prepareRename`). */
+  renames = false;
+  private preparesRename = false;
   private readonly docs = new Map<string, OpenDocument>();
   private readonly diagnostics = new Map<string, Diagnostic[]>();
   private readonly diagnosticListeners = new Set<(uri: string) => void>();
@@ -272,6 +276,58 @@ export class LspClient {
     }
   }
 
+  /**
+   * The server's formatting of `uri` (ED6.5, the fallback where no formatter
+   * of our own fits — L13): its edits, or `null` when it does not format.
+   */
+  async formatting(uri: string, options: { tabSize: number; insertSpaces: boolean }): Promise<TextEdit[] | null> {
+    try {
+      const result = await this.request<unknown>("textDocument/formatting", { textDocument: { uri }, options });
+      return Array.isArray(result) ? parseTextEdits(result) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Whether the symbol at `at` can be renamed, and its current name (ED6.5,
+   * L17): `null` when the server says there is nothing to rename there. A
+   * server without the check answers with the word at `at` (`fallback`).
+   */
+  async prepareRename(uri: string, at: Pos, fallback: string): Promise<{ name: string } | null> {
+    if (!this.preparesRename) return fallback ? { name: fallback } : null;
+    try {
+      const result = await this.request<unknown>("textDocument/prepareRename", {
+        textDocument: { uri },
+        position: { line: at.line, character: at.col },
+      });
+      if (result === null || result === undefined) return null;
+      const r = result as { placeholder?: unknown };
+      return { name: typeof r.placeholder === "string" ? r.placeholder : fallback };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Renames the symbol at `at` to `newName` (ED6.5, L16): the edits per file
+   * URI. Throws with the server's reason when it refuses, and when it would
+   * move or create files — which is not offered (L16).
+   */
+  async rename(uri: string, at: Pos, newName: string): Promise<Map<string, TextEdit[]>> {
+    const result = await this.request<unknown>("textDocument/rename", {
+      textDocument: { uri },
+      position: { line: at.line, character: at.col },
+      newName,
+    });
+    return parseWorkspaceEdit(result);
+  }
+
+  /** The document open on this server as `uri`, if one is (another editor's, perhaps). */
+  documentFor(uri: string): EditorDocument | null {
+    return this.docs.get(uri)?.doc ?? null;
+  }
+
   /** Stops following every document; the server itself is Rust's to stop. */
   dispose(): void {
     for (const open of this.docs.values()) {
@@ -286,7 +342,7 @@ export class LspClient {
     const rootUri = fileUri(this.options.rootPath);
     try {
       const result = await this.rpc.request<{
-        capabilities?: { textDocumentSync?: unknown; completionProvider?: unknown };
+        capabilities?: { textDocumentSync?: unknown; completionProvider?: unknown; renameProvider?: unknown };
       }>("initialize", {
         processId: null,
         clientInfo: { name: "Axiomata-OS" },
@@ -314,8 +370,15 @@ export class LspClient {
               },
               completionList: { itemDefaults: ["editRange", "insertTextFormat"] },
             },
+            formatting: {},
+            rename: { prepareSupport: true },
           },
-          workspace: { workspaceFolders: true, configuration: false },
+          // A rename's edits come as text only: moving or creating files is not offered (L16).
+          workspace: {
+            workspaceFolders: true,
+            configuration: false,
+            workspaceEdit: { documentChanges: true, resourceOperations: [] },
+          },
           window: { workDoneProgress: false },
         },
       });
@@ -328,6 +391,9 @@ export class LspClient {
         ? provider.triggerCharacters.filter((c): c is string => typeof c === "string")
         : [];
       this.resolvesCompletion = provider?.resolveProvider === true;
+      const rename = result?.capabilities?.renameProvider;
+      this.renames = rename === true || (typeof rename === "object" && rename !== null);
+      this.preparesRename = (rename as { prepareProvider?: unknown } | undefined)?.prepareProvider === true;
       this.rpc.notify("initialized", {});
       this.setState("ready");
       return true;
@@ -455,6 +521,41 @@ export function parseLocations(result: unknown): Location[] {
     if (!uri || !at) continue;
     const end = posOf(range?.end);
     out.push(end ? { uri, at, end } : { uri, at });
+  }
+  return out;
+}
+
+/**
+ * A `WorkspaceEdit` as the text edits per file URI — from `documentChanges`
+ * or `changes`. Throws when it would create, rename or delete a file.
+ */
+export function parseWorkspaceEdit(raw: unknown): Map<string, TextEdit[]> {
+  const out = new Map<string, TextEdit[]>();
+  const add = (uri: unknown, edits: unknown) => {
+    if (typeof uri !== "string" || !Array.isArray(edits)) return;
+    out.set(uri, [...(out.get(uri) ?? []), ...parseTextEdits(edits)]);
+  };
+  const edit = raw as { changes?: Record<string, unknown>; documentChanges?: unknown[] } | null;
+  if (Array.isArray(edit?.documentChanges)) {
+    for (const change of edit.documentChanges) {
+      const c = change as { kind?: unknown; textDocument?: { uri?: unknown }; edits?: unknown };
+      if (c?.kind !== undefined) throw new Error("the rename would create, move or delete files");
+      add(c?.textDocument?.uri, c?.edits);
+    }
+  } else if (edit?.changes && typeof edit.changes === "object") {
+    for (const [uri, edits] of Object.entries(edit.changes)) add(uri, edits);
+  }
+  return out;
+}
+
+/** A server's `TextEdit[]`, malformed ones skipped. */
+export function parseTextEdits(raw: readonly unknown[]): TextEdit[] {
+  const out: TextEdit[] = [];
+  for (const item of raw) {
+    const e = item as { range?: { start?: RawPos; end?: RawPos }; newText?: unknown } | null;
+    const start = posOf(e?.range?.start);
+    const end = posOf(e?.range?.end);
+    if (start && end && typeof e?.newText === "string") out.push({ range: { start, end }, text: e.newText });
   }
   return out;
 }

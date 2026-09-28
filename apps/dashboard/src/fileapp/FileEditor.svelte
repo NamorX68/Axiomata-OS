@@ -44,12 +44,15 @@
   import type { Indent } from "../editor/detect";
   import type { Effect } from "../editor/keymap";
   import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
-  import { fileBackend, type FileRemoved, type FileRenamed } from "./backend";
+  import { fileBackend, type FileRemoved, type Formatted, type FileRenamed } from "./backend";
   import { markDirty } from "./dirtyFiles";
   import { foldKey, rememberedFolds, rememberFolds, updateRememberedFolds } from "./foldMemory";
   import DiffPanes from "./DiffPanes.svelte";
   import { editorFace } from "./editorFace.svelte";
-  import { editorSettings, ensureEditorSettingsLoaded } from "./editorSettings";
+  import { editorSettings, ensureEditorSettingsLoaded, formatsOnSave } from "./editorSettings";
+  import { applyTextEdits, storeBody, textChanges } from "../editor/textEdits";
+  import { applyRename } from "./renameApply";
+  import { wordAt } from "../editor/text";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import EditorSurface from "./EditorSurface.svelte";
   import {
@@ -67,7 +70,7 @@
   import { highlightFor } from "./highlighting";
   import MarkdownPreview from "./MarkdownPreview.svelte";
   import { ScrollLink } from "./scrollLink";
-  import { DRAFT_REL, DRAFT_ROOT, FileSession } from "./session";
+  import { DRAFT_REL, DRAFT_ROOT, FileSession, FOREIGN_ROOT } from "./session";
   import { statusParts } from "./status";
   import { DiagnosticSet } from "../editor/lsp/diagnostics";
   import { detectLanguage } from "../editor/syntax/languages";
@@ -414,6 +417,17 @@
   }
 
   function interceptKey(e: KeyboardEvent): boolean {
+    if (e.key === "F2" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && lspDoc) {
+      e.preventDefault();
+      void startRename(null);
+      return true;
+    }
+    // ⇧⌥F: format (L7) — `code`, since ⌥ turns the key into another character.
+    if (e.code === "KeyF" && e.shiftKey && e.altKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      void formatNow();
+      return true;
+    }
     if (e.key === "F12" && !e.ctrlKey && !e.altKey && lspDoc) {
       // F12 definition, ⌘F12 implementation, ⇧F12 uses (L7, ED6.3).
       const kind: LocationKind = e.metaKey ? "implementation" : e.shiftKey ? "references" : "definition";
@@ -526,6 +540,93 @@
     return to > from ? `\`${line.slice(from, to)}\`` : null;
   }
 
+  /** The rename field (L17): where it shows, the name in it, and where the rename was asked. */
+  let renameBox = $state<{ x: number; y: number; name: string; at: { line: number; col: number } } | null>(null);
+  let renameInput = $state<HTMLInputElement | null>(null);
+
+  /**
+   * F2, Vi `grn` and `:rename {name}` (ED6.5, L16, L17): with a name the
+   * symbol at the cursor is renamed at once; without, the field opens at the
+   * cursor with the current name.
+   */
+  async function startRename(name: string | null): Promise<void> {
+    const s = session;
+    const found = lspDoc;
+    if (!s || !found) return void toast("No language server for this file", "info");
+    const { client } = found.connection;
+    if (!(await client.whenReady()) || !client.renames) {
+      return void toast("This language server does not rename", "info");
+    }
+    const at = s.doc.selection.head;
+    const line = s.doc.store.line(at.line);
+    const word = wordAt(line, at.col);
+    const prepared = await client.prepareRename(found.uri, at, line.slice(word.start, word.end));
+    if (session !== s) return;
+    if (!prepared) return void toast("Nothing to rename here", "info");
+    if (name !== null) return void rename(at, name);
+    const point = surface?.cursorPoint() ?? { x: 0, y: 0 };
+    renameBox = { ...point, name: prepared.name, at };
+    await nextTick();
+    renameInput?.select();
+  }
+
+  function onRenameKey(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      renameBox = null;
+      surface?.focus();
+    } else if (e.key === "Enter" && renameBox) {
+      e.preventDefault();
+      const { at, name } = renameBox;
+      renameBox = null;
+      surface?.focus();
+      if (name.trim()) void rename(at, name.trim());
+    }
+  }
+
+  /** Renames the symbol at `at` everywhere the server says (L16), and tells how it went. */
+  async function rename(at: { line: number; col: number }, newName: string): Promise<void> {
+    const s = session;
+    const found = lspDoc;
+    if (!s || !found) return;
+    // The server's edits are for the text as it is now; typing while it works would make them wrong.
+    const revision = s.doc.revision;
+    let edits;
+    try {
+      edits = await found.connection.client.rename(found.uri, at, newName);
+    } catch (err) {
+      // A rename that would move files (a Rust module) is refused, as the client says it moves none (L16).
+      const message = messageOf(err);
+      const movesFiles = /rename capability|create, move or delete files/i.test(message);
+      const text = movesFiles
+        ? "This rename would move files — do it in the file tree"
+        : `Could not rename: ${message}`;
+      return void toast(text, "danger");
+    }
+    if (session !== s) return;
+    if (s.doc.revision !== revision) {
+      return void toast("The text changed while renaming — nothing was renamed", "info");
+    }
+    const { client } = found.connection;
+    const outcome = await applyRename(edits, {
+      here: { uri: found.uri, doc: s.doc, apply: (changes) => surface?.applyCommand({ type: "replaceText", changes }) },
+      openDoc: (uri) => client.documentFor(uri),
+      fileOf: (uri) => {
+        const file = definitionFile(s.root, found, { uri, at: { line: 0, col: 0 } });
+        return file && !file.root.startsWith(FOREIGN_ROOT) ? file : null;
+      },
+      read: (root, rel) => fileBackend.read(root, rel),
+      write: (root, rel, content, expected) => fileBackend.write(root, rel, content, expected),
+    });
+    const files = outcome.changed === 1 ? "1 file" : `${outcome.changed} files`;
+    if (outcome.skipped.length === 0) toast(`Renamed to ${newName} in ${files}`, "info");
+    else {
+      const list = outcome.skipped.map((k) => `${k.file} (${k.reason})`).join(", ");
+      toast(`Renamed to ${newName} in ${files}; not changed: ${list}`, "danger");
+    }
+  }
+
   /** The folds of `s` as they are now (edits moved them), if they are kept at all. */
   function keepFolds(s: FileSession): void {
     if (!s.untitled) updateRememberedFolds(foldKey(s.root, s.rel), s.folds.serialize());
@@ -556,6 +657,68 @@
     if (session.untitled) return fileNote();
     await session.save(confirmed);
     refresh();
+  }
+
+  /** ⌘S and `:w`: formatted first where that is on (L14) — autosave never formats. */
+  async function saveExplicitly(): Promise<void> {
+    const s = session;
+    if (s && !s.untitled && !s.readOnly && formatsOnSave($editorSettings, languageOf(s))) {
+      await formatNow(true);
+    }
+    await save();
+  }
+
+  function languageOf(s: FileSession): string | null {
+    return detectLanguage(s.fileName, s.doc.store.line(0));
+  }
+
+  /**
+   * Formats the open file (ED6.5, L13): with its language's formatter (Rust
+   * picks it), else the language server's formatting. The changes go in as one
+   * step; text typed meanwhile wins (nothing is applied). On save a formatter
+   * that fails leaves the file as it is and says why; the save goes on.
+   */
+  async function formatNow(onSave = false): Promise<void> {
+    const s = session;
+    if (!s || s.untitled || s.readOnly) return;
+    const language = languageOf(s);
+    const input = s.doc.textForSave();
+    const revision = s.doc.revision;
+    let output: string | null = null;
+    let missing: string | null = null;
+    try {
+      const result = await invokeBackend<Formatted>("file_format", {
+        root: s.root,
+        rel: s.rel,
+        language: language ?? "",
+        text: input,
+      });
+      if (result.kind === "done") output = result.text;
+      else if (result.kind === "failed") {
+        toast(`${result.formatter}: ${result.message}`, "danger");
+        return;
+      } else if (result.kind === "missing") missing = result.formatter;
+    } catch (err) {
+      toast(`Could not format: ${messageOf(err)}`, "danger");
+      return;
+    }
+    if (output === null) {
+      const found = lspDoc;
+      const edits = found
+        ? await found.connection.client.formatting(found.uri, {
+            tabSize: s.doc.indent.kind === "tabs" ? $editorSettings.tabSize : s.doc.indent.size,
+            insertSpaces: s.doc.indent.kind !== "tabs",
+          })
+        : null;
+      if (!edits) {
+        if (!onSave || missing) toast(missing ? `${missing} is not installed` : "No formatter for this file", "info");
+        return;
+      }
+      output = applyTextEdits(input.replace(/\r\n?/g, "\n"), edits);
+    }
+    if (session !== s || s.doc.revision !== revision) return;
+    const changes = textChanges(s.doc.store.text(), storeBody(output));
+    if (changes.length > 0) surface?.applyCommand({ type: "replaceText", changes });
   }
 
   /**
@@ -604,15 +767,17 @@
 
   function onEffect(effect: Effect): void {
     if (effect === "togglePreview") cyclePreview();
-    else if (effect === "save") void save();
+    else if (effect === "save") void saveExplicitly();
     else if (effect === "open") onOpenRequest?.();
     else if (effect === "toggleWrap") wrap = !wrap;
   }
 
   /** What Vi asks of the editor around the surface: save, close, another file's mark. */
   function onViEffect(effect: ViEffect): void {
-    if (effect.type === "save") void save();
-    else if (effect.type === "saveQuit") void save().then(() => onQuit?.());
+    if (effect.type === "save") void saveExplicitly();
+    else if (effect.type === "saveQuit") void saveExplicitly().then(() => onQuit?.());
+    else if (effect.type === "format") void formatNow();
+    else if (effect.type === "rename") void startRename(effect.name);
     else if (effect.type === "quit") {
       // Unsaved text is kept aside either way (F8); only a forced quit leaves it unsaved.
       if (!effect.force && session?.doc.dirty) return;
@@ -685,7 +850,7 @@
     e.preventDefault();
     e.stopPropagation();
     if (previewKey) cyclePreview();
-    else void save();
+    else void saveExplicitly();
   }
 
   $effect(() => {
@@ -811,6 +976,20 @@
             completion={completionPort}
           />
         {/key}
+        {#if renameBox}
+          <input
+            bind:this={renameInput}
+            bind:value={renameBox.name}
+            class="rename"
+            style:left="{renameBox.x}px"
+            style:top="{renameBox.y}px"
+            aria-label="New name"
+            spellcheck="false"
+            autocomplete="off"
+            onkeydown={onRenameKey}
+            onblur={() => (renameBox = null)}
+          />
+        {/if}
       </div>
       {#if previewKind && viewMode !== "source"}
         <div class="pane preview-pane">
@@ -952,6 +1131,7 @@
   }
 
   .pane {
+    position: relative;
     flex: 1;
     min-width: 0;
     display: flex;
@@ -986,6 +1166,22 @@
 
   .pane > :global(.surface) {
     flex: 1;
+  }
+
+  /* The rename field (L17), at the cursor. */
+  .rename {
+    position: absolute;
+    z-index: 7;
+    min-width: 16ch;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-accent);
+    border-radius: var(--ax-radius-sm);
+    box-shadow: var(--ax-shadow-pop);
+    color: var(--ax-text);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-sm);
+    outline: none;
   }
 
   .problems {
