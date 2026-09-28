@@ -275,7 +275,7 @@ function fnv1aHex(text: string): string {
  *  identifier" (`mail-digest`'s SKILL.md, step 4), not a value this code
  *  reads directly off one canonical field — the skill builds its candidate
  *  pool from three separate `apple-mail` MCP calls in one run
- *  (`list_inbox_emails`, `get_needs_response`, one `search_emails` per
+ *  (a dated `search_emails`, `get_needs_response`, one `search_emails` per
  *  topic), and there's nothing guaranteeing those return the same id shape
  *  for the same message, let alone that the same message gets the same id
  *  across two separate digest runs. `sender`+`subject` are both far more

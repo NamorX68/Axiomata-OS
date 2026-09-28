@@ -22,12 +22,16 @@ Do exactly this and nothing more:
    Collect every calendar's display name, even ones with no events coming up.
    One call is enough — never re-fetch.
 2. List events from the **first day of the current month** through the
-   **last day of next month**, across every calendar found in step 1, using
-   that same tool's `calendar_events`. (This wider window lets the dashboard
-   module page the mini-month and slice out any 7-day agenda without a fresh
-   run — it filters client-side.) One call per calendar, at most ~12 calls
-   total; a calendar whose read errors is skipped, not retried. For each
-   event capture:
+   **last day of next month** — counted from the date stated at the top of
+   this message — with **one** call of that same tool's `calendar_events`:
+   `action="read"`, `startDate` = the first day (`YYYY-MM-DD 00:00:00`),
+   `endDate` = the last day (`YYYY-MM-DD 23:59:59`), and **no**
+   `filterCalendar`, so every calendar's events come back at once. (This
+   wider window lets the dashboard module page the mini-month and slice out
+   any 7-day agenda without a fresh run — it filters client-side.) Only if
+   that one call errors, fall back to one call per calendar (at most ~12); a
+   calendar whose read errors is skipped, not retried. For each event
+   capture:
    - `id` — the event's own identifier, exactly as the tool returns it
    - `title` — the event's title
    - `start` — ISO 8601 timestamp (date only, `YYYY-MM-DD`, for an all-day event)

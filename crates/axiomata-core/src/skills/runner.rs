@@ -85,7 +85,7 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
     // Code used to be sent `/<name>` instead, on the assumption that its own
     // slash-command skill machinery would resolve it — it doesn't, which is
     // one of the reasons that backend was retired.)
-    let prompt = match build_prompt(config, &skill) {
+    let prompt = match build_prompt_at(config, &skill, Some(chrono::Local::now())) {
         Ok(prompt) => prompt,
         // A prompt-build failure (today: a `prepend_files` entry breaking the
         // workspace-relative guard — `build_prompt` is the only fallible step)
@@ -130,7 +130,31 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
 /// Errors:
 ///     [`AxiomataError::InvalidSkill`] if a `prepend_files` entry is an
 ///     absolute path or contains `..` (workspace-relative only, no escape).
+/// [`build_prompt_at`] without the date line (the tests' form).
+#[cfg(test)]
 fn build_prompt(config: &Config, skill: &registry::Skill) -> Result<String, AxiomataError> {
+    build_prompt_at(config, skill, None)
+}
+
+/// The line every skill run starts its instructions with: today's date,
+/// weekday and local time. A skill that works with "the last 2 days" or
+/// "this month" needs it — the model's own idea of the date is a guess.
+fn now_line(now: chrono::DateTime<chrono::Local>) -> String {
+    format!(
+        "Today is {} ({}); the local time is {} (UTC{}).\n\n",
+        now.format("%Y-%m-%d"),
+        now.format("%A"),
+        now.format("%H:%M"),
+        now.format("%:z"),
+    )
+}
+
+/// [`build_prompt`] with `now` stated before the skill's own body.
+fn build_prompt_at(
+    config: &Config,
+    skill: &registry::Skill,
+    now: Option<chrono::DateTime<chrono::Local>>,
+) -> Result<String, AxiomataError> {
     let mut prompt = String::new();
     for rel in &skill.prepend_files {
         if rel.contains("..") || std::path::Path::new(rel).is_absolute() {
@@ -163,8 +187,34 @@ fn build_prompt(config: &Config, skill: &registry::Skill) -> Result<String, Axio
             }
         }
     }
+    if let Some(now) = now {
+        prompt.push_str(&now_line(now));
+    }
     prompt.push_str(&skill.body);
     Ok(prompt)
+}
+
+/// The error a digest skill reported *instead of* data, if its reply is that:
+/// one JSON object with an `"error"` string and no filled array beside it
+/// (`{"emails": [], "error": "no mail tool available"}`). Such a run did not
+/// do its job and is recorded as failed, so the dashboard keeps the last good
+/// digest and the run history says why. An object with data and an `"error"`
+/// (partial results) stays a success, as the skills' contract says.
+fn reported_failure(stdout: &str) -> Option<String> {
+    let start = stdout.find('{')?;
+    let object: serde_json::Value = serde_json::Deserializer::from_str(&stdout[start..])
+        .into_iter::<serde_json::Value>()
+        .next()?
+        .ok()?;
+    let map = object.as_object()?;
+    let error = map.get("error")?.as_str()?.trim();
+    if error.is_empty() {
+        return None;
+    }
+    let has_data = map.iter().any(|(key, value)| {
+        key != "error" && value.as_array().is_some_and(|items| !items.is_empty())
+    });
+    (!has_data).then(|| error.to_string())
 }
 
 /// A `Failed` [`RunRecord`] for a skill that *resolved* but couldn't be run —
@@ -457,11 +507,16 @@ fn record_from_result(
     model: Option<String>,
     result: AgentRunResult,
 ) -> RunRecord {
+    let reported = if result.is_success() {
+        reported_failure(&result.stdout)
+    } else {
+        None
+    };
     RunRecord {
         id: None,
         skill_name: skill_name.to_owned(),
         backend: backend_id.to_owned(),
-        status: if result.is_success() {
+        status: if result.is_success() && reported.is_none() {
             RunStatus::Success
         } else {
             RunStatus::Failed
@@ -470,7 +525,7 @@ fn record_from_result(
         duration_ms: result.duration_ms,
         stdout: result.stdout,
         stderr: result.stderr,
-        error: None,
+        error: reported.map(|e| format!("the skill reported: {e}")),
         started_at,
         finished_at: Utc::now(),
         provider,
@@ -551,6 +606,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
+    use chrono::TimeZone as _;
     use std::env;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -831,6 +887,44 @@ mod tests {
             "a blank topic file adds no context block"
         );
         fs::remove_dir_all(&cwd).ok();
+    }
+
+    #[test]
+    fn a_run_states_the_date_before_the_skill_body() {
+        let config = Config {
+            workspace_root: unique_temp_dir("axiomata-test-runner-now"),
+            ..Config::default()
+        };
+        let now = chrono::Local
+            .with_ymd_and_hms(2026, 9, 28, 15, 5, 0)
+            .single()
+            .unwrap();
+        let prompt = build_prompt_at(&config, &skill("opencode", &[]), Some(now)).unwrap();
+        assert!(
+            prompt.starts_with("Today is 2026-09-28 (Monday); the local time is 15:05 (UTC"),
+            "{prompt}"
+        );
+        assert!(prompt.ends_with(").\n\nBODY-BODY"), "{prompt}");
+    }
+
+    #[test]
+    fn a_reply_that_is_only_an_error_is_a_failure_but_partial_data_is_not() {
+        assert_eq!(
+            reported_failure(r#"{"emails": [], "error": "no mail tool available"}"#).as_deref(),
+            Some("no mail tool available")
+        );
+        assert_eq!(
+            reported_failure("```json\n{\"calendars\": [], \"events\": [], \"error\": \"x\"}\n```")
+                .as_deref(),
+            Some("x")
+        );
+        assert_eq!(
+            reported_failure(r#"{"emails": [{"id": "1"}], "error": "one call timed out"}"#),
+            None
+        );
+        assert_eq!(reported_failure(r#"{"emails": []}"#), None);
+        assert_eq!(reported_failure("done, nothing to report"), None);
+        assert_eq!(reported_failure(r#"{"error": ""}"#), None);
     }
 
     #[test]

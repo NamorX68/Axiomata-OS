@@ -15,6 +15,8 @@ copy of the object. If you cannot finish a step, output what you did collect
 and set `"error"` to a short reason — an object containing only `"error"` is
 better than an empty reply.
 
+This takes exactly **two tool calls** (step 1 and step 2) — never more.
+
 Do exactly this and nothing more:
 
 1. List every reminder list using whichever reminders tool is available right

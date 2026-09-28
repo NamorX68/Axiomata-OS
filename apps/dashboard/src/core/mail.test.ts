@@ -148,7 +148,7 @@ describe("mailNotePath", () => {
     // Owner-reported: the same physical email produced two note files. Root
     // cause: `id` is the *skill's* own transcription of "the mail tool's
     // identifier", sourced from three separate MCP calls in one run
-    // (`list_inbox_emails`/`get_needs_response`/`search_emails`) with no
+    // (`search_emails`/`get_needs_response`/`search_emails` per topic) with no
     // guarantee they render the same id shape for the same message, or that
     // the same message gets the same id across two separate digest runs.
     // `mailNotePath` no longer keys off `id` for exactly this reason — two

@@ -107,7 +107,18 @@ impl Service {
         let deadline = tokio::time::Instant::now() + request.timeout;
         let mut events = EventStream::open(self).await?;
         let session_id = match request.session {
-            TurnSession::New(new) => self.create_session(&new).await?,
+            TurnSession::New(new) => {
+                // A location's MCP server that died stays dead (`mcp.rs`): bring it back first,
+                // or a connector skill finds no tool and answers empty. Best effort.
+                match self.reconnect_failed_mcp(&new.directory).await {
+                    Ok(names) if !names.is_empty() => {
+                        tracing::info!(?names, directory = %new.directory, "reconnected failed MCP servers")
+                    }
+                    Ok(_) => {}
+                    Err(err) => tracing::warn!(%err, "could not check the MCP servers"),
+                }
+                self.create_session(&new).await?
+            }
             TurnSession::Existing { id, model } => {
                 if let Some(model) = model {
                     let current = self.session(&id).await?;

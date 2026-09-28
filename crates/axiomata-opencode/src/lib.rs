@@ -25,6 +25,7 @@
 
 pub mod error;
 pub mod events;
+pub mod mcp;
 pub mod service;
 pub mod session;
 pub mod status;
