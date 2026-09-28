@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import { onDestroy, tick, untrack } from "svelte";
+  import IconButton from "../ui/IconButton.svelte";
 
   import type { AgentFileChange, AgentState, IdeAgent } from "../core/backend";
   import { formatBytes } from "../core/format";
@@ -41,9 +42,11 @@
     heading?: string;
     /** Move this view into a dock pane of its own (the side tab's "⧉ Dock"). */
     onDock?: () => void;
+    /** How many files the agent changed, whenever that is known anew (the side bar's badge, editor-look I2). */
+    onCount?: (files: number) => void;
   }
 
-  let { agent, agentState, visible, place, onOpenFile, heading, onDock }: Props = $props();
+  let { agent, agentState, visible, place, onOpenFile, heading, onDock, onCount }: Props = $props();
 
   // An agent's view stays with its agent for as long as it is mounted.
   const session = new AgentDiffSession(untrack(() => agent.id));
@@ -51,6 +54,7 @@
   let layout = $state<DiffLayout>(diffLayout(untrack(() => place)));
   let panes = $state<DiffPanes | null>(null);
   session.onLoaded = () => void tick().then(() => panes?.showFirstChange());
+  $effect(() => onCount?.(session.files.length));
 
   /** The question being asked, and how answering it went (G3, G7, G13, H6). */
   let pending = $state<GitAction | null>(null);
@@ -192,23 +196,27 @@
     {/if}
     <span class="spacer"></span>
     {#if showsLines}
-      <button
-        type="button"
-        class:on={session.wholeFile}
+      <IconButton
+        icon="file"
+        size="sm"
+        label="Show the whole file"
+        pressed={session.wholeFile}
         onclick={() => session.toggleWholeFile()}
-        title="Show the whole file">Whole file</button
-      >
-      <button type="button" onclick={toggleLayout} title="One column or two (⌘⇧D)">
-        {layout === "unified" ? "Split" : "Unified"}
-      </button>
+      />
+      <IconButton
+        icon={layout === "unified" ? "columns-2" : "rows-2"}
+        size="sm"
+        label={layout === "unified" ? "Two columns (⌘⇧D)" : "One column (⌘⇧D)"}
+        onclick={toggleLayout}
+      />
       {#if onOpenFile && loaded?.change.kind !== "deleted"}
-        <button type="button" onclick={() => open(panes?.openLine() ?? 0)} title="Open the agent's copy (⏎)">Open</button>
+        <IconButton icon="external-link" size="sm" label="Open the agent's copy (⏎)" onclick={() => open(panes?.openLine() ?? 0)} />
       {/if}
     {/if}
     {#if session.current}
       <button
         type="button"
-        class="danger"
+        class="ax-btn danger"
         onclick={() => ask({ kind: "discard-file", path: session.current!.path })}
         title="Put this file back to how {base?.branch} has it">Discard file</button
       >
@@ -216,6 +224,7 @@
     {#if base}
       <button
         type="button"
+        class="ax-btn"
         disabled={!session.hasUncommitted}
         onclick={() => ask({ kind: "commit", message: `wip: ${agent.name}` })}
         title={session.hasUncommitted ? "Commit what the agent left uncommitted" : "Nothing uncommitted"}
@@ -223,21 +232,18 @@
       >
       <button
         type="button"
+        class="ax-btn primary"
         disabled={takeOverBlocked !== null}
         onclick={() => void askTakeOver()}
         title={takeOverBlocked ?? `Take the committed work over into ${base.branch}`}>Take over…</button
       >
     {/if}
     {#if onDock}
-      <button type="button" onclick={onDock} title="Open these diffs in a dock pane of their own">⧉ Dock</button>
+      <IconButton icon="panel-right" size="sm" label="Open these diffs in a dock pane of their own" onclick={onDock} />
     {/if}
-    <button
-      type="button"
-      class="reload"
-      class:spinning={session.refreshing}
-      onclick={() => session.refresh(true)}
-      title="Reload (⌘R)">↻</button
-    >
+    <span class="reload" class:spinning={session.refreshing}>
+      <IconButton icon="refresh-cw" size="sm" label="Reload (⌘R)" onclick={() => session.refresh(true)} />
+    </span>
   </header>
 
   {#if session.listError}
@@ -382,30 +388,9 @@
     color: var(--ax-text);
   }
 
-  .bar button {
-    padding: 0 var(--ax-space-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    background: var(--ax-surface-2);
-    color: var(--ax-text);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .bar button:hover:not(:disabled),
-  .bar button.on {
-    border-color: var(--ax-accent);
-    color: var(--ax-accent);
-  }
-
-  .bar button.danger:hover {
-    border-color: var(--ax-danger);
-    color: var(--ax-danger);
-  }
-
-  .bar button:disabled {
-    opacity: 0.45;
-    cursor: default;
+  /* The main actions are `.ax-btn` pills, the small ones icons (editor-look I6). */
+  .reload {
+    display: inline-flex;
   }
 
   .reload.spinning {

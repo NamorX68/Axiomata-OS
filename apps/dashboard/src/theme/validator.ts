@@ -69,6 +69,7 @@ export const ALLOWED_TOKENS: readonly string[] = [
   ),
   ...["current-line", "indent-guide", "bracket-1", "bracket-2", "bracket-3", "glow"].map((t) => `--ax-editor-${t}`),
   ...LANGUAGE_COLOR_IDS.map((id) => `--ax-lang-${id}`),
+  ...["claude_code", "opencode", "mini"].map((id) => `--ax-harness-${id}`),
 ];
 
 const OUTPUT_SELECTOR = ":root[data-theme][data-theme]";

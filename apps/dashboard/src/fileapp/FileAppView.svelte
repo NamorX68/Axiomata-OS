@@ -32,9 +32,7 @@
   import type { OpenFileState, OpenResult } from "./FileEditor.svelte";
   import FileTab from "./FileTab.svelte";
   import Inspector, { type InspectorTab } from "./Inspector.svelte";
-  import { editorFace } from "./editorFace.svelte";
-  import { editorSettings } from "./editorSettings";
-  import { surfaceSettings } from "./surfaceSettings";
+  import { inspectorSurface } from "./inspectorSurface.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import FileTree from "./FileTree.svelte";
   import ProjectSearch from "./ProjectSearch.svelte";
@@ -107,13 +105,8 @@
   let showRecent = $state(false);
   /** The right-hand column (LK1, K2): which tab it shows, or closed. */
   let inspector = $state<InspectorTab | null>(null);
-  /** The editor's font as the settings' live preview draws it. */
-  const face = editorFace();
-  const inspectorSurface = $derived({
-    ...surfaceSettings($editorSettings, false),
-    fontFamily: face.family,
-    fontWeight: face.weight,
-  });
+  /** What the settings' live preview draws with. */
+  const preview = inspectorSurface();
 
   /** The header's two inspector buttons: open on that tab, or close it when it shows already. */
   function toggleInspector(tab: InspectorTab): void {
@@ -699,7 +692,7 @@
   {/if}
   </div>
   {#if inspector}
-    <Inspector tab={inspector} surface={inspectorSurface} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
+    <Inspector tab={inspector} surface={preview.current} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
   {/if}
   </div>
   {#if quickOpen}

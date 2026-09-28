@@ -32,6 +32,9 @@
   import { newAgentSession, prepareAgent } from "../agents";
   import { agentStatus, describeStatus } from "../agentStatus";
   import DiffView from "../DiffView.svelte";
+  import Icon from "../../ui/Icon.svelte";
+  import IconButton from "../../ui/IconButton.svelte";
+  import type { IconName } from "../../ui/icons/lucide";
   import { getDock } from "../dockContext";
   import { agentDiffOf, agentDiffTab } from "../paneKinds";
   import { openFileBeside } from "./openFile";
@@ -84,13 +87,16 @@
       });
   });
 
-  type SideTab = { id: string; label: string; waiting?: string };
+  type SideTab = { id: string; label: string; icon: IconName; waiting?: string };
+  // An icon rail, as editors have (editor-look I2); the label is the tooltip.
   const SIDE_TABS: SideTab[] = [
-    { id: "terminal", label: "Terminal" },
-    { id: "plan", label: "Plan" },
-    { id: "diffs", label: "Diffs" },
-    { id: "inbox", label: "Inbox", waiting: "Arrives with agent-to-agent messaging (M7.5)" },
+    { id: "terminal", label: "Terminal", icon: "terminal" },
+    { id: "plan", label: "Plan", icon: "list-checks" },
+    { id: "diffs", label: "Diffs", icon: "git-compare" },
+    { id: "inbox", label: "Inbox", icon: "inbox", waiting: "Arrives with agent-to-agent messaging (M7.5)" },
   ];
+  /** How many files the agent changed, once the Diffs view has looked (its badge). */
+  let changedFiles = $state<number | null>(null);
   let sideTab = $state("terminal");
   const dock = getDock();
   const openFile = openFileBeside(() => tabId);
@@ -213,6 +219,7 @@
           place="tab"
           onOpenFile={(rel, line) => openFile(agent.id, rel, line)}
           onDock={dockDiffs}
+          onCount={(n) => (changedFiles = n)}
         />
       </div>
     {/if}
@@ -288,8 +295,12 @@
         aria-selected={sideTab === tab.id}
         aria-controls="agent-view-{tab.id}"
         title={tab.waiting ?? tab.label}
-        onclick={() => (sideTab = tab.id)}>{tab.label}</button
+        aria-label={tab.label}
+        onclick={() => (sideTab = tab.id)}
       >
+        <Icon name={tab.icon} />
+        {#if tab.id === "diffs" && changedFiles}<span class="badge">{changedFiles}</span>{/if}
+      </button>
     {/each}
   </div>
 
@@ -299,8 +310,7 @@
       {statusView.label}
     </span>
     <span class="name">{agent.name}</span>
-    <span class="harness">{agent.harness}</span>
-    {#if agent.model}<span class="model">{agent.model}</span>{/if}
+    <span class="harness">{agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
     {#if ready?.shared_folder}
       <span class="branch" title="The project is not a git repository, so agents share its folder">
         shared folder
@@ -311,16 +321,16 @@
     {#if ready?.agent.port}<span class="port" title="AXIOMATA_PORT">:{ready.agent.port}</span>{/if}
     <code class="command" title={command}>{command}</code>
     {#if keepsSession}
-      <button
-        type="button"
-        class="restart"
-        title={ready?.agent.opencode_session
-          ? `Leave session ${ready.agent.opencode_session} and start a fresh one`
-          : "Start a fresh Opencode session"}
-        onclick={startNewSession}>New session</button
-      >
+      <IconButton
+        icon="message-square-plus"
+        size="sm"
+        label={ready?.agent.opencode_session
+          ? `New session — leave ${ready.agent.opencode_session} and start a fresh one`
+          : "New session — start a fresh Opencode session"}
+        onclick={startNewSession}
+      />
     {/if}
-    <button type="button" class="restart" onclick={() => (restarts += 1)}>Restart</button>
+    <IconButton icon="rotate-ccw" size="sm" label="Restart the agent" onclick={() => (restarts += 1)} />
   </footer>
 </div>
 
@@ -538,17 +548,17 @@
   }
 
   .side-tab {
-    /* Reads bottom-to-top along the right edge, like an editor's side bar. */
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
-    padding: var(--ax-space-2) var(--ax-space-1);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--ax-hit-min);
+    height: var(--ax-hit-min);
+    padding: 0;
     background: none;
     border: none;
-    border-radius: var(--ax-radius-sm);
+    border-radius: var(--ax-radius-md);
     color: var(--ax-text-muted);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
     cursor: pointer;
   }
 
@@ -559,11 +569,26 @@
 
   .side-tab.active {
     color: var(--ax-accent);
-    background: var(--ax-surface-1);
+    background: var(--ax-accent-muted);
   }
 
   .side-tab:focus-visible {
     outline: var(--ax-focus-ring);
+  }
+
+  /* The count of changed files, on the Diffs icon's corner. */
+  .badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: calc(14px * var(--ax-ui-scale));
+    padding: 0 3px;
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-accent);
+    color: var(--ax-text-invert);
+    font-family: var(--ax-font-sans);
+    font-size: calc(10px * var(--ax-ui-scale));
+    line-height: calc(14px * var(--ax-ui-scale));
   }
 
   .status {
@@ -603,15 +628,6 @@
     color: var(--ax-danger);
   }
 
-  .harness,
-  .model,
-  .branch,
-  .port {
-    padding: 0 var(--ax-space-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-  }
-
   .command {
     flex: 1 1 auto;
     min-width: 0;
@@ -620,19 +636,4 @@
     font-family: var(--ax-font-mono);
   }
 
-  .restart {
-    padding: 0 var(--ax-space-2);
-    background: var(--ax-surface-3);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    color: var(--ax-text-muted);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-xs);
-    cursor: pointer;
-  }
-
-  .restart:hover {
-    color: var(--ax-accent);
-    border-color: var(--ax-accent);
-  }
 </style>

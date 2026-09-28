@@ -134,6 +134,33 @@ Einstellung „Cursor: Strong / Subtle / Off“, Vorgabe Strong; gespeicherte �
 Auswahl im Dokument liegt, nicht in der Ansicht. Entscheid: jede Datei nur einmal. „Dieselbe Datei zweimal mit eigenem
 Cursor“ ist vorgemerkt — es braucht Auswahl, Mehrfach-Cursor, Undo-Auswahl und Vi-Zustand pro Ansicht.
 
+## 5. Die Optik in der IDE (gegrillt 2026-09-28, I1–I7)
+
+Erstes Modul, auf das der Standard übertragen wird (Owner: „fangen wir mit der IDE an“; das Kanban folgt, eigens geplant).
+
+- **I1 — Gruppen bündig wie in Zed**, in IDE und Datei-App: keine schwebenden, gerahmten Kästen mehr, sondern
+  aneinanderstoßende Gruppen mit 1-px-Trennlinie (zum Ziehen breiter).
+- **I2 — Icon-Leiste im Agenten-Pane**: statt gedrehter Wörter senkrechte Icons (Terminal, Plan, Diffs, Inbox) mit
+  Tooltip; offene Diffs und ungelesene Inbox-Einträge als Abzeichen.
+- **I3 — Statuszeile des Agenten**: Zustand als Punkt + Wort, Name, Harness, Worktree, Port, Befehl gedämpft;
+  „New session“ und „Restart“ als Icon-Knöpfe.
+- **I4 — Agenten- und Projekt-Menü als Zeilen**: Punkt, Name, darunter gedämpft Harness/Modell; Bearbeiten und Entfernen
+  als Icon-Knöpfe beim Überfahren; „New agent…“/„New project…“ als Zeile mit Plus; die Befehlszeile nur im Dialog.
+- **I5 — Kopfzeile**: der Hinweis „Drag a tab…“ entfällt (steht in der Kürzel-Liste); die IDE bekommt denselben
+  Inspector (Settings | Shortcuts) wie die Datei-App, die Kürzel-Liste einen IDE-Abschnitt.
+- **I6 — Diff und Git-Dialoge**: Hauptaktionen (Commit, Übernehmen, Verwerfen) bleiben Text, als einheitliche Pillen —
+  primär Akzent, sekundär neutral, gefährlich rot; kleine Aktionen (Hunk verwerfen, neu laden, Datei öffnen) als Icons.
+- **I7 — Agenten-Reiter** getönt nach Harness (Claude Code, Opencode), der Punkt bleibt der Zustand.
+
+Checkpoints: **IK1** Gruppen bündig (I1), Kopfzeile + Inspector (I5), Menüs (I4); **IK2** Agenten-Pane (I2, I3),
+Reiter-Tönung (I7), Diff und Dialoge (I6).
+
+**IK1 + IK2 umgesetzt (2026-09-28):** alle Punkte I1–I7. Globale Pillen-Knöpfe `.ax-btn` (`primary`, `danger`) in
+`styles.css` als Standard für Text-Knöpfe; `fileapp/inspectorSurface.svelte.ts` teilen Datei-App und IDE; Harness-Farben
+`--ax-harness-*`. **Bekannte Einschränkung (Review):** das Diffs-Abzeichen im Agenten-Pane kommt aus der Diff-Ansicht, die
+erst beim ersten Öffnen des Reiters entsteht und nur abfragt, solange sie sichtbar ist — vorher kein Abzeichen, danach
+kann es veralten. Ein immer aktuelles Abzeichen bräuchte eine eigene Abfrage je Agent; offen zum Entscheiden.
+
 ## 4. Offen beim Bau
 
 - Welche Icon-Themes Zed anbietet und was dort „Git“ heißt (K5).

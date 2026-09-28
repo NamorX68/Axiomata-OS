@@ -121,3 +121,61 @@ input[type="radio"] {
   outline: 2px solid var(--ax-focus-ring);
   outline-offset: 1px;
 }
+
+/* The app's text buttons (editor-look I6): pills — neutral, `primary` in the
+   accent for the action a dialog is for, `danger` for one that throws work away.
+   Where an icon says it better, `ui/IconButton.svelte` instead. */
+.ax-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ax-space-1);
+  min-height: calc(var(--ax-hit-min) - var(--ax-space-1));
+  padding: 0 var(--ax-space-3);
+  background: var(--ax-surface-2);
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-radius-pill);
+  color: var(--ax-text);
+  font-family: var(--ax-font-sans);
+  font-size: var(--ax-font-size-sm);
+  cursor: pointer;
+  transition:
+    background var(--ax-dur-fast) var(--ax-ease),
+    border-color var(--ax-dur-fast) var(--ax-ease);
+}
+
+.ax-btn:hover:not(:disabled) {
+  border-color: var(--ax-border-strong);
+  background: var(--ax-surface-3);
+}
+
+.ax-btn.primary {
+  background: var(--ax-accent);
+  border-color: var(--ax-accent);
+  color: var(--ax-text-invert);
+}
+
+.ax-btn.primary:hover:not(:disabled) {
+  background: var(--ax-accent-hover);
+  border-color: var(--ax-accent-hover);
+}
+
+.ax-btn.danger {
+  border-color: color-mix(in srgb, var(--ax-danger) 50%, var(--ax-border));
+  color: var(--ax-danger);
+}
+
+.ax-btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ax-danger) 14%, var(--ax-surface-2));
+  border-color: var(--ax-danger);
+}
+
+.ax-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ax-btn:focus-visible {
+  outline: 2px solid var(--ax-focus-ring);
+  outline-offset: 1px;
+}
+

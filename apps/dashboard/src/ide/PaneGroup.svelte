@@ -37,10 +37,18 @@
     return agent ? describeStatus($statuses.byAgent.get(id), agent, $statuses.checkedAt) : null;
   }
 
-  /** A file tab's tint (editor-look K14): its language's colour, as in the file app. */
+  /**
+   * A tab's tint: a file tab's language colour, as in the file app (K14); an
+   * agent tab's harness colour — Claude Code or Opencode at a glance (I7); none
+   * for the rest, or when tints are off.
+   */
   function tint(tab: PaneTab): string | undefined {
+    if (!$editorSettings.tabColors) return undefined;
     const file = filePaneConfig(tab);
-    return $editorSettings.tabColors && file ? languageColor(file.rel) : undefined;
+    if (file) return languageColor(file.rel);
+    const id = tab.kind === "agent" ? tab.config?.agentId : undefined;
+    const harness = typeof id === "number" ? $session.agents.find((a) => a.id === id)?.harness : undefined;
+    return harness ? `var(--ax-harness-${harness})` : undefined;
   }
 
   /** The `+` menu, open at these viewport coordinates (W16). */
@@ -170,8 +178,6 @@
     min-width: 0;
     min-height: 0;
     background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-md);
     overflow: hidden;
   }
 

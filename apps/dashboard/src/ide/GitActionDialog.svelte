@@ -138,10 +138,11 @@
     {/if}
 
     <div class="buttons">
-      <button type="button" onclick={onCancel}>Cancel</button>
+      <button type="button" class="ax-btn" onclick={onCancel}>Cancel</button>
       <button
         type="button"
-        class="primary"
+        class="ax-btn"
+        class:primary={action.kind !== "discard-file" && action.kind !== "discard-hunk"}
         class:danger={action.kind === "discard-file" || action.kind === "discard-hunk"}
         disabled={!canConfirm}
         onclick={confirm}
@@ -264,28 +265,4 @@
     margin-top: var(--ax-space-3);
   }
 
-  .buttons button {
-    padding: var(--ax-space-1) var(--ax-space-3);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-    background: var(--ax-surface-1);
-    color: var(--ax-text);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .buttons button.primary {
-    border-color: var(--ax-accent);
-    color: var(--ax-accent);
-  }
-
-  .buttons button.primary.danger {
-    border-color: var(--ax-danger);
-    color: var(--ax-danger);
-  }
-
-  .buttons button:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
 </style>

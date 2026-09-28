@@ -138,6 +138,15 @@ export const SHORTCUTS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "IDE",
+    items: [
+      { keys: "⌘P", what: "Open a file of the project by name" },
+      { keys: "⇧⌘F", what: "Search the project (the Search pane)" },
+      { keys: "Drag a tab", what: "Onto a tab bar: join it — onto an edge: split" },
+      { keys: "Drag a divider", what: "Resize the groups beside it" },
+    ],
+  },
+  {
     title: "Vi — moving",
     vi: true,
     items: [

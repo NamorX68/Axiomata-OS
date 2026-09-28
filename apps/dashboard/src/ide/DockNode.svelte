@@ -63,24 +63,32 @@
     min-height: 0;
   }
 
+  /* A 1 px line between groups (editor-look I1, as in Zed); the grabbable strip is wider
+     than the line, on both sides of it, and lights up on hover. */
   .divider {
-    flex: 0 0 var(--ax-space-2);
-    background: transparent;
-    /* The grabbable strip is wider than the line the user sees, the way every
-       usable splitter is; the line itself is drawn by the panes' own borders. */
     position: relative;
     z-index: 1;
+    flex: 0 0 1px;
+    background: var(--ax-border);
   }
 
-  .divider:hover {
-    background: var(--ax-accent-muted);
+  .divider::before {
+    content: "";
+    position: absolute;
   }
 
-  .split.row > .divider {
+  .row > .divider::before {
+    inset: 0 calc(-1 * var(--ax-space-1));
     cursor: col-resize;
   }
 
-  .split.col > .divider {
+  .col > .divider::before {
+    inset: calc(-1 * var(--ax-space-1)) 0;
     cursor: row-resize;
+  }
+
+  .divider:hover,
+  .divider:active {
+    background: var(--ax-accent);
   }
 </style>

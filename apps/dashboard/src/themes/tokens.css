@@ -120,6 +120,10 @@
   --ax-lang-swift: #f05138;
   --ax-lang-sql: #e8a33a;
   --ax-lang-other: var(--ax-text-muted);
+  /* Agent harnesses (editor-look I7): an agent's tab is tinted with its harness's colour. */
+  --ax-harness-claude_code: #d97757;
+  --ax-harness-opencode: #6f9dff;
+  --ax-harness-mini: var(--ax-text-muted);
 
   /* ---------- neutral fallback palette (themes override) ---------- */
 

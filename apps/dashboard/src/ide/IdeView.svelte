@@ -44,6 +44,8 @@
   import { pendingLocations } from "../fileapp/locationList";
   import DockNode from "./DockNode.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import Inspector, { type InspectorTab } from "../fileapp/Inspector.svelte";
+  import { inspectorSurface } from "../fileapp/inspectorSurface.svelte";
   import {
     activateTab,
     addTab,
@@ -102,6 +104,9 @@
   let dockEl = $state<HTMLElement | undefined>();
   let draggingTab = $state<string | null>(null);
   let hint = $state<DockTarget | null>(null);
+  /** The right-hand inspector (editor-look I5): the editor's settings and the shortcuts, as in the file app. */
+  let inspector = $state<InspectorTab | null>(null);
+  const preview = inspectorSurface();
   /** ⌘P over the open project's files (W9). */
   let quickOpen = $state(false);
 
@@ -522,12 +527,26 @@
         onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
         onRemove={(id) => void projectSession.removeAgent(id)}
       />
-      {#if current}
-        <p class="hint">Drag a tab to an edge to split, to a tab bar to join.</p>
-      {/if}
     </div>
-    <IconButton icon="layout-grid" label="Back to the OS" onclick={() => (open = false)} />
+    <div class="actions">
+      <IconButton
+        icon="sliders-horizontal"
+        label="Editor settings"
+        pressed={inspector === "settings"}
+        onclick={() => (inspector = inspector === "settings" ? null : "settings")}
+      />
+      <IconButton
+        icon="keyboard"
+        label="Keyboard shortcuts"
+        pressed={inspector === "shortcuts"}
+        onclick={() => (inspector = inspector === "shortcuts" ? null : "shortcuts")}
+      />
+      <span class="separator" aria-hidden="true"></span>
+      <IconButton icon="layout-grid" label="Back to the OS" onclick={() => (open = false)} />
+    </div>
   </header>
+
+  <div class="body">
 
   <div
     class="dock"
@@ -566,6 +585,10 @@
         <p>Add a project to work in — a name and the folder of a repository.</p>
       </div>
     {/if}
+  </div>
+  {#if inspector}
+    <Inspector tab={inspector} surface={preview.current} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
+  {/if}
   </div>
   {#if quickOpen && open}
     <QuickOpen
@@ -619,22 +642,37 @@
     letter-spacing: var(--ax-tracking-wide);
   }
 
-  .hint {
-    margin: 0;
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
   }
 
+  .separator {
+    width: 1px;
+    height: var(--ax-icon-md);
+    margin: 0 var(--ax-space-1);
+    background: var(--ax-border);
+  }
+
+  /* The dock and, beside it, the inspector. */
+  .body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+  }
+
+  /* Groups meet edge to edge, a line between them (editor-look I1). */
   .dock {
     position: relative;
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 0;
-    padding: var(--ax-space-2);
   }
 
   .pane-store {
     position: absolute;
-    inset: var(--ax-space-2);
+    inset: 0;
     visibility: hidden;
     pointer-events: none;
   }

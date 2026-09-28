@@ -47,14 +47,20 @@ ICONS=(
   folder-plus
   git-branch
   git-commit-horizontal
+  git-commit-vertical
+  git-compare
+  git-merge
   history
+  inbox
   info
   keyboard
   layout-grid
   list
+  list-checks
   lock
   map
   maximize-2
+  message-square-plus
   minimize-2
   panel-left
   panel-right
@@ -62,6 +68,7 @@ ICONS=(
   play
   plus
   refresh-cw
+  rotate-ccw
   rows-2
   save
   search
@@ -71,6 +78,7 @@ ICONS=(
   terminal
   text-search
   trash-2
+  undo-2
   wrap-text
   x
 )

@@ -15,6 +15,8 @@
 -->
 <script lang="ts">
   import type { IdeProject } from "../core/backend";
+  import Icon from "../ui/Icon.svelte";
+  import IconButton from "../ui/IconButton.svelte";
 
   let {
     projects,
@@ -41,12 +43,23 @@
   let newRoot = $state("");
   let editingRoot = $state<number | null>(null);
   let editedRoot = $state("");
+  /** The "New project" form is folded into a row until asked for (editor-look I4). */
+  let adding = $state(false);
+
+  // A menu opens fresh: a form left open when it closed (a click elsewhere) is folded again.
+  $effect(() => {
+    if (!open) {
+      adding = false;
+      editingRoot = null;
+    }
+  });
 
   function submitNew() {
     if (!newName.trim() || !newRoot.trim()) return;
     onCreate(newName.trim(), newRoot.trim());
     newName = "";
     newRoot = "";
+    adding = false;
     open = false;
   }
 
@@ -77,7 +90,7 @@
     {:else}
       <span class="name none">No project</span>
     {/if}
-    <span class="caret" aria-hidden="true">▾</span>
+    <span class="caret" aria-hidden="true"><Icon name="chevron-down" size="sm" /></span>
   </button>
 
   {#if open}
@@ -95,17 +108,24 @@
                 <span class="name">{project.name}</span>
                 <span class="path" class:missing={!project.root_exists}>{project.repo_root}</span>
               </button>
+              <!-- Quiet until the row is hovered or focused (editor-look I4). -->
               <div class="row-actions">
-                <button type="button" onclick={() => startEditingRoot(project)}>Change path</button>
-                <button
-                  type="button"
-                  class="danger"
+                <IconButton
+                  icon="folder-open"
+                  label="Change the path of {project.name}"
+                  size="sm"
+                  onclick={() => startEditingRoot(project)}
+                />
+                <IconButton
+                  icon="trash-2"
+                  label="Remove {project.name} from the list (the folder is left alone)"
+                  size="sm"
                   onclick={() => {
                     if (confirm(`Remove “${project.name}” from the list? The folder itself is left alone.`)) {
                       onRemove(project.id);
                     }
-                  }}>Remove from list</button
-                >
+                  }}
+                />
               </div>
               {#if editingRoot === project.id}
                 <form
@@ -116,7 +136,7 @@
                   }}
                 >
                   <input type="text" spellcheck="false" bind:value={editedRoot} placeholder="/Users/…/repo" />
-                  <button type="submit">Save</button>
+                  <button type="submit" class="ax-btn primary">Save</button>
                 </form>
               {/if}
             </li>
@@ -124,18 +144,25 @@
         </ul>
       {/if}
 
-      <form
-        class="new"
-        onsubmit={(event) => {
-          event.preventDefault();
-          submitNew();
-        }}
-      >
-        <p class="label">New project</p>
-        <input type="text" spellcheck="false" bind:value={newName} placeholder="Name" />
-        <input type="text" spellcheck="false" bind:value={newRoot} placeholder="/Users/…/repo" />
-        <button type="submit" disabled={!newName.trim() || !newRoot.trim()}>Add</button>
-      </form>
+      {#if !adding}
+        <button class="add" type="button" onclick={() => (adding = true)}><Icon name="plus" size="sm" /> New project…</button>
+      {:else}
+        <form
+          class="new"
+          onsubmit={(event) => {
+            event.preventDefault();
+            submitNew();
+          }}
+        >
+          <p class="label">New project</p>
+          <input type="text" spellcheck="false" bind:value={newName} placeholder="Name" />
+          <input type="text" spellcheck="false" bind:value={newRoot} placeholder="/Users/…/repo" />
+          <div class="form-actions">
+            <button type="submit" class="ax-btn primary" disabled={!newName.trim() || !newRoot.trim()}>Add</button>
+            <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
+          </div>
+        </form>
+      {/if}
     </div>
   {/if}
 </div>
@@ -181,7 +208,7 @@
     top: calc(100% + var(--ax-space-2));
     left: 0;
     z-index: 2;
-    width: 26rem;
+    width: calc(416px * var(--ax-ui-scale));
     max-height: 60vh;
     overflow-y: auto;
     padding: var(--ax-space-3);
@@ -192,17 +219,25 @@
   }
 
   ul {
-    margin: 0 0 var(--ax-space-3);
+    margin: 0 0 var(--ax-space-2);
     padding: 0;
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-2);
   }
 
+  /* A row per project (editor-look I4): the pick, its actions on hover, the path form below when open. */
   li {
-    padding: var(--ax-space-2);
-    border-radius: var(--ax-radius-sm);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border-radius: var(--ax-radius-md);
+  }
+
+  li:hover,
+  li:focus-within {
     background: var(--ax-surface-2);
   }
 
@@ -213,8 +248,9 @@
   .pick {
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-1);
-    width: 100%;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
     padding: 0;
     background: none;
     border: none;
@@ -226,10 +262,12 @@
   }
 
   .path {
+    overflow: hidden;
     color: var(--ax-text-muted);
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
-    word-break: break-all;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .path.missing {
@@ -239,38 +277,44 @@
 
   .row-actions {
     display: flex;
-    gap: var(--ax-space-2);
-    margin-top: var(--ax-space-2);
+    gap: var(--ax-space-1);
+    opacity: 0;
   }
 
-  .row-actions button,
-  .new button,
-  .edit-root button {
-    padding: var(--ax-space-1) var(--ax-space-2);
-    background: var(--ax-surface-3);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
+  li:hover .row-actions,
+  li:focus-within .row-actions {
+    opacity: 1;
+  }
+
+  /* "New project…": a row of its own, like the projects above it. */
+  .add {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-2);
+    background: none;
+    border: 0;
+    border-radius: var(--ax-radius-md);
     color: var(--ax-text-muted);
     font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-xs);
+    font-size: var(--ax-font-size-sm);
+    text-align: left;
     cursor: pointer;
   }
 
-  .row-actions button:hover,
-  .new button:hover:not(:disabled),
-  .edit-root button:hover {
-    color: var(--ax-accent);
-    border-color: var(--ax-accent);
+  .add:hover {
+    background: var(--ax-surface-2);
+    color: var(--ax-text);
   }
 
-  .row-actions .danger:hover {
-    color: var(--ax-danger);
-    border-color: var(--ax-danger);
+  .form-actions {
+    display: flex;
+    gap: var(--ax-space-2);
   }
 
-  .new button:disabled {
-    opacity: var(--ax-tile-glass-opacity);
-    cursor: default;
+  .edit-root {
+    flex-basis: 100%;
   }
 
   .new,

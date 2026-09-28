@@ -11,6 +11,8 @@
   import { HARNESSES, blankFields, fieldsOf } from "./agents";
   import { agentStatus, describeStatus } from "./agentStatus";
   import StatusDot from "./StatusDot.svelte";
+  import Icon from "../ui/Icon.svelte";
+  import IconButton from "../ui/IconButton.svelte";
 
   const statuses = agentStatus.statuses;
 
@@ -35,6 +37,11 @@
   let root = $state<HTMLElement | undefined>();
   /** `null` = the "new agent" form, a number = editing that agent. */
   let editing = $state<number | null | undefined>(undefined);
+
+  // A menu opens fresh: a form left open when it closed (a click elsewhere) is folded again.
+  $effect(() => {
+    if (!open) editing = undefined;
+  });
   let form = $state<AgentFields>(blankFields());
 
   function startNew() {
@@ -64,7 +71,7 @@
 <div class="picker" bind:this={root}>
   <button class="current" type="button" {disabled} aria-expanded={open} onclick={() => (open = !open)}>
     Agents<span class="count">{agents.length}</span>
-    <span class="caret" aria-hidden="true">▾</span>
+    <span class="caret" aria-hidden="true"><Icon name="chevron-down" size="sm" /></span>
   </button>
 
   {#if open}
@@ -86,19 +93,20 @@
                   {agent.name}
                 </span>
                 <span class="meta">{agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
-                <code>{agent.effective_command}</code>
               </button>
+              <!-- Quiet until the row is hovered or focused (editor-look I4); the command is in the edit form. -->
               <div class="row-actions">
-                <button type="button" onclick={() => startEdit(agent)}>Edit</button>
-                <button
-                  type="button"
-                  class="danger"
+                <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
+                <IconButton
+                  icon="trash-2"
+                  label="Remove {agent.name}"
+                  size="sm"
                   onclick={() => {
                     if (confirm(`Remove the agent “${agent.name}”? Panes already running it stay open.`)) {
                       onRemove(agent.id);
                     }
-                  }}>Remove</button
-                >
+                  }}
+                />
               </div>
             </li>
           {/each}
@@ -108,7 +116,7 @@
       {/if}
 
       {#if editing === undefined}
-        <button class="add" type="button" onclick={startNew}>New agent…</button>
+        <button class="add" type="button" onclick={startNew}><Icon name="plus" size="sm" /> New agent…</button>
       {:else}
         <form
           onsubmit={(event) => {
@@ -143,8 +151,8 @@
             harness picks; with a command of your own, it is yours to pass.
           </p>
           <div class="form-actions">
-            <button type="submit" disabled={!form.name.trim()}>Save</button>
-            <button type="button" onclick={() => (editing = undefined)}>Cancel</button>
+            <button type="submit" class="ax-btn primary" disabled={!form.name.trim()}>Save</button>
+            <button type="button" class="ax-btn" onclick={() => (editing = undefined)}>Cancel</button>
           </div>
         </form>
       {/if}
@@ -197,7 +205,7 @@
     top: calc(100% + var(--ax-space-2));
     left: 0;
     z-index: 2;
-    width: 26rem;
+    width: calc(416px * var(--ax-ui-scale));
     max-height: 70vh;
     overflow-y: auto;
     padding: var(--ax-space-3);
@@ -208,25 +216,33 @@
   }
 
   ul {
-    margin: 0 0 var(--ax-space-3);
+    margin: 0 0 var(--ax-space-2);
     padding: 0;
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-2);
   }
 
+  /* A row per agent (editor-look I4): the pick on the left, its actions on the right on hover. */
   li {
-    padding: var(--ax-space-2);
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border-radius: var(--ax-radius-md);
+  }
+
+  li:hover,
+  li:focus-within {
     background: var(--ax-surface-2);
-    border-radius: var(--ax-radius-sm);
   }
 
   .pick {
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-1);
-    width: 100%;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
     padding: 0;
     background: none;
     border: none;
@@ -248,17 +264,15 @@
     font-size: var(--ax-font-size-xs);
   }
 
-  code {
-    color: var(--ax-text-muted);
-    font-family: var(--ax-font-mono);
-    font-size: var(--ax-font-size-xs);
-    word-break: break-all;
-  }
-
   .row-actions {
     display: flex;
-    gap: var(--ax-space-2);
-    margin-top: var(--ax-space-2);
+    gap: var(--ax-space-1);
+    opacity: 0;
+  }
+
+  li:hover .row-actions,
+  li:focus-within .row-actions {
+    opacity: 1;
   }
 
   .empty {
@@ -313,33 +327,25 @@
     outline: var(--ax-focus-ring);
   }
 
-  .row-actions button,
-  .form-actions button,
+  /* "New agent…": a row of its own, like the agents above it. */
   .add {
-    padding: var(--ax-space-1) var(--ax-space-2);
-    background: var(--ax-surface-3);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-2);
+    background: none;
+    border: 0;
+    border-radius: var(--ax-radius-md);
     color: var(--ax-text-muted);
     font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-xs);
+    font-size: var(--ax-font-size-sm);
+    text-align: left;
     cursor: pointer;
   }
 
-  .row-actions button:hover,
-  .form-actions button:hover:not(:disabled),
   .add:hover {
-    color: var(--ax-accent);
-    border-color: var(--ax-accent);
-  }
-
-  .row-actions .danger:hover {
-    color: var(--ax-danger);
-    border-color: var(--ax-danger);
-  }
-
-  .form-actions button:disabled {
-    opacity: var(--ax-tile-glass-opacity);
-    cursor: default;
+    background: var(--ax-surface-2);
+    color: var(--ax-text);
   }
 </style>
