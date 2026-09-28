@@ -1,8 +1,10 @@
 <!--
   The file app's full-screen view (`docs/plans/editor.md`, ED1.3, F7, ED4.3):
   the title, opening files with the native dialog (⌘O) or from the recent
-  list, the settings gear — and the tabs (W7, W12), each a `FileTab` with its
-  own `FileEditor`, the same editor the panel and the IDE's file pane use.
+  list, the inspector's two buttons (settings, shortcuts; editor-look LK1) — and
+  the tabs (W7, W12), each a `FileTab` with its own `FileEditor`, the same
+  editor the panel and the IDE's file pane use. The inspector (`Inspector.svelte`)
+  is a column of its own right of the tabs, so the minimap stays in view (K3).
 
   * **Hidden, never unmounted** — the same rule as the IDE: `App.svelte` keeps
     it mounted once opened, so unsaved text and the cursor survive a trip back
@@ -26,6 +28,11 @@
   import { listRoots, pickFile, type FileRenamed } from "./backend";
   import type { OpenFileState, OpenResult } from "./FileEditor.svelte";
   import FileTab from "./FileTab.svelte";
+  import Inspector, { type InspectorTab } from "./Inspector.svelte";
+  import { editorFace } from "./editorFace.svelte";
+  import { editorSettings } from "./editorSettings";
+  import { surfaceSettings } from "./surfaceSettings";
+  import IconButton from "../ui/IconButton.svelte";
   import FileTree from "./FileTree.svelte";
   import ProjectSearch from "./ProjectSearch.svelte";
   import type { LocationList } from "./locationList";
@@ -75,7 +82,20 @@
   let recent = $state<RecentFile[]>([]);
   let roots = $state<FileRootInfo[]>([]);
   let showRecent = $state(false);
-  let showSettings = $state(false);
+  /** The right-hand column (LK1, K2): which tab it shows, or closed. */
+  let inspector = $state<InspectorTab | null>(null);
+  /** The editor's font as the settings' live preview draws it. */
+  const face = editorFace();
+  const inspectorSurface = $derived({
+    ...surfaceSettings($editorSettings, false),
+    fontFamily: face.family,
+    fontWeight: face.weight,
+  });
+
+  /** The header's two inspector buttons: open on that tab, or close it when it shows already. */
+  function toggleInspector(tab: InspectorTab): void {
+    inspector = inspector === tab ? null : tab;
+  }
   let tree = $state<TreePrefs>(loadTreePrefs());
   let treeView = $state<FileTree | null>(null);
   /** The tree's width while its edge is being dragged. */
@@ -352,13 +372,18 @@
           </ul>
         {/if}
       </div>
-      <button
-        type="button"
-        class="pill gear"
-        aria-label="Editor settings"
-        aria-pressed={showSettings}
-        onclick={() => (showSettings = !showSettings)}>⚙</button
-      >
+      <IconButton
+        icon="sliders-horizontal"
+        label="Editor settings"
+        pressed={inspector === "settings"}
+        onclick={() => toggleInspector("settings")}
+      />
+      <IconButton
+        icon="keyboard"
+        label="Keyboard shortcuts"
+        pressed={inspector === "shortcuts"}
+        onclick={() => toggleInspector("shortcuts")}
+      />
       <button type="button" class="pill back" onclick={() => (open = false)}>Back to the OS</button>
     </div>
   </header>
@@ -469,8 +494,6 @@
         handed={handedTo.get(tab.id) ?? null}
         line={lineFor.get(tab.id) ?? null}
         visible={open && tab.id === tabs.active}
-        {showSettings}
-        onCloseSettings={() => (showSettings = false)}
         onOpenRequest={() => void openPicked()}
         onQuit={() => void requestCloseTab(tab.id)}
         onState={(state) => onTabState(tab, state)}
@@ -499,6 +522,9 @@
     {/each}
   </div>
   </div>
+  {#if inspector}
+    <Inspector tab={inspector} surface={inspectorSurface} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
+  {/if}
   </div>
   {#if quickOpen}
     <QuickOpen
@@ -676,15 +702,6 @@
 
   .banner button {
     font-size: var(--ax-font-size-xs);
-  }
-
-  .gear {
-    font-size: var(--ax-font-size-base);
-    line-height: 1;
-  }
-
-  .gear[aria-pressed="true"] {
-    border-color: var(--ax-accent);
   }
 
   /* The tree beside the tabs. */

@@ -24,8 +24,6 @@
     /** The line to put the cursor on when the file first opens (quick open's `:12`). */
     line?: number | null;
     visible: boolean;
-    showSettings?: boolean;
-    onCloseSettings?: () => void;
     onOpenRequest?: () => void;
     /** Vi's `:q`/`ZZ`: close this tab. */
     onQuit?: () => void;
@@ -46,8 +44,6 @@
     handed = null,
     line = null,
     visible,
-    showSettings = false,
-    onCloseSettings,
     onOpenRequest,
     onQuit,
     onState,
@@ -123,8 +119,6 @@
   <FileEditor
     bind:this={editor}
     {visible}
-    showSettings={showSettings && visible}
-    {onCloseSettings}
     {onOpenRequest}
     {onQuit}
     onState={reportState}

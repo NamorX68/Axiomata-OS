@@ -68,6 +68,20 @@ const VISUAL_COMMANDS = new Set([
 /** Commands followed by one character: `r m q @` (and Visual `r`, surround `S`). */
 const CHAR_COMMANDS = new Set(["r", "m", "q", "@"]);
 
+/**
+ * Every key the grammar knows, by kind — read by the shortcut list's test
+ * (`fileapp/shortcuts.test.ts`) so the list cannot fall behind the machine.
+ */
+export const VI_GRAMMAR = {
+  operators: Object.keys(OPERATORS),
+  motions: [...MOTIONS],
+  charMotions: [...CHAR_MOTIONS],
+  objects: [...OBJECTS],
+  normal: [...NORMAL_COMMANDS],
+  visual: [...VISUAL_COMMANDS],
+  charCommands: [...CHAR_COMMANDS],
+} as const;
+
 export type Target =
   | { kind: "motion"; name: string; char?: string }
   | { kind: "object"; inner: boolean; name: string }

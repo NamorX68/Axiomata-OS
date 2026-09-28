@@ -78,6 +78,9 @@ const OPTIONS: ReadonlyArray<{ name: SetOption; short: string }> = [
   { name: "list", short: "list" },
 ];
 
+/** Every `:` command by its full name — read by the shortcut list's test (`fileapp/shortcuts.test.ts`). */
+export const EX_COMMAND_NAMES: readonly string[] = COMMANDS.map((c) => c.name);
+
 /** A full command name for what was typed (`w`, `wri`, `noh`), or `null`. */
 function commandName(typed: string): string | null {
   for (const c of COMMANDS) if (typed.length >= c.min && c.name.startsWith(typed)) return c.name;

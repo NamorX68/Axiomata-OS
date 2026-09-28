@@ -1,8 +1,9 @@
 <!--
-  The editor's settings (`docs/plans/editor.md`, D6, F12, F13), opened from the
-  gear in the file app's header. Every change applies at once and is saved; the
-  preview at the top is a real, read-only editor surface on sample code, so what
-  it shows is exactly what the editor will do.
+  The editor's settings (`docs/plans/editor.md`, D6, F12, F13), the Settings tab
+  of the file app's inspector (`Inspector.svelte`, editor-look LK1). Every change
+  applies at once and is saved; the preview at the top is a real, read-only
+  editor surface on sample code, so what it shows is exactly what the editor
+  will do.
 -->
 <script lang="ts">
   import { onDestroy } from "svelte";
@@ -26,10 +27,9 @@
   interface Props {
     /** The surface settings the editor uses right now (font already loaded). */
     surface: SurfaceSettings;
-    onClose: () => void;
   }
 
-  let { surface, onClose }: Props = $props();
+  let { surface }: Props = $props();
 
   const SAMPLE = [
     "// Live preview — every change shows here first.",
@@ -98,11 +98,7 @@
   ];
 </script>
 
-<aside class="panel" aria-label="Editor settings">
-  <header>
-    <h2>Editor settings</h2>
-    <button type="button" onclick={onClose}>Done</button>
-  </header>
+<div class="panel" aria-label="Editor settings">
 
   <div class="preview">
     <EditorSurface
@@ -347,44 +343,14 @@
       </label>
     {/if}
   </div>
-</aside>
+</div>
 
 <style>
   .panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 5;
-    width: min(calc(460px * var(--ax-ui-scale)), 100%);
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    background: var(--ax-surface-2);
-    border-left: 1px solid var(--ax-border);
-    box-shadow: var(--ax-shadow-pop);
-  }
-
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--ax-space-3) var(--ax-space-4);
-    border-bottom: 1px solid var(--ax-border);
-  }
-
-  h2 {
-    margin: 0;
-    font-size: var(--ax-font-size-base);
-  }
-
-  header button {
-    padding: var(--ax-space-1) var(--ax-space-3);
-    background: var(--ax-surface-1);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-    color: var(--ax-text);
-    font-family: var(--ax-font-sans);
-    cursor: pointer;
   }
 
   .preview {

@@ -53,7 +53,6 @@
   import { applyTextEdits, storeBody, textChanges } from "../editor/textEdits";
   import { applyWorkspaceEdit, type EditPorts } from "./workspaceEdit";
   import { wordAt } from "../editor/text";
-  import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import EditorSurface from "./EditorSurface.svelte";
   import {
     initialViewMode,
@@ -95,9 +94,6 @@
   interface Props {
     /** On screen: leaving it is a moment for "autosave when leaving". */
     visible?: boolean;
-    /** The settings panel beside the text (the file app's gear). */
-    showSettings?: boolean;
-    onCloseSettings?: () => void;
     /** A hint above the text, from the owner (G6: the agent is working in this worktree). */
     notice?: string | null;
     /** ⌘O — the owner decides what opening another file means. */
@@ -125,8 +121,6 @@
 
   let {
     visible = true,
-    showSettings = false,
-    onCloseSettings,
     notice = null,
     onOpenRequest,
     onQuit,
@@ -1075,9 +1069,6 @@
   {/if}
 
   <div class="body">
-    {#if showSettings}
-      <EditorSettingsPanel surface={settings} onClose={() => onCloseSettings?.()} />
-    {/if}
     {#if image}
       {#key image}
         <ImageView root={image.root} rel={image.rel} />

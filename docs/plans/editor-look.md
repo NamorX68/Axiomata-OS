@@ -84,6 +84,17 @@ Vorgänger: `docs/plans/editor.md` (ED0–ED6).
 
 Danach: die Optik je Modul in den Rest der App übertragen, jedes Modul eigens geplant.
 
+**LK0 umgesetzt (2026-09-28, `085d7d6`)** — UI-Skalierung, Schrifttreppe, Icon-System; eingeschoben `3f4be8a`: Kacheln
+auch von links / links unten ziehbar (Owner-Wunsch).
+
+**LK1 umgesetzt (2026-09-28):** `fileapp/Inspector.svelte` als eigene Spalte rechts der Reiter in der Datei-App (nicht
+mehr pro Editor und nicht mehr über dem Text — die Minimap bleibt sichtbar), Reiter Settings | Shortcuts, geöffnet über
+zwei Icon-Knöpfe im Kopf (Regler, Tastatur) statt „⚙“. `fileapp/shortcuts.ts` ist der Katalog; `shortcuts.test.ts`
+drückt jeden Eintrag der geprüften Gruppen durch die echte Keymap (jeder Eintrag muss wirken, jede Wirkung der Keymap
+muss aufgeführt sein) und gleicht die Vi-Gruppen mit `VI_GRAMMAR` (`editor/vi/parse.ts`) und `EX_COMMAND_NAMES`
+(`editor/vi/ex.ts`) ab. Tasten außerhalb der Keymap (Datei-App, Sprachserver, Menüs) sind von Hand gepflegt.
+`EditorSettingsPanel` ist nur noch Inhalt.
+
 ## 4. Offen beim Bau
 
 - Welche Icon-Themes Zed anbietet und was dort „Git“ heißt (K5).
