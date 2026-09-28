@@ -114,6 +114,12 @@ export class CursorGlide {
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
     }
+    // Shown at exactly the scroller's size: a canvas stretched over the minimap or a
+    // scrollbar would draw every glide that much too far right (and too low).
+    const cssW = `${w}px`;
+    const cssH = `${h}px`;
+    if (canvas.style.width !== cssW) canvas.style.width = cssW;
+    if (canvas.style.height !== cssH) canvas.style.height = cssH;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const styles = getComputedStyle(host.styles);

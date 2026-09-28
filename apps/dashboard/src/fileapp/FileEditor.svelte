@@ -976,21 +976,23 @@
             completion={completionPort}
           />
         {/key}
-        {#if renameBox}
-          <input
-            bind:this={renameInput}
-            bind:value={renameBox.name}
-            class="rename"
-            style:left="{renameBox.x}px"
-            style:top="{renameBox.y}px"
-            aria-label="New name"
-            spellcheck="false"
-            autocomplete="off"
-            onkeydown={onRenameKey}
-            onblur={() => (renameBox = null)}
-          />
-        {/if}
       </div>
+      <!-- Positioned in `.body`: the source pane starts at its corner, so the surface's
+           pixels apply as they are. -->
+      {#if renameBox}
+        <input
+          bind:this={renameInput}
+          bind:value={renameBox.name}
+          class="rename"
+          style:left="{renameBox.x}px"
+          style:top="{renameBox.y}px"
+          aria-label="New name"
+          spellcheck="false"
+          autocomplete="off"
+          onkeydown={onRenameKey}
+          onblur={() => (renameBox = null)}
+        />
+      {/if}
       {#if previewKind && viewMode !== "source"}
         <div class="pane preview-pane">
           {#if previewKind === "markdown"}
@@ -1131,7 +1133,6 @@
   }
 
   .pane {
-    position: relative;
     flex: 1;
     min-width: 0;
     display: flex;

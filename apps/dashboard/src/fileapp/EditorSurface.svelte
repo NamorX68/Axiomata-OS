@@ -1085,11 +1085,14 @@
   // A rename changed this document from another editor (`renameApply.ts`): redraw, tell the owner.
   let seenRevision = untrack(() => doc.revision);
   $effect(() =>
-    docTouched.subscribe(() => {
-      if (doc.revision === seenRevision) return;
-      seenRevision = doc.revision;
-      changed(false);
-    }),
+    docTouched.subscribe(() =>
+      // Untracked: what `changed` reads must not make this effect re-subscribe on every redraw.
+      untrack(() => {
+        if (doc.revision === seenRevision) return;
+        seenRevision = doc.revision;
+        changed(false);
+      }),
+    ),
   );
 
   // ---------------------------------------------------------------- completion (ED6.4)
@@ -2214,11 +2217,11 @@
     bottom: 0;
   }
 
+  /* Sized to the scroller's client area by `cursorGlide.ts` (not the minimap, not a scrollbar). */
   .glide {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    top: 0;
+    left: 0;
     z-index: 4;
     pointer-events: none;
     visibility: hidden;
