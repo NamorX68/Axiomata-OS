@@ -17,25 +17,15 @@ import { writable, type Readable } from "svelte/store";
 
 import { getSetting, setSetting } from "../core/persist";
 
-/**
- * How a card should sit on the column beneath it.
- *
- * `auto` leaves it to the theme, which is the right answer most of the time
- * and the default: whether a shadow or a hairline reads at all is a property
- * of the theme's brightness, not a taste (see the note on `--ax-card-*` in
- * `themes/tokens.css`). The other three exist because the owner could not
- * decide between them by description and asked to have all of them — a look
- * is judged by looking.
- */
-export type CardStyle = "auto" | "flat" | "edge" | "raised";
-
-const CARD_STYLES: CardStyle[] = ["auto", "flat", "edge", "raised"];
-
 interface KanbanPrefs {
   /** The board a tile shows when its own instance config does not say. */
   lastBoard?: number;
-  /** How cards sit on their column, across every board and every tile. */
-  cardStyle?: CardStyle;
+  /**
+   * A card's colour stripe from its first label (editor-look B6), across every
+   * board and every tile. There used to be a choice of four card treatments
+   * here (`cardStyle`); one look remains (B7), and a stored choice is ignored.
+   */
+  cardStripes?: boolean;
 }
 
 const KEY = "kanban";
@@ -73,7 +63,7 @@ export function rememberLastBoard(id: number): void {
 }
 
 /**
- * The card treatment, as a store.
+ * Whether cards carry their colour stripe, as a store.
  *
  * A store rather than a plain read, because the two sides of a tile are two
  * components: the switch is on the flip side and the cards it changes are on
@@ -85,19 +75,11 @@ export function rememberLastBoard(id: number): void {
 // while the module registry is being built, which happens before
 // `initPersistence()` has put dashboard.json into the settings bag. The first
 // subscriber is a mounting Kanban component, which is comfortably after.
-const style = writable<CardStyle>("auto", (set) => set(readCardStyle()));
+const stripes = writable<boolean>(true, (set) => set(prefs().cardStripes !== false));
 
-export const cardStyle: Readable<CardStyle> = style;
+export const cardStripes: Readable<boolean> = stripes;
 
-export function setCardStyle(next: CardStyle): void {
-  style.set(next);
-  setSetting(KEY, { ...prefs(), cardStyle: next });
-}
-
-/** Tolerates a hand-edited dashboard.json naming a style that no longer
- *  exists — an unreadable preference is not worth an error, it is worth the
- *  default. */
-function readCardStyle(): CardStyle {
-  const stored = prefs().cardStyle;
-  return stored !== undefined && CARD_STYLES.includes(stored) ? stored : "auto";
+export function setCardStripes(next: boolean): void {
+  stripes.set(next);
+  setSetting(KEY, { ...prefs(), cardStripes: next });
 }

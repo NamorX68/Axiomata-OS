@@ -134,22 +134,23 @@ describe("dueState", () => {
   const now = new Date(2026, 8, 20, 12);
 
   it("calls something due late today 'heute', not 'in 0 T'", () => {
-    expect(dueState(local(20, 23), now)).toEqual({ label: "heute", overdue: false });
+    expect(dueState(local(20, 23), now)).toEqual({ label: "heute", overdue: false, soon: true });
   });
 
   it("counts calendar days, so tomorrow early is still tomorrow", () => {
-    expect(dueState(local(21, 6), now)).toEqual({ label: "morgen", overdue: false });
+    expect(dueState(local(21, 6), now)).toEqual({ label: "morgen", overdue: false, soon: true });
   });
 
   it("marks a past date overdue with how far past it is", () => {
     expect(dueState(local(18, 12), now)).toEqual({
       label: "2 T überfällig",
       overdue: true,
+      soon: false,
     });
   });
 
   it("counts further-out dates in days", () => {
-    expect(dueState(local(25, 12), now).label).toBe("in 5 T");
+    expect(dueState(local(25, 12), now)).toEqual({ label: "in 5 T", overdue: false, soon: false });
   });
 });
 

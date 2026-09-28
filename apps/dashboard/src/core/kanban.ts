@@ -88,6 +88,8 @@ export interface DueState {
   /** Short human label: "heute", "in 3 T", "2 T überfällig". */
   label: string;
   overdue: boolean;
+  /** Due today or tomorrow: the card says so in the warning colour (editor-look B1). */
+  soon: boolean;
 }
 
 /**
@@ -107,10 +109,10 @@ export function dueState(dueAt: string, now: Date = new Date()): DueState {
       86_400_000,
   );
 
-  if (days < 0) return { label: `${Math.abs(days)} T überfällig`, overdue: true };
-  if (days === 0) return { label: "heute", overdue: false };
-  if (days === 1) return { label: "morgen", overdue: false };
-  return { label: `in ${days} T`, overdue: false };
+  if (days < 0) return { label: `${Math.abs(days)} T überfällig`, overdue: true, soon: false };
+  if (days === 0) return { label: "heute", overdue: false, soon: true };
+  if (days === 1) return { label: "morgen", overdue: false, soon: true };
+  return { label: `in ${days} T`, overdue: false, soon: false };
 }
 
 /** Palette index for a label, so the same word always reads the same colour. */

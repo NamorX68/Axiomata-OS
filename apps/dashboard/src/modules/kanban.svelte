@@ -1,3 +1,14 @@
+<script lang="ts" module>
+  import { writable } from "svelte/store";
+
+  /**
+   * A card the small tile asked the large board to show (editor-look B4): the
+   * tile opens the board panel and leaves the card here; the panel for that
+   * board takes it into its side panel. Shared by every Kanban instance.
+   */
+  const focusCard = writable<{ boardId: number; cardId: number } | null>(null);
+</script>
+
 <script lang="ts">
   /**
    * kanban — a board of columns and cards.
@@ -41,9 +52,10 @@
     type ColumnGeometry,
     type DropTarget,
   } from "../core/kanban";
-  import { closeStaged, hostAnchor, openStaged, staged } from "../core/staging";
+  import { closeStaged, openStaged, staged } from "../core/staging";
   import type { ModuleContext } from "../core/types";
-  import { cardStyle, lastBoard, rememberLastBoard } from "./kanbanPrefs";
+  import { cardStripes, lastBoard, rememberLastBoard } from "./kanbanPrefs";
+  import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -156,35 +168,43 @@
   const grouped = $derived($data ? groupByColumn($data.columns, visible) : []);
   const allLabels = $derived($data ? collectLabels($data.cards) : []);
   const boardEmpty = $derived($data !== null && $data.cards.length === 0);
+  /** The card in the large board's side panel (editor-look B4), if one is open. */
+  let sideCardId = $state<number | null>(null);
+  /** The card the detail shows: a stand-alone card panel's, else the side panel's. */
+  const shownCardId = $derived(cardId ?? sideCardId);
   const detail = $derived<BoardCard | null>(
-    cardId === null ? null : ($data?.cards.find((card) => card.id === cardId) ?? null),
+    shownCardId === null ? null : ($data?.cards.find((card) => card.id === shownCardId) ?? null),
   );
 
-  function openCard(card: BoardCard, event: MouseEvent) {
+  // The large board takes a card the tile asked for (B4).
+  $effect(() =>
+    focusCard.subscribe((wanted) => {
+      if (!wanted || !isPanel || wanted.boardId !== boardId) return;
+      showInSide(wanted.cardId);
+      focusCard.set(null);
+    }),
+  );
+
+  function showInSide(id: number | null): void {
+    confirmingDelete = false;
+    sideCardId = id;
+  }
+
+  function openCard(card: BoardCard) {
     // A drag ends with a click on the card it just moved. Without this, every
     // successful drag would also fling the detail panel open.
     if (justDragged) {
       justDragged = false;
       return;
     }
-    // `openStaged` recognises an already-open panel only by `config.path`
-    // (core/staging.ts), so the card id goes in as one — without it every
-    // click would stack another copy of the same card.
-    //
-    // The anchor makes the detail appear over the tile the card was clicked
-    // in, rather than in the middle of the screen: the eye is already there.
-    openStaged("kanban", {
-      path: `card:${card.id}`,
-      cardId: card.id,
-      boardId: card.board_id,
-      anchor: hostAnchor(event.currentTarget as Element),
-      // A card is a short form, not a board. Without its own key it would
-      // inherit the board panel's size, which is far too big for five fields.
-      sizeKey: "kanban-card",
-      // Five lines more body than the fields strictly need — a card is
-      // usually a sentence, but the ones that are not deserve room.
-      panelSize: { w: 520, h: 540 },
-    });
+    // B4: in the large board the card opens in its side panel, the board staying in view; from the
+    // small tile, the large board opens (or comes forward) and shows it there.
+    if (isPanel) {
+      showInSide(sideCardId === card.id ? null : card.id);
+      return;
+    }
+    focusCard.set({ boardId: card.board_id, cardId: card.id });
+    openAsPanel();
   }
 
   function toggleLabel(label: string) {
@@ -412,6 +432,19 @@
   /* ------------------------------------------------------------ writing --- */
 
   let addingTo = $state<number | null>(null);
+  /** The column whose "…" menu is open (editor-look B2). */
+  let colMenu = $state<number | null>(null);
+  type Role = BoardColumn["maps_to_status"];
+  const ROLES: Role[] = ["open", "doing", "done"];
+  const ROLE_NAMES: Record<Role, string> = { open: "offen", doing: "in Arbeit", done: "fertig" };
+
+  /** The menu's "Umbenennen": the column's own name field, selected. */
+  function renameColumn(id: number): void {
+    colMenu = null;
+    const field = rootEl?.querySelector<HTMLInputElement>(`[data-column="${id}"] input.name`);
+    field?.focus();
+    field?.select();
+  }
   let newTitle = $state("");
 
   async function quickAdd(columnId: number) {
@@ -538,8 +571,10 @@
   let savingDetail: Promise<unknown> = Promise.resolve();
 
   function saveDetail(fields: Partial<CardFields>) {
+    // The card is fixed when the edit is made, not when its turn in the queue comes: by then the side
+    // panel may show another card (editor-look B4), and the edit would land on that one.
+    const card = detail;
     savingDetail = savingDetail.then(async () => {
-      const card = detail;
       if (!card) return;
       try {
         await invoke("update_card", {
@@ -587,13 +622,122 @@
       {/if}
       {#if card.due_at}
         {@const due = dueState(card.due_at)}
-        <span class="due" class:over={due.overdue}>{due.label}</span>
+        <span class="due" class:over={due.overdue} class:soon={due.soon}>
+          <Icon name="calendar" size="sm" />{due.label}
+        </span>
       {/if}
     </div>
   {/if}
   {#if showsAssignee(card.assignee)}
-    <p class="who">{actorLabel(card.assignee)}</p>
+    <p class="who">
+      <Icon name={card.assignee.startsWith("agent:") ? "bot" : "user"} size="sm" />{actorLabel(card.assignee)}
+    </p>
   {/if}
+{/snippet}
+
+<svelte:window
+  onclick={(event) => {
+    if (colMenu !== null && !(event.target as Element | null)?.closest?.(".col-menu, .col-tools")) colMenu = null;
+  }}
+  onkeydown={(event) => {
+    if (event.key !== "Escape") return;
+    if (colMenu !== null) colMenu = null;
+    else if (sideCardId !== null && !(event.target as Element | null)?.closest?.("input, textarea, select")) {
+      showInSide(null);
+    }
+  }}
+/>
+
+<!-- A card's detail: in a stand-alone card panel, and in the large board's side panel (editor-look B4). -->
+{#snippet cardDetail(detail: BoardCard)}
+    <article class="detail">
+    <!-- Edited in place rather than behind an edit mode: there is no reading
+         state worth protecting on a card, and a mode would make the common
+         act (fix a typo) cost two extra clicks. Saved on blur, so nothing
+         needs confirming either. -->
+    <input
+      class="detail-title"
+      value={detail.title}
+      aria-label="Titel"
+      onblur={(event) => saveDetail({ title: event.currentTarget.value })}
+    />
+    {#if detail.labels.length > 0}
+      <div class="chips">
+        {#each detail.labels as label (label)}
+          <span class="chip" data-tone={labelColorIndex(label, LABEL_TOKENS)}>{label}</span>
+        {/each}
+      </div>
+    {/if}
+    <textarea
+      class="detail-body"
+      value={detail.body}
+      placeholder="Kein Text."
+      aria-label="Text"
+      onblur={(event) => saveDetail({ body: event.currentTarget.value })}
+    ></textarea>
+    <div class="fields">
+      <label>
+        <span>Labels</span>
+        <input
+          value={detail.labels.join(", ")}
+          placeholder="rust, design"
+          onblur={(event) => saveDetail({ labels: parseLabels(event.currentTarget.value) })}
+        />
+      </label>
+      <label>
+        <span>Fällig</span>
+        <input
+          type="date"
+          value={dueToInput(detail.due_at)}
+          onchange={(event) => saveDetail({ due_at: dueFromInput(event.currentTarget.value) })}
+        />
+      </label>
+      <label>
+        <span>Zuständig</span>
+        <input
+          value={detail.assignee ?? ""}
+          placeholder="human:owner oder agent:name"
+          onblur={(event) =>
+            saveDetail({ assignee: event.currentTarget.value.trim() || null })}
+        />
+      </label>
+    </div>
+
+    <dl>
+      {#if detail.due_at}
+        {@const due = dueState(detail.due_at)}
+        <dt>Fällig in</dt>
+        <dd class:over={due.overdue}>{due.label}</dd>
+      {/if}
+      {#if detail.claimed_by}
+        <dt>Übernommen</dt>
+        <dd>{actorLabel(detail.claimed_by)}</dd>
+      {/if}
+      {#if detail.verified_by}
+        <dt>Abgenommen</dt>
+        <dd>✓ {actorLabel(detail.verified_by)}</dd>
+      {/if}
+      {#if detail.archived_at}
+        <dt>Archiviert</dt>
+        <dd>ja</dd>
+      {/if}
+    </dl>
+
+    <!-- Archiving, not deleting, is how a finished card leaves the board:
+         it stays findable behind the archive filter. Deleting is for cards
+         that should never have existed and lives in CP-K2b's card menu. -->
+    <div class="detail-actions">
+      <button class="ax-btn" onclick={() => setArchived(detail, detail.archived_at === null)}>
+        {detail.archived_at === null ? "Archivieren" : "Zurückholen"}
+      </button>
+      {#if confirmingDelete}
+        <button class="ax-btn danger" onclick={() => removeCard(detail)}>Wirklich löschen</button>
+        <button class="ax-btn" onclick={() => (confirmingDelete = false)}>Abbrechen</button>
+      {:else}
+        <button class="ax-btn danger" onclick={() => (confirmingDelete = true)}>Löschen</button>
+      {/if}
+    </div>
+  </article>
 {/snippet}
 
 {#if listError}
@@ -609,97 +753,10 @@
   {#if detail === null}
     <p class="notice">Diese Karte gibt es nicht mehr.</p>
   {:else}
-    <article class="detail">
-      <!-- Edited in place rather than behind an edit mode: there is no reading
-           state worth protecting on a card, and a mode would make the common
-           act (fix a typo) cost two extra clicks. Saved on blur, so nothing
-           needs confirming either. -->
-      <input
-        class="detail-title"
-        value={detail.title}
-        aria-label="Titel"
-        onblur={(event) => saveDetail({ title: event.currentTarget.value })}
-      />
-      {#if detail.labels.length > 0}
-        <div class="chips">
-          {#each detail.labels as label (label)}
-            <span class="chip" data-tone={labelColorIndex(label, LABEL_TOKENS)}>{label}</span>
-          {/each}
-        </div>
-      {/if}
-      <textarea
-        class="detail-body"
-        value={detail.body}
-        placeholder="Kein Text."
-        aria-label="Text"
-        onblur={(event) => saveDetail({ body: event.currentTarget.value })}
-      ></textarea>
-      <div class="fields">
-        <label>
-          <span>Labels</span>
-          <input
-            value={detail.labels.join(", ")}
-            placeholder="rust, design"
-            onblur={(event) => saveDetail({ labels: parseLabels(event.currentTarget.value) })}
-          />
-        </label>
-        <label>
-          <span>Fällig</span>
-          <input
-            type="date"
-            value={dueToInput(detail.due_at)}
-            onchange={(event) => saveDetail({ due_at: dueFromInput(event.currentTarget.value) })}
-          />
-        </label>
-        <label>
-          <span>Zuständig</span>
-          <input
-            value={detail.assignee ?? ""}
-            placeholder="human:owner oder agent:name"
-            onblur={(event) =>
-              saveDetail({ assignee: event.currentTarget.value.trim() || null })}
-          />
-        </label>
-      </div>
-
-      <dl>
-        {#if detail.due_at}
-          {@const due = dueState(detail.due_at)}
-          <dt>Fällig in</dt>
-          <dd class:over={due.overdue}>{due.label}</dd>
-        {/if}
-        {#if detail.claimed_by}
-          <dt>Übernommen</dt>
-          <dd>{actorLabel(detail.claimed_by)}</dd>
-        {/if}
-        {#if detail.verified_by}
-          <dt>Abgenommen</dt>
-          <dd>✓ {actorLabel(detail.verified_by)}</dd>
-        {/if}
-        {#if detail.archived_at}
-          <dt>Archiviert</dt>
-          <dd>ja</dd>
-        {/if}
-      </dl>
-
-      <!-- Archiving, not deleting, is how a finished card leaves the board:
-           it stays findable behind the archive filter. Deleting is for cards
-           that should never have existed and lives in CP-K2b's card menu. -->
-      <div class="detail-actions">
-        <button onclick={() => setArchived(detail, detail.archived_at === null)}>
-          {detail.archived_at === null ? "Archivieren" : "Zurückholen"}
-        </button>
-        {#if confirmingDelete}
-          <button class="danger" onclick={() => removeCard(detail)}>Wirklich löschen</button>
-          <button onclick={() => (confirmingDelete = false)}>Abbrechen</button>
-        {:else}
-          <button onclick={() => (confirmingDelete = true)}>Löschen</button>
-        {/if}
-      </div>
-    </article>
+    {@render cardDetail(detail)}
   {/if}
 {:else}
-  <div class="kanban" data-cards={$cardStyle} bind:this={rootEl}>
+  <div class="kanban" class:stripes={$cardStripes} bind:this={rootEl}>
     <!-- The board says which board it is, and offers the two things you
          otherwise had to flip the tile to find. Boards are *managed* on the
          flip side (create, rename, delete — settings); switching between them
@@ -719,38 +776,42 @@
       {:else}
         <span class="board-name">{$data.board?.name ?? ""}</span>
       {/if}
-      <button class="head-action add-col" onclick={addColumn}>+ Spalte</button>
+      {#if isPanel}
+        <!-- One toolbar in the large board (editor-look B5); the filters stay out of the tile,
+             which is for glancing at. -->
+        <label class="filter">
+          <Icon name="search" size="sm" />
+          <input type="search" placeholder="Karten filtern …" bind:value={filterText} aria-label="Karten filtern" />
+        </label>
+        <span class="label-filters">
+          {#each allLabels as label (label)}
+            <button
+              class="chip"
+              data-tone={labelColorIndex(label, LABEL_TOKENS)}
+              class:on={activeLabels.includes(label)}
+              aria-pressed={activeLabels.includes(label)}
+              onclick={() => toggleLabel(label)}
+            >
+              {label}
+            </button>
+          {/each}
+        </span>
+        <IconButton
+          icon="archive"
+          label={showArchived ? "Archivierte Karten ausblenden" : "Archivierte Karten zeigen"}
+          pressed={showArchived}
+          onclick={() => (showArchived = !showArchived)}
+        />
+      {:else}
+        <span class="spacer"></span>
+      {/if}
+      <IconButton icon="columns-3" label="Spalte hinzufügen" onclick={addColumn} />
       {#if !isPanel}
         <IconButton icon="maximize-2" label="Brett groß öffnen" onclick={openAsPanel} />
       {/if}
     </div>
 
-    {#if isPanel}
-      <!-- Filters live in the panel only: the tile is for glancing at. -->
-      <div class="filters">
-        <input
-          type="search"
-          placeholder="Karten filtern …"
-          bind:value={filterText}
-          aria-label="Karten filtern"
-        />
-        {#each allLabels as label (label)}
-          <button
-            class="chip"
-            data-tone={labelColorIndex(label, LABEL_TOKENS)}
-            class:on={activeLabels.includes(label)}
-            onclick={() => toggleLabel(label)}
-          >
-            {label}
-          </button>
-        {/each}
-        <label class="archived">
-          <input type="checkbox" bind:checked={showArchived} />
-          Archiv
-        </label>
-      </div>
-    {/if}
-
+    <div class="work">
     <div class="board" style="--min-col: calc({MIN_COL_PX}px * var(--ax-ui-scale))" bind:this={boardEl}>
       {#each grouped as { column, cards } (column.id)}
         <section class="col" data-column={column.id} class:col-lifted={draggingColumn?.id === column.id}>
@@ -765,7 +826,8 @@
             <!-- A grip, because the header is almost entirely the name field
                  and form controls never start a drag — without it there is
                  nothing to take hold of. Same idea as the tile's own grip. -->
-            <span class="col-grip" aria-hidden="true">⠿</span>
+            <span class="col-grip" aria-hidden="true"><Icon name="grip-vertical" size="sm" /></span>
+            <span class="role" data-role={column.maps_to_status} title={ROLE_NAMES[column.maps_to_status]}></span>
             <input
               class="name"
               value={column.name}
@@ -774,37 +836,58 @@
               onblur={(event) => saveColumn(column, { name: event.currentTarget.value })}
             />
             <span class="count">{cards.length}</span>
-            <!-- D4: the controls stay out of sight until the pointer or the
-                 keyboard comes near. A menu on every column head is noise. -->
-            <span class="col-tools">
-              <select
-                data-no-drag
-                aria-label="Status der Spalte"
-                value={column.maps_to_status}
-                onchange={(event) =>
-                  saveColumn(column, {
-                    maps_to_status: event.currentTarget.value as BoardColumn["maps_to_status"],
-                  })}
-              >
-                <option value="open">offen</option>
-                <option value="doing">in Arbeit</option>
-                <option value="done">fertig</option>
-              </select>
-              <button
-                data-no-drag
-                aria-label="Spalte entfernen"
-                onclick={() => (removingColumn = { id: column.id, held: cards.length })}
-              >
-                ✕
-              </button>
+            <!-- D4: the controls stay out of sight until the pointer or the keyboard comes near — now one
+                 "…" menu (editor-look B2) instead of a select and a ×. -->
+            <span class="col-tools" class:menu-shown={colMenu === column.id} data-no-drag>
+              <IconButton
+                icon="ellipsis"
+                size="sm"
+                label="Spalte {column.name}: Aktionen"
+                pressed={colMenu === column.id}
+                onclick={() => (colMenu = colMenu === column.id ? null : column.id)}
+              />
             </span>
+            {#if colMenu === column.id}
+              <div class="col-menu" role="menu" data-no-drag>
+                <p class="menu-label">Rolle</p>
+                {#each ROLES as role (role)}
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={column.maps_to_status === role}
+                    onclick={() => {
+                      colMenu = null;
+                      void saveColumn(column, { maps_to_status: role });
+                    }}
+                  >
+                    <span class="role" data-role={role}></span>{ROLE_NAMES[role]}
+                    {#if column.maps_to_status === role}<Icon name="check" size="sm" />{/if}
+                  </button>
+                {/each}
+                <hr />
+                <button type="button" role="menuitem" onclick={() => renameColumn(column.id)}>
+                  <Icon name="pencil" size="sm" />Umbenennen
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="danger"
+                  onclick={() => {
+                    colMenu = null;
+                    removingColumn = { id: column.id, held: cards.length };
+                  }}
+                >
+                  <Icon name="trash-2" size="sm" />Entfernen
+                </button>
+              </div>
+            {/if}
           </header>
 
           {#if removingColumn?.id === column.id}
             <div class="col-remove">
               {#if removingColumn.held === 0}
                 <span>Spalte entfernen?</span>
-                <button onclick={() => removeColumn(column, null)}>Entfernen</button>
+                <button class="ax-btn danger" onclick={() => removeColumn(column, null)}>Entfernen</button>
               {:else}
                 <span>{removingColumn.held} Karten wohin?</span>
                 <select
@@ -817,7 +900,7 @@
                   {/each}
                 </select>
               {/if}
-              <button onclick={() => (removingColumn = null)}>Abbrechen</button>
+              <button class="ax-btn" onclick={() => (removingColumn = null)}>Abbrechen</button>
             </div>
           {/if}
           <div class="cards">
@@ -827,6 +910,7 @@
               {/if}
               <article
                 class="card"
+                data-tone={card.labels.length > 0 ? labelColorIndex(card.labels[0], LABEL_TOKENS) : undefined}
                 class:archived={card.archived_at !== null}
                 class:lifted={dragging?.id === card.id || carrying?.id === card.id}
                 class:settling={settling.has(card.id)}
@@ -840,7 +924,7 @@
               >
                 <button
                   class="open"
-                  onclick={(event) => openCard(card, event)}
+                  onclick={() => openCard(card)}
                   onkeydown={(event) => onCardKey(event, card, column.id, index)}
                 >
                   <span class="title">{card.title}</span>
@@ -882,12 +966,27 @@
             </form>
           {:else}
             <button class="add" data-no-drag onclick={() => ((addingTo = column.id), (newTitle = ""))}>
-              + Karte
+              <Icon name="plus" size="sm" /> Karte
             </button>
           {/if}
         </section>
       {/each}
 
+    </div>
+    {#if isPanel && sideCardId !== null}
+      <!-- B4: the card beside the board, which stays in view; another card's click swaps it. -->
+      <aside class="side-detail" aria-label="Karte">
+        <header class="side-head">
+          <span>Karte</span>
+          <IconButton icon="x" size="sm" label="Karte schließen (Esc)" onclick={() => showInSide(null)} />
+        </header>
+        {#if detail}
+          {@render cardDetail(detail)}
+        {:else}
+          <p class="notice">Diese Karte gibt es nicht mehr.</p>
+        {/if}
+      </aside>
+    {/if}
     </div>
 
     {#if dragging}
@@ -915,24 +1014,6 @@
 {/if}
 
 <style>
-  /* How a card sits on its column, when the user overrides the theme's own
-     answer (`modules/kanbanPrefs.ts`). Only the three tokens the card face
-     reads are touched, so the override reaches the drag ghost and the card
-     detail for free — they are the same face. `auto` sets nothing at all and
-     leaves the theme's values standing. */
-  .kanban[data-cards="flat"] {
-    --ax-card-border: transparent;
-    --ax-card-shadow: none;
-  }
-  .kanban[data-cards="edge"] {
-    --ax-card-border: var(--ax-border);
-    --ax-card-shadow: none;
-  }
-  .kanban[data-cards="raised"] {
-    --ax-card-border: transparent;
-    --ax-card-shadow: var(--ax-card-shadow-raised);
-  }
-
   .kanban {
     /* The drag ghost is positioned against this box. */
     position: relative;
@@ -986,29 +1067,67 @@
     border-color: var(--ax-border);
   }
 
-  .filters {
+  /* The large board's toolbar (B5): the filter field takes what width is left. */
+  .spacer {
+    flex: 1;
+  }
+  .filter {
     display: flex;
-    flex-wrap: wrap;
+    flex: 1 1 calc(160px * var(--ax-ui-scale));
     align-items: center;
     gap: var(--ax-space-2);
-  }
-  .filters input[type="search"] {
-    flex: 1 1 calc(160px * var(--ax-ui-scale));
     min-width: 0;
     padding: var(--ax-space-1) var(--ax-space-2);
     border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
+    border-radius: var(--ax-radius-md);
     background: var(--ax-surface-2);
+    color: var(--ax-text-muted);
+  }
+  .filter:focus-within {
+    border-color: var(--ax-accent);
+  }
+  .kanban .filter input[type="search"] {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
     color: var(--ax-text);
     font: inherit;
     font-size: var(--ax-font-size-sm);
   }
-  .archived {
+  .label-filters {
     display: inline-flex;
-    align-items: center;
+    flex-wrap: wrap;
     gap: var(--ax-space-1);
+  }
+
+  /* The board and, in the large board, the card beside it (B4). */
+  .work {
+    display: flex;
+    gap: var(--ax-space-2);
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .side-detail {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 min(calc(400px * var(--ax-ui-scale)), 45%);
+    min-height: 0;
+    padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-3);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-lg);
+    background: var(--ax-surface-1);
+  }
+  .side-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
   }
 
   /* D1: squeeze to --min-col, then scroll sideways. A board that hides a
@@ -1017,6 +1136,8 @@
     display: flex;
     gap: var(--ax-space-2);
     flex: 1 1 auto;
+    /* Shrinks beside the side panel instead of pushing it out (B4). */
+    min-width: 0;
     min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
@@ -1027,9 +1148,9 @@
     min-height: 0;
     flex: 1 1 0;
     min-width: var(--min-col);
-    /* D3: the desk the cards lie on — a tint, never a frame. */
-    background: var(--ax-bg);
-    border-radius: var(--ax-radius-md);
+    /* D3, B2: a lane the cards lie on — a tint, rounded, never a frame. */
+    background: color-mix(in srgb, var(--ax-surface-1) 70%, var(--ax-bg));
+    border-radius: var(--ax-radius-lg);
     padding: var(--ax-space-2);
     container: col / inline-size;
   }
@@ -1042,9 +1163,24 @@
        reach for them. */
     position: relative;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--ax-space-2);
     padding: 0 var(--ax-space-1) var(--ax-space-2);
+  }
+  /* The column's role (B2): a dot — open grey, in progress the accent, done green. */
+  .role {
+    flex: 0 0 auto;
+    width: calc(8px * var(--ax-ui-scale));
+    height: calc(8px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-text-muted);
+  }
+  /* An attribute, not a class: `open` is already the card button's class here. */
+  .role[data-role="doing"] {
+    background: var(--ax-accent);
+  }
+  .role[data-role="done"] {
+    background: var(--ax-success);
   }
   /* Quiet until touched: the header should read as a heading, not as a form.
      Selectors are deliberately more specific than a bare class — styles.css's
@@ -1075,25 +1211,26 @@
   /* Taken out of the flow: laid out in it, these would keep their width even
      while invisible and squeeze the column name down to nothing on a narrow
      column. They overlay the name's tail only while actually shown. */
+  /* Taken out of the flow: laid out in it, it would keep its width even while invisible and squeeze
+     the column name on a narrow column. It overlays the name's tail only while shown. */
   .col-tools {
     position: absolute;
     right: 0;
-    top: 0;
+    top: 50%;
+    translate: 0 -60%;
     display: inline-flex;
-    align-items: center;
-    gap: var(--ax-space-1);
     padding-left: var(--ax-space-2);
-    background: var(--ax-bg);
+    background: color-mix(in srgb, var(--ax-surface-1) 70%, var(--ax-bg));
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--ax-dur-fast) var(--ax-ease);
   }
   .col:hover .col-tools,
-  .col-tools:focus-within {
+  .col-tools:focus-within,
+  .col-tools.menu-shown {
     opacity: 1;
     pointer-events: auto;
   }
-  .col-tools select,
   .col-remove select {
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-sm);
@@ -1102,15 +1239,52 @@
     font: inherit;
     font-size: var(--ax-font-size-xs);
   }
-  .col-tools button {
-    border: 0;
-    background: transparent;
+
+  /* The column's "…" menu (B2). */
+  .col-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    min-width: calc(180px * var(--ax-ui-scale));
+    padding: var(--ax-space-1);
+    border: 1px solid var(--ax-border-strong);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-surface-2);
+    box-shadow: var(--ax-shadow-pop);
+  }
+  .col-menu .menu-label {
+    margin: var(--ax-space-1) var(--ax-space-2);
     color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+  .col-menu button {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 0;
+    border-radius: var(--ax-radius-sm);
+    background: none;
+    color: var(--ax-text);
     font: inherit;
+    font-size: var(--ax-font-size-sm);
+    text-align: left;
     cursor: pointer;
   }
-  .col-tools button:hover {
+  .col-menu button:hover {
+    background: var(--ax-surface-3);
+  }
+  .col-menu button.danger {
     color: var(--ax-danger);
+  }
+  .col-menu hr {
+    width: 100%;
+    margin: var(--ax-space-1) 0;
+    border: 0;
+    border-top: 1px solid var(--ax-border);
   }
 
   .col-remove {
@@ -1125,42 +1299,14 @@
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
   }
-  .col-remove button {
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: var(--ax-font-size-xs);
-    cursor: pointer;
-  }
-
-  /* Board-wide actions live in the board header, not in the column row: a
-     button in that row costs the columns width, and at the default tile size
-     that is the difference between labels as chips and labels as bare dots. */
-  .head-action {
-    flex: 0 0 auto;
-    padding: 1px var(--ax-space-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-    background: transparent;
-    color: var(--ax-text-muted);
-    font: inherit;
-    font-size: var(--ax-font-size-xs);
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .head-action:hover {
-    color: var(--ax-accent);
-    border-color: var(--ax-accent);
-  }
-  .add-col {
-    margin-left: auto;
-  }
+  /* The count as a small pill (B2). */
   .count {
+    padding: 0 var(--ax-space-2);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-    font-family: var(--ax-font-mono);
+    line-height: 1.6;
   }
 
   .cards {
@@ -1172,13 +1318,27 @@
     flex: 1 1 auto;
   }
 
-  /* The theme decides how a card sits on its surface (CP-K2-Design). */
+  /* One card look (editor-look B1, B7): the theme's card surface with a hairline, lifting a little
+     under the pointer. A light theme may add its own resting shadow (`--ax-card-shadow`). */
   .card {
     background: var(--ax-card-bg);
-    border: 1px solid var(--ax-card-border);
+    border: 1px solid var(--ax-border);
     box-shadow: var(--ax-card-shadow);
     border-radius: var(--ax-radius-md);
-    padding: var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-3);
+    transition:
+      box-shadow var(--ax-dur-fast) var(--ax-ease),
+      border-color var(--ax-dur-fast) var(--ax-ease),
+      translate var(--ax-dur-fast) var(--ax-ease);
+  }
+  .card:hover {
+    border-color: var(--ax-border-strong);
+    box-shadow: var(--ax-card-shadow-raised);
+    translate: 0 -1px;
+  }
+  /* B6: a stripe in the first label's colour, so cards of one topic belong together at a glance. */
+  .stripes .card[data-tone] {
+    border-left: 3px solid var(--tone);
   }
   .card.archived {
     opacity: 0.55;
@@ -1203,9 +1363,13 @@
     background: var(--ax-accent);
   }
 
+  /* "+ Karte": a quiet row at the column's foot (B3). */
   .add {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
     margin-top: var(--ax-space-2);
-    padding: var(--ax-space-1);
+    padding: var(--ax-space-1) var(--ax-space-2);
     border: 0;
     border-radius: var(--ax-radius-sm);
     background: transparent;
@@ -1224,9 +1388,9 @@
     opacity: 0.5;
   }
   .col-grip {
+    display: inline-flex;
     flex: 0 0 auto;
     color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
     opacity: 0.35;
     cursor: grab;
     user-select: none;
@@ -1335,16 +1499,16 @@
     flex-wrap: wrap;
     gap: var(--ax-space-1);
   }
-  /* D2: labels are the only thing on the board that carries colour. */
+  /* D2: labels are the only thing on the board that carries colour — filled, softly tinted (B1). */
   .chip {
-    padding: 0 calc(6px * var(--ax-ui-scale));
-    border: 1px solid var(--tone);
+    padding: 0 calc(7px * var(--ax-ui-scale));
+    border: 1px solid transparent;
     border-radius: var(--ax-radius-pill);
-    background: transparent;
-    color: var(--tone);
+    background: color-mix(in srgb, var(--tone) 18%, transparent);
+    color: color-mix(in srgb, var(--tone) 85%, var(--ax-text));
     font: inherit;
     font-size: var(--ax-font-size-xs);
-    line-height: 1.6;
+    line-height: 1.7;
   }
   button.chip {
     cursor: pointer;
@@ -1374,20 +1538,34 @@
   .verified {
     color: var(--ax-success);
   }
+  /* The due date with its calendar icon (B1): quiet, the warning colour today and tomorrow, red once past. */
   .due {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
     margin-left: auto;
     color: var(--ax-text-muted);
-    font-family: var(--ax-font-mono);
     white-space: nowrap;
+  }
+  .due.soon {
+    color: var(--ax-warning);
   }
   .due.over {
     color: var(--ax-danger);
   }
+  /* Who holds the card (B1): a small badge — a bot for an agent, a person for a human. */
   .who {
-    margin: var(--ax-space-1) 0 0;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    max-width: 100%;
+    margin: var(--ax-space-2) 0 0;
+    padding: 0 var(--ax-space-2) 0 var(--ax-space-1);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
     color: var(--ax-text-muted);
-    font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
+    line-height: 1.7;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1500,24 +1678,6 @@
     display: flex;
     gap: var(--ax-space-2);
     margin-top: var(--ax-space-4);
-  }
-  .detail-actions button {
-    padding: var(--ax-space-1) var(--ax-space-3);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    background: transparent;
-    color: var(--ax-text-muted);
-    font: inherit;
-    font-size: var(--ax-font-size-sm);
-    cursor: pointer;
-  }
-  .detail-actions button.danger {
-    color: var(--ax-danger);
-    border-color: var(--ax-danger);
-  }
-  .detail-actions button:hover {
-    color: var(--ax-text);
-    border-color: var(--ax-border-strong);
   }
   dl {
     display: grid;

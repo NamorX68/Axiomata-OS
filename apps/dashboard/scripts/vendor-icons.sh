@@ -18,18 +18,24 @@ WORK="${TMPDIR:-/tmp}/axiomata-icons"
 
 # Sorted; each is a file `icons/<name>.svg` in the package.
 ICONS=(
+  archive
+  archive-restore
   book-open
   bot
+  calendar
   check
   chevron-down
   chevron-right
   circle-alert
+  circle-check
   code
   columns-2
+  columns-3
   container
   copy
   database
   ellipsis
+  ellipsis-vertical
   external-link
   eye
   eye-off
@@ -50,6 +56,7 @@ ICONS=(
   git-commit-vertical
   git-compare
   git-merge
+  grip-vertical
   history
   inbox
   info
@@ -79,6 +86,7 @@ ICONS=(
   text-search
   trash-2
   undo-2
+  user
   wrap-text
   x
 )

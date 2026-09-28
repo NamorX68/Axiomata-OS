@@ -17,16 +17,7 @@
   import { invokeBackend as invoke, type Board } from "../core/backend";
   import { forgetBoard, refreshBoard } from "../core/boardStore";
   import type { ModuleContext } from "../core/types";
-  import { cardStyle, rememberLastBoard, setCardStyle, type CardStyle } from "./kanbanPrefs";
-
-  /** The card treatments, in the order they are offered. `auto` first because
-   *  it is the default and the right answer unless the eye says otherwise. */
-  const CARD_STYLE_CHOICES: { id: CardStyle; label: string; note: string }[] = [
-    { id: "auto", label: "Automatisch", note: "das Thema entscheidet" },
-    { id: "flat", label: "Flach", note: "nur der Tonwert trennt" },
-    { id: "edge", label: "Kante", note: "eine Haarlinie ringsum" },
-    { id: "raised", label: "Schwebend", note: "ein leichter Schatten" },
-  ];
+  import { cardStripes, rememberLastBoard, setCardStripes } from "./kanbanPrefs";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // svelte-ignore state_referenced_locally
@@ -175,22 +166,10 @@
   </form>
 
   <h3>Karten</h3>
-  <ul class="styles">
-    {#each CARD_STYLE_CHOICES as choice (choice.id)}
-      <li>
-        <label>
-          <input
-            type="radio"
-            name="card-style-{ctx.instanceId}"
-            checked={$cardStyle === choice.id}
-            onchange={() => setCardStyle(choice.id)}
-          />
-          <span class="label">{choice.label}</span>
-          <span class="note">{choice.note}</span>
-        </label>
-      </li>
-    {/each}
-  </ul>
+  <label class="stripes">
+    <input type="checkbox" checked={$cardStripes} onchange={(e) => setCardStripes(e.currentTarget.checked)} />
+    <span>Farbstreifen nach dem ersten Label</span>
+  </label>
   <p class="hint">Gilt für alle Bretter.</p>
 </div>
 
@@ -297,22 +276,10 @@
     gap: var(--ax-space-2);
     margin-top: var(--ax-space-2);
   }
-  ul.styles {
-    gap: 0;
-  }
-  ul.styles label {
-    align-items: baseline;
+  .stripes {
+    display: flex;
+    align-items: center;
     gap: var(--ax-space-2);
-    padding: var(--ax-space-1) 0;
     cursor: pointer;
-  }
-  ul.styles .label {
-    flex: 0 0 auto;
-  }
-  ul.styles .note {
-    flex: 1 1 auto;
-    min-width: 0;
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
   }
 </style>

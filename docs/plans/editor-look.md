@@ -161,7 +161,7 @@ Reiter-Tönung (I7), Diff und Dialoge (I6).
 erst beim ersten Öffnen des Reiters entsteht und nur abfragt, solange sie sichtbar ist — vorher kein Abzeichen, danach
 kann es veralten. Ein immer aktuelles Abzeichen bräuchte eine eigene Abfrage je Agent; offen zum Entscheiden.
 
-## 6. Die Optik im Kanban (gegrillt 2026-09-28, B1–B7) — noch nicht gebaut
+## 6. Die Optik im Kanban (gegrillt 2026-09-28, B1–B7)
 
 Zweites Modul nach der IDE. Heutiger Stand (Browser-Blick): flache Karten mit umrandeten Label-Chips, Fälligkeit und
 Zuständiger als Mono-Text; Spalten mit Griff, Name und Zahl, beim Überfahren ein rohes Auswahlfeld (Rolle) und ×; das
@@ -187,6 +187,15 @@ Karten-Detail als Kasten über der mittleren Spalte; „+ Spalte“, „+ Karte�
 
 Checkpoints (Vorschlag): **KB1** Karten + ein Stil + Farbstreifen (B1, B6, B7); **KB2** Spalten + Knöpfe + Kopfleiste
 (B2, B3, B5); **KB3** Detail als Seitenleiste (B4).
+
+**KB1–KB3 umgesetzt (2026-09-28):** Karten mit Haarlinie, Anheben beim Überfahren, gefüllten Label-Chips, Fälligkeit mit
+Kalender-Icon (`dueState` kennt jetzt `soon`), Zuständigem als Abzeichen; Farbstreifen nach dem ersten Label (Schalter in
+den Kanban-Einstellungen, `kanbanPrefs.cardStripes`); die vier Kartenstile sind weg. Spalten als Bahnen mit Rollen-Punkt
+(als `data-role` — die Klasse `open` ist im Kanban schon der Kartenknopf), Zahl als Pille, „…“-Menü mit Rolle, Umbenennen,
+Entfernen; „+ Karte“ als Zeile, „+ Spalte“ und Archiv als Icons, im großen Brett eine Werkzeugleiste mit Filterfeld und
+Label-Chips. Das Karten-Detail ist im großen Brett eine Seitenleiste rechts (Esc schließt); ein Klick in der Kachel öffnet
+das große Brett und reicht die Karte über einen modulweiten Store (`focusCard`) hinüber. Einzelkarten-Panels älterer
+Stände (`config.cardId`) zeigen weiter dasselbe Detail.
 
 ## 4. Offen beim Bau
 
