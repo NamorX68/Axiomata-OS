@@ -1253,7 +1253,8 @@ Edition der Crate, prettier, stylua, shfmt; Text über stdin, 10 s Grenze), Taur
 andere direkt + `docTouched`) und schreibt geschlossene Dateien mit Versionsprüfung; Dateien außerhalb der Wurzeln
 bleiben unangetastet. Security-Review: Prettiers Suche nach seiner Konfiguration (die sonst bis `/` hinaufgeht und
 `prettier.config.js` ausführt) macht Rust selbst und nur bis zur Wurzel (`--config <datei>` oder `--no-config`);
-höchstens 4 Formatierer laufen gleichzeitig. Der Client meldet `resourceOperations: []` — `rust-analyzer` lehnt ein Modul-Umbenennen dann
+höchstens 4 Formatierer laufen gleichzeitig. Nachtrag: Sprachserver, Formatierer und Toolchain-Abfragen laufen in einer
+Umgebung mit Freigabeliste (`axiomata-files::toolenv`) — keine API-Schlüssel, kein `NODE_OPTIONS`. Der Client meldet `resourceOperations: []` — `rust-analyzer` lehnt ein Modul-Umbenennen dann
 ab, der Editor sagt es verständlich. Live geprüft: ruff (Importe + Format, Syntaxfehler gemeldet), rustfmt
 (Edition 2024), prettier (aus Mason), Umbenennen über zwei Dateien mit `rust-analyzer`. Offen: Live-Test in der App;
 Code-Aktionen (vorgemerkt).

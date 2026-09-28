@@ -1231,6 +1231,10 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   step each (another editor's surface redraws on `docTouched`), closed files through the file service with a
   version check, nothing outside the roots; the client declares no resource operations, so a rename that would
   move files is refused by the server. The search path ends in `~/.local/share/nvim/mason/bin` (L15).
+  Every tool the editor starts — language servers, formatters, `rustc --print sysroot` — runs in an
+  allow-listed environment (`axiomata-files::toolenv`: home, user, locale, temp folder, the toolchains' own
+  variables; `PATH` = the editor's search path plus the system folders), never the app's whole one: no API
+  keys, no `NODE_OPTIONS`.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the
