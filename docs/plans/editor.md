@@ -98,7 +98,8 @@ für die IDE muss auch Projektordner und Agenten-Worktrees öffnen.
   erreichbar über ein Zahnrad im Editor, mit **Live-Vorschau** (Code-Beispiel mit Cursor,
   Zeilennummern, Hervorhebung). Inhalt: Modus normal/Vi (Vorgabe normal), Schrift,
   Schnitt, Größe, Zeilenhöhe, Ligaturen, Zeilennummern absolut/relativ/hybrid, Effekte
-  an/aus, Zwischenablage, Autospeichern, LSP-Befehle je Sprache.
+  an/aus, Zwischenablage, Autospeichern. (Die LSP-Befehle je Sprache stehen seit ED6 nicht hier, sondern
+  in `~/.axiomata/lsp.json`, die nur Rust liest — L2.)
 - **D7 — Schriften** (Q13): Der Schnitt-Regler bietet nur **echte** Schnitte, geladen
   erst bei Bedarf. v1: die elf mitgelieferten Mono-Schriften mit **allen** ihren
   Schnitten (Thin 100 bei JetBrains, IBM Plex, Roboto, Victor; ab 200 Source Code Pro
@@ -1117,6 +1118,51 @@ Sicherheitsprüfung (voll): nur LOW. Über Wurzeln hinweg ist ein Verschieben sc
 beide Pfade), „in sich selbst“ verhindert ohnehin der Kernel; die Meldung dafür vergleicht jetzt Pfad-Komponenten statt
 roher Zeichenketten (`./src/x`, `src//x`). Kein zusätzliches Sonnet-Review: der Diff ist klein, die Sicherheitsprüfung
 deckt ihn ab.
+
+### ED6 im Detail (gegrillt 2026-09-28, Q0–Q11, bestätigt)
+
+Vorlauf und zwölf Entscheidungen (L0–L11). D18 bleibt der Rahmen (Server auf dem `PATH` erkannt, einer
+pro Wurzel und Sprache, Reihenfolge Diagnosen → Hover → Definition → Vervollständigung →
+Formatieren/Umbenennen); D6 wird in einem Punkt geändert (L2).
+
+- **L0 — Vorlauf `$HOME`** (Q0): `normalize_root` lehnt als IDE-Projektwurzel `$HOME` selbst und alles
+  darüber (`/Users`, `/`) ab, mit klarer Meldung. Alles *innerhalb* des Home-Ordners bleibt erlaubt
+  (`~/Documents`, …). Grund: ein Projekt „Home“ gäbe dem Webview das ganze Home, und ein Sprachserver
+  würde es indizieren. Erledigt damit die Owner-Notiz zur `$HOME`-Wurzel.
+- **L1 — Aufgeteilt** (Q1): Rust (`axiomata-files`) startet/beendet die Server, macht das
+  `Content-Length`-Framing und reicht ganze JSON-Nachrichten über einen Tauri-Kanal durch; das Protokoll
+  (Initialisierung, Dokument-Synchronisation mit Rope-Versionen, UTF-16-Positionen, Antworten) lebt in
+  TypeScript unter `src/editor/lsp/` — ohne DOM/Svelte, extrahierbar wie der Rest der Engine (D1).
+- **L2 — Welche Befehle laufen, entscheidet Rust** (Q2): eine eingebaute Tabelle bekannter Server, auf dem
+  `PATH` erkannt; Überschreiben nur in `~/.axiomata/lsp.json`, die **kein** Tauri-Befehl schreibt (von
+  Hand, oder im Editor über den Datei-Dienst mit Dialog-Freigabe). **Ändert D6:** keine LSP-Befehle in
+  `editor-settings.json` — die schreibt der Webview, und ein kompromittierter Webview dürfte sonst
+  Programme starten lassen.
+- **L3 — Wo** (Q3): Datei-App im Vollbild und IDE-Pane. Nicht im schwebenden Panel und nicht in der
+  Second-Brain-Vorschau (kurze Blicke; wie Minimap/Sticky Scroll dort aus).
+- **L4 — Wurzeln und Lebensdauer** (Q4): ein Server pro (Wurzel, Sprache), gestartet mit der ersten Datei
+  seiner Sprache in dieser Wurzel, beendet nach 10 Minuten ohne offene Datei der Wurzel. Workspace,
+  Projekt und Worktree gleich behandelt (jeder Worktree hat seinen Stand); `grant:`-Einzeldateien
+  bekommen keinen.
+- **L5 — Checkpoints** (Q5): **ED6.1** Server-Verwaltung + Protokoll-Basis + **Diagnosen**; **ED6.2**
+  **Hover** + **Definition** (auch in andere Dateien, als Reiter); **ED6.3** **Vervollständigung**;
+  **ED6.4** **Formatieren** + **Umbenennen** (Änderungen über mehrere Dateien; nicht offene Dateien über
+  den geschützten Datei-Dienst).
+- **L6 — Diagnosen** (Q6): Wellenlinie je Schwere (Farben über `--ax-*`), Marke am Zeilenrand, Meldung
+  beim Überfahren; Einstellung „Meldung am Zeilenende“, Vorgabe aus.
+- **L7 — Tasten** (Q7): normal F12/⌘-Klick Definition, Überfahren Hover, F8/⇧F8 Probleme, ⌃Space
+  Vervollständigung, ⇧⌥F Formatieren, F2 Umbenennen; Vi `gd`, `K`, `]d`/`[d`, ⌃Space im Insert,
+  `:format`, `:rename <name>`.
+- **L8 — Formatieren beim Speichern** (Q8): Einstellung, Vorgabe aus.
+- **L9 — Snippets** (Q9): Platzhalter werden als ihr Vorgabetext eingesetzt, der Cursor steht auf dem
+  ersten; Tab-Springen durch Platzhalter folgt später.
+- **L10 — Sprachen und Abnahme** (Q10): die Tabelle deckt die 15 tree-sitter-Sprachen ab, wo ein gängiger
+  Server existiert; fehlt einer, ein ruhiger Hinweis mit dem Installationsbefehl. Live abgenommen mit
+  `rust-analyzer` und `pyright`; TypeScript/Svelte, sobald der Owner sie installiert — nichts wird
+  ungefragt installiert.
+- **L11 — Definition außerhalb der Wurzeln** (Q11): schreibgeschützt öffnen, aber nur Pfade, die der
+  Server selbst in einer Definitions-Antwort genannt hat (Rust liest diese eine Antwortart mit — eine
+  gezielte Ausnahme von L1), reguläre Datei, keine Verknüpfung. Der Webview kann keinen Pfad unterschieben.
 
 ## 6. Verifikation (pro Meilenstein)
 
