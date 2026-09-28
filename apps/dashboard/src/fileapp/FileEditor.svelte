@@ -77,6 +77,7 @@
   import { definitionFile, openOnServer, type LspDocument } from "./lsp";
   import { buildLocationList, type LocationList } from "./locationList";
   import type { CompletionPort } from "./completionMenu";
+  import type { SignaturePort } from "./signatureHint";
   import type { Location, LocationKind } from "../editor/lsp/client";
   import { toast } from "../core/toast";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
@@ -457,6 +458,19 @@
           : { items: [], incomplete: false },
       resolve: (item) => client.resolveCompletion(item),
       triggers: () => client.completionTriggers,
+    };
+  });
+
+  /** The open file's signature help (ED6.6), for the surface's hint. */
+  const signaturePort = $derived.by((): SignaturePort | null => {
+    const found = lspDoc;
+    if (!found) return null;
+    const { client } = found.connection;
+    return {
+      ask: async (at, trigger, retrigger) =>
+        (await client.whenReady()) ? client.signatureHelp(found.uri, at, trigger, retrigger) : null,
+      triggers: () => client.signatureTriggers,
+      retriggers: () => client.signatureRetriggers,
     };
   });
 
@@ -974,6 +988,7 @@
             hoverAt={lspDoc ? hoverAt : undefined}
             onDefinitionAt={lspDoc ? (at) => void goToDefinition(at) : undefined}
             completion={completionPort}
+            signature={signaturePort}
           />
         {/key}
       </div>

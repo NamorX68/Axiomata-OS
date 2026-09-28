@@ -1241,7 +1241,13 @@ Wort ersetzt, Zusatz-Änderungen wie ein Auto-Import angewendet — vorher bis 4
 `rust-analyzer` den Import erst dort liefert); in Vi läuft er in der Insert-Sitzung, `.` wiederholt ihn ohne
 den Import. Nur mit einem Cursor. Logik des Menüs in `fileapp/completionMenu.ts`, Zeichnen in
 `CompletionPopup.svelte`. Live gegen `rust-analyzer`: Methoden nach `v.`, Auto-Import von `HashMap`.
-Offen: Signaturhilfe und Wörter aus der Datei als zweite Quelle (blink hat beide) — bei Bedarf später.
+Offen: Wörter aus der Datei als zweite Quelle (blink hat sie) — bei Bedarf später.
+
+**ED6.6 umgesetzt (2026-09-28): Signaturhilfe** (in der nvim-Konfiguration des Owners bei blink.cmp an): nach den
+Trigger-Zeichen des Servers (`(`, `,`) und auf ⇧⌘Space erscheint über der Zeile die Signatur, der aktive Parameter
+markiert, darunter seine Doku; sie folgt dem Tippen und dem Cursor und schließt, wenn der Server nichts mehr meldet,
+bei Esc, einem Klick, dem Verlassen der Zeile oder von Insert. `editor/lsp/signature.ts` (Auswertung),
+`fileapp/signatureHint.ts` (Verhalten), Anzeige in `EditorSurface`. Live gegen `rust-analyzer` geprüft.
 
 **ED6.5 umgesetzt (2026-09-28, L13–L17) — ED6 ist damit komplett:** Formatieren (⇧⌥F, Vi `:format`, beim
 Speichern mit ⌘S/`:w`): `axiomata-files::format` mit der Formatierer-Tabelle (ruff in drei Schritten, rustfmt mit der

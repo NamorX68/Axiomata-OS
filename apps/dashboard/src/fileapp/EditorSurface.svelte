@@ -74,6 +74,7 @@
   import type { FoldAction, ViEffect } from "../editor/vi/machine";
   import { CompletionMenu, type CompletionPort } from "./completionMenu";
   import { docTouched } from "./renameApply";
+  import { SignatureHint, type SignaturePort } from "./signatureHint";
   import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
   import FindBar from "./FindBar.svelte";
@@ -147,6 +148,8 @@
     onDefinitionAt?: (at: Pos) => void;
     /** The language server's completion (ED6.4); without it there is no menu. */
     completion?: CompletionPort | null;
+    /** The language server's signature help (ED6.6); without it there is no hint. */
+    signature?: SignaturePort | null;
   }
 
   let {
@@ -174,6 +177,7 @@
     hoverAt,
     onDefinitionAt,
     completion = null,
+    signature = null,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -906,6 +910,8 @@
     handleKeydown(e);
     // A ⌫, an arrow, Esc leaving Insert: the open menu follows the word, or closes.
     if (menu?.isOpen) followMenu();
+    // A character is followed once it is in the text (`commitInput`); here only moves and deletions.
+    if (hint?.isOpen && e.key.length !== 1) followHint();
   }
 
   function handleKeydown(e: KeyboardEvent): void {
@@ -1029,6 +1035,8 @@
     else exec({ type: "insert", text });
     if (menu && canComplete()) menu.typed(doc, text);
     else menu?.close();
+    if (hint && canComplete()) hint.typed(doc, text);
+    else hint?.close();
   }
 
   /**
@@ -1048,6 +1056,7 @@
   function onBlur(): void {
     focused = false;
     menu?.close();
+    hint?.close();
     if (composing) {
       composing = false;
       input.value = "";
@@ -1152,6 +1161,17 @@
    * ⏎ and ⇥ take too; in Vi they stay a new line and indentation.
    */
   function completionKey(e: KeyboardEvent): boolean {
+    // ⇧⌘Space: the signature of the call the cursor is in (ED6.6), as in VS Code.
+    if (hint && e.code === "Space" && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
+      if (canComplete()) hint.invoke(doc);
+      return canComplete();
+    }
+    const plainEsc = e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    // Esc closes the hint when no menu is open (in Vi it also leaves Insert, below).
+    if (plainEsc && hint?.isOpen && !menu?.isOpen) {
+      hint.close();
+      return !vi;
+    }
     const m = menu;
     if (!m) return false;
     const ctrlOnly = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
@@ -1172,6 +1192,33 @@
       return !vi;
     } else return false;
     return true;
+  }
+
+  // ---------------------------------------------------------------- signature help (ED6.6)
+
+  let hintTick = $state(0);
+  const hint = $derived(signature ? new SignatureHint(signature, () => hintTick++) : null);
+  $effect(() => {
+    const current = hint;
+    return () => current?.close();
+  });
+
+  /** The hint above the line it was asked on, at the cursor's column. */
+  const hintView = $derived.by(() => {
+    void hintTick;
+    void tick;
+    const view = hint?.view;
+    if (!view) return null;
+    const cell = cursorCell(layout, doc.store, doc.selection.head, settings.tabSize);
+    const x = textLeft + cell.cell * charW - (settings.wrap ? 0 : scrollLeft);
+    const y = cell.row * rowH - scrollTop;
+    const docHtml = view.signature.documentation ? renderMarkdown(view.signature.documentation) : null;
+    return { ...view.signature, x, y, docHtml };
+  });
+
+  function followHint(): void {
+    if (canComplete()) hint?.follow(doc);
+    else hint?.close();
   }
 
   /** Takes the chosen item: one step, through Vi's Insert session when Vi is on. */
@@ -1266,6 +1313,7 @@
    */
   function onMousedown(e: MouseEvent): void {
     menu?.close();
+    hint?.close();
     if (e.button !== 0) return;
     e.preventDefault();
     input.focus();
@@ -1701,6 +1749,17 @@
       {/if}
     </div>
   {/if}
+  {#if hintView}
+    <div class="signature-hint" style:left="{hintView.x}px" style:top="{hintView.y}px" role="tooltip">
+      <code
+        >{hintView.before}<mark>{hintView.active}</mark>{hintView.after}</code
+      >{#if hintView.overloads}<span class="overloads">{hintView.overloads}</span>{/if}
+      {#if hintView.docHtml}
+        <!-- Sanitised by `renderMarkdown` (DOMPurify): the text comes from the language server. -->
+        <div class="hover-doc">{@html hintView.docHtml}</div>
+      {/if}
+    </div>
+  {/if}
   {#if menuView}
     <CompletionPopup
       items={menuView.items}
@@ -1957,6 +2016,53 @@
   }
   .diag-inline.diag-hint {
     color: var(--ax-diag-hint);
+  }
+
+  /* Signature help (ED6.6): above the line being typed, the active parameter marked. */
+  .signature-hint {
+    position: absolute;
+    z-index: 7;
+    max-width: min(80ch, 90%);
+    transform: translateY(-100%);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    box-shadow: var(--ax-shadow-pop);
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text);
+    pointer-events: none;
+  }
+  .signature-hint code {
+    font-family: var(--ax-font-mono);
+    white-space: pre-wrap;
+  }
+  .signature-hint mark {
+    background: none;
+    color: var(--ax-accent);
+    font-weight: 600;
+    text-decoration: underline;
+  }
+  .signature-hint .overloads {
+    margin-left: var(--ax-space-2);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+  .signature-hint .hover-doc {
+    max-height: 30vh;
+    overflow: hidden;
+    margin-top: var(--ax-space-1);
+    padding-top: var(--ax-space-1);
+    border-top: 1px solid var(--ax-border);
+    font-family: var(--ax-font-sans);
+  }
+  .signature-hint .hover-doc :global(p) {
+    margin: var(--ax-space-1) 0;
+  }
+  .signature-hint .hover-doc :global(pre) {
+    margin: var(--ax-space-1) 0;
+    font-family: var(--ax-font-mono);
+    white-space: pre-wrap;
   }
 
   /* The messages under a resting mouse. */

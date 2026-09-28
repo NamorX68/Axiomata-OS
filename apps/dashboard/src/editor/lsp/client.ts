@@ -16,6 +16,7 @@ import type { EditorDocument, TextChange } from "../document";
 import { range, type Pos } from "../position";
 import { type CompletionAnswer, type CompletionItem, parseCompletion, parseItem } from "./completion";
 import { type Diagnostic, parseDiagnostics } from "./diagnostics";
+import { parseSignatureHelp, type SignatureView } from "./signature";
 import type { TextEdit } from "../textEdits";
 import { Rpc, type Transport } from "./rpc";
 
@@ -106,6 +107,9 @@ export class LspClient {
   /** Whether the server renames, and checks a place first (`prepareRename`). */
   renames = false;
   private preparesRename = false;
+  /** Characters after which the server offers a signature (`(`, `,`), and ones that refresh an open one. */
+  signatureTriggers: readonly string[] = [];
+  signatureRetriggers: readonly string[] = [];
   private readonly docs = new Map<string, OpenDocument>();
   private readonly diagnostics = new Map<string, Diagnostic[]>();
   private readonly diagnosticListeners = new Set<(uri: string) => void>();
@@ -290,6 +294,29 @@ export class LspClient {
   }
 
   /**
+   * The signature of the call at `at` (ED6.6): `null` when there is none (the
+   * cursor left the call) or the request failed. `trigger` is the character
+   * just typed, `retrigger` whether one is showing already.
+   */
+  async signatureHelp(uri: string, at: Pos, trigger: string | null, retrigger: boolean): Promise<SignatureView | null> {
+    try {
+      const result = await this.request<unknown>("textDocument/signatureHelp", {
+        textDocument: { uri },
+        position: { line: at.line, character: at.col },
+        context: {
+          // The protocol's trigger kinds: invoked, a trigger character, the content changed.
+          triggerKind: trigger ? 2 : retrigger ? 3 : 1,
+          ...(trigger ? { triggerCharacter: trigger } : {}),
+          isRetrigger: retrigger,
+        },
+      });
+      return parseSignatureHelp(result);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Whether the symbol at `at` can be renamed, and its current name (ED6.5,
    * L17): `null` when the server says there is nothing to rename there. A
    * server without the check answers with the word at `at` (`fallback`).
@@ -342,7 +369,12 @@ export class LspClient {
     const rootUri = fileUri(this.options.rootPath);
     try {
       const result = await this.rpc.request<{
-        capabilities?: { textDocumentSync?: unknown; completionProvider?: unknown; renameProvider?: unknown };
+        capabilities?: {
+          textDocumentSync?: unknown;
+          completionProvider?: unknown;
+          renameProvider?: unknown;
+          signatureHelpProvider?: unknown;
+        };
       }>("initialize", {
         processId: null,
         clientInfo: { name: "Axiomata-OS" },
@@ -371,6 +403,14 @@ export class LspClient {
               completionList: { itemDefaults: ["editRange", "insertTextFormat"] },
             },
             formatting: {},
+            signatureHelp: {
+              contextSupport: true,
+              signatureInformation: {
+                documentationFormat: ["markdown", "plaintext"],
+                parameterInformation: { labelOffsetSupport: true },
+                activeParameterSupport: true,
+              },
+            },
             rename: { prepareSupport: true },
           },
           // A rename's edits come as text only: moving or creating files is not offered (L16).
@@ -394,6 +434,13 @@ export class LspClient {
       const rename = result?.capabilities?.renameProvider;
       this.renames = rename === true || (typeof rename === "object" && rename !== null);
       this.preparesRename = (rename as { prepareProvider?: unknown } | undefined)?.prepareProvider === true;
+      const signature = result?.capabilities?.signatureHelpProvider as
+        | { triggerCharacters?: unknown; retriggerCharacters?: unknown }
+        | undefined;
+      const chars = (list: unknown) =>
+        Array.isArray(list) ? list.filter((c): c is string => typeof c === "string") : [];
+      this.signatureTriggers = chars(signature?.triggerCharacters);
+      this.signatureRetriggers = chars(signature?.retriggerCharacters);
       this.rpc.notify("initialized", {});
       this.setState("ready");
       return true;
