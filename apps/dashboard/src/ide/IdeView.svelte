@@ -131,18 +131,34 @@
    * The pane the user last worked in — a terminal, an agent, a file; never
    * the Files tree or the Search pane. A first file opened from those helpers
    * becomes a tab in its group (`fileOrigin`). Followed by focus and by
-   * pointer, since a terminal's canvas takes clicks without moving focus.
+   * pointer, since a terminal's canvas takes clicks without moving focus —
+   * and, because a pane can hold the focus without ever having been clicked
+   * (a terminal focuses itself when it starts; a reload forgets this value),
+   * also by asking which pane still has the focus the moment the user turns
+   * to the tree or to ⌘P.
    */
   let lastWorkTab = $state<string | null>(null);
 
-  function noteWorkPane(event: Event): void {
-    const target = event.target as HTMLElement | null;
+  /** The work pane `el` sits in (or whose tab it is), if any. */
+  function workPaneOf(el: Element | null): string | null {
     const id =
-      target?.closest(`[${PANE_ATTR}]`)?.getAttribute(PANE_ATTR) ??
-      target?.closest("[data-ide-tab]")?.getAttribute("data-ide-tab") ??
+      el?.closest(`[${PANE_ATTR}]`)?.getAttribute(PANE_ATTR) ??
+      el?.closest("[data-ide-tab]")?.getAttribute("data-ide-tab") ??
       null;
     const tab = id ? allTabs(layout).find((t) => t.id === id) : undefined;
-    if (tab && isWorkPane(tab)) lastWorkTab = tab.id;
+    return tab && isWorkPane(tab) ? tab.id : null;
+  }
+
+  /** Remembers the work pane that still has the focus, before it moves. */
+  function noteFocusedPane(): void {
+    lastWorkTab = workPaneOf(document.activeElement) ?? lastWorkTab;
+  }
+
+  function noteWorkPane(event: Event): void {
+    // A pointer press comes before the focus moves: whatever held it is
+    // where the user comes from, even when that pane was never clicked.
+    if (event.type === "pointerdown") noteFocusedPane();
+    lastWorkTab = workPaneOf(event.target as Element | null) ?? lastWorkTab;
   }
 
   /**
@@ -156,6 +172,7 @@
     if (!e.shiftKey && key === "p") {
       e.preventDefault();
       e.stopPropagation();
+      if (!quickOpen) noteFocusedPane();
       quickOpen = !quickOpen;
     } else if (e.shiftKey && (key === "f" || e.code === "KeyF")) {
       e.preventDefault();
