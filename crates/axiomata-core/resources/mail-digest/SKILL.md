@@ -73,7 +73,12 @@ Do exactly this and nothing more:
 4. Cap the output at the **12 most relevant messages** (prefer important,
    then most recent). For each, capture:
    - `id` — the message's identifier, exactly as the tool returns it
-   - `sender` — display name if present, else the address
+   - `sender` — the display name exactly as the header shows it if there is
+     one, otherwise the bare email address. When a display name exists,
+     output it **alone** — never append the address in angle brackets
+     (`Adobe Acrobat`, not `Adobe Acrobat <mail@adobe.example>`). This
+     string becomes part of the summary note's file name, so any variation
+     creates a duplicate note.
    - `subject` — the subject line
    - `date` — ISO 8601 timestamp received
    - `reason` — exactly `"important"` or `"topic"`
