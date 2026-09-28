@@ -666,6 +666,12 @@ carrying its own config.
   terminal's fonts are content, not UI, and stay as set. UI icons are a vendored Lucide subset
   (`scripts/vendor-icons.sh` → `src/ui/icons/lucide.ts`) drawn by `ui/Icon.svelte`; clickable ones
   are `ui/IconButton.svelte` (at least `--ax-hit-min`, label required).
+- **File app look** (`docs/plans/editor-look.md`, LK1–LK2): the right-hand inspector
+  (`fileapp/Inspector.svelte`: Settings | Shortcuts; `fileapp/shortcuts.ts` is tested against the real key map and
+  the Vi grammar) is a column beside the tabs, so the minimap stays in view. The tabs sit in groups side by side or
+  stacked on the IDE's dock tree (`fileapp/fileDock.ts` over `ide/layout.ts`, drag geometry from `ide/dock.ts`,
+  editors moved between groups by `ide/paneStore.ts` so a move keeps cursor, undo and unsaved text); a file is open
+  at most once in the whole layout.
 - **Connector modules — "provider = skill, not code"**: Calendar and Reminders (and Mail)
   are the pattern for any future integration behind an MCP server the app doesn't have
   first-class Tauri commands for. A `*-digest` skill (seeded on first run from

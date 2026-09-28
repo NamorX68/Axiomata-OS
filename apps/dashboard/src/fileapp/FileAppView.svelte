@@ -10,6 +10,9 @@
     it mounted once opened, so unsaved text and the cursor survive a trip back
     to the OS. `inert` keeps the hidden view out of focus and tab order. The
     tabs behind the front one stay mounted the same way.
+  * **Tabs in groups** (`fileDock.ts`, editor-look LK2): side by side or stacked
+    (⌘\\, or a tab dragged to an edge), one tab per file in the whole layout,
+    editors moved between groups without being rebuilt (`ide/paneStore.ts`).
   * **Tabs** (`tabs.ts`): one per file, a reusable preview tab, kept across
     restarts; ⌘W closes (asking first over unsaved text), ⌘N a new note,
     ⌃Tab/⌃⇧Tab and ⌘1–⌘9 switch. Editing in the preview tab fixes it.
@@ -41,19 +44,38 @@
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
   import { FOREIGN_ROOT } from "./session";
   import {
+    activeTab,
     closeTab,
     cycleTab,
-    loadTabs,
-    NO_TABS,
+    emptyDock,
+    focusedGroup,
+    focusTab,
+    loadDock,
+    moveTabTo,
     nthTab,
-    openInTabs,
+    openInDock,
     pinTab,
     retargetTab,
-    saveTabs,
+    saveDock,
+    splitActive,
+    tabsOf,
+    type FileDock,
     type FileRef,
     type Tab,
-    type TabsState,
-  } from "./tabs";
+  } from "./fileDock";
+  import { setFileDock } from "./fileDockContext";
+  import FileDockNode from "./FileDockNode.svelte";
+  import {
+    ROOT_NODE_ID,
+    crossedDragThreshold,
+    dividerFraction,
+    dropTarget,
+    splitFractionAt,
+    type GroupGeometry,
+    type Rect,
+  } from "../ide/dock";
+  import { allGroups, findNode, isSplit, resizeSplit, type DockTarget, type SplitDir } from "../ide/layout";
+  import { PANE_ATTR, parkPanes, placePanes } from "../ide/paneStore";
   import { foldKey, forgetFolds } from "./foldMemory";
   import { uiScale } from "../core/uiScale";
   import { clampWidth, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
@@ -61,7 +83,8 @@
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
-  let tabs = $state<TabsState>(NO_TABS);
+  /** The tabs, in groups side by side or stacked (LK2): the IDE's dock tree, with file rules (`fileDock.ts`). */
+  let dock = $state<FileDock>(emptyDock());
   /** What each tab's editor reports — for titles, the unsaved dots, the header. */
   let states = $state<Record<string, OpenFileState | null>>({});
   let views = $state<Record<string, FileTab | null>>({});
@@ -103,7 +126,12 @@
   /** The tree shows the workspace, projects and picked folders — agents' worktrees are the IDE's (W6). */
   const treeRoots = $derived(roots.filter((r) => r.kind !== "worktree"));
   const newId = () => crypto.randomUUID();
-  const active = $derived(tabs.tabs.find((t) => t.id === tabs.active) ?? null);
+  /** Every tab, flat — the editors are rendered once each, in this order, and moved into their groups. */
+  const allFileTabs = $derived(tabsOf(dock));
+  /** The focused group's visible tab: the one the header and the keys are about. */
+  const active = $derived(activeTab(dock));
+  /** The tabs on screen: every group's visible one. */
+  const visibleTabs = $derived(new Set(allGroups(dock.layout).map((g) => g.active)));
   const current = $derived(active ? (states[active.id] ?? null) : null);
 
   function rootLabel(id: string): string {
@@ -124,12 +152,12 @@
   ): void {
     showRecent = false;
     error = "";
-    const result = openInTabs(tabs, file, { preview }, newId);
+    const result = openInDock(dock, file, { preview }, newId);
     if (handed && result.load) handedTo.set(result.target, handed);
     else if (handed) void keepAside(handed);
     if (line !== null && result.load) lineFor.set(result.target, line);
     else if (line !== null) views[result.target]?.goToLine(line);
-    tabs = result.state;
+    dock = result.dock;
     // A language server's read-only file outside every root (L11) is not one to come back to.
     if (file && !file.root.startsWith(FOREIGN_ROOT)) {
       rememberRecent(file);
@@ -162,7 +190,7 @@
   function onTabState(tab: Tab, state: OpenFileState | null): void {
     states[tab.id] = state;
     // Editing in the preview tab makes it a tab of its own (W7).
-    if (state?.dirty && tab.preview) tabs = pinTab(tabs, tab.id);
+    if (state?.dirty && allFileTabs.find((t) => t.id === tab.id)?.preview) dock = pinTab(dock, tab.id);
   }
 
   function onTabFailed(tab: Tab, result: Extract<OpenResult, { ok: false }>): void {
@@ -180,10 +208,10 @@
     if (!views[id]) void handedTo.get(id)?.session.close();
     handedTo.delete(id);
     lineFor.delete(id);
-    const file = tabs.tabs.find((t) => t.id === id)?.file;
+    const file = allFileTabs.find((t) => t.id === id)?.file;
     // Folds are kept for the files in open tabs only (T7).
     if (file) forgetFolds(foldKey(file.root, file.rel));
-    tabs = closeTab(tabs, id);
+    dock = closeTab(dock, id);
     delete states[id];
     delete views[id];
   }
@@ -194,7 +222,7 @@
     if (closing) return;
     const view = views[id];
     if (view?.hasUnsaved()) {
-      tabs = { ...tabs, active: id };
+      dock = focusTab(dock, id);
       const close = await new Promise<boolean>((resolve) => {
         closing = {
           id,
@@ -250,13 +278,20 @@
     const key = e.key.toLowerCase();
     if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
       take(e);
-      tabs = cycleTab(tabs, e.shiftKey ? -1 : 1);
+      dock = cycleTab(dock, e.shiftKey ? -1 : 1);
+      return;
+    }
+    // ⌘\ splits the visible tab off to the right, ⇧⌘\ below (LK2) — by the key's place, since
+    // a German layout types "\" with ⌥⇧7.
+    if (e.metaKey && !e.ctrlKey && (e.code === "Backslash" || e.key === "\\")) {
+      take(e);
+      dock = splitActive(dock, e.code === "Backslash" && e.shiftKey ? "bottom" : "right");
       return;
     }
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
     if (!e.shiftKey && /^[1-9]$/.test(key)) {
       take(e);
-      tabs = nthTab(tabs, Number(key));
+      dock = nthTab(dock, Number(key));
     } else if (e.shiftKey && (key === "f" || e.code === "KeyF")) {
       take(e);
       void showSearch();
@@ -270,7 +305,7 @@
       openTab(null);
     } else if (key === "w") {
       take(e);
-      if (tabs.active) void requestCloseTab(tabs.active);
+      if (active) void requestCloseTab(active.id);
     } else if (key === "b") {
       take(e);
       tree = { ...tree, visible: !tree.visible };
@@ -301,29 +336,172 @@
     e.stopPropagation();
   }
 
+  // ---- groups: dragging a tab, dragging a divider (LK2), as in the IDE (`ide/IdeView.svelte`) ----
+
+  let dockEl = $state<HTMLElement | undefined>();
+  let storeEl = $state<HTMLElement | undefined>();
+  let hint = $state<DockTarget | null>(null);
+  let draggingTab = $state<string | null>(null);
+  let pendingDrag: { tabId: string; pointerId: number; x: number; y: number } | null = null;
+  let snapshot: { root: Rect; groups: GroupGeometry[] } | null = null;
+  let divider: { splitId: string; boundary: number; pointerId: number; rect: Rect; dir: SplitDir } | null = null;
+
+  function rectOf(el: Element): Rect {
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+
+  /** The groups' geometry for a drag, the dragged tab left out of every bar (`moveTab` counts the others). */
+  function measure(draggedId: string): { root: Rect; groups: GroupGeometry[] } | null {
+    if (!dockEl) return null;
+    const groups: GroupGeometry[] = [];
+    for (const el of dockEl.querySelectorAll<HTMLElement>("[data-ide-group]")) {
+      const bar = el.querySelector<HTMLElement>("[data-ide-tabbar]");
+      if (!bar || !el.dataset.ideGroup) continue;
+      groups.push({
+        nodeId: el.dataset.ideGroup,
+        rect: rectOf(el),
+        tabBar: rectOf(bar),
+        tabs: [...bar.querySelectorAll<HTMLElement>("[data-ide-tab]")]
+          .filter((tab) => tab.dataset.ideTab !== draggedId)
+          .map(rectOf),
+      });
+    }
+    return { root: rectOf(dockEl), groups };
+  }
+
+  function onTabPointerMove(event: PointerEvent): void {
+    if (!pendingDrag || event.pointerId !== pendingDrag.pointerId) return;
+    if (!draggingTab) {
+      if (!crossedDragThreshold(pendingDrag, event.clientX, event.clientY)) return;
+      snapshot = measure(pendingDrag.tabId);
+      if (!snapshot) return;
+      draggingTab = pendingDrag.tabId;
+    }
+    if (snapshot) hint = dropTarget(snapshot.root, snapshot.groups, event.clientX, event.clientY);
+  }
+
+  function onTabPointerUp(event: PointerEvent): void {
+    if (pendingDrag && event.pointerId !== pendingDrag.pointerId) return;
+    if (draggingTab && hint) {
+      // `dropTarget` works from rectangles and cannot know the root's id.
+      const nodeId = hint.nodeId === ROOT_NODE_ID ? dock.layout.root.id : hint.nodeId;
+      dock = moveTabTo(dock, draggingTab, { ...hint, nodeId });
+    }
+    endTabDrag();
+  }
+
+  /** Every way out of a tab drag, dropped or abandoned (see `IdeView.endTabDrag`). */
+  function endTabDrag(): void {
+    pendingDrag = null;
+    snapshot = null;
+    draggingTab = null;
+    hint = null;
+    window.removeEventListener("pointermove", onTabPointerMove);
+    window.removeEventListener("pointerup", onTabPointerUp);
+    window.removeEventListener("pointercancel", endTabDrag);
+  }
+
+  function onDividerPointerMove(event: PointerEvent): void {
+    if (!divider || event.pointerId !== divider.pointerId) return;
+    const node = findNode(dock.layout, divider.splitId);
+    if (!node || !isSplit(node)) return;
+    const along = splitFractionAt(divider.rect, divider.dir, event.clientX, event.clientY);
+    const fraction = dividerFraction(node.sizes, divider.boundary, along);
+    dock = { ...dock, layout: resizeSplit(dock.layout, divider.splitId, divider.boundary, fraction) };
+  }
+
+  function endDividerDrag(): void {
+    divider = null;
+    window.removeEventListener("pointermove", onDividerPointerMove);
+    window.removeEventListener("pointerup", endDividerDrag);
+    window.removeEventListener("pointercancel", endDividerDrag);
+  }
+
+  function abandonDrags(): void {
+    endTabDrag();
+    endDividerDrag();
+  }
+
+  setFileDock({
+    title: tabTitle,
+    where: (tab) => (tab.file ? `${rootLabel(tab.file.root)} / ${tab.file.rel}` : "New note"),
+    dirty: (tabId) => states[tabId]?.dirty ?? false,
+    focusedGroup: () => focusedGroup(dock).id,
+    focusTab: (tabId) => {
+      dock = focusTab(dock, tabId);
+    },
+    focusGroup: (groupId) => {
+      if (dock.focus !== groupId) dock = { ...dock, focus: groupId };
+    },
+    pin: (tabId) => {
+      dock = pinTab(dock, tabId);
+    },
+    requestClose: (tabId) => void requestCloseTab(tabId),
+    startTabDrag: (tabId, event) => {
+      if (event.button !== 0 || pendingDrag || divider) return;
+      dock = focusTab(dock, tabId);
+      pendingDrag = { tabId, pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      window.addEventListener("pointermove", onTabPointerMove);
+      window.addEventListener("pointerup", onTabPointerUp);
+      window.addEventListener("pointercancel", endTabDrag);
+    },
+    startDividerDrag: (splitId, boundary, event) => {
+      if (event.button !== 0 || pendingDrag || divider) return;
+      const el = (event.currentTarget as HTMLElement | null)?.closest("[data-ide-split]");
+      const node = findNode(dock.layout, splitId);
+      if (!el || !node || !isSplit(node)) return;
+      divider = { splitId, boundary, pointerId: event.pointerId, rect: rectOf(el), dir: node.dir };
+      window.addEventListener("pointermove", onDividerPointerMove);
+      window.addEventListener("pointerup", endDividerDrag);
+      window.addEventListener("pointercancel", endDividerDrag);
+      event.preventDefault();
+    },
+    draggingTab: () => draggingTab,
+    hint: () => hint,
+  });
+
+  /** The drop highlight for a drag onto the whole area's edge. */
+  const rootHint = $derived(hint && hint.nodeId === ROOT_NODE_ID ? hint.side : null);
+
+  // Keeping an editor alive across a layout change (`ide/paneStore.ts`): park every
+  // editor before Svelte rebuilds the tree, place each into its group's slot after.
+  $effect.pre(() => {
+    void dock;
+    if (dockEl && storeEl) parkPanes(dockEl, storeEl);
+  });
+
+  $effect(() => {
+    void dock;
+    if (dockEl) placePanes(dockEl);
+  });
+
   /** Files handed over from a panel (W11), in the order they came. */
   function takeWaiting(): void {
     for (const h of takeHandoffs()) openTab(h.file, false, h.handed);
   }
 
   onMount(() => {
-    tabs = loadTabs(newId);
+    dock = loadDock(newId);
     restored = true;
     takeWaiting();
     const unlistenRenamed = listenBackend<FileRenamed>("files:renamed", onRenamed);
     const unsubscribe = handoffs.subscribe((list) => {
       if (list.length > 0) takeWaiting();
     });
+    window.addEventListener("blur", abandonDrags);
     return () => {
+      window.removeEventListener("blur", abandonDrags);
+      abandonDrags();
       unsubscribe();
       void unlistenRenamed.then((off) => off());
     };
   });
 
   $effect(() => {
-    const snapshot = tabs;
+    const snapshot = dock;
     if (!restored) return;
-    saveTabs(snapshot);
+    saveDock(snapshot);
   });
 
   $effect(() => {
@@ -442,33 +620,6 @@
     ></div>
   {/if}
   <div class="column">
-  {#if tabs.tabs.length > 0}
-    <div class="tabbar" role="tablist" aria-label="Open files">
-      {#each tabs.tabs as tab (tab.id)}
-        <div class="tab" class:active={tab.id === tabs.active} class:preview={tab.preview}>
-          <button
-            type="button"
-            role="tab"
-            class="tab-title"
-            aria-selected={tab.id === tabs.active}
-            title={tab.file ? `${rootLabel(tab.file.root)} / ${tab.file.rel}` : "New note"}
-            onclick={() => (tabs = { ...tabs, active: tab.id })}
-            ondblclick={() => (tabs = pinTab(tabs, tab.id))}
-          >
-            {tabTitle(tab)}
-            {#if states[tab.id]?.dirty}<span class="dirty" aria-label="Unsaved changes">●</span>{/if}
-          </button>
-          <button
-            type="button"
-            class="tab-close"
-            aria-label="Close {tabTitle(tab)}"
-            onclick={() => void requestCloseTab(tab.id)}>×</button
-          >
-        </div>
-      {/each}
-    </div>
-  {/if}
-
   {#if error}
     <div class="banner danger" role="alert">
       <span>{error}</span>
@@ -486,23 +637,39 @@
     />
   {/if}
 
+  {#if allFileTabs.length > 0}
+    <div class="dock" class:dragging={draggingTab !== null} bind:this={dockEl}>
+      <!-- Every editor is rendered here once and only ever *moved* into its group's
+           slot (`ide/paneStore.ts`), so moving a tab to another group keeps its
+           cursor, undo history and unsaved text. Hidden with `visibility`, filling
+           the area, so an editor waiting here still measures its real size. -->
+      <div class="pane-store" bind:this={storeEl} aria-hidden="true">
+        {#each allFileTabs as tab (tab.id)}
+          <div class="pane" {...{ [PANE_ATTR]: tab.id }}>
+            <FileTab
+              bind:this={views[tab.id]}
+              file={tab.file}
+              handed={handedTo.get(tab.id) ?? null}
+              line={lineFor.get(tab.id) ?? null}
+              visible={open && visibleTabs.has(tab.id)}
+              onOpenRequest={() => void openPicked()}
+              onQuit={() => void requestCloseTab(tab.id)}
+              onState={(state) => onTabState(tab, state)}
+              onMoved={(file) => (dock = retargetTab(dock, tab.id, file))}
+              onFailed={(result) => onTabFailed(tab, result)}
+              onOpenFile={(file, line) => openTab(file, false, null, line)}
+              onShowLocations={(list) => void showLocations(list)}
+            />
+          </div>
+        {/each}
+      </div>
+      <FileDockNode node={dock.layout.root} />
+      {#if rootHint}
+        <div class="root-highlight {rootHint}"></div>
+      {/if}
+    </div>
+  {:else}
   <div class="stack">
-    {#each tabs.tabs as tab (tab.id)}
-      <FileTab
-        bind:this={views[tab.id]}
-        file={tab.file}
-        handed={handedTo.get(tab.id) ?? null}
-        line={lineFor.get(tab.id) ?? null}
-        visible={open && tab.id === tabs.active}
-        onOpenRequest={() => void openPicked()}
-        onQuit={() => void requestCloseTab(tab.id)}
-        onState={(state) => onTabState(tab, state)}
-        onMoved={(file) => (tabs = retargetTab(tabs, tab.id, file))}
-        onFailed={(result) => onTabFailed(tab, result)}
-        onOpenFile={(file, line) => openTab(file, false, null, line)}
-        onShowLocations={(list) => void showLocations(list)}
-      />
-    {:else}
       <div class="empty">
         <p>No file open.</p>
         <button type="button" class="pill" onclick={() => void openPicked()}>Open a file… <kbd>⌘O</kbd></button>
@@ -519,8 +686,8 @@
           </ul>
         {/if}
       </div>
-    {/each}
   </div>
+  {/if}
   </div>
   {#if inspector}
     <Inspector tab={inspector} surface={inspectorSurface} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
@@ -810,59 +977,72 @@
     display: flex;
   }
 
-  .tabbar {
+  /* The groups (LK2): the tree fills the column; editors wait in the store until placed. */
+  .dock {
+    position: relative;
+    flex: 1;
+    min-height: 0;
     display: flex;
-    gap: 1px;
-    overflow-x: auto;
-    background: var(--ax-border);
-    border-bottom: 1px solid var(--ax-border);
   }
 
-  .tab {
+  .dock.dragging {
+    cursor: grabbing;
+  }
+
+  /* While a tab is dragged, the editors must not take the pointer (and its hover). */
+  .dock.dragging :global([data-ide-slot]) {
+    pointer-events: none;
+  }
+
+  .pane-store {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  /* Absolute in the store and in a group's slot alike: both are positioned, so it fills either. */
+  .pane {
+    position: absolute;
+    inset: 0;
     display: flex;
-    align-items: center;
-    flex-shrink: 0;
-    max-width: calc(240px * var(--ax-ui-scale));
-    background: var(--ax-surface-1);
   }
 
-  .tab.active {
-    background: var(--ax-bg);
-    box-shadow: inset 0 -2px 0 var(--ax-accent);
+  .root-highlight {
+    position: absolute;
+    z-index: 10;
+    pointer-events: none;
+    background: var(--ax-accent-muted);
+    border: 2px solid var(--ax-accent);
+    border-radius: var(--ax-radius-sm);
   }
 
-  .tab-title,
-  .tab-close {
-    background: none;
-    border: 0;
-    color: var(--ax-text-muted);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-sm);
-    cursor: pointer;
+  .root-highlight.left {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 25%;
   }
 
-  .tab-title {
-    overflow: hidden;
-    padding: var(--ax-space-2) var(--ax-space-2) var(--ax-space-2) var(--ax-space-4);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .root-highlight.right {
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 25%;
   }
 
-  .tab.active .tab-title {
-    color: var(--ax-text);
+  .root-highlight.top {
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 25%;
   }
 
-  /* The preview tab (W7): italic until it becomes a tab of its own. */
-  .tab.preview .tab-title {
-    font-style: italic;
-  }
-
-  .tab-close {
-    padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-2) var(--ax-space-1);
-  }
-
-  .tab-close:hover {
-    color: var(--ax-text);
+  .root-highlight.bottom {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 25%;
   }
 
   .empty {

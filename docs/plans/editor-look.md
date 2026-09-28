@@ -95,6 +95,20 @@ muss aufgeführt sein) und gleicht die Vi-Gruppen mit `VI_GRAMMAR` (`editor/vi/p
 (`editor/vi/ex.ts`) ab. Tasten außerhalb der Keymap (Datei-App, Sprachserver, Menüs) sind von Hand gepflegt.
 `EditorSettingsPanel` ist nur noch Inhalt.
 
+**LK2 umgesetzt (2026-09-28):** Die Datei-App legt ihre Reiter in Gruppen nebeneinander oder untereinander, auf dem
+Dock-Baum der IDE (`ide/layout.ts`); die Datei-Regeln stehen in `fileapp/fileDock.ts` (eine Datei höchstens einmal im
+ganzen Layout — Owner-Entscheid beim Bau, s. u.; der Vorschau-Reiter je Gruppe; die fokussierte Gruppe für neue Reiter,
+⌃⇥ und ⌘1–9; gespeichert unter `settings.editor.dock`, alte `settings.editor.tabs` werden einmal als eine Gruppe
+übernommen). ⌘\ schiebt den sichtbaren Reiter in eine neue Gruppe rechts, ⇧⌘\ darunter (nach der Tastenposition,
+weil ein deutsches Layout „\“ mit ⌥⇧7 tippt); ein Reiter lässt sich in eine Gruppe (Mitte) oder an einen Rand ziehen,
+Teiler mit der Maus verschieben — Ziehgeometrie aus `ide/dock.ts`. Die Editoren werden einmal flach gezeichnet und in
+ihre Gruppe umgehängt (`ide/paneStore.ts`): ein Reiterumzug behält Cursor, Undo und ungespeicherten Text (im Browser
+geprüft). Neu: `FileDockNode.svelte`, `FileGroup.svelte`, `fileDockContext.ts`; `tabs.ts` liest nur noch alte Stände.
+
+**K4 präzisiert (Owner, beim Bau von LK2):** Dieselbe Datei in zwei Gruppen hätte einen gemeinsamen Cursor, weil die
+Auswahl im Dokument liegt, nicht in der Ansicht. Entscheid: jede Datei nur einmal. „Dieselbe Datei zweimal mit eigenem
+Cursor“ ist vorgemerkt — es braucht Auswahl, Mehrfach-Cursor, Undo-Auswahl und Vi-Zustand pro Ansicht.
+
 ## 4. Offen beim Bau
 
 - Welche Icon-Themes Zed anbietet und was dort „Git“ heißt (K5).
