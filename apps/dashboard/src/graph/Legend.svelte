@@ -20,7 +20,7 @@
   let { hex = false }: { hex?: boolean } = $props();
 
   const KINDS: { kind: LegendKind; label: string }[] = [
-    { kind: "hub", label: "CLAUDE.md (hub)" },
+    { kind: "hub", label: "AGENTS.md (hub)" },
     { kind: "area", label: "Bereich (Ordner)" },
     { kind: "file", label: "Notiz / Seite" },
     { kind: "skill", label: "Skill" },

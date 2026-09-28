@@ -179,7 +179,7 @@ export function registerBuiltins(): void {
     actions: [
       {
         name: "sync",
-        description: "Regenerate the workspace CLAUDE.md router blocks now.",
+        description: "Regenerate the workspace AGENTS.md router blocks now.",
         params: { type: "object", properties: {} },
         run: (_params, ctx) => ctx.invoke("sync_memory"),
       },
@@ -776,7 +776,9 @@ export function registerBuiltins(): void {
       },
       {
         name: "add_card",
-        description: "Add a card. Without a column name it goes to the board's first column.",
+        description:
+          "Add a card. Without a column name it goes to the board's first column. Labels, a due date and an " +
+          "assignee are optional.",
         params: {
           type: "object",
           properties: {
@@ -784,11 +786,28 @@ export function registerBuiltins(): void {
             body: { type: "string" },
             column: { type: "string", description: "Column name, e.g. \"Offen\"." },
             board_id: { type: "number" },
+            labels: { type: "array", items: { type: "string" }, description: "Short lowercase topics, e.g. [\"rust\"]." },
+            due: { type: "string", description: "Due date as YYYY-MM-DD." },
+            assignee: { type: "string", description: "\"human:owner\" or \"agent:<name>\"." },
           },
           required: ["title"],
         },
         run: async (params, ctx) => {
-          const p = params as { title: string; body?: string; column?: string; board_id?: number };
+          const p = params as {
+            title: string;
+            body?: string;
+            column?: string;
+            board_id?: number;
+            labels?: string[];
+            due?: string;
+            assignee?: string;
+          };
+          // A due date as the card detail stores it: noon local time on that day.
+          const dueMatch = p.due ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.due) : null;
+          if (p.due && !dueMatch) return { error: `due must be YYYY-MM-DD, not ${p.due}` };
+          const dueAt = dueMatch
+            ? new Date(Number(dueMatch[1]), Number(dueMatch[2]) - 1, Number(dueMatch[3]), 12).toISOString()
+            : null;
           const boards = await ctx.invoke<{ id: number }[]>("list_boards");
           const boardId = p.board_id ?? boards[0]?.id;
           if (boardId === undefined) return { error: "no boards yet" };
@@ -802,9 +821,9 @@ export function registerBuiltins(): void {
               column_id: target.id,
               title: p.title,
               body: p.body ?? "",
-              labels: [],
-              assignee: null,
-              due_at: null,
+              labels: (p.labels ?? []).map((l) => l.trim().toLowerCase()).filter(Boolean),
+              assignee: p.assignee?.trim() || null,
+              due_at: dueAt,
             },
           });
         },

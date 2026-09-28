@@ -58,7 +58,7 @@ enum Command {
         /// Run id, as shown by `list-runs`.
         id: i64,
     },
-    /// Memory router: regenerate or inspect the workspace `CLAUDE.md` blocks.
+    /// Memory router: regenerate or inspect the workspace `AGENTS.md` blocks.
     Memory {
         #[command(subcommand)]
         action: MemoryAction,
@@ -160,7 +160,7 @@ enum SkillsAction {
     /// Re-copy the bundled skills from `resources/` into `~/.axiomata/skills/`.
     ///
     /// Without `--force` this only seeds any *missing* bundled skill (the
-    /// app's normal every-start behaviour). With `--force` the bundled four
+    /// app's normal every-start behaviour). With `--force` the bundled skills
     /// (`calendar-digest`, `mail-digest`, `reminders-digest`, `cleanup`) are
     /// overwritten from `resources/` — the escape hatch for the seed's
     /// seed-if-absent gotcha, where a bundled `SKILL.md` edit never reaches an
@@ -578,7 +578,7 @@ async fn import_obsidian(
     if !dry_run {
         let sync = memory::sync(&config).context("memory sync after import")?;
         println!(
-            "memory router synced: {} CLAUDE.md written, {} tracked files (session {}, ${:.2})",
+            "memory router synced: {} AGENTS.md written, {} tracked files (session {}, ${:.2})",
             sync.written.len(),
             sync.tracked_files,
             reply.session_id,
@@ -900,16 +900,16 @@ fn get_run(core: &AxiomataCore, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Regenerates the workspace router `CLAUDE.md` blocks and reports what changed.
+/// Regenerates the workspace router `AGENTS.md` blocks and reports what changed.
 fn memory_sync(core: &AxiomataCore) -> Result<()> {
     let report = memory::sync(&read_config(core)).context("memory sync failed")?;
     if report.written.is_empty() {
         println!(
-            "Router already in sync — {} tracked files, {} CLAUDE.md file(s) unchanged.",
+            "Router already in sync — {} tracked files, {} AGENTS.md file(s) unchanged.",
             report.tracked_files, report.unchanged,
         );
     } else {
-        println!("Wrote {} CLAUDE.md file(s):", report.written.len());
+        println!("Wrote {} AGENTS.md file(s):", report.written.len());
         for path in &report.written {
             println!("  {}", path.display());
         }

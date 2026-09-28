@@ -218,10 +218,15 @@ from the code itself:
   replaced both the Claude Code CLI and the Stufe 2 `ollama-agent` tool loop.
   `mail-digest` also uses `prepend_files: ["Mail/.topics.md"]` to inline its workspace topics
   (opencode has no file tool for `mail-digest`'s workspace file).
+- **The vault router is `AGENTS.md`** (was `CLAUDE.md`, 2026-09-28): `memory sync` writes the router block into
+  `<workspace>/AGENTS.md` and `<area>/AGENTS.md`, renames an old `CLAUDE.md` router on the way (the owner's own text
+  goes along) and leaves a `CLAUDE.md` that only imports `@AGENTS.md`, so Claude Code reads the same map. The chat's
+  appended `module-context.md` now opens with a fixed guide to the app (`bridge.rs` `APP_GUIDE`: workspace, skills and
+  their frontmatter, routines, the board, "ask when unclear, confirm before moving or deleting").
 - **Bundled skills are seed-if-absent**: a `resources/<name>/SKILL.md` edit does **not**
   reach an install whose `~/.axiomata/skills/<name>/SKILL.md` already exists (the seed never
   overwrites). Bring it up to date with `cargo run -p axiomata-cli -- skills reseed --force`
-  (re-copies only the bundled four; user skills untouched).
+  (re-copies only the bundled ones — the four digests/cleanup plus `inbox-sort` and `todo-to-kanban`; user skills untouched).
 - **HTML/course pages render via `<iframe sandbox srcdoc=…>`, not `asset://`** — an
   `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
   WebKit sandboxing wall); don't re-attempt it without reading the postmortem in

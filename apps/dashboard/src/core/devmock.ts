@@ -620,7 +620,7 @@ function mockGraph(): WorkspaceGraph {
   }
   return {
     workspace_root: memory.workspace_root,
-    hub: "CLAUDE.md",
+    hub: "AGENTS.md",
     areas: [...areas.map(([name, n]) => ({ name, files: n })), { name: "Learning", files: 10 }],
     files,
     links,
@@ -1055,7 +1055,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return { ...memory } as T;
     case "sync_memory": {
       const report: SyncReport = {
-        written: memory.stale ? ["CLAUDE.md", "projects/CLAUDE.md"] : [],
+        written: memory.stale ? ["AGENTS.md", "projects/AGENTS.md"] : [],
         unchanged: memory.stale ? 3 : 5,
         failed: [],
         tracked_files: memory.tracked_files,

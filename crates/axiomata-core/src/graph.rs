@@ -134,10 +134,11 @@ pub fn build(config: &Config, db: &Connection) -> Result<WorkspaceGraph, Axiomat
         .collect();
     let routines = routines::store::list(db)?;
 
-    let hub = root
-        .join("CLAUDE.md")
-        .is_file()
-        .then(|| "CLAUDE.md".to_string());
+    // The router is AGENTS.md now; a workspace not synced since still has only CLAUDE.md.
+    let hub = ["AGENTS.md", "CLAUDE.md"]
+        .into_iter()
+        .find(|name| root.join(name).is_file())
+        .map(str::to_string);
 
     Ok(WorkspaceGraph {
         workspace_root: root.to_string_lossy().into_owned(),

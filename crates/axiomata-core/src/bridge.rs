@@ -78,10 +78,52 @@ fn inline(raw: &str) -> String {
 
 /// Renders the manifest Markdown. `cli` is how the agent should invoke the
 /// CLI (a bare name on PATH or an absolute path).
+/// What the chat needs to know about Axiomata itself, beyond the modules on
+/// screen: the workspace and its router, skills and their format, routines,
+/// the board, and how to behave. `{cli}` is replaced with the CLI invocation.
+const APP_GUIDE: &str = "\
+# How Axiomata works
+
+You are the assistant inside Axiomata-OS, the owner's personal command centre and second brain.
+
+**The workspace** (your working directory) is the owner's vault of Markdown notes, sorted into areas \
+(top-level folders). Every area and the workspace root carry an `AGENTS.md` router: a generated map of \
+the files there between `AXIOMATA-ROUTER` markers — read it to find your way, never edit inside the \
+markers. `Inbox/` holds notes not sorted yet. `ToDo.md` at the root is the ToDo tile's list.
+
+**Skills** live only in `~/.axiomata/skills/<name>/SKILL.md` (never in the workspace). A skill is \
+frontmatter plus instructions:
+
+```
+---
+name: my-skill            # the folder's name
+description: One sentence on what it does and when to use it.
+backend: opencode         # or ollama
+model: provider/model-id  # optional; else the configured skill model
+prepend_files: [\"Area/notes.md\"]   # optional workspace files inlined into the prompt
+timeout_secs: 600         # optional
+---
+The instructions the skill runs with — written to the agent that will run it.
+```
+
+List them with `{cli} list-skills`, run one with `{cli} run-skill <name>` (or the Skills Deck's `run` \
+action below). **Routines** run a skill or a prompt on a schedule; cron is six fields, seconds first \
+(`0 0 9 * * *` is 09:00 daily) — see the Routines actions below or `{cli} routines --help`. **The Kanban \
+board** is in the app's database (the `Kanban/` notes are a read-only mirror): use the Kanban actions \
+below or `{cli} board --help`.
+
+**How to behave:** ask the owner when something is unclear instead of guessing. Before moving, renaming \
+or deleting files, or changing many things at once, say what you will do and wait for a yes. Keep your \
+work inside the workspace and `~/.axiomata/skills/`.
+
+";
+
 pub fn render_manifest(entries: &[ManifestEntry], cli: &str) -> String {
     let mut out = String::new();
     out.push_str(MANIFEST_START);
-    out.push_str("\n# Axiomata-OS dashboard modules\n\n");
+    out.push('\n');
+    out.push_str(&APP_GUIDE.replace("{cli}", cli));
+    out.push_str("# Axiomata-OS dashboard modules\n\n");
     out.push_str(
         "The user's Axiomata-OS dashboard is running with the module instances listed \
          below. You can call an instance's action from a shell:\n\n",

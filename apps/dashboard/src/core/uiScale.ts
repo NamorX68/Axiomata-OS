@@ -33,7 +33,7 @@ export interface UiDisplay {
 export type UiSize = "auto" | number;
 
 /** The sizes the setting offers besides "Auto". */
-export const UI_SIZES = [90, 100, 110, 120, 125, 130, 140, 150] as const;
+export const UI_SIZES = [90, 95, 100, 105, 110, 120, 125, 130, 140, 150] as const;
 
 /** The "UI size" setting (K13), persisted in `dashboard.json` by `persist.ts`. */
 export const uiSize: Writable<UiSize> = writable("auto");

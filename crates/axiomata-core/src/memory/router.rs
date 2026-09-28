@@ -78,7 +78,7 @@ pub fn render_root_block(tree: &WorkspaceTree) -> String {
             if area_name_is_link_safe(area) {
                 let _ = writeln!(
                     body,
-                    "- **{name}/** — {n} {plural} · [index]({area}/CLAUDE.md)"
+                    "- **{name}/** — {n} {plural} · [index]({area}/AGENTS.md)"
                 );
             } else {
                 // Unsafe as a link target — list it, but without the link.
@@ -217,7 +217,7 @@ fn read_existing(path: &Path) -> Result<Option<String>, AxiomataError> {
     if meta.file_type().is_symlink() {
         return Err(AxiomataError::InvalidRouter {
             path: path.to_path_buf(),
-            reason: "refusing to write through a symlinked CLAUDE.md".to_owned(),
+            reason: "refusing to write through a symlinked router file".to_owned(),
         });
     }
     if meta.len() > MAX_EXISTING_BYTES {
@@ -351,8 +351,8 @@ mod tests {
 
         assert!(a.starts_with(ROUTER_START));
         assert!(a.ends_with(ROUTER_END));
-        assert!(a.contains("- **projects/** — 2 files · [index](projects/CLAUDE.md)"));
-        assert!(a.contains("- **reference/** — 1 file · [index](reference/CLAUDE.md)"));
+        assert!(a.contains("- **projects/** — 2 files · [index](projects/AGENTS.md)"));
+        assert!(a.contains("- **reference/** — 1 file · [index](reference/AGENTS.md)"));
         assert!(a.contains("- `inbox.md` — Quick capture"));
         assert!(a.contains("- `readme.md`\n"));
     }

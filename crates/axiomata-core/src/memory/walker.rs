@@ -138,12 +138,10 @@ fn tracked_files(root: &Path) -> Result<Vec<Tracked>, AxiomataError> {
             continue;
         }
         let path = dir_entry.path();
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.eq_ignore_ascii_case("CLAUDE.md"))
-        {
-            continue; // generated output, not content (case-insensitive FS)
+        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+            n.eq_ignore_ascii_case("CLAUDE.md") || n.eq_ignore_ascii_case("AGENTS.md")
+        }) {
+            continue; // generated output (the router and its import), not content (case-insensitive FS)
         }
         let Ok(rel) = path.strip_prefix(root) else {
             continue;

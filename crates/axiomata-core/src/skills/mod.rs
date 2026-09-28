@@ -34,7 +34,7 @@ pub const EXAMPLE_SKILL_NAME: &str = "example-skill";
 /// checkout compiles and the crate stays relocatable).
 const EXAMPLE_SKILL_MD: &str = include_str!("../../resources/example-skill/SKILL.md");
 
-/// The four skills bundled with the app and seeded into
+/// The skills bundled with the app and seeded into
 /// `~/.axiomata/skills/` on first run (or after a clean reinstall) — the
 /// owner's actual working skill set, not the `example-skill` smoke test.
 const DEFAULT_SKILLS: &[(&str, &str)] = &[
@@ -51,6 +51,15 @@ const DEFAULT_SKILLS: &[(&str, &str)] = &[
         include_str!("../../resources/reminders-digest/SKILL.md"),
     ),
     ("cleanup", include_str!("../../resources/cleanup/SKILL.md")),
+    // The chat's helpers for the vault and the board (owner, 2026-09-28).
+    (
+        "inbox-sort",
+        include_str!("../../resources/inbox-sort/SKILL.md"),
+    ),
+    (
+        "todo-to-kanban",
+        include_str!("../../resources/todo-to-kanban/SKILL.md"),
+    ),
 ];
 
 /// Writes `content` into `~/.axiomata/skills/<name>/SKILL.md` if it isn't

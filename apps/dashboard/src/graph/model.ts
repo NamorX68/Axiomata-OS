@@ -291,7 +291,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
   add({
     id: "hub",
     kind: "hub",
-    label: g.hub ?? "CLAUDE.md",
+    label: g.hub ?? "AGENTS.md",
     area: null,
     path: g.hub ?? undefined,
     bytes: 0,
