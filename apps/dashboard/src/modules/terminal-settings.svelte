@@ -252,7 +252,7 @@
     // technique `graph/model.ts`'s `readPalette()` already uses) — this
     // component's own DOM has no canvas of its own to measure against, but
     // the CSS custom property resolves identically off any element.
-    const px = getComputedStyle(document.documentElement).getPropertyValue("--ax-font-size-sm").trim();
+    const px = getComputedStyle(document.documentElement).getPropertyValue("--ax-terminal-font-size").trim();
     if (px) fontSizeDefaultHint = px;
 
     void ensureTerminalSettingsLoaded().then(() => {

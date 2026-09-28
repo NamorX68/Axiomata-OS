@@ -48,6 +48,7 @@
     type TabsState,
   } from "./tabs";
   import { foldKey, forgetFolds } from "./foldMemory";
+  import { uiScale } from "../core/uiScale";
   import { clampWidth, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
   import UnsavedQuestion from "./UnsavedQuestion.svelte";
 
@@ -217,7 +218,8 @@
   }
 
   function onDrag(e: PointerEvent): void {
-    if (dragging) tree = { ...tree, width: clampWidth(dragging.startWidth + e.clientX - dragging.startX) };
+    // The width is unscaled, drawn times the UI scale (editor-look K10); the pointer moves in screen pixels.
+    if (dragging) tree = { ...tree, width: clampWidth(dragging.startWidth + (e.clientX - dragging.startX) / $uiScale) };
   }
 
   /**
@@ -363,7 +365,7 @@
 
   <div class="main">
   {#if tree.visible}
-    <aside class="side" style:width="{tree.width}px">
+    <aside class="side" style:width="{tree.width * $uiScale}px">
       <div class="side-bar">
         <div class="side-tabs" role="tablist" aria-label="Left column">
           <button type="button" role="tab" aria-selected={sideTab === "files"} onclick={() => (sideTab = "files")}
@@ -617,7 +619,7 @@
     right: 0;
     top: calc(100% + var(--ax-space-1));
     z-index: 10;
-    min-width: 320px;
+    min-width: calc(320px * var(--ax-ui-scale));
     margin: 0;
     padding: var(--ax-space-1);
     list-style: none;
@@ -803,7 +805,7 @@
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    max-width: 240px;
+    max-width: calc(240px * var(--ax-ui-scale));
     background: var(--ax-surface-1);
   }
 
@@ -859,6 +861,6 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    min-width: 360px;
+    min-width: calc(360px * var(--ax-ui-scale));
   }
 </style>

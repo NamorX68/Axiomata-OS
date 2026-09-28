@@ -112,7 +112,7 @@
   }
   textarea {
     flex: 1 1 auto;
-    min-height: 80px;
+    min-height: calc(80px * var(--ax-ui-scale));
     resize: none;
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-sm);

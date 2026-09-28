@@ -23,7 +23,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-2);
-    max-width: min(480px, calc(100vw - 2 * var(--ax-space-4)));
+    max-width: min(calc(480px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-4)));
   }
 
   .toast {
@@ -48,8 +48,8 @@
 
   .toast button {
     flex: 0 0 auto;
-    width: 20px;
-    height: 20px;
+    width: calc(20px * var(--ax-ui-scale));
+    height: calc(20px * var(--ax-ui-scale));
     padding: 0;
     line-height: 1;
     background: transparent;

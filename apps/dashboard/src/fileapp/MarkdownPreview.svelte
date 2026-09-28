@@ -91,6 +91,8 @@
     color: var(--ax-text);
     background: var(--ax-surface-1);
     font-family: var(--ax-font-sans);
+    /* Reading text in the base size (K12) — it used to inherit whatever small size surrounded it. */
+    font-size: var(--ax-font-size-base);
     line-height: 1.55;
     user-select: text;
   }

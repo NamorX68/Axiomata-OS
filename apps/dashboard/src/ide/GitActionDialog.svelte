@@ -166,7 +166,7 @@
   }
 
   .dialog {
-    width: min(460px, 100%);
+    width: min(calc(460px * var(--ax-ui-scale)), 100%);
     padding: var(--ax-space-4);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-md);

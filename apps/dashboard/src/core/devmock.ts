@@ -1715,6 +1715,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         { family: "Menlo", weights: [400, 700], monospace: true },
         { family: "SF Mono", weights: [300, 400, 500, 600, 700, 800], monospace: true },
       ] as T;
+    case "ui_displays":
+      // One MacBook-like display at scale 1: browser checks look as before; set "UI size" to try others.
+      return [{ x: 0, y: 0, width: 1512, height: 982, scale: 1 }] as T;
     case "file_create": {
       const { root, rel } = fileArgs(args);
       if (relsOf(root).some((p) => p === rel || p.startsWith(`${rel}/`))) {

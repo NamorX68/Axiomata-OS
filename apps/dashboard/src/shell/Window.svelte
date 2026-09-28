@@ -141,8 +141,8 @@
   }
   .icon {
     display: inline-flex;
-    width: 16px;
-    height: 16px;
+    width: calc(16px * var(--ax-ui-scale));
+    height: calc(16px * var(--ax-ui-scale));
     color: var(--ax-accent);
   }
   .icon :global(svg) {
@@ -157,8 +157,8 @@
   }
   /* Matches canvas/Tile.svelte's .tile-btn exactly. */
   .close {
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
     padding: 0;
     display: grid;
     place-items: center;

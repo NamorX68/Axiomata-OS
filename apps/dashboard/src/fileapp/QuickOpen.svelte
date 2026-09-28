@@ -182,7 +182,7 @@
   .quick-open {
     display: flex;
     flex-direction: column;
-    width: min(640px, calc(100vw - 2 * var(--ax-space-5)));
+    width: min(calc(640px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5)));
     max-height: 60vh;
     background: var(--ax-surface-2);
     border: 1px solid var(--ax-border-strong);

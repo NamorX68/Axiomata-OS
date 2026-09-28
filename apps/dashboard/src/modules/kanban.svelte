@@ -44,6 +44,7 @@
   import { closeStaged, hostAnchor, openStaged, staged } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import { cardStyle, lastBoard, rememberLastBoard } from "./kanbanPrefs";
+  import IconButton from "../ui/IconButton.svelte";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // svelte-ignore state_referenced_locally
@@ -720,9 +721,7 @@
       {/if}
       <button class="head-action add-col" onclick={addColumn}>+ Spalte</button>
       {#if !isPanel}
-        <button class="head-action" onclick={openAsPanel} title="Groß öffnen" aria-label="Brett groß öffnen">
-          ⤢
-        </button>
+        <IconButton icon="maximize-2" label="Brett groß öffnen" onclick={openAsPanel} />
       {/if}
     </div>
 
@@ -752,7 +751,7 @@
       </div>
     {/if}
 
-    <div class="board" style="--min-col: {MIN_COL_PX}px" bind:this={boardEl}>
+    <div class="board" style="--min-col: calc({MIN_COL_PX}px * var(--ax-ui-scale))" bind:this={boardEl}>
       {#each grouped as { column, cards } (column.id)}
         <section class="col" data-column={column.id} class:col-lifted={draggingColumn?.id === column.id}>
           <header
@@ -963,7 +962,7 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    min-height: 22px;
+    min-height: calc(22px * var(--ax-ui-scale));
   }
   .board-name {
     font-size: var(--ax-font-size-sm);
@@ -994,7 +993,7 @@
     gap: var(--ax-space-2);
   }
   .filters input[type="search"] {
-    flex: 1 1 160px;
+    flex: 1 1 calc(160px * var(--ax-ui-scale));
     min-width: 0;
     padding: var(--ax-space-1) var(--ax-space-2);
     border: 1px solid var(--ax-border);
@@ -1323,11 +1322,11 @@
   }
   .dots {
     display: none;
-    gap: 3px;
+    gap: calc(3px * var(--ax-ui-scale));
   }
   .dot {
-    width: 7px;
-    height: 7px;
+    width: calc(7px * var(--ax-ui-scale));
+    height: calc(7px * var(--ax-ui-scale));
     border-radius: var(--ax-radius-pill);
     background: var(--tone);
   }
@@ -1338,7 +1337,7 @@
   }
   /* D2: labels are the only thing on the board that carries colour. */
   .chip {
-    padding: 0 6px;
+    padding: 0 calc(6px * var(--ax-ui-scale));
     border: 1px solid var(--tone);
     border-radius: var(--ax-radius-pill);
     background: transparent;

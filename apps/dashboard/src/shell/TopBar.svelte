@@ -52,7 +52,7 @@
 <style>
   .topbar {
     position: relative;
-    height: 84px;
+    height: calc(84px * var(--ax-ui-scale));
     flex: 0 0 auto;
   }
 
@@ -70,14 +70,14 @@
     align-items: center;
     justify-content: center;
     gap: var(--ax-space-2);
-    font-size: 28px;
+    font-size: calc(28px * var(--ax-ui-scale));
     font-weight: 700;
     letter-spacing: 0.02em;
   }
 
   .logo {
-    width: 26px;
-    height: 26px;
+    width: calc(26px * var(--ax-ui-scale));
+    height: calc(26px * var(--ax-ui-scale));
     color: var(--ax-accent);
     flex: 0 0 auto;
   }

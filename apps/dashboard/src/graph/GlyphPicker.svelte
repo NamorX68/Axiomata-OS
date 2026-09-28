@@ -76,8 +76,8 @@
   .cell {
     display: grid;
     place-items: center;
-    width: 50px;
-    height: 50px;
+    width: calc(50px * var(--ax-ui-scale));
+    height: calc(50px * var(--ax-ui-scale));
     padding: 0;
     background: transparent;
     border: 1px solid transparent;

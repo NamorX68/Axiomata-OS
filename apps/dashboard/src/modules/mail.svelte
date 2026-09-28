@@ -323,7 +323,7 @@
   .legend-item {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: calc(5px * var(--ax-ui-scale));
     font-size: var(--ax-font-size-sm);
     color: var(--ax-text-muted);
     white-space: nowrap;

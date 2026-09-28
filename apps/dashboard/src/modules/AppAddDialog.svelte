@@ -119,7 +119,7 @@
   <Window
     title="Add app"
     onClose={() => (open = false)}
-    style="width: min(420px, calc(100vw - 2 * var(--ax-space-5))); height: min(560px, calc(100vh - 2 * var(--ax-space-5)));"
+    style="width: min(calc(420px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); height: min(calc(560px * var(--ax-ui-scale)), calc(100vh - 2 * var(--ax-space-5)));"
   >
     <div class="content">
       <div class="mode-switch" role="radiogroup" aria-label="Intern oder extern">

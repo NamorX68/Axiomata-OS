@@ -99,11 +99,15 @@ import { startAgentBridge } from "./core/agent-bridge";
 import { loadCustomTheme } from "./core/custom-theme";
 import { initPersistence } from "./core/persist";
 import { DEFAULT_THEME, applyTheme } from "./core/themes";
+import { startUiScale } from "./core/uiScale";
 import { registerBuiltins } from "./modules";
 
 // Paint the default theme immediately; `initPersistence` swaps in the saved
 // one (and the saved layout) as soon as ~/.axiomata/dashboard.json is read.
 applyTheme(DEFAULT_THEME);
+// The UI scale for the window's display (LK0, K9), before the first paint settles;
+// the saved "UI size" (`initPersistence`) may override it a moment later.
+startUiScale();
 
 registerBuiltins();
 

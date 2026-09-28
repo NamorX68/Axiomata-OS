@@ -16,6 +16,7 @@ import { hiddenBuiltins, loadHiddenBuiltins, loadUserApps, userApps, type UserAp
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges, windowTransparency } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
+import { isUiSize, uiSize } from "./uiScale";
 import { toast } from "./toast";
 import type { CanvasInstance, TileAnchor } from "./types";
 
@@ -247,6 +248,8 @@ export async function initPersistence(): Promise<void> {
   showGrid.set(getSetting<boolean>("showGrid") === true);
   snapEdges.set(getSetting<boolean>("snapEdges") !== false);
   windowTransparency.set(getSetting<number>("windowTransparency") ?? 50);
+  const savedUiSize = getSetting<unknown>("uiSize");
+  uiSize.set(isUiSize(savedUiSize) ? savedUiSize : "auto");
   loading = false;
   onDirty(scheduleSave);
   // Svelte stores call the subscriber once immediately, so this also
@@ -269,6 +272,10 @@ export async function initPersistence(): Promise<void> {
   });
   snapEdges.subscribe((v) => {
     if (!first) setSetting("snapEdges", v);
+  });
+  // `uiScale.ts` applies it; only its persistence is here.
+  uiSize.subscribe((v) => {
+    if (!first) setSetting("uiSize", v);
   });
   // Unlike showGrid/snapEdges (read reactively wherever they're rendered),
   // this setting needs an actual DOM side effect on every change, not just

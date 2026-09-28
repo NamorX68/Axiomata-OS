@@ -72,7 +72,7 @@
   .chat-wrap {
     position: fixed;
     left: 50%;
-    bottom: 64px;
+    bottom: calc(64px * var(--ax-ui-scale));
     transform: translateX(-50%);
     width: min(var(--ax-chat-width), calc(100vw - 2 * var(--ax-space-5)));
     /* Always a little taller than half the viewport — no fixed px cap, so a
@@ -152,7 +152,7 @@
     font-family: var(--ax-font-mono);
     font-size: 0.92em;
     background: var(--ax-surface-3);
-    padding: 1px 4px;
+    padding: 1px calc(4px * var(--ax-ui-scale));
     border-radius: var(--ax-radius-sm);
   }
   .md :global(pre) {
@@ -188,11 +188,11 @@
   }
   .dots {
     display: inline-flex;
-    gap: 4px;
+    gap: calc(4px * var(--ax-ui-scale));
   }
   .dots i {
-    width: 6px;
-    height: 6px;
+    width: calc(6px * var(--ax-ui-scale));
+    height: calc(6px * var(--ax-ui-scale));
     border-radius: 50%;
     background: var(--ax-text-muted);
     animation: blink 1.2s infinite;

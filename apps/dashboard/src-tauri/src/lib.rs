@@ -175,6 +175,7 @@ pub fn run() {
             commands::ide_agent_base_file,
             commands::clipboard_read,
             commands::installed_fonts,
+            commands::ui_displays,
             commands::clipboard_write,
             commands::ide_agent_discard_hunk,
             commands::ide_agent_last_subject,

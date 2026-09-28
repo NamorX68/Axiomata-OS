@@ -93,8 +93,8 @@
   }
 
   .icon {
-    width: 34px;
-    height: 34px;
+    width: calc(34px * var(--ax-ui-scale));
+    height: calc(34px * var(--ax-ui-scale));
     padding: 0;
     display: grid;
     place-items: center;
@@ -111,7 +111,7 @@
   }
 
   .icon svg {
-    width: 18px;
-    height: 18px;
+    width: calc(18px * var(--ax-ui-scale));
+    height: calc(18px * var(--ax-ui-scale));
   }
 </style>

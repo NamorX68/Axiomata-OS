@@ -276,8 +276,8 @@
   .field {
     display: flex;
     align-items: center;
-    flex: 1 1 220px;
-    min-width: 80px;
+    flex: 1 1 calc(220px * var(--ax-ui-scale));
+    min-width: calc(80px * var(--ax-ui-scale));
     background: var(--ax-surface-1);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-sm);
@@ -290,8 +290,8 @@
   input {
     flex: 1;
     min-width: 0;
-    width: 180px;
-    padding: 3px var(--ax-space-2);
+    width: calc(180px * var(--ax-ui-scale));
+    padding: calc(3px * var(--ax-ui-scale)) var(--ax-space-2);
     background: none;
     border: 0;
     outline: none;
@@ -322,8 +322,8 @@
   }
 
   .toggle {
-    min-width: 22px;
-    padding: 1px 3px;
+    min-width: calc(22px * var(--ax-ui-scale));
+    padding: 1px calc(3px * var(--ax-ui-scale));
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
   }
@@ -340,8 +340,8 @@
   }
 
   .icon {
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
     padding: 0;
   }
 
@@ -362,7 +362,7 @@
 
   .count {
     flex-shrink: 0;
-    min-width: 64px;
+    min-width: calc(64px * var(--ax-ui-scale));
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
     font-variant-numeric: tabular-nums;

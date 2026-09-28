@@ -10,6 +10,7 @@
 
   import { getModule } from "../core/registry";
   import { canvasSize, guides, instances, showGrid, updateInstance } from "../core/stores";
+  import { uiScale } from "../core/uiScale";
   import BackgroundHost from "./BackgroundHost.svelte";
   import { anchorFor } from "./snap";
   import Tile from "./Tile.svelte";
@@ -22,18 +23,25 @@
 
   // Publish the canvas box; every Tile derives its displayed position from
   // it (anchored edge + clamp), so nothing is persisted on resize and growing
-  // the window brings tiles back to their committed spots.
+  // the window brings tiles back to their committed spots. In the canvas's own
+  // unscaled units (`docs/plans/editor-look.md`, K10): tiles are drawn times
+  // the UI scale, so a larger scale leaves fewer units on the same screen.
   onMount(() => {
     if (!section) return;
     const publish = () => {
-      const size = { w: section!.clientWidth, h: section!.clientHeight };
+      const scale = get(uiScale);
+      const size = { w: section!.clientWidth / scale, h: section!.clientHeight / scale };
       canvasSize.set(size);
       backfillAnchors(size);
     };
-    publish();
     const ro = new ResizeObserver(publish);
     ro.observe(section);
-    return () => ro.disconnect();
+    // Also on every change of the scale (and once now, as the store calls back at once).
+    const stop = uiScale.subscribe(publish);
+    return () => {
+      ro.disconnect();
+      stop();
+    };
   });
 
   // Layouts saved before anchors existed (or hand-edited ones) get theirs
@@ -57,7 +65,11 @@
 
 <section class="canvas" class:grid={$showGrid} aria-label="Module canvas" bind:this={section}>
   {#each $guides as g, i (i)}
-    <div class="guide {g.axis}" style:left={g.axis === "x" ? `${g.at}px` : undefined} style:top={g.axis === "y" ? `${g.at}px` : undefined}></div>
+    <div
+      class="guide {g.axis}"
+      style:left={g.axis === "x" ? `${g.at * $uiScale}px` : undefined}
+      style:top={g.axis === "y" ? `${g.at * $uiScale}px` : undefined}
+    ></div>
   {/each}
   <div id="particle-slot">
     {#each backgrounds as inst (inst.id)}

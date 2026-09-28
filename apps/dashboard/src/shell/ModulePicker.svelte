@@ -34,7 +34,7 @@
   <Window
     title="Add module"
     onClose={() => (open = false)}
-    style="width: min(520px, calc(100vw - 2 * var(--ax-space-5))); max-height: calc(100vh - 2 * var(--ax-space-5));"
+    style="width: min(calc(520px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); max-height: calc(100vh - 2 * var(--ax-space-5));"
   >
     {#if modules.length === 0}
       <p class="empty">No modules registered.</p>
@@ -70,7 +70,7 @@
     margin: 0;
     padding: var(--ax-space-2);
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
   }
 
@@ -90,8 +90,8 @@
 
   .icon {
     display: inline-flex;
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
     flex: 0 0 auto;
     color: var(--ax-accent);
   }

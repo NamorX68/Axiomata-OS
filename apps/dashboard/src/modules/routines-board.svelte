@@ -282,7 +282,7 @@
     gap: var(--ax-space-1);
   }
   .act button {
-    min-width: 40px;
+    min-width: calc(40px * var(--ax-ui-scale));
     padding: 1px var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
   }

@@ -2061,6 +2061,38 @@ pub async fn installed_fonts() -> Result<Vec<InstalledFont>, String> {
     .map_err(|err| format!("font lookup failed: {err}"))
 }
 
+/// One display as the UI scale sees it (`docs/plans/editor-look.md`, LK0, K9):
+/// where it is, in points of the global display space (the webview's
+/// `screenX`/`screenY`), and the UI scale its real density asks for.
+#[derive(Debug, Clone, Serialize)]
+pub struct UiDisplay {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    scale: f64,
+}
+
+/// The Mac's displays with their UI scale (K9); the page picks the one its
+/// window is on. Asked again whenever the window moves to another display.
+#[tauri::command]
+pub async fn ui_displays() -> Result<Vec<UiDisplay>, String> {
+    tokio::task::spawn_blocking(|| {
+        axiomata_macos::display::displays()
+            .into_iter()
+            .map(|d| UiDisplay {
+                scale: d.ui_scale(),
+                x: d.x,
+                y: d.y,
+                width: d.width,
+                height: d.height,
+            })
+            .collect()
+    })
+    .await
+    .map_err(|err| format!("display lookup failed: {err}"))
+}
+
 /// Puts files back to the agent's base (G13). The UI asks first.
 #[tauri::command]
 pub async fn ide_agent_discard(

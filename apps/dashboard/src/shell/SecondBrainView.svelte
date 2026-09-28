@@ -730,7 +730,7 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    font-size: 20px;
+    font-size: var(--ax-font-size-xl);
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -741,8 +741,8 @@
     color: var(--ax-text-muted);
   }
   .logo {
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
     color: var(--ax-accent);
   }
   .back {
@@ -781,10 +781,10 @@
   .controls {
     position: absolute;
     z-index: 2;
-    top: 72px;
+    top: calc(72px * var(--ax-ui-scale));
     right: var(--ax-space-5);
-    width: 270px;
-    max-height: calc(100vh - 100px);
+    width: calc(270px * var(--ax-ui-scale));
+    max-height: calc(100vh - calc(100px * var(--ax-ui-scale)));
     overflow: auto;
     display: flex;
     flex-direction: column;
@@ -847,7 +847,7 @@
     border-color: var(--ax-border);
   }
   .result .dot {
-    margin-top: 6px;
+    margin-top: calc(6px * var(--ax-ui-scale));
   }
   .result-text {
     display: flex;
@@ -870,7 +870,7 @@
     overflow: hidden;
   }
   .help-btn {
-    width: 30px;
+    width: calc(30px * var(--ax-ui-scale));
     padding: 0;
     border-radius: var(--ax-radius-pill);
     color: var(--ax-text-muted);
@@ -914,7 +914,7 @@
     accent-color: var(--ax-accent);
   }
   .readout {
-    min-width: 44px;
+    min-width: calc(44px * var(--ax-ui-scale));
     text-align: right;
     font-size: var(--ax-font-size-xs);
     color: var(--ax-text-muted);
@@ -950,17 +950,17 @@
     position: absolute;
     z-index: 2;
     left: var(--ax-space-5);
-    bottom: 80px;
+    bottom: calc(80px * var(--ax-ui-scale));
   }
 
   /* ---- detail panel ---- */
   .detail {
     position: absolute;
     z-index: 2;
-    top: 72px;
+    top: calc(72px * var(--ax-ui-scale));
     left: var(--ax-space-5);
-    width: 360px;
-    max-height: calc(100vh - 100px);
+    width: calc(360px * var(--ax-ui-scale));
+    max-height: calc(100vh - calc(100px * var(--ax-ui-scale)));
     overflow: auto;
     padding: var(--ax-space-4) var(--ax-space-5) var(--ax-space-5);
     /* Same glass/hairline/elevated-shadow language as Window.svelte and
@@ -1000,8 +1000,8 @@
     position: absolute;
     top: 0;
     right: 0;
-    width: 26px;
-    height: 26px;
+    width: calc(26px * var(--ax-ui-scale));
+    height: calc(26px * var(--ax-ui-scale));
     padding: 0;
     background: transparent;
     border-color: transparent;
@@ -1082,7 +1082,7 @@
 
   /* W5: the file as the editor shows it — a fixed window onto its start, never the whole panel. */
   .preview {
-    height: 260px;
+    height: calc(260px * var(--ax-ui-scale));
     overflow: hidden;
     margin: 0 0 var(--ax-space-4);
     background: var(--ax-surface-2);

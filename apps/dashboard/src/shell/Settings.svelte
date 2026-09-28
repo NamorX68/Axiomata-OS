@@ -19,6 +19,7 @@
   } from "../core/backend";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
+  import { UI_SIZES, uiScaleAuto, uiSize, type UiSize } from "../core/uiScale";
   import { THEMES, applyTheme } from "../core/themes";
   import { toast } from "../core/toast";
   import { TEMPLATE } from "../theme/validator";
@@ -260,7 +261,7 @@
   <Window
     title="Settings"
     onClose={() => (open = false)}
-    style="width: min(620px, calc(100vw - 2 * var(--ax-space-5))); max-height: calc(100vh - 2 * var(--ax-space-5));"
+    style="width: min(calc(620px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); max-height: calc(100vh - 2 * var(--ax-space-5));"
   >
     <nav class="tabs">
       {#each TABS as t (t.id)}
@@ -299,6 +300,30 @@
           <h3>Canvas</h3>
           <label class="opt"><input type="checkbox" bind:checked={$showGrid} /> Show dot grid <span class="hint">(tiles snap to it either way)</span></label>
           <label class="opt"><input type="checkbox" bind:checked={$snapEdges} /> Magnetic edges <span class="hint">(tiles stick to their neighbours within 8 px)</span></label>
+        </section>
+
+        <section>
+          <h3>UI-Größe</h3>
+          <label class="row">
+            <span class="label">Schrift und Bedienelemente</span>
+            <select
+              value={String($uiSize)}
+              onchange={(e) => {
+                const v = e.currentTarget.value;
+                uiSize.set((v === "auto" ? "auto" : Number(v)) as UiSize);
+              }}
+            >
+              <option value="auto">Auto ({Math.round($uiScaleAuto * 100)}%)</option>
+              {#each UI_SIZES as size (size)}
+                <option value={String(size)}>{size}%</option>
+              {/each}
+            </select>
+          </label>
+          <p class="hint">
+            „Auto“ richtet sich nach der tatsächlichen Pixeldichte des Bildschirms, auf dem das Fenster liegt: auf
+            einem dichten Monitor wird die Oberfläche größer, damit sie so gut lesbar ist wie auf einem MacBook. Die
+            Schrift im Editor und im Terminal bleibt davon unberührt.
+          </p>
         </section>
 
         <section>
@@ -569,7 +594,7 @@
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(calc(170px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
   }
   .theme {
@@ -591,8 +616,8 @@
     flex: 0 0 auto;
   }
   .swatch i {
-    width: 10px;
-    height: 22px;
+    width: calc(10px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
     border-radius: 2px;
   }
   /* Swatches use the theme files' own tokens by scoping the data-theme. */
@@ -650,7 +675,7 @@
     accent-color: var(--ax-accent);
   }
   .readout {
-    min-width: 40px;
+    min-width: calc(40px * var(--ax-ui-scale));
     text-align: right;
     font-size: var(--ax-font-size-xs);
     color: var(--ax-text-muted);
@@ -707,7 +732,7 @@
 
   .role-picks {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(calc(200px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
     margin-bottom: var(--ax-space-3);
   }
@@ -725,7 +750,7 @@
     margin: 0 0 var(--ax-space-3);
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(calc(170px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
   }
   .provider {

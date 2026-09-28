@@ -24,17 +24,33 @@
 :root {
   /* ---------- structural (theme-independent) ---------- */
 
-  --ax-radius-sm: 4px;
-  --ax-radius-md: 8px;
-  --ax-radius-lg: 14px;
+  /* The UI scale (`docs/plans/editor-look.md`, K9–K11): set on <html> by
+     `core/uiScale.ts` from the display's real density or the "UI size"
+     setting. Every UI size below is multiplied by it — type, spacing, radii,
+     icons, hit targets, panel widths. Content fonts (the editor's, the
+     terminal's) are not. The canvas stores its tiles unscaled and draws them
+     times the scale (`canvas/Canvas.svelte`, `canvas/Tile.svelte`). */
+  --ax-ui-scale: 1;
+
+  --ax-radius-sm: calc(4px * var(--ax-ui-scale));
+  --ax-radius-md: calc(8px * var(--ax-ui-scale));
+  --ax-radius-lg: calc(14px * var(--ax-ui-scale));
   --ax-radius-pill: 999px;
 
-  --ax-space-1: 4px;
-  --ax-space-2: 8px;
-  --ax-space-3: 12px;
-  --ax-space-4: 16px;
-  --ax-space-5: 24px;
-  --ax-space-6: 32px;
+  --ax-space-1: calc(4px * var(--ax-ui-scale));
+  --ax-space-2: calc(8px * var(--ax-ui-scale));
+  --ax-space-3: calc(12px * var(--ax-ui-scale));
+  --ax-space-4: calc(16px * var(--ax-ui-scale));
+  --ax-space-5: calc(24px * var(--ax-ui-scale));
+  --ax-space-6: calc(32px * var(--ax-ui-scale));
+
+  /* Icons (`ui/Icon.svelte`, K6) and the smallest thing that may be clicked (K11). */
+  --ax-icon-sm: calc(14px * var(--ax-ui-scale));
+  --ax-icon-md: calc(16px * var(--ax-ui-scale));
+  --ax-icon-lg: calc(20px * var(--ax-ui-scale));
+  --ax-hit-min: calc(28px * var(--ax-ui-scale));
+  /* Line weight of the UI icons, in their own 24-unit grid: a touch lighter than Lucide's 2, as in Zed. */
+  --ax-icon-stroke: 1.75;
 
   --ax-z-particle: 1;
   --ax-z-tile-base: 10;
@@ -51,11 +67,12 @@
   --ax-dur-slow: 560ms;
 
   /* Assistant bar / chat panel widths; the bar never spans an ultra-wide screen. */
-  --ax-assistant-width: 820px;
-  --ax-chat-width: 900px;
+  --ax-assistant-width: calc(820px * var(--ax-ui-scale));
+  --ax-chat-width: calc(900px * var(--ax-ui-scale));
 
-  /* Canvas tile grid (drag / resize snap to it). */
-  --ax-grid: 16px;
+  /* Canvas tile grid (drag / resize snap to it): 16 of the canvas's unscaled
+     units (`canvas/snap.ts` GRID), drawn times the UI scale like the tiles. */
+  --ax-grid: calc(16px * var(--ax-ui-scale));
 
   /* Backdrop blur behind a tile's frameless front "glass" face. */
   --ax-tile-glass-blur: 12px;
@@ -75,11 +92,14 @@
   --ax-font-display: var(--ax-font-sans);
   /* Letter-spacing for the uppercase panel headings ("SKILLS DECK"). */
   --ax-tracking-wide: 0.14em;
-  --ax-font-size-xs: 11px;
-  --ax-font-size-sm: 12px;
-  --ax-font-size-base: 14px;
-  --ax-font-size-lg: 16px;
-  --ax-font-size-xl: 20px;
+  /* The type scale (K11): reading text never below `sm`; `xs` only for tags and counts. */
+  --ax-font-size-xs: calc(12px * var(--ax-ui-scale));
+  --ax-font-size-sm: calc(13px * var(--ax-ui-scale));
+  --ax-font-size-base: calc(14px * var(--ax-ui-scale));
+  --ax-font-size-lg: calc(16px * var(--ax-ui-scale));
+  --ax-font-size-xl: calc(20px * var(--ax-ui-scale));
+  /* The terminal's default text size — a content font like the editor's, so not scaled. */
+  --ax-terminal-font-size: 12px;
   --ax-line-height: 1.5;
 
   /* ---------- neutral fallback palette (themes override) ---------- */

@@ -356,7 +356,7 @@
     right: 0;
     bottom: 0;
     z-index: 5;
-    width: min(460px, 100%);
+    width: min(calc(460px * var(--ax-ui-scale)), 100%);
     display: flex;
     flex-direction: column;
     background: var(--ax-surface-2);
@@ -388,7 +388,7 @@
   }
 
   .preview {
-    height: clamp(280px, 38vh, 440px);
+    height: clamp(calc(280px * var(--ax-ui-scale)), 38vh, calc(440px * var(--ax-ui-scale)));
     flex: 0 0 auto;
     border-bottom: 1px solid var(--ax-border);
   }
@@ -410,7 +410,7 @@
   }
 
   label > span:first-child {
-    width: 96px;
+    width: calc(96px * var(--ax-ui-scale));
     color: var(--ax-text-muted);
   }
 
@@ -431,7 +431,7 @@
   }
 
   input[type="number"] {
-    width: 64px;
+    width: calc(64px * var(--ax-ui-scale));
   }
 
   input[type="text"] {
@@ -445,7 +445,7 @@
   }
 
   output {
-    min-width: 96px;
+    min-width: calc(96px * var(--ax-ui-scale));
     color: var(--ax-text-muted);
   }
 

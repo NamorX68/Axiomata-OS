@@ -44,6 +44,7 @@
 -->
 <script lang="ts">
   import { cubicOut } from "svelte/easing";
+  import { get } from "svelte/store";
   import type { TransitionConfig } from "svelte/transition";
 
   import { draggable, type DragDelta } from "../canvas/drag";
@@ -59,6 +60,7 @@
     type StagedPanel,
   } from "../core/staging";
   import type { ModuleContext } from "../core/types";
+  import { uiScale } from "../core/uiScale";
 
   let { panel, ctx, onClose }: { panel: StagedPanel; ctx: ModuleContext; onClose: () => void } = $props();
 
@@ -76,11 +78,18 @@
   const SETTING_KEY = "stagingPanelSize";
   const SETTING_KEY_BY_TYPE = "stagingPanelSizes";
 
+  // Sizes are in unscaled units, drawn times the UI scale like the canvas's tiles
+  // (`docs/plans/editor-look.md`, K10): the panel grows with its text.
   function clampW(w: number): number {
-    return Math.min(Math.max(MIN_W, w), Math.round(window.innerWidth * 0.9));
+    return Math.min(Math.max(MIN_W, w), Math.round((window.innerWidth / get(uiScale)) * 0.9));
   }
   function clampH(h: number): number {
-    return Math.min(Math.max(MIN_H, h), Math.round(window.innerHeight * 0.9));
+    return Math.min(Math.max(MIN_H, h), Math.round((window.innerHeight / get(uiScale)) * 0.9));
+  }
+  /** The pointer's way on screen (CSS px) in unscaled units. */
+  function unscaled(d: ResizeDelta): ResizeDelta {
+    const scale = get(uiScale);
+    return { dw: d.dw / scale, dh: d.dh / scale };
   }
 
   /**
@@ -134,10 +143,12 @@
   function startResize() {
     resizing = { dw: 0, dh: 0 };
     const rect = panelEl?.getBoundingClientRect();
-    resizeBase = rect ? { w: rect.width, h: rect.height } : (panelSize ?? { w: MIN_W, h: MIN_H });
+    const scale = get(uiScale);
+    resizeBase = rect ? { w: rect.width / scale, h: rect.height / scale } : (panelSize ?? { w: MIN_W, h: MIN_H });
   }
 
-  function endResize(delta: ResizeDelta) {
+  function endResize(onScreen: ResizeDelta) {
+    const delta = unscaled(onScreen);
     resizing = null;
     panelSize = {
       w: clampW(resizeBase.w + delta.dw),
@@ -162,8 +173,10 @@
   function anchoredPos(): { x: number; y: number } | null {
     const anchor = readAnchor(panel.config.anchor);
     if (!anchor) return null;
-    const w = clampW(panelSize?.w ?? 0);
-    const h = clampH(panelSize?.h ?? 0);
+    // On screen, so times the UI scale; the anchor is in screen pixels already.
+    const scale = get(uiScale);
+    const w = clampW(panelSize?.w ?? 0) * scale;
+    const h = clampH(panelSize?.h ?? 0) * scale;
     const inset = 8;
     const fit = (value: number, size: number, limit: number) =>
       Math.round(Math.min(Math.max(value, inset), Math.max(inset, limit - size - inset)));
@@ -231,16 +244,16 @@
   aria-label={def?.title ?? panel.type}
   bind:this={panelEl}
   onpointerdowncapture={() => bringToFront(panel.id)}
-  style:width="{liveW}px"
-  style:height="{liveH}px"
+  style:width="{liveW * $uiScale}px"
+  style:height="{liveH * $uiScale}px"
   style:left={pos ? `${liveX}px` : undefined}
   style:top={pos ? `${liveY}px` : undefined}
   use:draggable={{ handle: ".panel-head", onStart: startMove, onMove: (d) => (moving = d), onEnd: endMove }}
 >
-  <div class="resize-handle resize-w" use:resizable={{ dir: "w", onStart: startResize, onMove: (d) => (resizing = d), onEnd: endResize }}></div>
-  <div class="resize-handle resize-e" use:resizable={{ dir: "e", onStart: startResize, onMove: (d) => (resizing = d), onEnd: endResize }}></div>
-  <div class="resize-handle resize-n" use:resizable={{ dir: "n", onStart: startResize, onMove: (d) => (resizing = d), onEnd: endResize }}></div>
-  <div class="resize-handle resize-s" use:resizable={{ dir: "s", onStart: startResize, onMove: (d) => (resizing = d), onEnd: endResize }}></div>
+  <div class="resize-handle resize-w" use:resizable={{ dir: "w", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
+  <div class="resize-handle resize-e" use:resizable={{ dir: "e", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
+  <div class="resize-handle resize-n" use:resizable={{ dir: "n", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
+  <div class="resize-handle resize-s" use:resizable={{ dir: "s", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
   <header class="panel-head">
     <span class="icon" aria-hidden="true">{@html def?.icon ?? ""}</span>
     <h2>{def?.title ?? panel.type}</h2>
@@ -271,13 +284,13 @@
        Overridden entirely by `.positioned` below once the panel has been
        dragged at least once. */
     top: var(--ax-space-4);
-    bottom: 64px;
+    bottom: calc(64px * var(--ax-ui-scale));
     left: 50%;
     transform: translateX(-50%);
     margin-top: auto;
     margin-bottom: auto;
-    height: min(80vh, calc(100vh - 64px - var(--ax-space-4)));
-    width: min(1000px, calc(100vw - 2 * var(--ax-space-5)));
+    height: min(80vh, calc(100vh - calc(64px * var(--ax-ui-scale)) - var(--ax-space-4)));
+    width: min(calc(1000px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5)));
     border-radius: var(--ax-radius-lg);
     /* Tile-front "elevated" look (see canvas/Tile.svelte's
        .tile.dragging/.resizing .face.front), permanently on rather than
@@ -368,8 +381,8 @@
   }
   .icon {
     display: inline-flex;
-    width: 16px;
-    height: 16px;
+    width: calc(16px * var(--ax-ui-scale));
+    height: calc(16px * var(--ax-ui-scale));
     color: var(--ax-accent);
   }
   .icon :global(svg) {
@@ -387,8 +400,8 @@
      behaviour of staying hidden until the pointer is over the tile (or it
      has focus), not a permanently-visible button. */
   .close {
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
     padding: 0;
     display: grid;
     place-items: center;

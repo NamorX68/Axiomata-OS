@@ -138,7 +138,7 @@
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(calc(150px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
   }
 
@@ -162,8 +162,8 @@
   .icon {
     grid-row: 1 / span 2;
     display: inline-flex;
-    width: 18px;
-    height: 18px;
+    width: calc(18px * var(--ax-ui-scale));
+    height: calc(18px * var(--ax-ui-scale));
     color: var(--ax-accent);
   }
   .icon svg {
@@ -208,8 +208,8 @@
   .run {
     grid-column: 3;
     grid-row: 1 / span 2;
-    width: 28px;
-    height: 28px;
+    width: calc(28px * var(--ax-ui-scale));
+    height: calc(28px * var(--ax-ui-scale));
     padding: 0;
     display: grid;
     place-items: center;
@@ -223,13 +223,13 @@
     color: var(--ax-text-invert);
   }
   .run svg {
-    width: 14px;
-    height: 14px;
+    width: calc(14px * var(--ax-ui-scale));
+    height: calc(14px * var(--ax-ui-scale));
   }
 
   .spinner {
-    width: 12px;
-    height: 12px;
+    width: calc(12px * var(--ax-ui-scale));
+    height: calc(12px * var(--ax-ui-scale));
     border: 2px solid var(--ax-accent-muted);
     border-top-color: var(--ax-accent);
     border-radius: 50%;

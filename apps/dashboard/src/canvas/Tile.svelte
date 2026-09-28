@@ -17,6 +17,7 @@
   import { getModule, makeContext } from "../core/registry";
   import { bringToFront, canvasSize, guides, instances, removeInstance, snapEdges, updateInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
+  import { uiScale } from "../core/uiScale";
   import { draggable, type DragDelta } from "./drag";
   import { resizable, type ResizeDelta } from "./resize";
   import {
@@ -79,6 +80,20 @@
     guides.set(merged);
   }
 
+  /**
+   * The canvas works in unscaled units and draws them times the UI scale
+   * (`docs/plans/editor-look.md`, K10): the pointer's way on screen, in CSS
+   * px, is that many units divided by the scale.
+   */
+  function unscaledDrag(d: DragDelta): DragDelta {
+    const scale = get(uiScale);
+    return { dx: d.dx / scale, dy: d.dy / scale };
+  }
+  function unscaledResize(d: ResizeDelta): ResizeDelta {
+    const scale = get(uiScale);
+    return { dw: d.dw / scale, dh: d.dh / scale };
+  }
+
   /** Snapped drag offset: the tile "sticks" to grid / neighbour edges live. */
   function snappedDrag(d: DragDelta): DragDelta {
     const base = shown(inst);
@@ -118,7 +133,7 @@
 
   function onDragEnd(d: DragDelta) {
     const base = shown(inst);
-    const sd = snappedDrag(d);
+    const sd = snappedDrag(unscaledDrag(d));
     drag = null;
     guides.set([]);
     commit(resolveOverlap({ x: base.x + sd.dx, y: base.y + sd.dy, w: base.w, h: base.h }, others(), bounds()));
@@ -149,17 +164,17 @@
   class:dragging={drag !== null}
   class:resizing={resize !== null}
   data-instance={inst.id}
-  style:left="{disp.x}px"
-  style:top="{disp.y}px"
-  style:width="{liveW}px"
-  style:height="{liveH}px"
+  style:left="{disp.x * $uiScale}px"
+  style:top="{disp.y * $uiScale}px"
+  style:width="{liveW * $uiScale}px"
+  style:height="{liveH * $uiScale}px"
   style:z-index={drag ? "var(--ax-z-tile-drag)" : `calc(var(--ax-z-tile-base) + ${inst.z})`}
-  style:transform={drag ? `translate3d(${drag.dx}px, ${drag.dy}px, 0)` : undefined}
+  style:transform={drag ? `translate3d(${drag.dx * $uiScale}px, ${drag.dy * $uiScale}px, 0)` : undefined}
   onpointerdowncapture={() => bringToFront(inst.id)}
   use:draggable={{
     handle: ".tile-drag",
     onStart: () => (drag = { dx: 0, dy: 0 }),
-    onMove: (d) => (drag = snappedDrag(d)),
+    onMove: (d) => (drag = snappedDrag(unscaledDrag(d))),
     onEnd: onDragEnd,
   }}
 >
@@ -246,7 +261,7 @@
           resizeDir = dir;
           resize = { dw: 0, dh: 0 };
         },
-        onMove: (d) => (resize = snappedResize(d, dir)),
+        onMove: (d) => (resize = snappedResize(unscaledResize(d), dir)),
         onEnd: onResizeEnd,
       }}
     ></div>
@@ -369,8 +384,8 @@
     color: var(--ax-text-muted);
   }
   .front-head .tile-icon {
-    width: 20px;
-    height: 20px;
+    width: calc(20px * var(--ax-ui-scale));
+    height: calc(20px * var(--ax-ui-scale));
   }
   .front-head .tile-btn {
     opacity: 0;
@@ -395,8 +410,8 @@
 
   .tile-icon {
     display: inline-flex;
-    width: 16px;
-    height: 16px;
+    width: calc(16px * var(--ax-ui-scale));
+    height: calc(16px * var(--ax-ui-scale));
     color: var(--ax-accent);
   }
   .tile-icon :global(svg) {
@@ -416,8 +431,8 @@
   }
 
   .tile-btn {
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
     padding: 0;
     display: grid;
     place-items: center;
@@ -432,8 +447,8 @@
     background: var(--ax-surface-3);
   }
   .tile-btn svg {
-    width: 14px;
-    height: 14px;
+    width: calc(14px * var(--ax-ui-scale));
+    height: calc(14px * var(--ax-ui-scale));
   }
 
   .tile-body {
@@ -493,8 +508,8 @@
   .resize-se {
     right: -2px;
     bottom: -2px;
-    width: 16px;
-    height: 16px;
+    width: calc(16px * var(--ax-ui-scale));
+    height: calc(16px * var(--ax-ui-scale));
     cursor: nwse-resize;
     border-right: 2px solid var(--ax-border-strong);
     border-bottom: 2px solid var(--ax-border-strong);

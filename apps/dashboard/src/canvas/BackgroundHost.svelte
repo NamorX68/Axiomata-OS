@@ -48,8 +48,8 @@
     gap: var(--ax-space-1);
   }
   .corner button {
-    width: 24px;
-    height: 24px;
+    width: calc(24px * var(--ax-ui-scale));
+    height: calc(24px * var(--ax-ui-scale));
     padding: 0;
     line-height: 1;
     font-size: var(--ax-font-size-sm);
@@ -64,8 +64,8 @@
   .popover {
     position: absolute;
     left: 0;
-    bottom: 30px;
-    min-width: 180px;
+    bottom: calc(30px * var(--ax-ui-scale));
+    min-width: calc(180px * var(--ax-ui-scale));
     /* Same glass/hairline/elevated-shadow language as Window.svelte and
        every other panel in the app. */
     background: var(--ax-tile-glass-bg);

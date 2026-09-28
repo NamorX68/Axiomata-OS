@@ -139,7 +139,7 @@
   .app-context-menu {
     position: fixed;
     z-index: var(--ax-z-dialog);
-    min-width: 160px;
+    min-width: calc(160px * var(--ax-ui-scale));
     padding: var(--ax-space-2);
     /* Same glass/hairline/elevated-shadow language as Window.svelte and
        every other panel — a plain rgba surface + full border would read as

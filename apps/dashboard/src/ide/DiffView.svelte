@@ -433,7 +433,7 @@
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: minmax(160px, 22%) 1fr;
+    grid-template-columns: minmax(calc(160px * var(--ax-ui-scale)), 22%) 1fr;
     min-height: 0;
   }
 

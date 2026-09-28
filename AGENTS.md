@@ -249,6 +249,14 @@ from the code itself:
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.
+- **UI scale** (`docs/plans/editor-look.md`, K9–K11): every UI size is `N px × var(--ax-ui-scale)`
+  (tokens already are; a size that is no token is written `calc(Npx * var(--ax-ui-scale))`), set by
+  `core/uiScale.ts` from the display's real density (`axiomata-macos::display`) or the "UI size"
+  setting. The canvas, the floating panels and the file tree store **unscaled** sizes and draw them
+  times `$uiScale` — divide pointer deltas by it. Not scaled: the editor's and terminal's fonts, and
+  anything measured in editor character cells. Script that reads a size token gets the unresolved
+  `calc(…)`, not a number. UI icons: `ui/Icon.svelte`/`ui/IconButton.svelte` over the Lucide subset
+  vendored by `scripts/vendor-icons.sh`.
 - **Backend ids + the one frontmatter bridge**: `backend:` is `opencode` (default) |
   `ollama`; the only other relevant field is `prepend_files: ["rel/path.md"]` (workspace files
   inlined into the prompt as `## Context file:` blocks; missing = skipped, `..`/absolute =

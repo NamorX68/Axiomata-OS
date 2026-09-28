@@ -655,6 +655,17 @@ carrying its own config.
 - **Themes**: `<html data-theme="…">`, every colour/size through a `--ax-*` token (graphite,
   paper, steampunk, forest, ocean); a user `~/.axiomata/theme.css` is validated
   (`:root { --ax-*: … }` only) before injection.
+- **UI scale** (`docs/plans/editor-look.md`, LK0): `--ax-ui-scale` on `<html>` multiplies every UI
+  size — type (12/13/14/16/20 px), spacing, radii, icons (`--ax-icon-*`), hit targets
+  (`--ax-hit-min`), panel and dialog widths. "Auto" (`core/uiScale.ts`) asks Rust (`ui_displays`,
+  `axiomata-macos::display`, CoreGraphics FFI) for each display's points per inch against what macOS
+  is designed for (127 built-in, 110 external), 1.0–1.6; it follows the window to another display.
+  The "UI size" setting (Settings → Darstellung) overrides it. The canvas keeps tile geometry in
+  unscaled units and draws it times the scale (tiles grow with their text instead of cutting it
+  off); the floating panels and the file tree's width work the same way. The editor's and the
+  terminal's fonts are content, not UI, and stay as set. UI icons are a vendored Lucide subset
+  (`scripts/vendor-icons.sh` → `src/ui/icons/lucide.ts`) drawn by `ui/Icon.svelte`; clickable ones
+  are `ui/IconButton.svelte` (at least `--ax-hit-min`, label required).
 - **Connector modules — "provider = skill, not code"**: Calendar and Reminders (and Mail)
   are the pattern for any future integration behind an MCP server the app doesn't have
   first-class Tauri commands for. A `*-digest` skill (seeded on first run from

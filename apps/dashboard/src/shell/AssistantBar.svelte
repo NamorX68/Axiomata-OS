@@ -123,8 +123,8 @@
     color: var(--ax-text-muted);
   }
   .spinner {
-    width: 10px;
-    height: 10px;
+    width: calc(10px * var(--ax-ui-scale));
+    height: calc(10px * var(--ax-ui-scale));
     border: 2px solid var(--ax-accent-muted);
     border-top-color: var(--ax-accent);
     border-radius: 50%;

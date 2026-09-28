@@ -43,11 +43,17 @@ Vorgänger: `docs/plans/editor.md` (ED0–ED6).
   / dezent / stark“, Vorgabe stark. Heute: pauschal 110 ms (`fileapp/cursorGlide.ts`).
 - **K9 — UI-Skalierung „Auto“** (R2-Q1): Nach der **körperlichen** Größe. macOS liefert die Maße des Bildschirms in
   Millimetern (CoreGraphics `CGDisplayScreenSize`, über `axiomata-macos` wie die Schriften per FFI) und die Auflösung
-  in Punkten. Bezug ist das MacBook in Standardeinstellung (≈ 127 Punkte pro Zoll): Faktor = Punkte pro Zoll des
-  Bildschirms / 127, begrenzt auf 1,0–1,6. Wechselt das Fenster den Bildschirm, wird neu gerechnet. Manuell
+  in Punkten. Bezug ist, wofür macOS ausgelegt ist: ein MacBook in Standardeinstellung (≈ 127 Punkte pro Zoll) für
+  eingebaute Bildschirme, ein Schreibtischmonitor wie das Studio Display (≈ 110) für externe — er steht weiter weg
+  (Nachtrag beim Bau: gegen 127 gerechnet käme ein nativ betriebener 40″-5K2K nur auf 1,1). Faktor = Punkte pro Zoll /
+  Bezug, begrenzt auf 1,0–1,6, in Schritten von 0,05. Wechselt das Fenster den Bildschirm, wird neu gerechnet. Manuell
   übersteuerbar: „UI-Größe: Auto / 90 %–150 %“.
 - **K10 — Sofort app-weit** (R2-Q2): Der Faktor `--ax-ui-scale` multipliziert alle `--ax-font-size-*`,
-  Icon-Größen und Abstände der UI, und das gilt vom Fundament an in der ganzen App. Dazu gehört ein Durchgang mit
+  Icon-Größen und Abstände der UI, und das gilt vom Fundament an in der ganzen App. **Nachtrag beim Bau (Owner,
+  nach dem Screenshot-Durchgang):** auch die Geometrie wächst mit — Kacheln, schwebende Panels und die Breite des
+  Dateibaums werden in unskalierten Einheiten gespeichert und mal Faktor gezeichnet, feste Dialog- und Panelbreiten
+  sind `calc(N px × Faktor)`. Die Alternative, die ganze Webansicht zu zoomen (Tauri `set_zoom`), hat der Owner
+  verworfen: „fühlt sich nach Browser an“. Dazu gehört ein Durchgang mit
   Screenshots durch alle Module (21:9 und MacBook), um Stellen mit festen Pixelmaßen zu finden. Ausgenommen sind die
   Editor-Schrift und der Code im FilePeek.
 - **K11 — Schrifttreppe und Mindestgrößen** (R2-Q3): xs 12, sm 13, base 14, lg 16, xl 20 px, je mal Faktor

@@ -7,7 +7,9 @@
 //! system's own `pbcopy`/`pbpaste` do it, as subprocesses, text only.
 //!
 //! And the installed fonts for the editor's and the terminal's font pickers
-//! (ED5, T10), straight from CoreText.
+//! (ED5, T10), straight from CoreText; and the displays with their real
+//! density, for the UI scale (`docs/plans/editor-look.md`, LK0, K9).
 
 pub mod clipboard;
+pub mod display;
 pub mod fonts;

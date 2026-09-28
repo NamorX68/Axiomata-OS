@@ -3,6 +3,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import { uiScale } from "../core/uiScale";
   import { readPalette, type NodeKind } from "./model";
   import { drawGlyph } from "./render";
 
@@ -40,9 +41,10 @@
     KINDS.forEach(({ kind }, i) => {
       const c = canvases[i];
       if (!c) return;
-      const dpr = window.devicePixelRatio || 1;
-      c.width = 22 * dpr;
-      c.height = 22 * dpr;
+      // Drawn in a 22-unit box; the box on screen grows with the UI scale, so the bitmap does too (crisp).
+      const dpr = (window.devicePixelRatio || 1) * $uiScale;
+      c.width = Math.round(22 * dpr);
+      c.height = Math.round(22 * dpr);
       const ctx = c.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -83,9 +85,10 @@
     return () => mo.disconnect();
   });
 
-  // Repaint whenever the canvases mount or `hex` flips (layout switch).
+  // Repaint whenever the canvases mount, `hex` flips (layout switch) or the UI scale changes.
   $effect(() => {
     hex;
+    void $uiScale;
     paint();
   });
 </script>
@@ -122,7 +125,7 @@
     gap: var(--ax-space-2);
   }
   canvas {
-    width: 22px;
-    height: 22px;
+    width: calc(22px * var(--ax-ui-scale));
+    height: calc(22px * var(--ax-ui-scale));
   }
 </style>

@@ -123,7 +123,7 @@ function resolveTerminalFontString(): string {
   const settings = get(terminalSettings);
   const cs = getComputedStyle(document.documentElement);
   const fallbackFamily = cs.getPropertyValue("--ax-font-mono").trim() || "monospace";
-  const fallbackSizePx = cs.getPropertyValue("--ax-font-size-sm").trim() || "13px";
+  const fallbackSizePx = cs.getPropertyValue("--ax-terminal-font-size").trim() || "13px";
   const size = typeof settings.fontSizePx === "number" ? `${settings.fontSizePx}px` : fallbackSizePx;
   const family =
     typeof settings.fontFamily === "string" && settings.fontFamily.trim() ? settings.fontFamily : fallbackFamily;
