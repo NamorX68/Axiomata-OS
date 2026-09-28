@@ -339,6 +339,19 @@ describe("modes and status", () => {
     ]);
   });
 
+  it("hands gra to the view: at the cursor in Normal, the selection as the range in Visual (ED6.7)", () => {
+    const { m, effects } = setup("a|bc def\nghi");
+    m.feedKeys("gra");
+    m.feedKeys("vlgra");
+    m.feedKeys("jVgra");
+    expect(effects).toEqual([
+      { type: "codeAction", range: null },
+      { type: "codeAction", range: { start: pos(0, 1), end: pos(0, 3) } },
+      { type: "codeAction", range: { start: pos(1, 0), end: pos(1, 3) } },
+    ]);
+    expect(m.status().mode).toBe("normal");
+  });
+
   it("takes a completion inside Insert as one change, and . repeats its text without the import (ED6.4)", () => {
     const { doc, m } = setup("|x\ny");
     m.feedKeys("jAfo");

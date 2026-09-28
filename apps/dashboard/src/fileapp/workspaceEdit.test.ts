@@ -6,7 +6,7 @@ import { EditorDocument } from "../editor/document";
 import { parseWorkspaceEdit } from "../editor/lsp/client";
 import { pos, range } from "../editor/position";
 import type { TextEdit } from "../editor/textEdits";
-import { applyRename, docTouched, documentChanges } from "./renameApply";
+import { applyWorkspaceEdit, docTouched, documentChanges } from "./workspaceEdit";
 
 const ctx = { tabSize: 4, layout: UNWRAPPED, pageRows: 1, commentPrefix: null };
 const doc = (text: string) => new EditorDocument(text, { indentFallback: { kind: "spaces", size: 4 } });
@@ -38,7 +38,7 @@ describe("parseWorkspaceEdit", () => {
   });
 });
 
-describe("applyRename (ED6.5, L16)", () => {
+describe("applyWorkspaceEdit (ED6.5, L16)", () => {
   it("changes this editor, another open editor, and a closed file; skips what it may not touch", async () => {
     const here = doc("fn old() {}\nold();");
     const other = doc("use crate::old;");
@@ -52,7 +52,7 @@ describe("applyRename (ED6.5, L16)", () => {
       ["file:///p/d.rs", [at(0, 0, 3, "new")]],
       ["file:///opt/lib.rs", [at(0, 0, 3, "new")]],
     ]);
-    const outcome = await applyRename(edits, {
+    const outcome = await applyWorkspaceEdit(edits, {
       here: {
         uri: "file:///p/a.rs",
         doc: here,
@@ -77,13 +77,39 @@ describe("applyRename (ED6.5, L16)", () => {
     expect(disk["c.rs"]).toBe("new()\r\nnew()\r\n");
     expect(outcome.changed).toBe(3);
     expect(outcome.skipped).toEqual([
-      { file: "d.rs", reason: "changed on disk meanwhile" },
       { file: "file:///opt/lib.rs", reason: "outside the project" },
+      { file: "d.rs", reason: "changed on disk meanwhile" },
     ]);
     expect(get(docTouched)).toBe(touchedBefore + 1);
     // One undo step in each open document.
     other.undo();
     expect(other.store.text()).toBe("use crate::old;");
+  });
+
+  it("changes nothing when a closed file it needs cannot be read — a file it would create (ED6.7)", async () => {
+    const here = doc("const total = 1 + 2;");
+    const disk: Record<string, string> = { "other.ts": "x" };
+    let wrote = false;
+    const edits = new Map<string, TextEdit[]>([
+      ["file:///p/main.ts", [at(0, 0, 0, 'import { total } from "./total";\n')]],
+      ["file:///p/other.ts", [at(0, 0, 1, "y")]],
+      ["file:///p/total.ts", [at(0, 0, 0, "export const total = 1 + 2;\n")]],
+    ]);
+    const outcome = await applyWorkspaceEdit(edits, {
+      here: { uri: "file:///p/main.ts", doc: here, apply: (changes) => run(here, { type: "replaceText", changes }, ctx) },
+      openDoc: () => null,
+      fileOf: (uri) => ({ root: "project:1", rel: uri.slice("file:///p/".length) }),
+      read: async (_root, rel) => {
+        if (!(rel in disk)) throw { kind: "NotFound", message: "no such file" };
+        return { content: disk[rel], version: "v" };
+      },
+      write: async () => {
+        wrote = true;
+      },
+    });
+    expect(outcome).toEqual({ changed: 0, skipped: [], refused: "it would create total.ts" });
+    expect(here.store.text()).toBe("const total = 1 + 2;");
+    expect(wrote).toBe(false);
   });
 
   it("works on the text as the server has it: CRLF and the final line break do not shift anything", () => {

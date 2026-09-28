@@ -78,6 +78,8 @@ export type ViEffect =
   | { type: "format" }
   /** `grn` (no name: the view asks for one) or `:rename {name}` (ED6.5, L17). */
   | { type: "rename"; name: string | null }
+  /** `gra` and `:action` (ED6.7, L21): code actions at the cursor, or for the Visual selection (`range`). */
+  | { type: "codeAction"; range: { start: Pos; end: Pos } | null }
   /** `:set wrap`, `:set nu` … — the view's own options, for this editor only (V6). */
   | { type: "set"; option: SetOption; value: boolean | "toggle" }
   /** `]c`/`[c` in a diff (H9), `gf` there or on a path. */
@@ -988,6 +990,9 @@ export class ViMachine {
       case "grn":
         this.env.effect({ type: "rename", name: null });
         return true;
+      case "gra":
+        this.env.effect({ type: "codeAction", range: null });
+        return true;
       case "gri":
       case "grt":
       case "grr": {
@@ -1327,6 +1332,15 @@ export class ViMachine {
         this.setCursor(this.cursor);
         this.commands.open(":", "'<,'>");
         return true;
+      case "gra": {
+        // As Neovim: the selection is the range; Visual ends, the cursor goes to its start.
+        const start = regionStart(store, region, this.ctx.tabSize);
+        const end = regionEnd(store, region);
+        this.exitVisualFor(region);
+        this.setCursor(start);
+        this.env.effect({ type: "codeAction", range: { start, end } });
+        return true;
+      }
       case "zt":
       case "zz":
       case "zb":

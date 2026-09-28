@@ -93,6 +93,7 @@ export type CommandEffect =
   | { type: "reload" }
   | { type: "format" }
   | { type: "rename"; name: string | null }
+  | { type: "codeAction"; range: null }
   | { type: "set"; option: SetOption; value: boolean | "toggle" };
 
 export interface CommandHost {
@@ -556,6 +557,8 @@ export class CommandMode {
         return host.readOnly() ? this.error(NOT_HERE) : host.effect({ type: "format" });
       case "rename":
         return host.readOnly() ? this.error(NOT_HERE) : host.effect({ type: "rename", name: cmd.newName });
+      case "action":
+        return host.readOnly() ? this.error(NOT_HERE) : host.effect({ type: "codeAction", range: null });
       case "goto":
         return host.jumpTo(pos(cmd.line, firstNonBlank(doc.store, cmd.line)));
       case "substitute":

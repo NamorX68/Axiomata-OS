@@ -27,6 +27,8 @@ export interface Diagnostic {
   message: string;
   source?: string;
   code?: string;
+  /** The server's own object, handed back as a code action's context (ED6.7). */
+  raw?: unknown;
 }
 
 /** One underlined stretch of one line. */
@@ -77,6 +79,7 @@ export function parseDiagnostics(raw: unknown): Diagnostic[] {
       message: item.message,
       source: typeof item.source === "string" ? item.source : undefined,
       code: code === undefined ? undefined : String(code),
+      raw: item,
     });
   }
   return out.sort((a, b) => a.start.line - b.start.line || a.start.col - b.start.col || a.severity - b.severity);

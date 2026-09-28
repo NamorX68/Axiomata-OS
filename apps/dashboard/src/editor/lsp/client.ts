@@ -14,6 +14,7 @@
 
 import type { EditorDocument, TextChange } from "../document";
 import { range, type Pos } from "../position";
+import { CODE_ACTION_KINDS, type CodeActionItem, parseCodeAction, parseCodeActions, type ServerCommand } from "./codeActions";
 import { type CompletionAnswer, type CompletionItem, parseCompletion, parseItem } from "./completion";
 import { type Diagnostic, parseDiagnostics } from "./diagnostics";
 import { parseSignatureHelp, type SignatureView } from "./signature";
@@ -27,6 +28,15 @@ export const CHANGE_DELAY = 150;
 const SYNC_NONE = 0;
 const SYNC_FULL = 1;
 const SYNC_INCREMENTAL = 2;
+
+/**
+ * How long after a command of ours finished the server may still send its
+ * edit (`workspace/applyEdit`, L23) — some answer the command first.
+ */
+export const APPLY_EDIT_GRACE_MS = 1000;
+
+/** Applies a server's `WorkspaceEdit` (raw) for a command of ours; whether it was applied. */
+export type EditApplier = (edit: unknown) => Promise<boolean>;
 
 /** Sent by Rust when the server's output ended (it crashed or was stopped). */
 export const EXITED = "$/axiomata/exited";
@@ -110,6 +120,12 @@ export class LspClient {
   /** Characters after which the server offers a signature (`(`, `,`), and ones that refresh an open one. */
   signatureTriggers: readonly string[] = [];
   signatureRetriggers: readonly string[] = [];
+  /** Whether the server offers code actions, and fills them in when one is chosen (`codeAction/resolve`). */
+  codeActions = false;
+  private resolvesCodeAction = false;
+  /** Who applies a server's edit while a command of ours runs, and until when (L23). */
+  private applier: { apply: EditApplier; until: number; token: number } | null = null;
+  private commandToken = 0;
   private readonly docs = new Map<string, OpenDocument>();
   private readonly diagnostics = new Map<string, Diagnostic[]>();
   private readonly diagnosticListeners = new Set<(uri: string) => void>();
@@ -122,6 +138,7 @@ export class LspClient {
     this.rpc = new Rpc(transport);
     this.rpc.onNotification("textDocument/publishDiagnostics", (params) => this.published(params));
     this.rpc.onNotification(EXITED, () => this.exited());
+    this.rpc.onRequest("workspace/applyEdit", (params) => this.applyEdit(params));
     this.ready = this.initialize();
   }
 
@@ -350,6 +367,74 @@ export class LspClient {
     return parseWorkspaceEdit(result);
   }
 
+  /**
+   * The code actions for `from`..`to` (ED6.7): `diagnostics` are the server's
+   * own objects for the problems there (`Diagnostic.raw`). Empty when there
+   * are none or the request failed.
+   */
+  async codeActionsAt(uri: string, from: Pos, to: Pos, diagnostics: readonly unknown[]): Promise<CodeActionItem[]> {
+    try {
+      const result = await this.request<unknown>("textDocument/codeAction", {
+        textDocument: { uri },
+        range: lspRange(from, to),
+        // The protocol's trigger kind "invoked": asked for by a key or the button.
+        context: { diagnostics, triggerKind: 1 },
+      });
+      return parseCodeActions(result);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * An action with what the server fills in only when it is chosen (its
+   * edit); the action as it was when there is nothing to resolve. Throws when
+   * the request fails — taking the action then would do nothing, silently.
+   */
+  async resolveCodeAction(item: CodeActionItem): Promise<CodeActionItem> {
+    if (item.edit !== null || !item.raw || !this.resolvesCodeAction) return item;
+    const resolved = parseCodeAction(await this.request<unknown>("codeAction/resolve", item.raw));
+    // Only the edit is resolved (the capability says so); the command stays the one offered —
+    // Rust lets only that one run (L18).
+    return resolved ? { ...resolved, fixes: item.fixes, command: item.command } : item;
+  }
+
+  /**
+   * Runs a command the server offered (ED6.7, L18). An edit the server sends
+   * meanwhile — or up to {@link APPLY_EDIT_GRACE_MS} after — goes to `apply`
+   * (L23); at any other time it is refused. One command at a time: the
+   * server's edit does not say which command it belongs to, so a second one
+   * while the first runs is refused. Throws with the server's reason when the
+   * command fails.
+   */
+  async executeCommand(command: ServerCommand, apply: EditApplier): Promise<void> {
+    if (this.applier?.until === Number.POSITIVE_INFINITY) {
+      throw new Error("another code action is still running");
+    }
+    const token = ++this.commandToken;
+    this.applier = { apply, until: Number.POSITIVE_INFINITY, token };
+    try {
+      const params: { command: string; arguments?: unknown[] } = { command: command.command };
+      if (command.arguments) params.arguments = command.arguments;
+      await this.request<unknown>("workspace/executeCommand", params);
+    } finally {
+      if (this.applier?.token === token) this.applier.until = Date.now() + APPLY_EDIT_GRACE_MS;
+    }
+  }
+
+  /** The server's `workspace/applyEdit`: applied only for a command of ours (L23). */
+  private async applyEdit(params: unknown): Promise<{ applied: boolean; failureReason?: string }> {
+    const applier = this.applier;
+    if (!applier || Date.now() > applier.until) {
+      return { applied: false, failureReason: "Axiomata applies edits only for a command it ran" };
+    }
+    try {
+      return { applied: await applier.apply((params as { edit?: unknown } | null)?.edit ?? null) };
+    } catch (err) {
+      return { applied: false, failureReason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   /** The document open on this server as `uri`, if one is (another editor's, perhaps). */
   documentFor(uri: string): EditorDocument | null {
     return this.docs.get(uri)?.doc ?? null;
@@ -374,6 +459,7 @@ export class LspClient {
           completionProvider?: unknown;
           renameProvider?: unknown;
           signatureHelpProvider?: unknown;
+          codeActionProvider?: unknown;
         };
       }>("initialize", {
         processId: null,
@@ -412,12 +498,22 @@ export class LspClient {
               },
             },
             rename: { prepareSupport: true },
+            codeAction: {
+              codeActionLiteralSupport: { codeActionKind: { valueSet: CODE_ACTION_KINDS } },
+              isPreferredSupport: true,
+              disabledSupport: true,
+              dataSupport: true,
+              resolveSupport: { properties: ["edit"] },
+            },
           },
           // A rename's edits come as text only: moving or creating files is not offered (L16).
           workspace: {
             workspaceFolders: true,
             configuration: false,
             workspaceEdit: { documentChanges: true, resourceOperations: [] },
+            // Only for a command of ours, while it runs (L23).
+            applyEdit: true,
+            executeCommand: { dynamicRegistration: false },
           },
           window: { workDoneProgress: false },
         },
@@ -441,6 +537,9 @@ export class LspClient {
         Array.isArray(list) ? list.filter((c): c is string => typeof c === "string") : [];
       this.signatureTriggers = chars(signature?.triggerCharacters);
       this.signatureRetriggers = chars(signature?.retriggerCharacters);
+      const actions = result?.capabilities?.codeActionProvider;
+      this.codeActions = actions === true || (typeof actions === "object" && actions !== null);
+      this.resolvesCodeAction = (actions as { resolveProvider?: unknown } | undefined)?.resolveProvider === true;
       this.rpc.notify("initialized", {});
       this.setState("ready");
       return true;
@@ -586,7 +685,7 @@ export function parseWorkspaceEdit(raw: unknown): Map<string, TextEdit[]> {
   if (Array.isArray(edit?.documentChanges)) {
     for (const change of edit.documentChanges) {
       const c = change as { kind?: unknown; textDocument?: { uri?: unknown }; edits?: unknown };
-      if (c?.kind !== undefined) throw new Error("the rename would create, move or delete files");
+      if (c?.kind !== undefined) throw new Error("the edit would create, move or delete files");
       add(c?.textDocument?.uri, c?.edits);
     }
   } else if (edit?.changes && typeof edit.changes === "object") {

@@ -1192,6 +1192,30 @@ Formatieren/Umbenennen); D6 wird in einem Punkt geändert (L2).
 - **L17 — Eingabe des neuen Namens**: F2 und Vi `grn` öffnen ein kleines Feld am Symbol, mit dem alten Namen
   vorbelegt (⏎ benennt um, Esc bricht ab); `:rename <name>` ohne Feld.
 
+**Code-Aktionen (ED6.7, gegrillt 2026-09-28, löst den Vormerk aus L12 ein):**
+
+- **L18 — Serverbefehle nur als Echo**: `workspace/executeCommand` kommt nur durch, wenn es genau einem
+  `command` (Name + `arguments`, Zahlen als Double verglichen — der Webview hält sie in JavaScript) entspricht, den der Server selbst in einer `codeAction`-Antwort angeboten hat.
+  Rust liest diese Antworten mit (wie die Orts-Antworten bei L11), jedes Angebot gilt einmal; höchstens 256
+  gemerkte Angebote je Server, eine neue `codeAction`-Antwort ersetzt die alten. Der Webview kann nichts
+  erfinden, nur auslösen, was der Server gerade angeboten hat.
+- **L19 — Alle Arten**: was der Server an der Stelle meldet (`quickfix`, `refactor.*`, `source.*`), die Art als
+  kleine Marke; Quick-Fixes oben, eine `isPreferred`-Aktion vorgewählt.
+- **L20 — Auswahl**: Menü am Cursor im Stil des Vervollständigungsmenüs — ↓/↑, ⌃N/⌃P, ⏎ nimmt, Esc schließt,
+  Buchstaben filtern unscharf (wie das Telescope-Dropdown des Owners), Ziffern 1–9 nehmen sofort.
+- **L21 — Tasten**: Vi `gra` (Normal: Cursor, Visual: Auswahl als Bereich), `:action`; ⌘. immer (wie VS Code), ⌘L
+  dort, wo ein Sprachserver läuft (wie im nvim des Owners) — ohne Server wählt ⌘L weiter die Zeile (ED1; Owner-
+  Entscheid beim Bau); im Hover einer Diagnose ein Knopf „Fix…“, der das Menü nur mit den Aktionen zu dieser
+  Diagnose öffnet.
+- **L22 — Keine Glühbirne**: gefragt wird nur auf Tastendruck bzw. Knopf, keine Anfrage bei Cursorbewegung.
+- **L23 — `workspace/applyEdit` nur während eines eigenen Befehls**: angenommen nur, solange ein von uns
+  ausgelöstes `executeCommand` läuft (plus kurze Nachfrist), sonst abgelehnt. Angewendet wie beim Umbenennen
+  (L16): offene Dateien im Editor (ein Undo-Schritt, ungespeichert), geschlossene über den Datei-Dienst mit
+  Versionsprüfung, außerhalb der Wurzeln nichts.
+- **L24 — Wo und Umfang**: wie L3 (Datei-App-Vollbild und IDE-Pane); ein Checkpoint ED6.7, ein Commit, mit
+  Security-Review wegen der Lockerung in Rust. Live gegen `rust-analyzer`, `pyright` (Organize Imports über einen
+  Befehl) und TypeScript, sofern installiert.
+
 **ED6.1 umgesetzt (2026-09-28):** `axiomata-files::lsp` (Tabelle + `lsp.json`, `LspHost` mit Framing,
 Seitenkennung — dieselbe Seite teilt einen Server, eine neu geladene startet ihn neu —, 10-Minuten-Leerlauf),
 Tauri `lsp_start/send/opened/closed` (keine `grant:`-Wurzel), Engine `src/editor/lsp/` (`rpc`, `client`
@@ -1249,6 +1273,24 @@ markiert, darunter seine Doku; sie folgt dem Tippen und dem Cursor und schließt
 bei Esc, einem Klick, dem Verlassen der Zeile oder von Insert. `editor/lsp/signature.ts` (Auswertung),
 `fileapp/signatureHint.ts` (Verhalten), Anzeige in `EditorSurface`. Live gegen `rust-analyzer` geprüft.
 
+**ED6.7 umgesetzt (2026-09-28, L18–L24): Code-Aktionen.** ⌘. immer, ⌘L wo ein Server sie anbietet (sonst wählt
+⌘L weiter die Zeile), Vi `gra` (Visual: die Auswahl als Bereich), `:action`, „Fix…“ im Hover einer Diagnose (der
+Hover bleibt 400 ms, damit die Maus den Knopf erreicht). `editor/lsp/codeActions.ts` (lesen, ordnen: Fixes,
+Refactorings, Quell-Aktionen, nicht verfügbare ausgegraut zuletzt; unscharfer Filter), `fileapp/codeActionMenu.ts` +
+`CodeActionPopup.svelte` (Menü am Cursor, 1–9, tippen filtert, ⌫), `FileEditor.takeCodeAction` (nachladen per
+`codeAction/resolve`, Änderung anwenden, Befehl ausführen; getippter Text dazwischen gewinnt). Rust: `Watch`/`Offer` in
+`axiomata-files::lsp` — Befehle nur aus der Antwort auf die neueste `textDocument/codeAction`-Anfrage (eine ältere, die
+spät kommt, zählt nicht), je einmal, höchstens 256; Zahlen als Double verglichen. Security-Review (HIGH, behoben):
+`codeAction/resolve`-Antworten bieten nichts an — die Seite bestimmt, was aufgelöst wird, und ein Server, der es
+zurückspiegelt, hätte jeden erfundenen Befehl „angeboten“; der Client führt immer den Befehl der ursprünglichen Aktion
+aus. `workspace/applyEdit` nur während eines eigenen Befehls plus 1 s, und nur ein Befehl zur Zeit (die Änderung sagt
+nicht, zu welchem Befehl sie gehört — Review).
+`renameApply.ts` heißt jetzt `workspaceEdit.ts` und liest vor jeder Änderung alle geschlossenen Dateien: fehlt eine
+(TypeScripts „Move to a new file“ schreibt über ein einfaches `changes` in eine neue Datei), wird nichts angewendet —
+gefunden im Live-Test. Live gegen `rust-analyzer` (Import, per `resolve` nachgeladen) und `typescript-language-server`
+(„Extract to constant“ über `_typescript.applyRefactoring` → `workspace/applyEdit`; ein erfundener und ein wiederholter
+Befehl abgelehnt) geprüft (`tests/lsp_live.rs`). basedpyright bot im Test keine Code-Aktionen an.
+
 **ED6.5 umgesetzt (2026-09-28, L13–L17) — ED6 ist damit komplett:** Formatieren (⇧⌥F, Vi `:format`, beim
 Speichern mit ⌘S/`:w`): `axiomata-files::format` mit der Formatierer-Tabelle (ruff in drei Schritten, rustfmt mit der
 Edition der Crate, prettier, stylua, shfmt; Text über stdin, 10 s Grenze), Tauri `file_format`; wo keiner passt,
@@ -1263,7 +1305,7 @@ höchstens 4 Formatierer laufen gleichzeitig. Nachtrag: Sprachserver, Formatiere
 Umgebung mit Freigabeliste (`axiomata-files::toolenv`) — keine API-Schlüssel, kein `NODE_OPTIONS`. Der Client meldet `resourceOperations: []` — `rust-analyzer` lehnt ein Modul-Umbenennen dann
 ab, der Editor sagt es verständlich. Live geprüft: ruff (Importe + Format, Syntaxfehler gemeldet), rustfmt
 (Edition 2024), prettier (aus Mason), Umbenennen über zwei Dateien mit `rust-analyzer`. Offen: Live-Test in der App;
-Code-Aktionen (vorgemerkt).
+Code-Aktionen: ED6.7.
 
 ## 6. Verifikation (pro Meilenstein)
 

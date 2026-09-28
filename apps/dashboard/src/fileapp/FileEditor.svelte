@@ -51,7 +51,7 @@
   import { editorFace } from "./editorFace.svelte";
   import { editorSettings, ensureEditorSettingsLoaded, formatsOnSave } from "./editorSettings";
   import { applyTextEdits, storeBody, textChanges } from "../editor/textEdits";
-  import { applyRename } from "./renameApply";
+  import { applyWorkspaceEdit, type EditPorts } from "./workspaceEdit";
   import { wordAt } from "../editor/text";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import EditorSurface from "./EditorSurface.svelte";
@@ -76,9 +76,12 @@
   import { detectLanguage } from "../editor/syntax/languages";
   import { definitionFile, openOnServer, type LspDocument } from "./lsp";
   import { buildLocationList, type LocationList } from "./locationList";
+  import type { CodeActionPort } from "./codeActionMenu";
   import type { CompletionPort } from "./completionMenu";
   import type { SignaturePort } from "./signatureHint";
-  import type { Location, LocationKind } from "../editor/lsp/client";
+  import { parseWorkspaceEdit, type Location, type LocationKind } from "../editor/lsp/client";
+  import { fixesOnly, type CodeActionItem } from "../editor/lsp/codeActions";
+  import type { Diagnostic } from "../editor/lsp/diagnostics";
   import { toast } from "../core/toast";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
   import SvgPreview from "./SvgPreview.svelte";
@@ -418,6 +421,15 @@
   }
 
   function interceptKey(e: KeyboardEvent): boolean {
+    // ⌘. always, ⌘L where a server offers code actions — else ⌘L selects the line (L21).
+    const cmdOnly = e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+    const actionsHere = !!lspDoc?.connection.client.codeActions;
+    if (cmdOnly && (e.key === "." || (e.key === "l" && actionsHere))) {
+      e.preventDefault();
+      if (lspDoc) void surface?.openCodeActions();
+      else toast("No language server for this file", "info");
+      return true;
+    }
     if (e.key === "F2" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && lspDoc) {
       e.preventDefault();
       void startRename(null);
@@ -473,6 +485,118 @@
       retriggers: () => client.signatureRetriggers,
     };
   });
+
+  /**
+   * The open file's code actions (ED6.7), for the surface's menu: the
+   * problems in the range go along as the request's context; the hover's
+   * "Fix…" (`fix`) asks about its one problem and keeps only its actions.
+   */
+  const codeActionPort = $derived.by((): CodeActionPort | null => {
+    const found = lspDoc;
+    if (!found) return null;
+    const { client } = found.connection;
+    return {
+      ask: async (from, to, fix) => {
+        if (!(await client.whenReady()) || !client.codeActions) return [];
+        const problems = fix ? [fix] : problemsIn(from, to);
+        const context = problems.map((d) => d.raw).filter((raw) => raw !== undefined);
+        const items = await client.codeActionsAt(found.uri, from, to, context);
+        return fix ? fixesOnly(items) : items;
+      },
+      take: (item) => void takeCodeAction(item),
+      none: () =>
+        toast(client.codeActions ? "No code actions here" : "This language server offers no code actions", "info"),
+    };
+  });
+
+  /** The problems the server reported in `from`..`to` (at the cursor: the ones under it). */
+  function problemsIn(from: { line: number; col: number }, to: { line: number; col: number }): Diagnostic[] {
+    const set = diagnostics;
+    if (!set) return [];
+    if (from.line === to.line && from.col === to.col) return set.at(from);
+    const before = (a: { line: number; col: number }, b: { line: number; col: number }) =>
+      a.line < b.line || (a.line === b.line && a.col <= b.col);
+    return set.all.filter((d) => before(d.start, to) && before(from, d.end));
+  }
+
+  /**
+   * Carries out a taken code action (ED6.7, L18, L23): filled in first when
+   * it came without its edit, then its edit applied (as a rename's, L16), then
+   * its command run — an edit the server sends back for that command is
+   * applied the same way. Text typed meanwhile wins: nothing is done.
+   */
+  async function takeCodeAction(item: CodeActionItem): Promise<void> {
+    const s = session;
+    const found = lspDoc;
+    if (!s || !found) return;
+    if (s.readOnly) return void toast("This file is read-only", "info");
+    const { client } = found.connection;
+    const revision = s.doc.revision;
+    let action: CodeActionItem;
+    try {
+      action = await client.resolveCodeAction(item);
+    } catch (err) {
+      return void toast(`Could not run “${item.title}”: ${messageOf(err)}`, "danger");
+    }
+    if (session !== s) return;
+    if (s.doc.revision !== revision) {
+      return void toast("The text changed meanwhile — the action was not run", "info");
+    }
+    if (action.edit === null && !action.command) return void toast(`“${action.title}” changes nothing`, "info");
+    if (action.edit !== null && !(await applyServerEdit(s, found, action.edit, action.title))) return;
+    if (!action.command) return;
+    let before = s.doc.revision;
+    try {
+      await client.executeCommand(action.command, async (edit) => {
+        // Only onto the text the command was run on: typing meanwhile makes the server's edit wrong.
+        if (session !== s || s.doc.revision !== before) return false;
+        const applied = await applyServerEdit(s, found, edit, action.title);
+        before = s.doc.revision;
+        return applied;
+      });
+    } catch (err) {
+      toast(`“${action.title}” failed: ${messageOf(err)}`, "danger");
+    }
+  }
+
+  /**
+   * Applies a server's `WorkspaceEdit` for the action `title` where each file
+   * is (L16/L23); whether all of it went in. One that would move files is refused.
+   */
+  async function applyServerEdit(s: FileSession, found: LspDocument, raw: unknown, title: string): Promise<boolean> {
+    let edits;
+    try {
+      edits = parseWorkspaceEdit(raw);
+    } catch {
+      toast(`“${title}” would move files — do it in the file tree`, "danger");
+      return false;
+    }
+    const outcome = await applyWorkspaceEdit(edits, editPorts(s, found));
+    if (outcome.refused) {
+      toast(`“${title}” was not applied: ${outcome.refused}`, "danger");
+      return false;
+    }
+    if (outcome.skipped.length > 0) {
+      const list = outcome.skipped.map((k) => `${k.file} (${k.reason})`).join(", ");
+      toast(`“${title}”: not changed: ${list}`, "danger");
+    }
+    return outcome.skipped.length === 0;
+  }
+
+  /** Where a server's edit goes (L16): this editor through its surface, other open editors, closed files. */
+  function editPorts(s: FileSession, found: LspDocument): EditPorts {
+    const { client } = found.connection;
+    return {
+      here: { uri: found.uri, doc: s.doc, apply: (changes) => surface?.applyCommand({ type: "replaceText", changes }) },
+      openDoc: (uri) => client.documentFor(uri),
+      fileOf: (uri) => {
+        const file = definitionFile(s.root, found, { uri, at: { line: 0, col: 0 } });
+        return file && !file.root.startsWith(FOREIGN_ROOT) ? file : null;
+      },
+      read: (root, rel) => fileBackend.read(root, rel),
+      write: (root, rel, content, expected) => fileBackend.write(root, rel, content, expected),
+    };
+  }
 
   /** What the language server says about the symbol at `at` (the surface's hover, Vi's `K`). */
   function hoverAt(at: { line: number; col: number }): Promise<string | null> {
@@ -622,17 +746,8 @@
     if (s.doc.revision !== revision) {
       return void toast("The text changed while renaming — nothing was renamed", "info");
     }
-    const { client } = found.connection;
-    const outcome = await applyRename(edits, {
-      here: { uri: found.uri, doc: s.doc, apply: (changes) => surface?.applyCommand({ type: "replaceText", changes }) },
-      openDoc: (uri) => client.documentFor(uri),
-      fileOf: (uri) => {
-        const file = definitionFile(s.root, found, { uri, at: { line: 0, col: 0 } });
-        return file && !file.root.startsWith(FOREIGN_ROOT) ? file : null;
-      },
-      read: (root, rel) => fileBackend.read(root, rel),
-      write: (root, rel, content, expected) => fileBackend.write(root, rel, content, expected),
-    });
+    const outcome = await applyWorkspaceEdit(edits, editPorts(s, found));
+    if (outcome.refused) return void toast(`Nothing was renamed: ${outcome.refused}`, "danger");
     const files = outcome.changed === 1 ? "1 file" : `${outcome.changed} files`;
     if (outcome.skipped.length === 0) toast(`Renamed to ${newName} in ${files}`, "info");
     else {
@@ -792,6 +907,10 @@
     else if (effect.type === "saveQuit") void saveExplicitly().then(() => onQuit?.());
     else if (effect.type === "format") void formatNow();
     else if (effect.type === "rename") void startRename(effect.name);
+    else if (effect.type === "codeAction") {
+      if (!lspDoc) toast("No language server for this file", "info");
+      else void surface?.openCodeActions(effect.range?.start, effect.range?.end);
+    }
     else if (effect.type === "quit") {
       // Unsaved text is kept aside either way (F8); only a forced quit leaves it unsaved.
       if (!effect.force && session?.doc.dirty) return;
@@ -989,6 +1108,7 @@
             onDefinitionAt={lspDoc ? (at) => void goToDefinition(at) : undefined}
             completion={completionPort}
             signature={signaturePort}
+            codeActions={codeActionPort}
           />
         {/key}
       </div>

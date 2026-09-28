@@ -1227,7 +1227,7 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   most 4 formatters at once) behind Tauri `file_format`, the language server's
   `textDocument/formatting` as the fallback; the result goes in as the lines that differ (`editor/textEdits.ts`,
   the `replaceText` command), and ⌘S/`:w` format first unless off (`formatOnSave`, `formatOnSaveExcept`). Rename
-  (F2, `grn`, `:rename`): `prepareRename` + `rename`, applied by `fileapp/renameApply.ts` — open documents as one
+  (F2, `grn`, `:rename`): `prepareRename` + `rename`, applied by `fileapp/workspaceEdit.ts` — open documents as one
   step each (another editor's surface redraws on `docTouched`), closed files through the file service with a
   version check, nothing outside the roots; the client declares no resource operations, so a rename that would
   move files is refused by the server. The search path ends in `~/.local/share/nvim/mason/bin` (L15).
@@ -1236,7 +1236,17 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   variables; `PATH` = the editor's search path plus the system folders), never the app's whole one: no API
   keys, no `NODE_OPTIONS`. ED6.6: signature help — `editor/lsp/signature.ts` parses it,
   `fileapp/signatureHint.ts` opens it on the server's trigger characters (and ⇧⌘Space) and follows the
-  typing until the server answers with nothing; `EditorSurface` draws it above the line.
+  typing until the server answers with nothing; `EditorSurface` draws it above the line. ED6.7: code actions
+  (⌘., ⌘L where a server offers them — else ⌘L still selects the line —, Vi `gra` incl. Visual range,
+  `:action`, a "Fix…" button in a problem's hover): `editor/lsp/codeActions.ts` parses and orders them,
+  `fileapp/codeActionMenu.ts` + `CodeActionPopup.svelte` are the menu (numbers 1–9, unscharf filter),
+  `FileEditor.takeCodeAction` resolves, applies the edit and runs the command. **The one server command the
+  page may send is an echo** (L18): Rust reads every `textDocument/codeAction` answer and lets
+  `workspace/executeCommand` through only for a command (name + arguments, numbers as doubles) the server
+  offered there, once each — resolve answers offer nothing, since the page chooses what is resolved. The
+  server's `workspace/applyEdit` is honoured only while a command of ours runs, plus 1 s (L23).
+  `workspaceEdit.ts` reads every closed file first and changes nothing when one is missing (TypeScript's
+  "Move to a new file" writes into a file that does not exist yet).
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

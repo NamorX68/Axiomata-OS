@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorDocument } from "../document";
 import { cursor, pos, range } from "../position";
 import {
+  APPLY_EDIT_GRACE_MS,
   CHANGE_DELAY,
   documentUri,
   EXITED,
@@ -355,5 +356,96 @@ describe("hover and definition", () => {
       server.reply(asked.id as number, [{ uri: "file:///r/b", range }]);
       expect((await asking).map((l) => l.uri)).toEqual(["file:///r/b"]);
     }
+  });
+});
+
+describe("code actions (ED6.7)", () => {
+  const withActions = { textDocumentSync: 2, codeActionProvider: { resolveProvider: true } };
+  /** The answer the client wrote back to the server's request `id`. */
+  const answerTo = (server: FakeServer, id: string) => server.sent.find((m) => m.id === id && m.method === undefined);
+
+  it("asks for a range with the problems as context, and resolves a chosen action's edit", async () => {
+    const server = new FakeServer(withActions);
+    const client = new LspClient(server, { rootPath: "/r", server: "x" });
+    await client.whenReady();
+    expect(client.codeActions).toBe(true);
+    const init = server.of("initialize")[0].params as { capabilities: { workspace: Record<string, unknown> } };
+    expect(init.capabilities.workspace.applyEdit).toBe(true);
+
+    const problem = { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 2 } }, message: "m" };
+    const asking = client.codeActionsAt("file:///r/a", pos(1, 0), pos(1, 2), [problem]);
+    await settle();
+    const asked = server.of("textDocument/codeAction")[0];
+    expect(asked.params).toEqual({
+      textDocument: { uri: "file:///r/a" },
+      range: { start: { line: 1, character: 0 }, end: { line: 1, character: 2 } },
+      context: { diagnostics: [problem], triggerKind: 1 },
+    });
+    server.reply(asked.id as number, [{ title: "Fix it", kind: "quickfix", data: 7 }]);
+    const [item] = await asking;
+    expect(item.edit).toBeNull();
+
+    const resolving = client.resolveCodeAction(item);
+    await settle();
+    const resolve = server.of("codeAction/resolve")[0];
+    expect(resolve.params).toEqual({ title: "Fix it", kind: "quickfix", data: 7 });
+    server.reply(resolve.id as number, { title: "Fix it", kind: "quickfix", edit: { changes: {} } });
+    expect((await resolving).edit).toEqual({ changes: {} });
+  });
+
+  it("applies a server's edit only while a command of ours runs, and a moment after", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+    const server = new FakeServer(withActions);
+    const client = new LspClient(server, { rootPath: "/r", server: "x" });
+    await client.whenReady();
+    const applied: unknown[] = [];
+    const apply = async (edit: unknown) => {
+      applied.push(edit);
+      return true;
+    };
+    const applyEdit = (id: string) =>
+      server.push({ jsonrpc: "2.0", id, method: "workspace/applyEdit", params: { edit: { id } } });
+
+    // Unasked: refused.
+    applyEdit("before");
+    await settle();
+    expect(answerTo(server, "before")?.result).toMatchObject({ applied: false });
+
+    const running = client.executeCommand({ title: "Organize", command: "organize" }, apply);
+    await settle();
+    const execute = server.of("workspace/executeCommand")[0];
+    // No `arguments` offered, none sent: Rust compares the echo exactly (L18).
+    expect(execute.params).toEqual({ command: "organize" });
+    applyEdit("during");
+    await settle();
+    expect(answerTo(server, "during")?.result).toEqual({ applied: true });
+    // A second command meanwhile would not know whose edit is whose: refused.
+    await expect(client.executeCommand({ title: "Other", command: "other" }, apply)).rejects.toThrow(/still running/);
+    expect(server.of("workspace/executeCommand")).toHaveLength(1);
+    server.reply(execute.id as number, null);
+    await running;
+
+    now.mockReturnValue(1000 + APPLY_EDIT_GRACE_MS - 1);
+    applyEdit("grace");
+    await settle();
+    expect(answerTo(server, "grace")?.result).toEqual({ applied: true });
+    now.mockReturnValue(1000 + APPLY_EDIT_GRACE_MS + 1);
+    applyEdit("late");
+    await settle();
+    expect(answerTo(server, "late")?.result).toMatchObject({ applied: false });
+    expect(applied).toEqual([{ id: "during" }, { id: "grace" }]);
+    now.mockRestore();
+  });
+
+  it("throws when a command fails, with the server's reason", async () => {
+    const server = new FakeServer(withActions);
+    const client = new LspClient(server, { rootPath: "/r", server: "x" });
+    await client.whenReady();
+    const running = client.executeCommand({ title: "x", command: "x", arguments: [1] }, async () => true);
+    await settle();
+    const execute = server.of("workspace/executeCommand")[0];
+    expect(execute.params).toEqual({ command: "x", arguments: [1] });
+    server.push({ jsonrpc: "2.0", id: execute.id, error: { code: -32603, message: "refused by Rust" } });
+    await expect(running).rejects.toThrow("refused by Rust");
   });
 });

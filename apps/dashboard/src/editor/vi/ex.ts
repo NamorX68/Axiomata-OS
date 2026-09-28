@@ -30,6 +30,8 @@ export type ExCommand =
   | { name: "format" }
   /** `:rename {name}` (ED6.5, L17): the symbol under the cursor, through the language server. */
   | { name: "rename"; newName: string }
+  /** `:action` (ED6.7, L21): the code actions at the cursor. */
+  | { name: "action" }
   | { name: "goto"; line: number }
   | { name: "substitute"; range: LineRange; args: string }
   /** `:&` repeats the last `:s` without its flags, `:&&` with them. */
@@ -66,6 +68,7 @@ const COMMANDS: ReadonlyArray<{ name: string; min: number }> = [
   { name: "normal", min: 4 },
   { name: "format", min: 3 },
   { name: "rename", min: 3 },
+  { name: "action", min: 3 },
 ];
 
 const OPTIONS: ReadonlyArray<{ name: SetOption; short: string }> = [
@@ -135,6 +138,8 @@ export function parseEx(line: string, ctx: ExContext): ExCommand | { error: stri
       return { name: "normal", range, keys: arg };
     case "format":
       return arg === "" ? { name: "format" } : badArg(arg);
+    case "action":
+      return arg === "" ? { name: "action" } : badArg(arg);
     case "rename": {
       const newName = arg.trim();
       if (!newName) return { error: "E471: Argument required" };

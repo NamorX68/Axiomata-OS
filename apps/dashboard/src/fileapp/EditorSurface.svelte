@@ -62,7 +62,7 @@
     type FoldKey,
     type KeyInput,
   } from "../editor/keymap";
-  import { SEVERITY_NAME, type DiagnosticSet } from "../editor/lsp/diagnostics";
+  import { SEVERITY_NAME, type Diagnostic, type DiagnosticSet } from "../editor/lsp/diagnostics";
   import { renderMarkdown } from "../core/markdown";
   import { FindModel } from "../editor/search/findModel";
   import { cursor, pos, range, selectionRange, type Pos, type Range } from "../editor/position";
@@ -72,8 +72,10 @@
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
   import type { FoldAction, ViEffect } from "../editor/vi/machine";
+  import { CodeActionMenu, type CodeActionPort } from "./codeActionMenu";
+  import CodeActionPopup from "./CodeActionPopup.svelte";
   import { CompletionMenu, type CompletionPort } from "./completionMenu";
-  import { docTouched } from "./renameApply";
+  import { docTouched } from "./workspaceEdit";
   import { SignatureHint, type SignaturePort } from "./signatureHint";
   import CompletionPopup from "./CompletionPopup.svelte";
   import { CursorGlide } from "./cursorGlide";
@@ -150,6 +152,8 @@
     completion?: CompletionPort | null;
     /** The language server's signature help (ED6.6); without it there is no hint. */
     signature?: SignaturePort | null;
+    /** The language server's code actions (ED6.7); without them there is no menu and no "Fix…". */
+    codeActions?: CodeActionPort | null;
   }
 
   let {
@@ -178,6 +182,7 @@
     onDefinitionAt,
     completion = null,
     signature = null,
+    codeActions = null,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -903,6 +908,10 @@
   function onKeydown(e: KeyboardEvent): void {
     if (e.isComposing || composing) return;
     endHover();
+    if (actionKey(e)) {
+      e.preventDefault();
+      return;
+    }
     if (completionKey(e)) {
       e.preventDefault();
       return;
@@ -1091,7 +1100,7 @@
     };
   }
 
-  // A rename changed this document from another editor (`renameApply.ts`): redraw, tell the owner.
+  // A rename changed this document from another editor (`workspaceEdit.ts`): redraw, tell the owner.
   let seenRevision = untrack(() => doc.revision);
   $effect(() =>
     docTouched.subscribe(() =>
@@ -1240,6 +1249,86 @@
     void takeCompletion();
   }
 
+  // ---------------------------------------------------------------- code actions (ED6.7)
+
+  let actionTick = $state(0);
+  const actionMenu = new CodeActionMenu(() => actionTick++);
+  /** Bumped on every request, so an answer that arrives after another request is dropped. */
+  let actionToken = 0;
+
+  /** Where the menu shows: below the start of the range it was asked for, in the surface's pixels. */
+  const actionView = $derived.by(() => {
+    void actionTick;
+    void tick;
+    const view = actionMenu.view;
+    if (!view) return null;
+    const cell = cursorCell(layout, doc.store, view.anchor, settings.tabSize);
+    const x = textLeft + cell.cell * charW - (settings.wrap ? 0 : scrollLeft);
+    const y = (cell.row + 1) * rowH - scrollTop;
+    return { ...view, x, y };
+  });
+
+  /**
+   * ⌘., ⌘L, Vi `gra` and `:action` (L21): the code actions for `from`..`to` —
+   * by default the selection — in a menu below `from`. `fix` narrows them to
+   * one problem's (the hover's "Fix…"). The owner says when there are none.
+   */
+  export async function openCodeActions(
+    from: Pos = selectionRange(doc.selection).start,
+    to: Pos = selectionRange(doc.selection).end,
+    fix: Diagnostic | null = null,
+  ): Promise<void> {
+    const port = codeActions;
+    if (!port) return;
+    endHover();
+    menu?.close();
+    hint?.close();
+    const token = ++actionToken;
+    const items = await port.ask(from, to, fix);
+    if (token !== actionToken || port !== codeActions) return;
+    if (!actionMenu.show(from, items)) port.none();
+  }
+
+  /**
+   * The menu's keys, before anything else while it is open (L20): ↓/↑ and
+   * ⌃N/⌃P choose, ⏎ takes, 1–9 take that entry, other characters narrow the
+   * list and ⌫ widens it again, Esc closes. Any other key closes it and goes
+   * on as usual.
+   */
+  function actionKey(e: KeyboardEvent): boolean {
+    if (!actionMenu.isOpen) return false;
+    const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    const ctrlOnly = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+    if ((plain && e.key === "ArrowDown") || (ctrlOnly && e.key === "n")) actionMenu.move(1);
+    else if ((plain && e.key === "ArrowUp") || (ctrlOnly && e.key === "p")) actionMenu.move(-1);
+    else if (plain && e.key === "Enter") takeAction(null);
+    else if (plain && e.key === "Escape") actionMenu.close();
+    else if (plain && e.key === "Backspace") actionMenu.narrow(null);
+    else if (["Shift", "Alt", "Meta", "Control", "CapsLock"].includes(e.key)) return true;
+    else if (e.metaKey || e.ctrlKey || e.key.length !== 1) {
+      actionMenu.close();
+      return false;
+    } else if (/^[1-9]$/.test(e.key)) takeAction(Number(e.key));
+    else actionMenu.narrow(e.key);
+    return true;
+  }
+
+  /** Takes the chosen entry (or entry `number`) and hands it to the owner to carry out. */
+  function takeAction(number: number | null): void {
+    const item = actionMenu.take(number);
+    if (item) codeActions?.take(item);
+  }
+
+  function pickAction(index: number): void {
+    takeAction(index + 1);
+  }
+
+  // A new server (or none) takes its menu along.
+  $effect(() => {
+    void codeActions;
+    return () => actionMenu.close();
+  });
+
   // ---------------------------------------------------------------- hover (ED6)
 
   /** How long the mouse rests on a symbol before what is known about it shows. */
@@ -1247,12 +1336,25 @@
   let hoverTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped on every move, so an answer that arrives after the mouse moved on is dropped. */
   let hoverToken = 0;
-  /** The problems and the server's note (sanitised HTML) under the mouse, and where to show them. */
-  let hover = $state<{ x: number; y: number; items: { severity: string; text: string }[]; html: string | null } | null>(
-    null,
-  );
+  /** How long a hover with a "Fix…" button stays after the mouse left, to reach the button. */
+  const HOVER_GRACE_MS = 400;
+  let hoverGrace: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The problems and the server's note (sanitised HTML) under the mouse, and
+   * where to show them; `fix` is the problem the "Fix…" button asks code actions
+   * for (L21) — the hover can then be clicked.
+   */
+  let hover = $state<{
+    x: number;
+    y: number;
+    items: { severity: string; text: string }[];
+    html: string | null;
+    fix: Diagnostic | null;
+  } | null>(null);
 
   function onHoverMove(e: MouseEvent): void {
+    // A hover with a button waits a moment, so the mouse can travel to it.
+    if (hover?.fix) return leaveHoverSoon();
     endHover();
     if (e.buttons !== 0 || (!hoverAt && (!diagnostics || diagnostics.size === 0))) return;
     const { clientX, clientY } = e;
@@ -1265,7 +1367,8 @@
 
   /** Shows what is known about `at` at (`x`, `y`) in the surface, unless the mouse moved on meanwhile. */
   async function showHover(at: Pos, x: number, y: number, token: number): Promise<void> {
-    const items = (diagnostics?.at(at) ?? []).map((d) => ({
+    const problems = diagnostics?.at(at) ?? [];
+    const items = problems.map((d) => ({
       severity: SEVERITY_NAME[d.severity],
       text: `${d.message}${d.source ? ` (${d.source}${d.code ? ` ${d.code}` : ""})` : ""}`,
     }));
@@ -1274,7 +1377,7 @@
     // The server's text is foreign content: rendered through DOMPurify (`renderMarkdown`).
     const html = markdown ? renderMarkdown(markdown) : null;
     if (items.length === 0 && !html) return;
-    hover = { x, y, items, html };
+    hover = { x, y, items, html, fix: codeActions ? (problems[0] ?? null) : null };
   }
 
   /** Vi's `K` (ED6.2): what is known about the symbol under the cursor, shown below it. */
@@ -1287,7 +1390,26 @@
     void showHover(at, x, y, hoverToken);
   }
 
+  /** The mouse left a hover that has a button: it goes unless the mouse reaches it in time. */
+  function leaveHoverSoon(): void {
+    hoverGrace ??= setTimeout(endHover, HOVER_GRACE_MS);
+  }
+
+  function stayHover(): void {
+    if (hoverGrace) clearTimeout(hoverGrace);
+    hoverGrace = null;
+  }
+
+  /** The hover's "Fix…": the code actions for its problem (L21). */
+  function fixFromHover(): void {
+    const problem = hover?.fix;
+    endHover();
+    input.focus();
+    if (problem) void openCodeActions(problem.start, problem.end, problem);
+  }
+
   function endHover(): void {
+    stayHover();
     if (hoverTimer) clearTimeout(hoverTimer);
     hoverTimer = null;
     hoverToken++;
@@ -1313,6 +1435,7 @@
    */
   function onMousedown(e: MouseEvent): void {
     menu?.close();
+    actionMenu.close();
     hint?.close();
     if (e.button !== 0) return;
     e.preventDefault();
@@ -1511,7 +1634,7 @@
     }}
     onmousedown={onMousedown}
     onmousemove={onHoverMove}
-    onmouseleave={endHover}
+    onmouseleave={() => (hover?.fix ? leaveHoverSoon() : endHover())}
     role="presentation"
   >
     <div
@@ -1739,10 +1862,23 @@
   {/if}
   <canvas class="glide" class:on={gliding} bind:this={canvas} aria-hidden="true"></canvas>
   {#if hover}
-    <div class="diag-hover" style:left="{hover.x}px" style:top="{hover.y}px" role="tooltip">
+    <div
+      class="diag-hover"
+      class:interactive={hover.fix !== null}
+      style:left="{hover.x}px"
+      style:top="{hover.y}px"
+      role="tooltip"
+      onmouseenter={stayHover}
+      onmouseleave={endHover}
+    >
       {#each hover.items as item, i (i)}
         <p class="diag-{item.severity}">{item.text}</p>
       {/each}
+      {#if hover.fix}
+        <button type="button" class="fix" onmousedown={(e) => e.preventDefault()} onclick={fixFromHover}>
+          Fix…
+        </button>
+      {/if}
       {#if hover.html}
         <!-- Sanitised by `renderMarkdown` (DOMPurify): the text comes from the language server. -->
         <div class="hover-doc">{@html hover.html}</div>
@@ -1759,6 +1895,16 @@
         <div class="hover-doc">{@html hintView.docHtml}</div>
       {/if}
     </div>
+  {/if}
+  {#if actionView}
+    <CodeActionPopup
+      items={actionView.items}
+      selected={actionView.selected}
+      query={actionView.query}
+      x={actionView.x}
+      y={actionView.y}
+      onPick={pickAction}
+    />
   {/if}
   {#if menuView}
     <CompletionPopup
@@ -2079,6 +2225,22 @@
     font-size: var(--ax-font-size-sm);
     color: var(--ax-text);
     pointer-events: none;
+  }
+  .diag-hover.interactive {
+    pointer-events: auto;
+  }
+  .diag-hover .fix {
+    margin-top: var(--ax-space-1);
+    padding: 0 var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-1);
+    color: var(--ax-accent);
+    font: inherit;
+    cursor: pointer;
+  }
+  .diag-hover .fix:hover {
+    background: var(--ax-accent-muted);
   }
   .diag-hover p {
     margin: 0;

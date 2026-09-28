@@ -24,6 +24,9 @@ describe("parseEx (V6)", () => {
     ["rename new_name", { name: "rename", newName: "new_name" }],
     ["ren  x ", { name: "rename", newName: "x" }],
     ["rename", { error: "E471: Argument required" }],
+    ["action", { name: "action" }],
+    ["act", { name: "action" }],
+    ["action x", { error: "E488: Trailing characters: x" }],
   ])(":%s", (line, expected) => {
     expect(parseEx(line, ctx)).toEqual(expected);
   });

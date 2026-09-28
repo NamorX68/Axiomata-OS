@@ -54,7 +54,7 @@ const NORMAL_COMMANDS = new Set([
   "x", "X", "s", "S", "D", "C", "Y", "p", "P", "gp", "gP", "J", "gJ", "~", "i", "a", "I", "A", "gi", "gI", "o", "O",
   "R", "u", "<C-r>", ".", "v", "V", "<C-v>", "gv", "<C-a>", "<C-x>", "<C-o>", "<C-i>", "<Tab>", "zt", "zz", "zb",
   "z<CR>", "z.", "z-", "<C-e>", "<C-y>", "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>", "]c", "[c",
-  "]d", "[d", "gd", "K", "gf", "gri", "grr", "grt", "grn",
+  "]d", "[d", "gd", "K", "gf", "gri", "grr", "grt", "grn", "gra",
   "ZZ", "ZQ", ":", "@@", "&", "<Esc>", "<C-[>", "<C-c>", "gn", "gN", "zc", "zo", "za", "zR", "zM",
 ]);
 
@@ -62,7 +62,7 @@ const NORMAL_COMMANDS = new Set([
 const VISUAL_COMMANDS = new Set([
   "o", "O", "I", "A", "x", "X", "D", "Y", "C", "S", "R", "s", "J", "gJ", "u", "U", "~", "p", "P", "v", "V", "<C-v>",
   "gv", ":", "<C-a>", "<C-x>", "<Esc>", "<C-[>", "<C-c>", "zt", "zz", "zb", "<C-e>", "<C-y>", "<C-d>",
-  "<C-u>", "<C-f>", "<C-b>", "gn", "gN",
+  "<C-u>", "<C-f>", "<C-b>", "gn", "gN", "gra",
 ]);
 
 /** Commands followed by one character: `r m q @` (and Visual `r`, surround `S`). */
