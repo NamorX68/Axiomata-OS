@@ -45,7 +45,7 @@
   } from "../core/calendar";
   import { dayLabel, relativeTime } from "../core/format";
   import { monthDiff, monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
-  import { resolveSkillName } from "../core/skillRun";
+  import { resolveSkillName, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
   import CalendarCreateForm from "./CalendarCreateForm.svelte";
   import Clock from "./Clock.svelte";
@@ -257,6 +257,10 @@
   // (`core/devFlags.ts`) skips just the real run, not `loadLatest()` — see
   // its own doc comment for why this exists (a dev-only escape hatch).
   onMount(() => void loadLatest().then(() => runUnlessAutoRefreshDisabled(refreshNow)));
+
+  // A run made while this tile stays mounted (a Routine, the Skills Deck, the command line) is read
+  // back within a minute — not only on the next mount (`watchSkillRuns`).
+  onMount(() => watchSkillRuns(ctx.invoke, () => skillName, () => void loadLatest()));
 
   // Keep the mini-month's "today" and the agenda's default anchor honest
   // across midnight while this module stays mounted (see `today`'s comment):

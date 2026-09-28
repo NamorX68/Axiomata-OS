@@ -188,3 +188,41 @@ export function resolveSkillName(config: Record<string, unknown>, fallback: stri
   const override = typeof config.skillName === "string" ? config.skillName.trim() : "";
   return override || fallback;
 }
+
+/** How often a connector tile looks for a run of its skill it has not seen. */
+export const WATCH_MS = 60_000;
+
+/**
+ * Calls `onNew` whenever `skillName` has a newer run than the one seen last —
+ * a Routine's hourly run, one from the Skills Deck or the command line — so
+ * a tile that stays mounted reads it back (and the Mail tile writes its
+ * notes) instead of only on its next mount. The first look only sets the
+ * baseline. One `list_runs` per `everyMs`; no agent turn. Returns the stop
+ * function.
+ */
+export function watchSkillRuns(
+  invoke: Invoke,
+  skillName: () => string,
+  onNew: () => void,
+  everyMs: number = WATCH_MS,
+): () => void {
+  let seen: number | null | undefined;
+  let busy = false;
+  const look = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const runs = await invoke<RunSummary[]>("list_runs", { limit: RUN_LOOKUP_LIMIT });
+      const newest = runs.find((run) => run.skill_name === skillName())?.id ?? null;
+      if (seen !== undefined && newest !== seen) onNew();
+      seen = newest;
+    } catch {
+      // A failed look is retried on the next tick.
+    } finally {
+      busy = false;
+    }
+  };
+  void look();
+  const id = setInterval(() => void look(), everyMs);
+  return () => clearInterval(id);
+}

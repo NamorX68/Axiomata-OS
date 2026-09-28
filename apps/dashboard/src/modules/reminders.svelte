@@ -45,7 +45,7 @@
     type ReminderDigest,
     type ReminderTask,
   } from "../core/reminders";
-  import { resolveSkillName } from "../core/skillRun";
+  import { resolveSkillName, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -213,6 +213,10 @@
   // exactly why `runUnlessAutoRefreshDisabled` (`core/devFlags.ts`, its own
   // doc comment) is especially worth it for this module.
   onMount(() => void loadLatest().then(() => runUnlessAutoRefreshDisabled(refreshNow)));
+
+  // A run made while this tile stays mounted (a Routine, the Skills Deck, the command line) is read
+  // back within a minute — not only on the next mount (`watchSkillRuns`).
+  onMount(() => watchSkillRuns(ctx.invoke, () => skillName, () => void loadLatest()));
 </script>
 
 <div class="reminders">
