@@ -87,6 +87,7 @@
     { key: "foldAnimation", label: "Animated folding" },
     { key: "minimap", label: "Minimap" },
     { key: "stickyScroll", label: "Sticky scroll" },
+    { key: "diagnosticsInline", label: "Problem message at line end" },
   ];
 
   const AUTOSAVE: { value: Autosave; label: string }[] = [

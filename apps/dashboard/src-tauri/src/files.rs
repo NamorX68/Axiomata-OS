@@ -136,7 +136,7 @@ type SharedConfig = Arc<RwLock<Config>>;
 type SharedDb = Arc<Mutex<Connection>>;
 
 /// Runs `work` on a blocking thread with the shared config and database.
-async fn blocking<T, F>(state: &CoreState, work: F) -> Result<T, FileError>
+pub(crate) async fn blocking<T, F>(state: &CoreState, work: F) -> Result<T, FileError>
 where
     T: Send + 'static,
     F: FnOnce(&SharedConfig, &SharedDb) -> Result<T, FilesError> + Send + 'static,
@@ -162,7 +162,7 @@ fn with_roots<T>(config: &SharedConfig, db: &SharedDb, f: impl FnOnce(&Roots) ->
     f(&Roots::new(&config, &db))
 }
 
-fn root(config: &SharedConfig, db: &SharedDb, id: &str) -> Result<Root, FilesError> {
+pub(crate) fn root(config: &SharedConfig, db: &SharedDb, id: &str) -> Result<Root, FilesError> {
     with_roots(config, db, |roots| roots.root(id))
 }
 

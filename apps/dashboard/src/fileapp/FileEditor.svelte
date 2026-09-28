@@ -69,6 +69,9 @@
   import { ScrollLink } from "./scrollLink";
   import { DRAFT_REL, DRAFT_ROOT, FileSession } from "./session";
   import { statusParts } from "./status";
+  import { DiagnosticSet } from "../editor/lsp/diagnostics";
+  import { detectLanguage } from "../editor/syntax/languages";
+  import { openOnServer, type LspDocument } from "./lsp";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
   import SvgPreview from "./SvgPreview.svelte";
   import { isUnder, renamedPath } from "./treeModel";
@@ -143,6 +146,11 @@
   let list = $state(false);
   /** Syntax colours for the open file (ED2); `null` for plain text or a large file. */
   let highlighter = $state.raw<SyntaxHighlighter | null>(null);
+  /** The open file on its language server (ED6), if it has one. */
+  let lspDoc: LspDocument | null = null;
+  let stopDiagnostics: (() => void) | null = null;
+  /** What the language server last reported about the open file (L6). */
+  let diagnostics = $state.raw<DiagnosticSet | null>(null);
   /** A file with a rendered view (G8, W3): the source, the rendered view, or both side by side. */
   let viewMode = $state<ViewMode>("source");
   /** What the open file renders as, if anything. */
@@ -264,6 +272,7 @@
     compare = null;
     refresh();
     void attachHighlighter(next);
+    void attachLsp(next);
     await nextTick();
     if (line !== null) goToLine(line);
     else surface?.focus();
@@ -282,6 +291,7 @@
     keepFolds(s);
     highlighter?.dispose();
     highlighter = null;
+    detachLsp();
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;
     if (autosaveTimer) clearTimeout(autosaveTimer);
@@ -339,6 +349,60 @@
     if (created) highlighter = created;
   }
 
+  /**
+   * Opens `s` on its language server (ED6), and follows what the server reports
+   * about it. The full-screen app and the IDE only (L3) — not the floating
+   * panel, not a file in the light mode, not a new note.
+   */
+  async function attachLsp(s: FileSession): Promise<void> {
+    if (compact || s.light || s.untitled) return;
+    const language = detectLanguage(s.fileName, s.doc.store.line(0));
+    const found = await openOnServer(s.root, s.rel, language, s.doc);
+    if (!found) return;
+    if (session !== s || lspDoc) {
+      found.close();
+      return;
+    }
+    lspDoc = found;
+    const { client } = found.connection;
+    const show = () => {
+      const store = s.doc.store;
+      diagnostics = new DiagnosticSet(client.diagnosticsFor(found.uri), (line) =>
+        line < store.lineCount() ? store.line(line).length : 0,
+      );
+    };
+    stopDiagnostics = client.onDiagnostics((uri) => {
+      if (uri === found.uri) show();
+    });
+    show();
+  }
+
+  /** Lets go of the language server for the file being left. */
+  function detachLsp(): void {
+    stopDiagnostics?.();
+    stopDiagnostics = null;
+    lspDoc?.close();
+    lspDoc = null;
+    diagnostics = null;
+  }
+
+  /** F8 / ⇧F8 and Vi's `]d` / `[d`: the next or previous problem (L7). */
+  function goToProblem(dir: 1 | -1): boolean {
+    const s = session;
+    if (!s || !diagnostics || diagnostics.size === 0) return false;
+    const here = s.doc.selection.head;
+    const found = dir === 1 ? diagnostics.next(here) : diagnostics.previous(here);
+    if (found) surface?.goTo(found.start);
+    return true;
+  }
+
+  function interceptKey(e: KeyboardEvent): boolean {
+    if (e.key !== "F8" || e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (!goToProblem(e.shiftKey ? -1 : 1)) return false;
+    e.preventDefault();
+    return true;
+  }
+
   /** The folds of `s` as they are now (edits moved them), if they are kept at all. */
   function keepFolds(s: FileSession): void {
     if (!s.untitled) updateRememberedFolds(foldKey(s.root, s.rel), s.folds.serialize());
@@ -354,6 +418,7 @@
   async function leaveCurrent(): Promise<void> {
     highlighter?.dispose();
     highlighter = null;
+    detachLsp();
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;
     if (!session) return;
@@ -432,6 +497,8 @@
     } else if (effect.type === "fileMark") {
       const [root, rel] = effect.file.split("\0");
       if (root && rel) void open({ root, rel }, effect.at.line);
+    } else if (effect.type === "problem") {
+      goToProblem(effect.dir);
     } else if (effect.type === "reload") {
       // `:e!` — the `!` is the confirmation the Reload button would ask for.
       void act((s) => s.discardChanges());
@@ -505,7 +572,14 @@
     const unlistenRenamed = listenBackend<FileRenamed>("files:renamed", (renamed) => {
       const s = session;
       const rel = s && s.root === renamed.root ? renamedPath(s.rel, renamed.from, renamed.to) : null;
-      if (s && rel !== null) void s.moved(rel).then(refresh);
+      if (s && rel !== null) {
+        void s.moved(rel).then(() => {
+          refresh();
+          // A new name is a new document for the language server.
+          detachLsp();
+          void attachLsp(s);
+        });
+      }
     });
     const unlistenRemoved = listenBackend<FileRemoved>("files:removed", (removed) => {
       const s = session;
@@ -521,6 +595,7 @@
       void unlistenRemoved.then((off) => off());
       if (hintTimer) clearTimeout(hintTimer);
       if (autosaveTimer) clearTimeout(autosaveTimer);
+      detachLsp();
       // Going away is leaving the file: keep unsaved text aside, stop watching.
       markDirty(editorId, null);
       void leaveCurrent();
@@ -597,6 +672,9 @@
             fileKey={`${session.root}\0${session.rel}`}
             folds={session.folds}
             {onFolds}
+            {interceptKey}
+            {diagnostics}
+            diagnosticsInline={$editorSettings.diagnosticsInline}
           />
         {/key}
       </div>
@@ -663,6 +741,14 @@
         <span class="note">{filing ? "Filing the note…" : "New note — ⌘S files it"}</span>
       {/if}
       {#if session.light}<span class="warn" title="Over 2 MB: no syntax colours">Large file — light mode</span>{/if}
+      {#if diagnostics && diagnostics.size > 0}
+        {@const counts = diagnostics.counts()}
+        <span class="problems" title="Problems from the language server — F8 / ⇧F8 to step through">
+          {#if counts.error}<span class="diag-error">✖ {counts.error}</span>{/if}
+          {#if counts.warning}<span class="diag-warning">⚠ {counts.warning}</span>{/if}
+          {#if counts.info + counts.hint}<span class="diag-info">ℹ {counts.info + counts.hint}</span>{/if}
+        </span>
+      {/if}
     </footer>
   {/if}
 </div>
@@ -763,6 +849,20 @@
 
   .pane > :global(.surface) {
     flex: 1;
+  }
+
+  .problems {
+    display: inline-flex;
+    gap: var(--ax-space-2);
+  }
+  .problems .diag-error {
+    color: var(--ax-diag-error);
+  }
+  .problems .diag-warning {
+    color: var(--ax-diag-warning);
+  }
+  .problems .diag-info {
+    color: var(--ax-diag-info);
   }
 
   footer {

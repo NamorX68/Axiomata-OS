@@ -4,6 +4,7 @@ use tauri::Manager;
 mod bootstrap;
 mod commands;
 mod files;
+mod lsp;
 #[cfg(target_os = "macos")]
 mod menu;
 mod terminal;
@@ -109,6 +110,10 @@ pub fn run() {
             files::file_pick,
             files::file_watch,
             files::file_unwatch,
+            lsp::lsp_start,
+            lsp::lsp_send,
+            lsp::lsp_opened,
+            lsp::lsp_closed,
             files::editor_recovery_save,
             files::editor_recovery_load,
             files::editor_recovery_delete,
@@ -193,6 +198,7 @@ pub fn run() {
             app.manage(terminal::TerminalSessions::default());
             app.manage(files::FileWatch::start(app.handle()));
             app.manage(files::Searches::default());
+            app.manage(lsp::LspState::new());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

@@ -187,4 +187,11 @@
   --ax-minimap-slider-active: color-mix(in srgb, var(--ax-text) 17%, transparent);
   --ax-sticky-shadow: 0 6px 8px -6px rgba(0, 0, 0, 0.55);
   --ax-editor-whitespace: color-mix(in srgb, var(--ax-text-muted) 55%, transparent);
+  /* Language-server diagnostics (ED6, L6), from each theme's own colours. */
+  --ax-diag-error: var(--ax-danger);
+  --ax-diag-warning: var(--ax-warning);
+  --ax-diag-info: var(--ax-syntax-link);
+  --ax-diag-hint: var(--ax-text-muted);
+  --ax-diag-dot: 6px;
+  --ax-diag-wave: 8px 3px;
 }

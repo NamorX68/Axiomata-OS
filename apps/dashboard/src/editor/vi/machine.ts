@@ -78,6 +78,8 @@ export type ViEffect =
   | { type: "set"; option: SetOption; value: boolean | "toggle" }
   /** `]c`/`[c` in a diff (H9), `gf` there or on a path. */
   | { type: "hunk"; dir: 1 | -1 }
+  /** `]d`/`[d` (ED6, L7): the next or previous problem a language server reported — the view knows them. */
+  | { type: "problem"; dir: 1 | -1 }
   | { type: "openFile" }
   /** A file mark (`'A`) that belongs to another file. */
   | { type: "fileMark"; file: string; at: Pos }
@@ -963,6 +965,10 @@ export class ViMachine {
       case "]c":
       case "[c":
         this.env.effect({ type: "hunk", dir: b.name === "]c" ? 1 : -1 });
+        return true;
+      case "]d":
+      case "[d":
+        this.env.effect({ type: "problem", dir: b.name === "]d" ? 1 : -1 });
         return true;
       case "gf":
         this.env.effect({ type: "openFile" });

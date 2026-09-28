@@ -62,6 +62,7 @@
     type FoldKey,
     type KeyInput,
   } from "../editor/keymap";
+  import { SEVERITY_NAME, type DiagnosticSet } from "../editor/lsp/diagnostics";
   import { FindModel } from "../editor/search/findModel";
   import { cursor, pos, range, selectionRange, type Pos, type Range } from "../editor/position";
   import { clearOfSticky, NO_STICKY, stickyAt } from "../editor/sticky";
@@ -129,6 +130,13 @@
     folds?: FoldState | null;
     /** The owner's folds were opened or closed (to remember them). */
     onFolds?: () => void;
+    /**
+     * What a language server reported about this document (ED6, L6): underlined
+     * stretches, a gutter marker per line, the messages when the mouse rests on one.
+     */
+    diagnostics?: DiagnosticSet | null;
+    /** Also write a line's first message after its text (L6; off by default). */
+    diagnosticsInline?: boolean;
   }
 
   let {
@@ -151,6 +159,8 @@
     fileKey,
     folds = null,
     onFolds,
+    diagnostics = null,
+    diagnosticsInline = false,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -637,6 +647,7 @@
       segments: rowSegments(doc.store.line(r.line), spans.get(r.line), r.start, r.end),
       guides: guides.get(r.line) ?? [],
       deco: decorations?.line(r.line) ?? NO_DECORATION,
+      diag: diagnosticMark(r),
       fold: foldMark(r),
       slide: slideOf(r.row, r.line),
       // A relative line number leaves folded lines out (T18).
@@ -650,7 +661,11 @@
     const others = vi ? [] : doc.extra;
     const ranges = viRanges ?? (vi ? [] : [sel, ...others].map(selectionRange));
     const runs = ranges.flatMap((r) => selectionRuns(layout, doc.store, r, first, last, settings.tabSize));
-    const marks = [...markRuns(rows, first, last), ...searchRuns(firstLine, lastLine, first, last)];
+    const marks = [
+      ...markRuns(rows, first, last),
+      ...diagnosticRuns(firstLine, lastLine, first, last),
+      ...searchRuns(firstLine, lastLine, first, last),
+    ];
     const whitespace = settings.list ? whitespaceMarks(rows, first, last) : [];
     const caret = cursorCell(layout, doc.store, sel.head, settings.tabSize);
     const shape = vi?.cursorShape() ?? "bar";
@@ -692,6 +707,33 @@
     if (!closed || !r.last) return { chevron, pill: null };
     const end = cursorCell(layout, doc.store, pos(r.line, doc.store.line(r.line).length), settings.tabSize);
     return { chevron, pill: { cell: end.cell + 1, lines: closed.end - closed.start } };
+  }
+
+  /**
+   * A row's part in the diagnostics (ED6): on a line's first row the gutter
+   * marker's severity, and — with the inline setting — on its last row the
+   * worst message, placed a cell after the text.
+   */
+  function diagnosticMark(r: { line: number; sub: number; last: boolean }) {
+    const d = diagnostics?.line(r.line);
+    if (!d) return null;
+    const severity = SEVERITY_NAME[d.worst];
+    const gutter = r.sub === 0 ? severity : null;
+    if (!diagnosticsInline || !r.last) return { gutter, inline: null };
+    const end = cursorCell(layout, doc.store, pos(r.line, doc.store.line(r.line).length), settings.tabSize);
+    return { gutter, inline: { cell: end.cell + 2, text: d.message.split("\n")[0], severity } };
+  }
+
+  /** The underlined stretches of the lines on screen, as runs per visual row. */
+  function diagnosticRuns(firstLine: number, lastLine: number, first: number, last: number) {
+    const out: MarkRun[] = [];
+    if (!diagnostics) return out;
+    for (let line = firstLine; line <= lastLine; line++) {
+      for (const m of diagnostics.line(line)?.marks ?? []) {
+        pushMarkRuns(out, range(pos(line, m.from), pos(line, m.to)), `diag-${SEVERITY_NAME[m.severity]}`, first, last);
+      }
+    }
+    return out;
   }
 
   type MarkRun = { key: string; row: number; from: number; to: number; kind: string };
@@ -995,6 +1037,44 @@
     return posAtCell(layout, doc.store, Math.floor(y / rowH), x / charW, settings.tabSize);
   }
 
+  // ---------------------------------------------------------------- hover (ED6)
+
+  /** How long the mouse rests on a problem before its messages show. */
+  const HOVER_DELAY_MS = 350;
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The messages under the resting mouse, and where to show them. */
+  let hover = $state<{ x: number; y: number; items: { severity: string; text: string }[] } | null>(null);
+
+  function onHoverMove(e: MouseEvent): void {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hover = null;
+    if (!diagnostics || diagnostics.size === 0 || e.buttons !== 0) return;
+    const { clientX, clientY } = e;
+    hoverTimer = setTimeout(() => {
+      const at = posAt({ clientX, clientY } as MouseEvent);
+      const found = diagnostics?.at(at) ?? [];
+      if (found.length === 0) return;
+      const rect = surfaceEl.getBoundingClientRect();
+      hover = {
+        x: clientX - rect.left,
+        y: clientY - rect.top + rowH,
+        items: found.map((d) => ({
+          severity: SEVERITY_NAME[d.severity],
+          text: `${d.message}${d.source ? ` (${d.source}${d.code ? ` ${d.code}` : ""})` : ""}`,
+        })),
+      };
+    }, HOVER_DELAY_MS);
+  }
+
+  // A resting mouse must not show anything after the surface is gone.
+  $effect(() => () => endHover());
+
+  function endHover(): void {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = null;
+    hover = null;
+  }
+
   function wordRange(p: Pos): { start: Pos; end: Pos } {
     const w = wordAt(doc.store.line(p.line), p.col);
     return { start: pos(p.line, w.start), end: pos(p.line, w.end) };
@@ -1150,8 +1230,14 @@
    * below the top edge so what leads up to it stays visible (H9: next change).
    */
   export function goToLine(line: number): void {
-    const target = Math.max(0, Math.min(line, doc.store.lineCount() - 1));
-    doc.setSelection({ anchor: pos(target, 0), head: pos(target, 0) });
+    goTo(pos(line, 0));
+  }
+
+  /** {@link goToLine} to a column: the next problem (ED6, F8 / `]d`). */
+  export function goTo(at: Pos): void {
+    const target = Math.max(0, Math.min(at.line, doc.store.lineCount() - 1));
+    const col = Math.max(0, Math.min(at.col, doc.store.line(target).length));
+    doc.setSelection({ anchor: pos(target, col), head: pos(target, col) });
     layout.refresh();
     tick++;
     onChange?.();
@@ -1199,6 +1285,8 @@
       onScrollPos?.(scroller.scrollTop, scroller.scrollLeft);
     }}
     onmousedown={onMousedown}
+    onmousemove={onHoverMove}
+    onmouseleave={endHover}
     role="presentation"
   >
     <div
@@ -1223,6 +1311,9 @@
             >
               {lineLabel(r.line, view.cursorLine, settings.lineNumbers, r.hiddenToCursor)}
             </div>
+          {/if}
+          {#if r.diag?.gutter}
+            <div class="diag-dot diag-{r.diag.gutter}" style:top="{r.row * rowH}px" aria-hidden="true"></div>
           {/if}
           {#if r.fold.chevron}
             <button
@@ -1306,6 +1397,15 @@
                 input.focus();
               }}>⋯ {r.fold.pill.lines} {r.fold.pill.lines === 1 ? "line" : "lines"}</button
             >
+          {/if}
+          {#if r.diag?.inline}
+            <div
+              class="diag-inline diag-{r.diag.inline.severity}"
+              style:top="{r.row * rowH}px"
+              style:left="{r.diag.inline.cell * charW}px"
+            >
+              {r.diag.inline.text}
+            </div>
           {/if}
           {#if r.sub === 0 && (r.deco.label || r.deco.actions)}
             <!-- A fold or a note: the label, and buttons the mouse can reach. -->
@@ -1413,6 +1513,13 @@
     </div>
   {/if}
   <canvas class="glide" class:on={gliding} bind:this={canvas} aria-hidden="true"></canvas>
+  {#if hover}
+    <div class="diag-hover" style:left="{hover.x}px" style:top="{hover.y}px" role="tooltip">
+      {#each hover.items as item, i (i)}
+        <p class="diag-{item.severity}">{item.text}</p>
+      {/each}
+    </div>
+  {/if}
   {#if findOpen && find}
     <FindBar
       bind:this={findBar}
@@ -1582,6 +1689,116 @@
 
   .mk-search-current {
     background: var(--ax-search-current);
+  }
+
+  /* Language-server diagnostics (ED6, L6): a wavy line under the stretch, in the
+     severity's colour; a hint only a dotted one. */
+  .mk-diag-error {
+    --diag: var(--ax-diag-error);
+  }
+  .mk-diag-warning {
+    --diag: var(--ax-diag-warning);
+  }
+  .mk-diag-info {
+    --diag: var(--ax-diag-info);
+  }
+  .mk-diag-error,
+  .mk-diag-warning,
+  .mk-diag-info {
+    border-radius: 0;
+    background-image:
+      linear-gradient(45deg, transparent 65%, var(--diag) 80%, transparent 90%),
+      linear-gradient(135deg, transparent 5%, var(--diag) 15%, transparent 25%),
+      linear-gradient(135deg, transparent 45%, var(--diag) 55%, transparent 65%),
+      linear-gradient(45deg, transparent 35%, var(--diag) 40%, transparent 55%);
+    background-size: var(--ax-diag-wave);
+    background-repeat: repeat-x;
+    background-position: left bottom;
+  }
+  .mk-diag-hint {
+    border-radius: 0;
+    border-bottom: 1px dotted var(--ax-diag-hint);
+  }
+
+  /* The gutter marker of a line with a problem, at the gutter's left edge. */
+  .diag-dot {
+    position: absolute;
+    left: var(--ax-space-1);
+    width: var(--ax-diag-dot);
+    height: var(--ax-diag-dot);
+    margin-top: calc((var(--row) - var(--ax-diag-dot)) / 2);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .diag-dot.diag-error {
+    background: var(--ax-diag-error);
+  }
+  .diag-dot.diag-warning {
+    background: var(--ax-diag-warning);
+  }
+  .diag-dot.diag-info {
+    background: var(--ax-diag-info);
+  }
+  .diag-dot.diag-hint {
+    background: var(--ax-diag-hint);
+  }
+
+  /* "Message at line end" (off by default): the line's worst message after its text. */
+  .diag-inline {
+    position: absolute;
+    height: var(--row);
+    line-height: var(--row);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-xs);
+    white-space: nowrap;
+    opacity: 0.8;
+    pointer-events: none;
+  }
+  .diag-inline.diag-error {
+    color: var(--ax-diag-error);
+  }
+  .diag-inline.diag-warning {
+    color: var(--ax-diag-warning);
+  }
+  .diag-inline.diag-info {
+    color: var(--ax-diag-info);
+  }
+  .diag-inline.diag-hint {
+    color: var(--ax-diag-hint);
+  }
+
+  /* The messages under a resting mouse. */
+  .diag-hover {
+    position: absolute;
+    z-index: 6;
+    max-width: min(60ch, 80%);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    box-shadow: var(--ax-shadow-pop);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text);
+    pointer-events: none;
+  }
+  .diag-hover p {
+    margin: 0;
+    padding-left: var(--ax-space-2);
+    border-left: 2px solid var(--ax-diag-hint);
+    white-space: pre-wrap;
+  }
+  .diag-hover p + p {
+    margin-top: var(--ax-space-1);
+  }
+  .diag-hover p.diag-error {
+    border-left-color: var(--ax-diag-error);
+  }
+  .diag-hover p.diag-warning {
+    border-left-color: var(--ax-diag-warning);
+  }
+  .diag-hover p.diag-info {
+    border-left-color: var(--ax-diag-info);
   }
 
   /* The find bar's "in selection" range (ED5.4): a faint wash under its matches. */

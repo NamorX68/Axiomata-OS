@@ -1668,6 +1668,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         .sort();
       return { files, truncated: false } as T;
     }
+    // No language servers in the browser mock: the editor runs without them.
+    case "lsp_start":
+      return { kind: "none" } as T;
+    case "lsp_send":
+    case "lsp_opened":
+    case "lsp_closed":
+      return undefined as T;
     case "file_search": {
       // A plain JS search over the fixture files — enough to see the view work.
       const root = String(args.root);

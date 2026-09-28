@@ -1119,7 +1119,7 @@ beide Pfade), „in sich selbst“ verhindert ohnehin der Kernel; die Meldung da
 roher Zeichenketten (`./src/x`, `src//x`). Kein zusätzliches Sonnet-Review: der Diff ist klein, die Sicherheitsprüfung
 deckt ihn ab.
 
-### ED6 im Detail (gegrillt 2026-09-28, Q0–Q11, bestätigt)
+### ED6 im Detail (gegrillt 2026-09-28, Q0–Q11, bestätigt; Umsetzung begonnen)
 
 Vorlauf und zwölf Entscheidungen (L0–L11). D18 bleibt der Rahmen (Server auf dem `PATH` erkannt, einer
 pro Wurzel und Sprache, Reihenfolge Diagnosen → Hover → Definition → Vervollständigung →
@@ -1163,6 +1163,21 @@ Formatieren/Umbenennen); D6 wird in einem Punkt geändert (L2).
 - **L11 — Definition außerhalb der Wurzeln** (Q11): schreibgeschützt öffnen, aber nur Pfade, die der
   Server selbst in einer Definitions-Antwort genannt hat (Rust liest diese eine Antwortart mit — eine
   gezielte Ausnahme von L1), reguläre Datei, keine Verknüpfung. Der Webview kann keinen Pfad unterschieben.
+
+**ED6.1 umgesetzt (2026-09-28):** `axiomata-files::lsp` (Tabelle + `lsp.json`, `LspHost` mit Framing,
+Seitenkennung — dieselbe Seite teilt einen Server, eine neu geladene startet ihn neu —, 10-Minuten-Leerlauf),
+Tauri `lsp_start/send/opened/closed` (keine `grant:`-Wurzel), Engine `src/editor/lsp/` (`rpc`, `client`
+mit inkrementeller Synchronisation, `diagnostics`), `fileapp/lsp.ts`, Anzeige in `EditorSurface`
+(Wellenlinie, Randpunkt, Hover, Meldung am Zeilenende als Einstellung), F8/⇧F8 und Vi `]d`/`[d`,
+Zähler in der Statuszeile. Sicherheitsprüfung (HIGH behoben): Rust lässt nur die Methoden durch, die
+der Client spricht (`ALLOWED_METHODS`, wächst je Checkpoint), plus Antworten auf Server-Anfragen —
+`workspace/executeCommand` und Co. bleiben draußen; `lsp_send/opened/closed` nur für die startende
+Seite; höchstens 8 Server, Neustart durch eine andere Seite höchstens alle 2 s; ausgehend ≤ 64 MiB,
+geschrieben ohne die Host-Sperre; ohne auflösbares `$HOME` keine Projektwurzel. Review: zwei Editoren
+auf einer Datei werden gezählt (erst das letzte Schließen meldet `didClose`), Starts je Wurzel laufen
+nacheinander (sonst hing ein zweiter TS/TSX-Client in „starting“). Gefunden beim Bau: der App fehlt aus dem Finder der Shell-`PATH` — die
+Servererkennung sucht zusätzlich an den üblichen Installationsorten. Live gegen echte Server geprüft
+(`tests/lsp_live.rs`: `rust-analyzer` E0308, `pyright` reportUndefinedVariable). Offen: Live-Test in der App.
 
 ## 6. Verifikation (pro Meilenstein)
 

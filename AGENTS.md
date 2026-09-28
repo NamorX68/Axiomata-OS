@@ -78,8 +78,11 @@ app's Files | Search column and the IDE's `search` pane, ⇧⌘F). ED5.8: instal
 tree by dragging (`FileTree.svelte`, pointer events, `treeModel.moveTarget`) — **ED5 is complete**. **Opencode 2
 (`docs/plans/opencode2.md`, OC1–OC4) is done**: Axiomata is a client of Opencode 2's shared background service
 (crate `axiomata-opencode`) — skills and chat run as sessions on it, IDE Opencode agents start on a session the IDE
-keeps (`opencode --session <id>`), and their status comes from the service's event stream. Next: ED6 (LSP, D18);
-open before it: the `$HOME` project root (owner's memory notes).
+keeps (`opencode --session <id>`), and their status comes from the service's event stream. **ED6 (LSP) is under way**
+(`docs/plans/editor.md` "ED6 im Detail", L0–L11): L0 refuses `$HOME` and above as a project root; ED6.1 runs language
+servers from Rust (`axiomata-files::lsp` — which program, only from a built-in table or `~/.axiomata/lsp.json`; only
+the methods the client speaks pass) with the protocol in `src/editor/lsp/`, and shows diagnostics. Next: ED6.2 (hover,
+definition).
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

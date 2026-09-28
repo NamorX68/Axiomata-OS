@@ -316,6 +316,15 @@ describe("modes and status", () => {
     ]);
     expect(m.status().cmdline).toEqual({ kind: ":", text: "", cursor: 0, register: false });
   });
+
+  it("hands ]d and [d to the view, which knows the language server's problems", () => {
+    const { m, effects } = setup("|a\nb");
+    m.feedKeys("]d[d");
+    expect(effects).toEqual([
+      { type: "problem", dir: 1 },
+      { type: "problem", dir: -1 },
+    ]);
+  });
 });
 
 describe("the Mac clipboard", () => {

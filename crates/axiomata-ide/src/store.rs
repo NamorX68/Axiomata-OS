@@ -143,8 +143,15 @@ fn normalize_root(root: &Path) -> Result<PathBuf> {
             reason: "is not a directory".to_string(),
         });
     }
-    let home = std::env::var_os("HOME").and_then(|h| PathBuf::from(h).canonicalize().ok());
-    if too_wide(&resolved, home.as_deref()) {
+    // Without a home to measure against, nothing is accepted: failing open would let
+    // `/Users` through (security review of ED6.1).
+    let home = std::env::var_os("HOME")
+        .and_then(|h| PathBuf::from(h).canonicalize().ok())
+        .ok_or_else(|| IdeError::Invalid {
+            field: "repo_root",
+            reason: "cannot be checked: the home folder is unknown ($HOME is not set)".to_string(),
+        })?;
+    if too_wide(&resolved, &home) {
         return Err(IdeError::Invalid {
             field: "repo_root",
             reason: "is your home folder or a folder above it — choose a folder inside it"
@@ -154,10 +161,10 @@ fn normalize_root(root: &Path) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-/// Whether `root` (canonical) is the home folder or one of its ancestors —
-/// or the file system root, whatever home is.
-fn too_wide(root: &Path, home: Option<&Path>) -> bool {
-    root.parent().is_none() || home.is_some_and(|home| home.starts_with(root))
+/// Whether `root` (canonical) is the home folder or one of its ancestors
+/// (the file system root among them).
+fn too_wide(root: &Path, home: &Path) -> bool {
+    root.parent().is_none() || home.starts_with(root)
 }
 
 fn root_as_text(root: &Path) -> Result<String> {
@@ -925,7 +932,7 @@ mod tests {
     fn the_home_folder_and_everything_above_it_are_too_wide() {
         let home = Path::new("/Users/me");
         for wide in ["/", "/Users", "/Users/me"] {
-            assert!(too_wide(Path::new(wide), Some(home)), "{wide}");
+            assert!(too_wide(Path::new(wide), home), "{wide}");
         }
         for fine in [
             "/Users/me/Documents",
@@ -933,12 +940,7 @@ mod tests {
             "/opt/src",
             "/Users/other",
         ] {
-            assert!(!too_wide(Path::new(fine), Some(home)), "{fine}");
+            assert!(!too_wide(Path::new(fine), home), "{fine}");
         }
-        assert!(
-            too_wide(Path::new("/"), None),
-            "the root is refused even without a home"
-        );
-        assert!(!too_wide(Path::new("/Users"), None));
     }
 }

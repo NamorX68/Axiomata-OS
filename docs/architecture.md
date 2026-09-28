@@ -233,6 +233,30 @@ project, a discarded worktree or a revoked grant is noticed at the next access. 
 this crate (`core::workspace` delegates); the new `file_*` commands use the editor's limits
 (read 16 MiB, `large` above 2 MiB, write 2 MiB) and typed `{ kind, message }` errors.
 
+**Language servers (ED6, `lsp/`).** `axiomata-files::lsp` runs the editor's language servers
+(`docs/plans/editor.md`, L1–L4, L10). `servers.rs` is the only place that decides which
+program runs: a built-in table (one server id per server, TypeScript/JavaScript/TSX sharing
+one), found on `PATH` plus `/opt/homebrew/bin`, `/usr/local/bin`, `~/.cargo/bin`,
+`~/.local/bin` (a Finder-started app has no shell `PATH`), overridden or switched off only in
+`~/.axiomata/lsp.json`, which no Tauri command writes — the webview names a root and a
+language, never a program (L2). `LspHost` runs one server per (root id, server id) in the
+root's folder, frames messages (`framing.rs`, `Content-Length`, ≤ 64 MiB) and passes them
+through whole; stderr is discarded. A start names the page asking: the same page gets the
+running server back, a reloaded page restarts it (a server refuses a second `initialize`).
+The embedder counts open documents (`opened`/`closed`); a janitor thread stops a server ten
+minutes after its last one closed, sending `shutdown`/`exit` and killing it after 2 s. When a
+server's output ends the page gets `$/axiomata/exited`. Single-file roots get none; the
+Tauri glue (`src-tauri/src/lsp.rs`: `lsp_start` with a `Channel`, `lsp_send`, `lsp_opened`,
+`lsp_closed`) also refuses every `grant:` root. What the page may send is limited in Rust,
+not in the page (ED6.1 security review): only `ALLOWED_METHODS` — the handshake, document
+sync, `$/cancelRequest` — and answers to the server's own requests pass, so a compromised
+webview cannot make a server run its commands (`workspace/executeCommand`); the list grows
+with each checkpoint's requests. Every message, open and close must carry the page token of
+the server's starter; outgoing messages are capped like incoming ones and written through a
+per-server `stdin` lock, never the host's; at most `MAX_SERVERS` (8) run, and another page
+restarts one at most every 2 s. `tests/lsp_live.rs` checks real `rust-analyzer` and `pyright`
+(`#[ignore]`d).
+
 ### The editor (`apps/dashboard/src/editor/` + `src/fileapp/`, ED1)
 
 The file app's own editor, split along the D1 line: **`src/editor/` is the engine** —
@@ -1142,6 +1166,22 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   pickers offer them (the terminal monospaced only), a missing chosen font draws the default.
   ED5.9: moving in the tree: drag a file or folder onto a folder of the same root (pointer events,
   `treeModel.moveTarget`, the existing `file_rename`); a closed folder opens after half a second.
+- **Editor ED6 — language servers: under way** (2026-09-28, `docs/plans/editor.md` "ED6 im
+  Detail", L0–L11). L0: `$HOME`, `/Users` and `/` are refused as IDE project roots
+  (`store::too_wide`; with no resolvable `$HOME` no root is accepted at all). ED6.1 (server host + protocol base + diagnostics): Rust side above
+  (`axiomata-files::lsp`); the protocol is the engine's, `src/editor/lsp/` (no app imports):
+  `rpc.ts` (JSON-RPC, answers the server's own requests with `null`/per-item `null` for
+  `workspace/configuration`), `client.ts` (`initialize` with UTF-16 positions; a document is
+  opened with its text as on disk and then follows `EditorDocument.onTextChange` —
+  incremental ranges when the server takes them, the whole text otherwise — sent after a
+  150 ms pause and before every request), `diagnostics.ts` (`DiagnosticSet`: stretches per
+  line, worst severity per line, what covers a position, next/previous). `fileapp/lsp.ts`
+  keeps one client per (root, server) for the page and shows the install hint once per
+  server; `FileEditor` opens the file on its server in the full-screen app and the IDE only
+  (not the panel, not the light mode, not a new note), and `EditorSurface` draws wavy
+  underlines (`--ax-diag-*`), a gutter dot, the messages under a resting mouse and — with the
+  setting "Problem message at line end" (off) — the worst message after the line. F8/⇧F8
+  and Vi's `]d`/`[d` (a `problem` effect) step through; the status line counts them.
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the
