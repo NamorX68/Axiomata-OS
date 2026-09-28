@@ -319,10 +319,12 @@ describe("modes and status", () => {
 
   it("hands ]d and [d to the view, which knows the language server's problems", () => {
     const { m, effects } = setup("|a\nb");
-    m.feedKeys("]d[d");
+    m.feedKeys("]d[dgdK");
     expect(effects).toEqual([
       { type: "problem", dir: 1 },
       { type: "problem", dir: -1 },
+      { type: "definition" },
+      { type: "hover" },
     ]);
   });
 });

@@ -13,6 +13,7 @@
  */
 
 import { getSetting, setSetting } from "../core/persist";
+import { FOREIGN_ROOT } from "./session";
 
 export interface FileRef {
   root: string;
@@ -113,9 +114,11 @@ export interface SavedTabs {
 }
 
 export function serializeTabs(state: TabsState): SavedTabs {
+  // A language server's file (`lsp:<handle>`) is readable only while that server runs; it is not kept.
+  const kept = state.tabs.filter((t) => !t.file?.root.startsWith(FOREIGN_ROOT));
   return {
-    tabs: state.tabs.map((t) => (t.file ? { ...t.file, preview: t.preview } : { newNote: true as const })),
-    active: Math.max(0, state.tabs.findIndex((t) => t.id === state.active)),
+    tabs: kept.map((t) => (t.file ? { ...t.file, preview: t.preview } : { newNote: true as const })),
+    active: Math.max(0, kept.findIndex((t) => t.id === state.active)),
   };
 }
 

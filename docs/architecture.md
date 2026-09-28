@@ -254,8 +254,23 @@ webview cannot make a server run its commands (`workspace/executeCommand`); the 
 with each checkpoint's requests. Every message, open and close must carry the page token of
 the server's starter; outgoing messages are capped like incoming ones and written through a
 per-server `stdin` lock, never the host's; at most `MAX_SERVERS` (8) run, and another page
-restarts one at most every 2 s. `tests/lsp_live.rs` checks real `rust-analyzer` and `pyright`
-(`#[ignore]`d).
+restarts one at most every 2 s. ED6.2 adds `textDocument/hover` and `/definition` to the list
+and makes one answer readable in Rust (L11): the ids of definition requests are noted, their
+answers are parsed in the pump thread, and the files they name (`uri`/`targetUri`, at most
+4096 per server) become readable through `LspHost::read_foreign` — but only when they lie under
+the server's **toolchain folders** (`servers::toolchain_roots`: the program's own install root —
+its Homebrew keg or `node_modules` — plus per server `rustc --print sysroot`, `~/.cargo/registry/src`,
+`~/.cargo/git/checkouts`, `~/.rustup/toolchains`; Python's prefixes; Xcode and the Command Line
+Tools). Without that limit a project file could make a server name any file (`#[path = "…"]`, a
+reference) and the page read it (ED6.2 security review, CRITICAL); a root at or above `$HOME` (or `/`) is dropped. The read opens the path with
+`O_NOFOLLOW`, checks the open fd is a regular file whose path (`F_GETPATH`) is the named one, and
+reads from that fd — no check-then-open race; ≤ 16 MiB, UTF-8. At most 256 definition requests
+may wait for an answer per server. `file_read` on `lsp:` does not check the page token: the token
+is self-asserted by the page, and the toolchain allow-list is the boundary. The file app opens
+such a file under the read-only root `lsp:<handle>` with the absolute path as `rel`:
+`file_read` routes it to `read_foreign`, `file_watch` does nothing for it, a write fails as
+for any unknown root. `tests/lsp_live.rs` checks real `rust-analyzer` (diagnostics, hover,
+a definition into the Rust standard library read back) and `pyright` (`#[ignore]`d).
 
 ### The editor (`apps/dashboard/src/editor/` + `src/fileapp/`, ED1)
 
@@ -1181,7 +1196,16 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   (not the panel, not the light mode, not a new note), and `EditorSurface` draws wavy
   underlines (`--ax-diag-*`), a gutter dot, the messages under a resting mouse and — with the
   setting "Problem message at line end" (off) — the worst message after the line. F8/⇧F8
-  and Vi's `]d`/`[d` (a `problem` effect) step through; the status line counts them.
+  and Vi's `]d`/`[d` (a `problem` effect) step through; the status line counts them. ED6.2:
+  hover and definition — `LspClient.hover` (`hoverMarkdown` normalises every contents shape;
+  the client asks for Markdown) and `.definition` (`firstLocation` of a `Location`, a list, or
+  `LocationLink`s). The surface shows the server's note (through `renderMarkdown`/DOMPurify)
+  under the problems when the mouse rests, and on Vi's `K` below the cursor
+  (`showHoverAtCursor`); F12, ⌘-click and Vi's `gd` go to the definition: in the same file
+  the cursor moves, in another file of the root the host opens a tab (`onOpenFile` —
+  `FileAppView`'s tabs, the IDE's dock), outside every root a read-only tab on
+  `lsp:<handle>` (`definitionFile`; `FileSession.readOnly` never saves or keeps text aside,
+  and such files stay out of "recently opened").
 - **Editor ED1 — the editor core: done** (2026-09-24, §3 "The editor"). Model, surface with
   soft wrap and IME input, the full-screen view with save/external-change/recovery flows,
   settings with every real font weight, autosave. Next: ED2 (tree-sitter, themes, the

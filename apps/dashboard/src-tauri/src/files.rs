@@ -177,12 +177,33 @@ pub async fn file_roots(state: State<'_, CoreState>) -> Result<Vec<RootInfo>, Fi
 
 /// Reads a text file (≤ 16 MiB; `large` over 2 MiB, which the editor edits in
 /// its light mode) together with its version.
+///
+/// `lsp:<server>` is the read-only root of files outside every root that a
+/// language server pointed to in a definition answer (editor plan L11); `rel`
+/// is then the absolute path, and only what that server named is readable.
 #[tauri::command]
 pub async fn file_read(
     state: State<'_, CoreState>,
+    lsp: State<'_, crate::lsp::LspState>,
     root: String,
     rel: String,
 ) -> Result<TextFile, FileError> {
+    if let Some(handle) = root.strip_prefix(crate::lsp::FOREIGN_ROOT) {
+        let handle = handle.parse::<u64>().map_err(|_| FileError {
+            kind: "UnknownRoot",
+            message: format!("unknown file root `{root}`"),
+        })?;
+        let host = lsp.host();
+        return tauri::async_runtime::spawn_blocking(move || {
+            host.read_foreign(handle, std::path::Path::new(&rel), MAX_READ_BYTES)
+        })
+        .await
+        .map_err(|err| FileError {
+            kind: "Io",
+            message: format!("file task failed: {err}"),
+        })?
+        .map_err(FileError::from);
+    }
     blocking(&state, move |config, db| {
         service::read_text(&self::root(config, db, &root)?, &rel, MAX_READ_BYTES)
     })
@@ -491,6 +512,10 @@ pub async fn file_watch(
     root: String,
     rel: String,
 ) -> Result<(), FileError> {
+    // A language server's file outside every root is read once, never watched (L11).
+    if root.starts_with(crate::lsp::FOREIGN_ROOT) {
+        return Ok(());
+    }
     let resolved = blocking(&state, {
         let root = root.clone();
         move |config, db| self::root(config, db, &root)

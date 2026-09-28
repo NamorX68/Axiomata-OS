@@ -174,6 +174,14 @@ describe("serializeTabs and parseTabs (W12)", () => {
     expect(back.tabs.findIndex((t) => t.id === back.active)).toBe(2);
   });
 
+  it("does not keep a language server's read-only file (ED6.2)", () => {
+    const foreign: FileRef = { root: "lsp:7", rel: "/opt/rust/lib/string.rs" };
+    const s = { ...opened([[a, false], [foreign, false], [b, false]]), active: "t3" };
+    const saved = serializeTabs(s);
+    expect(saved.tabs.map((t) => ("rel" in t ? t.rel : "new"))).toEqual(["a.md", "b.md"]);
+    expect(saved.active).toBe(1);
+  });
+
   it("skips what is malformed or doubled, and falls back to the first tab", () => {
     const back = parseTabs(
       {

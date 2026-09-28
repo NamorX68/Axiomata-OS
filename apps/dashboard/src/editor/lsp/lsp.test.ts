@@ -2,7 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EditorDocument } from "../document";
 import { cursor, pos, range } from "../position";
-import { CHANGE_DELAY, documentUri, EXITED, fileUri, LspClient } from "./client";
+import {
+  CHANGE_DELAY,
+  documentUri,
+  EXITED,
+  fileUri,
+  firstLocation,
+  hoverMarkdown,
+  LspClient,
+  uriPath,
+} from "./client";
 import { DiagnosticSet, parseDiagnostics } from "./diagnostics";
 import { lspLanguageId } from "./languages";
 import { Rpc, RpcError, type Transport } from "./rpc";
@@ -273,5 +282,56 @@ describe("uris and language ids", () => {
     expect(lspLanguageId("bash")).toBe("shellscript");
     expect(lspLanguageId("markdown_inline")).toBeNull();
     expect(lspLanguageId(null)).toBeNull();
+  });
+});
+
+describe("hover and definition", () => {
+  it("turns every shape of hover contents into Markdown", () => {
+    expect(hoverMarkdown({ kind: "markdown", value: "**x**" })).toBe("**x**");
+    expect(hoverMarkdown({ kind: "plaintext", value: "a*b" })).toBe("a\\*b");
+    expect(hoverMarkdown({ language: "rust", value: "fn f()" })).toBe("```rust\nfn f()\n```");
+    expect(hoverMarkdown(["one", { language: "ts", value: "x: number" }, ""])).toBe(
+      "one\n\n```ts\nx: number\n```",
+    );
+    expect(hoverMarkdown(null)).toBe("");
+  });
+
+  it("fences code longer than any backtick run inside it", () => {
+    expect(hoverMarkdown({ language: "md", value: "a ``` b" })).toBe("````md\na ``` b\n````");
+  });
+
+  it("reads the first place of any definition answer", () => {
+    const range = { start: { line: 4, character: 2 }, end: { line: 4, character: 9 } };
+    expect(firstLocation({ uri: "file:///a.rs", range })).toEqual({ uri: "file:///a.rs", at: { line: 4, col: 2 } });
+    expect(firstLocation([{ uri: "file:///b.rs", range }, { uri: "file:///c.rs", range }])?.uri).toBe("file:///b.rs");
+    expect(
+      firstLocation([{ targetUri: "file:///d.rs", targetRange: range, targetSelectionRange: range }]),
+    ).toEqual({ uri: "file:///d.rs", at: { line: 4, col: 2 } });
+    expect(firstLocation([])).toBeNull();
+    expect(firstLocation(null)).toBeNull();
+  });
+
+  it("decodes file URIs back to paths", () => {
+    expect(uriPath("file:///Users/me/a%20b/%C3%BC.rs")).toBe("/Users/me/a b/ü.rs");
+    expect(uriPath("https://x")).toBeNull();
+    expect(uriPath("file:///bad%zz")).toBeNull();
+  });
+
+  it("asks the server with the document and position, and answers null on failure", async () => {
+    const server = new FakeServer();
+    const client = new LspClient(server, { rootPath: "/r", server: "x" });
+    await client.whenReady();
+    const hovering = client.hover("file:///r/a", pos(1, 3));
+    await settle();
+    const asked = server.of("textDocument/hover")[0];
+    expect(asked.params).toEqual({ textDocument: { uri: "file:///r/a" }, position: { line: 1, character: 3 } });
+    server.reply(asked.id as number, { contents: { kind: "markdown", value: "fn main()" } });
+    expect(await hovering).toBe("fn main()");
+
+    const defining = client.definition("file:///r/a", pos(0, 0));
+    await settle();
+    const def = server.of("textDocument/definition")[0];
+    server.push({ jsonrpc: "2.0", id: def.id, error: { code: -32603, message: "no" } });
+    expect(await defining).toBeNull();
   });
 });

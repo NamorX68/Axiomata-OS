@@ -80,6 +80,9 @@ export type ViEffect =
   | { type: "hunk"; dir: 1 | -1 }
   /** `]d`/`[d` (ED6, L7): the next or previous problem a language server reported — the view knows them. */
   | { type: "problem"; dir: 1 | -1 }
+  /** `gd` / `K` (ED6.2, L7): the language server's definition / hover for the symbol under the cursor. */
+  | { type: "definition" }
+  | { type: "hover" }
   | { type: "openFile" }
   /** A file mark (`'A`) that belongs to another file. */
   | { type: "fileMark"; file: string; at: Pos }
@@ -969,6 +972,12 @@ export class ViMachine {
       case "]d":
       case "[d":
         this.env.effect({ type: "problem", dir: b.name === "]d" ? 1 : -1 });
+        return true;
+      case "gd":
+        this.env.effect({ type: "definition" });
+        return true;
+      case "K":
+        this.env.effect({ type: "hover" });
         return true;
       case "gf":
         this.env.effect({ type: "openFile" });

@@ -31,6 +31,7 @@
   import QuickOpen from "./QuickOpen.svelte";
   import { handoffs, takeHandoffs, type Handoff } from "./handoff";
   import { forgetRecent, recentFiles, rememberRecent, type RecentFile } from "./recent";
+  import { FOREIGN_ROOT } from "./session";
   import {
     closeTab,
     cycleTab,
@@ -107,7 +108,8 @@
     if (line !== null && result.load) lineFor.set(result.target, line);
     else if (line !== null) views[result.target]?.goToLine(line);
     tabs = result.state;
-    if (file) {
+    // A language server's read-only file outside every root (L11) is not one to come back to.
+    if (file && !file.root.startsWith(FOREIGN_ROOT)) {
       rememberRecent(file);
       recent = recentFiles();
     }
@@ -463,6 +465,7 @@
         onState={(state) => onTabState(tab, state)}
         onMoved={(file) => (tabs = retargetTab(tabs, tab.id, file))}
         onFailed={(result) => onTabFailed(tab, result)}
+        onOpenFile={(file, line) => openTab(file, false, null, line)}
       />
     {:else}
       <div class="empty">

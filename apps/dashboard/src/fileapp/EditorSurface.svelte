@@ -63,6 +63,7 @@
     type KeyInput,
   } from "../editor/keymap";
   import { SEVERITY_NAME, type DiagnosticSet } from "../editor/lsp/diagnostics";
+  import { renderMarkdown } from "../core/markdown";
   import { FindModel } from "../editor/search/findModel";
   import { cursor, pos, range, selectionRange, type Pos, type Range } from "../editor/position";
   import { clearOfSticky, NO_STICKY, stickyAt } from "../editor/sticky";
@@ -137,6 +138,10 @@
     diagnostics?: DiagnosticSet | null;
     /** Also write a line's first message after its text (L6; off by default). */
     diagnosticsInline?: boolean;
+    /** What the language server says about the symbol at a position (ED6.2), as Markdown. */
+    hoverAt?: (at: Pos) => Promise<string | null>;
+    /** ⌘-click (ED6.2, L7): go to the definition of the symbol there. */
+    onDefinitionAt?: (at: Pos) => void;
   }
 
   let {
@@ -161,6 +166,8 @@
     onFolds,
     diagnostics = null,
     diagnosticsInline = false,
+    hoverAt,
+    onDefinitionAt,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -885,6 +892,7 @@
 
   function onKeydown(e: KeyboardEvent): void {
     if (e.isComposing || composing) return;
+    endHover();
     // The find bar's keys come first, in Vi mode as well (T15).
     const findKey = findKeyAction(keyInputFrom(e));
     if (findKey) {
@@ -1039,41 +1047,60 @@
 
   // ---------------------------------------------------------------- hover (ED6)
 
-  /** How long the mouse rests on a problem before its messages show. */
+  /** How long the mouse rests on a symbol before what is known about it shows. */
   const HOVER_DELAY_MS = 350;
   let hoverTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The messages under the resting mouse, and where to show them. */
-  let hover = $state<{ x: number; y: number; items: { severity: string; text: string }[] } | null>(null);
+  /** Bumped on every move, so an answer that arrives after the mouse moved on is dropped. */
+  let hoverToken = 0;
+  /** The problems and the server's note (sanitised HTML) under the mouse, and where to show them. */
+  let hover = $state<{ x: number; y: number; items: { severity: string; text: string }[]; html: string | null } | null>(
+    null,
+  );
 
   function onHoverMove(e: MouseEvent): void {
-    if (hoverTimer) clearTimeout(hoverTimer);
-    hover = null;
-    if (!diagnostics || diagnostics.size === 0 || e.buttons !== 0) return;
+    endHover();
+    if (e.buttons !== 0 || (!hoverAt && (!diagnostics || diagnostics.size === 0))) return;
     const { clientX, clientY } = e;
+    const rect = surfaceEl.getBoundingClientRect();
+    const token = hoverToken;
     hoverTimer = setTimeout(() => {
-      const at = posAt({ clientX, clientY } as MouseEvent);
-      const found = diagnostics?.at(at) ?? [];
-      if (found.length === 0) return;
-      const rect = surfaceEl.getBoundingClientRect();
-      hover = {
-        x: clientX - rect.left,
-        y: clientY - rect.top + rowH,
-        items: found.map((d) => ({
-          severity: SEVERITY_NAME[d.severity],
-          text: `${d.message}${d.source ? ` (${d.source}${d.code ? ` ${d.code}` : ""})` : ""}`,
-        })),
-      };
+      void showHover(posAt({ clientX, clientY } as MouseEvent), clientX - rect.left, clientY - rect.top + rowH, token);
     }, HOVER_DELAY_MS);
   }
 
-  // A resting mouse must not show anything after the surface is gone.
-  $effect(() => () => endHover());
+  /** Shows what is known about `at` at (`x`, `y`) in the surface, unless the mouse moved on meanwhile. */
+  async function showHover(at: Pos, x: number, y: number, token: number): Promise<void> {
+    const items = (diagnostics?.at(at) ?? []).map((d) => ({
+      severity: SEVERITY_NAME[d.severity],
+      text: `${d.message}${d.source ? ` (${d.source}${d.code ? ` ${d.code}` : ""})` : ""}`,
+    }));
+    const markdown = hoverAt ? await hoverAt(at) : null;
+    if (token !== hoverToken) return;
+    // The server's text is foreign content: rendered through DOMPurify (`renderMarkdown`).
+    const html = markdown ? renderMarkdown(markdown) : null;
+    if (items.length === 0 && !html) return;
+    hover = { x, y, items, html };
+  }
+
+  /** Vi's `K` (ED6.2): what is known about the symbol under the cursor, shown below it. */
+  export function showHoverAtCursor(): void {
+    endHover();
+    const at = doc.selection.head;
+    const cell = cursorCell(layout, doc.store, at, settings.tabSize);
+    const x = textLeft + cell.cell * charW - (settings.wrap ? 0 : scrollLeft);
+    const y = (cell.row + 1) * rowH - scrollTop;
+    void showHover(at, x, y, hoverToken);
+  }
 
   function endHover(): void {
     if (hoverTimer) clearTimeout(hoverTimer);
     hoverTimer = null;
+    hoverToken++;
     hover = null;
   }
+
+  // Nothing may show up after the surface is gone.
+  $effect(() => () => endHover());
 
   function wordRange(p: Pos): { start: Pos; end: Pos } {
     const w = wordAt(doc.store.line(p.line), p.col);
@@ -1095,6 +1122,7 @@
     input.focus();
     const unit = e.detail >= 3 ? lineRange : e.detail === 2 ? wordRange : null;
     const start = posAt(e);
+    if (e.metaKey && !e.altKey && !e.shiftKey && onDefinitionAt && !unit) return onDefinitionAt(start);
     if (vi) return viMousedown(start);
     if (e.altKey && !unit) return altMousedown(start);
     const origin = unit ? unit(start) : { start, end: start };
@@ -1518,6 +1546,10 @@
       {#each hover.items as item, i (i)}
         <p class="diag-{item.severity}">{item.text}</p>
       {/each}
+      {#if hover.html}
+        <!-- Sanitised by `renderMarkdown` (DOMPurify): the text comes from the language server. -->
+        <div class="hover-doc">{@html hover.html}</div>
+      {/if}
     </div>
   {/if}
   {#if findOpen && find}
@@ -1790,6 +1822,26 @@
   }
   .diag-hover p + p {
     margin-top: var(--ax-space-1);
+  }
+  .diag-hover .hover-doc {
+    max-height: 40vh;
+    overflow: hidden;
+  }
+  .diag-hover p + .hover-doc {
+    margin-top: var(--ax-space-2);
+    padding-top: var(--ax-space-2);
+    border-top: 1px solid var(--ax-border);
+  }
+  .diag-hover .hover-doc :global(pre) {
+    margin: var(--ax-space-1) 0;
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-sm);
+    white-space: pre-wrap;
+  }
+  .diag-hover .hover-doc :global(p) {
+    margin: var(--ax-space-1) 0;
+    padding: 0;
+    border: 0;
   }
   .diag-hover p.diag-error {
     border-left-color: var(--ax-diag-error);

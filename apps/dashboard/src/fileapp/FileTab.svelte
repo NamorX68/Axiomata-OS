@@ -33,6 +33,8 @@
     onMoved?: (file: FileRef) => void;
     /** The file could not be opened. */
     onFailed?: (result: Extract<OpenResult, { ok: false }>) => void;
+    /** A definition in another file (ED6.2): the view opens it in a tab. */
+    onOpenFile?: (file: FileRef, line: number) => void;
     empty?: Snippet;
   }
 
@@ -48,6 +50,7 @@
     onState,
     onMoved,
     onFailed,
+    onOpenFile,
     empty,
   }: Props = $props();
 
@@ -122,6 +125,7 @@
     {onQuit}
     onState={reportState}
     {empty}
+    {onOpenFile}
   />
 </div>
 

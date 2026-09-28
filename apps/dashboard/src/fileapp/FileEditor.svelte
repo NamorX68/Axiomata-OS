@@ -71,7 +71,8 @@
   import { statusParts } from "./status";
   import { DiagnosticSet } from "../editor/lsp/diagnostics";
   import { detectLanguage } from "../editor/syntax/languages";
-  import { openOnServer, type LspDocument } from "./lsp";
+  import { definitionFile, openOnServer, type LspDocument } from "./lsp";
+  import { toast } from "../core/toast";
   import { surfaceSettings, wrapsByDefault } from "./surfaceSettings";
   import SvgPreview from "./SvgPreview.svelte";
   import { isUnder, renamedPath } from "./treeModel";
@@ -99,6 +100,11 @@
     empty?: Snippet;
     /** The floating panel (T8, T9): too small for the minimap and sticky scroll. */
     compact?: boolean;
+    /**
+     * Opens another file at a line — a definition elsewhere (ED6.2): a new tab
+     * where the host has tabs. Without it the file opens in this editor.
+     */
+    onOpenFile?: (file: { root: string; rel: string }, line: number) => void;
   }
 
   let {
@@ -111,6 +117,7 @@
     onState,
     empty,
     compact = false,
+    onOpenFile,
   }: Props = $props();
 
   /** Quiet time after the last change before unsaved text is kept aside (F8). */
@@ -147,7 +154,7 @@
   /** Syntax colours for the open file (ED2); `null` for plain text or a large file. */
   let highlighter = $state.raw<SyntaxHighlighter | null>(null);
   /** The open file on its language server (ED6), if it has one. */
-  let lspDoc: LspDocument | null = null;
+  let lspDoc = $state.raw<LspDocument | null>(null);
   let stopDiagnostics: (() => void) | null = null;
   /** What the language server last reported about the open file (L6). */
   let diagnostics = $state.raw<DiagnosticSet | null>(null);
@@ -397,10 +404,45 @@
   }
 
   function interceptKey(e: KeyboardEvent): boolean {
-    if (e.key !== "F8" || e.metaKey || e.ctrlKey || e.altKey) return false;
-    if (!goToProblem(e.shiftKey ? -1 : 1)) return false;
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (e.key === "F12" && !e.shiftKey && lspDoc) {
+      e.preventDefault();
+      void goToDefinition(session?.doc.selection.head ?? null);
+      return true;
+    }
+    if (e.key !== "F8" || !goToProblem(e.shiftKey ? -1 : 1)) return false;
     e.preventDefault();
     return true;
+  }
+
+  /** What the language server says about the symbol at `at` (the surface's hover, Vi's `K`). */
+  function hoverAt(at: { line: number; col: number }): Promise<string | null> {
+    const found = lspDoc;
+    return found ? found.connection.client.hover(found.uri, at) : Promise.resolve(null);
+  }
+
+  /**
+   * F12, ⌘-click and Vi's `gd` (ED6.2, L7): the definition of the symbol at
+   * `at` — here, in another file of the root (a tab where the host has them),
+   * or read-only outside every root (L11).
+   */
+  async function goToDefinition(at: { line: number; col: number } | null): Promise<void> {
+    const s = session;
+    const found = lspDoc;
+    if (!s || !found || !at) return;
+    const location = await found.connection.client.definition(found.uri, at);
+    if (session !== s) return;
+    const file = location ? definitionFile(s.root, found, location) : null;
+    if (!location || !file) {
+      toast("No definition found", "info");
+      return;
+    }
+    if (file.root === s.root && file.rel === s.rel) {
+      surface?.goTo(location.at);
+      return;
+    }
+    if (onOpenFile) onOpenFile(file, location.at.line);
+    else void open(file, location.at.line);
   }
 
   /** The folds of `s` as they are now (edits moved them), if they are kept at all. */
@@ -499,6 +541,11 @@
       if (root && rel) void open({ root, rel }, effect.at.line);
     } else if (effect.type === "problem") {
       goToProblem(effect.dir);
+    } else if (effect.type === "definition" || effect.type === "hover") {
+      // Vi's keys exist for every file; say why nothing happens where no server runs.
+      if (!lspDoc) toast("No language server for this file", "info");
+      else if (effect.type === "definition") void goToDefinition(session?.doc.selection.head ?? null);
+      else surface?.showHoverAtCursor();
     } else if (effect.type === "reload") {
       // `:e!` — the `!` is the confirmation the Reload button would ask for.
       void act((s) => s.discardChanges());
@@ -675,6 +722,9 @@
             {interceptKey}
             {diagnostics}
             diagnosticsInline={$editorSettings.diagnosticsInline}
+            readOnly={session.readOnly}
+            hoverAt={lspDoc ? hoverAt : undefined}
+            onDefinitionAt={lspDoc ? (at) => void goToDefinition(at) : undefined}
           />
         {/key}
       </div>
@@ -741,6 +791,9 @@
         <span class="note">{filing ? "Filing the note…" : "New note — ⌘S files it"}</span>
       {/if}
       {#if session.light}<span class="warn" title="Over 2 MB: no syntax colours">Large file — light mode</span>{/if}
+      {#if session.readOnly}
+        <span class="note" title={session.rel}>Read-only — outside the project, shown by the language server</span>
+      {/if}
       {#if diagnostics && diagnostics.size > 0}
         {@const counts = diagnostics.counts()}
         <span class="problems" title="Problems from the language server — F8 / ⇧F8 to step through">

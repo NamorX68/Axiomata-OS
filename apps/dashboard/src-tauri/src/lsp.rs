@@ -17,10 +17,19 @@ use tauri::ipc::Channel;
 use crate::commands::CoreState;
 use crate::files::{self, FileError};
 
+/// The root id prefix of files outside every root that a server pointed to
+/// (`lsp:<handle>`, read-only — `files::file_read`).
+pub const FOREIGN_ROOT: &str = "lsp:";
+
 /// The app's one language-server host.
 pub struct LspState(Arc<LspHost>);
 
 impl LspState {
+    /// The host, for the file commands that read a server's foreign files.
+    pub fn host(&self) -> Arc<LspHost> {
+        Arc::clone(&self.0)
+    }
+
     /// A host reading `~/.axiomata/lsp.json` and looking on `PATH` and in the usual install places.
     pub fn new() -> Self {
         let home = std::env::var_os("HOME").map(std::path::PathBuf::from);

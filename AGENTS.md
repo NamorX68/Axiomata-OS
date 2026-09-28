@@ -81,8 +81,9 @@ tree by dragging (`FileTree.svelte`, pointer events, `treeModel.moveTarget`) —
 keeps (`opencode --session <id>`), and their status comes from the service's event stream. **ED6 (LSP) is under way**
 (`docs/plans/editor.md` "ED6 im Detail", L0–L11): L0 refuses `$HOME` and above as a project root; ED6.1 runs language
 servers from Rust (`axiomata-files::lsp` — which program, only from a built-in table or `~/.axiomata/lsp.json`; only
-the methods the client speaks pass) with the protocol in `src/editor/lsp/`, and shows diagnostics. Next: ED6.2 (hover,
-definition).
+the methods the client speaks pass) with the protocol in `src/editor/lsp/`, and shows diagnostics; ED6.2 adds hover
+and go-to-definition (a definition outside every root opens read-only on the root `lsp:<handle>`, readable only for
+files the server named). Next: ED6.3 (completion).
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

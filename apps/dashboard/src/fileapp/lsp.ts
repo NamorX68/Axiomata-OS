@@ -20,7 +20,8 @@ import { Channel } from "@tauri-apps/api/core";
 import { insideTauri, invokeBackend } from "../core/backend";
 import { toast } from "../core/toast";
 import type { EditorDocument } from "../editor/document";
-import { documentUri, LspClient } from "../editor/lsp/client";
+import { documentUri, LspClient, uriPath, type Location } from "../editor/lsp/client";
+import { FOREIGN_ROOT } from "./session";
 import { lspLanguageId } from "../editor/lsp/languages";
 import type { Transport } from "../editor/lsp/rpc";
 
@@ -161,4 +162,22 @@ export async function openOnServer(
       void invokeBackend<void>("lsp_closed", { handle: connection.handle, page: PAGE }).catch(() => {});
     },
   };
+}
+
+/**
+ * Where a definition is, as a file the editor can open: under the document's
+ * own root when it lies there, otherwise the server's read-only root
+ * `lsp:<handle>` with the absolute path (L11) — Rust lets it read only what
+ * the server named. `null` for a place that is not a file.
+ */
+export function definitionFile(
+  root: string,
+  opened: LspDocument,
+  location: Location,
+): { root: string; rel: string } | null {
+  const path = uriPath(location.uri);
+  if (!path) return null;
+  const base = `${opened.connection.rootPath.replace(/\/+$/, "")}/`;
+  if (path.startsWith(base)) return { root, rel: path.slice(base.length) };
+  return { root: `${FOREIGN_ROOT}${opened.connection.handle}`, rel: path };
 }

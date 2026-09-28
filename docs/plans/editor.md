@@ -1179,6 +1179,19 @@ nacheinander (sonst hing ein zweiter TS/TSX-Client in „starting“). Gefunden 
 Servererkennung sucht zusätzlich an den üblichen Installationsorten. Live gegen echte Server geprüft
 (`tests/lsp_live.rs`: `rust-analyzer` E0308, `pyright` reportUndefinedVariable). Offen: Live-Test in der App.
 
+**ED6.2 umgesetzt (2026-09-28):** Hover (Mausruhe, Vi `K`) und Definition (F12, ⌘-Klick, Vi `gd`):
+gleiche Datei → Cursor, andere Datei der Wurzel → Reiter (Datei-App-Tabs bzw. IDE-Dock, Rückruf
+`onOpenFile`), außerhalb jeder Wurzel → schreibgeschützter Reiter auf der Wurzel `lsp:<Server>` (L11):
+Rust merkt sich die Ids der Definitions-Anfragen, liest deren Antworten mit und gibt genau die genannten
+Dateien über `read_foreign` frei (reguläre Datei ohne Verknüpfung, ≤ 16 MiB) — **L11 verengt**
+(Security-Review, CRITICAL): nur Dateien unter den Werkzeug-Ordnern des Servers (Installationsort des
+Programms, Rust-Sysroot, Cargo-Registry/-Checkouts, rustup, Python-Präfixe, Xcode/CLT), sonst könnte eine
+Projektdatei (`#[path = "…"]`) den Server jede Datei nennen lassen. Gelesen wird über das mit `O_NOFOLLOW`
+geöffnete fd (kein TOCTOU); höchstens 256 offene Definitions-Anfragen je Server. Reiter auf `lsp:` werden
+nicht über den Neustart gerettet; `gd`/`K` ohne Server geben einen Hinweis. Der Client kündigt
+Markdown für den Hover an. Live gegen `rust-analyzer` geprüft: Hover, Definition im Projekt und in die
+Standardbibliothek (`/opt/homebrew/Cellar/rust/…/string.rs`), dort gelesen.
+
 ## 6. Verifikation (pro Meilenstein)
 
 - Das TS-Paket ist von ED1 an ohne DOM testbar (`vitest`): Puffer, Undo, Cursor, später

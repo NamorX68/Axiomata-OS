@@ -114,6 +114,21 @@ describe("opening and saving", () => {
     expect(await session.save()).toBe("saved");
   });
 
+  it("never writes or keeps aside a language server's file outside every root (L11)", async () => {
+    const backend = new FakeBackend();
+    backend.files.set("lsp:3:/Users/me/.rustup/lib.rs", "pub fn std() {}\n");
+    const session = await FileSession.open(backend, "lsp:3", "/Users/me/.rustup/lib.rs", INDENT);
+    expect(session.readOnly).toBe(true);
+    expect(session.fileName).toBe("lib.rs");
+    typeInto(session, "x");
+    expect(await session.save()).toBe("unchanged");
+    await session.persistRecovery();
+    expect(backend.writes).toBe(0);
+    expect(backend.recoveries.size).toBe(0);
+    const { session: normal } = await opened();
+    expect(normal.readOnly).toBe(false);
+  });
+
   it("stops watching when closed", async () => {
     const { backend, session } = await opened();
     await session.close();

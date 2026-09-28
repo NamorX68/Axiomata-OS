@@ -55,6 +55,9 @@ export type Banner =
   | { kind: "reloaded" }
   | { kind: "error"; message: string };
 
+/** The root id prefix of a language server's read-only files outside every root (L11). */
+export const FOREIGN_ROOT = "lsp:";
+
 /** The recovery key a new note's draft is kept under — a key, not a place on disk. */
 export const DRAFT_ROOT = "new-note";
 /** `.md`, so the draft gets Markdown's colours and preview like the note it becomes. */
@@ -182,13 +185,21 @@ export class FileSession {
   }
 
   /**
+   * A file outside every root that a language server pointed to (ED6.2, L11):
+   * its root is `lsp:<server>`, and it is shown, never written.
+   */
+  get readOnly(): boolean {
+    return this.root.startsWith(FOREIGN_ROOT);
+  }
+
+  /**
    * Saves with the expected version. A conflict raises the external-change
    * banner; after "keep mine" the first save only asks (`needsConfirm`), and
    * `save(true)` then overwrites.
    */
   async save(confirmed = false): Promise<SaveResult> {
     // A new note is filed by the view (`create_note`), never written here — not even by autosave.
-    if (this.untitled) return "unchanged";
+    if (this.untitled || this.readOnly) return "unchanged";
     if (!this.doc.dirty && this.version !== null && !this.overwriteArmed) return "unchanged";
     if (this.overwriteArmed && !confirmed) {
       this.banner = { kind: "confirmOverwrite" };
@@ -277,7 +288,7 @@ export class FileSession {
 
   /** Keeps the unsaved text aside (F8); called by the view after 2 s of quiet. */
   async persistRecovery(): Promise<void> {
-    if (this.closed) return;
+    if (this.closed || this.readOnly) return;
     if (!this.doc.dirty) {
       await this.backend.recoveryDelete(this.root, this.rel).catch(() => undefined);
       return;

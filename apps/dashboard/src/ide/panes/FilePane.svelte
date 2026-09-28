@@ -25,11 +25,14 @@
     config,
     visible,
     onQuit,
+    onOpenFile,
   }: {
     config: FilePaneConfig;
     visible: boolean;
     /** Vi's `ZZ`/`ZQ`: close this pane's tab. */
     onQuit?: () => void;
+    /** A definition in another file (ED6.2): the dock opens it as a tab. */
+    onOpenFile?: (file: { root: string; rel: string }, line: number) => void;
   } = $props();
 
   let editor = $state<FileEditor | null>(null);
@@ -72,7 +75,7 @@
   {#if failure}
     <p class="failure">{failure}</p>
   {:else}
-    <FileEditor bind:this={editor} {visible} {notice} {onQuit} />
+    <FileEditor bind:this={editor} {visible} {notice} {onQuit} {onOpenFile} />
   {/if}
 </div>
 

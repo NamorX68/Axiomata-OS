@@ -13,7 +13,7 @@
  */
 
 import type { EditorDocument, TextChange } from "../document";
-import { range } from "../position";
+import { range, type Pos } from "../position";
 import { type Diagnostic, parseDiagnostics } from "./diagnostics";
 import { Rpc, type Transport } from "./rpc";
 
@@ -54,6 +54,23 @@ interface OpenDocument {
 /** A `file://` URI for an absolute path, each segment percent-encoded. */
 export function fileUri(path: string): string {
   return `file://${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** The path of a `file://` URI, or `null` for anything else. */
+export function uriPath(uri: string): string | null {
+  if (!uri.startsWith("file://")) return null;
+  try {
+    const path = decodeURIComponent(uri.slice("file://".length));
+    return path.startsWith("/") ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Where a definition is: a file and a position in it. */
+export interface Location {
+  uri: string;
+  at: Pos;
 }
 
 /** A path under a root as a `file://` URI. */
@@ -160,6 +177,39 @@ export class LspClient {
     return this.rpc.request<T>(method, params);
   }
 
+  /**
+   * What the server says about the symbol at `at` (ED6.2), as Markdown —
+   * `null` when it has nothing, or the request failed.
+   */
+  async hover(uri: string, at: Pos): Promise<string | null> {
+    try {
+      const result = await this.request<{ contents?: unknown } | null>("textDocument/hover", {
+        textDocument: { uri },
+        position: { line: at.line, character: at.col },
+      });
+      const text = hoverMarkdown(result?.contents).trim();
+      return text === "" ? null : text;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Where the symbol at `at` is defined (ED6.2) — the first place the server
+   * names, `null` when it names none or the request failed.
+   */
+  async definition(uri: string, at: Pos): Promise<Location | null> {
+    try {
+      const result = await this.request<unknown>("textDocument/definition", {
+        textDocument: { uri },
+        position: { line: at.line, character: at.col },
+      });
+      return firstLocation(result);
+    } catch {
+      return null;
+    }
+  }
+
   /** Stops following every document; the server itself is Rust's to stop. */
   dispose(): void {
     for (const open of this.docs.values()) {
@@ -184,6 +234,8 @@ export class LspClient {
           textDocument: {
             synchronization: { dynamicRegistration: false, willSave: false, didSave: false },
             publishDiagnostics: { relatedInformation: false, versionSupport: true },
+            hover: { contentFormat: ["markdown", "plaintext"] },
+            definition: { linkSupport: true },
           },
           workspace: { workspaceFolders: true, configuration: false },
           window: { workDoneProgress: false },
@@ -274,4 +326,43 @@ function syncKindOf(value: unknown): number {
     return SYNC_NONE;
   }
   return SYNC_FULL;
+}
+
+/**
+ * A hover's `contents` as Markdown: `MarkupContent` (`{kind, value}`), a
+ * `MarkedString` (a string, or `{language, value}` — a code block), or a list
+ * of them.
+ */
+export function hoverMarkdown(contents: unknown): string {
+  if (typeof contents === "string") return contents;
+  if (Array.isArray(contents)) return contents.map(hoverMarkdown).filter((t) => t.trim() !== "").join("\n\n");
+  if (typeof contents === "object" && contents !== null) {
+    const c = contents as { kind?: unknown; language?: unknown; value?: unknown };
+    if (typeof c.value !== "string") return "";
+    if (typeof c.language === "string") {
+      // A fence longer than any backtick run inside, so the code cannot close it early.
+      const longest = Math.max(0, ...(c.value.match(/`+/g) ?? []).map((run) => run.length));
+      const fence = "`".repeat(Math.max(3, longest + 1));
+      return `${fence}${c.language}\n${c.value}\n${fence}`;
+    }
+    if (c.kind === "plaintext") return c.value.replace(/[\\`*_{}[\]()#+\-.!<>]/g, "\\$&");
+    return c.value;
+  }
+  return "";
+}
+
+/** The first place of a definition answer: a `Location`, a list of them, or `LocationLink`s. */
+export function firstLocation(result: unknown): Location | null {
+  const item = Array.isArray(result) ? result[0] : result;
+  if (typeof item !== "object" || item === null) return null;
+  const r = item as {
+    uri?: unknown;
+    range?: { start?: { line?: unknown; character?: unknown } };
+    targetUri?: unknown;
+    targetSelectionRange?: { start?: { line?: unknown; character?: unknown } };
+  };
+  const uri = typeof r.uri === "string" ? r.uri : typeof r.targetUri === "string" ? r.targetUri : null;
+  const start = typeof r.uri === "string" ? r.range?.start : r.targetSelectionRange?.start;
+  if (!uri || typeof start?.line !== "number" || typeof start.character !== "number") return null;
+  return { uri, at: { line: start.line, col: start.character } };
 }

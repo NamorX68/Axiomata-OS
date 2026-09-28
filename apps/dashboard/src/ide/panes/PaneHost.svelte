@@ -32,7 +32,9 @@
     FILES_PANE,
     filePaneConfig,
     filesPaneConfig,
+    fileTab,
     SEARCH_PANE,
+    showsFile,
   } from "../paneKinds";
   import AgentPane from "./AgentPane.svelte";
   import FilePane from "./FilePane.svelte";
@@ -107,7 +109,13 @@
     {/if}
   {:else if tab.kind === FILE_PANE}
     {#if fileConfig}
-      <FilePane config={fileConfig} {visible} onQuit={() => dock.close(tab.id)} />
+      <FilePane
+        config={fileConfig}
+        {visible}
+        onQuit={() => dock.close(tab.id)}
+        onOpenFile={(file, line) =>
+          dock.open(fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), tab.id)}
+      />
     {:else}
       <p class="unknown">This file pane lost its file.</p>
     {/if}
