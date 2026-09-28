@@ -26,13 +26,21 @@ ICONS=(
   circle-alert
   code
   columns-2
+  container
   copy
+  database
   ellipsis
   external-link
   eye
   eye-off
   file
+  file-archive
+  file-braces
+  file-code
+  file-cog
+  file-image
   file-plus
+  file-text
   files
   folder
   folder-open
@@ -44,6 +52,7 @@ ICONS=(
   keyboard
   layout-grid
   list
+  lock
   map
   maximize-2
   minimize-2

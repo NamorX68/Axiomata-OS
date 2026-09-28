@@ -887,7 +887,7 @@
         : view.shape === "underline"
           ? { width: view.cells * charW, height: 2, alpha: 1 }
           : undefined;
-    const style = fx.cursor === "off" ? null : { trail: fx.cursor === "trail", glow: fx.glow, shape };
+    const style = fx.cursor === "off" ? null : { strength: fx.cursor, glow: fx.glow, shape };
     untrack(() => glide.moveTo(target, style));
   });
 

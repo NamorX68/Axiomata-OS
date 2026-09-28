@@ -22,6 +22,7 @@
   import { ensureInstalledFonts, installedFonts } from "../core/installedFonts";
   import { DEFAULT_FONT_FAMILY, drawnFamily, EDITOR_FONTS, nearestWeight, realWeights, weightName } from "./fonts";
   import { highlightFor } from "./highlighting";
+  import { FILE_ICON_STYLE_NAMES, FILE_ICON_STYLES, type FileIconStyle } from "../core/fileIcons";
   import type { SurfaceSettings } from "./surfaceSettings";
 
   interface Props {
@@ -73,8 +74,8 @@
   const missing = $derived(drawnFamily(s.fontFamily, $installedFonts.loaded) !== s.fontFamily);
 
   const CURSOR: { value: CursorAnimation; label: string }[] = [
-    { value: "trail", label: "Glide with trail" },
-    { value: "glide", label: "Glide" },
+    { value: "strong", label: "Strong (smear, longer on long jumps)" },
+    { value: "subtle", label: "Subtle" },
     { value: "off", label: "Off" },
   ];
 
@@ -294,6 +295,17 @@
         >
           {#each CURSOR as option (option.value)}
             <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        <span>File icons</span>
+        <select
+          value={s.fileIcons}
+          onchange={(e) => updateEditorSettings({ fileIcons: e.currentTarget.value as FileIconStyle })}
+        >
+          {#each FILE_ICON_STYLES as style (style)}
+            <option value={style}>{FILE_ICON_STYLE_NAMES[style]}</option>
           {/each}
         </select>
       </label>

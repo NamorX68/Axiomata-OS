@@ -671,7 +671,11 @@ carrying its own config.
   the Vi grammar) is a column beside the tabs, so the minimap stays in view. The tabs sit in groups side by side or
   stacked on the IDE's dock tree (`fileapp/fileDock.ts` over `ide/layout.ts`, drag geometry from `ide/dock.ts`,
   editors moved between groups by `ide/paneStore.ts` so a move keeps cursor, undo and unsaved text); a file is open
-  at most once in the whole layout.
+  at most once in the whole layout. LK3–LK5: tabs are pills tinted by language (`core/languageColors.ts`, tokens
+  `--ax-lang-*`), text buttons are `ui/IconButton`s, the file tree has icons in four styles (`core/fileIcons.ts` over
+  the sets vendored by `scripts/vendor-file-icons.sh` — Catppuccin, Octicons, JetBrains Expui — and Lucide for
+  monochrome), and the cursor's glide lasts longer the farther it goes, with a smear at "strong"
+  (`editor/decorations.ts` `glideMotion`/`stepCursor`, drawn by `fileapp/cursorGlide.ts`).
 - **Connector modules — "provider = skill, not code"**: Calendar and Reminders (and Mail)
   are the pattern for any future integration behind an MCP server the app doesn't have
   first-class Tauri commands for. A `*-digest` skill (seeded on first run from

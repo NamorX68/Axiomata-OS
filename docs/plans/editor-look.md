@@ -1,6 +1,7 @@
 # Editor: drei Erweiterungen und eine moderne Optik — der künftige Standard für Axiomata
 
-Stand: 2026-09-28, gegrillt (Runden 1–2) und vom Owner bestätigt; Umsetzung beginnt mit LK0. Anlass (Owner): „Zur Zeit sieht das alles nach einer
+Stand: 2026-09-28, gegrillt (Runden 1–2), vom Owner bestätigt und umgesetzt (LK0–LK5). Offen: der Live-Test in der App
+und die Übertragung der Optik auf die übrigen Module, jedes eigens geplant. Anlass (Owner): „Zur Zeit sieht das alles nach einer
 alten Linux-X-Anwendung aus und nicht wie ein moderner Editor.“ Vorbild ist vor allem Zed, daneben VS Code und
 JetBrains. Was hier für die Datei-App und die IDE entsteht, wird später Modul für Modul zum Standard der ganzen App.
 Vorgänger: `docs/plans/editor.md` (ED0–ED6).
@@ -112,6 +113,22 @@ abschaltbar („Tabs coloured by language“, `tabColors`). Stärke nach Browser
 fokussierte Gruppe trägt den Akzentrand. Icon-Knöpfe statt Text: Datei-App-Kopf (öffnen, zuletzt, Einstellungen,
 Kürzel, zurück zum OS), Baumkopf (Dateien | Suche, versteckte Dateien, neu lesen), IDE-Kopf (Terminal, zurück),
 IDE-Files-Pane, × und + in den Tab-Leisten. Drei Lucide-Icons nachgeladen (history, layout-grid, eye-off).
+
+**LK4 umgesetzt (2026-09-28):** Icons im Dateibaum (Datei-App und IDE-Files-Pane) in vier Stilen, wählbar in den
+Editor-Einstellungen („File icons“, Vorgabe Catppuccin, auch „None“). `scripts/vendor-file-icons.sh` holt je Dateiart ein
+Icon aus Catppuccin (`@iconify-json/catppuccin`, MIT), Octicons für „Git“ (`@iconify-json/octicon`, MIT) und JetBrains'
+Expui-Icons (hell und dunkel, `intellij-community` am festen Commit, Apache 2.0) nach `src/ui/icons/fileIcons.ts`, mit
+Lizenztexten; Monochrom nimmt Lucide. `core/fileIcons.ts` bestimmt die Dateiart (ganzer Name → Endung → Sprache aus der
+Farbtabelle) und wählt JetBrains' Variante nach `--ax-color-scheme`. JetBrains hat im Community-Repository keine Icons für
+Rust, Python, Svelte und Lua — dort steht sein allgemeines Datei-Icon. Die Aufklapp-Pfeile sind Lucide-Chevrons.
+
+**LK5 umgesetzt (2026-09-28):** Die Cursor-Animation (`fileapp/cursorGlide.ts`, Logik in `editor/decorations.ts`)
+richtet ihre Dauer nach der Entfernung (`glideMotion`: stark 80 → 240 ms, dezent 70 → 130 ms, Wurzel-Kurve bis 700 px),
+und bei „stark“ folgt ein Schwanz 2,4-mal langsamer als der Kopf: zwischen beiden liegt eine Schliere (konvexe Hülle von
+Schwanz- und Kopf-Kasten, mindestens 6 px breit, Verlauf zum Schwanz hin durchsichtig), die sich beim Landen ins Ziel
+zusammenzieht; das Leuchten im Flug ist stärker (16 statt 8 px). Tippen und Pfeile bleiben durch die kurze Strecke kurz.
+Einstellung „Cursor: Strong / Subtle / Off“, Vorgabe Strong; gespeicherte „trail“/„glide“ werden übernommen. Im Browser
+(verlangsamt) mitten im Flug geprüft.
 
 **K4 präzisiert (Owner, beim Bau von LK2):** Dieselbe Datei in zwei Gruppen hätte einen gemeinsamen Cursor, weil die
 Auswahl im Dokument liegt, nicht in der Ansicht. Entscheid: jede Datei nur einmal. „Dieselbe Datei zweimal mit eigenem

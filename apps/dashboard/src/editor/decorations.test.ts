@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { LineStore } from "./buffer";
-import { indentGuides, stepCursor } from "./decorations";
+import { glideMotion, indentGuides, stepCursor } from "./decorations";
 
 describe("indentGuides", () => {
   it("draws one guide per indentation level", () => {
@@ -24,32 +24,45 @@ describe("indentGuides", () => {
   });
 });
 
-describe("stepCursor", () => {
-  const options = { durationMs: 100, trail: true };
+describe("stepCursor and glideMotion (K8)", () => {
+  const strong = { durationMs: 100, tailLag: 2.4 };
+  const at = (x: number, y: number) => ({ x, y, tail: { x, y } });
 
-  it("approaches the target and arrives in about the glide's duration", () => {
-    let motion = { x: 0, y: 0, trail: [] as { x: number; y: number }[] };
+  it("brings the head and then the tail to the target, in about the glide's duration", () => {
+    let motion = at(0, 0);
     let done = false;
     let elapsed = 0;
-    while (!done && elapsed < 1000) {
-      ({ motion, done } = stepCursor(motion, { x: 100, y: 20 }, 16, options));
+    let headAt = -1;
+    while (!done && elapsed < 2000) {
+      ({ motion, done } = stepCursor(motion, { x: 100, y: 20 }, 16, strong));
       elapsed += 16;
+      if (headAt < 0 && Math.hypot(100 - motion.x, 20 - motion.y) < 1) headAt = elapsed;
     }
     expect(done).toBe(true);
-    expect(motion).toEqual({ x: 100, y: 20, trail: [] });
-    expect(elapsed).toBeLessThan(300);
+    expect(motion).toEqual(at(100, 20));
+    expect(headAt).toBeLessThan(300);
+    // The tail lands later: that is the smear shrinking into the target.
+    expect(elapsed).toBeGreaterThan(headAt);
   });
 
-  it("leaves a trail while moving, capped, and none without the option", () => {
-    let motion = { x: 0, y: 0, trail: [] as { x: number; y: number }[] };
-    for (let i = 0; i < 20; i++) ({ motion } = stepCursor(motion, { x: 1000, y: 0 }, 1, options));
-    expect(motion.trail.length).toBe(8);
-    expect(stepCursor({ x: 0, y: 0, trail: [] }, { x: 50, y: 0 }, 16, { durationMs: 100, trail: false }).motion.trail)
-      .toEqual([]);
+  it("smears only when the tail lags: behind the head, on the way", () => {
+    const moving = stepCursor(at(0, 0), { x: 500, y: 0 }, 16, strong).motion;
+    expect(moving.tail.x).toBeLessThan(moving.x);
+    const subtle = stepCursor(at(0, 0), { x: 500, y: 0 }, 16, { durationMs: 100, tailLag: 1 }).motion;
+    expect(subtle.tail).toEqual({ x: subtle.x, y: subtle.y });
   });
 
   it("does not move backwards for a zero or negative frame time", () => {
-    const { motion } = stepCursor({ x: 10, y: 0, trail: [] }, { x: 20, y: 0 }, -5, options);
+    const { motion } = stepCursor(at(10, 0), { x: 20, y: 0 }, -5, strong);
     expect(motion.x).toBe(10);
+  });
+
+  it("takes longer the farther the jump, strong more than subtle", () => {
+    const step = glideMotion(8, "strong").durationMs;
+    const far = glideMotion(900, "strong").durationMs;
+    expect(step).toBeLessThan(100);
+    expect(far).toBe(240);
+    expect(glideMotion(300, "strong").durationMs).toBeGreaterThan(glideMotion(300, "subtle").durationMs);
+    expect(glideMotion(300, "subtle").tailLag).toBe(1);
   });
 });

@@ -25,6 +25,8 @@
   import { messageOf } from "../core/errors";
   import { countTree, createFile, deleteTree, listDir, makeDir, renameEntry, type Listing } from "./backend";
   import type { FileRef } from "./tabs";
+  import Icon from "../ui/Icon.svelte";
+  import FileIcon from "./FileIcon.svelte";
   import {
     baseName,
     expandedAfterDelete,
@@ -361,7 +363,10 @@
             ondblclick={() => entry.kind === "file" && onOpen({ root, rel: path }, false)}
             oncontextmenu={(e) => openMenu(e, root, path, entry.kind === "dir" ? "dir" : "file")}
           >
-            <span class="chevron" aria-hidden="true">{entry.kind === "dir" ? (isOpen(root, path) ? "▾" : "▸") : ""}</span>
+            <span class="chevron" aria-hidden="true"
+              >{#if entry.kind === "dir"}<Icon name={isOpen(root, path) ? "chevron-down" : "chevron-right"} size="sm" />{/if}</span
+            >
+            <FileIcon name={entry.name} folder={entry.kind === "dir"} open={entry.kind === "dir" && isOpen(root, path)} />
             <span class="label">{entry.name}{entry.kind === "link" ? " ↗" : ""}</span>
           </button>
           <button
@@ -419,7 +424,9 @@
         onclick={() => toggle(root.id, "")}
         oncontextmenu={(e) => openMenu(e, root.id, "", "root")}
       >
-        <span class="chevron" aria-hidden="true">{isOpen(root.id, "") ? "▾" : "▸"}</span>
+        <span class="chevron" aria-hidden="true"
+          ><Icon name={isOpen(root.id, "") ? "chevron-down" : "chevron-right"} size="sm" /></span
+        >
         <span class="label">{root.label}</span>
       </button>
       <button
@@ -513,7 +520,9 @@
   }
 
   .chevron {
-    width: var(--ax-space-3);
+    display: inline-flex;
+    align-items: center;
+    width: var(--ax-icon-sm);
     color: var(--ax-text-muted);
     flex-shrink: 0;
   }

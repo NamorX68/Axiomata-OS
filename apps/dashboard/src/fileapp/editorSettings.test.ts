@@ -86,6 +86,19 @@ describe("font weights (F13)", () => {
   });
 });
 
+describe("cursor animation and file icons (editor-look K8, K5)", () => {
+  it("defaults to the strong glide and Catppuccin icons, and takes the names saved before K8", () => {
+    expect(DEFAULT_EDITOR_SETTINGS.cursorAnimation).toBe("strong");
+    expect(parseEditorSettings({ cursorAnimation: "trail" }).cursorAnimation).toBe("strong");
+    expect(parseEditorSettings({ cursorAnimation: "glide" }).cursorAnimation).toBe("subtle");
+    expect(parseEditorSettings({ cursorAnimation: "off" }).cursorAnimation).toBe("off");
+    expect(parseEditorSettings({ cursorAnimation: "wild" }).cursorAnimation).toBe("strong");
+    expect(DEFAULT_EDITOR_SETTINGS.fileIcons).toBe("catppuccin");
+    expect(parseEditorSettings({ fileIcons: "jetbrains" }).fileIcons).toBe("jetbrains");
+    expect(parseEditorSettings({ fileIcons: "emoji" }).fileIcons).toBe("catppuccin");
+  });
+});
+
 describe("tab colours (editor-look K14)", () => {
   it("defaults to on, keeps off, and ignores a value that is no boolean", () => {
     expect(DEFAULT_EDITOR_SETTINGS.tabColors).toBe(true);

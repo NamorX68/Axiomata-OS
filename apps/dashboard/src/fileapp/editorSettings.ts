@@ -15,10 +15,12 @@ import { invokeBackend, type LoadedJsonState } from "../core/backend";
 import type { LineNumberMode } from "../editor/gutter";
 import { toast } from "../core/toast";
 import { usableFamilyName } from "../core/installedFonts";
+import { FILE_ICON_STYLES, type FileIconStyle } from "../core/fileIcons";
 
 export type EditorMode = "normal" | "vi";
 export type Autosave = "off" | "delay" | "leave";
-export type CursorAnimation = "off" | "glide" | "trail";
+/** The cursor's glide (editor-look K8): off, subtle (short, no smear) or strong (longer the farther, smeared). */
+export type CursorAnimation = "off" | "subtle" | "strong";
 
 export interface EditorSettings {
   /** Mac-style keys, or Vi (ED3). */
@@ -68,6 +70,8 @@ export interface EditorSettings {
   formatOnSaveExcept: string[];
   /** editor-look K14: tabs tinted with their language's colour. */
   tabColors: boolean;
+  /** editor-look K5: the file tree's icons — Catppuccin, Git (Octicons), JetBrains, monochrome or none. */
+  fileIcons: FileIconStyle;
 }
 
 /** F12's defaults, confirmed by the owner. */
@@ -86,7 +90,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   indentSize: 4,
   tabSize: 4,
   autosave: "off",
-  cursorAnimation: "trail",
+  cursorAnimation: "strong",
   smoothScroll: true,
   currentLine: true,
   indentGuides: true,
@@ -98,6 +102,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   diagnosticsInline: false,
   formatOnSave: true,
   tabColors: true,
+  fileIcons: "catppuccin",
   formatOnSaveExcept: [],
 };
 
@@ -148,7 +153,12 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     indentSize: Math.round(number(r.indentSize, 1, 8, d.indentSize)),
     tabSize: Math.round(number(r.tabSize, 1, 8, d.tabSize)),
     autosave: pick(r.autosave, ["off", "delay", "leave"] as const, d.autosave),
-    cursorAnimation: pick(r.cursorAnimation, ["off", "glide", "trail"] as const, d.cursorAnimation),
+    // Saved before K8 as "glide" / "trail": the same two steps, renamed.
+    cursorAnimation: pick(
+      r.cursorAnimation === "glide" ? "subtle" : r.cursorAnimation === "trail" ? "strong" : r.cursorAnimation,
+      ["off", "subtle", "strong"] as const,
+      d.cursorAnimation,
+    ),
     smoothScroll: bool(r.smoothScroll, d.smoothScroll),
     currentLine: bool(r.currentLine, d.currentLine),
     indentGuides: bool(r.indentGuides, d.indentGuides),
@@ -160,6 +170,7 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     diagnosticsInline: bool(r.diagnosticsInline, d.diagnosticsInline),
     formatOnSave: bool(r.formatOnSave, d.formatOnSave),
     tabColors: bool(r.tabColors, d.tabColors),
+    fileIcons: pick(r.fileIcons, FILE_ICON_STYLES, d.fileIcons),
     formatOnSaveExcept: languageList(r.formatOnSaveExcept),
   };
 }

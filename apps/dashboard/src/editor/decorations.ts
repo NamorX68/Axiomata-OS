@@ -49,30 +49,54 @@ export function indentGuides(
   return guides;
 }
 
-/** Where the drawn cursor is, and where it has just been. */
+/**
+ * Where the drawn cursor is (`x`, `y`, the head) and where its smear ends
+ * (`tail`): the tail follows the head more slowly, so a glide draws a streak
+ * that shrinks into the target as it lands (`docs/plans/editor-look.md`, K8).
+ */
 export interface CursorMotion {
   x: number;
   y: number;
-  /** Earlier positions, oldest first, for the trail; empty when it rests. */
-  trail: { x: number; y: number }[];
+  tail: { x: number; y: number };
 }
 
 export interface MotionOptions {
-  /** Roughly how long a glide takes. */
+  /** Roughly how long the head takes to arrive. */
   durationMs: number;
-  /** Keep a trail behind the moving cursor. */
-  trail: boolean;
-  /** Trail points kept. */
-  trailLength?: number;
+  /** How much slower the tail follows: 1 keeps it on the head (no smear). */
+  tailLag: number;
+}
+
+/** How strongly the cursor glides (K8): `subtle` is short and without a smear. */
+export type GlideStrength = "subtle" | "strong";
+
+/** The shortest glide (a character) and the longest (half a screen and further), per strength. */
+const GLIDE_RANGE: Record<GlideStrength, { min: number; max: number; tailLag: number }> = {
+  subtle: { min: 70, max: 130, tailLag: 1 },
+  strong: { min: 80, max: 240, tailLag: 2.4 },
+};
+/** A jump this long (pixels) or longer takes the longest glide. */
+const FAR_PX = 700;
+
+/**
+ * How a glide over `distancePx` runs (K8): the farther, the longer — a
+ * character's step stays quick, a click across the screen travels visibly —
+ * rising steeply at first, then flattening.
+ */
+export function glideMotion(distancePx: number, strength: GlideStrength): MotionOptions {
+  const { min, max, tailLag } = GLIDE_RANGE[strength];
+  const t = Math.min(1, Math.max(0, distancePx) / FAR_PX);
+  return { durationMs: min + (max - min) * Math.sqrt(t), tailLag };
 }
 
 /** Closer than this (pixels) counts as arrived. */
 const ARRIVED_PX = 0.5;
 
 /**
- * One animation frame of the cursor's glide towards `target`: an exponential
- * approach that takes about `durationMs` whatever the frame rate. Returns the
- * next state and whether the cursor has arrived (then the trail is gone too).
+ * One animation frame of the cursor's glide towards `target`: the head and the
+ * tail each approach it exponentially — the tail `tailLag` times slower —
+ * taking about `durationMs` whatever the frame rate. Returns the next state and
+ * whether both have arrived.
  */
 export function stepCursor(
   motion: CursorMotion,
@@ -80,16 +104,17 @@ export function stepCursor(
   dtMs: number,
   options: MotionOptions,
 ): { motion: CursorMotion; done: boolean } {
+  const dt = Math.max(0, dtMs);
   const tau = Math.max(1, options.durationMs / 4);
-  const k = 1 - Math.exp(-Math.max(0, dtMs) / tau);
-  const x = motion.x + (target.x - motion.x) * k;
-  const y = motion.y + (target.y - motion.y) * k;
-  const arrived = Math.hypot(target.x - x, target.y - y) < ARRIVED_PX;
-  if (arrived) return { motion: { x: target.x, y: target.y, trail: [] }, done: true };
-  const trail = options.trail
-    ? [...motion.trail, { x: motion.x, y: motion.y }].slice(-(options.trailLength ?? 8))
-    : [];
-  return { motion: { x, y, trail }, done: false };
+  const approach = (from: { x: number; y: number }, lag: number) => {
+    const k = 1 - Math.exp(-dt / (tau * lag));
+    return { x: from.x + (target.x - from.x) * k, y: from.y + (target.y - from.y) * k };
+  };
+  const head = approach(motion, 1);
+  const tail = options.tailLag <= 1 ? head : approach(motion.tail, options.tailLag);
+  const near = (p: { x: number; y: number }) => Math.hypot(target.x - p.x, target.y - p.y) < ARRIVED_PX;
+  if (near(head) && near(tail)) return { motion: { x: target.x, y: target.y, tail: { ...target } }, done: true };
+  return { motion: { ...head, tail }, done: false };
 }
 
 /** A marked stretch of one line (a changed word, H4), `[from, to)` in UTF-16 columns. */
