@@ -408,6 +408,26 @@ mod tests {
     }
 
     #[test]
+    fn an_area_whose_last_file_moved_away_loses_it_from_its_router() {
+        let s = Scratch::new(&[("Inbox/list.md", "# List\n"), ("KI/x.md", "# X\n")]);
+        sync(&s.config).unwrap();
+        assert!(s.read("Inbox/AGENTS.md").contains("- `list.md` — List"));
+
+        fs::rename(s.ws.join("Inbox/list.md"), s.ws.join("KI/list.md")).unwrap();
+        assert!(
+            status(&s.config).unwrap().stale,
+            "a move shows through the directories"
+        );
+        sync(&s.config).unwrap();
+
+        let inbox = s.read("Inbox/AGENTS.md");
+        assert!(!inbox.contains("list.md"), "{inbox}");
+        assert!(inbox.contains("_(no files)_"));
+        assert!(s.read("KI/AGENTS.md").contains("- `list.md` — List"));
+        assert!(s.read("AGENTS.md").contains("- **Inbox/** — 0 files"));
+    }
+
+    #[test]
     fn sync_preserves_hand_written_content_outside_the_block() {
         let s = Scratch::new(&[("note.md", "# Note\n")]);
         let root_path = s.ws.join("AGENTS.md");

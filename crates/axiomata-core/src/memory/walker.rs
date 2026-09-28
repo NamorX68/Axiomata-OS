@@ -1,8 +1,10 @@
 //! Walks the workspace root and groups files by top-level area.
 //!
 //! Uses the `ignore` crate, so `.gitignore` rules and hidden entries (`.git/`,
-//! `.claude/`, dotfiles) are skipped automatically. The generated `CLAUDE.md`
-//! router files are skipped too — they are output, not content.
+//! `.claude/`, dotfiles) are skipped automatically. The generated `AGENTS.md`
+//! routers and their `CLAUDE.md` imports are skipped too — they are output, not
+//! content — but an area that holds nothing else is still an area: its router
+//! has to be rewritten when its last file moves away.
 //!
 //! Implemented in M2.
 
@@ -65,8 +67,12 @@ pub fn scan(config: &Config) -> Result<WorkspaceScan, AxiomataError> {
     let root = &config.workspace_root;
     let mut tree = WorkspaceTree::default();
     let mut file_count = 0usize;
+    let walk = walk(root)?;
 
-    for tracked in tracked_files(root)? {
+    for area in walk.router_areas {
+        tree.areas.entry(area).or_default();
+    }
+    for tracked in walk.files {
         file_count += 1;
         let entry = FileEntry {
             title: file_title(&root.join(&tracked.rel_path)),
@@ -89,12 +95,15 @@ pub fn scan(config: &Config) -> Result<WorkspaceScan, AxiomataError> {
 /// Like [`scan`] but reads no file contents — just walks and stats. Used by the
 /// stale check, which runs on every status poll.
 pub fn freshness(config: &Config) -> Result<Freshness, AxiomataError> {
-    let mut newest_mtime: Option<SystemTime> = None;
-    let mut file_count = 0usize;
-    for tracked in tracked_files(&config.workspace_root)? {
-        file_count += 1;
-        newest_mtime = newest_mtime.max(tracked.mtime);
-    }
+    let walk = walk(&config.workspace_root)?;
+    let file_count = walk.files.len();
+    let newest_mtime = walk
+        .files
+        .iter()
+        .map(|tracked| tracked.mtime)
+        .chain(walk.dir_mtimes)
+        .max()
+        .flatten();
     Ok(Freshness {
         newest_mtime,
         file_count,
@@ -110,8 +119,20 @@ struct Tracked {
     mtime: Option<SystemTime>,
 }
 
-/// Runs the `ignore` walk over `root` and yields every tracked file.
-fn tracked_files(root: &Path) -> Result<Vec<Tracked>, AxiomataError> {
+/// What one walk over the workspace found.
+struct Walk {
+    /// Every tracked (content) file.
+    files: Vec<Tracked>,
+    /// Top-level directories that hold a router file (`AGENTS.md` or
+    /// `CLAUDE.md`) directly — an area whose content all moved away still has one.
+    router_areas: Vec<String>,
+    /// Modification times of the walked directories. Moving a file keeps its own
+    /// mtime, so only the two directories it left and entered show the change.
+    dir_mtimes: Vec<Option<SystemTime>>,
+}
+
+/// Runs the `ignore` walk over `root`.
+fn walk(root: &Path) -> Result<Walk, AxiomataError> {
     if !root.is_dir() {
         return Err(AxiomataError::Io {
             path: root.to_path_buf(),
@@ -125,7 +146,11 @@ fn tracked_files(root: &Path) -> Result<Vec<Tracked>, AxiomataError> {
         .git_global(false)
         .build();
 
-    let mut out = Vec::new();
+    let mut out = Walk {
+        files: Vec::new(),
+        router_areas: Vec::new(),
+        dir_mtimes: Vec::new(),
+    };
     for result in walk {
         let dir_entry = match result {
             Ok(entry) => entry,
@@ -134,18 +159,29 @@ fn tracked_files(root: &Path) -> Result<Vec<Tracked>, AxiomataError> {
         if dir_entry.depth() == 0 {
             continue; // the root itself
         }
+        let mtime = dir_entry.metadata().ok().and_then(|m| m.modified().ok());
+        if dir_entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            out.dir_mtimes.push(mtime);
+            continue;
+        }
         if !dir_entry.file_type().is_some_and(|ft| ft.is_file()) {
             continue;
         }
         let path = dir_entry.path();
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-            n.eq_ignore_ascii_case("CLAUDE.md") || n.eq_ignore_ascii_case("AGENTS.md")
-        }) {
-            continue; // generated output (the router and its import), not content (case-insensitive FS)
-        }
         let Ok(rel) = path.strip_prefix(root) else {
             continue;
         };
+        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+            n.eq_ignore_ascii_case("CLAUDE.md") || n.eq_ignore_ascii_case("AGENTS.md")
+        }) {
+            // Generated output (the router and its import), not content (case-insensitive FS).
+            if dir_entry.depth() == 2
+                && let Some(area) = rel.components().next().and_then(|c| c.as_os_str().to_str())
+            {
+                out.router_areas.push(area.to_owned());
+            }
+            continue;
+        }
         let mut components = rel.components();
         let first = components.next().and_then(|c| c.as_os_str().to_str());
         let has_more = components.next().is_some();
@@ -154,8 +190,7 @@ fn tracked_files(root: &Path) -> Result<Vec<Tracked>, AxiomataError> {
             (Some(dir), true) => Some(dir.to_owned()),
             _ => None,
         };
-        let mtime = dir_entry.metadata().ok().and_then(|m| m.modified().ok());
-        out.push(Tracked {
+        out.files.push(Tracked {
             rel_path: rel_path_string(rel),
             area,
             mtime,
@@ -455,6 +490,38 @@ mod tests {
         let f = freshness(&config).unwrap();
         assert_eq!(f.file_count, 2);
         assert!(f.newest_mtime.is_some());
+    }
+
+    #[test]
+    fn an_area_with_only_its_router_left_is_still_an_area() {
+        let (_g, config) = workspace(&[
+            ("Inbox/AGENTS.md", "# old router\n"),
+            ("Inbox/CLAUDE.md", "@AGENTS.md\n"),
+            ("KI/note.md", "# Note\n"),
+            ("KI/deep/AGENTS.md", "not an area router\n"),
+        ]);
+        let scan = scan(&config).unwrap();
+        assert_eq!(scan.tree.areas.keys().collect::<Vec<_>>(), ["Inbox", "KI"]);
+        assert!(scan.tree.areas["Inbox"].is_empty());
+        assert_eq!(scan.file_count, 1);
+    }
+
+    #[test]
+    fn freshness_sees_a_moved_file_through_its_new_directory() {
+        let (_g, config) = workspace(&[("Inbox/a.md", "# A\n"), ("KI/b.md", "# B\n")]);
+        let old = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        let root = &config.workspace_root;
+        for rel in ["Inbox/a.md", "KI/b.md", "Inbox", "KI"] {
+            fs::File::open(root.join(rel))
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        assert_eq!(freshness(&config).unwrap().newest_mtime, Some(old));
+
+        // `mv` keeps the file's own mtime; only the directories change.
+        fs::rename(root.join("Inbox/a.md"), root.join("KI/a.md")).unwrap();
+        assert!(freshness(&config).unwrap().newest_mtime > Some(old));
     }
 
     #[test]
