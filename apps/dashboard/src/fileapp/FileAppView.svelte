@@ -25,7 +25,7 @@
     is gone or its root is; any other failure only says so. Its tab closes.
 -->
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import { listenBackend, type FileRootInfo } from "../core/backend";
   import { listRoots, pickFile, type FileRenamed } from "./backend";
@@ -459,9 +459,14 @@
 
   // Keeping an editor alive across a layout change (`ide/paneStore.ts`): park every
   // editor before Svelte rebuilds the tree, place each into its group's slot after.
+  // Parks on a change of `dock` only: the elements are read untracked. Tracked, the first tab —
+  // which mounts the dock and binds `dockEl`/`storeEl` a moment later — parked its editor again
+  // right after it was placed, and nothing placed it a second time (an open tab showing nothing).
   $effect.pre(() => {
     void dock;
-    if (dockEl && storeEl) parkPanes(dockEl, storeEl);
+    untrack(() => {
+      if (dockEl && storeEl) parkPanes(dockEl, storeEl);
+    });
   });
 
   $effect(() => {

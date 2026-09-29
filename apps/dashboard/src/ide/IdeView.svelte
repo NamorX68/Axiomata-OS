@@ -28,7 +28,7 @@
   one terminal and lives only as long as the app does.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
   import {
@@ -475,7 +475,11 @@
   // `layout` in both is what ties them to the change. See `ide/paneStore.ts`.
   $effect.pre(() => {
     void layout;
-    if (dockEl && storeEl) parkPanes(dockEl, storeEl);
+    // Untracked elements: see `fileapp/FileAppView.svelte` — parking again when the elements get bound
+    // would undo the placement, and nothing places a second time.
+    untrack(() => {
+      if (dockEl && storeEl) parkPanes(dockEl, storeEl);
+    });
   });
 
   $effect(() => {
