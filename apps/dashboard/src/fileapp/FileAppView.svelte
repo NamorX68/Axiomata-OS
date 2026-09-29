@@ -73,7 +73,7 @@
     type Rect,
   } from "../ide/dock";
   import { allGroups, findNode, isSplit, resizeSplit, type DockTarget, type SplitDir } from "../ide/layout";
-  import { PANE_ATTR, parkPanes, placePanes } from "../ide/paneStore";
+  import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "../ide/paneStore";
   import { foldKey, forgetFolds } from "./foldMemory";
   import { uiScale } from "../core/uiScale";
   import { clampWidth, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
@@ -464,9 +464,20 @@
   // right after it was placed, and nothing placed it a second time (an open tab showing nothing).
   $effect.pre(() => {
     void dock;
+    // Moving an editor takes the keyboard focus away from it: noted here, given back after the move.
+    const focused = untrack(() => (dockEl ? focusedIn(dockEl) : null));
     untrack(() => {
       if (dockEl && storeEl) parkPanes(dockEl, storeEl);
     });
+    // Place again once Svelte has rebuilt the tree. The effect below cannot promise to run after this
+    // one: a change of `dock` made from inside an effect (the first edit pins the preview tab) reaches
+    // it first, and the editor parked here would then stay in the store.
+    void tick().then(() =>
+      untrack(() => {
+        if (dockEl) placePanes(dockEl);
+        restoreFocus(focused);
+      }),
+    );
   });
 
   $effect(() => {

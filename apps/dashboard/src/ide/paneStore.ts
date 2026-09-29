@@ -118,3 +118,21 @@ export function placePanes(root: ParentNode): PanePlacement[] {
   }
   return placements;
 }
+
+/**
+ * The element with the keyboard focus if it lies inside `root`, else `null`.
+ *
+ * Moving a pane's DOM node (`parkPanes`, `placePanes`) takes the focus away from the field inside it —
+ * the browser drops it to the page. The caller notes the focused element before the move and hands it to
+ * `restoreFocus` after: otherwise the first edit of a preview tab, which pins the tab and so rebuilds the
+ * layout, left the editor without focus and every key after it going nowhere.
+ */
+export function focusedIn(root: Element): HTMLElement | null {
+  const active = document.activeElement;
+  return active instanceof HTMLElement && active !== root && root.contains(active) ? active : null;
+}
+
+/** Gives `element` (from `focusedIn`) the focus back if a move took it, without scrolling. */
+export function restoreFocus(element: HTMLElement | null): void {
+  if (element && element.isConnected && document.activeElement !== element) element.focus({ preventScroll: true });
+}

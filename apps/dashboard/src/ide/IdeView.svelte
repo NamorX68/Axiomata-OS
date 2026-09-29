@@ -28,7 +28,7 @@
   one terminal and lives only as long as the app does.
 -->
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
   import {
@@ -86,7 +86,7 @@
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import PaneHost from "./panes/PaneHost.svelte";
-  import { PANE_ATTR, parkPanes, placePanes } from "./paneStore";
+  import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "./paneStore";
   import ProjectPicker from "./ProjectPicker.svelte";
   import * as projectSession from "./projectSession";
   import { flushLayout } from "./projects";
@@ -477,9 +477,18 @@
     void layout;
     // Untracked elements: see `fileapp/FileAppView.svelte` — parking again when the elements get bound
     // would undo the placement, and nothing places a second time.
+    const focused = untrack(() => (dockEl ? focusedIn(dockEl) : null));
     untrack(() => {
       if (dockEl && storeEl) parkPanes(dockEl, storeEl);
     });
+    // Place once the tree is rebuilt, and give the focus back (a moved pane loses it); see
+    // `fileapp/FileAppView.svelte` for why the effect below is not enough.
+    void tick().then(() =>
+      untrack(() => {
+        if (dockEl) placePanes(dockEl);
+        restoreFocus(focused);
+      }),
+    );
   });
 
   $effect(() => {

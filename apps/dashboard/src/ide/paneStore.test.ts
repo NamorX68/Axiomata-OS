@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { KEEP_SCROLL } from "../fileapp/keepScroll";
-import { KEEP_SCROLL_ATTR, PANE_ATTR, SLOT_ATTR, parkPanes, placePanes } from "./paneStore";
+import { KEEP_SCROLL_ATTR, PANE_ATTR, SLOT_ATTR, focusedIn, parkPanes, placePanes, restoreFocus } from "./paneStore";
 
 /**
  * Builds a dock: a store holding panes, and slots wherever the tree wants one.
@@ -251,5 +251,44 @@ describe("scroll positions across a move", () => {
     } finally {
       Element.prototype.appendChild = append;
     }
+  });
+});
+
+describe("keeping the focus across a move", () => {
+  it("names the focused field inside the dock, and nothing when the focus is elsewhere", () => {
+    const root = dock(["a"], ["a"]);
+    document.body.appendChild(root);
+    const field = document.createElement("textarea");
+    root.querySelector(`[${PANE_ATTR}]`)!.appendChild(field);
+    const outside = document.createElement("input");
+    document.body.appendChild(outside);
+
+    field.focus();
+    expect(focusedIn(root)).toBe(field);
+    outside.focus();
+    expect(focusedIn(root)).toBeNull();
+    root.remove();
+    outside.remove();
+  });
+
+  it("gives the focus back to a field a move took it from — the first edit of a preview tab", () => {
+    // Live, 2026-09-29: pinning a tab re-parks its editor; the moved textarea lost the focus and every
+    // key after it went to the page.
+    const root = dock(["a"], ["a"]);
+    document.body.appendChild(root);
+    const field = document.createElement("textarea");
+    root.querySelector(`[${PANE_ATTR}]`)!.appendChild(field);
+    field.focus();
+    const focused = focusedIn(root);
+
+    parkPanes(root, root.querySelector(".store")!);
+    placePanes(root);
+    field.blur(); // what the browser does to a moved, focused field
+    expect(document.activeElement).not.toBe(field);
+
+    restoreFocus(focused);
+    expect(document.activeElement).toBe(field);
+    restoreFocus(null); // nothing to give back is fine
+    root.remove();
   });
 });
