@@ -386,6 +386,20 @@ enum BoardAction {
         #[arg(long = "label")]
         labels: Vec<String>,
     },
+    /// Change a card's title, body or labels; whatever is not passed keeps its value.
+    Edit {
+        id: i64,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        /// Repeatable, and replaces all labels: `--label error --label mail`.
+        #[arg(long = "label", conflicts_with = "clear_labels")]
+        labels: Vec<String>,
+        /// Remove every label.
+        #[arg(long)]
+        clear_labels: bool,
+    },
     /// Move a card to a column, at an optional index within it (default: end).
     Move {
         id: i64,
@@ -1163,6 +1177,13 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             body,
             labels,
         } => board_add(core, column, &title, body, labels),
+        BoardAction::Edit {
+            id,
+            title,
+            body,
+            labels,
+            clear_labels,
+        } => board_edit(core, id, title, body, labels, clear_labels),
         BoardAction::Move { id, column, index } => board_move(core, id, column, index),
         BoardAction::Claim { id, actor } => board_claim(core, id, &actor),
         BoardAction::Done { id } => board_done(core, id),
@@ -1804,6 +1825,52 @@ fn board_add(
     Ok(())
 }
 
+/// The fields a card has after `board edit`: what was passed replaces the old
+/// value, everything else — assignee and due date included — stays as it was,
+/// because the store's update is a full replace of the writable fields.
+fn edited_fields(
+    card: &board::Card,
+    title: Option<String>,
+    body: Option<String>,
+    labels: Vec<String>,
+    clear_labels: bool,
+) -> board::CardFields {
+    board::CardFields {
+        title: title.unwrap_or_else(|| card.title.clone()),
+        body: body.unwrap_or_else(|| card.body.clone()),
+        labels: if clear_labels {
+            Vec::new()
+        } else if labels.is_empty() {
+            card.labels.clone()
+        } else {
+            labels
+        },
+        assignee: card.assignee.clone(),
+        due_at: card.due_at,
+    }
+}
+
+fn board_edit(
+    core: &AxiomataCore,
+    id: i64,
+    title: Option<String>,
+    body: Option<String>,
+    labels: Vec<String>,
+    clear_labels: bool,
+) -> Result<()> {
+    let db = core.db_lock();
+    let Some(card) = board::store::get_card(&db, id)? else {
+        bail!("no card with id {id}");
+    };
+    let fields = edited_fields(&card, title, body, labels, clear_labels);
+    let updated = board::store::update_card(&db, id, &fields)
+        .with_context(|| format!("failed to edit card #{id}"))?
+        .with_context(|| format!("no card with id {id}"))?;
+    board_mirror::after_change(&db, &read_config(core), updated.board_id);
+    println!("edited {}", card_line(&updated));
+    Ok(())
+}
+
 fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize) -> Result<()> {
     let mut db = core.db_lock();
     // `usize::MAX` is the "no --index given" sentinel; the store clamps an
@@ -1897,4 +1964,62 @@ fn board_archive(core: &AxiomataCore, id: i64, archived: bool) -> Result<()> {
         if archived { "archived" } else { "restored" }
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn card() -> board::Card {
+        let now = Utc::now();
+        board::Card {
+            id: 7,
+            board_id: 1,
+            column_id: 8,
+            position: 0.0,
+            title: "Old title".to_string(),
+            body: "Old body".to_string(),
+            labels: vec!["bug".to_string(), "mail".to_string()],
+            assignee: Some("human:owner".to_string()),
+            claimed_by: None,
+            claimed_at: None,
+            verified_by: None,
+            verified_at: None,
+            due_at: Some(now),
+            archived_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn an_edit_without_flags_changes_nothing() {
+        let card = card();
+        let fields = edited_fields(&card, None, None, Vec::new(), false);
+        assert_eq!(fields.title, card.title);
+        assert_eq!(fields.body, card.body);
+        assert_eq!(fields.labels, card.labels);
+        assert_eq!(fields.assignee, card.assignee);
+        assert_eq!(fields.due_at, card.due_at);
+    }
+
+    #[test]
+    fn labels_are_replaced_as_a_whole_and_can_be_cleared() {
+        let card = card();
+        let replaced = edited_fields(&card, None, None, vec!["error".to_string()], false);
+        assert_eq!(replaced.labels, ["error"]);
+        let cleared = edited_fields(&card, None, None, Vec::new(), true);
+        assert!(cleared.labels.is_empty());
+    }
+
+    #[test]
+    fn a_new_title_keeps_body_labels_assignee_and_due_date() {
+        let card = card();
+        let fields = edited_fields(&card, Some("New".to_string()), None, Vec::new(), false);
+        assert_eq!(fields.title, "New");
+        assert_eq!(fields.body, card.body);
+        assert_eq!(fields.labels, card.labels);
+        assert_eq!(fields.due_at, card.due_at);
+    }
 }

@@ -8,11 +8,11 @@
  * start lying the moment CP-K2b lets a card be dragged in one of them.
  *
  * Deliberately no polling, unlike `routines-board`: routines fire on their own
- * in the background, a board only changes when somebody changes it, and that
- * somebody is currently always this app. **That stops being true in M7.5**,
- * when agents claim cards without the user doing anything — at which point
- * this module needs a refresh path (a backend event, or a poll) rather than
- * relying on every mutation going through `refreshBoard`.
+ * in the background, a board only changes when somebody changes it. Somebody
+ * is no longer only this app — the CLI (`axiomata-cli board …`), the chat and,
+ * from M7.5, agents change it too — so the board tile has a reload button and
+ * reloads when the window regains focus, instead of relying on every mutation
+ * going through `refreshBoard`.
  */
 
 import { get, writable, type Readable } from "svelte/store";

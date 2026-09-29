@@ -636,6 +636,11 @@
 {/snippet}
 
 <svelte:window
+  onfocus={() => {
+    // The CLI, the chat and (from M7.5) agents change a board without this window knowing; coming
+    // back to the app is the moment to look again. Views of one board share a single load.
+    if (boardId !== null) void refreshBoard(boardId);
+  }}
   onclick={(event) => {
     if (colMenu !== null && !(event.target as Element | null)?.closest?.(".col-menu, .col-tools")) colMenu = null;
   }}
@@ -805,6 +810,12 @@
       {:else}
         <span class="spacer"></span>
       {/if}
+      <IconButton
+        icon="refresh-cw"
+        label="Brett neu laden"
+        disabled={$data.loading}
+        onclick={() => boardId !== null && void refreshBoard(boardId)}
+      />
       <IconButton icon="columns-3" label="Spalte hinzufügen" onclick={addColumn} />
       {#if !isPanel}
         <IconButton icon="maximize-2" label="Brett groß öffnen" onclick={openAsPanel} />

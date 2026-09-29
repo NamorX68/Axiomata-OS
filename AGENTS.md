@@ -122,6 +122,7 @@ cargo run -p axiomata-cli -- board new <name>            # board + its three def
 cargo run -p axiomata-cli -- board rename <id> <name>    # mirror follows, old file swept up
 cargo run -p axiomata-cli -- board delete <id> [--force] # --force required once it holds cards
 cargo run -p axiomata-cli -- board add --column <id> <title> [--label …]
+cargo run -p axiomata-cli -- board edit <id> [--title …] [--body …] [--label … | --clear-labels]  # omitted flags keep their value; --label replaces all labels
 cargo run -p axiomata-cli -- board move <id> --column <id> [--index <n>]
 cargo run -p axiomata-cli -- board claim <id> [--actor human:owner]   # CAS; fails if already held
 cargo run -p axiomata-cli -- board done <id>             # move into the board's done column
