@@ -88,7 +88,9 @@ export function selectionRuns(
 ): Run[] {
   const runs: Run[] = [];
   const from = Math.max(firstRow, layout.firstRow(r.start.line));
-  const to = Math.min(lastRow, layout.firstRow(r.end.line) + layout.rowStarts(r.end.line).length - 1);
+  // `rowCount`, not `rowStarts`: a line a fold hides has no rows, and its first row belongs to the line after
+  // the fold — counting one made every mark on a hidden line (a diagnostic, a search match) cover that line.
+  const to = Math.min(lastRow, layout.firstRow(r.end.line) + layout.rowCount(r.end.line) - 1);
   for (let row = from; row <= to; row++) {
     const slice = rowSlice(layout, store, row);
     const selStart = slice.line === r.start.line ? r.start.col : 0;
@@ -121,4 +123,20 @@ export function posAtCell(layout: VisualLayout, store: TextStore, row: number, c
   col = Math.min(Math.max(col, slice.start), slice.end);
   if (!slice.last && col === slice.end && slice.end > slice.start) col = slice.end - 1;
   return pos(slice.line, col);
+}
+
+/**
+ * `items` with the later of any two that share a `key` left out. The view draws its marks in a keyed
+ * `{#each}`, where one repeated key stops the whole surface from updating; two marks with one key
+ * are one place drawn twice, so dropping the second loses nothing.
+ */
+export function uniqueByKey<T extends { key: string }>(items: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    if (seen.has(item.key)) continue;
+    seen.add(item.key);
+    out.push(item);
+  }
+  return out;
 }

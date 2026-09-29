@@ -108,7 +108,11 @@ export class DiagnosticSet {
         }
         let entry = this.byLine.get(line);
         if (!entry) this.byLine.set(line, (entry = { marks: [], worst: d.severity, message: d.message }));
-        entry.marks.push({ from, to, severity: d.severity });
+        // Two problems at one spot (a missing `;` and an expected expression) draw one mark: the view
+        // keys its marks by place, and twice the same key breaks drawing the whole surface.
+        if (!entry.marks.some((m) => m.from === from && m.to === to && m.severity === d.severity)) {
+          entry.marks.push({ from, to, severity: d.severity });
+        }
         if (d.severity < entry.worst) {
           entry.worst = d.severity;
           entry.message = d.message;

@@ -113,6 +113,11 @@ export class VisualLayout implements RowLayout {
     return this.offsets[line];
   }
 
+  /** How many visual rows `line` has: none for a line a fold hides (`rowStarts` still says one). */
+  rowCount(line: number): number {
+    return this.offsets[line + 1] - this.offsets[line];
+  }
+
   /**
    * The logical line and its sub-row that visual row `row` shows (clamped).
    * Folded lines share their offset with the line after them, so the search

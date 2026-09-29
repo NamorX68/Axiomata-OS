@@ -272,6 +272,25 @@ describe("diagnostics", () => {
   });
 });
 
+describe("diagnostics at one spot", () => {
+  it("draws one mark for two problems at the same place", () => {
+    // Live, 2026-09-29: rust-analyzer's "expected SEMICOLON" and "expected expression" on one line gave two
+    // identical marks under one key, and the editor stopped updating (text frozen, popups stuck).
+    const at = { start: { line: 0, character: 5 }, end: { line: 0, character: 5 } };
+    const two = parseDiagnostics([
+      { range: at, severity: 1, message: "expected SEMICOLON" },
+      { range: at, severity: 1, message: "expected expression" },
+      { range: at, severity: 2, message: "a warning is its own mark" },
+    ]);
+    const set = new DiagnosticSet(two, () => 10);
+    expect(set.size).toBe(3);
+    expect(set.line(0)?.marks).toEqual([
+      { from: 5, to: 6, severity: 1 },
+      { from: 5, to: 6, severity: 2 },
+    ]);
+  });
+});
+
 describe("uris and language ids", () => {
   it("encodes every path segment", () => {
     expect(fileUri("/a b/ü#?.rs")).toBe("file:///a%20b/%C3%BC%23%3F.rs");

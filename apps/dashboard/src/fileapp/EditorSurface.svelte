@@ -48,7 +48,7 @@
   import { commentPrefixFor, copyText, cut, paste, run, type ClipboardText, type Command } from "../editor/commands";
   import { indentGuides, type LineDecoration, type LineDecorations } from "../editor/decorations";
   import type { EditorDocument } from "../editor/document";
-  import { cursorCell, posAtCell, rowSlice, selectionRuns } from "../editor/geometry";
+  import { cursorCell, posAtCell, rowSlice, selectionRuns, uniqueByKey } from "../editor/geometry";
   import { allSelections, columnSelection, toggleCursor } from "../editor/multicursor";
   import { gutterDigits, lineLabel } from "../editor/gutter";
   import { FoldRanges, type FoldRange } from "../editor/fold/ranges";
@@ -683,11 +683,11 @@
     const others = vi ? [] : doc.extra;
     const ranges = viRanges ?? (vi ? [] : [sel, ...others].map(selectionRange));
     const runs = ranges.flatMap((r) => selectionRuns(layout, doc.store, r, first, last, settings.tabSize));
-    const marks = [
+    const marks = uniqueByKey([
       ...markRuns(rows, first, last),
       ...diagnosticRuns(firstLine, lastLine, first, last),
       ...searchRuns(firstLine, lastLine, first, last),
-    ];
+    ]);
     const whitespace = settings.list ? whitespaceMarks(rows, first, last) : [];
     const caret = cursorCell(layout, doc.store, sel.head, settings.tabSize);
     const shape = vi?.cursorShape() ?? "bar";

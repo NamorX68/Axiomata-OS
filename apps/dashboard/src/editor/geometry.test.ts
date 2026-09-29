@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { LineStore } from "./buffer";
-import { cursorCell, posAtCell, rowSlice, selectionRuns } from "./geometry";
+import { cursorCell, posAtCell, rowSlice, selectionRuns, uniqueByKey } from "./geometry";
 import { pos, range } from "./position";
-import { VisualLayout } from "./visual";
+import { VisualLayout, type HiddenSource } from "./visual";
 
 // "  aaa bbb ccc" wraps at width 8 into rows [0, 6, 10], continuation indent 2.
 const TEXT = "  aaa bbb ccc\n\n\tx";
@@ -61,6 +61,27 @@ describe("selectionRuns", () => {
     expect(selectionRuns(layout, store, range(pos(0, 0), pos(2, 2)), 3, 3, 4)).toEqual([{ row: 3, from: 0, to: 1 }]);
   });
 
+  it("draws nothing for lines a fold hides, and still the rest of a range that crosses it", () => {
+    // Live, 2026-09-29: diagnostics inside a folded range were drawn over the line after the fold,
+    // twice under one key, and the text of the whole view went blank.
+    const store = new LineStore("head\n  a\n  b\n  c\ntail");
+    const layout = new VisualLayout(store, { wrap: false, width: 80, tabSize: 4 });
+    const folds: HiddenSource = {
+      hidden: () => [{ from: 1, to: 3 }],
+      visibleLine: (line, dir) => (line >= 1 && line <= 3 ? (dir < 0 ? 0 : 4) : line),
+    };
+    layout.setFolds(folds);
+    expect(layout.rowCount(1)).toBe(0);
+    expect(layout.rowCount(0)).toBe(1);
+    // A mark on a hidden line: nothing.
+    expect(selectionRuns(layout, store, range(pos(2, 2), pos(2, 3)), 0, 10, 4)).toEqual([]);
+    // A range from the header across the fold to the tail: the two shown rows only.
+    expect(selectionRuns(layout, store, range(pos(0, 0), pos(4, 4)), 0, 10, 4)).toEqual([
+      { row: 0, from: 0, to: 5 },
+      { row: 1, from: 0, to: 4 },
+    ]);
+  });
+
   it("draws nothing for an empty selection", () => {
     const { store, layout } = setup();
     expect(selectionRuns(layout, store, range(pos(0, 3), pos(0, 3)), 0, 10, 4)).toEqual([]);
@@ -90,5 +111,17 @@ describe("posAtCell", () => {
     const { store, layout } = setup();
     expect(posAtCell(layout, store, 4, 1, 4)).toEqual(pos(2, 0));
     expect(posAtCell(layout, store, 4, 3, 4)).toEqual(pos(2, 1));
+  });
+});
+
+describe("uniqueByKey", () => {
+  it("keeps the first of two items with one key and the order of the rest", () => {
+    const items = [
+      { key: "1:0:diag-error", n: 1 },
+      { key: "2:0:search", n: 2 },
+      { key: "1:0:diag-error", n: 3 },
+    ];
+    expect(uniqueByKey(items).map((i) => i.n)).toEqual([1, 2]);
+    expect(uniqueByKey([])).toEqual([]);
   });
 });
