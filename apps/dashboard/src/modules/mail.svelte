@@ -32,7 +32,7 @@
   import type { RunRecord, RunSummary } from "../core/backend";
   import { runUnlessAutoRefreshDisabled } from "../core/devFlags";
   import { relativeTime } from "../core/format";
-  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, writeAllMailSummaries, type MailDigest, type MailItem } from "../core/mail";
+  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, staleDigestNote, summaryPreview, writeAllMailSummaries, type MailDigest, type MailItem } from "../core/mail";
   import { resolveSkillName, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
@@ -46,6 +46,8 @@
   let loading = $state(true);
   let running = $state(false);
   let error = $state("");
+  /** Set while the digest on screen is older than the newest run (see `staleDigestNote`). */
+  let staleNote = $state("");
   let openingId = $state<string | null>(null);
 
   const skillName = $derived(resolveSkillName($config, MAIL_SKILL_NAME));
@@ -76,6 +78,7 @@
       digest = parseMailDigest(run.stdout);
       lastRun = run;
       error = "";
+      staleNote = "";
       // Best-effort durability: every curated mail gets its own note the
       // moment it's seen, not only the ones a user clicks (see
       // `writeAllMailSummaries`'s own doc comment for why). Fire-and-forget
@@ -93,9 +96,11 @@
       lastRun = result.run;
       digest = result.digest;
       error = result.error ?? "";
+      staleNote = staleDigestNote(result);
       void writeAllMailSummaries(ctx.invoke, digest.emails);
     } catch (err) {
       error = String(err);
+      staleNote = "";
     } finally {
       loading = false;
     }
@@ -155,6 +160,7 @@
   </div>
 
   {#if error}<p class="error">{error}</p>{/if}
+  {#if staleNote}<p class="muted">{staleNote}</p>{/if}
 
   {#if !loading && mix.length > 0}
     <!-- A fixed "Today's mix" header: it stays put while the email lists

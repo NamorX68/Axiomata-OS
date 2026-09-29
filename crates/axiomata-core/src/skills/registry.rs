@@ -42,6 +42,10 @@ struct SkillFrontmatter {
     allowed_tools: Option<String>,
     #[serde(default)]
     timeout_secs: Option<u64>,
+    /// What the skill's reply must be: `json` (exactly one JSON object) or
+    /// `text` (the default). Anything else is rejected.
+    #[serde(default)]
+    output: Option<String>,
 }
 
 /// Default agent backend for a skill that doesn't name one.
@@ -82,6 +86,11 @@ pub struct Skill {
     /// global default. Used by the connector-digest skills, whose MCP-heavy
     /// SOPs legitimately need longer than a quick maintenance skill.
     pub timeout_secs: Option<u64>,
+    /// Whether the reply must be exactly one JSON object (`output: json` in
+    /// the frontmatter) — the connector digests, whose dashboard module parses
+    /// it. A reply without one gets a single repair prompt in the same session
+    /// (`agents::opencode::run`) before the run counts as done.
+    pub expects_json: bool,
     /// Absolute path to the skill's `SKILL.md`.
     pub path: PathBuf,
     /// The Markdown body after the frontmatter — the skill's actual
@@ -288,6 +297,17 @@ fn load_skill(manifest: &Path) -> Result<Skill, AxiomataError> {
         });
     }
 
+    let expects_json = match frontmatter.output.as_deref().map(str::trim) {
+        None | Some("") | Some("text") => false,
+        Some("json") => true,
+        Some(other) => {
+            return Err(AxiomataError::InvalidSkill {
+                path: manifest.to_path_buf(),
+                reason: format!("frontmatter `output` must be `json` or `text`, not {other:?}"),
+            });
+        }
+    };
+
     Ok(Skill {
         name: frontmatter.name,
         description: frontmatter.description,
@@ -298,6 +318,7 @@ fn load_skill(manifest: &Path) -> Result<Skill, AxiomataError> {
         prepend_files: frontmatter.prepend_files.unwrap_or_default(),
         allowed_tools: frontmatter.allowed_tools,
         timeout_secs: frontmatter.timeout_secs,
+        expects_json,
         path: manifest.to_path_buf(),
         body: parsed.content,
     })
@@ -508,6 +529,30 @@ mod tests {
             Some("mcp__apple-reminders__calendar_events".to_string())
         );
         assert_eq!(find_skill("without-tools").unwrap().allowed_tools, None);
+    }
+
+    #[test]
+    fn output_frontmatter_marks_a_json_skill_and_rejects_anything_else() {
+        let h = TestHome::new("output-frontmatter");
+        let with_output = |name: &str, output: &str| {
+            write_skill(
+                &h.skills_dir(),
+                name,
+                &format!("---\nname: {name}\ndescription: d\noutput: {output}\n---\nbody\n"),
+            );
+        };
+        with_output("as-json", "json");
+        with_output("as-text", "text");
+        with_output("as-xml", "xml");
+        write_skill(&h.skills_dir(), "plain", &skill_md("plain", "opencode"));
+
+        assert!(find_skill("as-json").unwrap().expects_json);
+        assert!(!find_skill("as-text").unwrap().expects_json);
+        assert!(!find_skill("plain").unwrap().expects_json);
+        assert!(matches!(
+            find_skill("as-xml").unwrap_err(),
+            AxiomataError::InvalidSkill { reason, .. } if reason.contains("`output`")
+        ));
     }
 
     #[test]

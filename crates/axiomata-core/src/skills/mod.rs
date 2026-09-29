@@ -282,6 +282,20 @@ mod tests {
                 "{name} failed to parse via list_skills (found: {found:?})"
             );
         }
+        // The connector digests promise one JSON object to their dashboard module, and
+        // `output: json` is what makes a reply without one get repaired.
+        let json_skills: Vec<String> = registry::list_skills()
+            .unwrap()
+            .into_iter()
+            .filter(|s| s.expects_json)
+            .map(|s| s.name)
+            .collect();
+        for digest in ["mail-digest", "calendar-digest", "reminders-digest"] {
+            assert!(
+                json_skills.contains(&digest.to_string()),
+                "{digest} lost its `output: json` (json skills: {json_skills:?})"
+            );
+        }
 
         unsafe {
             env::remove_var(paths::AXIOMATA_HOME_ENV);

@@ -34,6 +34,17 @@ const SKILL_SESSION_TITLE: &str = "Axiomata skill run";
 /// The title of an assistant-bar session.
 const CHAT_SESSION_TITLE: &str = "Axiomata assistant";
 
+/// What a skill that promised one JSON object is told when its reply held none
+/// (a small model sometimes ends on prose about the JSON instead of the JSON).
+/// It goes to the same session, so the data the skill collected is still there.
+const JSON_REPAIR_PROMPT: &str = "Your last reply contained no JSON object. Do not call any tools \
+    and do not explain anything: reply now with exactly the one JSON object the task asked for, \
+    built from what you have already collected — nothing before it and nothing after it.";
+
+/// How long the repair turn may take. It only has to write out what is known,
+/// so it gets far less than a skill's own limit.
+const JSON_REPAIR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
 /// Name of the Opencode binary; expected on `PATH`.
 const OPENCODE_BIN: &str = "opencode";
 
@@ -215,6 +226,7 @@ fn model_ref(model: Option<String>, what: &str) -> Result<ModelRef, AxiomataErro
 /// produces. A turn that ran but failed is an `Ok` with a non-zero
 /// `exit_code` and the reason in `stderr`; an `Err` means it could not run.
 pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError> {
+    let expects_json = request.expects_json;
     let model = model_ref(request.model, "run")?;
     check_cwd(&request.cwd)?;
     let _permit = agent_slots()
@@ -222,7 +234,7 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         .await
         .expect("agent_slots semaphore is never closed");
     let service = connect().await?;
-    let outcome = service
+    let mut outcome = service
         .run_turn(TurnRequest {
             session: TurnSession::New(NewSession {
                 directory: request.cwd.display().to_string(),
@@ -236,7 +248,105 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         })
         .await
         .map_err(into_axiomata)?;
+    if expects_json && outcome.succeeded() && find_json_object(&outcome.reply).is_none() {
+        outcome = ask_for_json(&service, outcome).await;
+    }
     Ok(run_result(outcome))
+}
+
+/// Asks the skill's session once more for the JSON object its first reply
+/// lacked, and folds the second turn into the first (tokens and cost count
+/// twice — both were paid). A repair that fails or answers without JSON
+/// changes nothing but those counts: the run is then recorded as it was, and
+/// the dashboard treats it as unusable like any other.
+async fn ask_for_json(service: &Service, first: TurnOutcome) -> TurnOutcome {
+    tracing::warn!(session = %first.session_id, "the reply holds no JSON object; asking once more in the same session");
+    let repair = service
+        .run_turn(TurnRequest {
+            session: TurnSession::Existing {
+                id: first.session_id.clone(),
+                model: None,
+            },
+            text: JSON_REPAIR_PROMPT.to_string(),
+            timeout: JSON_REPAIR_TIMEOUT,
+        })
+        .await;
+    match repair {
+        Ok(repair) => merge_repair(first, repair),
+        Err(err) => {
+            tracing::warn!(%err, "the JSON repair turn failed; keeping the first reply");
+            first
+        }
+    }
+}
+
+/// Folds a repair turn into the turn it repairs: its usage is added, and its
+/// reply replaces the first one only when it succeeded and holds a JSON object.
+fn merge_repair(mut first: TurnOutcome, repair: TurnOutcome) -> TurnOutcome {
+    first.input_tokens += repair.input_tokens;
+    first.output_tokens += repair.output_tokens;
+    first.cost += repair.cost;
+    first.turns += repair.turns;
+    first.has_usage |= repair.has_usage;
+    first.duration += repair.duration;
+    if repair.succeeded() && find_json_object(&repair.reply).is_some() {
+        first.reply = repair.reply;
+    }
+    first
+}
+
+/// The first JSON object in `text`, following the dashboard's `firstJsonObject`
+/// (`core/skillRun.ts`) so both sides agree on whether a reply is usable: the
+/// first balanced `{…}` that parses as a JSON object. A balanced `{…}` that is
+/// not JSON (braces in the model's prose) is stepped over; an unterminated one
+/// — a truncated reply — ends the search. Where the two differ, it is on the
+/// safe side: a reply that ends in an unterminated object is `None` here, so the
+/// repair runs, while the dashboard would hand back the prose braces and then
+/// reject them as JSON.
+fn find_json_object(text: &str) -> Option<&str> {
+    let mut from = 0;
+    while let Some(offset) = text[from..].find('{') {
+        let start = from + offset;
+        let end = balanced_object_end(text, start)?;
+        let candidate = &text[start..=end];
+        if matches!(
+            serde_json::from_str::<serde_json::Value>(candidate),
+            Ok(serde_json::Value::Object(_))
+        ) {
+            return Some(candidate);
+        }
+        from = end + 1;
+    }
+    None
+}
+
+/// The byte index of the `}` closing the object that opens at `start`, or
+/// `None` when the text ends first. Braces inside JSON strings do not count.
+fn balanced_object_end(text: &str, start: usize) -> Option<usize> {
+    let (mut depth, mut in_string, mut escaped) = (0_usize, false, false);
+    for (offset, byte) in text.as_bytes()[start..].iter().enumerate() {
+        if in_string {
+            match (escaped, byte) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// A finished skill turn as the runner records it.
@@ -749,5 +859,80 @@ mod tests {
             chat_model_id(&config).unwrap(),
             "anthropic/claude-haiku-4-5"
         );
+    }
+
+    fn turn_outcome(reply: &str, failure: Option<&str>) -> TurnOutcome {
+        TurnOutcome {
+            session_id: "ses_x".to_string(),
+            reply: reply.to_string(),
+            failure: failure.map(str::to_string),
+            input_tokens: 10,
+            output_tokens: 5,
+            cost: 0.5,
+            turns: 2,
+            has_usage: true,
+            duration: Duration::from_secs(3),
+        }
+    }
+
+    #[test]
+    fn a_json_object_is_found_behind_prose_and_before_a_truncated_copy() {
+        assert_eq!(
+            find_json_object("Now I have the data.\n{\"emails\": []}"),
+            Some("{\"emails\": []}")
+        );
+        assert_eq!(find_json_object("{\"a\": 1}{\"a\": 2"), Some("{\"a\": 1}"));
+        assert_eq!(
+            find_json_object("{\"s\": \"a } and a {\"}"),
+            Some("{\"s\": \"a } and a {\"}")
+        );
+    }
+
+    #[test]
+    fn a_balanced_brace_pair_in_prose_is_stepped_over() {
+        let reply = "The format is {emails: [...]}, here it is:\n{\"emails\": [{\"id\": \"1\"}]}";
+        assert_eq!(
+            find_json_object(reply),
+            Some("{\"emails\": [{\"id\": \"1\"}]}")
+        );
+    }
+
+    #[test]
+    fn prose_about_the_json_and_a_truncated_object_are_no_json_object() {
+        // Live, run 988 (2026-09-28): the model described the JSON instead of writing it.
+        assert_eq!(
+            find_json_object("The mail digest has been compiled. The JSON output was produced."),
+            None
+        );
+        assert_eq!(find_json_object("{\"emails\": [{\"id\": \"1\"}"), None);
+        assert_eq!(find_json_object(""), None);
+    }
+
+    #[test]
+    fn a_repair_with_json_replaces_the_reply_and_adds_the_usage() {
+        let first = turn_outcome("The JSON output was produced.", None);
+        let repair = turn_outcome("{\"emails\": []}", None);
+        let merged = merge_repair(first, repair);
+        assert_eq!(merged.reply, "{\"emails\": []}");
+        assert!(merged.succeeded());
+        assert_eq!(
+            (merged.input_tokens, merged.output_tokens, merged.turns),
+            (20, 10, 4)
+        );
+        assert_eq!(merged.cost, 1.0);
+        assert_eq!(merged.duration, Duration::from_secs(6));
+    }
+
+    #[test]
+    fn a_repair_without_json_or_a_failed_one_keeps_the_first_reply_but_counts_the_usage() {
+        for repair in [
+            turn_outcome("Sorry, no.", None),
+            turn_outcome("{\"emails\": []}", Some("the turn ended failed")),
+        ] {
+            let merged = merge_repair(turn_outcome("prose only", None), repair);
+            assert_eq!(merged.reply, "prose only");
+            assert!(merged.succeeded());
+            assert_eq!(merged.output_tokens, 10);
+        }
     }
 }

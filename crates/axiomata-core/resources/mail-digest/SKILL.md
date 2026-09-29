@@ -5,6 +5,7 @@ backend: opencode
 prepend_files: ["Mail/.topics.md"]
 allowed_tools: mcp__apple-mail__search_emails mcp__apple-mail__get_needs_response mcp__apple-mail__get_email_source
 timeout_secs: 600
+output: json
 ---
 
 # Mail Digest

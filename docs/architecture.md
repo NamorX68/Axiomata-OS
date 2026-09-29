@@ -558,6 +558,23 @@ One `SKILL.md` frontmatter mechanism surviving from Stufe 2's lean-local-agent p
   **every** backend. Applies live to the routine scheduler's `skill` targets too (they go
   through `execute_skill`); a raw-`prompt` target has no `SKILL.md`, so no `prepend_files`.
 
+### The `output: json` frontmatter (2026-09-29)
+
+The three connector digests (`mail-`, `calendar-`, `reminders-digest`) promise one JSON object that
+their dashboard module parses. A small model sometimes ends on prose *about* the JSON instead of the
+JSON (run 988, `ling-3.0-flash`: ~3 % of the mail runs since the Opencode move). `output: json` (or
+the default `text`; anything else makes the skill invalid) is the contract: when the reply of an
+`opencode` run holds no JSON object, `agents::opencode::run` sends **one** repair prompt into the
+same session (`JSON_REPAIR_PROMPT`, at most 180 s on top of the skill's own limit) and folds its tokens
+and cost into the run (a repair that times out is paid for but not recorded). The check
+(`find_json_object`) follows the dashboard's `firstJsonObject` (`core/skillRun.ts`): the first
+balanced `{…}` that parses; a balanced `{…}` of prose is stepped over, a truncated object is none
+(where they differ, Rust errs towards repairing).
+Ollama ignores the field. On the dashboard side `loadLatestSkillRun` reports the newer run it passed
+over (`skipped`), and the Mail tile says so (`staleDigestNote`) instead of quietly showing an older
+digest. Bundled skills are seed-if-absent: an edited `SKILL.md` reaches an install through
+`skills reseed --force`.
+
 ### Skills runner (`skills/`)
 
 Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`

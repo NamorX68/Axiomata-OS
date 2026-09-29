@@ -111,8 +111,11 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
         &backend,
         config,
         model,
-        skill.allowed_tools.clone(),
-        skill.timeout_secs,
+        RunOptions {
+            allowed_tools: skill.allowed_tools.clone(),
+            timeout_secs: skill.timeout_secs,
+            expects_json: skill.expects_json,
+        },
     )
     .await
 }
@@ -283,15 +286,10 @@ pub async fn execute_prompt(
             ));
         }
     };
-    run_on_backend(
-        name, prompt, &backend, config, model,
-        // Raw prompt targets (no `SKILL.md`) have no frontmatter to carry an
-        // `allowed_tools` declaration from — a non-issue, since the opencode
-        // backend ignores the field anyway.
-        None, // ...nor a per-target timeout override; the global default applies.
-        None,
-    )
-    .await
+    // Raw prompt targets (no `SKILL.md`) have no frontmatter to carry an
+    // `allowed_tools` declaration, a timeout override or an `output` contract
+    // from: the defaults apply.
+    run_on_backend(name, prompt, &backend, config, model, RunOptions::default()).await
 }
 
 /// Resolves the model id a run on `backend` needs, exactly as the request
@@ -345,6 +343,17 @@ impl Drop for RunningGuard {
     }
 }
 
+/// What a run takes from its skill's frontmatter besides the prompt. A raw
+/// prompt target (a routine's prompt) has no frontmatter: the defaults.
+#[derive(Debug, Default)]
+struct RunOptions {
+    allowed_tools: Option<String>,
+    /// The skill's own `timeout_secs`; `None` uses the global default.
+    timeout_secs: Option<u64>,
+    /// The skill's `output: json` contract.
+    expects_json: bool,
+}
+
 /// Shared tail of [`execute_skill`] / [`execute_prompt`]: claims `name` for
 /// the duration of the run, builds the request, runs the backend, and maps
 /// the outcome onto an unpersisted [`RunRecord`] attributed to `name`.
@@ -366,8 +375,7 @@ async fn run_on_backend(
     backend: &AgentBackend,
     config: &Config,
     model: Option<String>,
-    allowed_tools: Option<String>,
-    timeout_override_secs: Option<u64>,
+    options: RunOptions,
 ) -> Result<RunRecord, AxiomataError> {
     let started_at = Utc::now();
     let already_running = {
@@ -389,13 +397,7 @@ async fn run_on_backend(
     let _guard = RunningGuard(name.to_string());
 
     let provider = provider_label(backend, config);
-    let request = agent_request(
-        prompt,
-        config,
-        model.clone(),
-        allowed_tools,
-        timeout_override_secs,
-    );
+    let request = request_for(prompt, config, model.clone(), options);
     Ok(match backend.run(request).await {
         Ok(result) => {
             let mut result = result;
@@ -464,6 +466,25 @@ fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
     }
 }
 
+/// The [`AgentRequest`] for a run: [`agent_request`] plus what the skill's
+/// frontmatter asks of the reply.
+fn request_for(
+    prompt: String,
+    config: &Config,
+    model: Option<String>,
+    options: RunOptions,
+) -> AgentRequest {
+    let mut request = agent_request(
+        prompt,
+        config,
+        model,
+        options.allowed_tools,
+        options.timeout_secs,
+    );
+    request.expects_json = options.expects_json;
+    request
+}
+
 /// Builds the [`AgentRequest`] for a prompt: the caller-supplied prompt, the
 /// workspace as the working directory, and the run timeout (the skill's own
 /// `timeout_secs` frontmatter if set, else `config.agents.skill_timeout_secs`).
@@ -491,6 +512,7 @@ fn agent_request(
         model,
         auto_approve_tools: config.agents.auto_approve_tools,
         allowed_tools,
+        expects_json: false,
     }
 }
 
@@ -796,6 +818,22 @@ mod tests {
     }
 
     #[test]
+    fn a_run_request_carries_the_skills_json_contract_and_its_other_options() {
+        let config = Config::default();
+        let options = RunOptions {
+            allowed_tools: Some("mcp__x__y".to_string()),
+            timeout_secs: Some(600),
+            expects_json: true,
+        };
+        let req = request_for("p".to_string(), &config, None, options);
+        assert!(req.expects_json);
+        assert_eq!(req.allowed_tools.as_deref(), Some("mcp__x__y"));
+        assert_eq!(req.timeout, Duration::from_secs(600));
+        // A raw prompt target has no contract.
+        assert!(!request_for("p".to_string(), &config, None, RunOptions::default()).expects_json);
+    }
+
+    #[test]
     fn resolve_run_model_gives_opencode_the_provider_prefixed_id_and_ollama_none() {
         let mut config = Config::default();
         config.agents.skill_provider = crate::config::ProviderId::OpenRouter;
@@ -835,6 +873,7 @@ mod tests {
             prepend_files: prepend.iter().map(|s| s.to_string()).collect(),
             allowed_tools: None,
             timeout_secs: None,
+            expects_json: false,
             path: PathBuf::from("/tmp/s/SKILL.md"),
             body: "BODY-BODY".to_string(),
         }

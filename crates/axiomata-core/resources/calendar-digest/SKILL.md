@@ -4,6 +4,7 @@ description: Reads upcoming calendar events from whichever calendar tool is avai
 backend: opencode
 allowed_tools: mcp__apple-reminders__calendar_calendars mcp__apple-reminders__calendar_events
 timeout_secs: 600
+output: json
 ---
 
 # Calendar Digest

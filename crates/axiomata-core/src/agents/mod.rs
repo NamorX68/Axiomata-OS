@@ -406,6 +406,10 @@ pub struct AgentRequest {
     /// backend ignores it (MCP servers come from opencode's own config). Kept
     /// so callers don't lose the declared tools.
     pub allowed_tools: Option<String>,
+    /// The reply must contain one JSON object (`output: json` in the skill's
+    /// frontmatter). The opencode backend asks once more, in the same
+    /// session, when the first reply has none; Ollama ignores it.
+    pub expects_json: bool,
 }
 
 /// The chat provider's `chat_model`, for interactive dashboard-assistant

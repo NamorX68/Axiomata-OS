@@ -4,6 +4,7 @@ description: Reads Apple Reminders lists and open tasks via whichever reminders 
 backend: opencode
 allowed_tools: mcp__apple-reminders__reminders_lists mcp__apple-reminders__reminders_tasks
 timeout_secs: 600
+output: json
 ---
 
 # Reminders Digest

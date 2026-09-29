@@ -102,6 +102,7 @@ backend: opencode         # or ollama
 model: provider/model-id  # optional; else the configured skill model
 prepend_files: [\"Area/notes.md\"]   # optional workspace files inlined into the prompt
 timeout_secs: 600         # optional
+output: json              # optional; the reply must be one JSON object (a dashboard module parses it)
 ---
 The instructions the skill runs with — written to the agent that will run it.
 ```

@@ -13,8 +13,9 @@
  */
 
 import type { RunSummary } from "./backend";
+import { relativeTime } from "./format";
 import { cut } from "./markdown";
-import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
+import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke, type SkippedRun } from "./skillRun";
 import { openFilePanel } from "./staging";
 
 /** Why one message made it into the digest at all. */
@@ -165,6 +166,10 @@ export interface LatestMailDigest {
   /** The failed run's own error, or a parse failure's message; `null` on a
    *  clean success (including the "never run yet" case). */
   error: string | null;
+  /** A newer run the digest was *not* taken from (it failed, or its output was
+   *  unreadable) — `null` when `run` is the newest. The tile says so, so an
+   *  older digest never passes for the current one. */
+  skipped: SkippedRun | null;
 }
 
 /**
@@ -176,12 +181,12 @@ export interface LatestMailDigest {
  * just parsed with this module's own contract.
  */
 export async function loadLatestMailDigest(invoke: Invoke, skillName: string = MAIL_SKILL_NAME): Promise<LatestMailDigest> {
-  const { run, stdout, error } = await loadLatestSkillRun(invoke, skillName);
-  if (error || stdout === null) return { run, digest: EMPTY_MAIL_DIGEST, error };
+  const { run, stdout, error, skipped } = await loadLatestSkillRun(invoke, skillName);
+  if (error || stdout === null) return { run, digest: EMPTY_MAIL_DIGEST, error, skipped };
   try {
-    return { run, digest: parseMailDigest(stdout), error: null };
+    return { run, digest: parseMailDigest(stdout), error: null, skipped };
   } catch (err) {
-    return { run, digest: EMPTY_MAIL_DIGEST, error: err instanceof Error ? err.message : String(err) };
+    return { run, digest: EMPTY_MAIL_DIGEST, error: err instanceof Error ? err.message : String(err), skipped };
   }
 }
 
@@ -216,6 +221,15 @@ export async function saveTopics(invoke: Invoke, topics: string[]): Promise<void
     ...topics.map((t) => t.trim()).filter((t) => t.length > 0),
   ];
   await invoke("write_workspace_file", { rel: TOPICS_PATH, content: `${lines.join("\n")}\n` });
+}
+
+/** The tile's note that its digest is older than the newest run, or `""` when it is not.
+ *  `now` is a parameter so the wording can be tested. */
+export function staleDigestNote(latest: Pick<LatestMailDigest, "run" | "skipped">, now: number = Date.now()): string {
+  const { run, skipped } = latest;
+  if (!skipped) return "";
+  const shown = run ? ` — showing the digest from ${relativeTime(run.started_at, now)}` : "";
+  return `The latest run (${relativeTime(skipped.run.started_at, now)}) could not be used: ${skipped.reason}${shown}.`;
 }
 
 /** Word-boundary truncation for the tile's one-line summary preview — the
@@ -264,12 +278,29 @@ function fnv1aHex(text: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+/** Matches `Display Name <address>` — the address only counts when a space
+ *  separates it from a non-empty name, so a bare `<address>` or a structured
+ *  string like `account::INBOX::<address>` is left alone. */
+const NAME_WITH_ADDRESS = /^(.*\S)\s+<[^<>]*>$/;
+
+/** A sender reduced to its display name: `Adobe Acrobat <mail@adobe.example>`
+ *  becomes `Adobe Acrobat`. `mail-digest` asks the model for the name alone,
+ *  but the model still appends the address in some runs (seen live with
+ *  `ling-3.0-flash`, 2026-09-28/29), and the sender is part of the note's
+ *  file name — so the same email got one note per spelling. Normalised here,
+ *  in code, because a prompt cannot guarantee it. A sender without an
+ *  address comes back unchanged, keeping every existing note's file name. */
+function senderDisplayName(sender: string): string {
+  const match = NAME_WITH_ADDRESS.exec(sender.trim());
+  return match ? match[1] : sender;
+}
+
 /** Deterministic note path for one email — re-opening the same email's
  *  summary overwrites its own note rather than accumulating duplicates.
  *  The date prefix keeps notes sorted chronologically in a file browser;
  *  the suffix disambiguates two same-day emails with the same subject.
  *
- *  Hashed from `sender`+`subject`, not `item.id` (owner-reported: real
+ *  Hashed from the sender's display name + `subject`, not `item.id` (owner-reported: real
  *  duplicate notes for the same physical email showing up under two
  *  filenames). `id` is the *skill's own* transcription of "the mail tool's
  *  identifier" (`mail-digest`'s SKILL.md, step 4), not a value this code
@@ -295,7 +326,7 @@ function fnv1aHex(text: string): string {
  *  one — never a data-loss risk. */
 export function mailNotePath(item: MailItem): string {
   const day = (Number.isNaN(Date.parse(item.date)) ? new Date() : new Date(item.date)).toISOString().slice(0, 10);
-  const key = `${item.sender}\0${item.subject}`;
+  const key = `${senderDisplayName(item.sender)}\0${item.subject}`;
   return `Mail/${day}-${slugify(item.subject)}-${fnv1aHex(key).slice(0, 8)}.md`;
 }
 

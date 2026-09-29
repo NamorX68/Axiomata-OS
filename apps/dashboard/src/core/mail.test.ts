@@ -3,7 +3,7 @@ import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
 import type { RunRecord, RunSummary } from "./backend";
-import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailMix, mailNotePath, openMailSummary, parseMailDigest, saveTopics, summaryPreview, TOPICS_PATH, writeAllMailSummaries, writeMailSummary, type MailDigest, type MailItem } from "./mail";
+import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailMix, mailNotePath, openMailSummary, parseMailDigest, saveTopics, staleDigestNote, summaryPreview, TOPICS_PATH, writeAllMailSummaries, writeMailSummary, type MailDigest, type MailItem } from "./mail";
 import { staged } from "./staging";
 
 const DIGEST_JSON = JSON.stringify({
@@ -157,6 +157,20 @@ describe("mailNotePath", () => {
     expect(mailNotePath(item)).toBe(mailNotePath(other));
   });
 
+  it("ignores an address appended to the display name — the second duplicate-note fix", () => {
+    // Live, 2026-09-28/29: `ling-3.0-flash` returned "Adobe Acrobat" in one run and
+    // "Adobe Acrobat <mail@mail.adobe.com>" in the next for the same email, so the
+    // note got two file names despite the skill asking for the name alone.
+    const named = { ...item, sender: "The RoboNuggets Network (free) (Skool)" };
+    const withAddress = { ...item, sender: "The RoboNuggets Network (free) (Skool) <noreply@skool.com>" };
+    expect(mailNotePath(withAddress)).toBe(mailNotePath(named));
+  });
+
+  it("keeps a bare address or a structured id distinct from a display name", () => {
+    expect(mailNotePath({ ...item, sender: "<a@example.com>" })).not.toBe(mailNotePath({ ...item, sender: "<b@example.com>" }));
+    expect(mailNotePath({ ...item, sender: "noreply@example.com" })).not.toBe(mailNotePath({ ...item, sender: "Example" }));
+  });
+
   it("differs for two emails from different senders sharing the same day/subject", () => {
     const other = { ...item, sender: "someone-else@example.com" };
     expect(mailNotePath(item)).not.toBe(mailNotePath(other));
@@ -255,7 +269,7 @@ describe("loadLatestMailDigest", () => {
 
   it("returns an empty digest with no error when the skill has never run", async () => {
     const result = await loadLatestMailDigest(fakeInvoke([], {}));
-    expect(result).toEqual({ run: null, digest: EMPTY_MAIL_DIGEST, error: null });
+    expect(result).toEqual({ run: null, digest: EMPTY_MAIL_DIGEST, error: null, skipped: null });
   });
 
   it("parses the latest successful run", async () => {
@@ -269,6 +283,55 @@ describe("loadLatestMailDigest", () => {
     const runs = [summary({ status: "failed", error: "agent timed out" })];
     const result = await loadLatestMailDigest(fakeInvoke(runs, {}));
     expect(result.error).toBe("agent timed out");
+    expect(result.skipped).toBeNull(); // nothing older to fall back to, so nothing was passed over
+  });
+
+  it("reports the newer run it passed over when it falls back to an older digest", async () => {
+    // Live, run 988 (2026-09-28): the model answered in prose only, the tile quietly showed run 983.
+    const newer = summary({ id: 2, started_at: "2026-09-05T12:00:00Z" });
+    const older = summary({ id: 1, started_at: "2026-09-05T09:00:00Z" });
+    const records = {
+      2: { ...newer, stdout: "All done, the JSON has been produced as specified.", stderr: "", finished_at: "" },
+      1: { ...older, stdout: DIGEST_JSON, stderr: "", finished_at: "" },
+    };
+    const result = await loadLatestMailDigest(fakeInvoke([newer, older], records));
+    expect(result.run?.id).toBe(1);
+    expect(result.digest.emails).toHaveLength(2);
+    expect(result.error).toBeNull();
+    expect(result.skipped?.run.id).toBe(2);
+    expect(result.skipped?.reason).toMatch(/no readable JSON/);
+  });
+
+  it("names a failed newer run as the one passed over", async () => {
+    const failed = summary({ id: 2, status: "failed", error: "the opencode agent timed out after 900s" });
+    const good = summary({ id: 1 });
+    const records = { 1: { ...good, stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestMailDigest(fakeInvoke([failed, good], records));
+    expect(result.skipped).toEqual({ run: failed, reason: "the opencode agent timed out after 900s" });
+  });
+
+  it("passes over nothing when the newest run is the usable one", async () => {
+    const newest = summary({ id: 2 });
+    const records = { 2: { ...newest, stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestMailDigest(fakeInvoke([newest, summary({ id: 1 })], records));
+    expect(result.skipped).toBeNull();
+  });
+});
+
+describe("staleDigestNote", () => {
+  const now = Date.parse("2026-09-29T12:00:00Z");
+  const run = (started_at: string) => ({ started_at }) as RunSummary;
+
+  it("is empty when no run was passed over", () => {
+    expect(staleDigestNote({ run: run("2026-09-29T09:00:00Z"), skipped: null }, now)).toBe("");
+  });
+
+  it("says which run was unusable and how old the shown digest is", () => {
+    const note = staleDigestNote(
+      { run: run("2026-09-29T09:00:00Z"), skipped: { run: run("2026-09-29T11:00:00Z"), reason: "it produced no output" } },
+      now,
+    );
+    expect(note).toBe("The latest run (1 h ago) could not be used: it produced no output — showing the digest from 3 h ago.");
   });
 });
 

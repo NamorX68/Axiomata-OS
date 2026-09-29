@@ -39,6 +39,18 @@ export interface LatestSkillRun {
   /** The failed run's own error, or "record not found"; `null` on a clean
    *  success (including the "never run yet" case, which isn't an error). */
   error: string | null;
+  /** The newest run that was passed over because a *usable* older one exists —
+   *  it failed, or its output could not be read. `null` when the run returned
+   *  is the newest one. A tile uses it to say that what it shows is older than
+   *  the latest run, and why. */
+  skipped: SkippedRun | null;
+}
+
+/** A newer run that `loadLatestSkillRun` passed over, and why. */
+export interface SkippedRun {
+  run: RunSummary;
+  /** A short reason: the run's own error, or what was wrong with its output. */
+  reason: string;
 }
 
 /**
@@ -68,20 +80,25 @@ export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Pro
   let newestEmpty: RunSummary | null = null;
   let newestUnparseable: RunSummary | null = null;
   let unparseableReason: string | null = null;
+  // The newest run passed over so far — runs come newest first, so the first skip is it.
+  let skipped: SkippedRun | null = null;
   for (const run of runs) {
     if (run.skill_name !== skillName) continue;
     if (run.status === "failed") {
       newestFailed ??= run;
+      skipped ??= { run, reason: run.error ?? "the run failed" };
       continue;
     }
     const full = await invoke<RunRecord | null>("get_run", { id: run.id });
     if (!full) {
       newestMissing ??= run;
+      skipped ??= { run, reason: "its record was not found" };
       continue;
     }
     const stripped = stripCodeFence(full.stdout);
     if (!stripped) {
       newestEmpty ??= run;
+      skipped ??= { run, reason: "it produced no output" };
       continue;
     }
     const object = firstJsonObject(stripped);
@@ -99,17 +116,24 @@ export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Pro
     }
     if (unusable) {
       newestUnparseable ??= run;
+      skipped ??= { run, reason: "its output held no readable JSON" };
       continue;
     }
-    return { run, stdout: full.stdout, error: null };
+    return { run, stdout: full.stdout, error: null, skipped };
   }
-  if (newestFailed) return { run: newestFailed, stdout: null, error: newestFailed.error ?? "Last run failed." };
-  if (newestMissing) return { run: newestMissing, stdout: null, error: "Run record not found." };
+  // No usable run at all: the error itself is what gets shown, so nothing was "skipped".
+  if (newestFailed) return { run: newestFailed, stdout: null, error: newestFailed.error ?? "Last run failed.", skipped: null };
+  if (newestMissing) return { run: newestMissing, stdout: null, error: "Run record not found.", skipped: null };
   if (newestUnparseable) {
-    return { run: newestUnparseable, stdout: null, error: `${skillName} output was not valid JSON: ${unparseableReason}` };
+    return {
+      run: newestUnparseable,
+      stdout: null,
+      error: `${skillName} output was not valid JSON: ${unparseableReason}`,
+      skipped: null,
+    };
   }
-  if (newestEmpty) return { run: newestEmpty, stdout: null, error: "Last run produced no output." };
-  return { run: null, stdout: null, error: null };
+  if (newestEmpty) return { run: newestEmpty, stdout: null, error: "Last run produced no output.", skipped: null };
+  return { run: null, stdout: null, error: null, skipped: null };
 }
 
 /**
@@ -141,13 +165,32 @@ export function stripCodeFence(text: string): string {
  * the whole reply fails both — the first is prose, the second unparseable —
  * even though the first object itself is exactly the contract. Taking the
  * balanced first object salvages both: leading prose is skipped, and a
- * trailing duplicate is never reached. Used by every digest parser and by
+ * trailing duplicate is never reached. A balanced `{…}` in that prose which is
+ * not JSON is skipped over, so the real object behind it is still found. Used by every digest parser and by
  * `loadLatestSkillRun`'s "is this run's output usable?" check, so the two
  * always agree on what a usable run's stdout looks like.
  */
 export function firstJsonObject(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
+  let firstBalanced: string | null = null;
+  let from = 0;
+  for (;;) {
+    const start = text.indexOf("{", from);
+    if (start === -1) return firstBalanced;
+    const end = balancedObjectEnd(text, start);
+    if (end === -1) return firstBalanced; // runs off the end of the text — unterminated
+    const candidate = text.slice(start, end + 1);
+    if (parsesAsObject(candidate)) return candidate;
+    // Balanced, but not JSON: a `{…}` in the model's prose ("format {emails: [...]}").
+    // Look on after it; if nothing better turns up, the first one is handed back so
+    // callers keep their own `JSON.parse` error message.
+    firstBalanced ??= candidate;
+    from = end + 1;
+  }
+}
+
+/** The index of the `}` closing the object that opens at `start`, or `-1` when
+ *  the text ends first. Braces inside strings don't count. */
+function balancedObjectEnd(text: string, start: number): number {
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -165,10 +208,19 @@ export function firstJsonObject(text: string): string | null {
       depth++;
     } else if (c === "}") {
       depth--;
-      if (depth === 0) return text.slice(start, i + 1);
+      if (depth === 0) return i;
     }
   }
-  return null; // the object runs off the end of the text — unterminated
+  return -1;
+}
+
+function parsesAsObject(candidate: string): boolean {
+  try {
+    const value: unknown = JSON.parse(candidate);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  } catch {
+    return false;
+  }
 }
 
 /**
