@@ -81,7 +81,8 @@
      itself is inside `root`, so opening it does not immediately close it. -->
 <svelte:window
   onclick={(event) => {
-    if (open && root && !root.contains(event.target as Node)) open = false;
+    // composedPath, not contains(target): a click that swaps the menu's own buttons has already detached its target.
+    if (open && root && !event.composedPath().includes(root)) open = false;
   }}
 />
 
