@@ -92,7 +92,7 @@
           onclick={() => {
             open = false;
             onOpenFolder();
-          }}><Icon name="folder-open" size="sm" /> Open folder…</button
+          }}><Icon name="folder-open" size="sm" /> Open project…</button
         >
         <button type="button" role="menuitem" class="action" onclick={() => (adding = true)}
           ><Icon name="plus" size="sm" /> New project…</button
@@ -109,20 +109,24 @@
           >
         {/if}
       {:else}
-        <form
-          onsubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
-        >
+        <!-- No <form>: the buttons act on click, so nothing depends on how the webview treats a submit. -->
+        <div class="new-form">
           <p class="label">New project</p>
-          <input type="text" spellcheck="false" bind:value={name} placeholder="Folder name" />
+          <input
+            type="text"
+            spellcheck="false"
+            bind:value={name}
+            placeholder="Folder name"
+            onkeydown={(event) => {
+              if (event.key === "Enter") submit();
+            }}
+          />
           <label class="check"><input type="checkbox" bind:checked={git} /> Start a git repository</label>
           <div class="form-actions">
-            <button type="submit" class="ax-btn primary" disabled={!name.trim()}>Choose where…</button>
+            <button type="button" class="ax-btn primary" disabled={!name.trim()} onclick={submit}>Choose where…</button>
             <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
           </div>
-        </form>
+        </div>
       {/if}
     </div>
   {/if}
@@ -225,7 +229,7 @@
     white-space: nowrap;
   }
 
-  form {
+  .new-form {
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-2);

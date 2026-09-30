@@ -33,7 +33,7 @@
     /** An open is in flight; taking another click now only invites a race. */
     switching?: boolean;
     onOpen: (id: number) => void;
-    /** "Open folder…": the native dialog, then the folder is a project. */
+    /** "Open project…": the native dialog, then the folder is a project. */
     onOpenFolder: () => void;
     /** "New project": a new folder called `name`, in a folder the dialog picks. */
     onNewFolder: (name: string, gitInit: boolean) => void;
@@ -155,25 +155,27 @@
           onclick={() => {
             open = false;
             onOpenFolder();
-          }}><Icon name="folder-open" size="sm" /> Open folder…</button
+          }}><Icon name="folder-open" size="sm" /> Open project…</button
         >
         <button class="add" type="button" onclick={() => (adding = true)}><Icon name="plus" size="sm" /> New project…</button>
       {:else}
-        <form
-          class="new"
-          onsubmit={(event) => {
-            event.preventDefault();
-            submitNew();
-          }}
-        >
+        <div class="new">
           <p class="label">New project</p>
-          <input type="text" spellcheck="false" bind:value={newName} placeholder="Folder name" />
+          <input
+            type="text"
+            spellcheck="false"
+            bind:value={newName}
+            placeholder="Folder name"
+            onkeydown={(event) => {
+              if (event.key === "Enter") submitNew();
+            }}
+          />
           <label class="check"><input type="checkbox" bind:checked={newGit} /> Start a git repository</label>
           <div class="form-actions">
-            <button type="submit" class="ax-btn primary" disabled={!newName.trim()}>Choose where…</button>
+            <button type="button" class="ax-btn primary" disabled={!newName.trim()} onclick={submitNew}>Choose where…</button>
             <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
           </div>
-        </form>
+        </div>
       {/if}
     </div>
   {/if}

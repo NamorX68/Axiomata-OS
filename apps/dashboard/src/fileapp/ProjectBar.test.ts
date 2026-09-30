@@ -22,12 +22,12 @@ describe("ProjectBar", () => {
     add.click();
     document.body.removeEventListener("click", flushBetweenListeners);
     flushSync();
-    expect(target.querySelector("form")).not.toBeNull();
-    const input = target.querySelector("form input[type=text]") as HTMLInputElement;
+    expect(target.querySelector(".new-form")).not.toBeNull();
+    const input = target.querySelector(".new-form input[type=text]") as HTMLInputElement;
     input.value = "demo";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     flushSync();
-    (target.querySelector("form button[type=submit]") as HTMLElement).click();
+    (target.querySelector(".new-form button.primary") as HTMLElement).click();
     flushSync();
     expect(onNew).toHaveBeenCalledWith("demo", true);
     unmount(app);
