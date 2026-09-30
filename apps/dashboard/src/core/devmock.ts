@@ -1150,10 +1150,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (project) project.name = String(args.name);
       return (project ?? null) as T;
     }
-    case "set_ide_project_root": {
+    case "project_set_root": {
       const project = ideProjects.find((p) => p.id === args.id);
       if (project) {
-        project.repo_root = String(args.repoRoot);
+        // No native dialog in a browser: "pick" a folder of the project's own name.
+        project.repo_root = `/mock/moved/${project.name}`;
         project.root_exists = true;
       }
       return (project ?? null) as T;

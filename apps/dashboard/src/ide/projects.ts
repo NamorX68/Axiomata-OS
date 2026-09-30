@@ -30,8 +30,8 @@ export function renameProject(id: number, name: string): Promise<IdeProject | nu
 }
 
 /** Changes where a project points without touching its id, name or layout. */
-export function setProjectRoot(id: number, repoRoot: string): Promise<IdeProject | null> {
-  return invoke<IdeProject | null>("set_ide_project_root", { id, repoRoot });
+export function setProjectRoot(id: number): Promise<IdeProject | null> {
+  return invoke<IdeProject | null>("project_set_root", { id });
 }
 
 /** Marks the project as just opened — what the project list sorts by. */

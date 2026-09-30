@@ -38,7 +38,8 @@
     onOpenFolder: () => void;
     /** "New project": a new folder called `name`, in a folder the dialog picks. */
     onNewFolder: (name: string, gitInit: boolean) => void;
-    onSetRoot: (id: number, repoRoot: string) => void;
+    /** "Change folder": the native dialog picks the new one. */
+    onSetRoot: (id: number) => void;
     onRemove: (id: number) => void;
   } = $props();
 
@@ -46,8 +47,6 @@
   let root = $state<HTMLElement | undefined>();
   let newName = $state("");
   let newGit = $state(true);
-  let editingRoot = $state<number | null>(null);
-  let editedRoot = $state("");
   /** The "New project" form is folded into a row until asked for (editor-look I4). */
   let adding = $state(false);
 
@@ -56,7 +55,6 @@
     if (!open) {
       adding = false;
       problem = null;
-      editingRoot = null;
     }
   });
 
@@ -74,16 +72,6 @@
     newName = "";
     adding = false;
     open = false;
-  }
-
-  function startEditingRoot(project: IdeProject) {
-    editingRoot = project.id;
-    editedRoot = project.repo_root;
-  }
-
-  function submitRoot(id: number) {
-    if (editedRoot.trim()) onSetRoot(id, editedRoot.trim());
-    editingRoot = null;
   }
 </script>
 
@@ -126,9 +114,9 @@
               <div class="row-actions">
                 <IconButton
                   icon="folder-open"
-                  label="Change the path of {project.name}"
+                  label="Change the folder of {project.name}…"
                   size="sm"
-                  onclick={() => startEditingRoot(project)}
+                  onclick={() => (onSetRoot(project.id), (open = false))}
                 />
                 <IconButton
                   icon="trash-2"
@@ -141,18 +129,6 @@
                   }}
                 />
               </div>
-              {#if editingRoot === project.id}
-                <form
-                  class="edit-root"
-                  onsubmit={(event) => {
-                    event.preventDefault();
-                    submitRoot(project.id);
-                  }}
-                >
-                  <input type="text" spellcheck="false" bind:value={editedRoot} placeholder="/Users/…/repo" />
-                  <button type="submit" class="ax-btn primary">Save</button>
-                </form>
-              {/if}
             </li>
           {/each}
         </ul>
@@ -354,19 +330,10 @@
     gap: var(--ax-space-2);
   }
 
-  .edit-root {
-    flex-basis: 100%;
-  }
-
-  .new,
-  .edit-root {
+  .new {
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-2);
-  }
-
-  .edit-root {
-    margin-top: var(--ax-space-2);
   }
 
   .new {

@@ -229,8 +229,8 @@
     if (next) layout = next;
   }
 
-  async function changeRoot(id: number, repoRoot: string) {
-    const next = await projectSession.changeRoot(id, repoRoot, layout);
+  async function changeRoot(id: number) {
+    const next = await projectSession.changeRoot(id, layout);
     if (next) layout = next;
   }
 
@@ -534,7 +534,7 @@
         onOpen={(id) => void openProjectById(id)}
         onOpenFolder={() => void openFolderAsProject()}
         onNewFolder={(name, gitInit) => void addProject(name, gitInit)}
-        onSetRoot={(id, root) => void changeRoot(id, root)}
+        onSetRoot={(id) => void changeRoot(id)}
         onRemove={(id) => void removeProject(id)}
       />
       <IconButton icon="terminal" label="Open a terminal beside the others" disabled={!current} onclick={openTerminal} />

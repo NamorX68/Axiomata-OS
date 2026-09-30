@@ -655,6 +655,30 @@ pub async fn project_open(
     .await
 }
 
+/// "Change folder" (Pfad ändern): the user picks the project's new folder; the
+/// project keeps its id, name and layout. `None` if the dialog was cancelled or
+/// the project is gone.
+#[tauri::command]
+pub async fn project_set_root(
+    app: AppHandle,
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<Option<axiomata_core::ide::Project>, FileError> {
+    let Some(path) = pick_folder_path(&app, "Choose the project's folder").await else {
+        return Ok(None);
+    };
+    blocking(&state, move |_, db| {
+        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        axiomata_core::ide::store::set_repo_root(&db, id, &path).map_err(|err| {
+            FilesError::Refused {
+                path: path.clone(),
+                reason: err.to_string(),
+            }
+        })
+    })
+    .await
+}
+
 /// "New project": the user picks the parent folder, `name` becomes a new
 /// folder in it (optionally a git repository), and that folder is opened as a
 /// project. `None` if the dialog was cancelled.

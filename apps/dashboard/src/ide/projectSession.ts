@@ -177,9 +177,9 @@ export async function createFolder(name: string, gitInit: boolean): Promise<Layo
  * its panes were started in the old folder and their stored `cwd` now names a
  * place the project has nothing to do with.
  */
-export async function changeRoot(id: number, repoRoot: string, layout: Layout): Promise<Layout | null> {
+export async function changeRoot(id: number, layout: Layout): Promise<Layout | null> {
   try {
-    const updated = await setProjectRoot(id, repoRoot);
+    const updated = await setProjectRoot(id);
     await refresh();
     if (!updated) return null;
     const isOpen = get(state).current?.id === id;

@@ -131,9 +131,9 @@ Zeile „Zwei Projektbegriffe bleiben getrennt“ des Nachgrills):
   (der Editor soll ohne Vault denkbar sein); er lässt sich als Ordner öffnen. Eine einzeln geöffnete Datei ist in
   keinem Projekt.
 - **Mehrere Ordner (VS-Code-Workspace)** sind ausdrücklich später; dann kommt „Wurzeln hinzufügen/ausblenden“ zurück.
-- **Bewusst entfernt:** der Tauri-Befehl `create_ide_project` (nahm einen Pfad aus der Webview). **Noch offen:**
-  `set_ide_project_root` („Pfad ändern“) nimmt weiter einen getippten Pfad — sollte wie `project_open` über den Dialog
-  laufen.
+- **Bewusst entfernt:** die Tauri-Befehle `create_ide_project` und `set_ide_project_root` (nahmen einen Pfad aus der
+  Webview). „Pfad ändern" läuft jetzt wie Öffnen über den Dialog (`project_set_root`). Im Editor gibt es noch keinen Weg,
+  ein Projekt aus dem Register zu nehmen (nur in der IDE).
 
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 

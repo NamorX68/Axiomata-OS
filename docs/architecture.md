@@ -820,7 +820,7 @@ project removes a row and **never** a folder.
 **One project registry for editor and IDE** (2026-09-30, `docs/plans/editor-projekt-werkzeuge.md`): the file app's
 tree shows exactly one open project (`settings.editor.tree.project`), the IDE keeps its own; both open folders through
 the same Rust commands (`files.rs` `project_open` / `project_new`, which drive the native dialog — the webview never
-types a path; `create_ide_project` was removed for that reason). `store::open_root` finds or creates the row for a
+types a path; `create_ide_project` and `set_ide_project_root` were removed for that reason; "change folder" is `project_set_root`). `store::open_root` finds or creates the row for a
 folder, `newproject::create_project_folder` makes a new folder (optionally `git init`) and is the one place in
 `axiomata-ide` that creates directories. No project file is written into the folder.
 

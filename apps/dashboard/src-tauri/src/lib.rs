@@ -160,7 +160,7 @@ pub fn run() {
             commands::move_board_column,
             commands::list_ide_projects,
             commands::rename_ide_project,
-            commands::set_ide_project_root,
+            files::project_set_root,
             commands::set_ide_project_layout,
             commands::open_ide_project,
             commands::delete_ide_project,
