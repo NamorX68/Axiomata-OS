@@ -47,7 +47,7 @@ describe("ProjectBar", () => {
     flushSync();
     (target.querySelector(".new-form button.primary") as HTMLElement).click();
     flushSync();
-    expect(target.querySelector(".problem")?.textContent).toMatch(/Enter a folder name/);
+    expect(target.querySelector(".problem")?.textContent).toMatch(/Enter a project name/);
     expect(onNew).not.toHaveBeenCalled();
     unmount(app);
   });

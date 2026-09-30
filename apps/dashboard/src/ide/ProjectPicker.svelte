@@ -177,7 +177,7 @@
             bind:this={nameField}
             bind:value={newName}
             oninput={() => (problem = null)}
-            placeholder="Folder name"
+            placeholder="Project name"
             onkeydown={(event) => {
               if (event.key === "Enter") submitNew();
             }}

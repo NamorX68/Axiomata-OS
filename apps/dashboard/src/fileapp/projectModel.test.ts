@@ -39,7 +39,7 @@ describe("the editor's project", () => {
   });
 
   it("explains a folder name that would be refused, and accepts a plain one", () => {
-    expect(folderNameProblem("  ")).toMatch(/Enter a folder name/);
+    expect(folderNameProblem("  ")).toMatch(/Enter a project name/);
     expect(folderNameProblem(".hidden")).toMatch(/dot/);
     expect(folderNameProblem("a/b")).toMatch(/must not contain/);
     expect(folderNameProblem("a:b")).toMatch(/must not contain/);
