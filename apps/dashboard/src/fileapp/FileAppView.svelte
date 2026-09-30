@@ -86,8 +86,11 @@
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "../ide/paneStore";
   import { foldKey, forgetFolds } from "./foldMemory";
   import { uiScale } from "../core/uiScale";
-  import { clampWidth, folderKey, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
+  import { clampOutlineHeight, clampWidth, folderKey, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
   import ProjectBar from "./ProjectBar.svelte";
+  import OutlinePanel from "./OutlinePanel.svelte";
+  import { pathAt } from "../editor/syntax/outline";
+  import type { OutlineInfo } from "./outlineModel";
   import { projectRootId, resolveProject, treeRootsOf } from "./projectModel";
   import type { IdeProject } from "../core/backend";
   import UnsavedQuestion from "./UnsavedQuestion.svelte";
@@ -129,6 +132,23 @@
   let treeView = $state<FileTree | null>(null);
   /** The tree's width while its edge is being dragged. */
   let dragging = $state<{ startX: number; startWidth: number } | null>(null);
+  /** What each tab's editor last reported for the outline (#49), by tab id. */
+  let outlines = $state<Record<string, OutlineInfo | undefined>>({});
+  /** The outline's top edge, dragged for its height. */
+  let outlineDrag = $state<{ startY: number; startHeight: number } | null>(null);
+
+  function startOutlineDrag(e: PointerEvent): void {
+    outlineDrag = { startY: e.clientY, startHeight: tree.outlineHeight };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onOutlineDrag(e: PointerEvent): void {
+    // Unscaled like the tree's width; the pointer moves in screen pixels, and up makes it taller.
+    if (outlineDrag) {
+      tree = { ...tree, outlineHeight: clampOutlineHeight(outlineDrag.startHeight - (e.clientY - outlineDrag.startY) / $uiScale) };
+    }
+  }
+
   /** The registry the editor shares with the IDE. */
   let projects = $state<IdeProject[]>([]);
   /** A project is being opened or made; the bar takes no second click meanwhile. */
@@ -141,6 +161,14 @@
   const allFileTabs = $derived(tabsOf(dock));
   /** The focused group's visible tab: the one the header and the keys are about. */
   const active = $derived(activeTab(dock));
+  const activeOutline = $derived(active ? (outlines[active.id] ?? null) : null);
+
+  /** The symbols around the cursor, outermost first. */
+  const crumbs = $derived(activeOutline?.symbols ? pathAt(activeOutline.symbols, activeOutline.line) : []);
+
+  function jumpToSymbol(line: number): void {
+    if (active) views[active.id]?.goToLine(line);
+  }
   /** The tabs on screen: every group's visible one. */
   const visibleTabs = $derived(new Set(allGroups(dock.layout).map((g) => g.active)));
   const current = $derived(active ? (states[active.id] ?? null) : null);
@@ -618,6 +646,12 @@
           <span class="root">{rootLabel(current.root)}</span> / {current.rel}
           {#if current.dirty}<span class="dirty" aria-label="Unsaved changes">●</span>{/if}
         </span>
+        <!-- Breadcrumbs (#49): the symbols holding the cursor, from the same data as the outline. -->
+        {#each crumbs as crumb (crumb.line + "\0" + crumb.name)}
+          <button type="button" class="crumb" onclick={() => jumpToSymbol(crumb.nameLine)}>
+            <span aria-hidden="true">›</span> {crumb.name}
+          </button>
+        {/each}
       {/if}
     </div>
     <div class="actions">
@@ -706,6 +740,7 @@
         />
       </div>
       <div class="side-pane" class:gone={sideTab !== "files"}>
+      <div class="tree-area">
       <FileTree
         bind:this={treeView}
         roots={treeRoots}
@@ -720,6 +755,26 @@
           {currentProject ? "The project folder is not available." : "No project open. Open a folder or start a new project from the bar above."}
         </p>
       {/if}
+      </div>
+      {#if tree.outlineOpen}
+        <div
+          class="outline-edge"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Outline height"
+          onpointerdown={startOutlineDrag}
+          onpointermove={onOutlineDrag}
+          onpointerup={() => (outlineDrag = null)}
+        ></div>
+      {/if}
+      <div class="outline-area" style:height={tree.outlineOpen ? `${tree.outlineHeight * $uiScale}px` : "auto"}>
+        <OutlinePanel
+          info={activeOutline}
+          open={tree.outlineOpen}
+          onToggle={() => (tree = { ...tree, outlineOpen: !tree.outlineOpen })}
+          onJump={jumpToSymbol}
+        />
+      </div>
       </div>
     </aside>
     <div
@@ -773,6 +828,7 @@
               onFailed={(result) => onTabFailed(tab, result)}
               onOpenFile={(file, line) => openTab(file, false, null, line)}
               onShowLocations={(list) => void showLocations(list)}
+              onOutline={(info) => (outlines[tab.id] = info)}
             />
           </div>
         {/each}
@@ -867,6 +923,26 @@
   }
 
   .root {
+    color: var(--ax-text);
+  }
+
+  .crumb {
+    flex-shrink: 0;
+    padding: 0 var(--ax-space-1);
+    background: none;
+    border: 0;
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .crumb:last-of-type {
+    color: var(--ax-accent);
+  }
+
+  .crumb:hover {
     color: var(--ax-text);
   }
 
@@ -1032,6 +1108,24 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+
+  .tree-area {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .outline-area {
+    flex-shrink: 0;
+    min-height: 0;
+  }
+
+  .outline-edge {
+    height: var(--ax-space-1);
+    flex-shrink: 0;
+    background: var(--ax-border);
+    cursor: row-resize;
   }
 
   .side-pane.gone {

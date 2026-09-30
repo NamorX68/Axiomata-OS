@@ -14,6 +14,7 @@
 
   import FileEditor, { type OpenFileState, type OpenResult } from "./FileEditor.svelte";
   import type { Handoff } from "./handoff";
+  import type { OutlineInfo } from "./outlineModel";
   import type { FileRef } from "./tabs";
 
   interface Props {
@@ -36,6 +37,8 @@
     onOpenFile?: (file: FileRef, line: number) => void;
     /** A language server's list of places (ED6.3): the view shows it in its search column. */
     onShowLocations?: (list: LocationList) => void;
+    /** The symbols and cursor line of this tab's file (the outline view). */
+    onOutline?: (info: OutlineInfo) => void;
     empty?: Snippet;
   }
 
@@ -51,6 +54,7 @@
     onFailed,
     onOpenFile,
     onShowLocations,
+    onOutline,
     empty,
   }: Props = $props();
 
@@ -125,6 +129,7 @@
     {empty}
     {onOpenFile}
     {onShowLocations}
+    {onOutline}
   />
 </div>
 

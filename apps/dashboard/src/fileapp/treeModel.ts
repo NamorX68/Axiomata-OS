@@ -105,11 +105,21 @@ export interface TreePrefs {
   showHidden: boolean;
   /** The open project's id (`projects` table), or `null` — the tree shows that project's folder only. */
   project: number | null;
+  /** The outline under the tree (#49): shown or folded away, and its height in pixels. */
+  outlineOpen: boolean;
+  outlineHeight: number;
 }
 
-export const DEFAULT_TREE: TreePrefs = { expanded: [], width: 260, visible: true, showHidden: false, project: null };
+export const DEFAULT_TREE: TreePrefs = { expanded: [], width: 260, visible: true, showHidden: false, project: null, outlineOpen: true, outlineHeight: 240 };
 /** The tree is never narrower or wider than this. */
 export const TREE_WIDTH = { min: 160, max: 640 } as const;
+
+/** The outline is never shorter or taller than this. */
+export const OUTLINE_HEIGHT = { min: 80, max: 800 } as const;
+
+export function clampOutlineHeight(height: number): number {
+  return Math.round(Math.min(OUTLINE_HEIGHT.max, Math.max(OUTLINE_HEIGHT.min, height)));
+}
 
 export function clampWidth(width: number): number {
   return Math.round(Math.min(TREE_WIDTH.max, Math.max(TREE_WIDTH.min, width)));
@@ -124,6 +134,11 @@ export function parseTreePrefs(raw: unknown): TreePrefs {
     visible: typeof r.visible === "boolean" ? r.visible : DEFAULT_TREE.visible,
     showHidden: typeof r.showHidden === "boolean" ? r.showHidden : DEFAULT_TREE.showHidden,
     project: typeof r.project === "number" && Number.isInteger(r.project) ? r.project : null,
+    outlineOpen: typeof r.outlineOpen === "boolean" ? r.outlineOpen : DEFAULT_TREE.outlineOpen,
+    outlineHeight:
+      typeof r.outlineHeight === "number" && Number.isFinite(r.outlineHeight)
+        ? clampOutlineHeight(r.outlineHeight)
+        : DEFAULT_TREE.outlineHeight,
   };
 }
 

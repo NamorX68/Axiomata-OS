@@ -1,6 +1,6 @@
 # Grobplan: Projekt-Werkzeuge im Editor (Wurzeln, Outline, Git, Run, Debug)
 
-Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 ist gebaut (2026-09-30) — als Projekt neu/öffnen/schließen, nicht als Wurzel-Auswahl; der Rest weiter geparkt**.
+Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 (Projekt neu/öffnen/schließen) und #49 (Outline) sind gebaut (2026-09-30); der Rest weiter geparkt**.
 Ursprünglich geparkt 2026-09-29 („keine Resourcen für Umsetzung“). Die Entscheidungen unten sind der
 abgelegte Grill-Stand; vor dem Bauen jeden Punkt anhand dessen in Checkpoints zerlegen
 (siehe die Arbeitsweise im Dachplan [`agentic-ide.md`](agentic-ide.md)).
@@ -134,6 +134,21 @@ Zeile „Zwei Projektbegriffe bleiben getrennt“ des Nachgrills):
 - **Bewusst entfernt:** die Tauri-Befehle `create_ide_project` und `set_ide_project_root` (nahmen einen Pfad aus der
   Webview). „Pfad ändern" läuft jetzt wie Öffnen über den Dialog (`project_set_root`). Die Projektleiste des Editors bietet
   dasselbe wie die IDE-Auswahl: Ordner ändern und „aus der Liste entfernen“ (nie den Ordner).
+
+## #49 Outline gebaut (2026-09-30)
+
+Drei Checkpoints, wie im Gespräch festgelegt (Owner: Bereich unter dem Baum, Code + Markdown, LSP später):
+
+- **CP1 Symbole:** `editor/syntax/outline.ts` — `outlineFromTree` (Knotentabelle wie bei Textobjekten/Faltung: Rust, TS/JS/TSX,
+  Python, Swift, Lua, Bash), `outlineFromMarkdown` (Überschriften, nicht in Code-Zäunen), `pathAt`, `filterOutline`.
+  Nichts aus Funktionskörpern (Closures, lokale Helfer); `const f = () => …` zählt als Funktion; Funktionen in
+  Klassen/impl/trait sind `method`; höchstens 5000 Symbole; Namen aus dem `TextStore`, nie `node.text`.
+- **CP2 Ansicht:** `fileapp/OutlinePanel.svelte` als einklappbarer Bereich unter dem Dateibaum (Höhe ziehbar, in
+  `settings.editor.tree`), Filterfeld, Klick springt zum Namen, die Zeile am Cursor ist markiert und im Bild gehalten,
+  Pin friert die Markierung ein. `FileEditor` meldet (`onOutline`, Symbole 250 ms nach der letzten Änderung, der Cursor
+  sofort) über `FileTab` an die Ansicht, die die Meldung des vorderen Tabs zeigt. Keine Outline im Light-Modus.
+- **CP3 Breadcrumbs:** in der Kopfzeile hinter dem Dateipfad: die Symbole, die den Cursor halten, klickbar.
+- **Offen:** LSP-`documentSymbol` als Verfeinerung; Outline als Dock-Pane der IDE; Daten-Formate (JSON/TOML/YAML).
 
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 
