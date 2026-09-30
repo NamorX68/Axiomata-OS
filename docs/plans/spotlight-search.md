@@ -1,6 +1,6 @@
 # Plan: Spotlight search (⌘K)
 
-Status: **draft, not started.** Follows the owner's stepwise workflow — settle the "Open
+Status: **draft, not started — deferred** (owner decision, 2026-09-30; see `AGENTS.md`). Follows the owner's stepwise workflow — settle the "Open
 decisions" first, then confirm each checkpoint before the next.
 
 ## Why

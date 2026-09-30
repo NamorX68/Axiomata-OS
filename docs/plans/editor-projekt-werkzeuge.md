@@ -1,6 +1,6 @@
 # Grobplan: Projekt-Werkzeuge im Editor (Wurzeln, Outline, Git, Run, Debug)
 
-Status: **gegrillt 2026-09-30 (Q1–Q19, bestätigt), weiter geparkt — kein Bau** (Owner: grillen ja, Code nein).
+Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), weiter geparkt — kein Bau** (Owner: grillen ja, Code nein).
 Ursprünglich geparkt 2026-09-29 („keine Resourcen für Umsetzung“). Die Entscheidungen unten sind der
 abgelegte Grill-Stand; vor dem Bauen jeden Punkt anhand dessen in Checkpoints zerlegen
 (siehe die Arbeitsweise im Dachplan [`agentic-ide.md`](agentic-ide.md)).
@@ -74,17 +74,17 @@ Rahmen: alle fünf Punkte (#47–#51) in einer Runde gegrillt, nichts wird gebau
 - **Run (#50):** generisch für Rust + Python + TS/Node. Konfiguration als Datei im Projekt
   (Zed-Vorbild `tasks.json`) + Auto-Erkennung (`cargo build/test/run`, `npm run …`,
   `uv run …`/`pytest`), Persönliches unter `~/.axiomata`. Ausführung auf der Terminal-PTY-Engine,
-  Ausgabe in einem Dock-Pane mit klickbaren `Datei:Zeile`-Fehlern, Umgebung wie `toolenv.rs`,
+  Ausgabe in einem Dock-Pane mit klickbaren `Datei:Zeile`-Fehlern und Problem-Matchern je Sprache (Diagnosen im Editor, Nachgrill), Umgebung wie `toolenv.rs`,
   Abbrechen/Neustart dabei.
-- **Debug (#51):** Rust + Python + TS/Node von Anfang an. DAP-Client in Rust analog
+- **Debug (#51):** Rust zuerst, Python + TS/Node als spätere Checkpoints (Nachgrill Q20–Q27). DAP-Client in Rust analog
   `axiomata-files::lsp`, nur gesprochene Methoden. Adapter-Tabelle eingebaut (`codelldb`/`lldb-dap`,
   `debugpy`, Node-Inspector), Suchpfad wie bei LSP (`PATH`, Homebrew, `mason/bin` zuletzt).
   `debug.json` im Projekt (Zed-Vorbild). Breakpoints in der Gutter-Spalte (gemerkt je Datei),
   Panel mit Breakpoint-Liste („Neue Sitzung“), Variablen, Call-Stack, Konsole.
 - **Trust-Modell (Run/Debug):** `tasks.json`/`debug.json` im Projekt führen Befehle/Adapter aus,
-  also fremden Code aus einem Repo. Gleicher Rahmen wie `lsp.json`: nur eingebaute Tabelle +
+  also fremden Code aus einem Repo. Gleicher Rahmen wie `lsp.json` für Adapter- und Sprachtabellen: nur eingebaute Tabelle +
   Hand-Override in `~/.axiomata/*.json` (kein Tauri-Schreibbefehl), nur gesprochene Methoden, vor
-  dem Start anzeigen, was läuft.
+  dem Start anzeigen, was läuft. Die Projektdatei selbst läuft erst nach Hash-Bestätigung (Nachgrill).
 
 ## Nachgrill (2026-09-30, Q20–Q27)
 
@@ -159,10 +159,12 @@ Zweite Runde über denselben Plan, Fokus auf Widersprüche und Zuschnitt. Weiter
   Konsole.
 - **Editor:** Breakpoints in der Gutter-Spalte, Anzeige der aktuellen Zeile; Panel mit Breakpoint-Liste und „Neue
   Sitzung“, `debug.json` (Vorbild Zed).
-- **Entschieden (Grill 2026-09-30):** Rust, Python und TS/Node von Anfang an; Adapter nur aus der eingebauten
-  Tabelle, Hand-Override unter `~/.axiomata`; Trust wie bei `lsp.json`. → „Debug (#51)" und „Trust-Modell" oben.
+- **Entschieden (Grill 2026-09-30, Nachgrill: ein Adapter zuerst):** Rust (`lldb-dap`/`codelldb`) zuerst, Python und
+  TS/Node danach als kleine Checkpoints; Adapter nur aus der eingebauten Tabelle, Hand-Override unter `~/.axiomata`;
+  Trust wie bei `lsp.json`, Projektdateien mit Hash-Bestätigung. → „Debug (#51)" und „Trust-Modell" oben.
 
 ## Nicht in diesem Plan
 
 Ein eigener Agent für die Codebasis, Snippets/Completion-Erweiterungen (L9 in `editor.md`) und die Herauslösung des
-Editors (ED7) — eigene Karten (#36, #35).
+Editors (ED7) — eigene Karten (#36, #35). Für ED7 gilt aber: die Werkzeuge hier werden ohne `axiomata-core` gebaut
+(siehe Nachgrill).

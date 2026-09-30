@@ -157,7 +157,7 @@ für die IDE muss auch Projektordner und Agenten-Worktrees öffnen.
 - **D19 — Ausgesprochene Annahmen:** „Neue Notiz" bleibt inhaltlich wie heute (Agent
   schlägt den Bereich vor), nur das Eingabefeld wird zum Editor. Undo ist in v1 linear.
   Mehrere Cursor kommen mit Suchen/Ersetzen in ED5. Sehr große Dateien öffnen
-  schreibgeschützt, Binärdateien werden wie heute abgelehnt. Die eigenständige App (ED7)
+  schreibgeschützt (seit ED5.1 überholt: editierbar bis 16 MiB, Light-Modus ab 2 MiB), Binärdateien werden wie heute abgelehnt. Die eigenständige App (ED7)
   ist eine eigene Tauri-Hülle um D1 und D2, wie beim Terminal. KI-Funktionen im Editor
   sind nicht Teil dieses Plans.
 
@@ -194,8 +194,8 @@ hier der Stand, damit die Lücke zwischen ED6 und heute sichtbar ist:
   umgesetzt (2026-09-28/30), Live-Test bestanden. Offen: die Übertragung der Optik auf die übrigen
   Module, jedes Modul eigens geplant.
 - **[`editor-projekt-werkzeuge.md`](editor-projekt-werkzeuge.md)** — die Projekt-Werkzeuge: Wurzeln
-  im Dateibaum, Outline, Git-Panel, Run/Tasks, Debug/DAP. Gegrillt 2026-09-30 (Q1–Q19, bestätigt),
-  **geparkt — kein Bau**; ED7, Snippets/Completion (#36) und ein eigener Codebasis-Agent bleiben
+  im Dateibaum, Outline, Git-Panel, Run/Tasks, Debug/DAP. Gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt),
+  **geparkt — kein Bau**; ED7 (die Werkzeuge dort werden ohne `axiomata-core` gebaut, damit ED7 eine Hülle bleibt), Snippets/Completion (#36) und ein eigener Codebasis-Agent bleiben
   draußen.
 - **[`opencode2.md`](opencode2.md)** — berührt den Editor mittelbar: Skills und Chat laufen als
   Sessions auf dem gemeinsamen Opencode-2-Dienst, dessen Agenten die IDE startet. OC1–OC4 erledigt.
@@ -210,8 +210,8 @@ hier der Stand, damit die Lücke zwischen ED6 und heute sichtbar ist:
 - **E2 — Link-Regeln je Wurzel** (Q2): Der Workspace bleibt streng (kein Symlink, kein
   Hardlink). Projekt-, Worktree- und Grant-Wurzeln erlauben Symlinks, deren Ziel in
   derselben Wurzel liegt, und Hardlinks (pnpm). Wer nach außen zeigt, wird abgelehnt.
-- **E3 — Größen** (Q3): Lesen bis 16 MiB, ab 2 MiB mit `large: true` (Editor öffnet
-  schreibgeschützt), Schreiben bis 2 MiB. Die alten Workspace-Befehle behalten 1 MiB.
+- **E3 — Größen** (Q3): Lesen bis 16 MiB, ab 2 MiB mit `large: true` (Editor öffnete
+  schreibgeschützt — **überholt durch ED5.1**: bis 16 MiB editierbar, über 2 MiB im „Light-Modus“ ohne tree-sitter), Schreiben bis 16 MiB (`MAX_WRITE_BYTES`, vorher 2 MiB). Die alten Workspace-Befehle behalten 1 MiB.
 - **E4 — Version** (Q4): Jedes Lesen liefert eine Version (Länge + FNV-1a-Hash des
   Inhalts); Schreiben nimmt sie optional mit und scheitert mit `Conflict`, wenn die
   Datei sich inzwischen geändert hat. Grundlage für D10.

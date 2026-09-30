@@ -64,7 +64,7 @@ picks a chat provider in the UI).
 **CP1–CP3 done** (2026-09-11); CP4 (docs + polish + `skills reseed`) landed after. This
 plan's per-role provider is the *switch* the Stufe 2 loop leverages: with
 `skill_provider = ollama`, a connector digest no longer runs `claude -p` at all — its
-`local_backend: ollama-agent` frontmatter resolves it to the bounded local tool-call loop
+`local_backend: ollama-agent` frontmatter resolved it (*überholt*: `ollama-agent` und `local_backend` sind entfernt, siehe `opencode2.md`) to the bounded local tool-call loop
 (`docs/architecture.md` §5, [`local_backend` + `prepend_files`]). Model-quality status per
 candidate (which 4–8B model actually clears the digests' JSON shape):
 `docs/plans/stufe2-cp3-bakeoff.md`. The full checkpointed plan:
