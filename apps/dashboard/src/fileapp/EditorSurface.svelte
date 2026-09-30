@@ -2500,11 +2500,11 @@
   }
 
   .glow .caret {
-    box-shadow: 0 0 8px 1px var(--ax-editor-glow);
+    box-shadow: 0 0 16px 3px var(--ax-editor-glow);
   }
 
   .glow .number.current {
-    text-shadow: 0 0 8px var(--ax-editor-glow);
+    text-shadow: 0 0 14px var(--ax-editor-glow);
   }
 
   .row {

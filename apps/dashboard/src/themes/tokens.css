@@ -213,7 +213,7 @@
   --ax-editor-bracket-1: #ffb86b;
   --ax-editor-bracket-2: #7cb8ff;
   --ax-editor-bracket-3: #d4a8ff;
-  --ax-editor-glow: rgba(255, 122, 26, 0.35);
+  --ax-editor-glow: rgba(255, 122, 26, 0.7);
   --ax-diff-add: rgba(79, 214, 127, 0.12);
   --ax-diff-remove: rgba(242, 109, 109, 0.12);
   --ax-diff-add-word: rgba(79, 214, 127, 0.3);

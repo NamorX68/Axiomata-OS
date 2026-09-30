@@ -21,11 +21,11 @@ import {
 } from "../editor/decorations";
 
 /** Opacity of the smear where it meets the cursor (it fades to nothing at its tail). */
-const SMEAR_ALPHA = 0.55;
+const SMEAR_ALPHA = 0.9;
 /** A bar cursor is a hairline; its smear is at least this wide, centred on it, so a long jump reads as a streak. */
-const SMEAR_MIN_WIDTH_PX = 6;
+const SMEAR_MIN_WIDTH_PX = 14;
 /** Blur radius of the accent glow around the cursor in flight, per strength. */
-const GLOW_BLUR_PX: Record<GlideStrength, number> = { subtle: 8, strong: 16 };
+const GLOW_BLUR_PX: Record<GlideStrength, number> = { subtle: 12, strong: 34 };
 /** Width of the drawn cursor bar. */
 const CARET_WIDTH_PX = 2;
 

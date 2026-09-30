@@ -76,7 +76,7 @@
   --ax-editor-bracket-1: #b0521c;
   --ax-editor-bracket-2: #2b5f9e;
   --ax-editor-bracket-3: #7a4fa0;
-  --ax-editor-glow: rgba(208, 100, 44, 0.3);
+  --ax-editor-glow: rgba(208, 100, 44, 0.65);
   --ax-diff-add: rgba(63, 125, 78, 0.1);
   --ax-diff-remove: rgba(178, 58, 58, 0.1);
   --ax-diff-add-word: rgba(63, 125, 78, 0.24);

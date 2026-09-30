@@ -115,7 +115,7 @@
     max-width: calc(240px * var(--ax-ui-scale));
     border: 1px solid transparent;
     border-radius: var(--ax-radius-pill);
-    background: color-mix(in srgb, var(--tint) 20%, var(--ax-surface-2));
+    background: color-mix(in srgb, var(--tint) 32%, var(--ax-surface-2));
     transition:
       background var(--ax-dur-fast) var(--ax-ease),
       border-color var(--ax-dur-fast) var(--ax-ease);
@@ -124,12 +124,12 @@
   }
 
   .tab:hover {
-    background: color-mix(in srgb, var(--tint) 28%, var(--ax-surface-3));
+    background: color-mix(in srgb, var(--tint) 40%, var(--ax-surface-3));
   }
 
   .tab.active {
-    background: color-mix(in srgb, var(--tint) 36%, var(--ax-surface-3));
-    border-color: color-mix(in srgb, var(--tint) 60%, var(--ax-border));
+    background: color-mix(in srgb, var(--tint) 50%, var(--ax-surface-3));
+    border-color: color-mix(in srgb, var(--tint) 75%, var(--ax-border));
   }
 
   /* The focused group's visible tab carries the accent: the one the keys are about. */

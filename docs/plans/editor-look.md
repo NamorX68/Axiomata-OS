@@ -1,7 +1,8 @@
 # Editor: drei Erweiterungen und eine moderne Optik — der künftige Standard für Axiomata
 
-Stand: 2026-09-28, gegrillt (Runden 1–2), vom Owner bestätigt und umgesetzt (LK0–LK5). Offen: der Live-Test in der App
-und die Übertragung der Optik auf die übrigen Module, jedes eigens geplant. Anlass (Owner): „Zur Zeit sieht das alles nach einer
+Stand: 2026-09-28, gegrillt (Runden 1–2), vom Owner bestätigt und umgesetzt (LK0–LK5). Live-Test in der App
+bestanden (2026-09-30, Owner): Reiter, Baum-Icons, Minimap, Cursor-Flug und Inline-Diagnose sind ok; Glow, Spur und
+Tab-Tönung auf Owner-Wunsch zweimal verstärkt. Offen: die Übertragung der Optik auf die übrigen Module, jedes eigens geplant. Anlass (Owner): „Zur Zeit sieht das alles nach einer
 alten Linux-X-Anwendung aus und nicht wie ein moderner Editor.“ Vorbild ist vor allem Zed, daneben VS Code und
 JetBrains. Was hier für die Datei-App und die IDE entsteht, wird später Modul für Modul zum Standard der ganzen App.
 Vorgänger: `docs/plans/editor.md` (ED0–ED6).
@@ -109,7 +110,7 @@ geprüft). Neu: `FileDockNode.svelte`, `FileGroup.svelte`, `fileDockContext.ts`;
 **LK3 umgesetzt (2026-09-28):** Reiter als schwebende Pillen in Datei-App und IDE (`FileGroup.svelte`,
 `ide/PaneGroup.svelte`), jede mit dem Farbton ihrer Sprache (K14): `core/languageColors.ts` (Sprache → Token,
 TSX = TypeScript), Tokens `--ax-lang-*` in `themes/tokens.css`, für eigene Themes freigegeben (`theme/validator.ts`);
-abschaltbar („Tabs coloured by language“, `tabColors`). Stärke nach Browser-Blick erhöht (20 % / aktiv 36 %), die
+abschaltbar („Tabs coloured by language“, `tabColors`). Stärke zweimal erhöht (32 % / hover 40 % / aktiv 50 %, Rand 75 %), die
 fokussierte Gruppe trägt den Akzentrand. Icon-Knöpfe statt Text: Datei-App-Kopf (öffnen, zuletzt, Einstellungen,
 Kürzel, zurück zum OS), Baumkopf (Dateien | Suche, versteckte Dateien, neu lesen), IDE-Kopf (Terminal, zurück),
 IDE-Files-Pane, × und + in den Tab-Leisten. Drei Lucide-Icons nachgeladen (history, layout-grid, eye-off).
@@ -122,11 +123,11 @@ Lizenztexten; Monochrom nimmt Lucide. `core/fileIcons.ts` bestimmt die Dateiart 
 Farbtabelle) und wählt JetBrains' Variante nach `--ax-color-scheme`. JetBrains hat im Community-Repository keine Icons für
 Rust, Python, Svelte und Lua — dort steht sein allgemeines Datei-Icon. Die Aufklapp-Pfeile sind Lucide-Chevrons.
 
-**LK5 umgesetzt (2026-09-28):** Die Cursor-Animation (`fileapp/cursorGlide.ts`, Logik in `editor/decorations.ts`)
-richtet ihre Dauer nach der Entfernung (`glideMotion`: stark 80 → 240 ms, dezent 70 → 130 ms, Wurzel-Kurve bis 700 px),
-und bei „stark“ folgt ein Schwanz 2,4-mal langsamer als der Kopf: zwischen beiden liegt eine Schliere (konvexe Hülle von
-Schwanz- und Kopf-Kasten, mindestens 6 px breit, Verlauf zum Schwanz hin durchsichtig), die sich beim Landen ins Ziel
-zusammenzieht; das Leuchten im Flug ist stärker (16 statt 8 px). Tippen und Pfeile bleiben durch die kurze Strecke kurz.
+**LK5 umgesetzt (2026-09-28), verstärkt auf Owner-Wunsch (2026-09-29):** Die Cursor-Animation (`fileapp/cursorGlide.ts`, Logik in `editor/decorations.ts`)
+richtet ihre Dauer nach der Entfernung (`glideMotion`: stark 90 → 380 ms, dezent 70 → 130 ms, Wurzel-Kurve bis 700 px),
+und bei „stark“ folgt ein Schwanz 3,6-mal langsamer als der Kopf: zwischen beiden liegt eine Schliere (konvexe Hülle von
+Schwanz- und Kopf-Kasten, mindestens 14 px breit, 90 % deckend, Verlauf zum Schwanz hin durchsichtig), die sich beim Landen ins Ziel
+zusammenzieht; das Leuchten im Flug ist stärker (34 statt 12 px). Tippen und Pfeile bleiben durch die kurze Strecke kurz.
 Einstellung „Cursor: Strong / Subtle / Off“, Vorgabe Strong; gespeicherte „trail“/„glide“ werden übernommen. Im Browser
 (verlangsamt) mitten im Flug geprüft.
 

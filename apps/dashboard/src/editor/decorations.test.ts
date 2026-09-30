@@ -60,8 +60,8 @@ describe("stepCursor and glideMotion (K8)", () => {
   it("takes longer the farther the jump, strong more than subtle", () => {
     const step = glideMotion(8, "strong").durationMs;
     const far = glideMotion(900, "strong").durationMs;
-    expect(step).toBeLessThan(100);
-    expect(far).toBe(240);
+    expect(step).toBeLessThan(130);
+    expect(far).toBe(380);
     expect(glideMotion(300, "strong").durationMs).toBeGreaterThan(glideMotion(300, "subtle").durationMs);
     expect(glideMotion(300, "subtle").tailLag).toBe(1);
   });

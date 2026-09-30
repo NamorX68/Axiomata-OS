@@ -160,7 +160,7 @@ das Neu-Einlesen nimmt ebenfalls die letzte). Plugin, `OPENCODE_CONFIG_DIR`, `pl
 und der Opencode-Teil der Planungs-Anweisung sind entfernt; `reset` löscht den alten Plugin-Ordner. Ein
 Opencode-Agent meldet nie `ended` (der Dienst weiß nicht, wann eine TUI endet). Live geprüft:
 `ide agents status` über den Dienst; `tests/live.rs` folgt einem Plan-Agenten-Turn (working → idle) und
-vergleicht den Plan mit dem Neu-Einlesen.
+vergleicht den Plan mit dem Neu-Einlesen. Live-Test in der App bestanden (2026-09-30, Owner).
 
 ### OC4 — Anweisungen und Doku (erledigt)
 

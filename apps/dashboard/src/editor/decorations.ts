@@ -73,7 +73,7 @@ export type GlideStrength = "subtle" | "strong";
 /** The shortest glide (a character) and the longest (half a screen and further), per strength. */
 const GLIDE_RANGE: Record<GlideStrength, { min: number; max: number; tailLag: number }> = {
   subtle: { min: 70, max: 130, tailLag: 1 },
-  strong: { min: 80, max: 240, tailLag: 2.4 },
+  strong: { min: 90, max: 380, tailLag: 3.6 },
 };
 /** A jump this long (pixels) or longer takes the longest glide. */
 const FAR_PX = 700;
