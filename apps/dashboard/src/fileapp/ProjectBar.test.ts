@@ -9,7 +9,7 @@ describe("ProjectBar", () => {
     const target = document.body.appendChild(document.createElement("div"));
     const app = mount(ProjectBar, {
       target,
-      props: { projects: [], current: null, onPick: vi.fn(), onOpenFolder: vi.fn(), onNew, onClose: vi.fn() },
+      props: { projects: [], current: null, onPick: vi.fn(), onOpenFolder: vi.fn(), onNew, onClose: vi.fn(), onChangeFolder: vi.fn(), onRemove: vi.fn() },
     });
     flushSync();
     (target.querySelector(".current") as HTMLElement).click();
@@ -38,7 +38,7 @@ describe("ProjectBar", () => {
     const target = document.body.appendChild(document.createElement("div"));
     const app = mount(ProjectBar, {
       target,
-      props: { projects: [], current: null, onPick: vi.fn(), onOpenFolder: vi.fn(), onNew, onClose: vi.fn() },
+      props: { projects: [], current: null, onPick: vi.fn(), onOpenFolder: vi.fn(), onNew, onClose: vi.fn(), onChangeFolder: vi.fn(), onRemove: vi.fn() },
     });
     flushSync();
     (target.querySelector(".current") as HTMLElement).click();

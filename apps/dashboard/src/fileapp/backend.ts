@@ -52,6 +52,16 @@ export function touchProject(id: number): Promise<IdeProject | null> {
   return invokeBackend<IdeProject | null>("open_ide_project", { id });
 }
 
+/** "Change folder": the native dialog picks the project's new folder; it keeps its id, name and layout. `null` if cancelled. */
+export function changeProjectFolder(id: number): Promise<IdeProject | null> {
+  return invokeBackend<IdeProject | null>("project_set_root", { id });
+}
+
+/** Takes a project out of the registry. Never its folder. */
+export function removeProject(id: number): Promise<boolean> {
+  return invokeBackend<boolean>("delete_ide_project", { id });
+}
+
 export function listRoots(): Promise<FileRootInfo[]> {
   return invokeBackend<FileRootInfo[]>("file_roots");
 }

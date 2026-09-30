@@ -9,6 +9,7 @@
 <script lang="ts">
   import type { IdeProject } from "../core/backend";
   import Icon from "../ui/Icon.svelte";
+  import IconButton from "../ui/IconButton.svelte";
   import { folderNameProblem, otherProjects } from "./projectModel";
 
   interface Props {
@@ -19,9 +20,13 @@
     onOpenFolder: () => void;
     onNew: (name: string, gitInit: boolean) => void;
     onClose: () => void;
+    /** "Change folder…": the native dialog picks the new one; the project keeps its id and layout. */
+    onChangeFolder: (id: number) => void;
+    /** "Remove from list": the registry row goes, the folder stays. */
+    onRemove: (id: number) => void;
   }
 
-  let { projects, current, busy = false, onPick, onOpenFolder, onNew, onClose }: Props = $props();
+  let { projects, current, busy = false, onPick, onOpenFolder, onNew, onClose, onChangeFolder, onRemove }: Props = $props();
 
   let open = $state(false);
   let adding = $state(false);
@@ -41,6 +46,12 @@
   /** Shown under the field once a click or Enter found the name unusable. */
   let problem = $state<string | null>(null);
   let nameField = $state<HTMLInputElement | undefined>();
+
+  function removeWithQuestion(project: IdeProject): void {
+    if (!confirm(`Remove “${project.name}” from the list? The folder itself is left alone.`)) return;
+    open = false;
+    onRemove(project.id);
+  }
 
   function submit(): void {
     const trimmed = name.trim();
@@ -91,6 +102,21 @@
                 <span>{project.name}</span>
                 <small class:missing={!project.root_exists}>{project.repo_root}</small>
               </button>
+              <!-- Quiet until the row is hovered or focused, as in the IDE's project list. -->
+              <div class="row-actions">
+                <IconButton
+                  icon="folder-open"
+                  label="Change the folder of {project.name}…"
+                  size="sm"
+                  onclick={() => (onChangeFolder(project.id), (open = false))}
+                />
+                <IconButton
+                  icon="trash-2"
+                  label="Remove {project.name} from the list (the folder is left alone)"
+                  size="sm"
+                  onclick={() => removeWithQuestion(project)}
+                />
+              </div>
             </li>
           {/each}
         </ul>
@@ -117,6 +143,18 @@
               open = false;
               onClose();
             }}><Icon name="x" size="sm" /> Close project</button
+          >
+          <button
+            type="button"
+            role="menuitem"
+            class="action"
+            onclick={() => {
+              open = false;
+              onChangeFolder(current.id);
+            }}><Icon name="folder-open" size="sm" /> Change folder…</button
+          >
+          <button type="button" role="menuitem" class="action" onclick={() => removeWithQuestion(current)}
+            ><Icon name="trash-2" size="sm" /> Remove from list</button
           >
         {/if}
       {:else}
@@ -233,6 +271,24 @@
 
   .menu button:hover {
     background: var(--ax-accent-muted);
+  }
+
+  li {
+    position: relative;
+  }
+
+  .row-actions {
+    position: absolute;
+    top: 50%;
+    right: var(--ax-space-1);
+    display: none;
+    gap: var(--ax-space-1);
+    transform: translateY(-50%);
+  }
+
+  li:hover .row-actions,
+  li:focus-within .row-actions {
+    display: flex;
   }
 
   small {

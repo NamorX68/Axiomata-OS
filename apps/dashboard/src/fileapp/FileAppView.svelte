@@ -29,11 +29,13 @@
 
   import { listenBackend, type FileRootInfo } from "../core/backend";
   import {
+    changeProjectFolder,
     listProjects,
     listRoots,
     newProjectFolder,
     openProjectFolder,
     pickFile,
+    removeProject,
     touchProject,
     type FileRenamed,
   } from "./backend";
@@ -231,6 +233,29 @@
   const pickProject = (id: number) => runProject(() => touchProject(id));
   const openProjectFolderDialog = () => runProject(openProjectFolder);
   const newProject = (name: string, gitInit: boolean) => runProject(() => newProjectFolder(name, gitInit));
+
+  /** "Change folder…": the project keeps its id; the tree follows if it is the open one. */
+  async function changeFolder(id: number): Promise<void> {
+    projectBusy = true;
+    try {
+      if (await changeProjectFolder(id)) await reloadProjects();
+    } catch (err) {
+      error = (err as { message?: string }).message ?? String(err);
+    } finally {
+      projectBusy = false;
+    }
+  }
+
+  /** Removes the registry row (the IDE shares it); never the folder. The open project closes with it. */
+  async function removeFromList(id: number): Promise<void> {
+    try {
+      await removeProject(id);
+      if (tree.project === id) closeProject();
+      await reloadProjects();
+    } catch (err) {
+      error = (err as { message?: string }).message ?? String(err);
+    }
+  }
 
   /** Takes the project out of the tree. Nothing on disk changes, open tabs stay, the IDE keeps the project. */
   function closeProject(): void {
@@ -646,6 +671,8 @@
         onOpenFolder={() => void openProjectFolderDialog()}
         onNew={(name, git) => void newProject(name, git)}
         onClose={closeProject}
+        onChangeFolder={(id) => void changeFolder(id)}
+        onRemove={(id) => void removeFromList(id)}
       />
       <div class="side-bar">
         <div class="side-tabs" role="tablist" aria-label="Left column">
