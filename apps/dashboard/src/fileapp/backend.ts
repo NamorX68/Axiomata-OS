@@ -10,6 +10,7 @@ import {
   invokeBackend,
   type EditorRecovery,
   type FileRootInfo,
+  type IdeProject,
   type FileVersion,
   type PickedFile,
   type TextFile,
@@ -29,6 +30,36 @@ export const fileBackend: FileBackend = {
 /** The native open dialog (driven from Rust); `null` when cancelled. */
 export function pickFile(): Promise<PickedFile | null> {
   return invokeBackend<PickedFile | null>("file_pick", { folder: false });
+}
+
+/** "Open project": the native folder dialog (from Rust); the folder becomes, or already is, a project. `null` when cancelled. */
+export function openProjectFolder(): Promise<IdeProject | null> {
+  return invokeBackend<IdeProject | null>("project_open");
+}
+
+/** "New project": the dialog picks the parent folder, `name` becomes a new folder in it. `null` when cancelled. */
+export function newProjectFolder(name: string, gitInit: boolean): Promise<IdeProject | null> {
+  return invokeBackend<IdeProject | null>("project_new", { name, gitInit });
+}
+
+/** The project registry the editor and the IDE share, most recently opened first. */
+export function listProjects(): Promise<IdeProject[]> {
+  return invokeBackend<IdeProject[]>("list_ide_projects");
+}
+
+/** Marks a known project as just opened (what the list sorts by). `null` if it is gone. */
+export function touchProject(id: number): Promise<IdeProject | null> {
+  return invokeBackend<IdeProject | null>("open_ide_project", { id });
+}
+
+/** "Change folder": the native dialog picks the project's new folder; it keeps its id, name and layout. `null` if cancelled. */
+export function changeProjectFolder(id: number): Promise<IdeProject | null> {
+  return invokeBackend<IdeProject | null>("project_set_root", { id });
+}
+
+/** Takes a project out of the registry. Never its folder. */
+export function removeProject(id: number): Promise<boolean> {
+  return invokeBackend<boolean>("delete_ide_project", { id });
 }
 
 export function listRoots(): Promise<FileRootInfo[]> {

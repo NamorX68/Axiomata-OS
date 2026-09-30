@@ -1,5 +1,10 @@
 # Plan: Stufe 2 — a lean local agent for connector digests
 
+> **Überholt (Stand 2026-09-30):** Der hier beschriebene `ollama-agent`-Backend, `local_backend`/`effective_backend`
+> und die eigene MCP-Schicht existieren nicht mehr. Skills laufen als Sessions auf Opencode 2
+> (`opencode2.md`, `AGENTS.md`); `backend:` ist nur noch `opencode` | `ollama`. Dieses Dokument bleibt als
+> Begründungsprotokoll.
+
 Status: **COMPLETE — CP1 + CP2 + CP3 + CP4 done** (CP4 2026-09-11). CP1
 (`54173bf`): the `[mcp_servers]` config schema, a hand-rolled stdio MCP client
 (`crates/axiomata-core/src/mcp/mod.rs`), the `axiomata-cli mcp import` helper —

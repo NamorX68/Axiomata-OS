@@ -1,6 +1,8 @@
 # Plan: Agentische IDE (M7)
 
-Status: **M7.0 und M7.1 komplett, M7.2 begonnen (CP4 steht).**
+Status: **M7.0 bis M7.3 komplett** (Kanban, IDE-Skelett, Agent-Fenster samt Worktree/Status/Plan-Tab, Git-Schicht).
+**M7.4 (Mini-Harness), M7.5 (A2A) und M7.6 (Herauslösung) sind offen**, ohne laufende Arbeit. Stand 2026-09-30;
+die Editor-Kette (ED0–ED6) und Opencode 2 (OC1–OC4) sind eigene Pläne (`editor.md`, `opencode2.md`).
 Folgt dem schrittweisen Workflow des Owners: dieser Plan legt die Kette und die
 bereits getroffenen Entscheidungen fest; **jeder Meilenstein wird einzeln
 durchgeplant und bestätigt, bevor Code entsteht.** Was gebaut ist, steht bei den
@@ -362,9 +364,11 @@ und ein Projektwechsel, der das Layout wiederherstellt.
   add/list/remove, commit, merge. **Gebaut (2026-09-23)** — Detailplan
   [`git-layer.md`](git-layer.md) für CP7–CP9, Entscheidungen G1–G13 (gegrillt);
   `git` als Unterprozess (F3, schon in CP5 entschieden).
-- **CP8** — Diff-Tabs am Fensterrand pro Agent: geänderte Dateien, Diff-Ansicht.
+- **CP8** — Diff-Tabs am Fensterrand pro Agent: geänderte Dateien, Diff-Ansicht. **Gebaut (2026-09-24/25)**, auf dem
+  Editor (H1–H16, `git-layer.md`).
 - **CP9** — Diff → Datei im Betrachter öffnen und bearbeiten; Stage/Verwerfen/
-  Commit pro Datei; Merge des Agenten-Branches in den Hauptbaum.
+  Commit pro Datei; Merge des Agenten-Branches in den Hauptbaum. **Gebaut** — als „Take-over“ (Squash
+  als Vorgabe, nie ein Push), Details in `git-layer.md`.
 
 ### M7.4 — Mini-Harness
 

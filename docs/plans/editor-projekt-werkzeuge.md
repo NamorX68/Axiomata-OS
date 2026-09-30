@@ -1,6 +1,6 @@
 # Grobplan: Projekt-Werkzeuge im Editor (Wurzeln, Outline, Git, Run, Debug)
 
-Status: **gegrillt 2026-09-30 (Q1–Q19, bestätigt), weiter geparkt — kein Bau** (Owner: grillen ja, Code nein).
+Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 ist gebaut (2026-09-30) — als Projekt neu/öffnen/schließen, nicht als Wurzel-Auswahl; der Rest weiter geparkt**.
 Ursprünglich geparkt 2026-09-29 („keine Resourcen für Umsetzung“). Die Entscheidungen unten sind der
 abgelegte Grill-Stand; vor dem Bauen jeden Punkt anhand dessen in Checkpoints zerlegen
 (siehe die Arbeitsweise im Dachplan [`agentic-ide.md`](agentic-ide.md)).
@@ -74,17 +74,66 @@ Rahmen: alle fünf Punkte (#47–#51) in einer Runde gegrillt, nichts wird gebau
 - **Run (#50):** generisch für Rust + Python + TS/Node. Konfiguration als Datei im Projekt
   (Zed-Vorbild `tasks.json`) + Auto-Erkennung (`cargo build/test/run`, `npm run …`,
   `uv run …`/`pytest`), Persönliches unter `~/.axiomata`. Ausführung auf der Terminal-PTY-Engine,
-  Ausgabe in einem Dock-Pane mit klickbaren `Datei:Zeile`-Fehlern, Umgebung wie `toolenv.rs`,
+  Ausgabe in einem Dock-Pane mit klickbaren `Datei:Zeile`-Fehlern und Problem-Matchern je Sprache (Diagnosen im Editor, Nachgrill), Umgebung wie `toolenv.rs`,
   Abbrechen/Neustart dabei.
-- **Debug (#51):** Rust + Python + TS/Node von Anfang an. DAP-Client in Rust analog
+- **Debug (#51):** Rust zuerst, Python + TS/Node als spätere Checkpoints (Nachgrill Q20–Q27). DAP-Client in Rust analog
   `axiomata-files::lsp`, nur gesprochene Methoden. Adapter-Tabelle eingebaut (`codelldb`/`lldb-dap`,
   `debugpy`, Node-Inspector), Suchpfad wie bei LSP (`PATH`, Homebrew, `mason/bin` zuletzt).
   `debug.json` im Projekt (Zed-Vorbild). Breakpoints in der Gutter-Spalte (gemerkt je Datei),
   Panel mit Breakpoint-Liste („Neue Sitzung“), Variablen, Call-Stack, Konsole.
 - **Trust-Modell (Run/Debug):** `tasks.json`/`debug.json` im Projekt führen Befehle/Adapter aus,
-  also fremden Code aus einem Repo. Gleicher Rahmen wie `lsp.json`: nur eingebaute Tabelle +
+  also fremden Code aus einem Repo. Gleicher Rahmen wie `lsp.json` für Adapter- und Sprachtabellen: nur eingebaute Tabelle +
   Hand-Override in `~/.axiomata/*.json` (kein Tauri-Schreibbefehl), nur gesprochene Methoden, vor
-  dem Start anzeigen, was läuft.
+  dem Start anzeigen, was läuft. Die Projektdatei selbst läuft erst nach Hash-Bestätigung (Nachgrill).
+
+## Nachgrill (2026-09-30, Q20–Q27)
+
+Zweite Runde über denselben Plan, Fokus auf Widersprüche und Zuschnitt. Weiter **kein Bau**.
+
+- **Trust präzisiert (ersetzt die Lesart „nur Tabelle + Override“ für Projektdateien):** eine
+  `tasks.json`/`debug.json` im Projekt wird gelesen, läuft aber erst nach einer Bestätigung — beim ersten
+  Lauf und nach jeder Änderung (Datei-Hash) zeigt ein Dialog die Befehle/Adapter-Pfade/Argumente. Die
+  Freigabe (Hash je Datei) liegt unter `~/.axiomata`, geschrieben aus Rust, kein Tauri-Schreibbefehl aus
+  der Webview. Gilt für `debug.json` genauso. Adapter- und LSP-Tabellen bleiben eingebaut + Hand-Override.
+- **Zwei Projektbegriffe bleiben getrennt:** IDE-Projekt (Layout, Agenten, Worktrees) und globaler
+  Editor-Arbeitsbereich (Wurzelauswahl, #47) — bewusst, wie gegrillt.
+- **Git: gemeinsamer Unterbau.** Prozessaufruf, Status- und Diff-Parsing ziehen nach `axiomata-files`;
+  `axiomata-ide::git` behält nur Worktree/Basis-Branch/Take-over und setzt darauf auf. Dieser Umbau ist
+  der **erste Checkpoint von #48** (M7.3-Tests müssen grün bleiben).
+- **ED7 nimmt die Werkzeuge mit.** Jedes Werkzeug (Outline, Git, Run, Debug) wird ohne `axiomata-core`
+  gebaut (nur `axiomata-files`/`axiomata-terminal`), damit ED7 nur noch eine Hülle ist.
+- **Run (#50): Problem-Matcher je Sprache mit Diagnosen im Editor** (Wellen/Markierungen wie bei LSP-
+  Diagnosen, Quelle „task“), nicht nur klickbare Stellen. Je Toolchain ein Matcher (rustc/cargo
+  `--message-format=json`, tsc, pytest/ruff o. ä.); der Zuschnitt des ersten Wurfs wird im Checkpoint-
+  Grill von #50 festgelegt. **Offen:** wann Diagnosen einer Task verschwinden (nächster Lauf? Datei-Edit?).
+- **Debug (#51): ein Adapter zuerst.** DAP-Client bleibt generisch; Abnahme mit `lldb-dap`/`codelldb`
+  (Rust), Python (`debugpy`) und Node folgen je als kleiner Checkpoint. Ändert „alle drei von Anfang an“ oben.
+- **Parkung bleibt**, bis ein konkreter Schmerz auftritt (Owner). Reihenfolge zu M7.4–M7.6/ED7 daher
+  nicht festgelegt; der Vorschlag der Tabelle oben gilt, wenn gezogen wird.
+
+## #47 umgebaut und gebaut: Projekt neu / öffnen / schließen (Owner, 2026-09-30)
+
+Der Owner hat die Wurzel-Auswahl durch einen schlichteren Projektbegriff ersetzt (ersetzt „Wurzeln (#47)“ und die
+Zeile „Zwei Projektbegriffe bleiben getrennt“ des Nachgrills):
+
+- **Ein Register für Editor und IDE:** die Tabelle `projects` (M7.1). Ein Projekt ist ein Ordner mit einer Zeile dort;
+  **keine Projektdatei im Ordner** (Repo bleibt sauber, Worktrees bleiben unberührt). Der Ordner ist die Wurzel
+  `project:<id>`.
+- **Öffnen:** Ordner über den nativen Dialog aus Rust (`project_open`), gibt es ihn schon als Projekt, wird dieses
+  geöffnet, sonst angelegt (Name = Ordnername; `axiomata_ide::store::open_root`). `$HOME` und darüber bleiben
+  abgelehnt (L0).
+- **Neu:** Name + „git init“ (Vorgabe an), dann Dialog für den Elternordner (`project_new`;
+  `axiomata_ide::newproject`, legt den Ordner an, nie einen bestehenden, räumt bei einem Fehler auf).
+- **Schließen:** nimmt das Projekt nur aus dem Baum. Tabs (auch mit ungespeichertem Stand), Ordner und Registerzeile
+  bleiben.
+- **Ein Projekt je Ansicht:** Editor und IDE halten je eines offen (Editor: `settings.editor.tree.project`). Der Baum,
+  ⌘P und die Projektsuche zeigen nur dessen Ordner. Der Second-Brain-Workspace bleibt **nicht** dauerhaft im Baum
+  (der Editor soll ohne Vault denkbar sein); er lässt sich als Ordner öffnen. Eine einzeln geöffnete Datei ist in
+  keinem Projekt.
+- **Mehrere Ordner (VS-Code-Workspace)** sind ausdrücklich später; dann kommt „Wurzeln hinzufügen/ausblenden“ zurück.
+- **Bewusst entfernt:** die Tauri-Befehle `create_ide_project` und `set_ide_project_root` (nahmen einen Pfad aus der
+  Webview). „Pfad ändern" läuft jetzt wie Öffnen über den Dialog (`project_set_root`). Die Projektleiste des Editors bietet
+  dasselbe wie die IDE-Auswahl: Ordner ändern und „aus der Liste entfernen“ (nie den Ordner).
 
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 
@@ -134,10 +183,12 @@ Rahmen: alle fünf Punkte (#47–#51) in einer Runde gegrillt, nichts wird gebau
   Konsole.
 - **Editor:** Breakpoints in der Gutter-Spalte, Anzeige der aktuellen Zeile; Panel mit Breakpoint-Liste und „Neue
   Sitzung“, `debug.json` (Vorbild Zed).
-- **Entschieden (Grill 2026-09-30):** Rust, Python und TS/Node von Anfang an; Adapter nur aus der eingebauten
-  Tabelle, Hand-Override unter `~/.axiomata`; Trust wie bei `lsp.json`. → „Debug (#51)" und „Trust-Modell" oben.
+- **Entschieden (Grill 2026-09-30, Nachgrill: ein Adapter zuerst):** Rust (`lldb-dap`/`codelldb`) zuerst, Python und
+  TS/Node danach als kleine Checkpoints; Adapter nur aus der eingebauten Tabelle, Hand-Override unter `~/.axiomata`;
+  Trust wie bei `lsp.json`, Projektdateien mit Hash-Bestätigung. → „Debug (#51)" und „Trust-Modell" oben.
 
 ## Nicht in diesem Plan
 
 Ein eigener Agent für die Codebasis, Snippets/Completion-Erweiterungen (L9 in `editor.md`) und die Herauslösung des
-Editors (ED7) — eigene Karten (#36, #35).
+Editors (ED7) — eigene Karten (#36, #35). Für ED7 gilt aber: die Werkzeuge hier werden ohne `axiomata-core` gebaut
+(siehe Nachgrill).

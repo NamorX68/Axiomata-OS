@@ -17,13 +17,15 @@
   import type { IdeProject } from "../core/backend";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import { folderNameProblem } from "../fileapp/projectModel";
 
   let {
     projects,
     current,
     switching = false,
     onOpen,
-    onCreate,
+    onOpenFolder,
+    onNewFolder,
     onSetRoot,
     onRemove,
   }: {
@@ -32,17 +34,19 @@
     /** An open is in flight; taking another click now only invites a race. */
     switching?: boolean;
     onOpen: (id: number) => void;
-    onCreate: (name: string, repoRoot: string) => void;
-    onSetRoot: (id: number, repoRoot: string) => void;
+    /** "Open project…": the native dialog, then the folder is a project. */
+    onOpenFolder: () => void;
+    /** "New project": a new folder called `name`, in a folder the dialog picks. */
+    onNewFolder: (name: string, gitInit: boolean) => void;
+    /** "Change folder": the native dialog picks the new one. */
+    onSetRoot: (id: number) => void;
     onRemove: (id: number) => void;
   } = $props();
 
   let open = $state(false);
   let root = $state<HTMLElement | undefined>();
   let newName = $state("");
-  let newRoot = $state("");
-  let editingRoot = $state<number | null>(null);
-  let editedRoot = $state("");
+  let newGit = $state(true);
   /** The "New project" form is folded into a row until asked for (editor-look I4). */
   let adding = $state(false);
 
@@ -50,27 +54,24 @@
   $effect(() => {
     if (!open) {
       adding = false;
-      editingRoot = null;
+      problem = null;
     }
   });
 
+  /** Shown under the field once a click or Enter found the name unusable. */
+  let problem = $state<string | null>(null);
+  let nameField = $state<HTMLInputElement | undefined>();
+
   function submitNew() {
-    if (!newName.trim() || !newRoot.trim()) return;
-    onCreate(newName.trim(), newRoot.trim());
+    problem = folderNameProblem(newName);
+    if (problem) {
+      nameField?.focus();
+      return;
+    }
+    onNewFolder(newName.trim(), newGit);
     newName = "";
-    newRoot = "";
     adding = false;
     open = false;
-  }
-
-  function startEditingRoot(project: IdeProject) {
-    editingRoot = project.id;
-    editedRoot = project.repo_root;
-  }
-
-  function submitRoot(id: number) {
-    if (editedRoot.trim()) onSetRoot(id, editedRoot.trim());
-    editingRoot = null;
   }
 </script>
 
@@ -78,7 +79,8 @@
      itself is inside `root`, so opening it does not immediately close it. -->
 <svelte:window
   onclick={(event) => {
-    if (open && root && !root.contains(event.target as Node)) open = false;
+    // composedPath, not contains(target): a click that swaps the menu's own buttons has already detached its target.
+    if (open && root && !event.composedPath().includes(root)) open = false;
   }}
 />
 
@@ -112,9 +114,9 @@
               <div class="row-actions">
                 <IconButton
                   icon="folder-open"
-                  label="Change the path of {project.name}"
+                  label="Change the folder of {project.name}…"
                   size="sm"
-                  onclick={() => startEditingRoot(project)}
+                  onclick={() => (onSetRoot(project.id), (open = false))}
                 />
                 <IconButton
                   icon="trash-2"
@@ -127,41 +129,42 @@
                   }}
                 />
               </div>
-              {#if editingRoot === project.id}
-                <form
-                  class="edit-root"
-                  onsubmit={(event) => {
-                    event.preventDefault();
-                    submitRoot(project.id);
-                  }}
-                >
-                  <input type="text" spellcheck="false" bind:value={editedRoot} placeholder="/Users/…/repo" />
-                  <button type="submit" class="ax-btn primary">Save</button>
-                </form>
-              {/if}
             </li>
           {/each}
         </ul>
       {/if}
 
       {#if !adding}
+        <button
+          class="add"
+          type="button"
+          onclick={() => {
+            open = false;
+            onOpenFolder();
+          }}><Icon name="folder-open" size="sm" /> Open project…</button
+        >
         <button class="add" type="button" onclick={() => (adding = true)}><Icon name="plus" size="sm" /> New project…</button>
       {:else}
-        <form
-          class="new"
-          onsubmit={(event) => {
-            event.preventDefault();
-            submitNew();
-          }}
-        >
+        <div class="new">
           <p class="label">New project</p>
-          <input type="text" spellcheck="false" bind:value={newName} placeholder="Name" />
-          <input type="text" spellcheck="false" bind:value={newRoot} placeholder="/Users/…/repo" />
+          <input
+            type="text"
+            spellcheck="false"
+            bind:this={nameField}
+            bind:value={newName}
+            oninput={() => (problem = null)}
+            placeholder="Project name"
+            onkeydown={(event) => {
+              if (event.key === "Enter") submitNew();
+            }}
+          />
+          {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
+          <label class="check"><input type="checkbox" bind:checked={newGit} /> Start a git repository</label>
           <div class="form-actions">
-            <button type="submit" class="ax-btn primary" disabled={!newName.trim() || !newRoot.trim()}>Add</button>
+            <button type="button" class="ax-btn primary" onclick={submitNew}>Choose where…</button>
             <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
           </div>
-        </form>
+        </div>
       {/if}
     </div>
   {/if}
@@ -308,24 +311,29 @@
     color: var(--ax-text);
   }
 
+  .problem {
+    margin: 0;
+    color: var(--ax-warning);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+
   .form-actions {
     display: flex;
     gap: var(--ax-space-2);
   }
 
-  .edit-root {
-    flex-basis: 100%;
-  }
-
-  .new,
-  .edit-root {
+  .new {
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-2);
-  }
-
-  .edit-root {
-    margin-top: var(--ax-space-2);
   }
 
   .new {

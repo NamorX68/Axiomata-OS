@@ -11,7 +11,6 @@ import * as projects from "./projects";
 vi.mock("./projects", () => ({
   listProjects: vi.fn(),
   openProject: vi.fn(),
-  createProject: vi.fn(),
   setProjectRoot: vi.fn(),
   deleteProject: vi.fn(),
   flushLayout: vi.fn(async () => {}),
@@ -156,14 +155,14 @@ describe("changeRoot", () => {
     await session.open(1);
     api.setProjectRoot.mockResolvedValue(project(1, { repo_root: "/repo/elsewhere" }));
 
-    const next = await session.changeRoot(1, "/repo/elsewhere", layout);
+    const next = await session.changeRoot(1, layout);
     expect(findTab(next!, "t1")!.tab.config).toEqual({ cwd: "/repo/elsewhere" });
     expect(get(session.session).current?.repo_root).toBe("/repo/elsewhere");
   });
 
   it("leaves the layout alone when the project moved is not the open one", async () => {
     api.setProjectRoot.mockResolvedValue(project(7, { repo_root: "/somewhere" }));
-    expect(await session.changeRoot(7, "/somewhere", layout)).toBeNull();
+    expect(await session.changeRoot(7, layout)).toBeNull();
   });
 });
 

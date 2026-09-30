@@ -608,6 +608,114 @@ pub async fn file_pick(
     .await
 }
 
+// ---------------------------------------------------------------- projects
+//
+// A project is a folder with a row in the IDE's `projects` table (M7.1) — the
+// one registry the editor and the IDE share. The folder always comes from the
+// native dialog, driven from here, never as a path the webview typed.
+
+fn ide_error(err: axiomata_core::ide::IdeError) -> FileError {
+    FileError {
+        kind: "Invalid",
+        message: err.to_string(),
+    }
+}
+
+/// Opens the native folder dialog; `None` if it was cancelled.
+async fn pick_folder_path(app: &AppHandle, title: &str) -> Option<PathBuf> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title(title)
+        .pick_folder(move |picked| {
+            let _ = tx.send(picked.and_then(|p| p.into_path().ok()));
+        });
+    rx.await.ok().flatten()
+}
+
+/// "Open project": the user picks a folder; it becomes (or already is) a
+/// project and is marked as just opened. `None` if the dialog was cancelled.
+#[tauri::command]
+pub async fn project_open(
+    app: AppHandle,
+    state: State<'_, CoreState>,
+) -> Result<Option<axiomata_core::ide::Project>, FileError> {
+    let Some(path) = pick_folder_path(&app, "Open project").await else {
+        return Ok(None);
+    };
+    blocking(&state, move |_, db| {
+        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        axiomata_core::ide::store::open_root(&db, &path)
+            .map(Some)
+            .map_err(|err| FilesError::Refused {
+                path: path.clone(),
+                reason: err.to_string(),
+            })
+    })
+    .await
+}
+
+/// "Change folder" (Pfad ändern): the user picks the project's new folder; the
+/// project keeps its id, name and layout. `None` if the dialog was cancelled or
+/// the project is gone.
+#[tauri::command]
+pub async fn project_set_root(
+    app: AppHandle,
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<Option<axiomata_core::ide::Project>, FileError> {
+    let Some(path) = pick_folder_path(&app, "Choose the project's folder").await else {
+        return Ok(None);
+    };
+    blocking(&state, move |_, db| {
+        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        axiomata_core::ide::store::set_repo_root(&db, id, &path).map_err(|err| {
+            FilesError::Refused {
+                path: path.clone(),
+                reason: err.to_string(),
+            }
+        })
+    })
+    .await
+}
+
+/// "New project": the user picks the parent folder, `name` becomes a new
+/// folder in it (optionally a git repository), and that folder is opened as a
+/// project. `None` if the dialog was cancelled.
+#[tauri::command]
+pub async fn project_new(
+    app: AppHandle,
+    state: State<'_, CoreState>,
+    name: String,
+    git_init: bool,
+) -> Result<Option<axiomata_core::ide::Project>, FileError> {
+    // Checked before the dialog so a bad name does not cost a pick.
+    axiomata_core::ide::newproject::check_folder_name(&name).map_err(ide_error)?;
+    let Some(parent) = pick_folder_path(&app, "Where should the new project go?").await else {
+        return Ok(None);
+    };
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder =
+            axiomata_core::ide::newproject::create_project_folder(&parent, &name, git_init)
+                .map_err(ide_error)?;
+        let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        match axiomata_core::ide::store::open_root(&db, &folder) {
+            Ok(project) => Ok(Some(project)),
+            Err(err) => {
+                // Nothing of ours is in there but what we just made.
+                let _ = std::fs::remove_dir_all(&folder);
+                Err(ide_error(err))
+            }
+        }
+    })
+    .await
+    .map_err(|err| FileError {
+        kind: "Io",
+        message: format!("project task failed: {err}"),
+    })?
+}
+
 // ------------------------------------------------------------ editor recovery
 //
 // Unsaved editor work kept aside (`axiomata_core::editor_recovery`, plan F8).

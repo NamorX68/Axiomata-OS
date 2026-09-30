@@ -1699,20 +1699,6 @@ pub fn list_ide_projects(state: State<'_, CoreState>) -> Result<Vec<ide::Project
     ide::store::list_projects(&db).map_err(|err| err.to_string())
 }
 
-#[tauri::command]
-pub fn create_ide_project(
-    state: State<'_, CoreState>,
-    name: String,
-    repo_root: String,
-) -> Result<ide::Project, String> {
-    let db = state.db_lock();
-    let new = ide::NewProject {
-        name,
-        repo_root: PathBuf::from(repo_root),
-    };
-    ide::store::create_project(&db, new).map_err(|err| err.to_string())
-}
-
 /// Returns `None` if there is no such project.
 #[tauri::command]
 pub fn rename_ide_project(
@@ -1722,17 +1708,6 @@ pub fn rename_ide_project(
 ) -> Result<Option<ide::Project>, String> {
     let db = state.db_lock();
     ide::store::rename_project(&db, id, &name).map_err(|err| err.to_string())
-}
-
-/// "Pfad ändern": the project keeps its id, its name and its layout.
-#[tauri::command]
-pub fn set_ide_project_root(
-    state: State<'_, CoreState>,
-    id: i64,
-    repo_root: String,
-) -> Result<Option<ide::Project>, String> {
-    let db = state.db_lock();
-    ide::store::set_repo_root(&db, id, &PathBuf::from(repo_root)).map_err(|err| err.to_string())
 }
 
 /// Stores the frontend's serialised dock tree. `None` clears it, which is what

@@ -25,17 +25,13 @@ export function listProjects(): Promise<IdeProject[]> {
   return invoke<IdeProject[]>("list_ide_projects");
 }
 
-export function createProject(name: string, repoRoot: string): Promise<IdeProject> {
-  return invoke<IdeProject>("create_ide_project", { name, repoRoot });
-}
-
 export function renameProject(id: number, name: string): Promise<IdeProject | null> {
   return invoke<IdeProject | null>("rename_ide_project", { id, name });
 }
 
 /** Changes where a project points without touching its id, name or layout. */
-export function setProjectRoot(id: number, repoRoot: string): Promise<IdeProject | null> {
-  return invoke<IdeProject | null>("set_ide_project_root", { id, repoRoot });
+export function setProjectRoot(id: number): Promise<IdeProject | null> {
+  return invoke<IdeProject | null>("project_set_root", { id });
 }
 
 /** Marks the project as just opened — what the project list sorts by. */

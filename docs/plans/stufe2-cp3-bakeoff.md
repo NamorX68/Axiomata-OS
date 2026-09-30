@@ -1,5 +1,10 @@
 # Stufe 2 CP3 — bake-off notes
 
+> **Überholt (Stand 2026-09-30):** Der hier beschriebene `ollama-agent`-Backend, `local_backend`/`effective_backend`
+> und die eigene MCP-Schicht existieren nicht mehr. Skills laufen als Sessions auf Opencode 2
+> (`opencode2.md`, `AGENTS.md`); `backend:` ist nur noch `opencode` | `ollama`. Dieses Dokument bleibt als
+> Begründungsprotokoll.
+
 Status: **mechanism shipped; first bake-off round done (2026-09-10).** The
 provider-switch (`local_backend` / `effective_backend`), the `prepend_files`
 bridge, the loop tracing, and `axiomata-cli get-run` are implemented with unit

@@ -30,6 +30,7 @@ pub mod agent_store;
 pub mod git;
 pub mod lifecycle;
 pub mod model;
+pub mod newproject;
 pub mod provision;
 pub mod store;
 pub mod worktree;

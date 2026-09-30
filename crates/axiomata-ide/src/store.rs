@@ -333,6 +333,49 @@ pub fn touch_opened(db: &Connection, id: i64) -> Result<bool> {
     Ok(changed == 1)
 }
 
+/// "Open folder as a project": the project already on this folder, or a new one
+/// named after it, marked as just opened either way.
+///
+/// This is the one door both the editor and the IDE use to turn a picked
+/// folder into a project, so the two never disagree about which row a folder
+/// is. The folder is canonicalised first (see [`normalize_root`]), so `~/x`
+/// and `/Users/me/x` find the same row.
+pub fn open_root(db: &Connection, root: &Path) -> Result<Project> {
+    let resolved = normalize_root(root)?;
+    let root_text = root_as_text(&resolved)?;
+    let existing: Option<i64> = db
+        .query_row(
+            "SELECT id FROM projects WHERE repo_root = ?1",
+            params![root_text],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let id = match existing {
+        Some(id) => id,
+        None => {
+            let name = resolved
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Project")
+                .to_string();
+            create_project(
+                db,
+                NewProject {
+                    name,
+                    repo_root: resolved,
+                },
+            )?
+            .id
+        }
+    };
+    touch_opened(db, id)?;
+    get_project(db, id)?.ok_or_else(|| IdeError::CorruptRow {
+        table: "projects",
+        id,
+        reason: "vanished right after being opened".to_string(),
+    })
+}
+
 /// Removes the project **row**. Never the folder.
 ///
 /// Worth stating in code because the opposite is a plausible reading of
@@ -942,5 +985,29 @@ mod tests {
         ] {
             assert!(!too_wide(Path::new(fine), home), "{fine}");
         }
+    }
+    #[test]
+    fn open_root_reuses_the_row_of_a_known_folder_and_names_a_new_one_after_it() {
+        let db = temp_db();
+        let dir = TempDir::new("open-root");
+        let first = open_root(&db, dir.path()).unwrap();
+        assert!(first.last_opened_at.is_some());
+        assert_eq!(
+            first.name,
+            dir.path().file_name().unwrap().to_str().unwrap()
+        );
+        // A second pick of the same folder — even spelled with a detour — is the same project.
+        let detour = dir.path().join(".");
+        let again = open_root(&db, &detour).unwrap();
+        assert_eq!(again.id, first.id);
+        assert_eq!(list_projects(&db).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn open_root_refuses_a_folder_that_is_not_there() {
+        let db = temp_db();
+        let gone = std::env::temp_dir().join("axiomata-ide-test-open-root-missing-xyz");
+        assert!(open_root(&db, &gone).is_err());
+        assert!(list_projects(&db).unwrap().is_empty());
     }
 }
