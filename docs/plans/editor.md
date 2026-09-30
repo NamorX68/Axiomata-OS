@@ -195,7 +195,7 @@ hier der Stand, damit die Lücke zwischen ED6 und heute sichtbar ist:
   Module, jedes Modul eigens geplant.
 - **[`editor-projekt-werkzeuge.md`](editor-projekt-werkzeuge.md)** — die Projekt-Werkzeuge: Wurzeln
   im Dateibaum, Outline, Git-Panel, Run/Tasks, Debug/DAP. Gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt),
-  **geparkt — kein Bau**; ED7 (die Werkzeuge dort werden ohne `axiomata-core` gebaut, damit ED7 eine Hülle bleibt), Snippets/Completion (#36) und ein eigener Codebasis-Agent bleiben
+  **Wurzeln (#47) als Nächstes zu bauen, der Rest geparkt**; ED7 (die Werkzeuge dort werden ohne `axiomata-core` gebaut, damit ED7 eine Hülle bleibt), Snippets/Completion (#36) und ein eigener Codebasis-Agent bleiben
   draußen.
 - **[`opencode2.md`](opencode2.md)** — berührt den Editor mittelbar: Skills und Chat laufen als
   Sessions auf dem gemeinsamen Opencode-2-Dienst, dessen Agenten die IDE startet. OC1–OC4 erledigt.
@@ -1314,7 +1314,7 @@ Edition der Crate, prettier, stylua, shfmt; Text über stdin, 10 s Grenze), Taur
 `textDocument/formatting`. Das Ergebnis geht als geänderte Zeilen hinein (`editor/textEdits.ts`, Befehl
 `replaceText`), ein Undo-Schritt, der Cursor bleibt auf seiner Zeile. Einstellungen `formatOnSave` (an) und
 `formatOnSaveExcept`. Mason-Ordner in `servers::search_path`. Umbenennen (F2, Vi `grn`, `:rename <name>`):
-`prepareRename`, dann `rename`; `fileapp/renameApply.ts` ändert offene Dokumente (dieses über seine Oberfläche,
+`prepareRename`, dann `rename`; `fileapp/workspaceEdit.ts` (früher `renameApply.ts`) ändert offene Dokumente (dieses über seine Oberfläche,
 andere direkt + `docTouched`) und schreibt geschlossene Dateien mit Versionsprüfung; Dateien außerhalb der Wurzeln
 bleiben unangetastet. Security-Review: Prettiers Suche nach seiner Konfiguration (die sonst bis `/` hinaufgeht und
 `prettier.config.js` ausführt) macht Rust selbst und nur bis zur Wurzel (`--config <datei>` oder `--no-config`);

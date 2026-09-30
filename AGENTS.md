@@ -94,8 +94,8 @@ Next in the editor: **ED7** (extraction into a standalone app, the engine alread
 from the app — D1). Beyond that the editor has two follow-on plans of their own:
 [`editor-look.md`](docs/plans/editor-look.md) (LK0–LK5, complete — the modern look becoming the
 app's standard) and [`editor-projekt-werkzeuge.md`](docs/plans/editor-projekt-werkzeuge.md)
-(project roots in the tree, outline, git panel, run/tasks, debug/DAP — grilled 2026-09-30, Q1–Q19,
-**parked, no build**). `docs/plans/editor.md` lists both under „Fortschreibungen".
+(project roots in the tree, outline, git panel, run/tasks, debug/DAP — grilled 2026-09-30, Q1–Q27;
+**roots (#47) are next to build, the rest stays parked**). `docs/plans/editor.md` lists both under „Fortschreibungen".
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

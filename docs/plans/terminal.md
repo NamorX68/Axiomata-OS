@@ -1,101 +1,16 @@
 # Eigenes Terminal-Modul
 
-Status (2026-09-15): Checkpoints 0–4 sind umgesetzt und automatisiert
-verifiziert (Engine-/Tauri-/Frontend-Tests, Sub-Agent-Reviews); der volle
-interaktive Live-Test (Scrollback-Gefühl, `vim`/`htop` im Alternate-Screen,
-Auswahl+Copy, Paste, mehrere gleichzeitige Terminals) steht noch aus — der
-Owner testet das bei nächster Gelegenheit am Mac selbst. Checkpoint 5 ist
-teilweise umgesetzt ("Mehrere Instanzen" brauchte keinen Code, Konfiguration
-Schriftgröße/Shell-Wahl ist da); Performance-Tuning bei sehr hohem Output
-ist noch offen. Checkpoint 5b (Settings-Erweiterung) ist KOMPLETT — Block A
-committet (`76a5715`), Block B committet (`9f44a71`), beide automatisiert
-verifiziert und durch alle vier Pflicht-Sub-Agents gegangen. Checkpoint 5d
-(Bugfixes + globale Settings-Datei, `5f22b51`) ist committet. Checkpoint 5e
-(zweite Live-Test-Runde: Ghosting/Clear-Fix, Startgröße 120×60, erster
-Autofokus-Versuch, `f6f945e`) ist committet — der Autofokus-Teil hat beim
-echten Live-Test am Mac aber NICHT gehalten (Owner-Feedback: weiterhin
-Klick nötig). Checkpoint 5f (robusterer Autofokus-Fix + Gating gegen
-Fokus-Diebstahl, `e415426`) ist committet — Owner-Feedback danach: der
-Fokus beim Öffnen/Start funktioniert jetzt, ABER ein verbleibender Fall
-war noch offen (Flip zu den Settings und zurück erforderte weiterhin
-einen Klick, siehe Checkpoint 5f). Checkpoint 5g (mehr Themes, mitgelieferte
-Fonts inkl. Nerd Font) ist KOMPLETT (siehe unten) — auf ausdrücklichen
-Owner-Wunsch vorgezogen, noch vor Behebung des verbleibenden Fokus-Falls.
-Checkpoint 5f2 (Fix für genau diesen Flip-Fokus-Fall, siehe unten) ist
-ebenfalls KOMPLETT, Chromium-verifiziert. Farbtiefe (Owner-Frage): volles
-24-Bit-True-Color End-to-End (Rust-Parser → Screen-Modell → Canvas
-`rgb()`), plus die 16-Farben-ANSI-Palette und den 256er-Cube/
-Graustufen-Ramp — dieselbe Farbtiefe wie Ghostty; die vom Owner
-beobachtete fehlende Abstufung lag an den Nerd-Font-Glyphen (5g), nicht an
-der Farbtiefe. Der Owner hat außerdem die Frage aufgeworfen, ob die App
-auf ein Chromium-basiertes Webview statt WKWebView umsteigen sollte, um
-diese ganze Klasse von Bugs zu vermeiden — zurückgestellt, noch nicht
-beantwortet. Checkpoint 5h (echtes Font-Gewicht-Setting + acht weitere
-Mono-Fonts, zehn insgesamt) und Checkpoint 5i (Pfeiltasten/Home/End/
-PageUp/PageDown/Delete wurden nie an die Shell weitergegeben — fixt u. a.
-die vom Owner gemeldete fehlende Shell-Autosuggestion-Übernahme per →)
-sind beide KOMPLETT. Checkpoint 5j (Font-Wechsel löste kein Neu-Vermessen
-aus + Web-Font-Lade-Race, gefunden beim Erstellen von Demo-Screenshots für
-den Owner, siehe unten) ist ebenfalls KOMPLETT. Checkpoint 5k
-(Hintergrundfarbe folgte dem App- statt dem Terminal-Theme + kaputte
-Blockzeichen, per Ghostty-Screenshot-Vergleich vom Owner gefunden, siehe
-unten) ist ebenfalls KOMPLETT. Checkpoint 5l (COLORTERM=truecolor nie
-gesetzt) und Checkpoint 5m (echter gepatchter Nerd Font statt
-Icon-Fallback-Kette, direkte Ursache der abweichenden Kommandozeilen-
-Symbole/-Farben) sind ebenfalls beide KOMPLETT. Checkpoint 5n
-(Hintergrundfarben ignorierten das Theme komplett — echter Engine-Bug,
-vom Owner selbst per `printf`-Repro am echten Mac bewiesen, siehe unten)
-ist ebenfalls KOMPLETT — vom Owner selbst am echten Mac bestätigt
-(korrektes Pastell-Blau, saubere abgerundete Pills). Checkpoint 5o
-(Settings-Seite Redesign, siehe unten) ist ebenfalls KOMPLETT — vom Owner
-selbst am echten Mac bestätigt und als "kann so bleiben" akzeptiert.
-Checkpoint 5p (kaputte Box-Drawing-Linien — derselbe Bug wie 5k, nur für
-Linienzeichen statt Füllzeichen, vom Owner per Screenshot der eigenen
-Claude-Code-Darstellung im Terminal gemeldet, siehe unten) ist ebenfalls
-KOMPLETT. Ein zweites, im selben Screenshot sichtbares Problem
-(ungewöhnlich viel/durchgehende Unterstreichung) ist NICHT gefixt, aber
-per Owner-Screenshot-Vergleich mit Ghostty jetzt als echter OSC-8-
-Hyperlink-Unterschied bestätigt — Implementierung folgt als eigener
-Checkpoint 5r. Checkpoint 5q (Shift+Tab — Claude Codes eigener Modus-
-Wechsel-Shortcut — tat nichts, Owner-Feedback) ist ebenfalls KOMPLETT.
-Checkpoint 5r (OSC-8-Hyperlinks — permanentes Unterstreichen
-unterdrückt, Fortsetzung von Checkpoint 5p Problem 2, per
-Ghostty-Vergleichs-Screenshots vom Owner bestätigt) ist ebenfalls
-KOMPLETT. Owners erster echter Live-Test danach zeigte: der Screenshot
-sah nach CP5r unverändert aus (Text weiterhin durchgehend
-unterstrichen) — Ursache war aber gar nicht OSC-8, sondern ein
-unabhängiger, älterer CSI-Parsing-Bug, jetzt als eigener Checkpoint 5s
-gefixt (siehe unten) KOMPLETT. Owner hat direkt im Anschluss den ersten
-echten Live-Test der ganzen Kette gemacht: Underline-Problem bestätigt
-behoben; `vim`/`bpytop`/`neovim` laufen, Rendering laut Owner "nicht
-wirklich smooth" (noch nicht weiter eingegrenzt — evtl. das offene
-Performance-Tuning bei hohem Output, siehe unten); Maus-Auswahl,
-`Cmd+C`/`Cmd+V` und mehrere gleichzeitige Kacheln funktionieren alle;
-`Cmd+C` verursachte aber jedes Mal einen Systemton — gefixt als
-Checkpoint 5t (siehe unten) KOMPLETT. Nächster Schritt: das
-"nicht smooth"-Rendering bei vim/bpytop genauer eingrenzen (ruckelt es,
-flackert es, hängt die Eingabe nach?), außerdem weiterhin ausstehend:
-Scrollback-Gefühl explizit testen, danach Live-Test von
-5f+5f2+5g+5h+5i+5j+5k+5l+5m+5n+5o+5p+5q+5r+5s+5t insgesamt als
-abgeschlossen bestätigen (bei 5l zusätzlich `cargo test`, das in jener
-Session wegen eines Umgebungs-Linker-Problems nicht laufen konnte; bei 5s
-lief `cargo test` erstmals wieder durch und deckte dabei nebenbei auch
-einen Bug in einem 5r-eigenen Test auf, siehe 5s) — diese ganze Kette
-entstand aus genau solchen Live-Tests (oder, bei 5j/5k/5m/5p/5r, deren
-Chromium-Ersatz), nicht aus automatisierter Verifikation allein. Checkpoint
-5u (falsche Zeilen-/Spaltenzahl nach App-Neustart) und 5v (Startkachel etwas
-zu breit) sind ebenfalls KOMPLETT (siehe unten). Checkpoint 6 (siehe unten)
-greift das seit CP5t offene "Performance-Tuning bei sehr hohem Output"/
-"nicht smooth"-Thema konkret auf: Owner-Frage nach GPU-Rendering (à la
-Ghostty) führte zur eigentlichen Diagnose — ungedrosselte
-Backend-IPC-Emission pro PTY-`read()` (Flackern bei Full-Screen-Redraws)
-plus unbedingtes 60/120Hz-Frontend-Redraw auch im Leerlauf, beides gefixt,
-GPU/WebGL bewusst zurückgestellt (anderer Bottleneck, unverhältnismäßiger
-Aufwand). Direkt im Live-Test danach ein zweiter, unabhängiger Fund: Claude
-Codes eigene CLI-Ausgabe verlor fast alle Leerzeichen zwischen Wörtern —
-Ursache war ein fehlendes `CSI n G` (CHA) in `Screen::csi_dispatch`, per
-echtem PTY-Capture zweifelsfrei nachgewiesen und gefixt. Checkpoint 6 ist
-KOMPLETT (Owner-Bestätigung: `neovim`/`opencode`/`bpytop` "top").
+Status (bereinigt 2026-09-30): **Checkpoints 0–6 samt 5b–5v sind KOMPLETT.** Engine (`axiomata-terminal`,
+`vte`), Canvas-Renderer, Scrollback, Alternate-Screen, Auswahl/Copy/Paste (Bracketed Paste), Settings
+(Fonts inkl. Nerd Font, Themes, Transparenz, Scrollback), Autofokus, True Color und die Fixes aus den
+Live-Test-Runden am echten Mac (Box-Drawing, Unterstreichung/OSC 8, Shift+Tab, Cmd+C-Ton, Zeilen/Spalten nach
+Neustart, Flackern, fehlende Leerzeichen) sind umgesetzt. Der Owner hat die Kette live bestätigt
+(`vim`/`neovim`/`bpytop`/`opencode` „top“, Maus-Auswahl, mehrere Kacheln). **Bewusst zurückgestellt:**
+GPU-/WebGL-Rendering (anderer Engpass, unverhältnismäßiger Aufwand) und der Wechsel auf ein Chromium-basiertes
+Webview statt WKWebView (vom Owner aufgeworfen, nie entschieden). Das Terminal trägt außerdem die PTY-Panes der
+IDE (M7) und die Run-Ausgabe der geplanten Projekt-Werkzeuge. Die Checkpoint-Abschnitte unten sind das
+unveränderte Protokoll der Reihe nach; die Zeile „Nächster Schritt“ und die „ausstehend“-Hinweise darin
+sind Stand ihres Datums.
 
 ## Checkpoint 5d — Bugfixes aus dem ersten echten Live-Test + globale
 Settings-Datei (Owner-Feedback, 2026-09-14)
@@ -1589,7 +1504,7 @@ sinnvoll etwas zeichnen lässt).
   Checkpoint 2 behoben). Kachel schließen beendet den Shell-Prozess
   (prüfbar z. B. über `ps aux | grep zsh` vor/nach dem Schließen).
 
-## Fahrplan für die weiteren Phasen (Umfang grob, Detailplanung folgt vor dem jeweiligen Start)
+## Fahrplan für die weiteren Phasen (Umfang grob, Detailplanung folgt vor dem jeweiligen Start) — alle umgesetzt (Checkpoint 2–5 komplett, s. o.)
 
 **Checkpoint 2 — ANSI/VT100-Interpretation**: `vte`-Parser einbinden,
 Bildschirm-Zustandsmaschine (Zellgitter mit Zeichen + RGB-Vorder-/
@@ -1705,7 +1620,7 @@ Sub-Agent-Durchlauf und einen eigenen Commit, kein großer Rutsch.
 — aber andersherum macht es wenig Sinn, z. B. das Scrollback-Limit
 Rust-seitig zu bauen, bevor der Rest der Settings-Seite überhaupt die
 neuen UI-Muster hat). Nach beiden Blöcken: kurzer gemeinsamer Live-Test
-aller neuen Einstellungen zusammen mit dem noch offenen CP4/5-Live-Test.
+aller neuen Einstellungen zusammen mit dem damals noch offenen CP4/5-Live-Test (inzwischen durch die Owner-Live-Tests in 5n–6 abgedeckt).
 
 ## Verifikation (gesamt, pro Checkpoint anwendbar)
 

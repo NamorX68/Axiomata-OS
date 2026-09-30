@@ -1,6 +1,6 @@
 # Grobplan: Projekt-Werkzeuge im Editor (Wurzeln, Outline, Git, Run, Debug)
 
-Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), weiter geparkt — kein Bau** (Owner: grillen ja, Code nein).
+Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **Wurzeln (#47) freigegeben zum Bau (Owner, 2026-09-30); der Rest weiter geparkt**.
 Ursprünglich geparkt 2026-09-29 („keine Resourcen für Umsetzung“). Die Entscheidungen unten sind der
 abgelegte Grill-Stand; vor dem Bauen jeden Punkt anhand dessen in Checkpoints zerlegen
 (siehe die Arbeitsweise im Dachplan [`agentic-ide.md`](agentic-ide.md)).
