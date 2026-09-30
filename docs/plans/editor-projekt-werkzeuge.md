@@ -86,6 +86,31 @@ Rahmen: alle fünf Punkte (#47–#51) in einer Runde gegrillt, nichts wird gebau
   Hand-Override in `~/.axiomata/*.json` (kein Tauri-Schreibbefehl), nur gesprochene Methoden, vor
   dem Start anzeigen, was läuft.
 
+## Nachgrill (2026-09-30, Q20–Q27)
+
+Zweite Runde über denselben Plan, Fokus auf Widersprüche und Zuschnitt. Weiter **kein Bau**.
+
+- **Trust präzisiert (ersetzt die Lesart „nur Tabelle + Override“ für Projektdateien):** eine
+  `tasks.json`/`debug.json` im Projekt wird gelesen, läuft aber erst nach einer Bestätigung — beim ersten
+  Lauf und nach jeder Änderung (Datei-Hash) zeigt ein Dialog die Befehle/Adapter-Pfade/Argumente. Die
+  Freigabe (Hash je Datei) liegt unter `~/.axiomata`, geschrieben aus Rust, kein Tauri-Schreibbefehl aus
+  der Webview. Gilt für `debug.json` genauso. Adapter- und LSP-Tabellen bleiben eingebaut + Hand-Override.
+- **Zwei Projektbegriffe bleiben getrennt:** IDE-Projekt (Layout, Agenten, Worktrees) und globaler
+  Editor-Arbeitsbereich (Wurzelauswahl, #47) — bewusst, wie gegrillt.
+- **Git: gemeinsamer Unterbau.** Prozessaufruf, Status- und Diff-Parsing ziehen nach `axiomata-files`;
+  `axiomata-ide::git` behält nur Worktree/Basis-Branch/Take-over und setzt darauf auf. Dieser Umbau ist
+  der **erste Checkpoint von #48** (M7.3-Tests müssen grün bleiben).
+- **ED7 nimmt die Werkzeuge mit.** Jedes Werkzeug (Outline, Git, Run, Debug) wird ohne `axiomata-core`
+  gebaut (nur `axiomata-files`/`axiomata-terminal`), damit ED7 nur noch eine Hülle ist.
+- **Run (#50): Problem-Matcher je Sprache mit Diagnosen im Editor** (Wellen/Markierungen wie bei LSP-
+  Diagnosen, Quelle „task“), nicht nur klickbare Stellen. Je Toolchain ein Matcher (rustc/cargo
+  `--message-format=json`, tsc, pytest/ruff o. ä.); der Zuschnitt des ersten Wurfs wird im Checkpoint-
+  Grill von #50 festgelegt. **Offen:** wann Diagnosen einer Task verschwinden (nächster Lauf? Datei-Edit?).
+- **Debug (#51): ein Adapter zuerst.** DAP-Client bleibt generisch; Abnahme mit `lldb-dap`/`codelldb`
+  (Rust), Python (`debugpy`) und Node folgen je als kleiner Checkpoint. Ändert „alle drei von Anfang an“ oben.
+- **Parkung bleibt**, bis ein konkreter Schmerz auftritt (Owner). Reihenfolge zu M7.4–M7.6/ED7 daher
+  nicht festgelegt; der Vorschlag der Tabelle oben gilt, wenn gezogen wird.
+
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 
 - **Hinzufügen:** Eintrag „Ordner hinzufügen“ (Dialog wie `file_pick`, Ergebnis ein `grant:<id>`). **Nie** einen Pfad
