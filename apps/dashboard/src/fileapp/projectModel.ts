@@ -29,3 +29,16 @@ export function resolveProject(projects: readonly IdeProject[], saved: number | 
 export function otherProjects(projects: readonly IdeProject[], current: number | null, limit = 8): IdeProject[] {
   return projects.filter((p) => p.id !== current).slice(0, limit);
 }
+
+/**
+ * Why `name` cannot be a new project's folder, or `null` if it can — the same rules as
+ * `axiomata_ide::newproject::check_folder_name`, so the form says so before any dialog opens.
+ */
+export function folderNameProblem(name: string): string | null {
+  const n = name.trim();
+  if (n === "") return "Enter a folder name first.";
+  if (n.length > 100) return "That name is too long for a folder.";
+  if (n.startsWith(".")) return "The name must not start with a dot.";
+  if (/[/\\:\0]/.test(n)) return "The name must not contain / \\ or :.";
+  return null;
+}

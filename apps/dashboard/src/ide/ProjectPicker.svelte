@@ -17,6 +17,7 @@
   import type { IdeProject } from "../core/backend";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import { folderNameProblem } from "../fileapp/projectModel";
 
   let {
     projects,
@@ -54,12 +55,21 @@
   $effect(() => {
     if (!open) {
       adding = false;
+      problem = null;
       editingRoot = null;
     }
   });
 
+  /** Shown under the field once a click or Enter found the name unusable. */
+  let problem = $state<string | null>(null);
+  let nameField = $state<HTMLInputElement | undefined>();
+
   function submitNew() {
-    if (!newName.trim()) return;
+    problem = folderNameProblem(newName);
+    if (problem) {
+      nameField?.focus();
+      return;
+    }
     onNewFolder(newName.trim(), newGit);
     newName = "";
     adding = false;
@@ -164,15 +174,18 @@
           <input
             type="text"
             spellcheck="false"
+            bind:this={nameField}
             bind:value={newName}
+            oninput={() => (problem = null)}
             placeholder="Folder name"
             onkeydown={(event) => {
               if (event.key === "Enter") submitNew();
             }}
           />
+          {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
           <label class="check"><input type="checkbox" bind:checked={newGit} /> Start a git repository</label>
           <div class="form-actions">
-            <button type="button" class="ax-btn primary" disabled={!newName.trim()} onclick={submitNew}>Choose where…</button>
+            <button type="button" class="ax-btn primary" onclick={submitNew}>Choose where…</button>
             <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
           </div>
         </div>
@@ -320,6 +333,12 @@
   .add:hover {
     background: var(--ax-surface-2);
     color: var(--ax-text);
+  }
+
+  .problem {
+    margin: 0;
+    color: var(--ax-warning);
+    font-size: var(--ax-font-size-xs);
   }
 
   .check {

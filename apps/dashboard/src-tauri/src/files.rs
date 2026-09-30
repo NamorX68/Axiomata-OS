@@ -665,14 +665,11 @@ pub async fn project_new(
     name: String,
     git_init: bool,
 ) -> Result<Option<axiomata_core::ide::Project>, FileError> {
-    tracing::info!(%name, git_init, "project_new: called");
     // Checked before the dialog so a bad name does not cost a pick.
     axiomata_core::ide::newproject::check_folder_name(&name).map_err(ide_error)?;
     let Some(parent) = pick_folder_path(&app, "Where should the new project go?").await else {
-        tracing::info!("project_new: the folder dialog was cancelled");
         return Ok(None);
     };
-    tracing::info!(parent = %parent.display(), "project_new: parent chosen");
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let folder =

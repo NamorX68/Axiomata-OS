@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { IdeProject } from "../core/backend";
-import { otherProjects, projectRootId, resolveProject, treeRootsOf } from "./projectModel";
+import { folderNameProblem, otherProjects, projectRootId, resolveProject, treeRootsOf } from "./projectModel";
 
 const project = (id: number): IdeProject => ({
   id,
@@ -36,5 +36,14 @@ describe("the editor's project", () => {
     const all = [1, 2, 3, 4].map(project);
     expect(otherProjects(all, 2).map((p) => p.id)).toEqual([1, 3, 4]);
     expect(otherProjects(all, null, 2).map((p) => p.id)).toEqual([1, 2]);
+  });
+
+  it("explains a folder name that would be refused, and accepts a plain one", () => {
+    expect(folderNameProblem("  ")).toMatch(/Enter a folder name/);
+    expect(folderNameProblem(".hidden")).toMatch(/dot/);
+    expect(folderNameProblem("a/b")).toMatch(/must not contain/);
+    expect(folderNameProblem("a:b")).toMatch(/must not contain/);
+    expect(folderNameProblem("x".repeat(101))).toMatch(/too long/);
+    expect(folderNameProblem(" my-app ")).toBeNull();
   });
 });

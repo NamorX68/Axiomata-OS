@@ -9,7 +9,7 @@
 <script lang="ts">
   import type { IdeProject } from "../core/backend";
   import Icon from "../ui/Icon.svelte";
-  import { otherProjects } from "./projectModel";
+  import { folderNameProblem, otherProjects } from "./projectModel";
 
   interface Props {
     projects: IdeProject[];
@@ -32,12 +32,23 @@
   const others = $derived(otherProjects(projects, current?.id ?? null));
 
   $effect(() => {
-    if (!open) adding = false;
+    if (!open) {
+      adding = false;
+      problem = null;
+    }
   });
+
+  /** Shown under the field once a click or Enter found the name unusable. */
+  let problem = $state<string | null>(null);
+  let nameField = $state<HTMLInputElement | undefined>();
 
   function submit(): void {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    problem = folderNameProblem(trimmed);
+    if (problem) {
+      nameField?.focus();
+      return;
+    }
     open = false;
     name = "";
     onNew(trimmed, git);
@@ -115,15 +126,18 @@
           <input
             type="text"
             spellcheck="false"
+            bind:this={nameField}
             bind:value={name}
+            oninput={() => (problem = null)}
             placeholder="Folder name"
             onkeydown={(event) => {
               if (event.key === "Enter") submit();
             }}
           />
+          {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
           <label class="check"><input type="checkbox" bind:checked={git} /> Start a git repository</label>
           <div class="form-actions">
-            <button type="button" class="ax-btn primary" disabled={!name.trim()} onclick={submit}>Choose where…</button>
+            <button type="button" class="ax-btn primary" onclick={submit}>Choose where…</button>
             <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
           </div>
         </div>
@@ -239,6 +253,12 @@
   .label {
     margin: 0;
     color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .problem {
+    margin: 0;
+    color: var(--ax-warning);
     font-size: var(--ax-font-size-xs);
   }
 

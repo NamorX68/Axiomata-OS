@@ -32,4 +32,23 @@ describe("ProjectBar", () => {
     expect(onNew).toHaveBeenCalledWith("demo", true);
     unmount(app);
   });
+
+  it("says what is wrong with an empty name instead of doing nothing", () => {
+    const onNew = vi.fn();
+    const target = document.body.appendChild(document.createElement("div"));
+    const app = mount(ProjectBar, {
+      target,
+      props: { projects: [], current: null, onPick: vi.fn(), onOpenFolder: vi.fn(), onNew, onClose: vi.fn() },
+    });
+    flushSync();
+    (target.querySelector(".current") as HTMLElement).click();
+    flushSync();
+    ([...target.querySelectorAll("button.action")].find((b) => b.textContent?.includes("New project")) as HTMLElement).click();
+    flushSync();
+    (target.querySelector(".new-form button.primary") as HTMLElement).click();
+    flushSync();
+    expect(target.querySelector(".problem")?.textContent).toMatch(/Enter a folder name/);
+    expect(onNew).not.toHaveBeenCalled();
+    unmount(app);
+  });
 });
