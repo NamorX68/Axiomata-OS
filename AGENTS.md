@@ -88,8 +88,14 @@ results); ED6.4 completion (a menu while typing, as blink.cmp in the owner's Neo
 formatter table in `axiomata-files::format`, after the owner's conform.nvim) and rename; ED6.6 signature help;
 ED6.7 code actions (L18–L24: `workspace/executeCommand` only as an echo of a command the server offered in a
 `textDocument/codeAction` answer, checked in Rust; `workspace/applyEdit` only while our command runs) —
-**ED6 is complete**.
-Next: the owner's live test of ED6.
+**ED6 is complete** — and the owner's live test of ED6 was accepted on 2026-09-29, as were the ED5
+live test and the ED2 colour sign-off. Nothing in ED0–ED6 is open.
+Next in the editor: **ED7** (extraction into a standalone app, the engine already imports nothing
+from the app — D1). Beyond that the editor has two follow-on plans of their own:
+[`editor-look.md`](docs/plans/editor-look.md) (LK0–LK5, complete — the modern look becoming the
+app's standard) and [`editor-projekt-werkzeuge.md`](docs/plans/editor-projekt-werkzeuge.md)
+(project roots in the tree, outline, git panel, run/tasks, debug/DAP — grilled 2026-09-30, Q1–Q19,
+**parked, no build**). `docs/plans/editor.md` lists both under „Fortschreibungen".
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
@@ -286,3 +292,33 @@ from the code itself:
   into both role fields on load, then `save()` drops it). Details: `docs/architecture.md` §5
   "Model providers"; `docs/plans/per-role-provider.md`;
   `docs/plans/settings-provider-overhaul.md`.
+
+## Sub-agents (use the Rust variants, not the Python-oriented defaults)
+
+The owner's global `~/.claude/CLAUDE.md` defines mandatory automatic sub-agent triggers. Three of
+the named agents there (`test-engineer`, `dependency-auditor`, `performance-analyzer`) are worded
+for a Python/`uv` stack and **do not apply to this repo**. Global, Rust-flavored replacements exist
+at `~/.claude/agents/{rust-test-engineer,rust-dependency-auditor,rust-performance-analyzer}.md`
+(usable in any Rust project) — use those instead, same trigger conditions translated to Rust terms
+(`cargo test`, `cargo audit`, `rusqlite`/`tokio`).
+
+**Cadence override** (owner, 2026-09-08; rationale in `docs/architecture.md` §7): fire them **once
+per plan checkpoint, and always before a commit**, not after every single changed
+`fn`/`struct`/`Cargo.toml` line mid-task. Keep writing/updating tests inline as code lands
+regardless — the test engineer's run is a bundled second-pass gap check over the accumulated diff,
+not the first pass. The same override applies to an agent's own verification loop: batch
+`cargo build`/`clippy`/`fmt`/`test` per unit of work, and run the full set only when the work is
+done, before handing off to a sub-agent, and before a commit.
+
+**Lean review cadence** (owner, 2026-09-27, to save resources; reversible): reviews run only before
+a commit, and small checkpoints may be bundled into one commit. Instead of separate architecture +
+test-gap agents, **one** combined review agent (model `sonnet`, narrow brief: defects and
+convention breaks only, short report) covers design and missing tests; the tests themselves are
+written inline as code lands. `security-auditor` still runs in full where a plan asks for it or the
+global trigger applies (auth, external paths, new endpoints, …).
+
+`architecture-reviewer`, `security-auditor`, `docs-writer`, and `refactoring-specialist` are
+already language-agnostic as globally defined and apply here unchanged. When
+`architecture-reviewer` or another background sub-agent run is not available (e.g. a session rate
+limit), do a manual review pass yourself rather than skipping the check — the trigger is
+mandatory, not the specific tool.

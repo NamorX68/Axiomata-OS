@@ -1,10 +1,11 @@
 # Plan: Die Datei-App — ein eigener Editor als Single Point of Truth
 
-Status: **ED0, ED1 und ED2 fertig** (2026-09-23/24; ED2 wartet auf die Farbabnahme und den
-Live-Test); **M7.3 CP8/CP9 auf dem Editor fertig** (2026-09-25, `git-layer.md`); **ED3 (Vi)
-(V1–V12) fertig** (2026-09-25: Automat, Anbindung, Suche/Ex, tree-sitter-Textobjekte und
-`editor-vi.json`); wartet auf den Live-Test. **ED4 (Single Point of Truth) gegrillt (W1–W17), in
-Arbeit.**
+Status: **ED0 bis ED6 fertig** (2026-09-23 bis 2026-09-28) — ED0 Datei-Dienst, ED1 Editor-Kern,
+ED2 Aussehen, ED3 Vi, ED4 Single Point of Truth, ED5 Werkzeuge, ED6 LSP. Dazu die Diff-Ansicht des
+Editors aus M7.3 (CP8/CP9, 2026-09-25, `git-layer.md`). Live-Tests des Owners abgenommen: ED5 und
+ED6 am 2026-09-29, die ED2-Farben ebenso. **Offen: ED7** — der Editor als eigenständige App
+(`src/editor/` importiert dafür nichts aus der App, D1). Alles nach ED6 führt in eigenen Plänen
+weiter, siehe **„Fortschreibungen"** unten.
 
 ## 1. Idee
 
@@ -182,6 +183,22 @@ für die IDE muss auch Projektordner und Agenten-Worktrees öffnen.
 - **ED7 — Herauslösung** als eigenständige App.
 
 Jeder Meilenstein wird vor seinem Start in Checkpoints zerlegt und gegrillt, wie bisher.
+
+### Fortschreibungen nach ED6
+
+Dieser Plan endet mit ED7. Was danach am Editor gebaut oder geplant wurde, steht in eigenen Plänen —
+hier der Stand, damit die Lücke zwischen ED6 und heute sichtbar ist:
+
+- **[`editor-look.md`](editor-look.md)** — drei Erweiterungen (Tastenkürzel-Anzeige, immer sichtbare
+  Minimap, Reiter nebeneinander) und die moderne Optik als künftiger App-Standard. LK0–LK5
+  umgesetzt (2026-09-28/30), Live-Test bestanden. Offen: die Übertragung der Optik auf die übrigen
+  Module, jedes Modul eigens geplant.
+- **[`editor-projekt-werkzeuge.md`](editor-projekt-werkzeuge.md)** — die Projekt-Werkzeuge: Wurzeln
+  im Dateibaum, Outline, Git-Panel, Run/Tasks, Debug/DAP. Gegrillt 2026-09-30 (Q1–Q19, bestätigt),
+  **geparkt — kein Bau**; ED7, Snippets/Completion (#36) und ein eigener Codebasis-Agent bleiben
+  draußen.
+- **[`opencode2.md`](opencode2.md)** — berührt den Editor mittelbar: Skills und Chat laufen als
+  Sessions auf dem gemeinsamen Opencode-2-Dienst, dessen Agenten die IDE startet. OC1–OC4 erledigt.
 
 ### ED0 im Detail (gegrillt 2026-09-23, Q1–Q17, bestätigt; Umsetzung begonnen)
 
