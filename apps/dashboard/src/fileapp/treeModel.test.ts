@@ -61,12 +61,14 @@ describe("treeModel (W6, W13)", () => {
 
   it("reads saved tree settings, clamping and defaulting what is off", () => {
     expect(parseTreePrefs(null)).toEqual(DEFAULT_TREE);
-    expect(parseTreePrefs({ expanded: ["w\0a", 3], width: 5000, visible: false, showHidden: "yes" })).toEqual({
+    expect(parseTreePrefs({ expanded: ["w\0a", 3], width: 5000, visible: false, showHidden: "yes", project: 4 })).toEqual({
       expanded: ["w\0a"],
       width: 640,
       visible: false,
       showHidden: false,
+      project: 4,
     });
+    expect(parseTreePrefs({ project: "4" }).project).toBeNull();
     expect(clampWidth(10)).toBe(160);
   });
 });
@@ -85,19 +87,20 @@ describe("loadTreePrefs and saveTreePrefs (settings.editor.tree)", () => {
 
   it("reads what was saved under settings.editor.tree", () => {
     getSettingMock.mockReturnValue({
-      tree: { expanded: ["workspace\u0000notes"], width: 300, visible: false, showHidden: true },
+      tree: { expanded: ["workspace\u0000notes"], width: 300, visible: false, showHidden: true, project: 3 },
     });
     expect(loadTreePrefs()).toEqual({
       expanded: ["workspace\u0000notes"],
       width: 300,
       visible: false,
       showHidden: true,
+      project: 3,
     });
   });
 
   it("saves under settings.editor.tree without touching a sibling key like `tabs`", () => {
     getSettingMock.mockReturnValue({ tabs: { tabs: [], active: null } });
-    saveTreePrefs({ expanded: ["w\u0000a"], width: 400, visible: true, showHidden: false });
+    saveTreePrefs({ expanded: ["w\u0000a"], width: 400, visible: true, showHidden: false, project: 2 });
     expect(setSettingMock).toHaveBeenCalledTimes(1);
     const [key, value] = setSettingMock.mock.calls[0];
     expect(key).toBe("editor");
@@ -107,6 +110,7 @@ describe("loadTreePrefs and saveTreePrefs (settings.editor.tree)", () => {
       width: 400,
       visible: true,
       showHidden: false,
+      project: 2,
     });
   });
 });

@@ -1,6 +1,6 @@
 # Grobplan: Projekt-Werkzeuge im Editor (Wurzeln, Outline, Git, Run, Debug)
 
-Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **Wurzeln (#47) freigegeben zum Bau (Owner, 2026-09-30); der Rest weiter geparkt**.
+Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 ist gebaut (2026-09-30) — als Projekt neu/öffnen/schließen, nicht als Wurzel-Auswahl; der Rest weiter geparkt**.
 Ursprünglich geparkt 2026-09-29 („keine Resourcen für Umsetzung“). Die Entscheidungen unten sind der
 abgelegte Grill-Stand; vor dem Bauen jeden Punkt anhand dessen in Checkpoints zerlegen
 (siehe die Arbeitsweise im Dachplan [`agentic-ide.md`](agentic-ide.md)).
@@ -110,6 +110,30 @@ Zweite Runde über denselben Plan, Fokus auf Widersprüche und Zuschnitt. Weiter
   (Rust), Python (`debugpy`) und Node folgen je als kleiner Checkpoint. Ändert „alle drei von Anfang an“ oben.
 - **Parkung bleibt**, bis ein konkreter Schmerz auftritt (Owner). Reihenfolge zu M7.4–M7.6/ED7 daher
   nicht festgelegt; der Vorschlag der Tabelle oben gilt, wenn gezogen wird.
+
+## #47 umgebaut und gebaut: Projekt neu / öffnen / schließen (Owner, 2026-09-30)
+
+Der Owner hat die Wurzel-Auswahl durch einen schlichteren Projektbegriff ersetzt (ersetzt „Wurzeln (#47)“ und die
+Zeile „Zwei Projektbegriffe bleiben getrennt“ des Nachgrills):
+
+- **Ein Register für Editor und IDE:** die Tabelle `projects` (M7.1). Ein Projekt ist ein Ordner mit einer Zeile dort;
+  **keine Projektdatei im Ordner** (Repo bleibt sauber, Worktrees bleiben unberührt). Der Ordner ist die Wurzel
+  `project:<id>`.
+- **Öffnen:** Ordner über den nativen Dialog aus Rust (`project_open`), gibt es ihn schon als Projekt, wird dieses
+  geöffnet, sonst angelegt (Name = Ordnername; `axiomata_ide::store::open_root`). `$HOME` und darüber bleiben
+  abgelehnt (L0).
+- **Neu:** Name + „git init“ (Vorgabe an), dann Dialog für den Elternordner (`project_new`;
+  `axiomata_ide::newproject`, legt den Ordner an, nie einen bestehenden, räumt bei einem Fehler auf).
+- **Schließen:** nimmt das Projekt nur aus dem Baum. Tabs (auch mit ungespeichertem Stand), Ordner und Registerzeile
+  bleiben.
+- **Ein Projekt je Ansicht:** Editor und IDE halten je eines offen (Editor: `settings.editor.tree.project`). Der Baum,
+  ⌘P und die Projektsuche zeigen nur dessen Ordner. Der Second-Brain-Workspace bleibt **nicht** dauerhaft im Baum
+  (der Editor soll ohne Vault denkbar sein); er lässt sich als Ordner öffnen. Eine einzeln geöffnete Datei ist in
+  keinem Projekt.
+- **Mehrere Ordner (VS-Code-Workspace)** sind ausdrücklich später; dann kommt „Wurzeln hinzufügen/ausblenden“ zurück.
+- **Bewusst entfernt:** der Tauri-Befehl `create_ide_project` (nahm einen Pfad aus der Webview). **Noch offen:**
+  `set_ide_project_root` („Pfad ändern“) nimmt weiter einen getippten Pfad — sollte wie `project_open` über den Dialog
+  laufen.
 
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 

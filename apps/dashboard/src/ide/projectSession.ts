@@ -33,10 +33,10 @@ import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { emptyLayout, parseLayout, serializeLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
 import { withFilesPane } from "./paneKinds";
+import { newProjectFolder, openProjectFolder } from "../fileapp/backend";
 import { applyProjectCwd } from "./paneCwd";
 import {
   cancelLayoutWrite,
-  createProject,
   deleteProject,
   flushLayout,
   listProjects,
@@ -144,10 +144,24 @@ export async function start(): Promise<Layout | null> {
   }
 }
 
-/** Creates a project and opens it. Returns its layout, or `null` on failure. */
-export async function create(name: string, repoRoot: string): Promise<Layout | null> {
+/** "Open folder": the native dialog picks it; it is opened as a project. `null` when cancelled or failed. */
+export async function openFolder(): Promise<Layout | null> {
   try {
-    const created = await createProject(name, repoRoot);
+    const picked = await openProjectFolder();
+    if (!picked) return null;
+    await refresh();
+    return await open(picked.id);
+  } catch (err) {
+    report(err);
+    return null;
+  }
+}
+
+/** "New project": a new folder (optionally a git repository) in a folder the dialog picks, opened as a project. */
+export async function createFolder(name: string, gitInit: boolean): Promise<Layout | null> {
+  try {
+    const created = await newProjectFolder(name, gitInit);
+    if (!created) return null;
     await refresh();
     return await open(created.id);
   } catch (err) {

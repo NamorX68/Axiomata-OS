@@ -1122,24 +1122,28 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         if (!b.last_opened_at) return -1;
         return b.last_opened_at.localeCompare(a.last_opened_at);
       }) as T;
-    case "create_ide_project": {
-      const repoRoot = String(args.repoRoot);
-      if (ideProjects.some((p) => p.repo_root === repoRoot)) {
-        // The real store's UNIQUE constraint names who is already there.
-        const taken = ideProjects.find((p) => p.repo_root === repoRoot)!;
-        throw new Error(`that folder is already project "${taken.name}"`);
+    // The real commands open a native folder dialog; a browser has none, so the
+    // mock "picks" a folder of its own and opens the project that is on it.
+    case "project_open":
+    case "project_new": {
+      const isNew = cmd === "project_new";
+      const name = isNew ? String(args.name) : `picked-${ideProjects.length + 1}`;
+      const repoRoot = `/mock/code/${name}`;
+      let project = ideProjects.find((p) => p.repo_root === repoRoot);
+      if (!project) {
+        project = {
+          id: (ideProjects[ideProjects.length - 1]?.id ?? 0) + 1,
+          name,
+          repo_root: repoRoot,
+          layout_json: null,
+          created_at: new Date().toISOString(),
+          last_opened_at: null,
+          root_exists: true,
+        };
+        ideProjects = [...ideProjects, project];
       }
-      const created: IdeProject = {
-        id: (ideProjects[ideProjects.length - 1]?.id ?? 0) + 1,
-        name: String(args.name),
-        repo_root: repoRoot,
-        layout_json: null,
-        created_at: new Date().toISOString(),
-        last_opened_at: null,
-        root_exists: true,
-      };
-      ideProjects = [...ideProjects, created];
-      return created as T;
+      project.last_opened_at = new Date().toISOString();
+      return project as T;
     }
     case "rename_ide_project": {
       const project = ideProjects.find((p) => p.id === args.id);
@@ -1612,7 +1616,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "file_roots":
       return [
         { id: "workspace", label: "Second Brain", path: "/mock/vault", kind: "workspace" },
-        { id: "project:1", label: "Axiomata-OS", path: "/mock/code/axiomata-os", kind: "project" },
+        ...ideProjects.map((p) => ({ id: `project:${p.id}`, label: p.name, path: p.repo_root, kind: "project" })),
         { id: "worktree:1", label: "Builder", path: "/mock/.axiomata/worktrees/builder-1", kind: "worktree" },
       ] as T;
     case "file_read": {

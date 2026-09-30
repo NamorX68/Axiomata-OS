@@ -28,7 +28,15 @@
   import { onMount, tick, untrack } from "svelte";
 
   import { listenBackend, type FileRootInfo } from "../core/backend";
-  import { listRoots, pickFile, type FileRenamed } from "./backend";
+  import {
+    listProjects,
+    listRoots,
+    newProjectFolder,
+    openProjectFolder,
+    pickFile,
+    touchProject,
+    type FileRenamed,
+  } from "./backend";
   import type { OpenFileState, OpenResult } from "./FileEditor.svelte";
   import FileTab from "./FileTab.svelte";
   import Inspector, { type InspectorTab } from "./Inspector.svelte";
@@ -76,7 +84,10 @@
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "../ide/paneStore";
   import { foldKey, forgetFolds } from "./foldMemory";
   import { uiScale } from "../core/uiScale";
-  import { clampWidth, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
+  import { clampWidth, folderKey, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
+  import ProjectBar from "./ProjectBar.svelte";
+  import { projectRootId, resolveProject, treeRootsOf } from "./projectModel";
+  import type { IdeProject } from "../core/backend";
   import UnsavedQuestion from "./UnsavedQuestion.svelte";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -116,8 +127,13 @@
   let treeView = $state<FileTree | null>(null);
   /** The tree's width while its edge is being dragged. */
   let dragging = $state<{ startX: number; startWidth: number } | null>(null);
-  /** The tree shows the workspace, projects and picked folders — agents' worktrees are the IDE's (W6). */
-  const treeRoots = $derived(roots.filter((r) => r.kind !== "worktree"));
+  /** The registry the editor shares with the IDE. */
+  let projects = $state<IdeProject[]>([]);
+  /** A project is being opened or made; the bar takes no second click meanwhile. */
+  let projectBusy = $state(false);
+  const currentProject = $derived(resolveProject(projects, tree.project));
+  /** The tree shows the open project's folder and nothing else — a file opened alone is in no project. */
+  const treeRoots = $derived(treeRootsOf(roots, currentProject?.id ?? null));
   const newId = () => crypto.randomUUID();
   /** Every tab, flat — the editors are rendered once each, in this order, and moved into their groups. */
   const allFileTabs = $derived(tabsOf(dock));
@@ -178,6 +194,47 @@
       return;
     }
     if (picked && !picked.folder) openTab({ root: picked.root, rel: picked.rel });
+  }
+
+  async function reloadProjects(): Promise<void> {
+    try {
+      [projects, roots] = await Promise.all([listProjects(), listRoots()]);
+    } catch (err) {
+      error = `Could not read the projects: ${(err as { message?: string }).message ?? String(err)}`;
+    }
+  }
+
+  /** Makes `project` the open one: the tree shows its folder, opened. Tabs already open stay as they are. */
+  async function showProject(project: IdeProject): Promise<void> {
+    await reloadProjects();
+    const key = folderKey(projectRootId(project.id), "");
+    tree = {
+      ...tree,
+      project: project.id,
+      expanded: tree.expanded.includes(key) ? tree.expanded : [...tree.expanded, key],
+    };
+    sideTab = "files";
+  }
+
+  async function runProject(work: () => Promise<IdeProject | null>): Promise<void> {
+    projectBusy = true;
+    try {
+      const project = await work();
+      if (project) await showProject(project);
+    } catch (err) {
+      error = (err as { message?: string }).message ?? String(err);
+    } finally {
+      projectBusy = false;
+    }
+  }
+
+  const pickProject = (id: number) => runProject(() => touchProject(id));
+  const openProjectFolderDialog = () => runProject(openProjectFolder);
+  const newProject = (name: string, gitInit: boolean) => runProject(() => newProjectFolder(name, gitInit));
+
+  /** Takes the project out of the tree. Nothing on disk changes, open tabs stay, the IDE keeps the project. */
+  function closeProject(): void {
+    tree = { ...tree, project: null };
   }
 
   function onTabState(tab: Tab, state: OpenFileState | null): void {
@@ -522,9 +579,7 @@
   $effect(() => {
     if (open) {
       recent = recentFiles();
-      void listRoots()
-        .then((list) => (roots = list))
-        .catch(() => undefined);
+      void reloadProjects();
     }
   });
 </script>
@@ -583,6 +638,15 @@
   <div class="main">
   {#if tree.visible}
     <aside class="side" style:width="{tree.width * $uiScale}px">
+      <ProjectBar
+        {projects}
+        current={currentProject}
+        busy={projectBusy}
+        onPick={(id) => void pickProject(id)}
+        onOpenFolder={() => void openProjectFolderDialog()}
+        onNew={(name, git) => void newProject(name, git)}
+        onClose={closeProject}
+      />
       <div class="side-bar">
         <div class="side-tabs" role="tablist" aria-label="Left column">
           <IconButton icon="files" label="Files" tab pressed={sideTab === "files"} onclick={() => (sideTab = "files")} />
@@ -624,6 +688,11 @@
         onOpen={(file, preview) => openTab(file, preview)}
         onError={(message) => (error = message)}
       />
+      {#if treeRoots.length === 0}
+        <p class="no-project">
+          {currentProject ? "The project folder is not available." : "No project open. Open a folder or start a new project from the bar above."}
+        </p>
+      {/if}
       </div>
     </aside>
     <div
@@ -823,6 +892,13 @@
     color: var(--ax-text-muted);
     font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-xs);
+  }
+
+  .no-project {
+    margin: 0;
+    padding: var(--ax-space-4);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
   }
 
   .recent-anchor {

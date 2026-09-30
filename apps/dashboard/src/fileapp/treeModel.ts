@@ -103,9 +103,11 @@ export interface TreePrefs {
   width: number;
   visible: boolean;
   showHidden: boolean;
+  /** The open project's id (`projects` table), or `null` — the tree shows that project's folder only. */
+  project: number | null;
 }
 
-export const DEFAULT_TREE: TreePrefs = { expanded: [], width: 260, visible: true, showHidden: false };
+export const DEFAULT_TREE: TreePrefs = { expanded: [], width: 260, visible: true, showHidden: false, project: null };
 /** The tree is never narrower or wider than this. */
 export const TREE_WIDTH = { min: 160, max: 640 } as const;
 
@@ -121,6 +123,7 @@ export function parseTreePrefs(raw: unknown): TreePrefs {
     width: typeof r.width === "number" && Number.isFinite(r.width) ? clampWidth(r.width) : DEFAULT_TREE.width,
     visible: typeof r.visible === "boolean" ? r.visible : DEFAULT_TREE.visible,
     showHidden: typeof r.showHidden === "boolean" ? r.showHidden : DEFAULT_TREE.showHidden,
+    project: typeof r.project === "number" && Number.isInteger(r.project) ? r.project : null,
   };
 }
 

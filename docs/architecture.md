@@ -817,6 +817,13 @@ migrations in M7.2/M7.4, so a frozen schema carries no guesses. Two rules worth 
 before touching it: `repo_root` is UNIQUE and canonicalised on the way in, and deleting a
 project removes a row and **never** a folder.
 
+**One project registry for editor and IDE** (2026-09-30, `docs/plans/editor-projekt-werkzeuge.md`): the file app's
+tree shows exactly one open project (`settings.editor.tree.project`), the IDE keeps its own; both open folders through
+the same Rust commands (`files.rs` `project_open` / `project_new`, which drive the native dialog — the webview never
+types a path; `create_ide_project` was removed for that reason). `store::open_root` finds or creates the row for a
+folder, `newproject::create_project_folder` makes a new folder (optionally `git init`) and is the one place in
+`axiomata-ide` that creates directories. No project file is written into the folder.
+
 **CP1 is done too**: `apps/dashboard/src/ide/layout.ts` is the dock-layout model — a tree of
 `Split { dir, children, sizes }` and `TabGroup { tabs, active }` with docking, moving,
 closing and divider dragging, plus the serialisation that fills CP0's `layout_json`. Pure

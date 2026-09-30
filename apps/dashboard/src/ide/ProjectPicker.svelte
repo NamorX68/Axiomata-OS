@@ -23,7 +23,8 @@
     current,
     switching = false,
     onOpen,
-    onCreate,
+    onOpenFolder,
+    onNewFolder,
     onSetRoot,
     onRemove,
   }: {
@@ -32,7 +33,10 @@
     /** An open is in flight; taking another click now only invites a race. */
     switching?: boolean;
     onOpen: (id: number) => void;
-    onCreate: (name: string, repoRoot: string) => void;
+    /** "Open folder…": the native dialog, then the folder is a project. */
+    onOpenFolder: () => void;
+    /** "New project": a new folder called `name`, in a folder the dialog picks. */
+    onNewFolder: (name: string, gitInit: boolean) => void;
     onSetRoot: (id: number, repoRoot: string) => void;
     onRemove: (id: number) => void;
   } = $props();
@@ -40,7 +44,7 @@
   let open = $state(false);
   let root = $state<HTMLElement | undefined>();
   let newName = $state("");
-  let newRoot = $state("");
+  let newGit = $state(true);
   let editingRoot = $state<number | null>(null);
   let editedRoot = $state("");
   /** The "New project" form is folded into a row until asked for (editor-look I4). */
@@ -55,10 +59,9 @@
   });
 
   function submitNew() {
-    if (!newName.trim() || !newRoot.trim()) return;
-    onCreate(newName.trim(), newRoot.trim());
+    if (!newName.trim()) return;
+    onNewFolder(newName.trim(), newGit);
     newName = "";
-    newRoot = "";
     adding = false;
     open = false;
   }
@@ -145,6 +148,14 @@
       {/if}
 
       {#if !adding}
+        <button
+          class="add"
+          type="button"
+          onclick={() => {
+            open = false;
+            onOpenFolder();
+          }}><Icon name="folder-open" size="sm" /> Open folder…</button
+        >
         <button class="add" type="button" onclick={() => (adding = true)}><Icon name="plus" size="sm" /> New project…</button>
       {:else}
         <form
@@ -155,10 +166,10 @@
           }}
         >
           <p class="label">New project</p>
-          <input type="text" spellcheck="false" bind:value={newName} placeholder="Name" />
-          <input type="text" spellcheck="false" bind:value={newRoot} placeholder="/Users/…/repo" />
+          <input type="text" spellcheck="false" bind:value={newName} placeholder="Folder name" />
+          <label class="check"><input type="checkbox" bind:checked={newGit} /> Start a git repository</label>
           <div class="form-actions">
-            <button type="submit" class="ax-btn primary" disabled={!newName.trim() || !newRoot.trim()}>Add</button>
+            <button type="submit" class="ax-btn primary" disabled={!newName.trim()}>Choose where…</button>
             <button type="button" class="ax-btn" onclick={() => (adding = false)}>Cancel</button>
           </div>
         </form>
@@ -306,6 +317,14 @@
   .add:hover {
     background: var(--ax-surface-2);
     color: var(--ax-text);
+  }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
   }
 
   .form-actions {

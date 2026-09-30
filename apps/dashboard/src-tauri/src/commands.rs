@@ -1699,20 +1699,6 @@ pub fn list_ide_projects(state: State<'_, CoreState>) -> Result<Vec<ide::Project
     ide::store::list_projects(&db).map_err(|err| err.to_string())
 }
 
-#[tauri::command]
-pub fn create_ide_project(
-    state: State<'_, CoreState>,
-    name: String,
-    repo_root: String,
-) -> Result<ide::Project, String> {
-    let db = state.db_lock();
-    let new = ide::NewProject {
-        name,
-        repo_root: PathBuf::from(repo_root),
-    };
-    ide::store::create_project(&db, new).map_err(|err| err.to_string())
-}
-
 /// Returns `None` if there is no such project.
 #[tauri::command]
 pub fn rename_ide_project(

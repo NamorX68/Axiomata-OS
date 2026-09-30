@@ -219,8 +219,13 @@
     if (next) layout = next;
   }
 
-  async function addProject(name: string, repoRoot: string) {
-    const next = await projectSession.create(name, repoRoot);
+  async function openFolderAsProject() {
+    const next = await projectSession.openFolder();
+    if (next) layout = next;
+  }
+
+  async function addProject(name: string, gitInit: boolean) {
+    const next = await projectSession.createFolder(name, gitInit);
     if (next) layout = next;
   }
 
@@ -527,7 +532,8 @@
         {current}
         switching={$sessionState.switching}
         onOpen={(id) => void openProjectById(id)}
-        onCreate={(name, root) => void addProject(name, root)}
+        onOpenFolder={() => void openFolderAsProject()}
+        onNewFolder={(name, gitInit) => void addProject(name, gitInit)}
         onSetRoot={(id, root) => void changeRoot(id, root)}
         onRemove={(id) => void removeProject(id)}
       />
@@ -595,7 +601,7 @@
       <!-- No project, no panes: a terminal with nowhere to start is worse than
            no terminal. The menu above is the only thing to do here. -->
       <div class="empty">
-        <p>Add a project to work in — a name and the folder of a repository.</p>
+        <p>Open a folder to work in, or start a new project — from the project menu above.</p>
       </div>
     {/if}
   </div>

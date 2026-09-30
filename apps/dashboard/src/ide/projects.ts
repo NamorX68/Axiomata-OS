@@ -25,10 +25,6 @@ export function listProjects(): Promise<IdeProject[]> {
   return invoke<IdeProject[]>("list_ide_projects");
 }
 
-export function createProject(name: string, repoRoot: string): Promise<IdeProject> {
-  return invoke<IdeProject>("create_ide_project", { name, repoRoot });
-}
-
 export function renameProject(id: number, name: string): Promise<IdeProject | null> {
   return invoke<IdeProject | null>("rename_ide_project", { id, name });
 }

@@ -11,7 +11,6 @@ import * as projects from "./projects";
 vi.mock("./projects", () => ({
   listProjects: vi.fn(),
   openProject: vi.fn(),
-  createProject: vi.fn(),
   setProjectRoot: vi.fn(),
   deleteProject: vi.fn(),
   flushLayout: vi.fn(async () => {}),

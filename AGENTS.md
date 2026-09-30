@@ -95,7 +95,7 @@ from the app — D1). Beyond that the editor has two follow-on plans of their ow
 [`editor-look.md`](docs/plans/editor-look.md) (LK0–LK5, complete — the modern look becoming the
 app's standard) and [`editor-projekt-werkzeuge.md`](docs/plans/editor-projekt-werkzeuge.md)
 (project roots in the tree, outline, git panel, run/tasks, debug/DAP — grilled 2026-09-30, Q1–Q27;
-**roots (#47) are next to build, the rest stays parked**). `docs/plans/editor.md` lists both under „Fortschreibungen".
+**#47 is built as project new/open/close — one `projects` registry for editor and IDE, the folder from the native dialog (`project_open`/`project_new`), the tree shows the open project only; the rest stays parked**). `docs/plans/editor.md` lists both under „Fortschreibungen".
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).

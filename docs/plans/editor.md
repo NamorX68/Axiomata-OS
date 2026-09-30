@@ -195,7 +195,7 @@ hier der Stand, damit die Lücke zwischen ED6 und heute sichtbar ist:
   Module, jedes Modul eigens geplant.
 - **[`editor-projekt-werkzeuge.md`](editor-projekt-werkzeuge.md)** — die Projekt-Werkzeuge: Wurzeln
   im Dateibaum, Outline, Git-Panel, Run/Tasks, Debug/DAP. Gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt),
-  **Wurzeln (#47) als Nächstes zu bauen, der Rest geparkt**; ED7 (die Werkzeuge dort werden ohne `axiomata-core` gebaut, damit ED7 eine Hülle bleibt), Snippets/Completion (#36) und ein eigener Codebasis-Agent bleiben
+  **Projekt neu/öffnen/schließen (#47) gebaut, der Rest geparkt**; ED7 (die Werkzeuge dort werden ohne `axiomata-core` gebaut, damit ED7 eine Hülle bleibt), Snippets/Completion (#36) und ein eigener Codebasis-Agent bleiben
   draußen.
 - **[`opencode2.md`](opencode2.md)** — berührt den Editor mittelbar: Skills und Chat laufen als
   Sessions auf dem gemeinsamen Opencode-2-Dienst, dessen Agenten die IDE startet. OC1–OC4 erledigt.
