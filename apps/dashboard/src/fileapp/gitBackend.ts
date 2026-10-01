@@ -33,6 +33,12 @@ export type GitState = { state: "not_a_repo" } | { state: "ready"; status: RepoS
 
 export type Side = "staged" | "unstaged";
 
+export interface Branch {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+}
+
 export interface PushResult {
   remote: string;
   branch: string;
@@ -55,6 +61,15 @@ export interface GitApi {
   fetch(root: string): Promise<void>;
   /** Pushes the checked-out branch to its upstream, or publishes it to `origin`. Never forced. */
   push(root: string): Promise<PushResult>;
+  /** Makes the project's folder a git repository. */
+  init(root: string): Promise<void>;
+  /** Throws away unstaged changes of the paths and deletes untracked ones. Destroys work. */
+  discard(root: string, paths: string[]): Promise<void>;
+  /** Throws away one hunk of a file's unstaged diff. Destroys work. */
+  discardHunk(root: string, path: string, index: number, header: string): Promise<void>;
+  branches(root: string): Promise<Branch[]>;
+  switchBranch(root: string, name: string): Promise<void>;
+  createBranch(root: string, name: string): Promise<void>;
   /** The working file's text, or `null` when it cannot be read as text. */
   workingText(root: string, path: string): Promise<string | null>;
 }
@@ -72,6 +87,12 @@ export const gitApi: GitApi = {
   commit: (root, message) => invoke<string>("git_commit", { root, message }),
   fetch: (root) => invoke<void>("git_fetch", { root }),
   push: (root) => invoke<PushResult>("git_push", { root }),
+  init: (root) => invoke<void>("git_init", { root }),
+  discard: (root, paths) => invoke<void>("git_discard", { root, paths }),
+  discardHunk: (root, path, index, header) => invoke<void>("git_discard_hunk", { root, path, index, header }),
+  branches: (root) => invoke<Branch[]>("git_branches", { root }),
+  switchBranch: (root, name) => invoke<void>("git_switch", { root, name }),
+  createBranch: (root, name) => invoke<void>("git_create_branch", { root, name }),
   workingText: async (root, path) => {
     try {
       return (await fileBackend.read(root, path)).content;

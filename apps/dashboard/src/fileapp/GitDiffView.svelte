@@ -76,7 +76,8 @@
   const hunks = $derived(loaded?.diff.hunks ?? []);
   const headers = $derived({
     headers: hunks.map((h) => h.header),
-    discard: false,
+    // A working-tree change can also be thrown away; a staged one is unstaged first.
+    discard: side === "unstaged",
     action: side === "staged" ? ("unstage" as const) : ("stage" as const),
   });
 
@@ -101,6 +102,14 @@
       if (header === undefined) return;
       if (action !== (side === "staged" ? "unstage" : "stage")) return;
       await gitApi.applyHunk(root, entry.path, entry.old_path, side, index, header);
+    });
+
+  const onDiscard = (index: number) =>
+    run(async () => {
+      const header = hunks[index]?.header;
+      if (header === undefined || side !== "unstaged") return;
+      if (!confirm("Throw this change away? It is not saved anywhere and cannot be brought back.")) return;
+      await gitApi.discardHunk(root, entry.path, index, header);
     });
 
   const wholeFile = () =>
@@ -142,6 +151,7 @@
           fileName={entry.path}
           hunkHeaders={headers}
           onStageHunk={(hunk, action) => void onHunk(hunk, action)}
+          onDiscardHunk={(hunk) => void onDiscard(hunk)}
           onOpen={onOpenFile}
         />
       </div>

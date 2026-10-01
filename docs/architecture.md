@@ -826,7 +826,7 @@ folder, `newproject::create_project_folder` makes a new folder (optionally `git 
 
 **Git layer** (2026-10-01, `docs/plans/editor-projekt-werkzeuge.md` #48): `crates/axiomata-git` is the one place that runs `git`
 (subprocess, never `git2`; the only thing that publishes is `repo::push` — the checked-out branch to its upstream or `origin`, never forced, only on the owner's button) and reads its machine formats — `run` (the runner and its environment), `diff`
-(diff types, parser, hunk patch), `repo` (status, stage/unstage, hunk apply, blob, commit, fetch). It has no Tauri,
+(diff types, parser, hunk patch), `repo` (status, stage/unstage, hunk apply, discard, blob, commit, fetch, push, branches, init). It has no Tauri,
 database or macOS-only code, so it builds and tests anywhere `git` runs. `axiomata-ide::git` (agent worktrees) sits on
 it through thin wrappers that keep the IDE's error type; the editor's git panel talks to it through `src-tauri/src/git.rs`.
 

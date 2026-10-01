@@ -81,6 +81,7 @@
     openOrFocus,
     projectRoot,
     SEARCH_PANE,
+    gitTab,
     searchTab,
     showsFile,
   } from "./paneKinds";
@@ -424,7 +425,13 @@
       const project = current;
       if (!project) return;
       const tab =
-        kind === "files" ? filesTab(project.id) : kind === "search" ? searchTab() : projectSession.terminalTab();
+        kind === "files"
+          ? filesTab(project.id)
+          : kind === "search"
+            ? searchTab()
+            : kind === "git"
+              ? gitTab()
+              : projectSession.terminalTab();
       const added = addTab(layout, tab, { nodeId: groupId, side: "center" });
       layout = applyProjectCwd(added, project.repo_root);
     },

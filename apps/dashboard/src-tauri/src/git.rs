@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use axiomata_git::GitError;
 use axiomata_git::diff::FileDiff;
-use axiomata_git::repo::{self, Blob, PushResult, RepoStatus, Side, Source};
+use axiomata_git::repo::{self, Blob, Branch, PushResult, RepoStatus, Side, Source};
 use serde::Serialize;
 use tauri::State;
 
@@ -134,6 +134,65 @@ pub async fn git_apply_hunk(
         repo::apply_hunk(&dir, &path, old_path.as_deref(), side, index, &header)
     })
     .await
+}
+
+/// Makes the project's folder a git repository (refused when it already is one, or lies in one).
+#[tauri::command]
+pub async fn git_init(state: State<'_, CoreState>, root: String) -> Result<(), FileError> {
+    on_repo(&state, root, |dir| repo::init(&dir)).await
+}
+
+/// Throws away the unstaged changes of `paths` and deletes untracked ones. **Destroys work git cannot
+/// bring back**: the page asks the owner first.
+#[tauri::command]
+pub async fn git_discard(
+    state: State<'_, CoreState>,
+    root: String,
+    paths: Vec<String>,
+) -> Result<(), FileError> {
+    on_repo(&state, root, move |dir| repo::discard(&dir, &paths)).await
+}
+
+/// Throws away one hunk of a file's unstaged diff. **Destroys work git cannot bring back.**
+#[tauri::command]
+pub async fn git_discard_hunk(
+    state: State<'_, CoreState>,
+    root: String,
+    path: String,
+    index: usize,
+    header: String,
+) -> Result<(), FileError> {
+    on_repo(&state, root, move |dir| {
+        repo::discard_hunk(&dir, &path, index, &header)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_branches(
+    state: State<'_, CoreState>,
+    root: String,
+) -> Result<Vec<Branch>, FileError> {
+    on_repo(&state, root, |dir| repo::branches(&dir)).await
+}
+
+/// Switches to a local branch; git refuses when uncommitted changes are in the way.
+#[tauri::command]
+pub async fn git_switch(
+    state: State<'_, CoreState>,
+    root: String,
+    name: String,
+) -> Result<(), FileError> {
+    on_repo(&state, root, move |dir| repo::switch_branch(&dir, &name)).await
+}
+
+#[tauri::command]
+pub async fn git_create_branch(
+    state: State<'_, CoreState>,
+    root: String,
+    name: String,
+) -> Result<(), FileError> {
+    on_repo(&state, root, move |dir| repo::create_branch(&dir, &name)).await
 }
 
 /// Commits what is staged; resolves to the new commit.

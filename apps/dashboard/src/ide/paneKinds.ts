@@ -35,6 +35,13 @@ export function searchTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: SEARCH_PANE, title: "Search", config: { focus: Date.now() } };
 }
 
+/** The project's git panel (`docs/plans/editor-projekt-werkzeuge.md`, #48): changes, commit, push, branches. */
+export const GIT_PANE = "git";
+
+export function gitTab(): PaneTab {
+  return { id: crypto.randomUUID(), kind: GIT_PANE, title: "Git", config: {} };
+}
+
 /** The file-service root of an IDE project (`axiomata-files`' `project:<id>`). */
 export function projectRoot(projectId: number): string {
   return `project:${projectId}`;
@@ -154,14 +161,14 @@ export function worktreeAgent(root: string): number | null {
  */
 export function fileOrigin(layout: Layout, fromTabId: string | null, lastWorkTabId: string | null): string | null {
   const from = fromTabId ? findTab(layout, fromTabId) : null;
-  const helper = !from || from.tab.kind === FILES_PANE || from.tab.kind === SEARCH_PANE;
+  const helper = !from || from.tab.kind === FILES_PANE || from.tab.kind === SEARCH_PANE || from.tab.kind === GIT_PANE;
   const lastWork = lastWorkTabId ? findTab(layout, lastWorkTabId) : null;
   return helper && lastWork ? lastWork.tab.id : fromTabId;
 }
 
 /** Whether focusing `tab` makes it the pane the user works in (not a helper). */
 export function isWorkPane(tab: PaneTab): boolean {
-  return tab.kind !== FILES_PANE && tab.kind !== SEARCH_PANE;
+  return tab.kind !== FILES_PANE && tab.kind !== SEARCH_PANE && tab.kind !== GIT_PANE;
 }
 
 /**

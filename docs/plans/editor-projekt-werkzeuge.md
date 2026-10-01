@@ -174,8 +174,14 @@ unter Linux/Windows läuft), erst umziehen, dann bauen, zwei Gruppen mit Hunk-St
   Changes; Stage/Unstage je Datei und alle; Commit-Feld, ⌘⏎, *Commit* und *Commit & Push*), ein Klick auf eine Datei öffnet die Änderung als
   `GitDiffView.svelte` über dem Editor (derselbe `DiffPanes` wie der Diff der IDE; Knopf „Stage“/„Unstage“ je Hunk, „Stage
   file“, Layout-Umschalter; liest sich alle 5 s neu, ohne Falten/Cursor zu verlieren).
-- **Offen:** das Panel als Dock-Pane der IDE; History (Log + Diff je Commit) und Branch-Liste; „Revert“ einer Datei; ein
-  `git init`-Knopf für Ordner ohne Repository; Verlauf/Tags. Die Tauri-Hülle ist auf der Linux-Box nicht kompiliert.
+- **Abrundung (2026-10-01, Owner: „Git-Tasks fertig machen“):** `init` (Knopf „Create repository“; verweigert in/unter einem
+  Repository), `discard` (Datei: Unstaged zurück auf den Index, Untracked wird gelöscht — nur nach Rückfrage in der Oberfläche;
+  Gestagtes bleibt) und `discard_hunk` (je Block im Diff, neben „Stage“), Branches (`branches`, `switch_branch`,
+  `create_branch`; Wechsel verweigert, wenn Änderungen im Weg sind — kein stilles Stash; Namen prüft `git check-ref-format`),
+  Branch-Menü im Panel-Kopf, und das Panel als **Git-Pane der IDE** (`ide/panes/GitPane.svelte`, `+`-Menü → Git; der Diff
+  öffnet sich über dem Pane, „Datei öffnen“ in einem Datei-Pane daneben).
+- **Offen:** History (Log + Diff je Commit), Remote-Branches wechseln, Stash, Merge/Rebase/Konflikte lösen, Tags. Die Tauri-Hülle
+  ist auf der Linux-Box nicht kompiliert.
 
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 

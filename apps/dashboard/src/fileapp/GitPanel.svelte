@@ -17,7 +17,7 @@
 
   import { messageOf } from "../core/errors";
   import IconButton from "../ui/IconButton.svelte";
-  import { gitApi, type RepoStatus, type Side } from "./gitBackend";
+  import { gitApi, type Branch, type RepoStatus, type Side } from "./gitBackend";
   import { canCommit, groupEntries, markOf, pushState, splitPath, type GitRow } from "./gitModel";
 
   interface Props {
@@ -44,6 +44,11 @@
   let busy = $state(false);
   let fetching = $state(false);
   let pushing = $state(false);
+  /** The branch menu: open, the branches it lists, and the name being typed for a new one. */
+  let branchMenu = $state(false);
+  let branchList = $state<Branch[]>([]);
+  let newBranch = $state("");
+  let branchBox = $state<HTMLElement | undefined>();
   let timer: ReturnType<typeof setInterval> | undefined;
   let generation = 0;
 
@@ -97,6 +102,47 @@
       await gitApi.commit(root!, text);
       message = "";
     });
+  }
+
+  /** Throws a file's unstaged changes away — or deletes an untracked file — after asking. */
+  async function revert(row: GitRow): Promise<void> {
+    const name = row.entry.path;
+    const question = row.untracked
+      ? `Delete ${name}? It is not in git, so it cannot be brought back.`
+      : `Throw away the unstaged changes in ${name}? They are not saved anywhere and cannot be brought back.`;
+    if (!confirm(question)) return;
+    await act(() => gitApi.discard(root!, [name]));
+  }
+
+  async function createRepo(): Promise<void> {
+    if (!root) return;
+    await act(() => gitApi.init(root!));
+  }
+
+  async function openBranches(): Promise<void> {
+    if (!root) return;
+    branchMenu = !branchMenu;
+    if (!branchMenu) return;
+    try {
+      branchList = await gitApi.branches(root);
+      error = "";
+    } catch (err) {
+      error = messageOf(err);
+      branchMenu = false;
+    }
+  }
+
+  async function switchTo(name: string): Promise<void> {
+    branchMenu = false;
+    await act(() => gitApi.switchBranch(root!, name));
+  }
+
+  async function makeBranch(): Promise<void> {
+    const name = newBranch.trim();
+    if (!name) return;
+    branchMenu = false;
+    newBranch = "";
+    await act(() => gitApi.createBranch(root!, name));
   }
 
   async function pushBranch(): Promise<void> {
@@ -173,7 +219,13 @@
   onDestroy(() => clearInterval(timer));
 </script>
 
-<svelte:window onfocus={() => active && void read()} />
+<svelte:window
+  onfocus={() => active && void read()}
+  onclick={(event) => {
+    // composedPath, not contains(target): a click that swaps the menu's own rows has detached its target.
+    if (branchMenu && branchBox && !event.composedPath().includes(branchBox)) branchMenu = false;
+  }}
+/>
 
 {#snippet rows(list: GitRow[], side: Side)}
   {#each list as row (side + row.entry.path)}
@@ -188,6 +240,16 @@
         <span class="name">{parts.name}</span>
         {#if parts.dir}<span class="dir">{parts.dir}</span>{/if}
       </button>
+      {#if side === "unstaged" && !row.entry.conflicted}
+        <button
+          type="button"
+          class="toggle revert"
+          disabled={busy}
+          aria-label={row.untracked ? `Delete ${row.entry.path}` : `Discard changes in ${row.entry.path}`}
+          title={row.untracked ? "Delete this untracked file" : "Discard the unstaged changes"}
+          onclick={() => void revert(row)}>↶</button
+        >
+      {/if}
       <button
         type="button"
         class="toggle"
@@ -205,14 +267,55 @@
     <p class="note">No project open.</p>
   {:else if notARepo}
     <p class="note">This project folder is not a git repository.</p>
+    <p class="note">
+      <button type="button" class="ax-btn primary" disabled={busy} onclick={() => void createRepo()}>Create repository</button>
+    </p>
+    {#if error}<p class="problem" role="alert">{error}</p>{/if}
   {:else if !status}
     <p class="note">{error || "Reading the repository…"}</p>
   {:else}
     <header>
-      <span class="branch" title={status.upstream ? `Follows ${status.upstream}` : "No upstream"}>
-        <span class="name">{status.branch ?? `detached at ${status.head ?? "?"}`}</span>
+      <span class="branch" bind:this={branchBox}>
+        <button
+          type="button"
+          class="branch-button"
+          aria-expanded={branchMenu}
+          title={status.upstream ? `Follows ${status.upstream} — switch branch` : "No upstream — switch branch"}
+          onclick={() => void openBranches()}
+        >
+          <span class="name">{status.branch ?? `detached at ${status.head ?? "?"}`}</span>
+        </button>
         {#if status.ahead > 0}<span class="count" title="Commits not on the upstream">↑{status.ahead}</span>{/if}
         {#if status.behind > 0}<span class="count" title="Commits on the upstream you do not have">↓{status.behind}</span>{/if}
+        {#if branchMenu}
+          <div class="branch-menu" role="menu">
+            {#each branchList as branch (branch.name)}
+              <button
+                type="button"
+                role="menuitem"
+                class:current={branch.current}
+                disabled={branch.current}
+                onclick={() => void switchTo(branch.name)}
+              >
+                <span class="check" aria-hidden="true">{branch.current ? "✓" : ""}</span>
+                <span class="name">{branch.name}</span>
+                {#if branch.upstream}<small>{branch.upstream}</small>{/if}
+              </button>
+            {/each}
+            <div class="new-branch">
+              <input
+                type="text"
+                spellcheck="false"
+                placeholder="New branch from here"
+                bind:value={newBranch}
+                onkeydown={(e) => {
+                  if (e.key === "Enter") void makeBranch();
+                }}
+              />
+              <button type="button" class="ax-btn" disabled={!newBranch.trim()} onclick={() => void makeBranch()}>Create</button>
+            </div>
+          </div>
+        {/if}
       </span>
       <span class="remote">
         <IconButton
@@ -334,6 +437,90 @@
 
   .commit-buttons .ax-btn {
     flex: 1;
+  }
+
+  .branch {
+    position: relative;
+  }
+
+  .branch-button {
+    min-width: 0;
+    padding: 0 var(--ax-space-1);
+    background: none;
+    border: 0;
+    border-radius: var(--ax-radius-sm);
+    color: var(--ax-text);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .branch-button:hover {
+    background: var(--ax-accent-muted);
+  }
+
+  .branch-menu {
+    position: absolute;
+    left: 0;
+    top: calc(100% + var(--ax-space-1));
+    z-index: 10;
+    min-width: calc(220px * var(--ax-ui-scale));
+    max-height: calc(320px * var(--ax-ui-scale));
+    overflow: auto;
+    padding: var(--ax-space-1);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    box-shadow: var(--ax-shadow-pop);
+  }
+
+  .branch-menu > button {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: none;
+    border: 0;
+    border-radius: var(--ax-radius-sm);
+    color: var(--ax-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .branch-menu > button:hover:not(:disabled) {
+    background: var(--ax-accent-muted);
+  }
+
+  .branch-menu > button.current {
+    color: var(--ax-text-muted);
+  }
+
+  .check {
+    width: calc(12px * var(--ax-ui-scale));
+    color: var(--ax-accent);
+  }
+
+  .new-branch {
+    display: flex;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-1) var(--ax-space-1);
+    border-top: 1px solid var(--ax-border);
+  }
+
+  .new-branch input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: var(--ax-bg);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    color: var(--ax-text);
+    font: inherit;
+  }
+
+  .revert:hover:not(:disabled) {
+    color: var(--ax-danger, var(--ax-warning));
   }
 
   .count {

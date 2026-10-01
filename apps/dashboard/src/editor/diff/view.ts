@@ -64,15 +64,15 @@ export function parseHunkActionId(id: string): { hunk: number; action: HunkActio
 }
 
 function hunkDecoration(hunk: number, header: string, headers: HunkHeaders): LineDecoration {
-  const actions: LineAction[] = headers.action
-    ? [
-        headers.action === "stage"
-          ? { id: hunkActionId(hunk, "stage"), label: "Stage", title: "Add this change to the next commit" }
-          : { id: hunkActionId(hunk, "unstage"), label: "Unstage", title: "Take this change out of the next commit" },
-      ]
-    : headers.discard
-      ? [{ id: hunkActionId(hunk, "discard"), label: "Discard", title: "Put this change back to the base (⌘⌫)" }]
-      : [];
+  const actions: LineAction[] = [];
+  if (headers.action === "stage") {
+    actions.push({ id: hunkActionId(hunk, "stage"), label: "Stage", title: "Add this change to the next commit" });
+  } else if (headers.action === "unstage") {
+    actions.push({ id: hunkActionId(hunk, "unstage"), label: "Unstage", title: "Take this change out of the next commit" });
+  }
+  if (headers.discard) {
+    actions.push({ id: hunkActionId(hunk, "discard"), label: "Discard", title: "Put this change back to the base (⌘⌫)" });
+  }
   return { kind: "hunk", gutter: "@@", label: header, actions };
 }
 

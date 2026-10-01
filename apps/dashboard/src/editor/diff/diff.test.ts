@@ -430,6 +430,8 @@ describe("diff panes", () => {
     expect(unstage.decorations.line(1)?.actions).toMatchObject([{ id: hunkActionId(0, "unstage"), label: "Unstage" }]);
     expect(parseHunkActionId(hunkActionId(2, "stage"))).toEqual({ hunk: 2, action: "stage" });
     expect(parseHunkActionId("hunk:1:nope")).toBeNull();
+    const both = unifiedPane(model.unified(), UNFOLD_STEP, { headers: ["@@ h @@"], discard: true, action: "stage" });
+    expect(both.decorations.line(1)?.actions?.map((a) => a.label)).toEqual(["Stage", "Discard"]);
   });
 
   it("round-trips fold action ids", () => {

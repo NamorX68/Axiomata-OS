@@ -930,6 +930,9 @@ function relsOf(root: string): string[] {
 const GIT_ROOT = "project:1";
 const gitHead = new Map<string, string>();
 let gitAhead = 1;
+let gitIsRepo = true;
+const gitBranches = new Set(['main', 'feature/ui']);
+let gitBranch = 'main';
 const gitIndex = new Map<string, string>();
 otherRootFiles.set("project:1\0notes.txt", "Remember the milk.\nCall the bank.\n");
 gitHead.set("src/demo.rs", demoLines(true));
@@ -1696,10 +1699,10 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       ] as T;
     // ---- git panel ----
     case "git_status":
-      if (args.root !== GIT_ROOT) return { state: "not_a_repo" } as T;
+      if (args.root !== GIT_ROOT || !gitIsRepo) return { state: "not_a_repo" } as T;
       return {
         state: "ready",
-        status: { branch: "main", head: "abc12345", upstream: "origin/main", ahead: gitAhead, behind: 0, entries: gitEntries() },
+        status: { branch: gitBranch, head: "abc12345", upstream: "origin/main", ahead: gitAhead, behind: 0, entries: gitEntries() },
       } as T;
     case "git_stage":
       for (const path of args.paths as string[]) {
@@ -1747,6 +1750,42 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (gitAhead === 0) throw { kind: "Git", message: "git push failed: nothing to push" };
       gitAhead = 0;
       return { remote: "origin", branch: "main", created_upstream: false } as T;
+    }
+    case "git_init":
+      gitIsRepo = true;
+      return undefined as T;
+    case "git_discard":
+      for (const path of args.paths as string[]) {
+        const index = gitIndex.get(path);
+        if (index === undefined) otherRootFiles.delete(`${GIT_ROOT}\0${path}`);
+        else otherRootFiles.set(`${GIT_ROOT}\0${path}`, index);
+      }
+      return undefined as T;
+    case "git_discard_hunk": {
+      // Back to the index: apply the hunk's old side to the working text.
+      const path = String(args.path);
+      const hunk = gitHunks(path, "unstaged")[Number(args.index)];
+      if (!hunk || hunk.header !== args.header) throw { kind: "Invalid", message: `${path} changed since its diff was shown; reload it and try again` };
+      const nums = hunk.lines.map((l) => l.newLine).filter((n): n is number => n !== null);
+      const first = nums.length ? Math.min(...nums) - 1 : 0;
+      const last = nums.length ? Math.max(...nums) : 0;
+      const old = hunk.lines.filter((l) => l.kind !== "add").map((l) => l.text);
+      const work = textLines(gitWorking(path) ?? "");
+      otherRootFiles.set(`${GIT_ROOT}\0${path}`, [...work.slice(0, first), ...old, ...work.slice(last)].join("\n") + "\n");
+      return undefined as T;
+    }
+    case "git_branches":
+      return [...gitBranches].sort().map((name) => ({ name, current: name === gitBranch, upstream: name === "main" ? "origin/main" : null })) as T;
+    case "git_switch":
+      if (!gitBranches.has(String(args.name))) throw { kind: "Invalid", message: `there is no local branch called ${args.name}` };
+      gitBranch = String(args.name);
+      return undefined as T;
+    case "git_create_branch": {
+      const name = String(args.name).trim();
+      if (gitBranches.has(name)) throw { kind: "Invalid", message: `the branch ${name} exists already` };
+      gitBranches.add(name);
+      gitBranch = name;
+      return undefined as T;
     }
     case "git_fetch":
       return undefined as T;

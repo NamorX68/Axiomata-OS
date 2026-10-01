@@ -139,6 +139,7 @@
       <button type="button" role="menuitem" onclick={() => add("terminal")}>Terminal</button>
       <button type="button" role="menuitem" onclick={() => add("files")}>Files</button>
       <button type="button" role="menuitem" onclick={() => add("search")}>Search</button>
+      <button type="button" role="menuitem" onclick={() => add("git")}>Git</button>
     </div>
   {/if}
 
