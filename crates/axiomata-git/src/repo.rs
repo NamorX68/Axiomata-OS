@@ -467,6 +467,191 @@ pub fn fetch(repo: &Path) -> Result<()> {
     git(repo, &["fetch", "--quiet"]).map(drop)
 }
 
+/// One local branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Branch {
+    pub name: String,
+    pub current: bool,
+    /// The remote branch it follows, e.g. `origin/main`.
+    pub upstream: Option<String>,
+}
+
+/// Makes `path` a git repository (`git init`). Refuses a folder that already is one — or lies inside
+/// one — so a nested repository is never made by accident. **Creates `.git`.**
+pub fn init(path: &Path) -> Result<()> {
+    if is_repo(path) {
+        return Err(GitError::Invalid {
+            field: "path",
+            reason: "this folder is already part of a git repository".into(),
+        });
+    }
+    git(path, &["init", "--quiet"]).map(drop)
+}
+
+/// A branch name git would accept for a new local branch (`git check-ref-format --branch`), never
+/// one that starts with a dash (it would read as an option).
+fn checked_branch(name: &str) -> Result<&str> {
+    let name = name.trim();
+    let bad = |reason: &str| GitError::Invalid {
+        field: "branch",
+        reason: reason.to_string(),
+    };
+    if name.is_empty() {
+        return Err(bad("a branch needs a name"));
+    }
+    if name.starts_with('-') || name.contains('\0') {
+        return Err(bad("is not a usable branch name"));
+    }
+    // `check-ref-format` runs in no repository; git itself is the judge of the rules.
+    let ok = std::process::Command::new("git")
+        .args(["check-ref-format", "--branch", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if ok {
+        Ok(name)
+    } else {
+        Err(bad("is not a valid branch name"))
+    }
+}
+
+/// The local branches, current one first-marked; read-only.
+pub fn branches(repo: &Path) -> Result<Vec<Branch>> {
+    let raw = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(HEAD)%00%(refname:short)%00%(upstream:short)",
+            "--sort=refname",
+            "refs/heads",
+        ],
+    )?;
+    Ok(raw
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\0');
+            let head = parts.next()?;
+            let name = parts.next()?.to_string();
+            let upstream = parts.next().filter(|u| !u.is_empty()).map(str::to_string);
+            Some(Branch {
+                name,
+                current: head == "*",
+                upstream,
+            })
+        })
+        .collect())
+}
+
+/// Switches to the local branch `name`. Git refuses when uncommitted changes would be overwritten —
+/// nothing is stashed or thrown away to make it work. **Changes the checked-out files and `HEAD`.**
+pub fn switch_branch(repo: &Path, name: &str) -> Result<()> {
+    let name = checked_branch(name)?;
+    if !branches(repo)?.iter().any(|b| b.name == name) {
+        return Err(GitError::Invalid {
+            field: "branch",
+            reason: format!("there is no local branch called {name}"),
+        });
+    }
+    git(repo, &["switch", "--quiet", name]).map(drop)
+}
+
+/// Creates the branch `name` at the current commit and switches to it; uncommitted changes come
+/// along. Refuses a name that exists. **Changes `HEAD`.**
+pub fn create_branch(repo: &Path, name: &str) -> Result<()> {
+    let name = checked_branch(name)?;
+    if branches(repo)?.iter().any(|b| b.name == name) {
+        return Err(GitError::Invalid {
+            field: "branch",
+            reason: format!("the branch {name} exists already"),
+        });
+    }
+    git(repo, &["switch", "--quiet", "--create", name]).map(drop)
+}
+
+/// Throws away the unstaged changes of `paths` — the files go back to what the index has — and
+/// deletes untracked ones. **Destroys work that git cannot bring back**: the caller must have asked
+/// the owner. Staged changes are kept (a file changed on both sides goes back to its staged
+/// version). A path with nothing to discard is refused, so a typo cannot pass for success.
+pub fn discard(repo: &Path, paths: &[String]) -> Result<()> {
+    check_all(paths)?;
+    let entries = status(repo)?.entries;
+    let mut restore: Vec<&str> = Vec::new();
+    let mut remove: Vec<&str> = Vec::new();
+    for path in paths {
+        let Some(entry) = entries.iter().find(|e| &e.path == path) else {
+            return Err(GitError::Invalid {
+                field: "path",
+                reason: format!("{path} has no changes to discard"),
+            });
+        };
+        if entry.untracked {
+            remove.push(path);
+        } else if entry.unstaged.is_some() {
+            restore.push(path);
+        } else {
+            return Err(GitError::Invalid {
+                field: "path",
+                reason: format!("{path} has no unstaged changes to discard"),
+            });
+        }
+    }
+    if !restore.is_empty() {
+        let mut args = vec!["restore", "--worktree", "--"];
+        args.extend(restore);
+        git(repo, &args)?;
+    }
+    for path in remove {
+        let file = repo.join(path);
+        let meta = fs::symlink_metadata(&file).map_err(|err| GitError::Invalid {
+            field: "path",
+            reason: format!("{path}: {err}"),
+        })?;
+        // Only a plain file or a symlink itself — never a directory, never what a link points to.
+        if meta.is_dir() {
+            return Err(GitError::Invalid {
+                field: "path",
+                reason: format!("{path} is a folder; discard its files"),
+            });
+        }
+        fs::remove_file(&file).map_err(|err| GitError::Invalid {
+            field: "path",
+            reason: format!("{path}: {err}"),
+        })?;
+    }
+    Ok(())
+}
+
+/// Throws away one hunk of `path`'s unstaged diff (same checks as [`apply_hunk`]). **Destroys work
+/// git cannot bring back**: ask first.
+pub fn discard_hunk(repo: &Path, path: &str, index: usize, header: &str) -> Result<()> {
+    let diff = file_diff(repo, path, None, Side::Unstaged)?;
+    if diff.binary || diff.truncated {
+        return Err(GitError::Invalid {
+            field: "hunk",
+            reason: format!("{path} has no hunks to take back one by one; discard the whole file"),
+        });
+    }
+    let hunk = diff
+        .hunks
+        .get(index)
+        .filter(|hunk| hunk.header == header)
+        .ok_or_else(|| GitError::Invalid {
+            field: "hunk",
+            reason: format!("{path} changed since its diff was shown; reload it and try again"),
+        })?;
+    if diff.old_size.is_none() || diff.new_size.is_none() {
+        // Added (untracked) or deleted as a whole: the hunk is the file.
+        return discard(repo, &[path.to_string()]);
+    }
+    let patch = hunk_patch(path, hunk);
+    git_with_input(
+        repo,
+        &["apply", "-R", "--whitespace=nowarn", "-"],
+        patch.as_bytes(),
+    )
+    .map(drop)
+}
+
 /// What a push did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushResult {
@@ -1073,5 +1258,122 @@ mod tests {
             "theirs"
         );
         let _ = fs::remove_dir_all(&other);
+    }
+    #[test]
+    fn init_makes_a_repository_but_not_inside_one() {
+        let plain = std::env::temp_dir().join(format!("axiomata-git-init-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&plain);
+        fs::create_dir_all(&plain).unwrap();
+        assert!(!is_repo(&plain));
+        init(&plain).unwrap();
+        assert!(is_repo(&plain));
+        assert!(init(&plain).is_err());
+        let inner = plain.join("sub");
+        fs::create_dir_all(&inner).unwrap();
+        assert!(
+            init(&inner)
+                .unwrap_err()
+                .to_string()
+                .contains("already part")
+        );
+        let _ = fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn discarding_puts_a_file_back_to_the_index_and_deletes_untracked_ones() {
+        let r = Repo::new("discard");
+        r.write("a.txt", "1\n");
+        r.write("b.txt", "1\n");
+        r.commit_all("base");
+        r.write("a.txt", "2\n");
+        r.run(&["add", "a.txt"]);
+        r.write("a.txt", "3\n");
+        r.write("b.txt", "2\n");
+        r.write("new.txt", "n\n");
+        discard(&r.0, &["a.txt".into(), "b.txt".into(), "new.txt".into()]).unwrap();
+        // Staged work survives; unstaged work does not.
+        assert_eq!(fs::read_to_string(r.0.join("a.txt")).unwrap(), "2\n");
+        assert_eq!(fs::read_to_string(r.0.join("b.txt")).unwrap(), "1\n");
+        assert!(!r.0.join("new.txt").exists());
+        assert_eq!(r.entry("a.txt").unwrap().staged, Some(ChangeKind::Modified));
+        // A deleted file comes back.
+        fs::remove_file(r.0.join("b.txt")).unwrap();
+        discard(&r.0, &["b.txt".into()]).unwrap();
+        assert!(r.0.join("b.txt").exists());
+    }
+
+    #[test]
+    fn discarding_refuses_what_has_nothing_to_discard_and_what_leaves_the_repository() {
+        let r = Repo::new("discard-refuse");
+        r.write("a.txt", "1\n");
+        r.commit_all("base");
+        assert!(discard(&r.0, &["a.txt".into()]).is_err());
+        assert!(discard(&r.0, &["nope.txt".into()]).is_err());
+        assert!(discard(&r.0, &["../x".into()]).is_err());
+        r.write("dir/f.txt", "x\n");
+        assert!(discard(&r.0, &["dir".into()]).is_err());
+        assert!(r.0.join("dir/f.txt").exists());
+    }
+
+    #[test]
+    fn one_hunk_is_discarded_on_its_own_and_a_stale_one_is_refused() {
+        let r = Repo::new("discard-hunk");
+        two_hunks(&r);
+        let un = file_diff(&r.0, "f.txt", None, Side::Unstaged).unwrap();
+        assert!(discard_hunk(&r.0, "f.txt", 0, "@@ -9,9 +9,9 @@").is_err());
+        discard_hunk(&r.0, "f.txt", 1, &un.hunks[1].header).unwrap();
+        let text = fs::read_to_string(r.0.join("f.txt")).unwrap();
+        assert!(text.contains("L2") && !text.contains("L14") && text.contains("l14"));
+    }
+
+    #[test]
+    fn branches_are_listed_created_and_switched_to_without_losing_changes() {
+        let r = Repo::new("branches");
+        r.write("a.txt", "1\n");
+        r.commit_all("base");
+        create_branch(&r.0, "feature/x").unwrap();
+        let list = branches(&r.0).unwrap();
+        assert_eq!(
+            list.iter()
+                .map(|b| (b.name.as_str(), b.current))
+                .collect::<Vec<_>>(),
+            [("feature/x", true), ("main", false)]
+        );
+        assert_eq!(status(&r.0).unwrap().branch.as_deref(), Some("feature/x"));
+        // Uncommitted work comes along when the branch is made…
+        r.write("a.txt", "2\n");
+        create_branch(&r.0, "feature/y").unwrap();
+        assert_eq!(fs::read_to_string(r.0.join("a.txt")).unwrap(), "2\n");
+        // …and a switch that would overwrite it is refused, not forced.
+        r.run(&["add", "a.txt"]);
+        r.run(&["commit", "--quiet", "-m", "on y"]);
+        r.write("a.txt", "3\n");
+        assert!(switch_branch(&r.0, "main").is_err());
+        assert_eq!(status(&r.0).unwrap().branch.as_deref(), Some("feature/y"));
+        discard(&r.0, &["a.txt".into()]).unwrap();
+        switch_branch(&r.0, "main").unwrap();
+        assert_eq!(status(&r.0).unwrap().branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn bad_branch_names_and_unknown_branches_are_refused() {
+        let r = Repo::new("branch-names");
+        r.write("a.txt", "1\n");
+        r.commit_all("base");
+        for bad in ["", "  ", "-x", "a b", "a..b", "x~1", "/lead"] {
+            assert!(create_branch(&r.0, bad).is_err(), "{bad:?}");
+        }
+        assert!(
+            create_branch(&r.0, "main")
+                .unwrap_err()
+                .to_string()
+                .contains("exists")
+        );
+        assert!(
+            switch_branch(&r.0, "nope")
+                .unwrap_err()
+                .to_string()
+                .contains("no local branch")
+        );
     }
 }
