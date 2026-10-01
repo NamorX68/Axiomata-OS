@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "axiomata-core",
  "axiomata-files",
+ "axiomata-git",
  "axiomata-macos",
  "axiomata-terminal",
  "home",

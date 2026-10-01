@@ -89,6 +89,9 @@
   import { clampOutlineHeight, clampWidth, folderKey, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
   import ProjectBar from "./ProjectBar.svelte";
   import OutlinePanel from "./OutlinePanel.svelte";
+  import GitPanel from "./GitPanel.svelte";
+  import GitDiffView from "./GitDiffView.svelte";
+  import type { Side as GitSide } from "./gitBackend";
   import { pathAt } from "../editor/syntax/outline";
   import type { OutlineInfo } from "./outlineModel";
   import { projectRootId, resolveProject, treeRootsOf } from "./projectModel";
@@ -108,7 +111,13 @@
   const lineFor = new Map<string, number>();
   let quickOpen = $state(false);
   /** The left column's tab (T13): the file tree, or the project search (⇧⌘F). */
-  let sideTab = $state<"files" | "search">("files");
+  let sideTab = $state<"files" | "search" | "git">("files");
+  /** The git panel (#48): the change open over the editor, how many files are changed, and a nudge to re-read. */
+  let gitChange = $state<{ path: string; old_path: string | null; side: GitSide } | null>(null);
+  let gitCount = $state(0);
+  let gitNudge = $state(0);
+  let gitVersion = $state(0);
+  let gitSignature = "";
   let searchView = $state<ProjectSearch | null>(null);
   /** The tab being closed while it asks about unsaved text. */
   let closing = $state<{ id: string; answer: (close: boolean) => void } | null>(null);
@@ -261,6 +270,12 @@
   const pickProject = (id: number) => runProject(() => touchProject(id));
   const openProjectFolderDialog = () => runProject(openProjectFolder);
   const newProject = (name: string, gitInit: boolean) => runProject(() => newProjectFolder(name, gitInit));
+
+  // Another project, or none: its change is not this one's.
+  $effect(() => {
+    void currentProject?.id;
+    untrack(() => (gitChange = null));
+  });
 
   /** "Change folder…": the project keeps its id; the tree follows if it is the open one. */
   async function changeFolder(id: number): Promise<void> {
@@ -718,6 +733,13 @@
             pressed={sideTab === "search"}
             onclick={() => void showSearch()}
           />
+          <IconButton
+            icon="git-branch"
+            tab
+            label={gitCount > 0 ? `Git — ${gitCount} changed` : "Git"}
+            pressed={sideTab === "git"}
+            onclick={() => (sideTab = "git")}
+          />
         </div>
         {#if sideTab === "files"}
           <IconButton
@@ -737,6 +759,24 @@
           roots={treeRoots}
           initialRoot={active?.file?.root ?? null}
           onOpen={(root, rel, line) => openTab({ root, rel }, true, null, line)}
+        />
+      </div>
+      <div class="side-pane" class:gone={sideTab !== "git"}>
+        <GitPanel
+          root={currentProject ? projectRootId(currentProject.id) : null}
+          active={open && sideTab === "git"}
+          selected={gitChange ? { path: gitChange.path, side: gitChange.side } : null}
+          refresh={gitNudge}
+          onOpen={(row) => (gitChange = { path: row.entry.path, old_path: row.entry.old_path, side: row.side })}
+          onStatus={(count, status) => {
+            gitCount = count;
+            // The open change follows the status, but only when the list of changes really changed.
+            const signature = JSON.stringify(status?.entries ?? []);
+            if (signature !== gitSignature) {
+              gitSignature = signature;
+              gitVersion++;
+            }
+          }}
         />
       </div>
       <div class="side-pane" class:gone={sideTab !== "files"}>
@@ -857,6 +897,22 @@
         {/if}
       </div>
   </div>
+  {/if}
+  {#if gitChange && currentProject}
+    <GitDiffView
+      root={projectRootId(currentProject.id)}
+      entry={gitChange}
+      side={gitChange.side}
+      version={gitVersion}
+      onClose={() => (gitChange = null)}
+      onChanged={() => gitNudge++}
+      onOpenFile={(line) => {
+        if (!gitChange || !currentProject) return;
+        const file = { root: projectRootId(currentProject.id), rel: gitChange.path };
+        gitChange = null;
+        openTab(file, true, null, line);
+      }}
+    />
   {/if}
   </div>
   {#if inspector}
@@ -1148,6 +1204,7 @@
 
   /* Tab bar, banners and the tabs, beside the tree. */
   .column {
+    position: relative;
     flex: 1;
     min-width: 0;
     display: flex;

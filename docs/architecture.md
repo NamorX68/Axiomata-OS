@@ -824,6 +824,12 @@ types a path; `create_ide_project` and `set_ide_project_root` were removed for t
 folder, `newproject::create_project_folder` makes a new folder (optionally `git init`) and is the one place in
 `axiomata-ide` that creates directories. No project file is written into the folder.
 
+**Git layer** (2026-10-01, `docs/plans/editor-projekt-werkzeuge.md` #48): `crates/axiomata-git` is the one place that runs `git`
+(subprocess, never `git2`, never a push) and reads its machine formats — `run` (the runner and its environment), `diff`
+(diff types, parser, hunk patch), `repo` (status, stage/unstage, hunk apply, blob, commit, fetch). It has no Tauri,
+database or macOS-only code, so it builds and tests anywhere `git` runs. `axiomata-ide::git` (agent worktrees) sits on
+it through thin wrappers that keep the IDE's error type; the editor's git panel talks to it through `src-tauri/src/git.rs`.
+
 **CP1 is done too**: `apps/dashboard/src/ide/layout.ts` is the dock-layout model — a tree of
 `Split { dir, children, sizes }` and `TabGroup { tabs, active }` with docking, moving,
 closing and divider dragging, plus the serialisation that fills CP0's `layout_json`. Pure

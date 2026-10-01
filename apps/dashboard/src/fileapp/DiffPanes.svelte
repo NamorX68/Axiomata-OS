@@ -63,6 +63,8 @@
     hunkHeaders?: HunkHeaders | null;
     /** "Discard" on a hunk's header, or ⌘⌫ inside it (H9). */
     onDiscardHunk?: (hunk: number) => void;
+    /** "Stage" / "Unstage" on a hunk's header (the git panel, #48). */
+    onStageHunk?: (hunk: number, action: "stage" | "unstage") => void;
   }
 
   let {
@@ -76,6 +78,7 @@
     interceptKey,
     hunkHeaders = null,
     onDiscardHunk,
+    onStageHunk,
   }: Props = $props();
 
   const face = editorFace();
@@ -179,7 +182,8 @@
   function onLineAction(action: string): void {
     const hunk = parseHunkActionId(action);
     if (hunk) {
-      onDiscardHunk?.(hunk.hunk);
+      if (hunk.action === "discard") onDiscardHunk?.(hunk.hunk);
+      else onStageHunk?.(hunk.hunk, hunk.action);
       return;
     }
     const fold = parseFoldActionId(action);

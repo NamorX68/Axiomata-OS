@@ -43,27 +43,37 @@ export interface HunkHeaders {
   /** Git's header line of every hunk, by hunk index. */
   headers: readonly string[];
   discard: boolean;
+  /**
+   * The git panel's button instead of the discard one (#48): stage a hunk of the working tree's
+   * diff, or unstage one of the staged diff.
+   */
+  action?: "stage" | "unstage";
 }
 
+/** What a hunk's button does. */
+export type HunkAction = "discard" | "stage" | "unstage";
+
 /** A hunk button's action id, and back. */
-export function hunkActionId(hunk: number, action: "discard"): string {
+export function hunkActionId(hunk: number, action: HunkAction): string {
   return `hunk:${hunk}:${action}`;
 }
 
-export function parseHunkActionId(id: string): { hunk: number; action: "discard" } | null {
-  const m = /^hunk:(\d+):(discard)$/.exec(id);
-  return m ? { hunk: Number(m[1]), action: "discard" } : null;
+export function parseHunkActionId(id: string): { hunk: number; action: HunkAction } | null {
+  const m = /^hunk:(\d+):(discard|stage|unstage)$/.exec(id);
+  return m ? { hunk: Number(m[1]), action: m[2] as HunkAction } : null;
 }
 
-function hunkDecoration(hunk: number, header: string, discard: boolean): LineDecoration {
-  return {
-    kind: "hunk",
-    gutter: "@@",
-    label: header,
-    actions: discard
+function hunkDecoration(hunk: number, header: string, headers: HunkHeaders): LineDecoration {
+  const actions: LineAction[] = headers.action
+    ? [
+        headers.action === "stage"
+          ? { id: hunkActionId(hunk, "stage"), label: "Stage", title: "Add this change to the next commit" }
+          : { id: hunkActionId(hunk, "unstage"), label: "Unstage", title: "Take this change out of the next commit" },
+      ]
+    : headers.discard
       ? [{ id: hunkActionId(hunk, "discard"), label: "Discard", title: "Put this change back to the base (⌘⌫)" }]
-      : [],
-  };
+      : [];
+  return { kind: "hunk", gutter: "@@", label: header, actions };
 }
 
 const ACTION_LABELS: Record<FoldAction, (step: number) => LineAction["label"]> = {
@@ -140,7 +150,7 @@ class PaneBuilder {
       this.hunkStarts.push(this.lines.length);
       this.lastHunk = hunk;
       const header = this.headers?.headers[hunk];
-      if (header !== undefined) this.row("", hunkDecoration(hunk, header, this.headers!.discard), null, hunk);
+      if (header !== undefined) this.row("", hunkDecoration(hunk, header, this.headers!), null, hunk);
     }
     this.row(text, deco, source, hunk);
   }

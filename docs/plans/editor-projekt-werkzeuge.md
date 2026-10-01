@@ -1,6 +1,6 @@
 # Grobplan: Projekt-Werkzeuge im Editor (Wurzeln, Outline, Git, Run, Debug)
 
-Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 (Projekt neu/öffnen/schließen) und #49 (Outline) sind gebaut (2026-09-30); der Rest weiter geparkt**.
+Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 (Projekt neu/öffnen/schließen), #49 (Outline) und #48 (Git-Panel, erster Wurf) sind gebaut (2026-09-30/10-01); der Rest weiter geparkt**.
 Ursprünglich geparkt 2026-09-29 („keine Resourcen für Umsetzung“). Die Entscheidungen unten sind der
 abgelegte Grill-Stand; vor dem Bauen jeden Punkt anhand dessen in Checkpoints zerlegen
 (siehe die Arbeitsweise im Dachplan [`agentic-ide.md`](agentic-ide.md)).
@@ -149,6 +149,30 @@ Drei Checkpoints, wie im Gespräch festgelegt (Owner: Bereich unter dem Baum, Co
   sofort) über `FileTab` an die Ansicht, die die Meldung des vorderen Tabs zeigt. Keine Outline im Light-Modus.
 - **CP3 Breadcrumbs:** in der Kopfzeile hinter dem Dateipfad: die Symbole, die den Cursor halten, klickbar.
 - **Offen:** LSP-`documentSymbol` als Verfeinerung; Outline als Dock-Pane der IDE; Daten-Formate (JSON/TOML/YAML).
+
+## #48 Git-Panel gebaut (2026-10-01, erster Wurf: Changes)
+
+Entscheidungen des Owners (2026-10-01): neues schlankes Crate `axiomata-git` (nicht in `axiomata-files`; das Crate ist
+macOS-gebunden und trägt Watcher/LSP mit — mac-only Code soll später ohnehin aufgebrochen werden, damit die App auch
+unter Linux/Windows läuft), erst umziehen, dann bauen, zwei Gruppen mit Hunk-Staging.
+
+- **CP1 Umzug:** `crates/axiomata-git` (`run` = der eine Ort, der `git` aufruft, mit `GIT_OPTIONAL_LOCKS=0`,
+  `GIT_LITERAL_PATHSPECS=1`, `GIT_TERMINAL_PROMPT=0`; `diff` = Typen, Parser, Hunk-Patch, `checked_path`, `ChangeKind`).
+  `axiomata-ide` nutzt es über dünne Hüllen (eigener Fehlertyp bleibt), seine Tests blieben unverändert grün.
+- **CP2 Engine** (`axiomata-git::repo`): `status` (porcelain v2 -z, Branch/Upstream/ahead-behind), `stage`/`unstage`
+  (Datei, alles; vor dem ersten Commit geht `unstage` über `rm --cached`), `file_diff` je Seite (`Staged` = Index gegen
+  `HEAD`, `Unstaged` = Arbeitsbaum gegen Index, Untracked gegen nichts), `apply_hunk` (Stage/Unstage eines Blocks per
+  `git apply --cached`, nur wenn Index+Header noch stimmen; ein ganz neuer/gelöschter Block = die Datei), `blob`
+  (Datei wie `HEAD`/Index sie hat), `commit` (nur Gestagtes; verweigert leere Nachricht/leeren Index), `fetch`
+  (nie ein Push). Gegen echte Repositories getestet.
+- **CP3 Tauri:** `src-tauri/src/git.rs` — `git_status|stage|unstage|stage_all|unstage_all|diff|blob|apply_hunk|commit|fetch`
+  auf `project:<id>`-Wurzeln (`files::project_folder` lässt nur Projekt-Wurzeln zu).
+- **CP4 Oberfläche:** dritter Reiter „Git“ in der linken Spalte (`GitPanel.svelte`: Branch, ↑↓, Fetch; Gruppen Staged/
+  Changes; Stage/Unstage je Datei und alle; Commit-Feld, ⌘⏎), ein Klick auf eine Datei öffnet die Änderung als
+  `GitDiffView.svelte` über dem Editor (derselbe `DiffPanes` wie der Diff der IDE; Knopf „Stage“/„Unstage“ je Hunk, „Stage
+  file“, Layout-Umschalter; liest sich alle 5 s neu, ohne Falten/Cursor zu verlieren).
+- **Offen:** das Panel als Dock-Pane der IDE; History (Log + Diff je Commit) und Branch-Liste; „Revert“ einer Datei; ein
+  `git init`-Knopf für Ordner ohne Repository; Verlauf/Tags. Die Tauri-Hülle ist auf der Linux-Box nicht kompiliert.
 
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 
