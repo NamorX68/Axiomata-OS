@@ -44,8 +44,6 @@
   import Inspector, { type InspectorTab } from "./Inspector.svelte";
   import { inspectorSurface } from "./inspectorSurface.svelte";
   import IconButton from "../ui/IconButton.svelte";
-  import FileTree from "./FileTree.svelte";
-  import ProjectSearch from "./ProjectSearch.svelte";
   import type { LocationList } from "./locationList";
   import QuickOpen from "./QuickOpen.svelte";
   import { handoffs, takeHandoffs, type Handoff } from "./handoff";
@@ -78,12 +76,9 @@
   import { allGroups, resizeSplit } from "../ide/layout";
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "../ide/paneStore";
   import { foldKey, forgetFolds } from "./foldMemory";
-  import { uiScale } from "../core/uiScale";
-  import { clampOutlineHeight, clampWidth, folderKey, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
-  import ProjectBar from "./ProjectBar.svelte";
-  import OutlinePanel from "./OutlinePanel.svelte";
-  import GitPanel from "./GitPanel.svelte";
+  import { folderKey, loadTreePrefs, renamedPath, saveTreePrefs, type TreePrefs } from "./treeModel";
   import GitDiffView from "./GitDiffView.svelte";
+  import ProjectSidebar from "./ProjectSidebar.svelte";
   import type { Side as GitSide } from "./gitBackend";
   import { pathAt } from "../editor/syntax/outline";
   import type { OutlineInfo } from "./outlineModel";
@@ -104,14 +99,12 @@
   const lineFor = new Map<string, number>();
   let quickOpen = $state(false);
   /** The left column's tab (T13): the file tree, or the project search (⇧⌘F). */
-  let sideTab = $state<"files" | "search" | "git">("files");
+  let sidebar = $state<ProjectSidebar | null>(null);
   /** The git panel (#48): the change open over the editor, how many files are changed, and a nudge to re-read. */
   let gitChange = $state<{ path: string; old_path: string | null; side: GitSide } | null>(null);
-  let gitCount = $state(0);
   let gitNudge = $state(0);
   let gitVersion = $state(0);
   let gitSignature = "";
-  let searchView = $state<ProjectSearch | null>(null);
   /** The tab being closed while it asks about unsaved text. */
   let closing = $state<{ id: string; answer: (close: boolean) => void } | null>(null);
   /** Tabs are saved only once the saved ones were read back, never over them (tracked: the save waits for it). */
@@ -131,26 +124,8 @@
     inspector = inspector === tab ? null : tab;
   }
   let tree = $state<TreePrefs>(loadTreePrefs());
-  let treeView = $state<FileTree | null>(null);
-  /** The tree's width while its edge is being dragged. */
-  let dragging = $state<{ startX: number; startWidth: number } | null>(null);
   /** What each tab's editor last reported for the outline (#49), by tab id. */
   let outlines = $state<Record<string, OutlineInfo | undefined>>({});
-  /** The outline's top edge, dragged for its height. */
-  let outlineDrag = $state<{ startY: number; startHeight: number } | null>(null);
-
-  function startOutlineDrag(e: PointerEvent): void {
-    outlineDrag = { startY: e.clientY, startHeight: tree.outlineHeight };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-
-  function onOutlineDrag(e: PointerEvent): void {
-    // Unscaled like the tree's width; the pointer moves in screen pixels, and up makes it taller.
-    if (outlineDrag) {
-      tree = { ...tree, outlineHeight: clampOutlineHeight(outlineDrag.startHeight - (e.clientY - outlineDrag.startY) / $uiScale) };
-    }
-  }
-
   /** The registry the editor shares with the IDE. */
   let projects = $state<IdeProject[]>([]);
   /** A project is being opened or made; the bar takes no second click meanwhile. */
@@ -245,7 +220,7 @@
       project: project.id,
       expanded: tree.expanded.includes(key) ? tree.expanded : [...tree.expanded, key],
     };
-    sideTab = "files";
+    sidebar?.showFiles();
   }
 
   async function runProject(work: () => Promise<IdeProject | null>): Promise<void> {
@@ -371,16 +346,6 @@
     recent = recentFiles();
   }
 
-  function startDrag(e: PointerEvent): void {
-    dragging = { startX: e.clientX, startWidth: tree.width };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-
-  function onDrag(e: PointerEvent): void {
-    // The width is unscaled, drawn times the UI scale (editor-look K10); the pointer moves in screen pixels.
-    if (dragging) tree = { ...tree, width: clampWidth(dragging.startWidth + (e.clientX - dragging.startX) / $uiScale) };
-  }
-
   /**
    * The view's own keys (W12), in the capture phase so they work with the
    * editor focused or not — and stopped there, like the editor's own ⌘S.
@@ -429,17 +394,15 @@
   /** ⇧⌘F: the left column shows the project search, its field focused (T13). */
   async function showSearch(): Promise<void> {
     tree = { ...tree, visible: true };
-    sideTab = "search";
     await tick();
-    await searchView?.focus();
+    await sidebar?.showSearch();
   }
 
   /** A language server's list (ED6.3): the left column's search shows it. */
   async function showLocations(list: LocationList): Promise<void> {
     tree = { ...tree, visible: true };
-    sideTab = "search";
     await tick();
-    searchView?.showLocations(list);
+    sidebar?.showLocations(list);
   }
 
   function take(e: KeyboardEvent): void {
@@ -545,7 +508,7 @@
   $effect(() => {
     const snapshot = tree;
     // Not while dragging: once, when the edge is let go.
-    if (!dragging) saveTreePrefs(snapshot);
+    if (!sidebar?.dragging()) saveTreePrefs(snapshot);
   });
 
   $effect(() => {
@@ -615,122 +578,39 @@
 
   <div class="main">
   {#if tree.visible}
-    <aside class="side" style:width="{tree.width * $uiScale}px">
-      <ProjectBar
-        {projects}
-        current={currentProject}
-        busy={projectBusy}
-        onPick={(id) => void pickProject(id)}
-        onOpenFolder={() => void openProjectFolderDialog()}
-        onNew={(name, git) => void newProject(name, git)}
-        onClose={closeProject}
-        onChangeFolder={(id) => void changeFolder(id)}
-        onRemove={(id) => void removeFromList(id)}
-      />
-      <div class="side-bar">
-        <div class="side-tabs" role="tablist" aria-label="Left column">
-          <IconButton icon="files" label="Files" tab pressed={sideTab === "files"} onclick={() => (sideTab = "files")} />
-          <IconButton
-            icon="text-search"
-            tab
-            label="Search the project (⇧⌘F)"
-            pressed={sideTab === "search"}
-            onclick={() => void showSearch()}
-          />
-          <IconButton
-            icon="git-branch"
-            tab
-            label={gitCount > 0 ? `Git — ${gitCount} changed` : "Git"}
-            pressed={sideTab === "git"}
-            onclick={() => (sideTab = "git")}
-          />
-        </div>
-        {#if sideTab === "files"}
-          <IconButton
-            icon={tree.showHidden ? "eye" : "eye-off"}
-            label={tree.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
-            pressed={tree.showHidden}
-            size="sm"
-            onclick={() => (tree = { ...tree, showHidden: !tree.showHidden })}
-          />
-          <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => treeView?.refresh()} />
-        {/if}
-      </div>
-      <!-- Both stay mounted: the tree keeps what is open, the search its results. -->
-      <div class="side-pane" class:gone={sideTab !== "search"}>
-        <ProjectSearch
-          bind:this={searchView}
-          roots={treeRoots}
-          initialRoot={active?.file?.root ?? null}
-          onOpen={(root, rel, line) => openTab({ root, rel }, true, null, line)}
-        />
-      </div>
-      <div class="side-pane" class:gone={sideTab !== "git"}>
-        <GitPanel
-          root={currentProject ? projectRootId(currentProject.id) : null}
-          active={open && sideTab === "git"}
-          selected={gitChange ? { path: gitChange.path, side: gitChange.side } : null}
-          refresh={gitNudge}
-          onOpen={(row) => (gitChange = { path: row.entry.path, old_path: row.entry.old_path, side: row.side })}
-          onStatus={(count, status) => {
-            gitCount = count;
-            // The open change follows the status, but only when the list of changes really changed.
-            const signature = JSON.stringify(status?.entries ?? []);
-            if (signature !== gitSignature) {
-              gitSignature = signature;
-              gitVersion++;
-            }
-          }}
-        />
-      </div>
-      <div class="side-pane" class:gone={sideTab !== "files"}>
-      <div class="tree-area">
-      <FileTree
-        bind:this={treeView}
-        roots={treeRoots}
-        bind:expanded={tree.expanded}
-        showHidden={tree.showHidden}
-        active={active?.file ?? null}
-        onOpen={(file, preview) => openTab(file, preview)}
-        onError={(message) => (error = message)}
-      />
-      {#if treeRoots.length === 0}
-        <p class="no-project">
-          {currentProject ? "The project folder is not available." : "No project open. Open a folder or start a new project from the bar above."}
-        </p>
-      {/if}
-      </div>
-      {#if tree.outlineOpen}
-        <div
-          class="outline-edge"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Outline height"
-          onpointerdown={startOutlineDrag}
-          onpointermove={onOutlineDrag}
-          onpointerup={() => (outlineDrag = null)}
-        ></div>
-      {/if}
-      <div class="outline-area" style:height={tree.outlineOpen ? `${tree.outlineHeight * $uiScale}px` : "auto"}>
-        <OutlinePanel
-          info={activeOutline}
-          open={tree.outlineOpen}
-          onToggle={() => (tree = { ...tree, outlineOpen: !tree.outlineOpen })}
-          onJump={jumpToSymbol}
-        />
-      </div>
-      </div>
-    </aside>
-    <div
-      class="edge"
-      class:dragging={dragging !== null}
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Tree width"
-      onpointerdown={startDrag}
-      onpointermove={onDrag}
-      onpointerup={() => (dragging = null)}
-    ></div>
+    <ProjectSidebar
+      bind:this={sidebar}
+      bind:prefs={tree}
+      {open}
+      {projects}
+      current={currentProject}
+      busy={projectBusy}
+      onPickProject={(id) => void pickProject(id)}
+      onOpenFolder={() => void openProjectFolderDialog()}
+      onNewProject={(name, git) => void newProject(name, git)}
+      onCloseProject={closeProject}
+      onChangeFolder={(id) => void changeFolder(id)}
+      onRemoveProject={(id) => void removeFromList(id)}
+      roots={treeRoots}
+      active={active?.file ?? null}
+      onOpenFile={(file, preview) => openTab(file, preview)}
+      onOpenResult={(root, rel, line) => openTab({ root, rel }, true, null, line)}
+      onError={(message) => (error = message)}
+      outline={activeOutline}
+      onJumpToSymbol={jumpToSymbol}
+      gitRoot={currentProject ? projectRootId(currentProject.id) : null}
+      gitSelected={gitChange ? { path: gitChange.path, side: gitChange.side } : null}
+      gitRefresh={gitNudge}
+      onOpenChange={(row) => (gitChange = { path: row.entry.path, old_path: row.entry.old_path, side: row.side })}
+      onGitStatus={(_count, status) => {
+        // The open change follows the status, but only when the list of changes really changed.
+        const signature = JSON.stringify(status?.entries ?? []);
+        if (signature !== gitSignature) {
+          gitSignature = signature;
+          gitVersion++;
+        }
+      }}
+    />
   {/if}
   <div class="column">
   {#if error}
@@ -959,13 +839,6 @@
     font-size: var(--ax-font-size-xs);
   }
 
-  .no-project {
-    margin: 0;
-    padding: var(--ax-space-4);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-sm);
-  }
-
   .recent-anchor {
     position: relative;
   }
@@ -1041,73 +914,7 @@
     display: flex;
   }
 
-  .side {
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    min-height: 0;
-    background: var(--ax-surface-1);
-  }
-
-  .side-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-3);
-    border-bottom: 1px solid var(--ax-border);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .side-tabs {
-    flex: 1;
-    display: flex;
-    gap: var(--ax-space-1);
-  }
-
-  .side-pane {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  .tree-area {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-  }
-
-  .outline-area {
-    flex-shrink: 0;
-    min-height: 0;
-  }
-
-  .outline-edge {
-    height: var(--ax-space-1);
-    flex-shrink: 0;
-    background: var(--ax-border);
-    cursor: row-resize;
-  }
-
-  .side-pane.gone {
-    display: none;
-  }
-
-
   /* The tree's right edge, dragged for its width. */
-  .edge {
-    width: var(--ax-space-1);
-    flex-shrink: 0;
-    background: var(--ax-border);
-    cursor: col-resize;
-  }
-
-  .edge:hover,
-  .edge.dragging {
-    background: var(--ax-accent);
-  }
-
   /* Tab bar, banners and the tabs, beside the tree. */
   .column {
     position: relative;
