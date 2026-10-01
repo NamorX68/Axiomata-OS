@@ -4,6 +4,7 @@
 //! Nothing here ever pushes.
 
 pub mod diff;
+pub mod repo;
 pub mod run;
 
 /// A failed git operation.

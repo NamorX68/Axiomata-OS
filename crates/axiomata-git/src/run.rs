@@ -69,6 +69,8 @@ fn git_raw(repo: &Path, args: &[&str], ok: &[i32], input: Option<&[u8]>) -> Resu
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_LITERAL_PATHSPECS", "1")
+        // Never wait for a credential prompt nobody can answer: fail with git's own message instead.
+        .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(if input.is_some() {

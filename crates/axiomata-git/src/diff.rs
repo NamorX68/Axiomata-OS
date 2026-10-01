@@ -16,6 +16,22 @@ pub const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
 /// The most diff lines returned for one file.
 pub const MAX_DIFF_LINES: usize = 10_000;
 
+/// How a file differs from the base.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    /// Not in the base — either committed on the agent's branch or untracked.
+    Added,
+    /// In both, with different content.
+    Modified,
+    /// In the base, gone from the worktree.
+    Deleted,
+    /// The same content (or close to it) under a different path.
+    Renamed,
+    /// File became a symlink or the other way round.
+    TypeChanged,
+}
+
 /// The kind of one line in a diff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

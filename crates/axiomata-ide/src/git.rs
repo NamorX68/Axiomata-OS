@@ -47,7 +47,9 @@ use crate::{IdeError, Result};
 
 // The diff types and parser are shared with the editor's git panel and live in `axiomata-git`;
 // they stay reachable here under their old names.
-pub use axiomata_git::diff::{DiffLine, FileDiff, Hunk, LineKind, MAX_DIFF_BYTES, MAX_DIFF_LINES};
+pub use axiomata_git::diff::{
+    ChangeKind, DiffLine, FileDiff, Hunk, LineKind, MAX_DIFF_BYTES, MAX_DIFF_LINES,
+};
 use axiomata_git::diff::{hunk_patch, parse_diff};
 
 /// Checks a path that came from outside: relative, no `..`, not empty.
@@ -72,22 +74,6 @@ pub struct Base {
     /// True when `branch` was not recorded for this agent but is simply what
     /// the project folder has checked out (an agent from before M7.3).
     pub fallback: bool,
-}
-
-/// How a file differs from the base.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChangeKind {
-    /// Not in the base — either committed on the agent's branch or untracked.
-    Added,
-    /// In both, with different content.
-    Modified,
-    /// In the base, gone from the worktree.
-    Deleted,
-    /// The same content (or close to it) under a different path.
-    Renamed,
-    /// File became a symlink or the other way round.
-    TypeChanged,
 }
 
 /// One changed file, as the Diffs tab lists it (G2).
