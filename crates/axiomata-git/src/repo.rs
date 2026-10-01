@@ -16,7 +16,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::diff::{ChangeKind, FileDiff, MAX_DIFF_BYTES, checked_path, hunk_patch, parse_diff};
-use crate::run::{git, git_with, git_with_input};
+use crate::run::{git, git_bytes, git_with, git_with_input};
 use crate::{GitError, Result};
 
 /// One changed path, with what is staged and what is not (Zed's two groups).
@@ -338,6 +338,55 @@ pub fn file_diff(repo: &Path, path: &str, old_path: Option<&str>, side: Side) ->
         new_size,
         ..parse_diff(path, &raw)
     })
+}
+
+/// Where to read a file from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    /// As the last commit has it.
+    Head,
+    /// As the index has it — what is staged, or unchanged.
+    Index,
+}
+
+/// A file as git has it, for the diff view's whole sides.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum Blob {
+    /// There is no such file there.
+    Absent,
+    /// Larger than the limit; not read.
+    TooLarge {
+        size: u64,
+    },
+    /// Not UTF-8 text.
+    Binary,
+    Text {
+        text: String,
+    },
+}
+
+/// `path` as `source` has it, if it is at most `max_bytes` and text. Read-only.
+pub fn blob(repo: &Path, path: &str, source: Source, max_bytes: u64) -> Result<Blob> {
+    checked_path(path)?;
+    let spec = match source {
+        Source::Head if has_head(repo) => format!("HEAD:{path}"),
+        Source::Head => return Ok(Blob::Absent),
+        Source::Index => format!(":{path}"),
+    };
+    let Some(size) = object_size(repo, &spec) else {
+        return Ok(Blob::Absent);
+    };
+    if size > max_bytes {
+        return Ok(Blob::TooLarge { size });
+    }
+    let bytes = git_bytes(repo, &["cat-file", "blob", &spec])?;
+    // NUL in the first stretch is how git itself tells binary from text.
+    if bytes.iter().take(8000).any(|b| *b == 0) {
+        return Ok(Blob::Binary);
+    }
+    Ok(String::from_utf8(bytes).map_or(Blob::Binary, |text| Blob::Text { text }))
 }
 
 /// Stages one hunk of `path`'s unstaged diff, or unstages one hunk of its staged diff.
@@ -781,5 +830,39 @@ mod tests {
         fs::create_dir_all(&plain).unwrap();
         assert!(!is_repo(&plain));
         let _ = fs::remove_dir_all(&plain);
+    }
+    #[test]
+    fn blobs_read_either_side_and_say_why_they_cannot() {
+        let r = Repo::new("blob");
+        r.write("a.txt", "head\n");
+        r.write("bin.dat", "x\0y");
+        r.commit_all("base");
+        r.write("a.txt", "index\n");
+        r.run(&["add", "a.txt"]);
+        r.write("a.txt", "disk\n");
+        let text = |source| match blob(&r.0, "a.txt", source, 1000).unwrap() {
+            Blob::Text { text } => text,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(text(Source::Head), "head\n");
+        assert_eq!(text(Source::Index), "index\n");
+        assert_eq!(
+            blob(&r.0, "bin.dat", Source::Index, 1000).unwrap(),
+            Blob::Binary
+        );
+        assert_eq!(
+            blob(&r.0, "a.txt", Source::Index, 2).unwrap(),
+            Blob::TooLarge { size: 6 }
+        );
+        assert_eq!(
+            blob(&r.0, "nope.txt", Source::Head, 1000).unwrap(),
+            Blob::Absent
+        );
+        assert!(blob(&r.0, "../x", Source::Head, 1000).is_err());
+        let fresh = Repo::new("blob-fresh");
+        assert_eq!(
+            blob(&fresh.0, "a.txt", Source::Head, 10).unwrap(),
+            Blob::Absent
+        );
     }
 }

@@ -4,6 +4,7 @@ use tauri::Manager;
 mod bootstrap;
 mod commands;
 mod files;
+mod git;
 mod lsp;
 #[cfg(target_os = "macos")]
 mod menu;
@@ -109,6 +110,16 @@ pub fn run() {
             files::file_read_image,
             files::file_pick,
             files::project_open,
+            git::git_status,
+            git::git_stage,
+            git::git_unstage,
+            git::git_stage_all,
+            git::git_unstage_all,
+            git::git_diff,
+            git::git_blob,
+            git::git_apply_hunk,
+            git::git_commit,
+            git::git_fetch,
             files::project_new,
             files::file_watch,
             files::file_unwatch,

@@ -51,6 +51,12 @@ pub struct FileError {
     message: String,
 }
 
+impl FileError {
+    pub(crate) fn new(kind: &'static str, message: String) -> Self {
+        Self { kind, message }
+    }
+}
+
 impl From<FilesError> for FileError {
     fn from(err: FilesError) -> Self {
         Self {
@@ -160,6 +166,23 @@ fn with_roots<T>(config: &SharedConfig, db: &SharedDb, f: impl FnOnce(&Roots) ->
         .clone();
     let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
     f(&Roots::new(&config, &db))
+}
+
+/// The folder of a **project** root (`project:<id>`) — the only roots the git panel works on, since
+/// a project is a folder the owner opened with the native dialog. Anything else is refused.
+pub(crate) fn project_folder(
+    config: &SharedConfig,
+    db: &SharedDb,
+    id: &str,
+) -> Result<PathBuf, FilesError> {
+    if !id.starts_with("project:") {
+        return Err(FilesError::UnknownRoot(id.to_string()));
+    }
+    with_roots(config, db, |roots| roots.list())?
+        .into_iter()
+        .find(|r| r.id == id)
+        .map(|r| r.path)
+        .ok_or_else(|| FilesError::UnknownRoot(id.to_string()))
 }
 
 pub(crate) fn root(config: &SharedConfig, db: &SharedDb, id: &str) -> Result<Root, FilesError> {
