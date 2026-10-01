@@ -49,7 +49,7 @@ vorgeschlagene Begriffe stehen noch nicht fest.
   Tabs da sind; gespeichert wird das Layout nur mit Projekt).
 - **Ein Einstieg:** die Ring-Einträge „Editor" und „IDE" öffnen dieselbe Ansicht (`ide/modeRequest.ts`): „Editor" im Editor-Modus, „IDE" im
   Agents-Modus. Die alte Editor-Ansicht (`FileAppView`, `FileGroup`, `FileTab`, `fileDock`) ist entfernt; `settings.editor.dock` wird nicht mehr gelesen.
-- **Offen aus Schritt 3:** Pfad-Kopf mit Breadcrumbs über dem Editor (die Outline unter dem Baum ist da), Einstellungs-/Tastenspalte ist als Inspector da.
+- **Pfad-Kopf:** die Kopfzeile zeigt Pfad und Symbol-Breadcrumbs der vordersten Datei (aus denselben Daten wie die Outline). Einstellungs-/Tastenspalte ist als Inspector da.
 
 ## Stand Schritt 5 (Name)
 

@@ -96,6 +96,7 @@
   import GitDiffView from "../fileapp/GitDiffView.svelte";
   import type { Side as GitSide } from "../fileapp/gitBackend";
   import type { OutlineInfo } from "../fileapp/outlineModel";
+  import { pathAt } from "../editor/syntax/outline";
   import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
   import { listenBackend } from "../core/backend";
   import { treeRootsOf } from "../fileapp/projectModel";
@@ -141,6 +142,9 @@
   let outlines = $state<Record<string, OutlineInfo>>({});
   const front = $derived(frontFile(layout));
   const activeOutline = $derived(front ? (outlines[`${front.root}\0${front.rel}`] ?? null) : null);
+  /** The symbols holding the front file's cursor — the breadcrumbs (#49), from the same data as the outline. */
+  const crumbs = $derived(activeOutline?.symbols ? pathAt(activeOutline.symbols, activeOutline.line) : []);
+  const rootLabel = (id: string): string => roots.find((r) => r.id === id)?.label ?? id;
   /** A change open in the diff view over the dock. */
   let gitChange = $state<{ path: string; old_path: string | null; side: GitSide } | null>(null);
   let gitNudge = $state(0);
@@ -667,6 +671,14 @@
         onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
         onRemove={(id) => void projectSession.removeAgent(id)}
       />
+      {#if front}
+        <span class="path" title={front.rel}><span class="root">{rootLabel(front.root)}</span> / {front.rel}</span>
+        {#each crumbs as crumb (crumb.line + "\0" + crumb.name)}
+          <button type="button" class="crumb" onclick={() => jumpToSymbol(crumb.nameLine)}>
+            <span aria-hidden="true">›</span> {crumb.name}
+          </button>
+        {/each}
+      {/if}
     </div>
     <div class="actions">
       <IconButton
@@ -835,6 +847,39 @@
     display: flex;
     align-items: baseline;
     gap: var(--ax-space-3);
+    min-width: 0;
+  }
+
+  .path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  .path .root {
+    color: var(--ax-text);
+  }
+
+  .crumb {
+    flex-shrink: 0;
+    padding: 0 var(--ax-space-1);
+    background: none;
+    border: 0;
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .crumb:last-of-type {
+    color: var(--ax-accent);
+  }
+
+  .crumb:hover {
+    color: var(--ax-text);
   }
 
   h1 {
