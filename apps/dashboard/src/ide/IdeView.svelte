@@ -450,6 +450,12 @@
    * does not mean hunting down copies in a stored layout.
    */
   function openAgent(agent: IdeAgent) {
+    // Already open in this layout: bring that pane forward instead of starting a second copy of the agent.
+    const existing = allTabs(layout).find((t) => t.kind === "agent" && t.config?.agentId === agent.id);
+    if (existing) {
+      layout = activateTab(layout, existing.id);
+      return;
+    }
     const tab: PaneTab = {
       id: crypto.randomUUID(),
       kind: "agent",

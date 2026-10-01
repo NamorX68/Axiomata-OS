@@ -7,7 +7,8 @@
 <script lang="ts">
   import type { AgentFields, IdeAgent } from "../core/backend";
   import { HARNESSES, blankFields, fieldsOf } from "./agents";
-  import { agentStatus, describeStatus, withoutPane } from "./agentStatus";
+  import { agentStatus } from "./agentStatus";
+  import { cardOf } from "./agentCard";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -35,11 +36,6 @@
   } = $props();
 
   /** `null` = the "new agent" form, a number = editing that agent. */
-  function statusOf(agent: IdeAgent) {
-    const view = describeStatus($statuses.byAgent.get(agent.id), agent, $statuses.checkedAt);
-    return openAgentIds.has(agent.id) ? view : withoutPane(view);
-  }
-
   let editing = $state<number | null | undefined>(undefined);
 
   let form = $state<AgentFields>(blankFields());
@@ -66,17 +62,34 @@
   <p class="title">AGENTS</p>
   <div class="body">
     {#if agents.length > 0}
-      <ul>
+      <ul class="cards">
         {#each agents as agent (agent.id)}
-          <li>
-            <button class="pick" type="button" {disabled} onclick={() => onOpen(agent)}>
-              <span class="name">
-                <StatusDot view={statusOf(agent)} />
-                {agent.name}
+          {@const card = cardOf(agent, $statuses.byAgent.get(agent.id), openAgentIds.has(agent.id), $statuses.checkedAt)}
+          <li class="card {card.status.tone}" style:--harness="var(--ax-harness-{agent.harness})">
+            <button class="open" type="button" {disabled} title={card.status.title} onclick={() => onOpen(agent)}>
+              <span class="top">
+                <span class="avatar" aria-hidden="true">{agent.name.trim().charAt(0).toUpperCase() || "?"}</span>
+                <span class="who">
+                  <span class="name">{agent.name}</span>
+                  <span class="meta">{agent.harness === "claude_code" ? "Claude Code" : agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
+                </span>
+                <span class="state">
+                  <StatusDot view={card.status} />
+                  {card.status.label}
+                </span>
               </span>
-              <span class="meta">{agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
+              {#if card.plan || card.step}
+                <span class="doing">{card.step ?? card.plan}</span>
+              {/if}
+              {#if card.progress}
+                <span class="progress" title="{card.progress.done} of {card.progress.total} steps done">
+                  <span class="bar"><span class="fill" style:width="{(card.progress.done / card.progress.total) * 100}%"></span></span>
+                  <span class="count">{card.progress.done}/{card.progress.total}</span>
+                </span>
+              {/if}
+              {#if card.since}<span class="since">{card.status.tone === "ended" ? "last" : card.status.label} · {card.since}</span>{/if}
             </button>
-            <!-- Quiet until the row is hovered or focused (editor-look I4); the command is in the edit form. -->
+            <!-- Quiet until the card is hovered or focused (editor-look I4). -->
             <div class="row-actions">
               <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
               <IconButton
@@ -164,8 +177,7 @@
     padding: var(--ax-space-3);
   }
 
-  .add:disabled,
-  .pick:disabled {
+  .add:disabled {
     opacity: 0.5;
     cursor: default;
   }
@@ -178,27 +190,46 @@
     flex-direction: column;
   }
 
-  /* A row per agent (editor-look I4): the pick on the left, its actions on the right on hover. */
-  li {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    border-radius: var(--ax-radius-md);
+  .cards {
+    gap: var(--ax-space-3);
   }
 
-  li:hover,
-  li:focus-within {
+  /* A card per agent: the harness's colour on its edge, the step it is on, how far it is. */
+  .card {
+    position: relative;
+    display: block;
+    padding: 0;
+    border: 1px solid var(--ax-border);
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--harness, var(--ax-border-strong));
+    border-radius: var(--ax-radius-md);
     background: var(--ax-surface-2);
   }
 
-  .pick {
+  .card:hover,
+  .card:focus-within {
+    border-color: var(--ax-border-strong);
+    border-left-color: var(--harness, var(--ax-border-strong));
+    background: var(--ax-surface-3);
+  }
+
+  .card.working {
+    box-shadow: 0 0 0 1px var(--ax-accent) inset;
+  }
+
+  .card.waiting {
+    box-shadow: 0 0 0 1px var(--ax-warning) inset;
+  }
+
+  .card.ended {
+    opacity: 0.75;
+  }
+
+  .open {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    flex: 1;
-    min-width: 0;
-    padding: 0;
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-3);
     background: none;
     border: none;
     color: var(--ax-text);
@@ -208,25 +239,108 @@
     cursor: pointer;
   }
 
+  .open:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .top {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-3);
+  }
+
+  .avatar {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: calc(28px * var(--ax-ui-scale));
+    height: calc(28px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: color-mix(in srgb, var(--harness, var(--ax-text-muted)) 22%, transparent);
+    color: var(--harness, var(--ax-text-muted));
+    font-weight: 600;
+  }
+
+  .who {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
   .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .state {
     display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    flex: 0 0 auto;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .doing {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--ax-text);
+  }
+
+  .progress {
+    display: flex;
     align-items: center;
     gap: var(--ax-space-2);
   }
 
-  .meta {
+  .bar {
+    flex: 1;
+    height: calc(4px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
+    overflow: hidden;
+  }
+
+  .fill {
+    display: block;
+    height: 100%;
+    background: var(--ax-accent);
+  }
+
+  .count,
+  .since {
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
   }
 
   .row-actions {
+    position: absolute;
+    right: var(--ax-space-1);
+    bottom: var(--ax-space-1);
     display: flex;
     gap: var(--ax-space-1);
     opacity: 0;
+    background: var(--ax-surface-3);
+    border-radius: var(--ax-radius-md);
   }
 
-  li:hover .row-actions,
-  li:focus-within .row-actions {
+  .card:hover .row-actions,
+  .card:focus-within .row-actions {
     opacity: 1;
   }
 
