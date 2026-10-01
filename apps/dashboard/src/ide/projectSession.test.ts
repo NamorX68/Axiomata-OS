@@ -284,3 +284,39 @@ describe("close", () => {
     expect(get(session.session).current).toBeNull();
   });
 });
+
+describe("modes", () => {
+  it("switching parks the shown layout and saves both under one row", async () => {
+    api.openProject.mockResolvedValue(project(1));
+    const agents = (await session.open(1))!;
+    expect(get(session.session).mode).toBe("agents");
+
+    const editor = session.switchMode(agents);
+    expect(allTabs(editor)).toEqual([]);
+    expect(get(session.session).mode).toBe("editor");
+    expect(allTabs(get(session.session).parked).map((t) => t.kind)).toEqual(["terminal"]);
+
+    session.save(editor);
+    const written = JSON.parse(api.saveLayoutSoon.mock.calls.at(-1)![1] as string);
+    expect(written.mode).toBe("editor");
+    expect(Object.keys(written.layouts)).toEqual(["editor", "agents"]);
+
+    // And back: the parked terminal is the very layout that was parked.
+    expect(session.switchMode(editor)).toBe(agents);
+  });
+
+  it("opens in the mode the project was left in", async () => {
+    const stored = JSON.stringify({
+      mode: "editor",
+      layouts: {
+        editor: { root: { type: "tabs", id: "e", active: null, tabs: [] } },
+        agents: { root: { type: "tabs", id: "a", active: "t", tabs: [{ id: "t", kind: "terminal", title: "T" }] } },
+      },
+    });
+    api.openProject.mockResolvedValue(project(1, { layout_json: stored }));
+    const layout = await session.open(1);
+    expect(allTabs(layout!)).toEqual([]);
+    expect(get(session.session).mode).toBe("editor");
+    expect(allTabs(get(session.session).parked)).toHaveLength(1);
+  });
+});

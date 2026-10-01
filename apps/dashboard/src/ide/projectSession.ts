@@ -31,7 +31,8 @@ import { toast } from "../core/toast";
 
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
-import { emptyLayout, parseLayout, serializeLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
+import { emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
+import { emptyEditorLayout, parseWorkspace, serializeWorkspace, switchMode as swapMode, type Mode, type Workspace } from "./modes";
 import { newProjectFolder, openProjectFolder } from "../fileapp/backend";
 import { applyProjectCwd } from "./paneCwd";
 import {
@@ -51,9 +52,20 @@ export interface ProjectSession {
   agents: IdeAgent[];
   /** True while an open is in flight, so the picker can stop taking clicks. */
   switching: boolean;
+  /** Which mode's layout the view shows (`ide/modes.ts`). */
+  mode: Mode;
+  /** The other mode's layout: not shown, its panes kept mounted and running. */
+  parked: Layout;
 }
 
-const EMPTY: ProjectSession = { projects: [], current: null, agents: [], switching: false };
+const EMPTY: ProjectSession = {
+  projects: [],
+  current: null,
+  agents: [],
+  switching: false,
+  mode: "agents",
+  parked: emptyLayout(),
+};
 
 const state = writable<ProjectSession>(EMPTY);
 
@@ -77,20 +89,28 @@ function startingLayout(project: IdeProject): Layout {
 }
 
 /**
- * The layout to show for a project: its stored one, or a starting one.
+ * The workspace to show for a project: its stored layouts, or a starting one.
  *
  * A stored layout that cannot be parsed says so rather than vanishing quietly
  * — losing an arrangement without a word is what `core/persist.ts` refuses to
  * do for `dashboard.json`, and the same applies here.
  */
-export function layoutFor(project: IdeProject): Layout {
-  if (project.layout_json === null) return startingLayout(project);
-  const parsed = parseLayout(project.layout_json);
+export function workspaceFor(project: IdeProject): Workspace {
+  const starting = (): Workspace => ({ mode: "agents", active: startingLayout(project), parked: emptyEditorLayout() });
+  if (project.layout_json === null) return starting();
+  const parsed = parseWorkspace(project.layout_json, {
+    editor: emptyEditorLayout,
+    agents: () => startingLayout(project),
+  });
   if (!parsed) {
     toast(`The stored layout for “${project.name}” could not be read; starting fresh.`, "warning");
-    return startingLayout(project);
+    return starting();
   }
-  return applyProjectCwd(parsed, project.repo_root);
+  return {
+    mode: parsed.mode,
+    active: applyProjectCwd(parsed.active, project.repo_root),
+    parked: applyProjectCwd(parsed.parked, project.repo_root),
+  };
 }
 
 async function refresh(): Promise<void> {
@@ -117,12 +137,12 @@ export async function open(id: number): Promise<Layout | null> {
       await refresh();
       return null;
     }
-    const layout = layoutFor(project);
+    const ws = workspaceFor(project);
     const agents = await listAgents(project.id);
     if (seq !== sequence) return null;
-    state.update((s) => ({ ...s, current: project, agents }));
+    state.update((s) => ({ ...s, current: project, agents, mode: ws.mode, parked: ws.parked }));
     await refresh();
-    return seq === sequence ? layout : null;
+    return seq === sequence ? ws.active : null;
   } catch (err) {
     report(err);
     return null;
@@ -183,7 +203,7 @@ export async function changeRoot(id: number, layout: Layout): Promise<Layout | n
     if (!updated) return null;
     const isOpen = get(state).current?.id === id;
     if (!isOpen) return null;
-    state.update((s) => ({ ...s, current: updated }));
+    state.update((s) => ({ ...s, current: updated, parked: applyProjectCwd(s.parked, updated.repo_root) }));
     return applyProjectCwd(layout, updated.repo_root);
   } catch (err) {
     report(err);
@@ -205,7 +225,7 @@ export async function remove(id: number): Promise<boolean> {
     await deleteProject(id);
     const wasOpen = get(state).current?.id === id;
     // The agents went with the project — the foreign key cascades.
-    if (wasOpen) state.update((s) => ({ ...s, current: null, agents: [] }));
+    if (wasOpen) state.update((s) => ({ ...s, current: null, agents: [], parked: emptyLayout(), mode: "agents" }));
     await refresh();
     return wasOpen;
   } catch (err) {
@@ -221,13 +241,24 @@ export async function remove(id: number): Promise<boolean> {
 export async function close(): Promise<void> {
   sequence++;
   await flushLayout();
-  state.update((s) => ({ ...s, current: null, agents: [], switching: false }));
+  state.update((s) => ({ ...s, current: null, agents: [], switching: false, parked: emptyLayout(), mode: "agents" }));
 }
 
 /** Queues a debounced write of the open project's layout. */
 export function save(layout: Layout): void {
-  const project = get(state).current;
-  if (project) saveLayoutSoon(project.id, serializeLayout(layout));
+  const { current: project, mode, parked } = get(state);
+  if (project) saveLayoutSoon(project.id, serializeWorkspace({ mode, active: layout, parked }));
+}
+
+/**
+ * Shows the other mode: `layout` (on screen) is parked and the parked one is returned for the view
+ * to show. Nothing is unmounted — the view keeps rendering the parked layout's panes, hidden.
+ */
+export function switchMode(layout: Layout): Layout {
+  const { mode, parked } = get(state);
+  const next = swapMode({ mode, active: layout, parked });
+  state.update((s) => ({ ...s, mode: next.mode, parked: next.parked }));
+  return next.active;
 }
 
 /** The layout an IDE with no project shows: nothing. */

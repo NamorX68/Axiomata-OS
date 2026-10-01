@@ -76,6 +76,7 @@
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
+  import type { Mode } from "./modes";
   import { fileHandle } from "./fileHandles";
   import UnsavedQuestion from "../fileapp/UnsavedQuestion.svelte";
   import { cycleTab, nthTab, splitActive } from "./dockKeys";
@@ -101,6 +102,9 @@
   const projects = $derived($sessionState.projects);
   const current = $derived($sessionState.current);
   const agents = $derived($sessionState.agents);
+  const mode = $derived($sessionState.mode);
+  /** The other mode's layout: its panes stay mounted (hidden), so an agent keeps running while the files are shown. */
+  const parked = $derived($sessionState.parked);
 
   let layout = $state<Layout>(projectSession.noProjectLayout());
   let dockEl = $state<HTMLElement | undefined>();
@@ -362,6 +366,17 @@
     layout = setTabConfig(layout, tab.id, { ...config, line, jump: Date.now() });
   }
 
+  /** Switches the shown mode; the layout on screen is parked, not closed. */
+  function switchTo(next: Mode): void {
+    if (!current || next === mode) return;
+    layout = projectSession.switchMode(layout);
+  }
+
+  /** Agents and terminals live in the Agents layout: shown first if the Editor mode is. */
+  function showAgents(): void {
+    switchTo("agents");
+  }
+
   /**
    * Puts an agent into a pane, beside whatever is already open.
    *
@@ -372,6 +387,7 @@
    * does not mean hunting down copies in a stored layout.
    */
   function openAgent(agent: IdeAgent) {
+    showAgents();
     const tab: PaneTab = {
       id: crypto.randomUUID(),
       kind: "agent",
@@ -393,6 +409,7 @@
   function openTerminal() {
     const project = current;
     if (!project) return;
+    showAgents();
     const groups = allGroups(layout);
     const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
     const added = addTab(layout, projectSession.terminalTab(), { nodeId: target, side: "right" });
@@ -489,7 +506,7 @@
   });
 
   /** Every pane in the layout, flat — the store renders exactly this list. */
-  const panes = $derived(allTabs(layout));
+  const panes = $derived([...allTabs(layout), ...allTabs(parked)]);
   /** The panes on screen: the active tab of every group, while the view is open. */
   const visibleTabs = $derived(new Set(open ? allGroups(layout).map((g) => g.active) : []));
 
@@ -566,6 +583,10 @@
         onclick={() => (tree.visible = !tree.visible)}
       />
       <h1>IDE</h1>
+      <div class="modes" role="group" aria-label="Mode">
+        <button type="button" class:on={mode === "editor"} disabled={!current} onclick={() => switchTo("editor")}>Editor</button>
+        <button type="button" class:on={mode === "agents"} disabled={!current} onclick={() => switchTo("agents")}>Agents</button>
+      </div>
       <IconButton icon="terminal" label="Open a terminal beside the others" disabled={!current} onclick={openTerminal} />
       <AgentPicker
         {agents}
@@ -750,6 +771,36 @@
     font-family: var(--ax-font-display);
     font-size: var(--ax-font-size-lg);
     letter-spacing: var(--ax-tracking-wide);
+  }
+
+  .modes {
+    display: flex;
+    gap: 1px;
+    padding: 2px;
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    align-self: center;
+  }
+
+  .modes button {
+    padding: calc(2px * var(--ax-ui-scale)) var(--ax-space-3);
+    border: 0;
+    border-radius: var(--ax-radius-sm);
+    background: transparent;
+    color: var(--ax-text-muted);
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+
+  .modes button.on {
+    background: var(--ax-accent-muted);
+    color: var(--ax-text);
+  }
+
+  .modes button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .actions {
