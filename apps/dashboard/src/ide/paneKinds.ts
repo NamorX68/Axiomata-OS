@@ -82,10 +82,15 @@ export function withFilesPane(layout: Layout, projectId: number): Layout {
  * With files dragged into a second group, the first one in reading order counts.
  */
 export function frontFile(layout: Layout): FileRef | null {
-  const group = allGroups(layout).find((g) => g.tabs.some((t) => t.kind === FILE_PANE));
-  const tab = group?.tabs.find((t) => t.id === group.active);
+  const tab = frontFileTab(layout);
   const config = tab ? filePaneConfig(tab) : null;
   return config ? { root: config.root, rel: config.rel } : null;
+}
+
+/** The tab `frontFile` is about, or `null`. */
+export function frontFileTab(layout: Layout): PaneTab | null {
+  const group = allGroups(layout).find((g) => g.tabs.some((t) => t.kind === FILE_PANE));
+  return group?.tabs.find((t) => t.id === group.active) ?? null;
 }
 
 /** A Files pane's config from a stored tab; missing or malformed fields fall back to closed and not hidden. */

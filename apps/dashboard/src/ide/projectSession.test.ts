@@ -71,10 +71,10 @@ describe("open", () => {
     expect(order).toEqual(["flush", "open"]);
   });
 
-  it("returns a starting layout for a project that has none: its Files pane and a terminal (W16)", async () => {
+  it("returns a starting layout for a project that has none: a terminal; the files are in the shared sidebar", async () => {
     api.openProject.mockResolvedValue(project(1));
     const layout = await session.open(1);
-    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["files", "terminal"]);
+    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["terminal"]);
     expect(get(session.session).current?.id).toBe(1);
   });
 
@@ -98,7 +98,7 @@ describe("open", () => {
     api.openProject.mockResolvedValue(project(1, { layout_json: "{ this is not a layout" }));
     const layout = await session.open(1);
 
-    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["files", "terminal"]);
+    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["terminal"]);
     expect(toasted).toHaveBeenCalledWith(expect.stringContaining("could not be read"), "warning");
   });
 
@@ -274,5 +274,13 @@ describe("save", () => {
     await session.open(4);
     session.save(layout);
     expect(api.saveLayoutSoon).toHaveBeenCalledWith(4, expect.stringContaining('"version"'));
+  });
+});
+
+describe("close", () => {
+  it("leaves the open project and keeps it in the list", async () => {
+    session.resetSessionForTests();
+    await session.close();
+    expect(get(session.session).current).toBeNull();
   });
 });

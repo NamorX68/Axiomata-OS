@@ -31,9 +31,10 @@
   import { onMount, tick, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
+  import { toast } from "../core/toast";
+
   import { DockDrag } from "./dockDrag.svelte";
   import { setDock } from "./dockContext";
-  import { pendingLocations } from "../fileapp/locationList";
   import DockNode from "./DockNode.svelte";
   import PaneGroup from "./PaneGroup.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -45,11 +46,9 @@
     allGroups,
     allTabs,
     closeTab,
-    findTab,
     moveTab,
     resizeSplit,
     setTabConfig,
-    type DockTarget,
     type Layout,
     type PaneTab,
   } from "./layout";
@@ -66,11 +65,11 @@
     fileOrigin,
     filesTab,
     frontFile,
+    frontFileTab,
     FILE_PANE,
     isWorkPane,
     openOrFocus,
     projectRoot,
-    SEARCH_PANE,
     gitTab,
     searchTab,
     showsFile,
@@ -78,9 +77,16 @@
   import { applyProjectCwd } from "./paneCwd";
   import PaneHost from "./panes/PaneHost.svelte";
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "./paneStore";
-  import ProjectPicker from "./ProjectPicker.svelte";
-  import * as projectSession from "./projectSession";
+    import * as projectSession from "./projectSession";
   import { flushLayout } from "./projects";
+  import ProjectSidebar from "../fileapp/ProjectSidebar.svelte";
+  import GitDiffView from "../fileapp/GitDiffView.svelte";
+  import type { Side as GitSide } from "../fileapp/gitBackend";
+  import type { OutlineInfo } from "../fileapp/outlineModel";
+  import { listRoots } from "../fileapp/backend";
+  import { treeRootsOf } from "../fileapp/projectModel";
+  import { loadTreePrefs, saveTreePrefs, type TreePrefs } from "../fileapp/treeModel";
+  import type { FileRootInfo } from "../core/backend";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -109,6 +115,20 @@
   /** The right-hand inspector (editor-look I5): the editor's settings and the shortcuts, as in the file app. */
   let inspector = $state<InspectorTab | null>(null);
   const preview = inspectorSurface();
+  /** The shared sidebar (`fileapp/ProjectSidebar.svelte`) and its own prefs, saved apart from the editor's. */
+  let sidebar = $state<ProjectSidebar | null>(null);
+  let tree = $state<TreePrefs>(loadTreePrefs("ide"));
+  let roots = $state<FileRootInfo[]>([]);
+  const treeRoots = $derived(treeRootsOf(roots, current?.id ?? null));
+  /** The symbols of each open file, by `root\0rel`; the front file's go to the sidebar's outline. */
+  let outlines = $state<Record<string, OutlineInfo>>({});
+  const front = $derived(frontFile(layout));
+  const activeOutline = $derived(front ? (outlines[`${front.root}\0${front.rel}`] ?? null) : null);
+  /** A change open in the diff view over the dock. */
+  let gitChange = $state<{ path: string; old_path: string | null; side: GitSide } | null>(null);
+  let gitNudge = $state(0);
+  let gitVersion = $state(0);
+  let gitSignature = "";
   /** ⌘P over the open project's files (W9). */
   let quickOpen = $state(false);
 
@@ -176,8 +196,15 @@
    * Everything else belongs to the panes.
    */
   function onViewKeydown(e: KeyboardEvent): void {
-    if (!e.metaKey || e.altKey || e.ctrlKey || !current) return;
+    if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const key = e.key.toLowerCase();
+    if (!e.shiftKey && key === "b") {
+      e.preventDefault();
+      e.stopPropagation();
+      tree.visible = !tree.visible;
+      return;
+    }
+    if (!current) return;
     if (!e.shiftKey && key === "p") {
       e.preventDefault();
       e.stopPropagation();
@@ -190,21 +217,11 @@
     }
   }
 
-  /**
-   * ⇧⌘F: brings the Search pane forward with its field focused, or opens one
-   * — in the Files pane's group, where a column for it already is.
-   */
-  function showSearch(focus = true): void {
-    const existing = allTabs(layout).find((t) => t.kind === SEARCH_PANE);
-    if (existing) {
-      const config = focus ? { ...existing.config, focus: Date.now() } : existing.config;
-      layout = activateTab(setTabConfig(layout, existing.id, config ?? {}), existing.id);
-      return;
-    }
-    const files = allTabs(layout).find((t) => t.kind === FILES_PANE);
-    const group = files ? findTab(layout, files.id)?.group.id : undefined;
-    const target: DockTarget = group ? { nodeId: group, side: "center" } : { nodeId: layout.root.id, side: "left" };
-    layout = addTab(layout, searchTab(), target);
+  /** ⇧⌘F: the sidebar's Search tab with its field focused — the sidebar is shown first if it was folded away. */
+  async function showSearch(): Promise<void> {
+    tree.visible = true;
+    await tick();
+    await sidebar?.showSearch();
   }
 
   /** Opening a project replaces the tree; its old panes are unmounted, which
@@ -232,6 +249,25 @@
 
   async function removeProject(id: number) {
     if (await projectSession.remove(id)) layout = projectSession.noProjectLayout();
+  }
+
+  async function closeProject() {
+    await projectSession.close();
+    layout = projectSession.noProjectLayout();
+    gitChange = null;
+  }
+
+  /** The sidebar's Files tab opens a file as a tab of the dock's file group. */
+  function openFromSidebar(file: FileRef, _preview: boolean, line: number | null = null): void {
+    openFromQuickOpen(file, line);
+  }
+
+  /** The outline's click: the front file pane moves its cursor (its `jump` changes, as for a diff). */
+  function jumpToSymbol(line: number): void {
+    const tab = frontFileTab(layout);
+    const config = tab ? filePaneConfig(tab) : null;
+    if (!tab || !config) return;
+    layout = setTabConfig(layout, tab.id, { ...config, line, jump: Date.now() });
   }
 
   /**
@@ -288,6 +324,7 @@
     void projectSession.start().then((next) => {
       if (next) layout = next;
     });
+    void listRoots().then((r) => (roots = r)).catch(() => {});
 
     window.addEventListener("blur", drag.abandon);
     // `pagehide` is what `core/persist.ts` uses for the same job: a quit while
@@ -307,9 +344,8 @@
       layout = activateTab(layout, tabId);
     },
     showLocations: (list) => {
-      // The Search pane takes the list from here once it is there (`SearchPane.svelte`).
-      pendingLocations.set(list);
-      showSearch(false);
+      tree.visible = true;
+      void tick().then(() => sidebar?.showLocations(list));
     },
     close: (tabId) => {
       // A file pane's folds are kept only while it is open (T7).
@@ -339,6 +375,9 @@
     open: (tab, match, fromTabId) => {
       const from = tab.kind === FILE_PANE ? fileOrigin(layout, fromTabId, lastWorkTab) : fromTabId;
       layout = openOrFocus(layout, tab, match, from);
+    },
+    reportOutline: (file, info) => {
+      outlines[`${file.root}\0${file.rel}`] = info;
     },
     setConfig: (tabId, config) => {
       layout = setTabConfig(layout, tabId, config);
@@ -382,6 +421,18 @@
     if (dockEl) placePanes(dockEl);
   });
 
+  // A project opened or added is a new root for the file service: read the list again.
+  $effect(() => {
+    void $sessionState.projects;
+    void listRoots().then((r) => (roots = r)).catch(() => {});
+  });
+
+  // The sidebar's prefs are written with a delay, and not while its edge is being dragged.
+  $effect(() => {
+    const snapshot = $state.snapshot(tree);
+    if (!sidebar?.dragging()) saveTreePrefs(snapshot, "ide");
+  });
+
   // Every change to the tree queues a write of the open project's layout. The
   // write that follows opening a project stores what was just read back, which
   // costs one statement and buys not having to track a dirty flag that could
@@ -407,17 +458,13 @@
 <section class="ide" class:hidden={!open} inert={!open} aria-label="IDE" onkeydowncapture={onViewKeydown}>
   <header>
     <div class="titles">
-      <h1>IDE</h1>
-      <ProjectPicker
-        {projects}
-        {current}
-        switching={$sessionState.switching}
-        onOpen={(id) => void openProjectById(id)}
-        onOpenFolder={() => void openFolderAsProject()}
-        onNewFolder={(name, gitInit) => void addProject(name, gitInit)}
-        onSetRoot={(id) => void changeRoot(id)}
-        onRemove={(id) => void removeProject(id)}
+      <IconButton
+        icon="panel-left"
+        label="Sidebar (⌘B)"
+        pressed={tree.visible}
+        onclick={() => (tree.visible = !tree.visible)}
       />
+      <h1>IDE</h1>
       <IconButton icon="terminal" label="Open a terminal beside the others" disabled={!current} onclick={openTerminal} />
       <AgentPicker
         {agents}
@@ -447,7 +494,41 @@
   </header>
 
   <div class="body">
-
+  {#if tree.visible}
+    <ProjectSidebar
+      bind:this={sidebar}
+      bind:prefs={tree}
+      {open}
+      {projects}
+      {current}
+      busy={$sessionState.switching}
+      onPickProject={(id) => void openProjectById(id)}
+      onOpenFolder={() => void openFolderAsProject()}
+      onNewProject={(name, git) => void addProject(name, git)}
+      onCloseProject={() => void closeProject()}
+      onChangeFolder={(id) => void changeRoot(id)}
+      onRemoveProject={(id) => void removeProject(id)}
+      roots={treeRoots}
+      active={front}
+      onOpenFile={openFromSidebar}
+      onOpenResult={(root, rel, line) => openFromSidebar({ root, rel }, true, line)}
+      onError={(message) => toast(message, "danger")}
+      outline={activeOutline}
+      onJumpToSymbol={jumpToSymbol}
+      gitRoot={current ? projectRoot(current.id) : null}
+      gitSelected={gitChange ? { path: gitChange.path, side: gitChange.side } : null}
+      gitRefresh={gitNudge}
+      onOpenChange={(row) => (gitChange = { path: row.entry.path, old_path: row.entry.old_path, side: row.side })}
+      onGitStatus={(_count, status) => {
+        const signature = JSON.stringify(status?.entries ?? []);
+        if (signature !== gitSignature) {
+          gitSignature = signature;
+          gitVersion++;
+        }
+      }}
+    />
+  {/if}
+  <div class="dock-column">
   <div
     class="dock"
     class:dragging={drag.draggingTab !== null}
@@ -484,9 +565,26 @@
       <!-- No project, no panes: a terminal with nowhere to start is worse than
            no terminal. The menu above is the only thing to do here. -->
       <div class="empty">
-        <p>Open a folder to work in, or start a new project — from the project menu above.</p>
+        <p>Open a project — from the project bar in the sidebar.</p>
       </div>
     {/if}
+  </div>
+  {#if gitChange && current}
+    <GitDiffView
+      root={projectRoot(current.id)}
+      entry={gitChange}
+      side={gitChange.side}
+      version={gitVersion}
+      onClose={() => (gitChange = null)}
+      onChanged={() => gitNudge++}
+      onOpenFile={(line) => {
+        if (!gitChange || !current) return;
+        const file = { root: projectRoot(current.id), rel: gitChange.path };
+        gitChange = null;
+        openFromQuickOpen(file, line);
+      }}
+    />
+  {/if}
   </div>
   {#if inspector}
     <Inspector tab={inspector} surface={preview.current} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
@@ -565,6 +663,14 @@
   }
 
   /* Groups meet edge to edge, a line between them (editor-look I1). */
+  .dock-column {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+  }
+
   .dock {
     position: relative;
     flex: 1 1 auto;

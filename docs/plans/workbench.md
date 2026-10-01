@@ -1,6 +1,6 @@
 # Plan: Eine Arbeitsfläche statt Editor und IDE
 
-Status: **beschlossen 2026-10-02 (Owner), Schritt 2 gebaut.** Editor und IDE sollen eine Anwendung mit einem Schalter werden
+Status: **beschlossen 2026-10-02 (Owner), Schritte 1 (gemeinsame Seitenleiste `fileapp/ProjectSidebar.svelte` in Editor und IDE) und 2 gebaut.** Editor und IDE sollen eine Anwendung mit einem Schalter werden
 („Editor“-Modus und „Agenten“-Modus), nicht zwei Programme. Auslöser: das Git-Panel und die Seitenleiste mussten doppelt gedacht
 werden, der Editor wird selbst IDE-artig, die IDE ist die „agentische“. Der Name der einen Sache ist offen (Owner: „irgendwann“);
 vorgeschlagene Begriffe stehen noch nicht fest.

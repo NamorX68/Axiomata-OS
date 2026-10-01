@@ -15,6 +15,7 @@
 import { getContext, setContext } from "svelte";
 
 import type { LocationList } from "../fileapp/locationList";
+import type { OutlineInfo } from "../fileapp/outlineModel";
 import type { FileRef } from "../fileapp/tabs";
 import type { DockTarget, PaneTab } from "./layout";
 
@@ -36,6 +37,8 @@ export interface IdeDock {
   open: (tab: PaneTab, match: (t: PaneTab) => boolean, fromTabId: string | null) => void;
   /** A language server's list of places (ED6.3): shown in the Search pane, opened if need be. */
   showLocations: (list: LocationList) => void;
+  /** A file pane's symbols and cursor line, for the sidebar's outline. */
+  reportOutline: (file: FileRef, info: OutlineInfo) => void;
   /** A pane's module changed its config; it belongs on that pane's tab. */
   setConfig: (tabId: string, config: Record<string, unknown>) => void;
   /** A pointer went down on a tab: maybe a click, maybe the start of a drag. */

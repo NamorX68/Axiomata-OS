@@ -142,12 +142,13 @@ export function parseTreePrefs(raw: unknown): TreePrefs {
   };
 }
 
-const KEY = "editor";
+/** Each view of the workbench keeps its own sidebar prefs, under its own settings key. */
+export type TreePrefsKey = "editor" | "ide";
 
-export function loadTreePrefs(): TreePrefs {
-  return parseTreePrefs(getSetting<{ tree?: unknown }>(KEY)?.tree);
+export function loadTreePrefs(key: TreePrefsKey = "editor"): TreePrefs {
+  return parseTreePrefs(getSetting<{ tree?: unknown }>(key)?.tree);
 }
 
-export function saveTreePrefs(prefs: TreePrefs): void {
-  setSetting(KEY, { ...getSetting<Record<string, unknown>>(KEY), tree: prefs });
+export function saveTreePrefs(prefs: TreePrefs, key: TreePrefsKey = "editor"): void {
+  setSetting(key, { ...getSetting<Record<string, unknown>>(key), tree: prefs });
 }

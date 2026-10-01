@@ -32,7 +32,6 @@ import { toast } from "../core/toast";
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { emptyLayout, parseLayout, serializeLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
-import { withFilesPane } from "./paneKinds";
 import { newProjectFolder, openProjectFolder } from "../fileapp/backend";
 import { applyProjectCwd } from "./paneCwd";
 import {
@@ -72,9 +71,9 @@ export function terminalTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: "terminal", title: "Terminal" };
 }
 
-/** What a project gets the first time it is opened: its Files pane on the left, a terminal beside it (W16). */
+/** What a project gets the first time it is opened: a terminal (the files are in the shared sidebar). */
 function startingLayout(project: IdeProject): Layout {
-  return applyProjectCwd(withFilesPane(singleGroupLayout([terminalTab()]), project.id), project.repo_root);
+  return applyProjectCwd(singleGroupLayout([terminalTab()]), project.repo_root);
 }
 
 /**
@@ -213,6 +212,16 @@ export async function remove(id: number): Promise<boolean> {
     report(err);
     return false;
   }
+}
+
+/**
+ * "Close project": the open project is left (its layout written first) and the IDE shows nothing.
+ * The row stays in the list; its panes are unmounted by the caller's empty layout.
+ */
+export async function close(): Promise<void> {
+  sequence++;
+  await flushLayout();
+  state.update((s) => ({ ...s, current: null, agents: [], switching: false }));
 }
 
 /** Queues a debounced write of the open project's layout. */

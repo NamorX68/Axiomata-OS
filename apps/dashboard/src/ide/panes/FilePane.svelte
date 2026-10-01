@@ -21,6 +21,7 @@
   import { worktreeAgent, type FilePaneConfig } from "../paneKinds";
   import { session } from "../projectSession";
   import type { LocationList } from "../../fileapp/locationList";
+  import type { OutlineInfo } from "../../fileapp/outlineModel";
 
   let {
     config,
@@ -28,6 +29,7 @@
     onQuit,
     onOpenFile,
     onShowLocations,
+    onOutline,
   }: {
     config: FilePaneConfig;
     visible: boolean;
@@ -37,6 +39,8 @@
     onOpenFile?: (file: { root: string; rel: string }, line: number) => void;
     /** A language server's list of places (ED6.3): the IDE's Search pane shows it. */
     onShowLocations?: (list: LocationList) => void;
+    /** The file's symbols and the cursor's line, for the sidebar's outline. */
+    onOutline?: (info: OutlineInfo) => void;
   } = $props();
 
   let editor = $state<FileEditor | null>(null);
@@ -79,7 +83,7 @@
   {#if failure}
     <p class="failure">{failure}</p>
   {:else}
-    <FileEditor bind:this={editor} {visible} {notice} {onQuit} {onOpenFile} {onShowLocations} />
+    <FileEditor bind:this={editor} {visible} {notice} {onQuit} {onOpenFile} {onShowLocations} {onOutline} />
   {/if}
 </div>
 
