@@ -69,6 +69,10 @@
     FILE_PANE,
     isWorkPane,
     layoutAfterRename,
+    openFilePreview,
+    pinFileTab,
+    retargetFileTab,
+    untitledTab,
     openOrFocus,
     projectRoot,
     gitTab,
@@ -77,7 +81,11 @@
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import type { Mode } from "./modes";
-  import { fileHandle } from "./fileHandles";
+  import { modeRequest } from "./modeRequest";
+  import { fileHandle, stashHandover } from "./fileHandles";
+  import { takeHandoffs, handoffs } from "../fileapp/handoff";
+  import { recentFiles, rememberRecent } from "../fileapp/recent";
+  import { FOREIGN_ROOT } from "../fileapp/session";
   import UnsavedQuestion from "../fileapp/UnsavedQuestion.svelte";
   import { cycleTab, nthTab, splitActive } from "./dockKeys";
   import PaneHost from "./panes/PaneHost.svelte";
@@ -151,7 +159,7 @@
   const openFiles = $derived(
     allTabs(layout).flatMap((t): FileRef[] => {
       const c = filePaneConfig(t);
-      return c ? [{ root: c.root, rel: c.rel }] : [];
+      return c && !c.untitled ? [{ root: c.root, rel: c.rel }] : [];
     }),
   );
 
@@ -159,10 +167,45 @@
    * Opens a file from quick open in the dock's file group, at `line` if given —
    * or, with no file open yet, beside the Files pane, as a click in it would.
    */
-  function openFromQuickOpen(file: FileRef, line: number | null): void {
+  function openFromQuickOpen(file: FileRef, line: number | null, preview = false): void {
     const beside = allTabs(layout).find((t) => t.kind === FILES_PANE)?.id ?? null;
     const from = fileOrigin(layout, beside, lastWorkTab);
-    layout = openOrFocus(layout, fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), from);
+    layout = preview
+      ? openFilePreview(layout, file, line, from)
+      : openOrFocus(layout, fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), from);
+    // Not a language server's read-only file (`lsp:`): it is not one to come back to.
+    if (!file.root.startsWith(FOREIGN_ROOT)) rememberRecent(file);
+  }
+
+  /** ⌘N: a new note in the file group — one draft at a time, as in the editor. */
+  function newNote(): void {
+    const from = fileOrigin(layout, null, lastWorkTab);
+    layout = openOrFocus(layout, untitledTab(), (t) => filePaneConfig(t)?.untitled === true, from);
+  }
+
+  /**
+   * Files handed over from the floating panel (W11), in the order they came: the Editor mode shows them,
+   * each with the panel's live session (unsaved text, undo history). One whose file already has a tab
+   * keeps its text aside instead.
+   */
+  async function takeWaiting(): Promise<void> {
+    for (const h of takeHandoffs()) {
+      if (mode !== "editor" && current) switchTo("editor");
+      const shown = h.file && allTabs(layout).find((t) => showsFile(t, h.file!.root, h.file!.rel));
+      if (shown) {
+        if (h.handed) {
+          await h.handed.session.persistRecovery();
+          await h.handed.session.close();
+        }
+        layout = activateTab(layout, shown.id);
+        continue;
+      }
+      const tab = h.file ? fileTab(h.file.root, h.file.rel, null) : untitledTab();
+      if (h.handed) stashHandover(tab.id, h.handed);
+      const from = fileOrigin(layout, null, lastWorkTab);
+      layout = openOrFocus(layout, tab, (t) => t.id === tab.id, from);
+      if (h.file && !h.file.root.startsWith(FOREIGN_ROOT)) rememberRecent(h.file);
+    }
   }
 
   /**
@@ -206,14 +249,14 @@
    */
   function onViewKeydown(e: KeyboardEvent): void {
     // The editor's tab keys, on the group the user last worked in.
-    if (current && e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
+    if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
       e.preventDefault();
       e.stopPropagation();
       noteFocusedPane();
       layout = cycleTab(layout, lastWorkTab, e.shiftKey ? -1 : 1);
       return;
     }
-    if (current && e.metaKey && !e.ctrlKey && !e.altKey && (e.code === "Backslash" || e.key === "\\")) {
+    if (e.metaKey && !e.ctrlKey && !e.altKey && (e.code === "Backslash" || e.key === "\\")) {
       e.preventDefault();
       e.stopPropagation();
       noteFocusedPane();
@@ -222,14 +265,14 @@
     }
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const key = e.key.toLowerCase();
-    if (current && !e.shiftKey && /^[1-9]$/.test(key)) {
+    if (!e.shiftKey && /^[1-9]$/.test(key)) {
       e.preventDefault();
       e.stopPropagation();
       noteFocusedPane();
       layout = nthTab(layout, lastWorkTab, Number(key));
       return;
     }
-    if (current && !e.shiftKey && key === "w") {
+    if (!e.shiftKey && key === "w") {
       // ⌘W closes a *file* tab only: a terminal or agent holds a live shell.
       noteFocusedPane();
       const tab = allTabs(layout).find((t) => t.id === lastWorkTab);
@@ -240,7 +283,13 @@
       }
       return;
     }
-    if (current && !e.shiftKey && key === "o") {
+    if (!e.shiftKey && key === "n") {
+      e.preventDefault();
+      e.stopPropagation();
+      newNote();
+      return;
+    }
+    if (!e.shiftKey && key === "o") {
       e.preventDefault();
       e.stopPropagation();
       void openPicked();
@@ -306,8 +355,8 @@
   }
 
   /** The sidebar's Files tab opens a file as a tab of the dock's file group. */
-  function openFromSidebar(file: FileRef, _preview: boolean, line: number | null = null): void {
-    openFromQuickOpen(file, line);
+  function openFromSidebar(file: FileRef, preview: boolean, line: number | null = null): void {
+    openFromQuickOpen(file, line, preview);
   }
 
   /** The file tab being asked about before it closes, and how the user answered. */
@@ -430,8 +479,21 @@
     // The most recently opened project comes first out of the store, so
     // reopening the IDE lands where the user left off without a stored
     // "current project" of its own to drift out of step.
+    // Hand-overs wait until the project's own layout is in place — it would replace them otherwise.
+    let unsubscribeHandoffs = () => {};
+    let unsubscribeMode = () => {};
+    let gone = false;
     void projectSession.start().then((next) => {
       if (next) layout = next;
+      if (gone) return;
+      unsubscribeHandoffs = handoffs.subscribe((list) => {
+        if (list.length > 0) void takeWaiting();
+      });
+      unsubscribeMode = modeRequest.subscribe((wanted) => {
+        if (!wanted) return;
+        modeRequest.set(null);
+        switchTo(wanted);
+      });
     });
     void listRoots().then((r) => (roots = r)).catch(() => {});
     // A rename in the tree reaches the open file tabs: their stored path (and so the layout kept per project) follows.
@@ -444,6 +506,9 @@
     // the IDE is still the view on screen would otherwise drop the last write.
     window.addEventListener("pagehide", flushOnLeaving);
     return () => {
+      gone = true;
+      unsubscribeHandoffs();
+      unsubscribeMode();
       void unlistenRenamed.then((off) => off());
       window.removeEventListener("blur", drag.abandon);
       window.removeEventListener("pagehide", flushOnLeaving);
@@ -493,6 +558,12 @@
     open: (tab, match, fromTabId) => {
       const from = tab.kind === FILE_PANE ? fileOrigin(layout, fromTabId, lastWorkTab) : fromTabId;
       layout = openOrFocus(layout, tab, match, from);
+    },
+    pin: (tabId) => {
+      layout = pinFileTab(layout, tabId);
+    },
+    filed: (tabId, file) => {
+      layout = retargetFileTab(layout, tabId, file, null, false);
     },
     reportOutline: (file, info) => {
       outlines[`${file.root}\0${file.rel}`] = info;
@@ -685,7 +756,7 @@
       {/each}
     </div>
 
-    {#if current}
+    {#if current || panes.length > 0}
       <DockNode node={layout.root} onDividerDown={(splitId, boundary, event) => drag.startDivider(splitId, boundary, event)}>
         {#snippet group(g)}<PaneGroup group={g} />{/snippet}
       </DockNode>
@@ -724,7 +795,7 @@
   {#if quickOpen && open}
     <QuickOpen
       roots={projectRoots}
-      recent={openFiles}
+      recent={[...openFiles, ...recentFiles()]}
       onOpen={(file, _preview, line) => openFromQuickOpen(file, line)}
       onClose={() => (quickOpen = false)}
     />

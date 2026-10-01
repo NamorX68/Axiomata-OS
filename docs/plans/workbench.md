@@ -1,6 +1,6 @@
 # Plan: Eine Arbeitsfläche statt Editor und IDE
 
-Status: **beschlossen 2026-10-02 (Owner), Schritte 1 (gemeinsame Seitenleiste `fileapp/ProjectSidebar.svelte` in Editor und IDE) und 2 gebaut.** Editor und IDE sollen eine Anwendung mit einem Schalter werden
+Status: **beschlossen 2026-10-02 (Owner), Schritte 1–4 gebaut (Live-Test auf dem Mac offen); Schritt 5 (Namen, Aufräumen) offen.** Editor und IDE sollen eine Anwendung mit einem Schalter werden
 („Editor“-Modus und „Agenten“-Modus), nicht zwei Programme. Auslöser: das Git-Panel und die Seitenleiste mussten doppelt gedacht
 werden, der Editor wird selbst IDE-artig, die IDE ist die „agentische“. Der Name der einen Sache ist offen (Owner: „irgendwann“);
 vorgeschlagene Begriffe stehen noch nicht fest.
@@ -38,3 +38,15 @@ vorgeschlagene Begriffe stehen noch nicht fest.
    - **3a gebaut:** die Tasten ⌃Tab, ⌘1–9, ⌘\ / ⇧⌘\ und ⌘O in der IDE (`ide/dockKeys.ts`, auf der Gruppe des zuletzt benutzten Tabs). **3b gebaut:** Rückfrage beim Schließen einer Datei mit ungespeichertem Text (×, ⌘W nur auf Datei-Tabs, Vi `:q`; `ide/fileHandles.ts`). **3c gebaut:** Umbenennen im Baum (`files:renamed`) zieht Pfad und Titel der offenen Datei-Tabs nach (`layoutAfterRename`). **3d gebaut — der Schalter:** im Kopf *Editor | Agents*; zwei Layouts je Projekt in einer `layout_json` (`ide/modes.ts`: `{mode, layouts:{editor, agents}}`, alte Zeilen lesen sich als Agents-Layout), das nicht gezeigte Layout ist *geparkt* — seine Panes bleiben gemountet und laufen weiter (`projectSession.switchMode`). Ein Agent oder Terminal öffnet sich immer im Agents-Layout (schaltet dorthin). Offen: Vorschau-Tab, ⌘N, „Zuletzt geöffnet“, Pfad-Kopf, Übergabe vom Datei-Panel, Umbenennen/Löschen, Layout je Modus.
 4. **Ein Einstieg im Ring**; die alte Editor-Ansicht fällt weg, das schwebende Datei-Panel übergibt an die Arbeitsfläche.
 5. **Name und Aufräumen** der Begriffe in der App, `AGENTS.md`, den Plänen.
+
+
+## Stand Schritt 3/4 (gebaut, nicht auf dem Mac getestet)
+
+- **Datei-Fähigkeiten in der IDE:** Vorschau-Tab (Einzelklick im Baum/Treffer ersetzt den Vorschau-Tab; Bearbeiten oder Doppelklick auf den Tab
+  heftet ihn an; kursiv), ⌘N (neue Notiz, ein Entwurf zugleich; nach ⌘S zieht der Tab auf die Datei um), Übergabe vom schwebenden
+  Datei-Panel (`fileapp/handoff.ts` → `IdeView.takeWaiting`, schaltet in den Editor-Modus; die Live-Sitzung geht mit), „Zuletzt geöffnet"
+  im ⌘P, Tasten ⌘N/⌘O/⌘W/⌃Tab/⌘1–9/⌘\ auch ohne Projekt. Dateien lassen sich ohne offenes Projekt öffnen (Dock bleibt sichtbar, solange
+  Tabs da sind; gespeichert wird das Layout nur mit Projekt).
+- **Ein Einstieg:** die Ring-Einträge „Editor" und „IDE" öffnen dieselbe Ansicht (`ide/modeRequest.ts`): „Editor" im Editor-Modus, „IDE" im
+  Agents-Modus. Die alte Editor-Ansicht (`FileAppView`, `FileGroup`, `FileTab`, `fileDock`) ist entfernt; `settings.editor.dock` wird nicht mehr gelesen.
+- **Offen aus Schritt 3:** Pfad-Kopf mit Breadcrumbs über dem Editor (die Outline unter dem Baum ist da), Einstellungs-/Tastenspalte ist als Inspector da.

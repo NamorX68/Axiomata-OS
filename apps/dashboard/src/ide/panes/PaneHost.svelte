@@ -119,6 +119,8 @@
         onOpenFile={(file, line) =>
           dock.open(fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), tab.id)}
         onShowLocations={(list) => dock.showLocations(list)}
+        onDirty={() => dock.pin(tab.id)}
+        onMoved={(file) => dock.filed(tab.id, file)}
         onOutline={(info) => fileConfig && dock.reportOutline({ root: fileConfig.root, rel: fileConfig.rel }, info)}
       />
     {:else}

@@ -24,3 +24,22 @@ export function registerFileHandle(tabId: string, handle: FileHandle): () => voi
 export function fileHandle(tabId: string): FileHandle | null {
   return handles.get(tabId) ?? null;
 }
+
+/** A live session handed over from the floating panel, waiting for its tab's pane to take it (`fileapp/handoff.ts`). */
+export interface Handover {
+  session: import("../fileapp/session").FileSession;
+  viewMode: import("../fileapp/fileKinds").ViewMode;
+}
+
+const handovers = new Map<string, Handover>();
+
+export function stashHandover(tabId: string, handed: Handover): void {
+  handovers.set(tabId, handed);
+}
+
+/** The session waiting for `tabId`, once. */
+export function takeHandover(tabId: string): Handover | null {
+  const handed = handovers.get(tabId) ?? null;
+  handovers.delete(tabId);
+  return handed;
+}

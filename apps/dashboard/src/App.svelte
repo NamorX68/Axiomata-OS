@@ -8,7 +8,7 @@
   import { loadInstances } from "./core/stores";
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
-  import FileAppView from "./fileapp/FileAppView.svelte";
+  import { requestMode } from "./ide/modeRequest";
   import IdeView from "./ide/IdeView.svelte";
   import IconBar from "./shell/IconBar.svelte";
   import ModulePicker from "./shell/ModulePicker.svelte";
@@ -28,10 +28,6 @@
   // wanted at all; `ideOpen` is what it listens to afterwards.
   let ideStarted = $state(false);
   let ideOpen = $state(false);
-  // The editor view follows the IDE's rule for the same reason: hiding keeps
-  // unsaved text and the cursor, unmounting would lose them.
-  let editorStarted = $state(false);
-  let editorOpen = $state(false);
   let brainOpen = $state(false);
   let brainFocus = $state<string | null>(null);
   let brainQuery = $state("");
@@ -46,13 +42,16 @@
         openFilePanel(d.path, d.mode === "edit" ? "edit" : "read");
       }),
       on("shell:settings", () => (settingsOpen = true)),
+      // One workbench, two ring entries: "IDE" shows it in the Agents mode, "Editor" in the Editor mode.
       on("shell:ide", () => {
+        requestMode("agents");
         ideStarted = true;
         ideOpen = true;
       }),
       on("shell:editor", () => {
-        editorStarted = true;
-        editorOpen = true;
+        requestMode("editor");
+        ideStarted = true;
+        ideOpen = true;
       }),
       // The top-bar search icon → the Second Brain, focused on its search
       // box (SecondBrainView autofocuses when opened with no query/target).
@@ -101,18 +100,15 @@
 {#if ideStarted}
   <IdeView bind:open={ideOpen} />
 {/if}
-{#if editorStarted}
-  <FileAppView bind:open={editorOpen} />
-{/if}
 <StagingLayer />
 <ChatPanel />
 
 <Canvas />
 <!-- The assistant bar floats over the bottom of the screen, which is fine over
      the canvas or the Second Brain but sits squarely on an agent pane's status
-     line in the IDE (and on the editor's). Hidden rather than unmounted so a
+     line in the IDE. Hidden rather than unmounted so a
      half-typed prompt is still there when the view is closed again. -->
-<div class="assistant-host" class:hidden={ideOpen || editorOpen}>
+<div class="assistant-host" class:hidden={ideOpen}>
   <AssistantBar />
 </div>
 

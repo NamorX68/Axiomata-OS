@@ -18,6 +18,10 @@ import {
   showsFile,
   withFilesPane,
   layoutAfterRename,
+  openFilePreview,
+  pinFileTab,
+  retargetFileTab,
+  untitledTab,
   worktreeAgent,
 } from "./paneKinds";
 
@@ -39,6 +43,9 @@ describe("pane kinds (H14)", () => {
       rel: "b",
       line: null,
       jump: 0,
+      preview: false,
+      untitled: false,
+      reopen: 0,
     });
   });
 
@@ -65,7 +72,7 @@ describe("pane kinds (H14)", () => {
       title: "x",
       config: { root: "a", rel: "b", line: 7, jump: 42 },
     };
-    expect(filePaneConfig(stored)).toEqual({ root: "a", rel: "b", line: 7, jump: 42 });
+    expect(filePaneConfig(stored)).toEqual({ root: "a", rel: "b", line: 7, jump: 42, preview: false, untitled: false, reopen: 0 });
   });
 
   it("titles a file tab after its own name when there is no directory", () => {
@@ -254,5 +261,47 @@ describe("layoutAfterRename", () => {
   it("returns the same layout when nothing matched", () => {
     const layout = singleGroupLayout([fileTab("project:1", "x.ts", null)]);
     expect(layoutAfterRename(layout, "project:1", "y.ts", "z.ts")).toBe(layout);
+  });
+});
+
+describe("preview tabs", () => {
+  const f = (rel: string) => ({ root: "project:1", rel });
+  const rels = (l: ReturnType<typeof singleGroupLayout>) => allTabs(l).map((t) => filePaneConfig(t)?.rel);
+
+  it("a single click opens a preview tab, the next one replaces it", () => {
+    let layout = singleGroupLayout([]);
+    layout = openFilePreview(layout, f("a.ts"), null, null);
+    expect(allTabs(layout)).toHaveLength(1);
+    expect(filePaneConfig(allTabs(layout)[0])?.preview).toBe(true);
+    layout = openFilePreview(layout, f("b.ts"), 4, null);
+    expect(rels(layout)).toEqual(["b.ts"]);
+    expect(allTabs(layout)[0].title).toBe("b.ts");
+    expect(filePaneConfig(allTabs(layout)[0])?.line).toBe(4);
+  });
+
+  it("a pinned tab is kept, the next preview opens beside it", () => {
+    let layout = openFilePreview(singleGroupLayout([]), f("a.ts"), null, null);
+    layout = pinFileTab(layout, allTabs(layout)[0].id);
+    layout = openFilePreview(layout, f("b.ts"), null, null);
+    expect(rels(layout)).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it("a click on a file already open shows that tab and keeps its preview state", () => {
+    let layout = openFilePreview(singleGroupLayout([]), f("a.ts"), null, null);
+    layout = openFilePreview(layout, f("a.ts"), null, null);
+    expect(allTabs(layout)).toHaveLength(1);
+    expect(filePaneConfig(allTabs(layout)[0])?.preview).toBe(true);
+  });
+});
+
+describe("untitled notes", () => {
+  it("is a file tab without a file, and filing it retargets the tab", () => {
+    const tab = untitledTab();
+    expect(filePaneConfig(tab)?.untitled).toBe(true);
+    expect(showsFile(tab, "", "")).toBe(false);
+    const layout = retargetFileTab(singleGroupLayout([tab]), tab.id, { root: "workspace", rel: "Notes/x.md" });
+    const filed = allTabs(layout)[0];
+    expect(filePaneConfig(filed)).toMatchObject({ root: "workspace", rel: "Notes/x.md", untitled: false });
+    expect(filed.title).toBe("x.md");
   });
 });

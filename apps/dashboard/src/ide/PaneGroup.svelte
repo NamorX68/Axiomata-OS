@@ -95,6 +95,7 @@
         class="tab"
         class:active={tab.id === group.active}
         class:dragging={dock.draggingTab() === tab.id}
+        class:preview={filePaneConfig(tab)?.preview === true}
         style:--lang={tint(tab)}
         data-ide-tab={tab.id}
         id="ide-tab-{tab.id}"
@@ -103,6 +104,7 @@
         aria-selected={tab.id === group.active}
         aria-controls="ide-pane-{tab.id}"
         onpointerdown={(event) => dock.startTabDrag(tab.id, event)}
+        ondblclick={() => dock.pin(tab.id)}
         onkeydown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -235,6 +237,11 @@
 
   .tab:focus-visible {
     outline: var(--ax-focus-ring);
+  }
+
+  /* The preview tab (W7): italic until it becomes a tab of its own. */
+  .tab.preview .title {
+    font-style: italic;
   }
 
   .close,

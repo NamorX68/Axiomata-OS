@@ -16,6 +16,7 @@ import {
   allTabs,
   findTab,
   isSplit,
+  mapTabs,
   setSplitSizes,
   setTabConfig,
   type Layout,
@@ -85,7 +86,7 @@ export function withFilesPane(layout: Layout, projectId: number): Layout {
 export function frontFile(layout: Layout): FileRef | null {
   const tab = frontFileTab(layout);
   const config = tab ? filePaneConfig(tab) : null;
-  return config ? { root: config.root, rel: config.rel } : null;
+  return config && !config.untitled ? { root: config.root, rel: config.rel } : null;
 }
 
 /** The tab `frontFile` is about, or `null`. */
@@ -112,15 +113,27 @@ export interface FilePaneConfig {
    * open jumps again even to the same line it jumped to before.
    */
   jump: number;
+  /** A preview tab (W7): the next single-click open replaces it, until editing or a double click pins it. */
+  preview: boolean;
+  /** A new note, not filed yet (`root`/`rel` empty): the editor starts a draft and the tab moves to the file once ⌘S filed it. */
+  untitled: boolean;
+  /** Changes when the tab is pointed at another file (a preview tab reused): the pane opens `root`/`rel` anew. */
+  reopen: number;
 }
 
 function baseName(rel: string): string {
   return rel.split("/").pop() || rel;
 }
 
-export function fileTab(root: string, rel: string, line: number | null): PaneTab {
-  const config: FilePaneConfig = { root, rel, line, jump: Date.now() };
+export function fileTab(root: string, rel: string, line: number | null, preview = false): PaneTab {
+  const config: FilePaneConfig = { root, rel, line, jump: Date.now(), preview, untitled: false, reopen: 0 };
   return { id: crypto.randomUUID(), kind: FILE_PANE, title: baseName(rel), config: { ...config } };
+}
+
+/** A new note (⌘N): a draft that belongs to no file yet. */
+export function untitledTab(): PaneTab {
+  const config: FilePaneConfig = { root: "", rel: "", line: null, jump: 0, preview: false, untitled: true, reopen: 0 };
+  return { id: crypto.randomUUID(), kind: FILE_PANE, title: "New note", config: { ...config } };
 }
 
 /** A file pane's config from a stored tab, or `null` if it is not one or is malformed. */
@@ -132,13 +145,70 @@ export function filePaneConfig(tab: PaneTab): FilePaneConfig | null {
     rel: c.rel,
     line: typeof c.line === "number" ? c.line : null,
     jump: typeof c.jump === "number" ? c.jump : 0,
+    preview: c.preview === true,
+    untitled: c.untitled === true,
+    reopen: typeof c.reopen === "number" ? c.reopen : 0,
   };
 }
 
 /** Whether `tab` shows the file `root`/`rel`. */
 export function showsFile(tab: PaneTab, root: string, rel: string): boolean {
   const c = filePaneConfig(tab);
-  return c !== null && c.root === root && c.rel === rel;
+  return c !== null && !c.untitled && c.root === root && c.rel === rel;
+}
+
+function withFileConfig(layout: Layout, tabId: string, change: (c: FilePaneConfig) => FilePaneConfig, title?: string): Layout {
+  const hit = findTab(layout, tabId);
+  const c = hit ? filePaneConfig(hit.tab) : null;
+  if (!hit || !c) return layout;
+  const next = setTabConfig(layout, tabId, { ...hit.tab.config, ...change(c) });
+  if (title === undefined) return next;
+  return mapTabs(next, (t) => (t.id === tabId ? { ...t, title } : t));
+}
+
+/**
+ * A tab pointed at another file: its path, title and cursor line follow. With `reopen` (a preview tab
+ * reused) the pane opens the file anew; without (a note the editor filed itself) it only learns the name.
+ */
+export function retargetFileTab(
+  layout: Layout,
+  tabId: string,
+  file: FileRef,
+  line: number | null = null,
+  reopen = true,
+): Layout {
+  return withFileConfig(
+    layout,
+    tabId,
+    (c) => ({
+      ...c,
+      root: file.root,
+      rel: file.rel,
+      untitled: false,
+      line,
+      jump: line === null ? c.jump : Date.now(),
+      reopen: reopen ? Date.now() : c.reopen,
+    }),
+    baseName(file.rel),
+  );
+}
+
+/** A preview tab becomes a tab of its own (editing, a double click). */
+export function pinFileTab(layout: Layout, tabId: string): Layout {
+  const hit = findTab(layout, tabId);
+  return hit && filePaneConfig(hit.tab)?.preview ? withFileConfig(layout, tabId, (c) => ({ ...c, preview: false })) : layout;
+}
+
+/**
+ * A single click in the tree or a search hit: the file shows in the preview tab, which it replaces when
+ * there is one — or in a tab already showing it, or a new preview tab. Same placement as `openOrFocus`.
+ */
+export function openFilePreview(layout: Layout, file: FileRef, line: number | null, fromTabId: string | null): Layout {
+  const shown = allTabs(layout).find((t) => showsFile(t, file.root, file.rel));
+  if (shown) return openOrFocus(layout, fileTab(file.root, file.rel, line, filePaneConfig(shown)?.preview ?? false), (t) => t.id === shown.id, fromTabId);
+  const preview = allTabs(layout).find((t) => filePaneConfig(t)?.preview);
+  if (preview) return activateTab(retargetFileTab(layout, preview.id, file, line), preview.id);
+  return openOrFocus(layout, fileTab(file.root, file.rel, line, true), (t) => showsFile(t, file.root, file.rel), fromTabId);
 }
 
 export function agentDiffTab(agentId: number, agentName: string): PaneTab {

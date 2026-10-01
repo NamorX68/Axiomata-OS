@@ -18,7 +18,8 @@
 
   import FileEditor from "../../fileapp/FileEditor.svelte";
   import { agentStatus } from "../agentStatus";
-  import { registerFileHandle } from "../fileHandles";
+  import { registerFileHandle, takeHandover } from "../fileHandles";
+  import type { OpenFileState } from "../../fileapp/FileEditor.svelte";
   import { worktreeAgent, type FilePaneConfig } from "../paneKinds";
   import { session } from "../projectSession";
   import type { LocationList } from "../../fileapp/locationList";
@@ -32,6 +33,8 @@
     onOpenFile,
     onShowLocations,
     onOutline,
+    onMoved,
+    onDirty,
   }: {
     /** The dock tab this pane sits in, under which the dock can ask for unsaved text. */
     tabId: string;
@@ -45,12 +48,18 @@
     onShowLocations?: (list: LocationList) => void;
     /** The file's symbols and the cursor's line, for the sidebar's outline. */
     onOutline?: (info: OutlineInfo) => void;
+    /** The editor now shows another file than the tab names (a note was filed): the tab follows. */
+    onMoved?: (file: { root: string; rel: string }) => void;
+    /** The text has unsaved changes: a preview tab becomes a tab of its own. */
+    onDirty?: () => void;
   } = $props();
 
   let editor = $state<FileEditor | null>(null);
   let failure = $state<string | null>(null);
   /** The last `jump` acted on; a newer one moves the cursor. */
   let lastJump = 0;
+  /** The last `reopen` acted on. */
+  let lastReopen = 0;
 
   const statuses = agentStatus.statuses;
   const ownerAgent = $derived(worktreeAgent(config.root));
@@ -67,16 +76,42 @@
       discard: async () => void (await editor?.discard()),
     });
     lastJump = config.jump;
-    void editor?.open({ root: config.root, rel: config.rel }, config.line).then((result) => {
-      if (result.ok) return;
-      failure =
-        result.kind === "UnknownRoot"
-          ? `${config.rel}: the place it lived in is gone (a discarded worktree, or a removed project).`
-          : result.kind === "NotFound"
-            ? `${config.rel} does not exist (any more).`
-            : `Could not open ${config.rel}: ${result.message}`;
-    });
+    lastReopen = config.reopen;
+    const handed = takeHandover(tabId);
+    if (handed) void editor?.adoptSession(handed);
+    else if (config.untitled) void editor?.newNote();
+    else void openConfigured();
     return unregister;
+  });
+
+  /** Opens the file the tab names; a failure says so in place of the editor. */
+  async function openConfigured(): Promise<void> {
+    const result = await editor?.open({ root: config.root, rel: config.rel }, config.line);
+    if (!result || result.ok) {
+      failure = null;
+      return;
+    }
+    failure =
+      result.kind === "UnknownRoot"
+        ? `${config.rel}: the place it lived in is gone (a discarded worktree, or a removed project).`
+        : result.kind === "NotFound"
+          ? `${config.rel} does not exist (any more).`
+          : `Could not open ${config.rel}: ${result.message}`;
+  }
+
+  /** The editor's own account of what it shows. */
+  function onState(state: OpenFileState | null): void {
+    if (!state) return;
+    if (state.dirty) onDirty?.();
+    if (config.untitled && !state.untitled) onMoved?.({ root: state.root, rel: state.rel });
+  }
+
+  // The tab was pointed at another file (a preview tab reused): open it.
+  $effect(() => {
+    const reopen = config.reopen;
+    if (reopen === lastReopen) return;
+    lastReopen = reopen;
+    void openConfigured();
   });
 
   // Opened again from the diff: jump to the new line.
@@ -93,7 +128,7 @@
   {#if failure}
     <p class="failure">{failure}</p>
   {:else}
-    <FileEditor bind:this={editor} {visible} {notice} {onQuit} {onOpenFile} {onShowLocations} {onOutline} />
+    <FileEditor bind:this={editor} {visible} {notice} {onQuit} {onOpenFile} {onShowLocations} {onOutline} {onState} />
   {/if}
 </div>
 

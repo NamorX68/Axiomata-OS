@@ -41,6 +41,10 @@ export interface IdeDock {
   showLocations: (list: LocationList) => void;
   /** A file pane's symbols and cursor line, for the sidebar's outline. */
   reportOutline: (file: FileRef, info: OutlineInfo) => void;
+  /** A preview tab becomes a tab of its own. */
+  pin: (tabId: string) => void;
+  /** A new note was filed: its tab now names the file. */
+  filed: (tabId: string, file: FileRef) => void;
   /** A pane's module changed its config; it belongs on that pane's tab. */
   setConfig: (tabId: string, config: Record<string, unknown>) => void;
   /** A pointer went down on a tab: maybe a click, maybe the start of a drag. */

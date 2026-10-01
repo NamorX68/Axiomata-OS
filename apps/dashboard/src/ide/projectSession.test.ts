@@ -297,7 +297,7 @@ describe("modes", () => {
     expect(allTabs(get(session.session).parked).map((t) => t.kind)).toEqual(["terminal"]);
 
     session.save(editor);
-    const written = JSON.parse(api.saveLayoutSoon.mock.calls.at(-1)![1] as string);
+    const written = JSON.parse(api.saveLayoutSoon.mock.calls[api.saveLayoutSoon.mock.calls.length - 1][1] as string);
     expect(written.mode).toBe("editor");
     expect(Object.keys(written.layouts)).toEqual(["editor", "agents"]);
 
