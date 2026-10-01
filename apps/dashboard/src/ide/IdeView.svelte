@@ -31,18 +31,11 @@
   import { onMount, tick, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
-  import {
-    ROOT_NODE_ID,
-    crossedDragThreshold,
-    dividerFraction,
-    dropTarget,
-    splitFractionAt,
-    type GroupGeometry,
-    type Rect,
-  } from "./dock";
+  import { DockDrag } from "./dockDrag.svelte";
   import { setDock } from "./dockContext";
   import { pendingLocations } from "../fileapp/locationList";
   import DockNode from "./DockNode.svelte";
+  import PaneGroup from "./PaneGroup.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Inspector, { type InspectorTab } from "../fileapp/Inspector.svelte";
   import { inspectorSurface } from "../fileapp/inspectorSurface.svelte";
@@ -52,16 +45,13 @@
     allGroups,
     allTabs,
     closeTab,
-    findNode,
     findTab,
-    isSplit,
     moveTab,
     resizeSplit,
     setTabConfig,
     type DockTarget,
     type Layout,
     type PaneTab,
-    type SplitDir,
   } from "./layout";
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentPicker from "./AgentPicker.svelte";
@@ -103,8 +93,19 @@
 
   let layout = $state<Layout>(projectSession.noProjectLayout());
   let dockEl = $state<HTMLElement | undefined>();
-  let draggingTab = $state<string | null>(null);
-  let hint = $state<DockTarget | null>(null);
+  const drag = new DockDrag({
+    dockEl: () => dockEl,
+    layout: () => layout,
+    onPress: (tabId) => {
+      layout = activateTab(layout, tabId);
+    },
+    onMove: (tabId, target) => {
+      layout = moveTab(layout, tabId, target);
+    },
+    onResize: (splitId, boundary, fraction) => {
+      layout = resizeSplit(layout, splitId, boundary, fraction);
+    },
+  });
   /** The right-hand inspector (editor-look I5): the editor's settings and the shortcuts, as in the file app. */
   let inspector = $state<InspectorTab | null>(null);
   const preview = inspectorSurface();
@@ -206,12 +207,6 @@
     layout = addTab(layout, searchTab(), target);
   }
 
-  /** Set on pointerdown, promoted to a drag once the pointer has moved far enough. */
-  let pending: { tabId: string; pointerId: number; x: number; y: number } | null = null;
-  /** Measured once per drag — see the header. */
-  let snapshot: { root: Rect; groups: GroupGeometry[] } | null = null;
-  let divider: { splitId: string; boundary: number; pointerId: number; rect: Rect; dir: SplitDir } | null = null;
-
   /** Opening a project replaces the tree; its old panes are unmounted, which
    *  is the one place in this view where destroying a pane is right — those
    *  terminals were running in a different project's folder. */
@@ -281,104 +276,6 @@
     if (created) openAgent(created);
   }
 
-  function rectOf(el: Element): Rect {
-    const r = el.getBoundingClientRect();
-    return { x: r.left, y: r.top, w: r.width, h: r.height };
-  }
-
-  /**
-   * Reads the dock's geometry off the DOM for a drag.
-   *
-   * The dragged tab is left out of every tab bar, because `moveTab`'s drop
-   * index counts positions among the *other* tabs.
-   */
-  function measure(draggedId: string): { root: Rect; groups: GroupGeometry[] } | null {
-    if (!dockEl) return null;
-    const groups: GroupGeometry[] = [];
-    for (const el of dockEl.querySelectorAll<HTMLElement>("[data-ide-group]")) {
-      const bar = el.querySelector<HTMLElement>("[data-ide-tabbar]");
-      if (!bar || !el.dataset.ideGroup) continue;
-      groups.push({
-        nodeId: el.dataset.ideGroup,
-        rect: rectOf(el),
-        tabBar: rectOf(bar),
-        tabs: [...bar.querySelectorAll<HTMLElement>("[data-ide-tab]")]
-          .filter((tab) => tab.dataset.ideTab !== draggedId)
-          .map(rectOf),
-      });
-    }
-    return { root: rectOf(dockEl), groups };
-  }
-
-  function onTabPointerMove(event: PointerEvent) {
-    if (!pending || event.pointerId !== pending.pointerId) return;
-    if (!draggingTab) {
-      if (!crossedDragThreshold(pending, event.clientX, event.clientY)) return;
-      snapshot = measure(pending.tabId);
-      if (!snapshot) return;
-      draggingTab = pending.tabId;
-    }
-    if (snapshot) hint = dropTarget(snapshot.root, snapshot.groups, event.clientX, event.clientY);
-  }
-
-  function onTabPointerUp(event: PointerEvent) {
-    if (pending && event.pointerId !== pending.pointerId) return;
-    if (draggingTab && hint) {
-      // `dropTarget` works from rectangles and cannot know the root's id.
-      const nodeId = hint.nodeId === ROOT_NODE_ID ? layout.root.id : hint.nodeId;
-      layout = moveTab(layout, draggingTab, { ...hint, nodeId });
-    }
-    endTabDrag();
-  }
-
-  /**
-   * Ends a tab drag, dropped or abandoned.
-   *
-   * Every way out of a drag goes through here, including the ones nobody
-   * arranged: a `pointercancel` from the system, a window that lost focus
-   * mid-drag to an OS dialog or ⌘-Tab, a pointer released outside the window.
-   * That matters more here than it looks: while `draggingTab` is set the panes
-   * ignore the pointer, so a drag that never ends leaves the whole IDE
-   * unclickable with no way back.
-   */
-  function endTabDrag() {
-    pending = null;
-    snapshot = null;
-    draggingTab = null;
-    hint = null;
-    window.removeEventListener("pointermove", onTabPointerMove);
-    window.removeEventListener("pointerup", onTabPointerUp);
-    window.removeEventListener("pointercancel", endTabDrag);
-  }
-
-  function onDividerPointerMove(event: PointerEvent) {
-    if (!divider || event.pointerId !== divider.pointerId) return;
-    const node = findNode(layout, divider.splitId);
-    if (!node || !isSplit(node)) return;
-    const along = splitFractionAt(divider.rect, divider.dir, event.clientX, event.clientY);
-    const fraction = dividerFraction(node.sizes, divider.boundary, along);
-    layout = resizeSplit(layout, divider.splitId, divider.boundary, fraction);
-  }
-
-  function onDividerPointerUp(event: PointerEvent) {
-    if (divider && event.pointerId !== divider.pointerId) return;
-    endDividerDrag();
-  }
-
-  /** Ends a divider drag, however it ended. See {@link endTabDrag}. */
-  function endDividerDrag() {
-    divider = null;
-    window.removeEventListener("pointermove", onDividerPointerMove);
-    window.removeEventListener("pointerup", onDividerPointerUp);
-    window.removeEventListener("pointercancel", endDividerDrag);
-  }
-
-  /** The window lost the pointer to something outside the page. */
-  function abandonDrags() {
-    endTabDrag();
-    endDividerDrag();
-  }
-
   /** The last arrangement must not be left in a timer when the app goes away. */
   function flushOnLeaving() {
     void flushLayout();
@@ -392,16 +289,16 @@
       if (next) layout = next;
     });
 
-    window.addEventListener("blur", abandonDrags);
+    window.addEventListener("blur", drag.abandon);
     // `pagehide` is what `core/persist.ts` uses for the same job: a quit while
     // the IDE is still the view on screen would otherwise drop the last write.
     window.addEventListener("pagehide", flushOnLeaving);
     return () => {
-      window.removeEventListener("blur", abandonDrags);
+      window.removeEventListener("blur", drag.abandon);
       window.removeEventListener("pagehide", flushOnLeaving);
       // Today the view is never unmounted, but its correctness must not depend
       // on a caller-side invariant it cannot enforce — HMR alone breaks it.
-      abandonDrags();
+      drag.abandon();
     };
   });
 
@@ -436,29 +333,9 @@
       layout = applyProjectCwd(added, project.repo_root);
     },
     startTabDrag: (tabId, event) => {
-      // A second pointer must not take over a drag already under way, and a
-      // right-click is not a drag at all.
-      if (event.button !== 0 || pending || divider) return;
-      layout = activateTab(layout, tabId);
-      pending = { tabId, pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-      // On `window`, not the tab: the pointer spends the drag over other
-      // panes, and a terminal's canvas would otherwise swallow the moves.
-      window.addEventListener("pointermove", onTabPointerMove);
-      window.addEventListener("pointerup", onTabPointerUp);
-      window.addEventListener("pointercancel", endTabDrag);
-      event.preventDefault();
+      if (drag.startTab(tabId, event)) event.preventDefault();
     },
-    startDividerDrag: (splitId, boundary, event) => {
-      if (event.button !== 0 || pending || divider) return;
-      const el = (event.currentTarget as HTMLElement | null)?.closest("[data-ide-split]");
-      const node = findNode(layout, splitId);
-      if (!el || !node || !isSplit(node)) return;
-      divider = { splitId, boundary, pointerId: event.pointerId, rect: rectOf(el), dir: node.dir };
-      window.addEventListener("pointermove", onDividerPointerMove);
-      window.addEventListener("pointerup", onDividerPointerUp);
-      window.addEventListener("pointercancel", endDividerDrag);
-      event.preventDefault();
-    },
+    startDividerDrag: (splitId, boundary, event) => drag.startDivider(splitId, boundary, event),
     open: (tab, match, fromTabId) => {
       const from = tab.kind === FILE_PANE ? fileOrigin(layout, fromTabId, lastWorkTab) : fromTabId;
       layout = openOrFocus(layout, tab, match, from);
@@ -467,12 +344,9 @@
       layout = setTabConfig(layout, tabId, config);
     },
     activeFile: () => frontFile(layout),
-    draggingTab: () => draggingTab,
-    hint: () => hint,
+    draggingTab: () => drag.draggingTab,
+    hint: () => drag.hint,
   });
-
-  /** The drop highlight for a drag onto the whole layout's edge. */
-  const rootHint = $derived(hint && hint.nodeId === ROOT_NODE_ID ? hint.side : null);
 
   /** Every pane in the layout, flat — the store renders exactly this list. */
   const panes = $derived(allTabs(layout));
@@ -576,7 +450,7 @@
 
   <div
     class="dock"
-    class:dragging={draggingTab !== null}
+    class:dragging={drag.draggingTab !== null}
     bind:this={dockEl}
     onfocusin={noteWorkPane}
     onpointerdowncapture={noteWorkPane}
@@ -600,9 +474,11 @@
     </div>
 
     {#if current}
-      <DockNode node={layout.root} />
-      {#if rootHint && rootHint !== "center"}
-        <div class="root-highlight {rootHint}" transition:fade={{ duration: 80 }}></div>
+      <DockNode node={layout.root} onDividerDown={(splitId, boundary, event) => drag.startDivider(splitId, boundary, event)}>
+        {#snippet group(g)}<PaneGroup group={g} />{/snippet}
+      </DockNode>
+      {#if drag.rootHint && drag.rootHint !== "center"}
+        <div class="root-highlight {drag.rootHint}" transition:fade={{ duration: 80 }}></div>
       {/if}
     {:else}
       <!-- No project, no panes: a terminal with nowhere to start is worse than

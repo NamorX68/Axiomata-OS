@@ -173,6 +173,7 @@
 <style>
   .group {
     position: relative;
+    flex: 1;
     display: flex;
     flex-direction: column;
     height: 100%;

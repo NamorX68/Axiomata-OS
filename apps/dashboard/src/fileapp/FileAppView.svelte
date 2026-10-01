@@ -72,17 +72,10 @@
     type Tab,
   } from "./fileDock";
   import { setFileDock } from "./fileDockContext";
-  import FileDockNode from "./FileDockNode.svelte";
-  import {
-    ROOT_NODE_ID,
-    crossedDragThreshold,
-    dividerFraction,
-    dropTarget,
-    splitFractionAt,
-    type GroupGeometry,
-    type Rect,
-  } from "../ide/dock";
-  import { allGroups, findNode, isSplit, resizeSplit, type DockTarget, type SplitDir } from "../ide/layout";
+  import DockNode from "../ide/DockNode.svelte";
+  import FileGroup from "./FileGroup.svelte";
+  import { DockDrag } from "../ide/dockDrag.svelte";
+  import { allGroups, resizeSplit } from "../ide/layout";
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "../ide/paneStore";
   import { foldKey, forgetFolds } from "./foldMemory";
   import { uiScale } from "../core/uiScale";
@@ -458,88 +451,19 @@
 
   let dockEl = $state<HTMLElement | undefined>();
   let storeEl = $state<HTMLElement | undefined>();
-  let hint = $state<DockTarget | null>(null);
-  let draggingTab = $state<string | null>(null);
-  let pendingDrag: { tabId: string; pointerId: number; x: number; y: number } | null = null;
-  let snapshot: { root: Rect; groups: GroupGeometry[] } | null = null;
-  let divider: { splitId: string; boundary: number; pointerId: number; rect: Rect; dir: SplitDir } | null = null;
-
-  function rectOf(el: Element): Rect {
-    const r = el.getBoundingClientRect();
-    return { x: r.left, y: r.top, w: r.width, h: r.height };
-  }
-
-  /** The groups' geometry for a drag, the dragged tab left out of every bar (`moveTab` counts the others). */
-  function measure(draggedId: string): { root: Rect; groups: GroupGeometry[] } | null {
-    if (!dockEl) return null;
-    const groups: GroupGeometry[] = [];
-    for (const el of dockEl.querySelectorAll<HTMLElement>("[data-ide-group]")) {
-      const bar = el.querySelector<HTMLElement>("[data-ide-tabbar]");
-      if (!bar || !el.dataset.ideGroup) continue;
-      groups.push({
-        nodeId: el.dataset.ideGroup,
-        rect: rectOf(el),
-        tabBar: rectOf(bar),
-        tabs: [...bar.querySelectorAll<HTMLElement>("[data-ide-tab]")]
-          .filter((tab) => tab.dataset.ideTab !== draggedId)
-          .map(rectOf),
-      });
-    }
-    return { root: rectOf(dockEl), groups };
-  }
-
-  function onTabPointerMove(event: PointerEvent): void {
-    if (!pendingDrag || event.pointerId !== pendingDrag.pointerId) return;
-    if (!draggingTab) {
-      if (!crossedDragThreshold(pendingDrag, event.clientX, event.clientY)) return;
-      snapshot = measure(pendingDrag.tabId);
-      if (!snapshot) return;
-      draggingTab = pendingDrag.tabId;
-    }
-    if (snapshot) hint = dropTarget(snapshot.root, snapshot.groups, event.clientX, event.clientY);
-  }
-
-  function onTabPointerUp(event: PointerEvent): void {
-    if (pendingDrag && event.pointerId !== pendingDrag.pointerId) return;
-    if (draggingTab && hint) {
-      // `dropTarget` works from rectangles and cannot know the root's id.
-      const nodeId = hint.nodeId === ROOT_NODE_ID ? dock.layout.root.id : hint.nodeId;
-      dock = moveTabTo(dock, draggingTab, { ...hint, nodeId });
-    }
-    endTabDrag();
-  }
-
-  /** Every way out of a tab drag, dropped or abandoned (see `IdeView.endTabDrag`). */
-  function endTabDrag(): void {
-    pendingDrag = null;
-    snapshot = null;
-    draggingTab = null;
-    hint = null;
-    window.removeEventListener("pointermove", onTabPointerMove);
-    window.removeEventListener("pointerup", onTabPointerUp);
-    window.removeEventListener("pointercancel", endTabDrag);
-  }
-
-  function onDividerPointerMove(event: PointerEvent): void {
-    if (!divider || event.pointerId !== divider.pointerId) return;
-    const node = findNode(dock.layout, divider.splitId);
-    if (!node || !isSplit(node)) return;
-    const along = splitFractionAt(divider.rect, divider.dir, event.clientX, event.clientY);
-    const fraction = dividerFraction(node.sizes, divider.boundary, along);
-    dock = { ...dock, layout: resizeSplit(dock.layout, divider.splitId, divider.boundary, fraction) };
-  }
-
-  function endDividerDrag(): void {
-    divider = null;
-    window.removeEventListener("pointermove", onDividerPointerMove);
-    window.removeEventListener("pointerup", endDividerDrag);
-    window.removeEventListener("pointercancel", endDividerDrag);
-  }
-
-  function abandonDrags(): void {
-    endTabDrag();
-    endDividerDrag();
-  }
+  const drag = new DockDrag({
+    dockEl: () => dockEl,
+    layout: () => dock.layout,
+    onPress: (tabId) => {
+      dock = focusTab(dock, tabId);
+    },
+    onMove: (tabId, target) => {
+      dock = moveTabTo(dock, tabId, target);
+    },
+    onResize: (splitId, boundary, fraction) => {
+      dock = { ...dock, layout: resizeSplit(dock.layout, splitId, boundary, fraction) };
+    },
+  });
 
   setFileDock({
     title: tabTitle,
@@ -556,31 +480,11 @@
       dock = pinTab(dock, tabId);
     },
     requestClose: (tabId) => void requestCloseTab(tabId),
-    startTabDrag: (tabId, event) => {
-      if (event.button !== 0 || pendingDrag || divider) return;
-      dock = focusTab(dock, tabId);
-      pendingDrag = { tabId, pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-      window.addEventListener("pointermove", onTabPointerMove);
-      window.addEventListener("pointerup", onTabPointerUp);
-      window.addEventListener("pointercancel", endTabDrag);
-    },
-    startDividerDrag: (splitId, boundary, event) => {
-      if (event.button !== 0 || pendingDrag || divider) return;
-      const el = (event.currentTarget as HTMLElement | null)?.closest("[data-ide-split]");
-      const node = findNode(dock.layout, splitId);
-      if (!el || !node || !isSplit(node)) return;
-      divider = { splitId, boundary, pointerId: event.pointerId, rect: rectOf(el), dir: node.dir };
-      window.addEventListener("pointermove", onDividerPointerMove);
-      window.addEventListener("pointerup", endDividerDrag);
-      window.addEventListener("pointercancel", endDividerDrag);
-      event.preventDefault();
-    },
-    draggingTab: () => draggingTab,
-    hint: () => hint,
+    startTabDrag: (tabId, event) => void drag.startTab(tabId, event),
+    startDividerDrag: (splitId, boundary, event) => drag.startDivider(splitId, boundary, event),
+    draggingTab: () => drag.draggingTab,
+    hint: () => drag.hint,
   });
-
-  /** The drop highlight for a drag onto the whole area's edge. */
-  const rootHint = $derived(hint && hint.nodeId === ROOT_NODE_ID ? hint.side : null);
 
   // Keeping an editor alive across a layout change (`ide/paneStore.ts`): park every
   // editor before Svelte rebuilds the tree, place each into its group's slot after.
@@ -623,10 +527,10 @@
     const unsubscribe = handoffs.subscribe((list) => {
       if (list.length > 0) takeWaiting();
     });
-    window.addEventListener("blur", abandonDrags);
+    window.addEventListener("blur", drag.abandon);
     return () => {
-      window.removeEventListener("blur", abandonDrags);
-      abandonDrags();
+      window.removeEventListener("blur", drag.abandon);
+      drag.abandon();
       unsubscribe();
       void unlistenRenamed.then((off) => off());
     };
@@ -847,7 +751,7 @@
   {/if}
 
   {#if allFileTabs.length > 0}
-    <div class="dock" class:dragging={draggingTab !== null} bind:this={dockEl}>
+    <div class="dock" class:dragging={drag.draggingTab !== null} bind:this={dockEl}>
       <!-- Every editor is rendered here once and only ever *moved* into its group's
            slot (`ide/paneStore.ts`), so moving a tab to another group keeps its
            cursor, undo history and unsaved text. Hidden with `visibility`, filling
@@ -873,9 +777,11 @@
           </div>
         {/each}
       </div>
-      <FileDockNode node={dock.layout.root} />
-      {#if rootHint}
-        <div class="root-highlight {rootHint}"></div>
+      <DockNode node={dock.layout.root} onDividerDown={(splitId, boundary, event) => drag.startDivider(splitId, boundary, event)}>
+        {#snippet group(g)}<FileGroup group={g} />{/snippet}
+      </DockNode>
+      {#if drag.rootHint}
+        <div class="root-highlight {drag.rootHint}"></div>
       {/if}
     </div>
   {:else}

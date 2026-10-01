@@ -1,7 +1,7 @@
 <!--
   One node of the dock tree, drawn recursively: a split becomes a flex row or
   column with a divider between each pair of children, a tab group becomes a
-  `PaneGroup`.
+  group (drawn by the owner's `group` snippet, so the IDE and the file app share this one).
 
   A child's `flex-grow` is its stored fraction and its `flex-basis` is zero, so
   the fractions *are* the proportions — there is no second place where a size
@@ -10,34 +10,40 @@
   smaller than their exact fraction; nothing depends on the difference.
 -->
 <script lang="ts">
+  import type { Snippet } from "svelte";
+
   import DockNode from "./DockNode.svelte";
-  import { getDock } from "./dockContext";
-  import { isSplit, type LayoutNode } from "./layout";
-  import PaneGroup from "./PaneGroup.svelte";
+  import { isSplit, type LayoutNode, type TabGroup } from "./layout";
 
-  let { node }: { node: LayoutNode } = $props();
+  interface Props {
+    node: LayoutNode;
+    /** How a tab group is drawn — the IDE's `PaneGroup`, the file app's `FileGroup`. */
+    group: Snippet<[TabGroup]>;
+    /** A divider was pressed: boundary `boundary` of split `splitId` (`DockDrag.startDivider`). */
+    onDividerDown: (splitId: string, boundary: number, event: PointerEvent) => void;
+  }
 
-  const dock = getDock();
+  let { node, group, onDividerDown }: Props = $props();
 </script>
 
 {#if isSplit(node)}
   <div class="split {node.dir}" data-ide-split={node.id}>
     {#each node.children as child, i (child.id)}
       <div class="child" style="flex: {node.sizes[i]} 1 0">
-        <DockNode node={child} />
+        <DockNode node={child} {group} {onDividerDown} />
       </div>
       {#if i < node.children.length - 1}
         <div
           class="divider"
           role="separator"
           aria-orientation={node.dir === "row" ? "vertical" : "horizontal"}
-          onpointerdown={(event) => dock.startDividerDrag(node.id, i, event)}
+          onpointerdown={(event) => onDividerDown(node.id, i, event)}
         ></div>
       {/if}
     {/each}
   </div>
 {:else}
-  <PaneGroup group={node} />
+  {@render group(node)}
 {/if}
 
 <style>
@@ -59,6 +65,7 @@
   }
 
   .child {
+    display: flex;
     min-width: 0;
     min-height: 0;
   }
