@@ -1,8 +1,9 @@
 <!--
   The activity rail (`docs/plans/workbench.md`): a narrow column of icons at the Studio's left edge.
-  The top icons choose what the sidebar column shows — Files, Search, Git, Agents; a click on the one
-  already shown folds the column away, as in VS Code. The terminal icon is an action, not a view: every
-  click opens a new terminal. Settings and shortcuts stay on the right of the header.
+  Files and Search sit on top; below the rule come Agents, Terminal and Git as one block. They choose what
+  the sidebar column shows (Files, Search, Agents, Git); a click on the one already shown folds the column
+  away, as in VS Code. Terminal is an action, not a view: every click opens a new terminal. "Open a file…"
+  sits at the foot. Settings and shortcuts stay on the right of the header.
 -->
 <script lang="ts">
   import IconButton from "../ui/IconButton.svelte";
@@ -16,6 +17,7 @@
     disabled = false,
     onSelect,
     onTerminal,
+    onOpenFile,
   }: {
     /** What the sidebar column shows. */
     view: SidebarView;
@@ -29,6 +31,8 @@
     disabled?: boolean;
     onSelect: (view: SidebarView) => void;
     onTerminal: () => void;
+    /** The native file dialog (⌘O). */
+    onOpenFile: () => void;
   } = $props();
 
   const shown = (v: SidebarView) => open && view === v;
@@ -36,25 +40,22 @@
 
 <nav class="rail" aria-label="Views">
   <div class="group" role="tablist" aria-orientation="vertical">
-    <IconButton icon="files" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
-    <IconButton icon="text-search" label="Search the project (⇧⌘F)" tab pressed={shown("search")} onclick={() => onSelect("search")} />
-    <span class="slot">
-      <IconButton
-        icon="git-branch"
-        label={gitCount > 0 ? `Git — ${gitCount} changed` : "Git"}
-        tab
-        pressed={shown("git")}
-        onclick={() => onSelect("git")}
-      />
-      {#if gitCount > 0}<span class="badge" aria-hidden="true">{gitCount > 99 ? "99+" : gitCount}</span>{/if}
-    </span>
-    <IconButton icon="terminal" label="New terminal" {disabled} onclick={onTerminal} />
+    <IconButton icon="files" size="lg" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
+    <IconButton
+      icon="search"
+      size="lg"
+      label="Search the project (⇧⌘F)"
+      tab
+      pressed={shown("search")}
+      onclick={() => onSelect("search")}
+    />
   </div>
   <span class="rule" aria-hidden="true"></span>
   <div class="group" role="tablist" aria-orientation="vertical">
     <span class="slot">
       <IconButton
         icon="bot"
+        size="lg"
         label={agentsRunning > 0 ? `Agents — ${agentsRunning} working` : "Agents"}
         tab
         pressed={shown("agents")}
@@ -62,6 +63,21 @@
       />
       {#if agentsRunning > 0}<span class="badge live" aria-hidden="true">{agentsRunning}</span>{/if}
     </span>
+    <IconButton icon="terminal" size="lg" label="New terminal" {disabled} onclick={onTerminal} />
+    <span class="slot">
+      <IconButton
+        icon="git-branch"
+        size="lg"
+        label={gitCount > 0 ? `Git — ${gitCount} changed` : "Git"}
+        tab
+        pressed={shown("git")}
+        onclick={() => onSelect("git")}
+      />
+      {#if gitCount > 0}<span class="badge" aria-hidden="true">{gitCount > 99 ? "99+" : gitCount}</span>{/if}
+    </span>
+  </div>
+  <div class="foot">
+    <IconButton icon="folder-open" size="lg" label="Open a file… (⌘O)" onclick={onOpenFile} />
   </div>
 </nav>
 
@@ -71,8 +87,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-2) var(--ax-space-1);
+    gap: var(--ax-space-3);
+    padding: var(--ax-space-3) var(--ax-space-2);
     border-right: 1px solid var(--ax-border);
     background: var(--ax-surface-1);
   }
@@ -84,8 +100,12 @@
     gap: var(--ax-space-1);
   }
 
+  .foot {
+    margin-top: auto;
+  }
+
   .rule {
-    width: calc(20px * var(--ax-ui-scale));
+    width: calc(28px * var(--ax-ui-scale));
     height: 1px;
     background: var(--ax-border);
   }

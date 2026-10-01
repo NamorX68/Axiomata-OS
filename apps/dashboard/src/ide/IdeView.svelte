@@ -652,9 +652,8 @@
       {/if}
     </div>
     <div class="actions">
-      <IconButton icon="folder-open" label="Open a file… (⌘O)" onclick={() => void openPicked()} />
       <IconButton
-        icon="sliders-horizontal"
+        icon="settings"
         label="Editor settings"
         pressed={inspector === "settings"}
         onclick={() => (inspector = inspector === "settings" ? null : "settings")}
@@ -688,6 +687,7 @@
     disabled={!current}
     onSelect={selectView}
     onTerminal={openTerminal}
+    onOpenFile={() => void openPicked()}
   />
   <!-- Folded away, not unmounted: the tree keeps what is open, the search its results, the git panel its status. -->
   <div class="side-wrap" class:gone={!tree.visible}>
