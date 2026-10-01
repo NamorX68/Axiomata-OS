@@ -145,6 +145,14 @@
   const rootLabel = (id: string): string => roots.find((r) => r.id === id)?.label ?? id;
   let gitCount = $state(0);
   const statuses = agentStatus.statuses;
+  /** The agents with a pane open in either layout (a hidden mode's pane still runs). */
+  const openAgentIds = $derived(
+    new Set(
+      [...allTabs(layout), ...allTabs(parked)].flatMap((t) =>
+        t.kind === "agent" && typeof t.config?.agentId === "number" ? [t.config.agentId] : [],
+      ),
+    ),
+  );
   const agentsRunning = $derived([...$statuses.byAgent.values()].filter((v) => v?.state === "working").length);
 
   /** The rail: a click on another view shows it; a click on the one shown folds the column away. */
@@ -727,6 +735,7 @@
       {#snippet agentsView()}
         <AgentsPanel
           {agents}
+          {openAgentIds}
           disabled={!current}
           onOpen={openAgent}
           onCreate={(fields) => void addAgent(fields)}

@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { AgentFields, IdeAgent } from "../core/backend";
   import { HARNESSES, blankFields, fieldsOf } from "./agents";
-  import { agentStatus, describeStatus } from "./agentStatus";
+  import { agentStatus, describeStatus, withoutPane } from "./agentStatus";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -16,6 +16,7 @@
 
   let {
     agents,
+    openAgentIds,
     disabled = false,
     onOpen,
     onCreate,
@@ -23,6 +24,8 @@
     onRemove,
   }: {
     agents: IdeAgent[];
+    /** The agents that have a pane open somewhere (either layout): the others read as closed. */
+    openAgentIds: ReadonlySet<number>;
     /** No project open — there is nothing an agent could belong to. */
     disabled?: boolean;
     onOpen: (agent: IdeAgent) => void;
@@ -32,6 +35,11 @@
   } = $props();
 
   /** `null` = the "new agent" form, a number = editing that agent. */
+  function statusOf(agent: IdeAgent) {
+    const view = describeStatus($statuses.byAgent.get(agent.id), agent, $statuses.checkedAt);
+    return openAgentIds.has(agent.id) ? view : withoutPane(view);
+  }
+
   let editing = $state<number | null | undefined>(undefined);
 
   let form = $state<AgentFields>(blankFields());
@@ -63,7 +71,7 @@
           <li>
             <button class="pick" type="button" {disabled} onclick={() => onOpen(agent)}>
               <span class="name">
-                <StatusDot view={describeStatus($statuses.byAgent.get(agent.id), agent, $statuses.checkedAt)} />
+                <StatusDot view={statusOf(agent)} />
                 {agent.name}
               </span>
               <span class="meta">{agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
