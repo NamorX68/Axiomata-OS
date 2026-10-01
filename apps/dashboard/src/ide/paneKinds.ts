@@ -8,7 +8,7 @@
  */
 
 import type { FileRef } from "../fileapp/tabs";
-import { folderKey } from "../fileapp/treeModel";
+import { folderKey, renamedPath } from "../fileapp/treeModel";
 import {
   activateTab,
   addTab,
@@ -19,6 +19,7 @@ import {
   setSplitSizes,
   setTabConfig,
   type Layout,
+  type LayoutNode,
   type PaneTab,
 } from "./layout";
 
@@ -219,4 +220,27 @@ export function openOrFocus(
   }
   const target = from?.group.id ?? groups[groups.length - 1]?.id ?? layout.root.id;
   return addTab(layout, tab, { nodeId: target, side: "right" });
+}
+
+/**
+ * A rename in `root` (`files:renamed`): every file tab on `from` — or inside the renamed folder —
+ * now names the new path, with its title. The layout is returned as it was when nothing matched.
+ */
+export function layoutAfterRename(layout: Layout, root: string, from: string, to: string): Layout {
+  let changed = false;
+  const walk = (node: LayoutNode): LayoutNode => {
+    if (isSplit(node)) return { ...node, children: node.children.map(walk) };
+    return {
+      ...node,
+      tabs: node.tabs.map((tab) => {
+        const c = filePaneConfig(tab);
+        const rel = c && c.root === root ? renamedPath(c.rel, from, to) : null;
+        if (!c || rel === null) return tab;
+        changed = true;
+        return { ...tab, title: baseName(rel), config: { ...tab.config, root: c.root, rel, line: c.line, jump: c.jump } };
+      }),
+    };
+  };
+  const next = walk(layout.root);
+  return changed ? { ...layout, root: next } : layout;
 }

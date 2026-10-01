@@ -35,6 +35,6 @@ vorgeschlagene Begriffe stehen noch nicht fest.
    `FileGroup`/`PaneGroup` bleiben vorerst zwei (sie zeigen verschiedene Tab-Inhalte); sie wachsen mit Schritt 3 zusammen.
 3. **Die Arbeitsfläche selbst:** `IdeView` bekommt die Datei-Fähigkeiten des Editors (Liste oben), Layout je Projekt und Modus, den
    Schalter im Kopf. Der große Brocken, in Checkpoints zu zerlegen.
-   - **3a gebaut:** die Tasten ⌃Tab, ⌘1–9, ⌘\ / ⇧⌘\ und ⌘O in der IDE (`ide/dockKeys.ts`, auf der Gruppe des zuletzt benutzten Tabs). **3b gebaut:** Rückfrage beim Schließen einer Datei mit ungespeichertem Text (×, ⌘W nur auf Datei-Tabs, Vi `:q`; `ide/fileHandles.ts`). Offen: Vorschau-Tab, ⌘N, „Zuletzt geöffnet“, Pfad-Kopf, Übergabe vom Datei-Panel, Umbenennen/Löschen, Layout je Modus.
+   - **3a gebaut:** die Tasten ⌃Tab, ⌘1–9, ⌘\ / ⇧⌘\ und ⌘O in der IDE (`ide/dockKeys.ts`, auf der Gruppe des zuletzt benutzten Tabs). **3b gebaut:** Rückfrage beim Schließen einer Datei mit ungespeichertem Text (×, ⌘W nur auf Datei-Tabs, Vi `:q`; `ide/fileHandles.ts`). **3c gebaut:** Umbenennen im Baum (`files:renamed`) zieht Pfad und Titel der offenen Datei-Tabs nach (`layoutAfterRename`). Offen: Vorschau-Tab, ⌘N, „Zuletzt geöffnet“, Pfad-Kopf, Übergabe vom Datei-Panel, Umbenennen/Löschen, Layout je Modus.
 4. **Ein Einstieg im Ring**; die alte Editor-Ansicht fällt weg, das schwebende Datei-Panel übergibt an die Arbeitsfläche.
 5. **Name und Aufräumen** der Begriffe in der App, `AGENTS.md`, den Plänen.

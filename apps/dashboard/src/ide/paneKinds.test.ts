@@ -17,6 +17,7 @@ import {
   projectRoot,
   showsFile,
   withFilesPane,
+  layoutAfterRename,
   worktreeAgent,
 } from "./paneKinds";
 
@@ -235,5 +236,23 @@ describe("the Files pane (W9, W16)", () => {
     layout = addTab(layout, terminal2, { nodeId: group, side: "center" });
     // The file group's front tab is now a terminal: no file to highlight.
     expect(frontFile(layout)).toBeNull();
+  });
+});
+
+describe("layoutAfterRename", () => {
+  it("renames a file tab and the ones inside a renamed folder, with titles", () => {
+    const a = fileTab("project:1", "src/a.ts", null);
+    const b = fileTab("project:1", "src/sub/b.ts", null);
+    const other = fileTab("project:2", "src/a.ts", null);
+    const layout = singleGroupLayout([a, b, other]);
+    const renamed = layoutAfterRename(layout, "project:1", "src", "lib");
+    const tabs = allTabs(renamed);
+    expect(tabs.map((t) => filePaneConfig(t)?.rel)).toEqual(["lib/a.ts", "lib/sub/b.ts", "src/a.ts"]);
+    expect(tabs.map((t) => t.title)).toEqual(["a.ts", "b.ts", "a.ts"]);
+  });
+
+  it("returns the same layout when nothing matched", () => {
+    const layout = singleGroupLayout([fileTab("project:1", "x.ts", null)]);
+    expect(layoutAfterRename(layout, "project:1", "y.ts", "z.ts")).toBe(layout);
   });
 });

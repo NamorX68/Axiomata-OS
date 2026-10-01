@@ -68,6 +68,7 @@
     frontFileTab,
     FILE_PANE,
     isWorkPane,
+    layoutAfterRename,
     openOrFocus,
     projectRoot,
     gitTab,
@@ -86,7 +87,8 @@
   import GitDiffView from "../fileapp/GitDiffView.svelte";
   import type { Side as GitSide } from "../fileapp/gitBackend";
   import type { OutlineInfo } from "../fileapp/outlineModel";
-  import { listRoots, pickFile } from "../fileapp/backend";
+  import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
+  import { listenBackend } from "../core/backend";
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
@@ -415,12 +417,17 @@
       if (next) layout = next;
     });
     void listRoots().then((r) => (roots = r)).catch(() => {});
+    // A rename in the tree reaches the open file tabs: their stored path (and so the layout kept per project) follows.
+    const unlistenRenamed = listenBackend<FileRenamed>("files:renamed", (r) => {
+      layout = layoutAfterRename(layout, r.root, r.from, r.to);
+    });
 
     window.addEventListener("blur", drag.abandon);
     // `pagehide` is what `core/persist.ts` uses for the same job: a quit while
     // the IDE is still the view on screen would otherwise drop the last write.
     window.addEventListener("pagehide", flushOnLeaving);
     return () => {
+      void unlistenRenamed.then((off) => off());
       window.removeEventListener("blur", drag.abandon);
       window.removeEventListener("pagehide", flushOnLeaving);
       // Today the view is never unmounted, but its correctness must not depend
