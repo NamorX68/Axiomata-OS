@@ -681,6 +681,7 @@
       {/if}
     </div>
     <div class="actions">
+      <IconButton icon="folder-open" label="Open a file… (⌘O)" onclick={() => void openPicked()} />
       <IconButton
         icon="sliders-horizontal"
         label="Editor settings"

@@ -31,7 +31,8 @@ import { toast } from "../core/toast";
 
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
-import { emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
+import { allTabs, closeTab, emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
+import { FILES_PANE } from "./paneKinds";
 import { emptyEditorLayout, parseWorkspace, serializeWorkspace, switchMode as swapMode, type Mode, type Workspace } from "./modes";
 import { newProjectFolder, openProjectFolder } from "../fileapp/backend";
 import { applyProjectCwd } from "./paneCwd";
@@ -89,6 +90,16 @@ function startingLayout(project: IdeProject): Layout {
 }
 
 /**
+ * Layouts stored before the shared sidebar start with a Files pane of their own — a second copy of the tree
+ * the sidebar shows. The sidebar owns the tree now, so those panes are dropped on load.
+ */
+export function withoutFilesPanes(layout: Layout): Layout {
+  return allTabs(layout)
+    .filter((t) => t.kind === FILES_PANE)
+    .reduce((acc, t) => closeTab(acc, t.id), layout);
+}
+
+/**
  * The workspace to show for a project: its stored layouts, or a starting one.
  *
  * A stored layout that cannot be parsed says so rather than vanishing quietly
@@ -108,8 +119,8 @@ export function workspaceFor(project: IdeProject): Workspace {
   }
   return {
     mode: parsed.mode,
-    active: applyProjectCwd(parsed.active, project.repo_root),
-    parked: applyProjectCwd(parsed.parked, project.repo_root),
+    active: applyProjectCwd(withoutFilesPanes(parsed.active), project.repo_root),
+    parked: applyProjectCwd(withoutFilesPanes(parsed.parked), project.repo_root),
   };
 }
 

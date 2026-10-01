@@ -64,7 +64,9 @@
 
 <svelte:window
   onclick={(event) => {
-    if (open && root && !root.contains(event.target as Node)) open = false;
+    // `composedPath`, not `contains(target)`: a click on "New agent…" swaps that button out of the DOM
+    // before this runs, and a detached target looks like a click outside.
+    if (open && root && !event.composedPath().includes(root)) open = false;
   }}
 />
 

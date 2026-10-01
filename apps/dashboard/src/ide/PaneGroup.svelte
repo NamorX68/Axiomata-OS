@@ -139,9 +139,7 @@
     <!-- Fixed, not inside the tab bar: the bar scrolls sideways and would clip it. -->
     <div class="add-menu" role="menu" style:left="{adding.x}px" style:top="{adding.y}px">
       <button type="button" role="menuitem" onclick={() => add("terminal")}>Terminal</button>
-      <button type="button" role="menuitem" onclick={() => add("files")}>Files</button>
-      <button type="button" role="menuitem" onclick={() => add("search")}>Search</button>
-      <button type="button" role="menuitem" onclick={() => add("git")}>Git</button>
+      <!-- Files, Search and Git live in the sidebar (workbench step 1); a second copy here only duplicated them. -->
     </div>
   {/if}
 

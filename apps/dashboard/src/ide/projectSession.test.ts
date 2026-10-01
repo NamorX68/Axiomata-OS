@@ -320,3 +320,26 @@ describe("modes", () => {
     expect(allTabs(get(session.session).parked)).toHaveLength(1);
   });
 });
+
+describe("withoutFilesPanes", () => {
+  it("drops the Files pane an old layout started with, keeping the rest", () => {
+    const layout = singleGroupLayout([
+      { id: "f", kind: "files", title: "Files" },
+      { id: "t", kind: "terminal", title: "Terminal" },
+    ]);
+    expect(allTabs(session.withoutFilesPanes(layout)).map((t) => t.id)).toEqual(["t"]);
+  });
+
+  it("is applied to both layouts of a project on open", async () => {
+    const tab = (id: string, kind: string) => ({ id, kind, title: id });
+    const group = (id: string, tabs: ReturnType<typeof tab>[]) => ({ root: { type: "tabs", id, active: tabs[0].id, tabs } });
+    const stored = JSON.stringify({
+      mode: "agents",
+      layouts: { editor: group("e", [tab("f1", "files")]), agents: group("a", [tab("f2", "files"), tab("t", "terminal")]) },
+    });
+    api.openProject.mockResolvedValue(project(1, { layout_json: stored }));
+    const layout = await session.open(1);
+    expect(allTabs(layout!).map((t) => t.id)).toEqual(["t"]);
+    expect(allTabs(get(session.session).parked)).toEqual([]);
+  });
+});
