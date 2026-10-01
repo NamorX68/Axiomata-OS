@@ -657,7 +657,10 @@
         <button type="button" class:on={mode === "agents"} disabled={!current} onclick={() => switchTo("agents")}>Agents</button>
       </div>
       {#if front}
-        <span class="path" title={front.rel}><span class="root">{rootLabel(front.root)}</span> / {front.rel}</span>
+        <span class="path" title={front.rel}>
+          <!-- The project is named in the sidebar; only other places (the workspace, a granted folder) say where. -->
+          {#if !front.root.startsWith("project:")}<span class="root">{rootLabel(front.root)}</span> / {/if}{front.rel}
+        </span>
         {#each crumbs as crumb (crumb.line + "\0" + crumb.name)}
           <button type="button" class="crumb" onclick={() => jumpToSymbol(crumb.nameLine)}>
             <span aria-hidden="true">›</span> {crumb.name}
