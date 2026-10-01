@@ -42,7 +42,12 @@
         openFilePanel(d.path, d.mode === "edit" ? "edit" : "read");
       }),
       on("shell:settings", () => (settingsOpen = true)),
-      // One workbench, two ring entries: "IDE" shows it in the Agents mode, "Editor" in the Editor mode.
+      // The ring's single "Studio" entry opens the workbench in the mode it was left in.
+      on("shell:studio", () => {
+        ideStarted = true;
+        ideOpen = true;
+      }),
+      // The old entry points: "IDE" shows it in the Agents mode, "Editor" (and a panel hand-over) in the Editor mode. "IDE" shows it in the Agents mode, "Editor" in the Editor mode.
       on("shell:ide", () => {
         requestMode("agents");
         ideStarted = true;

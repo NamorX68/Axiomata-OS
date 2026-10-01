@@ -16,6 +16,8 @@ import type { GraphNode } from "../graph/model";
  *  `path` (`UserApp.path`) — no synthetic per-member id, matching those
  *  types' own identity. `side` keeps builtin and user-app groups strictly
  *  separate; nothing here ever mixes the two. */
+import { migrateRingTypes } from "./ringTypes";
+
 export interface AppGroup {
   id: string;
   side: "builtin" | "user";
@@ -118,7 +120,7 @@ export function groupFor(side: AppGroup["side"], memberId: string): AppGroup | u
  *  anything dirty — this IS the loaded state, same convention as
  *  `apps.ts`'s `loadUserApps`. */
 export function loadAppGroups(list: AppGroup[]): void {
-  appGroups.set(list);
+  appGroups.set(list.map((g) => (g.side === "builtin" ? { ...g, members: migrateRingTypes(g.members) } : g)));
 }
 
 /** What a right-click on `node` should offer, given the current groups —

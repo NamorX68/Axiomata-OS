@@ -1,6 +1,6 @@
 # Plan: Eine Arbeitsfläche statt Editor und IDE
 
-Status: **beschlossen 2026-10-02 (Owner), Schritte 1–4 gebaut (Live-Test auf dem Mac offen); Schritt 5 (Namen, Aufräumen) offen.** Editor und IDE sollen eine Anwendung mit einem Schalter werden
+Status: **beschlossen 2026-10-02 (Owner), Schritte 1–5 gebaut (Live-Test auf dem Mac offen).** Name: **Studio** (Owner, 2026-10-02; später „Axiomata Studio“ als eigene App), Modi **Editor** und **Agents**. Editor und IDE sollen eine Anwendung mit einem Schalter werden
 („Editor“-Modus und „Agenten“-Modus), nicht zwei Programme. Auslöser: das Git-Panel und die Seitenleiste mussten doppelt gedacht
 werden, der Editor wird selbst IDE-artig, die IDE ist die „agentische“. Der Name der einen Sache ist offen (Owner: „irgendwann“);
 vorgeschlagene Begriffe stehen noch nicht fest.
@@ -50,3 +50,10 @@ vorgeschlagene Begriffe stehen noch nicht fest.
 - **Ein Einstieg:** die Ring-Einträge „Editor" und „IDE" öffnen dieselbe Ansicht (`ide/modeRequest.ts`): „Editor" im Editor-Modus, „IDE" im
   Agents-Modus. Die alte Editor-Ansicht (`FileAppView`, `FileGroup`, `FileTab`, `fileDock`) ist entfernt; `settings.editor.dock` wird nicht mehr gelesen.
 - **Offen aus Schritt 3:** Pfad-Kopf mit Breadcrumbs über dem Editor (die Outline unter dem Baum ist da), Einstellungs-/Tastenspalte ist als Inspector da.
+
+## Stand Schritt 5 (Name)
+
+- **Studio** ist der eine Ring-Eintrag (`shell:studio`, öffnet im zuletzt benutzten Modus des Projekts); Kopfzeile, Fenster-Label und IconBar heißen so.
+  Der Typ-Id bleibt `view:ide`, damit gespeicherte Ring-Einstellungen gelten; der alte Eintrag `view:editor` wird beim Laden darauf abgebildet
+  (`core/ringTypes.ts`, in `hiddenBuiltins` und in Gruppen). Die Events `shell:ide` (Agents-Modus) und `shell:editor` (Editor-Modus, Panel-Übergabe) bleiben als Einstiege.
+- Interne Namen (`ide/`, `IdeView`, `axiomata-ide`) bleiben vorerst; sie umzubenennen lohnt erst mit der Extraktion (ED7).

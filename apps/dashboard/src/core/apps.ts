@@ -13,6 +13,9 @@
 import { get, writable, type Writable } from "svelte/store";
 
 import { removeMemberFromAllGroups } from "./appGroups";
+import { migrateRingTypes } from "./ringTypes";
+
+export { migrateRingTypes, RETIRED_RING_TYPES } from "./ringTypes";
 import { listModules } from "./registry";
 import type { ModuleDefinition } from "./types";
 
@@ -59,8 +62,9 @@ export interface RingView extends BuiltinApp {
 
 /** The views the ring offers, in ring order after the modules. */
 export const RING_VIEWS: readonly RingView[] = [
-  { type: "view:editor", title: "Editor", event: "shell:editor" },
-  { type: "view:ide", title: "IDE", event: "shell:ide" },
+  // One entry for the whole workbench (`docs/plans/workbench.md`): it opens in the mode the project was left in.
+  // The type id stays `view:ide` so stored ring settings keep working; the old Editor entry is `RETIRED_RING_TYPES`.
+  { type: "view:ide", title: "Studio", event: "shell:studio" },
 ];
 
 /** The view a ring `type` opens, or `undefined` for a module type. */
@@ -118,7 +122,7 @@ export function showBuiltinApp(type: string): void {
  *  anything dirty — this IS the loaded state, same convention as
  *  `loadUserApps`. */
 export function loadHiddenBuiltins(list: string[]): void {
-  hiddenBuiltins.set(list);
+  hiddenBuiltins.set(migrateRingTypes(list));
 }
 
 /** An externally installed Mac app the owner added via the "+" dialog.

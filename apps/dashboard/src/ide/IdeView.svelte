@@ -644,7 +644,7 @@
   onMount(() => () => agentStatus.watch(null));
 </script>
 
-<section class="ide" class:hidden={!open} inert={!open} aria-label="IDE" onkeydowncapture={onViewKeydown}>
+<section class="ide" class:hidden={!open} inert={!open} aria-label="Studio" onkeydowncapture={onViewKeydown}>
   <header>
     <div class="titles">
       <IconButton
@@ -653,7 +653,7 @@
         pressed={tree.visible}
         onclick={() => (tree.visible = !tree.visible)}
       />
-      <h1>IDE</h1>
+      <h1>Studio</h1>
       <div class="modes" role="group" aria-label="Mode">
         <button type="button" class:on={mode === "editor"} disabled={!current} onclick={() => switchTo("editor")}>Editor</button>
         <button type="button" class:on={mode === "agents"} disabled={!current} onclick={() => switchTo("agents")}>Agents</button>

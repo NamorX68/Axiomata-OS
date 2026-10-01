@@ -41,9 +41,9 @@
     },
     {
       id: "ide",
-      label: "IDE",
+      label: "Studio",
       path: "M9 8l-4 4 4 4 M15 8l4 4-4 4 M3 4h18v16H3z",
-      onClick: () => emit("shell:ide"),
+      onClick: () => emit("shell:studio"),
     },
     {
       id: "search",
