@@ -91,6 +91,9 @@ describe("the shortcut list (LK1, K2)", () => {
     const titles = (groups: { title: string }[]) => groups.map((g) => g.title);
     expect(titles(visibleShortcuts(false, "")).some((t) => t.startsWith("Vi"))).toBe(false);
     expect(titles(visibleShortcuts(true, "")).some((t) => t.startsWith("Vi"))).toBe(true);
+    // With Vi on, its groups come first.
+    const order = visibleShortcuts(true, "").map((g) => !!g.vi);
+    expect(order.indexOf(false)).toBeGreaterThan(order.lastIndexOf(true));
     const found = visibleShortcuts(false, "rename");
     expect(found.flatMap((g) => g.items).map((s) => s.keys)).toEqual(["F2"]);
     expect(visibleShortcuts(false, "⌘D").flatMap((g) => g.items).map((s) => s.what)).toEqual([

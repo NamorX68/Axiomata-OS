@@ -15,6 +15,8 @@
   search field (`showSearch`) and show a language server's list of places (`showLocations`).
 -->
 <script lang="ts">
+  import type { Snippet } from "svelte";
+
   import type { FileRootInfo, IdeProject } from "../core/backend";
   import { uiScale } from "../core/uiScale";
   import IconButton from "../ui/IconButton.svelte";
@@ -67,6 +69,9 @@
     gitRefresh?: number;
     onOpenChange: (row: GitRow) => void;
     onGitStatus?: (changes: number, status: RepoStatus | null) => void;
+
+    /** The Agents view, which the host owns (it needs the project's agents and the dock). */
+    agentsView?: Snippet;
   }
 
   let {
@@ -93,10 +98,14 @@
     gitRefresh = 0,
     onOpenChange,
     onGitStatus,
+    agentsView,
   }: Props = $props();
 
-  let tab = $state<"files" | "search" | "git">("files");
-  let gitCount = $state(0);
+  /** Which view the column shows — chosen by the activity rail, kept in the prefs. */
+  const tab = $derived(prefs.view);
+  const setTab = (view: TreePrefs["view"]): void => {
+    prefs = { ...prefs, view };
+  };
   let treeView = $state<FileTree | null>(null);
   let searchView = $state<ProjectSearch | null>(null);
   /** The edge being dragged for the width, and the outline's top edge for its height. */
@@ -109,18 +118,18 @@
   }
 
   export function showFiles(): void {
-    tab = "files";
+    setTab("files");
   }
 
   /** ⇧⌘F: the search tab, its field focused. */
   export async function showSearch(): Promise<void> {
-    tab = "search";
+    setTab("search");
     await searchView?.focus();
   }
 
   /** A language server's list of places (ED6.3) in the search tab. */
   export function showLocations(list: LocationList): void {
-    tab = "search";
+    setTab("search");
     searchView?.showLocations(list);
   }
 
@@ -166,25 +175,9 @@
     {onChangeFolder}
     onRemove={onRemoveProject}
   />
-  <div class="side-bar">
-    <div class="side-tabs" role="tablist" aria-label="Sidebar">
-      <IconButton icon="files" label="Files" tab pressed={tab === "files"} onclick={() => (tab = "files")} />
-      <IconButton
-        icon="text-search"
-        tab
-        label="Search the project (⇧⌘F)"
-        pressed={tab === "search"}
-        onclick={() => void showSearch()}
-      />
-      <IconButton
-        icon="git-branch"
-        tab
-        label={gitCount > 0 ? `Git — ${gitCount} changed` : "Git"}
-        pressed={tab === "git"}
-        onclick={() => (tab = "git")}
-      />
-    </div>
-    {#if tab === "files"}
+  {#if tab === "files"}
+    <div class="side-bar">
+      <span class="side-title">FILES</span>
       <IconButton
         icon={prefs.showHidden ? "eye" : "eye-off"}
         label={prefs.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
@@ -193,9 +186,9 @@
         onclick={() => (prefs = { ...prefs, showHidden: !prefs.showHidden })}
       />
       <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => treeView?.refresh()} />
-    {/if}
-  </div>
-  <!-- All three stay mounted: the tree keeps what is open, the search its results. -->
+    </div>
+  {/if}
+  <!-- All the views stay mounted: the tree keeps what is open, the search its results. -->
   <div class="side-pane" class:gone={tab !== "search"}>
     <ProjectSearch
       bind:this={searchView}
@@ -212,11 +205,11 @@
       refresh={gitRefresh}
       onOpen={onOpenChange}
       onStatus={(count, status) => {
-        gitCount = count;
         onGitStatus?.(count, status);
       }}
     />
   </div>
+  <div class="side-pane" class:gone={tab !== "agents"}>{@render agentsView?.()}</div>
   <div class="side-pane" class:gone={tab !== "files"}>
     <div class="tree-area">
       <FileTree
@@ -285,10 +278,9 @@
     font-size: var(--ax-font-size-xs);
   }
 
-  .side-tabs {
+  .side-title {
     flex: 1;
-    display: flex;
-    gap: var(--ax-space-1);
+    letter-spacing: var(--ax-tracking-wide);
   }
 
   .side-pane {

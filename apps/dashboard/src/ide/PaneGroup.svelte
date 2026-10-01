@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { agentStatus, describeStatus, type StatusView } from "./agentStatus";
-  import { getDock, type NewPaneKind } from "./dockContext";
+  import { getDock } from "./dockContext";
   import type { PaneTab, TabGroup } from "./layout";
   import { SLOT_ATTR } from "./paneStore";
   import { session } from "./projectSession";
@@ -51,41 +51,12 @@
     return harness ? `var(--ax-harness-${harness})` : undefined;
   }
 
-  /** The `+` menu, open at these viewport coordinates (W16). */
-  let adding = $state<{ x: number; y: number } | null>(null);
-
-  let addButton = $state<HTMLButtonElement | undefined>();
-
-  function toggleAddMenu(event: MouseEvent): void {
-    if (adding) {
-      adding = null;
-      return;
-    }
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    adding = { x: rect.left, y: rect.bottom };
-  }
-
-  function add(kind: NewPaneKind): void {
-    adding = null;
-    dock.addPane(group.id, kind);
-  }
-
   /** The drop highlight for this group, or `null` when the drag is elsewhere. */
   const highlight = $derived.by(() => {
     const target = dock.hint();
     return target && target.nodeId === group.id ? target.side : null;
   });
 </script>
-
-<svelte:window
-  onclick={(event) => {
-    // Every group listens here, so a click on another group's `+` still closes this menu.
-    if (!addButton?.contains(event.target as Node)) adding = null;
-  }}
-  onkeydown={(event) => {
-    if (adding && event.key === "Escape") adding = null;
-  }}
-/>
 
 <div class="group" data-ide-group={group.id}>
   <div class="tabbar" data-ide-tabbar role="tablist">
@@ -123,25 +94,7 @@
         >
       </div>
     {/each}
-    <button
-      class="add"
-      type="button"
-      aria-label="New pane in this group"
-      title="New pane in this group"
-      aria-haspopup="menu"
-      bind:this={addButton}
-      aria-expanded={adding !== null}
-      onclick={toggleAddMenu}><Icon name="plus" size="sm" /></button
-    >
   </div>
-
-  {#if adding}
-    <!-- Fixed, not inside the tab bar: the bar scrolls sideways and would clip it. -->
-    <div class="add-menu" role="menu" style:left="{adding.x}px" style:top="{adding.y}px">
-      <button type="button" role="menuitem" onclick={() => add("terminal")}>Terminal</button>
-      <!-- Files, Search and Git live in the sidebar (workbench step 1); a second copy here only duplicated them. -->
-    </div>
-  {/if}
 
   <div class="body">
     <!-- Empty on purpose. The pane itself is rendered once, flat, in the
@@ -242,8 +195,7 @@
     font-style: italic;
   }
 
-  .close,
-  .add {
+  .close {
     display: flex;
     align-items: center;
     padding: 2px;
@@ -257,40 +209,6 @@
   .close:hover {
     background: var(--ax-surface-3);
     color: var(--ax-danger);
-  }
-
-  .add:hover {
-    background: var(--ax-surface-3);
-    color: var(--ax-accent);
-  }
-
-  .add-menu {
-    position: fixed;
-    z-index: calc(var(--ax-z-staging) + 1);
-    display: flex;
-    flex-direction: column;
-    padding: var(--ax-space-1);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    box-shadow: var(--ax-shadow-pop);
-  }
-
-  .add-menu button {
-    padding: var(--ax-space-1) var(--ax-space-2);
-    background: none;
-    border: none;
-    border-radius: var(--ax-radius-sm);
-    color: var(--ax-text);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-sm);
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .add-menu button:hover,
-  .add-menu button:focus-visible {
-    background: var(--ax-surface-3);
   }
 
   .body {

@@ -57,3 +57,18 @@ vorgeschlagene Begriffe stehen noch nicht fest.
   Der Typ-Id bleibt `view:ide`, damit gespeicherte Ring-Einstellungen gelten; der alte Eintrag `view:editor` wird beim Laden darauf abgebildet
   (`core/ringTypes.ts`, in `hiddenBuiltins` und in Gruppen). Die Events `shell:ide` (Agents-Modus) und `shell:editor` (Editor-Modus, Panel-Übergabe) bleiben als Einstiege.
 - Interne Namen (`ide/`, `IdeView`, `axiomata-ide`) bleiben vorerst; sie umzubenennen lohnt erst mit der Extraktion (ED7).
+
+## Stand: Aktivitätsleiste (nach dem ersten Mac-Test, 2026-10-02)
+
+- **Linke Icon-Leiste** (`ide/ActivityRail.svelte`): Dateien, Suche, Git (mit Zähler), darunter *Terminal* (Aktion: jeder Klick öffnet ein neues
+  Terminal), abgesetzt *Agents* (mit Zähler der arbeitenden Agenten). Ein Klick auf das gezeigte Icon klappt die Seitenspalte ein (auch ⌘B).
+  Einstellungen und Tastenkürzel bleiben rechts im Kopf. Die Spalte zeigt je Ansicht (`settings.ide.tree.view`) Files, Search, Git oder das
+  **Agents-Panel** (`ide/AgentsPanel.svelte`, aus dem früheren `AgentPicker`); eingeklappt wird sie nur versteckt, nicht entladen.
+- **Dock-Gruppen haben kein „+" mehr**; Files/Search/Git-Panes gibt es nur noch aus alten Layouts. Ein Files-Pane aus einem alten Layout wird
+  beim Öffnen entfernt (`projectSession.withoutFilesPanes`) — das war der doppelte Baum.
+- **Die zwei Modi sind zwei Arbeitsflächen** (je ein Dock-Layout pro Projekt), alles andere ist gemeinsam. Beim Öffnen eines Agenten oder
+  Terminals wird nicht mehr automatisch in den Agents-Modus gewechselt. Mehr als zwei Flächen wären nur eine Liste statt zweier Felder
+  (`ide/modes.ts`) — bewusst nicht gebaut.
+- **Vi:** mit Vi-Modus stehen dessen Tastengruppen oben in der Kürzelliste; „File app" und „IDE" sind eine Gruppe „Studio".
+- **Agenten-Kommunikation (M7.5, A2A über MCP)** kommt später (Owner); das Agents-Panel ist der Platz, an dem Nachrichten und Aufgabe je Agent
+  einmal erscheinen können.

@@ -96,7 +96,13 @@ export function expandedAfterDelete(expanded: readonly string[], root: string, r
   });
 }
 
+/** What the sidebar column shows; the activity rail chooses (`ide/ActivityRail.svelte`). */
+export type SidebarView = "files" | "search" | "git" | "agents";
+const VIEWS: readonly SidebarView[] = ["files", "search", "git", "agents"];
+
 export interface TreePrefs {
+  /** Which view the sidebar column shows. */
+  view: SidebarView;
   /** Open folders, as `folderKey`s. */
   expanded: string[];
   /** Pixels. */
@@ -110,7 +116,7 @@ export interface TreePrefs {
   outlineHeight: number;
 }
 
-export const DEFAULT_TREE: TreePrefs = { expanded: [], width: 260, visible: true, showHidden: false, project: null, outlineOpen: true, outlineHeight: 240 };
+export const DEFAULT_TREE: TreePrefs = { view: "files", expanded: [], width: 260, visible: true, showHidden: false, project: null, outlineOpen: true, outlineHeight: 240 };
 /** The tree is never narrower or wider than this. */
 export const TREE_WIDTH = { min: 160, max: 640 } as const;
 
@@ -129,6 +135,7 @@ export function clampWidth(width: number): number {
 export function parseTreePrefs(raw: unknown): TreePrefs {
   const r = (raw ?? {}) as Partial<Record<keyof TreePrefs, unknown>>;
   return {
+    view: VIEWS.includes(r.view as SidebarView) ? (r.view as SidebarView) : DEFAULT_TREE.view,
     expanded: Array.isArray(r.expanded) ? r.expanded.filter((k): k is string => typeof k === "string") : [],
     width: typeof r.width === "number" && Number.isFinite(r.width) ? clampWidth(r.width) : DEFAULT_TREE.width,
     visible: typeof r.visible === "boolean" ? r.visible : DEFAULT_TREE.visible,

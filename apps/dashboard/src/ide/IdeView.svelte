@@ -53,7 +53,8 @@
     type PaneTab,
   } from "./layout";
   import type { AgentFields, IdeAgent } from "../core/backend";
-  import AgentPicker from "./AgentPicker.svelte";
+  import AgentsPanel from "./AgentsPanel.svelte";
+  import ActivityRail from "./ActivityRail.svelte";
   import { agentStatus } from "./agentStatus";
   import { foldKey, forgetFolds } from "../fileapp/foldMemory";
   import QuickOpen from "../fileapp/QuickOpen.svelte";
@@ -63,7 +64,6 @@
     fileTab,
     filePaneConfig,
     fileOrigin,
-    filesTab,
     frontFile,
     frontFileTab,
     FILE_PANE,
@@ -75,8 +75,6 @@
     untitledTab,
     openOrFocus,
     projectRoot,
-    gitTab,
-    searchTab,
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
@@ -100,7 +98,7 @@
   import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
   import { listenBackend } from "../core/backend";
   import { treeRootsOf } from "../fileapp/projectModel";
-  import { loadTreePrefs, saveTreePrefs, type TreePrefs } from "../fileapp/treeModel";
+  import { loadTreePrefs, saveTreePrefs, type SidebarView, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -145,6 +143,15 @@
   /** The symbols holding the front file's cursor — the breadcrumbs (#49), from the same data as the outline. */
   const crumbs = $derived(activeOutline?.symbols ? pathAt(activeOutline.symbols, activeOutline.line) : []);
   const rootLabel = (id: string): string => roots.find((r) => r.id === id)?.label ?? id;
+  let gitCount = $state(0);
+  const statuses = agentStatus.statuses;
+  const agentsRunning = $derived([...$statuses.byAgent.values()].filter((v) => v?.state === "working").length);
+
+  /** The rail: a click on another view shows it; a click on the one shown folds the column away. */
+  function selectView(view: SidebarView): void {
+    tree = tree.visible && tree.view === view ? { ...tree, visible: false } : { ...tree, view, visible: true };
+  }
+
   /** A change open in the diff view over the dock. */
   let gitChange = $state<{ path: string; old_path: string | null; side: GitSide } | null>(null);
   let gitNudge = $state(0);
@@ -425,11 +432,6 @@
     layout = projectSession.switchMode(layout);
   }
 
-  /** Agents and terminals live in the Agents layout: shown first if the Editor mode is. */
-  function showAgents(): void {
-    switchTo("agents");
-  }
-
   /**
    * Puts an agent into a pane, beside whatever is already open.
    *
@@ -440,7 +442,6 @@
    * does not mean hunting down copies in a stored layout.
    */
   function openAgent(agent: IdeAgent) {
-    showAgents();
     const tab: PaneTab = {
       id: crypto.randomUUID(),
       kind: "agent",
@@ -462,7 +463,6 @@
   function openTerminal() {
     const project = current;
     if (!project) return;
-    showAgents();
     const groups = allGroups(layout);
     const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
     const added = addTab(layout, projectSession.terminalTab(), { nodeId: target, side: "right" });
@@ -541,20 +541,6 @@
     },
     close: dockClose,
     requestClose: (tabId) => void requestClose(tabId),
-    addPane: (groupId, kind) => {
-      const project = current;
-      if (!project) return;
-      const tab =
-        kind === "files"
-          ? filesTab(project.id)
-          : kind === "search"
-            ? searchTab()
-            : kind === "git"
-              ? gitTab()
-              : projectSession.terminalTab();
-      const added = addTab(layout, tab, { nodeId: groupId, side: "center" });
-      layout = applyProjectCwd(added, project.repo_root);
-    },
     startTabDrag: (tabId, event) => {
       if (drag.startTab(tabId, event)) event.preventDefault();
     },
@@ -651,26 +637,11 @@
 <section class="ide" class:hidden={!open} inert={!open} aria-label="Studio" onkeydowncapture={onViewKeydown}>
   <header>
     <div class="titles">
-      <IconButton
-        icon="panel-left"
-        label="Sidebar (⌘B)"
-        pressed={tree.visible}
-        onclick={() => (tree.visible = !tree.visible)}
-      />
       <h1>Studio</h1>
       <div class="modes" role="group" aria-label="Mode">
         <button type="button" class:on={mode === "editor"} disabled={!current} onclick={() => switchTo("editor")}>Editor</button>
         <button type="button" class:on={mode === "agents"} disabled={!current} onclick={() => switchTo("agents")}>Agents</button>
       </div>
-      <IconButton icon="terminal" label="Open a terminal beside the others" disabled={!current} onclick={openTerminal} />
-      <AgentPicker
-        {agents}
-        disabled={!current}
-        onOpen={openAgent}
-        onCreate={(fields) => void addAgent(fields)}
-        onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
-        onRemove={(id) => void projectSession.removeAgent(id)}
-      />
       {#if front}
         <span class="path" title={front.rel}><span class="root">{rootLabel(front.root)}</span> / {front.rel}</span>
         {#each crumbs as crumb (crumb.line + "\0" + crumb.name)}
@@ -709,7 +680,17 @@
     />
   {/if}
   <div class="body">
-  {#if tree.visible}
+  <ActivityRail
+    view={tree.view}
+    open={tree.visible}
+    {gitCount}
+    {agentsRunning}
+    disabled={!current}
+    onSelect={selectView}
+    onTerminal={openTerminal}
+  />
+  <!-- Folded away, not unmounted: the tree keeps what is open, the search its results, the git panel its status. -->
+  <div class="side-wrap" class:gone={!tree.visible}>
     <ProjectSidebar
       bind:this={sidebar}
       bind:prefs={tree}
@@ -734,15 +715,27 @@
       gitSelected={gitChange ? { path: gitChange.path, side: gitChange.side } : null}
       gitRefresh={gitNudge}
       onOpenChange={(row) => (gitChange = { path: row.entry.path, old_path: row.entry.old_path, side: row.side })}
-      onGitStatus={(_count, status) => {
+      onGitStatus={(count, status) => {
         const signature = JSON.stringify(status?.entries ?? []);
         if (signature !== gitSignature) {
           gitSignature = signature;
           gitVersion++;
         }
+        gitCount = count;
       }}
-    />
-  {/if}
+    >
+      {#snippet agentsView()}
+        <AgentsPanel
+          {agents}
+          disabled={!current}
+          onOpen={openAgent}
+          onCreate={(fields) => void addAgent(fields)}
+          onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
+          onRemove={(id) => void projectSession.removeAgent(id)}
+        />
+      {/snippet}
+    </ProjectSidebar>
+  </div>
   <div class="dock-column">
   <div
     class="dock"
@@ -941,6 +934,14 @@
   }
 
   /* Groups meet edge to edge, a line between them (editor-look I1). */
+  .side-wrap {
+    display: contents;
+  }
+
+  .side-wrap.gone {
+    display: none;
+  }
+
   .dock-column {
     position: relative;
     flex: 1 1 auto;

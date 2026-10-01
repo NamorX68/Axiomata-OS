@@ -19,9 +19,6 @@ import type { OutlineInfo } from "../fileapp/outlineModel";
 import type { FileRef } from "../fileapp/tabs";
 import type { DockTarget, PaneTab } from "./layout";
 
-/** What the tab bar's `+` menu offers. */
-export type NewPaneKind = "terminal" | "files" | "search" | "git";
-
 export interface IdeDock {
   /** Make a tab the visible one in its group. */
   activate: (tabId: string) => void;
@@ -29,8 +26,6 @@ export interface IdeDock {
   close: (tabId: string) => void;
   /** Close a tab, asking first when it is a file with unsaved text (the tab's ×, ⌘W, Vi's `:q`). */
   requestClose: (tabId: string) => void;
-  /** Open a new pane of that kind in that group — the tab bar's `+` menu. */
-  addPane: (groupId: string, kind: NewPaneKind) => void;
   /**
    * Opens `tab` beside the pane `fromTabId`, or brings forward the open tab
    * `match` finds (`paneKinds.ts`'s `openOrFocus`) — a file from a diff, an
