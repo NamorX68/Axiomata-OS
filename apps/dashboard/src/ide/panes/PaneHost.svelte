@@ -112,9 +112,10 @@
   {:else if tab.kind === FILE_PANE}
     {#if fileConfig}
       <FilePane
+        tabId={tab.id}
         config={fileConfig}
         {visible}
-        onQuit={() => dock.close(tab.id)}
+        onQuit={() => dock.requestClose(tab.id)}
         onOpenFile={(file, line) =>
           dock.open(fileTab(file.root, file.rel, line), (t) => showsFile(t, file.root, file.rel), tab.id)}
         onShowLocations={(list) => dock.showLocations(list)}

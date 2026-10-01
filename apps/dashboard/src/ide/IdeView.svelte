@@ -75,6 +75,8 @@
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
+  import { fileHandle } from "./fileHandles";
+  import UnsavedQuestion from "../fileapp/UnsavedQuestion.svelte";
   import { cycleTab, nthTab, splitActive } from "./dockKeys";
   import PaneHost from "./panes/PaneHost.svelte";
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "./paneStore";
@@ -221,6 +223,17 @@
       layout = nthTab(layout, lastWorkTab, Number(key));
       return;
     }
+    if (current && !e.shiftKey && key === "w") {
+      // ⌘W closes a *file* tab only: a terminal or agent holds a live shell.
+      noteFocusedPane();
+      const tab = allTabs(layout).find((t) => t.id === lastWorkTab);
+      if (tab && filePaneConfig(tab)) {
+        e.preventDefault();
+        e.stopPropagation();
+        void requestClose(tab.id);
+      }
+      return;
+    }
     if (current && !e.shiftKey && key === "o") {
       e.preventDefault();
       e.stopPropagation();
@@ -289,6 +302,44 @@
   /** The sidebar's Files tab opens a file as a tab of the dock's file group. */
   function openFromSidebar(file: FileRef, _preview: boolean, line: number | null = null): void {
     openFromQuickOpen(file, line);
+  }
+
+  /** The file tab being asked about before it closes, and how the user answered. */
+  let closing = $state<{ id: string; name: string; answer: (close: boolean) => void } | null>(null);
+
+  /** Closes `tabId`, asking first over unsaved text in a file pane; one question at a time. */
+  async function requestClose(tabId: string): Promise<void> {
+    if (closing) return;
+    const handle = fileHandle(tabId);
+    if (handle?.hasUnsaved()) {
+      layout = activateTab(layout, tabId);
+      const tab = allTabs(layout).find((t) => t.id === tabId);
+      const name = (tab && filePaneConfig(tab)?.rel) || "This file";
+      const close = await new Promise<boolean>((resolve) => {
+        closing = {
+          id: tabId,
+          name,
+          answer: (answer) => {
+            closing = null;
+            resolve(answer);
+          },
+        };
+      });
+      if (!close) return;
+    }
+    dockClose(tabId);
+  }
+
+  async function saveAndClose(): Promise<void> {
+    const c = closing;
+    if (c && (await fileHandle(c.id)?.saveNow())) c.answer(true);
+  }
+
+  async function discardAndClose(): Promise<void> {
+    const c = closing;
+    if (!c) return;
+    await fileHandle(c.id)?.discard();
+    c.answer(true);
   }
 
   /** ⌘O: the native file dialog; a picked file opens as a tab of the file group. */
@@ -378,6 +429,15 @@
     };
   });
 
+  /** Closes a tab at once, whatever is in it. */
+  function dockClose(tabId: string): void {
+    // A file pane's folds are kept only while it is open (T7).
+    const file = allTabs(layout).find((t) => t.id === tabId);
+    const config = file ? filePaneConfig(file) : null;
+    if (config) forgetFolds(foldKey(config.root, config.rel));
+    layout = closeTab(layout, tabId);
+  }
+
   setDock({
     activate: (tabId) => {
       layout = activateTab(layout, tabId);
@@ -386,13 +446,8 @@
       tree.visible = true;
       void tick().then(() => sidebar?.showLocations(list));
     },
-    close: (tabId) => {
-      // A file pane's folds are kept only while it is open (T7).
-      const file = allTabs(layout).find((t) => t.id === tabId);
-      const config = file ? filePaneConfig(file) : null;
-      if (config) forgetFolds(foldKey(config.root, config.rel));
-      layout = closeTab(layout, tabId);
-    },
+    close: dockClose,
+    requestClose: (tabId) => void requestClose(tabId),
     addPane: (groupId, kind) => {
       const project = current;
       if (!project) return;
@@ -532,6 +587,15 @@
     </div>
   </header>
 
+  {#if closing}
+    <UnsavedQuestion
+      name={closing.name}
+      untitled={false}
+      onSave={() => void saveAndClose()}
+      onDiscard={() => void discardAndClose()}
+      onCancel={() => closing?.answer(false)}
+    />
+  {/if}
   <div class="body">
   {#if tree.visible}
     <ProjectSidebar

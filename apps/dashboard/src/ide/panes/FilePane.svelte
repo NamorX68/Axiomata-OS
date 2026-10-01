@@ -18,12 +18,14 @@
 
   import FileEditor from "../../fileapp/FileEditor.svelte";
   import { agentStatus } from "../agentStatus";
+  import { registerFileHandle } from "../fileHandles";
   import { worktreeAgent, type FilePaneConfig } from "../paneKinds";
   import { session } from "../projectSession";
   import type { LocationList } from "../../fileapp/locationList";
   import type { OutlineInfo } from "../../fileapp/outlineModel";
 
   let {
+    tabId,
     config,
     visible,
     onQuit,
@@ -31,6 +33,8 @@
     onShowLocations,
     onOutline,
   }: {
+    /** The dock tab this pane sits in, under which the dock can ask for unsaved text. */
+    tabId: string;
     config: FilePaneConfig;
     visible: boolean;
     /** Vi's `ZZ`/`ZQ`: close this pane's tab. */
@@ -57,6 +61,11 @@
   });
 
   onMount(() => {
+    const unregister = registerFileHandle(tabId, {
+      hasUnsaved: () => editor?.hasUnsaved() ?? false,
+      saveNow: async () => (await editor?.saveNow()) ?? true,
+      discard: async () => void (await editor?.discard()),
+    });
     lastJump = config.jump;
     void editor?.open({ root: config.root, rel: config.rel }, config.line).then((result) => {
       if (result.ok) return;
@@ -67,6 +76,7 @@
             ? `${config.rel} does not exist (any more).`
             : `Could not open ${config.rel}: ${result.message}`;
     });
+    return unregister;
   });
 
   // Opened again from the diff: jump to the new line.

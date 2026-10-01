@@ -117,7 +117,7 @@
           type="button"
           aria-label="Close {tab.title}"
           onpointerdown={(event) => event.stopPropagation()}
-          onclick={() => dock.close(tab.id)}><Icon name="x" size="sm" /></button
+          onclick={() => dock.requestClose(tab.id)}><Icon name="x" size="sm" /></button
         >
       </div>
     {/each}

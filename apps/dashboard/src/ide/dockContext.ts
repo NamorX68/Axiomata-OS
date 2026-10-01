@@ -27,6 +27,8 @@ export interface IdeDock {
   activate: (tabId: string) => void;
   /** Close a tab, and with it the pane inside. */
   close: (tabId: string) => void;
+  /** Close a tab, asking first when it is a file with unsaved text (the tab's ×, ⌘W, Vi's `:q`). */
+  requestClose: (tabId: string) => void;
   /** Open a new pane of that kind in that group — the tab bar's `+` menu. */
   addPane: (groupId: string, kind: NewPaneKind) => void;
   /**
