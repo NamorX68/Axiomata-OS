@@ -33,6 +33,13 @@ export type GitState = { state: "not_a_repo" } | { state: "ready"; status: RepoS
 
 export type Side = "staged" | "unstaged";
 
+export interface PushResult {
+  remote: string;
+  branch: string;
+  /** The branch had no upstream; it was published and now follows `remote/branch`. */
+  created_upstream: boolean;
+}
+
 type Blob = { kind: "absent" } | { kind: "too_large"; size: number } | { kind: "binary" } | { kind: "text"; text: string };
 
 export interface GitApi {
@@ -46,6 +53,8 @@ export interface GitApi {
   applyHunk(root: string, path: string, oldPath: string | null, side: Side, index: number, header: string): Promise<void>;
   commit(root: string, message: string): Promise<string>;
   fetch(root: string): Promise<void>;
+  /** Pushes the checked-out branch to its upstream, or publishes it to `origin`. Never forced. */
+  push(root: string): Promise<PushResult>;
   /** The working file's text, or `null` when it cannot be read as text. */
   workingText(root: string, path: string): Promise<string | null>;
 }
@@ -62,6 +71,7 @@ export const gitApi: GitApi = {
     invoke<void>("git_apply_hunk", { root, path, oldPath, side, index, header }),
   commit: (root, message) => invoke<string>("git_commit", { root, message }),
   fetch: (root) => invoke<void>("git_fetch", { root }),
+  push: (root) => invoke<PushResult>("git_push", { root }),
   workingText: async (root, path) => {
     try {
       return (await fileBackend.read(root, path)).content;

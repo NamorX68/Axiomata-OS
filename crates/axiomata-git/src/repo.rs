@@ -3,8 +3,9 @@
 //! or a single hunk, and committing what is staged.
 //!
 //! Everything works on the repository's own working copy, so these are the functions that change
-//! the user's files and index — each says what it touches. **Nothing here pushes.** `fetch` only
-//! updates remote-tracking branches.
+//! the user's files and index — each says what it touches. **[`push`] is the only function that
+//! publishes anything**, and only the checked-out branch, never with force; `fetch` only updates
+//! remote-tracking branches.
 //!
 //! Paths from outside are checked ([`crate::diff::checked_path`]), a hunk is applied only if it
 //! is still the hunk the UI showed (same index, same header), and git runs with literal
@@ -466,6 +467,109 @@ pub fn fetch(repo: &Path) -> Result<()> {
     git(repo, &["fetch", "--quiet"]).map(drop)
 }
 
+/// What a push did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PushResult {
+    pub remote: String,
+    pub branch: String,
+    /// The branch had no upstream yet; it was published and now follows `remote/branch`.
+    pub created_upstream: bool,
+}
+
+/// Pushes the checked-out branch to its upstream — or, if it has none, publishes it to `origin`
+/// (the only remote if there is just one) and makes that its upstream. **Publishes commits.**
+///
+/// The one function here that leaves the machine, so it is narrow on purpose: only the current
+/// branch, to a ref git itself reports as its upstream (or `origin`), **never with `--force`** —
+/// a rejected, non-fast-forward push fails with git's own message and changes nothing. Nothing
+/// from outside names a remote or a ref.
+pub fn push(repo: &Path) -> Result<PushResult> {
+    if !has_head(repo) {
+        return Err(GitError::Invalid {
+            field: "branch",
+            reason: "nothing is committed yet".into(),
+        });
+    }
+    let (code, branch) = git_with(
+        repo,
+        &["symbolic-ref", "--short", "--quiet", "HEAD"],
+        &[0, 1],
+    )?;
+    let branch = branch.trim().to_string();
+    if code != 0 || branch.is_empty() {
+        return Err(GitError::Invalid {
+            field: "branch",
+            reason: "HEAD is detached; switch to a branch before pushing".into(),
+        });
+    }
+    let (code, upstream) = git_with(
+        repo,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        &[0, 128],
+    )?;
+    let upstream = upstream.trim();
+    if code == 0 && !upstream.is_empty() {
+        let remote = git(
+            repo,
+            &["config", "--get", &format!("branch.{branch}.remote")],
+        )?
+        .trim()
+        .to_string();
+        let merge = git(
+            repo,
+            &["config", "--get", &format!("branch.{branch}.merge")],
+        )?
+        .trim()
+        .to_string();
+        if remote.is_empty() || !merge.starts_with("refs/heads/") {
+            return Err(GitError::Invalid {
+                field: "upstream",
+                reason: format!("{upstream} is not a branch on a remote; set an upstream first"),
+            });
+        }
+        git(repo, &["push", &remote, &format!("HEAD:{merge}")])?;
+        return Ok(PushResult {
+            remote,
+            branch: merge["refs/heads/".len()..].to_string(),
+            created_upstream: false,
+        });
+    }
+    let remotes = git(repo, &["remote"])?;
+    let remotes: Vec<&str> = remotes
+        .lines()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .collect();
+    let remote = if remotes.contains(&"origin") {
+        "origin"
+    } else if let [only] = remotes[..] {
+        only
+    } else {
+        return Err(GitError::Invalid {
+            field: "remote",
+            reason: if remotes.is_empty() {
+                "this repository has no remote to push to".into()
+            } else {
+                "there is no remote called origin; set an upstream for this branch first".into()
+            },
+        });
+    };
+    git(
+        repo,
+        &[
+            "push",
+            "--set-upstream",
+            remote,
+            &format!("HEAD:refs/heads/{branch}"),
+        ],
+    )?;
+    Ok(PushResult {
+        remote: remote.to_string(),
+        branch,
+        created_upstream: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -492,6 +596,19 @@ mod tests {
             repo.run(&["config", "user.name", "T"]);
             repo.run(&["config", "commit.gpgsign", "false"]);
             repo
+        }
+
+        /// A bare repository, to push to.
+        fn bare(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "axiomata-git-{label}-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            let dir = dir.canonicalize().unwrap();
+            git(&dir, &["init", "--quiet", "--bare", "-b", "main"]).unwrap();
+            Repo(dir)
         }
 
         fn run(&self, args: &[&str]) -> String {
@@ -864,5 +981,97 @@ mod tests {
             blob(&fresh.0, "a.txt", Source::Head, 10).unwrap(),
             Blob::Absent
         );
+    }
+    /// `origin` (bare) and a clone of it with one commit, ready to push from.
+    fn with_remote(label: &str) -> (Repo, Repo) {
+        let bare = Repo::bare(&format!("{label}-bare"));
+        let work = Repo::new(&format!("{label}-work"));
+        work.write("a.txt", "1\n");
+        work.commit_all("base");
+        work.run(&["remote", "add", "origin", bare.0.to_str().unwrap()]);
+        (bare, work)
+    }
+
+    #[test]
+    fn push_publishes_a_new_branch_and_then_pushes_to_its_upstream() {
+        let (bare, work) = with_remote("push");
+        let first = push(&work.0).unwrap();
+        assert_eq!(
+            first,
+            PushResult {
+                remote: "origin".into(),
+                branch: "main".into(),
+                created_upstream: true
+            }
+        );
+        assert_eq!(
+            status(&work.0).unwrap().upstream.as_deref(),
+            Some("origin/main")
+        );
+        work.write("a.txt", "2\n");
+        work.commit_all("second");
+        assert_eq!(status(&work.0).unwrap().ahead, 1);
+        let second = push(&work.0).unwrap();
+        assert!(!second.created_upstream);
+        assert_eq!(
+            git(&bare.0, &["log", "-1", "--format=%s", "main"])
+                .unwrap()
+                .trim(),
+            "second"
+        );
+        assert_eq!(status(&work.0).unwrap().ahead, 0);
+    }
+
+    #[test]
+    fn push_refuses_without_commits_detached_or_without_a_remote() {
+        let fresh = Repo::new("push-fresh");
+        assert!(
+            push(&fresh.0)
+                .unwrap_err()
+                .to_string()
+                .contains("nothing is committed")
+        );
+        let lone = Repo::new("push-lone");
+        lone.write("a.txt", "1\n");
+        lone.commit_all("base");
+        assert!(push(&lone.0).unwrap_err().to_string().contains("no remote"));
+        lone.run(&["checkout", "--quiet", "--detach"]);
+        assert!(push(&lone.0).unwrap_err().to_string().contains("detached"));
+    }
+
+    #[test]
+    fn a_push_that_would_overwrite_the_remote_is_rejected_and_never_forced() {
+        let (bare, work) = with_remote("reject");
+        push(&work.0).unwrap();
+        // Someone else lands a commit on the remote…
+        let other = std::env::temp_dir().join(format!("axiomata-git-other-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&other);
+        git(
+            &bare.0,
+            &[
+                "clone",
+                "--quiet",
+                bare.0.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        )
+        .unwrap();
+        git(&other, &["config", "user.email", "o@example.com"]).unwrap();
+        git(&other, &["config", "user.name", "O"]).unwrap();
+        fs::write(other.join("theirs.txt"), "x\n").unwrap();
+        git(&other, &["add", "-A"]).unwrap();
+        git(&other, &["commit", "--quiet", "-m", "theirs"]).unwrap();
+        git(&other, &["push", "--quiet", "origin", "HEAD:main"]).unwrap();
+        // …and ours diverges.
+        work.write("a.txt", "ours\n");
+        work.commit_all("ours");
+        assert!(push(&work.0).is_err());
+        assert_eq!(
+            git(&bare.0, &["log", "-1", "--format=%s", "main"])
+                .unwrap()
+                .trim(),
+            "theirs"
+        );
+        let _ = fs::remove_dir_all(&other);
     }
 }

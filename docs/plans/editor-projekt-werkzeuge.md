@@ -164,11 +164,14 @@ unter Linux/Windows läuft), erst umziehen, dann bauen, zwei Gruppen mit Hunk-St
   `HEAD`, `Unstaged` = Arbeitsbaum gegen Index, Untracked gegen nichts), `apply_hunk` (Stage/Unstage eines Blocks per
   `git apply --cached`, nur wenn Index+Header noch stimmen; ein ganz neuer/gelöschter Block = die Datei), `blob`
   (Datei wie `HEAD`/Index sie hat), `commit` (nur Gestagtes; verweigert leere Nachricht/leeren Index), `fetch`
-  (nie ein Push). Gegen echte Repositories getestet.
+  (liest nur) und `push` (Owner-Wunsch 2026-10-01: Push und Commit & Push; nur der ausgecheckte Branch, zu seinem
+  Upstream bzw. als neuer Branch zu `origin`, **nie mit `--force`**, Remote und Ref nennt nie die Oberfläche — eine
+  abgelehnte Übertragung ändert nichts und zeigt Gits Meldung; scheitert der Push nach „Commit & Push“, bleibt der Commit
+  und die Meldung sagt es). Gegen echte Repositories (auch ein lokales Remote) getestet.
 - **CP3 Tauri:** `src-tauri/src/git.rs` — `git_status|stage|unstage|stage_all|unstage_all|diff|blob|apply_hunk|commit|fetch`
   auf `project:<id>`-Wurzeln (`files::project_folder` lässt nur Projekt-Wurzeln zu).
-- **CP4 Oberfläche:** dritter Reiter „Git“ in der linken Spalte (`GitPanel.svelte`: Branch, ↑↓, Fetch; Gruppen Staged/
-  Changes; Stage/Unstage je Datei und alle; Commit-Feld, ⌘⏎), ein Klick auf eine Datei öffnet die Änderung als
+- **CP4 Oberfläche:** dritter Reiter „Git“ in der linken Spalte (`GitPanel.svelte`: Branch, ↑↓, Fetch, Push (*Push ↑N* / *Publish branch*); Gruppen Staged/
+  Changes; Stage/Unstage je Datei und alle; Commit-Feld, ⌘⏎, *Commit* und *Commit & Push*), ein Klick auf eine Datei öffnet die Änderung als
   `GitDiffView.svelte` über dem Editor (derselbe `DiffPanes` wie der Diff der IDE; Knopf „Stage“/„Unstage“ je Hunk, „Stage
   file“, Layout-Umschalter; liest sich alle 5 s neu, ohne Falten/Cursor zu verlieren).
 - **Offen:** das Panel als Dock-Pane der IDE; History (Log + Diff je Commit) und Branch-Liste; „Revert“ einer Datei; ein

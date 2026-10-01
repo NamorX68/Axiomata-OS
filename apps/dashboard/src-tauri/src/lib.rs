@@ -120,6 +120,7 @@ pub fn run() {
             git::git_apply_hunk,
             git::git_commit,
             git::git_fetch,
+            git::git_push,
             files::project_new,
             files::file_watch,
             files::file_unwatch,

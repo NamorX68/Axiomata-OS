@@ -6,7 +6,9 @@
 
   * **The status is read again** when the panel comes into view, after everything done here or in
     the diff, when the window is focused again, and every few seconds while the panel is showing.
-  * **Nothing here pushes.** *Fetch* only updates the remote-tracking branches.
+  * **Only *Push* and *Commit & Push* publish**, and only the checked-out branch to its upstream (or
+    `origin`, for a branch that has none) — never forced; a rejected push shows git's own message and
+    changes nothing. *Fetch* only updates the remote-tracking branches.
   * It works on the open project's folder; without a project, or in a folder that is no
     repository, it says so instead.
 -->
@@ -16,7 +18,7 @@
   import { messageOf } from "../core/errors";
   import IconButton from "../ui/IconButton.svelte";
   import { gitApi, type RepoStatus, type Side } from "./gitBackend";
-  import { canCommit, groupEntries, markOf, splitPath, type GitRow } from "./gitModel";
+  import { canCommit, groupEntries, markOf, pushState, splitPath, type GitRow } from "./gitModel";
 
   interface Props {
     /** The open project's root (`project:<id>`), or `null`. */
@@ -41,11 +43,13 @@
   let message = $state("");
   let busy = $state(false);
   let fetching = $state(false);
+  let pushing = $state(false);
   let timer: ReturnType<typeof setInterval> | undefined;
   let generation = 0;
 
   const groups = $derived(groupEntries(status?.entries ?? []));
   const commitReady = $derived(canCommit(groups, message));
+  const push = $derived(status ? pushState(status) : null);
 
   async function read(): Promise<void> {
     const mine = ++generation;
@@ -93,6 +97,47 @@
       await gitApi.commit(root!, text);
       message = "";
     });
+  }
+
+  async function pushBranch(): Promise<void> {
+    if (!root) return;
+    pushing = true;
+    try {
+      await gitApi.push(root);
+      error = "";
+    } catch (err) {
+      error = messageOf(err);
+    } finally {
+      pushing = false;
+      await read();
+    }
+  }
+
+  /** Commits what is staged, then pushes; if the push fails the commit stays and the message says so. */
+  async function commitAndPush(): Promise<void> {
+    if (!commitReady || !root) return;
+    const text = message;
+    busy = true;
+    try {
+      await gitApi.commit(root, text);
+      message = "";
+    } catch (err) {
+      error = messageOf(err);
+      busy = false;
+      await read();
+      return;
+    }
+    pushing = true;
+    try {
+      await gitApi.push(root);
+      error = "";
+    } catch (err) {
+      error = `Committed, but not pushed: ${messageOf(err)}`;
+    } finally {
+      busy = false;
+      pushing = false;
+      await read();
+    }
   }
 
   async function fetchRemote(): Promise<void> {
@@ -169,13 +214,24 @@
         {#if status.ahead > 0}<span class="count" title="Commits not on the upstream">↑{status.ahead}</span>{/if}
         {#if status.behind > 0}<span class="count" title="Commits on the upstream you do not have">↓{status.behind}</span>{/if}
       </span>
-      <IconButton
-        icon="refresh-cw"
-        size="sm"
-        label="Fetch from the remote (never pushes)"
-        disabled={fetching}
-        onclick={() => void fetchRemote()}
-      />
+      <span class="remote">
+        <IconButton
+          icon="refresh-cw"
+          size="sm"
+          label="Fetch from the remote (only reads)"
+          disabled={fetching}
+          onclick={() => void fetchRemote()}
+        />
+        {#if push}
+          <button
+            type="button"
+            class="ax-btn push"
+            disabled={!push.enabled || pushing || busy}
+            title={push.title}
+            onclick={() => void pushBranch()}>{pushing ? "Pushing…" : push.label}</button
+          >
+        {/if}
+      </span>
     </header>
 
     <div class="scroll">
@@ -211,9 +267,20 @@
           }
         }}
       ></textarea>
-      <button type="button" class="ax-btn primary" disabled={!commitReady || busy} onclick={() => void commit()}>
-        Commit {groups.staged.length > 0 ? `(${groups.staged.length})` : ""}
-      </button>
+      <div class="commit-buttons">
+        <button type="button" class="ax-btn primary" disabled={!commitReady || busy} onclick={() => void commit()}>
+          Commit {groups.staged.length > 0 ? `(${groups.staged.length})` : ""}
+        </button>
+        <button
+          type="button"
+          class="ax-btn"
+          disabled={!commitReady || busy || pushing || status.branch === null}
+          title={status.branch === null ? "HEAD is detached; switch to a branch to push" : "Commit what is staged, then push the branch (never forced)"}
+          onclick={() => void commitAndPush()}
+        >
+          Commit &amp; Push
+        </button>
+      </div>
     </div>
     {#if error}<p class="problem" role="alert">{error}</p>{/if}
   {/if}
@@ -248,6 +315,25 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--ax-text);
+  }
+
+  .remote {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+  }
+
+  .push {
+    padding: 0 var(--ax-space-2);
+  }
+
+  .commit-buttons {
+    display: flex;
+    gap: var(--ax-space-2);
+  }
+
+  .commit-buttons .ax-btn {
+    flex: 1;
   }
 
   .count {

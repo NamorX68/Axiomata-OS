@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { FileDiff } from "../core/backend";
-import { loadGitDiff, type GitApi, type GitEntry } from "./gitBackend";
-import { canCommit, groupEntries, markOf, splitPath } from "./gitModel";
+import { loadGitDiff, type GitApi, type GitEntry, type RepoStatus } from "./gitBackend";
+import { canCommit, groupEntries, markOf, pushState, splitPath } from "./gitModel";
 
 const entry = (path: string, over: Partial<GitEntry> = {}): GitEntry => ({
   path,
@@ -83,5 +83,29 @@ describe("loadGitDiff", () => {
     expect([binary.oldText, binary.newText]).toEqual([null, null]);
     const big = await loadGitDiff("p", { path: "f", old_path: null }, "unstaged", api(diff({ truncated: true, hunks: [] })));
     expect(big.source.oldLines).toBeNull();
+  });
+});
+
+describe("the Push button", () => {
+  const status = (over: Partial<RepoStatus> = {}): RepoStatus => ({
+    branch: "main",
+    head: "abc12345",
+    upstream: "origin/main",
+    ahead: 0,
+    behind: 0,
+    entries: [],
+    ...over,
+  });
+
+  it("offers Push with the number of waiting commits, and Publish for a branch that follows nothing", () => {
+    expect(pushState(status({ ahead: 2 }))).toMatchObject({ enabled: true, label: "Push ↑2" });
+    expect(pushState(status({ ahead: 1 })).title).toContain("1 commit to origin/main");
+    expect(pushState(status({ upstream: null }))).toMatchObject({ enabled: true, label: "Publish branch" });
+  });
+
+  it("is off when there is nothing to push, nothing committed, or no branch", () => {
+    expect(pushState(status()).enabled).toBe(false);
+    expect(pushState(status({ head: null })).enabled).toBe(false);
+    expect(pushState(status({ branch: null, ahead: 3 })).enabled).toBe(false);
   });
 });

@@ -4,14 +4,15 @@
 //! The webview names the repository as a root id (`project:<id>`), never as a path
 //! ([`crate::files::project_folder`] turns it into one, and refuses every other kind of root); the
 //! files in it as paths relative to that folder, checked again in `axiomata-git`. Every command is
-//! `async` and runs git on a blocking thread. **Nothing here pushes**; [`git_fetch`] only updates
-//! remote-tracking branches.
+//! `async` and runs git on a blocking thread. **[`git_push`] is the only command that publishes**: the
+//! checked-out branch to its upstream (or `origin`), never forced, and only when the owner presses
+//! the button; [`git_fetch`] only updates remote-tracking branches.
 
 use std::path::PathBuf;
 
 use axiomata_git::GitError;
 use axiomata_git::diff::FileDiff;
-use axiomata_git::repo::{self, Blob, RepoStatus, Side, Source};
+use axiomata_git::repo::{self, Blob, PushResult, RepoStatus, Side, Source};
 use serde::Serialize;
 use tauri::State;
 
@@ -143,6 +144,12 @@ pub async fn git_commit(
     message: String,
 ) -> Result<String, FileError> {
     on_repo(&state, root, move |dir| repo::commit(&dir, &message)).await
+}
+
+/// Pushes the checked-out branch to its upstream, or publishes it to `origin`; never forced.
+#[tauri::command]
+pub async fn git_push(state: State<'_, CoreState>, root: String) -> Result<PushResult, FileError> {
+    on_repo(&state, root, |dir| repo::push(&dir)).await
 }
 
 #[tauri::command]

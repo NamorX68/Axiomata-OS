@@ -929,6 +929,7 @@ function relsOf(root: string): string[] {
 
 const GIT_ROOT = "project:1";
 const gitHead = new Map<string, string>();
+let gitAhead = 1;
 const gitIndex = new Map<string, string>();
 otherRootFiles.set("project:1\0notes.txt", "Remember the milk.\nCall the bank.\n");
 gitHead.set("src/demo.rs", demoLines(true));
@@ -1698,7 +1699,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (args.root !== GIT_ROOT) return { state: "not_a_repo" } as T;
       return {
         state: "ready",
-        status: { branch: "main", head: "abc12345", upstream: "origin/main", ahead: 1, behind: 0, entries: gitEntries() },
+        status: { branch: "main", head: "abc12345", upstream: "origin/main", ahead: gitAhead, behind: 0, entries: gitEntries() },
       } as T;
     case "git_stage":
       for (const path of args.paths as string[]) {
@@ -1739,7 +1740,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (String(args.message ?? "").trim() === "") throw { kind: "Invalid", message: "a commit needs a message" };
       for (const [path, text] of gitIndex) gitHead.set(path, text);
       for (const path of [...gitHead.keys()]) if (!gitIndex.has(path)) gitHead.delete(path);
+      gitAhead++;
       return "deadbeefcafe" as T;
+    }
+    case "git_push": {
+      if (gitAhead === 0) throw { kind: "Git", message: "git push failed: nothing to push" };
+      gitAhead = 0;
+      return { remote: "origin", branch: "main", created_upstream: false } as T;
     }
     case "git_fetch":
       return undefined as T;

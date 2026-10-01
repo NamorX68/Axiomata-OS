@@ -1,7 +1,7 @@
 //! Git for Axiomata-OS, as a standalone layer: runs `git` ([`run`]) and reads its machine formats
 //! ([`diff`], and the working tree's status). No Tauri, no database, no macOS-only code.
 //!
-//! Nothing here ever pushes.
+//! The only thing that publishes is [`repo::push`]: the checked-out branch, to its upstream, never forced.
 
 pub mod diff;
 pub mod repo;
