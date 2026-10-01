@@ -75,6 +75,7 @@
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
+  import { cycleTab, nthTab, splitActive } from "./dockKeys";
   import PaneHost from "./panes/PaneHost.svelte";
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "./paneStore";
     import * as projectSession from "./projectSession";
@@ -83,7 +84,7 @@
   import GitDiffView from "../fileapp/GitDiffView.svelte";
   import type { Side as GitSide } from "../fileapp/gitBackend";
   import type { OutlineInfo } from "../fileapp/outlineModel";
-  import { listRoots } from "../fileapp/backend";
+  import { listRoots, pickFile } from "../fileapp/backend";
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
@@ -196,8 +197,36 @@
    * Everything else belongs to the panes.
    */
   function onViewKeydown(e: KeyboardEvent): void {
+    // The editor's tab keys, on the group the user last worked in.
+    if (current && e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+      noteFocusedPane();
+      layout = cycleTab(layout, lastWorkTab, e.shiftKey ? -1 : 1);
+      return;
+    }
+    if (current && e.metaKey && !e.ctrlKey && !e.altKey && (e.code === "Backslash" || e.key === "\\")) {
+      e.preventDefault();
+      e.stopPropagation();
+      noteFocusedPane();
+      layout = splitActive(layout, lastWorkTab, e.code === "Backslash" && e.shiftKey ? "bottom" : "right");
+      return;
+    }
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const key = e.key.toLowerCase();
+    if (current && !e.shiftKey && /^[1-9]$/.test(key)) {
+      e.preventDefault();
+      e.stopPropagation();
+      noteFocusedPane();
+      layout = nthTab(layout, lastWorkTab, Number(key));
+      return;
+    }
+    if (current && !e.shiftKey && key === "o") {
+      e.preventDefault();
+      e.stopPropagation();
+      void openPicked();
+      return;
+    }
     if (!e.shiftKey && key === "b") {
       e.preventDefault();
       e.stopPropagation();
@@ -260,6 +289,16 @@
   /** The sidebar's Files tab opens a file as a tab of the dock's file group. */
   function openFromSidebar(file: FileRef, _preview: boolean, line: number | null = null): void {
     openFromQuickOpen(file, line);
+  }
+
+  /** ⌘O: the native file dialog; a picked file opens as a tab of the file group. */
+  async function openPicked(): Promise<void> {
+    try {
+      const picked = await pickFile();
+      if (picked && !picked.folder) openFromQuickOpen({ root: picked.root, rel: picked.rel }, null);
+    } catch (err) {
+      toast(`Could not open the dialog: ${(err as { message?: string }).message ?? String(err)}`, "danger");
+    }
   }
 
   /** The outline's click: the front file pane moves its cursor (its `jump` changes, as for a diff). */
