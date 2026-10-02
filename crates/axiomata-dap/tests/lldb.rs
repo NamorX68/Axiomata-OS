@@ -190,3 +190,39 @@ fn a_c_compile_error_comes_back_in_the_compilers_words() {
         Ok(_) => panic!("a broken file must not build"),
     }
 }
+
+#[test]
+fn a_rust_project_below_the_opened_folder_is_built_there_and_stops_at_its_breakpoint() {
+    if rust::cargo().is_none() || rust::adapter_command(&PathBuf::from("/")).is_err() {
+        eprintln!("skipped: cargo or lldb-dap is missing");
+        return;
+    }
+    // The parent folder is the project; the Rust project lies one level below it.
+    let parent = scratch("parent");
+    std::fs::create_dir_all(parent.join("inner/src")).unwrap();
+    std::fs::write(
+        parent.join("inner/Cargo.toml"),
+        "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::write(parent.join("inner/src/main.rs"), MAIN).unwrap();
+    let config = rust::config_for_file(&parent, "inner/src/main.rs").expect("a binary");
+    assert_eq!(config.dir.as_deref(), Some("inner"));
+    let executable = rust::build(&parent, &config).expect("the build");
+    assert!(
+        executable.starts_with(parent.join("inner")),
+        "{executable:?}"
+    );
+    let adapter = rust::adapter_command(&parent).unwrap();
+    let launch = rust::launch_arguments(&config, &executable, &parent, &[]);
+    let source = parent
+        .join("inner/src/main.rs")
+        .to_string_lossy()
+        .into_owned();
+    let session =
+        Session::start(&adapter, "lldb-dap", launch, &[(source, vec![2])]).expect("start");
+    let (reason, thread) = next_stop(&session);
+    assert_eq!(reason, "breakpoint");
+    assert!(session.stack_trace(thread).unwrap()[0].name.contains("add"));
+    session.end();
+}

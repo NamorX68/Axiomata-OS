@@ -318,3 +318,10 @@ Nicht gebaut. Wenn es wieder aufgenommen wird: js-debug (`dapDebugServer.js`) sp
 eine Unter-Sitzung (`startDebugging` → neue Verbindung, `attach`); der Client braucht TCP-Transport und mehrere Sitzungen unter einer
 `Session`. Beschaffung: entweder die Kopie in einer vorhandenen VS-Code-/Cursor-Installation nutzen oder ein Release mit festem SHA-256
 laden (nur nach ausdrücklicher Zustimmung im Panel). Auf der Linux-Box nicht abrufbar, also nicht testbar.
+
+### Unterordner-Projekte und C/C++-Syntax (2026-10-03)
+
+Hat der geöffnete Ordner selbst kein `Cargo.toml` / `Package.swift` / `CMakeLists.txt`, sucht die Erkennung bis zu zwei Ebenen darunter
+(`config::manifest_dirs`, ohne `target`, `node_modules`, `build`, versteckte Ordner; höchstens 8 Treffer). Die Konfiguration trägt dann
+`dir`; gebaut und gestartet wird dort. „Current file“ findet das Projekt, in dem die Datei liegt. Außerdem: Tree-sitter-Grammatiken für C
+und C++ (`scripts/build-grammars.sh c cpp`, `languages.ts`).

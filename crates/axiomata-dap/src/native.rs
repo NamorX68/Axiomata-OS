@@ -36,6 +36,7 @@ fn native(name: String, language: Language) -> DebugConfig {
         code: None,
         package: None,
         source: None,
+        dir: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),
@@ -127,29 +128,49 @@ fn quoted_after(text: &str, key: &str) -> Option<String> {
     Some(after[..after.find('"')?].to_string())
 }
 
-/// What a C/C++/Swift project suggests.
+/// What a C/C++/Swift project suggests — from its own manifest or from the projects in the folders beneath it.
 pub fn detect(project: &Path) -> Vec<DebugConfig> {
+    let tag = |dir: &str| {
+        if dir.is_empty() {
+            String::new()
+        } else {
+            format!(" ({dir})")
+        }
+    };
+    let dir_of = |dir: &str| (!dir.is_empty()).then(|| dir.to_string());
     let mut out = Vec::new();
-    for target in cmake_targets(project) {
-        let mut config = native(format!("cmake: {target}"), Language::Cpp);
-        config.program = Some(target);
-        config.package = Some("cmake".into());
-        out.push(config);
+    for dir in crate::config::manifest_dirs(project, "CMakeLists.txt") {
+        for target in cmake_targets(&project.join(&dir)) {
+            let mut config = native(format!("cmake: {target}{}", tag(&dir)), Language::Cpp);
+            config.program = Some(target);
+            config.package = Some("cmake".into());
+            config.dir = dir_of(&dir);
+            out.push(config);
+        }
     }
-    for product in swift_products(project) {
-        let mut config = native(format!("swift: {product}"), Language::Swift);
-        config.program = Some(product);
-        out.push(config);
+    for dir in crate::config::manifest_dirs(project, "Package.swift") {
+        for product in swift_products(&project.join(&dir)) {
+            let mut config = native(format!("swift: {product}{}", tag(&dir)), Language::Swift);
+            config.program = Some(product);
+            config.dir = dir_of(&dir);
+            out.push(config);
+        }
     }
     out
 }
 
 /// A Swift file's executable: the product whose folder under `Sources/` holds it.
 pub fn swift_config_for_file(project: &Path, rel: &str) -> Option<DebugConfig> {
-    let target = rel.strip_prefix("Sources/")?.split('/').next()?;
-    detect(project)
-        .into_iter()
-        .find(|c| c.language == Language::Swift && c.program.as_deref() == Some(target))
+    detect(project).into_iter().find(|c| {
+        if c.language != Language::Swift {
+            return false;
+        }
+        let prefix = match &c.dir {
+            Some(dir) => format!("{dir}/Sources/{}/", c.program.as_deref().unwrap_or("")),
+            None => format!("Sources/{}/", c.program.as_deref().unwrap_or("")),
+        };
+        rel.starts_with(&prefix)
+    })
 }
 
 fn on_path(name: &str) -> Option<PathBuf> {
@@ -221,6 +242,7 @@ fn find_built(dir: &Path, target: &str) -> Option<PathBuf> {
 pub fn build(project: &Path, build_root: &Path, config: &DebugConfig) -> Result<PathBuf, String> {
     std::fs::create_dir_all(build_root)
         .map_err(|e| format!("could not make {}: {e}", build_root.display()))?;
+    let base = crate::rust::base_of(project, config);
     match config.language {
         Language::Swift => {
             let product = config
@@ -235,7 +257,7 @@ pub fn build(project: &Path, build_root: &Path, config: &DebugConfig) -> Result<
                 .args(["build", "--product", product]);
             run(command, "swift build")?;
             let mut show = Command::new(swift);
-            show.current_dir(project).args(["build", "--show-bin-path"]);
+            show.current_dir(&base).args(["build", "--show-bin-path"]);
             let bin_dir = run(show, "swift build --show-bin-path")?;
             let exe = Path::new(bin_dir.trim()).join(product);
             exe.is_file()
@@ -270,16 +292,16 @@ pub fn build(project: &Path, build_root: &Path, config: &DebugConfig) -> Result<
                 let dir = build_root.join("cmake");
                 let mut configure = Command::new(&cmake);
                 configure
-                    .current_dir(project)
+                    .current_dir(&base)
                     .arg("-S")
-                    .arg(project)
+                    .arg(&base)
                     .arg("-B")
                     .arg(&dir)
                     .arg("-DCMAKE_BUILD_TYPE=Debug");
                 run(configure, "cmake")?;
                 let mut compile = Command::new(cmake);
                 compile
-                    .current_dir(project)
+                    .current_dir(&base)
                     .arg("--build")
                     .arg(&dir)
                     .args(["--target", program, "--config", "Debug"]);

@@ -151,6 +151,7 @@ pub fn current_file_config(rel: &str) -> DebugConfig {
         code: None,
         package: None,
         source: None,
+        dir: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),

@@ -23,6 +23,8 @@ pub struct RustBin {
     pub package: String,
     /// The source file of its `main`, relative to the project folder.
     pub source: String,
+    /// The folder of the project it belongs to, relative to the project folder (`""` = the project itself).
+    pub dir: String,
 }
 
 fn read_toml(path: &Path) -> Option<toml::Table> {
@@ -55,6 +57,7 @@ fn package_bins(dir: &Path, rel: &str) -> Vec<RustBin> {
                 name: name.to_string(),
                 package: package.to_string(),
                 source,
+                dir: String::new(),
             });
         }
     };
@@ -96,12 +99,20 @@ fn package_bins(dir: &Path, rel: &str) -> Vec<RustBin> {
     bins
 }
 
-/// Every binary target of the project: the root package and, for a workspace, its members.
-pub fn bins(project: &Path) -> Vec<RustBin> {
-    let Some(root) = read_toml(&project.join("Cargo.toml")) else {
+/// The binaries of the project in `base` (`rel_base` = where it lies below the project; `""` = the project):
+/// its root package and, for a workspace, its members. Sources are named relative to the *project*.
+fn bins_in(base: &Path, rel_base: &str) -> Vec<RustBin> {
+    let Some(root) = read_toml(&base.join("Cargo.toml")) else {
         return Vec::new();
     };
-    let mut out = package_bins(project, "");
+    let join = |rel: &str| {
+        if rel_base.is_empty() {
+            rel.to_string()
+        } else {
+            format!("{rel_base}/{rel}")
+        }
+    };
+    let mut out = package_bins(base, rel_base);
     if let Some(members) = root
         .get("workspace")
         .and_then(|w| w.get("members"))
@@ -110,7 +121,7 @@ pub fn bins(project: &Path) -> Vec<RustBin> {
         let mut dirs: Vec<String> = Vec::new();
         for member in members.iter().filter_map(|m| m.as_str()) {
             if let Some(parent) = member.strip_suffix("/*") {
-                if let Ok(entries) = std::fs::read_dir(project.join(parent)) {
+                if let Ok(entries) = std::fs::read_dir(base.join(parent)) {
                     let mut names: Vec<String> = entries
                         .flatten()
                         .filter(|e| e.path().join("Cargo.toml").is_file())
@@ -127,7 +138,7 @@ pub fn bins(project: &Path) -> Vec<RustBin> {
             if rel.starts_with('/') || rel.split('/').any(|p| p == "..") {
                 continue;
             }
-            for bin in package_bins(&project.join(&rel), &rel) {
+            for bin in package_bins(&base.join(&rel), &join(&rel)) {
                 if !out
                     .iter()
                     .any(|b| b.name == bin.name && b.package == bin.package)
@@ -137,19 +148,45 @@ pub fn bins(project: &Path) -> Vec<RustBin> {
             }
         }
     }
+    for bin in &mut out {
+        bin.dir = rel_base.to_string();
+    }
+    out
+}
+
+/// Every binary target below the project: of its own `Cargo.toml` or, when the folder has none, of the Rust
+/// projects in the folders beneath it.
+pub fn bins(project: &Path) -> Vec<RustBin> {
+    let mut out = Vec::new();
+    for rel in crate::config::manifest_dirs(project, "Cargo.toml") {
+        out.extend(bins_in(&project.join(&rel), &rel));
+    }
     out.truncate(MAX_BINS);
     out
 }
 
+/// The folder a configuration builds and runs in: its manifest's folder, else the project.
+pub fn base_of(project: &Path, config: &DebugConfig) -> PathBuf {
+    config
+        .dir
+        .as_deref()
+        .map_or_else(|| project.to_path_buf(), |d| project.join(d))
+}
+
 fn config_of(bin: &RustBin) -> DebugConfig {
     DebugConfig {
-        name: format!("cargo: {}", bin.name),
+        name: if bin.dir.is_empty() {
+            format!("cargo: {}", bin.name)
+        } else {
+            format!("cargo: {} ({})", bin.name, bin.dir)
+        },
         language: Language::Rust,
         program: Some(bin.name.clone()),
         module: None,
         code: None,
         package: Some(bin.package.clone()),
         source: None,
+        dir: (!bin.dir.is_empty()).then(|| bin.dir.clone()),
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),
@@ -296,7 +333,7 @@ pub fn build(project: &Path, config: &DebugConfig) -> Result<PathBuf, String> {
         .ok_or("the configuration names no binary")?;
     let cargo = cargo().ok_or("cargo was not found — install Rust from https://rustup.rs")?;
     let mut command = Command::new(cargo);
-    command.current_dir(project).args([
+    command.current_dir(base_of(project, config)).args([
         "build",
         "--bin",
         bin,
@@ -357,7 +394,7 @@ pub fn launch_arguments(
     let cwd = config
         .cwd
         .as_deref()
-        .map_or_else(|| project.to_path_buf(), |c| project.join(c));
+        .map_or_else(|| base_of(project, config), |c| project.join(c));
     json!({
         "name": config.name,
         "type": "lldb-dap",

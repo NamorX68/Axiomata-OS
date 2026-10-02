@@ -42,6 +42,9 @@ pub struct DebugConfig {
     pub package: Option<String>,
     /// C/C++: a single source file to compile and run (“Current file”). Detected only.
     pub source: Option<String>,
+    /// Detected: the folder (relative to the project) whose manifest — `Cargo.toml`, `Package.swift`,
+    /// `CMakeLists.txt` — this belongs to; `None` = the project folder itself.
+    pub dir: Option<String>,
     pub args: Vec<String>,
     /// A folder inside the project; `None` = the project folder.
     pub cwd: Option<String>,
@@ -190,6 +193,7 @@ fn build_rust(name: String, entry: Entry) -> Result<DebugConfig, String> {
         code: None,
         package: package.map(str::to_string),
         source: None,
+        dir: None,
         args: entry.args,
         cwd: cwd.map(str::to_string),
         env: entry.env.into_iter().collect(),
@@ -256,6 +260,7 @@ fn build_native(name: String, language: Language, entry: Entry) -> Result<DebugC
         code: None,
         package: None,
         source: None,
+        dir: None,
         args: entry.args,
         cwd: cwd.map(str::to_string),
         env: entry.env.into_iter().collect(),
@@ -353,6 +358,7 @@ fn build(mut entry: Entry) -> Result<DebugConfig, String> {
         code: None,
         package: None,
         source: None,
+        dir: None,
         name,
         language,
         program,
@@ -493,6 +499,7 @@ fn detected(name: &str, program: Option<&str>, module: Option<&str>) -> DebugCon
         code: None,
         package: None,
         source: None,
+        dir: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),
@@ -583,6 +590,67 @@ pub fn detect(project: &Path) -> Vec<DebugConfig> {
     out.extend(crate::rust::detect(project));
     out.extend(crate::native::detect(project));
     out
+}
+
+/// Folders that never hold a project of their own.
+const SKIPPED_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    "build",
+    "dist",
+    "vendor",
+    "venv",
+    "Pods",
+    "DerivedData",
+    "out",
+];
+
+/// The folders (project-relative; `""` = the project itself) that hold a manifest named `file`: the project
+/// folder when it has one, otherwise the folders up to two levels below it — so a parent folder of several
+/// small projects (an `examples/` folder, a monorepo) still offers each.
+pub fn manifest_dirs(project: &Path, file: &str) -> Vec<String> {
+    if project.join(file).is_file() {
+        return vec![String::new()];
+    }
+    let mut found = Vec::new();
+    let mut visited = 0;
+    let mut level = vec![String::new()];
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for rel in &level {
+            let Ok(entries) = std::fs::read_dir(project.join(rel)) else {
+                continue;
+            };
+            let mut names: Vec<String> = entries
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| !n.starts_with('.') && !SKIPPED_DIRS.contains(&n.as_str()))
+                .collect();
+            names.sort();
+            for name in names {
+                visited += 1;
+                if visited > 300 {
+                    return found;
+                }
+                let child = if rel.is_empty() {
+                    name
+                } else {
+                    format!("{rel}/{name}")
+                };
+                if project.join(&child).join(file).is_file() {
+                    found.push(child);
+                    if found.len() == 8 {
+                        return found;
+                    }
+                } else {
+                    next.push(child);
+                }
+            }
+        }
+        level = next;
+    }
+    found
 }
 
 #[cfg(test)]

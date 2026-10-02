@@ -44,6 +44,20 @@ describe("SyntaxHighlighter", () => {
     h.dispose();
   });
 
+  it("colours C and C++ (C++ adds its own queries to C's)", async () => {
+    const c = docFrom('|#include <stdio.h>\nint add(int a) { return a; } // sum\n');
+    const hc = (await SyntaxHighlighter.create(c, runtime, "c"))!;
+    expect(tokensOn(hc, c, 1)).toContain("int:type");
+    expect(tokensOn(hc, c, 1)).toContain("return:keyword");
+    expect(tokensOn(hc, c, 1)).toContain("// sum:comment");
+    hc.dispose();
+    const cpp = docFrom('|class Counter {\n  long add(long n) { return n; }\n};\n');
+    const hp = (await SyntaxHighlighter.create(cpp, runtime, "cpp"))!;
+    expect(tokensOn(hp, cpp, 0)).toContain("class:keyword");
+    expect(tokensOn(hp, cpp, 1)).toContain("long:type");
+    hp.dispose();
+  });
+
   it("follows edits incrementally: the tree always matches the text", async () => {
     const doc = docFrom('fn a() {}\n|');
     const h = (await SyntaxHighlighter.create(doc, runtime, "rust"))!;

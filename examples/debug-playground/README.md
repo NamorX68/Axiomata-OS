@@ -33,3 +33,9 @@ Comments in the code mark good places for a breakpoint.
 5. Insert a few lines above a breakpoint: it should move with its code.
 6. Tick **Run in a terminal** and start again: the program runs in the “Debug” pane instead.
 7. Break the build on purpose (a typo in the Rust, C or C++ file): the build error appears in the panel.
+
+## Opening the whole folder
+
+You can also open `debug-playground` itself as the project: the Debug view then lists the Rust, CMake and Swift
+projects beneath it (`cargo: tiny (rust)`, `cmake: demo (cpp)`, `swift: demo (swift)`), and **Current file** works
+for the `.rs`, `.swift`, `.c` and `.cpp` files in them.
