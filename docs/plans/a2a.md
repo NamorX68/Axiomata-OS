@@ -48,10 +48,22 @@ wo er etwas anders sagt, die älteren Aussagen.
   Aktionen (Starten, Sitzung öffnen, Diff, Übernehmen, hochstufen), **kein Kabel-Editor** (E3), Anordnung automatisch. Gebaut **nach** dem Kern
   (Postfach, Karten starten, Review), vorher wäre sie leer.
 
+- **A7 — Was läuft von allein, was braucht ein Ja (Owner, 2026-10-03: „an manchen Stellen lockerer"):**
+  Feste Tore: der Owner gibt den **Plan frei** und **übernimmt** am Ende (Take-over, nie ein Push). Dazwischen:
+  *Karten anlegen:* ein Agent darf Karten **bestimmter Arten** anlegen und starten lassen, ohne zu fragen — der Owner nennt als Beispiele **Testkarten**
+  (ein Agent legt eine Testkarte an) und **Doku-Karten** (ein anderer legt eine an). Technisch: je Agent ein Feld `creates: [test, doc, …]` in
+  `AGENT.md`; Karten dieser Arten starten im Automatikmodus (A4) von selbst, andere Arten legt der Agent an, sie landen aber in „Vorschlag" und warten
+  auf ein Ja. Zum Schutz vor Lawinen: Tiefe (eine von einem Agenten angelegte Karte darf höchstens bis Tiefe 2 weitere anlegen) und Anzahl je
+  Ausgangskarte begrenzt (Vorschlag: 3), außerdem gilt immer das Kostenlimit.
+  *Eskalation (leicht → schwer):* automatisch, mit Meldung im Flow; nur nach dem Scheitern der letzten Stufe wartet die Karte auf den Owner.
+  *Befehle der Agenten:* regeln die Rechte je Agent wie bei den Harnesses heute. *Nachrichten zwischen Agenten:* ohne Bestätigung, im Team-Panel
+  einsehbar. *Kosten:* ein Limit je Plan oder Tag; ist es erreicht, hält die Automatik an und fragt. *Deutung zu prüfen:* „Testfahrten" wurde als
+  „Testkarten" gelesen.
+
 ## Offene Fragen der Runde
 
 1. ~~Rollen und Rechte / Aufgabenverteilung~~ — beantwortet durch A2–A5.
-2. Bestätigung durch den Owner: was läuft von allein, was braucht ein Ja?
+2. ~~Bestätigung durch den Owner~~ — beantwortet durch A7.
 4. Zustellung an laufende TUI-Agenten: abfragen oder hineintippen; Schutz vor Endlosschleifen.
 5. Grenzen und Kosten: Limits pro Aufgabe.
 6. MCP-Eintrag pro Harness (F4 im Plan `agentic-ide.md`).
