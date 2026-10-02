@@ -22,7 +22,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 pub use detect::detect;
-pub use file::{Parsed, parse_tasks_file};
+pub use file::{NewTask, Parsed, parse_tasks_file, remove_task, upsert_task};
 
 /// Where a task comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +152,33 @@ pub struct TaskList {
 
 /// Where the project's file lives, relative to the project folder.
 pub const PROJECT_FILE: &str = ".axiomata/tasks.json";
+
+/// Writes the project's `tasks.json` (creating `.axiomata/`), atomically. Refuses to write through a symbolic
+/// link — a cloned repository could make `.axiomata` or the file one and point it somewhere else.
+pub fn write_project_file(project: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let target = project.join(PROJECT_FILE);
+    let dir = target.parent().expect("the file lies in a folder");
+    let is_link = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    if is_link(dir) || is_link(&target) {
+        return Err(std::io::Error::other(format!(
+            "{PROJECT_FILE} is a symbolic link — not written"
+        )));
+    }
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join("tasks.json.tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, &target)
+}
+
+/// Writes the owner's own `tasks.json` (the folder is created), atomically.
+pub fn write_personal_file(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, file)
+}
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ResolveError {

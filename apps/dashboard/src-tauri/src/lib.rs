@@ -131,6 +131,8 @@ pub fn run() {
             tasks::tasks_list,
             tasks::tasks_trust,
             tasks::task_command_line,
+            tasks::tasks_save,
+            tasks::tasks_remove,
             files::project_new,
             files::file_watch,
             files::file_unwatch,

@@ -333,3 +333,101 @@ fn makefile_targets_become_tasks_but_not_patterns_or_assignments() {
         "no .PHONY, no CC, no pattern, no duplicate: {commands:?}"
     );
 }
+
+fn new_task(label: &str, command: &str) -> NewTask {
+    NewTask {
+        label: label.into(),
+        command: command.into(),
+        cwd: None,
+        env: Default::default(),
+        group: None,
+    }
+}
+
+#[test]
+fn a_task_from_the_form_lands_in_a_new_file_and_reads_back() {
+    let mut task = new_task("Server", "uv run uvicorn app:app --reload");
+    task.group = Some("run".into());
+    task.cwd = Some("backend".into());
+    let bytes = upsert_task(None, &task, None).unwrap();
+    let parsed = parse_tasks_file(&bytes, Source::Project);
+    assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+    assert_eq!(
+        parsed.tasks[0].command_line(),
+        "cd 'backend' && uv run uvicorn app:app --reload"
+    );
+    assert_eq!(parsed.tasks[0].group, Group::Run);
+}
+
+#[test]
+fn adding_keeps_what_the_file_already_holds_and_refuses_a_second_label() {
+    let existing = br#"{"note":"mine","tasks":[{"label":"A","command":"a"}]}"#;
+    let bytes = upsert_task(Some(existing), &new_task("B", "b"), None).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["note"], "mine");
+    assert_eq!(json["tasks"].as_array().unwrap().len(), 2);
+    assert!(
+        upsert_task(Some(&bytes), &new_task("A", "other"), None)
+            .unwrap_err()
+            .contains("already")
+    );
+}
+
+#[test]
+fn editing_replaces_in_place_and_may_rename() {
+    let bytes = upsert_task(None, &new_task("A", "a"), None).unwrap();
+    let bytes = upsert_task(Some(&bytes), &new_task("B", "b"), None).unwrap();
+    let edited = upsert_task(Some(&bytes), &new_task("A2", "a2"), Some("A")).unwrap();
+    let labels: Vec<_> = parse_tasks_file(&edited, Source::Project)
+        .tasks
+        .into_iter()
+        .map(|t| t.label)
+        .collect();
+    assert_eq!(labels, ["A2", "B"]);
+}
+
+#[test]
+fn the_form_is_held_to_the_same_rules_as_a_hand_written_file() {
+    let mut escape = new_task("x", "y");
+    escape.cwd = Some("../up".into());
+    assert!(upsert_task(None, &escape, None).is_err());
+    assert!(upsert_task(None, &new_task("", "y"), None).is_err());
+    assert!(upsert_task(None, &new_task("x", "  "), None).is_err());
+}
+
+#[test]
+fn a_file_that_is_not_json_is_never_overwritten() {
+    assert!(
+        upsert_task(Some(b"{ my notes"), &new_task("x", "y"), None)
+            .unwrap_err()
+            .contains("left alone")
+    );
+    assert!(remove_task(b"nope", "x").is_err());
+}
+
+#[test]
+fn removing_drops_one_task_by_label() {
+    let bytes = upsert_task(None, &new_task("A", "a"), None).unwrap();
+    let bytes = upsert_task(Some(&bytes), &new_task("B", "b"), None).unwrap();
+    let labels: Vec<_> = parse_tasks_file(&remove_task(&bytes, "A").unwrap(), Source::Project)
+        .tasks
+        .into_iter()
+        .map(|t| t.label)
+        .collect();
+    assert_eq!(labels, ["B"]);
+}
+
+#[test]
+fn the_project_file_is_written_into_a_new_dot_axiomata_and_never_through_a_link() {
+    let dir = project(&[]);
+    write_project_file(dir.path(), b"{\"tasks\":[]}").unwrap();
+    assert!(dir.path().join(PROJECT_FILE).is_file());
+    #[cfg(unix)]
+    {
+        let evil = project(&[]);
+        let outside = project(&[]);
+        std::os::unix::fs::symlink(outside.path(), evil.path().join(".axiomata")).unwrap();
+        assert!(write_project_file(evil.path(), b"{}").is_err());
+        assert!(!outside.path().join("tasks.json").exists());
+    }
+}

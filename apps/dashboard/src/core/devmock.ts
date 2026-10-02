@@ -1786,6 +1786,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         project_file: { hash: "ab12", trusted: tasksTrusted },
         problems: [],
       } as T;
+    case "tasks_save":
+    case "tasks_remove":
+      return undefined as T;
     case "tasks_trust":
       tasksTrusted = true;
       return undefined as T;

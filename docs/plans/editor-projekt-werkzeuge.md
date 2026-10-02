@@ -256,3 +256,13 @@ Bestätigung), Ausführung als **Task-Pane** (`ide/panes/TaskPane.svelte`): Term
 nennt nur die Task-Id, die Zeile liegt nur im Speicher (`ide/taskRuns.ts`), gespeicherte Task-Panes werden beim Laden entfernt.
 **Offen (nächste Checkpoints):** klickbare `Datei:Zeile`-Fehler im Ausgabe-Pane, Problem-Matcher + Diagnosen im Editor (offen:
 wann verschwinden sie?), Abbrechen ohne Neustart, Umgebung wie `toolenv.rs`.
+
+**Eigene Tasks im Panel (2026-10-02, Owner-Wunsch):** „New task…" im Run-Panel — Name, Befehl, Ordner (optional), Zweck, und wo es
+liegt: *in this project* (`.axiomata/tasks.json`, reist mit dem Repository) oder *for all my projects* (`~/.axiomata/tasks.json`).
+Eigene Tasks lassen sich bearbeiten und entfernen. Rust: `upsert_task`/`remove_task` arbeiten auf dem JSON selbst (Fremdes bleibt
+stehen, eine ungültige Datei wird nie überschrieben, doppelte Namen und Pfade nach draußen werden abgewiesen), `write_project_file`
+schreibt atomar und **nie durch einen Symlink** (`.axiomata` oder die Datei könnten in einem geklonten Repo einer sein).
+**Vertrauen:** Speichert der Owner in eine Projektdatei, die er bereits bestätigt hatte (oder die es noch nicht gab), gilt der neue
+Inhalt als bestätigt; war sie **nicht** bestätigt (kann Fremdes enthalten), bleibt sie es — sonst würde das Speichern still
+fremde Befehle freigeben. Glue: `tasks_save`, `tasks_remove` in `src-tauri/src/tasks.rs` (nicht auf Linux kompiliert). Umgebungsvariablen
+sind im Formular noch nicht einstellbar (nur in der Datei).

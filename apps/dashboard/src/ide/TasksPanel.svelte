@@ -15,10 +15,16 @@
     describeTask,
     groupTasks,
     GROUP_LABEL,
+    inputOf,
     listTasks,
+    removeTask,
+    saveTask,
     trustTasks,
+    type NewTaskInput,
+    type TaskGroup,
     type TaskInfo,
     type TaskListInfo,
+    type TaskScope,
   } from "./tasksBackend";
 
   let {
@@ -58,7 +64,7 @@
   });
   onMount(() => void refresh());
 
-  async function confirm(): Promise<void> {
+  async function allow(): Promise<void> {
     if (!root || !listed?.project_file) return;
     try {
       await trustTasks(root, listed.project_file.hash);
@@ -67,6 +73,63 @@
     } catch (err) {
       onError((err as { message?: string }).message ?? String(err));
       await refresh();
+    }
+  }
+
+  // ---- the form: a task of your own, kept in the project or for every project ----
+
+  /** `null` = closed, `""` = a new task, else the label of the task being edited. */
+  let editing = $state<string | null>(null);
+  let form = $state<NewTaskInput & { cwd: string }>({ label: "", command: "", cwd: "", group: "run" });
+  let scope = $state<TaskScope>("project");
+  let saving = $state(false);
+
+  const GROUP_CHOICES: { id: TaskGroup; label: string }[] = [
+    { id: "run", label: "Run" },
+    { id: "build", label: "Build" },
+    { id: "test", label: "Test" },
+    { id: "lint", label: "Check" },
+    { id: "other", label: "Other" },
+  ];
+
+  function startNew(): void {
+    editing = "";
+    form = { label: "", command: "", cwd: "", group: "run" };
+    scope = "project";
+  }
+
+  function startEdit(task: TaskInfo): void {
+    editing = task.label;
+    form = { ...inputOf(task), cwd: task.cwd ?? "" };
+    scope = task.source === "personal" ? "personal" : "project";
+  }
+
+  async function submit(): Promise<void> {
+    if (!root || editing === null || saving) return;
+    if (!form.label.trim() || !form.command.trim()) {
+      onError("A task needs a name and a command.");
+      return;
+    }
+    saving = true;
+    try {
+      await saveTask(root, scope, { ...form, cwd: form.cwd.trim() || null }, editing === "" ? null : editing);
+      editing = null;
+      await refresh();
+    } catch (err) {
+      onError((err as { message?: string }).message ?? String(err));
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function remove(task: TaskInfo): Promise<void> {
+    if (!root || task.source === "detected") return;
+    if (!window.confirm(`Remove the task “${task.label}” from ${task.source === "personal" ? "your tasks file" : "the project's tasks.json"}?`)) return;
+    try {
+      await removeTask(root, task.source === "personal" ? "personal" : "project", task.label);
+      await refresh();
+    } catch (err) {
+      onError((err as { message?: string }).message ?? String(err));
     }
   }
 
@@ -95,7 +158,7 @@
               {#each projectTasks as task (task.id)}<li><code>{describeTask(task)}</code></li>{/each}
             </ul>
             <div class="actions">
-              <button type="button" class="ax-btn primary" onclick={() => void confirm()}>Allow these tasks</button>
+              <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these tasks</button>
               <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
             </div>
           {:else}
@@ -123,6 +186,12 @@
                   </span>
                   {#if task.source !== "detected"}<span class="tag">{task.source}</span>{/if}
                 </button>
+                {#if task.source !== "detected" && !locked(task)}
+                  <span class="own">
+                    <IconButton icon="pencil" label="Edit {task.label}" size="sm" onclick={() => startEdit(task)} />
+                    <IconButton icon="trash-2" label="Remove {task.label}" size="sm" onclick={() => void remove(task)} />
+                  </span>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -136,6 +205,40 @@
       {#each listed.problems as problem (problem)}
         <p class="problem">{problem}</p>
       {/each}
+    {/if}
+    {#if root}
+      {#if editing === null}
+        <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> New task…</button>
+      {:else}
+        <form
+          onsubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <p class="form-title">{editing === "" ? "New task" : "Edit task"}</p>
+          <input type="text" bind:value={form.label} placeholder="Name, e.g. Start the server" spellcheck="false" />
+          <input
+            type="text"
+            bind:value={form.command}
+            placeholder="Command, e.g. uv run uvicorn app:app --reload"
+            spellcheck="false"
+          />
+          <input type="text" bind:value={form.cwd} placeholder="Folder inside the project (optional)" spellcheck="false" />
+          <select bind:value={form.group} aria-label="What it is for">
+            {#each GROUP_CHOICES as choice (choice.id)}<option value={choice.id}>{choice.label}</option>{/each}
+          </select>
+          <fieldset>
+            <legend>Keep it</legend>
+            <label><input type="radio" bind:group={scope} value="project" /> in this project <small>.axiomata/tasks.json</small></label>
+            <label><input type="radio" bind:group={scope} value="personal" /> for all my projects <small>~/.axiomata</small></label>
+          </fieldset>
+          <div class="actions">
+            <button type="submit" class="ax-btn primary" disabled={saving || !form.label.trim() || !form.command.trim()}>Save</button>
+            <button type="button" class="ax-btn" onclick={() => (editing = null)}>Cancel</button>
+          </div>
+        </form>
+      {/if}
     {/if}
   </div>
 </div>
@@ -296,6 +399,99 @@
     background: var(--ax-surface-3);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+  }
+
+  li {
+    position: relative;
+  }
+
+  .own {
+    position: absolute;
+    top: 50%;
+    right: var(--ax-space-1);
+    transform: translateY(-50%);
+    display: flex;
+    gap: var(--ax-space-1);
+    opacity: 0;
+    background: var(--ax-surface-3);
+    border-radius: var(--ax-radius-md);
+  }
+
+  li:hover .own,
+  li:focus-within .own {
+    opacity: 1;
+  }
+
+  .add {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    margin-top: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: none;
+    border: none;
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+
+  .add:hover {
+    color: var(--ax-text);
+  }
+
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    margin-top: var(--ax-space-3);
+    padding-top: var(--ax-space-3);
+    border-top: 1px solid var(--ax-border);
+  }
+
+  .form-title {
+    margin: 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    letter-spacing: var(--ax-tracking-wide);
+  }
+
+  input[type="text"],
+  select {
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: var(--ax-bg);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    color: var(--ax-text);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  input[type="text"]:focus-visible,
+  select:focus-visible {
+    outline: var(--ax-focus-ring);
+  }
+
+  fieldset {
+    margin: 0;
+    padding: 0;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  legend {
+    padding: 0;
+    margin-bottom: var(--ax-space-1);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  fieldset small {
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-mono);
   }
 
   .note,
