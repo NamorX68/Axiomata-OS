@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **in Planung** (Fragenrunde mit dem Owner, begonnen 2026-10-03). Es entsteht kein Code, bevor die Runde bestätigt ist.
+Status: **geplant, Fragenrunde abgeschlossen (2026-10-03), Bauplan wartet auf die Freigabe des Owners.** Es entsteht kein Code vor der Freigabe.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -85,10 +85,54 @@ wo er etwas anders sagt, die älteren Aussagen.
   ein Planungsagent außerhalb des Studios ist damit vorerst nicht vorgesehen. *Beim Bau nachzuschlagen:* die genauen Orte und Formate der aktuellen
   Versionen von Claude Code und Opencode.
 
+- **A11 — Eigenständiges Studio: das Brett liegt in der Datenbank der jeweiligen App (Owner, 2026-10-03).** Die Haupt-App behält ihr Brett in der Axiomata-
+  Datenbank, eine eigenständige Studio-App bekäme ihre eigene kleine Datenbank in ihrem eigenen Ordner. Die Kern-Crates (`axiomata-board`,
+  `axiomata-ide` mit Postfach und MCP-Server) nehmen Pfade und liefern Daten, persistiert wird außen — ein späteres Brett im Projekt (Datei) wäre dann
+  ein Austausch der Speicherung. Keine Synchronisation zwischen den Apps, solange es die zweite nicht gibt.
+
+## Bauplan (Checkpoints)
+
+Jeder Checkpoint hinterlässt einen benutzbaren, getesteten Zustand; die reinen Crates sind hier auf der Linux-Box testbar, die Tauri-Schicht bleibt
+dünn und wird am Mac geprüft. Vor jedem Commit läuft die schlanke Prüfung (ein kombinierter Review-Agent); für CP-A4 und CP-A5 ist der
+`security-auditor` Pflicht (Eingaben von Agenten, Dateien des Owners).
+
+**Scheibe 1 — ein Umsetzer und ein Reviewer, von Hand gestartet (der Kern):**
+
+1. **CP-A1 Engines und Agenten.** Datenmodell Engine (Harness, Modell, Provider) und Agent (Rolle, Stufe, Engine, Ausweich-Engines, Rechte, Limits,
+   `creates`); Laden der `AGENT.md`-Dateien (`~/.axiomata/agents/`, Projekt-Überschreibung mit Bestätigung per Hash); Migration der heutigen
+   Studio-Agenten zu Engines mit einer einfachen Rolle; Einstellungen für die Engines.
+2. **CP-A2 Karten erweitern.** In `axiomata-board`: Art (`kind`), Stufe, zugewiesener Agent, Abhängigkeiten (azyklisch, geprüft), Spalte „Vorschlag",
+   Zustände nach dem A2A-Modell (`submitted`, `working`, `input-required`, `completed`, `failed`, `canceled`) plus „fertig/geprüft"; Brett-Oberfläche
+   zeigt die neuen Felder. Migration, Markdown-Spiegel bleibt einseitig.
+3. **CP-A3 Postfach-Kern** in `axiomata-ide`: Adressen, Nachrichten aus Teilen, Aufgaben, Zustellung an Zugwechseln (Status aus CP6), Kettenzähler
+   (6) und Grenzen (20 je Agent und Karte), Persistenz hinter einer Schnittstelle (A11).
+4. **CP-A4 MCP-Server (stdio).** `list_agents`, `send_message`, `read_inbox`, `claim_task` (Compare-and-Swap), `create_card` (nur erlaubte Arten, A7),
+   `report_done`, `review_verdict`; Identität über Umgebungsvariablen, Absender wird gestempelt; Tests gegen die Crates. *security-auditor.*
+5. **CP-A5 Einbindung je Harness.** Eintrag pro Worktree (Orte und Formate zuerst nachschlagen, A10), sichtbar und bestätigt, Aufräumen mit dem
+   Worktree; Sitzung starten mit der Karte als Auftrag (Start-Prompt); Anstupsen eines wartenden Agenten (A8, Weg 2). *security-auditor.*
+6. **CP-A6 Ablauf von Hand.** „Karte starten" (neue Sitzung, Worktree, `claim_task`), automatisches Review mit anderer Engine (A5), Rückgabe,
+   Take-over als zweites Tor, Limits pro Sitzung (A9).
+
+**Scheibe 2 — Planung und Automatik:**
+
+7. **CP-A7 Planer.** Planungsagent mit dem Agentenkatalog als Kontext; legt Karten mit Vorschlag für den Agenten an; Freigabe-Ansicht (Karte, vorgeschlagener
+   Agent, ändern); „Vorschlag"-Spalte für Karten, die ein Agent anlegt (A7).
+8. **CP-A8 Automatik und Eskalation.** Modus „automatisch bis N Agenten", Start bereiter Karten (Abhängigkeiten erledigt), Eskalation leicht → schwer nach zwei
+   Rückgaben (A5), Limits pro Plan und Tag/Monat (A9), Tiefe und Anzahl selbst angelegter Karten (A7).
+
+**Scheibe 3 — Oberfläche:**
+
+9. **CP-A9 Flow.** Umbenennung Editor | Agents → **Editor | Flow** (A6), Team-Panel (wer arbeitet woran, Nachrichten einsehbar), Inbox-Tab je Sitzung,
+   Rail-„Agents" als Katalog und Sitzungsliste.
+10. **CP-A10 Graph-Ansicht** des Plans (A6): Knoten, „braucht zuerst"-Linien, Zustandsfarben, Aktionen am Knoten, automatische Anordnung.
+
+**Später, bei Bedarf:** Hinweise während der Arbeit über Hooks/Plugins (A8, Weg 3, vorher gegen die Dokumentation prüfen); optionale Zuweiser mit
+kalibrierter Sicherheit (JEV, lokale offene Modelle — vorher prüfen, A5a); **A2A-Fassade** (Agent Card, JSON-RPC über HTTP, SSE; A1).
+
 ## Offene Fragen der Runde
 
 1. ~~Rollen und Rechte / Aufgabenverteilung~~ — beantwortet durch A2–A5.
 2. ~~Bestätigung durch den Owner~~ — beantwortet durch A7.
 3. ~~Zustellung / Schleifen~~ — beantwortet durch A8. 4. ~~Kostenlimits~~ — beantwortet durch A9.
 6. ~~MCP-Eintrag~~ — beantwortet durch A10.
-7. Eigenständiges Studio: Wo liegt das Brett, wenn das Studio eine eigene App wird?
+7. ~~Eigenständiges Studio~~ — beantwortet durch A11. **Die Runde ist damit durch;** offen ist die Freigabe des Bauplans.
