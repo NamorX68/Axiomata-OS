@@ -294,3 +294,12 @@ Terminal: Häkchen „Run in a terminal“ → der Adapter schickt `runInTermina
 
 Offen: Rust (`lldb-dap`) und Node als
 weitere Adapter; Watch-Ausdrücke, bedingte Breakpoints.
+
+### Rust (2026-10-02)
+
+`axiomata-dap/src/rust.rs`: Binaries aus `Cargo.toml` (Root-Package, `[[bin]]`, `src/bin/*`, Workspace-Members) erscheinen als
+„cargo: <bin>“. Der Start baut zuerst (`cargo build --bin … -p …`, bei Fehlern kommt die Compiler-Ausgabe zurück) und startet
+die gemeldete Executable unter `lldb-dap` (PATH, Homebrew-LLVM, `xcrun -f lldb-dap`). Rust-Pretty-Printer aus dem Toolchain-Ordner
+(`lldb_lookup.py`) werden geladen, wenn vorhanden. `debug.json`: `{"type":"rust","program":"<bin>","package":"<pkg>"}`.
+Getestet gegen ein echtes `lldb-dap` + `cargo` (`tests/lldb.rs`: Build, Breakpoint, Locals, Step; fehlerhafter Build).
+Offen: Tests debuggen (`cargo test --no-run`), Panic-Breakpoint, Node/TypeScript (js-debug).

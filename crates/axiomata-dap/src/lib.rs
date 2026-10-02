@@ -15,6 +15,7 @@ pub mod client;
 pub mod config;
 pub mod frame;
 pub mod python;
+pub mod rust;
 pub mod session;
 
 pub use client::{AdapterCommand, Client, DapError, Incoming};

@@ -364,7 +364,7 @@
         {/if}
       </h3>
       {#if total === 0}
-        <p class="note">Click a line number in a Python file to set one.</p>
+        <p class="note">Click a line number in a Python or Rust file to set one.</p>
       {:else}
         <ul class="bps">
           {#each files as [rel, lines] (rel)}
@@ -688,6 +688,8 @@
 
   .problem {
     color: var(--ax-warning);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .trust {

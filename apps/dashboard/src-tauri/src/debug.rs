@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axiomata_core::paths::axiomata_home;
-use axiomata_dap::config::{self, DebugConfig, PROJECT_FILE};
+use axiomata_dap::config::{self, DebugConfig, Language, PROJECT_FILE};
 use axiomata_dap::python::{adapter_command, current_file_config, launch_arguments};
+use axiomata_dap::rust;
 use axiomata_dap::{Control, DapError, DebugEvent, PythonEnv, Session, TerminalHandler};
 use axiomata_tasks::trust::{self, TrustStore};
 use serde::{Deserialize, Serialize};
@@ -242,13 +243,24 @@ pub async fn debug_start(
         clear_if(&debug.active, &previous);
     }
     let for_terminal = on_event.clone();
+    let for_build = on_event.clone();
     let started = off_main({
         let project = project.clone();
         move || -> Result<Arc<Active>, FileError> {
             let config = match target {
                 Target::CurrentFile { rel } => {
                     inside(&project, &rel)?;
-                    current_file_config(&rel)
+                    if rel.ends_with(".rs") {
+                        // A Rust file runs as the cargo binary whose `main` it is.
+                        rust::config_for_file(&project, &rel).ok_or_else(|| {
+                            FileError::new(
+                                "NotRunnable",
+                                format!("“{rel}” is not the main file of a binary — pick a “cargo: …” configuration, or open the file with `fn main`."),
+                            )
+                        })?
+                    } else {
+                        current_file_config(&rel)
+                    }
                 }
                 Target::Named { name } => {
                     let list = list_configs(&project);
@@ -270,22 +282,41 @@ pub async fn debug_start(
             for file in breakpoints {
                 paths.push((inside(&project, &file.rel)?.to_string_lossy().into_owned(), file.lines));
             }
-            let env = PythonEnv::detect(&project);
-            let adapter = adapter_command(&project, &env).map_err(|why| FileError::new("NoAdapter", why))?;
-            let mut launch = launch_arguments(&config, &project, &env);
+            let (adapter, adapter_id, mut launch) = match config.language {
+                Language::Python => {
+                    let env = PythonEnv::detect(&project);
+                    let adapter = adapter_command(&project, &env).map_err(|why| FileError::new("NoAdapter", why))?;
+                    (adapter, "python", launch_arguments(&config, &project, &env))
+                }
+                Language::Rust => {
+                    let adapter = rust::adapter_command(&project).map_err(|why| FileError::new("NoAdapter", why))?;
+                    // Rust is compiled first; the compiler's words come back if that fails.
+                    let _ = for_build.send(DebugEvent::Output {
+                        category: "console".into(),
+                        text: format!("Building {}…\n", config.program.as_deref().unwrap_or("the program")),
+                    });
+                    let executable = rust::build(&project, &config).map_err(|why| FileError::new("BuildFailed", why))?;
+                    (adapter, "lldb-dap", rust::launch_arguments(&config, &executable, &project, &rust::init_commands()))
+                }
+            };
             // “In the terminal”: the adapter asks for the program to be run with `runInTerminal`, and the
             // Studio types that line into a terminal pane (a program with a TUI or `input()` needs one).
             // The line lives only in this message — it is never stored.
             let handler: Option<TerminalHandler> = terminal.then(|| {
-                launch["console"] = "integratedTerminal".into();
-                // The program writes to the terminal pane itself; the console would only echo a second copy.
-                launch["redirectOutput"] = false.into();
+                match config.language {
+                    Language::Python => {
+                        launch["console"] = "integratedTerminal".into();
+                        // The program writes to the terminal pane itself; the console would only echo a second copy.
+                        launch["redirectOutput"] = false.into();
+                    }
+                    Language::Rust => launch["runInTerminal"] = true.into(),
+                }
                 let handler: TerminalHandler = Arc::new(move |request| {
                     let _ = for_terminal.send(DebugEvent::RunInTerminal { title: request.title.clone(), line: request.command_line() });
                 });
                 handler
             });
-            let session = Session::start_with(&adapter, "python", launch, &paths, handler).map_err(dap_error)?;
+            let session = Session::start_with(&adapter, adapter_id, launch, &paths, handler).map_err(dap_error)?;
             Ok(Arc::new(Active { session, project, thread: Mutex::new(None) }))
         }
     })

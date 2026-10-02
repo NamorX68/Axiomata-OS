@@ -10,7 +10,7 @@ import type { NewDebugConfig } from "./debugForm";
 
 export interface DebugConfigInfo {
   name: string;
-  language: "python";
+  language: "python" | "rust";
   program: string | null;
   module: string | null;
   args: string[];
@@ -98,9 +98,10 @@ export const debugEvaluate = (expression: string, frameId: number | null): Promi
 export const debugSetBreakpoints = (rel: string, lines: number[]): Promise<BreakpointInfo[]> =>
   invoke<BreakpointInfo[]>("debug_set_breakpoints", { rel, lines });
 
-/** Languages the debugger can start for: the file in front is offered when it is one of these. */
+/** Languages the debugger can start for: the file in front is offered, and takes breakpoints, when it is one of these. */
 export function isDebuggable(rel: string): boolean {
-  return rel.toLowerCase().endsWith(".py");
+  const name = rel.toLowerCase();
+  return name.endsWith(".py") || name.endsWith(".rs");
 }
 
 /** Saves a configuration of your own into the project's `debug.json` (`replace` = the name being edited). */

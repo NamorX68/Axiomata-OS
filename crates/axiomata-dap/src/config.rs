@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Language {
     Python,
+    Rust,
 }
 
 /// Where the project keeps its own configurations, relative to the project folder.
@@ -34,6 +35,8 @@ pub struct DebugConfig {
     pub module: Option<String>,
     /// Python code to run (`python -c`): how a console script's `pkg.mod:func` is started. Detected only.
     pub code: Option<String>,
+    /// Rust: the cargo package the binary `program` belongs to (`cargo build -p`). Detected only.
+    pub package: Option<String>,
     pub args: Vec<String>,
     /// A folder inside the project; `None` = the project folder.
     pub cwd: Option<String>,
@@ -62,6 +65,8 @@ struct Entry {
     kind: Option<String>,
     program: Option<String>,
     module: Option<String>,
+    /// Rust: the cargo package of the binary.
+    package: Option<String>,
     #[serde(default)]
     args: Vec<String>,
     cwd: Option<String>,
@@ -122,19 +127,92 @@ fn inside(path: &str) -> bool {
         || path.split(['/', '\\']).any(|p| p == ".."))
 }
 
-fn build(entry: Entry) -> Result<DebugConfig, String> {
-    let name = entry.name.map(|n| n.trim().to_string()).unwrap_or_default();
+/// A `"type": "rust"` entry: `program` is the cargo binary to build and run.
+fn build_rust(name: String, entry: Entry) -> Result<DebugConfig, String> {
+    let program = entry.program.as_deref().map(str::trim).unwrap_or_default();
+    if !crate::rust::is_target_name(program) {
+        return Err(format!(
+            "“{name}” needs a “program”: the name of a cargo binary (letters, digits, - and _)"
+        ));
+    }
+    if entry.module.is_some() {
+        return Err(format!("“{name}”: a rust configuration has no “module”"));
+    }
+    let package = entry
+        .package
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    if let Some(p) = package
+        && !crate::rust::is_target_name(p)
+    {
+        return Err(format!("“{name}”: “{p}” is not a package name"));
+    }
+    let cwd = entry
+        .cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && *c != ".");
+    if let Some(c) = cwd
+        && !inside(c)
+    {
+        return Err(format!(
+            "“{name}”: the folder must lie inside the project (no absolute path, no ..)"
+        ));
+    }
+    let valid_env = entry.env.keys().all(|k| {
+        let mut chars = k.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    });
+    if !valid_env {
+        return Err(format!(
+            "“{name}”: an environment variable has a name it cannot have"
+        ));
+    }
+    if entry.args.iter().any(|a| a.contains('\0')) || entry.env.values().any(|v| v.contains('\0')) {
+        return Err(format!(
+            "“{name}”: arguments and values must not contain a NUL"
+        ));
+    }
+    Ok(DebugConfig {
+        name,
+        language: Language::Rust,
+        program: Some(program.to_string()),
+        module: None,
+        code: None,
+        package: package.map(str::to_string),
+        args: entry.args,
+        cwd: cwd.map(str::to_string),
+        env: entry.env.into_iter().collect(),
+        just_my_code: entry.just_my_code.unwrap_or(true),
+        detected: false,
+    })
+}
+
+fn build(mut entry: Entry) -> Result<DebugConfig, String> {
+    let name = entry
+        .name
+        .take()
+        .map(|n| n.trim().to_string())
+        .unwrap_or_default();
     if name.is_empty() || name.chars().count() > 80 || name.contains(char::is_control) {
         return Err("needs a name of 1–80 characters".into());
     }
     let language = match entry.kind.as_deref() {
         Some("python") | None => Language::Python,
+        Some("rust") => Language::Rust,
         Some(other) => {
             return Err(format!(
-                "“{name}”: the type “{other}” is not supported yet (python is)"
+                "“{name}”: the type “{other}” is not supported yet (python and rust are)"
             ));
         }
     };
+    if language == Language::Rust {
+        return build_rust(name, entry);
+    }
     let program = entry
         .program
         .map(|p| p.trim().to_string())
@@ -196,6 +274,7 @@ fn build(entry: Entry) -> Result<DebugConfig, String> {
     }
     Ok(DebugConfig {
         code: None,
+        package: None,
         name,
         language,
         program,
@@ -334,6 +413,7 @@ fn detected(name: &str, program: Option<&str>, module: Option<&str>) -> DebugCon
         program: program.map(str::to_string),
         module: module.map(str::to_string),
         code: None,
+        package: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),
@@ -352,10 +432,10 @@ pub fn detect(project: &Path) -> Vec<DebugConfig> {
         || has("requirements.txt")
         || has("main.py")
         || has("manage.py");
-    if !is_python {
-        return Vec::new();
-    }
     let mut out = Vec::new();
+    if !is_python {
+        return crate::rust::detect(project);
+    }
     // The console scripts the project declares are how it starts: `ocht = "ocht.cli:main"`.
     let manifest: Option<toml::Table> = pyproject.parse().ok();
     let mut scripts: Vec<(String, String)> = Vec::new();
@@ -419,6 +499,7 @@ pub fn detect(project: &Path) -> Vec<DebugConfig> {
             break;
         }
     }
+    out.extend(crate::rust::detect(project));
     out
 }
 
@@ -456,7 +537,7 @@ mod tests {
             {"name":"e","program":"a.py","module":"m"},
             {"name":"f","program":"a.py","cwd":"../up"},
             {"name":"g","program":"a.py","env":{"1X":"v"}},
-            {"name":"h","type":"rust","program":"a"},
+            {"name":"h","type":"go","program":"a"},
             {"program":"a.py"},
             {"name":"ok","program":"a.py"},
             {"name":"ok","program":"b.py"}
@@ -464,6 +545,24 @@ mod tests {
         let parsed = parse_debug_file(json);
         assert_eq!(parsed.configurations.len(), 1);
         assert_eq!(parsed.problems.len(), 10, "{:?}", parsed.problems);
+    }
+
+    #[test]
+    fn a_rust_entry_names_a_cargo_binary_and_nothing_else() {
+        let json = br#"{"configurations":[
+            {"name":"srv","type":"rust","program":"server","package":"app","args":["--x"],"env":{"A":"1"}},
+            {"name":"bad path","type":"rust","program":"../x"},
+            {"name":"bad module","type":"rust","program":"x","module":"m"},
+            {"name":"none","type":"rust"}
+        ]}"#;
+        let parsed = parse_debug_file(json);
+        assert_eq!(parsed.configurations.len(), 1, "{:?}", parsed.problems);
+        let c = &parsed.configurations[0];
+        assert_eq!(
+            (c.language, c.program.as_deref(), c.package.as_deref()),
+            (Language::Rust, Some("server"), Some("app"))
+        );
+        assert_eq!(parsed.problems.len(), 3);
     }
 
     #[test]
