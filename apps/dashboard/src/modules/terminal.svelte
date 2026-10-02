@@ -124,6 +124,7 @@
     type CursorStyle,
     type TermCell,
   } from "./TerminalScreen";
+  import { outputRefAt, rowText, type OutputRef } from "../core/outputLinks";
   import { keyToBytes } from "./terminalInput";
   import { createSequenceGuard } from "./terminalScrollback";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
@@ -133,8 +134,15 @@
   let {
     ctx,
     initialCommand = "",
+    onLink,
   }: {
     ctx: ModuleContext;
+    /**
+     * A file location in the output (`src/a.rs:12:5`, a Python traceback line) was ⌘-clicked. Only a host that
+     * can open files passes it; without it the output is plain text. The text under the pointer is output of
+     * whatever runs in the shell, so the host decides what the path may mean — nothing is opened here.
+     */
+    onLink?: (ref: OutputRef) => void,
     /**
      * A command to type into the shell once it is up (M7.2 CP4: an agent pane
      * starts its harness this way).
@@ -598,6 +606,11 @@
     }
   }
 
+  /** Ctrl-C into the shell — what a host's "Stop" button sends (a task pane): the running program gets SIGINT, the shell stays. */
+  export function interrupt(): void {
+    sendBytes(new Uint8Array([0x03]));
+  }
+
   function sendBytes(bytes: Uint8Array): void {
     if (!sessionId) return;
     snapToLive();
@@ -812,7 +825,16 @@
     needsRedraw = true;
   }
 
+  /** The file location under the pointer while ⌘ (or Ctrl) is held, if the host wants them. */
+  function linkAt(e: PointerEvent): OutputRef | null {
+    if (!onLink || !(e.metaKey || e.ctrlKey)) return null;
+    const pos = cellFromEvent(e);
+    const row = pos ? displayRows()[pos.row] : undefined;
+    return pos && row ? outputRefAt(rowText(row), pos.col) : null;
+  }
+
   function handlePointerMove(e: PointerEvent): void {
+    if (canvasEl) canvasEl.style.cursor = !selecting && linkAt(e) ? "pointer" : "";
     if (!selecting) return;
     const pos = cellFromEvent(e);
     if (!pos) return;
@@ -824,9 +846,17 @@
   /** A genuine drag copies the covered text; a plain click (no drag) just
    *  clears whatever was selected before — matching how most terminals
    *  treat a click as "deselect", not "select one character". */
-  function handlePointerUp(): void {
+  function handlePointerUp(e: PointerEvent): void {
     if (!selecting) return;
     selecting = false;
+    const link = dragged ? null : linkAt(e);
+    if (link) {
+      selStart = null;
+      selEnd = null;
+      needsRedraw = true;
+      onLink?.(link);
+      return;
+    }
     if (dragged && selStart && selEnd) {
       const text = selectionText(displayRows(), selStart, selEnd);
       if (text) void navigator.clipboard.writeText(text).catch(() => {});

@@ -1,7 +1,7 @@
 <!--
   The activity rail (`docs/plans/workbench.md`): a narrow column of icons at the Studio's left edge.
   Three kinds of things, set apart: **views of the code** (Files, Search, Git), **views for making things
-  run** (Run, Agents), and at the foot the **actions** (new terminal, open a file). The views choose what
+  run** (Run, Debug, Agents), and at the foot the **actions** (new terminal, open a file). The views choose what
   the sidebar column shows; a click on the one already shown folds the column away, as in VS Code. Actions
   never stay pressed. Settings and shortcuts stay on the right of the header.
 -->
@@ -66,6 +66,7 @@
   <!-- Making things run: tasks and agents. -->
   <div class="group" role="tablist" aria-orientation="vertical">
     <IconButton icon="play" size="lg" label="Run — build, test, start" tab pressed={shown("tasks")} onclick={() => onSelect("tasks")} />
+    <IconButton icon="bug" size="lg" label="Debug" tab pressed={shown("debug")} onclick={() => onSelect("debug")} />
     <span class="slot">
       <IconButton
         icon="bot"

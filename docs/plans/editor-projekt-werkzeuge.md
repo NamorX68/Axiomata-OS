@@ -46,7 +46,7 @@ sich lohnt, und was der Grill vom 2026-09-30 entschieden hat.
 | 2 | Outline | #49 | klein–mittel | Liefert auch Breadcrumbs und bessere Sticky Scroll |
 | 3 | Git-Panel | #48 | mittel | Engine und Diff-Ansicht großenteils da |
 | 4 | Run/Tasks | #50 | mittel | Braucht ein Ausgabe-Pane und Konfiguration |
-| 5 | Debug | #51 | groß | Baut auf Run auf, braucht einen DAP-Client |
+| 5 | Debug | #51 | groß | **Abgeschlossen (2026-10-03, Owner):** Python, Rust, C/C++, Swift auf dem Mac bestätigt; **Node/TypeScript offen** (geparkt, siehe unten) |
 
 ## Gegrillte Entscheidungen (2026-09-30, Q1–Q19, bestätigt)
 
@@ -266,3 +266,79 @@ schreibt atomar und **nie durch einen Symlink** (`.axiomata` oder die Datei kön
 Inhalt als bestätigt; war sie **nicht** bestätigt (kann Fremdes enthalten), bleibt sie es — sonst würde das Speichern still
 fremde Befehle freigeben. Glue: `tasks_save`, `tasks_remove` in `src-tauri/src/tasks.rs` (nicht auf Linux kompiliert). Umgebungsvariablen
 sind im Formular noch nicht einstellbar (nur in der Datei).
+
+**#50 Nachzug (2026-10-02):** ⌘-Klick auf `Datei:Zeile` in der Ausgabe öffnet die Stelle im Editor — in Task-Panes (Pfad nur innerhalb des
+Projekts, `ide/outputPath.ts`) und in Agent-Panes (innerhalb des Agent-Worktrees). Erkannt werden rustc/gcc/pytest/ruff/eslint-Form
+`pfad:zeile:spalte`, Python-Tracebacks (`File "…", line N`) und tsc (`pfad(zeile,spalte)`); URLs und `host:port` nie
+(`core/outputLinks.ts`). Der Terminal-Baustein bekommt dafür nur den optionalen Prop `onLink`; der Text kommt aus der Shell und
+bestimmt nie selbst, wohin geöffnet wird. Neu außerdem: **Stop** (Ctrl-C an die Shell, sie bleibt) im Task-Pane.
+**Weiterhin offen:** Problem-Matcher mit Diagnosen im Editor (Frage: wann verschwinden sie? Vorschlag: beim nächsten Lauf derselben Task
+und wenn ihr Pane geschlossen wird) und die Umgebung wie `toolenv.rs`.
+
+## Debug (#51) — Stand 2026-10-02: Python zuerst (Owner: „denke die weiteren Sprachen sind dann eh einfacher")
+
+Gebaut: Crate `axiomata-dap` (Content-Length-Framing, `Client`, `Session` mit Start-Reihenfolge initialize → launch →
+`initialized` → Breakpoints → `configurationDone`; Reverse-Requests werden abgelehnt), `debug.json`
+(`.axiomata/debug.json`, Hash-Bestätigung wie bei Run) plus erkannte Konfigurationen (pytest, `__main__.py`,
+`main.py`/`app.py`/`manage.py`) und „Current file". Adapter: `.venv`-Python mit debugpy, sonst
+`uv run --with debugpy`, sonst System-Python, sonst eine Meldung. Tauri-Glue `src-tauri/src/debug.rs`
+(auf dem Linux-Rechner nicht kompilierbar — Mac-Test steht aus). Frontend: Breakpoints per Klick auf die
+Zeilennummer (rote Pille, `settings.ide.breakpoints`, folgen Umbenennungen), Debug-Ansicht in der Rail
+(Toolbar, Tasten F1–F4 = Continue/Over/Out/Into, F5/F10 bleiben; F11 ist unter macOS „Desktop zeigen“, Call Stack, Variablen, Breakpoint-Liste, Konsole mit Evaluate), Datei öffnet sich am Stopp.
+
+Eigene Konfigurationen werden im Panel angelegt (Formular „New configuration…“, schreibt `.axiomata/debug.json`, ohne dass man eine Datei anfassen muss).
+
+Breakpoints wandern mit den Edits (`shiftBreakpoints`, `doc.onTextChange`).
+
+Terminal: Häkchen „Run in a terminal“ → der Adapter schickt `runInTerminal`, die Zeile wird in ein Task-Pane „Debug“ getippt (nur im Speicher), für TUIs und `input()`.
+
+Offen: Rust (`lldb-dap`) und Node als
+weitere Adapter; Watch-Ausdrücke, bedingte Breakpoints.
+
+### Rust (2026-10-02)
+
+`axiomata-dap/src/rust.rs`: Binaries aus `Cargo.toml` (Root-Package, `[[bin]]`, `src/bin/*`, Workspace-Members) erscheinen als
+„cargo: <bin>“. Der Start baut zuerst (`cargo build --bin … -p …`, bei Fehlern kommt die Compiler-Ausgabe zurück) und startet
+die gemeldete Executable unter `lldb-dap` (PATH, Homebrew-LLVM, `xcrun -f lldb-dap`). Rust-Pretty-Printer aus dem Toolchain-Ordner
+(`lldb_lookup.py`) werden geladen, wenn vorhanden. `debug.json`: `{"type":"rust","program":"<bin>","package":"<pkg>"}`.
+Getestet gegen ein echtes `lldb-dap` + `cargo` (`tests/lldb.rs`: Build, Breakpoint, Locals, Step; fehlerhafter Build).
+Offen: Tests debuggen (`cargo test --no-run`), Panic-Breakpoint, Node/TypeScript (js-debug).
+
+### C, C++ und Swift (2026-10-02)
+
+`axiomata-dap/src/native.rs`, derselbe Adapter `lldb-dap` wie bei Rust. Erkannt werden CMake-Targets (`add_executable`, gebaut in
+`~/.axiomata/debug-build/<id>/cmake`, nicht im Repository) und Swift-Pakete (`swift build --product`); „Current file“ übersetzt eine
+einzelne `.c`/`.cpp`-Datei mit `cc -g -O0`. `debug.json`: `{"type":"cpp","program":"build/app"}` (schon gebautes Programm) oder
+`{"type":"swift","program":"<product>"}`. Getestet mit echtem `lldb-dap`, `cc` und `cmake` (Einzeldatei, CMake, Compilerfehler);
+Swift nur die Erkennung (kein Swift auf der Linux-Box).
+
+### Node/TypeScript — geparkt (Owner, 2026-10-02)
+
+Nicht gebaut. Wenn es wieder aufgenommen wird: js-debug (`dapDebugServer.js`) spricht DAP über TCP (nicht stdio) und öffnet für jeden Node-Prozess
+eine Unter-Sitzung (`startDebugging` → neue Verbindung, `attach`); der Client braucht TCP-Transport und mehrere Sitzungen unter einer
+`Session`. Beschaffung: entweder die Kopie in einer vorhandenen VS-Code-/Cursor-Installation nutzen oder ein Release mit festem SHA-256
+laden (nur nach ausdrücklicher Zustimmung im Panel). Auf der Linux-Box nicht abrufbar, also nicht testbar.
+
+### Unterordner-Projekte und C/C++-Syntax (2026-10-03)
+
+Hat der geöffnete Ordner selbst kein `Cargo.toml` / `Package.swift` / `CMakeLists.txt`, sucht die Erkennung bis zu zwei Ebenen darunter
+(`config::manifest_dirs`, ohne `target`, `node_modules`, `build`, versteckte Ordner; höchstens 8 Treffer). Die Konfiguration trägt dann
+`dir`; gebaut und gestartet wird dort. „Current file“ findet das Projekt, in dem die Datei liegt. Außerdem: Tree-sitter-Grammatiken für C
+und C++ (`scripts/build-grammars.sh c cpp`, `languages.ts`).
+
+### Rust: Standardbibliothek (2026-10-03)
+
+Step in sprang in `alloc::vec::Vec::push` & Co. (Quellpfad `/rustc/<hash>/library/…`, auf Macs teils nur `library/core/…`). Jetzt setzt der
+Start `step-avoid-regexp ^<?(core|std|alloc)(::| as )` (`rust::init_commands`, mit echtem lldb-dap getestet), und der Editor öffnet
+nur **absolute** Pfade innerhalb des Projekts (`absoluteInside`); die übrigen Frames stehen abgeblendet im Call Stack.
+
+### Bedingte Breakpoints, Watch, Rust-Tests, Panic (2026-10-03)
+
+- **Breakpoint-Extras:** Bedingung, Hit-Count (`5`, `>3`, `% 10`) und Log-Meldung (`{x}`) je Breakpoint — Rechtsklick auf die Zeilennummer
+  (Popover) oder Stift in der Breakpoint-Liste; gespeichert in `settings.ide.breakpointInfo`, wandern mit den Edits
+  (`breakpoints.ts`: `lineMap`/`applyEdit`) und werden an eine laufende Sitzung weitergegeben. Rust: `BreakpointSpec`, `Session::set_breakpoints_spec`.
+- **Watch:** Ausdrücke je Projekt (`settings.ide.watches`), bei jedem Stopp im gewählten Frame ausgewertet (DAP-Kontext `watch`).
+- **Argumente:** Feld unter der Konfiguration ersetzt für diesen Lauf deren `args` (z. B. ein Testfilter).
+- **Rust-Tests:** „cargo test: <paket> (lib)“, „… (bin)“ und je Datei in `tests/`; gebaut mit `cargo test --no-run`, Standard-Argument `--nocapture`.
+- **Panic:** Rust-Binaries (nicht Tests) stoppen in `rust_panic`; der Stopp zeigt den ersten Frame im Projekt (`Hooks.isUserFrame`).
+- Alles Rust-seitige gegen echtes `lldb-dap`/`debugpy` getestet (Bedingung, Hit-Count, Log-Point, Panic, Tests); die Tauri-Schicht wie immer erst auf dem Mac.

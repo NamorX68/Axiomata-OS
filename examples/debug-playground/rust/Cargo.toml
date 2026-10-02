@@ -1,0 +1,7 @@
+[package]
+name = "debug-demo"
+version = "0.1.0"
+edition = "2021"
+
+# Keeps this example out of the Axiomata workspace it lives inside.
+[workspace]

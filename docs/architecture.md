@@ -1318,6 +1318,13 @@ tests are already being written inline as each function lands. The trigger stays
 only its timing is batched. This is a project-local override, not an edit to the global agent
 definitions: a fresh Rust project without it keeps the tighter per-edit cadence.
 
+### Debug (#51), 2026-10-02
+
+Crate `axiomata-dap` (DAP client, `debug.json`, Python under debugpy — tested against a real debugpy with
+`AXIOMATA_TEST_DEBUGPY_PATH=<dir with debugpy> cargo test -p axiomata-dap`), Tauri glue `src-tauri/src/debug.rs`
+(one session at a time), frontend `ide/debug*.ts`, `ide/breakpoints.ts`, `ide/DebugPanel.svelte`, gutter
+breakpoints in `fileapp/EditorSurface.svelte`. Details: `docs/plans/editor-projekt-werkzeuge.md` (#51).
+
 ### Status log (moved out of `AGENTS.md`, 2026-10-02)
 
 `AGENTS.md` is loaded into every agent turn and had grown past 30 KB, most of it this running status

@@ -3,6 +3,7 @@ use tauri::Manager;
 
 mod bootstrap;
 mod commands;
+mod debug;
 mod files;
 mod git;
 mod lsp;
@@ -133,6 +134,18 @@ pub fn run() {
             tasks::task_command_line,
             tasks::tasks_save,
             tasks::tasks_remove,
+            debug::debug_configs,
+            debug::debug_save,
+            debug::debug_remove,
+            debug::debug_trust,
+            debug::debug_start,
+            debug::debug_stop,
+            debug::debug_control,
+            debug::debug_stack,
+            debug::debug_scopes,
+            debug::debug_variables,
+            debug::debug_evaluate,
+            debug::debug_set_breakpoints,
             files::project_new,
             files::file_watch,
             files::file_unwatch,
@@ -226,6 +239,7 @@ pub fn run() {
             app.manage(files::FileWatch::start(app.handle()));
             app.manage(files::Searches::default());
             app.manage(lsp::LspState::new());
+            app.manage(debug::DebugState::default());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

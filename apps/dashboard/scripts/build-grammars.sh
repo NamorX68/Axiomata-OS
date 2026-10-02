@@ -28,6 +28,8 @@ GRAMMARS=(
   "json|tree-sitter/tree-sitter-json|v0.24.8|.|queries|ee35a6ebefcef0c5c416c0d1ccec7370cfca5a24"
   "css|tree-sitter/tree-sitter-css|v0.25.0|.|queries|dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f"
   "html|tree-sitter/tree-sitter-html|v0.23.2|.|queries|5a5ca8551a179998360b4a4ca2c0f366a35acc03"
+  "c|tree-sitter/tree-sitter-c|v0.24.1|.|queries|7fa1be1b694b6e763686793d97da01f36a0e5c12"
+  "cpp|tree-sitter/tree-sitter-cpp|v0.23.4|.|queries|f41e1a044c8a84ea9fa8577fdd2eab92ec96de02"
   "python|tree-sitter/tree-sitter-python|v0.25.0|.|queries|293fdc02038ee2bf0e2e206711b69c90ac0d413f"
   "bash|tree-sitter/tree-sitter-bash|v0.25.1|.|queries|a06c2e4415e9bc0346c6b86d401879ffb44058f7"
   "markdown|tree-sitter-grammars/tree-sitter-markdown|v0.5.3|tree-sitter-markdown|tree-sitter-markdown/queries|f969cd3ae3f9fbd4e43205431d0ae286014c05b5"

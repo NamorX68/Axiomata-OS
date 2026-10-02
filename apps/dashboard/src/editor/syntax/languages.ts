@@ -63,6 +63,8 @@ export const LANGUAGES: readonly LanguageSpec[] = [
     highlights: ["html/highlights.scm", "svelte/highlights.scm"],
     injections: "svelte/injections.scm",
   },
+  { id: "c", grammar: "c", highlights: ["c/highlights.scm"] },
+  { id: "cpp", grammar: "cpp", highlights: ["c/highlights.scm", "cpp/highlights.scm"], injections: "cpp/injections.scm" },
   { id: "swift", grammar: "swift", highlights: ["swift/highlights.scm"] },
   { id: "sql", grammar: "sql", highlights: ["sql/highlights.scm"] },
 ];
@@ -102,6 +104,15 @@ const EXTENSIONS: Record<string, string> = {
   svelte: "svelte",
   swift: "swift",
   sql: "sql",
+  c: "c",
+  h: "c",
+  cc: "cpp",
+  cpp: "cpp",
+  cxx: "cpp",
+  hh: "cpp",
+  hpp: "cpp",
+  hxx: "cpp",
+  "c++": "cpp",
 };
 
 /** Whole file names that say more than their extension. */
