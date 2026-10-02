@@ -6,6 +6,7 @@
 import { Channel } from "@tauri-apps/api/core";
 
 import { insideTauri, invokeBackend as invoke } from "../core/backend";
+import type { BreakpointSpec } from "./breakpoints";
 import type { NewDebugConfig } from "./debugForm";
 
 export interface DebugConfigInfo {
@@ -77,14 +78,15 @@ export const trustDebugFile = (root: string, hash: string): Promise<void> => inv
 export function startDebug(
   root: string,
   target: DebugTarget,
-  breakpoints: { rel: string; lines: number[] }[],
+  breakpoints: { rel: string; breakpoints: BreakpointSpec[] }[],
   terminal: boolean,
+  args: string[] | null,
   onEvent: (event: DebugEvent) => void,
 ): Promise<void> {
   // The browser mock has no Tauri channel; it calls the same `onmessage` on a plain object.
   const channel = insideTauri() ? new Channel<DebugEvent>() : { onmessage: (_: DebugEvent) => {} };
   channel.onmessage = onEvent;
-  return invoke<void>("debug_start", { root, target, breakpoints, terminal, onEvent: channel });
+  return invoke<void>("debug_start", { root, target, breakpoints, terminal, args, onEvent: channel });
 }
 
 export const stopDebug = (): Promise<void> => invoke<void>("debug_stop");
@@ -93,10 +95,11 @@ export const debugStack = (): Promise<StackFrame[]> => invoke<StackFrame[]>("deb
 export const debugScopes = (frameId: number): Promise<DebugScope[]> => invoke<DebugScope[]>("debug_scopes", { frameId });
 export const debugVariables = (variablesReference: number): Promise<DebugVariable[]> =>
   invoke<DebugVariable[]>("debug_variables", { variablesReference });
-export const debugEvaluate = (expression: string, frameId: number | null): Promise<DebugVariable> =>
-  invoke<DebugVariable>("debug_evaluate", { expression, frameId });
-export const debugSetBreakpoints = (rel: string, lines: number[]): Promise<BreakpointInfo[]> =>
-  invoke<BreakpointInfo[]>("debug_set_breakpoints", { rel, lines });
+/** `context`: `watch` for a watch expression, else the console (`repl`). */
+export const debugEvaluate = (expression: string, frameId: number | null, context?: "watch"): Promise<DebugVariable> =>
+  invoke<DebugVariable>("debug_evaluate", { expression, frameId, context: context ?? null });
+export const debugSetBreakpoints = (rel: string, breakpoints: BreakpointSpec[]): Promise<BreakpointInfo[]> =>
+  invoke<BreakpointInfo[]>("debug_set_breakpoints", { rel, breakpoints });
 
 /** Languages the debugger can start for: the file in front is offered, and takes breakpoints, when it is one of these. */
 export function isDebuggable(rel: string): boolean {

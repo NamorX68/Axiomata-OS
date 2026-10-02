@@ -331,3 +331,14 @@ und C++ (`scripts/build-grammars.sh c cpp`, `languages.ts`).
 Step in sprang in `alloc::vec::Vec::push` & Co. (Quellpfad `/rustc/<hash>/library/…`, auf Macs teils nur `library/core/…`). Jetzt setzt der
 Start `step-avoid-regexp ^<?(core|std|alloc)(::| as )` (`rust::init_commands`, mit echtem lldb-dap getestet), und der Editor öffnet
 nur **absolute** Pfade innerhalb des Projekts (`absoluteInside`); die übrigen Frames stehen abgeblendet im Call Stack.
+
+### Bedingte Breakpoints, Watch, Rust-Tests, Panic (2026-10-03)
+
+- **Breakpoint-Extras:** Bedingung, Hit-Count (`5`, `>3`, `% 10`) und Log-Meldung (`{x}`) je Breakpoint — Rechtsklick auf die Zeilennummer
+  (Popover) oder Stift in der Breakpoint-Liste; gespeichert in `settings.ide.breakpointInfo`, wandern mit den Edits
+  (`breakpoints.ts`: `lineMap`/`applyEdit`) und werden an eine laufende Sitzung weitergegeben. Rust: `BreakpointSpec`, `Session::set_breakpoints_spec`.
+- **Watch:** Ausdrücke je Projekt (`settings.ide.watches`), bei jedem Stopp im gewählten Frame ausgewertet (DAP-Kontext `watch`).
+- **Argumente:** Feld unter der Konfiguration ersetzt für diesen Lauf deren `args` (z. B. ein Testfilter).
+- **Rust-Tests:** „cargo test: <paket> (lib)“, „… (bin)“ und je Datei in `tests/`; gebaut mit `cargo test --no-run`, Standard-Argument `--nocapture`.
+- **Panic:** Rust-Binaries (nicht Tests) stoppen in `rust_panic`; der Stopp zeigt den ersten Frame im Projekt (`Hooks.isUserFrame`).
+- Alles Rust-seitige gegen echtes `lldb-dap`/`debugpy` getestet (Bedingung, Hit-Count, Log-Point, Panic, Tests); die Tauri-Schicht wie immer erst auf dem Mac.

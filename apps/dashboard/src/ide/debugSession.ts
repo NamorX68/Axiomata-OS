@@ -8,6 +8,7 @@
  */
 
 import { isFullScreen, stripAnsi } from "./ansi";
+import type { BreakpointSpec } from "./breakpoints";
 import { writable, get, type Readable } from "svelte/store";
 
 import {
@@ -35,6 +36,13 @@ export interface ScopeView {
   variables: DebugVariable[] | null;
 }
 
+export interface WatchView {
+  expr: string;
+  /** `null` while there is nothing to show (not stopped, or not evaluated yet). */
+  value: string | null;
+  error: string | null;
+}
+
 export interface OutputLine {
   /** `stdout`, `stderr`, `console`, or `repl` for the console's own lines. */
   category: string;
@@ -53,6 +61,8 @@ export interface DebugState {
   output: OutputLine[];
   exitCode: number | null;
   error: string | null;
+  /** Watch expressions, evaluated in the selected frame at every stop. */
+  watches: WatchView[];
   /** The program draws a full-screen terminal interface: its output is no console text (see `ansi.ts`). */
   tui: boolean;
 }
@@ -69,6 +79,7 @@ export const IDLE: DebugState = {
   exitCode: null,
   error: null,
   tui: false,
+  watches: [],
 };
 
 /** The most output lines kept; older ones fall off the top. */
@@ -158,11 +169,23 @@ export interface Hooks {
   onTerminal?: (title: string, line: string) => void;
   /** Something went wrong that the panel should say. */
   onError?: (message: string) => void;
+  /**
+   * Is `frame` code of the project (rather than the standard library, a generated file)? At a stop the first
+   * such frame is the one shown — a stop inside `rust_panic` lands on the line that panicked.
+   */
+  isUserFrame?: (frame: StackFrame) => boolean;
 }
 
 export interface DebugController {
   state: Readable<DebugState>;
-  start: (root: string, target: DebugTarget, breakpoints: { rel: string; lines: number[] }[], name: string, terminal?: boolean) => Promise<void>;
+  start: (
+    root: string,
+    target: DebugTarget,
+    breakpoints: { rel: string; breakpoints: BreakpointSpec[] }[],
+    name: string,
+    terminal?: boolean,
+    args?: string[] | null,
+  ) => Promise<void>;
   stop: () => Promise<void>;
   control: (action: DebugAction) => Promise<void>;
   selectFrame: (frameId: number) => Promise<void>;
@@ -171,7 +194,11 @@ export interface DebugController {
   /** The console's line: evaluated in the selected frame, answered in the output. */
   evaluate: (expression: string) => Promise<void>;
   /** The editor changed a file's breakpoints while a session runs. */
-  syncBreakpoints: (rel: string, lines: number[]) => Promise<void>;
+  syncBreakpoints: (rel: string, specs: BreakpointSpec[]) => Promise<void>;
+  /** Watch expressions: set the whole list (loading), add one, drop one. Evaluated at every stop. */
+  setWatches: (expressions: string[]) => void;
+  addWatch: (expression: string) => void;
+  removeWatch: (index: number) => void;
 }
 
 const message = (err: unknown): string => (err as { message?: string })?.message ?? String(err);
@@ -198,15 +225,34 @@ export function createDebugController(backend: Backend, hooks: Hooks = {}): Debu
     }
   }
 
+  /** Evaluates every watch expression in `frameId`; a stop that has been overtaken throws its answers away. */
+  async function refreshWatches(frameId: number, mine: number): Promise<void> {
+    const expressions = get(state).watches.map((w) => w.expr);
+    const results = await Promise.all(
+      expressions.map(async (expr) => {
+        try {
+          return { expr, value: (await backend.evaluate(expr, frameId, "watch")).value, error: null };
+        } catch (err) {
+          return { expr, value: null, error: message(err) };
+        }
+      }),
+    );
+    if (mine !== epoch) return;
+    // Keep what was added or removed while this was running.
+    set((s) => ({ ...s, watches: s.watches.map((w) => results.find((r) => r.expr === w.expr) ?? w) }));
+  }
+
   async function onStopped(mine: number): Promise<void> {
     try {
       const frames = await backend.stack();
       if (mine !== epoch) return;
       set((s) => ({ ...s, frames }));
-      const top = frames[0];
-      if (!top) return;
-      hooks.onStop?.(top);
-      await loadFrame(top.id, mine);
+      // The first frame that is the project's own (a stop inside the standard library lands on the caller).
+      const shown = frames.find((f) => hooks.isUserFrame?.(f)) ?? frames[0];
+      if (!shown) return;
+      hooks.onStop?.(shown);
+      await loadFrame(shown.id, mine);
+      await refreshWatches(shown.id, mine);
     } catch (err) {
       if (mine === epoch) hooks.onError?.(message(err));
     }
@@ -225,11 +271,16 @@ export function createDebugController(backend: Backend, hooks: Hooks = {}): Debu
   return {
     state: { subscribe: state.subscribe },
 
-    async start(root, target, breakpoints, name, terminal = false) {
+    async start(root, target, breakpoints, name, terminal = false, args = null) {
       epoch++;
-      state.set({ ...IDLE, phase: "starting", configName: name });
+      state.set({
+        ...IDLE,
+        phase: "starting",
+        configName: name,
+        watches: get(state).watches.map((w) => ({ expr: w.expr, value: null, error: null })),
+      });
       try {
-        await backend.start(root, target, breakpoints, terminal, onEvent);
+        await backend.start(root, target, breakpoints, terminal, args, onEvent);
         // The program may already have stopped on a breakpoint by now; only a quiet start is "running".
         set((s) => (s.phase === "starting" ? { ...s, phase: "running" } : s));
       } catch (err) {
@@ -264,6 +315,7 @@ export function createDebugController(backend: Backend, hooks: Hooks = {}): Debu
       hooks.onStop?.(frame);
       try {
         await loadFrame(frameId, mine);
+        await refreshWatches(frameId, mine);
       } catch (err) {
         if (mine === epoch) hooks.onError?.(message(err));
       }
@@ -300,11 +352,29 @@ export function createDebugController(backend: Backend, hooks: Hooks = {}): Debu
       }
     },
 
-    async syncBreakpoints(rel, lines) {
+    setWatches(expressions) {
+      set((s) => ({ ...s, watches: expressions.map((expr) => ({ expr, value: null, error: null })) }));
+      const now = get(state);
+      if (now.phase === "stopped" && now.frameId !== null) void refreshWatches(now.frameId, epoch);
+    },
+
+    addWatch(expression) {
+      const expr = expression.trim();
+      if (!expr || get(state).watches.some((w) => w.expr === expr)) return;
+      set((s) => ({ ...s, watches: [...s.watches, { expr, value: null, error: null }] }));
+      const now = get(state);
+      if (now.phase === "stopped" && now.frameId !== null) void refreshWatches(now.frameId, epoch);
+    },
+
+    removeWatch(index) {
+      set((s) => ({ ...s, watches: s.watches.filter((_, i) => i !== index) }));
+    },
+
+    async syncBreakpoints(rel, specs) {
       const phase = get(state).phase;
       if (phase === "idle" || phase === "ended") return;
       try {
-        await backend.setBreakpoints(rel, lines);
+        await backend.setBreakpoints(rel, specs);
       } catch (err) {
         hooks.onError?.(message(err));
       }

@@ -49,3 +49,19 @@ fn main() {
     }
     println!("done: {} counted {}", counter.name, counter.count); // look at `counter`, `scores` and `names` in Variables
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fibonacci_of_ten() {
+        let value = fibonacci(10); // debug this test: the Debug view offers “cargo test: debug-demo (bin)”
+        assert_eq!(value, 55);
+    }
+
+    #[test]
+    fn collatz_of_27_takes_111_steps() {
+        assert_eq!(collatz(27), 111);
+    }
+}

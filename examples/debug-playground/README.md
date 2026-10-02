@@ -32,7 +32,14 @@ Comments in the code mark good places for a breakpoint.
 4. In the console (while stopped) evaluate an expression, e.g. `counter` or `a + b`.
 5. Insert a few lines above a breakpoint: it should move with its code.
 6. Tick **Run in a terminal** and start again: the program runs in the “Debug” pane instead.
-7. Break the build on purpose (a typo in the Rust, C or C++ file): the build error appears in the panel.
+7. **Conditional breakpoint:** right-click a line number → enter `i == 3` (or a hit count like `4`, or a log message
+   like `total = {total}` that prints instead of stopping). Such breakpoints are drawn outlined; the Debug view's
+   breakpoint list shows and edits them too.
+8. **Watch:** in the Debug view's *Watch* box add `a + b` or `total`; it is re-evaluated at every stop.
+9. **Arguments:** type some in the field under the configuration (they replace the configuration's own for this run).
+10. **Rust only:** pick `cargo: boom` — the debugger stops at the `panic!`; pick `cargo test: debug-demo (bin)` to debug
+    a test (set a breakpoint inside `fibonacci_of_ten`).
+11. Break the build on purpose (a typo in the Rust, C or C++ file): the build error appears in the panel.
 
 ## Opening the whole folder
 

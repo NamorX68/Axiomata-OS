@@ -16,7 +16,7 @@ use axiomata_core::paths::axiomata_home;
 use axiomata_dap::config::{self, DebugConfig, Language, PROJECT_FILE};
 use axiomata_dap::python::{adapter_command, current_file_config, launch_arguments};
 use axiomata_dap::{native, rust};
-use axiomata_dap::{Control, DapError, DebugEvent, PythonEnv, Session, TerminalHandler};
+use axiomata_dap::{BreakpointSpec, Control, DapError, DebugEvent, PythonEnv, Session, StartOptions, TerminalHandler};
 use axiomata_tasks::trust::{self, TrustStore};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -215,12 +215,12 @@ pub async fn debug_remove(state: State<'_, CoreState>, root: String, name: Strin
     .await
 }
 
-/// A file's breakpoints as the editor keeps them.
+/// A file's breakpoints as the editor keeps them (one-based lines, each with an optional condition, hit
+/// count and log message).
 #[derive(Debug, Deserialize)]
 pub struct FileBreakpoints {
     pub rel: String,
-    /// One-based lines.
-    pub lines: Vec<u32>,
+    pub breakpoints: Vec<BreakpointSpec>,
 }
 
 /// Which configuration to run: one by name, or “the file in front”.
@@ -240,6 +240,7 @@ pub async fn debug_start(
     target: Target,
     breakpoints: Vec<FileBreakpoints>,
     terminal: bool,
+    args: Option<Vec<String>>,
     on_event: Channel<DebugEvent>,
 ) -> Result<(), FileError> {
     let project = folder_of(&state, root).await?;
@@ -293,9 +294,17 @@ pub async fn debug_start(
                     config
                 }
             };
+            // Arguments typed into the panel for this run replace the configuration's own.
+            let mut config = config;
+            if let Some(args) = args.filter(|a| !a.is_empty()) {
+                if args.iter().any(|a| a.contains('\0')) {
+                    return Err(FileError::new("Invalid", "Arguments must not contain a NUL.".into()));
+                }
+                config.args = args;
+            }
             let mut paths = Vec::new();
             for file in breakpoints {
-                paths.push((inside(&project, &file.rel)?.to_string_lossy().into_owned(), file.lines));
+                paths.push((inside(&project, &file.rel)?.to_string_lossy().into_owned(), file.breakpoints));
             }
             let (adapter, adapter_id, mut launch) = match config.language {
                 Language::Python => {
@@ -341,7 +350,14 @@ pub async fn debug_start(
                 });
                 handler
             });
-            let session = Session::start_with(&adapter, adapter_id, launch, &paths, handler).map_err(dap_error)?;
+            // A Rust `panic!` stops the program at the panic (not in tests: `#[should_panic]` would stop every time).
+            let functions: Vec<String> = if config.language == Language::Rust && config.test.is_none() {
+                rust::PANIC_FUNCTIONS.iter().map(|f| f.to_string()).collect()
+            } else {
+                Vec::new()
+            };
+            let options = StartOptions { terminal: handler, functions };
+            let session = Session::start_with(&adapter, adapter_id, launch, &paths, options).map_err(dap_error)?;
             Ok(Arc::new(Active { session, project, thread: Mutex::new(None) }))
         }
     })
@@ -453,9 +469,15 @@ pub async fn debug_evaluate(
     debug: State<'_, DebugState>,
     expression: String,
     frame_id: Option<i64>,
+    context: Option<String>,
 ) -> Result<axiomata_dap::Variable, FileError> {
     let active = debug.current()?;
-    off_main(move || active.session.evaluate(&expression, frame_id).map_err(dap_error)).await
+    // `watch` for a watch expression, `repl` (the default) for the console.
+    let context = match context.as_deref() {
+        Some("watch") => "watch",
+        _ => "repl",
+    };
+    off_main(move || active.session.evaluate_in(&expression, frame_id, context).map_err(dap_error)).await
 }
 
 /// Replaces the breakpoints of one file in the running session.
@@ -463,12 +485,12 @@ pub async fn debug_evaluate(
 pub async fn debug_set_breakpoints(
     debug: State<'_, DebugState>,
     rel: String,
-    lines: Vec<u32>,
+    breakpoints: Vec<BreakpointSpec>,
 ) -> Result<Vec<axiomata_dap::Breakpoint>, FileError> {
     let active = debug.current()?;
     off_main(move || {
         let path = inside(&active.project, &rel)?;
-        active.session.set_breakpoints(&path.to_string_lossy(), &lines).map_err(dap_error)
+        active.session.set_breakpoints_spec(&path.to_string_lossy(), &breakpoints).map_err(dap_error)
     })
     .await
 }

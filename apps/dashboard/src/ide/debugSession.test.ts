@@ -10,7 +10,7 @@ function fakeBackend(): { backend: Backend; emit: (e: DebugEvent) => void; calls
   let sink: (e: DebugEvent) => void = () => {};
   const calls: string[] = [];
   const backend: Backend = {
-    start: vi.fn(async (_r, _t, _b, _term, onEvent) => {
+    start: vi.fn(async (_r, _t, _b, _term, _args, onEvent) => {
       sink = onEvent;
       calls.push("start");
     }),
@@ -31,6 +31,54 @@ function fakeBackend(): { backend: Backend; emit: (e: DebugEvent) => void; calls
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("debug state", () => {
+  it("watch expressions are evaluated in the shown frame at a stop, and survive the next session", async () => {
+    const { backend, emit } = fakeBackend();
+    const c = createDebugController(backend);
+    c.setWatches(["a + b", "bad("]);
+    vi.mocked(backend.evaluate).mockImplementation(async (expr) => {
+      if (expr === "bad(") throw new Error("SyntaxError");
+      return { name: expr, value: "5", type_name: null, variables_reference: 0 };
+    });
+    await c.start("project:1", { kind: "current_file", rel: "a.py" }, [], "x");
+    emit({ event: "stopped", thread_id: 1, reason: "breakpoint", text: null });
+    await tick();
+    await tick();
+    expect(get(c.state).watches).toEqual([
+      { expr: "a + b", value: "5", error: null },
+      { expr: "bad(", value: null, error: "SyntaxError" },
+    ]);
+    expect(backend.evaluate).toHaveBeenCalledWith("a + b", 10, "watch");
+    // A new session keeps the expressions and clears the old answers.
+    await c.start("project:1", { kind: "current_file", rel: "a.py" }, [], "x");
+    expect(get(c.state).watches.map((w) => [w.expr, w.value])).toEqual([["a + b", null], ["bad(", null]]);
+    c.removeWatch(0);
+    expect(get(c.state).watches.map((w) => w.expr)).toEqual(["bad("]);
+  });
+
+  it("a stop in code outside the project shows the first frame that is the project's own", async () => {
+    const { backend, emit } = fakeBackend();
+    backend.stack = vi.fn(async () => [
+      { id: 1, name: "rust_panic", path: "/rustc/abc/library/std/src/panicking.rs", line: 9, column: 1 },
+      { id: 2, name: "check", path: "/p/main.rs", line: 3, column: 1 },
+    ]);
+    const onStop = vi.fn();
+    const c = createDebugController(backend, { onStop, isUserFrame: (f) => f.path?.startsWith("/p/") ?? false });
+    await c.start("project:1", { kind: "named", name: "x" }, [], "x");
+    emit({ event: "stopped", thread_id: 1, reason: "breakpoint", text: null });
+    await tick();
+    await tick();
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onStop.mock.calls[0][0].id).toBe(2);
+    expect(get(c.state).frameId).toBe(2);
+  });
+
+  it("the arguments typed for a run go to the backend", async () => {
+    const { backend } = fakeBackend();
+    const c = createDebugController(backend);
+    await c.start("project:1", { kind: "named", name: "x" }, [], "x", false, ["--only", "adds"]);
+    expect(vi.mocked(backend.start).mock.calls[0][4]).toEqual(["--only", "adds"]);
+  });
+
   it("a program the adapter wants in a terminal goes to the host, and changes nothing in the state", async () => {
     const { backend, emit } = fakeBackend();
     const onTerminal = vi.fn();
@@ -79,7 +127,7 @@ describe("debug state", () => {
   it("a breakpoint hit during start keeps the stopped state", async () => {
     const { backend } = fakeBackend();
     let sink: (e: DebugEvent) => void = () => {};
-    backend.start = vi.fn(async (_r, _t, _b, _term, onEvent) => {
+    backend.start = vi.fn(async (_r, _t, _b, _term, _args, onEvent) => {
       sink = onEvent;
       sink({ event: "stopped", thread_id: 1, reason: "breakpoint", text: null });
     });

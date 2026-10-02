@@ -10,11 +10,13 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { get } from "svelte/store";
 
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
-  import { breakpoints, clearBreakpoints } from "./breakpoints";
-  import { debug, debugProblem, startDebugging, toggleDebugBreakpoint } from "./debug";
+  import BreakpointEditor from "./BreakpointEditor.svelte";
+  import { breakpointInfo, breakpoints, clearBreakpoints, infoOf } from "./breakpoints";
+  import { debug, debugProblem, editDebugBreakpoint, loadWatches, saveWatches, startDebugging, toggleDebugBreakpoint } from "./debug";
   import {
     isDebuggable,
     listDebugConfigs,
@@ -26,7 +28,7 @@
   } from "./debugBackend";
   import { absoluteInside } from "./outputPath";
   import { debugKeyAction, KEY_LABEL } from "./debugKeys";
-  import { EMPTY_FORM, formOf, toNewConfig, type DebugForm } from "./debugForm";
+  import { EMPTY_FORM, formOf, splitArgs, toNewConfig, type DebugForm } from "./debugForm";
   import type { DebugVariable } from "./debugBackend";
 
   let {
@@ -51,6 +53,25 @@
   } = $props();
 
   const ds = debug.state;
+
+  // ---- watch expressions: kept per project, evaluated at every stop ----
+  let watchInput = $state("");
+  $effect(() => {
+    debug.setWatches(root ? loadWatches(root) : []);
+  });
+
+  function addWatch(expression: string): void {
+    debug.addWatch(expression);
+    if (root) saveWatches(root, get(ds).watches.map((w) => w.expr));
+  }
+
+  function removeWatch(index: number): void {
+    debug.removeWatch(index);
+    if (root) saveWatches(root, get(ds).watches.map((w) => w.expr));
+  }
+
+  /** The breakpoint whose condition is being edited in the list. */
+  let editingBp = $state<{ rel: string; line: number } | null>(null);
 
   let listed = $state<DebugListInfo | null>(null);
   let reviewing = $state(false);
@@ -157,13 +178,21 @@
     if (!picked || !choices.some((c) => c.value === choice && !c.disabled)) choice = first;
   });
 
+  /** Arguments typed for this run, per configuration (empty = the configuration's own). */
+  let argsByChoice = $state<Record<string, string>>({});
+  const argsPlaceholder = $derived.by(() => {
+    const own = chosen?.args ?? [];
+    return own.length > 0 ? `Arguments — ${own.join(" ")}` : "Arguments (optional)";
+  });
+
   const busy = $derived($ds.phase === "starting" || $ds.phase === "running" || $ds.phase === "stopped");
   async function start(): Promise<void> {
     if (!root || !folder || !choice) return;
     const label = choices.find((c) => c.value === choice)?.label ?? choice;
     const target = choice === "file" && fileRel ? ({ kind: "current_file", rel: fileRel } as const) : ({ kind: "named", name: choice.slice(6) } as const);
     open = {};
-    await startDebugging(root, folder, target, label, inTerminal);
+    const typed = splitArgs(argsByChoice[choice] ?? "");
+    await startDebugging(root, folder, target, label, inTerminal, typed.length > 0 ? typed : null);
   }
 
   function describe(c: DebugConfigInfo): string {
@@ -269,6 +298,16 @@
             <Icon name="bug" size="sm" /> Debug
           </button>
         </div>
+        <input
+          class="args"
+          type="text"
+          value={argsByChoice[choice] ?? ""}
+          oninput={(e) => (argsByChoice[choice] = e.currentTarget.value)}
+          placeholder={argsPlaceholder}
+          aria-label="Arguments"
+          spellcheck="false"
+          autocomplete="off"
+        />
         <label class="terminal">
           <input type="checkbox" bind:checked={inTerminal} />
           Run in a terminal <small>for a TUI or a program that reads the keyboard</small>
@@ -365,6 +404,31 @@
         {/each}
       {/if}
 
+      <h3>Watch<span class="n">{$ds.watches.length}</span></h3>
+      {#if $ds.watches.length > 0}
+        <ul class="watches">
+          {#each $ds.watches as w, i (w.expr)}
+            <li class="watch">
+              <span class="wexpr">{w.expr}</span>
+              <span class="wvalue" class:error={w.error !== null}>
+                {w.error !== null ? w.error : (w.value ?? ($ds.phase === "stopped" ? "…" : ""))}
+              </span>
+              <IconButton icon="x" label="Remove {w.expr}" size="sm" onclick={() => removeWatch(i)} />
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <form
+        class="watch-form"
+        onsubmit={(e) => {
+          e.preventDefault();
+          addWatch(watchInput);
+          watchInput = "";
+        }}
+      >
+        <input type="text" bind:value={watchInput} placeholder="Add a watch expression…" spellcheck="false" autocomplete="off" />
+      </form>
+
       <h3>
         Breakpoints<span class="n">{total}</span>
         {#if total > 0 && root}
@@ -377,11 +441,37 @@
         <ul class="bps">
           {#each files as [rel, lines] (rel)}
             {#each lines as line (line)}
-              <li class="bp">
-                <button type="button" class="bp-open" onclick={() => onOpen(rel, line)} title={rel}>
-                  <span class="dot" aria-hidden="true"></span>{leaf(rel)}:{line}
-                </button>
-                <IconButton icon="x" label="Remove" size="sm" onclick={() => root && toggleDebugBreakpoint(root, rel, line)} />
+              <li class="bp-row">
+                <div class="bp">
+                  <button type="button" class="bp-open" onclick={() => onOpen(rel, line)} title={rel}>
+                    <span class="dot" class:plain={!infoOf($breakpointInfo, root ?? "", rel, line)} aria-hidden="true"></span>{leaf(rel)}:{line}
+                  </button>
+                  <IconButton
+                    icon="pencil"
+                    label="Condition, hit count, log message"
+                    size="sm"
+                    onclick={() => (editingBp = editingBp?.rel === rel && editingBp.line === line ? null : { rel, line })}
+                  />
+                  <IconButton icon="x" label="Remove" size="sm" onclick={() => root && toggleDebugBreakpoint(root, rel, line)} />
+                </div>
+                {#if infoOf($breakpointInfo, root ?? "", rel, line)}
+                  {@const extra = infoOf($breakpointInfo, root ?? "", rel, line)}
+                  <p class="bp-extra">
+                    {#if extra?.condition}when <code>{extra.condition}</code>{/if}
+                    {#if extra?.hit}hit <code>{extra.hit}</code>{/if}
+                    {#if extra?.log}logs <code>{extra.log}</code>{/if}
+                  </p>
+                {/if}
+                {#if editingBp?.rel === rel && editingBp.line === line && root}
+                  <div class="bp-form">
+                    <BreakpointEditor
+                      info={infoOf($breakpointInfo, root, rel, line)}
+                      label="{leaf(rel)}:{line}"
+                      onSave={(info) => editDebugBreakpoint(root, rel, line, info)}
+                      onClose={() => (editingBp = null)}
+                    />
+                  </div>
+                {/if}
               </li>
             {/each}
           {/each}
@@ -722,5 +812,88 @@
   .actions {
     display: flex;
     gap: var(--ax-space-2);
+  }
+
+  .args {
+    width: 100%;
+    margin-top: var(--ax-space-2);
+    box-sizing: border-box;
+  }
+
+  .bp-row {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .bp {
+    display: flex;
+    align-items: center;
+  }
+
+  .bp .bp-open {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .dot.plain {
+    background: var(--ax-danger);
+  }
+
+  .dot:not(.plain) {
+    background: transparent;
+    box-shadow: inset 0 0 0 2px var(--ax-danger);
+  }
+
+  .bp-extra {
+    margin: 0 0 var(--ax-space-1) calc(8px * var(--ax-ui-scale) + var(--ax-space-4));
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .bp-extra code {
+    font-family: var(--ax-font-mono);
+    color: var(--ax-text);
+  }
+
+  .bp-form {
+    padding: var(--ax-space-2);
+    margin: var(--ax-space-1) 0 var(--ax-space-2);
+    background: var(--ax-surface-2);
+    border-radius: var(--ax-radius-md);
+  }
+
+  .watch {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ax-space-2);
+    padding: 2px var(--ax-space-2);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .wexpr {
+    flex: 0 0 auto;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ax-accent);
+  }
+
+  .wvalue {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wvalue.error {
+    color: var(--ax-warning);
+  }
+
+  .watch-form {
+    display: flex;
+    margin-top: var(--ax-space-1);
   }
 </style>

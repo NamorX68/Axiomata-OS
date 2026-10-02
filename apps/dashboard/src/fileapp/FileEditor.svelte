@@ -36,9 +36,10 @@
 
 <script lang="ts">
   import { get } from "svelte/store";
-  import { breakpoints, linesOf, shiftBreakpoints } from "../ide/breakpoints";
+  import BreakpointEditor from "../ide/BreakpointEditor.svelte";
+  import { breakpointInfo, breakpoints, infoOf, linesOf } from "../ide/breakpoints";
   import { isDebuggable } from "../ide/debugBackend";
-  import { execPoint, moveDebugBreakpoints, toggleDebugBreakpoint } from "../ide/debug";
+  import { editDebugBreakpoint, execPoint, moveDebugBreakpoints, toggleDebugBreakpoint } from "../ide/debug";
   import { onMount, tick as nextTick, untrack, type Snippet } from "svelte";
 
   import { invokeBackend, listenBackend, type FileChange } from "../core/backend";
@@ -199,19 +200,24 @@
     if (!debuggable || !session) return null;
     return new Set([...linesOf($breakpoints, session.root, session.rel)].map((l) => l - 1));
   });
-  // Breakpoints stay on their code while the text above them changes (and a running session hears of it).
+  // Breakpoints (and their conditions) stay on their code while the text above them changes.
   $effect(() => {
     if (!debuggable || !session) return;
     const { root, rel, doc } = session;
     let count = doc.store.lineCount();
     return doc.onTextChange((change) => {
-      const before = [...(get(breakpoints)[root]?.[rel] ?? [])];
-      const after = before.length > 0 ? shiftBreakpoints(before, change, count) : before;
+      const before = count;
       count = doc.store.lineCount();
-      if (after.length === before.length && after.every((l, i) => l === before[i])) return;
-      moveDebugBreakpoints(root, rel, after);
+      if ((get(breakpoints)[root]?.[rel] ?? []).length > 0) moveDebugBreakpoints(root, rel, change, before);
     });
   });
+  /** Breakpoints with extras (zero-based), drawn paler; a right-click on a number edits them. */
+  const conditionalLines = $derived.by(() => {
+    if (!debuggable || !session) return null;
+    const extras = $breakpointInfo[session.root]?.[session.rel] ?? {};
+    return new Set(Object.keys(extras).map((l) => Number(l) - 1));
+  });
+  let bpEdit = $state<{ line: number; x: number; y: number } | null>(null);
   const execLine = $derived($execPoint && session && $execPoint.root === session.root && $execPoint.rel === session.rel ? $execPoint.line : null);
 
   const settings = $derived({
@@ -1175,9 +1181,27 @@
             breakpoints={breakpointLines}
             {execLine}
             onToggleBreakpoint={debuggable && session ? (line) => toggleDebugBreakpoint(session!.root, session!.rel, line + 1) : undefined}
+            conditionalBreakpoints={conditionalLines}
+            onBreakpointContext={debuggable ? (line, x, y) => (bpEdit = { line: line + 1, x, y }) : undefined}
           />
         {/key}
       </div>
+      {#if bpEdit && session}
+        <!-- A breakpoint's condition, hit count and log message (right-click on a line number). -->
+        <div class="bp-backdrop" role="presentation" onmousedown={() => (bpEdit = null)}></div>
+        <div
+          class="bp-popover"
+          style:left="{Math.min(bpEdit.x, window.innerWidth - 300)}px"
+          style:top="{Math.min(bpEdit.y, window.innerHeight - 280)}px"
+        >
+          <BreakpointEditor
+            info={infoOf($breakpointInfo, session.root, session.rel, bpEdit.line)}
+            label="{session.rel.split('/').pop()}:{bpEdit.line}"
+            onSave={(info) => session && bpEdit && editDebugBreakpoint(session.root, session.rel, bpEdit.line, info)}
+            onClose={() => (bpEdit = null)}
+          />
+        </div>
+      {/if}
       <!-- Positioned in `.body`: the source pane starts at its corner, so the surface's
            pixels apply as they are. -->
       {#if renameBox}
@@ -1427,4 +1451,21 @@
   }
 
   /* Vi's mode pill (V8): one colour per mode, Normal in the accent. */
+
+  .bp-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+
+  .bp-popover {
+    position: fixed;
+    z-index: 41;
+    width: calc(280px * var(--ax-ui-scale));
+    padding: var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    box-shadow: var(--ax-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.4));
+  }
 </style>

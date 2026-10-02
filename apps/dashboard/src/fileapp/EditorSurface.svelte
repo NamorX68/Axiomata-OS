@@ -159,6 +159,10 @@
     /** Debug: the line the program is stopped at (zero-based), drawn as a band with an arrow. */
     execLine?: number | null;
     onToggleBreakpoint?: (line: number) => void;
+    /** Debug: breakpoints with a condition, hit count or log message (zero-based lines), drawn differently. */
+    conditionalBreakpoints?: ReadonlySet<number> | null;
+    /** Debug: a right-click on a line number — edit that breakpoint (`x`/`y` are window coordinates). */
+    onBreakpointContext?: (line: number, x: number, y: number) => void;
   }
 
   let {
@@ -191,6 +195,8 @@
     breakpoints = null,
     execLine = null,
     onToggleBreakpoint,
+    conditionalBreakpoints = null,
+    onBreakpointContext,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -1518,6 +1524,15 @@
     window.addEventListener("mouseup", onUp);
   }
 
+  /** A right-click on a line number edits that line's breakpoint (condition, hit count, log message). */
+  function onGutterContext(e: MouseEvent): void {
+    if (!onBreakpointContext) return;
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (e.clientX - box.left < FOLD_CELLS * charW) return;
+    e.preventDefault();
+    onBreakpointContext(posAt(e).line, e.clientX, e.clientY);
+  }
+
   /** A click in the gutter selects the whole line. */
   function onGutterMousedown(e: MouseEvent): void {
     e.preventDefault();
@@ -1657,13 +1672,19 @@
       style:height="{view.total * rowH}px"
       style:width={settings.wrap ? "100%" : `${textLeft + (view.widest + 8) * charW}px`}
     >
-      <div class="gutter" style:width="{gutterW}px" onmousedown={onGutterMousedown} role="presentation">
+      <div
+        class="gutter"
+        style:width="{gutterW}px"
+        onmousedown={onGutterMousedown}
+        oncontextmenu={onGutterContext}
+        role="presentation"
+      >
         {#each view.rows as r (r.row)}
           {#if r.sub === 0 && execLine === r.line}
             <div class="exec-arrow" style:top="{r.row * rowH}px" aria-hidden="true">▶</div>
           {/if}
           {#if r.sub === 0 && breakpoints?.has(r.line)}
-            <div class="bp-mark" style:top="{r.row * rowH}px" aria-hidden="true"></div>
+            <div class="bp-mark" class:conditional={conditionalBreakpoints?.has(r.line)} style:top="{r.row * rowH}px" aria-hidden="true"></div>
           {/if}
           {#if decorations}
             <div
@@ -2023,6 +2044,11 @@
     border-radius: calc(var(--row) / 2);
     opacity: 0.85;
     pointer-events: none;
+  }
+  /* With a condition, a hit count or a log message: the same pill, outlined and paler. */
+  .bp-mark.conditional {
+    background: color-mix(in srgb, var(--ax-danger) 35%, transparent);
+    box-shadow: inset 0 0 0 1px var(--ax-danger);
   }
   .bp-mark + .number {
     color: var(--ax-text);

@@ -8,7 +8,18 @@
  */
 import { derived, get, writable, type Readable } from "svelte/store";
 
-import { breakpoints, filesOf, linesOf, setBreakpointLines, toggleBreakpoint } from "./breakpoints";
+import { getSetting, setSetting } from "../core/persist";
+
+import {
+  applyEdit,
+  breakpointInfo,
+  breakpoints,
+  setBreakpointInfo,
+  specsOf,
+  toggleBreakpoint,
+  type BpInfo,
+  type EditSpan,
+} from "./breakpoints";
 import { createDebugController, realBackend } from "./debugSession";
 import type { DebugTarget, StackFrame } from "./debugBackend";
 import { absoluteInside } from "./outputPath";
@@ -48,6 +59,10 @@ export const debug = createDebugController(realBackend, {
   onStop: show,
   onTerminal: (title, line) => terminalHandler?.(title, line),
   onError: (message) => debugProblem.set(message),
+  isUserFrame: (frame) => {
+    const at = get(running);
+    return !!at && absoluteInside(frame.path, at.folder) !== null;
+  },
 });
 
 /** Where the selected frame stands, in the editor's terms (`line` zero-based); `null` unless stopped. */
@@ -66,20 +81,55 @@ export const execPoint: Readable<ExecPoint | null> = derived([debug.state, runni
 });
 
 /** Starts a session; the breakpoints are the ones the owner set in this project. */
-export async function startDebugging(root: string, folder: string, target: DebugTarget, name: string, terminal = false): Promise<void> {
+export async function startDebugging(
+  root: string,
+  folder: string,
+  target: DebugTarget,
+  name: string,
+  terminal = false,
+  args: string[] | null = null,
+): Promise<void> {
   debugProblem.set(null);
   running.set({ root, folder });
-  await debug.start(root, target, filesOf(get(breakpoints), root), name, terminal);
+  await debug.start(root, target, specsOf(get(breakpoints), get(breakpointInfo), root), name, terminal, args);
+}
+
+/** Tells a running session the current breakpoints of one file (lines and their extras). */
+function syncFile(root: string, rel: string): void {
+  const files = specsOf(get(breakpoints), get(breakpointInfo), root);
+  void debug.syncBreakpoints(rel, files.find((f) => f.rel === rel)?.breakpoints ?? []);
 }
 
 /** Toggles a breakpoint in the editor or the list; a running session learns of it at once. */
 export function toggleDebugBreakpoint(root: string, rel: string, line: number): void {
   toggleBreakpoint(root, rel, line);
-  void debug.syncBreakpoints(rel, [...linesOf(get(breakpoints), root, rel)].sort((a, b) => a - b));
+  syncFile(root, rel);
 }
 
-/** The editor moved a file's breakpoints along with an edit; a running session learns the new lines. */
-export function moveDebugBreakpoints(root: string, rel: string, lines: number[]): void {
-  setBreakpointLines(root, rel, lines);
-  void debug.syncBreakpoints(rel, lines);
+/** Gives a breakpoint a condition, a hit count or a log message (`null` = back to a plain breakpoint). */
+export function editDebugBreakpoint(root: string, rel: string, line: number, info: BpInfo | null): void {
+  setBreakpointInfo(root, rel, line, info);
+  syncFile(root, rel);
+}
+
+/** An edit in the editor moved lines: the breakpoints and their extras go along; a running session learns it. */
+export function moveDebugBreakpoints(root: string, rel: string, edit: EditSpan, lineCountBefore: number): void {
+  if (applyEdit(root, rel, edit, lineCountBefore) !== null) syncFile(root, rel);
+}
+
+// ---- watch expressions, kept per project ----------------------------------------------------------------
+
+
+const SETTINGS_KEY = "ide";
+
+/** The watch expressions remembered for `root`. */
+export function loadWatches(root: string): string[] {
+  const all = getSetting<{ watches?: Record<string, unknown> }>(SETTINGS_KEY)?.watches;
+  const list = all?.[root];
+  return Array.isArray(list) ? list.filter((e): e is string => typeof e === "string" && e.trim() !== "").slice(0, 50) : [];
+}
+
+export function saveWatches(root: string, expressions: string[]): void {
+  const current = getSetting<{ watches?: Record<string, string[]> }>(SETTINGS_KEY) ?? {};
+  setSetting(SETTINGS_KEY, { ...current, watches: { ...current.watches, [root]: expressions } });
 }

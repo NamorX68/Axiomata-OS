@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { filesOf, linesOf, parseBreakpoints, renamed, toggled, shiftBreakpoints } from "./breakpoints";
+import { get } from "svelte/store";
+
+import {
+  applyEdit,
+  breakpointInfo,
+  breakpoints,
+  filesOf,
+  linesOf,
+  parseBreakpoints,
+  renamed,
+  shiftBreakpoints,
+  specsOf,
+  toggled,
+  withInfo,
+} from "./breakpoints";
 
 describe("breakpoints", () => {
   it("toggles a line on and off, keeps the lines sorted, and drops empty files and roots", () => {
@@ -69,5 +83,40 @@ describe("shiftBreakpoints", () => {
 
   it("replacing the whole text keeps the breakpoints that still fit", () => {
     expect(shiftBreakpoints([2, 9], edit([0, 0], [7, 4], [4, 0]), 8)).toEqual([2]);
+  });
+});
+
+describe("conditions follow their breakpoints", () => {
+  const info = (c: string) => ({ condition: c });
+
+  it("a condition is kept, trimmed, and an empty one means a plain breakpoint", () => {
+    const set = withInfo({}, "p", "a.py", 3, { condition: "  i == 3 ", hit: "", log: " " });
+    expect(set).toEqual({ p: { "a.py": { 3: { condition: "i == 3", hit: undefined, log: undefined } } } });
+    expect(withInfo(set, "p", "a.py", 3, { condition: "" })).toEqual({});
+  });
+
+  it("the debugger is told every breakpoint with its extras", () => {
+    const specs = specsOf({ p: { "a.py": [2, 5] } }, { p: { "a.py": { 5: info("x > 1") } } }, "p");
+    expect(specs).toEqual([
+      {
+        rel: "a.py",
+        breakpoints: [
+          { line: 2, condition: null, hit_condition: null, log_message: null },
+          { line: 5, condition: "x > 1", hit_condition: null, log_message: null },
+        ],
+      },
+    ]);
+  });
+
+  it("an edit above moves the extras along; deleting the line drops them", () => {
+    breakpoints.set({ p: { "a.py": [4, 9] } });
+    breakpointInfo.set({ p: { "a.py": { 4: info("a"), 9: info("b") } } });
+    const at = (l: number, c: number) => ({ line: l, col: c });
+    // A line added at the end of line 2 (one-based): everything below moves down.
+    expect(applyEdit("p", "a.py", { start: at(1, 5), oldEnd: at(1, 5), newEnd: at(2, 0) }, 12)).toEqual([5, 10]);
+    expect(get(breakpointInfo).p["a.py"]).toEqual({ 5: info("a"), 10: info("b") });
+    // Whole line 5 removed: its breakpoint and condition go, the later one moves up.
+    expect(applyEdit("p", "a.py", { start: at(4, 0), oldEnd: at(5, 0), newEnd: at(4, 0) }, 13)).toEqual([9]);
+    expect(get(breakpointInfo).p["a.py"]).toEqual({ 9: info("b") });
   });
 });

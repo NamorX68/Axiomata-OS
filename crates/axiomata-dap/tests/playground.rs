@@ -24,7 +24,18 @@ fn every_playground_offers_what_the_readme_says() {
         "{:?}",
         names("python")
     );
-    assert_eq!(names("rust"), ["cargo: debug-demo", "cargo: tiny"]);
+    let rust = names("rust");
+    for expected in [
+        "cargo: debug-demo",
+        "cargo: tiny",
+        "cargo: boom",
+        "cargo test: debug-demo (bin)",
+    ] {
+        assert!(
+            rust.contains(&expected.to_string()),
+            "{expected} in {rust:?}"
+        );
+    }
     assert_eq!(names("cpp"), ["cmake: demo"]);
     assert_eq!(names("swift"), ["swift: demo"]);
     assert!(

@@ -1796,14 +1796,14 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "debug_start": {
       const channel = args.onEvent as { onmessage: (e: Record<string, unknown>) => void };
       debugSink = channel.onmessage;
-      const files = (args.breakpoints as { rel: string; lines: number[] }[]) ?? [];
+      const files = (args.breakpoints as { rel: string; breakpoints: { line: number }[] }[]) ?? [];
       const rel = files[0]?.rel ?? "main.py";
       if (args.terminal) debugSink({ event: "run_in_terminal", title: "Debug", line: "echo 'debugging in the terminal'" });
       globalThis.setTimeout(() => {
         debugSink?.({ event: "output", category: "stdout", text: "starting\n" });
         debugSink?.({ event: "stopped", thread_id: 1, reason: "breakpoint", text: null });
         (globalThis as { __mockDebugRel?: string }).__mockDebugRel = `/Users/dev/Development/Axiomata-OS/${rel}`;
-        (globalThis as { __mockDebugLine?: number }).__mockDebugLine = files[0]?.lines[0] ?? 1;
+        (globalThis as { __mockDebugLine?: number }).__mockDebugLine = files[0]?.breakpoints[0]?.line ?? 1;
       }, 150);
       return undefined as T;
     }
@@ -1837,7 +1837,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       debugSink?.({ event: "terminated" });
       return undefined as T;
     case "debug_set_breakpoints":
-      return (args.lines as number[]).map((line) => ({ line, verified: true, message: null })) as T;
+      return (args.breakpoints as { line: number }[]).map(({ line }) => ({ line, verified: true, message: null })) as T;
     case "tasks_list":
       return {
         tasks: [
