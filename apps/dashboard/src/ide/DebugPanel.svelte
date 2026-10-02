@@ -375,6 +375,12 @@
         </ul>
       {/if}
 
+      {#if $ds.tui}
+        <p class="problem">
+          This program draws a full-screen interface, which a console cannot show. Stop it and start again with
+          “Run in a terminal” ticked — breakpoints and stepping work the same there.
+        </p>
+      {/if}
       {#if busy || $ds.output.length > 0}
         <h3>Console</h3>
         <div class="console" bind:this={consoleEl}>

@@ -7,6 +7,7 @@
  * is tested without a Tauri window.
  */
 
+import { isFullScreen, stripAnsi } from "./ansi";
 import { writable, get, type Readable } from "svelte/store";
 
 import {
@@ -52,6 +53,8 @@ export interface DebugState {
   output: OutputLine[];
   exitCode: number | null;
   error: string | null;
+  /** The program draws a full-screen terminal interface: its output is no console text (see `ansi.ts`). */
+  tui: boolean;
 }
 
 export const IDLE: DebugState = {
@@ -65,6 +68,7 @@ export const IDLE: DebugState = {
   output: [],
   exitCode: null,
   error: null,
+  tui: false,
 };
 
 /** The most output lines kept; older ones fall off the top. */
@@ -99,8 +103,11 @@ export function reduce(state: DebugState, event: DebugEvent): DebugState {
       };
     case "continued":
       return { ...state, phase: "running", stop: null, frames: [], frameId: null, scopes: [], children: {} };
-    case "output":
-      return { ...state, output: appendOutput(state.output, event.category, event.text) };
+    case "output": {
+      if (state.tui && (event.category === "stdout" || event.category === "stderr")) return state;
+      if (isFullScreen(event.text)) return { ...state, tui: true };
+      return { ...state, output: appendOutput(state.output, event.category, stripAnsi(event.text)) };
+    }
     case "exited":
       return { ...state, exitCode: event.code };
     case "terminated":
