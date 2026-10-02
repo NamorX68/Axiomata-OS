@@ -284,7 +284,7 @@ fn a_program_asked_for_in_a_terminal_is_run_there_and_still_stops_at_its_breakpo
     let handler: axiomata_dap::TerminalHandler = std::sync::Arc::new(move |request| {
         let line = request.command_line();
         seen.lock().unwrap().push(line.clone());
-        std::process::Command::new("sh")
+        let mut child = std::process::Command::new("sh")
             .arg("-c")
             .arg(line)
             .env("PYTHONPATH", &pythonpath)
@@ -292,6 +292,9 @@ fn a_program_asked_for_in_a_terminal_is_run_there_and_still_stops_at_its_breakpo
             .stderr(std::process::Stdio::null())
             .spawn()
             .expect("the shell starts");
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     });
     let session = Session::start_with(
         &adapter(&project, &debugpy),
