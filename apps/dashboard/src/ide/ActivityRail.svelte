@@ -1,9 +1,9 @@
 <!--
   The activity rail (`docs/plans/workbench.md`): a narrow column of icons at the Studio's left edge.
-  Files and Search sit on top; below a rule come Agents and Terminal, below another Run and Git. They choose what
-  the sidebar column shows (Files, Search, Agents, Run, Git); a click on the one already shown folds the column
-  away, as in VS Code. Terminal is an action, not a view: every click opens a new terminal. "Open a file…"
-  sits at the foot. Settings and shortcuts stay on the right of the header.
+  Three kinds of things, set apart: **views of the code** (Files, Search, Git), **views for making things
+  run** (Run, Agents), and at the foot the **actions** (new terminal, open a file). The views choose what
+  the sidebar column shows; a click on the one already shown folds the column away, as in VS Code. Actions
+  never stay pressed. Settings and shortcuts stay on the right of the header.
 -->
 <script lang="ts">
   import IconButton from "../ui/IconButton.svelte";
@@ -39,6 +39,7 @@
 </script>
 
 <nav class="rail" aria-label="Views">
+  <!-- Working on the code: where it is, what is in it, what changed. -->
   <div class="group" role="tablist" aria-orientation="vertical">
     <IconButton icon="files" size="lg" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
     <IconButton
@@ -49,25 +50,6 @@
       pressed={shown("search")}
       onclick={() => onSelect("search")}
     />
-  </div>
-  <span class="rule" aria-hidden="true"></span>
-  <div class="group" role="tablist" aria-orientation="vertical">
-    <span class="slot">
-      <IconButton
-        icon="bot"
-        size="lg"
-        label={agentsRunning > 0 ? `Agents — ${agentsRunning} working` : "Agents"}
-        tab
-        pressed={shown("agents")}
-        onclick={() => onSelect("agents")}
-      />
-      {#if agentsRunning > 0}<span class="badge live" aria-hidden="true">{agentsRunning}</span>{/if}
-    </span>
-    <IconButton icon="terminal" size="lg" label="New terminal" {disabled} onclick={onTerminal} />
-  </div>
-  <span class="rule" aria-hidden="true"></span>
-  <div class="group" role="tablist" aria-orientation="vertical">
-    <IconButton icon="play" size="lg" label="Run — build, test, start" tab pressed={shown("tasks")} onclick={() => onSelect("tasks")} />
     <span class="slot">
       <IconButton
         icon="git-branch"
@@ -80,7 +62,25 @@
       {#if gitCount > 0}<span class="badge" aria-hidden="true">{gitCount > 99 ? "99+" : gitCount}</span>{/if}
     </span>
   </div>
+  <span class="rule" aria-hidden="true"></span>
+  <!-- Making things run: tasks and agents. -->
+  <div class="group" role="tablist" aria-orientation="vertical">
+    <IconButton icon="play" size="lg" label="Run — build, test, start" tab pressed={shown("tasks")} onclick={() => onSelect("tasks")} />
+    <span class="slot">
+      <IconButton
+        icon="bot"
+        size="lg"
+        label={agentsRunning > 0 ? `Agents — ${agentsRunning} working` : "Agents"}
+        tab
+        pressed={shown("agents")}
+        onclick={() => onSelect("agents")}
+      />
+      {#if agentsRunning > 0}<span class="badge live" aria-hidden="true">{agentsRunning}</span>{/if}
+    </span>
+  </div>
+  <!-- Actions, not views: they never stay pressed. -->
   <div class="foot">
+    <IconButton icon="terminal" size="lg" label="New terminal" {disabled} onclick={onTerminal} />
     <IconButton icon="folder-open" size="lg" label="Open a file… (⌘O)" onclick={onOpenFile} />
   </div>
 </nav>
@@ -106,6 +106,10 @@
 
   .foot {
     margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--ax-space-3);
   }
 
   .rule {
