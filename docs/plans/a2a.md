@@ -60,11 +60,20 @@ wo er etwas anders sagt, die älteren Aussagen.
   einsehbar. *Kosten:* ein Limit je Plan oder Tag; ist es erreicht, hält die Automatik an und fragt. *Deutung zu prüfen:* „Testfahrten" wurde als
   „Testkarten" gelesen.
 
+- **A8 — Zustellung an laufende Agenten und Schutz vor Schleifen (Owner, 2026-10-03):**
+  MCP ist Anfrage-Antwort, der Server kann einen Terminal-Agenten nicht von sich aus ansprechen. Deshalb drei Wege, in dieser Reihenfolge gebaut:
+  (1) **Selbst abfragen:** die `AGENT.md` weist den Agenten an, das Postfach (`read_inbox`) am Anfang, zwischen den Schritten und vor dem Fertigmelden
+  zu lesen — überall lauffähig, kann aber vergessen werden. (2) **Anstupsen, wenn der Agent wartet:** der Status (arbeitet / wartet auf Eingabe, CP6)
+  ist die Zustellbedingung; wartet der Agent, tippt das Studio eine kurze Zeile in sein Terminal („Neue Nachricht von @reviewer, bitte read_inbox"),
+  aber nie, während der Owner in genau diesem Pane tippt. (3) **Hinweis während der Arbeit (später):** Claude Code Hooks, Opencode Plugins (für den
+  Status schon im Einsatz) hängen bei Werkzeugaufrufen einen Hinweis an — **vor dem Bau gegen die aktuelle Dokumentation zu prüfen.**
+  *Schleifenschutz:* jede Nachricht trägt einen Zähler der Weitergaben in einer Kette; nach **6** Schritten stoppt die Kette und fragt den Owner;
+  höchstens **20** Nachrichten je Agent und Karte; auf eine reine Bestätigung ohne Inhalt wird nicht geantwortet. (Zahlen sind ein Anfang, einstellbar.)
+
 ## Offene Fragen der Runde
 
 1. ~~Rollen und Rechte / Aufgabenverteilung~~ — beantwortet durch A2–A5.
 2. ~~Bestätigung durch den Owner~~ — beantwortet durch A7.
-4. Zustellung an laufende TUI-Agenten: abfragen oder hineintippen; Schutz vor Endlosschleifen.
-5. Grenzen und Kosten: Limits pro Aufgabe.
+3. ~~Zustellung / Schleifen~~ — beantwortet durch A8. 4. Kostenlimits: wie viel, pro Plan oder Tag, wer stellt sie ein?
 6. MCP-Eintrag pro Harness (F4 im Plan `agentic-ide.md`).
 7. Eigenständiges Studio: Wo liegt das Brett, wenn das Studio eine eigene App wird?
