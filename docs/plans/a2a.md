@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **geplant, Fragenrunde abgeschlossen (2026-10-03), Bauplan wartet auf die Freigabe des Owners.** Es entsteht kein Code vor der Freigabe.
+Status: **Bauplan vom Owner freigegeben (2026-10-03). Umgesetzt wird noch nichts — Beginn mit CP-A1, an einem späteren Tag.**
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -135,4 +135,4 @@ kalibrierter Sicherheit (JEV, lokale offene Modelle — vorher prüfen, A5a); **
 2. ~~Bestätigung durch den Owner~~ — beantwortet durch A7.
 3. ~~Zustellung / Schleifen~~ — beantwortet durch A8. 4. ~~Kostenlimits~~ — beantwortet durch A9.
 6. ~~MCP-Eintrag~~ — beantwortet durch A10.
-7. ~~Eigenständiges Studio~~ — beantwortet durch A11. **Die Runde ist damit durch;** offen ist die Freigabe des Bauplans.
+7. ~~Eigenständiges Studio~~ — beantwortet durch A11. **Die Runde ist damit durch; der Bauplan ist freigegeben.**
