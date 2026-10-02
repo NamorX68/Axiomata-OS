@@ -35,6 +35,9 @@
 </script>
 
 <script lang="ts">
+  import { breakpoints, linesOf } from "../ide/breakpoints";
+  import { isDebuggable } from "../ide/debugBackend";
+  import { execPoint, toggleDebugBreakpoint } from "../ide/debug";
   import { onMount, tick as nextTick, untrack, type Snippet } from "svelte";
 
   import { invokeBackend, listenBackend, type FileChange } from "../core/backend";
@@ -188,6 +191,14 @@
   let hintTimer: ReturnType<typeof setTimeout> | null = null;
   /** The font face the surfaces draw with — switched only once it has loaded. */
   const face = editorFace();
+
+  /** Debug (#51): a Python file of a project takes breakpoints; they are kept one-based, the surface counts from zero. */
+  const debuggable = $derived(session !== null && session.root.startsWith("project:") && isDebuggable(session.rel));
+  const breakpointLines = $derived.by(() => {
+    if (!debuggable || !session) return null;
+    return new Set([...linesOf($breakpoints, session.root, session.rel)].map((l) => l - 1));
+  });
+  const execLine = $derived($execPoint && session && $execPoint.root === session.root && $execPoint.rel === session.rel ? $execPoint.line : null);
 
   const settings = $derived({
     ...surfaceSettings($editorSettings, wrap),
@@ -1147,6 +1158,9 @@
             completion={completionPort}
             signature={signaturePort}
             codeActions={codeActionPort}
+            breakpoints={breakpointLines}
+            {execLine}
+            onToggleBreakpoint={debuggable && session ? (line) => toggleDebugBreakpoint(session!.root, session!.rel, line + 1) : undefined}
           />
         {/key}
       </div>

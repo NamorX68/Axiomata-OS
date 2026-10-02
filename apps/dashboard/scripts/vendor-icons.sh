@@ -20,8 +20,11 @@ WORK="${TMPDIR:-/tmp}/axiomata-icons"
 ICONS=(
   archive
   archive-restore
+  arrow-down-to-line
+  arrow-up-from-line
   book-open
   bot
+  bug
   calendar
   check
   chevron-down
@@ -72,6 +75,7 @@ ICONS=(
   minimize-2
   panel-left
   panel-right
+  pause
   pencil
   play
   plus
@@ -83,6 +87,7 @@ ICONS=(
   settings
   sliders-horizontal
   square
+  step-forward
   terminal
   text-search
   trash-2

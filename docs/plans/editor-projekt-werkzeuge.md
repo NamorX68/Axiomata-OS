@@ -46,7 +46,7 @@ sich lohnt, und was der Grill vom 2026-09-30 entschieden hat.
 | 2 | Outline | #49 | klein–mittel | Liefert auch Breadcrumbs und bessere Sticky Scroll |
 | 3 | Git-Panel | #48 | mittel | Engine und Diff-Ansicht großenteils da |
 | 4 | Run/Tasks | #50 | mittel | Braucht ein Ausgabe-Pane und Konfiguration |
-| 5 | Debug | #51 | groß | Baut auf Run auf, braucht einen DAP-Client |
+| 5 | Debug | #51 | groß | Baut auf Run auf, braucht einen DAP-Client — **Python/debugpy gebaut (2026-10-02)**, Rust/Node folgen |
 
 ## Gegrillte Entscheidungen (2026-09-30, Q1–Q19, bestätigt)
 
@@ -274,3 +274,17 @@ Projekts, `ide/outputPath.ts`) und in Agent-Panes (innerhalb des Agent-Worktrees
 bestimmt nie selbst, wohin geöffnet wird. Neu außerdem: **Stop** (Ctrl-C an die Shell, sie bleibt) im Task-Pane.
 **Weiterhin offen:** Problem-Matcher mit Diagnosen im Editor (Frage: wann verschwinden sie? Vorschlag: beim nächsten Lauf derselben Task
 und wenn ihr Pane geschlossen wird) und die Umgebung wie `toolenv.rs`.
+
+## Debug (#51) — Stand 2026-10-02: Python zuerst (Owner: „denke die weiteren Sprachen sind dann eh einfacher")
+
+Gebaut: Crate `axiomata-dap` (Content-Length-Framing, `Client`, `Session` mit Start-Reihenfolge initialize → launch →
+`initialized` → Breakpoints → `configurationDone`; Reverse-Requests werden abgelehnt), `debug.json`
+(`.axiomata/debug.json`, Hash-Bestätigung wie bei Run) plus erkannte Konfigurationen (pytest, `__main__.py`,
+`main.py`/`app.py`/`manage.py`) und „Current file". Adapter: `.venv`-Python mit debugpy, sonst
+`uv run --with debugpy`, sonst System-Python, sonst eine Meldung. Tauri-Glue `src-tauri/src/debug.rs`
+(auf dem Linux-Rechner nicht kompilierbar — Mac-Test steht aus). Frontend: Breakpoints per Klick auf die
+Zeilennummer (rote Pille, `settings.ide.breakpoints`, folgen Umbenennungen), Debug-Ansicht in der Rail
+(Toolbar F5/F10/F11, Call Stack, Variablen, Breakpoint-Liste, Konsole mit Evaluate), Datei öffnet sich am Stopp.
+
+Offen: Breakpoints wandern nicht mit, wenn Zeilen davor eingefügt werden; Rust (`lldb-dap`) und Node als
+weitere Adapter; Watch-Ausdrücke, bedingte Breakpoints.

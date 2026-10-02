@@ -154,6 +154,11 @@
     signature?: SignaturePort | null;
     /** The language server's code actions (ED6.7); without them there is no menu and no "Fix…". */
     codeActions?: CodeActionPort | null;
+    /** Debug: the lines (zero-based) that carry a breakpoint; a click on a line number toggles one. */
+    breakpoints?: ReadonlySet<number> | null;
+    /** Debug: the line the program is stopped at (zero-based), drawn as a band with an arrow. */
+    execLine?: number | null;
+    onToggleBreakpoint?: (line: number) => void;
   }
 
   let {
@@ -183,6 +188,9 @@
     completion = null,
     signature = null,
     codeActions = null,
+    breakpoints = null,
+    execLine = null,
+    onToggleBreakpoint,
   }: Props = $props();
 
   /** Rows drawn above and below the viewport, so fast scrolling shows no gaps. */
@@ -1515,6 +1523,13 @@
     e.preventDefault();
     e.stopPropagation();
     input.focus();
+    if (onToggleBreakpoint && !e.shiftKey) {
+      const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      if (e.clientX - box.left >= FOLD_CELLS * charW) {
+        onToggleBreakpoint(posAt(e).line);
+        return;
+      }
+    }
     const r = lineRange(posAt(e));
     doc.setSelection(e.shiftKey ? { anchor: doc.selection.anchor, head: r.end } : { anchor: r.start, head: r.end });
     changed();
@@ -1644,6 +1659,12 @@
     >
       <div class="gutter" style:width="{gutterW}px" onmousedown={onGutterMousedown} role="presentation">
         {#each view.rows as r (r.row)}
+          {#if r.sub === 0 && execLine === r.line}
+            <div class="exec-arrow" style:top="{r.row * rowH}px" aria-hidden="true">▶</div>
+          {/if}
+          {#if r.sub === 0 && breakpoints?.has(r.line)}
+            <div class="bp-mark" style:top="{r.row * rowH}px" aria-hidden="true"></div>
+          {/if}
           {#if decorations}
             <div
               class="number decorated ln-{r.deco.kind ?? 'none'} {r.slide ?? ''}"
@@ -1695,6 +1716,11 @@
             style:left="{m.from * charW}px"
             style:width="{(m.to - m.from) * charW}px"
           ></div>
+        {/each}
+        {#each view.rows as r (r.row)}
+          {#if r.sub === 0 && execLine === r.line}
+            <div class="exec-line" style:top="{r.row * rowH}px"></div>
+          {/if}
         {/each}
         {#if fx.currentLine}
           <div
@@ -1985,6 +2011,41 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
     user-select: none;
+  }
+
+  /* Debug: a breakpoint is a red pill behind the line number; the stopped line is a band. */
+  .bp-mark {
+    position: absolute;
+    left: calc(var(--fold-cells) * var(--cell));
+    right: calc(var(--cell) / 2);
+    height: var(--row);
+    background: var(--ax-danger);
+    border-radius: calc(var(--row) / 2);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  .bp-mark + .number {
+    color: var(--ax-text);
+    opacity: 1;
+  }
+  .exec-arrow {
+    position: absolute;
+    left: 0;
+    width: calc(var(--fold-cells) * var(--cell));
+    height: var(--row);
+    line-height: var(--row);
+    text-align: center;
+    font-size: 0.7em;
+    color: var(--ax-warning);
+    pointer-events: none;
+  }
+  .exec-line {
+    position: absolute;
+    left: calc(-1 * var(--cell));
+    right: 0;
+    height: var(--row);
+    background: color-mix(in srgb, var(--ax-warning) 22%, transparent);
+    pointer-events: none;
   }
 
   .number.current {

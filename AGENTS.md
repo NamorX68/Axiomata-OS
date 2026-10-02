@@ -43,8 +43,10 @@ new/open/close (#47, one `projects` table for everything), **Run/Tasks (#50)** (
 `tasks.json` in the project or `~/.axiomata`, project file runs only after a hash confirmation; task panes are terminals
 whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/tasks.rs`).
 
-**Next / open:** the owner's Mac test of the Studio and of Run/Tasks (the Tauri glue in `src-tauri` is not
-compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, problem matchers); Debug (#51);
+**Debug (#51)** exists for Python (crate `axiomata-dap`, `ide/DebugPanel.svelte`, gutter breakpoints; `debug.json` runs only after a hash confirmation, like Run); Rust/Node adapters follow.
+
+**Next / open:** the owner's Mac test of the Studio, of Run/Tasks and of Debug (the Tauri glue in `src-tauri` is not
+compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, problem matchers);
 **agent-to-agent communication (M7.5, A2A over an own MCP server)** — to be planned carefully, it is central to
 the Studio; ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.

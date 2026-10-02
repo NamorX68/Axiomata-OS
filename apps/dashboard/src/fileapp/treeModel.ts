@@ -97,8 +97,8 @@ export function expandedAfterDelete(expanded: readonly string[], root: string, r
 }
 
 /** What the sidebar column shows; the activity rail chooses (`ide/ActivityRail.svelte`). */
-export type SidebarView = "files" | "search" | "git" | "agents" | "tasks";
-const VIEWS: readonly SidebarView[] = ["files", "search", "git", "agents", "tasks"];
+export type SidebarView = "files" | "search" | "git" | "agents" | "tasks" | "debug";
+const VIEWS: readonly SidebarView[] = ["files", "search", "git", "agents", "tasks", "debug"];
 
 export interface TreePrefs {
   /** Which view the sidebar column shows. */

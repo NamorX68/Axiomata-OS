@@ -933,6 +933,9 @@ let gitAhead = 1;
 let gitIsRepo = true;
 const gitBranches = new Set(['main', 'feature/ui']);
 let tasksTrusted = false;
+let debugTrusted = false;
+/** The mock debugger: stopped on the first breakpoint it was given (or line 1 of the first file). */
+let debugSink: ((event: Record<string, unknown>) => void) | null = null;
 let gitBranch = 'main';
 const gitIndex = new Map<string, string>();
 otherRootFiles.set("project:1\0notes.txt", "Remember the milk.\nCall the bank.\n");
@@ -1775,6 +1778,62 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       otherRootFiles.set(`${GIT_ROOT}\0${path}`, [...work.slice(0, first), ...old, ...work.slice(last)].join("\n") + "\n");
       return undefined as T;
     }
+    case "debug_configs":
+      return {
+        configs: [
+          { name: "pytest", language: "python", program: null, module: "pytest", args: [], cwd: null, env: [], just_my_code: true, detected: true },
+          { name: "Server", language: "python", program: "app.py", module: null, args: ["--port", "8000"], cwd: null, env: [], just_my_code: true, detected: false },
+        ],
+        project_file: { hash: "cd34", trusted: debugTrusted },
+        problems: [],
+      } as T;
+    case "debug_trust":
+      debugTrusted = true;
+      return undefined as T;
+    case "debug_start": {
+      const channel = args.onEvent as { onmessage: (e: Record<string, unknown>) => void };
+      debugSink = channel.onmessage;
+      const files = (args.breakpoints as { rel: string; lines: number[] }[]) ?? [];
+      const rel = files[0]?.rel ?? "main.py";
+      globalThis.setTimeout(() => {
+        debugSink?.({ event: "output", category: "stdout", text: "starting\n" });
+        debugSink?.({ event: "stopped", thread_id: 1, reason: "breakpoint", text: null });
+        (globalThis as { __mockDebugRel?: string }).__mockDebugRel = `/Users/dev/Development/Axiomata-OS/${rel}`;
+        (globalThis as { __mockDebugLine?: number }).__mockDebugLine = files[0]?.lines[0] ?? 1;
+      }, 150);
+      return undefined as T;
+    }
+    case "debug_stack": {
+      const g = globalThis as { __mockDebugRel?: string; __mockDebugLine?: number };
+      return [
+        { id: 1, name: "main", path: g.__mockDebugRel ?? null, line: g.__mockDebugLine ?? 1, column: 1 },
+        { id: 2, name: "<module>", path: g.__mockDebugRel ?? null, line: 40, column: 1 },
+      ] as T;
+    }
+    case "debug_scopes":
+      return [{ name: "Locals", variables_reference: 10, expensive: false }, { name: "Globals", variables_reference: 11, expensive: true }] as T;
+    case "debug_variables":
+      return (args.variablesReference === 12
+        ? [{ name: "0", value: "'a'", type_name: "str", variables_reference: 0 }]
+        : [
+            { name: "count", value: "3", type_name: "int", variables_reference: 0 },
+            { name: "items", value: "['a', 'b']", type_name: "list", variables_reference: 12 },
+          ]) as T;
+    case "debug_evaluate":
+      return { name: "", value: `${String(args.expression)} = 42`, type_name: "int", variables_reference: 0 } as T;
+    case "debug_control":
+      if (args.action === "continue") {
+        globalThis.setTimeout(() => {
+          debugSink?.({ event: "exited", code: 0 });
+          debugSink?.({ event: "terminated" });
+        }, 100);
+      }
+      return undefined as T;
+    case "debug_stop":
+      debugSink?.({ event: "terminated" });
+      return undefined as T;
+    case "debug_set_breakpoints":
+      return (args.lines as number[]).map((line) => ({ line, verified: true, message: null })) as T;
     case "tasks_list":
       return {
         tasks: [
