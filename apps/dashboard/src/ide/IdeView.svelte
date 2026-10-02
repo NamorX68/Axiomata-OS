@@ -142,7 +142,6 @@
   const activeOutline = $derived(front ? (outlines[`${front.root}\0${front.rel}`] ?? null) : null);
   /** The symbols holding the front file's cursor — the breadcrumbs (#49), from the same data as the outline. */
   const crumbs = $derived(activeOutline?.symbols ? pathAt(activeOutline.symbols, activeOutline.line) : []);
-  const rootLabel = (id: string): string => roots.find((r) => r.id === id)?.label ?? id;
   let gitCount = $state(0);
   const statuses = agentStatus.statuses;
   /** The agents with a pane open in either layout (a hidden mode's pane still runs). */
@@ -656,11 +655,7 @@
         <button type="button" class:on={mode === "editor"} disabled={!current} onclick={() => switchTo("editor")}>Editor</button>
         <button type="button" class:on={mode === "agents"} disabled={!current} onclick={() => switchTo("agents")}>Agents</button>
       </div>
-      {#if front}
-        <span class="path" title={front.rel}>
-          <!-- The project is named in the sidebar; only other places (the workspace, a granted folder) say where. -->
-          {#if !front.root.startsWith("project:")}<span class="root">{rootLabel(front.root)}</span> / {/if}{front.rel}
-        </span>
+      {#if front && crumbs.length > 0}
         {#each crumbs as crumb (crumb.line + "\0" + crumb.name)}
           <button type="button" class="crumb" onclick={() => jumpToSymbol(crumb.nameLine)}>
             <span aria-hidden="true">›</span> {crumb.name}
@@ -860,18 +855,6 @@
     align-items: baseline;
     gap: var(--ax-space-3);
     min-width: 0;
-  }
-
-  .path {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-sm);
-  }
-
-  .path .root {
-    color: var(--ax-text);
   }
 
   .crumb {

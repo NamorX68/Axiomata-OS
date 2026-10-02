@@ -87,8 +87,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--ax-space-3);
-    padding: var(--ax-space-3) var(--ax-space-2);
+    gap: var(--ax-space-4);
+    padding: var(--ax-space-4) var(--ax-space-2);
     border-right: 1px solid var(--ax-border);
     background: var(--ax-surface-1);
   }
@@ -97,7 +97,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--ax-space-1);
+    gap: var(--ax-space-3);
   }
 
   .foot {
