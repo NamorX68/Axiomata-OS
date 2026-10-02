@@ -311,3 +311,10 @@ Offen: Tests debuggen (`cargo test --no-run`), Panic-Breakpoint, Node/TypeScript
 einzelne `.c`/`.cpp`-Datei mit `cc -g -O0`. `debug.json`: `{"type":"cpp","program":"build/app"}` (schon gebautes Programm) oder
 `{"type":"swift","program":"<product>"}`. Getestet mit echtem `lldb-dap`, `cc` und `cmake` (Einzeldatei, CMake, Compilerfehler);
 Swift nur die Erkennung (kein Swift auf der Linux-Box).
+
+### Node/TypeScript — geparkt (Owner, 2026-10-02)
+
+Nicht gebaut. Wenn es wieder aufgenommen wird: js-debug (`dapDebugServer.js`) spricht DAP über TCP (nicht stdio) und öffnet für jeden Node-Prozess
+eine Unter-Sitzung (`startDebugging` → neue Verbindung, `attach`); der Client braucht TCP-Transport und mehrere Sitzungen unter einer
+`Session`. Beschaffung: entweder die Kopie in einer vorhandenen VS-Code-/Cursor-Installation nutzen oder ein Release mit festem SHA-256
+laden (nur nach ausdrücklicher Zustimmung im Panel). Auf der Linux-Box nicht abrufbar, also nicht testbar.

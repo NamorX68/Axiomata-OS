@@ -43,7 +43,7 @@ new/open/close (#47, one `projects` table for everything), **Run/Tasks (#50)** (
 `tasks.json` in the project or `~/.axiomata`, project file runs only after a hash confirmation; task panes are terminals
 whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/tasks.rs`).
 
-**Debug (#51)** exists for Python (crate `axiomata-dap`, `ide/DebugPanel.svelte`, gutter breakpoints; `debug.json` runs only after a hash confirmation, like Run); Rust/Node adapters follow.
+**Debug (#51)** exists for Python (debugpy), Rust, C/C++ and Swift (`lldb-dap`) — crate `axiomata-dap`, `ide/DebugPanel.svelte`, gutter breakpoints; `debug.json` runs only after a hash confirmation, like Run. **Node/TypeScript is parked** (owner, 2026-10-02): js-debug needs TCP + child sessions and cannot be fetched/tested on the dev box (`docs/plans/editor-projekt-werkzeuge.md`).
 
 **Next / open:** the owner's Mac test of the Studio, of Run/Tasks and of Debug (the Tauri glue in `src-tauri` is not
 compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, problem matchers);
