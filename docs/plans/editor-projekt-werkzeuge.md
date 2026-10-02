@@ -303,3 +303,11 @@ die gemeldete Executable unter `lldb-dap` (PATH, Homebrew-LLVM, `xcrun -f lldb-d
 (`lldb_lookup.py`) werden geladen, wenn vorhanden. `debug.json`: `{"type":"rust","program":"<bin>","package":"<pkg>"}`.
 Getestet gegen ein echtes `lldb-dap` + `cargo` (`tests/lldb.rs`: Build, Breakpoint, Locals, Step; fehlerhafter Build).
 Offen: Tests debuggen (`cargo test --no-run`), Panic-Breakpoint, Node/TypeScript (js-debug).
+
+### C, C++ und Swift (2026-10-02)
+
+`axiomata-dap/src/native.rs`, derselbe Adapter `lldb-dap` wie bei Rust. Erkannt werden CMake-Targets (`add_executable`, gebaut in
+`~/.axiomata/debug-build/<id>/cmake`, nicht im Repository) und Swift-Pakete (`swift build --product`); „Current file“ übersetzt eine
+einzelne `.c`/`.cpp`-Datei mit `cc -g -O0`. `debug.json`: `{"type":"cpp","program":"build/app"}` (schon gebautes Programm) oder
+`{"type":"swift","program":"<product>"}`. Getestet mit echtem `lldb-dap`, `cc` und `cmake` (Einzeldatei, CMake, Compilerfehler);
+Swift nur die Erkennung (kein Swift auf der Linux-Box).

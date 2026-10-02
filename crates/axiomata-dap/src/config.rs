@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 pub enum Language {
     Python,
     Rust,
+    /// C and C++ (and Objective-C), under lldb-dap.
+    Cpp,
+    Swift,
 }
 
 /// Where the project keeps its own configurations, relative to the project folder.
@@ -37,6 +40,8 @@ pub struct DebugConfig {
     pub code: Option<String>,
     /// Rust: the cargo package the binary `program` belongs to (`cargo build -p`). Detected only.
     pub package: Option<String>,
+    /// C/C++: a single source file to compile and run (“Current file”). Detected only.
+    pub source: Option<String>,
     pub args: Vec<String>,
     /// A folder inside the project; `None` = the project folder.
     pub cwd: Option<String>,
@@ -184,6 +189,73 @@ fn build_rust(name: String, entry: Entry) -> Result<DebugConfig, String> {
         module: None,
         code: None,
         package: package.map(str::to_string),
+        source: None,
+        args: entry.args,
+        cwd: cwd.map(str::to_string),
+        env: entry.env.into_iter().collect(),
+        just_my_code: entry.just_my_code.unwrap_or(true),
+        detected: false,
+    })
+}
+
+/// A `"type": "cpp"` entry names a program already built inside the project (`"program": "build/app"`); a
+/// `"type": "swift"` entry names an executable product of the package.
+fn build_native(name: String, language: Language, entry: Entry) -> Result<DebugConfig, String> {
+    let program = entry.program.as_deref().map(str::trim).unwrap_or_default();
+    let ok = match language {
+        Language::Swift => crate::rust::is_target_name(program),
+        _ => !program.is_empty() && inside(program),
+    };
+    if !ok {
+        return Err(match language {
+            Language::Swift => {
+                format!("“{name}” needs a “program”: the name of an executable product")
+            }
+            _ => format!(
+                "“{name}” needs a “program”: a built executable inside the project (no absolute path, no ..)"
+            ),
+        });
+    }
+    if entry.module.is_some() || entry.package.is_some() {
+        return Err(format!("“{name}”: this type has no “module” or “package”"));
+    }
+    let cwd = entry
+        .cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && *c != ".");
+    if let Some(c) = cwd
+        && !inside(c)
+    {
+        return Err(format!(
+            "“{name}”: the folder must lie inside the project (no absolute path, no ..)"
+        ));
+    }
+    let valid_env = entry.env.keys().all(|k| {
+        let mut chars = k.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    });
+    if !valid_env {
+        return Err(format!(
+            "“{name}”: an environment variable has a name it cannot have"
+        ));
+    }
+    if entry.args.iter().any(|a| a.contains('\0')) || entry.env.values().any(|v| v.contains('\0')) {
+        return Err(format!(
+            "“{name}”: arguments and values must not contain a NUL"
+        ));
+    }
+    Ok(DebugConfig {
+        name,
+        language,
+        program: Some(program.to_string()),
+        module: None,
+        code: None,
+        package: None,
+        source: None,
         args: entry.args,
         cwd: cwd.map(str::to_string),
         env: entry.env.into_iter().collect(),
@@ -204,14 +276,19 @@ fn build(mut entry: Entry) -> Result<DebugConfig, String> {
     let language = match entry.kind.as_deref() {
         Some("python") | None => Language::Python,
         Some("rust") => Language::Rust,
+        Some("cpp" | "c" | "c++") => Language::Cpp,
+        Some("swift") => Language::Swift,
         Some(other) => {
             return Err(format!(
-                "“{name}”: the type “{other}” is not supported yet (python and rust are)"
+                "“{name}”: the type “{other}” is not supported yet (python, rust, cpp and swift are)"
             ));
         }
     };
     if language == Language::Rust {
         return build_rust(name, entry);
+    }
+    if language != Language::Python {
+        return build_native(name, language, entry);
     }
     let program = entry
         .program
@@ -275,6 +352,7 @@ fn build(mut entry: Entry) -> Result<DebugConfig, String> {
     Ok(DebugConfig {
         code: None,
         package: None,
+        source: None,
         name,
         language,
         program,
@@ -414,6 +492,7 @@ fn detected(name: &str, program: Option<&str>, module: Option<&str>) -> DebugCon
         module: module.map(str::to_string),
         code: None,
         package: None,
+        source: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),
@@ -434,7 +513,9 @@ pub fn detect(project: &Path) -> Vec<DebugConfig> {
         || has("manage.py");
     let mut out = Vec::new();
     if !is_python {
-        return crate::rust::detect(project);
+        out.extend(crate::rust::detect(project));
+        out.extend(crate::native::detect(project));
+        return out;
     }
     // The console scripts the project declares are how it starts: `ocht = "ocht.cli:main"`.
     let manifest: Option<toml::Table> = pyproject.parse().ok();
@@ -500,6 +581,7 @@ pub fn detect(project: &Path) -> Vec<DebugConfig> {
         }
     }
     out.extend(crate::rust::detect(project));
+    out.extend(crate::native::detect(project));
     out
 }
 

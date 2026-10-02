@@ -15,7 +15,7 @@ use std::time::Duration;
 use axiomata_core::paths::axiomata_home;
 use axiomata_dap::config::{self, DebugConfig, Language, PROJECT_FILE};
 use axiomata_dap::python::{adapter_command, current_file_config, launch_arguments};
-use axiomata_dap::rust;
+use axiomata_dap::{native, rust};
 use axiomata_dap::{Control, DapError, DebugEvent, PythonEnv, Session, TerminalHandler};
 use axiomata_tasks::trust::{self, TrustStore};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,12 @@ use crate::files::{FileError, blocking, project_folder};
 
 fn trust_file() -> PathBuf {
     axiomata_home().join("debug-trust.json")
+}
+
+/// Where builds for `project` go: outside the repository, one folder per project (`~/.axiomata/debug-build/<id>`).
+fn build_root(project: &Path) -> PathBuf {
+    let id = trust::hash(project.to_string_lossy().as_bytes());
+    axiomata_home().join("debug-build").join(&id[..16.min(id.len())])
 }
 
 /// The one running session.
@@ -250,7 +256,16 @@ pub async fn debug_start(
             let config = match target {
                 Target::CurrentFile { rel } => {
                     inside(&project, &rel)?;
-                    if rel.ends_with(".rs") {
+                    if native::compiler_for(&rel).is_some() {
+                        native::single_file_config(&rel).expect("a C or C++ file")
+                    } else if rel.ends_with(".swift") {
+                        native::swift_config_for_file(&project, &rel).ok_or_else(|| {
+                            FileError::new(
+                                "NotRunnable",
+                                format!("“{rel}” is not inside an executable target — pick a “swift: …” configuration."),
+                            )
+                        })?
+                    } else if rel.ends_with(".rs") {
                         // A Rust file runs as the cargo binary whose `main` it is.
                         rust::config_for_file(&project, &rel).ok_or_else(|| {
                             FileError::new(
@@ -298,6 +313,16 @@ pub async fn debug_start(
                     let executable = rust::build(&project, &config).map_err(|why| FileError::new("BuildFailed", why))?;
                     (adapter, "lldb-dap", rust::launch_arguments(&config, &executable, &project, &rust::init_commands()))
                 }
+                Language::Cpp | Language::Swift => {
+                    let adapter = rust::adapter_command(&project).map_err(|why| FileError::new("NoAdapter", why))?;
+                    let _ = for_build.send(DebugEvent::Output {
+                        category: "console".into(),
+                        text: "Building…\n".into(),
+                    });
+                    let executable = native::build(&project, &build_root(&project), &config)
+                        .map_err(|why| FileError::new("BuildFailed", why))?;
+                    (adapter, "lldb-dap", rust::launch_arguments(&config, &executable, &project, &[]))
+                }
             };
             // “In the terminal”: the adapter asks for the program to be run with `runInTerminal`, and the
             // Studio types that line into a terminal pane (a program with a TUI or `input()` needs one).
@@ -309,7 +334,7 @@ pub async fn debug_start(
                         // The program writes to the terminal pane itself; the console would only echo a second copy.
                         launch["redirectOutput"] = false.into();
                     }
-                    Language::Rust => launch["runInTerminal"] = true.into(),
+                    Language::Rust | Language::Cpp | Language::Swift => launch["runInTerminal"] = true.into(),
                 }
                 let handler: TerminalHandler = Arc::new(move |request| {
                     let _ = for_terminal.send(DebugEvent::RunInTerminal { title: request.title.clone(), line: request.command_line() });

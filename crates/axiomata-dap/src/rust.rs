@@ -149,6 +149,7 @@ fn config_of(bin: &RustBin) -> DebugConfig {
         module: None,
         code: None,
         package: Some(bin.package.clone()),
+        source: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),

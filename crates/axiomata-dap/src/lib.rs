@@ -14,6 +14,7 @@
 pub mod client;
 pub mod config;
 pub mod frame;
+pub mod native;
 pub mod python;
 pub mod rust;
 pub mod session;
