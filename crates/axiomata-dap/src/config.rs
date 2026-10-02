@@ -32,6 +32,8 @@ pub struct DebugConfig {
     pub program: Option<String>,
     /// A module to run (`python -m <module>`); `pytest` debugs the tests.
     pub module: Option<String>,
+    /// Python code to run (`python -c`): how a console script's `pkg.mod:func` is started. Detected only.
+    pub code: Option<String>,
     pub args: Vec<String>,
     /// A folder inside the project; `None` = the project folder.
     pub cwd: Option<String>,
@@ -193,6 +195,7 @@ fn build(entry: Entry) -> Result<DebugConfig, String> {
         ));
     }
     Ok(DebugConfig {
+        code: None,
         name,
         language,
         program,
@@ -211,6 +214,7 @@ fn detected(name: &str, program: Option<&str>, module: Option<&str>) -> DebugCon
         language: Language::Python,
         program: program.map(str::to_string),
         module: module.map(str::to_string),
+        code: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),
@@ -233,6 +237,43 @@ pub fn detect(project: &Path) -> Vec<DebugConfig> {
         return Vec::new();
     }
     let mut out = Vec::new();
+    // The console scripts the project declares are how it starts: `ocht = "ocht.cli:main"`.
+    let manifest: Option<toml::Table> = pyproject.parse().ok();
+    let mut scripts: Vec<(String, String)> = Vec::new();
+    for path in [["project", "scripts"], ["tool", "poetry"]] {
+        let mut node = manifest.as_ref().map(|m| toml::Value::Table(m.clone()));
+        for key in path {
+            node = node.and_then(|n| n.get(key).cloned());
+        }
+        if path[1] == "poetry" {
+            node = node.and_then(|n| n.get("scripts").cloned());
+        }
+        if let Some(table) = node.as_ref().and_then(|n| n.as_table()) {
+            scripts.extend(
+                table
+                    .iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))),
+            );
+        }
+    }
+    for (name, target) in scripts.into_iter().take(5) {
+        let Some((module, func)) = target.split_once(':') else {
+            continue;
+        };
+        let ident = |s: &str| {
+            !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        };
+        if !ident(module) || !ident(func) {
+            continue;
+        }
+        let mut config = detected(&name, None, None);
+        config.code = Some(format!(
+            "import sys; sys.argv[0] = {name:?}; import {module}; sys.exit({module}.{func}())"
+        ));
+        out.push(config);
+    }
     if has("pytest.ini") || pyproject.contains("pytest") || project.join("tests").is_dir() {
         out.push(detected("pytest", None, Some("pytest")));
     }

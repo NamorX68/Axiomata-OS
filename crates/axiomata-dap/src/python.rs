@@ -128,10 +128,11 @@ pub fn launch_arguments(config: &DebugConfig, project: &Path, env: &PythonEnv) -
         "console": "internalConsole",
         "redirectOutput": true,
     });
-    match (&config.program, &config.module) {
-        (Some(program), _) => launch["program"] = json!(project.join(program)),
-        (None, Some(module)) => launch["module"] = json!(module),
-        (None, None) => {}
+    match (&config.program, &config.module, &config.code) {
+        (Some(program), _, _) => launch["program"] = json!(project.join(program)),
+        (None, Some(module), _) => launch["module"] = json!(module),
+        (None, None, Some(code)) => launch["code"] = json!(code),
+        (None, None, None) => {}
     }
     // Run the program with the project's own Python when it has one; `uv run` already provides it.
     if let (Some(python), true) = (&env.venv_python, env.venv_has_debugpy) {
@@ -147,6 +148,7 @@ pub fn current_file_config(rel: &str) -> DebugConfig {
         language: Language::Python,
         program: Some(rel.to_string()),
         module: None,
+        code: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),

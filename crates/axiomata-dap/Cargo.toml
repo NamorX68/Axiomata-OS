@@ -6,6 +6,7 @@ license.workspace = true
 description = "Debug Adapter Protocol client of the Studio (docs/plans/editor-projekt-werkzeuge.md, #51): wire framing, a client that talks to an adapter process, a debug session (launch, breakpoints, stepping, stack, variables, evaluate), debug.json, and how a Python program is launched under debugpy. Pure — no Tauri, no database, no macOS-only code; tested against a real debugpy where one is installed."
 
 [dependencies]
+toml.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -233,3 +233,34 @@ fn which_uv() -> Option<PathBuf> {
             .find(|c| c.is_file())
     })
 }
+
+#[test]
+fn a_console_script_entry_point_stops_at_a_breakpoint_inside_the_function_it_calls() {
+    let Some(debugpy) = debugpy_dir() else {
+        eprintln!("skipped: AXIOMATA_TEST_DEBUGPY_PATH not set");
+        return;
+    };
+    let project = project_with("def main():\n    value = 41 + 1\n    return 0\n");
+    std::fs::write(
+        project.join("pyproject.toml"),
+        "[project.scripts]\napp = \"prog:main\"\n",
+    )
+    .unwrap();
+    let config = axiomata_dap::config::detect(&project)
+        .into_iter()
+        .find(|c| c.name == "app")
+        .expect("the console script is offered");
+    let launch = launch_arguments(&config, &project, &PythonEnv::default());
+    let script = project.join("prog.py").to_string_lossy().into_owned();
+    let session = Session::start(
+        &adapter(&project, &debugpy),
+        "python",
+        launch,
+        &[(script, vec![2])],
+    )
+    .expect("start");
+    let (reason, thread) = next_stop(&session);
+    assert_eq!(reason, "breakpoint");
+    assert_eq!(session.stack_trace(thread).unwrap()[0].name, "main");
+    session.end();
+}

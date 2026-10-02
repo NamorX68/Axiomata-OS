@@ -83,8 +83,10 @@
   const locked = (c: DebugConfigInfo) => !c.detected && !listed?.project_file?.trusted;
   const choices = $derived.by(() => {
     const out: { value: string; label: string; disabled: boolean }[] = [];
-    if (fileRel) out.push({ value: "file", label: `Current file — ${fileRel}`, disabled: false });
+    // The project's own ways to start come first (an app is debugged from its entry point, not from
+    // whichever file is open); the file in front is the fallback.
     for (const c of listed?.configs ?? []) out.push({ value: `named:${c.name}`, label: c.name, disabled: locked(c) });
+    if (fileRel) out.push({ value: "file", label: `Current file — ${fileRel}`, disabled: false });
     return out;
   });
   // Keep the choice on something that exists.
