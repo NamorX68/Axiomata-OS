@@ -41,7 +41,7 @@
 <nav class="rail" aria-label="Views">
   <!-- Working on the code: where it is, what is in it, what changed. -->
   <div class="group" role="tablist" aria-orientation="vertical">
-    <IconButton icon="files" size="lg" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
+    <IconButton icon="folder-tree" size="lg" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
     <IconButton
       icon="search"
       size="lg"
