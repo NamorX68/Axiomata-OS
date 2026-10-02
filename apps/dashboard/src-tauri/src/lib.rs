@@ -135,6 +135,8 @@ pub fn run() {
             tasks::tasks_save,
             tasks::tasks_remove,
             debug::debug_configs,
+            debug::debug_save,
+            debug::debug_remove,
             debug::debug_trust,
             debug::debug_start,
             debug::debug_stop,

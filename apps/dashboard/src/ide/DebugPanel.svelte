@@ -15,7 +15,16 @@
   import IconButton from "../ui/IconButton.svelte";
   import { breakpoints, clearBreakpoints } from "./breakpoints";
   import { debug, debugProblem, startDebugging, toggleDebugBreakpoint } from "./debug";
-  import { isDebuggable, listDebugConfigs, trustDebugFile, type DebugConfigInfo, type DebugListInfo } from "./debugBackend";
+  import {
+    isDebuggable,
+    listDebugConfigs,
+    removeDebugConfig,
+    saveDebugConfig,
+    trustDebugFile,
+    type DebugConfigInfo,
+    type DebugListInfo,
+  } from "./debugBackend";
+  import { EMPTY_FORM, formOf, toNewConfig, type DebugForm } from "./debugForm";
   import type { DebugVariable } from "./debugBackend";
 
   let {
@@ -77,6 +86,51 @@
     }
     await refresh();
   }
+
+  // ---- a configuration of your own, kept in the project's .axiomata/debug.json ----
+
+  /** `null` = closed, `""` = a new one, else the name of the one being edited. */
+  let editing = $state<string | null>(null);
+  let form = $state<DebugForm>({ ...EMPTY_FORM });
+  let saving = $state(false);
+
+  function startNew(): void {
+    editing = "";
+    form = { ...EMPTY_FORM, target: fileRel ?? "" };
+  }
+
+  function startEdit(c: DebugConfigInfo): void {
+    editing = c.name;
+    form = formOf(c);
+  }
+
+  async function submit(): Promise<void> {
+    if (!root || editing === null || saving) return;
+    saving = true;
+    try {
+      const saved = toNewConfig(form);
+      await saveDebugConfig(root, saved, editing === "" ? null : editing);
+      editing = null;
+      await refresh();
+      choice = `named:${saved.name}`;
+    } catch (err) {
+      onError((err as { message?: string }).message ?? String(err));
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function remove(c: DebugConfigInfo): Promise<void> {
+    if (!root || !window.confirm(`Remove “${c.name}” from the project's debug.json?`)) return;
+    try {
+      await removeDebugConfig(root, c.name);
+      await refresh();
+    } catch (err) {
+      onError((err as { message?: string }).message ?? String(err));
+    }
+  }
+
+  const chosen = $derived(choice.startsWith("named:") ? listed?.configs.find((c) => c.name === choice.slice(6)) : undefined);
 
   const fileRel = $derived(currentFile && currentFile.root === root && isDebuggable(currentFile.rel) ? currentFile.rel : null);
   const projectConfigs = $derived(listed?.configs.filter((c) => !c.detected) ?? []);
@@ -207,10 +261,41 @@
             <Icon name="bug" size="sm" /> Debug
           </button>
         </div>
-        {#if choices.length === 0}
-          <p class="note">
-            Nothing to debug found. Open a Python file, or describe a program in <code>.axiomata/debug.json</code>.
-          </p>
+        {#if chosen && !chosen.detected && !locked(chosen)}
+          <span class="own">
+            <IconButton icon="pencil" label="Edit {chosen.name}" size="sm" onclick={() => startEdit(chosen)} />
+            <IconButton icon="trash-2" label="Remove {chosen.name}" size="sm" onclick={() => void remove(chosen)} />
+          </span>
+        {/if}
+        {#if choices.length === 0 && editing === null}
+          <p class="note">Nothing to debug found. Say what to start with “New configuration…”.</p>
+        {/if}
+        {#if editing === null}
+          <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> New configuration…</button>
+        {:else}
+          <form
+            class="config"
+            onsubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <p class="form-title">{editing === "" ? "New configuration" : "Edit configuration"}</p>
+            <input type="text" bind:value={form.name} placeholder="Name, e.g. OChaT app" spellcheck="false" />
+            <input
+              type="text"
+              bind:value={form.target}
+              placeholder="File or module, e.g. src/ocht/main.py or ocht.cli"
+              spellcheck="false"
+            />
+            <input type="text" bind:value={form.args} placeholder="Arguments (optional)" spellcheck="false" />
+            <input type="text" bind:value={form.cwd} placeholder="Folder inside the project (optional)" spellcheck="false" />
+            <p class="hint">Kept in <code>.axiomata/debug.json</code> of this project.</p>
+            <div class="actions">
+              <button type="submit" class="ax-btn primary" disabled={saving || !form.name.trim() || !form.target.trim()}>Save</button>
+              <button type="button" class="ax-btn" onclick={() => (editing = null)}>Cancel</button>
+            </div>
+          </form>
         {/if}
         {#each listed?.problems ?? [] as problem (problem)}<p class="problem">{problem}</p>{/each}
       {:else}
@@ -524,6 +609,44 @@
   form {
     display: flex;
     margin-top: var(--ax-space-2);
+  }
+
+  form.config {
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    padding-top: var(--ax-space-3);
+    border-top: 1px solid var(--ax-border);
+  }
+
+  .form-title,
+  .hint {
+    margin: 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .own {
+    display: flex;
+    gap: var(--ax-space-1);
+    margin-top: var(--ax-space-1);
+  }
+
+  .add {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    margin-top: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: none;
+    border: none;
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+
+  .add:hover {
+    color: var(--ax-text);
   }
 
   .note,

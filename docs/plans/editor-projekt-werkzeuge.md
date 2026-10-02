@@ -286,5 +286,7 @@ Gebaut: Crate `axiomata-dap` (Content-Length-Framing, `Client`, `Session` mit St
 Zeilennummer (rote Pille, `settings.ide.breakpoints`, folgen Umbenennungen), Debug-Ansicht in der Rail
 (Toolbar F5/F10/F11, Call Stack, Variablen, Breakpoint-Liste, Konsole mit Evaluate), Datei öffnet sich am Stopp.
 
-Offen: Breakpoints wandern nicht mit, wenn Zeilen davor eingefügt werden; Rust (`lldb-dap`) und Node als
+Eigene Konfigurationen werden im Panel angelegt (Formular „New configuration…“, schreibt `.axiomata/debug.json`, ohne dass man eine Datei anfassen muss).
+
+Offen: Terminal-Pane für TUI-Programme (`runInTerminal`); Breakpoints wandern nicht mit, wenn Zeilen davor eingefügt werden; Rust (`lldb-dap`) und Node als
 weitere Adapter; Watch-Ausdrücke, bedingte Breakpoints.

@@ -6,6 +6,7 @@
 import { Channel } from "@tauri-apps/api/core";
 
 import { insideTauri, invokeBackend as invoke } from "../core/backend";
+import type { NewDebugConfig } from "./debugForm";
 
 export interface DebugConfigInfo {
   name: string;
@@ -98,3 +99,9 @@ export const debugSetBreakpoints = (rel: string, lines: number[]): Promise<Break
 export function isDebuggable(rel: string): boolean {
   return rel.toLowerCase().endsWith(".py");
 }
+
+/** Saves a configuration of your own into the project's `debug.json` (`replace` = the name being edited). */
+export const saveDebugConfig = (root: string, config: NewDebugConfig, replace: string | null): Promise<void> =>
+  invoke<void>("debug_save", { root, config, replace });
+
+export const removeDebugConfig = (root: string, name: string): Promise<void> => invoke<void>("debug_remove", { root, name });

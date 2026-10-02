@@ -208,6 +208,125 @@ fn build(entry: Entry) -> Result<DebugConfig, String> {
     })
 }
 
+/// A configuration as the panel's form hands it in; checked by the same rules as a hand-written entry.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct NewConfig {
+    pub name: String,
+    #[serde(default)]
+    pub program: Option<String>,
+    #[serde(default)]
+    pub module: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+}
+
+fn load_root(existing: Option<&[u8]>) -> Result<serde_json::Value, String> {
+    match existing {
+        None => Ok(serde_json::json!({ "configurations": [] })),
+        Some(bytes) if bytes.len() > MAX_FILE_BYTES => {
+            Err("The file is too large to edit here.".into())
+        }
+        Some(bytes) => serde_json::from_slice(bytes)
+            .map_err(|err| format!("The file is not valid JSON, so it is left alone: {err}")),
+    }
+}
+
+fn list_of(root: &mut serde_json::Value) -> Result<&mut Vec<serde_json::Value>, String> {
+    root.as_object_mut()
+        .ok_or("The file is not of the form {\"configurations\": […]}.")?
+        .entry("configurations")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .ok_or_else(|| "\"configurations\" in the file is not a list.".to_string())
+}
+
+fn name_of(value: &serde_json::Value) -> Option<&str> {
+    value.get("name").and_then(|n| n.as_str()).map(str::trim)
+}
+
+fn render(root: &serde_json::Value) -> Result<Vec<u8>, String> {
+    let mut out = serde_json::to_vec_pretty(root).map_err(|e| e.to_string())?;
+    out.push(b'\n');
+    Ok(out)
+}
+
+/// `existing` (the file's bytes, `None` = no file yet) with `new` added, or put in the place of the
+/// configuration called `replace`. Works on the JSON itself so whatever else a hand-edited file holds stays;
+/// a file that is not valid JSON is refused rather than overwritten.
+pub fn upsert_config(
+    existing: Option<&[u8]>,
+    new: &NewConfig,
+    replace: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let name = new.name.trim();
+    let mut value = serde_json::json!({ "name": name, "type": "python" });
+    let map = value.as_object_mut().expect("an object");
+    for (key, text) in [
+        ("program", &new.program),
+        ("module", &new.module),
+        ("cwd", &new.cwd),
+    ] {
+        if let Some(t) = text
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && !(key == "cwd" && *t == "."))
+        {
+            map.insert(key.into(), t.into());
+        }
+    }
+    if !new.args.is_empty() {
+        map.insert("args".into(), serde_json::json!(new.args));
+    }
+    // The same checks a hand-written entry gets.
+    let probe = parse_debug_file(&render(
+        &serde_json::json!({ "configurations": [value.clone()] }),
+    )?);
+    if let Some(problem) = probe.problems.first() {
+        return Err(problem.clone());
+    }
+    let mut root = load_root(existing)?;
+    let list = list_of(&mut root)?;
+    let at = replace.and_then(|r| list.iter().position(|c| name_of(c) == Some(r)));
+    if list
+        .iter()
+        .enumerate()
+        .any(|(i, c)| name_of(c) == Some(name) && Some(i) != at)
+    {
+        return Err(format!("There is already a configuration called “{name}”."));
+    }
+    match at {
+        Some(i) => list[i] = value,
+        None => list.push(value),
+    }
+    render(&root)
+}
+
+/// `existing` without the configuration called `name`.
+pub fn remove_config(existing: &[u8], name: &str) -> Result<Vec<u8>, String> {
+    let mut root = load_root(Some(existing))?;
+    list_of(&mut root)?.retain(|c| name_of(c) != Some(name));
+    render(&root)
+}
+
+/// Writes the project's `debug.json` (creating `.axiomata/`), atomically; refuses to write through a
+/// symbolic link — a cloned repository could make `.axiomata` or the file one and point it elsewhere.
+pub fn write_project_file(project: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let target = project.join(PROJECT_FILE);
+    let dir = target.parent().expect("the file lies in a folder");
+    let is_link = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    if is_link(dir) || is_link(&target) {
+        return Err(std::io::Error::other(format!(
+            "{PROJECT_FILE} is a symbolic link — not written"
+        )));
+    }
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join("debug.json.tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, &target)
+}
+
 fn detected(name: &str, program: Option<&str>, module: Option<&str>) -> DebugConfig {
     DebugConfig {
         name: name.to_string(),
@@ -385,6 +504,48 @@ mod tests {
         let names: Vec<_> = detect(&dir).into_iter().map(|c| c.name).collect();
         assert_eq!(names, ["pytest", "ocht", "main.py"]);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_configuration_from_the_form_is_added_replaced_and_removed_keeping_the_rest() {
+        let new = |name: &str, module: &str| NewConfig {
+            name: name.into(),
+            program: None,
+            module: Some(module.into()),
+            args: vec!["--dev".into()],
+            cwd: None,
+        };
+        let first = upsert_config(None, &new("App", "ocht"), None).unwrap();
+        let parsed = parse_debug_file(&first);
+        assert_eq!(parsed.configurations[0].module.as_deref(), Some("ocht"));
+        // A hand-written extra key survives an edit.
+        let mut with_extra: serde_json::Value = serde_json::from_slice(&first).unwrap();
+        with_extra["note"] = "mine".into();
+        let bytes = serde_json::to_vec(&with_extra).unwrap();
+        let second = upsert_config(Some(&bytes), &new("App 2", "other"), None).unwrap();
+        assert!(String::from_utf8_lossy(&second).contains("\"note\""));
+        assert_eq!(parse_debug_file(&second).configurations.len(), 2);
+        // The same name twice is refused; a rename replaces in place.
+        assert!(upsert_config(Some(&second), &new("App", "x"), None).is_err());
+        let renamed = upsert_config(Some(&second), &new("Main", "ocht"), Some("App")).unwrap();
+        let names: Vec<_> = parse_debug_file(&renamed)
+            .configurations
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names, ["Main", "App 2"]);
+        let removed = remove_config(&renamed, "Main").unwrap();
+        assert_eq!(parse_debug_file(&removed).configurations.len(), 1);
+        // Nothing to run is refused, and so is a file that is not JSON.
+        let empty = NewConfig {
+            name: "x".into(),
+            program: None,
+            module: None,
+            args: vec![],
+            cwd: None,
+        };
+        assert!(upsert_config(None, &empty, None).is_err());
+        assert!(upsert_config(Some(b"not json"), &new("A", "m"), None).is_err());
     }
 
     #[test]

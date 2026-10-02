@@ -1787,6 +1787,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         project_file: { hash: "cd34", trusted: debugTrusted },
         problems: [],
       } as T;
+    case "debug_save":
+    case "debug_remove":
+      return undefined as T;
     case "debug_trust":
       debugTrusted = true;
       return undefined as T;

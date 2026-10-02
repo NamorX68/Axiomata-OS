@@ -158,6 +158,56 @@ pub async fn debug_trust(state: State<'_, CoreState>, root: String, hash: String
     .await
 }
 
+/// Changes the project's `debug.json` with `change` (given the current bytes, `None` if there is no file yet).
+///
+/// As for `tasks.json`: a file the owner had **not** confirmed is rewritten but stays unconfirmed — it may hold
+/// somebody else's configurations, and saving one of the owner's own must not quietly approve the rest. A file
+/// that was confirmed (or did not exist) stays confirmed for the new content: the owner just wrote that change.
+fn edit_file(
+    project: PathBuf,
+    change: impl FnOnce(Option<&[u8]>) -> Result<Vec<u8>, String>,
+) -> Result<(), FileError> {
+    let write_error = |err: &dyn std::fmt::Display| FileError::new("Io", format!("could not save the configuration: {err}"));
+    let existing = match std::fs::read(project.join(PROJECT_FILE)) {
+        Ok(bytes) => Some(bytes),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(write_error(&err)),
+    };
+    let new = change(existing.as_deref()).map_err(|msg| FileError::new("Invalid", msg))?;
+    let mut store = TrustStore::load(&trust_file());
+    let was_confirmed = existing.as_ref().is_none_or(|bytes| store.is_trusted(&project, &trust::hash(bytes)));
+    config::write_project_file(&project, &new).map_err(|e| write_error(&e))?;
+    if was_confirmed {
+        store.trust(&project, &trust::hash(&new)).map_err(|e| write_error(&e))?;
+    }
+    Ok(())
+}
+
+/// Adds a configuration the owner typed into the panel, or replaces the one called `replace`.
+#[tauri::command]
+pub async fn debug_save(
+    state: State<'_, CoreState>,
+    root: String,
+    config: config::NewConfig,
+    replace: Option<String>,
+) -> Result<(), FileError> {
+    let project = folder_of(&state, root).await?;
+    off_main(move || edit_file(project, |existing| config::upsert_config(existing, &config, replace.as_deref()))).await
+}
+
+/// Removes the configuration called `name` from the project's `debug.json`.
+#[tauri::command]
+pub async fn debug_remove(state: State<'_, CoreState>, root: String, name: String) -> Result<(), FileError> {
+    let project = folder_of(&state, root).await?;
+    off_main(move || {
+        edit_file(project, |existing| match existing {
+            Some(bytes) => config::remove_config(bytes, &name),
+            None => Err("There is no debug.json.".to_string()),
+        })
+    })
+    .await
+}
+
 /// A file's breakpoints as the editor keeps them.
 #[derive(Debug, Deserialize)]
 pub struct FileBreakpoints {
