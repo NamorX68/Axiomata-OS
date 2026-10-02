@@ -71,10 +71,10 @@ describe("open", () => {
     expect(order).toEqual(["flush", "open"]);
   });
 
-  it("returns a starting layout for a project that has none: its Files pane and a terminal (W16)", async () => {
+  it("returns a starting layout for a project that has none: a terminal; the files are in the shared sidebar", async () => {
     api.openProject.mockResolvedValue(project(1));
     const layout = await session.open(1);
-    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["files", "terminal"]);
+    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["terminal"]);
     expect(get(session.session).current?.id).toBe(1);
   });
 
@@ -98,7 +98,7 @@ describe("open", () => {
     api.openProject.mockResolvedValue(project(1, { layout_json: "{ this is not a layout" }));
     const layout = await session.open(1);
 
-    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["files", "terminal"]);
+    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["terminal"]);
     expect(toasted).toHaveBeenCalledWith(expect.stringContaining("could not be read"), "warning");
   });
 
@@ -274,5 +274,80 @@ describe("save", () => {
     await session.open(4);
     session.save(layout);
     expect(api.saveLayoutSoon).toHaveBeenCalledWith(4, expect.stringContaining('"version"'));
+  });
+});
+
+describe("close", () => {
+  it("leaves the open project and keeps it in the list", async () => {
+    session.resetSessionForTests();
+    await session.close();
+    expect(get(session.session).current).toBeNull();
+  });
+});
+
+describe("modes", () => {
+  it("switching parks the shown layout and saves both under one row", async () => {
+    api.openProject.mockResolvedValue(project(1));
+    const agents = (await session.open(1))!;
+    expect(get(session.session).mode).toBe("agents");
+
+    const editor = session.switchMode(agents);
+    expect(allTabs(editor)).toEqual([]);
+    expect(get(session.session).mode).toBe("editor");
+    expect(allTabs(get(session.session).parked).map((t) => t.kind)).toEqual(["terminal"]);
+
+    session.save(editor);
+    const written = JSON.parse(api.saveLayoutSoon.mock.calls[api.saveLayoutSoon.mock.calls.length - 1][1] as string);
+    expect(written.mode).toBe("editor");
+    expect(Object.keys(written.layouts)).toEqual(["editor", "agents"]);
+
+    // And back: the parked terminal is the very layout that was parked.
+    expect(session.switchMode(editor)).toBe(agents);
+  });
+
+  it("opens in the mode the project was left in", async () => {
+    const stored = JSON.stringify({
+      mode: "editor",
+      layouts: {
+        editor: { root: { type: "tabs", id: "e", active: null, tabs: [] } },
+        agents: { root: { type: "tabs", id: "a", active: "t", tabs: [{ id: "t", kind: "terminal", title: "T" }] } },
+      },
+    });
+    api.openProject.mockResolvedValue(project(1, { layout_json: stored }));
+    const layout = await session.open(1);
+    expect(allTabs(layout!)).toEqual([]);
+    expect(get(session.session).mode).toBe("editor");
+    expect(allTabs(get(session.session).parked)).toHaveLength(1);
+  });
+});
+
+describe("withoutFilesPanes", () => {
+  it("drops the Files pane an old layout started with, keeping the rest", () => {
+    const layout = singleGroupLayout([
+      { id: "f", kind: "files", title: "Files" },
+      { id: "t", kind: "terminal", title: "Terminal" },
+    ]);
+    expect(allTabs(session.withoutFilesPanes(layout)).map((t) => t.id)).toEqual(["t"]);
+  });
+
+  it("drops task panes too: a stored layout must not run a task again", () => {
+    const layout = singleGroupLayout([
+      { id: "k", kind: "task", title: "cargo test", config: { taskId: "detected:cargo-test" } },
+      { id: "t", kind: "terminal", title: "Terminal" },
+    ]);
+    expect(allTabs(session.withoutFilesPanes(layout)).map((t) => t.id)).toEqual(["t"]);
+  });
+
+  it("is applied to both layouts of a project on open", async () => {
+    const tab = (id: string, kind: string) => ({ id, kind, title: id });
+    const group = (id: string, tabs: ReturnType<typeof tab>[]) => ({ root: { type: "tabs", id, active: tabs[0].id, tabs } });
+    const stored = JSON.stringify({
+      mode: "agents",
+      layouts: { editor: group("e", [tab("f1", "files")]), agents: group("a", [tab("f2", "files"), tab("t", "terminal")]) },
+    });
+    api.openProject.mockResolvedValue(project(1, { layout_json: stored }));
+    const layout = await session.open(1);
+    expect(allTabs(layout!).map((t) => t.id)).toEqual(["t"]);
+    expect(allTabs(get(session.session).parked)).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@
 <script lang="ts">
   import { get } from "svelte/store";
 
+  import Icon from "../ui/Icon.svelte";
   import { getModule, makeContext } from "../core/registry";
   import { bringToFront, canvasSize, guides, instances, removeInstance, snapEdges, updateInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
@@ -205,19 +206,10 @@
             type="button"
             class="tile-btn"
             title="Settings"
-            aria-label="Flip to settings"
+            aria-label="Settings"
             onclick={flip}
           >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                d="M2.5 8a5.5 5.5 0 019.4-3.9M13.5 8a5.5 5.5 0 01-9.4 3.9M11.5 1.5v3h-3M4.5 14.5v-3h3"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
+            <Icon name="settings" size="sm" />
           </button>
         {/if}
         <button
@@ -454,7 +446,7 @@
     color: var(--ax-text);
     background: var(--ax-surface-3);
   }
-  .tile-btn svg {
+  .tile-btn :global(svg) {
     width: calc(14px * var(--ax-ui-scale));
     height: calc(14px * var(--ax-ui-scale));
   }

@@ -1,0 +1,13 @@
+[package]
+name = "axiomata-tasks"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Run/Tasks of the Studio (docs/plans/editor-projekt-werkzeuge.md, #50): which tasks a project offers (detected from Cargo.toml, package.json, pyproject; written in tasks.json), the owner's confirmation of a project file by content hash, and the shell line a task runs as. Pure — no Tauri, no database, no macOS-only code."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true

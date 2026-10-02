@@ -8,7 +8,9 @@ version = "0.1.0"
 dependencies = [
  "axiomata-core",
  "axiomata-files",
+ "axiomata-git",
  "axiomata-macos",
+ "axiomata-tasks",
  "axiomata-terminal",
  "home",
  "rusqlite",
@@ -397,9 +399,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiomata-git"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "axiomata-ide"
 version = "0.1.0"
 dependencies = [
+ "axiomata-git",
  "chrono",
  "rusqlite",
  "serde",
@@ -425,6 +436,17 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "axiomata-tasks"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "toml 0.8.2",
 ]
 
 [[package]]

@@ -121,6 +121,17 @@ pub enum IdeError {
 }
 
 /// Convenience alias used throughout the crate.
+impl From<axiomata_git::GitError> for IdeError {
+    fn from(err: axiomata_git::GitError) -> Self {
+        match err {
+            axiomata_git::GitError::Git { command, reason } => IdeError::Git { command, reason },
+            axiomata_git::GitError::Invalid { field, reason } => {
+                IdeError::Invalid { field, reason }
+            }
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, IdeError>;
 
 /// Applies every schema this crate ships, in order — the one place a test

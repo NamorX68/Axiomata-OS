@@ -35,7 +35,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, tick as nextTick, type Snippet } from "svelte";
+  import { onMount, tick as nextTick, untrack, type Snippet } from "svelte";
 
   import { invokeBackend, listenBackend, type FileChange } from "../core/backend";
   import { messageOf } from "../core/errors";
@@ -44,6 +44,8 @@
   import type { Indent } from "../editor/detect";
   import type { Effect } from "../editor/keymap";
   import type { SyntaxHighlighter } from "../editor/syntax/highlighter";
+  import { symbolsOf, type OutlineInfo } from "./outlineModel";
+  import type { OutlineSymbol } from "../editor/syntax/outline";
   import { fileBackend, type FileRemoved, type Formatted, type FileRenamed } from "./backend";
   import { markDirty } from "./dirtyFiles";
   import { foldKey, rememberedFolds, rememberFolds, updateRememberedFolds } from "./foldMemory";
@@ -117,6 +119,8 @@
      * goes to the first place.
      */
     onShowLocations?: (list: LocationList) => void;
+    /** The outline view and breadcrumbs (#49): the file's symbols and the cursor's line, while this editor is on screen. */
+    onOutline?: (info: OutlineInfo) => void;
   }
 
   let {
@@ -129,6 +133,7 @@
     compact = false,
     onOpenFile,
     onShowLocations,
+    onOutline,
   }: Props = $props();
 
   /** Quiet time after the last change before unsaved text is kept aside (F8). */
@@ -208,6 +213,48 @@
   const status = $derived.by(() => {
     void sessionTick;
     return session ? statusParts(session.doc, settings.tabSize) : null;
+  });
+
+  // ------------------------------------------------------------ outline (#49)
+
+  /** Quiet time after the last change before the symbols are worked out again. */
+  const OUTLINE_DELAY_MS = 250;
+  let outlineCache: { session: FileSession; revision: number; tree: unknown; symbols: OutlineSymbol[] | null } | null =
+    null;
+  let outlineTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => {
+    void sessionTick;
+    const s = session;
+    const hl = highlighter;
+    if (!onOutline || !s || !visible) return;
+    const line = s.doc.selection.head.line;
+    untrack(() => {
+      const revision = s.doc.revision;
+      const tree = hl?.syntaxTree?.() ?? null;
+      const c = outlineCache;
+      const fresh = c && c.session === s && c.revision === revision && c.tree === tree;
+      const now = () => {
+        outlineCache = {
+          session: s,
+          revision: s.doc.revision,
+          tree: hl?.syntaxTree?.() ?? null,
+          symbols: s.light ? null : symbolsOf(s.doc.store, s.fileName, hl?.syntaxTree?.() ?? null),
+        };
+        onOutline({ symbols: outlineCache.symbols, line: s.doc.selection.head.line });
+      };
+      clearTimeout(outlineTimer);
+      if (fresh) {
+        onOutline({ symbols: c.symbols, line });
+      } else if (!c || c.session !== s) {
+        now();
+      } else {
+        // The cursor moves at once; the symbols catch up a moment after the last change.
+        onOutline({ symbols: c.symbols, line });
+        outlineTimer = setTimeout(now, OUTLINE_DELAY_MS);
+      }
+    });
+    return () => clearTimeout(outlineTimer);
   });
 
   /** This editor's own id, for the shared list of files with unsaved changes. */

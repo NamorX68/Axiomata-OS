@@ -15,90 +15,39 @@ reason once already; see its own maintenance note.
 
 Axiomata-OS is an early-stage Rust + Tauri desktop app: a personal "Agentic OS" command
 centre / second brain, built around the **ARMS framework** (Applications, Routines, Memory,
-Skills — see `ARMS-Agentic-OS-Guide.pdf`, though the actual design has since diverged from it
-in several places; `docs/architecture.md` §1 explains how).
+Skills — see `ARMS-Agentic-OS-Guide.pdf`, though the design has since diverged from it;
+`docs/architecture.md` §1 explains how). The long milestone-by-milestone history lives in
+`docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"; each feature has a
+plan in `docs/plans/`. Read those before substantial new work, and **update them** (not just this
+file) when a milestone or major feature lands.
 
-Milestones **M0–M3, M5, M6** are complete (scaffold, skills runner, memory router, routines
-scheduler w/ full CRUD, the Svelte module-canvas dashboard, the particle-graph Second Brain),
-plus ongoing post-M6 feature work (ToDo, Calendar/Reminders/Mail connector modules, themes,
-the `srcdoc` HTML viewer, the Terminal module). **M4 (always-on/background scheduling) was
-dropped outright** (owner, 2026-09-20 — the app being open, or tiles refreshing on open, is
-enough); do not plan around it. Full detail: `docs/architecture.md` §5 (what exists) and §7
-(milestone history). Detailed step-by-step milestone plans live outside this repo, in the
-owner's local Claude Code planning notes — read them before starting new M0–M6-scale work if
-available.
+**Done:** M0–M3, M5, M6 (scaffold, skills runner, memory router, routines, the module-canvas
+dashboard, the Second Brain graph) and post-M6 work (ToDo, Calendar/Reminders/Mail connectors, themes,
+the `srcdoc` HTML viewer, Terminal module). **M4 (always-on scheduling) was dropped** (owner, 2026-09-20) —
+do not plan around it. M7.0–M7.3 (Kanban, IDE shell, agent panes with worktrees/status/plan, git layer),
+the editor ED0–ED6 (own TS engine in `src/editor/`, `axiomata-files`, tree-sitter, Vi, LSP) and Opencode 2
+(`docs/plans/opencode2.md`) are complete.
 
-**M7 — the agentic IDE is under way** (`docs/plans/agentic-ide.md`): M7.1 is complete (the
-`axiomata-ide` crate with projects, the dock-layout model, the full-screen IDE view, and
-per-project layouts), and M7.2 is under way: agent profiles (CP4), a git worktree plus reserved port per agent
-(CP5, the repo's first git integration — `git` as a subprocess, not `git2`), and a live status plus Plan tab
-per agent (CP6/CP6b, `docs/plans/agent-lifecycle.md` — a file channel under `~/.axiomata/agent-events/`, no DB
-column; nothing is ever written into a worktree). M7.2 is done; **M7.3 (git layer, `docs/plans/git-layer.md`)** is
-under way: CP7's git engine (diff against the recorded base branch, discard, commit, take-over into the project
-folder — squash by default, never a push), CP8's Diffs tab (drawn on the editor, H1–H16) and CP9 (file and
-agent-diff dock panes, discard per file/hunk, commit, take-over dialogs) are built — M7.3 is complete. The plan below
-describes the whole chain: an own full-screen IDE
-view with a dock/split/tab layout, foreign agent harnesses (Claude Code, Opencode) hosted as
-PTY tiles, A2A over an own MCP server rather than screen-scraping, one git worktree per
-agent, a "Plan" tab per agent showing what it is working on, and an own mini-harness —
-designed from the start to be extractable into a standalone app the way `axiomata-terminal`
-is. Seven milestones (M7.0–M7.6), and **M7.0 is a standalone Kanban module that deliberately
-ships before the IDE** — it is useful on its own and is the data layer the agents' task
-board later sits on. The eight load-bearing decisions are settled in §3 of that plan.
-**Under way:** the file app / own AAA editor (`docs/plans/editor.md`, decisions D1–D19 —
-TS engine + `axiomata-files` crate, tree-sitter WASM, Vi mode, LSP, one App-Ring icon each for Editor and
-IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on it). **ED0 (file service,
-E1–E12) and ED1 (editor core, F1–F13) are done**: `axiomata-files`, root ids + dialog grants, `file_*`
-commands, the watcher, the ring's "Ansicht öffnen" entries; the TS engine in `src/editor/` and the file
-app in `src/fileapp/` (full-screen view, recovery, settings); **ED2** (tree-sitter highlighting, themes,
-effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor are done, and so is **ED3 (Vi, V1–V12)**: the machine in
-`src/editor/vi/` (the `:` line lives inside it — `vi/cmdmode.ts`), wired to every surface, the Mac pasteboard
-via `axiomata-macos::clipboard`, tree-sitter text objects (`editor/syntax/objects.ts`), and
-`~/.axiomata/editor-vi.json` for registers, file marks and histories. **ED4 (single point of truth, W1–W17)**: ED4.1 replaced the Document tile/viewer (`md-file`) with the panel-only file panel
-(`fileapp/FilePanel.svelte` around `FileEditor`, opened via `core/staging.ts` `openFilePanel`), and the agent
-opens files for the owner through the shell action `openFile` (`core/registry.ts`, instance id `shell`).
-ED4.2–ED4.6 are done too — **ED4 is complete**: the Second Brain shows files through `FilePeek`, tabs in the file
-app (`fileapp/tabs.ts`; `src-tauri/src/menu.rs` drops the menu's ⌘W "Close Window"), the file tree on
-`axiomata-files::dir` (renames and deletes are broadcast as `files:renamed`/`files:removed`), ⌘P quick open
-(`axiomata-files::index`), and the IDE's Files pane (`ide/panes/FilesPane.svelte`, ⌘P over the project). **ED5
-(tools, T1–T19)** is under way: ED5.1 put documents on an immutable rope (`editor/rope.ts`; `LineStore` stays as the
-tests' reference) and made files up to 16 MiB editable, over 2 MiB in a "light mode" (`FileSession.light`, no
-tree-sitter). ED5.2: every search pattern is first run by a worker with a 1 s limit (`editor/search/guard.ts`
-`SearchGuard`, a verdict per rope version; Vi's key queue pauses on `SearchPending` like on the clipboard), plus Vi's
-`:g`/`:v`/`:d`/`:normal`, `:s///c`, `gn`/`cgn`. ED5.3: multiple cursors in normal mode (`editor/multicursor.ts`:
-a command runs at each cursor as one undo step; `EditorDocument.extra` + `extraGoals`). ED5.4: the find bar
-(`fileapp/FindBar.svelte`, logic in `editor/search/findModel.ts`; the bar and Vi share the last search via
-`fileapp/findShared.ts`). ED5.5: folding (`editor/fold/`: `ranges.ts` where the text folds, `FoldState` what is
-folded; folded lines have no rows in `VisualLayout`; kept per file in `settings.editor.folds`,
-`fileapp/foldMemory.ts`). ED5.6: sticky scroll (`editor/sticky.ts`) and the minimap (`editor/minimap.ts`,
-`fileapp/Minimap.svelte`), off in the floating panel (`FileEditor` `compact`). ED5.7: the project search
-(`axiomata-files::search`, Tauri `file_search` over an `ipc::Channel`, `fileapp/ProjectSearch.svelte` in the file
-app's Files | Search column and the IDE's `search` pane, ⇧⌘F). ED5.8: installed Mac fonts
-(`axiomata-macos::fonts`, CoreText through raw `unsafe extern` FFI; `core/installedFonts.ts`). ED5.9: moving in the
-tree by dragging (`FileTree.svelte`, pointer events, `treeModel.moveTarget`) — **ED5 is complete**. **Opencode 2
-(`docs/plans/opencode2.md`, OC1–OC4) is done**: Axiomata is a client of Opencode 2's shared background service
-(crate `axiomata-opencode`) — skills and chat run as sessions on it, IDE Opencode agents start on a session the IDE
-keeps (`opencode --session <id>`), and their status comes from the service's event stream. **ED6 (LSP) is under way**
-(`docs/plans/editor.md` "ED6 im Detail", L0–L11): L0 refuses `$HOME` and above as a project root; ED6.1 runs language
-servers from Rust (`axiomata-files::lsp` — which program, only from a built-in table or `~/.axiomata/lsp.json`; only
-the methods the client speaks pass) with the protocol in `src/editor/lsp/`, and shows diagnostics; ED6.2 adds hover
-and go-to-definition (a definition outside every root opens read-only on the root `lsp:<handle>`, readable only for
-files the server named); ED6.3 adds implementation, type definition and uses (a list in the project search's
-results); ED6.4 completion (a menu while typing, as blink.cmp in the owner's Neovim); ED6.5 formatting (own
-formatter table in `axiomata-files::format`, after the owner's conform.nvim) and rename; ED6.6 signature help;
-ED6.7 code actions (L18–L24: `workspace/executeCommand` only as an echo of a command the server offered in a
-`textDocument/codeAction` answer, checked in Rust; `workspace/applyEdit` only while our command runs) —
-**ED6 is complete** — and the owner's live test of ED6 was accepted on 2026-09-29, as were the ED5
-live test and the ED2 colour sign-off. Nothing in ED0–ED6 is open.
-Next in the editor: **ED7** (extraction into a standalone app, the engine already imports nothing
-from the app — D1). Beyond that the editor has two follow-on plans of their own:
-[`editor-look.md`](docs/plans/editor-look.md) (LK0–LK5, complete — the modern look becoming the
-app's standard) and [`editor-projekt-werkzeuge.md`](docs/plans/editor-projekt-werkzeuge.md)
-(project roots in the tree, outline, git panel, run/tasks, debug/DAP — grilled 2026-09-30, Q1–Q27;
-**#47 is built as project new/open/close — one `projects` registry for editor and IDE, the folder from the native dialog (`project_open`/`project_new`), the tree shows the open project only; the rest stays parked**). `docs/plans/editor.md` lists both under „Fortschreibungen".
-Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
-(`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
-OpenRouter setup is considered good enough).
+**The Studio** (`docs/plans/workbench.md`) is the one full-screen workbench that replaced the separate
+Editor and IDE views (owner, 2026-10-02): `ide/IdeView.svelte` with an **activity rail**
+(`ide/ActivityRail.svelte`: Files, Search, Git | Run, Agents | foot: Terminal, Open file) choosing what the
+sidebar column shows (`fileapp/ProjectSidebar.svelte`; `settings.ide.tree.view`; Agents = `ide/AgentsPanel.svelte`,
+Run = `ide/TasksPanel.svelte`), a dock of panes (`ide/DockNode.svelte`, `ide/dockDrag.svelte.ts`), and an
+**Editor | Agents switch**: two dock layouts per project in one `layout_json` (`ide/modes.ts`); the hidden
+mode's panes stay mounted, so agents keep running. One ring entry (`shell:studio`, type id `view:ide`; the old
+`view:editor` is migrated on load, `core/ringTypes.ts`); `shell:ide`/`shell:editor` open it in the Agents/Editor
+mode (`ide/modeRequest.ts`). Internal names (`ide/`, `IdeView`, `axiomata-ide`) stay until the extraction.
+Project tools: git panel (#48, crate `axiomata-git` — the only place that runs `git`; Push/Commit & Push publish
+only the checked-out branch, never forced; the agent layer never pushes), outline + breadcrumbs (#49), projects
+new/open/close (#47, one `projects` table for everything), **Run/Tasks (#50)** (crate `axiomata-tasks`: detected tasks,
+`tasks.json` in the project or `~/.axiomata`, project file runs only after a hash confirmation; task panes are terminals
+whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/tasks.rs`).
+
+**Next / open:** the owner's Mac test of the Studio and of Run/Tasks (the Tauri glue in `src-tauri` is not
+compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, problem matchers); Debug (#51);
+**agent-to-agent communication (M7.5, A2A over an own MCP server)** — to be planned carefully, it is central to
+the Studio; ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
+owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
 
 ## Commands
 
@@ -111,58 +60,16 @@ cargo test --workspace                     # run all tests
 cargo test -p axiomata-core                # run just the core engine's tests
 
 cargo run -p axiomata-cli                  # headless: init the core, print status, exit
-cargo run -p axiomata-cli -- list-skills   # discovered skills (~/.axiomata/skills/)
-cargo run -p axiomata-cli -- run-skill <name>   # run a skill, print outcome, exit 1 if it failed
-cargo run -p axiomata-cli -- list-runs --limit 20   # recent run history from the DB
-cargo run -p axiomata-cli -- get-run <id>    # one full run record incl. captured stdout
-cargo run -p axiomata-cli -- skills reseed [--force]  # re-copy bundled skills from resources/ (seed-if-absent unless --force)
-cargo run -p axiomata-cli -- memory sync    # regenerate the workspace CLAUDE.md router blocks
-cargo run -p axiomata-cli -- memory status  # is the router stale?
-cargo run -p axiomata-cli -- routines list  # scheduled routines, soonest next-fire first
-cargo run -p axiomata-cli -- routines add --name daily --cron '0 0 9 * * *' --skill <name>
-cargo run -p axiomata-cli -- routines edit <id> --name … --cron … --skill|--prompt … [--backend …] [--disabled]
-cargo run -p axiomata-cli -- routines delete <id>
-cargo run -p axiomata-cli -- routines tick  # run one scheduler poll pass now (no 30s wait)
-cargo run -p axiomata-cli -- board list [--board <id>] [--archived]   # boards, or one board's columns+cards
-cargo run -p axiomata-cli -- board new <name>            # board + its three default columns
-cargo run -p axiomata-cli -- board rename <id> <name>    # mirror follows, old file swept up
-cargo run -p axiomata-cli -- board delete <id> [--force] # --force required once it holds cards
-cargo run -p axiomata-cli -- board add --column <id> <title> [--label …]
-cargo run -p axiomata-cli -- board edit <id> [--title …] [--body …] [--label … | --clear-labels]  # omitted flags keep their value; --label replaces all labels
-cargo run -p axiomata-cli -- board move <id> --column <id> [--index <n>]
-cargo run -p axiomata-cli -- board claim <id> [--actor human:owner]   # CAS; fails if already held
-cargo run -p axiomata-cli -- board done <id>             # move into the board's done column
-cargo run -p axiomata-cli -- board verify <id> [--actor …]  # refused for whoever claimed it
-cargo run -p axiomata-cli -- board archive <id> [--undo]
-cargo run -p axiomata-cli -- ide projects list          # IDE projects, most recently opened first
-cargo run -p axiomata-cli -- ide projects new <name> <path>   # path is stored absolute + canonicalised
-cargo run -p axiomata-cli -- ide projects rename <id> <name>
-cargo run -p axiomata-cli -- ide projects set-root <id> <path>  # "Pfad ändern": keeps id + layout
-cargo run -p axiomata-cli -- ide projects delete <id>   # removes the row only, never the folder
-cargo run -p axiomata-cli -- ide agents list <project>  # a project's agent profiles
-cargo run -p axiomata-cli -- ide agents new <project> <name> [--harness …] [--command …] [--model …]
-cargo run -p axiomata-cli -- ide agents edit <id> [--name …] [--command …] …  # omitted flags keep their value
-cargo run -p axiomata-cli -- ide agents delete <id>
-cargo run -p axiomata-cli -- ide agents prepare <id>   # worktree + port (+ Opencode session), idempotent; prints where it runs
-cargo run -p axiomata-cli -- ide agents new-session <id>  # an Opencode agent opens a fresh session on its next start
-cargo run -p axiomata-cli -- ide agents discard-worktree <id> [--force]  # --force throws away uncommitted work
-cargo run -p axiomata-cli -- ide agents status <project>  # state word + plan per agent, as the harness reported it
-cargo run -p axiomata-cli -- ide agents diff <id> [--file <path>]   # what the agent changed since its base branch
-cargo run -p axiomata-cli -- ide agents base <id> <path>            # a file as the agent's base has it
-cargo run -p axiomata-cli -- ide agents commit <id> -m "…"          # commit what the agent left uncommitted
-cargo run -p axiomata-cli -- ide agents discard <id> <paths…>        # put files back to the base (committed too)
-cargo run -p axiomata-cli -- ide agents discard-hunk <id> <path> <n> # put the n-th hunk (from 0) back to the base
-cargo run -p axiomata-cli -- ide agents take-over <id> -m "…" [--no-ff]  # into the project folder; squash by default, never pushes
-cargo run -p axiomata-cli -- files roots          # file-service roots: workspace, project:<id>, worktree:<agent>, grant:<id>
-cargo run -p axiomata-cli -- files read <root> <rel>   # through the editor's guard; version on stderr
-cargo run -p axiomata-cli -- files write <root> <rel> [--expect <version>] < content   # Conflict if stale
-cargo run -p axiomata-cli -- files grants list|add <path>|revoke <id>   # dialog grants (~/.axiomata/file-grants.json)
-cargo run -p axiomata-cli -- files search <root> <pattern> [--regex] [--case] [--word] [--include g] [--exclude g]
-cargo run -p axiomata-cli -- assistant "hi" [--resume <session_id>] [--instruct] [--allowed-tools <tools>]
-cargo run -p axiomata-cli -- modules        # print the module manifest the dashboard wrote
-cargo run -p axiomata-cli -- module-action <instance> <action> --json '{}'  # needs a running dashboard
-cargo run -p axiomata-cli -- graph          # workspace graph summary (areas, links, skills, routines)
-cargo run -p axiomata-cli -- import obsidian <folder> [--dry-run] [--skip-secrets]  # agent-sorted import
+cargo run -p axiomata-cli -- --help        # every subcommand; each has its own --help. The groups:
+#   list-skills | run-skill <name> | list-runs | get-run <id> | skills reseed [--force]
+#   memory sync|status                       (the workspace router blocks)
+#   routines list|add|edit|delete|tick       (cron is 6–7 fields, seconds first)
+#   board list|new|rename|delete|add|edit|move|claim|done|verify|archive   (Kanban; claim is a CAS)
+#   ide projects list|new|rename|set-root|delete
+#   ide agents list|new|edit|delete|prepare|new-session|discard-worktree|status|diff|base|commit|discard|discard-hunk|take-over
+#                                            (take-over: squash by default, never pushes)
+#   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
+#   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>
 
 cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
 cd apps/dashboard && npm run check         # svelte-check + tsc (must be clean)
@@ -250,6 +157,10 @@ from the code itself:
   every action walks from the root fd with `openat(O_NOFOLLOW)` (`pinned.rs`), and a new place
   on disk is reachable only through `file_pick` — the native dialog driven from Rust. Never grant
   `dialog:*` (or `fs:*`) in `capabilities/default.json`; that would let the webview forge picks.
+- **Nothing a stored file says may start a process**: a pane's command is a *prop* of the component that mounts the
+  terminal, never a field of its stored config (`modules/terminal.svelte`'s `initialCommand`). A task pane's tab names
+  only the task id; its command line is resolved in Rust (`task_command_line`) and kept in memory (`ide/taskRuns.ts`),
+  and a project's own `.axiomata/tasks.json` runs only after the owner confirmed its exact bytes (SHA-256, `axiomata-tasks`).
 - **The editor engine (`src/editor/`) imports nothing from the app** — no DOM, no Svelte, no
   `core/`; `src/fileapp/` depends on it, never the reverse (D1, extractable for ED7). Its
   `EditorDocument` is a mutable class: a Svelte component redraws via its own counter after
@@ -292,33 +203,3 @@ from the code itself:
   into both role fields on load, then `save()` drops it). Details: `docs/architecture.md` §5
   "Model providers"; `docs/plans/per-role-provider.md`;
   `docs/plans/settings-provider-overhaul.md`.
-
-## Sub-agents (use the Rust variants, not the Python-oriented defaults)
-
-The owner's global `~/.claude/CLAUDE.md` defines mandatory automatic sub-agent triggers. Three of
-the named agents there (`test-engineer`, `dependency-auditor`, `performance-analyzer`) are worded
-for a Python/`uv` stack and **do not apply to this repo**. Global, Rust-flavored replacements exist
-at `~/.claude/agents/{rust-test-engineer,rust-dependency-auditor,rust-performance-analyzer}.md`
-(usable in any Rust project) — use those instead, same trigger conditions translated to Rust terms
-(`cargo test`, `cargo audit`, `rusqlite`/`tokio`).
-
-**Cadence override** (owner, 2026-09-08; rationale in `docs/architecture.md` §7): fire them **once
-per plan checkpoint, and always before a commit**, not after every single changed
-`fn`/`struct`/`Cargo.toml` line mid-task. Keep writing/updating tests inline as code lands
-regardless — the test engineer's run is a bundled second-pass gap check over the accumulated diff,
-not the first pass. The same override applies to an agent's own verification loop: batch
-`cargo build`/`clippy`/`fmt`/`test` per unit of work, and run the full set only when the work is
-done, before handing off to a sub-agent, and before a commit.
-
-**Lean review cadence** (owner, 2026-09-27, to save resources; reversible): reviews run only before
-a commit, and small checkpoints may be bundled into one commit. Instead of separate architecture +
-test-gap agents, **one** combined review agent (model `sonnet`, narrow brief: defects and
-convention breaks only, short report) covers design and missing tests; the tests themselves are
-written inline as code lands. `security-auditor` still runs in full where a plan asks for it or the
-global trigger applies (auth, external paths, new endpoints, …).
-
-`architecture-reviewer`, `security-auditor`, `docs-writer`, and `refactoring-specialist` are
-already language-agnostic as globally defined and apply here unchanged. When
-`architecture-reviewer` or another background sub-agent run is not available (e.g. a session rate
-limit), do a manual review pass yourself rather than skipping the check — the trigger is
-mandatory, not the specific tool.

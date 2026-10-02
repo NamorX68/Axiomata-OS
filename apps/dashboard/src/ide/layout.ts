@@ -263,6 +263,24 @@ export function setTabConfig(layout: Layout, tabId: string, config: Record<strin
   return root ? { root: finalize(root) } : layout;
 }
 
+/** Every tab replaced by `change`'s answer; the layout itself when no tab changed. */
+export function mapTabs(layout: Layout, change: (tab: PaneTab) => PaneTab): Layout {
+  let changed = false;
+  const walkNode = (node: LayoutNode): LayoutNode =>
+    isSplit(node)
+      ? { ...node, children: node.children.map(walkNode) }
+      : {
+          ...node,
+          tabs: node.tabs.map((tab) => {
+            const next = change(tab);
+            if (next !== tab) changed = true;
+            return next;
+          }),
+        };
+  const root = walkNode(layout.root);
+  return changed ? { ...layout, root } : layout;
+}
+
 /** Makes a tab the visible one in its group. Unchanged if there is no such tab. */
 export function activateTab(layout: Layout, tabId: string): Layout {
   const hit = findTab(layout, tabId);

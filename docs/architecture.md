@@ -824,6 +824,12 @@ types a path; `create_ide_project` and `set_ide_project_root` were removed for t
 folder, `newproject::create_project_folder` makes a new folder (optionally `git init`) and is the one place in
 `axiomata-ide` that creates directories. No project file is written into the folder.
 
+**Git layer** (2026-10-01, `docs/plans/editor-projekt-werkzeuge.md` #48): `crates/axiomata-git` is the one place that runs `git`
+(subprocess, never `git2`; the only thing that publishes is `repo::push` — the checked-out branch to its upstream or `origin`, never forced, only on the owner's button) and reads its machine formats — `run` (the runner and its environment), `diff`
+(diff types, parser, hunk patch), `repo` (status, stage/unstage, hunk apply, discard, blob, commit, fetch, push, branches, init). It has no Tauri,
+database or macOS-only code, so it builds and tests anywhere `git` runs. `axiomata-ide::git` (agent worktrees) sits on
+it through thin wrappers that keep the IDE's error type; the editor's git panel talks to it through `src-tauri/src/git.rs`.
+
 **CP1 is done too**: `apps/dashboard/src/ide/layout.ts` is the dock-layout model — a tree of
 `Split { dir, children, sizes }` and `TabGroup { tabs, active }` with docking, moving,
 closing and divider dragging, plus the serialisation that fills CP0's `layout_json`. Pure
@@ -1311,3 +1317,97 @@ fire **once per plan checkpoint and always before a commit**, not after every in
 tests are already being written inline as each function lands. The trigger stays mandatory;
 only its timing is batched. This is a project-local override, not an edit to the global agent
 definitions: a fresh Rust project without it keeps the tighter per-edit cadence.
+
+### Status log (moved out of `AGENTS.md`, 2026-10-02)
+
+`AGENTS.md` is loaded into every agent turn and had grown past 30 KB, most of it this running status
+paragraph. It is kept here verbatim as the history it is; `AGENTS.md` now carries a short current-state
+summary and points here and to the plans.
+
+Axiomata-OS is an early-stage Rust + Tauri desktop app: a personal "Agentic OS" command
+centre / second brain, built around the **ARMS framework** (Applications, Routines, Memory,
+Skills — see `ARMS-Agentic-OS-Guide.pdf`, though the actual design has since diverged from it
+in several places; `docs/architecture.md` §1 explains how).
+
+Milestones **M0–M3, M5, M6** are complete (scaffold, skills runner, memory router, routines
+scheduler w/ full CRUD, the Svelte module-canvas dashboard, the particle-graph Second Brain),
+plus ongoing post-M6 feature work (ToDo, Calendar/Reminders/Mail connector modules, themes,
+the `srcdoc` HTML viewer, the Terminal module). **M4 (always-on/background scheduling) was
+dropped outright** (owner, 2026-09-20 — the app being open, or tiles refreshing on open, is
+enough); do not plan around it. Full detail: `docs/architecture.md` §5 (what exists) and §7
+(milestone history). Detailed step-by-step milestone plans live outside this repo, in the
+owner's local Claude Code planning notes — read them before starting new M0–M6-scale work if
+available.
+
+**M7 — the agentic IDE is under way** (`docs/plans/agentic-ide.md`): M7.1 is complete (the
+`axiomata-ide` crate with projects, the dock-layout model, the full-screen IDE view, and
+per-project layouts), and M7.2 is under way: agent profiles (CP4), a git worktree plus reserved port per agent
+(CP5, the repo's first git integration — `git` as a subprocess, not `git2`), and a live status plus Plan tab
+per agent (CP6/CP6b, `docs/plans/agent-lifecycle.md` — a file channel under `~/.axiomata/agent-events/`, no DB
+column; nothing is ever written into a worktree). M7.2 is done; **M7.3 (git layer, `docs/plans/git-layer.md`)** is
+under way: CP7's git engine (diff against the recorded base branch, discard, commit, take-over into the project
+folder — squash by default, never a push), CP8's Diffs tab (drawn on the editor, H1–H16) and CP9 (file and
+agent-diff dock panes, discard per file/hunk, commit, take-over dialogs) are built — M7.3 is complete. The plan below
+describes the whole chain: an own full-screen IDE
+view with a dock/split/tab layout, foreign agent harnesses (Claude Code, Opencode) hosted as
+PTY tiles, A2A over an own MCP server rather than screen-scraping, one git worktree per
+agent, a "Plan" tab per agent showing what it is working on, and an own mini-harness —
+designed from the start to be extractable into a standalone app the way `axiomata-terminal`
+is. Seven milestones (M7.0–M7.6), and **M7.0 is a standalone Kanban module that deliberately
+ships before the IDE** — it is useful on its own and is the data layer the agents' task
+board later sits on. The eight load-bearing decisions are settled in §3 of that plan.
+**Under way:** the file app / own AAA editor (`docs/plans/editor.md`, decisions D1–D19 —
+TS engine + `axiomata-files` crate, tree-sitter WASM, Vi mode, LSP, one App-Ring icon each for Editor and
+IDE); it slots in before M7.3 CP8 (ED0–ED2 first, CP8's diff view is built on it). **ED0 (file service,
+E1–E12) and ED1 (editor core, F1–F13) are done**: `axiomata-files`, root ids + dialog grants, `file_*`
+commands, the watcher, the ring's "Ansicht öffnen" entries; the TS engine in `src/editor/` and the file
+app in `src/fileapp/` (full-screen view, recovery, settings); **ED2** (tree-sitter highlighting, themes,
+effects, Markdown preview) is done too. Per D15, M7.3 CP8/CP9 on the editor are done, and so is **ED3 (Vi, V1–V12)**: the machine in
+`src/editor/vi/` (the `:` line lives inside it — `vi/cmdmode.ts`), wired to every surface, the Mac pasteboard
+via `axiomata-macos::clipboard`, tree-sitter text objects (`editor/syntax/objects.ts`), and
+`~/.axiomata/editor-vi.json` for registers, file marks and histories. **ED4 (single point of truth, W1–W17)**: ED4.1 replaced the Document tile/viewer (`md-file`) with the panel-only file panel
+(`fileapp/FilePanel.svelte` around `FileEditor`, opened via `core/staging.ts` `openFilePanel`), and the agent
+opens files for the owner through the shell action `openFile` (`core/registry.ts`, instance id `shell`).
+ED4.2–ED4.6 are done too — **ED4 is complete**: the Second Brain shows files through `FilePeek`, tabs in the file
+app (`fileapp/tabs.ts`; `src-tauri/src/menu.rs` drops the menu's ⌘W "Close Window"), the file tree on
+`axiomata-files::dir` (renames and deletes are broadcast as `files:renamed`/`files:removed`), ⌘P quick open
+(`axiomata-files::index`), and the IDE's Files pane (`ide/panes/FilesPane.svelte`, ⌘P over the project). **ED5
+(tools, T1–T19)** is under way: ED5.1 put documents on an immutable rope (`editor/rope.ts`; `LineStore` stays as the
+tests' reference) and made files up to 16 MiB editable, over 2 MiB in a "light mode" (`FileSession.light`, no
+tree-sitter). ED5.2: every search pattern is first run by a worker with a 1 s limit (`editor/search/guard.ts`
+`SearchGuard`, a verdict per rope version; Vi's key queue pauses on `SearchPending` like on the clipboard), plus Vi's
+`:g`/`:v`/`:d`/`:normal`, `:s///c`, `gn`/`cgn`. ED5.3: multiple cursors in normal mode (`editor/multicursor.ts`:
+a command runs at each cursor as one undo step; `EditorDocument.extra` + `extraGoals`). ED5.4: the find bar
+(`fileapp/FindBar.svelte`, logic in `editor/search/findModel.ts`; the bar and Vi share the last search via
+`fileapp/findShared.ts`). ED5.5: folding (`editor/fold/`: `ranges.ts` where the text folds, `FoldState` what is
+folded; folded lines have no rows in `VisualLayout`; kept per file in `settings.editor.folds`,
+`fileapp/foldMemory.ts`). ED5.6: sticky scroll (`editor/sticky.ts`) and the minimap (`editor/minimap.ts`,
+`fileapp/Minimap.svelte`), off in the floating panel (`FileEditor` `compact`). ED5.7: the project search
+(`axiomata-files::search`, Tauri `file_search` over an `ipc::Channel`, `fileapp/ProjectSearch.svelte` in the file
+app's Files | Search column and the IDE's `search` pane, ⇧⌘F). ED5.8: installed Mac fonts
+(`axiomata-macos::fonts`, CoreText through raw `unsafe extern` FFI; `core/installedFonts.ts`). ED5.9: moving in the
+tree by dragging (`FileTree.svelte`, pointer events, `treeModel.moveTarget`) — **ED5 is complete**. **Opencode 2
+(`docs/plans/opencode2.md`, OC1–OC4) is done**: Axiomata is a client of Opencode 2's shared background service
+(crate `axiomata-opencode`) — skills and chat run as sessions on it, IDE Opencode agents start on a session the IDE
+keeps (`opencode --session <id>`), and their status comes from the service's event stream. **ED6 (LSP) is under way**
+(`docs/plans/editor.md` "ED6 im Detail", L0–L11): L0 refuses `$HOME` and above as a project root; ED6.1 runs language
+servers from Rust (`axiomata-files::lsp` — which program, only from a built-in table or `~/.axiomata/lsp.json`; only
+the methods the client speaks pass) with the protocol in `src/editor/lsp/`, and shows diagnostics; ED6.2 adds hover
+and go-to-definition (a definition outside every root opens read-only on the root `lsp:<handle>`, readable only for
+files the server named); ED6.3 adds implementation, type definition and uses (a list in the project search's
+results); ED6.4 completion (a menu while typing, as blink.cmp in the owner's Neovim); ED6.5 formatting (own
+formatter table in `axiomata-files::format`, after the owner's conform.nvim) and rename; ED6.6 signature help;
+ED6.7 code actions (L18–L24: `workspace/executeCommand` only as an echo of a command the server offered in a
+`textDocument/codeAction` answer, checked in Rust; `workspace/applyEdit` only while our command runs) —
+**ED6 is complete** — and the owner's live test of ED6 was accepted on 2026-09-29, as were the ED5
+live test and the ED2 colour sign-off. Nothing in ED0–ED6 is open.
+Next in the editor: **ED7** (extraction into a standalone app, the engine already imports nothing
+from the app — D1). Beyond that the editor has two follow-on plans of their own:
+[`editor-look.md`](docs/plans/editor-look.md) (LK0–LK5, complete — the modern look becoming the
+app's standard) and [`editor-projekt-werkzeuge.md`](docs/plans/editor-projekt-werkzeuge.md)
+(project roots in the tree, outline, git panel, run/tasks, debug/DAP — grilled 2026-09-30, Q1–Q27;
+**#48 git panel is built (status, stage/unstage incl. hunks, discard, commit, push, branches, `git init`; also as an IDE pane) (new crate `axiomata-git` — the only place that runs `git`, shared with `axiomata-ide`; panel in `fileapp/GitPanel.svelte`, change view `GitDiffView.svelte`, commands `src-tauri/src/git.rs`; Push / Commit & Push publish only the checked-out branch to its upstream or `origin`, never forced — the IDE's agent layer still never pushes). #49 outline is built too (`editor/syntax/outline.ts` from the syntax tree / Markdown headings, `fileapp/OutlinePanel.svelte` under the tree, breadcrumbs in the header). #47 is built as project new/open/close — one `projects` registry for editor and IDE, the folder from the native dialog (`project_open`/`project_new`), the tree shows the open project only; the rest stays parked**). `docs/plans/editor.md` lists both under „Fortschreibungen".
+**Editor and IDE are becoming one workbench** (`docs/plans/workbench.md`, owner 2026-10-02: one app, a switch Editor / Agents, two layouts per project, agents keep running when switched away). Steps 1 and 2 are built — `ide/dockDrag.svelte.ts` and one shared `ide/DockNode.svelte` serve both views, and `fileapp/ProjectSidebar.svelte` (project bar, Files | Search | Git, outline) is the left column of both (own prefs per view: `settings.editor.tree` / `settings.ide.tree`; the IDE no longer starts with a Files pane, its header has no project picker). Steps 3 and 4 are built: the IDE view *is* the workbench — the editor's tab keys, unsaved-text question, rename-following, preview tab, ⌘N, file-panel handoff, and the **Editor | Agents switch** (two layouts per project in one `layout_json`, `ide/modes.ts`; the hidden mode's panes stay mounted and running). The workbench is named **Studio** (owner, 2026-10-02): one ring entry (`shell:studio`, type id `view:ide`; the old `view:editor` is migrated on load, `core/ringTypes.ts`) opening in the project's last mode; `shell:ide`/`shell:editor` still open it in the Agents/Editor mode (`ide/modeRequest.ts`). The old `fileapp/FileAppView` is gone. Internal names (`ide/`, `IdeView`, `axiomata-ide`) stay until the extraction. The left edge is an activity rail (`ide/ActivityRail.svelte`: views of the code — Files, Search, Git; views for running — Run, Agents; at the foot the actions Terminal and Open file) choosing what the sidebar column shows (`settings.ide.tree.view`; Agents = `ide/AgentsPanel.svelte`); dock groups have no `+` menu. First Mac test done 2026-10-02 (rail follows from it); the header shows the front file's symbol breadcrumbs. **Run/Tasks (#50) first cut** (`axiomata-tasks` crate: detected tasks + `tasks.json` + hash-confirmed project file; rail *Run* view; task panes are terminals whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/tasks.rs`) — see `docs/plans/editor-projekt-werkzeuge.md`.
+Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
+(`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
+OpenRouter setup is considered good enough).

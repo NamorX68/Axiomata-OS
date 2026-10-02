@@ -82,6 +82,19 @@ export function describeStatus(status: AgentStatus | undefined, agent: IdeAgent,
   return { tone: state, ...LABELS[state] };
 }
 
+/**
+ * A status for an agent whose pane is closed.
+ *
+ * Claude Code reports `ended` itself when its session closes. An Opencode session lives on the shared
+ * service and stays `idle` after its terminal is gone — a green dot for something nobody is attached to.
+ * So without a pane an idle (or never started) agent reads as closed; one still *working* or *waiting* on
+ * the service keeps showing that, since it is true and the user wants to know.
+ */
+export function withoutPane(view: StatusView): StatusView {
+  if (view.tone !== "idle" && view.tone !== "starting") return view;
+  return { tone: "ended", label: "closed", title: "No pane is open for this agent" };
+}
+
 export interface PollerDeps {
   fetch: (projectId: number) => Promise<AgentStatus[]>;
   setInterval: (fn: () => void, ms: number) => unknown;

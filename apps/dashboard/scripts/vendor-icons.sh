@@ -51,6 +51,7 @@ ICONS=(
   folder
   folder-open
   folder-plus
+  folder-tree
   git-branch
   git-commit-horizontal
   git-commit-vertical

@@ -55,13 +55,12 @@ describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
       "mail",
       "terminal",
       "kanban",
-      "view:editor",
       "view:ide",
     ]);
   });
 
   it("maps a view entry to its shell event, and a module type to nothing", () => {
-    expect(ringViewFor("view:ide")).toMatchObject({ title: "IDE", event: "shell:ide" });
+    expect(ringViewFor("view:ide")).toMatchObject({ title: "Studio", event: "shell:studio" });
     expect(ringViewFor("terminal")).toBeUndefined();
     expect(ringViewFor("view:nope")).toBeUndefined();
   });

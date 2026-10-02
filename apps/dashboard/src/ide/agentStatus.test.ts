@@ -2,7 +2,15 @@ import { get } from "svelte/store";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentStatus, IdeAgent } from "../core/backend";
-import { createStatusPoller, describeStatus, planTitle, POLL_INTERVAL_MS, SILENT_OWN_COMMAND_MS } from "./agentStatus";
+import {
+  createStatusPoller,
+  describeStatus,
+  planTitle,
+  POLL_INTERVAL_MS,
+  SILENT_OWN_COMMAND_MS,
+  withoutPane,
+  type StatusView,
+} from "./agentStatus";
 
 vi.mock("./agents", () => ({ agentStates: vi.fn(async () => []) }));
 
@@ -162,5 +170,20 @@ describe("planTitle (H10)", () => {
     const markdown = "## Not the title\n\n1. Fix #42\n\n# The real title\n\n# A later heading, ignored";
     const doc = { markdown, name: "x", updated_at: null, from_earlier_session: false };
     expect(planTitle({ ...base, plan_document: doc })).toBe("The real title");
+  });
+});
+
+describe("withoutPane", () => {
+  const view = (tone: StatusView["tone"]): StatusView => ({ tone, label: tone, title: tone });
+
+  it("reads an idle or never-started agent without a pane as closed", () => {
+    expect(withoutPane(view("idle")).tone).toBe("ended");
+    expect(withoutPane(view("starting")).tone).toBe("ended");
+  });
+
+  it("keeps what is still true: working, waiting, ended and unknown", () => {
+    for (const tone of ["working", "waiting", "ended", "none"] as const) {
+      expect(withoutPane(view(tone)).tone).toBe(tone);
+    }
   });
 });

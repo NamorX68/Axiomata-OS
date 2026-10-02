@@ -2,7 +2,7 @@
  * The file app's tab records and the reader for tabs saved before groups
  * existed (`docs/plans/editor.md`, ED4, W7, W12). The tabs themselves — one per
  * file, the preview tab, closing, the keys, keeping them — now live in groups
- * (`fileDock.ts`, editor-look LK2); `settings.editor.tabs` is read once, by
+ * (retired with the old editor view, `docs/plans/workbench.md` step 4); `settings.editor.tabs` is read once, by
  * `loadDock`, and replaced by `settings.editor.dock`.
  */
 

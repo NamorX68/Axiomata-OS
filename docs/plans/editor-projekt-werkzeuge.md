@@ -1,6 +1,6 @@
 # Grobplan: Projekt-Werkzeuge im Editor (Wurzeln, Outline, Git, Run, Debug)
 
-Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 ist gebaut (2026-09-30) — als Projekt neu/öffnen/schließen, nicht als Wurzel-Auswahl; der Rest weiter geparkt**.
+Status: **gegrillt 2026-09-30 (Q1–Q19, Nachgrill Q20–Q27, bestätigt), **#47 (Projekt neu/öffnen/schließen), #49 (Outline) und #48 (Git-Panel, erster Wurf) sind gebaut (2026-09-30/10-01); der Rest weiter geparkt**.
 Ursprünglich geparkt 2026-09-29 („keine Resourcen für Umsetzung“). Die Entscheidungen unten sind der
 abgelegte Grill-Stand; vor dem Bauen jeden Punkt anhand dessen in Checkpoints zerlegen
 (siehe die Arbeitsweise im Dachplan [`agentic-ide.md`](agentic-ide.md)).
@@ -135,6 +135,54 @@ Zeile „Zwei Projektbegriffe bleiben getrennt“ des Nachgrills):
   Webview). „Pfad ändern" läuft jetzt wie Öffnen über den Dialog (`project_set_root`). Die Projektleiste des Editors bietet
   dasselbe wie die IDE-Auswahl: Ordner ändern und „aus der Liste entfernen“ (nie den Ordner).
 
+## #49 Outline gebaut (2026-09-30)
+
+Drei Checkpoints, wie im Gespräch festgelegt (Owner: Bereich unter dem Baum, Code + Markdown, LSP später):
+
+- **CP1 Symbole:** `editor/syntax/outline.ts` — `outlineFromTree` (Knotentabelle wie bei Textobjekten/Faltung: Rust, TS/JS/TSX,
+  Python, Swift, Lua, Bash), `outlineFromMarkdown` (Überschriften, nicht in Code-Zäunen), `pathAt`, `filterOutline`.
+  Nichts aus Funktionskörpern (Closures, lokale Helfer); `const f = () => …` zählt als Funktion; Funktionen in
+  Klassen/impl/trait sind `method`; höchstens 5000 Symbole; Namen aus dem `TextStore`, nie `node.text`.
+- **CP2 Ansicht:** `fileapp/OutlinePanel.svelte` als einklappbarer Bereich unter dem Dateibaum (Höhe ziehbar, in
+  `settings.editor.tree`), Filterfeld, Klick springt zum Namen, die Zeile am Cursor ist markiert und im Bild gehalten,
+  Pin friert die Markierung ein. `FileEditor` meldet (`onOutline`, Symbole 250 ms nach der letzten Änderung, der Cursor
+  sofort) über `FileTab` an die Ansicht, die die Meldung des vorderen Tabs zeigt. Keine Outline im Light-Modus.
+- **CP3 Breadcrumbs:** in der Kopfzeile hinter dem Dateipfad: die Symbole, die den Cursor halten, klickbar.
+- **Offen:** LSP-`documentSymbol` als Verfeinerung; Outline als Dock-Pane der IDE; Daten-Formate (JSON/TOML/YAML).
+
+## #48 Git-Panel gebaut (2026-10-01, erster Wurf: Changes)
+
+Entscheidungen des Owners (2026-10-01): neues schlankes Crate `axiomata-git` (nicht in `axiomata-files`; das Crate ist
+macOS-gebunden und trägt Watcher/LSP mit — mac-only Code soll später ohnehin aufgebrochen werden, damit die App auch
+unter Linux/Windows läuft), erst umziehen, dann bauen, zwei Gruppen mit Hunk-Staging.
+
+- **CP1 Umzug:** `crates/axiomata-git` (`run` = der eine Ort, der `git` aufruft, mit `GIT_OPTIONAL_LOCKS=0`,
+  `GIT_LITERAL_PATHSPECS=1`, `GIT_TERMINAL_PROMPT=0`; `diff` = Typen, Parser, Hunk-Patch, `checked_path`, `ChangeKind`).
+  `axiomata-ide` nutzt es über dünne Hüllen (eigener Fehlertyp bleibt), seine Tests blieben unverändert grün.
+- **CP2 Engine** (`axiomata-git::repo`): `status` (porcelain v2 -z, Branch/Upstream/ahead-behind), `stage`/`unstage`
+  (Datei, alles; vor dem ersten Commit geht `unstage` über `rm --cached`), `file_diff` je Seite (`Staged` = Index gegen
+  `HEAD`, `Unstaged` = Arbeitsbaum gegen Index, Untracked gegen nichts), `apply_hunk` (Stage/Unstage eines Blocks per
+  `git apply --cached`, nur wenn Index+Header noch stimmen; ein ganz neuer/gelöschter Block = die Datei), `blob`
+  (Datei wie `HEAD`/Index sie hat), `commit` (nur Gestagtes; verweigert leere Nachricht/leeren Index), `fetch`
+  (liest nur) und `push` (Owner-Wunsch 2026-10-01: Push und Commit & Push; nur der ausgecheckte Branch, zu seinem
+  Upstream bzw. als neuer Branch zu `origin`, **nie mit `--force`**, Remote und Ref nennt nie die Oberfläche — eine
+  abgelehnte Übertragung ändert nichts und zeigt Gits Meldung; scheitert der Push nach „Commit & Push“, bleibt der Commit
+  und die Meldung sagt es). Gegen echte Repositories (auch ein lokales Remote) getestet.
+- **CP3 Tauri:** `src-tauri/src/git.rs` — `git_status|stage|unstage|stage_all|unstage_all|diff|blob|apply_hunk|commit|fetch`
+  auf `project:<id>`-Wurzeln (`files::project_folder` lässt nur Projekt-Wurzeln zu).
+- **CP4 Oberfläche:** dritter Reiter „Git“ in der linken Spalte (`GitPanel.svelte`: Branch, ↑↓, Fetch, Push (*Push ↑N* / *Publish branch*); Gruppen Staged/
+  Changes; Stage/Unstage je Datei und alle; Commit-Feld, ⌘⏎, *Commit* und *Commit & Push*), ein Klick auf eine Datei öffnet die Änderung als
+  `GitDiffView.svelte` über dem Editor (derselbe `DiffPanes` wie der Diff der IDE; Knopf „Stage“/„Unstage“ je Hunk, „Stage
+  file“, Layout-Umschalter; liest sich alle 5 s neu, ohne Falten/Cursor zu verlieren).
+- **Abrundung (2026-10-01, Owner: „Git-Tasks fertig machen“):** `init` (Knopf „Create repository“; verweigert in/unter einem
+  Repository), `discard` (Datei: Unstaged zurück auf den Index, Untracked wird gelöscht — nur nach Rückfrage in der Oberfläche;
+  Gestagtes bleibt) und `discard_hunk` (je Block im Diff, neben „Stage“), Branches (`branches`, `switch_branch`,
+  `create_branch`; Wechsel verweigert, wenn Änderungen im Weg sind — kein stilles Stash; Namen prüft `git check-ref-format`),
+  Branch-Menü im Panel-Kopf, und das Panel als **Git-Pane der IDE** (`ide/panes/GitPane.svelte`, `+`-Menü → Git; der Diff
+  öffnet sich über dem Pane, „Datei öffnen“ in einem Datei-Pane daneben).
+- **Offen:** History (Log + Diff je Commit), Remote-Branches wechseln, Stash, Merge/Rebase/Konflikte lösen, Tags. Die Tauri-Hülle
+  ist auf der Linux-Box nicht kompiliert.
+
 ## 1. Wurzeln hinzufügen und entfernen (#47)
 
 - **Hinzufügen:** Eintrag „Ordner hinzufügen“ (Dialog wie `file_pick`, Ergebnis ein `grant:<id>`). **Nie** einen Pfad
@@ -192,3 +240,29 @@ Zeile „Zwei Projektbegriffe bleiben getrennt“ des Nachgrills):
 Ein eigener Agent für die Codebasis, Snippets/Completion-Erweiterungen (L9 in `editor.md`) und die Herauslösung des
 Editors (ED7) — eigene Karten (#36, #35). Für ED7 gilt aber: die Werkzeuge hier werden ohne `axiomata-core` gebaut
 (siehe Nachgrill).
+
+## #50 Run/Tasks — erster Wurf gebaut (2026-10-02)
+
+Pure Logik in der neuen Crate **`axiomata-tasks`** (kein Tauri, keine DB; baut und testet überall): Erkennung aus `Cargo.toml`
+(`cargo build/check/clippy/test/run`), `package.json` (ein Task je Script, Paketmanager nach Lockfile, ohne `pre*`/`post*`-Hooks)
+und `pyproject.toml`/`pytest.ini` (`pytest`, `ruff check`, mit `uv run` bei `uv.lock`); `tasks.json` im Projekt
+(`.axiomata/tasks.json`) und persönlich (`~/.axiomata/tasks.json`), streng gelesen (nur Ordner im Projekt, gültige
+Umgebungsnamen, Obergrenzen, Doppelte und Fehler als `problems` sichtbar). **Trust:** Detected und Personal laufen ohne Frage; die
+Projektdatei erst nach Bestätigung, gespeichert als SHA-256 ihrer Bytes (`~/.axiomata/task-trust.json`, 0600, atomar) — jede Änderung
+fragt neu. Die Bestätigung nimmt nur den Hash an, der noch zur Datei auf der Platte passt (`tasks_trust`), die Webview kann keinen
+eigenen Hash eintragen. Glue: `src-tauri/src/tasks.rs` (`tasks_list`, `tasks_trust`, `task_command_line`; **nicht auf Linux
+kompiliert**). Oberfläche: Rail-Icon *Run* → `ide/TasksPanel.svelte` (nach Zweck gruppiert, ▶ je Task, gesperrt mit „Review…“ bis zur
+Bestätigung), Ausführung als **Task-Pane** (`ide/panes/TaskPane.svelte`): Terminal-PTY mit der Zeile als `initialCommand`; der Tab
+nennt nur die Task-Id, die Zeile liegt nur im Speicher (`ide/taskRuns.ts`), gespeicherte Task-Panes werden beim Laden entfernt.
+**Offen (nächste Checkpoints):** klickbare `Datei:Zeile`-Fehler im Ausgabe-Pane, Problem-Matcher + Diagnosen im Editor (offen:
+wann verschwinden sie?), Abbrechen ohne Neustart, Umgebung wie `toolenv.rs`.
+
+**Eigene Tasks im Panel (2026-10-02, Owner-Wunsch):** „New task…" im Run-Panel — Name, Befehl, Ordner (optional), Zweck, und wo es
+liegt: *in this project* (`.axiomata/tasks.json`, reist mit dem Repository) oder *for all my projects* (`~/.axiomata/tasks.json`).
+Eigene Tasks lassen sich bearbeiten und entfernen. Rust: `upsert_task`/`remove_task` arbeiten auf dem JSON selbst (Fremdes bleibt
+stehen, eine ungültige Datei wird nie überschrieben, doppelte Namen und Pfade nach draußen werden abgewiesen), `write_project_file`
+schreibt atomar und **nie durch einen Symlink** (`.axiomata` oder die Datei könnten in einem geklonten Repo einer sein).
+**Vertrauen:** Speichert der Owner in eine Projektdatei, die er bereits bestätigt hatte (oder die es noch nicht gab), gilt der neue
+Inhalt als bestätigt; war sie **nicht** bestätigt (kann Fremdes enthalten), bleibt sie es — sonst würde das Speichern still
+fremde Befehle freigeben. Glue: `tasks_save`, `tasks_remove` in `src-tauri/src/tasks.rs` (nicht auf Linux kompiliert). Umgebungsvariablen
+sind im Formular noch nicht einstellbar (nur in der Datei).

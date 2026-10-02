@@ -124,26 +124,19 @@ export const SHORTCUTS: ShortcutGroup[] = [
     ],
   },
   {
-    title: "File app",
+    title: "Studio",
     items: [
       { keys: "⌘P", what: "Open a file by name (name:12 goes to line 12)" },
-      { keys: "⇧⌘F", what: "Search the project" },
+      { keys: "⌘O", what: "Open a file with the file dialog" },
+      { keys: "⇧⌘F", what: "Search the project (the sidebar's Search view)" },
       { keys: "⌘N", what: "New note" },
-      { keys: "⌘W", what: "Close the tab" },
+      { keys: "⌘W", what: "Close the file tab" },
       { keys: "⌘1 – ⌘9", what: "Go to tab 1–9" },
       { keys: "⌃⇥ / ⌃⇧⇥", what: "Next / previous tab (in the focused group)" },
       { keys: "⌘\\ / ⇧⌘\\", what: "Move the tab into a new group to the right / below" },
       { keys: "Drag a tab", what: "Onto a group: join it — onto an edge: split" },
-      { keys: "⌘B", what: "Show / hide the file tree" },
-    ],
-  },
-  {
-    title: "IDE",
-    items: [
-      { keys: "⌘P", what: "Open a file of the project by name" },
-      { keys: "⇧⌘F", what: "Search the project (the Search pane)" },
-      { keys: "Drag a tab", what: "Onto a tab bar: join it — onto an edge: split" },
       { keys: "Drag a divider", what: "Resize the groups beside it" },
+      { keys: "⌘B", what: "Show / hide the sidebar column" },
     ],
   },
   {
@@ -232,7 +225,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
   },
 ];
 
-/** The groups to show: the Vi ones only with Vi on; narrowed by `query` (keys or description). */
+/** The groups to show: the Vi ones only with Vi on — and then first, since they are the keys in use; narrowed by `query` (keys or description). */
 export function visibleShortcuts(vi: boolean, query: string): ShortcutGroup[] {
   const q = query.trim().toLowerCase();
   const out: ShortcutGroup[] = [];
@@ -245,7 +238,8 @@ export function visibleShortcuts(vi: boolean, query: string): ShortcutGroup[] {
       : group.items;
     if (items.length > 0) out.push({ ...group, items });
   }
-  return out;
+  // Stable: the Vi groups move up, everything keeps its order within its kind.
+  return vi ? [...out.filter((g) => g.vi), ...out.filter((g) => !g.vi)] : out;
 }
 
 const MODIFIERS: Record<string, keyof Pick<KeyInput, "ctrl" | "alt" | "shift" | "meta">> = {

@@ -15,19 +15,17 @@
 import { getContext, setContext } from "svelte";
 
 import type { LocationList } from "../fileapp/locationList";
+import type { OutlineInfo } from "../fileapp/outlineModel";
 import type { FileRef } from "../fileapp/tabs";
 import type { DockTarget, PaneTab } from "./layout";
-
-/** What the tab bar's `+` menu offers. */
-export type NewPaneKind = "terminal" | "files" | "search";
 
 export interface IdeDock {
   /** Make a tab the visible one in its group. */
   activate: (tabId: string) => void;
   /** Close a tab, and with it the pane inside. */
   close: (tabId: string) => void;
-  /** Open a new pane of that kind in that group — the tab bar's `+` menu. */
-  addPane: (groupId: string, kind: NewPaneKind) => void;
+  /** Close a tab, asking first when it is a file with unsaved text (the tab's ×, ⌘W, Vi's `:q`). */
+  requestClose: (tabId: string) => void;
   /**
    * Opens `tab` beside the pane `fromTabId`, or brings forward the open tab
    * `match` finds (`paneKinds.ts`'s `openOrFocus`) — a file from a diff, an
@@ -36,6 +34,14 @@ export interface IdeDock {
   open: (tab: PaneTab, match: (t: PaneTab) => boolean, fromTabId: string | null) => void;
   /** A language server's list of places (ED6.3): shown in the Search pane, opened if need be. */
   showLocations: (list: LocationList) => void;
+  /** A file pane's symbols and cursor line, for the sidebar's outline. */
+  reportOutline: (file: FileRef, info: OutlineInfo) => void;
+  /** Start a task pane's task again (its command line is resolved anew, so a changed confirmation counts). */
+  restartTask: (tabId: string) => void;
+  /** A preview tab becomes a tab of its own. */
+  pin: (tabId: string) => void;
+  /** A new note was filed: its tab now names the file. */
+  filed: (tabId: string, file: FileRef) => void;
   /** A pane's module changed its config; it belongs on that pane's tab. */
   setConfig: (tabId: string, config: Record<string, unknown>) => void;
   /** A pointer went down on a tab: maybe a click, maybe the start of a drag. */

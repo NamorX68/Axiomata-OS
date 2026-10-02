@@ -1,0 +1,10 @@
+[package]
+name = "axiomata-git"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Standalone git layer of Axiomata-OS — runs `git` as a subprocess and reads its machine formats (diffs, status). No Tauri, no database, no macOS-only code, so it builds and tests anywhere `git` runs. Shared by the IDE (agent worktrees) and the editor (the project folder)."
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
