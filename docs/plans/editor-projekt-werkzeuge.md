@@ -46,7 +46,7 @@ sich lohnt, und was der Grill vom 2026-09-30 entschieden hat.
 | 2 | Outline | #49 | klein–mittel | Liefert auch Breadcrumbs und bessere Sticky Scroll |
 | 3 | Git-Panel | #48 | mittel | Engine und Diff-Ansicht großenteils da |
 | 4 | Run/Tasks | #50 | mittel | Braucht ein Ausgabe-Pane und Konfiguration |
-| 5 | Debug | #51 | groß | Baut auf Run auf, braucht einen DAP-Client — **Python/debugpy gebaut (2026-10-02)**, Rust/Node folgen |
+| 5 | Debug | #51 | groß | **Abgeschlossen (2026-10-03, Owner):** Python, Rust, C/C++, Swift auf dem Mac bestätigt; **Node/TypeScript offen** (geparkt, siehe unten) |
 
 ## Gegrillte Entscheidungen (2026-09-30, Q1–Q19, bestätigt)
 
