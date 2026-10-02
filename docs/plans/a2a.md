@@ -22,13 +22,16 @@ wo er etwas anders sagt, die älteren Aussagen.
 - **A4 — Starten von Hand oder automatisch (Owner bestätigt):** Standard von Hand; je Plan ein Schalter „automatisch bis N Agenten gleichzeitig",
   der bereite Karten (alle Abhängigkeiten erledigt) selbst startet. Der Review-Agent startet immer automatisch.
 
-## Offen zur Entscheidung
-
-- **A5 — Welcher Agent, welches Harness, welches Modell? (Vorschlag, noch nicht bestätigt):** ein *Profilkatalog* (Rolle, Harness, Modell, Kostenstufe,
-  Rechte) und ein *Zuweiser*, der für eine Karte ein Profil vorschlägt: erst feste Regeln (Rolle „Review" → Review-Profil), dann ein Klassifikator —
-  **JEV** (TypeSafe, typisierte Fragen mit kalibrierter Sicherheit: `Choice` über die Profile, `Score` für die Schwierigkeit; siehe `jev-einsatz.md`),
-  mit einem lokalen Fallback (kleines Ollama-Modell mit erzwungener Auswahl; Arbeitsname KEV) und zuletzt der Frage an den Owner. Im Freigabe-Schritt
-  sieht der Owner je Karte das vorgeschlagene Profil samt Sicherheit und kann es ändern; der Automatikmodus nimmt nur Vorschläge über der Schwelle.
+- **A5 — Welcher Agent, welches Harness, welches Modell (Owner, 2026-10-03).** Ein **Profilkatalog** (Rolle, Harness, Modell, Kostenstufe, Rechte)
+  und ein **Zuweiser als austauschbare Schnittstelle**. **Standard ist der Planungsagent selbst:** er kennt den Katalog, schlägt beim Anlegen einer
+  Karte ein Profil vor und begründet kurz; der Owner bestätigt beim Freigeben des Plans. Gründe (Owner): ein Agent ist bei jedem Nutzer ohnehin
+  da, JEV dagegen verlangt Konto, Schlüssel und Guthaben. Der **Automatikmodus (A4)** startet nur Karten, deren Profil der Owner bestätigt hat
+  oder die eine feste Regel bestimmt (z. B. Rolle „Review"). **Optional** kommt ein Zuweiser mit kalibrierter Sicherheit dazu — JEV (TypeSafe,
+  `jev-einsatz.md`, Version pinnen) oder ein lokales offenes Modell, sofern die Hardware reicht (Laya: ModernBERT-large; Nimble: Qwen3.5-9B + LoRA;
+  Kev u. a. — alle in einem DataCamp-Vergleich offener JEV-Alternativen genannt) — als Einstellung, kein Muss. Das Review-Modell ist ein anderes
+  als das der Umsetzung.
+  *Offen:* Kev und die übrigen offenen Modelle sind noch nicht geprüft (Größe, Lizenz, Laufzeit); Katalog-Ort (App-Einstellungen, pro Projekt, oder
+  beides mit Überschreiben) und die Anfangsprofile.
 
 ## Offene Fragen der Runde
 
