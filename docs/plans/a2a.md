@@ -77,10 +77,18 @@ wo er etwas anders sagt, die älteren Aussagen.
   stehen in den Einstellungen als Standard für alle Pläne und lassen sich je Plan überschreiben. Ist ein Limit erreicht, darf eine laufende Sitzung ihren
   **aktuellen Schritt beenden** und stoppt dann, damit nichts halb geschrieben liegen bleibt.
 
+- **A10 — MCP-Eintrag je Harness (Owner, 2026-10-03; löst F4 aus `agentic-ide.md`):** der Eintrag wird **pro Worktree** geschrieben (Claude Code:
+  `.mcp.json` bzw. `.claude/settings.local.json`; Opencode: `opencode.json` im Projekt), **nie** in `~/.config/opencode/opencode.json` oder das
+  Benutzerprofil. Der Server bekommt die Identität des Agenten über Umgebungsvariablen beim Start, der Absender wird vom Server gestempelt. **Sichtbar und
+  bestätigt:** beim ersten Mal je Projekt zeigt das Studio, was es einträgt; die Bestätigung gilt für diesen Inhalt (Hash), bis er sich ändert. Wird ein
+  Worktree entfernt, verschwindet der Eintrag mit. Der Server ist **nur lokal** erreichbar (Pipes der gestarteten Prozesse, **kein Netzwerkport**);
+  ein Planungsagent außerhalb des Studios ist damit vorerst nicht vorgesehen. *Beim Bau nachzuschlagen:* die genauen Orte und Formate der aktuellen
+  Versionen von Claude Code und Opencode.
+
 ## Offene Fragen der Runde
 
 1. ~~Rollen und Rechte / Aufgabenverteilung~~ — beantwortet durch A2–A5.
 2. ~~Bestätigung durch den Owner~~ — beantwortet durch A7.
 3. ~~Zustellung / Schleifen~~ — beantwortet durch A8. 4. ~~Kostenlimits~~ — beantwortet durch A9.
-6. MCP-Eintrag pro Harness (F4 im Plan `agentic-ide.md`).
+6. ~~MCP-Eintrag~~ — beantwortet durch A10.
 7. Eigenständiges Studio: Wo liegt das Brett, wenn das Studio eine eigene App wird?
