@@ -271,7 +271,7 @@ pub fn upsert_config(
         if let Some(t) = text
             .as_deref()
             .map(str::trim)
-            .filter(|t| !t.is_empty() && !(key == "cwd" && *t == "."))
+            .filter(|t| !(t.is_empty() || key == "cwd" && *t == "."))
         {
             map.insert(key.into(), t.into());
         }
