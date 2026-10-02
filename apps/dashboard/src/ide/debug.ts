@@ -11,7 +11,7 @@ import { derived, get, writable, type Readable } from "svelte/store";
 import { breakpoints, filesOf, linesOf, setBreakpointLines, toggleBreakpoint } from "./breakpoints";
 import { createDebugController, realBackend } from "./debugSession";
 import type { DebugTarget, StackFrame } from "./debugBackend";
-import { relativeInside } from "./outputPath";
+import { absoluteInside } from "./outputPath";
 
 /** Where the running session lives: the project root id and its folder on disk. */
 interface Running {
@@ -40,7 +40,7 @@ export function onDebugTerminal(handler: ((title: string, line: string) => void)
 function show(frame: StackFrame): void {
   const at = get(running);
   if (!at || !frame.path) return;
-  const rel = relativeInside(frame.path, at.folder);
+  const rel = absoluteInside(frame.path, at.folder);
   if (rel !== null) reveal?.(at.root, rel, frame.line);
 }
 
@@ -61,7 +61,7 @@ export const execPoint: Readable<ExecPoint | null> = derived([debug.state, runni
   if (!at || s.phase !== "stopped") return null;
   const frame = s.frames.find((f) => f.id === s.frameId) ?? s.frames[0];
   if (!frame?.path) return null;
-  const rel = relativeInside(frame.path, at.folder);
+  const rel = absoluteInside(frame.path, at.folder);
   return rel === null ? null : { root: at.root, rel, line: Math.max(0, frame.line - 1) };
 });
 

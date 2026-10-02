@@ -357,11 +357,11 @@ pub fn build(project: &Path, config: &DebugConfig) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("cargo built, but reported no executable for “{bin}”"))
 }
 
-/// Commands that teach lldb to print Rust values readably (`Vec`, `String`, `Option` …), from the toolchain's
-/// own `lldb_lookup.py` — what `rust-lldb` loads. Empty when the files are not there.
+/// Commands run in lldb before the program starts: step over the standard library, and — from the toolchain's
+/// own `lldb_lookup.py`, what `rust-lldb` loads — print Rust values readably (`Vec`, `String`, `Option` …).
 pub fn init_commands() -> Vec<String> {
     let Some(rustc) = on_path("rustc", &usual_places()) else {
-        return Vec::new();
+        return vec![STEP_AVOID_STD.to_string()];
     };
     let Some(sysroot) = Command::new(rustc)
         .args(["--print", "sysroot"])
@@ -371,18 +371,24 @@ pub fn init_commands() -> Vec<String> {
         .filter(|o| o.status.success())
         .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
     else {
-        return Vec::new();
+        return vec![STEP_AVOID_STD.to_string()];
     };
+    // Stepping into `Vec::push` or `HashMap::insert` lands in the standard library's source, which is not part
+    // of the project: step over such calls, so “step in” stays in the owner's code.
+    let mut commands = vec![STEP_AVOID_STD.to_string()];
     let etc = sysroot.join("lib/rustlib/etc");
-    let (lookup, commands) = (etc.join("lldb_lookup.py"), etc.join("lldb_commands"));
-    if !lookup.is_file() || !commands.is_file() {
-        return Vec::new();
+    let (lookup, source) = (etc.join("lldb_lookup.py"), etc.join("lldb_commands"));
+    if lookup.is_file() && source.is_file() {
+        commands.push(format!("command script import \"{}\"", lookup.display()));
+        commands.push(format!("command source -s 0 \"{}\"", source.display()));
     }
-    vec![
-        format!("command script import \"{}\"", lookup.display()),
-        format!("command source -s 0 \"{}\"", commands.display()),
-    ]
+    commands
 }
+
+/// lldb steps over a function whose name matches: the standard library's own (`core::`, `std::`, `alloc::`,
+/// also in the `<T as core::…>::` form).
+const STEP_AVOID_STD: &str =
+    "settings set target.process.thread.step-avoid-regexp ^<?(core|std|alloc)(::| as )";
 
 /// The arguments of the DAP `launch` request for the built `executable`.
 pub fn launch_arguments(

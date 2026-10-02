@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { relativeInside } from "./outputPath";
+import { absoluteInside, relativeInside } from "./outputPath";
 
 describe("relativeInside", () => {
   const base = "/Users/me/proj";
@@ -19,5 +19,21 @@ describe("relativeInside", () => {
     expect(relativeInside("src/../../x.py", base)).toBeNull();
     expect(relativeInside("~/x.py", base)).toBeNull();
     expect(relativeInside("/Users/me/proj", base)).toBeNull();
+  });
+});
+
+describe("absoluteInside", () => {
+  it("accepts an absolute path inside the folder", () => {
+    expect(absoluteInside("/p/proj/src/main.rs", "/p/proj")).toBe("src/main.rs");
+  });
+
+  it("refuses a relative path, which an adapter uses for files it cannot place", () => {
+    expect(absoluteInside("library/core/src/ptr/mod.rs", "/p/proj")).toBeNull();
+    expect(absoluteInside("src/main.rs", "/p/proj")).toBeNull();
+  });
+
+  it("refuses a path outside the folder and a missing one", () => {
+    expect(absoluteInside("/Users/x/.rustup/toolchains/s/library/alloc/src/vec/mod.rs", "/p/proj")).toBeNull();
+    expect(absoluteInside(null, "/p/proj")).toBeNull();
   });
 });

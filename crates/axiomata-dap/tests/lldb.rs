@@ -226,3 +226,37 @@ fn a_rust_project_below_the_opened_folder_is_built_there_and_stops_at_its_breakp
     assert!(session.stack_trace(thread).unwrap()[0].name.contains("add"));
     session.end();
 }
+
+#[test]
+fn step_in_stays_in_the_project_instead_of_entering_the_standard_library() {
+    if rust::cargo().is_none() || rust::adapter_command(&PathBuf::from("/")).is_err() {
+        eprintln!("skipped: cargo or lldb-dap is missing");
+        return;
+    }
+    let project = scratch("stdstep");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/main.rs"),
+        "fn main() {\n    let mut v = Vec::new();\n    v.push(1);\n    let n = v.len();\n    println!(\"{n}\");\n}\n",
+    )
+    .unwrap();
+    let config = rust::detect(&project).remove(0);
+    let executable = rust::build(&project, &config).expect("the build");
+    let adapter = rust::adapter_command(&project).unwrap();
+    let launch = rust::launch_arguments(&config, &executable, &project, &rust::init_commands());
+    let source = project.join("src/main.rs").to_string_lossy().into_owned();
+    let session =
+        Session::start(&adapter, "lldb-dap", launch, &[(source, vec![3])]).expect("start");
+    let (_, thread) = next_stop(&session);
+    session.control(Control::StepIn, thread).unwrap();
+    let (_, thread) = next_stop(&session);
+    let top = &session.stack_trace(thread).unwrap()[0];
+    assert!(top.name.contains("main"), "stepped into {top:?}");
+    assert_eq!(top.line, 4, "{top:?}");
+    session.end();
+}

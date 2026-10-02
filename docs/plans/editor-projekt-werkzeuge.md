@@ -325,3 +325,9 @@ Hat der geöffnete Ordner selbst kein `Cargo.toml` / `Package.swift` / `CMakeLis
 (`config::manifest_dirs`, ohne `target`, `node_modules`, `build`, versteckte Ordner; höchstens 8 Treffer). Die Konfiguration trägt dann
 `dir`; gebaut und gestartet wird dort. „Current file“ findet das Projekt, in dem die Datei liegt. Außerdem: Tree-sitter-Grammatiken für C
 und C++ (`scripts/build-grammars.sh c cpp`, `languages.ts`).
+
+### Rust: Standardbibliothek (2026-10-03)
+
+Step in sprang in `alloc::vec::Vec::push` & Co. (Quellpfad `/rustc/<hash>/library/…`, auf Macs teils nur `library/core/…`). Jetzt setzt der
+Start `step-avoid-regexp ^<?(core|std|alloc)(::| as )` (`rust::init_commands`, mit echtem lldb-dap getestet), und der Editor öffnet
+nur **absolute** Pfade innerhalb des Projekts (`absoluteInside`); die übrigen Frames stehen abgeblendet im Call Stack.

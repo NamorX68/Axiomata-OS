@@ -30,3 +30,15 @@ export function relativeInside(printed: string, base: string): string | null {
   }
   return parts.length > 0 ? parts.join("/") : null;
 }
+
+/**
+ * A debugger's file path as a path inside `base` — **absolute paths only**. A debug adapter reports files it
+ * cannot place (a standard-library source remapped to `library/core/src/…`, a generated file) with a relative
+ * path; resolving that against the project would name a file that is not there, so it counts as outside.
+ */
+export function absoluteInside(path: string | null, base: string): string | null {
+  if (!path) return null;
+  const printed = path.replace(/\\/g, "/");
+  if (!printed.startsWith("/") && !/^[A-Za-z]:\//.test(printed)) return null;
+  return relativeInside(path, base);
+}

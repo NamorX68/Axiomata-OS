@@ -24,6 +24,7 @@
     type DebugConfigInfo,
     type DebugListInfo,
   } from "./debugBackend";
+  import { absoluteInside } from "./outputPath";
   import { debugKeyAction, KEY_LABEL } from "./debugKeys";
   import { EMPTY_FORM, formOf, toNewConfig, type DebugForm } from "./debugForm";
   import type { DebugVariable } from "./debugBackend";
@@ -338,7 +339,14 @@
         <ul class="frames">
           {#each $ds.frames as f (f.id)}
             <li>
-              <button type="button" class="frame" class:on={f.id === $ds.frameId} onclick={() => void debug.selectFrame(f.id)}>
+              <button
+                type="button"
+                class="frame"
+                class:on={f.id === $ds.frameId}
+                class:outside={!folder || absoluteInside(f.path, folder) === null}
+                title={f.path ?? "No source file"}
+                onclick={() => void debug.selectFrame(f.id)}
+              >
                 <span class="fname">{f.name}</span>
                 <span class="floc">{leaf(f.path)}:{f.line}</span>
               </button>
@@ -530,6 +538,12 @@
   .scope:hover,
   .bp-open:hover {
     background: var(--ax-surface-2);
+  }
+
+  /* Code outside the project (the standard library, generated files): shown, but not one to open. */
+  .frame.outside .fname {
+    color: var(--ax-text-muted);
+    font-style: italic;
   }
 
   .frame.on {
