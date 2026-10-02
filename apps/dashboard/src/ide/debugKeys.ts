@@ -1,5 +1,5 @@
 /**
- * The debugger's keys. F1–F4 (owner's wish, 2026-10-03) are the ones to use: F11 is “show desktop” on macOS and
+ * The debugger's keys. F1–F4 (owner's wish, 2026-10-03: F1 continue, F2 over, F3 out, F4 into) are the ones to use: F11 is “show desktop” on macOS and
  * never reaches the app. F5 and F10 keep working for anyone used to other editors.
  */
 
@@ -8,8 +8,8 @@ import type { DebugAction } from "./debugBackend";
 const BY_KEY: Record<string, DebugAction> = {
   F1: "continue",
   F2: "next",
-  F3: "step_in",
-  F4: "step_out",
+  F3: "step_out",
+  F4: "step_in",
   F5: "continue",
   F10: "next",
 };
@@ -21,4 +21,4 @@ export function debugKeyAction(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlK
 }
 
 /** The key names shown in tooltips, one place so they cannot drift from `BY_KEY`. */
-export const KEY_LABEL = { continue: "F1", next: "F2", step_in: "F3", step_out: "F4" } as const;
+export const KEY_LABEL = { continue: "F1", next: "F2", step_in: "F4", step_out: "F3" } as const;

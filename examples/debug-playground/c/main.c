@@ -34,7 +34,7 @@ int collatz(long start) {
 
 int main(void) {
     Counter counter = {"demo", 0};
-    long scores[2] = {fibonacci(10), collatz(27)}; /* step into (F3) here */
+    long scores[2] = {fibonacci(10), collatz(27)}; /* step into (F4) here */
     const char *names[2] = {"fib", "collatz"};
     for (int i = 0; i < 2; i++) {
         long total = add(&counter, scores[i]);

@@ -31,7 +31,7 @@ func collatz(_ start: Int) -> Int {
 }
 
 var counter = Counter(name: "demo")
-let scores = ["fib": fibonacci(10), "collatz": collatz(27)]  // step into (F3) here
+let scores = ["fib": fibonacci(10), "collatz": collatz(27)]  // step into (F4) here
 for name in scores.keys.sorted() {
     let total = counter.add(scores[name]!)
     print("\(name) \(scores[name]!)  running total \(total)")

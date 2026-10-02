@@ -284,7 +284,7 @@ Gebaut: Crate `axiomata-dap` (Content-Length-Framing, `Client`, `Session` mit St
 `uv run --with debugpy`, sonst System-Python, sonst eine Meldung. Tauri-Glue `src-tauri/src/debug.rs`
 (auf dem Linux-Rechner nicht kompilierbar — Mac-Test steht aus). Frontend: Breakpoints per Klick auf die
 Zeilennummer (rote Pille, `settings.ide.breakpoints`, folgen Umbenennungen), Debug-Ansicht in der Rail
-(Toolbar, Tasten F1–F4 = Continue/Over/Into/Out, F5/F10 bleiben; F11 ist unter macOS „Desktop zeigen“, Call Stack, Variablen, Breakpoint-Liste, Konsole mit Evaluate), Datei öffnet sich am Stopp.
+(Toolbar, Tasten F1–F4 = Continue/Over/Out/Into, F5/F10 bleiben; F11 ist unter macOS „Desktop zeigen“, Call Stack, Variablen, Breakpoint-Liste, Konsole mit Evaluate), Datei öffnet sich am Stopp.
 
 Eigene Konfigurationen werden im Panel angelegt (Formular „New configuration…“, schreibt `.axiomata/debug.json`, ohne dass man eine Datei anfassen muss).
 

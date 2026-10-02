@@ -5,8 +5,8 @@ import { debugKeyAction } from "./debugKeys";
 const key = (k: string, extra: Partial<KeyboardEvent> = {}) => ({ key: k, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...extra });
 
 describe("debug keys", () => {
-  it("F1–F4 continue, step over, step into, step out", () => {
-    expect(["F1", "F2", "F3", "F4"].map((k) => debugKeyAction(key(k)))).toEqual(["continue", "next", "step_in", "step_out"]);
+  it("F1 continues, F2 steps over, F3 steps out, F4 steps into", () => {
+    expect(["F1", "F2", "F3", "F4"].map((k) => debugKeyAction(key(k)))).toEqual(["continue", "next", "step_out", "step_in"]);
   });
 
   it("F5 and F10 still work; F11 is left to macOS", () => {

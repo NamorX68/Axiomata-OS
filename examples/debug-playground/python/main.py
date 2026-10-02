@@ -31,7 +31,7 @@ def collatz(start):
 
 def main():
     counter = Counter("demo")
-    scores = {"fib": fibonacci(10), "collatz": collatz(27)}  # step into (F3) here
+    scores = {"fib": fibonacci(10), "collatz": collatz(27)}  # step into (F4) here
     for name, value in scores.items():
         total = counter.add(value)
         print(f"{name:8} {value:5}  running total {total}  {describe(name, value)}")

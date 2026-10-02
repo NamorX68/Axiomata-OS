@@ -36,7 +36,7 @@ int collatz(long start) {
 
 int main() {
     Counter counter{"demo"};
-    std::map<std::string, long> scores{{"fib", fibonacci(10)}, {"collatz", collatz(27)}};  // step into (F3) here
+    std::map<std::string, long> scores{{"fib", fibonacci(10)}, {"collatz", collatz(27)}};  // step into (F4) here
     std::vector<std::string> names;
     for (const auto& entry : scores) names.push_back(entry.first);
     for (const auto& name : names) {

@@ -38,7 +38,7 @@ fn collatz(start: u64) -> u32 {
 fn main() {
     let mut counter = Counter { name: "demo".to_string(), count: 0 };
     let mut scores: HashMap<&str, u64> = HashMap::new();
-    scores.insert("fib", fibonacci(10)); // step into (F3) here
+    scores.insert("fib", fibonacci(10)); // step into (F4) here
     scores.insert("collatz", collatz(27) as u64);
     let mut names: Vec<_> = scores.keys().copied().collect();
     names.sort();
