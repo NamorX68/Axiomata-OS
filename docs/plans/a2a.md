@@ -70,10 +70,17 @@ wo er etwas anders sagt, die älteren Aussagen.
   *Schleifenschutz:* jede Nachricht trägt einen Zähler der Weitergaben in einer Kette; nach **6** Schritten stoppt die Kette und fragt den Owner;
   höchstens **20** Nachrichten je Agent und Karte; auf eine reine Bestätigung ohne Inhalt wird nicht geantwortet. (Zahlen sind ein Anfang, einstellbar.)
 
+- **A9 — Kosten und Limits (Owner, 2026-10-03):** drei Ebenen. **Pro Sitzung** (Kosten oder Schritte einer Karte; einstellbar im Agenten, `AGENT.md`,
+  „leicht" klein, „schwer" größer; erreicht → Sitzung stoppt, Karte wird zurückgelegt und wenn möglich eskaliert). **Pro Plan** (Gesamtlimit; erreicht →
+  Automatik hält an und fragt). **Pro Tag/Monat** (harter Deckel, die Reißleine). Gemessen wird aus Token mal Preis nach der vorhandenen Preistabelle
+  (`config.agents.costs`, `spend.rs`); **Abonnement-Engines** (z. B. Claude Code über das Konto) werden in **Token** begrenzt, nicht in Geld. Die Werte
+  stehen in den Einstellungen als Standard für alle Pläne und lassen sich je Plan überschreiben. Ist ein Limit erreicht, darf eine laufende Sitzung ihren
+  **aktuellen Schritt beenden** und stoppt dann, damit nichts halb geschrieben liegen bleibt.
+
 ## Offene Fragen der Runde
 
 1. ~~Rollen und Rechte / Aufgabenverteilung~~ — beantwortet durch A2–A5.
 2. ~~Bestätigung durch den Owner~~ — beantwortet durch A7.
-3. ~~Zustellung / Schleifen~~ — beantwortet durch A8. 4. Kostenlimits: wie viel, pro Plan oder Tag, wer stellt sie ein?
+3. ~~Zustellung / Schleifen~~ — beantwortet durch A8. 4. ~~Kostenlimits~~ — beantwortet durch A9.
 6. MCP-Eintrag pro Harness (F4 im Plan `agentic-ide.md`).
 7. Eigenständiges Studio: Wo liegt das Brett, wenn das Studio eine eigene App wird?
