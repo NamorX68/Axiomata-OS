@@ -165,6 +165,7 @@ impl Session {
         let client = Arc::new(client);
         let (events_tx, events_rx) = mpsc::channel();
         let (init_tx, init_rx) = mpsc::channel();
+        let notes = events_tx.clone();
         let can_terminal = terminal.is_some();
         {
             let client = Arc::clone(&client);
@@ -204,7 +205,18 @@ impl Session {
             capabilities,
         };
         for (path, lines) in breakpoints {
-            session.set_breakpoints(path, lines)?;
+            for bp in session.set_breakpoints(path, lines)? {
+                if !bp.verified {
+                    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+                    let why = bp
+                        .message
+                        .unwrap_or_else(|| "the adapter did not accept it".into());
+                    let _ = notes.send(DebugEvent::Output {
+                        category: "console".into(),
+                        text: format!("Breakpoint {name}:{} is not set — {why}\n", bp.line),
+                    });
+                }
+            }
         }
         // Stop on an exception nobody catches, when the adapter offers it.
         let uncaught = session.capabilities["exceptionBreakpointFilters"]
@@ -432,6 +444,17 @@ fn pump(
                 }
                 "terminated" => {
                     let _ = events.send(DebugEvent::Terminated);
+                }
+                // A breakpoint the adapter could not place (the file is not the one the program runs, …).
+                "breakpoint" if body["breakpoint"]["verified"] == false => {
+                    let line = body["breakpoint"]["line"].as_u64().unwrap_or(0);
+                    let why = body["breakpoint"]["message"]
+                        .as_str()
+                        .unwrap_or("not verified");
+                    let _ = events.send(DebugEvent::Output {
+                        category: "console".into(),
+                        text: format!("Breakpoint on line {line} is not set — {why}\n"),
+                    });
                 }
                 _ => {}
             },

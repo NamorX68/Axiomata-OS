@@ -278,6 +278,8 @@ pub async fn debug_start(
             // The line lives only in this message — it is never stored.
             let handler: Option<TerminalHandler> = terminal.then(|| {
                 launch["console"] = "integratedTerminal".into();
+                // The program writes to the terminal pane itself; the console would only echo a second copy.
+                launch["redirectOutput"] = false.into();
                 let handler: TerminalHandler = Arc::new(move |request| {
                     let _ = for_terminal.send(DebugEvent::RunInTerminal { title: request.title.clone(), line: request.command_line() });
                 });
