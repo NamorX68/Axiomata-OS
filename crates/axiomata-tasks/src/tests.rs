@@ -272,3 +272,64 @@ fn the_trust_file_round_trips_and_an_unreadable_one_trusts_nothing() {
     std::fs::write(&file, "garbage").unwrap();
     assert!(!TrustStore::load(&file).is_trusted(proj.path(), "abc"));
 }
+
+#[test]
+fn a_python_project_offers_its_console_scripts_as_run() {
+    let dir = project(&[
+        (
+            "pyproject.toml",
+            "[project]\nname=\"x\"\n[project.scripts]\nocht = \"ocht.cli:main\"\n",
+        ),
+        ("uv.lock", ""),
+    ]);
+    let tasks = detect(dir.path());
+    let run: Vec<_> = tasks
+        .iter()
+        .filter(|t| t.group == Group::Run)
+        .map(|t| t.command.as_str())
+        .collect();
+    assert_eq!(run, ["uv run ocht"]);
+}
+
+#[test]
+fn without_scripts_a_runnable_package_or_an_entry_file_is_the_start() {
+    let pkg = project(&[
+        ("pyproject.toml", "[project]\nname=\"x\"\n"),
+        ("src/ocht/__main__.py", ""),
+        ("uv.lock", ""),
+    ]);
+    let commands: Vec<_> = detect(pkg.path()).into_iter().map(|t| t.command).collect();
+    assert!(
+        commands.contains(&"uv run python -m ocht".to_string()),
+        "{commands:?}"
+    );
+
+    let file = project(&[("main.py", "print(1)")]);
+    assert_eq!(detect(file.path())[0].command, "python main.py");
+
+    let django = project(&[("manage.py", "")]);
+    assert_eq!(
+        detect(django.path())[0].command,
+        "python manage.py runserver"
+    );
+}
+
+#[test]
+fn makefile_targets_become_tasks_but_not_patterns_or_assignments() {
+    let dir = project(&[(
+        "Makefile",
+        ".PHONY: all\nCC := gcc\nall: build\nbuild:\n\tcc x\n%.o: %.c\n\tcc -c $<\ntest:\n\techo\nbuild:\n",
+    )]);
+    let commands: Vec<_> = detect(dir.path()).into_iter().map(|t| t.command).collect();
+    for expected in ["make all", "make build", "make test"] {
+        assert!(
+            commands.contains(&expected.to_string()),
+            "{expected} missing in {commands:?}"
+        );
+    }
+    assert_eq!(
+        commands.len(),
+        3,
+        "no .PHONY, no CC, no pattern, no duplicate: {commands:?}"
+    );
+}

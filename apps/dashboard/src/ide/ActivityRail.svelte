@@ -1,6 +1,6 @@
 <!--
   The activity rail (`docs/plans/workbench.md`): a narrow column of icons at the Studio's left edge.
-  Files and Search sit on top; below the rule come Agents, Terminal, Run and Git as one block. They choose what
+  Files and Search sit on top; below a rule come Agents and Terminal, below another Run and Git. They choose what
   the sidebar column shows (Files, Search, Agents, Run, Git); a click on the one already shown folds the column
   away, as in VS Code. Terminal is an action, not a view: every click opens a new terminal. "Open a file…"
   sits at the foot. Settings and shortcuts stay on the right of the header.
@@ -64,6 +64,9 @@
       {#if agentsRunning > 0}<span class="badge live" aria-hidden="true">{agentsRunning}</span>{/if}
     </span>
     <IconButton icon="terminal" size="lg" label="New terminal" {disabled} onclick={onTerminal} />
+  </div>
+  <span class="rule" aria-hidden="true"></span>
+  <div class="group" role="tablist" aria-orientation="vertical">
     <IconButton icon="play" size="lg" label="Run — build, test, start" tab pressed={shown("tasks")} onclick={() => onSelect("tasks")} />
     <span class="slot">
       <IconButton

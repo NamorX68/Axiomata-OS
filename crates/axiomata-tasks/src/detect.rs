@@ -12,6 +12,7 @@ pub fn detect(project: &Path) -> Vec<Task> {
     cargo(project, &mut tasks);
     node(project, &mut tasks);
     python(project, &mut tasks);
+    make(project, &mut tasks);
     tasks
 }
 
@@ -110,6 +111,64 @@ fn node(project: &Path, tasks: &mut Vec<Task>) {
 fn python(project: &Path, tasks: &mut Vec<Task>) {
     let pyproject = std::fs::read_to_string(project.join("pyproject.toml")).unwrap_or_default();
     let has = |f: &str| project.join(f).is_file();
+    let runner = if has("uv.lock") {
+        "uv run "
+    } else if has("poetry.lock") {
+        "poetry run "
+    } else {
+        ""
+    };
+
+    // How the project starts: the console scripts it declares, else a package that can be run (`__main__.py`),
+    // else a conventional entry file at the top.
+    let manifest: Option<toml::Table> = pyproject.parse().ok();
+    let scripts = |path: &[&str]| -> Vec<String> {
+        let mut node = manifest.as_ref().map(|m| toml::Value::Table(m.clone()));
+        for key in path {
+            node = node.and_then(|n| n.get(key).cloned());
+        }
+        node.and_then(|n| n.as_table().map(|t| t.keys().cloned().collect()))
+            .unwrap_or_default()
+    };
+    let mut starts: Vec<String> = scripts(&["project", "scripts"]);
+    starts.extend(scripts(&["tool", "poetry", "scripts"]));
+    starts.retain(|name| !name.is_empty() && !name.contains(char::is_whitespace));
+    starts.dedup();
+    for name in &starts {
+        tasks.push(detected(
+            &format!("py-{name}"),
+            &format!("{runner}{name}"),
+            &format!("{runner}{name}"),
+            Group::Run,
+        ));
+    }
+    if starts.is_empty() {
+        for package in main_packages(project) {
+            let command = format!("{runner}python -m {package}");
+            tasks.push(detected(
+                &format!("py-m-{package}"),
+                &command,
+                &command,
+                Group::Run,
+            ));
+        }
+        for file in ["manage.py", "main.py", "app.py"] {
+            if has(file) {
+                let command = if file == "manage.py" {
+                    format!("{runner}python manage.py runserver")
+                } else {
+                    format!("{runner}python {file}")
+                };
+                tasks.push(detected(
+                    &format!("py-{file}"),
+                    &command,
+                    &command,
+                    Group::Run,
+                ));
+                break;
+            }
+        }
+    }
     let pytest = has("pytest.ini")
         || pyproject.contains("pytest")
         || (has("tox.ini") && project.join("tests").is_dir());
@@ -130,5 +189,60 @@ fn python(project: &Path, tasks: &mut Vec<Task>) {
             &format!("{prefix}ruff check ."),
             Group::Lint,
         ));
+    }
+}
+
+/// Packages with a `__main__.py` — directly under the project or under `src/`.
+fn main_packages(project: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    for base in [project.to_path_buf(), project.join("src")] {
+        let Ok(entries) = std::fs::read_dir(&base) else {
+            continue;
+        };
+        let mut names: Vec<String> = entries
+            .flatten()
+            .filter(|e| e.path().join("__main__.py").is_file())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| {
+                !n.starts_with('.') && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+            .collect();
+        names.sort();
+        found.extend(names);
+    }
+    found.truncate(3);
+    found
+}
+
+/// Targets of a `Makefile`: `name:` at the start of a line. Pattern rules (`%`), special targets (`.PHONY`)
+/// and variable assignments (`:=`) are not tasks.
+fn make(project: &Path, tasks: &mut Vec<Task>) {
+    let Some(text) = ["Makefile", "makefile", "GNUmakefile"]
+        .iter()
+        .find_map(|f| std::fs::read_to_string(project.join(f)).ok())
+    else {
+        return;
+    };
+    let mut seen: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let Some((target, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let valid = !target.is_empty()
+            && !target.starts_with(['.', '\t', ' ', '#'])
+            && target
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            && !rest.starts_with('=')
+            && !seen.contains(&target);
+        if valid && seen.len() < 20 {
+            seen.push(target);
+            tasks.push(detected(
+                &format!("make-{target}"),
+                &format!("make {target}"),
+                &format!("make {target}"),
+                Group::guess(target),
+            ));
+        }
     }
 }

@@ -10,6 +10,7 @@ dependencies = [
  "axiomata-files",
  "axiomata-git",
  "axiomata-macos",
+ "axiomata-tasks",
  "axiomata-terminal",
  "home",
  "rusqlite",

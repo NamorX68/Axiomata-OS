@@ -9,6 +9,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import {
     describeTask,
@@ -103,8 +104,8 @@
         </div>
       {/if}
       {#each groups as g (g.group)}
-        <section>
-          <h3>{GROUP_LABEL[g.group]}</h3>
+        <section class="g-{g.group}">
+          <h3><span class="swatch" aria-hidden="true"></span>{GROUP_LABEL[g.group]}<span class="n">{g.tasks.length}</span></h3>
           <ul>
             {#each g.tasks as task (task.id)}
               <li class:locked={locked(task)}>
@@ -115,8 +116,11 @@
                   title={locked(task) ? "Review the project's tasks.json first" : describeTask(task)}
                   onclick={() => onRun(task)}
                 >
-                  <span class="play" aria-hidden="true">▶</span>
-                  <span class="label">{task.label}</span>
+                  <span class="play" aria-hidden="true"><Icon name="play" size="sm" /></span>
+                  <span class="text">
+                    <span class="label">{task.label}</span>
+                    {#if task.command !== task.label}<span class="cmd">{describeTask(task)}</span>{/if}
+                  </span>
                   {#if task.source !== "detected"}<span class="tag">{task.source}</span>{/if}
                 </button>
               </li>
@@ -125,8 +129,8 @@
         </section>
       {:else}
         <p class="note">
-          Nothing to run found. Tasks are detected from <code>Cargo.toml</code>, <code>package.json</code> and
-          pytest, or written in <code>.axiomata/tasks.json</code>.
+          Nothing to run found. Tasks are detected from <code>Cargo.toml</code>, <code>package.json</code>,
+          <code>pyproject.toml</code> and a <code>Makefile</code>, or written in <code>.axiomata/tasks.json</code>.
         </p>
       {/each}
       {#each listed.problems as problem (problem)}
@@ -165,7 +169,31 @@
     padding: var(--ax-space-3);
   }
 
+  section {
+    --tone: var(--ax-text-muted);
+    margin-bottom: var(--ax-space-3);
+  }
+
+  section.g-run {
+    --tone: var(--ax-accent);
+  }
+
+  section.g-build {
+    --tone: var(--ax-harness-opencode);
+  }
+
+  section.g-test {
+    --tone: var(--ax-success);
+  }
+
+  section.g-lint {
+    --tone: var(--ax-warning);
+  }
+
   h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
     margin: var(--ax-space-3) 0 var(--ax-space-1);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
@@ -174,20 +202,35 @@
     text-transform: uppercase;
   }
 
+  .swatch {
+    width: calc(8px * var(--ax-ui-scale));
+    height: calc(8px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: var(--tone);
+  }
+
+  .n {
+    margin-left: auto;
+    font-weight: 400;
+  }
+
   ul {
     margin: 0;
     padding: 0;
     list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
   }
 
   .run {
     display: flex;
     align-items: center;
-    gap: var(--ax-space-2);
+    gap: var(--ax-space-3);
     width: 100%;
-    padding: var(--ax-space-1) var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-2);
     background: none;
-    border: none;
+    border: 1px solid transparent;
     border-radius: var(--ax-radius-md);
     color: var(--ax-text);
     font-family: var(--ax-font-sans);
@@ -196,8 +239,10 @@
     cursor: pointer;
   }
 
-  .run:hover:not(:disabled) {
+  .run:hover:not(:disabled),
+  .run:focus-visible {
     background: var(--ax-surface-2);
+    border-color: var(--ax-border);
   }
 
   .run:disabled {
@@ -205,17 +250,44 @@
     cursor: default;
   }
 
+  /* The play mark is a round button in the group's colour; filled on hover. */
   .play {
-    color: var(--ax-accent);
-    font-size: var(--ax-font-size-xs);
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: calc(26px * var(--ax-ui-scale));
+    height: calc(26px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: color-mix(in srgb, var(--tone) 18%, transparent);
+    color: var(--tone);
+  }
+
+  .run:hover:not(:disabled) .play {
+    background: var(--tone);
+    color: var(--ax-bg);
+  }
+
+  .text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .label {
-    flex: 1;
-    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .cmd {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
   }
 
   .tag {
