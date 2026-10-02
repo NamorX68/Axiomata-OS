@@ -7,6 +7,7 @@
   pane without a run (a stored layout is cleaned of them on load) says so rather than guessing.
 -->
 <script lang="ts">
+  import type { OutputRef } from "../../core/outputLinks";
   import { createContext } from "../../core/registry";
   import Terminal from "../../modules/terminal.svelte";
   import IconButton from "../../ui/IconButton.svelte";
@@ -17,15 +18,19 @@
     label,
     cwd,
     onRestart,
+    onLink,
   }: {
     tabId: string;
     label: string;
     /** The project folder, where the line starts (a task's own folder is a `cd` in the line). */
     cwd: string;
     onRestart: () => void;
+    /** A `file:line` in the output was ⌘-clicked. */
+    onLink: (ref: OutputRef) => void;
   } = $props();
 
   const run = $derived($taskRuns[tabId]);
+  let terminal = $state<{ interrupt: () => void } | null>(null);
 
   /** One context per run: a restart is a new terminal. Config changes go nowhere (a pane's terminal settings are global). */
   const context = $derived(run ? createContext(`${tabId}:${run.runs}`, { cwd }, () => {}) : null);
@@ -34,12 +39,14 @@
 <div class="task-pane">
   <div class="bar">
     <span class="label" title={label}>{label}</span>
+    <span class="hint">⌘-click a file:line to open it</span>
+    <IconButton icon="square" label="Stop (Ctrl-C)" size="sm" onclick={() => terminal?.interrupt()} />
     <IconButton icon="rotate-ccw" label="Run again" size="sm" onclick={onRestart} />
   </div>
   <div class="body">
     {#if run && context}
       {#key run.runs}
-        <Terminal ctx={context} initialCommand={run.line} />
+        <Terminal bind:this={terminal} ctx={context} initialCommand={run.line} {onLink} />
       {/key}
     {:else}
       <p class="none">This task was started in an earlier session. Run it again from the Run view.</p>
@@ -72,6 +79,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .hint {
+    flex: 0 0 auto;
+    opacity: 0.7;
   }
 
   .body {

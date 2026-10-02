@@ -35,9 +35,13 @@
     filesPaneConfig,
     fileTab,
     GIT_PANE,
+    projectRoot,
     SEARCH_PANE,
     showsFile,
   } from "../paneKinds";
+  import { toast } from "../../core/toast";
+  import type { OutputRef } from "../../core/outputLinks";
+  import { relativeInside } from "../outputPath";
   import AgentPane from "./AgentPane.svelte";
   import FilePane from "./FilePane.svelte";
   import FilesPane from "./FilesPane.svelte";
@@ -83,6 +87,18 @@
   const fileConfig = $derived(filePaneConfig(tab));
   const openFile = openFileBeside(() => tab.id);
   const dock = getDock();
+
+  /** A `file:line` ⌘-clicked in a task's output: opened if it lies inside the project, else said so. */
+  function openOutputLink(ref: OutputRef): void {
+    const project = $session.current;
+    const rel = project ? relativeInside(ref.path, project.repo_root) : null;
+    if (!project || !rel) {
+      toast(`“${ref.path}” is not inside this project.`, "warning");
+      return;
+    }
+    const root = projectRoot(project.id);
+    dock.open(fileTab(root, rel, ref.line - 1), (t) => showsFile(t, root, rel), tab.id);
+  }
 </script>
 
 <!-- `data-ide-pane` is a signal, not styling: a module that behaves differently
@@ -100,7 +116,13 @@
     {/if}
   {:else if tab.kind === TASK_PANE}
     {#if $session.current}
-      <TaskPane tabId={tab.id} label={tab.title} cwd={$session.current.repo_root} onRestart={() => dock.restartTask(tab.id)} />
+      <TaskPane
+        tabId={tab.id}
+        label={tab.title}
+        cwd={$session.current.repo_root}
+        onRestart={() => dock.restartTask(tab.id)}
+        onLink={(ref) => openOutputLink(ref)}
+      />
     {/if}
   {:else if tab.kind === AGENT_DIFF_PANE}
     {#if agent && agentDiffOf(tab) !== null}

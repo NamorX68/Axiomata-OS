@@ -266,3 +266,11 @@ schreibt atomar und **nie durch einen Symlink** (`.axiomata` oder die Datei kön
 Inhalt als bestätigt; war sie **nicht** bestätigt (kann Fremdes enthalten), bleibt sie es — sonst würde das Speichern still
 fremde Befehle freigeben. Glue: `tasks_save`, `tasks_remove` in `src-tauri/src/tasks.rs` (nicht auf Linux kompiliert). Umgebungsvariablen
 sind im Formular noch nicht einstellbar (nur in der Datei).
+
+**#50 Nachzug (2026-10-02):** ⌘-Klick auf `Datei:Zeile` in der Ausgabe öffnet die Stelle im Editor — in Task-Panes (Pfad nur innerhalb des
+Projekts, `ide/outputPath.ts`) und in Agent-Panes (innerhalb des Agent-Worktrees). Erkannt werden rustc/gcc/pytest/ruff/eslint-Form
+`pfad:zeile:spalte`, Python-Tracebacks (`File "…", line N`) und tsc (`pfad(zeile,spalte)`); URLs und `host:port` nie
+(`core/outputLinks.ts`). Der Terminal-Baustein bekommt dafür nur den optionalen Prop `onLink`; der Text kommt aus der Shell und
+bestimmt nie selbst, wohin geöffnet wird. Neu außerdem: **Stop** (Ctrl-C an die Shell, sie bleibt) im Task-Pane.
+**Weiterhin offen:** Problem-Matcher mit Diagnosen im Editor (Frage: wann verschwinden sie? Vorschlag: beim nächsten Lauf derselben Task
+und wenn ihr Pane geschlossen wird) und die Umgebung wie `toolenv.rs`.

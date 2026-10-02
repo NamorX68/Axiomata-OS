@@ -27,6 +27,8 @@
   import type { IdeAgent, ProvisionedAgent } from "../../core/backend";
   import { createContext } from "../../core/registry";
   import { toast } from "../../core/toast";
+  import type { OutputRef } from "../../core/outputLinks";
+  import { relativeInside } from "../outputPath";
   import { renderMarkdown } from "../../core/markdown";
   import Terminal from "../../modules/terminal.svelte";
   import { newAgentSession, prepareAgent } from "../agents";
@@ -100,6 +102,16 @@
   let sideTab = $state("terminal");
   const dock = getDock();
   const openFile = openFileBeside(() => tabId);
+
+  /** A `file:line` ⌘-clicked in the agent's output: opened from its worktree (or the project folder, which is where it runs without one). */
+  function openOutputLink(ref: OutputRef): void {
+    const rel = relativeInside(ref.path, ready?.cwd ?? cwd);
+    if (!rel) {
+      toast(`“${ref.path}” is not inside this agent's folder.`, "warning");
+      return;
+    }
+    openFile(agent.id, rel, ref.line - 1);
+  }
 
   /** The agent's diffs in a dock pane of their own (H14) — at most one per agent. */
   function dockDiffs(): void {
@@ -193,7 +205,7 @@
     >
       {#if ready}
         {#key restarts}
-          <Terminal ctx={terminalContext} initialCommand={command} />
+          <Terminal ctx={terminalContext} initialCommand={command} onLink={openOutputLink} />
         {/key}
       {:else if failure}
         <p class="pending error">{failure}</p>
