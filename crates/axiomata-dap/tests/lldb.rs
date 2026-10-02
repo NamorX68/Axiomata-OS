@@ -110,7 +110,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn stops_in_add(
-    project: &PathBuf,
+    project: &std::path::Path,
     executable: &std::path::Path,
     config: &axiomata_dap::DebugConfig,
     file: &str,
