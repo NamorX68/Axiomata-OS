@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { filesOf, linesOf, parseBreakpoints, renamed, toggled } from "./breakpoints";
+import { filesOf, linesOf, parseBreakpoints, renamed, toggled, shiftBreakpoints } from "./breakpoints";
 
 describe("breakpoints", () => {
   it("toggles a line on and off, keeps the lines sorted, and drops empty files and roots", () => {
@@ -33,5 +33,41 @@ describe("breakpoints", () => {
     const map = toggled(toggled({}, "project:1", "src/a.py", 4), "project:1", "other.py", 1);
     expect(renamed(map, "project:1", "src", "lib")["project:1"]).toEqual({ "lib/a.py": [4], "other.py": [1] });
     expect(renamed(map, "project:1", "nothing", "x")).toBe(map);
+  });
+});
+
+describe("shiftBreakpoints", () => {
+  const at = (l: number, c: number) => ({ line: l, col: c });
+  const edit = (s: [number, number], o: [number, number], n: [number, number]) => ({ start: at(...s), oldEnd: at(...o), newEnd: at(...n) });
+
+  it("lines after an inserted line move down, lines before stay", () => {
+    // Enter at the end of line 3 (one-based): a line is added below it.
+    expect(shiftBreakpoints([2, 3, 5], edit([2, 10], [2, 10], [3, 0]), 8)).toEqual([2, 3, 6]);
+  });
+
+  it("Enter at the start of a line pushes that line's breakpoint down", () => {
+    expect(shiftBreakpoints([4], edit([3, 0], [3, 0], [4, 0]), 8)).toEqual([5]);
+  });
+
+  it("Enter in the middle of a line leaves the breakpoint where it is", () => {
+    expect(shiftBreakpoints([4], edit([3, 5], [3, 5], [4, 0]), 8)).toEqual([4]);
+  });
+
+  it("deleting whole lines drops their breakpoints and pulls the later ones up", () => {
+    // Lines 3–4 (one-based) removed: (2,0)–(4,0).
+    expect(shiftBreakpoints([2, 3, 4, 6], edit([2, 0], [4, 0], [2, 0]), 9)).toEqual([2, 4]);
+  });
+
+  it("joining a line with the one before removes the later line's breakpoint", () => {
+    // Backspace at the start of line 4: (2,end)–(3,0) becomes nothing.
+    expect(shiftBreakpoints([3, 4, 5], edit([2, 8], [3, 0], [2, 8]), 8)).toEqual([3, 4]);
+  });
+
+  it("typing inside a line changes nothing", () => {
+    expect(shiftBreakpoints([2, 5], edit([1, 3], [1, 3], [1, 4]), 8)).toEqual([2, 5]);
+  });
+
+  it("replacing the whole text keeps the breakpoints that still fit", () => {
+    expect(shiftBreakpoints([2, 9], edit([0, 0], [7, 4], [4, 0]), 8)).toEqual([2]);
   });
 });

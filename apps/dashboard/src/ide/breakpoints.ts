@@ -101,3 +101,57 @@ export function clearBreakpoints(root: string): void {
   breakpoints.set(rest);
   save(rest);
 }
+
+/** A replacement as the editor's document reports it (`TextChange`); positions are zero-based. */
+export interface EditSpan {
+  start: { line: number; col: number };
+  oldEnd: { line: number; col: number };
+  newEnd: { line: number; col: number };
+}
+
+/**
+ * Where the breakpoints (one-based `lines`) of a file stand after one edit — so they stay on the code they
+ * were set on while you type above them.
+ *
+ *  - Lines before the edit stay; lines after it move by the number of lines it added or removed.
+ *  - Enter at the very start of a line pushes that line (and its breakpoint) down, as in other IDEs; Enter
+ *    elsewhere in a line leaves the breakpoint on the line it was set on.
+ *  - Lines deleted outright take their breakpoints with them; lines merged into the one before lose theirs.
+ *  - Replacing the whole document (a reload, a formatter) keeps the breakpoints that still fit on a line.
+ */
+export function shiftBreakpoints(lines: number[], edit: EditSpan, lineCountBefore: number): number[] {
+  const { start, oldEnd, newEnd } = edit;
+  const delta = newEnd.line - oldEnd.line;
+  if (start.line === 0 && start.col === 0 && oldEnd.line >= lineCountBefore - 1 && oldEnd.line > 0) {
+    // The whole text was replaced: stay put where the line still exists.
+    return lines.filter((l) => l - 1 <= newEnd.line);
+  }
+  const wholeLines = start.col === 0 && oldEnd.col === 0 && oldEnd.line > start.line;
+  const pureInsert = oldEnd.line === start.line && oldEnd.col === start.col;
+  const out = new Set<number>();
+  for (const one of lines) {
+    const l = one - 1;
+    let to: number | null;
+    if (l < start.line) to = l;
+    else if (wholeLines && l < oldEnd.line) to = null;
+    else if (l === start.line) to = pureInsert && start.col === 0 && delta > 0 ? l + delta : l;
+    else if (l <= oldEnd.line) to = wholeLines && l === oldEnd.line ? l + delta : null;
+    else to = l + delta;
+    if (to !== null && to >= 0) out.add(to + 1);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** Replaces one file's breakpoints (kept sorted, an empty list removes the file), and remembers them. */
+export function setBreakpointLines(root: string, rel: string, lines: number[]): void {
+  const map = get(breakpoints);
+  const before = map[root]?.[rel] ?? [];
+  if (before.length === lines.length && before.every((l, i) => l === lines[i])) return;
+  const files = { ...map[root] };
+  if (lines.length > 0) files[rel] = lines;
+  else delete files[rel];
+  const next = { ...map, [root]: files };
+  if (Object.keys(files).length === 0) delete next[root];
+  breakpoints.set(next);
+  save(next);
+}

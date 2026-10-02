@@ -35,9 +35,10 @@
 </script>
 
 <script lang="ts">
-  import { breakpoints, linesOf } from "../ide/breakpoints";
+  import { get } from "svelte/store";
+  import { breakpoints, linesOf, shiftBreakpoints } from "../ide/breakpoints";
   import { isDebuggable } from "../ide/debugBackend";
-  import { execPoint, toggleDebugBreakpoint } from "../ide/debug";
+  import { execPoint, moveDebugBreakpoints, toggleDebugBreakpoint } from "../ide/debug";
   import { onMount, tick as nextTick, untrack, type Snippet } from "svelte";
 
   import { invokeBackend, listenBackend, type FileChange } from "../core/backend";
@@ -197,6 +198,19 @@
   const breakpointLines = $derived.by(() => {
     if (!debuggable || !session) return null;
     return new Set([...linesOf($breakpoints, session.root, session.rel)].map((l) => l - 1));
+  });
+  // Breakpoints stay on their code while the text above them changes (and a running session hears of it).
+  $effect(() => {
+    if (!debuggable || !session) return;
+    const { root, rel, doc } = session;
+    let count = doc.store.lineCount();
+    return doc.onTextChange((change) => {
+      const before = [...(get(breakpoints)[root]?.[rel] ?? [])];
+      const after = before.length > 0 ? shiftBreakpoints(before, change, count) : before;
+      count = doc.store.lineCount();
+      if (after.length === before.length && after.every((l, i) => l === before[i])) return;
+      moveDebugBreakpoints(root, rel, after);
+    });
   });
   const execLine = $derived($execPoint && session && $execPoint.root === session.root && $execPoint.rel === session.rel ? $execPoint.line : null);
 

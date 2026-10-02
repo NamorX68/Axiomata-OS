@@ -8,7 +8,7 @@
  */
 import { derived, get, writable, type Readable } from "svelte/store";
 
-import { breakpoints, filesOf, linesOf, toggleBreakpoint } from "./breakpoints";
+import { breakpoints, filesOf, linesOf, setBreakpointLines, toggleBreakpoint } from "./breakpoints";
 import { createDebugController, realBackend } from "./debugSession";
 import type { DebugTarget, StackFrame } from "./debugBackend";
 import { relativeInside } from "./outputPath";
@@ -76,4 +76,10 @@ export async function startDebugging(root: string, folder: string, target: Debug
 export function toggleDebugBreakpoint(root: string, rel: string, line: number): void {
   toggleBreakpoint(root, rel, line);
   void debug.syncBreakpoints(rel, [...linesOf(get(breakpoints), root, rel)].sort((a, b) => a - b));
+}
+
+/** The editor moved a file's breakpoints along with an edit; a running session learns the new lines. */
+export function moveDebugBreakpoints(root: string, rel: string, lines: number[]): void {
+  setBreakpointLines(root, rel, lines);
+  void debug.syncBreakpoints(rel, lines);
 }
