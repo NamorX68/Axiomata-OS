@@ -1,0 +1,15 @@
+[project]
+name = "debug-playground"
+version = "0.1.0"
+requires-python = ">=3.9"
+
+# The Debug view offers “demo” for this entry point (it calls main.main()).
+[project.scripts]
+demo = "main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "helpers"]

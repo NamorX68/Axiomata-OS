@@ -1,5 +1,7 @@
 """Debug playground (Python): open this folder as a project, set breakpoints, press Debug."""
 
+from helpers import average, describe
+
 
 class Counter:
     def __init__(self, name):
@@ -32,7 +34,8 @@ def main():
     scores = {"fib": fibonacci(10), "collatz": collatz(27)}  # step into (F11) here
     for name, value in scores.items():
         total = counter.add(value)
-        print(f"{name:8} {value:5}  running total {total}")
+        print(f"{name:8} {value:5}  running total {total}  {describe(name, value)}")
+    print("average", average(list(scores.values())))
     print("done")  # evaluate in the console: scores, counter.count, len(scores) ...
 
 

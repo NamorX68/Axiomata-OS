@@ -9,13 +9,20 @@ Comments in the code mark good places for a breakpoint.
 
 | Folder | What to pick in the Debug view | Needs |
 |---|---|---|
-| `python/` | **Current file** (`main.py`) or **main.py** | Python; `uv` (fetches debugpy) or debugpy in a `.venv` |
+| `python/` | **demo** (the entry point in `pyproject.toml`), **main.py**, or **Current file** | Python; `uv` (fetches debugpy) or debugpy in a `.venv` |
 | `rust/` | **cargo: debug-demo** or **cargo: tiny** | Rust (`cargo`) and `lldb-dap` |
 | `c/` | open `main.c`, pick **Current file** | a C compiler (Xcode command line tools) and `lldb-dap` |
 | `cpp/` | **cmake: demo** | `cmake`, a C++ compiler and `lldb-dap` |
 | `swift/` | **swift: demo** | Swift (Xcode) and `lldb-dap` |
 
 `lldb-dap` comes with Xcode 16+ command line tools, or `brew install llvm`.
+
+### The Python folder in detail
+
+- `main.py` — the basic walk-through; `helpers.py` is stepped into with **F11** (the debugger moves between files).
+- `crash.py` — open it, pick **Current file**: an uncaught `ValueError` stops the debugger on the line that raised it.
+- `interactive.py` — reads with `input()`: pick **Current file** and tick **Run in a terminal**, type in the “Debug” pane.
+- `pyproject.toml` — declares the `demo` entry point, which the Debug view lists on its own (no file to write).
 
 ## Things to try
 
