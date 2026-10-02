@@ -1,4 +1,4 @@
-"""Step into these from main.py (F11) to see the debugger move between files."""
+"""Step into these from main.py (F3) to see the debugger move between files."""
 
 
 def describe(name, value):

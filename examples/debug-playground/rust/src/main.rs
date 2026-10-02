@@ -18,7 +18,7 @@ impl Counter {
 fn fibonacci(n: u32) -> u64 {
     let (mut a, mut b) = (0u64, 1u64);
     for _ in 0..n {
-        let next = a + b; // breakpoint in a loop: Continue (F5) hits it every round
+        let next = a + b; // breakpoint in a loop: Continue (F1) hits it every round
         a = b;
         b = next;
     }
@@ -38,7 +38,7 @@ fn collatz(start: u64) -> u32 {
 fn main() {
     let mut counter = Counter { name: "demo".to_string(), count: 0 };
     let mut scores: HashMap<&str, u64> = HashMap::new();
-    scores.insert("fib", fibonacci(10)); // step into (F11) here
+    scores.insert("fib", fibonacci(10)); // step into (F3) here
     scores.insert("collatz", collatz(27) as u64);
     let mut names: Vec<_> = scores.keys().copied().collect();
     names.sort();

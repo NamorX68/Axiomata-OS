@@ -13,7 +13,7 @@ struct Counter {
 func fibonacci(_ n: Int) -> Int {
     var a = 0, b = 1
     for _ in 0..<n {
-        let next = a + b  // breakpoint in a loop: Continue (F5) hits it every round
+        let next = a + b  // breakpoint in a loop: Continue (F1) hits it every round
         a = b
         b = next
     }
@@ -31,7 +31,7 @@ func collatz(_ start: Int) -> Int {
 }
 
 var counter = Counter(name: "demo")
-let scores = ["fib": fibonacci(10), "collatz": collatz(27)]  // step into (F11) here
+let scores = ["fib": fibonacci(10), "collatz": collatz(27)]  // step into (F3) here
 for name in scores.keys.sorted() {
     let total = counter.add(scores[name]!)
     print("\(name) \(scores[name]!)  running total \(total)")

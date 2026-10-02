@@ -19,7 +19,7 @@ Comments in the code mark good places for a breakpoint.
 
 ### The Python folder in detail
 
-- `main.py` — the basic walk-through; `helpers.py` is stepped into with **F11** (the debugger moves between files).
+- `main.py` — the basic walk-through; `helpers.py` is stepped into with **F3** (the debugger moves between files).
 - `crash.py` — open it, pick **Current file**: an uncaught `ValueError` stops the debugger on the line that raised it.
 - `interactive.py` — reads with `input()`: pick **Current file** and tick **Run in a terminal**, type in the “Debug” pane.
 - `pyproject.toml` — declares the `demo` entry point, which the Debug view lists on its own (no file to write).
@@ -27,8 +27,8 @@ Comments in the code mark good places for a breakpoint.
 ## Things to try
 
 1. Breakpoint in `add` → Debug → it stops; look at **Variables** and the **Call stack**.
-2. **F10** step over, **F11** step into, **⇧F11** step out, **F5** continue.
-3. Breakpoint inside the Fibonacci loop → **F5** several times, watch `a`, `b` change.
+2. **F2** step over, **F3** step into, **F4** step out, **F1** continue (F5 and F10 work too; F11 is "show desktop" on macOS).
+3. Breakpoint inside the Fibonacci loop → **F1** several times, watch `a`, `b` change.
 4. In the console (while stopped) evaluate an expression, e.g. `counter` or `a + b`.
 5. Insert a few lines above a breakpoint: it should move with its code.
 6. Tick **Run in a terminal** and start again: the program runs in the “Debug” pane instead.

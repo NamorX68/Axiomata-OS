@@ -15,7 +15,7 @@ long add(Counter *counter, long amount) {
 long fibonacci(int n) {
     long a = 0, b = 1;
     for (int i = 0; i < n; i++) {
-        long next = a + b; /* breakpoint in a loop: Continue (F5) hits it every round */
+        long next = a + b; /* breakpoint in a loop: Continue (F1) hits it every round */
         a = b;
         b = next;
     }
@@ -34,7 +34,7 @@ int collatz(long start) {
 
 int main(void) {
     Counter counter = {"demo", 0};
-    long scores[2] = {fibonacci(10), collatz(27)}; /* step into (F11) here */
+    long scores[2] = {fibonacci(10), collatz(27)}; /* step into (F3) here */
     const char *names[2] = {"fib", "collatz"};
     for (int i = 0; i < 2; i++) {
         long total = add(&counter, scores[i]);

@@ -16,7 +16,7 @@ class Counter:
 def fibonacci(n):
     a, b = 0, 1
     for _ in range(n):
-        a, b = b, a + b  # breakpoint in a loop: Continue (F5) hits it every round
+        a, b = b, a + b  # breakpoint in a loop: Continue (F1) hits it every round
     return a
 
 
@@ -31,7 +31,7 @@ def collatz(start):
 
 def main():
     counter = Counter("demo")
-    scores = {"fib": fibonacci(10), "collatz": collatz(27)}  # step into (F11) here
+    scores = {"fib": fibonacci(10), "collatz": collatz(27)}  # step into (F3) here
     for name, value in scores.items():
         total = counter.add(value)
         print(f"{name:8} {value:5}  running total {total}  {describe(name, value)}")

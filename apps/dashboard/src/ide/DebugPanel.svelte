@@ -24,6 +24,7 @@
     type DebugConfigInfo,
     type DebugListInfo,
   } from "./debugBackend";
+  import { debugKeyAction, KEY_LABEL } from "./debugKeys";
   import { EMPTY_FORM, formOf, toNewConfig, type DebugForm } from "./debugForm";
   import type { DebugVariable } from "./debugBackend";
 
@@ -186,8 +187,7 @@
 
   function keys(e: KeyboardEvent): void {
     if ($ds.phase !== "stopped") return;
-    const map: Record<string, "continue" | "next" | "step_in" | "step_out"> = { F5: "continue", F10: "next", F11: e.shiftKey ? "step_out" : "step_in" };
-    const action = map[e.key];
+    const action = debugKeyAction(e);
     if (!action) return;
     e.preventDefault();
     void debug.control(action);
@@ -312,13 +312,13 @@
       {:else}
         <div class="toolbar" role="toolbar" aria-label="Debugger">
           {#if $ds.phase === "stopped"}
-            <IconButton icon="play" label="Continue (F5)" size="sm" onclick={() => void debug.control("continue")} />
+            <IconButton icon="play" label="Continue ({KEY_LABEL.continue})" size="sm" onclick={() => void debug.control("continue")} />
           {:else}
             <IconButton icon="pause" label="Pause" size="sm" disabled={$ds.phase !== "running"} onclick={() => void debug.control("pause")} />
           {/if}
-          <IconButton icon="step-forward" label="Step over (F10)" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("next")} />
-          <IconButton icon="arrow-down-to-line" label="Step into (F11)" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_in")} />
-          <IconButton icon="arrow-up-from-line" label="Step out (⇧F11)" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_out")} />
+          <IconButton icon="step-forward" label="Step over ({KEY_LABEL.next})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("next")} />
+          <IconButton icon="arrow-down-to-line" label="Step into ({KEY_LABEL.step_in})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_in")} />
+          <IconButton icon="arrow-up-from-line" label="Step out ({KEY_LABEL.step_out})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_out")} />
           <IconButton icon="square" label="Stop" size="sm" onclick={() => void debug.stop()} />
         </div>
       {/if}

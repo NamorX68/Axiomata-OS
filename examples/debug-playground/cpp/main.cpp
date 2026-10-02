@@ -17,7 +17,7 @@ struct Counter {
 long fibonacci(int n) {
     long a = 0, b = 1;
     for (int i = 0; i < n; i++) {
-        long next = a + b;  // breakpoint in a loop: Continue (F5) hits it every round
+        long next = a + b;  // breakpoint in a loop: Continue (F1) hits it every round
         a = b;
         b = next;
     }
@@ -36,7 +36,7 @@ int collatz(long start) {
 
 int main() {
     Counter counter{"demo"};
-    std::map<std::string, long> scores{{"fib", fibonacci(10)}, {"collatz", collatz(27)}};  // step into (F11) here
+    std::map<std::string, long> scores{{"fib", fibonacci(10)}, {"collatz", collatz(27)}};  // step into (F3) here
     std::vector<std::string> names;
     for (const auto& entry : scores) names.push_back(entry.first);
     for (const auto& name : names) {
