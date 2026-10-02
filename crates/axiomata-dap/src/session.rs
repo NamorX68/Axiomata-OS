@@ -10,6 +10,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::client::{AdapterCommand, Client, DapError, Incoming};
@@ -18,7 +19,7 @@ const FAST: Duration = Duration::from_secs(10);
 const SLOW: Duration = Duration::from_secs(40);
 
 /// Why and where the program stopped.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StopState {
     pub thread_id: i64,
     /// `breakpoint`, `step`, `exception`, `pause`, `entry`, … as the adapter names it.
@@ -27,7 +28,8 @@ pub struct StopState {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
 pub enum DebugEvent {
     Stopped(StopState),
     Continued {
@@ -51,7 +53,7 @@ pub enum DebugEvent {
 }
 
 /// A line breakpoint as the adapter confirmed it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Breakpoint {
     /// The line it actually sits on (the adapter may move it to the next executable line).
     pub line: u32,
@@ -59,7 +61,7 @@ pub struct Breakpoint {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Frame {
     pub id: i64,
     pub name: String,
@@ -69,7 +71,7 @@ pub struct Frame {
     pub column: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Scope {
     pub name: String,
     pub variables_reference: i64,
@@ -77,7 +79,7 @@ pub struct Scope {
     pub expensive: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Variable {
     pub name: String,
     pub value: String,
