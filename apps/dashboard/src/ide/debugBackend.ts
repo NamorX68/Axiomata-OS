@@ -34,7 +34,9 @@ export type DebugEvent =
   | { event: "output"; category: string; text: string }
   | { event: "exited"; code: number }
   | { event: "terminated" }
-  | { event: "closed"; stderr: string };
+  | { event: "closed"; stderr: string }
+  /** The adapter wants the program run in a terminal: type `line` into a shell there. */
+  | { event: "run_in_terminal"; title: string; line: string };
 
 export interface StackFrame {
   id: number;
@@ -76,12 +78,13 @@ export function startDebug(
   root: string,
   target: DebugTarget,
   breakpoints: { rel: string; lines: number[] }[],
+  terminal: boolean,
   onEvent: (event: DebugEvent) => void,
 ): Promise<void> {
   // The browser mock has no Tauri channel; it calls the same `onmessage` on a plain object.
   const channel = insideTauri() ? new Channel<DebugEvent>() : { onmessage: (_: DebugEvent) => {} };
   channel.onmessage = onEvent;
-  return invoke<void>("debug_start", { root, target, breakpoints, onEvent: channel });
+  return invoke<void>("debug_start", { root, target, breakpoints, terminal, onEvent: channel });
 }
 
 export const stopDebug = (): Promise<void> => invoke<void>("debug_stop");

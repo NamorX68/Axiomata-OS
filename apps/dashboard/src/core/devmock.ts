@@ -1798,6 +1798,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       debugSink = channel.onmessage;
       const files = (args.breakpoints as { rel: string; lines: number[] }[]) ?? [];
       const rel = files[0]?.rel ?? "main.py";
+      if (args.terminal) debugSink({ event: "run_in_terminal", title: "Debug", line: "echo 'debugging in the terminal'" });
       globalThis.setTimeout(() => {
         debugSink?.({ event: "output", category: "stdout", text: "starting\n" });
         debugSink?.({ event: "stopped", thread_id: 1, reason: "breakpoint", text: null });

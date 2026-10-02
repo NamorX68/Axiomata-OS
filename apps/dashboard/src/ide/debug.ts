@@ -30,6 +30,13 @@ export function onDebugReveal(handler: ((root: string, rel: string, line: number
   reveal = handler;
 }
 
+let terminalHandler: ((title: string, line: string) => void) | null = null;
+
+/** The host runs the program in a terminal pane when the debugger asks for one. */
+export function onDebugTerminal(handler: ((title: string, line: string) => void) | null): void {
+  terminalHandler = handler;
+}
+
 function show(frame: StackFrame): void {
   const at = get(running);
   if (!at || !frame.path) return;
@@ -39,6 +46,7 @@ function show(frame: StackFrame): void {
 
 export const debug = createDebugController(realBackend, {
   onStop: show,
+  onTerminal: (title, line) => terminalHandler?.(title, line),
   onError: (message) => debugProblem.set(message),
 });
 
@@ -58,10 +66,10 @@ export const execPoint: Readable<ExecPoint | null> = derived([debug.state, runni
 });
 
 /** Starts a session; the breakpoints are the ones the owner set in this project. */
-export async function startDebugging(root: string, folder: string, target: DebugTarget, name: string): Promise<void> {
+export async function startDebugging(root: string, folder: string, target: DebugTarget, name: string, terminal = false): Promise<void> {
   debugProblem.set(null);
   running.set({ root, folder });
-  await debug.start(root, target, filesOf(get(breakpoints), root), name);
+  await debug.start(root, target, filesOf(get(breakpoints), root), name, terminal);
 }
 
 /** Toggles a breakpoint in the editor or the list; a running session learns of it at once. */

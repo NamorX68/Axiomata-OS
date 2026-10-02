@@ -10,7 +10,7 @@ function fakeBackend(): { backend: Backend; emit: (e: DebugEvent) => void; calls
   let sink: (e: DebugEvent) => void = () => {};
   const calls: string[] = [];
   const backend: Backend = {
-    start: vi.fn(async (_r, _t, _b, onEvent) => {
+    start: vi.fn(async (_r, _t, _b, _term, onEvent) => {
       sink = onEvent;
       calls.push("start");
     }),
@@ -31,6 +31,18 @@ function fakeBackend(): { backend: Backend; emit: (e: DebugEvent) => void; calls
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("debug state", () => {
+  it("a program the adapter wants in a terminal goes to the host, and changes nothing in the state", async () => {
+    const { backend, emit } = fakeBackend();
+    const onTerminal = vi.fn();
+    const c = createDebugController(backend, { onTerminal });
+    await c.start("project:1", { kind: "named", name: "App" }, [], "App", true);
+    const before = get(c.state);
+    emit({ event: "run_in_terminal", title: "Python Debug Console", line: "cd '/p' && 'python' 'x.py'" });
+    expect(onTerminal).toHaveBeenCalledWith("Python Debug Console", "cd '/p' && 'python' 'x.py'");
+    expect(get(c.state)).toEqual(before);
+    expect(vi.mocked(backend.start).mock.calls[0][3]).toBe(true);
+  });
+
   it("a stop shows the stack, the scopes and the locals, and tells the editor where", async () => {
     const { backend, emit } = fakeBackend();
     const onStop = vi.fn();
@@ -67,7 +79,7 @@ describe("debug state", () => {
   it("a breakpoint hit during start keeps the stopped state", async () => {
     const { backend } = fakeBackend();
     let sink: (e: DebugEvent) => void = () => {};
-    backend.start = vi.fn(async (_r, _t, _b, onEvent) => {
+    backend.start = vi.fn(async (_r, _t, _b, _term, onEvent) => {
       sink = onEvent;
       sink({ event: "stopped", thread_id: 1, reason: "breakpoint", text: null });
     });

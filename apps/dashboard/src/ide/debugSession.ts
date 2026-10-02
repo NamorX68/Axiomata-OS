@@ -105,6 +105,8 @@ export function reduce(state: DebugState, event: DebugEvent): DebugState {
       return { ...state, exitCode: event.code };
     case "terminated":
       return { ...state, phase: "ended", stop: null, frames: [], frameId: null, scopes: [], children: {} };
+    case "run_in_terminal":
+      return state; // the controller hands it to the host's terminal
     case "closed":
       return {
         ...state,
@@ -145,13 +147,15 @@ export const realBackend: Backend = {
 export interface Hooks {
   /** The program stopped at `frame` (the top of the stack) — show the file at that line. */
   onStop?: (frame: StackFrame) => void;
+  /** The program is to run in a terminal pane: type `line` into a shell there (`title` names the pane). */
+  onTerminal?: (title: string, line: string) => void;
   /** Something went wrong that the panel should say. */
   onError?: (message: string) => void;
 }
 
 export interface DebugController {
   state: Readable<DebugState>;
-  start: (root: string, target: DebugTarget, breakpoints: { rel: string; lines: number[] }[], name: string) => Promise<void>;
+  start: (root: string, target: DebugTarget, breakpoints: { rel: string; lines: number[] }[], name: string, terminal?: boolean) => Promise<void>;
   stop: () => Promise<void>;
   control: (action: DebugAction) => Promise<void>;
   selectFrame: (frameId: number) => Promise<void>;
@@ -202,6 +206,10 @@ export function createDebugController(backend: Backend, hooks: Hooks = {}): Debu
   }
 
   function onEvent(event: DebugEvent): void {
+    if (event.event === "run_in_terminal") {
+      hooks.onTerminal?.(event.title, event.line);
+      return;
+    }
     epoch++;
     set((s) => reduce(s, event));
     if (event.event === "stopped") void onStopped(epoch);
@@ -210,11 +218,11 @@ export function createDebugController(backend: Backend, hooks: Hooks = {}): Debu
   return {
     state: { subscribe: state.subscribe },
 
-    async start(root, target, breakpoints, name) {
+    async start(root, target, breakpoints, name, terminal = false) {
       epoch++;
       state.set({ ...IDLE, phase: "starting", configName: name });
       try {
-        await backend.start(root, target, breakpoints, onEvent);
+        await backend.start(root, target, breakpoints, terminal, onEvent);
         // The program may already have stopped on a breakpoint by now; only a quiet start is "running".
         set((s) => (s.phase === "starting" ? { ...s, phase: "running" } : s));
       } catch (err) {

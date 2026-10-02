@@ -15,7 +15,7 @@ use std::time::Duration;
 use axiomata_core::paths::axiomata_home;
 use axiomata_dap::config::{self, DebugConfig, PROJECT_FILE};
 use axiomata_dap::python::{adapter_command, current_file_config, launch_arguments};
-use axiomata_dap::{Control, DapError, DebugEvent, PythonEnv, Session};
+use axiomata_dap::{Control, DapError, DebugEvent, PythonEnv, Session, TerminalHandler};
 use axiomata_tasks::trust::{self, TrustStore};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -232,6 +232,7 @@ pub async fn debug_start(
     root: String,
     target: Target,
     breakpoints: Vec<FileBreakpoints>,
+    terminal: bool,
     on_event: Channel<DebugEvent>,
 ) -> Result<(), FileError> {
     let project = folder_of(&state, root).await?;
@@ -240,6 +241,7 @@ pub async fn debug_start(
         previous.session.end();
         clear_if(&debug.active, &previous);
     }
+    let for_terminal = on_event.clone();
     let started = off_main({
         let project = project.clone();
         move || -> Result<Arc<Active>, FileError> {
@@ -270,8 +272,18 @@ pub async fn debug_start(
             }
             let env = PythonEnv::detect(&project);
             let adapter = adapter_command(&project, &env).map_err(|why| FileError::new("NoAdapter", why))?;
-            let launch = launch_arguments(&config, &project, &env);
-            let session = Session::start(&adapter, "python", launch, &paths).map_err(dap_error)?;
+            let mut launch = launch_arguments(&config, &project, &env);
+            // “In the terminal”: the adapter asks for the program to be run with `runInTerminal`, and the
+            // Studio types that line into a terminal pane (a program with a TUI or `input()` needs one).
+            // The line lives only in this message — it is never stored.
+            let handler: Option<TerminalHandler> = terminal.then(|| {
+                launch["console"] = "integratedTerminal".into();
+                let handler: TerminalHandler = Arc::new(move |request| {
+                    let _ = for_terminal.send(DebugEvent::RunInTerminal { title: request.title.clone(), line: request.command_line() });
+                });
+                handler
+            });
+            let session = Session::start_with(&adapter, "python", launch, &paths, handler).map_err(dap_error)?;
             Ok(Arc::new(Active { session, project, thread: Mutex::new(None) }))
         }
     })

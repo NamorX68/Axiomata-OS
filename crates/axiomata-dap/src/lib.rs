@@ -20,4 +20,7 @@ pub mod session;
 pub use client::{AdapterCommand, Client, DapError, Incoming};
 pub use config::{DebugConfig, DebugFile, Language};
 pub use python::PythonEnv;
-pub use session::{Breakpoint, Control, DebugEvent, Frame, Scope, Session, StopState, Variable};
+pub use session::{
+    Breakpoint, Control, DebugEvent, Frame, Scope, Session, StopState, TerminalHandler,
+    TerminalRequest, Variable,
+};

@@ -54,6 +54,8 @@
   let reviewing = $state(false);
   let choice = $state("");
   let expression = $state("");
+  /** Run the program in a terminal pane: for a TUI, or one that reads from the keyboard. */
+  let inTerminal = $state(false);
   /** Expanded variable nodes, by `variablesReference`. */
   let open = $state<Record<number, boolean>>({});
 
@@ -154,7 +156,7 @@
     const label = choices.find((c) => c.value === choice)?.label ?? choice;
     const target = choice === "file" && fileRel ? ({ kind: "current_file", rel: fileRel } as const) : ({ kind: "named", name: choice.slice(6) } as const);
     open = {};
-    await startDebugging(root, folder, target, label);
+    await startDebugging(root, folder, target, label, inTerminal);
   }
 
   function describe(c: DebugConfigInfo): string {
@@ -261,6 +263,10 @@
             <Icon name="bug" size="sm" /> Debug
           </button>
         </div>
+        <label class="terminal">
+          <input type="checkbox" bind:checked={inTerminal} />
+          Run in a terminal <small>for a TUI or a program that reads the keyboard</small>
+        </label>
         {#if chosen && !chosen.detected && !locked(chosen)}
           <span class="own">
             <IconButton icon="pencil" label="Edit {chosen.name}" size="sm" onclick={() => startEdit(chosen)} />
@@ -621,6 +627,19 @@
   .form-title,
   .hint {
     margin: 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .terminal {
+    display: block;
+    margin-top: var(--ax-space-2);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  .terminal small {
+    display: block;
+    margin-left: calc(1.4em);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
   }

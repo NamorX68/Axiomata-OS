@@ -264,3 +264,47 @@ fn a_console_script_entry_point_stops_at_a_breakpoint_inside_the_function_it_cal
     assert_eq!(session.stack_trace(thread).unwrap()[0].name, "main");
     session.end();
 }
+
+#[test]
+fn a_program_asked_for_in_a_terminal_is_run_there_and_still_stops_at_its_breakpoint() {
+    let Some(debugpy) = debugpy_dir() else {
+        eprintln!("skipped: AXIOMATA_TEST_DEBUGPY_PATH not set");
+        return;
+    };
+    let project = project_with(SCRIPT);
+    let config = current_file_config("prog.py");
+    let mut launch = launch_arguments(&config, &project, &PythonEnv::default());
+    launch["console"] = "integratedTerminal".into();
+    let script = project.join("prog.py").to_string_lossy().into_owned();
+
+    // The "terminal" is a shell that gets the line, as the Studio's terminal pane does.
+    let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = std::sync::Arc::clone(&lines);
+    let pythonpath = debugpy.clone();
+    let handler: axiomata_dap::TerminalHandler = std::sync::Arc::new(move |request| {
+        let line = request.command_line();
+        seen.lock().unwrap().push(line.clone());
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(line)
+            .env("PYTHONPATH", &pythonpath)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("the shell starts");
+    });
+    let session = Session::start_with(
+        &adapter(&project, &debugpy),
+        "python",
+        launch,
+        &[(script, vec![2])],
+        Some(handler),
+    )
+    .expect("start");
+    let (reason, thread) = next_stop(&session);
+    assert_eq!(reason, "breakpoint");
+    assert_eq!(session.stack_trace(thread).unwrap()[0].name, "add");
+    assert_eq!(lines.lock().unwrap().len(), 1);
+    assert!(lines.lock().unwrap()[0].contains("prog.py"));
+    session.end();
+}

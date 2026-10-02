@@ -288,5 +288,7 @@ Zeilennummer (rote Pille, `settings.ide.breakpoints`, folgen Umbenennungen), Deb
 
 Eigene Konfigurationen werden im Panel angelegt (Formular „New configuration…“, schreibt `.axiomata/debug.json`, ohne dass man eine Datei anfassen muss).
 
-Offen: Terminal-Pane für TUI-Programme (`runInTerminal`); Breakpoints wandern nicht mit, wenn Zeilen davor eingefügt werden; Rust (`lldb-dap`) und Node als
+Terminal: Häkchen „Run in a terminal“ → der Adapter schickt `runInTerminal`, die Zeile wird in ein Task-Pane „Debug“ getippt (nur im Speicher), für TUIs und `input()`.
+
+Offen: Breakpoints wandern nicht mit, wenn Zeilen davor eingefügt werden; Rust (`lldb-dap`) und Node als
 weitere Adapter; Watch-Ausdrücke, bedingte Breakpoints.

@@ -57,7 +57,7 @@
   import AgentsPanel from "./AgentsPanel.svelte";
   import TasksPanel from "./TasksPanel.svelte";
   import DebugPanel from "./DebugPanel.svelte";
-  import { onDebugReveal } from "./debug";
+  import { onDebugReveal, onDebugTerminal } from "./debug";
   import { followRename, loadBreakpoints } from "./breakpoints";
   import { forgetTaskRun, startTaskRun } from "./taskRuns";
   import { taskCommandLine, type TaskInfo } from "./tasksBackend";
@@ -110,6 +110,9 @@
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type SidebarView, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
+
+  /** The task id of the pane the debugger uses when it runs a program in a terminal. */
+  const DEBUG_TERMINAL = "debug:session";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -455,9 +458,33 @@
       : addTab(layout, tab, { nodeId: layout.root.id, side: "bottom" });
   }
 
+  /**
+   * The debugger asked for the program to run in a terminal (a TUI, a program that reads the keyboard): it is
+   * typed into a task-style pane called “Debug”, reused by the next session. The line is never stored.
+   */
+  function openDebugTerminal(title: string, line: string): void {
+    const existing = allTabs(layout).find((t) => taskIdOf(t) === DEBUG_TERMINAL);
+    if (existing) {
+      startTaskRun(existing.id, line);
+      layout = activateTab(layout, existing.id);
+      return;
+    }
+    const tab = taskTab(title || "Debug", DEBUG_TERMINAL);
+    startTaskRun(tab.id, line);
+    const other = allTabs(layout).find((t) => t.kind === TASK_PANE);
+    const group = other ? findTab(layout, other.id)?.group.id : undefined;
+    layout = group
+      ? addTab(layout, tab, { nodeId: group, side: "center" })
+      : addTab(layout, tab, { nodeId: layout.root.id, side: "bottom" });
+  }
+
   function restartTask(tabId: string): void {
     const tab = allTabs(layout).find((t) => t.id === tabId);
     const id = tab ? taskIdOf(tab) : null;
+    if (id === DEBUG_TERMINAL) {
+      toast("Start the debug session again from the Debug view.", "info");
+      return;
+    }
     if (tab && id) void runTask({ id, label: tab.title });
   }
 
@@ -566,6 +593,7 @@
     });
 
     loadBreakpoints();
+    onDebugTerminal(openDebugTerminal);
     onDebugReveal((root, rel, line) => openFromQuickOpen({ root, rel }, Math.max(0, line - 1)));
     window.addEventListener("blur", drag.abandon);
     // `pagehide` is what `core/persist.ts` uses for the same job: a quit while
@@ -574,6 +602,7 @@
     return () => {
       gone = true;
       onDebugReveal(null);
+      onDebugTerminal(null);
       unsubscribeHandoffs();
       unsubscribeMode();
       void unlistenRenamed.then((off) => off());

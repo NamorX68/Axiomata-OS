@@ -50,7 +50,53 @@ pub enum DebugEvent {
     Closed {
         stderr: String,
     },
+    /// The adapter asks for the program to be started in a terminal (`runInTerminal`): type `line` into a
+    /// shell there. Not produced by [`Session::next_event`] — it reaches the [`TerminalHandler`] while the
+    /// session is still starting, since the program only gets going once it has been run.
+    RunInTerminal {
+        title: String,
+        line: String,
+    },
 }
+
+/// What the adapter asks for with `runInTerminal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalRequest {
+    pub title: String,
+    pub cwd: Option<String>,
+    pub args: Vec<String>,
+    /// `None` = unset the variable.
+    pub env: Vec<(String, Option<String>)>,
+}
+
+/// `value` as one single-quoted shell word (`it's` → `'it'\''s'`).
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+impl TerminalRequest {
+    /// The shell line that does it: `cd` first, the variables set for the program alone, every word quoted.
+    pub fn command_line(&self) -> String {
+        let mut line = String::new();
+        if let Some(cwd) = &self.cwd {
+            line.push_str(&format!("cd {} && ", shell_quote(cwd)));
+        }
+        for (key, value) in &self.env {
+            let valid =
+                !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+            match value {
+                Some(v) if valid => line.push_str(&format!("{key}={} ", shell_quote(v))),
+                _ => {}
+            }
+        }
+        let words: Vec<String> = self.args.iter().map(|a| shell_quote(a)).collect();
+        line.push_str(&words.join(" "));
+        line
+    }
+}
+
+/// Called with each `runInTerminal` request, on the reader's thread — it must not block.
+pub type TerminalHandler = Arc<dyn Fn(TerminalRequest) + Send + Sync>;
 
 /// A line breakpoint as the adapter confirmed it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -103,13 +149,28 @@ impl Session {
         launch: Value,
         breakpoints: &[(String, Vec<u32>)],
     ) -> Result<Session, DapError> {
+        Session::start_with(adapter, adapter_id, launch, breakpoints, None)
+    }
+
+    /// [`Session::start`], with a `terminal` that can run the program (`launch` must ask for it: debugpy's
+    /// `"console": "integratedTerminal"`). Without one the adapter is told there is no terminal.
+    pub fn start_with(
+        adapter: &AdapterCommand,
+        adapter_id: &str,
+        launch: Value,
+        breakpoints: &[(String, Vec<u32>)],
+        terminal: Option<TerminalHandler>,
+    ) -> Result<Session, DapError> {
         let (client, incoming) = Client::spawn(adapter)?;
         let client = Arc::new(client);
         let (events_tx, events_rx) = mpsc::channel();
         let (init_tx, init_rx) = mpsc::channel();
+        let can_terminal = terminal.is_some();
         {
             let client = Arc::clone(&client);
-            std::thread::spawn(move || pump(&client, incoming, &events_tx, &init_tx));
+            std::thread::spawn(move || {
+                pump(&client, incoming, &events_tx, &init_tx, terminal.as_ref())
+            });
         }
 
         let capabilities = client.request(
@@ -123,7 +184,7 @@ impl Session {
                 "pathFormat": "path",
                 "supportsVariableType": true,
                 "supportsVariablePaging": false,
-                "supportsRunInTerminalRequest": false,
+                "supportsRunInTerminalRequest": can_terminal,
                 "supportsProgressReporting": false,
             }),
             SLOW,
@@ -335,6 +396,7 @@ fn pump(
     incoming: Receiver<Incoming>,
     events: &Sender<DebugEvent>,
     initialized: &Sender<()>,
+    terminal: Option<&TerminalHandler>,
 ) {
     for message in incoming {
         match message {
@@ -373,6 +435,50 @@ fn pump(
                 }
                 _ => {}
             },
+            Incoming::Request {
+                seq,
+                command,
+                arguments,
+                ..
+            } if command == "runInTerminal" && terminal.is_some() => {
+                let words = |v: &Value| -> Vec<String> {
+                    v.as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+                let request = TerminalRequest {
+                    title: arguments["title"].as_str().unwrap_or("Debug").to_string(),
+                    cwd: arguments["cwd"]
+                        .as_str()
+                        .filter(|c| !c.is_empty())
+                        .map(str::to_string),
+                    args: words(&arguments["args"]),
+                    env: arguments["env"]
+                        .as_object()
+                        .map(|m| {
+                            m.iter()
+                                .map(|(k, v)| (k.clone(), v.as_str().map(str::to_string)))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                };
+                if request.args.is_empty() {
+                    let _ = client.respond(
+                        seq,
+                        &command,
+                        Err("runInTerminal without a command".into()),
+                    );
+                } else {
+                    if let Some(handler) = terminal {
+                        handler(request);
+                    }
+                    let _ = client.respond(seq, &command, Ok(json!({})));
+                }
+            }
             Incoming::Request { seq, command, .. } => {
                 let _ = client.respond(
                     seq,
