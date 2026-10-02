@@ -6,6 +6,7 @@ mod commands;
 mod files;
 mod git;
 mod lsp;
+mod tasks;
 #[cfg(target_os = "macos")]
 mod menu;
 mod terminal;
@@ -127,6 +128,9 @@ pub fn run() {
             git::git_branches,
             git::git_switch,
             git::git_create_branch,
+            tasks::tasks_list,
+            tasks::tasks_trust,
+            tasks::task_command_line,
             files::project_new,
             files::file_watch,
             files::file_unwatch,

@@ -66,3 +66,6 @@ rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
 # FSEvents on macOS. What an event *means* (modified/deleted/created, judged
 # by content version after a debounce) is our own code in `watch.rs`.
 notify = "8"
+# Content hash of a project's `tasks.json` for `axiomata-tasks`: the owner confirms what a file runs, and the
+# confirmation holds only for exactly that content. SHA-256, so a changed file cannot be made to match.
+sha2 = "0.10"

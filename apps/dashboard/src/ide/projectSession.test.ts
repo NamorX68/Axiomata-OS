@@ -330,6 +330,14 @@ describe("withoutFilesPanes", () => {
     expect(allTabs(session.withoutFilesPanes(layout)).map((t) => t.id)).toEqual(["t"]);
   });
 
+  it("drops task panes too: a stored layout must not run a task again", () => {
+    const layout = singleGroupLayout([
+      { id: "k", kind: "task", title: "cargo test", config: { taskId: "detected:cargo-test" } },
+      { id: "t", kind: "terminal", title: "Terminal" },
+    ]);
+    expect(allTabs(session.withoutFilesPanes(layout)).map((t) => t.id)).toEqual(["t"]);
+  });
+
   it("is applied to both layouts of a project on open", async () => {
     const tab = (id: string, kind: string) => ({ id, kind, title: id });
     const group = (id: string, tabs: ReturnType<typeof tab>[]) => ({ root: { type: "tabs", id, active: tabs[0].id, tabs } });

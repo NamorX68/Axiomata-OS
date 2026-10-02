@@ -72,6 +72,8 @@
 
     /** The Agents view, which the host owns (it needs the project's agents and the dock). */
     agentsView?: Snippet;
+    /** The Run view (tasks), likewise the host's. */
+    tasksView?: Snippet;
   }
 
   let {
@@ -99,6 +101,7 @@
     onOpenChange,
     onGitStatus,
     agentsView,
+    tasksView,
   }: Props = $props();
 
   /** Which view the column shows — chosen by the activity rail, kept in the prefs. */
@@ -210,6 +213,7 @@
     />
   </div>
   <div class="side-pane" class:gone={tab !== "agents"}>{@render agentsView?.()}</div>
+  <div class="side-pane" class:gone={tab !== "tasks"}>{@render tasksView?.()}</div>
   <div class="side-pane" class:gone={tab !== "files"}>
     <div class="tree-area">
       <FileTree

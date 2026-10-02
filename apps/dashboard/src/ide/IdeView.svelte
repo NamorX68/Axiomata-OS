@@ -46,6 +46,7 @@
     allGroups,
     allTabs,
     closeTab,
+    findTab,
     moveTab,
     resizeSplit,
     setTabConfig,
@@ -54,6 +55,9 @@
   } from "./layout";
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
+  import TasksPanel from "./TasksPanel.svelte";
+  import { forgetTaskRun, startTaskRun } from "./taskRuns";
+  import { taskCommandLine, type TaskInfo } from "./tasksBackend";
   import ActivityRail from "./ActivityRail.svelte";
   import { agentStatus } from "./agentStatus";
   import { foldKey, forgetFolds } from "../fileapp/foldMemory";
@@ -68,6 +72,9 @@
     frontFileTab,
     FILE_PANE,
     isWorkPane,
+    TASK_PANE,
+    taskIdOf,
+    taskTab,
     layoutAfterRename,
     openFilePreview,
     pinFileTab,
@@ -415,6 +422,42 @@
     c.answer(true);
   }
 
+  /**
+   * Runs a task: its shell line is resolved in Rust (a project task not yet confirmed is refused there),
+   * then typed into a terminal pane — a second click on the same task starts that pane again. A new pane
+   * docks below the dock, or joins the group of the task pane already open.
+   */
+  async function runTask(task: Pick<TaskInfo, "id" | "label">): Promise<void> {
+    const project = current;
+    if (!project) return;
+    let line: string;
+    try {
+      line = await taskCommandLine(projectRoot(project.id), task.id);
+    } catch (err) {
+      toast((err as { message?: string }).message ?? String(err), "danger");
+      return;
+    }
+    const existing = allTabs(layout).find((t) => taskIdOf(t) === task.id);
+    if (existing) {
+      startTaskRun(existing.id, line);
+      layout = activateTab(layout, existing.id);
+      return;
+    }
+    const tab = taskTab(task.label, task.id);
+    startTaskRun(tab.id, line);
+    const other = allTabs(layout).find((t) => t.kind === TASK_PANE);
+    const group = other ? findTab(layout, other.id)?.group.id : undefined;
+    layout = group
+      ? addTab(layout, tab, { nodeId: group, side: "center" })
+      : addTab(layout, tab, { nodeId: layout.root.id, side: "bottom" });
+  }
+
+  function restartTask(tabId: string): void {
+    const tab = allTabs(layout).find((t) => t.id === tabId);
+    const id = tab ? taskIdOf(tab) : null;
+    if (tab && id) void runTask({ id, label: tab.title });
+  }
+
   /** ⌘O: the native file dialog; a picked file opens as a tab of the file group. */
   async function openPicked(): Promise<void> {
     try {
@@ -541,6 +584,7 @@
     const file = allTabs(layout).find((t) => t.id === tabId);
     const config = file ? filePaneConfig(file) : null;
     if (config) forgetFolds(foldKey(config.root, config.rel));
+    if (file?.kind === TASK_PANE) forgetTaskRun(tabId);
     layout = closeTab(layout, tabId);
   }
 
@@ -554,6 +598,7 @@
     },
     close: dockClose,
     requestClose: (tabId) => void requestClose(tabId),
+    restartTask,
     startTabDrag: (tabId, event) => {
       if (drag.startTab(tabId, event)) event.preventDefault();
     },
@@ -745,6 +790,14 @@
           onCreate={(fields) => void addAgent(fields)}
           onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
           onRemove={(id) => void projectSession.removeAgent(id)}
+        />
+      {/snippet}
+      {#snippet tasksView()}
+        <TasksPanel
+          root={current ? projectRoot(current.id) : null}
+          active={tree.visible && tree.view === "tasks"}
+          onRun={(task) => void runTask(task)}
+          onError={(message) => toast(message, "danger")}
         />
       {/snippet}
     </ProjectSidebar>

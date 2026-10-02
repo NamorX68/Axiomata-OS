@@ -932,6 +932,7 @@ const gitHead = new Map<string, string>();
 let gitAhead = 1;
 let gitIsRepo = true;
 const gitBranches = new Set(['main', 'feature/ui']);
+let tasksTrusted = false;
 let gitBranch = 'main';
 const gitIndex = new Map<string, string>();
 otherRootFiles.set("project:1\0notes.txt", "Remember the milk.\nCall the bank.\n");
@@ -1774,6 +1775,23 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       otherRootFiles.set(`${GIT_ROOT}\0${path}`, [...work.slice(0, first), ...old, ...work.slice(last)].join("\n") + "\n");
       return undefined as T;
     }
+    case "tasks_list":
+      return {
+        tasks: [
+          { id: "detected:cargo-build", label: "cargo build", command: "cargo build", cwd: null, env: [], source: "detected", group: "build" },
+          { id: "detected:cargo-test", label: "cargo test", command: "cargo test --workspace", cwd: null, env: [], source: "detected", group: "test" },
+          { id: "detected:npm-dev", label: "npm run dev", command: "npm run dev", cwd: null, env: [], source: "detected", group: "run" },
+          { id: "project:Docs", label: "Docs", command: "mkdocs build", cwd: "site", env: [["LANG", "C"]], source: "project", group: "build" },
+        ],
+        project_file: { hash: "ab12", trusted: tasksTrusted },
+        problems: [],
+      } as T;
+    case "tasks_trust":
+      tasksTrusted = true;
+      return undefined as T;
+    case "task_command_line":
+      if (String(args.id).startsWith("project:") && !tasksTrusted) throw { kind: "NeedsTrust", message: "not confirmed" };
+      return `echo running ${args.id}` as T;
     case "git_branches":
       return [...gitBranches].sort().map((name) => ({ name, current: name === gitBranch, upstream: name === "main" ? "origin/main" : null })) as T;
     case "git_switch":

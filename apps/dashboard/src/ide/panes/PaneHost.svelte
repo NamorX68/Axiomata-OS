@@ -27,6 +27,7 @@
   import { agentStatus } from "../agentStatus";
   import {
     AGENT_DIFF_PANE,
+    TASK_PANE,
     agentDiffOf,
     FILE_PANE,
     FILES_PANE,
@@ -41,6 +42,7 @@
   import FilePane from "./FilePane.svelte";
   import FilesPane from "./FilesPane.svelte";
   import SearchPane from "./SearchPane.svelte";
+  import TaskPane from "./TaskPane.svelte";
   import GitPane from "./GitPane.svelte";
   import { getDock } from "../dockContext";
   import { openFileBeside } from "./openFile";
@@ -95,6 +97,10 @@
            The pane stays rather than closing itself: something may still be
            running in it, and closing would take that with it. -->
       <p class="unknown">This agent profile is no longer in the open project.</p>
+    {/if}
+  {:else if tab.kind === TASK_PANE}
+    {#if $session.current}
+      <TaskPane tabId={tab.id} label={tab.title} cwd={$session.current.repo_root} onRestart={() => dock.restartTask(tab.id)} />
     {/if}
   {:else if tab.kind === AGENT_DIFF_PANE}
     {#if agent && agentDiffOf(tab) !== null}

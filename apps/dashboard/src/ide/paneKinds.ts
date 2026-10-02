@@ -39,6 +39,8 @@ export function searchTab(): PaneTab {
 
 /** The project's git panel (`docs/plans/editor-projekt-werkzeuge.md`, #48): changes, commit, push, branches. */
 export const GIT_PANE = "git";
+/** A task running in a terminal (Run/Tasks, #50): the tab names the task, never the command line (`ide/taskRuns.ts`). */
+export const TASK_PANE = "task";
 
 export function gitTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: GIT_PANE, title: "Git", config: {} };
@@ -313,4 +315,14 @@ export function layoutAfterRename(layout: Layout, root: string, from: string, to
   };
   const next = walk(layout.root);
   return changed ? { ...layout, root: next } : layout;
+}
+
+export function taskTab(label: string, taskId: string): PaneTab {
+  return { id: crypto.randomUUID(), kind: TASK_PANE, title: label, config: { taskId } };
+}
+
+/** The task a task pane runs, or `null`. */
+export function taskIdOf(tab: PaneTab): string | null {
+  const id = tab.config?.taskId;
+  return tab.kind === TASK_PANE && typeof id === "string" ? id : null;
 }

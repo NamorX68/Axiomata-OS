@@ -240,3 +240,19 @@ unter Linux/Windows läuft), erst umziehen, dann bauen, zwei Gruppen mit Hunk-St
 Ein eigener Agent für die Codebasis, Snippets/Completion-Erweiterungen (L9 in `editor.md`) und die Herauslösung des
 Editors (ED7) — eigene Karten (#36, #35). Für ED7 gilt aber: die Werkzeuge hier werden ohne `axiomata-core` gebaut
 (siehe Nachgrill).
+
+## #50 Run/Tasks — erster Wurf gebaut (2026-10-02)
+
+Pure Logik in der neuen Crate **`axiomata-tasks`** (kein Tauri, keine DB; baut und testet überall): Erkennung aus `Cargo.toml`
+(`cargo build/check/clippy/test/run`), `package.json` (ein Task je Script, Paketmanager nach Lockfile, ohne `pre*`/`post*`-Hooks)
+und `pyproject.toml`/`pytest.ini` (`pytest`, `ruff check`, mit `uv run` bei `uv.lock`); `tasks.json` im Projekt
+(`.axiomata/tasks.json`) und persönlich (`~/.axiomata/tasks.json`), streng gelesen (nur Ordner im Projekt, gültige
+Umgebungsnamen, Obergrenzen, Doppelte und Fehler als `problems` sichtbar). **Trust:** Detected und Personal laufen ohne Frage; die
+Projektdatei erst nach Bestätigung, gespeichert als SHA-256 ihrer Bytes (`~/.axiomata/task-trust.json`, 0600, atomar) — jede Änderung
+fragt neu. Die Bestätigung nimmt nur den Hash an, der noch zur Datei auf der Platte passt (`tasks_trust`), die Webview kann keinen
+eigenen Hash eintragen. Glue: `src-tauri/src/tasks.rs` (`tasks_list`, `tasks_trust`, `task_command_line`; **nicht auf Linux
+kompiliert**). Oberfläche: Rail-Icon *Run* → `ide/TasksPanel.svelte` (nach Zweck gruppiert, ▶ je Task, gesperrt mit „Review…“ bis zur
+Bestätigung), Ausführung als **Task-Pane** (`ide/panes/TaskPane.svelte`): Terminal-PTY mit der Zeile als `initialCommand`; der Tab
+nennt nur die Task-Id, die Zeile liegt nur im Speicher (`ide/taskRuns.ts`), gespeicherte Task-Panes werden beim Laden entfernt.
+**Offen (nächste Checkpoints):** klickbare `Datei:Zeile`-Fehler im Ausgabe-Pane, Problem-Matcher + Diagnosen im Editor (offen:
+wann verschwinden sie?), Abbrechen ohne Neustart, Umgebung wie `toolenv.rs`.

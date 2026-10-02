@@ -438,6 +438,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiomata-tasks"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "axiomata-terminal"
 version = "0.1.0"
 dependencies = [

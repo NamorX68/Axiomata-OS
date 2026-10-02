@@ -32,7 +32,7 @@ import { toast } from "../core/toast";
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { allTabs, closeTab, emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
-import { FILES_PANE } from "./paneKinds";
+import { FILES_PANE, TASK_PANE } from "./paneKinds";
 import { emptyEditorLayout, parseWorkspace, serializeWorkspace, switchMode as swapMode, type Mode, type Workspace } from "./modes";
 import { newProjectFolder, openProjectFolder } from "../fileapp/backend";
 import { applyProjectCwd } from "./paneCwd";
@@ -95,7 +95,8 @@ function startingLayout(project: IdeProject): Layout {
  */
 export function withoutFilesPanes(layout: Layout): Layout {
   return allTabs(layout)
-    .filter((t) => t.kind === FILES_PANE)
+    // Task panes go too: a task is a run of this session, and a stored layout must not start it again.
+    .filter((t) => t.kind === FILES_PANE || t.kind === TASK_PANE)
     .reduce((acc, t) => closeTab(acc, t.id), layout);
 }
 

@@ -36,6 +36,8 @@ export interface IdeDock {
   showLocations: (list: LocationList) => void;
   /** A file pane's symbols and cursor line, for the sidebar's outline. */
   reportOutline: (file: FileRef, info: OutlineInfo) => void;
+  /** Start a task pane's task again (its command line is resolved anew, so a changed confirmation counts). */
+  restartTask: (tabId: string) => void;
   /** A preview tab becomes a tab of its own. */
   pin: (tabId: string) => void;
   /** A new note was filed: its tab now names the file. */
