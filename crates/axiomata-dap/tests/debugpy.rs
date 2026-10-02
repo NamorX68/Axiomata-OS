@@ -300,8 +300,11 @@ fn a_program_asked_for_in_a_terminal_is_run_there_and_still_stops_at_its_breakpo
         &adapter(&project, &debugpy),
         "python",
         launch,
-        &[(script, vec![2])],
-        Some(handler),
+        &[(script, vec![axiomata_dap::BreakpointSpec::from(2)])],
+        axiomata_dap::StartOptions {
+            terminal: Some(handler),
+            functions: Vec::new(),
+        },
     )
     .expect("start");
     let (reason, thread) = next_stop(&session);
@@ -309,5 +312,124 @@ fn a_program_asked_for_in_a_terminal_is_run_there_and_still_stops_at_its_breakpo
     assert_eq!(session.stack_trace(thread).unwrap()[0].name, "add");
     assert_eq!(lines.lock().unwrap().len(), 1);
     assert!(lines.lock().unwrap()[0].contains("prog.py"));
+    session.end();
+}
+
+const LOOP: &str = "total = 0\nfor i in range(6):\n    total += i\nprint('total', total)\n";
+
+fn variable(session: &Session, frame: i64, name: &str) -> Option<String> {
+    for scope in session.scopes(frame).unwrap() {
+        let scope_name = scope.name.to_lowercase();
+        if (scope_name.contains("local") || scope_name.contains("global"))
+            && let Some(v) = session
+                .variables(scope.variables_reference)
+                .unwrap()
+                .into_iter()
+                .find(|v| v.name == name)
+        {
+            return Some(v.value);
+        }
+    }
+    None
+}
+
+#[test]
+fn a_conditional_breakpoint_stops_only_when_its_condition_holds() {
+    let Some(debugpy) = debugpy_dir() else {
+        eprintln!("skipped: AXIOMATA_TEST_DEBUGPY_PATH not set");
+        return;
+    };
+    let project = project_with(LOOP);
+    let launch = launch_arguments(
+        &current_file_config("prog.py"),
+        &project,
+        &PythonEnv::default(),
+    );
+    let script = project.join("prog.py").to_string_lossy().into_owned();
+    let spec = axiomata_dap::BreakpointSpec {
+        line: 3,
+        condition: Some("i == 3".into()),
+        ..Default::default()
+    };
+    let session = Session::start_with(
+        &adapter(&project, &debugpy),
+        "python",
+        launch,
+        &[(script, vec![spec])],
+        axiomata_dap::StartOptions::default(),
+    )
+    .expect("start");
+    let (_, thread) = next_stop(&session);
+    let frame = session.stack_trace(thread).unwrap()[0].id;
+    assert_eq!(variable(&session, frame, "i").as_deref(), Some("3"));
+    // The watch context evaluates too.
+    assert_eq!(
+        session
+            .evaluate_in("i * 10", Some(frame), "watch")
+            .unwrap()
+            .value,
+        "30"
+    );
+    session.control(Control::Continue, thread).unwrap();
+    // Nothing else stops: the loop runs out and the program ends.
+    for _ in 0..100 {
+        match session.next_event(Duration::from_millis(100)) {
+            Some(DebugEvent::Stopped(stop)) => panic!("stopped again: {stop:?}"),
+            Some(DebugEvent::Terminated | DebugEvent::Exited { .. }) => break,
+            _ => {}
+        }
+    }
+    session.end();
+}
+
+#[test]
+fn a_hit_count_and_a_log_message_work_without_a_condition() {
+    let Some(debugpy) = debugpy_dir() else {
+        eprintln!("skipped: AXIOMATA_TEST_DEBUGPY_PATH not set");
+        return;
+    };
+    let project = project_with(LOOP);
+    let launch = launch_arguments(
+        &current_file_config("prog.py"),
+        &project,
+        &PythonEnv::default(),
+    );
+    let script = project.join("prog.py").to_string_lossy().into_owned();
+    let specs = vec![
+        axiomata_dap::BreakpointSpec {
+            line: 3,
+            hit_condition: Some("4".into()),
+            ..Default::default()
+        },
+        axiomata_dap::BreakpointSpec {
+            line: 4,
+            log_message: Some("done with total={total}".into()),
+            ..Default::default()
+        },
+    ];
+    let session = Session::start_with(
+        &adapter(&project, &debugpy),
+        "python",
+        launch,
+        &[(script, specs)],
+        axiomata_dap::StartOptions::default(),
+    )
+    .expect("start");
+    // The fourth hit of line 3 is i == 3.
+    let (_, thread) = next_stop(&session);
+    let frame = session.stack_trace(thread).unwrap()[0].id;
+    assert_eq!(variable(&session, frame, "i").as_deref(), Some("3"));
+    session.control(Control::Continue, thread).unwrap();
+    // The log point prints instead of stopping.
+    let mut logged = String::new();
+    for _ in 0..100 {
+        match session.next_event(Duration::from_millis(100)) {
+            Some(DebugEvent::Stopped(stop)) => panic!("a log point must not stop: {stop:?}"),
+            Some(DebugEvent::Output { text, .. }) => logged.push_str(&text),
+            Some(DebugEvent::Terminated) => break,
+            _ => {}
+        }
+    }
+    assert!(logged.contains("done with total=15"), "{logged:?}");
     session.end();
 }

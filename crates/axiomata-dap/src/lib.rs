@@ -23,6 +23,6 @@ pub use client::{AdapterCommand, Client, DapError, Incoming};
 pub use config::{DebugConfig, DebugFile, Language};
 pub use python::PythonEnv;
 pub use session::{
-    Breakpoint, Control, DebugEvent, Frame, Scope, Session, StopState, TerminalHandler,
-    TerminalRequest, Variable,
+    Breakpoint, BreakpointSpec, Control, DebugEvent, Frame, Scope, Session, StartOptions,
+    StopState, TerminalHandler, TerminalRequest, Variable,
 };

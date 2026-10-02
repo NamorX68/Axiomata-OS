@@ -37,6 +37,7 @@ fn native(name: String, language: Language) -> DebugConfig {
         package: None,
         source: None,
         dir: None,
+        test: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),

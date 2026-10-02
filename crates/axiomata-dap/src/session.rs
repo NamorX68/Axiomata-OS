@@ -98,6 +98,39 @@ impl TerminalRequest {
 /// Called with each `runInTerminal` request, on the reader's thread — it must not block.
 pub type TerminalHandler = Arc<dyn Fn(TerminalRequest) + Send + Sync>;
 
+/// A line breakpoint as the owner set it: the line, and — each optional — a condition, a hit count and a log message.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct BreakpointSpec {
+    pub line: u32,
+    /// Stop only when this expression is true.
+    #[serde(default)]
+    pub condition: Option<String>,
+    /// Stop only on this hit (`5`, `>3`, `% 10`) — the adapter's own syntax.
+    #[serde(default)]
+    pub hit_condition: Option<String>,
+    /// Do not stop: print this message (with `{expression}` placeholders) and carry on.
+    #[serde(default)]
+    pub log_message: Option<String>,
+}
+
+impl From<u32> for BreakpointSpec {
+    fn from(line: u32) -> Self {
+        BreakpointSpec {
+            line,
+            ..Default::default()
+        }
+    }
+}
+
+/// What a session may additionally be started with.
+#[derive(Default, Clone)]
+pub struct StartOptions {
+    /// Runs the program in a terminal when the adapter asks for one.
+    pub terminal: Option<TerminalHandler>,
+    /// Functions to stop in whatever the file (Rust: `rust_panic`, to stop at a `panic!`).
+    pub functions: Vec<String>,
+}
+
 /// A line breakpoint as the adapter confirmed it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Breakpoint {
@@ -149,7 +182,16 @@ impl Session {
         launch: Value,
         breakpoints: &[(String, Vec<u32>)],
     ) -> Result<Session, DapError> {
-        Session::start_with(adapter, adapter_id, launch, breakpoints, None)
+        let specs: Vec<(String, Vec<BreakpointSpec>)> = breakpoints
+            .iter()
+            .map(|(path, lines)| {
+                (
+                    path.clone(),
+                    lines.iter().copied().map(BreakpointSpec::from).collect(),
+                )
+            })
+            .collect();
+        Session::start_with(adapter, adapter_id, launch, &specs, StartOptions::default())
     }
 
     /// [`Session::start`], with a `terminal` that can run the program (`launch` must ask for it: debugpy's
@@ -158,9 +200,13 @@ impl Session {
         adapter: &AdapterCommand,
         adapter_id: &str,
         launch: Value,
-        breakpoints: &[(String, Vec<u32>)],
-        terminal: Option<TerminalHandler>,
+        breakpoints: &[(String, Vec<BreakpointSpec>)],
+        options: StartOptions,
     ) -> Result<Session, DapError> {
+        let StartOptions {
+            terminal,
+            functions,
+        } = options;
         let (client, incoming) = Client::spawn(adapter)?;
         let client = Arc::new(client);
         let (events_tx, events_rx) = mpsc::channel();
@@ -204,8 +250,8 @@ impl Session {
             events: Mutex::new(events_rx),
             capabilities,
         };
-        for (path, lines) in breakpoints {
-            for bp in session.set_breakpoints(path, lines)? {
+        for (path, specs) in breakpoints {
+            for bp in session.set_breakpoints_spec(path, specs)? {
                 if !bp.verified {
                     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
                     let why = bp
@@ -217,6 +263,9 @@ impl Session {
                     });
                 }
             }
+        }
+        if !functions.is_empty() {
+            let _ = session.set_function_breakpoints(&functions);
         }
         // Stop on an exception nobody catches, when the adapter offers it.
         let uncaught = session.capabilities["exceptionBreakpointFilters"]
@@ -248,15 +297,52 @@ impl Session {
 
     /// Replaces all breakpoints of a file; the answer says where each one landed.
     pub fn set_breakpoints(&self, path: &str, lines: &[u32]) -> Result<Vec<Breakpoint>, DapError> {
+        let specs: Vec<BreakpointSpec> = lines.iter().copied().map(BreakpointSpec::from).collect();
+        self.set_breakpoints_spec(path, &specs)
+    }
+
+    /// [`Session::set_breakpoints`] with conditions, hit counts and log messages.
+    pub fn set_breakpoints_spec(
+        &self,
+        path: &str,
+        specs: &[BreakpointSpec],
+    ) -> Result<Vec<Breakpoint>, DapError> {
+        let breakpoints: Vec<Value> = specs
+            .iter()
+            .map(|spec| {
+                let mut bp = json!({ "line": spec.line });
+                for (key, text) in [
+                    ("condition", &spec.condition),
+                    ("hitCondition", &spec.hit_condition),
+                    ("logMessage", &spec.log_message),
+                ] {
+                    if let Some(t) = text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                        bp[key] = t.into();
+                    }
+                }
+                bp
+            })
+            .collect();
         let body = self.client.request(
             "setBreakpoints",
-            json!({
-                "source": { "path": path },
-                "breakpoints": lines.iter().map(|l| json!({ "line": l })).collect::<Vec<_>>(),
-            }),
+            json!({ "source": { "path": path }, "breakpoints": breakpoints }),
             FAST,
         )?;
-        Ok(body["breakpoints"]
+        Ok(Self::breakpoints_of(&body))
+    }
+
+    /// Stops in the named functions (replacing the earlier list) — `rust_panic` for a Rust `panic!`.
+    pub fn set_function_breakpoints(&self, names: &[String]) -> Result<Vec<Breakpoint>, DapError> {
+        let body = self.client.request(
+            "setFunctionBreakpoints",
+            json!({ "breakpoints": names.iter().map(|n| json!({ "name": n })).collect::<Vec<_>>() }),
+            FAST,
+        )?;
+        Ok(Self::breakpoints_of(&body))
+    }
+
+    fn breakpoints_of(body: &Value) -> Vec<Breakpoint> {
+        body["breakpoints"]
             .as_array()
             .map(|list| {
                 list.iter()
@@ -267,7 +353,7 @@ impl Session {
                     })
                     .collect()
             })
-            .unwrap_or_default())
+            .unwrap_or_default()
     }
 
     pub fn stack_trace(&self, thread_id: i64) -> Result<Vec<Frame>, DapError> {
@@ -326,7 +412,18 @@ impl Session {
 
     /// Evaluates `expression` in a frame (the console's line). The answer is a [`Variable`] named after the expression.
     pub fn evaluate(&self, expression: &str, frame_id: Option<i64>) -> Result<Variable, DapError> {
-        let mut args = json!({ "expression": expression, "context": "repl" });
+        self.evaluate_in(expression, frame_id, "repl")
+    }
+
+    /// [`Session::evaluate`] in a DAP `context`: `repl` (the console), `watch` (a watch expression — no side
+    /// effects wanted) or `hover`.
+    pub fn evaluate_in(
+        &self,
+        expression: &str,
+        frame_id: Option<i64>,
+        context: &str,
+    ) -> Result<Variable, DapError> {
+        let mut args = json!({ "expression": expression, "context": context });
         if let Some(frame) = frame_id {
             args["frameId"] = frame.into();
         }

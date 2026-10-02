@@ -187,7 +187,158 @@ fn config_of(bin: &RustBin) -> DebugConfig {
         package: Some(bin.package.clone()),
         source: None,
         dir: (!bin.dir.is_empty()).then(|| bin.dir.clone()),
+        test: None,
         args: Vec::new(),
+        cwd: None,
+        env: Vec::new(),
+        just_my_code: true,
+        detected: true,
+    }
+}
+
+/// The functions a Rust `panic!` passes through; a function breakpoint on them stops the program at the panic.
+pub const PANIC_FUNCTIONS: &[&str] = &["rust_panic"];
+
+/// A set of tests cargo can build: a package's library, one of its binaries, or one integration-test file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestTarget {
+    pub package: String,
+    /// `lib`, `bin:<name>` or `test:<name>`.
+    pub selector: String,
+    pub dir: String,
+}
+
+/// Does any `.rs` file below `dir` hold a `#[test]`? (A bounded look: 300 files.)
+fn mentions_tests(dir: &Path) -> bool {
+    let mut stack = vec![dir.to_path_buf()];
+    let mut seen = 0;
+    while let Some(folder) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                seen += 1;
+                if seen > 300 {
+                    return false;
+                }
+                if std::fs::read_to_string(&path)
+                    .is_ok_and(|t| t.contains("#[test]") || t.contains("#[cfg(test)]"))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The test targets of the Rust projects of `project`: `lib` when the library holds tests, each binary that
+/// does, and every file in a package's `tests/` folder.
+pub fn test_targets(project: &Path) -> Vec<TestTarget> {
+    let mut out = Vec::new();
+    for rel in crate::config::manifest_dirs(project, "Cargo.toml") {
+        let base = project.join(&rel);
+        let Some(root) = read_toml(&base.join("Cargo.toml")) else {
+            continue;
+        };
+        // The root package and, for a workspace, its members' folders.
+        let mut folders: Vec<String> = vec![String::new()];
+        if let Some(members) = root
+            .get("workspace")
+            .and_then(|w| w.get("members"))
+            .and_then(|m| m.as_array())
+        {
+            for member in members.iter().filter_map(|m| m.as_str()).take(MAX_MEMBERS) {
+                if let Some(parent) = member.strip_suffix("/*") {
+                    if let Ok(entries) = std::fs::read_dir(base.join(parent)) {
+                        let mut names: Vec<String> = entries
+                            .flatten()
+                            .filter(|e| e.path().join("Cargo.toml").is_file())
+                            .filter_map(|e| e.file_name().into_string().ok())
+                            .collect();
+                        names.sort();
+                        folders.extend(names.into_iter().map(|n| format!("{parent}/{n}")));
+                    }
+                } else if !member.contains('*')
+                    && !member.starts_with('/')
+                    && !member.contains("..")
+                {
+                    folders.push(member.trim_end_matches('/').to_string());
+                }
+            }
+        }
+        for folder in folders {
+            let dir = if folder.is_empty() {
+                base.clone()
+            } else {
+                base.join(&folder)
+            };
+            let Some(name) = read_toml(&dir.join("Cargo.toml"))
+                .and_then(|m| m.get("package")?.get("name")?.as_str().map(str::to_string))
+            else {
+                continue;
+            };
+            let mut add = |selector: String| {
+                out.push(TestTarget {
+                    package: name.clone(),
+                    selector,
+                    dir: rel.clone(),
+                });
+            };
+            if dir.join("src/lib.rs").is_file() && mentions_tests(&dir.join("src")) {
+                add("lib".into());
+            }
+            for bin in package_bins(&dir, "") {
+                if std::fs::read_to_string(dir.join(&bin.source))
+                    .is_ok_and(|t| t.contains("#[test]") || t.contains("#[cfg(test)]"))
+                {
+                    add(format!("bin:{}", bin.name));
+                }
+            }
+            if let Ok(entries) = std::fs::read_dir(dir.join("tests")) {
+                let mut stems: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter_map(|n| n.strip_suffix(".rs").map(str::to_string))
+                    .collect();
+                stems.sort();
+                for stem in stems {
+                    add(format!("test:{stem}"));
+                }
+            }
+        }
+    }
+    out.truncate(MAX_BINS);
+    out
+}
+
+fn test_config_of(target: &TestTarget) -> DebugConfig {
+    let what = match target.selector.split_once(':') {
+        None => format!("{} (lib)", target.package),
+        Some(("bin", name)) => format!("{name} (bin)"),
+        Some((_, name)) => name.to_string(),
+    };
+    let suffix = if target.dir.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", target.dir)
+    };
+    DebugConfig {
+        name: format!("cargo test: {what}{suffix}"),
+        language: Language::Rust,
+        program: None,
+        module: None,
+        code: None,
+        package: Some(target.package.clone()),
+        source: None,
+        dir: (!target.dir.is_empty()).then(|| target.dir.clone()),
+        test: Some(target.selector.clone()),
+        // The test harness' own flag: print what a test writes while it runs.
+        args: vec!["--nocapture".into()],
         cwd: None,
         env: Vec::new(),
         just_my_code: true,
@@ -197,7 +348,9 @@ fn config_of(bin: &RustBin) -> DebugConfig {
 
 /// What a Rust project suggests: one configuration per binary.
 pub fn detect(project: &Path) -> Vec<DebugConfig> {
-    bins(project).iter().map(config_of).collect()
+    let mut out: Vec<DebugConfig> = bins(project).iter().map(config_of).collect();
+    out.extend(test_targets(project).iter().map(test_config_of));
+    out
 }
 
 /// “Debug the file in front” for a `.rs` file: the binary whose `main` it is, if it is one.
@@ -327,6 +480,9 @@ pub fn executable_in(output: &str, bin: &str) -> Option<PathBuf> {
 /// Builds the binary of `config` in `project` and returns the path of the executable. Slow (a compile):
 /// call it off the UI thread. A failed build answers with the compiler's own words.
 pub fn build(project: &Path, config: &DebugConfig) -> Result<PathBuf, String> {
+    if let Some(selector) = &config.test {
+        return build_tests(project, config, selector);
+    }
     let bin = config
         .program
         .as_deref()
@@ -355,6 +511,66 @@ pub fn build(project: &Path, config: &DebugConfig) -> Result<PathBuf, String> {
     executable_in(&String::from_utf8_lossy(&output.stdout), bin)
         .filter(|p| p.is_file())
         .ok_or_else(|| format!("cargo built, but reported no executable for “{bin}”"))
+}
+
+/// The test executable in `cargo test --no-run --message-format=json` output for the target named `name`.
+pub fn test_executable_in(output: &str, name: &str) -> Option<PathBuf> {
+    output
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|v| v["reason"] == "compiler-artifact" && v["profile"]["test"] == true)
+        .filter(|v| {
+            v["target"]["name"]
+                .as_str()
+                .is_some_and(|n| n == name || n.replace('-', "_") == name)
+        })
+        .filter_map(|v| v["executable"].as_str().map(PathBuf::from))
+        .next_back()
+}
+
+/// Builds the tests of `config` (`cargo test --no-run`) and returns their executable.
+fn build_tests(project: &Path, config: &DebugConfig, selector: &str) -> Result<PathBuf, String> {
+    let package = config
+        .package
+        .as_deref()
+        .ok_or("the configuration names no package")?;
+    let cargo = cargo().ok_or("cargo was not found — install Rust from https://rustup.rs")?;
+    let mut command = Command::new(cargo);
+    command.current_dir(base_of(project, config)).args([
+        "test",
+        "--no-run",
+        "--message-format=json-render-diagnostics",
+        "-p",
+        package,
+    ]);
+    // The target's name as cargo reports it in `target.name`.
+    let name = match selector.split_once(':') {
+        None => {
+            command.arg("--lib");
+            package.to_string()
+        }
+        Some(("bin", bin)) => {
+            command.args(["--bin", bin]);
+            bin.to_string()
+        }
+        Some((_, test)) => {
+            command.args(["--test", test]);
+            test.to_string()
+        }
+    };
+    let output = command
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("could not run cargo: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let tail: Vec<&str> = stderr.lines().rev().take(40).collect();
+        let text = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+        return Err(format!("The build failed:\n{text}"));
+    }
+    test_executable_in(&String::from_utf8_lossy(&output.stdout), &name)
+        .filter(|p| p.is_file())
+        .ok_or_else(|| format!("cargo built, but reported no test executable for “{name}”"))
 }
 
 /// Commands run in lldb before the program starts: step over the standard library, and — from the toolchain's

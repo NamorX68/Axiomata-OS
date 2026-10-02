@@ -45,6 +45,9 @@ pub struct DebugConfig {
     /// Detected: the folder (relative to the project) whose manifest — `Cargo.toml`, `Package.swift`,
     /// `CMakeLists.txt` — this belongs to; `None` = the project folder itself.
     pub dir: Option<String>,
+    /// Rust: debug the unit/integration tests of a target instead of a binary — `lib`, `bin:<name>` or
+    /// `test:<name>` (`cargo test --no-run`). Detected only.
+    pub test: Option<String>,
     pub args: Vec<String>,
     /// A folder inside the project; `None` = the project folder.
     pub cwd: Option<String>,
@@ -194,6 +197,7 @@ fn build_rust(name: String, entry: Entry) -> Result<DebugConfig, String> {
         package: package.map(str::to_string),
         source: None,
         dir: None,
+        test: None,
         args: entry.args,
         cwd: cwd.map(str::to_string),
         env: entry.env.into_iter().collect(),
@@ -261,6 +265,7 @@ fn build_native(name: String, language: Language, entry: Entry) -> Result<DebugC
         package: None,
         source: None,
         dir: None,
+        test: None,
         args: entry.args,
         cwd: cwd.map(str::to_string),
         env: entry.env.into_iter().collect(),
@@ -359,6 +364,7 @@ fn build(mut entry: Entry) -> Result<DebugConfig, String> {
         package: None,
         source: None,
         dir: None,
+        test: None,
         name,
         language,
         program,
@@ -500,6 +506,7 @@ fn detected(name: &str, program: Option<&str>, module: Option<&str>) -> DebugCon
         package: None,
         source: None,
         dir: None,
+        test: None,
         args: Vec::new(),
         cwd: None,
         env: Vec::new(),

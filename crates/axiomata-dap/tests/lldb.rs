@@ -260,3 +260,147 @@ fn step_in_stays_in_the_project_instead_of_entering_the_standard_library() {
     assert_eq!(top.line, 4, "{top:?}");
     session.end();
 }
+
+fn rust_project(name: &str, main: &str, extra: &[(&str, &str)]) -> PathBuf {
+    let dir = scratch(name);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/main.rs"), main).unwrap();
+    for (file, text) in extra {
+        let path = dir.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    dir
+}
+
+#[test]
+fn a_rust_panic_stops_the_program_and_the_stack_leads_back_to_the_owners_code() {
+    if rust::cargo().is_none() || rust::adapter_command(&PathBuf::from("/")).is_err() {
+        eprintln!("skipped: cargo or lldb-dap is missing");
+        return;
+    }
+    let project = rust_project(
+        "panic",
+        "fn check(n: i32) {\n    if n > 2 {\n        panic!(\"too big: {n}\");\n    }\n}\n\nfn main() {\n    for n in 0..5 {\n        check(n);\n    }\n}\n",
+        &[],
+    );
+    let config = rust::detect(&project).remove(0);
+    let executable = rust::build(&project, &config).expect("the build");
+    let adapter = rust::adapter_command(&project).unwrap();
+    let launch = rust::launch_arguments(&config, &executable, &project, &rust::init_commands());
+    let session = Session::start_with(
+        &adapter,
+        "lldb-dap",
+        launch,
+        &[],
+        axiomata_dap::StartOptions {
+            terminal: None,
+            functions: rust::PANIC_FUNCTIONS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        },
+    )
+    .expect("start");
+    let (_, thread) = next_stop(&session);
+    let frames = session.stack_trace(thread).unwrap();
+    let mine = frames
+        .iter()
+        .find(|f| {
+            f.path
+                .as_deref()
+                .is_some_and(|p| p.ends_with("src/main.rs"))
+                && f.name.contains("check")
+        })
+        .unwrap_or_else(|| panic!("no frame of check() in {frames:?}"));
+    assert_eq!(mine.line, 3);
+    session.end();
+}
+
+#[test]
+fn rust_tests_are_found_built_and_stop_at_a_breakpoint() {
+    if rust::cargo().is_none() || rust::adapter_command(&PathBuf::from("/")).is_err() {
+        eprintln!("skipped: cargo or lldb-dap is missing");
+        return;
+    }
+    let project = rust_project(
+        "rtests",
+        "fn main() {}\n",
+        &[
+            (
+                "src/lib.rs",
+                "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn adds() {\n        let total = add(2, 3);\n        assert_eq!(total, 5);\n    }\n}\n",
+            ),
+            (
+                "tests/api.rs",
+                "#[test]\nfn works() {\n    assert_eq!(probe::add(1, 1), 2);\n}\n",
+            ),
+        ],
+    );
+    let names: Vec<_> = rust::detect(&project).into_iter().map(|c| c.name).collect();
+    assert!(
+        names.contains(&"cargo test: probe (lib)".to_string()),
+        "{names:?}"
+    );
+    assert!(names.contains(&"cargo test: api".to_string()), "{names:?}");
+    let config = rust::detect(&project)
+        .into_iter()
+        .find(|c| c.name == "cargo test: probe (lib)")
+        .unwrap();
+    let executable = rust::build(&project, &config).expect("the build");
+    let adapter = rust::adapter_command(&project).unwrap();
+    let launch = rust::launch_arguments(&config, &executable, &project, &rust::init_commands());
+    let source = project.join("src/lib.rs").to_string_lossy().into_owned();
+    let session =
+        Session::start(&adapter, "lldb-dap", launch, &[(source, vec![11])]).expect("start");
+    let (_, thread) = next_stop(&session);
+    let top = &session.stack_trace(thread).unwrap()[0];
+    assert!(top.name.contains("adds"), "{top:?}");
+    session.end();
+}
+
+#[test]
+fn a_conditional_breakpoint_works_under_lldb() {
+    if rust::cargo().is_none() || rust::adapter_command(&PathBuf::from("/")).is_err() {
+        eprintln!("skipped: cargo or lldb-dap is missing");
+        return;
+    }
+    let project = rust_project(
+        "cond",
+        "fn main() {\n    let mut total = 0;\n    for i in 0..6 {\n        total += i;\n    }\n    println!(\"{total}\");\n}\n",
+        &[],
+    );
+    let config = rust::detect(&project).remove(0);
+    let executable = rust::build(&project, &config).expect("the build");
+    let adapter = rust::adapter_command(&project).unwrap();
+    let launch = rust::launch_arguments(&config, &executable, &project, &rust::init_commands());
+    let source = project.join("src/main.rs").to_string_lossy().into_owned();
+    let spec = axiomata_dap::BreakpointSpec {
+        line: 4,
+        condition: Some("i == 3".into()),
+        ..Default::default()
+    };
+    let session = Session::start_with(
+        &adapter,
+        "lldb-dap",
+        launch,
+        &[(source, vec![spec])],
+        axiomata_dap::StartOptions::default(),
+    )
+    .expect("start");
+    let (_, thread) = next_stop(&session);
+    let frame = session.stack_trace(thread).unwrap()[0].id;
+    assert_eq!(
+        session
+            .evaluate_in("i", Some(frame), "watch")
+            .unwrap()
+            .value,
+        "3"
+    );
+    session.end();
+}
