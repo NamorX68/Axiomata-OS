@@ -115,6 +115,7 @@
       editing = null;
       await refresh();
       choice = `named:${saved.name}`;
+      picked = true;
     } catch (err) {
       onError((err as { message?: string }).message ?? String(err));
     } finally {
@@ -145,9 +146,13 @@
     if (fileRel) out.push({ value: "file", label: `Current file — ${fileRel}`, disabled: false });
     return out;
   });
-  // Keep the choice on something that exists.
+  /** The owner picked something themselves; until then the first way to start the project is the choice. */
+  let picked = $state(false);
+  // Keep the choice on something that exists — and, until the owner chooses, on the project's own start (the
+  // list is read after the panel appears, so “Current file” alone must not stay the choice once it arrives).
   $effect(() => {
-    if (!choices.some((c) => c.value === choice && !c.disabled)) choice = choices.find((c) => !c.disabled)?.value ?? "";
+    const first = choices.find((c) => !c.disabled)?.value ?? "";
+    if (!picked || !choices.some((c) => c.value === choice && !c.disabled)) choice = first;
   });
 
   const busy = $derived($ds.phase === "starting" || $ds.phase === "running" || $ds.phase === "stopped");
@@ -256,7 +261,7 @@
 
       {#if !busy}
         <div class="start">
-          <select bind:value={choice} aria-label="What to debug" disabled={choices.length === 0}>
+          <select bind:value={choice} onchange={() => (picked = true)} aria-label="What to debug" disabled={choices.length === 0}>
             {#each choices as c (c.value)}<option value={c.value} disabled={c.disabled}>{c.label}</option>{/each}
           </select>
           <button type="button" class="ax-btn primary go" disabled={!choice || !folder} onclick={() => void start()}>
