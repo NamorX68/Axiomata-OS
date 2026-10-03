@@ -47,8 +47,8 @@ whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/
 
 **Next / open:** the owner's Mac test of the Studio, of Run/Tasks and of Debug (the Tauri glue in `src-tauri` is not
 compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, problem matchers);
-**agent-to-agent communication (M7.5, A2A over an own MCP server)** — to be planned carefully, it is central to
-the Studio; ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
+**agent-to-agent communication (M7.5)** — planned and approved 2026-10-03, nothing built yet: `docs/plans/a2a.md` (engine / agent /
+session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
 
 ## Commands

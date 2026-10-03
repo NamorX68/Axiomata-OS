@@ -1,7 +1,7 @@
 # Plan: Agentische IDE (M7)
 
 Status: **M7.0 bis M7.3 komplett** (Kanban, IDE-Skelett, Agent-Fenster samt Worktree/Status/Plan-Tab, Git-Schicht).
-**M7.4 (Mini-Harness), M7.5 (A2A) und M7.6 (Herauslösung) sind offen**, ohne laufende Arbeit. Stand 2026-09-30;
+**M7.4 (Mini-Harness), M7.5 (A2A) und M7.6 (Herauslösung) sind offen.** M7.5 ist seit 2026-10-03 in [`a2a.md`](a2a.md) neu geplant (Engine/Agent/Sitzung, Flow, Entscheidungen A1–A11, Bauplan); dort gilt, wo es von §5 abweicht. Stand 2026-09-30;
 die Editor-Kette (ED0–ED6) und Opencode 2 (OC1–OC4) sind eigene Pläne (`editor.md`, `opencode2.md`).
 Folgt dem schrittweisen Workflow des Owners: dieser Plan legt die Kette und die
 bereits getroffenen Entscheidungen fest; **jeder Meilenstein wird einzeln
