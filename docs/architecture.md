@@ -1418,3 +1418,45 @@ app's standard) and [`editor-projekt-werkzeuge.md`](docs/plans/editor-projekt-we
 Deferred meanwhile, by the same owner decision: the ⌘K spotlight search
 (`docs/plans/spotlight-search.md`) and further model-provider work (the current Opencode +
 OpenRouter setup is considered good enough).
+
+### Status snapshot (moved out of `AGENTS.md`, 2026-10-04)
+
+`AGENTS.md` had regrown a long status paragraph again; this is that paragraph, verbatim, as of the date above. `AGENTS.md` keeps only the short summary and points here.
+
+Axiomata-OS is an early-stage Rust + Tauri desktop app: a personal "Agentic OS" command
+centre / second brain, built around the **ARMS framework** (Applications, Routines, Memory,
+Skills — see `ARMS-Agentic-OS-Guide.pdf`, though the design has since diverged from it;
+`docs/architecture.md` §1 explains how). The long milestone-by-milestone history lives in
+`docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"; each feature has a
+plan in `docs/plans/`. Read those before substantial new work, and **update them** (not just this
+file) when a milestone or major feature lands.
+
+**Done:** M0–M3, M5, M6 (scaffold, skills runner, memory router, routines, the module-canvas
+dashboard, the Second Brain graph) and post-M6 work (ToDo, Calendar/Reminders/Mail connectors, themes,
+the `srcdoc` HTML viewer, Terminal module). **M4 (always-on scheduling) was dropped** (owner, 2026-09-20) —
+do not plan around it. M7.0–M7.3 (Kanban, IDE shell, agent panes with worktrees/status/plan, git layer),
+the editor ED0–ED6 (own TS engine in `src/editor/`, `axiomata-files`, tree-sitter, Vi, LSP) and Opencode 2
+(`docs/plans/opencode2.md`) are complete.
+
+**The Studio** (`docs/plans/workbench.md`) is the one full-screen workbench that replaced the separate
+Editor and IDE views (owner, 2026-10-02): `ide/IdeView.svelte` with an **activity rail**
+(`ide/ActivityRail.svelte`: Files, Search, Git | Run, Agents | foot: Terminal, Open file) choosing what the
+sidebar column shows (`fileapp/ProjectSidebar.svelte`; `settings.ide.tree.view`; Agents = `ide/AgentsPanel.svelte`,
+Run = `ide/TasksPanel.svelte`), a dock of panes (`ide/DockNode.svelte`, `ide/dockDrag.svelte.ts`), and an
+**Editor | Agents switch**: two dock layouts per project in one `layout_json` (`ide/modes.ts`); the hidden
+mode's panes stay mounted, so agents keep running. One ring entry (`shell:studio`, type id `view:ide`; the old
+`view:editor` is migrated on load, `core/ringTypes.ts`); `shell:ide`/`shell:editor` open it in the Agents/Editor
+mode (`ide/modeRequest.ts`). Internal names (`ide/`, `IdeView`, `axiomata-ide`) stay until the extraction.
+Project tools: git panel (#48, crate `axiomata-git` — the only place that runs `git`; Push/Commit & Push publish
+only the checked-out branch, never forced; the agent layer never pushes), outline + breadcrumbs (#49), projects
+new/open/close (#47, one `projects` table for everything), **Run/Tasks (#50)** (crate `axiomata-tasks`: detected tasks,
+`tasks.json` in the project or `~/.axiomata`, project file runs only after a hash confirmation; task panes are terminals
+whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/tasks.rs`).
+
+**Debug (#51)** exists for Python (debugpy), Rust, C/C++ and Swift (`lldb-dap`) — crate `axiomata-dap`, `ide/DebugPanel.svelte`, gutter breakpoints with conditions/hit counts/log points, watch expressions, Rust tests and panic stop; `debug.json` runs only after a hash confirmation, like Run. **Node/TypeScript is parked** (owner, 2026-10-02): js-debug needs TCP + child sessions and cannot be fetched/tested on the dev box (`docs/plans/editor-projekt-werkzeuge.md`).
+
+**Next / open:** the owner's Mac test of the Studio, of Run/Tasks and of Debug (the Tauri glue in `src-tauri` is not
+compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, problem matchers);
+**agent-to-agent communication (M7.5)** — planned and approved 2026-10-03, nothing built yet: `docs/plans/a2a.md` (engine / agent /
+session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
+owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
