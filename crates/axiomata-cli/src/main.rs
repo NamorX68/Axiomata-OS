@@ -114,6 +114,9 @@ enum Command {
         #[command(subcommand)]
         source: ImportSource,
     },
+    /// Serve the MCP tools (mailbox, board steps) for one agent session on stdin/stdout. Started by the studio for a
+    /// session, with `AXIOMATA_AGENT_ID` in the environment; not meant to be run by hand.
+    McpServe,
     /// Summarise the workspace graph (areas, files, links, skills, routines).
     Graph,
     /// Print the module manifest the dashboard wrote for the agent.
@@ -648,7 +651,12 @@ struct AddRoutine {
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // stderr, not the default stdout: `mcp-serve` speaks the MCP protocol on stdout, and one log line there would be a
+    // message the client cannot parse.
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 #[tokio::main]
@@ -688,6 +696,7 @@ async fn main() -> Result<()> {
                     skip_secrets,
                 },
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
+        Command::McpServe => return mcp_serve(&core),
         Command::Graph => graph_summary(&core)?,
         Command::Modules => modules()?,
         Command::ModuleAction {
@@ -698,6 +707,14 @@ async fn main() -> Result<()> {
         } => return module_action(instance, action, json, timeout_secs),
     }
     Ok(())
+}
+
+/// `mcp-serve`: the MCP server of one agent session (`docs/plans/a2a.md` CP-A4, `axiomata_core::agent_mcp`). Everything
+/// but the protocol goes to stderr.
+fn mcp_serve(core: &AxiomataCore) -> Result<()> {
+    let roots = axiomata_core::paths::ide_locations().channels;
+    let ctx = axiomata_core::agent_mcp::Context::from_env(core, roots)?;
+    axiomata_core::agent_mcp::serve_stdio(&ctx).context("serving MCP on stdio")
 }
 
 /// Scans an Obsidian folder, lets the agent sort the notes into areas, writes

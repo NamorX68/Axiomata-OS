@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A3 gebaut (2026-10-04); weiter mit CP-A4.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A4 gebaut (2026-10-04); weiter mit CP-A5.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -289,6 +289,38 @@ Zuschnitt in `axiomata-ide::mailbox` (Migration 16, `SCHEMA_SQL_V7`); weicht nir
 - **Aufbewahrung gelöschter Karten:** das Brett kann von einer gelöschten Karte nicht „abgeschlossen" sagen; der Aufrufer von `purge` listet sie deshalb als geschlossen (CP-A4-Glue).
 - **Einstellbar** sind die Zahlen über `Limits` (6 / 20 / 3); die Einstellungsoberfläche folgt, wenn es sie braucht.
 - **Noch nicht:** MCP-Werkzeuge (CP-A4), CLI-Spiegel `agent send|inbox` (A31), Tauri-Glue, Oberfläche (Team-Panel CP-A9), der Aufruf von `purge` beim Start (braucht die Liste abgeschlossener Karten aus dem Brett — der Glue in `axiomata-core` kommt mit CP-A4).
+
+## CP-A4 im Detail (gebaut 2026-10-04)
+
+`axiomata-cli mcp-serve` (A28) = `axiomata-core::agent_mcp`; Details in `architecture.md` §3. Festlegungen beim Bau, die der Plan offen ließ:
+
+- **Handgeschriebenes JSON-RPC** statt einer Protokoll-Bibliothek (vier Methoden; „selber bauen“). Zeilenweise über stdio, Zeilen höchstens 1 MiB, keine Batches.
+- **Identität nur aus der Umgebung:** `AXIOMATA_AGENT_ID` (Pflicht), `AXIOMATA_CARD_ID` (die Karte, für die die Sitzung gestartet wurde; setzt CP-A6) und `AXIOMATA_PLAN_ID`
+  (Planer, CP-A7). Ohne `…_CARD_ID` ist die Karte der Sitzung die, die sie hält. Der Reviewer hält die Karte nicht (er prüft die des Umsetzers) und braucht deshalb `…_CARD_ID`.
+- **Rollenrechte aus der `kind` der Rolle:** `review` → `review_verdict`; `plan` → `create_card` für jede Art; alle anderen → `claim_task`/`report_done`, `create_card` nur mit `creates:`
+  und nur diese Arten. Fehlende Rollendatei = nur lesen und Post. Vorgeschlagene Karten landen immer in „Vorschlag“, mit dem Plan der Ausgangskarte (A17); die Auto-Start-Regel für `creates`-Arten
+  (A7) sowie Tiefe und Anzahl selbst angelegter Karten kommen mit CP-A8.
+- **Anwesenheit als Dateisperre** (`axiomata-ide::presence`, `<events>/<id>/mcp.lock`): Ein laufender Server hält sie; wer sie nehmen kann, weiß, dass die Sitzung fort ist. Das Betriebssystem gibt sie
+  beim Prozessende frei, es gibt keinen Herzschlag und nichts aufzuräumen. Für Opencode ist der Server nach A31 vermutlich je Verzeichnis, nicht je Sitzung — Sache des CP-A5-Spikes.
+- **`claim_task` = `flow::start_card`:** Claim und Verschieben nach „In Arbeit“ und `started`-Ereignis in einer Transaktion; Karte muss bereit sein (offene Spalte, Vorgänger geprüft, nicht gehalten);
+  für den Halter idempotent. Eine Sitzung hält höchstens eine Karte gleichzeitig.
+- **Antwort-Ableitung** (Pflicht (2) aus dem CP-A3-Review) liegt im Postfach-Kern, nicht im Server: eine Nachricht an jemanden, der der Sitzung zur selben Karte geschrieben hat und noch unbeantwortet ist, gilt als Antwort.
+- **Die CLI loggt auf stderr** (vorher stdout): ein Logzeile auf stdout wäre eine Nachricht, die der Client nicht versteht.
+- **Aus Review und Security-Audit von CP-A4 eingearbeitet:** (1) `in_reply_to` ist kein Argument des Werkzeugs mehr; die Verknüpfung macht allein der Postfach-Kern, und eine nach dem Kettenlimit
+  *angehaltene* Antwort zählt nicht als beantwortet (sonst startete die nächste Nachricht eine frische Kette). (2) **Reichweite:** `get_card`, `list_cards`, `claim_task`, `review_verdict` nur auf dem
+  Brett, auf dem die Sitzung arbeitet (Brett der Karte bzw. des Plans); ohne Karte nur Karten, die der eigenen Rolle zugewiesen sind (`card.agent`); `claim_task` verlangt außerdem, dass `card.agent` leer
+  oder die eigene Rolle ist. Das Brett enthält auch Karten des Owners (ToDo). (3) „Eine Karte gleichzeitig“ prüft `flow::start_card` nach dem Sperren der Transaktion (nur für `agent:`-Akteure);
+  eine unsignierte, vom Owner nach „Fertig“ gezogene Karte zählt nicht mehr als offene Arbeit. (4) `report_done` schreibt die Zusammenfassung in derselben Transaktion (zu lang → nichts bewegt);
+  `create_card` ist `flow::propose_card` (Karte, Abhängigkeiten, Herkunftszeile atomar) und **höchstens 20 Vorschläge je Sitzung** (`MAX_PROPOSALS_PER_ACTOR`). (5) Anwesenheit: ein beschädigter
+  Lock-Pfad zählt als „nicht lebendig“ statt alles lahmzulegen; `hold` wartet bis 2 s, und ein Server, der den Lock nicht bekam, übernimmt ihn später auf einem eigenen Thread, wenn der alte endet.
+  (6) Dateiteile nennen nur relative Pfade im Projekt (kein `/`, `~`, `..`, Schema). (7) Rollen der Sitzung = die für ihr Projekt geltenden (`roster::project_roles(..).effective`, also bestätigte
+  Projektrollen), nicht nur die des Owners. (8) Protokoll: Notifications lösen nichts aus (auch `tools/call` ohne id nicht), Antworten des Clients werden nicht beantwortet, unbekannte Version → neueste.
+- **Bekannte Grenze (A39, jetzt konkret):** die Umgebung (`AXIOMATA_AGENT_ID`, …) erbt jeder Kindprozess der Sitzung. Ein Agent kann `AXIOMATA_AGENT_ID=<Reviewer> axiomata-cli mcp-serve` selbst
+  starten (die IDs liefert `list_agents`) und die eigene Karte abzeichnen — das Zwei-Parteien-Prinzip vergleicht nur Akteurs-Strings. Geschlossen wird das erst mit dem Scoping je Sitzung in CP-A5
+  (der Server nimmt die Identität nicht aus einer vererbbaren Umgebung, sondern aus einem pro Start erzeugten Geheimnis in der MCP-Konfiguration).
+- **Offen für den Owner:** (a) zusätzlich eine **Gesamtgrenze je Sitzung** für Nachrichten, unabhängig von der Karte (der Plan nennt nur „je Agent und Karte“; ein Agent, der seine Karte per CLI auf
+  `fail` setzt, bekommt einen frischen 20er-Eimer)? (b) Reicht „20 Vorschläge je Sitzung“ als Startwert?
+- **Noch nicht:** Eintrag je Harness und Start-Umgebung (CP-A5/CP-A6), der CLI-Spiegel `agent send|inbox` (A31), Kosten-/Schrittgrenzen, `purge` beim Start.
 
 ## Offene Fragen der Runde
 

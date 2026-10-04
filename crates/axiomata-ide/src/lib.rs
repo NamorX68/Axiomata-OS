@@ -33,6 +33,7 @@ pub mod lifecycle;
 pub mod mailbox;
 pub mod model;
 pub mod newproject;
+pub mod presence;
 pub mod provision;
 pub mod store;
 pub mod worktree;

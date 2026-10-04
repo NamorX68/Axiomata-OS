@@ -241,6 +241,22 @@ delivery, and the line is built from names filtered to harmless characters; whet
 typing itself, are the embedder's. `purge` applies the retention of A29 (card closed + 14 days, no card 30 days) from a list
 of closed cards the caller supplies. Not built yet: the MCP tools (CP-A4), the CLI mirror, Tauri glue and any UI.
 
+**The MCP server (A2A CP-A4, 2026-10-04, `docs/plans/a2a.md` A28, `axiomata-core::agent_mcp`).** `axiomata-cli mcp-serve` is one server per agent
+session, started by the session's harness and speaking MCP (JSON-RPC, one message per line) over stdio; it works directly on the database like the CLI
+does (WAL + busy timeout serve several processes). The protocol layer is hand-written (`protocol.rs`: `initialize` with version negotiation, `ping`,
+`tools/list`, `tools/call`, lines capped at 1 MiB, no batches); the tools (`tools.rs`) are thin wrappers over `axiomata_ide::mailbox` and
+`axiomata_board::flow`, so there is one set of rules. **Who is speaking comes from the environment, never from an argument** (`context.rs`:
+`AXIOMATA_AGENT_ID`, and `AXIOMATA_CARD_ID` / `AXIOMATA_PLAN_ID` when the studio started the session for a card or a plan): the sender is stamped, the
+card a message is about is the session's own, and the tools offered follow the role (`Capabilities::of`: kind `review` gets `review_verdict`, kind `plan`
+gets `create_card` for any kind, every other kind gets `claim_task`/`report_done`, `create_card` only with `creates:` and only those kinds; a missing role
+file means read and write mail, nothing else). Tools: `list_agents`, `send_message`, `read_inbox`, `get_card`, `list_cards`, `claim_task`, `report_done`,
+`review_verdict`, `create_card` (always into the board's proposal column, on the plan of the work it grew out of, optional `needs`). Reads and steps are limited to **the board the session works on** (or, without work yet, to cards assigned to its role) and the roles are the ones in force for the session's project. `create_card` is `flow::propose_card` (atomic, 20 per session). A session holds one
+card at a time (checked inside `start_card`); `claim_task` is `flow::start_card` (claim + move to work + `started` event in one transaction, idempotent for
+the holder, so the app may claim first, A20). **Liveness is a lock**: while a server runs it holds `<events>/<id>/mcp.lock` (`axiomata_ide::presence`);
+anyone who can take the lock knows the session is gone — the OS drops it when the process dies, so nothing goes stale. Logging of the CLI moved to **stderr**
+(stdout belongs to the protocol). Not built yet: wiring into the harnesses (CP-A5), the CLI mirror `agent send|inbox` (A31), delivery to a working agent
+(hooks), cost and step limits (CP-A6/A8).
+
 ### `axiomata-roster`
 
 The Studio's **engines and roles** (`docs/plans/a2a.md`, A5, CP-A1) — pure like `axiomata-tasks`: no Tauri, no database,
@@ -1552,6 +1568,11 @@ compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, 
 **agent-to-agent communication (M7.5)** — planned and approved 2026-10-03, nothing built yet: `docs/plans/a2a.md` (engine / agent /
 session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
+
+### A2A CP-A4 built (2026-10-04)
+
+The MCP server `axiomata-cli mcp-serve` (see its paragraph in §3): protocol, role-scoped tools, presence lock, `flow::start_card`. Nothing starts it yet —
+the per-harness entry is CP-A5.
 
 ### A2A CP-A3 built (2026-10-04)
 

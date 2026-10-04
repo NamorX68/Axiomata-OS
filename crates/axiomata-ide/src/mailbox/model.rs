@@ -192,6 +192,20 @@ pub enum Part {
     Data { data: Value },
 }
 
+/// Whether a file part's location is a plain relative path. The mailbox never opens it, but the *receiver* may, with
+/// its
+/// own rights: a message that sends an agent to `~/.ssh/id_ed25519` or `../../other-project` is a way to make it read
+/// what it was never given, so the sender can only name things inside the project tree.
+fn is_plain_relative(uri: &str) -> bool {
+    let uri = uri.trim();
+    !(uri.starts_with('/')
+        || uri.starts_with('~')
+        || uri.starts_with('\\')
+        || uri.contains(':')
+        || uri.contains('\\')
+        || uri.split('/').any(|part| part == ".."))
+}
+
 /// Checks a message's parts before they are stored.
 ///
 /// # Errors
@@ -226,6 +240,12 @@ pub fn check_parts(parts: &[Part]) -> Result<()> {
                 let long = |s: &str| s.len() > MAX_FILE_REF_LEN || s.chars().any(char::is_control);
                 if name.trim().is_empty() || uri.trim().is_empty() {
                     return Err(invalid("a file part needs a name and a location"));
+                }
+                if !is_plain_relative(uri) {
+                    return Err(invalid(
+                        "a file part points at a relative path inside the project: no absolute path, `..`, \
+                            `~` or scheme",
+                    ));
                 }
                 if long(name) || long(uri) || mime_type.as_deref().is_some_and(long) {
                     return Err(invalid(

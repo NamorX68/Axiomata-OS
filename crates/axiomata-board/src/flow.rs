@@ -3,19 +3,20 @@
 //!
 //! Same rules as [`crate::store`]: free functions over a borrowed connection, "missing" is `None`/`false`, and every
 //! step whose precondition could be raced checks it **inside the transaction that makes the change**. Two things differ
-//! on purpose. A refusal that the caller can act on (a card that is not in review, a verdict from the card's own worker)
+//! on purpose. A refusal that the caller can act on (a card that is not in review, a verdict from the card's own
+//! worker)
 //! is an [`BoardError::Invalid`] with a readable reason instead of a bare `false`, because the one reading it is often
 //! an agent that has to be told what to do instead.
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::model::{
-    Card, CardEvent, CardStatus, Column, ColumnStage, EventKind, Plan, PlanFields, PlanStatus,
-    TaskState,
+    Card, CardEvent, CardStatus, Column, ColumnStage, EventKind, NewCard, Plan, PlanFields,
+    PlanStatus, TaskState,
 };
 use crate::store::{
-    check_len, get_card, immediate, list_columns, move_card_in, normalize_actor, now, parse_opt_ts,
-    parse_ts,
+    check_len, create_card, get_card, immediate, list_columns, move_card_in, normalize_actor, now,
+    parse_opt_ts, parse_ts,
 };
 use crate::{BoardError, Result};
 
@@ -27,6 +28,11 @@ const MAX_DEPS_PER_CARD: i64 = 50;
 const MAX_EVENTS_PER_READ: usize = 500;
 const MAX_EVENT_TEXT_LEN: usize = 4_000;
 const MAX_QUESTION_LEN: usize = 2_000;
+/// How many cards one agent session may propose over its life. A session in a loop would otherwise fill the board
+/// (2000 cards) and the owner's proposal column; the owner can lift it by approving or deleting proposals.
+pub const MAX_PROPOSALS_PER_ACTOR: i64 = 20;
+/// The history line [`propose_card`] writes — also what the cap counts.
+const PROPOSED_NOTE: &str = "proposed by the session";
 
 /// Only the owner (a `human:` actor) may do this: it is a gate the agents work behind (a2a.md A7, A17), not a step
 /// they take. Enforced here so that the rule holds for every caller; *who* an actor really is, is the caller's side —
@@ -448,11 +454,19 @@ pub(crate) fn check_plan_change_keeps_edges(db: &Connection, card_id: i64) -> Re
 /// involved, or when the edge would close a cycle — a card that, through any chain, already waits for `card_id`.
 /// The check and the insert are one transaction, so two edges added at the same moment cannot together make a cycle.
 pub fn add_dependency(db: &mut Connection, card_id: i64, depends_on_id: i64) -> Result<bool> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let added = add_dependency_in(&tx, card_id, depends_on_id)?;
+    tx.commit()?;
+    Ok(added)
+}
+
+/// [`add_dependency`] inside a transaction the caller holds — for [`propose_card`], which makes the card and its edges
+/// as one step.
+fn add_dependency_in(tx: &Connection, card_id: i64, depends_on_id: i64) -> Result<bool> {
     if card_id == depends_on_id {
         return invalid("depends_on_id", "a card cannot wait for itself");
     }
-    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let (Some(card), Some(dep)) = (get_card(&tx, card_id)?, get_card(&tx, depends_on_id)?) else {
+    let (Some(card), Some(dep)) = (get_card(tx, card_id)?, get_card(tx, depends_on_id)?) else {
         return invalid("depends_on_id", "no such card");
     };
     match (card.plan_id, dep.plan_id) {
@@ -507,7 +521,6 @@ pub fn add_dependency(db: &mut Connection, card_id: i64, depends_on_id: i64) -> 
         "INSERT OR IGNORE INTO card_deps (card_id, depends_on_id) VALUES (?1, ?2)",
         params![card_id, depends_on_id],
     )?;
-    tx.commit()?;
     Ok(added == 1)
 }
 
@@ -551,10 +564,174 @@ fn check_not_called_off(card: &Card) -> Result<()> {
     Ok(())
 }
 
+/// An agent proposes a card: the card, its "needs first" edges and the history line that says who proposed it are one
+/// transaction, so a refused edge leaves no half-made proposal in front of the owner and a retry cannot make a second
+/// one. `new` must point at the board's proposal column (the caller picks it, A17). Refused after
+/// [`MAX_PROPOSALS_PER_ACTOR`] proposals by the same actor.
+pub fn propose_card(
+    db: &mut Connection,
+    new: &NewCard,
+    needs: &[i64],
+    actor: &str,
+) -> Result<Card> {
+    let actor = normalize_actor(actor)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let proposed: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM card_events WHERE actor = ?1 AND kind = 'note' AND text = ?2",
+        params![actor, PROPOSED_NOTE],
+        |row| row.get(0),
+    )?;
+    if proposed >= MAX_PROPOSALS_PER_ACTOR {
+        return invalid(
+            "actor",
+            format!(
+                "you have proposed {MAX_PROPOSALS_PER_ACTOR} cards already; the owner has to approve or \
+                    delete some first"
+            ),
+        );
+    }
+    let card = create_card(&tx, new)?;
+    for need in needs {
+        add_dependency_in(&tx, card.id, *need)?;
+    }
+    insert_event(&tx, card.id, &actor, EventKind::Note, PROPOSED_NOTE)?;
+    tx.commit()?;
+    // Read again: the dependencies are part of what a card shows.
+    get_card(db, card.id)?.ok_or_else(|| BoardError::CorruptRow {
+        table: "cards",
+        id: card.id,
+        reason: "vanished immediately after its proposal".to_string(),
+    })
+}
+
+/// What [`start_card`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// The card was taken and moved into work.
+    Started,
+    /// The caller held the card in work (or in review) already — the second `claim_task` of a session whose card the
+    /// app claimed for it (A20) is a confirmation, not an error.
+    AlreadyHeld,
+}
+
+/// Takes a ready card and puts it into work: claim and move to the board's plain doing column in one transaction,
+/// with a
+/// `started` line in the history (A20).
+///
+/// Refused — with the reason, as [`BoardError::Invalid`] — when there is no such card, it is archived, failed, called
+/// off or taken over, it sits in the proposal column (not approved), it is not in an open column, it waits for
+/// predecessors, or somebody else holds it. A card the caller holds already is [`Start::AlreadyHeld`] once it is in
+/// work; if it was claimed for the caller but still lies in the open column (the app claims it before the session
+/// starts), this moves it.
+pub fn start_card(db: &mut Connection, card_id: i64, actor: &str) -> Result<Start> {
+    let actor = normalize_actor(actor)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let Some(card) = get_card(&tx, card_id)? else {
+        return invalid("card_id", format!("no card {card_id}"));
+    };
+    if card.archived_at.is_some() {
+        return invalid("card_id", "the card is archived");
+    }
+    check_not_called_off(&card)?;
+    let columns = list_columns(&tx, card.board_id)?;
+    let Some(here) = columns.iter().find(|c| c.id == card.column_id) else {
+        return invalid("card_id", "the card lies in no column of its board");
+    };
+    let held_by_caller = card.claimed_by.as_deref() == Some(actor.as_str());
+    if held_by_caller && here.maps_to_status == CardStatus::Doing {
+        return Ok(Start::AlreadyHeld);
+    }
+    if here.stage == Some(ColumnStage::Proposal) {
+        return invalid(
+            "card_id",
+            "the card is a proposal; the owner has not approved it",
+        );
+    }
+    if let Some(holder) = card.claimed_by.as_deref()
+        && !held_by_caller
+    {
+        return invalid("card_id", format!("the card is held by {holder}"));
+    }
+    if here.maps_to_status != CardStatus::Open {
+        return invalid("card_id", "the card is not waiting in an open column");
+    }
+    if let Some(first) = card.waiting_on.first() {
+        return invalid("card_id", format!("the card waits for card #{first}"));
+    }
+    let Some(doing) = column_with(&columns, CardStatus::Doing, None) else {
+        return invalid("column_id", "the board has no column for work in progress");
+    };
+    // An agent works on one card at a time. The check lives here, after the lock is taken, so two servers of one
+    // session cannot both pass it; a card claimed for the caller beforehand (A20) is the caller's one card.
+    if actor.starts_with("agent:")
+        && let Some(other) = open_claims_in(&tx, &actor)?
+            .into_iter()
+            .find(|held| *held != card_id)
+    {
+        return invalid(
+            "card_id",
+            format!("you already hold card #{other}; finish it before you take another"),
+        );
+    }
+    if !held_by_caller {
+        let claimed = tx.execute(
+            "UPDATE cards SET claimed_by = ?2, claimed_at = ?3, updated_at = ?3
+             WHERE id = ?1 AND claimed_by IS NULL",
+            params![card_id, actor, now()],
+        )?;
+        if claimed != 1 {
+            return invalid(
+                "card_id",
+                "the card was taken by somebody else in the meantime",
+            );
+        }
+    }
+    move_card_in(&tx, card_id, doing.id, usize::MAX, None)?;
+    insert_event(&tx, card_id, &actor, EventKind::Started, "")?;
+    tx.commit()?;
+    Ok(Start::Started)
+}
+
+/// The cards `actor` holds that are still live work: not archived, not failed, canceled or taken over, not signed off,
+/// and not lying in a done column (the owner may drag an unsigned card there, A18 — it is finished work all the same).
+/// What "one card at a time" for an agent counts.
+pub fn open_claims(db: &Connection, actor: &str) -> Result<Vec<i64>> {
+    open_claims_in(db, &normalize_actor(actor)?)
+}
+
+/// [`open_claims`] for a canonical actor, usable inside a transaction.
+fn open_claims_in(db: &Connection, actor: &str) -> Result<Vec<i64>> {
+    let mut stmt = db.prepare(
+        "SELECT id FROM cards WHERE claimed_by = ?1 AND archived_at IS NULL AND failed_at IS NULL
+           AND canceled_at IS NULL AND taken_over_at IS NULL AND verified_by IS NULL
+           AND NOT EXISTS (SELECT 1 FROM board_columns c
+                           WHERE c.id = cards.column_id AND c.maps_to_status = 'done')
+         ORDER BY id",
+    )?;
+    let ids = stmt
+        .query_map(params![actor], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
 /// The working agent reports the card done (A18): it moves to the review column. Refused unless the card is claimed
 /// by `actor` and sits in a plain doing column.
 pub fn report_done(db: &mut Connection, card_id: i64, actor: &str) -> Result<()> {
+    report_done_with_note(db, card_id, actor, None)
+}
+
+/// [`report_done`] with a summary for the reviewer, written into the history in the same transaction — a summary that
+/// is too long is refused *before* the card moves, so a failed call leaves everything as it was and can be retried.
+pub fn report_done_with_note(
+    db: &mut Connection,
+    card_id: i64,
+    actor: &str,
+    note: Option<&str>,
+) -> Result<()> {
     let actor = normalize_actor(actor)?;
+    if let Some(note) = note {
+        check_event_text(note)?;
+    }
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let Some(card) = get_card(&tx, card_id)? else {
         return invalid("card_id", format!("no card {card_id}"));
@@ -583,6 +760,9 @@ pub fn report_done(db: &mut Connection, card_id: i64, actor: &str) -> Result<()>
         return invalid("column_id", "the board has no review column");
     };
     move_card_in(&tx, card_id, review.id, usize::MAX, Some(&actor))?;
+    if let Some(note) = note.filter(|n| !n.trim().is_empty()) {
+        insert_event(&tx, card_id, &actor, EventKind::Note, note)?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -1045,6 +1225,231 @@ mod tests {
 
     fn state_of(f: &Fixture, card: i64) -> TaskState {
         get_card(&f.db, card).unwrap().unwrap().state
+    }
+
+    // ------------------------------------------------------------- start ---
+
+    #[test]
+    fn starting_a_card_claims_it_and_moves_it_into_work() {
+        let mut f = fixture();
+        let card = card_in(&f, f.open, "k");
+        assert_eq!(
+            start_card(&mut f.db, card.id, "agent:a-1").unwrap(),
+            Start::Started
+        );
+        let after = get_card(&f.db, card.id).unwrap().unwrap();
+        assert_eq!(after.claimed_by.as_deref(), Some("agent:a-1"));
+        assert_eq!(after.column_id, f.doing);
+        assert_eq!(after.state, TaskState::Working);
+        let events = list_events(&f.db, card.id, 10).unwrap();
+        assert_eq!(events.last().map(|e| e.kind), Some(EventKind::Started));
+
+        // A second call by the holder is a confirmation; anybody else is refused.
+        assert_eq!(
+            start_card(&mut f.db, card.id, "agent:a-1").unwrap(),
+            Start::AlreadyHeld
+        );
+        let err = start_card(&mut f.db, card.id, "agent:b-2").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                BoardError::Invalid {
+                    field: "card_id",
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_card_claimed_for_the_caller_but_still_open_is_moved() {
+        let mut f = fixture();
+        let card = card_in(&f, f.open, "k");
+        assert!(claim_card(&f.db, card.id, "agent:a-1").unwrap());
+        assert_eq!(
+            start_card(&mut f.db, card.id, "agent:a-1").unwrap(),
+            Start::Started
+        );
+        assert_eq!(
+            get_card(&f.db, card.id).unwrap().unwrap().column_id,
+            f.doing
+        );
+    }
+
+    #[test]
+    fn only_a_ready_open_card_can_be_started() {
+        let mut f = fixture();
+        let proposal = card_in(&f, f.proposal, "p");
+        let review = card_in(&f, f.review, "r");
+        let done = card_in(&f, f.done, "d");
+        for id in [proposal.id, review.id, done.id, 999] {
+            assert!(
+                matches!(
+                    start_card(&mut f.db, id, "agent:a-1"),
+                    Err(BoardError::Invalid { .. })
+                ),
+                "card {id}"
+            );
+        }
+        // Waiting for a predecessor.
+        let plan = plan(&f);
+        let first = planned_card(&f, f.open, plan.id, "first");
+        let second = planned_card(&f, f.open, plan.id, "second");
+        add_dependency(&mut f.db, second.id, first.id).unwrap();
+        let err = start_card(&mut f.db, second.id, "agent:a-1").unwrap_err();
+        assert!(err.to_string().contains(&format!("#{}", first.id)), "{err}");
+        // Archived and called-off cards.
+        let archived = card_in(&f, f.open, "a");
+        set_card_archived(&f.db, archived.id, true).unwrap();
+        assert!(start_card(&mut f.db, archived.id, "agent:a-1").is_err());
+        let failed = card_in(&f, f.open, "f");
+        assert!(mark_failed(&f.db, failed.id, "human:owner", "no").unwrap());
+        assert!(start_card(&mut f.db, failed.id, "agent:a-1").is_err());
+    }
+
+    #[test]
+    fn two_agents_racing_for_one_card_produce_one_winner() {
+        let f = fixture();
+        let card = card_in(&f, f.open, "k");
+        let path = f.path.clone();
+        let workers: Vec<_> = ["agent:a-1", "agent:b-2"]
+            .into_iter()
+            .map(|actor| {
+                let path = path.clone();
+                let id = card.id;
+                std::thread::spawn(move || {
+                    let mut db = open(&path);
+                    db.busy_timeout(std::time::Duration::from_secs(10)).unwrap();
+                    start_card(&mut db, id, actor).is_ok()
+                })
+            })
+            .collect();
+        let winners = workers
+            .into_iter()
+            .map(|w| w.join().unwrap())
+            .filter(|won| *won)
+            .count();
+        assert_eq!(winners, 1);
+    }
+
+    #[test]
+    fn open_claims_lists_live_work_only() {
+        let mut f = fixture();
+        let a = card_in(&f, f.open, "a");
+        let b = card_in(&f, f.open, "b");
+        start_card(&mut f.db, a.id, "agent:a-1").unwrap();
+        // A claim without a start (the CLI's `board claim`) is held work as well.
+        assert!(claim_card(&f.db, b.id, "agent:a-1").unwrap());
+        assert_eq!(open_claims(&f.db, "agent:a-1").unwrap(), vec![a.id, b.id]);
+        assert!(mark_failed(&f.db, b.id, "agent:a-1", "x").unwrap());
+        assert_eq!(open_claims(&f.db, "agent:a-1").unwrap(), vec![a.id]);
+        assert!(open_claims(&f.db, "agent:b-2").unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_agent_starts_one_card_at_a_time() {
+        let mut f = fixture();
+        let a = card_in(&f, f.open, "a");
+        let b = card_in(&f, f.open, "b");
+        start_card(&mut f.db, a.id, "agent:w-1").unwrap();
+        let err = start_card(&mut f.db, b.id, "agent:w-1").unwrap_err();
+        assert!(err.to_string().contains(&format!("#{}", a.id)), "{err}");
+        // Another agent and the owner are not held to it.
+        start_card(&mut f.db, b.id, "agent:x-2").unwrap();
+        let c = card_in(&f, f.open, "c");
+        start_card(&mut f.db, c.id, "human:owner").unwrap();
+        let d = card_in(&f, f.open, "d");
+        start_card(&mut f.db, d.id, "human:owner").unwrap();
+    }
+
+    #[test]
+    fn a_card_dragged_to_done_unsigned_is_no_longer_open_work() {
+        let mut f = fixture();
+        let a = card_in(&f, f.open, "a");
+        start_card(&mut f.db, a.id, "agent:w-1").unwrap();
+        assert_eq!(open_claims(&f.db, "agent:w-1").unwrap(), vec![a.id]);
+        move_card(&mut f.db, a.id, f.done, 0).unwrap();
+        assert!(open_claims(&f.db, "agent:w-1").unwrap().is_empty());
+        let b = card_in(&f, f.open, "b");
+        start_card(&mut f.db, b.id, "agent:w-1").unwrap();
+    }
+
+    #[test]
+    fn a_summary_that_is_too_long_leaves_the_card_where_it_was() {
+        let mut f = fixture();
+        let a = card_in(&f, f.open, "a");
+        start_card(&mut f.db, a.id, "agent:w-1").unwrap();
+        let long = "x".repeat(MAX_EVENT_TEXT_LEN + 1);
+        assert!(report_done_with_note(&mut f.db, a.id, "agent:w-1", Some(&long)).is_err());
+        assert_eq!(
+            get_card(&f.db, a.id).unwrap().unwrap().column_id,
+            f.doing,
+            "not moved"
+        );
+
+        report_done_with_note(&mut f.db, a.id, "agent:w-1", Some("did it")).unwrap();
+        assert_eq!(get_card(&f.db, a.id).unwrap().unwrap().column_id, f.review);
+        let events = list_events(&f.db, a.id, 10).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.kind == EventKind::Note && e.text == "did it")
+        );
+    }
+
+    #[test]
+    fn a_proposal_is_made_whole_or_not_at_all() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        let first = planned_card(&f, f.open, plan.id, "first");
+        let stranger = card_in(&f, f.open, "no plan");
+        let new = |title: &str| NewCard {
+            column_id: f.proposal,
+            fields: CardFields {
+                plan_id: Some(plan.id),
+                ..fields(title)
+            },
+        };
+        let before = crate::store::list_cards(&f.db, f.board, true)
+            .unwrap()
+            .len();
+        // A refused edge leaves nothing behind.
+        let err = propose_card(&mut f.db, &new("x"), &[stranger.id], "agent:p-1").unwrap_err();
+        assert!(matches!(err, BoardError::Invalid { .. }));
+        assert_eq!(
+            crate::store::list_cards(&f.db, f.board, true)
+                .unwrap()
+                .len(),
+            before
+        );
+
+        let ok = propose_card(&mut f.db, &new("y"), &[first.id], "agent:p-1").unwrap();
+        assert_eq!(
+            (ok.column_id, ok.depends_on.clone()),
+            (f.proposal, vec![first.id])
+        );
+        assert!(
+            list_events(&f.db, ok.id, 5)
+                .unwrap()
+                .iter()
+                .any(|e| e.actor == "agent:p-1")
+        );
+    }
+
+    #[test]
+    fn an_actor_may_propose_only_so_many_cards() {
+        let mut f = fixture();
+        let new = |n: i64| NewCard {
+            column_id: f.proposal,
+            fields: fields(&format!("p{n}")),
+        };
+        for n in 0..MAX_PROPOSALS_PER_ACTOR {
+            propose_card(&mut f.db, &new(n), &[], "agent:p-1").unwrap();
+        }
+        let err = propose_card(&mut f.db, &new(99), &[], "agent:p-1").unwrap_err();
+        assert!(err.to_string().contains("proposed"), "{err}");
+        propose_card(&mut f.db, &new(100), &[], "agent:q-2").unwrap();
     }
 
     // ------------------------------------------------------------ states ---

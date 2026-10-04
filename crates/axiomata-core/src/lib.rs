@@ -6,6 +6,7 @@
 //! embedded in a headless binary on another platform later — see the
 //! `axiomata-macos` crate for the platform integration boundary.
 
+pub mod agent_mcp;
 pub mod agents;
 /// The Kanban board core, re-exported so callers reach it as
 /// `axiomata_core::board::…` without taking a direct dependency on the crate.

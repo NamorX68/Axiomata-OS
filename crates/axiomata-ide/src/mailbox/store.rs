@@ -290,7 +290,9 @@ fn notify_undeliverable(db: &Connection, message: &Message, reason: &str) -> Res
 ///
 /// 1. The parts are checked ([`check_parts`]) and `sender` must be a session or the owner — the studio's own notices
 ///    never come through here.
-/// 2. A reply (`in_reply_to`) must answer a message the sender **received**, and not an ack or a notice (A8). Its chain
+/// 2. A session's message to somebody who wrote to it about the same card and is still unanswered counts as the reply
+///    (`infer_parent`), named or not. A reply (`in_reply_to`) must answer a message the sender **received**, and not
+///    an ack or a notice (A8). Its chain
 ///    counter is the parent's plus one; a fresh message, or anything the owner writes, starts a chain at 1 (the owner
 ///    stepping in is what the chain limit asks for).
 /// 3. A session may send at most [`Limits::max_per_sender_and_card`] messages about one card.
@@ -308,7 +310,7 @@ pub fn send(
     db: &mut Connection,
     limits: &Limits,
     sender: &Sender,
-    new: NewMessage,
+    mut new: NewMessage,
     live: &[i64],
 ) -> Result<SendResult> {
     check_parts(&new.parts)?;
@@ -334,6 +336,15 @@ pub fn send(
     }
 
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+    // A session that writes to somebody who wrote to it, about the same card, and has not answered yet *is* answering,
+    // whether or not it says so. Without this the chain counter would guard only agents that politely name the message
+    // they reply to: writing "fresh" messages would restart the count at 1 for ever.
+    if new.in_reply_to.is_none()
+        && let Sender::Session(me) = sender
+    {
+        new.in_reply_to = infer_parent(&tx, *me, &new.to, new.card_id)?;
+    }
 
     let mut chain = 1;
     if let Some(parent_id) = new.in_reply_to {
@@ -384,6 +395,43 @@ pub fn send(
     let result = place(&tx, limits, sender, &new, chain, live)?;
     tx.commit()?;
     Ok(result)
+}
+
+/// The newest message that `me` received from the addressed party about `card`, is an ordinary message (not an ack or a
+/// notice), was delivered, and that `me` has not answered yet. An answer that was *held* at the chain limit is not an
+/// answer: counting it would let the next message start a fresh chain right after the owner was asked.
+fn infer_parent(
+    db: &Connection,
+    me: i64,
+    to: &Recipient,
+    card_id: Option<i64>,
+) -> Result<Option<i64>> {
+    let from = match to {
+        Recipient::Session(_) => "m.sender = ?3",
+        Recipient::Role(_) => {
+            "m.sender IN (SELECT 'session:' || id FROM ide_agents WHERE agent_role = ?3)"
+        }
+        Recipient::Owner => "m.sender = ?3",
+    };
+    let party = match to {
+        Recipient::Session(id) => format!("session:{id}"),
+        Recipient::Role(name) => name.clone(),
+        Recipient::Owner => "owner".to_owned(),
+    };
+    Ok(db
+        .query_row(
+            &format!(
+                "SELECT m.id FROM mail_deliveries d JOIN mail_messages m ON m.id = d.message_id \
+                 WHERE d.inbox = ?1 AND m.kind = 'message' AND m.status = 'delivered' AND m.card_id IS ?2 \
+                   AND {from} \
+                   AND NOT EXISTS (SELECT 1 FROM mail_messages r \
+                                   WHERE r.in_reply_to = m.id AND r.sender = ?4 AND r.status = 'delivered') \
+                 ORDER BY m.id DESC LIMIT 1"
+            ),
+            params![Inbox::Session(me).as_text(), card_id, party, Sender::Session(me).as_text()],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 /// Stores a checked message and routes it: delivered, held at the chain limit, or undeliverable.
@@ -966,6 +1014,42 @@ mod tests {
     }
 
     #[test]
+    fn a_file_part_names_only_things_inside_the_project() {
+        let file = |uri: &str| {
+            check_parts(&[Part::File {
+                name: "f".into(),
+                uri: uri.into(),
+                mime_type: None,
+            }])
+        };
+        for ok in [
+            "src/lib.rs",
+            "docs/plans/a2a.md",
+            "a.txt",
+            "dir/with space/f.rs",
+            "..hidden/x",
+        ] {
+            assert!(file(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "/etc/passwd",
+            "~/.ssh/id_ed25519",
+            "../other-project/secret",
+            "a/../../b",
+            "..",
+            "file:///etc/passwd",
+            "https://example.com/x",
+            "C:\\Windows",
+            "a\\b",
+        ] {
+            assert!(
+                matches!(file(bad), Err(IdeError::Invalid { field: "parts", .. })),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
     fn parts_use_the_a2a_tagged_shape() {
         let text = serde_json::to_value(Part::Text { text: "hi".into() }).unwrap();
         assert_eq!(text, json!({"kind": "text", "text": "hi"}));
@@ -1364,7 +1448,8 @@ mod tests {
             panic!("expected delivery")
         };
         assert_eq!(message.chain, 2);
-        // The owner has been copied in by hand and answers: a fresh chain, delivered although the parent was at the limit.
+        // The owner has been copied in by hand and answers: a fresh chain, delivered although the parent was at the
+        // limit.
         let to_owner = send(
             &mut db,
             &limits,
@@ -1908,7 +1993,12 @@ mod tests {
             .unwrap();
         assert_eq!(cards, vec![Some(2), Some(3)]);
         let orphans: i64 = db
-            .query_row("SELECT COUNT(*) FROM mail_deliveries WHERE message_id NOT IN (SELECT id FROM mail_messages)", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM mail_deliveries WHERE message_id NOT IN (SELECT id FROM \
+                mail_messages)",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(orphans, 0);
     }
@@ -2113,6 +2203,177 @@ mod tests {
             },
         ];
         assert_eq!(purge(&mut db, Utc::now(), &closed).unwrap(), 1);
+    }
+
+    #[test]
+    fn writing_fresh_messages_back_and_forth_still_runs_into_the_chain_limit() {
+        let (mut db, project) = fixture();
+        let a = session(&db, project, "a", "impl");
+        let b = session(&db, project, "b", "reviewer");
+        let live = [a, b];
+        let limits = Limits::default();
+        let first = delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(a),
+                text(Recipient::Session(b), "q"),
+                &live,
+            )
+            .unwrap(),
+        );
+        assert_eq!((first.in_reply_to, first.chain), (None, 1));
+
+        // Neither side names a parent; each answers the other's last message.
+        let (mut from, mut to) = (b, a);
+        let mut last = first;
+        loop {
+            let result = send(
+                &mut db,
+                &limits,
+                &Sender::Session(from),
+                text(Recipient::Session(to), "a"),
+                &live,
+            )
+            .unwrap();
+            match result {
+                SendResult::Delivered { message, .. } => {
+                    assert_eq!(
+                        message.in_reply_to,
+                        Some(last.id),
+                        "the reply was linked to what it answers"
+                    );
+                    assert_eq!(message.chain, last.chain + 1);
+                    last = message;
+                }
+                SendResult::Held { message } => {
+                    assert_eq!(message.chain, limits.max_chain + 1);
+                    break;
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+            std::mem::swap(&mut from, &mut to);
+        }
+        assert_eq!(last.chain, limits.max_chain);
+    }
+
+    #[test]
+    fn after_a_held_message_the_next_one_is_held_too() {
+        let (mut db, project) = fixture();
+        let a = session(&db, project, "a", "impl");
+        let b = session(&db, project, "b", "reviewer");
+        let live = [a, b];
+        let limits = Limits {
+            max_chain: 2,
+            ..Limits::default()
+        };
+        let say = |db: &mut Connection, from: i64, to: i64| {
+            send(
+                db,
+                &limits,
+                &Sender::Session(from),
+                text(Recipient::Session(to), "x"),
+                &live,
+            )
+            .unwrap()
+        };
+        delivered(say(&mut db, a, b));
+        delivered(say(&mut db, b, a));
+        assert!(
+            matches!(say(&mut db, a, b), SendResult::Held { .. }),
+            "third hop is over the limit"
+        );
+        // Writing again does not restart the count: it is still an answer to b's message.
+        let SendResult::Held { message } = say(&mut db, a, b) else {
+            panic!("a fresh message after a held one must be held as well")
+        };
+        assert_eq!(message.chain, 3);
+    }
+
+    #[test]
+    fn a_message_is_only_taken_for_a_reply_when_card_and_counterpart_match() {
+        let (mut db, project) = fixture();
+        let a = session(&db, project, "a", "impl");
+        let b = session(&db, project, "b", "reviewer");
+        let c = session(&db, project, "c", "reviewer");
+        let live = [a, b, c];
+        let limits = Limits::default();
+        let on = |to, card| NewMessage {
+            card_id: card,
+            ..text(to, "x")
+        };
+        delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(a),
+                on(Recipient::Session(b), Some(1)),
+                &live,
+            )
+            .unwrap(),
+        );
+
+        // Another card, another counterpart: a fresh message.
+        let other_card = delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(b),
+                on(Recipient::Session(a), Some(2)),
+                &live,
+            )
+            .unwrap(),
+        );
+        assert_eq!(other_card.in_reply_to, None);
+        let other_party = delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(c),
+                on(Recipient::Session(a), Some(1)),
+                &live,
+            )
+            .unwrap(),
+        );
+        assert_eq!(other_party.in_reply_to, None);
+
+        // The same card and counterpart; a role counts through its members; an answered message is not taken twice.
+        let reply = delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(b),
+                on(Recipient::Session(a), Some(1)),
+                &live,
+            )
+            .unwrap(),
+        );
+        assert_eq!(reply.in_reply_to, Some(1));
+        let again = delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(b),
+                on(Recipient::Session(a), Some(1)),
+                &live,
+            )
+            .unwrap(),
+        );
+        assert_eq!(again.in_reply_to, None, "already answered once");
+        let by_role = delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(a),
+                on(Recipient::Role("reviewer".into()), Some(1)),
+                &live,
+            )
+            .unwrap(),
+        );
+        assert!(
+            by_role.in_reply_to.is_some(),
+            "a reviewer wrote to a about card 1 and is still unanswered"
+        );
     }
 
     #[test]
