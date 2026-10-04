@@ -7,9 +7,9 @@ mod debug;
 mod files;
 mod git;
 mod lsp;
-mod tasks;
 #[cfg(target_os = "macos")]
 mod menu;
+mod tasks;
 mod terminal;
 
 /// Initializes `tracing`'s output so `axiomata_core`'s `tracing::info!`/

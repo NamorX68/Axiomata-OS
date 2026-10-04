@@ -15,8 +15,11 @@ use std::time::Duration;
 use axiomata_core::paths::axiomata_home;
 use axiomata_dap::config::{self, DebugConfig, Language, PROJECT_FILE};
 use axiomata_dap::python::{adapter_command, current_file_config, launch_arguments};
+use axiomata_dap::{
+    BreakpointSpec, Control, DapError, DebugEvent, PythonEnv, Session, StartOptions,
+    TerminalHandler,
+};
 use axiomata_dap::{native, rust};
-use axiomata_dap::{BreakpointSpec, Control, DapError, DebugEvent, PythonEnv, Session, StartOptions, TerminalHandler};
 use axiomata_tasks::trust::{self, TrustStore};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -32,7 +35,9 @@ fn trust_file() -> PathBuf {
 /// Where builds for `project` go: outside the repository, one folder per project (`~/.axiomata/debug-build/<id>`).
 fn build_root(project: &Path) -> PathBuf {
     let id = trust::hash(project.to_string_lossy().as_bytes());
-    axiomata_home().join("debug-build").join(&id[..16.min(id.len())])
+    axiomata_home()
+        .join("debug-build")
+        .join(&id[..16.min(id.len())])
 }
 
 /// The one running session.
@@ -53,7 +58,10 @@ pub struct DebugState {
 }
 
 fn is_current(slot: &Slot, active: &Arc<Active>) -> bool {
-    slot.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|a| Arc::ptr_eq(a, active))
+    slot.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+        .is_some_and(|a| Arc::ptr_eq(a, active))
 }
 
 fn clear_if(slot: &Slot, active: &Arc<Active>) {
@@ -69,7 +77,9 @@ impl DebugState {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone()
-            .ok_or_else(|| FileError::new("NotRunning", "There is no debug session running.".into()))
+            .ok_or_else(|| {
+                FileError::new("NotRunning", "There is no debug session running.".into())
+            })
     }
 }
 
@@ -100,7 +110,10 @@ fn inside(project: &Path, rel: &str) -> Result<PathBuf, FileError> {
         || rel.contains('\0')
         || rel.split(['/', '\\']).any(|part| part == "..");
     if bad {
-        return Err(FileError::new("Invalid", format!("“{rel}” is not a path inside the project.")));
+        return Err(FileError::new(
+            "Invalid",
+            format!("“{rel}” is not a path inside the project."),
+        ));
     }
     Ok(project.join(rel))
 }
@@ -128,7 +141,12 @@ fn list_configs(project: &Path) -> DebugList {
         Ok(bytes) => {
             let parsed = config::parse_debug_file(&bytes);
             configs.extend(parsed.configurations);
-            problems.extend(parsed.problems.into_iter().map(|p| format!("{PROJECT_FILE}: {p}")));
+            problems.extend(
+                parsed
+                    .problems
+                    .into_iter()
+                    .map(|p| format!("{PROJECT_FILE}: {p}")),
+            );
             let hash = trust::hash(&bytes);
             let trusted = TrustStore::load(&trust_file()).is_trusted(project, &hash);
             project_file = Some(ProjectFile { hash, trusted });
@@ -136,18 +154,29 @@ fn list_configs(project: &Path) -> DebugList {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => problems.push(format!("{PROJECT_FILE}: {err}")),
     }
-    DebugList { configs, project_file, problems }
+    DebugList {
+        configs,
+        project_file,
+        problems,
+    }
 }
 
 #[tauri::command]
-pub async fn debug_configs(state: State<'_, CoreState>, root: String) -> Result<DebugList, FileError> {
+pub async fn debug_configs(
+    state: State<'_, CoreState>,
+    root: String,
+) -> Result<DebugList, FileError> {
     let project = folder_of(&state, root).await?;
     off_main(move || Ok(list_configs(&project))).await
 }
 
 /// The owner confirmed the project's `debug.json` as shown; accepted only if the file still has that content.
 #[tauri::command]
-pub async fn debug_trust(state: State<'_, CoreState>, root: String, hash: String) -> Result<(), FileError> {
+pub async fn debug_trust(
+    state: State<'_, CoreState>,
+    root: String,
+    hash: String,
+) -> Result<(), FileError> {
     let project = folder_of(&state, root).await?;
     off_main(move || {
         let bytes = std::fs::read(project.join(PROJECT_FILE))
@@ -160,7 +189,9 @@ pub async fn debug_trust(state: State<'_, CoreState>, root: String, hash: String
         }
         TrustStore::load(&trust_file())
             .trust(&project, &hash)
-            .map_err(|err| FileError::new("Io", format!("could not remember the confirmation: {err}")))
+            .map_err(|err| {
+                FileError::new("Io", format!("could not remember the confirmation: {err}"))
+            })
     })
     .await
 }
@@ -174,7 +205,9 @@ fn edit_file(
     project: PathBuf,
     change: impl FnOnce(Option<&[u8]>) -> Result<Vec<u8>, String>,
 ) -> Result<(), FileError> {
-    let write_error = |err: &dyn std::fmt::Display| FileError::new("Io", format!("could not save the configuration: {err}"));
+    let write_error = |err: &dyn std::fmt::Display| {
+        FileError::new("Io", format!("could not save the configuration: {err}"))
+    };
     let existing = match std::fs::read(project.join(PROJECT_FILE)) {
         Ok(bytes) => Some(bytes),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
@@ -182,10 +215,14 @@ fn edit_file(
     };
     let new = change(existing.as_deref()).map_err(|msg| FileError::new("Invalid", msg))?;
     let mut store = TrustStore::load(&trust_file());
-    let was_confirmed = existing.as_ref().is_none_or(|bytes| store.is_trusted(&project, &trust::hash(bytes)));
+    let was_confirmed = existing
+        .as_ref()
+        .is_none_or(|bytes| store.is_trusted(&project, &trust::hash(bytes)));
     config::write_project_file(&project, &new).map_err(|e| write_error(&e))?;
     if was_confirmed {
-        store.trust(&project, &trust::hash(&new)).map_err(|e| write_error(&e))?;
+        store
+            .trust(&project, &trust::hash(&new))
+            .map_err(|e| write_error(&e))?;
     }
     Ok(())
 }
@@ -199,12 +236,21 @@ pub async fn debug_save(
     replace: Option<String>,
 ) -> Result<(), FileError> {
     let project = folder_of(&state, root).await?;
-    off_main(move || edit_file(project, |existing| config::upsert_config(existing, &config, replace.as_deref()))).await
+    off_main(move || {
+        edit_file(project, |existing| {
+            config::upsert_config(existing, &config, replace.as_deref())
+        })
+    })
+    .await
 }
 
 /// Removes the configuration called `name` from the project's `debug.json`.
 #[tauri::command]
-pub async fn debug_remove(state: State<'_, CoreState>, root: String, name: String) -> Result<(), FileError> {
+pub async fn debug_remove(
+    state: State<'_, CoreState>,
+    root: String,
+    name: String,
+) -> Result<(), FileError> {
     let project = folder_of(&state, root).await?;
     off_main(move || {
         edit_file(project, |existing| match existing {
@@ -232,6 +278,9 @@ pub enum Target {
 }
 
 /// Starts a session. `on_event` receives everything the program and the adapter report until the end.
+// Tauri maps a command's parameters by name onto the `invoke` arguments, so they are the IPC contract with the
+// frontend; bundling them into a struct would change that contract for no gain.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn debug_start(
     state: State<'_, CoreState>,
@@ -439,7 +488,9 @@ pub async fn debug_control(debug: State<'_, DebugState>, action: Action) -> Resu
 
 /// The stack of the thread the program stopped on.
 #[tauri::command]
-pub async fn debug_stack(debug: State<'_, DebugState>) -> Result<Vec<axiomata_dap::Frame>, FileError> {
+pub async fn debug_stack(
+    debug: State<'_, DebugState>,
+) -> Result<Vec<axiomata_dap::Frame>, FileError> {
     let active = debug.current()?;
     off_main(move || {
         let thread = (*active.thread.lock().unwrap_or_else(|p| p.into_inner()))
@@ -450,7 +501,10 @@ pub async fn debug_stack(debug: State<'_, DebugState>) -> Result<Vec<axiomata_da
 }
 
 #[tauri::command]
-pub async fn debug_scopes(debug: State<'_, DebugState>, frame_id: i64) -> Result<Vec<axiomata_dap::Scope>, FileError> {
+pub async fn debug_scopes(
+    debug: State<'_, DebugState>,
+    frame_id: i64,
+) -> Result<Vec<axiomata_dap::Scope>, FileError> {
     let active = debug.current()?;
     off_main(move || active.session.scopes(frame_id).map_err(dap_error)).await
 }
@@ -461,7 +515,13 @@ pub async fn debug_variables(
     variables_reference: i64,
 ) -> Result<Vec<axiomata_dap::Variable>, FileError> {
     let active = debug.current()?;
-    off_main(move || active.session.variables(variables_reference).map_err(dap_error)).await
+    off_main(move || {
+        active
+            .session
+            .variables(variables_reference)
+            .map_err(dap_error)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -477,7 +537,13 @@ pub async fn debug_evaluate(
         Some("watch") => "watch",
         _ => "repl",
     };
-    off_main(move || active.session.evaluate_in(&expression, frame_id, context).map_err(dap_error)).await
+    off_main(move || {
+        active
+            .session
+            .evaluate_in(&expression, frame_id, context)
+            .map_err(dap_error)
+    })
+    .await
 }
 
 /// Replaces the breakpoints of one file in the running session.
@@ -490,7 +556,10 @@ pub async fn debug_set_breakpoints(
     let active = debug.current()?;
     off_main(move || {
         let path = inside(&active.project, &rel)?;
-        active.session.set_breakpoints_spec(&path.to_string_lossy(), &breakpoints).map_err(dap_error)
+        active
+            .session
+            .set_breakpoints_spec(&path.to_string_lossy(), &breakpoints)
+            .map_err(dap_error)
     })
     .await
 }

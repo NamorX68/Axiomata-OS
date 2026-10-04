@@ -86,7 +86,11 @@ fn node(project: &Path, tasks: &mut Vec<Task>) {
     };
     let pm = package_manager(project);
     let mut added = 0;
-    for name in scripts.keys() {
+    // Sorted explicitly: `serde_json` keeps file order when any crate in the build enables `preserve_order`, and
+    // which scripts survive the `MAX_SCRIPTS` cut must not depend on that.
+    let mut names: Vec<&String> = scripts.keys().collect();
+    names.sort();
+    for name in names {
         // npm runs `pre<x>` and `post<x>` around `<x>` on its own; offering them would run them twice.
         let lifecycle = ["pre", "post"].iter().any(|p| {
             name.strip_prefix(p)

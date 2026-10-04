@@ -29,7 +29,11 @@ fn trust_file() -> PathBuf {
 }
 
 /// Runs `work` on the project's folder on a blocking thread.
-async fn on_project<T, F>(state: &State<'_, CoreState>, root: String, work: F) -> Result<T, FileError>
+async fn on_project<T, F>(
+    state: &State<'_, CoreState>,
+    root: String,
+    work: F,
+) -> Result<T, FileError>
 where
     T: Send + 'static,
     F: FnOnce(PathBuf) -> Result<T, FileError> + Send + 'static,
@@ -44,7 +48,11 @@ where
 #[tauri::command]
 pub async fn tasks_list(state: State<'_, CoreState>, root: String) -> Result<TaskList, FileError> {
     on_project(&state, root, |dir| {
-        Ok(axiomata_tasks::list(&dir, &personal_file(), &TrustStore::load(&trust_file())))
+        Ok(axiomata_tasks::list(
+            &dir,
+            &personal_file(),
+            &TrustStore::load(&trust_file()),
+        ))
     })
     .await
 }
@@ -67,9 +75,9 @@ pub async fn tasks_trust(
             ));
         }
         let mut store = TrustStore::load(&trust_file());
-        store
-            .trust(&dir, &hash)
-            .map_err(|err| FileError::new("Io", format!("could not remember the confirmation: {err}")))
+        store.trust(&dir, &hash).map_err(|err| {
+            FileError::new("Io", format!("could not remember the confirmation: {err}"))
+        })
     })
     .await
 }
@@ -82,17 +90,22 @@ pub async fn task_command_line(
     id: String,
 ) -> Result<String, FileError> {
     on_project(&state, root, move |dir| {
-        axiomata_tasks::resolve(&dir, &personal_file(), &TrustStore::load(&trust_file()), &id)
-            .map(|task| task.command_line())
-            .map_err(|err| {
-                FileError::new(
-                    match err {
-                        ResolveError::Unknown(_) => "NotFound",
-                        ResolveError::NeedsTrust => "NeedsTrust",
-                    },
-                    err.to_string(),
-                )
-            })
+        axiomata_tasks::resolve(
+            &dir,
+            &personal_file(),
+            &TrustStore::load(&trust_file()),
+            &id,
+        )
+        .map(|task| task.command_line())
+        .map_err(|err| {
+            FileError::new(
+                match err {
+                    ResolveError::Unknown(_) => "NotFound",
+                    ResolveError::NeedsTrust => "NeedsTrust",
+                },
+                err.to_string(),
+            )
+        })
     })
     .await
 }
@@ -135,7 +148,9 @@ fn edit_tasks(
         Scope::Personal => axiomata_tasks::write_personal_file(&path, &new).map_err(write_error),
         Scope::Project => {
             let mut store = TrustStore::load(&trust_file());
-            let was_confirmed = existing.as_ref().is_none_or(|bytes| store.is_trusted(&dir, &trust::hash(bytes)));
+            let was_confirmed = existing
+                .as_ref()
+                .is_none_or(|bytes| store.is_trusted(&dir, &trust::hash(bytes)));
             axiomata_tasks::write_project_file(&dir, &new).map_err(write_error)?;
             if was_confirmed {
                 store.trust(&dir, &trust::hash(&new)).map_err(write_error)?;
@@ -155,7 +170,9 @@ pub async fn tasks_save(
     replace: Option<String>,
 ) -> Result<(), FileError> {
     on_project(&state, root, move |dir| {
-        edit_tasks(dir, scope, |existing| axiomata_tasks::upsert_task(existing, &task, replace.as_deref()))
+        edit_tasks(dir, scope, |existing| {
+            axiomata_tasks::upsert_task(existing, &task, replace.as_deref())
+        })
     })
     .await
 }
