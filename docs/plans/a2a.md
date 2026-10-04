@@ -90,6 +90,97 @@ wo er etwas anders sagt, die älteren Aussagen.
   `axiomata-ide` mit Postfach und MCP-Server) nehmen Pfade und liefern Daten, persistiert wird außen — ein späteres Brett im Projekt (Datei) wäre dann
   ein Austausch der Speicherung. Keine Synchronisation zwischen den Apps, solange es die zweite nicht gibt.
 
+### Runde 2026-10-04 — die Checkpoints CP-A2 bis CP-A10 durchgegrillt (Owner: „passt so", alles wie vorgeschlagen)
+
+**Karte und Brett (CP-A2)**
+
+- **A12 — Zustand wird abgeleitet, die Spalte trägt ihn.** Der Grundsatz des Bretts bleibt: der Status einer Karte steht nur in ihrer Spalte. Der A2A-Zustand
+  (`proposed`, `ready`/`blocked`, `working`, `input_required`, `in_review`, `done`, `verified`, `taken_over`, `failed`, `canceled`) wird in Rust aus Spalte, Claim,
+  Prüfsignatur und wenigen Feldern berechnet und mit der Karte mitgeschickt (wie `root_exists`). Neue Felder der Karte nur dort, wo ein Zustand nicht aus der
+  Spalte folgt: `returned_count`, `input_required` (Text), `taken_over_at`, `failed_at`, `canceled_at`. „Unterbrochen" (Claim ohne lebende Sitzung) kennt nur der
+  Core, nicht das Board-Crate.
+- **A13 — Spaltenrollen statt neuer Status.** Eine Spalte behält ihren Status (offen/in Arbeit/fertig) und bekommt optional eine **Rolle** `stage`: `proposal`
+  (Status offen) oder `review` (Status in Arbeit). Das vermeidet den Neuaufbau der eingefrorenen Tabelle (`CHECK` auf `maps_to_status`). **Standard bei allen Boards**
+  (Owner): neue Boards starten mit Vorschlag · Offen · In Arbeit · **Review** · Fertig; bestehende Boards bekommen einmalig eine Spalte „Review" (zwischen letzter
+  „In Arbeit"- und erster „Fertig"-Spalte; eine schon vorhandene Review-Spalte wird genommen) und eine Spalte „Vorschlag" vor der ersten. Die Oberfläche blendet
+  „Vorschlag" aus, solange sie leer ist. Vorhandene Spalten und Karten bleiben unberührt.
+- **A14 — Plan als Objekt.** Tabelle `plans` (Brett, Name, Zustand Entwurf/freigegeben/abgeschlossen, Auto-Schalter mit N, Limits) und `cards.plan_id` (optional;
+  Karten ohne Plan bleiben normale Karten). Das Brett bleibt die Ansicht, der Plan die Einheit für Freigabe, Automatik, Limits und Graph.
+- **A15 — Felder der Karte:** `agent` (Rollen-Slug, Absicht; der Planer schlägt vor, die Freigabe bestätigt), `agent_reason` (kurze Begründung, A5a), `tier`,
+  `kind` (freier Slug wie bei Rollen), `acceptance` (Abnahmekriterien als Markdown, kein Schema). `assignee` und `claimed_by` bleiben: `claimed_by` ist die
+  **Sitzung** (`agent:<Sitzungsname>`), `agent` die Absicht.
+- **A16 — Abhängigkeiten** (`card_deps`): nur innerhalb eines Plans, azyklisch (Rust prüft in einer Transaktion beim Anlegen). **Bereit** heißt: alle Vorgänger
+  **geprüft**; die Folgekarte startet auf dem **Zweig des Vorgängers**. Löschen entfernt die Kante, Archivieren einer geprüften Karte zählt als geprüft, **abgebrochene oder
+  gescheiterte Vorgänger blockieren sichtbar** („wartet auf Karte #12, gescheitert"), bis die Kante gelöst oder die Karte neu gestartet wird.
+- **A17 — Vorschlag und Plan-Freigabe sind ein Konzept.** Der Planer legt seine Karten in der Spalte **Vorschlag** an (Plan im Entwurf); die **Freigabe** schiebt sie
+  gesammelt nach Offen (Plan „freigegeben"). Karten, die ein Agent außerhalb seiner erlaubten Arten anlegt (A7), landen ebenfalls dort, mit dem Plan der
+  Ausgangskarte. Einzelne Vorschläge lassen sich einzeln freigeben oder verwerfen.
+- **A18 — Review-Fluss am Brett (Owner-Beispiel: „Agent, review alles in der Review-Spalte").** `report_done` schiebt die Karte nach Review; `review_verdict` „gut" prüft
+  (`verify_card` verlangt künftig eine Karte in der Review-Spalte, für Boards ohne Rolle weiter die Fertig-Spalte) und schiebt nach Fertig, „zurück" geht nach In
+  Arbeit mit `returned_count` + 1. Zieht ein Akteur eine **unclaimte** Karte in die Review-Spalte, wird sie für ihn geclaimt („wer abgibt, hat gearbeitet"), damit ein
+  anderer Akteur sie prüfen kann (der `CHECK verified_by <> claimed_by` bleibt unangetastet). **Ziehen ist für den Owner immer frei**, auch aus Review nach Fertig ohne
+  Abzeichnen; die Signatur setzt nur `review_verdict`. Agenten bewegen Karten nur über `claim_task`, `report_done`, `review_verdict`.
+- **A19 — Verlauf der Karte (`card_events`).** Nur anfügende Tabelle (Karte, Zeit, Akteur, Art, Text): Review-Anmerkungen, Eskalationen, Limit-Stopps, Rückfragen,
+  Zustandswechsel. Quelle für den Kontext bei Eskalation und das Team-Panel; der Markdown-Spiegel hängt die letzten Einträge an.
+
+**Ablauf (CP-A6, CP-A8)**
+
+- **A20 — Die App claimt beim Start** der Karte (atomar, `agent:<Sitzungsname>`); `claim_task` des Agenten ist danach nur eine idempotente Bestätigung. Schlägt der
+  Claim fehl, startet keine Sitzung.
+- **A21 — Reviewer:** die Rolle mit `kind = review` (bei mehreren die höchste passende Stufe), immer auf einer **anderen Engine** als der Umsetzer; gibt es keine,
+  fragt das Studio (kein stilles Weiterlaufen mit derselben Engine). Er bekommt einen **eigenen Worktree**, detached auf dem Stand des Umsetzers, und schreibt nie
+  auf dessen Zweig.
+- **A22 — Aufräumen nach der Übernahme:** Sitzungen werden beendet (Panes bleiben zum Nachlesen offen), Worktree und Zweig des Umsetzers sowie der Reviewer-Worktree
+  werden **erst entfernt, wenn alle aufbauenden Folgekarten übernommen oder gelöst sind**; die Karte bekommt `taken_over_at` und wird archiviert. Das Studio pusht nie.
+- **A23 — Unterbrochene Karten** (Sitzung weg, z. B. App beendet): Anzeige „unterbrochen", nie automatisch neu starten. Aktionen **Fortsetzen** (neue Sitzung im
+  selben Worktree/Zweig, Hinweis „du wurdest unterbrochen, prüfe den Stand") und **Freigeben** (Claim lösen, zurück nach Offen). Beim Start der App wird das einmal geprüft.
+- **A24 — Mitgelieferte Rollen:** `allrounder`, `planner`, `reviewer` (gesät, wenn sie fehlen). Der Reviewer hat keine feste Engine und fragt beim ersten Gebrauch. Die
+  Anweisungstexte entstehen zu CP-A6/CP-A7 und werden dem Owner vor dem Commit vorgelegt.
+- **A25 — Automatik:** N gilt **je Plan**, dazu eine globale Obergrenze (Einstellung, Standard 3 gleichzeitige Sitzungen); Reihenfolge: Position in Offen, oben zuerst;
+  **die Automatik hält an und fragt**, sobald eine Karte scheitert (Eskalation ausgeschöpft) oder ein Limit greift. Fortsetzen mit einem Klick.
+- **A26 — Eskalation:** zuerst die **Ausweich-Engines** derselben Rolle (Engine nicht erreichbar/Limit); danach nach zwei Rückgaben oder Abbruch die Rolle mit
+  gleicher `kind` und **nächsthöherer Stufe**, sonst wartet die Karte auf den Owner. Die neue Sitzung übernimmt Worktree, Zweig und Claim und bekommt die `card_events` als
+  Kontext; die alte endet.
+- **A27 — Limits, Startwerte** (Studio-Inspektor, Reiter Agents; je Rolle und Plan überschreibbar): je Sitzung leicht 60 Schritte / 0,50 $ / 400 k Token, mittel 120 / 2 $ /
+  1,5 M, schwer 250 / 6 $ / 4 M; je Plan 15 $ oder 6 M Token; pro Tag 20 $ für Studio-Sitzungen mit Abrechnung nach Token, **getrennt** vom Tageslimit der Skills/des Chats.
+  Token zählen Eingabe, Ausgabe und Cache-Aufbau, **nicht** Cache-Lesezugriffe.
+
+**Transport und Harnesses (CP-A3 bis CP-A5)**
+
+- **A28 — MCP-Server = `axiomata-cli mcp-serve`**, arbeitet direkt auf der Datenbank (WAL + Wartezeit; Vorbild: das CLI schreibt heute genauso in laufende Apps) und ruft die
+  Core-Funktionen auf (inklusive Markdown-Spiegel). Der Pfad wird **bei jedem Start neu** geschrieben, überschreibbar per Umgebungsvariable; mit dem App-Bundle wird es
+  der Sidecar darin. Zusätzliche Werkzeuge: `list_cards`, `get_card` (und die Werkzeuge aus CP-A4).
+- **A29 — Postfach:** Adressen **Sitzung**, **Rolle** (aufgelöst auf die laufenden Sitzungen dieser Rolle) und **Owner**, keine Rundrufe. Persistenz in der Haupt-Datenbank im
+  IDE-Crate hinter einer Schnittstelle (A11), Teile als JSON, optional `card_id`. Nachrichten an eine **beendete** Sitzung kommen als nicht zustellbar zum Absender zurück und
+  erscheinen beim Owner. Aufbewahrung: bis die Karte übernommen/abgebrochen ist plus 14 Tage, Nachrichten ohne Karte 30 Tage; Aufräumen beim Start.
+- **A30 — MCP-Eintrag bei Claude Code** (ändert A10): eine **app-eigene Datei** (`~/.axiomata/agent-events/<id>/mcp.json`) und pro Lauf `--mcp-config` plus `--settings` mit
+  `enabledMcpjsonServers`; **nichts im Worktree** (eine Datei dort würde im Take-over landen) und nichts Globales. Beim Fortsetzen neu übergeben. Die Sichtbarkeit aus A10
+  bleibt (beim ersten Mal je Projekt zeigen, Bestätigung per Hash). Ob `--mcp-config` den Erlaubnisdialog überspringt, ist zuerst live zu prüfen.
+- **A31 — Opencode und universeller Rückfall:** zu Beginn von CP-A5 ein **Spike** mit echtem Worktree (`opencode.json` im Worktree gegen `PUT /api/experimental/mcp/axiomata`);
+  unabhängig davon ein **CLI-Spiegel** der Werkzeuge (`axiomata-cli agent send|inbox|claim|report|verdict|card …`) für jedes Harness mit Shell.
+- **A32 — Zustellung (präzisiert A8):** Opencode über die API (`POST /api/session/{id}/prompt`, `delivery: queue`), Claude Code während der Arbeit über einen
+  `PostToolUse`-Hook (`additionalContext`), wartend nur per Tippen ins Terminal (nie, während der Owner dort schreibt). Hooks kommen damit in **CP-A5**. „Channels" von
+  Claude Code (Vorschau, Entwickler-Flagge, Warndialog) werden nicht verwendet.
+- **A33 — Kosten messen und durchsetzen:** Opencode über die Token der API-Nachrichten, Claude Code durch tolerantes Summieren des Sitzungs-JSONL (`--session-id` beim Start
+  festgelegt; fehlende Felder zählen 0; Test mit Beispieldatei). Wird nichts gefunden: „Verbrauch unbekannt" und Rückfall auf **Schritte** (über `PostToolUse` zählbar). Durchsetzen:
+  Claude Code über einen `PreToolUse`-Hook, der nach Erreichen weitere Aufrufe ablehnt (der laufende Schritt endet sauber, A9), Opencode über die API.
+- **A34 — Rechte unbeaufsichtigter Karten-Sitzungen:** Claude Code `--permission-mode acceptEdits` plus `--allowedTools` aus der Rolle und die `mcp__axiomata__*`-Werkzeuge einzeln
+  aufgelistet; alles andere bleibt eine Rückfrage, die als **input-required** an der Karte erscheint. Opencode die entsprechende Regel der Sitzung (nicht `--auto`).
+  **`bypassPermissions` nie**, auch nicht per Rolle.
+- **A35 — Start-Prompt:** ein kurzer fester Satz („Du bist Sitzung `<name>`, Rolle `<rolle>`, deine Karte ist `#<id>`. Lies sie mit `get_card` und arbeite danach; lies zuerst
+  dein Postfach."); Karte und Abnahmekriterien holt der Agent per `get_card`, die Rollen-Anweisung geht bei Claude Code über `--append-system-prompt-file` (Datei im app-eigenen
+  Ordner), bei Opencode als erste Nachricht über die API. Kein Kartentext in einer Shell-Zeile.
+
+**Oberfläche und Takt**
+
+- **A36 — Flow-Modus:** leerer Zustand mit „Neuer Plan…" (Engine-Wahl für den Planer, Sitzung mit der Rolle `planner` in einem Terminal-Pane, Plan als Entwurf); Umschalter
+  oben bei mehreren Plänen; Team-Panel rechts; Posteingang je Sitzung als Reiter im Pane. Die Graph-Ansicht (CP-A10) wird selbst gebaut (geschichtetes Layout in TypeScript,
+  SVG, keine Bibliothek).
+- **A37 — Tests ohne echte Agenten:** der MCP-Server bekommt einen In-Process-Testclient (JSON-RPC über Pipes) für komplette Abläufe (claim, Nachrichten, report_done, Review,
+  Kettenzähler, Konkurrenz zweier Clients); echte Agenten nur als `#[ignore]`-Livetests und als Karten auf dem Brett für den Mac-Test.
+- **A38 — Takt:** ein Commit je Checkpoint nach dem schlanken Review (ein kombinierter Sonnet-Agent, Tests inline), zusätzlich `security-auditor` bei CP-A2, CP-A4 und CP-A5; Zuschnitte
+  werden vor dem Checkpoint kurz bestätigt, wenn etwas vom Plan abweicht; gepusht wird nur auf Ja des Owners.
+
 ## Bauplan (Checkpoints)
 
 Jeder Checkpoint hinterlässt einen benutzbaren, getesteten Zustand; die reinen Crates sind hier auf der Linux-Box testbar, die Tauri-Schicht bleibt
