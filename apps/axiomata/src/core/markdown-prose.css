@@ -11,12 +11,13 @@
   margin: var(--ax-space-3) 0 var(--ax-space-2);
 }
 .ax-prose h1 {
-  font-size: var(--ax-font-size-xl);
+  /* One step above the 20px heading size: the body text is 16px since the preview was enlarged. */
+  font-size: calc(26px * var(--ax-ui-scale));
   padding-bottom: var(--ax-space-2);
   border-bottom: 1px solid var(--ax-border);
 }
 .ax-prose h2 {
-  font-size: var(--ax-font-size-lg);
+  font-size: var(--ax-font-size-xl);
   color: var(--ax-accent);
 }
 .ax-prose hr {
