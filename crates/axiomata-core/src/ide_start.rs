@@ -97,6 +97,8 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             } else if let Some(arg) = arg {
                 ready.launch_command = format!("{} {arg}", ready.launch_command);
             }
+            let channel = axiomata_ide::lifecycle::Channel::for_agent(&roots, ready.agent.id);
+            ready.launch_command = typeable(&channel, &ready.launch_command)?;
             Ok(Started { ready, mcp })
         }
         Harness::Opencode => {
@@ -163,6 +165,33 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
     }
 }
 
+/// The longest launch command typed into a pane as it is. A terminal in line mode takes at most 1024 bytes per line and
+/// silently drops the rest (macOS `MAX_CANON`) — a card session's command, with its paths, rights and start prompt, is
+/// longer, and arrived cut off in the middle of the prompt. Well under the limit, so the shell's own prompt and any
+/// prefix the pane adds still fit.
+const MAX_TYPED_COMMAND: usize = 700;
+
+/// The file in the channel directory a long launch command is kept in.
+const LAUNCH_SCRIPT: &str = "launch.sh";
+
+/// `command` as it can be typed: itself when it is short, otherwise a line that runs a script holding it. The script is
+/// rewritten at every start, so it never outlives what the start decided, and it holds no secret (the secret is in the
+/// MCP configuration it points at). `exec`, so the harness takes the script's place and nothing is left behind it.
+fn typeable(
+    channel: &axiomata_ide::lifecycle::Channel,
+    command: &str,
+) -> Result<String, AxiomataError> {
+    if command.len() <= MAX_TYPED_COMMAND {
+        return Ok(command.to_owned());
+    }
+    channel.write_private(LAUNCH_SCRIPT, &format!("#!/bin/sh\nexec {command}\n"))?;
+    let path = channel.dir().join(LAUNCH_SCRIPT);
+    Ok(format!(
+        "sh {}",
+        agent_entry::shell_quote(&path.display().to_string())
+    ))
+}
+
 /// The card a session works on: the live card it holds **in work**, if any. Sessions the studio started for a card are
 /// the usual ones that hold one; a session that took a card by itself and is restarted counts the same, which is
 /// what an interrupted session needs. A card the session already reported (it waits in review) is not work any more:
@@ -223,6 +252,52 @@ fn with_session(command: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn channel(label: &str) -> axiomata_ide::lifecycle::Channel {
+        let base =
+            std::env::temp_dir().join(format!("axiomata-typeable-{label}-{}", std::process::id()));
+        axiomata_ide::lifecycle::Channel::for_agent(
+            &axiomata_ide::lifecycle::ChannelRoots {
+                events: base.join("events"),
+                claude_tasks: base.join("tasks"),
+                claude_plans: base.join("plans"),
+            },
+            3,
+        )
+    }
+
+    #[test]
+    fn a_short_command_is_typed_as_it_is() {
+        let channel = channel("short");
+        assert_eq!(
+            typeable(&channel, "claude --model 'x'").unwrap(),
+            "claude --model 'x'"
+        );
+        assert!(!channel.dir().join(LAUNCH_SCRIPT).exists());
+    }
+
+    #[test]
+    fn a_command_too_long_for_one_terminal_line_is_run_from_a_script() {
+        let channel = channel("long");
+        // The command of a card session was 1036 bytes and arrived cut at 1024, in the middle of its prompt.
+        let long = format!("claude -- '{}'", "word ".repeat(300));
+        assert!(long.len() > 1024);
+        let typed = typeable(&channel, &long).unwrap();
+        assert!(typed.len() < 200 && typed.starts_with("sh '"), "{typed}");
+        let script = std::fs::read_to_string(channel.dir().join(LAUNCH_SCRIPT)).unwrap();
+        assert_eq!(
+            script,
+            format!("#!/bin/sh\nexec {long}\n"),
+            "whole, nothing cut"
+        );
+        // Rewritten at the next start, not appended to.
+        typeable(&channel, &format!("{long} more")).unwrap();
+        let again = std::fs::read_to_string(channel.dir().join(LAUNCH_SCRIPT)).unwrap();
+        assert!(
+            again.ends_with("more\n") && again.matches("exec").count() == 1,
+            "{again}"
+        );
+    }
 
     #[test]
     fn the_session_is_appended_to_the_generated_command() {

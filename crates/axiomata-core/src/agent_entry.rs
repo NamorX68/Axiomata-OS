@@ -241,9 +241,10 @@ pub fn role_tools(role: Option<&Role>) -> Vec<&'static str> {
 pub fn start_prompt(agent: &Agent, card_id: i64) -> String {
     format!(
         "You are the session \"{name}\", role `{role}`, and your card is #{card_id}. Read your inbox with `read_inbox`, \
-         then read the card with `get_card` and work on it in your own worktree. If your branch already has commits or \
-         changes you were interrupted: look at `git log` and `git diff` and carry on instead of starting over. When the \
-         acceptance criteria are met, call `report_done` with a short summary.",
+         then read the card with `get_card` and work on it in your own worktree. Leave the work as changes in the \
+         worktree: do not commit and do not push, the studio commits it when the owner takes it over. If you find \
+         changes there already you were interrupted: look at `git status` and `git diff` and carry on instead of \
+         starting over. When the acceptance criteria are met, call `report_done` with a short summary.",
         name = agent.name,
         role = agent.agent_role,
     )
@@ -381,7 +382,7 @@ fn no_cli_note() -> String {
 }
 
 /// `value` as one word for a POSIX shell.
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
