@@ -129,6 +129,35 @@ dünn und wird am Mac geprüft. Vor jedem Commit läuft die schlanke Prüfung (e
 **Später, bei Bedarf:** Hinweise während der Arbeit über Hooks/Plugins (A8, Weg 3, vorher gegen die Dokumentation prüfen); optionale Zuweiser mit
 kalibrierter Sicherheit (JEV, lokale offene Modelle — vorher prüfen, A5a); **A2A-Fassade** (Agent Card, JSON-RPC über HTTP, SSE; A1).
 
+## CP-A1 im Detail (Entwurf, Owner-Antworten vom 2026-10-04)
+
+Drei Festlegungen des Owners: **(1)** der Engine-Katalog liegt **global in der Config** (wie `agents.providers`), nicht je Projekt;
+**(2)** die Migration **leitet Engines aus den vorhandenen Studio-Agenten ab** und gibt jeder Zeile die Rolle `allrounder`;
+**(3)** die Oberfläche bekommt **Engines in den Einstellungen und ein Rollen-Formular** (Anlegen/Bearbeiten von `AGENT.md`).
+
+**Befund, der den Zuschnitt prägt:** `ide_agents` ist heute faktisch schon die **Sitzung** (Worktree, Branch, Port, Basisbranch, Opencode-Session) und
+trägt zugleich die Engine-Felder (Harness, Command, Modell, Env). CP-A1 trennt das: die Zeile bleibt die Sitzung und verweist auf Engine und Rolle.
+
+- **Neues Crate `axiomata-roster`** (rein, ohne Tauri und ohne `axiomata-core`, wie `axiomata-tasks`/`axiomata-board`; A11): Typen `Engine`, `Role`
+  (Stufe, Ausweich-Engines, Rechte, Limits, `creates`), Laden und Schreiben der `AGENT.md` aus einem übergebenen Verzeichnis, Prüfungen (Name als Verzeichnis,
+  Engine-Verweise, Größenlimit wie bei Skills), Projekt-Überschreibung mit **Hash-Bestätigung** (Muster aus `axiomata-tasks/src/trust.rs`). Frontmatter über
+  `gray_matter`, wie die Skills.
+- **Engines** liegen in `axiomata-core::config` (`agents.engines`, eine Tabelle je Engine-Id) mit den Typen aus dem Roster-Crate; `validate_for_save` prüft sie.
+  Migration beim Laden: fehlt die Tabelle, wird sie aus nichts erzeugt, die Ableitung aus den Studio-Agenten läuft einmal in der DB-Migration (siehe unten).
+- **Datenbank, Migration 14 (`SCHEMA_SQL_V6`):** `ide_agents` bekommt `engine_id TEXT` und `agent_role TEXT` (nullable, `agent_role` Standard `allrounder`).
+  Die Ableitung der Engines braucht die Config, nicht die DB; deshalb schreibt eine **einmalige Anwendungs-Migration beim Start** (Core, nach `Config::load`)
+  je eindeutiger Kombination Harness/Command/Modell/Env eine Engine in die Config und setzt `engine_id`. Die alten Spalten `harness`/`command`/`model`/`env`
+  bleiben bis CP-A6 als Rückfall bestehen (kein Löschen in einer Migration, die Daten verlieren könnte).
+- **Rollen-Ablage:** `~/.axiomata/agents/<name>/AGENT.md`; die Rolle `allrounder` wird wie die Bundled Skills **seed-if-absent** angelegt.
+- **Schnittstellen:** CLI `ide engines list|add|edit|delete`, `ide roles list|show`; Tauri-Commands für Engines (Einstellungen) und Rollen (Formular);
+  Rolle löschen nur, wenn keine Sitzung sie trägt. Katalog-Ansicht im Rail und Start-Logik bleiben CP-A6/CP-A9.
+- **Tests (inline):** AGENT.md-Parser (Frontmatter, Fehler, Größe, Symlink), Engine-Validierung, Hash-Bestätigung der Überschreibung, Migration auf einer
+  Datenbank mit Alt-Zeilen (Ableitung eindeutig, idempotent), Config-Round-Trip; Frontend: Vitest für die Formular-Logik.
+- **Prüfung vor dem Commit:** ein kombinierter Review-Agent (schlank); `security-auditor` entfällt hier laut Plan, **bis auf** die Projekt-Überschreibung
+  (Dateien aus dem Projekt wirken auf Prozess-Start) — die wird im Review ausdrücklich mitgeprüft.
+
+*Vom Owner bestätigt (2026-10-04):* Crate-Zuschnitt `axiomata-roster` (statt Modul in Core) und die alten Spalten bleiben bis CP-A6.
+
 ## Offene Fragen der Runde
 
 1. ~~Rollen und Rechte / Aufgabenverteilung~~ — beantwortet durch A2–A5.
