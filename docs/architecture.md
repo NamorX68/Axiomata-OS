@@ -1596,7 +1596,7 @@ The board's agent flow (see the `axiomata-board` section in §3): column roles, 
 ### A2A CP-A1 built (2026-10-04)
 
 Engines and roles exist (`docs/plans/a2a.md`, "CP-A1 im Detail"): crate `axiomata-roster`, migration 14, `axiomata-core::roster`,
-CLI `ide engines …` / `ide roles …`, the Studio inspector's *Agents* tab (`ide/AgentsSettings.svelte` over
+CLI `ide engines …` / `ide roles …`, the Studio inspector's *Engines & roles* tab (renamed from *Agents* on 2026-10-04: the rail already says Agents) (`ide/AgentsSettings.svelte` over
 `ide/EnginesSection.svelte` and `ide/RolesSection.svelte`, logic in `core/roster.ts`; opened from the Agents panel's
 "Engines & roles…") and the confirmation notice for a project's own roles in the Agents panel
 (`ide/ProjectRolesNotice.svelte`). They sit in the Studio's own settings column, **not** in the app's general settings

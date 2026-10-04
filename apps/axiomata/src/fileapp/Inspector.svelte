@@ -22,7 +22,7 @@
     surface: SurfaceSettings;
     onTab: (tab: InspectorTab) => void;
     onClose: () => void;
-    /** The content of the "Agents" tab; without it the tab is not offered. Supplied by the host so this file app
+    /** The content of the "Engines & roles" tab; without it the tab is not offered. Supplied by the host so this file app
      *  column imports nothing from the Studio. */
     agents?: Snippet;
   }
@@ -32,7 +32,7 @@
   const TABS = $derived<{ id: InspectorTab; label: string }[]>([
     { id: "settings", label: "Settings" },
     { id: "shortcuts", label: "Shortcuts" },
-    ...(agents ? [{ id: "agents" as const, label: "Agents" }] : []),
+    ...(agents ? [{ id: "agents" as const, label: "Engines & roles" }] : []),
   ]);
 </script>
 
