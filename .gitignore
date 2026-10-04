@@ -9,6 +9,9 @@ dist/
 # Tauri build output
 apps/axiomata/src-tauri/target/
 
+# SwiftPM build output (examples/debug-playground/swift)
+.build/
+
 # macOS
 .DS_Store
 
