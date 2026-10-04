@@ -227,6 +227,12 @@ export interface IdeAgent {
   engine_id: string | null;
   /** The role this session plays — a name under `~/.axiomata/agents/`. Existing agents are `allrounder`. */
   agent_role: string;
+  /** The card the studio started this session for; absent for a session made and started by hand (CP-A6b). */
+  card_id?: number | null;
+  /** This session reviews that card instead of working on it. */
+  card_review?: boolean;
+  /** The commit a reviewer's checkout is cut from. */
+  start_ref?: string | null;
   /** Computed on read: what actually runs — `command`, or the harness's own
    *  default when it is empty. Sent along so no frontend keeps a second copy
    *  of that table. */
@@ -248,6 +254,19 @@ export interface CardSession {
   role: string;
   engine_id: string;
 }
+
+/** The reviewer session made for a reported card (A2A CP-A6b). */
+export interface ReviewSession {
+  agent: IdeAgent;
+  card_id: number;
+  role: string;
+  engine_id: string;
+}
+
+/** What taking a card over came to. Mirrors `axiomata_core::card_session::CardTakeOver`. */
+export type CardTakeOver =
+  | { outcome: "done"; commit: string; cleanup: string[] }
+  | { outcome: "conflict"; files: string[] };
 
 /** How a session is wired to the agent MCP server. Mirrors `axiomata_core::agent_entry::EntryStatus`. */
 export type AgentEntryStatus = "registered" | "unavailable" | "not_applicable";

@@ -28,8 +28,10 @@
 
   import type { BoardCard, BoardColumn, CardEvent, CardFields, CardTier } from "../core/backend";
   import { invokeBackend as invoke } from "../core/backend";
+  import CardReviewForm from "./CardReviewForm.svelte";
   import CardStartForm from "./CardStartForm.svelte";
-  import { canStart } from "../ide/cardStart";
+  import CardTakeOverForm from "./CardTakeOverForm.svelte";
+  import { canReview, canStart, canTakeOver } from "../ide/cardStart";
   import { boardStore, refreshBoard } from "../core/boardStore";
   import {
     actorLabel,
@@ -618,12 +620,12 @@
     });
   }
   let note = $state("");
-  /** The "Starten" form of a ready card is open (A2A CP-A6a). */
-  let startingCard = $state<number | null>(null);
+  /** The form of a card step that is open — start, review or take-over (A2A CP-A6) — and the card it belongs to. */
+  let stepForm = $state<{ card: number; step: "start" | "review" | "take-over"; state: string } | null>(null);
   // The form belongs to the card it was opened on: looking at another card closes it.
   $effect(() => {
     void cardId;
-    startingCard = null;
+    stepForm = null;
   });
 
   async function runFlow(step: Promise<unknown>): Promise<void> {
@@ -937,18 +939,28 @@
     <!-- Archiving, not deleting, is how a finished card leaves the board:
          it stays findable behind the archive filter. Deleting is for cards
          that should never have existed and lives in CP-K2b's card menu. -->
-    {#if startingCard === detail.id}
-      <CardStartForm
-        card={detail}
-        onDone={() => {
-          startingCard = null;
-          if (boardId !== null) void refreshBoard(boardId);
-        }}
-      />
+    {#if stepForm?.card === detail.id && stepForm.state === detail.state}
+      {@const finish = () => {
+        stepForm = null;
+        if (boardId !== null) void refreshBoard(boardId);
+      }}
+      {#if stepForm.step === "start"}
+        <CardStartForm card={detail} onDone={finish} />
+      {:else if stepForm.step === "review"}
+        <CardReviewForm card={detail} onDone={finish} />
+      {:else}
+        <CardTakeOverForm card={detail} onDone={finish} />
+      {/if}
     {/if}
     <div class="detail-actions">
-      {#if canStart(detail) && startingCard !== detail.id}
-        <button class="ax-btn primary" onclick={() => (startingCard = detail.id)}>Starten …</button>
+      {#if !(stepForm?.card === detail.id && stepForm.state === detail.state)}
+        {#if canStart(detail)}
+          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "start", state: detail.state })}>Starten …</button>
+        {:else if canReview(detail)}
+          <button class="ax-btn" title="Der Reviewer startet von selbst; hier mit einer Engine deiner Wahl" onclick={() => (stepForm = { card: detail.id, step: "review", state: detail.state })}>Review starten …</button>
+        {:else if canTakeOver(detail)}
+          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "take-over", state: detail.state })}>Übernehmen …</button>
+        {/if}
       {/if}
       {#if detail.state === "working" && detail.claimed_by}
         <button class="ax-btn" title="Die Karte wartet wieder in Offen; das Geheimnis der Sitzung wird zurückgenommen" onclick={() => releaseCard(detail)}>Freigeben</button>

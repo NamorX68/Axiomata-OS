@@ -179,6 +179,18 @@ pub fn list_events(db: &Connection, card_id: i64, limit: usize) -> Result<Vec<Ca
     Ok(events)
 }
 
+/// The latest history line of `kind` on a card, if there is one — asked directly, not by reading the card's last few
+/// hundred lines, because a card that was sent back many times must still know when it was reported last.
+pub fn latest_event(db: &Connection, card_id: i64, kind: EventKind) -> Result<Option<CardEvent>> {
+    Ok(read_events(
+        db,
+        "WHERE card_id = ?1 AND kind = ?2 ORDER BY id DESC LIMIT 1",
+        params![card_id, kind.as_str()],
+    )?
+    .into_iter()
+    .next())
+}
+
 // ----------------------------------------------------------------- plans ---
 
 const PLAN_COLS: &str = "id, board_id, name, status, auto_start_max, max_cost_usd, max_tokens, \
@@ -2522,6 +2534,39 @@ mod tests {
                 max_tokens: None,
             },
         )
+    }
+
+    #[test]
+    fn the_latest_line_of_a_kind_is_found_however_long_the_history() {
+        let mut f = fixture();
+        let card = card_in(&f, f.open, "work");
+        assert!(
+            latest_event(&f.db, card.id, EventKind::Reported)
+                .unwrap()
+                .is_none()
+        );
+        start_card(&mut f.db, card.id, "agent:a-1").unwrap();
+        report_done(&mut f.db, card.id, "agent:a-1").unwrap();
+        let first = latest_event(&f.db, card.id, EventKind::Reported)
+            .unwrap()
+            .unwrap();
+        // A long history of other lines between the reports does not hide the latest one.
+        for n in 0..600 {
+            add_event(
+                &f.db,
+                card.id,
+                "human:owner",
+                EventKind::Note,
+                &format!("n{n}"),
+            )
+            .unwrap();
+        }
+        review_verdict(&mut f.db, card.id, "agent:r-2", Verdict::Return, "no").unwrap();
+        report_done(&mut f.db, card.id, "agent:a-1").unwrap();
+        let second = latest_event(&f.db, card.id, EventKind::Reported)
+            .unwrap()
+            .unwrap();
+        assert!(second.id > first.id);
     }
 
     #[test]

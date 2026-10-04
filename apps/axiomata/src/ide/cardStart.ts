@@ -18,3 +18,18 @@ export function startableProjects(projects: IdeProject[]): IdeProject[] {
     .filter((project) => project.root_exists)
     .sort((a, b) => (b.last_opened_at ?? "").localeCompare(a.last_opened_at ?? ""));
 }
+
+/** A reported card can have its review started by hand — when the studio could not, or the owner wants another engine. */
+export function canReview(card: Pick<BoardCard, "state">): boolean {
+  return card.state === "in_review";
+}
+
+/** A card the reviewer signed off waits for the owner's take-over, the second gate. */
+export function canTakeOver(card: Pick<BoardCard, "state">): boolean {
+  return card.state === "verified";
+}
+
+/** What the take-over's commit says unless the owner writes something else: the card's number and its first line. */
+export function defaultTakeOverMessage(card: Pick<BoardCard, "id" | "title">): string {
+  return `#${card.id} ${card.title.split("\n")[0].trim()}`;
+}

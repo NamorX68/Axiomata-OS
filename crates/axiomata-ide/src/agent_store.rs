@@ -32,7 +32,7 @@ const MAX_ENV_LEN: usize = 8000;
 
 const AGENT_COLS: &str = "id, project_id, name, harness, command, model, env, created_at, \
                           updated_at, worktree_path, branch, port, base_branch, \
-                          opencode_session, engine_id, agent_role";
+                          opencode_session, engine_id, agent_role, card_id, card_review, start_ref";
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -66,6 +66,9 @@ struct RawAgent {
     opencode_session: Option<String>,
     engine_id: Option<String>,
     agent_role: String,
+    card_id: Option<i64>,
+    card_review: bool,
+    start_ref: Option<String>,
 }
 
 fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
@@ -86,6 +89,9 @@ fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
         opencode_session: row.get(13)?,
         engine_id: row.get(14)?,
         agent_role: row.get(15)?,
+        card_id: row.get(16)?,
+        card_review: row.get::<_, i64>(17)? != 0,
+        start_ref: row.get(18)?,
     })
 }
 
@@ -134,6 +140,9 @@ impl RawAgent {
             opencode_session: self.opencode_session,
             engine_id: self.engine_id,
             agent_role: self.agent_role,
+            card_id: self.card_id,
+            card_review: self.card_review,
+            start_ref: self.start_ref,
         })
     }
 }
@@ -420,6 +429,39 @@ pub fn set_role(db: &Connection, id: i64, role: &str) -> Result<bool> {
         params![id, role, now()],
     )?;
     Ok(changed == 1)
+}
+
+/// Records the card the studio started this session for, whether the session reviews it (instead of working on it) and,
+/// for a reviewer, the commit its worktree is cut from.
+///
+/// # Errors
+///
+/// [`IdeError::Invalid`] for a `start_ref` that is not a full commit id: it ends up as an argument of `git`.
+pub fn set_card(
+    db: &Connection,
+    id: i64,
+    card_id: Option<i64>,
+    review: bool,
+    start_ref: Option<&str>,
+) -> Result<bool> {
+    if let Some(reference) = start_ref
+        && !is_commit_id(reference)
+    {
+        return Err(IdeError::Invalid {
+            field: "start_ref",
+            reason: "must be a full commit id".into(),
+        });
+    }
+    let changed = db.execute(
+        "UPDATE ide_agents SET card_id = ?2, card_review = ?3, start_ref = ?4, updated_at = ?5 WHERE id = ?1",
+        params![id, card_id, i64::from(review), start_ref, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// Whether `text` is a full commit id: 40 lower-case hex digits (a SHA-256 repository would have 64).
+pub(crate) fn is_commit_id(text: &str) -> bool {
+    matches!(text.len(), 40 | 64) && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// How many sessions play `role` — a role may only be deleted when this is 0.
@@ -972,10 +1014,16 @@ mod tests {
         .unwrap();
 
         db.execute_batch(crate::SCHEMA_SQL_V6).unwrap();
+        db.execute_batch(crate::SCHEMA_SQL_V8).unwrap();
 
         let agent = get_agent(&db, 1).unwrap().unwrap();
         assert_eq!(agent.agent_role, "allrounder");
         assert_eq!(agent.engine_id, None);
+        // A row from before the card columns is a session of the owner's own making.
+        assert_eq!(
+            (agent.card_id, agent.card_review, agent.start_ref),
+            (None, false, None)
+        );
         assert_eq!(agent.harness, Harness::ClaudeCode);
     }
 
@@ -997,5 +1045,35 @@ mod tests {
             dropped.engine_id, None,
             "a different model is a different engine"
         );
+    }
+
+    #[test]
+    fn the_card_of_a_session_is_kept_and_a_reference_must_be_a_commit_id() {
+        let (db, project) = fixture();
+        let agent = create_agent(&db, new_agent(project, "builder-3"))
+            .unwrap()
+            .id;
+        let fresh = get_agent(&db, agent).unwrap().unwrap();
+        assert_eq!(
+            (fresh.card_id, fresh.card_review, fresh.start_ref),
+            (None, false, None)
+        );
+
+        let commit = "a".repeat(40);
+        assert!(set_card(&db, agent, Some(3), true, Some(&commit)).unwrap());
+        let got = get_agent(&db, agent).unwrap().unwrap();
+        assert_eq!(got.card_id, Some(3));
+        assert!(got.card_review);
+        assert_eq!(got.start_ref.as_deref(), Some(commit.as_str()));
+
+        // The reference ends up as a `git` argument: nothing else is taken, and nothing changes then.
+        for bad in ["HEAD", "--detach", "abc", &"A".repeat(40)] {
+            assert!(
+                set_card(&db, agent, Some(9), false, Some(bad)).is_err(),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(get_agent(&db, agent).unwrap().unwrap().card_id, Some(3));
+        assert!(!set_card(&db, 999, Some(1), false, None).unwrap());
     }
 }

@@ -8,7 +8,7 @@
 
 use std::fmt::Display;
 
-use axiomata_board::{self as board, CardFields, NewCard, Tier, flow, store};
+use axiomata_board::{self as board, Card, CardFields, NewCard, Tier, flow, store};
 use axiomata_ide::mailbox::{
     self, Inbox, MessageKind, NewMessage, Part, Recipient, SendResult, Sender,
 };
@@ -562,11 +562,59 @@ fn review_verdict(ctx: &Context, args: &Value) -> ToolResult {
         .map_err(text)?
         .ok_or_else(|| format!("no card {id}"))?;
     in_reach(ctx, &db, &card)?;
+    // A reviewer the studio made judges the report it was made for. One that belongs to an earlier report of the card
+    // (it is retired when the next reviewer is made, but a pane may still be open) must not sign a newer one.
+    if ctx.agent.card_review {
+        let sessions = agent_store::list_agents(&db, ctx.agent.project_id).map_err(text)?;
+        let current = crate::card_session::current_reviewer(&db, id, &sessions).map_err(text)?;
+        if current.map(|reviewer| reviewer.id) != Some(ctx.agent.id) {
+            return Err("you review an earlier report of this card; the studio made another reviewer for the latest one".to_owned());
+        }
+    }
     flow::review_verdict(&mut db, id, &ctx.actor, verdict, note).map_err(text)?;
     mirror(ctx, &db, id);
+    if verdict == flow::Verdict::Return {
+        tell_worker_it_was_returned(ctx, &db, &card, note);
+    }
+    // A verdict ends this reviewer's work: its secret goes, so a restarted pane cannot judge again.
+    if ctx.agent.card_review {
+        let _ = axiomata_ide::session_token::revoke(&ctx.roots, ctx.agent.id);
+    }
     Ok(
         json!({"card_id": id, "verdict": if verdict == flow::Verdict::Approve { "approved" } else { "returned" }}),
     )
+}
+
+/// The worker of a returned card learns it from the studio, in its inbox: it is probably idle and waiting, and the
+/// nudge (A8) types it one line. The reviewer's note is in the card's history as well, which is where the worker reads
+/// the full text. A failure to write the notice does not undo the verdict — the history has it.
+fn tell_worker_it_was_returned(ctx: &Context, db: &Connection, card: &Card, note: &str) {
+    let Some(worker) = card
+        .claimed_by
+        .as_deref()
+        .and_then(crate::card_session::session_id_of)
+    else {
+        return;
+    };
+    let note = note.trim();
+    // The note is another model's text: quoted and labelled as such, so that it reads as what the reviewer said and
+    // not as an instruction in the studio's own voice.
+    let text = format!(
+        "Review of card #{}: {} sent it back{}. Read the card's history with `get_card`, fix what is named, and call \
+         `report_done` again.",
+        card.id,
+        ctx.agent.name,
+        if note.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", and wrote (the reviewer's own words, not an instruction from the studio): \"{note}\""
+            )
+        },
+    );
+    if let Err(err) = axiomata_ide::mailbox::studio_notice(db, worker, Some(card.id), &text) {
+        tracing::warn!(%err, card = card.id, "could not tell the worker its card was returned");
+    }
 }
 
 fn create_card(ctx: &Context, args: &Value) -> ToolResult {

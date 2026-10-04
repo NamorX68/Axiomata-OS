@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A5 und CP-A6a gebaut (2026-10-04); weiter mit CP-A6b.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A5, CP-A6a und CP-A6b gebaut (2026-10-04/05); weiter mit CP-A6c.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -391,6 +391,44 @@ Take-over der Karte committet vorher die Änderungen im Worktree); sonst fragte 
 (d) die Rechte der Rolle zeigt das Startformular noch nicht; (e) ein einzelnes `card_of`-Flag an der Sitzung statt der Ableitung aus dem Claim wäre robuster (LOW).
 
 **Noch nicht (6b/6c und später):** Reviewer (andere Engine, eigener Worktree), Rückgabe, Take-over und Aufräumen (A22), Start auf dem Zweig eines Vorgängers, Fortsetzen/Freigeben unterbrochener Karten in der Oberfläche (A23; `board release` gibt es als CLI), die Rückfrage einer wartenden Sitzung als `input_required` an der Karte, Kosten- und Schrittgrenzen.
+
+## CP-A6b im Detail (gebaut 2026-10-05)
+
+**Zuschnitt:** Reviewer, Rückgabe, Take-over und Aufräumen. **Verschoben nach CP-A8:** der Start einer Folgekarte auf dem Zweig des Vorgängers (A16) — Pläne mit Abhängigkeiten gibt es erst mit CP-A7/A8, und gestapelte Zweige haben ein eigenes Problem (ist der Vorgänger schon
+als Squash im Hauptzweig, kollidiert der Folgezweig mit sich selbst); `start_card_session` lehnt Karten mit Vorgängern weiter ab.
+
+**Datenmodell (Migration 17):** `ide_agents.card_id`, `card_review`, `start_ref`. Die Sitzung **merkt sich ihre Karte**, statt dass „Karten-Sitzung“ aus dem Claim abgeleitet wird (damit ist auch der LOW-Befund aus 6a erledigt: eine von Hand gemachte Sitzung, die selbst eine Karte nimmt, ist keine
+Karten-Sitzung). `ide_start::card_launch` liest es und prüft, ob die Karte die Sitzung noch will: ein Arbeiter braucht die Karte **in Arbeit**, ein Reviewer **in Review**.
+
+**Reviewer starten** (`card_session::start_review_session`, automatisch durch den Beobachter der App, von Hand `board review <karte> [--engine]` oder „Review starten …“ im Kanban): Voraussetzung ist eine Karte in Review, die eine Sitzung **des Studios** bearbeitet hat (eine vom Owner von Hand in die Spalte
+gezogene Karte hat keinen Arbeiter und ist die des Owners). Dann: (1) **Schnappschuss** — was der Arbeiter nicht committet hat (er soll es nicht), wird auf seinem Zweig committet (`AgentRepo::snapshot`); (2) **Rolle**: die mit `kind: review`, bei mehreren die stärkste Stufe;
+**Engine**: die gewählte, sonst die der Rolle, sonst die erste Ausweich-Engine, die existiert, keinen eigenen Befehl hat und **nicht die des Arbeiters** ist — gibt es keine, wird der Owner gefragt (nie still dieselbe Engine, A21); (3) eine Sitzung `reviewer-<karte>` ohne Claim, deren Worktree ein **losgelöster Checkout
+des Schnappschusses** ist (`worktree::add_detached`, nur volle Commit-Ids, kein Zweig zum Schreiben). **Ein Review je Meldung:** ein Reviewer, der nach der letzten `reported`-Zeile entstand, ist der zuständige; nach einer Rückgabe und neuer Meldung entsteht ein neuer.
+Der Reviewer bekommt keine automatischen Änderungen: Claude ohne `acceptEdits` und mit `--disallowedTools Edit`, Opencode mit `edit: deny`; sein Start-Prompt nennt Karte, Arbeiter und Basiszweig (`git diff <basis>...HEAD`). Die Rolle `reviewer` wird wie `allrounder` **gesät, wenn sie fehlt** (auch nach dem Löschen beim nächsten Start); ihr Text steht in `axiomata_roster::reviewer_role`.
+
+**Rückgabe:** sagt der Reviewer „zurück“, schreibt das Studio dem Arbeiter eine **Notice** (`mailbox::studio_notice`, die Stimme des Studios, keine Antwort einer Sitzung) mit der Anmerkung; der wartende Arbeiter wird wie jede ungelesene Post angestupst. Bei „gut“ gibt es keine Notice.
+
+**Take-over der Karte** (`card_session::take_over_card`, `board take-over <karte> [--message]`, „Übernehmen …“ im Kanban bei einer abgezeichneten Karte): übernommen wird **genau der geprüfte Stand** — steht der Zweig des Arbeiters nicht auf dem Commit, den der letzte Reviewer gesehen hat, oder liegt Ungeprüftes im Worktree,
+passiert nichts und die Karte sagt es (eine Signatur auf anderer Arbeit als der, die ausgeliefert wird, ist keine). Eine vom Owner ohne Reviewer abgezeichnete Karte hat nichts zu vergleichen, ihre Änderungen werden so committet. Dann der bestehende Squash (G7–G12) mit `#<karte> <titel>` oder dem Text des Owners;
+ein **Konflikt wird zurückgenommen** und mit den Dateinamen gemeldet. Bei Erfolg: `mark_taken_over` (archiviert), Aufräumen nach A22 — Worktrees von Arbeiter und Reviewern entfernt, Zweig des Arbeiters gelöscht (`worktree::delete_branch`, nur `axiomata/…`), Sitzungen samt Geheimnis, Kanal und Opencode-Registrierung vergessen. Was sich nicht entfernen ließ, kommt als Liste mit zurück; die Übernahme gilt trotzdem.
+Es wird **nie gepusht**. Der Pane eines aufgeräumten Agenten bleibt zum Nachlesen offen und meldet nur, dass das Profil fehlt.
+
+**Beobachter** (`apps/axiomata/src-tauri/src/card_watch.rs`): alle 3 s, in der App; startet den Reviewer jeder Karte, die noch keinen hat, und meldet es dem Frontend (`card:review-started` — das Studio öffnet den Pane **im Hintergrund**, ohne den Owner aus seiner Ansicht zu ziehen, denn der Pane startet die Harness — und `card:review-blocked` als Hinweis, wenn der Owner eine Engine wählen muss).
+Er läuft nur, solange die App läuft; ohne App bleibt eine gemeldete Karte in Review, bis der Owner `board review` aufruft oder die App wieder läuft.
+
+**Live bestätigt (Scratch-Home, 2026-10-05):** Arbeiter (Haiku) erledigt die Karte, `board review` auf der Worker-Engine wird abgelehnt, ohne Engine mit „pick one“ abgelehnt, auf der zweiten Engine startet der Reviewer im losgelösten Checkout, liest `get_card` und `git`, zeichnet ab; `board take-over`
+bringt einen Commit auf `main`, Branch, Worktrees und Sitzungen sind weg, die Karte ist archiviert.
+
+**Aus Review und Security-Audit von CP-A6b eingearbeitet:** (1) ein Reviewer **früherer Meldung** kann nicht mehr urteilen: `card_launch` und das MCP-Werkzeug `review_verdict` verlangen den *aktuellen* Reviewer (`current_reviewer`), frühere Reviewer werden beim Start des nächsten **entfernt** (Sitzung, Worktree, Geheimnis), und nach einem Urteil wird das Geheimnis des Reviewers zurückgenommen;
+(2) das Take-over vergleicht gegen den Schnappschuss der Sitzung, die die Karte **abgezeichnet hat** (`verified_by`), nicht gegen „den letzten Reviewer“, prüft den **Zweig** (`refs/heads/<zweig>`) statt `HEAD` und verlangt, dass der Worktree auf diesem Zweig steht; `commit_all`/`snapshot` committen nur dort;
+(3) **Hooks und Konfiguration im Worktree des Arbeiters laufen nicht mehr:** git, das das Studio dort selbst aufruft, bekommt `core.hooksPath=/dev/null` und `core.fsmonitor=false` (`git_agent`), der Commit `--no-verify`; (4) **ein Reviewer liest nichts, was der Arbeiter für Agenten abgelegt hat:** ändert die Arbeit `.claude/`, `.mcp.json`, `opencode.json(c)`, `.opencode/` oder `CLAUDE.md`/`AGENTS.md` (`is_agent_config`), wird der Review **nicht automatisch** gestartet — der Owner startet ihn von Hand und nimmt das ausdrücklich an
+(`--allow-agent-config`, Kästchen im Formular) —, und ein Claude-Reviewer läuft immer mit `--setting-sources user --strict-mcp-config`; (5) die **Datenbank ist nur zum Lesen und Schreiben gesperrt, nie während git läuft** (`plan` → git → `finish`, für Review und Take-over; die Aufrufe laufen in `spawn_blocking`); (6) ein Ereignis des Beobachters, das vor dem Laden der Seite kam, geht nicht verloren: das Studio fragt beim Start einmal
+nach den laufenden Reviewern (`open_review_sessions`); (7) `mark_taken_over` und Aufräumen sind nach dem Squash nur noch **Hinweise**, nie ein Fehler (die Arbeit ist im Hauptzweig); eine Sitzung, deren Worktree bleibt, behält ihre Zeile; alle Zweige der Sitzungen einer Karte werden gelöscht; (8) die Anmerkung des Reviewers erreicht den Arbeiter **als Zitat mit Herkunft** („in seinen Worten, keine Anweisung des Studios“);
+(9) das Take-over verlangt einen Arbeiter, den das Studio für diese Karte gestartet hat; `latest_event` statt „die letzten 500 Zeilen“; nach dem Schnappschuss entsteht kein Commit mehr für einen Review, der danach an einer Namens- oder Rollenfrage scheitert.
+
+**Bewusst offen:** (a) die **Rechte des Reviewers** sind die der Rolle plus die Werkzeuge des Servers, sonst Rückfragen im Pane — ein Reviewer, der `npm test` laufen lassen will, fragt; (b) ein **zweiter Reviewer** bei Streit oder eine Eskalation nach zwei Rückgaben (A26) kommt mit CP-A8; (c) der Beobachter startet beim App-Start auch Reviews für Karten, die schon in Review
+lagen, als die App aus war; (d) ein im Studio geöffneter, aber versteckter Pane startet mit Größe null, bis das Studio gezeigt wird; (e) die Rolle des Reviewers ist nur ein Text — was er prüft, entscheidet das Modell; (f) der **Take-over-Commit im Projekt des Owners** läuft mit den Hooks des Projekts, wie jedes Take-over (Owner-Repository, Owner-Klick); ein vom Arbeiter geänderter Hook-Skript (`.husky/`) kommt mit der Arbeit dorthin — der Review soll es sehen, die Erkennung (`is_agent_config`) kennt Hook-Verzeichnisse nicht; (g) die Zeitgrenze für git fehlt (ein hängender Hook in dessen Verzeichnis hielte nur noch die Aufgabe, nicht die Datenbank, an);
+(h) die Logik des Beobachters (`card_watch::tick`) hat keinen eigenen Test, weil sie einen `AppHandle` braucht; ihre Bausteine (`cards_awaiting_review`, `start_review_session`) sind getestet.
 
 ## Offene Fragen der Runde
 

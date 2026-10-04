@@ -429,15 +429,29 @@ fn ide_permissions() -> Vec<PermissionRule> {
 /// The rules of an unattended card session on top of [`ide_permissions`] (A34): each of the role's tools of the agent
 /// MCP server is allowed by name — Opencode matches an MCP tool as action `<server>_<tool>` — and nothing else is
 /// opened up; whatever else the agent wants stays a question in the pane.
-fn card_permissions(tools: &[&str]) -> Vec<PermissionRule> {
+fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
     let server = crate::agent_entry::SERVER_NAME;
     let mut rules = ide_permissions();
     rules.extend(
-        tools
+        rights
+            .tools
             .iter()
             .map(|tool| PermissionRule::new(&format!("{server}_{tool}"), "*", "allow")),
     );
+    // A reviewer judges what it is shown and changes nothing.
+    if rights.review {
+        rules.push(PermissionRule::new("edit", "*", "deny"));
+    }
     rules
+}
+
+/// What an unattended card session of Opencode may do without asking.
+#[derive(Debug, Clone, Copy)]
+pub struct CardRights<'a> {
+    /// The tools of the agent MCP server its role has.
+    pub tools: &'a [&'a str],
+    /// A reviewer: no edits at all.
+    pub review: bool,
 }
 
 /// A session of an IDE agent on the service, and whether this start made it.
@@ -465,7 +479,7 @@ pub async fn ide_session(
     directory: &std::path::Path,
     title: &str,
     model: Option<&str>,
-    card_tools: Option<&[&str]>,
+    card_rights: Option<CardRights<'_>>,
 ) -> Result<IdeSession, AxiomataError> {
     check_cwd(directory)?;
     let model = model
@@ -512,7 +526,9 @@ pub async fn ide_session(
             directory: directory.display().to_string(),
             title: Some(title.to_string()),
             model,
-            permissions: card_tools.map_or_else(ide_permissions, card_permissions),
+            permissions: card_rights
+                .as_ref()
+                .map_or_else(ide_permissions, card_permissions),
             ..NewSession::default()
         })
         .await
@@ -706,7 +722,10 @@ mod tests {
 
     #[test]
     fn a_card_session_may_use_its_own_tools_by_name_and_still_cannot_push() {
-        let rules = card_permissions(&["read_inbox", "claim_task"]);
+        let rules = card_permissions(&CardRights {
+            tools: &["read_inbox", "claim_task"],
+            review: false,
+        });
         let has = |action: &str, effect: &str| {
             rules
                 .iter()
@@ -729,6 +748,21 @@ mod tests {
                 .iter()
                 .any(|r| r.action == "shell" && r.resource == "git push" && r.effect == "deny")
         );
+    }
+
+    #[test]
+    fn a_reviewer_may_not_edit_anything() {
+        let rights = |review| CardRights {
+            tools: &["review_verdict"],
+            review,
+        };
+        let denies_edits = |rules: Vec<PermissionRule>| {
+            rules
+                .iter()
+                .any(|r| r.action == "edit" && r.resource == "*" && r.effect == "deny")
+        };
+        assert!(denies_edits(card_permissions(&rights(true))));
+        assert!(!denies_edits(card_permissions(&rights(false))));
     }
 
     #[test]

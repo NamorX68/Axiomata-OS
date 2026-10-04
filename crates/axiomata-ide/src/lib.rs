@@ -90,6 +90,10 @@ pub const SCHEMA_SQL_V6: &str = include_str!("agent_roster.sql");
 /// migration number (16), frozen once released.
 pub const SCHEMA_SQL_V7: &str = include_str!("mailbox.sql");
 
+/// The IDE's **version 8** schema (`card_id`, `card_review`, `start_ref` on an agent), `docs/plans/a2a.md` CP-A6b. Its own
+/// constant and migration number (17), frozen once released.
+pub const SCHEMA_SQL_V8: &str = include_str!("agent_card.sql");
+
 /// Everything that can go wrong in the IDE core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant, matching
@@ -162,6 +166,7 @@ pub(crate) fn apply_all_schemas(db: &rusqlite::Connection) {
         SCHEMA_SQL_V5,
         SCHEMA_SQL_V6,
         SCHEMA_SQL_V7,
+        SCHEMA_SQL_V8,
     ] {
         db.execute_batch(schema).expect("test schema should apply");
     }
@@ -279,6 +284,19 @@ mod schema_is_frozen {
             EXPECTED,
             "mailbox.sql changed after it shipped as migration 16. Add a SCHEMA_SQL_V8 and a new migration number \
              instead. If it has never shipped, update EXPECTED here."
+        );
+    }
+
+    /// And for version 8 (`card_id`, `card_review`, `start_ref`), migration 17. A version 9 follows an edit of this one.
+    #[test]
+    fn the_shipped_card_schema_has_not_been_edited() {
+        const EXPECTED: u64 = 0x4856_7c80_1ff9_ad6b;
+
+        assert_eq!(
+            fnv1a(super::SCHEMA_SQL_V8),
+            EXPECTED,
+            "agent_card.sql changed after it shipped as migration 17. It is an ALTER TABLE — add a SCHEMA_SQL_V9 and a \
+             new migration number instead. If it has never shipped, update EXPECTED here."
         );
     }
 

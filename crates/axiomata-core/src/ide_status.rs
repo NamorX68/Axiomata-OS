@@ -252,6 +252,9 @@ mod tests {
             opencode_session: session.map(str::to_owned),
             engine_id: None,
             agent_role: "allrounder".into(),
+            card_id: None,
+            card_review: false,
+            start_ref: None,
             effective_command: String::new(),
             effective_env: String::new(),
         }

@@ -1763,6 +1763,58 @@ pub fn release_card(state: State<'_, CoreState>, card_id: i64) -> Result<bool, S
     Ok(released)
 }
 
+/// The owner starts the review of a reported card by hand, on an engine of their choice — what the studio does on its
+/// own as soon as a card is reported, except where it found no engine other than the worker's, or the work changes
+/// the files agents read their configuration from and the owner has to accept that (A2A CP-A6b).
+#[tauri::command]
+pub async fn start_review_session(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    engine_id: Option<String>,
+    allow_agent_config: bool,
+) -> Result<axiomata_core::card_session::ReviewSession, String> {
+    let config = read_config(&state.config);
+    let session = axiomata_core::card_session::start_review_session(
+        &state,
+        &axiomata_core::card_session::ReviewRequest {
+            card_id,
+            engine_id,
+            allow_agent_config,
+        },
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    let db = state.db_lock();
+    board_mirror::after_card_change(&db, &config, card_id);
+    Ok(session)
+}
+
+/// The reviewer sessions that are judging a card right now, for the Studio to open their panes on when the page starts —
+/// the watcher's event may have come before the page was listening (A2A CP-A6b).
+#[tauri::command]
+pub fn open_review_sessions(
+    state: State<'_, CoreState>,
+) -> Result<Vec<axiomata_core::card_session::OpenReview>, String> {
+    axiomata_core::card_session::open_reviews(&state).map_err(|err| err.to_string())
+}
+
+/// The owner takes a reviewed card over (A3, A22): the work lands in the project's main line as one commit, the card is
+/// closed and the sessions made for it are cleaned up. A conflict is undone and comes back as the outcome.
+#[tauri::command]
+pub async fn take_over_card(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    message: Option<String>,
+) -> Result<axiomata_core::card_session::CardTakeOver, String> {
+    let config = read_config(&state.config);
+    let outcome = axiomata_core::card_session::take_over_card(&state, card_id, message.as_deref())
+        .await
+        .map_err(|err| err.to_string())?;
+    let db = state.db_lock();
+    board_mirror::after_card_change(&db, &config, card_id);
+    Ok(outcome)
+}
+
 /// The latest `limit` lines of a card's history, oldest first.
 #[tauri::command]
 pub fn list_card_events(

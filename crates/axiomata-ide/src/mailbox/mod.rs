@@ -32,5 +32,5 @@ pub use model::{
 };
 pub use store::{
     CARD_RETENTION_DAYS, ClosedCard, LOOSE_RETENTION_DAYS, MAX_READ, Nudge, get_message, mark_read,
-    nudges, purge, read_inbox, record_nudge, release_held, send, unread_count,
+    nudges, purge, read_inbox, record_nudge, release_held, send, studio_notice, unread_count,
 };

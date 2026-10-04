@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IdeProject } from "../core/backend";
-import { canStart, startableProjects } from "./cardStart";
+import { canReview, canStart, canTakeOver, defaultTakeOverMessage, startableProjects } from "./cardStart";
 
 const project = (id: number, opened: string | null, exists = true): IdeProject => ({
   id,
@@ -30,5 +30,23 @@ describe("startableProjects", () => {
       project(4, "2026-04-01T00:00:00Z", false),
     ];
     expect(startableProjects(list).map((p) => p.id)).toEqual([2, 1, 3]);
+  });
+});
+
+describe("review and take-over", () => {
+  it("a review is started for a card in review, a take-over for a signed-off one", () => {
+    expect(canReview({ state: "in_review" })).toBe(true);
+    expect(canTakeOver({ state: "verified" })).toBe(true);
+    for (const state of ["ready", "working", "verified", "taken_over", "failed"] as const) {
+      expect(canReview({ state }), `review ${state}`).toBe(false);
+    }
+    for (const state of ["ready", "working", "in_review", "taken_over", "failed"] as const) {
+      expect(canTakeOver({ state }), `take-over ${state}`).toBe(false);
+    }
+  });
+
+  it("proposes the card's number and first line as the commit message", () => {
+    expect(defaultTakeOverMessage({ id: 56, title: "Editor: Textgröße erhöhen" })).toBe("#56 Editor: Textgröße erhöhen");
+    expect(defaultTakeOverMessage({ id: 7, title: "  First\nsecond " })).toBe("#7 First");
   });
 });

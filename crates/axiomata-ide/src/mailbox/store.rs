@@ -265,6 +265,40 @@ fn post_notice(
     Ok(notice)
 }
 
+/// A notice from the studio to one session — what the studio itself has to tell it, such as "your card was sent back
+/// in review" (CP-A6b). Written by the mailbox like every notice, so it is the studio's voice and nobody's reply; it
+/// counts against no limit and is announced like any unread message (the idle session gets one line typed in).
+///
+/// # Errors
+///
+/// [`IdeError::Invalid`] for text that is too long, [`IdeError::Database`] otherwise.
+pub fn studio_notice(
+    db: &Connection,
+    session_id: i64,
+    card_id: Option<i64>,
+    text: &str,
+) -> Result<Message> {
+    let parts = [Part::Text {
+        text: text.to_owned(),
+    }];
+    check_parts(&parts)?;
+    let notice = insert_message(
+        db,
+        &Draft {
+            sender: &Sender::System,
+            to: &Recipient::Session(session_id),
+            card_id,
+            kind: MessageKind::Notice,
+            parts: &parts,
+            in_reply_to: None,
+            chain: 0,
+            status: MessageStatus::Delivered,
+        },
+    )?;
+    deliver(db, notice.id, &Inbox::Session(session_id))?;
+    Ok(notice)
+}
+
 /// Tells a session that its message did not arrive, and the owner with it (A29). An owner who wrote the message
 /// needs no notice about their own message, and the studio's notices are never answered.
 fn notify_undeliverable(db: &Connection, message: &Message, reason: &str) -> Result<()> {
@@ -1989,6 +2023,23 @@ mod tests {
         assert!(line.contains(&format!("session {}", senders[0])), "{line}");
         assert!(line.contains("and others"), "{line}");
         assert!(line.starts_with("You have 5 new messages from "), "{line}");
+    }
+
+    #[test]
+    fn a_studio_notice_reaches_the_session_as_the_studios_voice_and_is_announced() {
+        let (db, project) = fixture();
+        let worker = session(&db, project, "worker", "impl");
+        let note = studio_notice(&db, worker, Some(7), "Review of card #7: sent back.").unwrap();
+        assert_eq!(note.sender, Sender::System);
+        assert_eq!(note.kind, MessageKind::Notice);
+        assert_eq!(note.card_id, Some(7));
+
+        let mail = read_inbox(&db, &Inbox::Session(worker), false, 10, false).unwrap();
+        assert_eq!(mail.len(), 1);
+        assert_eq!(mail[0].message.id, note.id);
+        let due = nudges(&db, &Limits::default(), &[(worker, AgentState::Idle)]).unwrap();
+        assert!(due[0].line.contains("the studio"), "{}", due[0].line);
+        assert!(studio_notice(&db, worker, None, &"x".repeat(MAX_TEXT_BYTES + 1)).is_err());
     }
 
     #[test]

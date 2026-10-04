@@ -2,6 +2,7 @@ use axiomata_core::routines::SchedulerHandle;
 use tauri::Manager;
 
 mod bootstrap;
+mod card_watch;
 mod commands;
 mod debug;
 mod files;
@@ -202,6 +203,9 @@ pub fn run() {
             commands::remove_card_dependency,
             commands::start_card_session,
             commands::release_card,
+            commands::start_review_session,
+            commands::take_over_card,
+            commands::open_review_sessions,
             commands::list_card_events,
             commands::add_card_note,
             commands::approve_card_proposal,
@@ -265,6 +269,7 @@ pub fn run() {
             app.manage(files::Searches::default());
             app.manage(lsp::LspState::new());
             app.manage(debug::DebugState::default());
+            card_watch::start(app.handle());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

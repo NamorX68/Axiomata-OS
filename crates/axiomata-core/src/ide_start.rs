@@ -61,15 +61,15 @@ impl std::ops::Deref for Started {
 /// gets no session and no MCP entry from here.
 pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, AxiomataError> {
     let _start = start_lock().lock().await;
-    let (mut ready, role, card) = {
+    let (mut ready, role, launch) = {
         let conn = core.db_lock();
         let ready = provision::prepare(&conn, &paths::ide_locations(), id)?;
         let config = core.config_read().clone();
         let role = roster::roles_for_project(&conn, &config, ready.agent.project_id)
             .into_iter()
             .find(|role| role.name == ready.agent.agent_role);
-        let card = card_of(&conn, &ready.agent);
-        (ready, role, card)
+        let launch = card_launch(&conn, &ready.agent);
+        (ready, role, launch)
     };
     let roots = paths::ide_locations().channels;
     if !ready.agent.command.trim().is_empty() {
@@ -84,11 +84,12 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
     }
     match ready.agent.harness {
         Harness::ClaudeCode => {
-            let (arg, mcp) = agent_entry::wire_claude(&roots, &ready.agent, role.as_ref(), card);
-            if let Some(card_id) = card {
+            let (arg, mcp) =
+                agent_entry::wire_claude(&roots, &ready.agent, role.as_ref(), launch.as_ref());
+            if let Some(launch) = &launch {
                 require_entry(&mcp)?;
                 // The prompt goes last, behind `--`: nothing after it may be read as an option.
-                let tail = agent_entry::claude_prompt_tail(&ready.agent, card_id);
+                let tail = agent_entry::claude_prompt_tail(&ready.agent, launch);
                 ready.launch_command = format!(
                     "{} {} {tail}",
                     ready.launch_command,
@@ -108,7 +109,10 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                 &ready.cwd,
                 &ready.agent.name,
                 ready.agent.model.as_deref(),
-                card.map(|_| tools.as_slice()),
+                launch.as_ref().map(|launch| opencode::CardRights {
+                    tools: tools.as_slice(),
+                    review: launch.review.is_some(),
+                }),
             )
             .await?;
             // Typed into a shell as it stands, so only an id of `[A-Za-z0-9_-]` is
@@ -134,10 +138,16 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                      carry one identity per session",
                 )
             } else {
-                agent_entry::wire_opencode(&roots, &ready.agent, &ready.cwd, role.as_ref(), card)
-                    .await
+                agent_entry::wire_opencode(
+                    &roots,
+                    &ready.agent,
+                    &ready.cwd,
+                    role.as_ref(),
+                    launch.as_ref(),
+                )
+                .await
             };
-            if let Some(card_id) = card {
+            if let Some(launch) = &launch {
                 require_entry(&mcp)?;
                 // Only a session made now gets its first message; a continued one has it already and would
                 // otherwise be told the same thing again on every restart of the pane.
@@ -145,7 +155,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                     let text = format!(
                         "{}\n\n{}",
                         agent_entry::instructions(&ready.agent, role.as_ref()),
-                        agent_entry::start_prompt(&ready.agent, card_id)
+                        agent_entry::start_prompt(&ready.agent, launch)
                     );
                     opencode::send_prompt(&session.id, &text).await?;
                 }
@@ -192,26 +202,61 @@ fn typeable(
     ))
 }
 
-/// The card a session works on: the live card it holds **in work**, if any. Sessions the studio started for a card are
-/// the usual ones that hold one; a session that took a card by itself and is restarted counts the same, which is
-/// what an interrupted session needs. A card the session already reported (it waits in review) is not work any more:
-/// a restarted pane must not be told to do it again, and `report_done` would be refused.
-pub(crate) fn card_of(db: &rusqlite::Connection, agent: &crate::ide::model::Agent) -> Option<i64> {
+/// What a session was started for, if the studio started it for a card and that card still wants it: a worker's card
+/// is **in work**, a reviewer's is **in review**. A card the worker already reported is not work any more — a restarted
+/// pane must not be told to do it again, and `report_done` would be refused — and a card that was reviewed, called off
+/// or archived is not a reviewer's any more. A session of the owner's own making is never one, whatever it claims by
+/// itself.
+pub(crate) fn card_launch(
+    db: &rusqlite::Connection,
+    agent: &crate::ide::model::Agent,
+) -> Option<agent_entry::CardLaunch> {
     use crate::board::{CardStatus, ColumnStage, store};
-    let actor = crate::session::actor_from(Some(&agent.id.to_string()), Some(&agent.name))?;
-    crate::board::flow::open_claims(db, &actor)
-        .ok()?
-        .into_iter()
-        .find(|card_id| {
-            let Ok(Some(card)) = store::get_card(db, *card_id) else {
-                return false;
-            };
-            matches!(
-                store::get_column(db, card.column_id),
-                Ok(Some(column))
-                    if column.maps_to_status == CardStatus::Doing && column.stage != Some(ColumnStage::Review)
-            )
-        })
+    let card_id = agent.card_id?;
+    let card = store::get_card(db, card_id).ok()??;
+    if card.archived_at.is_some() || card.failed_at.is_some() || card.canceled_at.is_some() {
+        return None;
+    }
+    let column = store::get_column(db, card.column_id).ok()??;
+    let in_review = column.stage == Some(ColumnStage::Review);
+    if !agent.card_review {
+        // A worker is the one who holds the card now: after a release and a new start the card belongs to another
+        // session, and the old pane must not go on working on it.
+        let mine = crate::session::actor_from(Some(&agent.id.to_string()), Some(&agent.name));
+        return (column.maps_to_status == CardStatus::Doing
+            && !in_review
+            && mine.is_some()
+            && card.claimed_by == mine)
+            .then(|| agent_entry::CardLaunch::work(card_id));
+    }
+    if !in_review || card.verified_by.is_some() {
+        return None;
+    }
+    // A reviewer of an earlier report is not the reviewer of this one: its pane, restarted, must not judge again.
+    let sessions = crate::ide::agent_store::list_agents(db, agent.project_id).ok()?;
+    if crate::card_session::current_reviewer(db, card_id, &sessions)
+        .ok()??
+        .id
+        != agent.id
+    {
+        return None;
+    }
+    let worker = crate::ide::agent_store::get_agent(
+        db,
+        crate::card_session::session_id_of(card.claimed_by.as_deref()?)?,
+    )
+    .ok()??;
+    // What the work is measured against; without a recorded base the project folder's own branch stands in, as the
+    // Diffs tab does (G1).
+    let base = worker.base_branch.clone().or_else(|| {
+        let project = crate::ide::store::get_project(db, worker.project_id).ok()??;
+        crate::ide::worktree::current_branch(&project.repo_root)
+    })?;
+    Some(agent_entry::CardLaunch::review(
+        card_id,
+        &worker.name,
+        &base,
+    ))
 }
 
 /// A session working on a card without the team tools could not report it, nor be reviewed: it is not started.

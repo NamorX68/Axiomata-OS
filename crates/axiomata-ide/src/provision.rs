@@ -109,22 +109,35 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
     let (cwd, shared_folder) = if worktree::is_repo(&project.repo_root) {
         let path =
             worktree::worktree_path(&locations.worktrees, &project.name, &agent.name, agent.id);
-        let branch = worktree::branch_name(&agent.name, agent.id);
-        // The base is recorded only when the branch is born (G1): a branch
-        // that already exists was cut earlier, from something nobody wrote
-        // down, and guessing now would be worse than the documented fallback.
-        let fresh_branch = !worktree::branch_exists(&project.repo_root, &branch);
-        let base = worktree::current_branch(&project.repo_root);
-        let created = worktree::add(&project.repo_root, &path, &branch)?;
-        agent_store::set_worktree(db, agent.id, Some(&created.path), created.branch.as_deref())?;
-        // Two statements, not one transaction: were the app killed between
-        // them, the branch would exist without a recorded base and fall back
-        // to the project folder's branch (G1) — an accepted, visible
-        // degradation, not a corruption.
-        if fresh_branch && agent.base_branch.is_none() {
-            agent_store::set_base_branch(db, agent.id, base.as_deref())?;
+        // A reviewer looks at one state and writes to no branch: a detached checkout of the snapshot it was made for.
+        let snapshot = agent.start_ref.as_deref().filter(|_| agent.card_review);
+        if let Some(commit) = snapshot {
+            let created = worktree::add_detached(&project.repo_root, &path, commit)?;
+            agent_store::set_worktree(db, agent.id, Some(&created.path), None)?;
+            (created.path, false)
+        } else {
+            let branch = worktree::branch_name(&agent.name, agent.id);
+            // The base is recorded only when the branch is born (G1): a branch
+            // that already exists was cut earlier, from something nobody wrote
+            // down, and guessing now would be worse than the documented fallback.
+            let fresh_branch = !worktree::branch_exists(&project.repo_root, &branch);
+            let base = worktree::current_branch(&project.repo_root);
+            let created = worktree::add(&project.repo_root, &path, &branch)?;
+            agent_store::set_worktree(
+                db,
+                agent.id,
+                Some(&created.path),
+                created.branch.as_deref(),
+            )?;
+            // Two statements, not one transaction: were the app killed between
+            // them, the branch would exist without a recorded base and fall back
+            // to the project folder's branch (G1) — an accepted, visible
+            // degradation, not a corruption.
+            if fresh_branch && agent.base_branch.is_none() {
+                agent_store::set_base_branch(db, agent.id, base.as_deref())?;
+            }
+            (created.path, false)
         }
-        (created.path, false)
     } else {
         (project.repo_root, true)
     };
@@ -927,5 +940,40 @@ mod tests {
             .unwrap();
         assert!(matches!(done, TakeOver::Done { .. }));
         assert!(repo.join("feature.txt").exists());
+    }
+
+    #[test]
+    fn a_reviewer_gets_a_detached_checkout_of_the_snapshot_and_no_branch() {
+        let repo = git_repo();
+        let head = {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        let (db, project) = db_with_project(repo.clone());
+        let reviewer = add_agent(&db, project, "reviewer-5");
+        agent_store::set_card(&db, reviewer, Some(5), true, Some(&head)).unwrap();
+
+        let places = locations();
+        let ready = prepare(&db, &places, reviewer).unwrap();
+        assert!(ready.cwd.is_dir());
+        assert_eq!(ready.agent.branch, None, "it has no branch to write to");
+        assert!(ready.agent.card_review);
+        let at = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&ready.cwd)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(at.stdout).unwrap().trim(), head);
+        // Starting it again finds the same checkout.
+        assert_eq!(
+            prepare(&db, &places, reviewer).unwrap().agent.worktree_path,
+            ready.agent.worktree_path
+        );
     }
 }

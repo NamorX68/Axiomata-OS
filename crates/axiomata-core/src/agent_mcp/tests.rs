@@ -388,6 +388,15 @@ fn a_card_goes_through_claim_report_and_review() {
         working.call("get_card", json!({})).unwrap()["card"]["returned_count"],
         1
     );
+    // The worker is told by the studio, with the reviewer's words, and not by the reviewer.
+    let inbox = working.call("read_inbox", json!({})).unwrap();
+    assert_eq!(inbox["count"], 1, "{inbox}");
+    let told = inbox["messages"][0].to_string();
+    assert!(
+        told.contains("tests missing") && told.contains("sent it back"),
+        "{told}"
+    );
+    assert!(told.contains("studio") || told.contains("system"), "{told}");
 
     working.call("report_done", json!({})).unwrap();
     judging
@@ -398,6 +407,66 @@ fn a_card_goes_through_claim_report_and_review() {
         .unwrap();
     let done = working.call("get_card", json!({})).unwrap();
     assert_eq!(done["card"]["state"], "verified");
+    // An approval needs no action from the worker, so it gets no notice.
+    assert_eq!(working.call("read_inbox", json!({})).unwrap()["count"], 0);
+}
+
+#[test]
+fn a_reviewer_of_an_earlier_report_cannot_judge_the_next_one() {
+    let mut w = world();
+    let worker = w.session("worker", "builder");
+    let card = w.card(w.open, "Do the thing");
+    let working = w.client(worker, Some(card), None);
+    working.call("claim_task", json!({})).unwrap();
+    working.call("report_done", json!({})).unwrap();
+
+    // The studio made the first reviewer for the first report; it sends the card back.
+    let first = w.session("rev-1", "reviewer");
+    agent_store::set_card(
+        &w.core.db_lock(),
+        first,
+        Some(card),
+        true,
+        Some(&"a".repeat(40)),
+    )
+    .unwrap();
+    let first_client = w.client(first, Some(card), None);
+    first_client
+        .call(
+            "review_verdict",
+            json!({"verdict": "return", "note": "more"}),
+        )
+        .unwrap();
+    working.call("report_done", json!({})).unwrap();
+
+    // The second report has its own reviewer; the first one's pane is still open and tries again.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let second = w.session("rev-2", "reviewer");
+    agent_store::set_card(
+        &w.core.db_lock(),
+        second,
+        Some(card),
+        true,
+        Some(&"b".repeat(40)),
+    )
+    .unwrap();
+    let stale = first_client
+        .call("review_verdict", json!({"verdict": "approve"}))
+        .unwrap_err();
+    assert!(stale.contains("earlier report"), "{stale}");
+    assert_eq!(
+        working.call("get_card", json!({})).unwrap()["card"]["state"],
+        "in_review"
+    );
+
+    let current = w.client(second, Some(card), None);
+    current
+        .call("review_verdict", json!({"verdict": "approve"}))
+        .unwrap();
+    assert_eq!(
+        working.call("get_card", json!({})).unwrap()["card"]["state"],
+        "verified"
+    );
 }
 
 #[test]

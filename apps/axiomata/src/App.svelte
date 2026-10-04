@@ -3,9 +3,11 @@
   import { onMount } from "svelte";
 
   import Canvas from "./canvas/Canvas.svelte";
+  import { invokeBackend, listenBackend } from "./core/backend";
   import { emit, on } from "./core/bus";
   import { openFilePanel, openNewNote, openStaged } from "./core/staging";
   import { loadInstances } from "./core/stores";
+  import { toast } from "./core/toast";
   import { openKanban } from "./modules/kanbanApp";
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
@@ -102,7 +104,37 @@
         };
       });
     }
-    return () => offs.forEach((off) => off());
+    // A reviewer was made for a reported card (A2A CP-A6b): its pane opens in the Studio, which stays where it is on
+    // screen — the pane is what starts the harness, so it has to exist, but the owner is not pulled out of what they do.
+    const review = [
+      listenBackend<{ cardId: number; projectId: number; agentId: number }>("card:review-started", (started) => {
+        requestAgent({ projectId: started.projectId, agentId: started.agentId });
+        ideStarted = true;
+        toast(`Karte #${started.cardId}: Ein Reviewer prüft sie (Studio, Agents).`, "info");
+      }),
+      listenBackend<{ cardId: number; reason: string }>("card:review-blocked", (blocked) => {
+        toast(`Karte #${blocked.cardId} wartet auf ein Review: ${blocked.reason}`, "warning");
+      }),
+    ];
+    // Reviewers made before the page was listening (or before a reload) still need their panes: asked once, after the
+    // listeners are in, so none is lost between the two.
+    void Promise.all(review).then(async () => {
+      try {
+        const open = await invokeBackend<{ card_id: number; project_id: number; agent_id: number }[]>(
+          "open_review_sessions",
+        );
+        for (const session of open) {
+          requestAgent({ projectId: session.project_id, agentId: session.agent_id });
+          ideStarted = true;
+        }
+      } catch {
+        // Without the list the watcher's events still arrive; a reviewer's pane can be opened from the Agents list.
+      }
+    });
+    return () => {
+      offs.forEach((off) => off());
+      review.forEach((pending) => void pending.then((off) => off()));
+    };
   });
 </script>
 

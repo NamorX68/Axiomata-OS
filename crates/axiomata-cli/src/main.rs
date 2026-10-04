@@ -515,6 +515,26 @@ enum BoardAction {
         #[arg(long)]
         engine: Option<String>,
     },
+    /// Start the review of a reported card by hand: a reviewer session on an engine other than the worker's, in a
+    /// detached checkout of the work. The studio does this on its own when the app runs. The owner's step.
+    Review {
+        id: i64,
+        /// An engine of the catalog; without it the reviewer role's own (or a fallback) is used.
+        #[arg(long)]
+        engine: Option<String>,
+        /// Review even when the work changes files agents read their configuration from (`.claude/`, `.mcp.json`,
+        /// `opencode.json`, `AGENTS.md` …): the reviewer would obey what the worker wrote there.
+        #[arg(long)]
+        allow_agent_config: bool,
+    },
+    /// Take a card the reviewer signed off over into the project's main line as one commit, close the card and clean
+    /// up the sessions made for it. The owner's step.
+    TakeOver {
+        id: i64,
+        /// The commit message; without it `#<card> <title>`.
+        #[arg(long)]
+        message: Option<String>,
+    },
     /// Give a started card back: the claim is dropped and the card waits in its open column again. The owner's step.
     Release { id: i64 },
     /// Move a card into this board's first done column.
@@ -1453,6 +1473,18 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         } => {
             owner_only("starting a card")?;
             board_start(core, id, project, engine).await
+        }
+        BoardAction::Review {
+            id,
+            engine,
+            allow_agent_config,
+        } => {
+            owner_only("starting a review")?;
+            board_review(core, id, engine, allow_agent_config).await
+        }
+        BoardAction::TakeOver { id, message } => {
+            owner_only("taking a card over")?;
+            board_take_over(core, id, message).await
         }
         BoardAction::Release { id } => {
             owner_only("giving a card back")?;
@@ -2594,12 +2626,63 @@ async fn board_start(
     // A session that cannot be started would hold the card for nothing: give it back.
     if let Err(err) = agent_prepare(core, session.agent.id).await {
         axiomata_core::card_session::release_card_session(core, id)?;
+        axiomata_core::card_session::discard_session(core, session.agent.id).await?;
         board_mirror::after_card_change(&core.db_lock(), &read_config(core), id);
         return Err(err.context(format!(
             "the session did not start; card #{id} is waiting again"
         )));
     }
     Ok(())
+}
+
+async fn board_review(
+    core: &AxiomataCore,
+    id: i64,
+    engine: Option<String>,
+    allow_agent_config: bool,
+) -> Result<()> {
+    let session = axiomata_core::card_session::start_review_session(
+        core,
+        &axiomata_core::card_session::ReviewRequest {
+            card_id: id,
+            engine_id: engine,
+            allow_agent_config,
+        },
+    )
+    .await?;
+    board_mirror::after_card_change(&core.db_lock(), &read_config(core), id);
+    println!(
+        "card #{id} is reviewed by the new session #{} {} (role {}, engine {})",
+        session.agent.id, session.agent.name, session.role, session.engine_id
+    );
+    // A reviewer that cannot start is of no use: forget it, the card waits for the next try.
+    if let Err(err) = agent_prepare(core, session.agent.id).await {
+        axiomata_core::card_session::discard_session(core, session.agent.id).await?;
+        return Err(err.context("the reviewer did not start"));
+    }
+    Ok(())
+}
+
+async fn board_take_over(core: &AxiomataCore, id: i64, message: Option<String>) -> Result<()> {
+    use axiomata_core::card_session::CardTakeOver;
+    let outcome = axiomata_core::card_session::take_over_card(core, id, message.as_deref()).await?;
+    board_mirror::after_card_change(&core.db_lock(), &read_config(core), id);
+    match outcome {
+        CardTakeOver::Done { commit, cleanup } => {
+            println!("card #{id} taken over as {commit}; its sessions are cleaned up");
+            for note in cleanup {
+                println!("  not removed: {note}");
+            }
+            Ok(())
+        }
+        CardTakeOver::Conflict { files } => {
+            println!("conflict — undone, the project folder is as it was. Conflicting files:");
+            for file in files {
+                println!("  {file}");
+            }
+            std::process::exit(1);
+        }
+    }
 }
 
 fn board_release(core: &AxiomataCore, id: i64) -> Result<()> {

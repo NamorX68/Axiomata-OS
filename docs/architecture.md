@@ -1591,6 +1591,13 @@ and role are set in the same transaction. Roles offered are those in force for t
 catalog through `ide/rosterStore.ts`. `axiomata-cli ide agents new` still takes raw fields (the owner's own tool); agents without an engine (older rows) show their profile
 until the profile-derived assignment gives them one. Also: a session may send at most 60 messages in all (`Limits::max_per_sender_total`, owner's choice of "a number", 2026-10-04).
 
+### A2A CP-A6b built (2026-10-05)
+
+Reviewer, return, take-over (`docs/plans/a2a.md` "CP-A6b im Detail"): `ide_agents` remembers its card (`card_id`, `card_review`, `start_ref`, migration 17); `card_session::start_review_session`
+snapshots the work, picks the reviewer role and an engine other than the worker's, and makes a session in a **detached** worktree of the snapshot; the app's `card_watch` task starts it
+for every reported card and the Studio opens its pane in the background; a returned card reaches the worker as a studio notice; `take_over_card` squashes exactly the reviewed state into the
+base branch, closes the card and removes the sessions, worktrees and the worker's branch. CLI `board review|take-over`, Kanban "Review starten …" / "Übernehmen …".
+
 ### A2A CP-A6a built (2026-10-04)
 
 Starting a card (`docs/plans/a2a.md` "CP-A6a im Detail"): `axiomata_core::card_session` makes a session of the card's role on an engine and claims the card for it

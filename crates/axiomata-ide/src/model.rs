@@ -94,6 +94,17 @@ pub struct Agent {
     pub engine_id: Option<String>,
     /// The role this session plays, a name under `~/.axiomata/agents/`. Existing agents are `allrounder`.
     pub agent_role: String,
+    /// The card the studio started this session for (A2A CP-A6b). `None` for a session the owner made and started by
+    /// hand — such a session is never a card session, whatever it claims by itself.
+    #[serde(default)]
+    pub card_id: Option<i64>,
+    /// Whether this session **reviews** that card instead of working on it. A reviewer holds no claim, works in a
+    /// detached checkout of the state it reviews ([`Agent::start_ref`]) and writes to no branch.
+    #[serde(default)]
+    pub card_review: bool,
+    /// The commit a reviewer's worktree is cut from: the snapshot of the work under review.
+    #[serde(default)]
+    pub start_ref: Option<String>,
     /// **Computed on read, never stored**: the command line that actually
     /// runs — `command` if it has one, else the harness's default.
     ///

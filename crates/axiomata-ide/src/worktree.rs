@@ -43,6 +43,28 @@ pub(crate) fn git(repo: &Path, args: &[&str]) -> Result<String> {
     Ok(axiomata_git::run::git(repo, args)?)
 }
 
+/// The options for git run **by the studio inside an agent's worktree**: no hooks and no file-system monitor. What lives
+/// in that directory is the agent's — a tracked hook script (`.husky/`, a relative `core.hooksPath`) or a repository
+/// setting it could edit would otherwise run, as the user and inside the app, the moment the studio commits or asks for
+/// the status, with nobody clicking anything.
+const AGENT_GIT_OPTIONS: [&str; 4] = [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+];
+
+/// [`git`] for a command the studio runs in an agent's worktree by itself; see [`AGENT_GIT_OPTIONS`].
+pub(crate) fn git_agent(worktree: &Path, args: &[&str]) -> Result<String> {
+    Ok(git_agent_with(worktree, args, &[0])?.1)
+}
+
+/// [`git_with`] for a command the studio runs in an agent's worktree by itself; see [`AGENT_GIT_OPTIONS`].
+pub(crate) fn git_agent_with(worktree: &Path, args: &[&str], ok: &[i32]) -> Result<(i32, String)> {
+    let all: Vec<&str> = AGENT_GIT_OPTIONS.iter().chain(args).copied().collect();
+    git_with(worktree, &all, ok)
+}
+
 /// Like [`git`], but any exit code in `ok` counts as success, and the code is returned.
 pub(crate) fn git_with(repo: &Path, args: &[&str], ok: &[i32]) -> Result<(i32, String)> {
     Ok(axiomata_git::run::git_with(repo, args, ok)?)
@@ -191,6 +213,72 @@ pub fn add(repo_root: &Path, path: &Path, branch: &str) -> Result<Worktree> {
         })
 }
 
+/// Creates a worktree on a **detached** checkout of `commit` — a reviewer's: it sees the state it judges and has no
+/// branch it could write to. Returns the existing one when the path is already a worktree (a restart).
+///
+/// `commit` must be a full commit id; it becomes an argument of `git`, so nothing that could be read as an option or a
+/// revision expression is accepted.
+pub fn add_detached(repo_root: &Path, path: &Path, commit: &str) -> Result<Worktree> {
+    if !crate::agent_store::is_commit_id(commit) {
+        return Err(IdeError::Git {
+            command: "git worktree add --detach".into(),
+            reason: format!("{commit:?} is not a full commit id"),
+        });
+    }
+    if path.exists() {
+        return existing(repo_root, path);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| IdeError::Git {
+            command: "git worktree add --detach".into(),
+            reason: format!("could not create {}: {err}", parent.display()),
+        })?;
+    }
+    let path_arg = path.to_str().ok_or_else(|| IdeError::Git {
+        command: "git worktree add --detach".into(),
+        reason: format!("path is not valid UTF-8: {}", path.display()),
+    })?;
+    git(
+        repo_root,
+        &["worktree", "add", "--detach", path_arg, commit],
+    )?;
+    existing(repo_root, path)
+}
+
+/// The listed worktree at `path`, or the reason it is not one.
+fn existing(repo_root: &Path, path: &Path) -> Result<Worktree> {
+    list(repo_root)?
+        .into_iter()
+        .find(|w| same_path(&w.path, path))
+        .ok_or_else(|| IdeError::Git {
+            command: "git worktree add".into(),
+            reason: format!("{} exists and is not a worktree", path.display()),
+        })
+}
+
+/// Deletes a branch the studio made for an agent (`axiomata/…`, [`branch_name`]), whatever its state: its work has been
+/// taken over or thrown away by then. Refuses any other name, so a stray argument cannot delete the owner's branches.
+/// `false` if there was no such branch.
+pub fn delete_branch(repo_root: &Path, branch: &str) -> Result<bool> {
+    let ours = branch.strip_prefix("axiomata/").is_some_and(|rest| {
+        !rest.is_empty()
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    });
+    if !ours {
+        return Err(IdeError::Invalid {
+            field: "branch",
+            reason: format!("{branch:?} is not a branch the studio made for an agent"),
+        });
+    }
+    if !branch_exists(repo_root, branch) {
+        return Ok(false);
+    }
+    git(repo_root, &["branch", "-D", branch])?;
+    Ok(true)
+}
+
 /// The branch checked out in `repo`, or `None` for a detached HEAD.
 pub fn current_branch(repo: &Path) -> Option<String> {
     git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"])
@@ -265,7 +353,7 @@ pub fn list(repo_root: &Path) -> Result<Vec<Worktree>> {
 
 /// Whether a worktree has changes that would be lost by removing it.
 pub fn has_uncommitted_changes(worktree_path: &Path) -> Result<bool> {
-    Ok(!git(worktree_path, &["status", "--porcelain"])?
+    Ok(!git_agent(worktree_path, &["status", "--porcelain"])?
         .trim()
         .is_empty())
 }
@@ -299,6 +387,64 @@ mod tests {
         git(&dir, &["add", "."]).unwrap();
         git(&dir, &["commit", "-m", "first"]).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_detached_worktree_sits_on_the_commit_and_has_no_branch() {
+        let repo = repo();
+        let head = git(&repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        let path = temp_dir("detached").join("review");
+        let made = add_detached(&repo, &path, &head).unwrap();
+        assert_eq!(made.branch, None, "a reviewer writes to no branch");
+        assert_eq!(git(&path, &["rev-parse", "HEAD"]).unwrap().trim(), head);
+        // A restart finds the same worktree instead of failing.
+        assert_eq!(add_detached(&repo, &path, &head).unwrap().path, made.path);
+        assert!(remove(&repo, &path, true).unwrap());
+    }
+
+    #[test]
+    fn a_detached_worktree_takes_only_a_full_commit_id() {
+        let repo = repo();
+        let path = temp_dir("detached-bad").join("review");
+        for bad in [
+            "HEAD",
+            "main",
+            "--help",
+            "abc123",
+            "../x",
+            "HEAD~1",
+            &"g".repeat(40),
+            "",
+        ] {
+            assert!(add_detached(&repo, &path, bad).is_err(), "{bad:?}");
+        }
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn only_a_branch_the_studio_made_can_be_deleted() {
+        let repo = repo();
+        git(&repo, &["branch", "axiomata/builder-3"]).unwrap();
+        git(&repo, &["branch", "feature/mine"]).unwrap();
+        for not_ours in [
+            "main",
+            "feature/mine",
+            "axiomata/",
+            "axiomata/a b",
+            "axiomata/../main",
+            "-D",
+        ] {
+            assert!(delete_branch(&repo, not_ours).is_err(), "{not_ours:?}");
+        }
+        assert!(branch_exists(&repo, "feature/mine") && branch_exists(&repo, "main"));
+        assert!(delete_branch(&repo, "axiomata/builder-3").unwrap());
+        assert!(
+            !delete_branch(&repo, "axiomata/builder-3").unwrap(),
+            "already gone is not an error"
+        );
     }
 
     #[test]

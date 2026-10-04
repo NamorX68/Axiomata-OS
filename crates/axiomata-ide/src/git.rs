@@ -42,7 +42,7 @@ use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::worktree::{self, git, git_bytes, git_with, git_with_input};
+use crate::worktree::{self, git, git_agent, git_agent_with, git_bytes, git_with, git_with_input};
 use crate::{IdeError, Result};
 
 // The diff types and parser are shared with the editor's git panel and live in `axiomata-git`;
@@ -220,9 +220,81 @@ impl AgentRepo {
         last_subject(&self.worktree, &self.base()?.commit)
     }
 
-    /// Commits everything uncommitted in the worktree (G3).
+    /// Commits everything uncommitted in the worktree (G3) — on the agent's own branch, and only there: a worktree whose
+    /// HEAD was moved elsewhere (`git checkout`, a rewritten `.git` file) is refused, because the studio would commit
+    /// onto something that is not the agent's.
     pub fn commit_all(&self, message: &str) -> Result<String> {
+        self.ensure_on_own_branch()?;
         commit_all(&self.worktree, message)
+    }
+
+    /// Refuses unless the worktree is checked out on the agent's own branch.
+    pub fn ensure_on_own_branch(&self) -> Result<()> {
+        let head = git_agent_with(
+            &self.worktree,
+            &["symbolic-ref", "--quiet", "HEAD"],
+            &[0, 1],
+        )?;
+        if head.0 == 0 && head.1.trim() == format!("refs/heads/{}", self.agent_branch) {
+            return Ok(());
+        }
+        Err(IdeError::Invalid {
+            field: "worktree",
+            reason: format!(
+                "the worktree is not on the agent's branch {} any more, so the studio does not commit there or take its \
+                 work over",
+                self.agent_branch
+            ),
+        })
+    }
+
+    /// The commit the agent's **branch** is at — the thing a take-over merges, not whatever the worktree's HEAD is.
+    pub fn branch_tip(&self) -> Result<String> {
+        Ok(git_agent(
+            &self.worktree,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", self.agent_branch),
+            ],
+        )?
+        .trim()
+        .to_string())
+    }
+
+    /// Whether the worktree holds changes that are not committed.
+    pub fn is_dirty(&self) -> Result<bool> {
+        worktree::has_uncommitted_changes(&self.worktree)
+    }
+
+    /// The state the agent's work is in, as one commit: everything uncommitted is committed with `message` first, and
+    /// when there is nothing to commit the branch's own tip is it. What a reviewer is shown (CP-A6b).
+    pub fn snapshot(&self, message: &str) -> Result<String> {
+        self.ensure_on_own_branch()?;
+        if !worktree::has_uncommitted_changes(&self.worktree)? {
+            return self.branch_tip();
+        }
+        commit_all(&self.worktree, message)
+    }
+
+    /// The files between the agent's base and `commit` that agents read their configuration, rules or plugins from
+    /// (see [`is_agent_config`]) — what a reviewer started on that checkout would obey.
+    pub fn agent_config_changes(&self, commit: &str) -> Result<Vec<String>> {
+        let base = self.base()?;
+        let out = git_agent(
+            &self.worktree,
+            &[
+                "diff",
+                "--name-only",
+                "-z",
+                &format!("{}...{commit}", base.commit),
+            ],
+        )?;
+        Ok(out
+            .split('\0')
+            .filter(|path| !path.is_empty() && is_agent_config(path))
+            .map(str::to_owned)
+            .collect())
     }
 
     /// Takes the agent's committed work over into the project folder (G7–G12).
@@ -666,6 +738,22 @@ pub fn last_subject(worktree: &Path, base: &str) -> Result<Option<String>> {
 fn base_blob_size(worktree: &Path, base: &str, path: &str) -> Result<Option<u64>> {
     Ok(base_entry(worktree, base, path)?.map(|entry| entry.size))
 }
+/// Whether a path is somewhere an agent harness reads configuration, rules or plugins from: Claude Code's `.claude/` and
+/// `.mcp.json`, Opencode's `opencode.json(c)` and `.opencode/`, and the `CLAUDE.md` / `AGENTS.md` instruction files, at
+/// any depth. A checkout that contains a changed one is not a neutral place to start another agent in.
+pub fn is_agent_config(path: &str) -> bool {
+    let components: Vec<&str> = path.split('/').collect();
+    let Some(name) = components.last() else {
+        return false;
+    };
+    matches!(
+        *name,
+        ".mcp.json" | "opencode.json" | "opencode.jsonc" | "CLAUDE.md" | "AGENTS.md"
+    ) || components[..components.len() - 1]
+        .iter()
+        .any(|dir| matches!(*dir, ".claude" | ".opencode"))
+}
+
 /// Commits everything uncommitted in the worktree (G3) — what the agent left
 /// lying around. Returns the new commit.
 pub fn commit_all(worktree: &Path, message: &str) -> Result<String> {
@@ -676,15 +764,20 @@ pub fn commit_all(worktree: &Path, message: &str) -> Result<String> {
             reason: "a commit needs a message".into(),
         });
     }
-    git(worktree, &["add", "-A"])?;
-    if git_with(worktree, &["diff", "--cached", "--quiet"], &[0, 1])?.0 == 0 {
+    git_agent(worktree, &["add", "-A"])?;
+    if git_agent_with(worktree, &["diff", "--cached", "--quiet"], &[0, 1])?.0 == 0 {
         return Err(IdeError::Invalid {
             field: "worktree",
             reason: "there is nothing uncommitted to commit".into(),
         });
     }
-    git(worktree, &["commit", "--quiet", "-m", message])?;
-    Ok(git(worktree, &["rev-parse", "HEAD"])?.trim().to_string())
+    git_agent(
+        worktree,
+        &["commit", "--quiet", "--no-verify", "-m", message],
+    )?;
+    Ok(git_agent(worktree, &["rev-parse", "HEAD"])?
+        .trim()
+        .to_string())
 }
 
 /// What [`take_over`] needs to know about the agent.
@@ -1848,6 +1941,105 @@ mod tests {
         fs::write(f.worktree.join("huge.txt"), "x".repeat(MAX_DIFF_BYTES + 1)).unwrap();
         let diff = file_diff(&f.worktree, &f.base().commit, "huge.txt", None).unwrap();
         assert!(diff.truncated && diff.hunks.is_empty());
+    }
+
+    fn agent_repo(f: &Fixture) -> AgentRepo {
+        AgentRepo {
+            repo_root: f.repo.clone(),
+            worktree: f.worktree.clone(),
+            agent_branch: AGENT_BRANCH.into(),
+            base_branch: Some("main".into()),
+        }
+    }
+
+    #[test]
+    fn the_paths_agents_read_their_configuration_from_are_recognised_at_any_depth() {
+        for config in [
+            ".claude/settings.json",
+            "sub/.claude/agents/x.md",
+            ".mcp.json",
+            "opencode.json",
+            "opencode.jsonc",
+            ".opencode/plugins/p.js",
+            "CLAUDE.md",
+            "docs/AGENTS.md",
+        ] {
+            assert!(is_agent_config(config), "{config}");
+        }
+        for plain in [
+            "README.md",
+            "src/claude.rs",
+            "docs/claude/notes.md",
+            "claude.md",
+            "opencode.toml",
+            ".claudex/x",
+        ] {
+            assert!(!is_agent_config(plain), "{plain}");
+        }
+    }
+
+    #[test]
+    fn a_review_is_told_which_agent_config_the_work_changed() {
+        let f = fixture();
+        f.agent_commits("src.txt", "plain\n");
+        fs::create_dir_all(f.worktree.join(".claude")).unwrap();
+        f.agent_commits(".claude/settings.json", "{}\n");
+        fs::create_dir_all(f.worktree.join("nested")).unwrap();
+        f.agent_commits("nested/AGENTS.md", "rules\n");
+        let repo = agent_repo(&f);
+        let tip = repo.branch_tip().unwrap();
+        let mut found = repo.agent_config_changes(&tip).unwrap();
+        found.sort();
+        assert_eq!(found, [".claude/settings.json", "nested/AGENTS.md"]);
+
+        let quiet = fixture();
+        quiet.agent_commits("src.txt", "plain\n");
+        let repo = agent_repo(&quiet);
+        assert!(
+            repo.agent_config_changes(&repo.branch_tip().unwrap())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_studios_own_commit_in_an_agents_worktree_runs_no_hook_of_the_agent() {
+        let f = fixture();
+        // A hook the agent could have planted, in the repository's hooks and by `core.hooksPath` alike.
+        install_rejecting_hook(&f.repo, "pre-commit");
+        fs::write(f.worktree.join("work.txt"), "work\n").unwrap();
+        let repo = agent_repo(&f);
+        let snapshot = repo
+            .snapshot("#1 work")
+            .expect("no hook runs: the studio commits");
+        assert_eq!(snapshot, repo.branch_tip().unwrap());
+        assert!(fs::read_to_string(f.worktree.join("work.txt")).is_ok());
+        assert!(f.changes().iter().any(|c| c.path == "work.txt"));
+    }
+
+    #[test]
+    fn the_studio_commits_and_snapshots_only_on_the_agents_own_branch() {
+        let f = fixture();
+        let repo = agent_repo(&f);
+        fs::write(f.worktree.join("work.txt"), "work\n").unwrap();
+        // The agent moved its HEAD onto another branch (here: the owner's main cannot be checked out twice, so a new one).
+        run(
+            &f.worktree,
+            &["checkout", "--quiet", "-b", "somewhere-else"],
+        );
+        let refused = repo.snapshot("#1 work").unwrap_err().to_string();
+        assert!(refused.contains("not on the agent's branch"), "{refused}");
+        assert!(repo.commit_all("x").is_err());
+        assert!(repo.ensure_on_own_branch().is_err());
+        // Nothing was committed anywhere.
+        assert!(worktree::has_uncommitted_changes(&f.worktree).unwrap());
+
+        run(&f.worktree, &["checkout", "--quiet", AGENT_BRANCH]);
+        assert!(repo.ensure_on_own_branch().is_ok());
+        // Detached is not on the branch either.
+        run(&f.worktree, &["checkout", "--quiet", "--detach"]);
+        assert!(repo.ensure_on_own_branch().is_err());
     }
 
     #[test]

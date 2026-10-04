@@ -235,19 +235,69 @@ pub fn role_tools(role: Option<&Role>) -> Vec<&'static str> {
         .tool_names()
 }
 
+/// The card a session was started for and what it does with it: works on it, or reviews what another session did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CardLaunch {
+    pub card_id: i64,
+    /// `Some` for a reviewer: who it judges and what the work is measured against.
+    pub review: Option<ReviewTarget>,
+}
+
+/// What a reviewer needs to know beyond the card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewTarget {
+    /// The session that worked on the card.
+    pub worker: String,
+    /// The branch the work is measured against (`git diff <base>...HEAD`).
+    pub base: String,
+}
+
+impl CardLaunch {
+    /// A session that works on the card.
+    pub fn work(card_id: i64) -> Self {
+        CardLaunch {
+            card_id,
+            review: None,
+        }
+    }
+
+    /// A session that reviews the work `worker` did on the card, measured against `base`.
+    pub fn review(card_id: i64, worker: &str, base: &str) -> Self {
+        CardLaunch {
+            card_id,
+            review: Some(ReviewTarget {
+                worker: worker.to_owned(),
+                base: base.to_owned(),
+            }),
+        }
+    }
+}
+
 /// The first thing a session started for a card is told (A35): who it is and which card, never the card's text — that
 /// comes through `get_card`, so no card text ever sits in a shell line. A restart goes through the same words, which is
 /// why they say what to do with work that is already there.
-pub fn start_prompt(agent: &Agent, card_id: i64) -> String {
-    format!(
-        "You are the session \"{name}\", role `{role}`, and your card is #{card_id}. Read your inbox with `read_inbox`, \
-         then read the card with `get_card` and work on it in your own worktree. Leave the work as changes in the \
-         worktree: do not commit and do not push, the studio commits it when the owner takes it over. If you find \
-         changes there already you were interrupted: look at `git status` and `git diff` and carry on instead of \
-         starting over. When the acceptance criteria are met, call `report_done` with a short summary.",
-        name = agent.name,
-        role = agent.agent_role,
-    )
+pub fn start_prompt(agent: &Agent, launch: &CardLaunch) -> String {
+    let (name, role, card_id) = (&agent.name, &agent.agent_role, launch.card_id);
+    match &launch.review {
+        None => format!(
+            "You are the session \"{name}\", role `{role}`, and your card is #{card_id}. Read your inbox with \
+             `read_inbox`, then read the card with `get_card` and work on it in your own worktree. Leave the work as \
+             changes in the worktree: do not commit and do not push, the studio commits it when the owner takes it \
+             over. If you find changes there already you were interrupted: look at `git status` and `git diff` and \
+             carry on instead of starting over. When the acceptance criteria are met, call `report_done` with a short \
+             summary."
+        ),
+        Some(target) => format!(
+            "You are the session \"{name}\", role `{role}`, and you review card #{card_id}, which the session \
+             \"{worker}\" worked on. Your worktree is a detached checkout of exactly the state under review: you \
+             cannot change it and must not try. Read the card with `get_card` — its acceptance criteria are your \
+             standard — then look at what was done: `git log {base}..HEAD` and `git diff {base}...HEAD`. When you have \
+             decided, call `review_verdict` with `approve` or `return` and a short note that says exactly what is wrong \
+             and how to see it, so the worker can fix it without asking you.",
+            worker = target.worker,
+            base = target.base,
+        ),
+    }
 }
 
 /// Whether a rule of a role file may be granted without asking: `Tool(spec)` with a spec that narrows something. A bare
@@ -275,7 +325,7 @@ const CLAUDE_CARD_DENIED: &str = "Bash(git push),Bash(git push *),Bash(git * pus
 /// for its role — each one listed, so no wildcard grants a tool the role does not have — and what the role file adds
 /// that is narrow enough ([`grantable`]). Everything else stays a question in the pane. `bypassPermissions` is never
 /// used, not even by a role, and a push is refused outright.
-fn claude_card_options(role: Option<&Role>) -> String {
+fn claude_card_options(role: Option<&Role>, review: bool) -> String {
     let mut allowed: Vec<String> = role_tools(role)
         .into_iter()
         .map(|tool| format!("mcp__{SERVER_NAME}__{tool}"))
@@ -285,17 +335,32 @@ fn claude_card_options(role: Option<&Role>) -> String {
             allowed.push(rule.trim().to_owned());
         }
     }
+    // A reviewer judges what it is shown and changes nothing: no automatic edits, and no editing tool at all.
+    // It also reads no project settings and no project MCP servers: its checkout is the worker's work, and whatever
+    // `.claude/settings.json` or `.mcp.json` the worker put there would otherwise be the reviewer's own configuration.
+    // The studio's `--settings` and `--mcp-config` still apply.
+    let (mode, denied) = if review {
+        (
+            "--setting-sources user --strict-mcp-config ".to_owned(),
+            format!("{CLAUDE_CARD_DENIED},Edit"),
+        )
+    } else {
+        (
+            "--permission-mode acceptEdits ".to_owned(),
+            CLAUDE_CARD_DENIED.to_owned(),
+        )
+    };
     format!(
-        "--permission-mode acceptEdits --allowedTools {} --disallowedTools {}",
+        "{mode}--allowedTools {} --disallowedTools {}",
         shell_quote(&allowed.join(",")),
-        shell_quote(CLAUDE_CARD_DENIED),
+        shell_quote(&denied),
     )
 }
 
 /// The end of the launch command of a card session: `--` and the start prompt, so that nothing after it can be taken
 /// for an option (and `--allowedTools` does not swallow it).
-pub fn claude_prompt_tail(agent: &Agent, card_id: i64) -> String {
-    format!("-- {}", shell_quote(&start_prompt(agent, card_id)))
+pub fn claude_prompt_tail(agent: &Agent, launch: &CardLaunch) -> String {
+    format!("-- {}", shell_quote(&start_prompt(agent, launch)))
 }
 
 /// Wires the server into a Claude Code session: issues this start's secret, writes the configuration and the
@@ -306,7 +371,7 @@ pub fn wire_claude(
     roots: &ChannelRoots,
     agent: &Agent,
     role: Option<&Role>,
-    card: Option<i64>,
+    card: Option<&CardLaunch>,
 ) -> (Option<String>, AgentEntry) {
     wire_claude_with(cli_path(), roots, agent, role, card)
 }
@@ -317,7 +382,7 @@ fn wire_claude_with(
     roots: &ChannelRoots,
     agent: &Agent,
     role: Option<&Role>,
-    card: Option<i64>,
+    card: Option<&CardLaunch>,
 ) -> (Option<String>, AgentEntry) {
     let Some(cli) = cli else {
         return (None, AgentEntry::unavailable(no_cli_note()));
@@ -325,7 +390,13 @@ fn wire_claude_with(
     let channel = Channel::for_agent(roots, agent.id);
     let wired = (|| {
         let secret = session_token::issue(roots, agent.id)?;
-        let server = Server::new(cli.clone(), agent.id, &secret, card, forwarded_from_process);
+        let server = Server::new(
+            cli.clone(),
+            agent.id,
+            &secret,
+            card.map(|launch| launch.card_id),
+            forwarded_from_process,
+        );
         channel.write_private(CLAUDE_CONFIG_FILE, &server.claude_config())?;
         channel.append_instructions(&instructions(agent, role))
     })();
@@ -333,8 +404,11 @@ fn wire_claude_with(
         Ok(()) => {
             let path = channel.dir().join(CLAUDE_CONFIG_FILE);
             let mut arg = format!("--mcp-config {}", shell_quote(&path.display().to_string()));
-            if card.is_some() {
-                arg = format!("{arg} {}", claude_card_options(role));
+            if let Some(launch) = card {
+                arg = format!(
+                    "{arg} {}",
+                    claude_card_options(role, launch.review.is_some())
+                );
             }
             (
                 Some(arg),
@@ -354,7 +428,7 @@ pub async fn wire_opencode(
     agent: &Agent,
     directory: &Path,
     role: Option<&Role>,
-    card: Option<i64>,
+    card: Option<&CardLaunch>,
 ) -> AgentEntry {
     let Some(cli) = cli_path() else {
         return AgentEntry::unavailable(no_cli_note());
@@ -365,7 +439,13 @@ pub async fn wire_opencode(
             return AgentEntry::unavailable(format!("the session secret could not be made: {err}"));
         }
     };
-    let server = Server::new(cli.clone(), agent.id, &secret, card, forwarded_from_process);
+    let server = Server::new(
+        cli.clone(),
+        agent.id,
+        &secret,
+        card.map(|launch| launch.card_id),
+        forwarded_from_process,
+    );
     match crate::agents::opencode::register_mcp(directory, &server.opencode_config()).await {
         Ok(()) => AgentEntry::new(EntryStatus::Registered, Some(&cli), role, None),
         Err(err) => {
@@ -667,7 +747,13 @@ mod tests {
             "bash: ask".into(),
             "Bash(a),Bash(b)".into(),
         ];
-        let (arg, entry) = wire_claude_with(Some(cli), &roots, &agent, Some(&role), Some(12));
+        let (arg, entry) = wire_claude_with(
+            Some(cli),
+            &roots,
+            &agent,
+            Some(&role),
+            Some(&CardLaunch::work(12)),
+        );
         let arg = arg.unwrap();
 
         // The card is the server's own environment, not an argument anybody can change.
@@ -710,6 +796,30 @@ mod tests {
     }
 
     #[test]
+    fn a_reviewer_reads_no_configuration_of_the_checkout_and_may_not_edit() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (agent, roots) = agent_in(&dir, "reviewer-3", "reviewer");
+        let role = reviewer();
+        let launch = CardLaunch::review(3, "worker-3", "main");
+        let (arg, _) = wire_claude_with(Some(cli), &roots, &agent, Some(&role), Some(&launch));
+        let arg = arg.unwrap();
+        assert!(arg.contains("--setting-sources user"), "{arg}");
+        assert!(arg.contains("--strict-mcp-config"), "{arg}");
+        assert!(!arg.contains("acceptEdits"), "{arg}");
+        assert!(
+            arg.contains(",Edit'") || arg.contains(",Edit,"),
+            "no editing tool at all: {arg}"
+        );
+        assert!(arg.contains("mcp__axiomata__review_verdict"), "{arg}");
+        let prompt = start_prompt(&agent, &launch);
+        assert!(
+            prompt.contains("worker-3") && prompt.contains("git diff main...HEAD"),
+            "{prompt}"
+        );
+    }
+
+    #[test]
     fn a_hand_started_session_gets_no_unattended_rights() {
         let dir = temp_dir();
         let cli = fake_cli(&dir);
@@ -726,7 +836,7 @@ mod tests {
     fn the_start_prompt_names_the_card_and_never_carries_its_text() {
         let dir = temp_dir();
         let (agent, _) = agent_in(&dir, "it's-a-name", "allrounder");
-        let prompt = start_prompt(&agent, 12);
+        let prompt = start_prompt(&agent, &CardLaunch::work(12));
         assert!(
             prompt.contains("#12") && prompt.contains("get_card") && prompt.contains("report_done"),
             "{prompt}"
@@ -736,7 +846,7 @@ mod tests {
             "a restart must not start over: {prompt}"
         );
         // After `--`, whole and quoted, even with a quote in the name.
-        let tail = claude_prompt_tail(&agent, 12);
+        let tail = claude_prompt_tail(&agent, &CardLaunch::work(12));
         assert!(tail.starts_with("-- '") && tail.ends_with('\''), "{tail}");
         assert!(tail.contains(r"it'\''s-a-name"), "{tail}");
     }

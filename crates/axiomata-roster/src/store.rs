@@ -311,19 +311,48 @@ pub fn default_role() -> Role {
     }
 }
 
-/// Seeds [`default_role`] if there is no `allrounder` yet — never overwrites, like the bundled skills.
-/// Returns whether it wrote.
+/// The role that judges cards (A21, A24): kind `review`, without an engine — the studio picks one that is not the engine
+/// of the session that did the work, or asks. The text is what a reviewer is told about *how* to review; what to review
+/// and against what comes in the start prompt.
+pub fn reviewer_role() -> Role {
+    Role {
+        name: "reviewer".into(),
+        description: "Judges the work another session did on a card".into(),
+        kind: "review".into(),
+        tier: Tier::Medium,
+        engine: None,
+        fallback_engines: Vec::new(),
+        permissions: Vec::new(),
+        limits: Limits::default(),
+        creates: Vec::new(),
+        instructions: "You judge work somebody else did; you do not do it again. The card's acceptance criteria are the \
+                       standard, not your taste: approve when they are met and you found no defect you would not want \
+                       on the main branch, and return the card otherwise. Read the changed files in their context, not \
+                       only the diff, and run what can be run without changing anything. A note that returns a card \
+                       names what is wrong and how to see it (file, line, command), in a few lines, so the worker can \
+                       fix it without asking you. Do not fix the work yourself, and do not write to the worker apart \
+                       from the verdict — the studio passes your note on."
+            .into(),
+        source: Source::User,
+    }
+}
+
+/// Seeds [`default_role`] and [`reviewer_role`] where they are missing — never overwrites, like the bundled skills.
+/// Returns whether it wrote anything.
 ///
 /// # Errors
 ///
 /// As [`save_role`].
 pub fn seed_default_roles(dir: &Path) -> Result<bool> {
-    let role = default_role();
-    if fs::symlink_metadata(dir.join(&role.name)).is_ok() {
-        return Ok(false);
+    let mut wrote = false;
+    for role in [default_role(), reviewer_role()] {
+        if fs::symlink_metadata(dir.join(&role.name)).is_ok() {
+            continue;
+        }
+        save_role(dir, &role)?;
+        wrote = true;
     }
-    save_role(dir, &role)?;
-    Ok(true)
+    Ok(wrote)
 }
 
 #[cfg(test)]
@@ -456,7 +485,35 @@ pub(crate) mod tests {
         save_role(&tmp.0, &edited).unwrap();
         assert!(!seed_default_roles(&tmp.0).unwrap());
         let loaded = load_roles(&tmp.0, Source::User).unwrap();
-        assert_eq!(loaded.roles[0].description, "my own words");
+        let allrounder = loaded
+            .roles
+            .iter()
+            .find(|r| r.name == "allrounder")
+            .unwrap();
+        assert_eq!(allrounder.description, "my own words");
+    }
+
+    #[test]
+    fn the_reviewer_is_seeded_next_to_the_allrounder_and_is_a_valid_role_that_judges() {
+        let tmp = Tmp::new();
+        assert!(seed_default_roles(&tmp.0).unwrap());
+        let loaded = load_roles(&tmp.0, Source::User).unwrap();
+        let names: Vec<_> = loaded.roles.iter().map(|r| r.name.as_str()).collect();
+        assert!(
+            names.contains(&"allrounder") && names.contains(&"reviewer"),
+            "{names:?}"
+        );
+        let reviewer = loaded.roles.iter().find(|r| r.name == "reviewer").unwrap();
+        assert_eq!(reviewer.kind, "review");
+        assert_eq!(
+            reviewer.engine, None,
+            "the studio picks an engine that is not the worker's"
+        );
+        assert!(reviewer.creates.is_empty() && reviewer.permissions.is_empty());
+        // A role that was seeded earlier gets the other one without losing its own edits.
+        fs::remove_dir_all(tmp.0.join("reviewer")).unwrap();
+        assert!(seed_default_roles(&tmp.0).unwrap());
+        assert!(!seed_default_roles(&tmp.0).unwrap());
     }
 
     #[test]

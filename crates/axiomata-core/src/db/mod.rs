@@ -44,6 +44,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (15, axiomata_board::SCHEMA_SQL_V2),
     // The mailbox between agent sessions and the owner (a2a.md, CP-A3).
     (16, axiomata_ide::SCHEMA_SQL_V7),
+    // The card a session was started for, and whether it reviews it (a2a.md, CP-A6b).
+    (17, axiomata_ide::SCHEMA_SQL_V8),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

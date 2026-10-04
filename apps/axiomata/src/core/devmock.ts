@@ -1582,6 +1582,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "release_card":
       return true as T;
+    case "start_review_session": {
+      const template = ideAgents[0];
+      const agent = { ...template, id: 950 + Number(args.cardId), name: `reviewer-${args.cardId}`, card_review: true };
+      if (!ideAgents.some((a) => a.id === agent.id)) ideAgents.push(agent);
+      return { agent, card_id: args.cardId, role: "reviewer", engine_id: (args.engineId as string | null) ?? "mock-engine" } as T;
+    }
+    case "open_review_sessions":
+      return [] as T;
+    case "take_over_card":
+      return { outcome: "done", commit: "0123456789abcdef0123456789abcdef01234567", cleanup: [] } as T;
     // No mail in the browser mock: there is never a line to type.
     case "ide_mailbox_nudge":
       return null as T;
