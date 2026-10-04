@@ -1563,8 +1563,7 @@ whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/
 
 **Debug (#51)** exists for Python (debugpy), Rust, C/C++ and Swift (`lldb-dap`) — crate `axiomata-dap`, `ide/DebugPanel.svelte`, gutter breakpoints with conditions/hit counts/log points, watch expressions, Rust tests and panic stop; `debug.json` runs only after a hash confirmation, like Run. **Node/TypeScript is parked** (owner, 2026-10-02): js-debug needs TCP + child sessions and cannot be fetched/tested on the dev box (`docs/plans/editor-projekt-werkzeuge.md`).
 
-**Next / open:** the owner's Mac test of the Studio, of Run/Tasks and of Debug (the Tauri glue in `src-tauri` is not
-compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, problem matchers);
+**Next / open:** Run/Tasks (#50) and Debug (#51) were tested on the Mac and accepted by the owner on 2026-10-04; #50 follow-ups (clickable `file:line` errors, problem matchers);
 **agent-to-agent communication (M7.5)** — planned and approved 2026-10-03, nothing built yet: `docs/plans/a2a.md` (engine / agent /
 session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.

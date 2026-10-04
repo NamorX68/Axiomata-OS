@@ -21,8 +21,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (Kanban, IDE shell, agent panes, git layer), the editor ED0–ED6, Opencode 2, the **Studio** workbench
   (`docs/plans/workbench.md`), Run/Tasks (#50) and Debug (#51). **M4 (always-on scheduling) was dropped** (owner,
   2026-09-20) — do not plan around it. Node/TypeScript debugging is parked (owner, 2026-10-02).
-- **Next / open:** the owner's Mac test of the Studio, Run/Tasks and Debug (the Tauri glue in `src-tauri` is not
-  compilable on the Linux dev box); #50 follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
+- **Next / open:** Run/Tasks (#50) and Debug (#51) were tested on the Mac and accepted by the owner (2026-10-04); #50
+  follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
   CP-A1 (engines + roles), CP-A2 (the board's agent flow) and CP-A3 (the mailbox core) and CP-A4 (the MCP server) built 2026-10-04, next CP-A5 (per-harness entry, `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
   ⌘K spotlight search and further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
