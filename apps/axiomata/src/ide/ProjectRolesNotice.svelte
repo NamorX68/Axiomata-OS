@@ -70,7 +70,9 @@
       role.engine ? `engine: ${role.engine}` : "engine: chosen at start",
       role.fallback_engines.length > 0 ? `falls back to: ${role.fallback_engines.join(", ")}` : "",
       role.creates.length > 0 ? `creates cards without asking: ${role.creates.join(", ")}` : "",
-      role.permissions.length > 0 ? `rights: ${role.permissions.join("; ")}` : "",
+      role.permissions.length > 0
+        ? `rights, granted without asking in sessions started for a card: ${role.permissions.join("; ")}`
+        : "",
       limitsText(role.limits) ? `limits: ${limitsText(role.limits)}` : "limits: none of its own",
     ].filter(Boolean);
 </script>
@@ -84,7 +86,8 @@
     <div class="trust" role="alert">
       <p>
         This project has its own agent roles in <code>.axiomata/agents/</code>. Their instructions are what an agent
-        will obey, so they stay off until you have read them.
+        will obey — and the rights they list are granted without asking in a session started for a card, where nobody
+        watches each step — so they stay off until you have read them.
       </p>
       {#if found.overrides.blocked}
         <p class="problem">They cannot be confirmed: {found.overrides.blocked}.</p>

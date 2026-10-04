@@ -147,12 +147,18 @@ impl Server {
         command: PathBuf,
         agent_id: i64,
         secret: &str,
+        card: Option<i64>,
         forwarded: impl Fn(&str) -> Option<String>,
     ) -> Self {
         let mut env = vec![
             ("AXIOMATA_AGENT_ID".to_owned(), agent_id.to_string()),
             ("AXIOMATA_AGENT_TOKEN".to_owned(), secret.to_owned()),
         ];
+        // The card the studio started this session for: with it the reviewer judges the implementer's card rather
+        // than one it holds itself, and a session cannot be steered to another card by a tool argument.
+        if let Some(card) = card {
+            env.push(("AXIOMATA_CARD_ID".to_owned(), card.to_string()));
+        }
         env.extend(
             FORWARDED_ENV
                 .iter()
@@ -223,15 +229,85 @@ pub fn instructions(agent: &Agent, role: Option<&Role>) -> String {
     text
 }
 
+/// The tools of the server a role gets, as the server names them (`list_agents`, `claim_task`, …).
+pub fn role_tools(role: Option<&Role>) -> Vec<&'static str> {
+    role.map_or(Capabilities::NONE, Capabilities::of)
+        .tool_names()
+}
+
+/// The first thing a session started for a card is told (A35): who it is and which card, never the card's text — that
+/// comes through `get_card`, so no card text ever sits in a shell line. A restart goes through the same words, which is
+/// why they say what to do with work that is already there.
+pub fn start_prompt(agent: &Agent, card_id: i64) -> String {
+    format!(
+        "You are the session \"{name}\", role `{role}`, and your card is #{card_id}. Read your inbox with `read_inbox`, \
+         then read the card with `get_card` and work on it in your own worktree. If your branch already has commits or \
+         changes you were interrupted: look at `git log` and `git diff` and carry on instead of starting over. When the \
+         acceptance criteria are met, call `report_done` with a short summary.",
+        name = agent.name,
+        role = agent.agent_role,
+    )
+}
+
+/// Whether a rule of a role file may be granted without asking: `Tool(spec)` with a spec that narrows something. A bare
+/// tool name (`Bash`), a catch-all (`Bash(*)`, `Bash(:*)`) or a rule with a comma (it would split into two) would
+/// open a whole tool to a session nobody watches, so such a rule is not passed on — the owner keeps being asked.
+fn grantable(rule: &str) -> bool {
+    let rule = rule.trim();
+    let Some(open) = rule.find('(') else {
+        return false;
+    };
+    if open == 0 || !rule.ends_with(')') || rule.contains(',') {
+        return false;
+    }
+    let spec = &rule[open + 1..rule.len() - 1];
+    spec.chars().any(|c| !matches!(c, '*' | ':' | ' '))
+}
+
+/// What a card session of Claude Code may never do, whatever the role says: push (the M7.3 rule "never a push"; the
+/// Opencode session gets the same as a rule), and write its own rules — `acceptEdits` takes edits without asking, and a
+/// session that can write `.claude/settings*.json` or a `.mcp.json` of its worktree could widen its own rights next
+/// time.
+const CLAUDE_CARD_DENIED: &str = "Bash(git push),Bash(git push *),Bash(git * push),Bash(git * push *),Edit(.claude/**),Edit(.mcp.json)";
+
+/// What an unattended Claude Code session may do without asking (A34): edits in its worktree, the server's own tools
+/// for its role — each one listed, so no wildcard grants a tool the role does not have — and what the role file adds
+/// that is narrow enough ([`grantable`]). Everything else stays a question in the pane. `bypassPermissions` is never
+/// used, not even by a role, and a push is refused outright.
+fn claude_card_options(role: Option<&Role>) -> String {
+    let mut allowed: Vec<String> = role_tools(role)
+        .into_iter()
+        .map(|tool| format!("mcp__{SERVER_NAME}__{tool}"))
+        .collect();
+    if let Some(role) = role {
+        for rule in role.permissions.iter().filter(|rule| grantable(rule)) {
+            allowed.push(rule.trim().to_owned());
+        }
+    }
+    format!(
+        "--permission-mode acceptEdits --allowedTools {} --disallowedTools {}",
+        shell_quote(&allowed.join(",")),
+        shell_quote(CLAUDE_CARD_DENIED),
+    )
+}
+
+/// The end of the launch command of a card session: `--` and the start prompt, so that nothing after it can be taken
+/// for an option (and `--allowedTools` does not swallow it).
+pub fn claude_prompt_tail(agent: &Agent, card_id: i64) -> String {
+    format!("-- {}", shell_quote(&start_prompt(agent, card_id)))
+}
+
 /// Wires the server into a Claude Code session: issues this start's secret, writes the configuration and the
-/// instructions into the channel and returns the argument for the launch command (already shell-quoted), plus what the
-/// owner is shown.
+/// instructions into the channel and returns the options for the launch command (already shell-quoted), plus what the
+/// owner is shown. For a card session (`card`) the options also carry the unattended rights; the caller appends
+/// [`claude_prompt_tail`] after everything else.
 pub fn wire_claude(
     roots: &ChannelRoots,
     agent: &Agent,
     role: Option<&Role>,
+    card: Option<i64>,
 ) -> (Option<String>, AgentEntry) {
-    wire_claude_with(cli_path(), roots, agent, role)
+    wire_claude_with(cli_path(), roots, agent, role, card)
 }
 
 /// [`wire_claude`] with the CLI's path given, so a test does not depend on where its own binary sits.
@@ -240,6 +316,7 @@ fn wire_claude_with(
     roots: &ChannelRoots,
     agent: &Agent,
     role: Option<&Role>,
+    card: Option<i64>,
 ) -> (Option<String>, AgentEntry) {
     let Some(cli) = cli else {
         return (None, AgentEntry::unavailable(no_cli_note()));
@@ -247,14 +324,17 @@ fn wire_claude_with(
     let channel = Channel::for_agent(roots, agent.id);
     let wired = (|| {
         let secret = session_token::issue(roots, agent.id)?;
-        let server = Server::new(cli.clone(), agent.id, &secret, forwarded_from_process);
+        let server = Server::new(cli.clone(), agent.id, &secret, card, forwarded_from_process);
         channel.write_private(CLAUDE_CONFIG_FILE, &server.claude_config())?;
         channel.append_instructions(&instructions(agent, role))
     })();
     match wired {
         Ok(()) => {
             let path = channel.dir().join(CLAUDE_CONFIG_FILE);
-            let arg = format!("--mcp-config {}", shell_quote(&path.display().to_string()));
+            let mut arg = format!("--mcp-config {}", shell_quote(&path.display().to_string()));
+            if card.is_some() {
+                arg = format!("{arg} {}", claude_card_options(role));
+            }
             (
                 Some(arg),
                 AgentEntry::new(EntryStatus::Registered, Some(&cli), role, None),
@@ -273,6 +353,7 @@ pub async fn wire_opencode(
     agent: &Agent,
     directory: &Path,
     role: Option<&Role>,
+    card: Option<i64>,
 ) -> AgentEntry {
     let Some(cli) = cli_path() else {
         return AgentEntry::unavailable(no_cli_note());
@@ -283,7 +364,7 @@ pub async fn wire_opencode(
             return AgentEntry::unavailable(format!("the session secret could not be made: {err}"));
         }
     };
-    let server = Server::new(cli.clone(), agent.id, &secret, forwarded_from_process);
+    let server = Server::new(cli.clone(), agent.id, &secret, card, forwarded_from_process);
     match crate::agents::opencode::register_mcp(directory, &server.opencode_config()).await {
         Ok(()) => AgentEntry::new(EntryStatus::Registered, Some(&cli), role, None),
         Err(err) => {
@@ -332,9 +413,13 @@ mod tests {
     }
 
     fn server() -> Server {
-        Server::new(PathBuf::from("/opt/ax/axiomata-cli"), 7, "s3cret", |name| {
-            (name == AXIOMATA_HOME_ENV).then(|| "/scratch/home".to_owned())
-        })
+        Server::new(
+            PathBuf::from("/opt/ax/axiomata-cli"),
+            7,
+            "s3cret",
+            None,
+            |name| (name == AXIOMATA_HOME_ENV).then(|| "/scratch/home".to_owned()),
+        )
     }
 
     #[test]
@@ -485,7 +570,7 @@ mod tests {
         let cli = fake_cli(&dir);
         let (agent, roots) = agent_in(&dir, "Rev", "reviewer");
         let role = reviewer();
-        let (arg, entry) = wire_claude_with(Some(cli.clone()), &roots, &agent, Some(&role));
+        let (arg, entry) = wire_claude_with(Some(cli.clone()), &roots, &agent, Some(&role), None);
 
         let path = Channel::for_agent(&roots, agent.id)
             .dir()
@@ -535,9 +620,9 @@ mod tests {
                 .unwrap()
                 .to_owned()
         };
-        wire_claude_with(Some(cli.clone()), &roots, &agent, None);
+        wire_claude_with(Some(cli.clone()), &roots, &agent, None, None);
         let first = secret_of(&roots);
-        wire_claude_with(Some(cli), &roots, &agent, None);
+        wire_claude_with(Some(cli), &roots, &agent, None, None);
         let second = secret_of(&roots);
         assert_ne!(first, second);
         assert!(!session_token::verify(&roots, agent.id, &first));
@@ -548,7 +633,7 @@ mod tests {
     fn without_a_cli_the_session_starts_without_the_tools_and_says_why() {
         let dir = temp_dir();
         let (agent, roots) = agent_in(&dir, "Dev", "allrounder");
-        let (arg, entry) = wire_claude_with(None, &roots, &agent, None);
+        let (arg, entry) = wire_claude_with(None, &roots, &agent, None, None);
         assert!(
             arg.is_none(),
             "no flag for a configuration that does not exist"
@@ -561,6 +646,98 @@ mod tests {
                 .join(CLAUDE_CONFIG_FILE)
                 .exists()
         );
+    }
+
+    #[test]
+    fn a_card_session_gets_its_card_in_the_server_and_the_unattended_rights_in_its_options() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (agent, roots) = agent_in(&dir, "builder-12", "allrounder");
+        let mut role = reviewer();
+        role.name = "allrounder".into();
+        role.kind = "implement".into();
+        role.permissions = vec![
+            "Bash(git status *)".into(),
+            "Bash(cargo test)".into(),
+            // Too wide or malformed to be granted unattended: dropped, not passed on.
+            "Bash".into(),
+            "Bash(*)".into(),
+            "Bash(:*)".into(),
+            "bash: ask".into(),
+            "Bash(a),Bash(b)".into(),
+        ];
+        let (arg, entry) = wire_claude_with(Some(cli), &roots, &agent, Some(&role), Some(12));
+        let arg = arg.unwrap();
+
+        // The card is the server's own environment, not an argument anybody can change.
+        let path = Channel::for_agent(&roots, agent.id)
+            .dir()
+            .join(CLAUDE_CONFIG_FILE);
+        let config: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            config["mcpServers"][SERVER_NAME]["env"]["AXIOMATA_CARD_ID"],
+            "12"
+        );
+
+        assert!(arg.contains("--permission-mode acceptEdits"), "{arg}");
+        assert!(!arg.contains("bypassPermissions"), "{arg}");
+        // Each of the role's tools is listed by name, and nothing the role does not have.
+        assert!(arg.contains("mcp__axiomata__claim_task"), "{arg}");
+        assert!(arg.contains("mcp__axiomata__report_done"), "{arg}");
+        assert!(
+            !arg.contains("review_verdict") && !arg.contains("create_card"),
+            "{arg}"
+        );
+        assert!(!arg.contains("mcp__axiomata__*"), "no wildcard: {arg}");
+        assert!(
+            arg.contains("Bash(git status *),Bash(cargo test)'"),
+            "only the narrow rules: {arg}"
+        );
+        assert!(
+            !arg.contains("Bash(*)") && !arg.contains("bash: ask"),
+            "{arg}"
+        );
+        assert!(
+            arg.contains("--disallowedTools '"),
+            "a push is refused: {arg}"
+        );
+        assert!(
+            arg.contains("Edit(.claude/**)") && arg.contains("Edit(.mcp.json)"),
+            "its own rules are closed: {arg}"
+        );
+        assert_eq!(entry.status, EntryStatus::Registered);
+    }
+
+    #[test]
+    fn a_hand_started_session_gets_no_unattended_rights() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (agent, roots) = agent_in(&dir, "Dev", "allrounder");
+        let (arg, _) = wire_claude_with(Some(cli), &roots, &agent, None, None);
+        let arg = arg.unwrap();
+        assert!(
+            !arg.contains("permission-mode") && !arg.contains("allowedTools"),
+            "{arg}"
+        );
+    }
+
+    #[test]
+    fn the_start_prompt_names_the_card_and_never_carries_its_text() {
+        let dir = temp_dir();
+        let (agent, _) = agent_in(&dir, "it's-a-name", "allrounder");
+        let prompt = start_prompt(&agent, 12);
+        assert!(
+            prompt.contains("#12") && prompt.contains("get_card") && prompt.contains("report_done"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("interrupted"),
+            "a restart must not start over: {prompt}"
+        );
+        // After `--`, whole and quoted, even with a quote in the name.
+        let tail = claude_prompt_tail(&agent, 12);
+        assert!(tail.starts_with("-- '") && tail.ends_with('\''), "{tail}");
+        assert!(tail.contains(r"it'\''s-a-name"), "{tail}");
     }
 
     #[test]

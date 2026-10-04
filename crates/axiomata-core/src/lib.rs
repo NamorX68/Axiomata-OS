@@ -17,6 +17,7 @@ pub mod agents;
 pub mod board_mirror;
 pub use axiomata_board as board;
 pub mod bridge;
+pub mod card_session;
 pub mod config;
 pub mod dashboard;
 pub mod db;

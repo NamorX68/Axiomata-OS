@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A5 gebaut (2026-10-04); weiter mit CP-A6.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A5 und CP-A6a gebaut (2026-10-04); weiter mit CP-A6b.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -354,9 +354,39 @@ Was das Geheimnis schließt: ein **MCP-Server als eine andere Sitzung** zu start
 **Offen:** (a) der Server einer Opencode-Sitzung lebt je Verzeichnis und überlebt das Terminal — seine Anwesenheitssperre sagt „lebt“, nachdem das Pane zu ist; der Statusbeobachter weiß es besser und
 ist in CP-A6/CP-A9 zu befragen; (b) die Rollen-Anweisung erreicht Opencode erst als erste Nachricht (CP-A6); (c) der Nachrichten-Hinweis während der Arbeit (Hooks, Weg 3) bleibt „später“.
 
-**A6a — Darstellung (Vorschlag des Owners, 2026-10-04, noch zu bestätigen vor CP-A7):** drei Modi im Studio statt zwei: **Editor | Canvas | Flow**. *Canvas* = die heutige freie Fläche der Agenten-Terminals
+**A6a — Darstellung (Vorschlag des Owners, vom Owner bestätigt 2026-10-04):** drei Modi im Studio statt zwei: **Editor | Canvas | Flow**. *Canvas* = die heutige freie Fläche der Agenten-Terminals
 (ohne Karten); *Flow* hat die Reiter **Planung** (Planer-Terminal, Vorschläge, Freigabe, CP-A7), **Agents** (Rollenkatalog, Sitzungen, Team-Panel, Nachrichten, CP-A9) und **Flowansicht** (Graph, CP-A10).
 Ersetzt A6 (dort ging die freie Fläche im Flow auf) und A36, wo sie abweichen.
+
+## CP-A6a im Detail (gebaut 2026-10-04)
+
+**Zuschnitt (Owner, 2026-10-04):** CP-A6 in drei Stufen — **6a Karte starten** (hier), **6b** Reviewer, Rückgabe und Take-over (Stücke 2–4), **6c** Limits je Sitzung (A9/A33). **Projekt beim Start gewählt** (Dialog, CLI `--project`); Folgekarten und der
+Reviewer übernehmen das Projekt der Vorgängersitzung, der Planer bekommt seines mit CP-A7 am Plan. Der Startknopf liegt am **Kanban-Brett** (Detailansicht einer bereiten Karte), solange es den Flow-Modus noch nicht gibt.
+
+**Ablauf:** `card_session::start_card_session` macht eine **Sitzung** (Agentenzeile, Name `<rolle>-<karte>`, bei Wiederholung `-2`, …) der Rolle der Karte (`card.agent`, sonst `allrounder`) auf einer Engine — die gewählte, sonst die der Rolle, sonst die erste vorhandene
+Ausweich-Engine; nennt nichts eine Engine, wird der Owner beim Start gefragt — und **claimt die Karte atomar für sie** (A20, `flow::start_card`, Akteur = die Sitzung). Scheitert der Claim (Vorschlag, gehalten, nicht bereit, abgesagt), wird die Zeile wieder gelöscht. Verlangt:
+ein Repository (unbeaufsichtigte Sitzungen teilen nie den Ordner des Owners), `axiomata-cli` für die Teamwerkzeuge, eine Rolle, die Karten **bearbeitet** (nicht prüft oder plant), eine Engine **ohne eigenen Befehl** (E13: den fasst Axiomata nicht an). Karten mit Vorgängern werden abgelehnt
+(der Start auf dem Zweig des Vorgängers, A16, kommt mit 6b). Das Gegenstück `flow::release_started` gibt eine gestartete Karte zurück (Halter oder Owner, Karte zurück nach Offen, Ereignis `released`); CLI `board start|release` sind Owner-Schritte.
+
+Die **Harness startet, wenn der Pane der Sitzung öffnet** (`prepare_ide_agent` → `start_agent`): `card_of` erkennt, dass die Sitzung eine Karte hält, und startet sie dann unbeaufsichtigt — `AXIOMATA_CARD_ID` in der Umgebung des MCP-Servers (kein Argument, das ein Modell ändern könnte),
+Claude Code mit `--permission-mode acceptEdits --allowedTools <je Werkzeug der Rolle, einzeln, kein Wildcard> + role.permissions` und dem **Start-Prompt hinter `--`** (A35: nur Namen und Ids, nie der Kartentext, den holt der Agent mit `get_card`), Opencode mit Regeln `axiomata_<werkzeug>: allow` je Werkzeug
+(Opencode nennt MCP-Werkzeuge `<server>_<werkzeug>`) plus `git push` verboten und der ersten Nachricht (Rolle + Start-Prompt) über die API — **nur bei einer neu angelegten Sitzung**, eine fortgesetzte hat sie schon. `role.permissions` sind Regeln im Stil von Claude Code (`Bash(git status *)`) und
+gelten nur dort. Fehlen die Teamwerkzeuge (kein CLI, Dienst lehnt ab, eigener Befehl, Mini-Harness), wird eine Karten-Sitzung **nicht gestartet**: sie könnte nicht berichten. Alles andere bleibt eine Rückfrage im Pane (A34); `bypassPermissions` nie.
+Eine Sitzung, die eine Karte **selbst** genommen hat (`claim_task`) und neu gestartet wird, zählt genauso als Karten-Sitzung — das braucht eine unterbrochene Sitzung.
+
+**Oberfläche:** „Starten …“ in der Detailansicht einer Karte im Zustand `ready` öffnet ein kleines Formular (Projekt, vorbelegt mit dem zuletzt geöffneten; Engine, vorbelegt „die der Rolle“); danach öffnet das Studio den Pane der Sitzung im Agents-Modus (`shell:agent` →
+`ide/agentRequest.ts` → `IdeView.showRequestedAgent`). **Live bestätigt (Scratch-Home, 2026-10-04):** Claude Code (Haiku) las `get_card`, schrieb die Datei im Worktree und rief `report_done` — Karte in Review mit Zusammenfassung; Opencode: Sitzung mit den Einzelregeln, Server verbunden, erste Nachricht zugestellt.
+
+**Aus Review und Security-Audit von CP-A6a eingearbeitet:** (1) die Opencode-Sitzung wird erst **nach** Verdrahtung und erster Nachricht gemerkt — scheitert der Start dazwischen, gäbe der nächste Start sonst keine erste Nachricht mehr; (2) `card_of` zählt nur
+eine Karte **in Arbeit** (nicht in Review: ein neu gestarteter Pane soll nicht noch einmal arbeiten) und eine Sitzung mit eigenem Befehl oder der Mini-Harness wird bei gehaltener Karte normal gestartet statt abgelehnt; (3) `role.permissions` gehen nur noch durch, wenn sie eng sind (`Tool(spec)`
+mit einer Einschränkung; nackte Werkzeugnamen, `Bash(*)`, Kommas fallen weg), Claude bekommt zusätzlich `--disallowedTools` für **`git push` in allen Schreibweisen und `Edit(.claude/**)`, `Edit(.mcp.json)`** (`acceptEdits` nimmt Änderungen ohne Rückfrage, die Sitzung soll ihre eigenen Regeln nicht
+erweitern), Opencode verbietet `git * push` ebenfalls; (4) `flow::release_started` lässt eine gescheiterte oder abgesagte Karte nicht nach Offen zurück; (5) **Freigeben** (`release_card_session`, Tauri `release_card`, CLI `board release`, Kanban-Knopf bei einer Karte in Arbeit) nimmt außerdem das **Geheimnis der Sitzung zurück**,
+und `board start` gibt die Karte selbst zurück, wenn die Sitzung nicht startet; (6) Anfragen an das Studio stehen in einer Warteschlange, ein Fehler beim Öffnen wird gemeldet; (7) die Bestätigung der Projekt-Rollen sagt jetzt, dass deren Rechte in Karten-Sitzungen **ohne Rückfrage** gelten.
+**Bewusst offen / zu wissen:** (a) jede erlaubte Bau- oder Testbefehlszeile (`Bash(cargo test)`) plus `acceptEdits` ist Codeausführung — der Agent ändert `build.rs` oder Tests und führt sie aus; die Rechte einer Rolle sind damit Vertrauen in die Rolle, auch die eigenen des Owners;
+(b) Opencodes Vorgabe ohne passende Regel ist laut Dokumentation `ask`, dann bleiben Shell und Edits Rückfragen — am Mac bei der ersten echten Karte zu bestätigen; (c) Freigeben stoppt den laufenden Pane nicht (der Owner schließt ihn), die Sitzung könnte `claim_task` erneut aufrufen, bis ihr Pane zu ist;
+(d) die Rechte der Rolle zeigt das Startformular noch nicht; (e) ein einzelnes `card_of`-Flag an der Sitzung statt der Ableitung aus dem Claim wäre robuster (LOW).
+
+**Noch nicht (6b/6c und später):** Reviewer (andere Engine, eigener Worktree), Rückgabe, Take-over und Aufräumen (A22), Start auf dem Zweig eines Vorgängers, Fortsetzen/Freigeben unterbrochener Karten in der Oberfläche (A23; `board release` gibt es als CLI), die Rückfrage einer wartenden Sitzung als `input_required` an der Karte, Kosten- und Schrittgrenzen.
 
 ## Offene Fragen der Runde
 

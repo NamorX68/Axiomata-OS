@@ -237,6 +237,18 @@ export interface IdeAgent {
   effective_env: string;
 }
 
+/**
+ * The session `start_card_session` made for a card (A2A CP-A6a): it holds the card now, and its pane — opened in the
+ * Studio — starts the harness.
+ */
+export interface CardSession {
+  agent: IdeAgent;
+  card_id: number;
+  /** The role the card named, else `allrounder`. */
+  role: string;
+  engine_id: string;
+}
+
 /** How a session is wired to the agent MCP server. Mirrors `axiomata_core::agent_entry::EntryStatus`. */
 export type AgentEntryStatus = "registered" | "unavailable" | "not_applicable";
 

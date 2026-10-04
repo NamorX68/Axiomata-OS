@@ -200,6 +200,8 @@ pub fn run() {
             commands::list_board_dependencies,
             commands::add_card_dependency,
             commands::remove_card_dependency,
+            commands::start_card_session,
+            commands::release_card,
             commands::list_card_events,
             commands::add_card_note,
             commands::approve_card_proposal,

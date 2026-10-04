@@ -504,6 +504,19 @@ enum BoardAction {
         #[arg(long)]
         actor: Option<String>,
     },
+    /// Start a card: make a session of its role for it in a project, take the card for it, and print how the session
+    /// starts (the same as `ide agents prepare`). The owner's step.
+    Start {
+        id: i64,
+        /// The project (repository) the session works in.
+        #[arg(long)]
+        project: i64,
+        /// An engine of the catalog; without it the role's own engine is used.
+        #[arg(long)]
+        engine: Option<String>,
+    },
+    /// Give a started card back: the claim is dropped and the card waits in its open column again. The owner's step.
+    Release { id: i64 },
     /// Move a card into this board's first done column.
     Done { id: i64 },
     /// Sign a finished card off. Refused for the actor who claimed it.
@@ -682,7 +695,7 @@ async fn main() -> Result<()> {
             }
         },
         Command::Routines { action } => return routines_cmd(&core, action).await,
-        Command::Board { action } => return board_cmd(&core, action),
+        Command::Board { action } => return board_cmd(&core, action).await,
         Command::Files { action } => files_cmd::run(&core, action)?,
         Command::Ide { action } => return ide_cmd(&core, action).await,
         Command::Assistant {
@@ -1372,7 +1385,7 @@ async fn routines_tick(core: &AxiomataCore) -> Result<()> {
 
 // ----------------------------------------------------------------- board ---
 
-fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
+async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
     use board_flow::{mcp_only, owner_only, resolve_actor};
     match action {
         BoardAction::List { board, archived } => board_list(core, board, archived),
@@ -1432,6 +1445,18 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         BoardAction::Claim { id, actor } => {
             mcp_only("taking a card")?;
             board_claim(core, id, &resolve_actor(actor)?)
+        }
+        BoardAction::Start {
+            id,
+            project,
+            engine,
+        } => {
+            owner_only("starting a card")?;
+            board_start(core, id, project, engine).await
+        }
+        BoardAction::Release { id } => {
+            owner_only("giving a card back")?;
+            board_release(core, id)
         }
         BoardAction::Done { id } => {
             owner_only("moving a card to done")?;
@@ -2544,6 +2569,48 @@ fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize, actor: &s
     }
     board_mirror::after_card_change(&db, &read_config(core), id);
     println!("card #{id} moved to column #{column}");
+    Ok(())
+}
+
+async fn board_start(
+    core: &AxiomataCore,
+    id: i64,
+    project: i64,
+    engine: Option<String>,
+) -> Result<()> {
+    let session = axiomata_core::card_session::start_card_session(
+        core,
+        &axiomata_core::card_session::StartRequest {
+            card_id: id,
+            project_id: project,
+            engine_id: engine,
+        },
+    )?;
+    board_mirror::after_card_change(&core.db_lock(), &read_config(core), id);
+    println!(
+        "card #{id} taken for the new session #{} {} (role {}, engine {})",
+        session.agent.id, session.agent.name, session.role, session.engine_id
+    );
+    // A session that cannot be started would hold the card for nothing: give it back.
+    if let Err(err) = agent_prepare(core, session.agent.id).await {
+        axiomata_core::card_session::release_card_session(core, id)?;
+        board_mirror::after_card_change(&core.db_lock(), &read_config(core), id);
+        return Err(err.context(format!(
+            "the session did not start; card #{id} is waiting again"
+        )));
+    }
+    Ok(())
+}
+
+fn board_release(core: &AxiomataCore, id: i64) -> Result<()> {
+    let board_id = board::store::get_card(&core.db_lock(), id)?
+        .map(|card| card.board_id)
+        .with_context(|| format!("no card with id {id}"))?;
+    if !axiomata_core::card_session::release_card_session(core, id)? {
+        bail!("card #{id} is not held by anybody");
+    }
+    board_mirror::after_change(&core.db_lock(), &read_config(core), board_id);
+    println!("card #{id} is waiting in its open column again");
     Ok(())
 }
 

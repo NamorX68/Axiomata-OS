@@ -1724,6 +1724,45 @@ pub fn remove_card_dependency(
     Ok(removed)
 }
 
+/// The owner starts a card (A3/A20, A2A CP-A6a): a new session of the card's role on an engine is made for it, in the
+/// chosen project, and the card is taken for that session. The harness itself starts when the session's pane opens
+/// and calls `prepare_ide_agent`; the pane then sees that the session holds a card and starts it unattended.
+#[tauri::command]
+pub fn start_card_session(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    project_id: i64,
+    engine_id: Option<String>,
+) -> Result<axiomata_core::card_session::CardSession, String> {
+    let config = read_config(&state.config);
+    let session = axiomata_core::card_session::start_card_session(
+        &state,
+        &axiomata_core::card_session::StartRequest {
+            card_id,
+            project_id,
+            engine_id,
+        },
+    )
+    .map_err(|err| err.to_string())?;
+    let db = state.db_lock();
+    board_mirror::after_card_change(&db, &config, card_id);
+    Ok(session)
+}
+
+/// The owner gives a started card back (A23, "Freigeben"): the claim is dropped, the card waits in its open column
+/// again and the secret of the session that held it is taken back. `false` if nobody held it.
+#[tauri::command]
+pub fn release_card(state: State<'_, CoreState>, card_id: i64) -> Result<bool, String> {
+    let config = read_config(&state.config);
+    let released = axiomata_core::card_session::release_card_session(&state, card_id)
+        .map_err(|err| err.to_string())?;
+    if released {
+        let db = state.db_lock();
+        board_mirror::after_card_change(&db, &config, card_id);
+    }
+    Ok(released)
+}
+
 /// The latest `limit` lines of a card's history, oldest first.
 #[tauri::command]
 pub fn list_card_events(

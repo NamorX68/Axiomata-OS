@@ -1568,6 +1568,20 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (agent) agent.opencode_session = null;
       return Boolean(agent) as T;
     }
+    // Starting a card in the browser mock: a session of the card's role on the chosen engine, nothing runs.
+    case "start_card_session": {
+      const template = ideAgents.find((a) => a.project_id === args.projectId) ?? ideAgents[0];
+      const agent = { ...template, id: 900 + Number(args.cardId), name: `allrounder-${args.cardId}` };
+      if (!ideAgents.some((a) => a.id === agent.id)) ideAgents.push(agent);
+      return {
+        agent,
+        card_id: args.cardId,
+        role: "allrounder",
+        engine_id: (args.engineId as string | null) ?? "mock-engine",
+      } as T;
+    }
+    case "release_card":
+      return true as T;
     // No mail in the browser mock: there is never a line to type.
     case "ide_mailbox_nudge":
       return null as T;

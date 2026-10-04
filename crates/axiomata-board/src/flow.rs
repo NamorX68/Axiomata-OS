@@ -692,6 +692,50 @@ pub fn start_card(db: &mut Connection, card_id: i64, actor: &str) -> Result<Star
     Ok(Start::Started)
 }
 
+/// Gives a started card back (A23 "Freigeben", and the undo of a start whose session could not be made): the claim is
+/// dropped and the card goes to the top of the board's plain open column again, with a `released` line in its history.
+/// Only the holder or the owner can; a card that was signed off, taken over or archived cannot be given back.
+/// `false` if the card is not held by anybody.
+///
+/// Unlike [`crate::store::release_card`], which only clears the claim, this also moves the card — a card that stayed
+/// in "In Arbeit" without a holder would look like work nobody is doing.
+pub fn release_started(db: &mut Connection, card_id: i64, actor: &str) -> Result<bool> {
+    let actor = normalize_actor(actor)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let Some(card) = get_card(&tx, card_id)? else {
+        return invalid("card_id", format!("no card {card_id}"));
+    };
+    if card.claimed_by.is_none() {
+        return Ok(false);
+    }
+    if !holder_or_human(&card, &actor) {
+        return invalid(
+            "card_id",
+            "only the one who holds the card (or the owner) can give it back",
+        );
+    }
+    if card.verified_by.is_some() || card.taken_over_at.is_some() || card.archived_at.is_some() {
+        return invalid(
+            "card_id",
+            "a card that was signed off, taken over or archived cannot be given back",
+        );
+    }
+    // A failed or called-off card keeps its claim; moving it to Open would show a dead card as waiting for work.
+    check_not_called_off(&card)?;
+    let columns = list_columns(&tx, card.board_id)?;
+    let Some(open) = column_with(&columns, CardStatus::Open, None) else {
+        return invalid("column_id", "the board has no plain open column");
+    };
+    tx.execute(
+        "UPDATE cards SET claimed_by = NULL, claimed_at = NULL, updated_at = ?2 WHERE id = ?1",
+        params![card_id, now()],
+    )?;
+    move_card_in(&tx, card_id, open.id, 0, None)?;
+    insert_event(&tx, card_id, &actor, EventKind::Released, "")?;
+    tx.commit()?;
+    Ok(true)
+}
+
 /// The cards `actor` holds that are still live work: not archived, not failed, canceled or taken over, not signed off,
 /// and not lying in a done column (the owner may drag an unsigned card there, A18 — it is finished work all the same).
 /// What "one card at a time" for an agent counts.
@@ -2478,5 +2522,48 @@ mod tests {
                 max_tokens: None,
             },
         )
+    }
+
+    #[test]
+    fn a_started_card_can_be_given_back_by_its_holder_or_the_owner_and_by_nobody_else() {
+        let mut f = fixture();
+        let card = card_in(&f, f.open, "work");
+        start_card(&mut f.db, card.id, "agent:a-1").unwrap();
+        assert!(release_started(&mut f.db, card.id, "agent:b-2").is_err());
+        assert!(release_started(&mut f.db, card.id, "agent:a-1").unwrap());
+
+        let back = get_card(&f.db, card.id).unwrap().unwrap();
+        assert_eq!(back.claimed_by, None);
+        assert_eq!(back.column_id, f.open, "it waits in the open column again");
+        let kinds: Vec<_> = list_events(&f.db, card.id, 10)
+            .unwrap()
+            .iter()
+            .map(|e| e.kind)
+            .collect();
+        assert!(kinds.contains(&EventKind::Released), "{kinds:?}");
+        // Not held any more: nothing to give back, and it can be started again.
+        assert!(!release_started(&mut f.db, card.id, "agent:a-1").unwrap());
+        start_card(&mut f.db, card.id, "agent:b-2").unwrap();
+        assert!(release_started(&mut f.db, card.id, "human:owner").unwrap());
+    }
+
+    #[test]
+    fn a_failed_or_called_off_card_is_not_given_back_into_the_open_column() {
+        let mut f = fixture();
+        let card = card_in(&f, f.open, "work");
+        start_card(&mut f.db, card.id, "agent:a-1").unwrap();
+        mark_failed(&f.db, card.id, "agent:a-1", "gave up").unwrap();
+        assert!(release_started(&mut f.db, card.id, "human:owner").is_err());
+        assert_ne!(get_card(&f.db, card.id).unwrap().unwrap().column_id, f.open);
+    }
+
+    #[test]
+    fn a_signed_off_card_cannot_be_given_back() {
+        let mut f = fixture();
+        let card = card_in(&f, f.open, "work");
+        start_card(&mut f.db, card.id, "agent:a-1").unwrap();
+        report_done(&mut f.db, card.id, "agent:a-1").unwrap();
+        review_verdict(&mut f.db, card.id, "agent:r-2", Verdict::Approve, "").unwrap();
+        assert!(release_started(&mut f.db, card.id, "human:owner").is_err());
     }
 }

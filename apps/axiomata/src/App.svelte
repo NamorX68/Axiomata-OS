@@ -9,6 +9,7 @@
   import { openKanban } from "./modules/kanbanApp";
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
+  import { requestAgent } from "./ide/agentRequest";
   import { requestMode } from "./ide/modeRequest";
   import IdeView from "./ide/IdeView.svelte";
   import IconBar from "./shell/IconBar.svelte";
@@ -53,6 +54,14 @@
       // The old entry points: "IDE" shows it in the Agents mode, "Editor" (and a panel hand-over) in the Editor mode. "IDE" shows it in the Agents mode, "Editor" in the Editor mode.
       on("shell:ide", () => {
         requestMode("agents");
+        ideStarted = true;
+        ideOpen = true;
+      }),
+      // A card was started: its session opens in the Studio (A2A CP-A6a).
+      on("shell:agent", (detail) => {
+        const d = (detail ?? {}) as { projectId?: number; agentId?: number };
+        if (typeof d.projectId !== "number" || typeof d.agentId !== "number") return;
+        requestAgent({ projectId: d.projectId, agentId: d.agentId });
         ideStarted = true;
         ideOpen = true;
       }),

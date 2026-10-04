@@ -21,6 +21,11 @@ use crate::paths;
 
 type Result<T> = std::result::Result<T, AxiomataError>;
 
+/// A refusal for the owner to read: `field` names what was asked for, `reason` why not.
+pub fn refusal(field: &'static str, reason: String) -> AxiomataError {
+    RosterError::Invalid { field, reason }.into()
+}
+
 /// Lower-case slug of free text: letters and digits, single dashes between them.
 fn slugify(text: &str) -> String {
     let mut out = String::new();

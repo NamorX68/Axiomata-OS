@@ -287,7 +287,7 @@ export function resetSessionForTests(): void {
 /* ------------------------------------------------------------- agents --- */
 
 /** Reloads the open project's agents. */
-async function refreshAgents(): Promise<void> {
+export async function refreshAgents(): Promise<void> {
   const project = get(state).current;
   if (!project) return;
   const agents = await listAgents(project.id);

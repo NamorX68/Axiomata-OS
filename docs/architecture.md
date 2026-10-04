@@ -1591,6 +1591,13 @@ and role are set in the same transaction. Roles offered are those in force for t
 catalog through `ide/rosterStore.ts`. `axiomata-cli ide agents new` still takes raw fields (the owner's own tool); agents without an engine (older rows) show their profile
 until the profile-derived assignment gives them one. Also: a session may send at most 60 messages in all (`Limits::max_per_sender_total`, owner's choice of "a number", 2026-10-04).
 
+### A2A CP-A6a built (2026-10-04)
+
+Starting a card (`docs/plans/a2a.md` "CP-A6a im Detail"): `axiomata_core::card_session` makes a session of the card's role on an engine and claims the card for it
+(`flow::start_card`, undone by `flow::release_started`); `ide_start::start_agent` recognises a session that holds a card and starts it unattended (card in the MCP server's
+environment, per-tool rights, start prompt after `--` for Claude Code, first API message for a new Opencode session). CLI `board start|release`, Tauri `start_card_session`, the Kanban's
+"Starten …" form and the Studio opening the session's pane (`ide/agentRequest.ts`). Reviewer, return, take-over and limits are 6b/6c.
+
 ### A2A CP-A5 built (2026-10-04)
 
 Per-harness entry and session scoping: see the CP-A5 paragraph under `axiomata-ide` in §3 and `docs/plans/a2a.md` "CP-A5 im Detail". The Opencode spike is

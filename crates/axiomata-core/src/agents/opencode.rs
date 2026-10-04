@@ -420,7 +420,32 @@ fn ide_permissions() -> Vec<PermissionRule> {
     vec![
         PermissionRule::new("shell", "git push", "deny"),
         PermissionRule::new("shell", "git push *", "deny"),
+        // `git -C . push`, `git -c k=v push`: the options that may stand between `git` and `push`.
+        PermissionRule::new("shell", "git * push", "deny"),
+        PermissionRule::new("shell", "git * push *", "deny"),
     ]
+}
+
+/// The rules of an unattended card session on top of [`ide_permissions`] (A34): each of the role's tools of the agent
+/// MCP server is allowed by name — Opencode matches an MCP tool as action `<server>_<tool>` — and nothing else is
+/// opened up; whatever else the agent wants stays a question in the pane.
+fn card_permissions(tools: &[&str]) -> Vec<PermissionRule> {
+    let server = crate::agent_entry::SERVER_NAME;
+    let mut rules = ide_permissions();
+    rules.extend(
+        tools
+            .iter()
+            .map(|tool| PermissionRule::new(&format!("{server}_{tool}"), "*", "allow")),
+    );
+    rules
+}
+
+/// A session of an IDE agent on the service, and whether this start made it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdeSession {
+    pub id: String,
+    /// New at this start. Only a new session gets the card's first message — a continued one still has it.
+    pub created: bool,
 }
 
 /// The Opencode session an IDE agent runs in (`docs/plans/opencode2.md`, OC2).
@@ -440,7 +465,8 @@ pub async fn ide_session(
     directory: &std::path::Path,
     title: &str,
     model: Option<&str>,
-) -> Result<String, AxiomataError> {
+    card_tools: Option<&[&str]>,
+) -> Result<IdeSession, AxiomataError> {
     check_cwd(directory)?;
     let model = model
         .map(str::trim)
@@ -460,7 +486,12 @@ pub async fn ide_session(
             .and_then(ModelRef::from_value);
         let found_dir = found.as_ref().and_then(session_directory);
         match reuse(found_dir, directory, current_model.as_ref(), model.as_ref()) {
-            Reuse::Continue => return Ok(id.to_string()),
+            Reuse::Continue => {
+                return Ok(IdeSession {
+                    id: id.to_string(),
+                    created: false,
+                });
+            }
             Reuse::SwitchModel => {
                 if let Some(model) = &model {
                     service
@@ -468,7 +499,10 @@ pub async fn ide_session(
                         .await
                         .map_err(into_axiomata)?;
                 }
-                return Ok(id.to_string());
+                return Ok(IdeSession {
+                    id: id.to_string(),
+                    created: false,
+                });
             }
             Reuse::Replace => {}
         }
@@ -478,7 +512,7 @@ pub async fn ide_session(
             directory: directory.display().to_string(),
             title: Some(title.to_string()),
             model,
-            permissions: ide_permissions(),
+            permissions: card_tools.map_or_else(ide_permissions, card_permissions),
             ..NewSession::default()
         })
         .await
@@ -491,7 +525,24 @@ pub async fn ide_session(
             message: format!("the Opencode service returned a malformed session id {created:?}"),
         });
     }
-    Ok(created)
+    Ok(IdeSession {
+        id: created,
+        created: true,
+    })
+}
+
+/// Sends the first message of a card session: the role's instructions and the start prompt (A35). The agent loop
+/// starts on it at once, and the terminal UI attached to the session shows it.
+///
+/// Errors:
+///     A malformed `session_id` or anything the service refuses as [`AxiomataError::AgentApi`].
+pub async fn send_prompt(session_id: &str, text: &str) -> Result<(), AxiomataError> {
+    connect()
+        .await?
+        .prompt(session_id, text)
+        .await
+        .map(drop)
+        .map_err(into_axiomata)
 }
 
 /// Registers the agent MCP server at the location `directory` on the shared service, replacing the one of an earlier
@@ -652,6 +703,33 @@ fn chat_reply(outcome: TurnOutcome) -> Result<ChatReply, AxiomataError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_card_session_may_use_its_own_tools_by_name_and_still_cannot_push() {
+        let rules = card_permissions(&["read_inbox", "claim_task"]);
+        let has = |action: &str, effect: &str| {
+            rules
+                .iter()
+                .any(|r| r.action == action && r.resource == "*" && r.effect == effect)
+        };
+        assert!(has("axiomata_read_inbox", "allow"));
+        assert!(has("axiomata_claim_task", "allow"));
+        assert!(
+            !has("axiomata_review_verdict", "allow"),
+            "only the role's own tools"
+        );
+        assert!(
+            !rules
+                .iter()
+                .any(|r| r.action.contains('*') && r.effect == "allow"),
+            "no wildcard grant"
+        );
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.action == "shell" && r.resource == "git push" && r.effect == "deny")
+        );
+    }
 
     #[test]
     fn a_refused_registration_does_not_repeat_the_services_answer() {

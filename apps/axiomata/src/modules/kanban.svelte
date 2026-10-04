@@ -28,6 +28,8 @@
 
   import type { BoardCard, BoardColumn, CardEvent, CardFields, CardTier } from "../core/backend";
   import { invokeBackend as invoke } from "../core/backend";
+  import CardStartForm from "./CardStartForm.svelte";
+  import { canStart } from "../ide/cardStart";
   import { boardStore, refreshBoard } from "../core/boardStore";
   import {
     actorLabel,
@@ -616,6 +618,13 @@
     });
   }
   let note = $state("");
+  /** The "Starten" form of a ready card is open (A2A CP-A6a). */
+  let startingCard = $state<number | null>(null);
+  // The form belongs to the card it was opened on: looking at another card closes it.
+  $effect(() => {
+    void cardId;
+    startingCard = null;
+  });
 
   async function runFlow(step: Promise<unknown>): Promise<void> {
     try {
@@ -631,6 +640,8 @@
     runFlow(invoke("add_card_dependency", { cardId: card.id, needs }));
   const removeDependency = (card: BoardCard, needs: number) =>
     runFlow(invoke("remove_card_dependency", { cardId: card.id, needs }));
+  /** The owner gives a started card back: it waits in Offen again and its session cannot start its server any more. */
+  const releaseCard = (card: BoardCard) => runFlow(invoke("release_card", { cardId: card.id }));
   const approveProposal = (card: BoardCard) => runFlow(invoke("approve_card_proposal", { cardId: card.id }));
   const markCard = (card: BoardCard, mark: "cancel" | "reopen") =>
     runFlow(invoke("mark_card", { cardId: card.id, mark, reason: null }));
@@ -926,7 +937,22 @@
     <!-- Archiving, not deleting, is how a finished card leaves the board:
          it stays findable behind the archive filter. Deleting is for cards
          that should never have existed and lives in CP-K2b's card menu. -->
+    {#if startingCard === detail.id}
+      <CardStartForm
+        card={detail}
+        onDone={() => {
+          startingCard = null;
+          if (boardId !== null) void refreshBoard(boardId);
+        }}
+      />
+    {/if}
     <div class="detail-actions">
+      {#if canStart(detail) && startingCard !== detail.id}
+        <button class="ax-btn primary" onclick={() => (startingCard = detail.id)}>Starten …</button>
+      {/if}
+      {#if detail.state === "working" && detail.claimed_by}
+        <button class="ax-btn" title="Die Karte wartet wieder in Offen; das Geheimnis der Sitzung wird zurückgenommen" onclick={() => releaseCard(detail)}>Freigeben</button>
+      {/if}
       {#if detail.state === "proposed"}
         <button class="ax-btn primary" onclick={() => approveProposal(detail)}>Vorschlag annehmen</button>
       {/if}

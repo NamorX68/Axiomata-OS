@@ -90,6 +90,8 @@
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import type { Mode } from "./modes";
+  import { get } from "svelte/store";
+  import { agentRequests, takeAgentRequests } from "./agentRequest";
   import { modeRequest } from "./modeRequest";
   import { fileHandle, stashHandover } from "./fileHandles";
   import { takeHandoffs, handoffs } from "../fileapp/handoff";
@@ -561,6 +563,29 @@
     if (created) openAgent(created);
   }
 
+  /**
+   * A card was started and the session made for it should be on screen: its project open, the Agents mode shown, its
+   * pane docked. The agent list is read again first — the session did not exist when it was last read.
+   */
+  async function showRequestedAgents(): Promise<void> {
+    for (const { projectId, agentId } of takeAgentRequests()) {
+      try {
+        if (get(projectSession.session).current?.id !== projectId) {
+          const next = await projectSession.open(projectId);
+          if (next) layout = next;
+        }
+        await projectSession.refreshAgents();
+        const agent = projectSession.agentById(agentId);
+        if (!agent) continue;
+        if (get(projectSession.session).mode !== "agents") layout = projectSession.switchMode(layout);
+        openAgent(agent);
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        toast(`Die Sitzung konnte nicht geöffnet werden: ${why}`, "danger");
+      }
+    }
+  }
+
   /** The last arrangement must not be left in a timer when the app goes away. */
   function flushOnLeaving() {
     void flushLayout();
@@ -573,6 +598,7 @@
     // Hand-overs wait until the project's own layout is in place — it would replace them otherwise.
     let unsubscribeHandoffs = () => {};
     let unsubscribeMode = () => {};
+    let unsubscribeAgent = () => {};
     let gone = false;
     void projectSession.start().then((next) => {
       if (next) layout = next;
@@ -584,6 +610,9 @@
         if (!wanted) return;
         modeRequest.set(null);
         switchTo(wanted);
+      });
+      unsubscribeAgent = agentRequests.subscribe((waiting) => {
+        if (waiting.length > 0) void showRequestedAgents();
       });
     });
     void listRoots().then((r) => (roots = r)).catch(() => {});
@@ -606,6 +635,7 @@
       onDebugTerminal(null);
       unsubscribeHandoffs();
       unsubscribeMode();
+      unsubscribeAgent();
       void unlistenRenamed.then((off) => off());
       window.removeEventListener("blur", drag.abandon);
       window.removeEventListener("pagehide", flushOnLeaving);

@@ -55,6 +55,23 @@ pub fn issue(roots: &ChannelRoots, agent_id: i64) -> Result<String> {
     Ok(secret)
 }
 
+/// Takes back the secret of session `agent_id`: a server that starts afterwards cannot present one until the next start
+/// issues a new secret. A server that is running keeps running — the secret is only asked at its start. Missing is
+/// fine.
+///
+/// # Errors
+///
+/// [`IdeError::Io`] when the file exists but cannot be removed.
+pub fn revoke(roots: &ChannelRoots, agent_id: i64) -> Result<()> {
+    let path = hash_path(roots, agent_id);
+    match fs::remove_file(&path) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+            Err(IdeError::Io { path, source: err })
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Whether `presented` is the secret issued at the latest start of session `agent_id`. A missing or damaged hash file
 /// means no — never a way in.
 pub fn verify(roots: &ChannelRoots, agent_id: i64, presented: &str) -> bool {
@@ -139,6 +156,17 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn a_revoked_secret_stops_working_and_revoking_twice_is_fine() {
+        let roots = roots();
+        let secret = issue(&roots, 6).unwrap();
+        revoke(&roots, 6).unwrap();
+        assert!(!verify(&roots, 6, &secret));
+        revoke(&roots, 6).unwrap();
+        let again = issue(&roots, 6).unwrap();
+        assert!(verify(&roots, 6, &again), "the next start issues a new one");
     }
 
     #[test]

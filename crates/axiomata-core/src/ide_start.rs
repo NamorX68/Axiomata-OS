@@ -61,17 +61,20 @@ impl std::ops::Deref for Started {
 /// gets no session and no MCP entry from here.
 pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, AxiomataError> {
     let _start = start_lock().lock().await;
-    let (mut ready, role) = {
+    let (mut ready, role, card) = {
         let conn = core.db_lock();
         let ready = provision::prepare(&conn, &paths::ide_locations(), id)?;
         let config = core.config_read().clone();
         let role = roster::roles_for_project(&conn, &config, ready.agent.project_id)
             .into_iter()
             .find(|role| role.name == ready.agent.agent_role);
-        (ready, role)
+        let card = card_of(&conn, &ready.agent);
+        (ready, role, card)
     };
     let roots = paths::ide_locations().channels;
     if !ready.agent.command.trim().is_empty() {
+        // A session of the owner's own making that took a card by itself and is restarted: started as written (E13),
+        // not refused. The studio never starts a card on an engine with a command of its own (`card_session`).
         return Ok(Started {
             ready,
             mcp: AgentEntry::not_applicable(
@@ -81,35 +84,45 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
     }
     match ready.agent.harness {
         Harness::ClaudeCode => {
-            let (arg, mcp) = agent_entry::wire_claude(&roots, &ready.agent, role.as_ref());
-            if let Some(arg) = arg {
+            let (arg, mcp) = agent_entry::wire_claude(&roots, &ready.agent, role.as_ref(), card);
+            if let Some(card_id) = card {
+                require_entry(&mcp)?;
+                // The prompt goes last, behind `--`: nothing after it may be read as an option.
+                let tail = agent_entry::claude_prompt_tail(&ready.agent, card_id);
+                ready.launch_command = format!(
+                    "{} {} {tail}",
+                    ready.launch_command,
+                    arg.unwrap_or_default()
+                );
+            } else if let Some(arg) = arg {
                 ready.launch_command = format!("{} {arg}", ready.launch_command);
             }
             Ok(Started { ready, mcp })
         }
         Harness::Opencode => {
+            let tools = agent_entry::role_tools(role.as_ref());
             let session = opencode::ide_session(
                 ready.agent.opencode_session.as_deref(),
                 &ready.cwd,
                 &ready.agent.name,
                 ready.agent.model.as_deref(),
+                card.map(|_| tools.as_slice()),
             )
             .await?;
-            if ready.agent.opencode_session.as_deref() != Some(session.as_str()) {
-                let conn = core.db_lock();
-                agent_store::set_opencode_session(&conn, id, Some(&session))?;
-            }
             // Typed into a shell as it stands, so only an id of `[A-Za-z0-9_-]` is
             // ever appended (`ide_session` checks the ones it returns; this keeps the
             // promise local).
-            if !crate::agents::valid_session_id(&session) {
+            if !crate::agents::valid_session_id(&session.id) {
                 return Err(AxiomataError::AgentApi {
                     backend: crate::agents::BACKEND_OPENCODE,
-                    message: format!("refusing to start on a malformed session id {session:?}"),
+                    message: format!(
+                        "refusing to start on a malformed session id {:?}",
+                        session.id
+                    ),
                 });
             }
-            ready.launch_command = with_session(&ready.launch_command, &session);
-            ready.agent.opencode_session = Some(session);
+            ready.launch_command = with_session(&ready.launch_command, &session.id);
+            ready.agent.opencode_session = Some(session.id.clone());
             // The registration is keyed on the directory. Agents of a project that is no repository all share its
             // folder, so a second start would replace the first one's server with its own id and secret — and the
             // first session would speak as the second.
@@ -119,8 +132,28 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                      carry one identity per session",
                 )
             } else {
-                agent_entry::wire_opencode(&roots, &ready.agent, &ready.cwd, role.as_ref()).await
+                agent_entry::wire_opencode(&roots, &ready.agent, &ready.cwd, role.as_ref(), card)
+                    .await
             };
+            if let Some(card_id) = card {
+                require_entry(&mcp)?;
+                // Only a session made now gets its first message; a continued one has it already and would
+                // otherwise be told the same thing again on every restart of the pane.
+                if session.created {
+                    let text = format!(
+                        "{}\n\n{}",
+                        agent_entry::instructions(&ready.agent, role.as_ref()),
+                        agent_entry::start_prompt(&ready.agent, card_id)
+                    );
+                    opencode::send_prompt(&session.id, &text).await?;
+                }
+            }
+            // Remembered only now: a start that failed on the way (the entry, the first message) must not leave a
+            // session behind that the next start would take for one that was told its card — it would sit empty.
+            if ready.agent.opencode_session.as_deref() != Some(session.id.as_str()) {
+                let conn = core.db_lock();
+                agent_store::set_opencode_session(&conn, id, Some(&session.id))?;
+            }
             Ok(Started { ready, mcp })
         }
         Harness::Mini => Ok(Started {
@@ -128,6 +161,48 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             mcp: AgentEntry::not_applicable("the mini harness does not exist yet"),
         }),
     }
+}
+
+/// The card a session works on: the live card it holds **in work**, if any. Sessions the studio started for a card are
+/// the usual ones that hold one; a session that took a card by itself and is restarted counts the same, which is
+/// what an interrupted session needs. A card the session already reported (it waits in review) is not work any more:
+/// a restarted pane must not be told to do it again, and `report_done` would be refused.
+pub(crate) fn card_of(db: &rusqlite::Connection, agent: &crate::ide::model::Agent) -> Option<i64> {
+    use crate::board::{CardStatus, ColumnStage, store};
+    let actor = crate::session::actor_from(Some(&agent.id.to_string()), Some(&agent.name))?;
+    crate::board::flow::open_claims(db, &actor)
+        .ok()?
+        .into_iter()
+        .find(|card_id| {
+            let Ok(Some(card)) = store::get_card(db, *card_id) else {
+                return false;
+            };
+            matches!(
+                store::get_column(db, card.column_id),
+                Ok(Some(column))
+                    if column.maps_to_status == CardStatus::Doing && column.stage != Some(ColumnStage::Review)
+            )
+        })
+}
+
+/// A session working on a card without the team tools could not report it, nor be reviewed: it is not started.
+fn require_entry(entry: &AgentEntry) -> Result<(), AxiomataError> {
+    if entry.status == agent_entry::EntryStatus::Registered {
+        return Ok(());
+    }
+    Err(unattended_needs_the_entry(
+        entry
+            .note
+            .as_deref()
+            .unwrap_or("its MCP entry is not in place"),
+    ))
+}
+
+fn unattended_needs_the_entry(why: &str) -> AxiomataError {
+    crate::roster::refusal(
+        "card session",
+        format!("a session working on a card needs the team tools, and {why}"),
+    )
 }
 
 /// Forgets agent `id`'s Opencode session, so its next start creates a fresh
