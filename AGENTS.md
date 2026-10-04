@@ -23,7 +23,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   2026-09-20) — do not plan around it. Node/TypeScript debugging is parked (owner, 2026-10-02).
 - **Next / open:** the owner's Mac test of the Studio, Run/Tasks and Debug (the Tauri glue in `src-tauri` is not
   compilable on the Linux dev box); #50 follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
-  CP-A1 (engines + roles) built 2026-10-04, next CP-A2 (`docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
+  CP-A1 (engines + roles) and CP-A2 (the board's agent flow) built 2026-10-04, next CP-A3 (mailbox, `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
   ⌘K spotlight search and further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
@@ -45,6 +45,7 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   memory sync|status                       (the workspace router blocks)
 #   routines list|add|edit|delete|tick       (cron is 6–7 fields, seconds first)
 #   board list|new|rename|delete|add|edit|move|claim|done|verify|archive   (Kanban; claim is a CAS)
+#   board plan|dep|report|verdict|events|note|input|fail|cancel|reopen|taken-over|approve   (agent flow, a2a.md CP-A2)
 #   ide projects list|new|rename|set-root|delete
 #   ide agents list|new|edit|delete|prepare|new-session|discard-worktree|status|diff|base|commit|discard|discard-hunk|take-over
 #                                            (take-over: squash by default, never pushes)
@@ -146,6 +147,13 @@ from the code itself:
   Same for roles (`AGENT.md`, `axiomata-roster`): a role names engines by id and never carries a command line, and a project's own
   roles apply only after the same kind of confirmation. Engines are saved into the *file* config only (`roster::persist_engines`),
   never by saving the live config — that would undo a workspace change queued for the next start.
+- **In an agent session the CLI acts as that agent** (`axiomata_core::session`, from `AXIOMATA_AGENT_ID`/`_NAME`): `--actor`
+  cannot say otherwise, the owner's commands (`board plan approve`, `board approve`, `board taken-over`, deleting/archiving …)
+  are closed there, and an agent adds cards only to the board's proposal column. The board store enforces the same gates for
+  any caller (`human:` actor for the owner's steps; an `agent:` actor never moves a card freely). Not a sandbox — see a2a.md A39.
+- **Every board has a Vorschlag and a Review column** (roles `proposal`/`review`, not deletable): "the open column" for a
+  new card is the first *plain* open one — `board_move`/`move_to_status` and the assistant's `add_card` skip the roles. A new
+  card put in Vorschlag by mistake waits for an approval nobody expects.
 - **The editor engine (`src/editor/`) imports nothing from the app** — no DOM, no Svelte, no
   `core/`; `src/fileapp/` depends on it, never the reverse (D1, extractable for ED7). Its
   `EditorDocument` is a mutable class: a Svelte component redraws via its own counter after

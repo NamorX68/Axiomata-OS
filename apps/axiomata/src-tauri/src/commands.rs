@@ -1571,8 +1571,9 @@ pub fn move_card(
 ) -> Result<bool, String> {
     let config = read_config(&state.config);
     let mut db = state.db_lock();
-    let moved =
-        board::store::move_card(&mut db, id, column_id, index).map_err(|err| err.to_string())?;
+    // The owner drags the card: handing a card into the review column claims it for them, so an agent can judge it.
+    let moved = board::store::move_card_as(&mut db, id, column_id, index, Some(OWNER_ACTOR))
+        .map_err(|err| err.to_string())?;
     if moved {
         board_mirror::after_card_change(&db, &config, id);
     }
@@ -1608,6 +1609,184 @@ pub fn set_card_archived(
         board_mirror::after_card_change(&db, &config, id);
     }
     Ok(changed)
+}
+
+// The agent flow on the board (a2a.md, CP-A2): plans, dependencies, history, proposals. The webview acts as the owner;
+// agents reach the same functions through the CLI and, from CP-A4, the MCP server.
+
+/// The actor the dashboard acts as. The same spelling the CLI defaults to.
+const OWNER_ACTOR: &str = "human:owner";
+
+#[tauri::command]
+pub fn list_board_plans(
+    state: State<'_, CoreState>,
+    board_id: i64,
+) -> Result<Vec<board::Plan>, String> {
+    let db = state.db_lock();
+    board::flow::list_plans(&db, board_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn create_board_plan(
+    state: State<'_, CoreState>,
+    board_id: i64,
+    fields: board::PlanFields,
+) -> Result<board::Plan, String> {
+    let db = state.db_lock();
+    board::flow::create_plan(&db, board_id, &fields).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn update_board_plan(
+    state: State<'_, CoreState>,
+    id: i64,
+    fields: board::PlanFields,
+) -> Result<Option<board::Plan>, String> {
+    let db = state.db_lock();
+    board::flow::update_plan(&db, id, &fields).map_err(|err| err.to_string())
+}
+
+/// The owner's yes to a plan: its proposals move to Offen. `None` if there is no such draft plan.
+#[tauri::command]
+pub fn approve_board_plan(state: State<'_, CoreState>, id: i64) -> Result<Option<usize>, String> {
+    let config = read_config(&state.config);
+    let mut db = state.db_lock();
+    let moved =
+        board::flow::approve_plan(&mut db, id, OWNER_ACTOR).map_err(|err| err.to_string())?;
+    if moved.is_some()
+        && let Some(plan) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())?
+    {
+        board_mirror::after_change(&db, &config, plan.board_id);
+    }
+    Ok(moved)
+}
+
+#[tauri::command]
+pub fn close_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db_lock();
+    board::flow::close_plan(&db, id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let config = read_config(&state.config);
+    let mut db = state.db_lock();
+    let board_id = board::flow::get_plan(&db, id)
+        .map_err(|err| err.to_string())?
+        .map(|plan| plan.board_id);
+    let gone = board::flow::delete_plan(&mut db, id).map_err(|err| err.to_string())?;
+    if let Some(board_id) = board_id.filter(|_| gone) {
+        board_mirror::after_change(&db, &config, board_id);
+    }
+    Ok(gone)
+}
+
+/// Every "needs first" edge on a board, as `[card, needs]` pairs.
+#[tauri::command]
+pub fn list_board_dependencies(
+    state: State<'_, CoreState>,
+    board_id: i64,
+) -> Result<Vec<(i64, i64)>, String> {
+    let db = state.db_lock();
+    board::flow::list_dependencies(&db, board_id).map_err(|err| err.to_string())
+}
+
+/// `false` if the edge existed already; a refusal (cycle, other plan) comes back as the error text.
+#[tauri::command]
+pub fn add_card_dependency(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    needs: i64,
+) -> Result<bool, String> {
+    let config = read_config(&state.config);
+    let mut db = state.db_lock();
+    let added =
+        board::flow::add_dependency(&mut db, card_id, needs).map_err(|err| err.to_string())?;
+    if added {
+        board_mirror::after_card_change(&db, &config, card_id);
+    }
+    Ok(added)
+}
+
+#[tauri::command]
+pub fn remove_card_dependency(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    needs: i64,
+) -> Result<bool, String> {
+    let config = read_config(&state.config);
+    let db = state.db_lock();
+    let removed =
+        board::flow::remove_dependency(&db, card_id, needs).map_err(|err| err.to_string())?;
+    if removed {
+        board_mirror::after_card_change(&db, &config, card_id);
+    }
+    Ok(removed)
+}
+
+/// The latest `limit` lines of a card's history, oldest first.
+#[tauri::command]
+pub fn list_card_events(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    limit: usize,
+) -> Result<Vec<board::CardEvent>, String> {
+    let db = state.db_lock();
+    board::flow::list_events(&db, card_id, limit).map_err(|err| err.to_string())
+}
+
+/// The owner writes a line into a card's history.
+#[tauri::command]
+pub fn add_card_note(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    text: String,
+) -> Result<bool, String> {
+    let db = state.db_lock();
+    let added = board::flow::add_event(&db, card_id, OWNER_ACTOR, board::EventKind::Note, &text)
+        .map_err(|err| err.to_string())?;
+    Ok(added.is_some())
+}
+
+/// The owner's yes to one proposal. `false` if the card is not in a proposal column.
+#[tauri::command]
+pub fn approve_card_proposal(state: State<'_, CoreState>, card_id: i64) -> Result<bool, String> {
+    let config = read_config(&state.config);
+    let mut db = state.db_lock();
+    let approved = board::flow::approve_proposal(&mut db, card_id, OWNER_ACTOR)
+        .map_err(|err| err.to_string())?;
+    if approved {
+        board_mirror::after_card_change(&db, &config, card_id);
+    }
+    Ok(approved)
+}
+
+/// Calls a card off (`cancel`), marks it failed, or undoes either (`reopen`).
+#[tauri::command]
+pub fn mark_card(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    mark: String,
+    reason: Option<String>,
+) -> Result<bool, String> {
+    let config = read_config(&state.config);
+    let db = state.db_lock();
+    let reason = reason.unwrap_or_default();
+    let done = match mark.as_str() {
+        "cancel" => board::flow::cancel_card(&db, card_id, OWNER_ACTOR, &reason),
+        "fail" => board::flow::mark_failed(&db, card_id, OWNER_ACTOR, &reason),
+        "reopen" => board::flow::reopen_card(&db, card_id, OWNER_ACTOR),
+        other => {
+            return Err(format!(
+                "unknown mark {other:?} — expected cancel, fail or reopen"
+            ));
+        }
+    }
+    .map_err(|err| err.to_string())?;
+    if done {
+        board_mirror::after_card_change(&db, &config, card_id);
+    }
+    Ok(done)
 }
 
 #[tauri::command]

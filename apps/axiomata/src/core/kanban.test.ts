@@ -6,17 +6,24 @@ import {
   actorLabel,
   applyFilter,
   collectLabels,
+  dependencyCandidates,
   dropTarget,
   dueState,
+  fieldsOf,
   groupByColumn,
+  hideEmptyProposal,
+  isNotableState,
   labelColorIndex,
+  planLabel,
+  STATE_LABEL,
+  stateTone,
   showsAssignee,
   statusOf,
   stepTarget,
 } from "./kanban";
 
 function column(id: number, position: number, maps_to_status: BoardColumn["maps_to_status"]): BoardColumn {
-  return { id, board_id: 1, name: `col-${id}`, position, maps_to_status };
+  return { id, board_id: 1, name: `col-${id}`, position, maps_to_status, stage: null };
 }
 
 function card(id: number, column_id: number, position: number, extra: Partial<BoardCard> = {}): BoardCard {
@@ -37,6 +44,20 @@ function card(id: number, column_id: number, position: number, extra: Partial<Bo
     archived_at: null,
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
+    plan_id: null,
+    agent: null,
+    agent_reason: null,
+    tier: null,
+    kind: null,
+    acceptance: "",
+    returned_count: 0,
+    input_required: null,
+    taken_over_at: null,
+    failed_at: null,
+    canceled_at: null,
+    depends_on: [],
+    waiting_on: [],
+    state: "ready",
     ...extra,
   };
 }
@@ -257,5 +278,100 @@ describe("stepTarget", () => {
   it("stays put at the outer columns", () => {
     expect(stepTarget(GEOMETRY, start, "left", 99)).toEqual(start);
     expect(stepTarget(GEOMETRY, { columnId: 2, index: 0 }, "right", 99)).toEqual({ columnId: 2, index: 0 });
+  });
+});
+
+describe("agent flow helpers", () => {
+  it("fieldsOf carries every writable field, so a save never wipes one", () => {
+    const rich = card(1, 1, 1, {
+      title: "t",
+      body: "b",
+      labels: ["x"],
+      assignee: "human:owner",
+      due_at: "2026-10-01T12:00:00Z",
+      plan_id: 4,
+      agent: "reviewer",
+      agent_reason: "weil",
+      tier: "heavy",
+      kind: "review",
+      acceptance: "- ok",
+    });
+    expect(fieldsOf(rich)).toEqual({
+      title: "t",
+      body: "b",
+      labels: ["x"],
+      assignee: "human:owner",
+      due_at: "2026-10-01T12:00:00Z",
+      plan_id: 4,
+      agent: "reviewer",
+      agent_reason: "weil",
+      tier: "heavy",
+      kind: "review",
+      acceptance: "- ok",
+    });
+    // The Rust `CardFields` has exactly these eleven; if a twelfth appears, this count is the reminder.
+    expect(Object.keys(fieldsOf(rich))).toHaveLength(11);
+  });
+
+  it("only what the column cannot say gets a badge", () => {
+    const badged = (["blocked", "input_required", "failed", "canceled", "taken_over"] as const).every(isNotableState);
+    const quiet = (["proposed", "ready", "working", "in_review", "done", "verified"] as const).every(
+      (s) => !isNotableState(s),
+    );
+    expect(badged && quiet).toBe(true);
+    expect(stateTone("failed")).toBe("bad");
+    expect(stateTone("blocked")).toBe("warn");
+    expect(stateTone("taken_over")).toBe("muted");
+    expect(STATE_LABEL.in_review).toBe("im Review");
+  });
+
+  it("hides the proposal column only while it is empty, whatever the filter says", () => {
+    const columns = [
+      { ...column(1, 0, "open"), stage: "proposal" as const },
+      column(2, 1, "open"),
+      column(3, 2, "done"),
+    ];
+    const none = hideEmptyProposal(groupByColumn(columns, []), []);
+    expect(none.map((g) => g.column.id)).toEqual([2, 3]);
+
+    const all = [card(10, 1, 1)];
+    const filteredAway = hideEmptyProposal(groupByColumn(columns, []), all);
+    expect(filteredAway.map((g) => g.column.id)).toEqual([1, 2, 3]);
+
+    const archivedOnly = [card(11, 1, 1, { archived_at: "2026-09-02T00:00:00Z" })];
+    expect(hideEmptyProposal(groupByColumn(columns, []), archivedOnly).map((g) => g.column.id)).toEqual([2, 3]);
+  });
+
+  it("offers only cards of the same plan that would not close a cycle", () => {
+    const a = card(1, 1, 1, { plan_id: 7 });
+    const b = card(2, 1, 2, { plan_id: 7, depends_on: [1] });
+    const c = card(3, 1, 3, { plan_id: 7, depends_on: [2] });
+    const elsewhere = card(4, 1, 4, { plan_id: 8 });
+    const loose = card(5, 1, 5);
+    const gone = card(6, 1, 6, { plan_id: 7, archived_at: "2026-09-02T00:00:00Z" });
+    const all = [a, b, c, elsewhere, loose, gone];
+
+    // a may wait for neither b nor c (they already wait for a), not for itself, other plans or archived cards.
+    expect(dependencyCandidates(a, all)).toEqual([]);
+    // c waits for b; b is already taken, a is free.
+    expect(dependencyCandidates(c, all).map((x) => x.id)).toEqual([1]);
+    expect(dependencyCandidates(loose, all)).toEqual([]);
+  });
+
+  it("names a plan with its status", () => {
+    const plan = {
+      id: 1,
+      board_id: 1,
+      name: "P",
+      status: "draft",
+      auto_start_max: null,
+      max_cost_usd: null,
+      max_tokens: null,
+      created_at: "",
+      updated_at: "",
+      approved_at: null,
+    } as const;
+    expect(planLabel(plan)).toBe("P · Entwurf");
+    expect(planLabel({ ...plan, status: "approved" })).toBe("P · freigegeben");
   });
 });

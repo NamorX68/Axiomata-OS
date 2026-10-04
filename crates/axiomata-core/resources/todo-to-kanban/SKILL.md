@@ -21,8 +21,9 @@ Steps:
 
 1. List the boards. With one board, use it. With several, use the one whose name fits the tasks best; if
    none clearly does, create no cards and ask which board to use.
-2. List that board: its columns and its cards. New cards go into the first column whose status is
-   open (usually "Offen").
+2. List that board: its columns and its cards. New cards go into the first plain column whose status is
+   open (usually "Offen"). Never the "Vorschlag" column: that one holds proposals that wait for the owner's
+   yes, and a card put there would sit unnoticed.
 3. For each open task: skip it if a card with the same meaning is already on the board (same title, or
    plainly the same thing). Otherwise add a card:
    - the title: the task, cleaned of checkbox, dates and tags, in the owner's words;

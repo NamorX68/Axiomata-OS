@@ -811,11 +811,15 @@ export function registerBuiltins(): void {
           const boards = await ctx.invoke<{ id: number }[]>("list_boards");
           const boardId = p.board_id ?? boards[0]?.id;
           if (boardId === undefined) return { error: "no boards yet" };
-          const columns = await ctx.invoke<{ id: number; name: string }[]>("list_board_columns", { boardId });
+          const columns = await ctx.invoke<
+            { id: number; name: string; maps_to_status: string; stage: string | null }[]
+          >("list_board_columns", { boardId });
+          // Without a column the card goes where a person would put it: the first plain open column. Not the
+          // leftmost one — that is the proposal column, where a card waits for approval nobody is expecting.
           const target = p.column
             ? columns.find((c) => c.name.toLowerCase() === p.column!.toLowerCase())
-            : columns[0];
-          if (!target) return { error: `no column named ${p.column}` };
+            : columns.find((c) => c.maps_to_status === "open" && c.stage === null);
+          if (!target) return { error: p.column ? `no column named ${p.column}` : "the board has no open column" };
           return ctx.invoke("create_card", {
             new: {
               column_id: target.id,

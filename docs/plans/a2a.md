@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 gebaut (2026-10-04); weiter mit CP-A2.**
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 und CP-A2 gebaut (2026-10-04); weiter mit CP-A3.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -118,10 +118,10 @@ wo er etwas anders sagt, die älteren Aussagen.
 - **A18 — Review-Fluss am Brett (Owner-Beispiel: „Agent, review alles in der Review-Spalte").** `report_done` schiebt die Karte nach Review; `review_verdict` „gut" prüft
   (`verify_card` verlangt künftig eine Karte in der Review-Spalte, für Boards ohne Rolle weiter die Fertig-Spalte) und schiebt nach Fertig, „zurück" geht nach In
   Arbeit mit `returned_count` + 1. Zieht ein Akteur eine **unclaimte** Karte in die Review-Spalte, wird sie für ihn geclaimt („wer abgibt, hat gearbeitet"), damit ein
-  anderer Akteur sie prüfen kann (der `CHECK verified_by <> claimed_by` bleibt unangetastet). **Ziehen ist für den Owner immer frei**, auch aus Review nach Fertig ohne
+  anderer Akteur sie prüfen kann (der `CHECK verified_by <> claimed_by` bleibt unangetastet). **Ziehen ist für den Owner immer frei** *(umgesetzt als: nur ein `human:`-Akteur darf Karten frei verschieben; ein `agent:`-Akteur wird abgewiesen, siehe A39)*, auch aus Review nach Fertig ohne
   Abzeichnen; die Signatur setzt nur `review_verdict`. Agenten bewegen Karten nur über `claim_task`, `report_done`, `review_verdict`.
 - **A19 — Verlauf der Karte (`card_events`).** Nur anfügende Tabelle (Karte, Zeit, Akteur, Art, Text): Review-Anmerkungen, Eskalationen, Limit-Stopps, Rückfragen,
-  Zustandswechsel. Quelle für den Kontext bei Eskalation und das Team-Panel; der Markdown-Spiegel hängt die letzten Einträge an.
+  Zustandswechsel. Quelle für den Kontext bei Eskalation und das Team-Panel; der Markdown-Spiegel hängt die letzten Einträge an *(noch nicht umgesetzt: CP-A2 zeigt im Spiegel die Zustandsmarken der Karte, die Einträge folgen mit dem Team-Panel in CP-A9)*.
 
 **Ablauf (CP-A6, CP-A8)**
 
@@ -170,6 +170,20 @@ wo er etwas anders sagt, die älteren Aussagen.
 - **A35 — Start-Prompt:** ein kurzer fester Satz („Du bist Sitzung `<name>`, Rolle `<rolle>`, deine Karte ist `#<id>`. Lies sie mit `get_card` und arbeite danach; lies zuerst
   dein Postfach."); Karte und Abnahmekriterien holt der Agent per `get_card`, die Rollen-Anweisung geht bei Claude Code über `--append-system-prompt-file` (Datei im app-eigenen
   Ordner), bei Opencode als erste Nachricht über die API. Kein Kartentext in einer Shell-Zeile.
+
+**Härtung nach Review und Security-Audit von CP-A2 (2026-10-04)**
+
+- **A39 — Wer handeln darf, wird im Store und in der Sitzung durchgesetzt, nicht dem Aufrufer geglaubt.** Der Store verlangt für die Tore des Owners einen `human:`-Akteur
+  (`approve_plan`, `approve_proposal`, `mark_taken_over`, `reopen_card`), lässt Fragen, Absagen und Scheitern nur den Halter oder den Owner an einer Karte setzen und
+  weist freies Verschieben durch einen `agent:`-Akteur ab (Agenten bewegen Karten nur über `report_done` und `review_verdict`). Die CLI leitet den Akteur in einer
+  Agenten-Sitzung aus der Umgebung ab (`AXIOMATA_AGENT_ID`/`_NAME`, `axiomata_core::session`) und lässt kein `--actor` zu, das davon abweicht; die Befehle des
+  Owners (Brett anlegen/löschen/archivieren, Plan freigeben/abschließen/löschen/ändern, vorschlag annehmen, nach Fertig schieben, Übernahme, Wieder-Öffnen, einfaches
+  Abzeichnen) sind dort gesperrt, und ein Agent legt Karten nur in die Vorschlag-Spalte. **Grenze:** das schützt vor Fehlern und vor Agenten, die ihre Anweisungen
+  befolgen, nicht vor einem Prozess desselben Benutzers, der die Umgebung löscht oder die SQLite-Datei direkt schreibt; echte Trennung kommt mit dem Scoping je Sitzung
+  in CP-A5 (der MCP-Server stempelt den Absender und bietet nur die Werkzeuge der Rolle). Offen bis dahin: die übrigen Befehle der CLI (`ide agents take-over`, Routinen,
+  Skills) sind für eine Agenten-Sitzung nicht gesperrt.
+- **A40 — Grenzen gegen Überlauf:** höchstens 2000 Karten je Brett, 100 Pläne je Brett, 50 Abhängigkeiten je Karte, höchstens 500 Verlaufszeilen je Abfrage; Titel und
+  Labels sind einzeilig (ein Zeilenumbruch könnte im Markdown-Spiegel eine Überschrift fälschen).
 
 **Oberfläche und Takt**
 

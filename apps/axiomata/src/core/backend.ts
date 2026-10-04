@@ -392,6 +392,28 @@ export type TakeOverResult = { outcome: "done"; commit: string } | { outcome: "c
 
 export type CardStatus = "open" | "doing" | "done";
 
+/** A column's role in the agent flow (a2a.md A13): it refines the status instead of adding statuses. A `proposal`
+ *  column is open, a `review` column is doing. */
+export type ColumnStage = "proposal" | "review";
+
+/** How strong an agent a card needs; the same three steps as an agent role's tier. */
+export type CardTier = "light" | "medium" | "heavy";
+
+/** Where a card stands in the agent flow. **Derived** by Rust from the column and the signatures (A12), never
+ *  stored, so it cannot contradict the column. */
+export type TaskState =
+  | "proposed"
+  | "blocked"
+  | "ready"
+  | "working"
+  | "input_required"
+  | "in_review"
+  | "done"
+  | "verified"
+  | "taken_over"
+  | "failed"
+  | "canceled";
+
 export interface Board {
   id: number;
   name: string;
@@ -405,6 +427,8 @@ export interface BoardColumn {
   name: string;
   position: number;
   maps_to_status: CardStatus;
+  /** The column's role in the agent flow, or `null` for a plain column. */
+  stage: ColumnStage | null;
 }
 
 export interface BoardCard {
@@ -425,15 +449,85 @@ export interface BoardCard {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  /** The plan the card belongs to (a2a.md A14). */
+  plan_id: number | null;
+  /** The role the card is meant for (a slug) and why — an intention; the working session is `claimed_by`. */
+  agent: string | null;
+  agent_reason: string | null;
+  tier: CardTier | null;
+  kind: string | null;
+  /** Acceptance criteria, Markdown. */
+  acceptance: string;
+  /** How often a reviewer sent the card back. */
+  returned_count: number;
+  /** What the working agent asked and waits for an answer to. */
+  input_required: string | null;
+  taken_over_at: string | null;
+  failed_at: string | null;
+  canceled_at: string | null;
+  /** Computed by Rust: the cards this one needs first, and those of them not signed off yet. */
+  depends_on: number[];
+  waiting_on: number[];
+  /** Computed by Rust, see {@link TaskState}. */
+  state: TaskState;
 }
 
-/** A card's writable fields. Update is a full replace, like `NewRoutine`. */
+/** A card's writable fields. Update is a full replace, like `NewRoutine` — so a save has to send the agent fields
+ *  too, and they are required here for exactly that reason: leaving one out would wipe it. */
 export interface CardFields {
   title: string;
   body: string;
   labels: string[];
   assignee: string | null;
   due_at: string | null;
+  plan_id: number | null;
+  agent: string | null;
+  agent_reason: string | null;
+  tier: CardTier | null;
+  kind: string | null;
+  acceptance: string;
+}
+
+export type PlanStatus = "draft" | "approved" | "closed";
+
+/** The unit of approval, automation, limits and the graph (a2a.md A14). */
+export interface BoardPlan {
+  id: number;
+  board_id: number;
+  name: string;
+  status: PlanStatus;
+  /** `null` = cards are started by hand; a number = up to that many start by themselves. */
+  auto_start_max: number | null;
+  max_cost_usd: number | null;
+  max_tokens: number | null;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+}
+
+export type CardEventKind =
+  | "started"
+  | "reported"
+  | "approved"
+  | "returned"
+  | "escalated"
+  | "limit_stop"
+  | "input_required"
+  | "input_provided"
+  | "failed"
+  | "canceled"
+  | "released"
+  | "taken_over"
+  | "note";
+
+/** One line of a card's history. */
+export interface CardEvent {
+  id: number;
+  card_id: number;
+  at: string;
+  actor: string;
+  kind: CardEventKind;
+  text: string;
 }
 
 export interface NewCard extends CardFields {
@@ -443,6 +537,7 @@ export interface NewCard extends CardFields {
 export interface NewColumn {
   name: string;
   maps_to_status: CardStatus;
+  stage?: ColumnStage | null;
 }
 
 export interface SearchHit {

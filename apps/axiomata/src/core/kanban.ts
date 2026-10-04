@@ -16,7 +16,15 @@
  *   and it is the one the user dragged into place.
  */
 
-import type { BoardCard, BoardColumn, CardStatus } from "./backend";
+import type {
+  BoardCard,
+  BoardColumn,
+  BoardPlan,
+  CardEventKind,
+  CardFields,
+  CardStatus,
+  TaskState,
+} from "./backend";
 
 /** A column together with the cards in it, in the order they are drawn. */
 export interface ColumnWithCards {
@@ -226,3 +234,146 @@ export const DEFAULT_HUMAN = "human:owner";
 export function showsAssignee(assignee: string | null): assignee is string {
   return assignee !== null && assignee !== DEFAULT_HUMAN;
 }
+
+// ------------------------------------------------------------ agent flow ---
+// What the board shows of the agent flow (a2a.md CP-A2). The state itself is derived in Rust and arrives with the
+// card; this file only decides how it reads and which controls make sense.
+
+
+/** How a card's state reads on the board. */
+export const STATE_LABEL: Record<TaskState, string> = {
+  proposed: "Vorschlag",
+  blocked: "wartet",
+  ready: "bereit",
+  working: "in Arbeit",
+  input_required: "Rückfrage",
+  in_review: "im Review",
+  done: "fertig",
+  verified: "geprüft",
+  taken_over: "übernommen",
+  failed: "gescheitert",
+  canceled: "abgebrochen",
+};
+
+/**
+ * Whether a state deserves a badge on the card. The column already says "open", "in progress", "in review" or
+ * "done", so repeating those would only add noise; what the column cannot say is that a card waits for another one,
+ * asks a question, failed, was called off or has been taken over.
+ */
+export function isNotableState(state: TaskState): boolean {
+  return (
+    state === "blocked" ||
+    state === "input_required" ||
+    state === "failed" ||
+    state === "canceled" ||
+    state === "taken_over"
+  );
+}
+
+/** The tone a badge takes (`data-tone` in the stylesheet). */
+export function stateTone(state: TaskState): "warn" | "bad" | "muted" {
+  switch (state) {
+    case "failed":
+    case "canceled":
+      return "bad";
+    case "taken_over":
+      return "muted";
+    default:
+      return "warn";
+  }
+}
+
+/**
+ * Every writable field of a card, for `update_card`.
+ *
+ * `update_card` replaces all of them, so a save that sends only the field it changed would wipe the others. Collected
+ * here, in one place, with a test that lists the keys — a field added to `CardFields` and forgotten in this function
+ * shows up as a failing test instead of as silently lost data.
+ */
+export function fieldsOf(card: BoardCard): CardFields {
+  return {
+    title: card.title,
+    body: card.body,
+    labels: card.labels,
+    assignee: card.assignee,
+    due_at: card.due_at,
+    plan_id: card.plan_id,
+    agent: card.agent,
+    agent_reason: card.agent_reason,
+    tier: card.tier,
+    kind: card.kind,
+    acceptance: card.acceptance,
+  };
+}
+
+/**
+ * Drops the proposal column while nothing is in it (a2a.md A13): every board has one, but it only takes space once an
+ * agent or a planner has put something there. Judged on the **unfiltered** cards, so typing in the filter box never
+ * makes the column come and go.
+ */
+export function hideEmptyProposal(groups: ColumnWithCards[], all: BoardCard[]): ColumnWithCards[] {
+  return groups.filter(({ column }) => {
+    if (column.stage !== "proposal") return true;
+    return all.some((card) => card.column_id === column.id && card.archived_at === null);
+  });
+}
+
+/**
+ * The cards `card` could be made to wait for: others of the same plan that are not archived, not waited for yet and
+ * that do not already (indirectly) wait for `card` — that edge would be a cycle. The Rust side is the authority; this
+ * only keeps the picker from offering what it would refuse.
+ */
+export function dependencyCandidates(card: BoardCard, cards: BoardCard[]): BoardCard[] {
+  if (card.plan_id === null) return [];
+  const byId = new Map(cards.map((other) => [other.id, other]));
+  const waitsForCard = (startId: number): boolean => {
+    const seen = new Set<number>();
+    const stack = [startId];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (current === card.id) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      stack.push(...(byId.get(current)?.depends_on ?? []));
+    }
+    return false;
+  };
+  return cards
+    .filter(
+      (other) =>
+        other.id !== card.id &&
+        other.plan_id === card.plan_id &&
+        other.archived_at === null &&
+        !card.depends_on.includes(other.id) &&
+        !waitsForCard(other.id),
+    )
+    .sort((a, b) => a.id - b.id);
+}
+
+/** The plan a card belongs to, if it is on this board. */
+export function planOf(card: BoardCard, plans: BoardPlan[]): BoardPlan | null {
+  return card.plan_id === null ? null : (plans.find((plan) => plan.id === card.plan_id) ?? null);
+}
+
+/** How a plan reads in a list. */
+export function planLabel(plan: BoardPlan): string {
+  const status = { draft: "Entwurf", approved: "freigegeben", closed: "abgeschlossen" }[plan.status];
+  return `${plan.name} · ${status}`;
+}
+
+/** How a line of a card's history reads. */
+export const EVENT_LABEL: Record<CardEventKind, string> = {
+  started: "gestartet",
+  reported: "fertig gemeldet",
+  approved: "geprüft",
+  returned: "zurückgegeben",
+  escalated: "eskaliert",
+  limit_stop: "Limit erreicht",
+  input_required: "Rückfrage",
+  input_provided: "beantwortet",
+  failed: "gescheitert",
+  canceled: "abgesagt",
+  released: "freigegeben",
+  taken_over: "übernommen",
+  note: "Notiz",
+};

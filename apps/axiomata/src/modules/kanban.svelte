@@ -35,23 +35,34 @@
   import { SvelteSet } from "svelte/reactivity";
 
   import { draggable, type DragDelta, type DragPoint } from "../canvas/drag";
-  import type { BoardCard, BoardColumn, CardFields } from "../core/backend";
+  import { onMount } from "svelte";
+
+  import type { BoardCard, BoardColumn, CardEvent, CardFields, CardTier } from "../core/backend";
   import { invokeBackend as invoke } from "../core/backend";
   import { boardStore, refreshBoard } from "../core/boardStore";
   import {
     actorLabel,
     applyFilter,
     collectLabels,
+    dependencyCandidates,
     dropTarget,
     dueState,
+    EVENT_LABEL,
+    fieldsOf,
     groupByColumn,
+    hideEmptyProposal,
+    isNotableState,
     labelColorIndex,
+    planLabel,
     showsAssignee,
+    STATE_LABEL,
+    stateTone,
     stepTarget,
     type CardFilter,
     type ColumnGeometry,
     type DropTarget,
   } from "../core/kanban";
+  import { listRoles } from "../core/roster";
   import { closeStaged, openStaged, staged } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import { cardStripes, lastBoard, rememberLastBoard } from "./kanbanPrefs";
@@ -165,7 +176,8 @@
   });
 
   const visible = $derived($data ? applyFilter($data.cards, filter) : []);
-  const grouped = $derived($data ? groupByColumn($data.columns, visible) : []);
+  const grouped = $derived($data ? hideEmptyProposal(groupByColumn($data.columns, visible), $data.cards) : []);
+  const plans = $derived($data?.plans ?? []);
   const allLabels = $derived($data ? collectLabels($data.cards) : []);
   const boardEmpty = $derived($data !== null && $data.cards.length === 0);
   /** The card in the large board's side panel (editor-look B4), if one is open. */
@@ -577,23 +589,113 @@
     savingDetail = savingDetail.then(async () => {
       if (!card) return;
       try {
-        await invoke("update_card", {
-          id: card.id,
-          fields: {
-            title: card.title,
-            body: card.body,
-            labels: card.labels,
-            assignee: card.assignee,
-            due_at: card.due_at,
-            ...fields,
-          },
-        });
+        detailError = "";
+        await invoke("update_card", { id: card.id, fields: { ...fieldsOf(card), ...fields } });
         if (boardId !== null) await refreshBoard(boardId);
       } catch (err) {
-        listError = String(err);
+        // A refusal of the agent fields ("use lower-case …") belongs next to the field, not in place of the board.
+        detailError = String(err);
       }
     });
     return savingDetail;
+  }
+
+  /* --------------------------------------------------------- agent flow --- */
+
+  /** The last refusal of an edit in the card's detail, shown under its fields. */
+  let detailError = $state("");
+  /** Role names for the suggestions of the "Rolle" field (a2a.md: the card names a role, the catalog lives in the Studio). */
+  let roleNames = $state<string[]>([]);
+  onMount(() => {
+    listRoles()
+      .then((loaded) => (roleNames = loaded.roles.map((role) => role.name)))
+      .catch(() => {
+        // Suggestions are a convenience; the field works without them.
+      });
+  });
+
+  /** The history of the card in the detail. Re-read when the card changes, which includes every flow step. */
+  let events = $state<CardEvent[]>([]);
+  $effect(() => {
+    const id = detail?.id;
+    void detail?.updated_at;
+    if (id === undefined) {
+      events = [];
+      return;
+    }
+    // A slower answer for the card that was open before must not overwrite the one that is open now.
+    let stale = false;
+    invoke<CardEvent[]>("list_card_events", { cardId: id, limit: 30 })
+      .then((list) => {
+        if (!stale) events = list;
+      })
+      .catch(() => {
+        if (!stale) events = [];
+      });
+    return () => {
+      stale = true;
+    };
+  });
+
+  /**
+   * After a save, puts a select back to what the card really holds. A refused value (an unknown plan, a dependency
+   * rule) leaves the card unchanged, so nothing re-renders and the select would keep showing the refused choice.
+   */
+  function settle(select: HTMLSelectElement, cardId: number, read: (card: BoardCard) => string): void {
+    void savingDetail.then(() => {
+      const current = $data?.cards.find((c) => c.id === cardId);
+      if (current) select.value = read(current);
+    });
+  }
+  let note = $state("");
+
+  async function runFlow(step: Promise<unknown>): Promise<void> {
+    try {
+      detailError = "";
+      await step;
+      if (boardId !== null) await refreshBoard(boardId);
+    } catch (err) {
+      detailError = String(err);
+    }
+  }
+
+  const addDependency = (card: BoardCard, needs: number) =>
+    runFlow(invoke("add_card_dependency", { cardId: card.id, needs }));
+  const removeDependency = (card: BoardCard, needs: number) =>
+    runFlow(invoke("remove_card_dependency", { cardId: card.id, needs }));
+  const approveProposal = (card: BoardCard) => runFlow(invoke("approve_card_proposal", { cardId: card.id }));
+  const markCard = (card: BoardCard, mark: "cancel" | "reopen") =>
+    runFlow(invoke("mark_card", { cardId: card.id, mark, reason: null }));
+
+  async function writeNote(card: BoardCard): Promise<void> {
+    const text = note.trim();
+    if (!text) return;
+    note = "";
+    await runFlow(invoke("add_card_note", { cardId: card.id, text }));
+    events = await invoke<CardEvent[]>("list_card_events", { cardId: card.id, limit: 30 });
+  }
+
+  /** Plans: a draft is approved with one click, which moves its proposals to Offen (a2a.md A17). */
+  let addingPlan = $state(false);
+  let planName = $state("");
+
+  async function createPlan(): Promise<void> {
+    const name = planName.trim();
+    if (!name || boardId === null) return;
+    planName = "";
+    addingPlan = false;
+    await runFlow(
+      invoke("create_board_plan", {
+        boardId,
+        fields: { name, auto_start_max: null, max_cost_usd: null, max_tokens: null },
+      }),
+    );
+  }
+  const approvePlan = (id: number) => runFlow(invoke("approve_board_plan", { id }));
+  const closePlan = (id: number) => runFlow(invoke("close_board_plan", { id }));
+
+  function titleOf(id: number): string {
+    return $data?.cards.find((c) => c.id === id)?.title ?? "gelöscht";
   }
 </script>
 
@@ -631,6 +733,19 @@
   {#if showsAssignee(card.assignee)}
     <p class="who">
       <Icon name={card.assignee.startsWith("agent:") ? "bot" : "user"} size="sm" />{actorLabel(card.assignee)}
+    </p>
+  {/if}
+  <!-- The agent flow (a2a.md CP-A2): what the column cannot say — waiting for another card, a question, a failure. -->
+  {#if isNotableState(card.state) || card.kind || card.agent}
+    <p class="flow-line">
+      {#if isNotableState(card.state)}
+        <span class="state-badge" data-state-tone={stateTone(card.state)} title={card.input_required ?? undefined}>
+          {STATE_LABEL[card.state]}{#if card.state === "blocked"}&nbsp;auf&nbsp;{card.waiting_on.map((id) => `#${id}`).join(", ")}{/if}
+        </span>
+      {/if}
+      {#if card.kind}<span class="flow-tag">{card.kind}</span>{/if}
+      {#if card.agent}<span class="flow-tag" title="Rolle">{card.agent}</span>{/if}
+      {#if card.returned_count > 0}<span class="flow-tag" title="vom Reviewer zurückgegeben">↩ {card.returned_count}</span>{/if}
     </p>
   {/if}
 {/snippet}
@@ -708,7 +823,119 @@
       </label>
     </div>
 
+    <!-- The agent flow (a2a.md CP-A2): what kind of work this is, for which role and how strong, and when it counts as done. -->
+    <h4 class="flow-head">Ablauf</h4>
+    <div class="fields">
+      <label>
+        <span>Art</span>
+        <input
+          value={detail.kind ?? ""}
+          placeholder="implement, review, test, doc"
+          onblur={(event) => saveDetail({ kind: event.currentTarget.value.trim() || null })}
+        />
+      </label>
+      <label>
+        <span>Stufe</span>
+        <select
+          value={detail.tier ?? ""}
+          onchange={(event) => {
+            const select = event.currentTarget;
+            void saveDetail({ tier: (select.value || null) as CardTier | null });
+            settle(select, detail.id, (card) => card.tier ?? "");
+          }}
+        >
+          <option value="">—</option>
+          <option value="light">leicht</option>
+          <option value="medium">mittel</option>
+          <option value="heavy">schwer</option>
+        </select>
+      </label>
+      <label>
+        <span>Rolle</span>
+        <input
+          list="kanban-roles"
+          value={detail.agent ?? ""}
+          placeholder="z. B. allrounder"
+          onblur={(event) => saveDetail({ agent: event.currentTarget.value.trim() || null })}
+        />
+      </label>
+      <label>
+        <span>Begründung</span>
+        <input
+          value={detail.agent_reason ?? ""}
+          placeholder="warum diese Rolle"
+          onblur={(event) => saveDetail({ agent_reason: event.currentTarget.value.trim() || null })}
+        />
+      </label>
+      <label>
+        <span>Plan</span>
+        <select
+          value={detail.plan_id ?? ""}
+          onchange={(event) => {
+            const select = event.currentTarget;
+            void saveDetail({ plan_id: select.value ? Number(select.value) : null });
+            settle(select, detail.id, (card) => String(card.plan_id ?? ""));
+          }}
+        >
+          <option value="">kein Plan</option>
+          {#each plans as plan (plan.id)}
+            <option value={plan.id}>{planLabel(plan)}</option>
+          {/each}
+        </select>
+      </label>
+    </div>
+    <datalist id="kanban-roles">
+      {#each roleNames as name (name)}<option value={name}></option>{/each}
+    </datalist>
+    <textarea
+      class="detail-body"
+      value={detail.acceptance}
+      placeholder="Abnahmekriterien — woran der Reviewer erkennt, dass die Karte fertig ist."
+      aria-label="Abnahmekriterien"
+      onblur={(event) => saveDetail({ acceptance: event.currentTarget.value })}
+    ></textarea>
+
+    {#if detail.plan_id !== null}
+      {@const candidates = dependencyCandidates(detail, $data?.cards ?? [])}
+      <div class="deps">
+        <span class="deps-label">Braucht zuerst</span>
+        {#each detail.depends_on as needs (needs)}
+          <span class="dep-chip" class:waiting={detail.waiting_on.includes(needs)} title={titleOf(needs)}>
+            #{needs} {titleOf(needs)}
+            <button type="button" aria-label="Abhängigkeit von #{needs} entfernen" onclick={() => removeDependency(detail, needs)}>
+              ×
+            </button>
+          </span>
+        {/each}
+        {#if candidates.length > 0}
+          <select
+            class="dep-add"
+            aria-label="Abhängigkeit hinzufügen"
+            onchange={(event) => {
+              const picked = Number(event.currentTarget.value);
+              event.currentTarget.value = "";
+              if (picked) void addDependency(detail, picked);
+            }}
+          >
+            <option value="">+ Abhängigkeit …</option>
+            {#each candidates as other (other.id)}<option value={other.id}>#{other.id} {other.title}</option>{/each}
+          </select>
+        {:else if detail.depends_on.length === 0}
+          <span class="deps-none">keine</span>
+        {/if}
+      </div>
+    {/if}
+    {#if detailError}<p class="detail-error" role="alert">{detailError}</p>{/if}
+
     <dl>
+      <dt>Zustand</dt>
+      <dd>
+        {STATE_LABEL[detail.state]}{#if detail.returned_count > 0} · {detail.returned_count}× zurückgegeben{/if}
+      </dd>
+      {#if detail.input_required}
+        <dt>Rückfrage</dt>
+        <dd>{detail.input_required}</dd>
+      {/if}
       {#if detail.due_at}
         {@const due = dueState(detail.due_at)}
         <dt>Fällig in</dt>
@@ -732,6 +959,14 @@
          it stays findable behind the archive filter. Deleting is for cards
          that should never have existed and lives in CP-K2b's card menu. -->
     <div class="detail-actions">
+      {#if detail.state === "proposed"}
+        <button class="ax-btn primary" onclick={() => approveProposal(detail)}>Vorschlag annehmen</button>
+      {/if}
+      {#if detail.state === "failed" || detail.state === "canceled"}
+        <button class="ax-btn" onclick={() => markCard(detail, "reopen")}>Wieder öffnen</button>
+      {:else if detail.state !== "taken_over" && detail.state !== "verified"}
+        <button class="ax-btn" onclick={() => markCard(detail, "cancel")}>Absagen</button>
+      {/if}
       <button class="ax-btn" onclick={() => setArchived(detail, detail.archived_at === null)}>
         {detail.archived_at === null ? "Archivieren" : "Zurückholen"}
       </button>
@@ -742,6 +977,33 @@
         <button class="ax-btn danger" onclick={() => (confirmingDelete = true)}>Löschen</button>
       {/if}
     </div>
+
+    <section class="history" aria-label="Verlauf">
+      <h4 class="flow-head">Verlauf</h4>
+      <form
+        class="note-form"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void writeNote(detail);
+        }}
+      >
+        <input bind:value={note} placeholder="Notiz schreiben …" aria-label="Notiz zum Verlauf" />
+      </form>
+      {#if events.length === 0}
+        <p class="history-empty">Noch nichts passiert.</p>
+      {:else}
+        <ul>
+          {#each [...events].reverse() as event (event.id)}
+            <li>
+              <span class="h-kind">{EVENT_LABEL[event.kind]}</span>
+              <span class="h-who">{actorLabel(event.actor)}</span>
+              <time class="h-when" datetime={event.at}>{new Date(event.at).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}</time>
+              {#if event.text}<p class="h-text">{event.text}</p>{/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   </article>
 {/snippet}
 
@@ -817,11 +1079,40 @@
         onclick={() => boardId !== null && void refreshBoard(boardId)}
       />
       <IconButton icon="columns-3" label="Spalte hinzufügen" onclick={addColumn} />
+      {#if isPanel}
+        <IconButton icon="plus" label="Plan anlegen" pressed={addingPlan} onclick={() => (addingPlan = !addingPlan)} />
+      {/if}
       {#if !isPanel}
         <IconButton icon="maximize-2" label="Brett groß öffnen" onclick={openAsPanel} />
       {/if}
     </div>
 
+    {#if isPanel && (plans.length > 0 || addingPlan)}
+      <div class="plans-bar" aria-label="Pläne">
+        {#each plans as plan (plan.id)}
+          <span class="plan" data-status={plan.status}>
+            {planLabel(plan)}
+            {#if plan.status === "draft"}
+              <button type="button" class="ax-btn primary" onclick={() => approvePlan(plan.id)}>Freigeben</button>
+            {/if}
+            {#if plan.status !== "closed"}
+              <button type="button" class="ax-btn" onclick={() => closePlan(plan.id)}>Abschließen</button>
+            {/if}
+          </span>
+        {/each}
+        {#if addingPlan}
+          <form
+            onsubmit={(event) => {
+              event.preventDefault();
+              void createPlan();
+            }}
+          >
+            <!-- svelte-ignore a11y_autofocus -->
+            <input autofocus bind:value={planName} placeholder="Name des Plans, Enter" aria-label="Name des neuen Plans" />
+          </form>
+        {/if}
+      </div>
+    {/if}
     <div class="work">
     <div class="board" style="--min-col: calc({MIN_COL_PX}px * var(--ax-ui-scale))" bind:this={boardEl}>
       {#each grouped as { column, cards } (column.id)}
@@ -861,11 +1152,12 @@
             {#if colMenu === column.id}
               <div class="col-menu" role="menu" data-no-drag>
                 <p class="menu-label">Rolle</p>
-                {#each ROLES as role (role)}
+                {#each column.stage ? [column.maps_to_status] : ROLES as role (role)}
                   <button
                     type="button"
                     role="menuitemradio"
                     aria-checked={column.maps_to_status === role}
+                    disabled={column.stage !== null}
                     onclick={() => {
                       colMenu = null;
                       void saveColumn(column, { maps_to_status: role });
@@ -879,17 +1171,23 @@
                 <button type="button" role="menuitem" onclick={() => renameColumn(column.id)}>
                   <Icon name="pencil" size="sm" />Umbenennen
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class="danger"
-                  onclick={() => {
-                    colMenu = null;
-                    removingColumn = { id: column.id, held: cards.length };
-                  }}
-                >
-                  <Icon name="trash-2" size="sm" />Entfernen
-                </button>
+                {#if column.stage === null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="danger"
+                    onclick={() => {
+                      colMenu = null;
+                      removingColumn = { id: column.id, held: cards.length };
+                    }}
+                  >
+                    <Icon name="trash-2" size="sm" />Entfernen
+                  </button>
+                {:else}
+                  <p class="menu-label">
+                    {column.stage === "review" ? "Review-Spalte des Ablaufs" : "Vorschlag-Spalte des Ablaufs"} — bleibt bei jedem Brett
+                  </p>
+                {/if}
               </div>
             {/if}
           </header>
@@ -1705,5 +2003,173 @@
   }
   dd.over {
     color: var(--ax-danger);
+  }
+
+  /* ----------------------------------------------------------- agent flow --- */
+  .flow-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ax-space-1);
+    margin: var(--ax-space-1) 0 0;
+    font-size: var(--ax-font-size-xs);
+  }
+  .state-badge {
+    padding: 0 calc(7px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: color-mix(in srgb, var(--ax-warning) 18%, transparent);
+    color: var(--ax-warning);
+    line-height: 1.7;
+  }
+  .state-badge[data-state-tone="bad"] {
+    background: color-mix(in srgb, var(--ax-danger) 18%, transparent);
+    color: var(--ax-danger);
+  }
+  .state-badge[data-state-tone="muted"] {
+    background: var(--ax-surface-2);
+    color: var(--ax-text-muted);
+  }
+  .flow-tag {
+    color: var(--ax-text-muted);
+  }
+  .flow-head {
+    margin: var(--ax-space-3) 0 var(--ax-space-2);
+    font-size: var(--ax-font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ax-text-muted);
+  }
+  .fields select {
+    width: 100%;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    color: inherit;
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
+  }
+  .deps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ax-space-1) var(--ax-space-2);
+    margin-bottom: var(--ax-space-3);
+    font-size: var(--ax-font-size-sm);
+  }
+  .deps-label,
+  .deps-none {
+    color: var(--ax-text-muted);
+  }
+  .dep-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    max-width: 100%;
+    padding: 0 var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dep-chip.waiting {
+    border-color: var(--ax-warning);
+  }
+  .dep-chip button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--ax-text-muted);
+    cursor: pointer;
+  }
+  .dep-add {
+    padding: 0 var(--ax-space-1);
+    border: 1px dashed var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    background: none;
+    color: var(--ax-text-muted);
+    font: inherit;
+    font-size: var(--ax-font-size-xs);
+  }
+  .detail-error {
+    margin: 0 0 var(--ax-space-3);
+    color: var(--ax-warning);
+    font-size: var(--ax-font-size-sm);
+    word-break: break-word;
+  }
+  .history {
+    margin-top: var(--ax-space-3);
+  }
+  .note-form input {
+    width: 100%;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    color: inherit;
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
+  }
+  .history ul {
+    margin: var(--ax-space-2) 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    font-size: var(--ax-font-size-sm);
+  }
+  .history-empty {
+    margin: var(--ax-space-2) 0 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+  .h-kind {
+    font-weight: 600;
+  }
+  .h-who,
+  .h-when {
+    margin-left: var(--ax-space-1);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+  .h-text {
+    margin: 2px 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .plans-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: 0 var(--ax-space-3) var(--ax-space-2);
+    font-size: var(--ax-font-size-sm);
+  }
+  .plans-bar .plan {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+  }
+  .plans-bar .plan[data-status="draft"] {
+    border-color: var(--ax-warning);
+  }
+  .plans-bar .plan[data-status="closed"] {
+    color: var(--ax-text-muted);
+  }
+  .plans-bar input {
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    background: var(--ax-surface-2);
+    color: inherit;
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
   }
 </style>

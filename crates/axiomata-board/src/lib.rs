@@ -15,10 +15,14 @@
 //! crate must never own a living, mutable schema, or two embedders would
 //! disagree about what version they are on.
 
+pub mod flow;
 pub mod model;
 pub mod store;
 
-pub use model::{Board, Card, CardFields, CardStatus, Column, NewCard, NewColumn};
+pub use model::{
+    Board, Card, CardEvent, CardFields, CardStatus, Column, ColumnStage, EventKind, NewCard,
+    NewColumn, Plan, PlanFields, PlanStatus, TaskState, Tier,
+};
 
 /// The board's **version 1** schema (`boards`, `board_columns`, `cards`).
 ///
@@ -33,6 +37,11 @@ pub use model::{Board, Card, CardFields, CardStatus, Column, NewCard, NewColumn}
 ///
 /// Not applied by this crate: the embedder owns the migration chain.
 pub const SCHEMA_SQL_V1: &str = include_str!("schema.sql");
+
+/// The board's **version 2** schema: the agent flow (`docs/plans/a2a.md`, CP-A2) — column roles, plans, the agent
+/// fields of a card, dependencies and the card history. An ALTER-and-ADD migration of its own, number 15 in the core's
+/// chain, frozen once released like version 1.
+pub const SCHEMA_SQL_V2: &str = include_str!("flow.sql");
 
 /// Everything that can go wrong in the board core.
 ///
@@ -95,6 +104,25 @@ mod schema_is_frozen {
              Add a new SCHEMA_SQL_V2 constant and a new migration number \
              instead. If you are deliberately changing the schema before it \
              has ever shipped, update EXPECTED in this test."
+        );
+    }
+
+    /// The same guard for version 2 (the agent flow), which ships as migration 15. A later change arrives as
+    /// `SCHEMA_SQL_V3`, never as an edit of `flow.sql`.
+    #[test]
+    fn the_shipped_flow_schema_has_not_been_edited() {
+        const EXPECTED: u64 = 0x54d7_1619_7f8c_e5c9;
+
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for byte in super::SCHEMA_SQL_V2.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+
+        assert_eq!(
+            hash, EXPECTED,
+            "flow.sql changed after it shipped as migration 15. It is an ALTER-and-ADD migration — add a \
+             SCHEMA_SQL_V3 and a new migration number instead. If it has never shipped, update EXPECTED here."
         );
     }
 }
@@ -168,6 +196,25 @@ pub fn render_board_markdown(board: &Board, columns: &[Column], cards: &[Card]) 
             if let Some(signer) = &card.verified_by {
                 notes.push(format!("geprüft von {signer}"));
             }
+            if let Some(kind) = &card.kind {
+                notes.push(format!("Art {kind}"));
+            }
+            if let Some(agent) = &card.agent {
+                notes.push(format!("Rolle {agent}"));
+            }
+            if card.returned_count > 0 {
+                notes.push(format!("{}× zurückgegeben", card.returned_count));
+            }
+            if !card.waiting_on.is_empty() {
+                let ids: Vec<String> = card.waiting_on.iter().map(|id| format!("#{id}")).collect();
+                notes.push(format!("wartet auf {}", ids.join(", ")));
+            }
+            if card.failed_at.is_some() {
+                notes.push("gescheitert".to_string());
+            }
+            if card.canceled_at.is_some() {
+                notes.push("abgebrochen".to_string());
+            }
             if !notes.is_empty() {
                 let _ = write!(out, "  ({})", notes.join(" · "));
             }
@@ -203,6 +250,7 @@ mod render_tests {
             name: name.to_string(),
             position,
             maps_to_status,
+            stage: None,
         }
     }
 
@@ -225,6 +273,20 @@ mod render_tests {
             archived_at: None,
             created_at: stamp,
             updated_at: stamp,
+            plan_id: None,
+            agent: None,
+            agent_reason: None,
+            tier: None,
+            kind: None,
+            acceptance: String::new(),
+            returned_count: 0,
+            input_required: None,
+            taken_over_at: None,
+            failed_at: None,
+            canceled_at: None,
+            depends_on: Vec::new(),
+            waiting_on: Vec::new(),
+            state: TaskState::default(),
         }
     }
 
@@ -297,6 +359,24 @@ mod render_tests {
             "body lines are indented under the card"
         );
         assert!(out.contains("  Zweite Zeile"));
+    }
+
+    #[test]
+    fn the_flow_details_of_a_card_travel_with_it() {
+        let columns = vec![column(1, "Offen", 1.0, CardStatus::Open)];
+        let mut flowing = card(10, 1, 1.0, "im Ablauf");
+        flowing.kind = Some("implement".to_string());
+        flowing.agent = Some("implementer-light".to_string());
+        flowing.returned_count = 2;
+        flowing.waiting_on = vec![7, 9];
+        flowing.failed_at = Some(Utc.with_ymd_and_hms(2026, 10, 1, 0, 0, 0).unwrap());
+
+        let out = render_board_markdown(&board(), &columns, &[flowing]);
+        assert!(out.contains("Art implement"));
+        assert!(out.contains("Rolle implementer-light"));
+        assert!(out.contains("2× zurückgegeben"));
+        assert!(out.contains("wartet auf #7, #9"));
+        assert!(out.contains("gescheitert"));
     }
 
     #[test]

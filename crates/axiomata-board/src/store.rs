@@ -20,7 +20,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::model::{
-    Board, Card, CardFields, CardStatus, Column, NewCard, NewColumn, default_columns,
+    Board, Card, CardFields, CardStatus, Column, ColumnStage, EventKind, NewCard, NewColumn,
+    TaskState, Tier, default_columns,
 };
 use crate::{BoardError, Result};
 
@@ -45,15 +46,39 @@ const STRIP_VERIFICATION_SET: &str = "verified_by = NULL, verified_at = NULL";
 const MIN_GAP: f64 = 1e-9;
 
 const BOARD_COLS: &str = "id, name, created_at, updated_at";
-const COLUMN_COLS: &str = "id, board_id, name, position, maps_to_status";
+const COLUMN_COLS: &str = "id, board_id, name, position, maps_to_status, stage";
 const CARD_COLS: &str = "id, board_id, column_id, position, title, body, labels, assignee, \
-     claimed_by, claimed_at, verified_by, verified_at, due_at, archived_at, created_at, updated_at";
+     claimed_by, claimed_at, verified_by, verified_at, due_at, archived_at, created_at, updated_at, \
+     plan_id, agent, agent_reason, tier, kind, acceptance, returned_count, input_required, \
+     taken_over_at, failed_at, canceled_at";
 
-fn now() -> String {
+/// Most cards one board holds, archived ones included. A runaway agent could otherwise fill a board until every read —
+/// and the Markdown mirror rewritten after every change — becomes slow. Far above anything a person keeps.
+const MAX_CARDS_PER_BOARD: i64 = 2_000;
+const MAX_AGENT_REASON_LEN: usize = 500;
+const MAX_ACCEPTANCE_LEN: usize = 20_000;
+/// Longest slug accepted for `agent` and `kind` (they name a role and a kind of work).
+const MAX_SLUG_LEN: usize = 48;
+
+/// Opens a write transaction on a connection that is only borrowed. `unchecked` because the borrow checker cannot see
+/// that nothing else on this connection is mid-transaction; every caller here holds the connection for the call.
+pub(crate) fn immediate(db: &Connection) -> Result<rusqlite::Transaction<'_>> {
+    Ok(rusqlite::Transaction::new_unchecked(
+        db,
+        TransactionBehavior::Immediate,
+    )?)
+}
+
+pub(crate) fn now() -> String {
     Utc::now().to_rfc3339()
 }
 
-fn parse_ts(raw: &str, table: &'static str, id: i64, field: &str) -> Result<DateTime<Utc>> {
+pub(crate) fn parse_ts(
+    raw: &str,
+    table: &'static str,
+    id: i64,
+    field: &str,
+) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(raw)
         .map(|dt| dt.with_timezone(&Utc))
         .map_err(|err| BoardError::CorruptRow {
@@ -63,7 +88,7 @@ fn parse_ts(raw: &str, table: &'static str, id: i64, field: &str) -> Result<Date
         })
 }
 
-fn parse_opt_ts(
+pub(crate) fn parse_opt_ts(
     raw: Option<String>,
     table: &'static str,
     id: i64,
@@ -73,7 +98,7 @@ fn parse_opt_ts(
         .transpose()
 }
 
-fn check_len(field: &'static str, value: &str, max: usize) -> Result<()> {
+pub(crate) fn check_len(field: &'static str, value: &str, max: usize) -> Result<()> {
     if value.trim().is_empty() {
         return Err(BoardError::Invalid {
             field,
@@ -97,7 +122,7 @@ fn check_len(field: &'static str, value: &str, max: usize) -> Result<()> {
 /// as `Agent:One` (or with a stray space) reads as two different actors to both
 /// of them, and self-verification slips through the one rule the schema calls
 /// load-bearing. Formatting must never decide identity.
-fn normalize_actor(actor: &str) -> Result<String> {
+pub(crate) fn normalize_actor(actor: &str) -> Result<String> {
     let trimmed = actor.trim().to_ascii_lowercase();
     check_len("actor", &trimmed, MAX_NAME_LEN)?;
 
@@ -121,6 +146,24 @@ fn normalize_actor(actor: &str) -> Result<String> {
         ));
     }
     Ok(trimmed)
+}
+
+/// A lower-case slug (letters and digits with `-` or `_` between them), the same shape as a role name.
+pub(crate) fn check_slug(field: &'static str, value: &str) -> Result<()> {
+    let bytes = value.as_bytes();
+    let edge = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    let ok = !bytes.is_empty()
+        && bytes.len() <= MAX_SLUG_LEN
+        && edge(bytes[0])
+        && edge(bytes[bytes.len() - 1])
+        && bytes.iter().all(|&b| edge(b) || b == b'-' || b == b'_');
+    if !ok {
+        return Err(BoardError::Invalid {
+            field,
+            reason: "use lower-case letters and digits, with - or _ between them".to_string(),
+        });
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------- boards ---
@@ -166,13 +209,14 @@ pub fn create_board(db: &mut Connection, name: &str) -> Result<Board> {
     let board_id = tx.last_insert_rowid();
     for (index, column) in default_columns().into_iter().enumerate() {
         tx.execute(
-            "INSERT INTO board_columns (board_id, name, position, maps_to_status)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO board_columns (board_id, name, position, maps_to_status, stage)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 board_id,
                 column.name,
                 (index + 1) as f64,
-                column.maps_to_status.as_str()
+                column.maps_to_status.as_str(),
+                column.stage.map(ColumnStage::as_str),
             ],
         )?;
     }
@@ -246,6 +290,7 @@ struct RawColumn {
     name: String,
     position: f64,
     maps_to_status: String,
+    stage: Option<String>,
 }
 
 impl RawColumn {
@@ -256,12 +301,24 @@ impl RawColumn {
                 id: self.id,
                 reason: format!("unknown maps_to_status {:?}", self.maps_to_status),
             })?;
+        let stage = self
+            .stage
+            .as_deref()
+            .map(|raw| {
+                ColumnStage::parse(raw).ok_or_else(|| BoardError::CorruptRow {
+                    table: "board_columns",
+                    id: self.id,
+                    reason: format!("unknown stage {raw:?}"),
+                })
+            })
+            .transpose()?;
         Ok(Column {
             id: self.id,
             board_id: self.board_id,
             name: self.name,
             position: self.position,
             maps_to_status: status,
+            stage,
         })
     }
 }
@@ -273,6 +330,7 @@ fn read_column(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawColumn> {
         name: row.get(2)?,
         position: row.get(3)?,
         maps_to_status: row.get(4)?,
+        stage: row.get(5)?,
     })
 }
 
@@ -295,18 +353,52 @@ pub fn get_column(db: &Connection, id: i64) -> Result<Option<Column>> {
     raw.map(RawColumn::into_column).transpose()
 }
 
+/// A column's role fixes its status: a proposal column is open, a review column is doing.
+fn check_stage_pairing(stage: Option<ColumnStage>, status: CardStatus) -> Result<()> {
+    if let Some(stage) = stage
+        && stage.required_status() != status
+    {
+        return Err(BoardError::Invalid {
+            field: "maps_to_status",
+            reason: format!(
+                "a {} column must map to {}",
+                stage.as_str(),
+                stage.required_status().as_str()
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Appends a column to the end of the board.
 pub fn create_column(db: &Connection, board_id: i64, new: &NewColumn) -> Result<Column> {
     check_len("name", &new.name, MAX_NAME_LEN)?;
+    check_stage_pairing(new.stage, new.maps_to_status)?;
+    if let Some(stage) = new.stage
+        && list_columns(db, board_id)?
+            .iter()
+            .any(|c| c.stage == Some(stage))
+    {
+        return Err(BoardError::Invalid {
+            field: "stage",
+            reason: format!("the board already has a {} column", stage.as_str()),
+        });
+    }
     let next: f64 = db.query_row(
         "SELECT COALESCE(MAX(position), 0.0) + 1.0 FROM board_columns WHERE board_id = ?1",
         params![board_id],
         |row| row.get(0),
     )?;
     db.execute(
-        "INSERT INTO board_columns (board_id, name, position, maps_to_status)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![board_id, new.name, next, new.maps_to_status.as_str()],
+        "INSERT INTO board_columns (board_id, name, position, maps_to_status, stage)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            board_id,
+            new.name,
+            next,
+            new.maps_to_status.as_str(),
+            new.stage.map(ColumnStage::as_str)
+        ],
     )?;
     let id = db.last_insert_rowid();
     get_column(db, id)?.ok_or_else(|| BoardError::CorruptRow {
@@ -332,6 +424,10 @@ pub fn update_column(
 ) -> Result<Option<Column>> {
     check_len("name", name, MAX_NAME_LEN)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // The role stays; only a status that goes with it is accepted.
+    if let Some(existing) = get_column(&tx, id)? {
+        check_stage_pairing(existing.stage, maps_to_status)?;
+    }
     let changed = tx.execute(
         "UPDATE board_columns SET name = ?2, maps_to_status = ?3 WHERE id = ?1",
         params![id, name, maps_to_status.as_str()],
@@ -360,6 +456,14 @@ pub fn update_column(
 /// a refusal the caller can act on beats a foreign-key error it cannot.
 pub fn delete_column(db: &mut Connection, id: i64, move_cards_to: Option<i64>) -> Result<bool> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // A column with a role is part of the agent flow on every board; take the role away first if it really has to go.
+    if get_column(&tx, id)?.is_some_and(|column| column.stage.is_some()) {
+        return Err(BoardError::Invalid {
+            field: "stage",
+            reason: "this column has a role in the agent flow on every board and cannot be deleted"
+                .to_string(),
+        });
+    }
     let held: i64 = tx.query_row(
         "SELECT COUNT(*) FROM cards WHERE column_id = ?1",
         params![id],
@@ -370,6 +474,15 @@ pub fn delete_column(db: &mut Connection, id: i64, move_cards_to: Option<i64>) -
             tx.commit()?;
             return Ok(false);
         };
+        // The entry rules of the flow columns (claim on review, no work in the proposal column) live in the steps;
+        // a bulk move would walk around them.
+        if get_column(&tx, target)?.is_some_and(|column| column.stage.is_some()) {
+            return Err(BoardError::Invalid {
+                field: "move_cards_to",
+                reason: "cards cannot be moved in bulk into a column with a role in the agent flow"
+                    .to_string(),
+            });
+        }
         tx.execute(
             "UPDATE cards SET column_id = ?2, updated_at = ?3 WHERE column_id = ?1",
             params![id, target, now()],
@@ -409,6 +522,17 @@ struct RawCard {
     archived_at: Option<String>,
     created_at: String,
     updated_at: String,
+    plan_id: Option<i64>,
+    agent: Option<String>,
+    agent_reason: Option<String>,
+    tier: Option<String>,
+    kind: Option<String>,
+    acceptance: String,
+    returned_count: i64,
+    input_required: Option<String>,
+    taken_over_at: Option<String>,
+    failed_at: Option<String>,
+    canceled_at: Option<String>,
 }
 
 impl RawCard {
@@ -420,6 +544,17 @@ impl RawCard {
                 id,
                 reason: format!("labels is not a JSON string array: {err}"),
             })?;
+        let tier = self
+            .tier
+            .as_deref()
+            .map(|raw| {
+                Tier::parse(raw).ok_or_else(|| BoardError::CorruptRow {
+                    table: "cards",
+                    id,
+                    reason: format!("unknown tier {raw:?}"),
+                })
+            })
+            .transpose()?;
         Ok(Card {
             id,
             board_id: self.board_id,
@@ -437,6 +572,21 @@ impl RawCard {
             archived_at: parse_opt_ts(self.archived_at, "cards", id, "archived_at")?,
             created_at: parse_ts(&self.created_at, "cards", id, "created_at")?,
             updated_at: parse_ts(&self.updated_at, "cards", id, "updated_at")?,
+            plan_id: self.plan_id,
+            agent: self.agent,
+            agent_reason: self.agent_reason,
+            tier,
+            kind: self.kind,
+            acceptance: self.acceptance,
+            returned_count: u32::try_from(self.returned_count).unwrap_or(0),
+            input_required: self.input_required,
+            taken_over_at: parse_opt_ts(self.taken_over_at, "cards", id, "taken_over_at")?,
+            failed_at: parse_opt_ts(self.failed_at, "cards", id, "failed_at")?,
+            canceled_at: parse_opt_ts(self.canceled_at, "cards", id, "canceled_at")?,
+            // Filled in by `decorate`, which knows the columns and the edges.
+            depends_on: Vec::new(),
+            waiting_on: Vec::new(),
+            state: TaskState::default(),
         })
     }
 }
@@ -459,13 +609,81 @@ fn read_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawCard> {
         archived_at: row.get(13)?,
         created_at: row.get(14)?,
         updated_at: row.get(15)?,
+        plan_id: row.get(16)?,
+        agent: row.get(17)?,
+        agent_reason: row.get(18)?,
+        tier: row.get(19)?,
+        kind: row.get(20)?,
+        acceptance: row.get(21)?,
+        returned_count: row.get(22)?,
+        input_required: row.get(23)?,
+        taken_over_at: row.get(24)?,
+        failed_at: row.get(25)?,
+        canceled_at: row.get(26)?,
     })
+}
+
+/// Fills in what is computed on read: a card's edges and its [`TaskState`].
+///
+/// One query for the edges of the whole board and one for its columns, however many cards there are — this runs on
+/// every render and for every agent that polls the board.
+fn decorate(db: &Connection, mut cards: Vec<Card>) -> Result<Vec<Card>> {
+    use std::collections::{BTreeSet, HashMap};
+
+    let boards: BTreeSet<i64> = cards.iter().map(|card| card.board_id).collect();
+    let mut columns: HashMap<i64, Column> = HashMap::new();
+    // card id → (depends-on id, signed off?)
+    let mut edges: HashMap<i64, Vec<(i64, bool)>> = HashMap::new();
+    for board_id in boards {
+        for column in list_columns(db, board_id)? {
+            columns.insert(column.id, column);
+        }
+        // A board's edges for a whole listing, a single card's for `get_card`: an agent that polls one card should not
+        // pay for every edge of a large board.
+        let only_card = (cards.len() == 1).then(|| cards[0].id);
+        let mut stmt = db.prepare(
+            "SELECT d.card_id, d.depends_on_id, dep.verified_by IS NOT NULL
+             FROM card_deps d
+             JOIN cards c ON c.id = d.card_id
+             JOIN cards dep ON dep.id = d.depends_on_id
+             WHERE c.board_id = ?1 AND (?2 IS NULL OR d.card_id = ?2)
+             ORDER BY d.card_id, d.depends_on_id",
+        )?;
+        let rows = stmt.query_map(params![board_id, only_card], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (card_id, dep_id, signed) = row?;
+            edges.entry(card_id).or_default().push((dep_id, signed));
+        }
+    }
+    for card in &mut cards {
+        if let Some(list) = edges.get(&card.id) {
+            card.depends_on = list.iter().map(|(dep, _)| *dep).collect();
+            card.waiting_on = list
+                .iter()
+                .filter(|(_, signed)| !signed)
+                .map(|(dep, _)| *dep)
+                .collect();
+        }
+        if let Some(column) = columns.get(&card.column_id) {
+            card.state = crate::flow::derive_state(card, column);
+        }
+    }
+    Ok(cards)
 }
 
 pub fn get_card(db: &Connection, id: i64) -> Result<Option<Card>> {
     let sql = format!("SELECT {CARD_COLS} FROM cards WHERE id = ?1");
     let raw = db.query_row(&sql, params![id], read_card).optional()?;
-    raw.map(RawCard::into_card).transpose()
+    let Some(card) = raw.map(RawCard::into_card).transpose()? else {
+        return Ok(None);
+    };
+    Ok(decorate(db, vec![card])?.pop())
 }
 
 /// Every card of a board, ordered the way it is drawn. Archived cards are left
@@ -488,11 +706,24 @@ pub fn list_cards(db: &Connection, board_id: i64, include_archived: bool) -> Res
     for raw in rows {
         out.push(raw?.into_card()?);
     }
-    Ok(out)
+    decorate(db, out)
+}
+
+/// A line of text must stay one line: the title and the labels are written into the Markdown mirror as a single list
+/// item, where a line break would forge a heading or a checklist entry in the user's vault.
+fn check_one_line(field: &'static str, value: &str) -> Result<()> {
+    if value.chars().any(char::is_control) {
+        return Err(BoardError::Invalid {
+            field,
+            reason: "must be a single line without control characters".to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn validate_fields(fields: &CardFields) -> Result<()> {
     check_len("title", &fields.title, MAX_TITLE_LEN)?;
+    check_one_line("title", &fields.title)?;
     if fields.body.len() > MAX_BODY_LEN {
         return Err(BoardError::Invalid {
             field: "body",
@@ -507,8 +738,54 @@ fn validate_fields(fields: &CardFields) -> Result<()> {
     }
     for label in &fields.labels {
         check_len("label", label, MAX_LABEL_LEN)?;
+        check_one_line("label", label)?;
+    }
+    if let Some(agent) = &fields.agent {
+        check_slug("agent", agent)?;
+    }
+    if let Some(kind) = &fields.kind {
+        check_slug("kind", kind)?;
+    }
+    if let Some(reason) = &fields.agent_reason
+        && reason.len() > MAX_AGENT_REASON_LEN
+    {
+        return Err(BoardError::Invalid {
+            field: "agent_reason",
+            reason: format!("longer than {MAX_AGENT_REASON_LEN} bytes"),
+        });
+    }
+    if fields.acceptance.len() > MAX_ACCEPTANCE_LEN {
+        return Err(BoardError::Invalid {
+            field: "acceptance",
+            reason: format!("longer than {MAX_ACCEPTANCE_LEN} bytes"),
+        });
     }
     Ok(())
+}
+
+/// A card may only belong to a plan of its own board.
+fn check_plan_of_board(db: &Connection, plan_id: Option<i64>, board_id: i64) -> Result<()> {
+    let Some(plan_id) = plan_id else {
+        return Ok(());
+    };
+    let plan_board: Option<i64> = db
+        .query_row(
+            "SELECT board_id FROM plans WHERE id = ?1",
+            params![plan_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match plan_board {
+        Some(found) if found == board_id => Ok(()),
+        Some(_) => Err(BoardError::Invalid {
+            field: "plan_id",
+            reason: format!("plan {plan_id} belongs to another board"),
+        }),
+        None => Err(BoardError::Invalid {
+            field: "plan_id",
+            reason: format!("no plan {plan_id}"),
+        }),
+    }
 }
 
 /// The assignee is an actor like any other, so it is stored in the same
@@ -534,6 +811,15 @@ pub fn create_card(db: &Connection, new: &NewCard) -> Result<Card> {
             reason: format!("no column {}", new.column_id),
         });
     };
+    check_plan_of_board(db, new.fields.plan_id, column.board_id)?;
+    if count_cards(db, column.board_id)? >= MAX_CARDS_PER_BOARD {
+        return Err(BoardError::Invalid {
+            field: "column_id",
+            reason: format!(
+                "the board already holds {MAX_CARDS_PER_BOARD} cards; archive or delete some first"
+            ),
+        });
+    }
     let position: f64 = db.query_row(
         "SELECT COALESCE(MAX(position), 0.0) + 1.0 FROM cards WHERE column_id = ?1",
         params![new.column_id],
@@ -542,8 +828,9 @@ pub fn create_card(db: &Connection, new: &NewCard) -> Result<Card> {
     let stamp = now();
     db.execute(
         "INSERT INTO cards (board_id, column_id, position, title, body, labels, assignee,
-                            due_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                            due_at, created_at, updated_at,
+                            plan_id, agent, agent_reason, tier, kind, acceptance)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             column.board_id,
             new.column_id,
@@ -553,7 +840,13 @@ pub fn create_card(db: &Connection, new: &NewCard) -> Result<Card> {
             labels_json(&new.fields.labels)?,
             canonical_assignee(&new.fields)?,
             new.fields.due_at.map(|d| d.to_rfc3339()),
-            stamp
+            stamp,
+            new.fields.plan_id,
+            new.fields.agent,
+            new.fields.agent_reason,
+            new.fields.tier.map(Tier::as_str),
+            new.fields.kind,
+            new.fields.acceptance,
         ],
     )?;
     let id = db.last_insert_rowid();
@@ -568,9 +861,20 @@ pub fn create_card(db: &Connection, new: &NewCard) -> Result<Card> {
 /// through [`claim_card`], [`release_card`] and [`verify_card`].
 pub fn update_card(db: &Connection, id: i64, fields: &CardFields) -> Result<Option<Card>> {
     validate_fields(fields)?;
-    let changed = db.execute(
+    // One transaction: the plan checks read edges and plans, and an edge added (or a plan deleted) between the check
+    // and the write would leave a card whose plan and edges disagree.
+    let tx = immediate(db)?;
+    let Some(existing) = get_card(&tx, id)? else {
+        return Ok(None);
+    };
+    check_plan_of_board(&tx, fields.plan_id, existing.board_id)?;
+    if fields.plan_id != existing.plan_id {
+        crate::flow::check_plan_change_keeps_edges(&tx, id)?;
+    }
+    let changed = tx.execute(
         "UPDATE cards SET title = ?2, body = ?3, labels = ?4, assignee = ?5, due_at = ?6,
-                          updated_at = ?7
+                          updated_at = ?7, plan_id = ?8, agent = ?9, agent_reason = ?10,
+                          tier = ?11, kind = ?12, acceptance = ?13
          WHERE id = ?1",
         params![
             id,
@@ -579,9 +883,16 @@ pub fn update_card(db: &Connection, id: i64, fields: &CardFields) -> Result<Opti
             labels_json(&fields.labels)?,
             canonical_assignee(fields)?,
             fields.due_at.map(|d| d.to_rfc3339()),
-            now()
+            now(),
+            fields.plan_id,
+            fields.agent,
+            fields.agent_reason,
+            fields.tier.map(Tier::as_str),
+            fields.kind,
+            fields.acceptance,
         ],
     )?;
+    tx.commit()?;
     if changed == 0 {
         return Ok(None);
     }
@@ -595,12 +906,42 @@ pub fn delete_card(db: &Connection, id: i64) -> Result<bool> {
 /// Archives or un-archives. Archiving is the ordinary way a finished card
 /// leaves the board; deleting is for cards that should never have existed.
 pub fn set_card_archived(db: &Connection, id: i64, archived: bool) -> Result<bool> {
+    let tx = immediate(db)?;
+    if archived {
+        // An unfinished card that other cards wait for cannot just vanish from the board: they would stay blocked on
+        // something nobody sees. Finish it, or take the edge away first.
+        let signed: Option<bool> = tx
+            .query_row(
+                "SELECT verified_by IS NOT NULL FROM cards WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if signed == Some(false) {
+            let waiting: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM card_deps d JOIN cards c ON c.id = d.card_id
+                 WHERE d.depends_on_id = ?1 AND c.archived_at IS NULL",
+                params![id],
+                |row| row.get(0),
+            )?;
+            if waiting > 0 {
+                return Err(BoardError::Invalid {
+                    field: "card_id",
+                    reason: format!(
+                        "{waiting} other card(s) wait for this one; remove their dependency before archiving it"
+                    ),
+                });
+            }
+        }
+    }
     let stamp = now();
     let value = archived.then_some(stamp.clone());
-    Ok(db.execute(
+    let changed = tx.execute(
         "UPDATE cards SET archived_at = ?2, updated_at = ?3 WHERE id = ?1",
         params![id, value, stamp],
-    )? == 1)
+    )?;
+    tx.commit()?;
+    Ok(changed == 1)
 }
 
 // ----------------------------------------------------------- positioning ---
@@ -713,6 +1054,30 @@ fn renumber(
 /// Also clears the verification if the destination is not a done column — the
 /// same rule [`update_column`] applies from the other direction.
 pub fn move_card(db: &mut Connection, id: i64, column_id: i64, index: usize) -> Result<bool> {
+    move_card_as(db, id, column_id, index, None)
+}
+
+/// [`move_card`] on behalf of an actor (A18). Two things only an actor makes possible, both when the card **enters a
+/// review column**: an unclaimed card is claimed for the mover ("whoever hands it in has worked on it"), which is what
+/// lets somebody else sign it off without loosening the schema's two-party rule, and the move is written into the
+/// card's history. Entering review also clears a pending question. Without an actor nothing of this happens.
+pub fn move_card_as(
+    db: &mut Connection,
+    id: i64,
+    column_id: i64,
+    index: usize,
+    actor: Option<&str>,
+) -> Result<bool> {
+    let actor = actor.map(normalize_actor).transpose()?;
+    // An agent moves a card only through its steps (`claim`, `report_done`, `review_verdict`), which check who may do
+    // what (a2a.md A18). A free move would be a way around all of them: out of the proposal column without the
+    // owner's yes, straight into Done without a review.
+    if actor.as_deref().is_some_and(|a| a.starts_with("agent:")) {
+        return Err(BoardError::Invalid {
+            field: "actor",
+            reason: "an agent moves a card only by reporting it done or by judging it".to_string(),
+        });
+    }
     // The transaction opens *first*, before the target column and the
     // neighbouring positions are read. Reading them beforehand — as this
     // function originally did — is the time-of-check/time-of-use hole this
@@ -723,22 +1088,57 @@ pub fn move_card(db: &mut Connection, id: i64, column_id: i64, index: usize) -> 
     // The reads are two indexed lookups, so holding the write lock across them
     // costs microseconds.
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let Some(target) = get_column(&tx, column_id)? else {
+    let moved = move_card_in(&tx, id, column_id, index, actor.as_deref())?;
+    tx.commit()?;
+    Ok(moved)
+}
+
+/// [`move_card_as`] inside a transaction the caller already holds — for the flow functions that check their
+/// preconditions and move the card as one atomic step. `actor` must already be canonical.
+pub(crate) fn move_card_in(
+    tx: &rusqlite::Transaction<'_>,
+    id: i64,
+    column_id: i64,
+    index: usize,
+    actor: Option<&str>,
+) -> Result<bool> {
+    let Some(target) = get_column(tx, column_id)? else {
         return Err(BoardError::Invalid {
             field: "column_id",
             reason: format!("no column {column_id}"),
         });
     };
-    let (mut position, index, collapsed) =
-        position_for(&tx, CARDS_IN_COLUMN, column_id, index, id)?;
+    let (mut position, index, collapsed) = position_for(tx, CARDS_IN_COLUMN, column_id, index, id)?;
     if collapsed {
-        renumber(&tx, CARDS_IN_COLUMN, column_id, id)?;
+        renumber(tx, CARDS_IN_COLUMN, column_id, id)?;
         // Against the fresh 1.0/2.0/3.0 spacing, slot `index` sits at
         // `index + 0.5`: before the first card for 0, between neighbours
         // otherwise, past the last one at the end.
         position = index as f64 + 0.5;
     }
     let stamp = now();
+    let previous_stage: Option<Option<String>> = tx
+        .query_row(
+            "SELECT c.stage FROM cards k JOIN board_columns c ON c.id = k.column_id WHERE k.id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    // A card that changes board leaves its plan and its edges behind: both only mean something inside one board.
+    let old_board: Option<i64> = tx
+        .query_row(
+            "SELECT board_id FROM cards WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if old_board.is_some_and(|board| board != target.board_id) {
+        tx.execute(
+            "DELETE FROM card_deps WHERE card_id = ?1 OR depends_on_id = ?1",
+            params![id],
+        )?;
+        tx.execute("UPDATE cards SET plan_id = NULL WHERE id = ?1", params![id])?;
+    }
     let changed = tx.execute(
         "UPDATE cards SET column_id = ?2, board_id = ?3, position = ?4, updated_at = ?5
          WHERE id = ?1",
@@ -750,7 +1150,22 @@ pub fn move_card(db: &mut Connection, id: i64, column_id: i64, index: usize) -> 
             params![id],
         )?;
     }
-    tx.commit()?;
+    let entered_review = target.stage == Some(ColumnStage::Review)
+        && previous_stage.is_some_and(|stage| stage.as_deref() != Some("review"));
+    if changed == 1 && entered_review {
+        tx.execute(
+            "UPDATE cards SET input_required = NULL WHERE id = ?1",
+            params![id],
+        )?;
+        if let Some(actor) = actor {
+            tx.execute(
+                "UPDATE cards SET claimed_by = ?2, claimed_at = ?3
+                 WHERE id = ?1 AND claimed_by IS NULL AND archived_at IS NULL",
+                params![id, actor, stamp],
+            )?;
+            crate::flow::insert_event(tx, id, actor, EventKind::Reported, "")?;
+        }
+    }
     Ok(changed == 1)
 }
 
@@ -789,9 +1204,11 @@ pub fn move_to_status(db: &mut Connection, id: i64, status: CardStatus) -> Resul
     let Some(card) = get_card(db, id)? else {
         return Ok(None);
     };
+    // A column with a role (proposal, review) is never "the" column of a status: marking something open must not
+    // put it into the proposal column.
     let Some(target) = list_columns(db, card.board_id)?
         .into_iter()
-        .find(|column| column.maps_to_status == status)
+        .find(|column| column.maps_to_status == status && column.stage.is_none())
     else {
         return Ok(None);
     };
@@ -810,12 +1227,15 @@ pub fn move_to_status(db: &mut Connection, id: i64, status: CardStatus) -> Resul
 pub fn claim_card(db: &Connection, id: i64, actor: &str) -> Result<bool> {
     let actor = normalize_actor(actor)?;
     let stamp = now();
-    // `archived_at IS NULL`: an archived card is not live work. Without this an
+    // A card in a proposal column has not been approved yet and cannot be taken. `archived_at IS NULL`: an
+    // archived card is not live work. Without this an
     // agent enumerating cards with a query that forgot the archive filter could
     // claim something nobody meant to put back in play.
     Ok(db.execute(
         "UPDATE cards SET claimed_by = ?2, claimed_at = ?3, updated_at = ?3
-         WHERE id = ?1 AND claimed_by IS NULL AND archived_at IS NULL",
+         WHERE id = ?1 AND claimed_by IS NULL AND archived_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM board_columns c
+                           WHERE c.id = cards.column_id AND c.stage = 'proposal')",
         params![id, actor, stamp],
     )? == 1)
 }
@@ -904,8 +1324,8 @@ pub fn explain_verify_refusal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SCHEMA_SQL_V1;
     use crate::model::CardFields;
+    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -932,6 +1352,7 @@ mod tests {
     fn fresh(path: &PathBuf) -> Connection {
         let conn = open(path);
         conn.execute_batch(SCHEMA_SQL_V1).expect("schema");
+        conn.execute_batch(SCHEMA_SQL_V2).expect("flow schema");
         conn
     }
 
@@ -942,13 +1363,29 @@ mod tests {
             labels: Vec::new(),
             assignee: None,
             due_at: None,
+            plan_id: None,
+            agent: None,
+            agent_reason: None,
+            tier: None,
+            kind: None,
+            acceptance: String::new(),
         }
     }
 
-    /// Board with its three default columns, plus one card in the first.
+    /// The three plain columns (Offen, In Arbeit, Fertig) of a board — the roles Vorschlag and Review are left
+    /// out, so the older tests keep their meaning of "column 0, 1, 2".
+    fn plain_columns(db: &Connection, board_id: i64) -> Vec<Column> {
+        list_columns(db, board_id)
+            .expect("columns")
+            .into_iter()
+            .filter(|column| column.stage.is_none())
+            .collect()
+    }
+
+    /// Board with its default columns, plus one card in the first.
     fn seed(db: &mut Connection) -> (Board, Vec<Column>, Card) {
         let board = create_board(db, "Test").expect("create board");
-        let columns = list_columns(db, board.id).expect("columns");
+        let columns = plain_columns(db, board.id);
         let card = create_card(
             db,
             &NewCard {
@@ -961,18 +1398,38 @@ mod tests {
     }
 
     #[test]
-    fn a_new_board_starts_with_the_three_default_columns() {
+    fn a_new_board_starts_with_the_flow_columns() {
         let path = temp_db_path();
         let mut db = fresh(&path);
         let board = create_board(&mut db, "Test").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
 
         let names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["Offen", "In Arbeit", "Fertig"]);
+        assert_eq!(
+            names,
+            ["Vorschlag", "Offen", "In Arbeit", "Review", "Fertig"]
+        );
         let statuses: Vec<CardStatus> = columns.iter().map(|c| c.maps_to_status).collect();
         assert_eq!(
             statuses,
-            [CardStatus::Open, CardStatus::Doing, CardStatus::Done]
+            [
+                CardStatus::Open,
+                CardStatus::Open,
+                CardStatus::Doing,
+                CardStatus::Doing,
+                CardStatus::Done
+            ]
+        );
+        let stages: Vec<Option<ColumnStage>> = columns.iter().map(|c| c.stage).collect();
+        assert_eq!(
+            stages,
+            [
+                Some(ColumnStage::Proposal),
+                None,
+                None,
+                Some(ColumnStage::Review),
+                None
+            ]
         );
         let _ = std::fs::remove_file(&path);
     }
@@ -1303,15 +1760,19 @@ mod tests {
                 .map(|c| c.name)
                 .collect()
         };
-        assert_eq!(names(&db), ["Offen", "In Arbeit", "Fertig"]);
+        let start = ["Vorschlag", "Offen", "In Arbeit", "Review", "Fertig"];
+        assert_eq!(names(&db), start);
 
-        let fertig = list_columns(&db, board.id).unwrap()[2].id;
+        let fertig = plain_columns(&db, board.id)[2].id;
         assert!(move_column(&mut db, fertig, 0).unwrap());
-        assert_eq!(names(&db), ["Fertig", "Offen", "In Arbeit"]);
+        assert_eq!(
+            names(&db),
+            ["Fertig", "Vorschlag", "Offen", "In Arbeit", "Review"]
+        );
 
         // Moving down its own list: the slot counts the *other* columns.
-        assert!(move_column(&mut db, fertig, 2).unwrap());
-        assert_eq!(names(&db), ["Offen", "In Arbeit", "Fertig"]);
+        assert!(move_column(&mut db, fertig, 4).unwrap());
+        assert_eq!(names(&db), start);
 
         assert!(!move_column(&mut db, 9999, 0).unwrap());
         let _ = std::fs::remove_file(&path);
@@ -1338,7 +1799,7 @@ mod tests {
         let path = temp_db_path();
         let mut db = fresh(&path);
         let board = create_board(&mut db, "Test").unwrap();
-        let columns = list_columns(&db, board.id).unwrap();
+        let columns = plain_columns(&db, board.id);
         let col = columns[0].id;
 
         for title in ["a", "b", "c"] {
@@ -1625,6 +2086,7 @@ mod tests {
             labels: vec!["dringend".to_string()],
             assignee: Some("human:owner".to_string()),
             due_at: None,
+            ..CardFields::default()
         };
         let updated = update_card(&db, card.id, &new_fields).unwrap().unwrap();
         assert_eq!(updated.title, "Neuer Titel");
@@ -1667,7 +2129,7 @@ mod tests {
         let path = temp_db_path();
         let mut db = fresh(&path);
         let board = create_board(&mut db, "Test").unwrap();
-        let columns = list_columns(&db, board.id).unwrap();
+        let columns = plain_columns(&db, board.id);
         let (open, doing, done) = (columns[0].id, columns[1].id, columns[2].id);
 
         // Deliberately created out of column order, to catch a grouping bug
@@ -1726,13 +2188,14 @@ mod tests {
             &db,
             board.id,
             &NewColumn {
-                name: "Review".to_string(),
+                name: "Prüfen".to_string(),
                 maps_to_status: CardStatus::Doing,
+                stage: None,
             },
         )
         .unwrap();
 
-        let columns = list_columns(&db, board.id).unwrap();
+        let columns = plain_columns(&db, board.id);
         assert_eq!(columns.len(), 4);
         assert_eq!(columns.last().unwrap().id, extra.id);
         assert!(
@@ -1797,6 +2260,7 @@ mod tests {
             &NewColumn {
                 name: "Auch fertig".to_string(),
                 maps_to_status: CardStatus::Done,
+                stage: None,
             },
         )
         .unwrap()

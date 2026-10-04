@@ -156,6 +156,38 @@ actor strings are canonicalised before either sees them — without that, `agent
 claim a card and `Agent:One` could sign it off. Every mutation is a single statement with its
 precondition in the `WHERE` clause; claiming is a compare-and-swap.
 
+**The agent flow (A2A CP-A2, 2026-10-04, `docs/plans/a2a.md` A12–A19).** Schema version 2
+(`SCHEMA_SQL_V2`, `flow.sql`, migration 15) and `flow.rs` give the board what agents need
+without touching the principle above. A column may have a **role** (`stage`: `proposal` is
+open, `review` is doing) that refines its status instead of adding statuses — the status
+`CHECK` of version 1 stays, and **every board has both columns** (new boards start with
+Vorschlag · Offen · In Arbeit · Review · Fertig, `ensure_flow_columns_all` adds them to older
+boards at start; they cannot be deleted, the Vorschlag column is hidden by the views while
+empty). A card's flow **state** (`TaskState`: proposed, blocked, ready, working,
+input_required, in_review, done, verified, taken_over, failed, canceled) is *derived* on every
+read from the column, the signatures and a few fields (`derive_state`), never stored. New
+tables: `plans` (the unit of approval, automation and limits; `cards.plan_id`), `card_deps`
+("needs first"; same plan, acyclic — checked in the transaction that inserts the edge —, ready
+means the predecessors are **signed off**), `card_events` (append-only history: review notes,
+escalations, limit stops). Steps for an agent are `report_done` (claimed card → review
+column) and `review_verdict` (approve = move to Done *and* sign in one transaction; return =
+back to work, `returned_count` + 1, a reason is required); nobody judges a card they hold.
+`move_card_as` claims an unclaimed card for whoever hands it into the review column, so a
+card the owner did alone can still be judged by an agent without loosening the two-party
+`CHECK`. Plan approval (`approve_plan`) moves the plan's proposals to Offen — proposals and
+the owner's yes are one concept. CLI: `board plan|dep|report|verdict|events|note|input|fail|
+cancel|reopen|taken-over|approve`; the Kanban module shows the state badge, the agent fields,
+dependencies and the history (`modules/kanban.svelte`, `core/kanban.ts`).
+
+**Who may act is enforced, not believed** (a2a.md A39, from the CP-A2 security review). The store asks for a
+`human:` actor at the owner's gates (approve plan/proposal, take-over, reopen), lets only the holder or the
+owner set a question or fail/cancel a card, and refuses free moves by an `agent:` actor. The CLI derives the
+actor in an agent session from `AXIOMATA_AGENT_ID/_NAME` (`axiomata_core::session`), refuses a different
+`--actor`, closes the owner's commands there and lets an agent add cards only to the proposal column. This guards
+against mistakes and against agents that follow their instructions; it is not a sandbox (a process of the same user
+can clear the variables or write the database), which is CP-A5's job. Bounds: 2000 cards per board, 100 plans, 50
+dependencies per card; titles and labels are one line.
+
 `core/board_mirror.rs` writes each board to `<workspace>/Kanban/<id>-<name>.md` after every
 change, one way only — see the trap list in `AGENTS.md`. Full plan and the list of what came
 out differently in practice: `docs/plans/kanban.md`.
@@ -1492,6 +1524,10 @@ compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, 
 **agent-to-agent communication (M7.5)** — planned and approved 2026-10-03, nothing built yet: `docs/plans/a2a.md` (engine / agent /
 session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
+
+### A2A CP-A2 built (2026-10-04)
+
+The board's agent flow (see the `axiomata-board` section in §3): column roles, plans, card fields, dependencies, history and derived state; migration 15; CLI and Kanban UI. Nothing starts from it yet — that is CP-A6.
 
 ### A2A CP-A1 built (2026-10-04)
 

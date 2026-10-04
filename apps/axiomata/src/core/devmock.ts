@@ -40,6 +40,9 @@ import type {
   AgentState,
   BaseFile,
   FileDiff,
+  BoardPlan,
+  CardEvent,
+  TaskState,
 } from "./backend";
 import { hunksFromTexts, parseHunkHeader } from "../editor/diff/hunks";
 import { textLines } from "../editor/diff/model";
@@ -491,10 +494,53 @@ let boards: Board[] = [
   },
 ];
 let boardColumns: BoardColumn[] = [
-  { id: 1, board_id: 1, name: "Offen", position: 1, maps_to_status: "open" },
-  { id: 2, board_id: 1, name: "In Arbeit", position: 2, maps_to_status: "doing" },
-  { id: 3, board_id: 1, name: "Fertig", position: 3, maps_to_status: "done" },
+  { id: 4, board_id: 1, name: "Vorschlag", position: 0, maps_to_status: "open", stage: "proposal" },
+  { id: 1, board_id: 1, name: "Offen", position: 1, maps_to_status: "open", stage: null },
+  { id: 2, board_id: 1, name: "In Arbeit", position: 2, maps_to_status: "doing", stage: null },
+  { id: 5, board_id: 1, name: "Review", position: 2.5, maps_to_status: "doing", stage: "review" },
+  { id: 3, board_id: 1, name: "Fertig", position: 3, maps_to_status: "done", stage: null },
 ];
+/* The agent flow (a2a.md CP-A2): one plan, the edges between its cards and a little history. */
+let boardPlans: BoardPlan[] = [
+  {
+    id: 1,
+    board_id: 1,
+    name: "Studio-Ablauf",
+    status: "approved",
+    auto_start_max: null,
+    max_cost_usd: null,
+    max_tokens: null,
+    created_at: new Date(Date.now() - 2 * DAY).toISOString(),
+    updated_at: new Date(Date.now() - DAY).toISOString(),
+    approved_at: new Date(Date.now() - DAY).toISOString(),
+  },
+];
+/** `[card, needs]` pairs. */
+let boardDeps: [number, number][] = [[8, 4]];
+let boardEvents: CardEvent[] = [
+  { id: 1, card_id: 9, at: new Date(Date.now() - 3_600_000).toISOString(), actor: "agent:reviewer-1", kind: "returned", text: "Der Test für den leeren Fall fehlt." },
+];
+
+/** The state Rust derives for a card (`axiomata_board::flow::derive_state`). */
+function mockState(card: BoardCard, column: BoardColumn | undefined, waiting: number[]): TaskState {
+  if (card.taken_over_at) return "taken_over";
+  if (card.canceled_at) return "canceled";
+  if (card.failed_at) return "failed";
+  if (!column) return "ready";
+  if (column.stage === "proposal") return "proposed";
+  if (column.stage === "review") return "in_review";
+  if (column.maps_to_status === "done") return card.verified_by ? "verified" : "done";
+  if (column.maps_to_status === "doing") return card.input_required ? "input_required" : "working";
+  return waiting.length > 0 ? "blocked" : "ready";
+}
+
+/** Fills in what Rust computes on every read: the edges and the state. */
+function decorate(card: BoardCard): BoardCard {
+  const depends_on = boardDeps.filter(([id]) => id === card.id).map(([, needs]) => needs);
+  const waiting_on = depends_on.filter((id) => !boardCards.find((c) => c.id === id)?.verified_by);
+  const column = boardColumns.find((c) => c.id === card.column_id);
+  return { ...card, depends_on, waiting_on, state: mockState(card, column, waiting_on) };
+}
 function mockCard(card: Partial<BoardCard> & Pick<BoardCard, "id" | "column_id" | "position" | "title">): BoardCard {
   return {
     board_id: 1,
@@ -509,6 +555,20 @@ function mockCard(card: Partial<BoardCard> & Pick<BoardCard, "id" | "column_id" 
     archived_at: null,
     created_at: new Date(Date.now() - 3 * DAY).toISOString(),
     updated_at: new Date().toISOString(),
+    plan_id: null,
+    agent: null,
+    agent_reason: null,
+    tier: null,
+    kind: null,
+    acceptance: "",
+    returned_count: 0,
+    input_required: null,
+    taken_over_at: null,
+    failed_at: null,
+    canceled_at: null,
+    depends_on: [],
+    waiting_on: [],
+    state: "ready",
     ...card,
   };
 }
@@ -544,6 +604,54 @@ let boardCards: BoardCard[] = [
   }),
   mockCard({ id: 5, column_id: 3, position: 1, title: "WAL und busy_timeout entschieden", labels: ["rust"], claimed_by: "agent:claude-1", claimed_at: new Date(Date.now() - 2 * DAY).toISOString(), verified_by: "human:owner", verified_at: new Date(Date.now() - DAY).toISOString() }),
   mockCard({ id: 6, column_id: 3, position: 2, title: "Alte Notiz, archiviert", archived_at: new Date(Date.now() - 5 * DAY).toISOString() }),
+  mockCard({
+    id: 7,
+    column_id: 4,
+    position: 1,
+    title: "Reviewer-Rolle fuer das Brett vorschlagen",
+    body: "Ein Agent hat das vorgeschlagen.",
+    plan_id: 1,
+    kind: "doc",
+    agent: "allrounder",
+    agent_reason: "Reine Doku, kein Code.",
+    tier: "light",
+  }),
+  mockCard({
+    id: 8,
+    column_id: 1,
+    position: 4,
+    title: "Review-Spalte im Kanban zeigen",
+    body: "Die Karte wartet auf die Drag-Karte.",
+    plan_id: 1,
+    kind: "implement",
+    agent: "allrounder",
+    tier: "medium",
+    acceptance: "- Die Spalte ist bei jedem Brett da\n- Ein leeres Vorschlag-Brett zeigt sie nicht",
+  }),
+  mockCard({
+    id: 9,
+    column_id: 5,
+    position: 1,
+    title: "Zustandsableitung testen",
+    plan_id: 1,
+    kind: "implement",
+    agent: "allrounder",
+    tier: "medium",
+    claimed_by: "agent:allrounder-9",
+    claimed_at: new Date(Date.now() - 3_600_000).toISOString(),
+    returned_count: 1,
+  }),
+  mockCard({
+    id: 10,
+    column_id: 2,
+    position: 2,
+    title: "Postfach-Kern bauen",
+    plan_id: 1,
+    kind: "implement",
+    claimed_by: "agent:allrounder-10",
+    claimed_at: new Date(Date.now() - 1_800_000).toISOString(),
+    input_required: "Soll das Postfach eine eigene Tabelle bekommen oder die Karten-Ereignisse nutzen?",
+  }),
 ];
 
 let routines: Routine[] = [
@@ -1570,9 +1678,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const base = (boardColumns[boardColumns.length - 1]?.id ?? 0) + 1;
       boardColumns = [
         ...boardColumns,
-        { id: base, board_id: created.id, name: "Offen", position: 1, maps_to_status: "open" },
-        { id: base + 1, board_id: created.id, name: "In Arbeit", position: 2, maps_to_status: "doing" },
-        { id: base + 2, board_id: created.id, name: "Fertig", position: 3, maps_to_status: "done" },
+        { id: base, board_id: created.id, name: "Vorschlag", position: 1, maps_to_status: "open", stage: "proposal" },
+        { id: base + 1, board_id: created.id, name: "Offen", position: 2, maps_to_status: "open", stage: null },
+        { id: base + 2, board_id: created.id, name: "In Arbeit", position: 3, maps_to_status: "doing", stage: null },
+        { id: base + 3, board_id: created.id, name: "Review", position: 4, maps_to_status: "doing", stage: "review" },
+        { id: base + 4, board_id: created.id, name: "Fertig", position: 5, maps_to_status: "done", stage: null },
       ];
       return created as T;
     }
@@ -1595,9 +1705,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "list_board_columns":
       return boardColumns.filter((c) => c.board_id === args.boardId) as T;
     case "list_board_cards":
-      return boardCards.filter(
-        (c) => c.board_id === args.boardId && (args.includeArchived === true || c.archived_at === null),
-      ) as T;
+      return boardCards
+        .filter((c) => c.board_id === args.boardId && (args.includeArchived === true || c.archived_at === null))
+        .map(decorate) as T;
     case "create_card": {
       const n = args.new as NewCard;
       const column = boardColumns.find((c) => c.id === n.column_id);
@@ -1612,9 +1722,15 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         labels: n.labels,
         assignee: n.assignee,
         due_at: n.due_at,
+        plan_id: n.plan_id ?? null,
+        agent: n.agent ?? null,
+        agent_reason: n.agent_reason ?? null,
+        tier: n.tier ?? null,
+        kind: n.kind ?? null,
+        acceptance: n.acceptance ?? "",
       });
       boardCards = [...boardCards, created];
-      return created as T;
+      return decorate(created) as T;
     }
     case "update_card": {
       const f = args.fields as CardFields;
@@ -1622,7 +1738,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (!target) return null as T;
       const updated: BoardCard = { ...target, ...f, updated_at: new Date().toISOString() };
       boardCards = boardCards.map((c) => (c.id === updated.id ? updated : c));
-      return updated as T;
+      return decorate(updated) as T;
     }
     case "move_card": {
       const moved = boardCards.find((c) => c.id === args.id);
@@ -1650,6 +1766,15 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         updated_at: new Date().toISOString(),
         // Same rule as the store: no longer done, no longer signed off.
         ...(column.maps_to_status === "done" ? {} : { verified_by: null, verified_at: null }),
+        // Handing an unclaimed card into the review column claims it for the owner, so somebody else can judge it.
+        ...(column.stage === "review" && moved.column_id !== column.id
+          ? {
+              input_required: null,
+              ...(moved.claimed_by === null
+                ? { claimed_by: "human:owner", claimed_at: new Date().toISOString() }
+                : {}),
+            }
+          : {}),
       };
       boardCards = boardCards.map((c) => (c.id === next.id ? next : c));
       return true as T;
@@ -1676,6 +1801,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         name: n.name,
         position: Math.max(0, ...boardColumns.filter((c) => c.board_id === args.boardId).map((c) => c.position)) + 1,
         maps_to_status: n.maps_to_status,
+        stage: n.stage ?? null,
       };
       boardColumns = [...boardColumns, created];
       return created as T;
@@ -1694,6 +1820,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return updated as T;
     }
     case "delete_board_column": {
+      if (boardColumns.find((c) => c.id === args.id)?.stage) {
+        throw new Error("invalid stage: this column has a role in the agent flow on every board and cannot be deleted");
+      }
       const held = cardsIn(Number(args.id));
       if (held.length > 0) {
         if (args.moveCardsTo === undefined || args.moveCardsTo === null) return false as T;
@@ -1722,6 +1851,137 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
               ? before + 1
               : (before + after) / 2;
       boardColumns = boardColumns.map((c) => (c.id === moved.id ? { ...c, position } : c));
+      return true as T;
+    }
+    // ---- the agent flow (a2a.md CP-A2) ----
+    case "list_board_plans":
+      return boardPlans.filter((p) => p.board_id === args.boardId) as T;
+    case "create_board_plan": {
+      const f = args.fields as { name: string; auto_start_max?: number | null; max_cost_usd?: number | null; max_tokens?: number | null };
+      if (!f.name.trim()) throw new Error("invalid name: must not be empty");
+      const created: BoardPlan = {
+        id: Math.max(0, ...boardPlans.map((p) => p.id)) + 1,
+        board_id: Number(args.boardId),
+        name: f.name,
+        status: "draft",
+        auto_start_max: f.auto_start_max ?? null,
+        max_cost_usd: f.max_cost_usd ?? null,
+        max_tokens: f.max_tokens ?? null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        approved_at: null,
+      };
+      boardPlans = [...boardPlans, created];
+      return created as T;
+    }
+    case "update_board_plan": {
+      const target = boardPlans.find((p) => p.id === args.id);
+      if (!target) return null as T;
+      const f = args.fields as { name: string; auto_start_max?: number | null; max_cost_usd?: number | null; max_tokens?: number | null };
+      const updated: BoardPlan = {
+        ...target,
+        name: f.name,
+        auto_start_max: f.auto_start_max ?? null,
+        max_cost_usd: f.max_cost_usd ?? null,
+        max_tokens: f.max_tokens ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      boardPlans = boardPlans.map((p) => (p.id === updated.id ? updated : p));
+      return updated as T;
+    }
+    case "approve_board_plan": {
+      const plan = boardPlans.find((p) => p.id === args.id);
+      if (!plan || plan.status !== "draft") return null as T;
+      const proposalIds = boardColumns.filter((c) => c.board_id === plan.board_id && c.stage === "proposal").map((c) => c.id);
+      const open = boardColumns.find((c) => c.board_id === plan.board_id && c.maps_to_status === "open" && !c.stage);
+      let moved = 0;
+      boardCards = boardCards.map((c) => {
+        if (c.plan_id !== plan.id || !proposalIds.includes(c.column_id) || !open) return c;
+        moved += 1;
+        return { ...c, column_id: open.id };
+      });
+      boardPlans = boardPlans.map((p) => (p.id === plan.id ? { ...p, status: "approved", approved_at: new Date().toISOString() } : p));
+      return moved as T;
+    }
+    case "close_board_plan": {
+      const plan = boardPlans.find((p) => p.id === args.id);
+      if (!plan || plan.status === "closed") return false as T;
+      boardPlans = boardPlans.map((p) => (p.id === plan.id ? { ...p, status: "closed" } : p));
+      return true as T;
+    }
+    case "delete_board_plan": {
+      const before = boardPlans.length;
+      boardPlans = boardPlans.filter((p) => p.id !== args.id);
+      const ids = boardCards.filter((c) => c.plan_id === args.id).map((c) => c.id);
+      boardDeps = boardDeps.filter(([a, b]) => !ids.includes(a) && !ids.includes(b));
+      boardCards = boardCards.map((c) => (c.plan_id === args.id ? { ...c, plan_id: null } : c));
+      return (boardPlans.length < before) as T;
+    }
+    case "list_board_dependencies":
+      return boardDeps.filter(([a]) => boardCards.find((c) => c.id === a)?.board_id === args.boardId) as T;
+    case "add_card_dependency": {
+      const card = boardCards.find((c) => c.id === args.cardId);
+      const needs = boardCards.find((c) => c.id === args.needs);
+      if (!card || !needs) throw new Error("invalid depends_on_id: no such card");
+      if (card.id === needs.id) throw new Error("invalid depends_on_id: a card cannot wait for itself");
+      if (card.plan_id === null || card.plan_id !== needs.plan_id) {
+        throw new Error("invalid depends_on_id: both cards must belong to the same plan; dependencies only exist inside a plan");
+      }
+      // A cycle: does `needs` already (indirectly) wait for `card`?
+      const stack = [needs.id];
+      const seen = new Set<number>();
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        if (current === card.id) throw new Error(`invalid depends_on_id: card ${needs.id} already (indirectly) waits for card ${card.id}; that would be a cycle`);
+        if (seen.has(current)) continue;
+        seen.add(current);
+        stack.push(...boardDeps.filter(([a]) => a === current).map(([, b]) => b));
+      }
+      if (boardDeps.some(([a, b]) => a === card.id && b === needs.id)) return false as T;
+      boardDeps = [...boardDeps, [card.id, needs.id]];
+      return true as T;
+    }
+    case "remove_card_dependency": {
+      const before = boardDeps.length;
+      boardDeps = boardDeps.filter(([a, b]) => !(a === args.cardId && b === args.needs));
+      return (boardDeps.length < before) as T;
+    }
+    case "list_card_events":
+      return boardEvents.filter((e) => e.card_id === args.cardId).slice(-Number(args.limit ?? 50)) as T;
+    case "add_card_note": {
+      if (!boardCards.some((c) => c.id === args.cardId)) return false as T;
+      boardEvents = [
+        ...boardEvents,
+        {
+          id: Math.max(0, ...boardEvents.map((e) => e.id)) + 1,
+          card_id: Number(args.cardId),
+          at: new Date().toISOString(),
+          actor: "human:owner",
+          kind: "note",
+          text: String(args.text),
+        },
+      ];
+      return true as T;
+    }
+    case "approve_card_proposal": {
+      const card = boardCards.find((c) => c.id === args.cardId);
+      const column = boardColumns.find((c) => c.id === card?.column_id);
+      const open = boardColumns.find((c) => c.board_id === card?.board_id && c.maps_to_status === "open" && !c.stage);
+      if (!card || column?.stage !== "proposal" || !open) return false as T;
+      boardCards = boardCards.map((c) => (c.id === card.id ? { ...c, column_id: open.id } : c));
+      return true as T;
+    }
+    case "mark_card": {
+      const card = boardCards.find((c) => c.id === args.cardId);
+      if (!card) return false as T;
+      const stamp = new Date().toISOString();
+      const patch =
+        args.mark === "cancel"
+          ? { canceled_at: stamp }
+          : args.mark === "fail"
+            ? { failed_at: stamp }
+            : { canceled_at: null, failed_at: null };
+      boardCards = boardCards.map((c) => (c.id === card.id ? { ...c, ...patch } : c));
       return true as T;
     }
     case "add_routine": {

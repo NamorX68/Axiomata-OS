@@ -36,6 +36,7 @@ pub mod notes;
 pub mod paths;
 pub mod roster;
 pub mod routines;
+pub mod session;
 pub mod skills;
 pub mod spend;
 pub mod terminal_settings;
@@ -109,7 +110,7 @@ impl AxiomataCore {
 
         skills::seed_default_skills()?;
 
-        let db = db::open_and_migrate()?;
+        let mut db = db::open_and_migrate()?;
         restrict_to_owner(&paths::db_path(), 0o600);
 
         // Re-meter recorded spend against the owner's per-model price table
@@ -123,6 +124,18 @@ impl AxiomataCore {
                 "re-metered recorded spend against configured model prices"
             ),
             Err(err) => tracing::warn!(%err, "failed to re-meter recorded spend"),
+        }
+
+        // Every board gets the two columns of the agent flow, Vorschlag and Review (a2a.md, A13). Idempotent and
+        // best-effort: a board that could not be extended just lacks them until the next start.
+        match board::flow::ensure_flow_columns_all(&mut db) {
+            Ok(0) => {}
+            Ok(changed) => {
+                tracing::info!(changed, "added the agent-flow columns to existing boards")
+            }
+            Err(err) => {
+                tracing::warn!(%err, "failed to add the agent-flow columns to existing boards")
+            }
         }
 
         // The Studio's roster (a2a.md, CP-A1): the `allrounder` role every existing agent plays, and an engine

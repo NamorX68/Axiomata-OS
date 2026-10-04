@@ -40,6 +40,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (13, axiomata_ide::SCHEMA_SQL_V5),
     // Engine and role of an IDE agent session (a2a.md, CP-A1).
     (14, axiomata_ide::SCHEMA_SQL_V6),
+    // The board's agent flow: column roles, plans, card fields, dependencies, history (a2a.md, CP-A2).
+    (15, axiomata_board::SCHEMA_SQL_V2),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

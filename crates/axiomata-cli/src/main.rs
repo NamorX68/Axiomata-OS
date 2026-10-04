@@ -20,11 +20,13 @@ use axiomata_core::skills::{self, RunStatus};
 use axiomata_core::{AxiomataCore, memory, paths, spend};
 use clap::{ArgGroup, Args, Parser, Subcommand};
 
+mod board_flow;
+
 /// Clones `Config` out from under `core.config`'s `RwLock`. The CLI is a
 /// one-shot process — this just keeps every call site short and consistent
 /// with the dashboard's own `commands::read_config`, rather than holding a
 /// guard across an `.await`.
-fn read_config(core: &AxiomataCore) -> Config {
+pub(crate) fn read_config(core: &AxiomataCore) -> Config {
     core.config_read().clone()
 }
 
@@ -458,6 +460,8 @@ enum BoardAction {
         /// Repeatable: `--label design --label rust`.
         #[arg(long = "label")]
         labels: Vec<String>,
+        #[command(flatten)]
+        flow: board_flow::FlowFlags,
     },
     /// Change a card's title, body or labels; whatever is not passed keeps its value.
     Edit {
@@ -472,28 +476,39 @@ enum BoardAction {
         /// Remove every label.
         #[arg(long)]
         clear_labels: bool,
+        #[command(flatten)]
+        flow: board_flow::FlowFlags,
+        /// Take the card out of its plan (its dependencies must be removed first).
+        #[arg(long, conflicts_with = "plan")]
+        no_plan: bool,
     },
-    /// Move a card to a column, at an optional index within it (default: end).
+    /// Move a card to a column, at an optional index within it (default: end). Moving an unclaimed card into the
+    /// review column claims it for `--actor`, so somebody else can sign it off.
     Move {
         id: i64,
         #[arg(long)]
         column: i64,
         #[arg(long, default_value_t = usize::MAX)]
         index: usize,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
     },
     /// Take a card, if nobody else holds it.
     Claim {
         id: i64,
-        #[arg(long, default_value = "human:owner")]
-        actor: String,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
     },
     /// Move a card into this board's first done column.
     Done { id: i64 },
     /// Sign a finished card off. Refused for the actor who claimed it.
     Verify {
         id: i64,
-        #[arg(long, default_value = "human:owner")]
-        actor: String,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
     },
     /// Archive or restore a card.
     Archive {
@@ -501,6 +516,101 @@ enum BoardAction {
         /// Restore instead of archiving.
         #[arg(long)]
         undo: bool,
+    },
+    /// Plans: the unit of approval, automation and limits.
+    Plan {
+        #[command(subcommand)]
+        action: board_flow::PlanAction,
+    },
+    /// Dependencies between the cards of one plan.
+    Dep {
+        #[command(subcommand)]
+        action: board_flow::DepAction,
+    },
+    /// The worker reports a card done: it moves to the review column.
+    Report {
+        id: i64,
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// A reviewer's verdict on a card in the review column: `--approve`, or `--return --note "why"`.
+    Verdict {
+        id: i64,
+        #[arg(long)]
+        actor: Option<String>,
+        #[arg(
+            long,
+            conflicts_with = "send_back",
+            required_unless_present = "send_back"
+        )]
+        approve: bool,
+        /// Send the card back to work (needs --note).
+        #[arg(long = "return", id = "send_back")]
+        send_back: bool,
+        #[arg(long, default_value = "")]
+        note: String,
+    },
+    /// A card's history, latest last.
+    Events {
+        id: i64,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Write a line into a card's history.
+    Note {
+        id: i64,
+        text: String,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// Say what a working card waits for an answer to (`--ask "…"`), or clear it (`--clear`).
+    Input {
+        id: i64,
+        #[arg(long, conflicts_with = "clear", required_unless_present = "clear")]
+        ask: Option<String>,
+        #[arg(long)]
+        clear: bool,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// Mark a card failed. Cards waiting for it stay blocked.
+    Fail {
+        id: i64,
+        reason: String,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// Call a card off. Cards waiting for it stay blocked.
+    Cancel {
+        id: i64,
+        reason: String,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// Undo a failure or cancellation.
+    Reopen {
+        id: i64,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// Record that the finished work was taken over into the main line; the card is archived.
+    TakenOver {
+        id: i64,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// Say yes to a proposal: it moves out of the proposal column to Offen.
+    Approve {
+        id: i64,
+        /// Who acts. Defaults to the owner in your own terminal; in an agent session it is always that agent.
+        #[arg(long)]
+        actor: Option<String>,
     },
 }
 
@@ -1239,29 +1349,130 @@ async fn routines_tick(core: &AxiomataCore) -> Result<()> {
 // ----------------------------------------------------------------- board ---
 
 fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
+    use board_flow::{owner_only, resolve_actor};
     match action {
         BoardAction::List { board, archived } => board_list(core, board, archived),
-        BoardAction::New { name } => board_new(core, &name),
-        BoardAction::Rename { id, name } => board_rename(core, id, &name),
-        BoardAction::Delete { id, force } => board_delete(core, id, force),
+        BoardAction::New { name } => {
+            owner_only("creating a board")?;
+            board_new(core, &name)
+        }
+        BoardAction::Rename { id, name } => {
+            owner_only("renaming a board")?;
+            board_rename(core, id, &name)
+        }
+        BoardAction::Delete { id, force } => {
+            owner_only("deleting a board")?;
+            board_delete(core, id, force)
+        }
         BoardAction::Add {
             column,
             title,
             body,
             labels,
-        } => board_add(core, column, &title, body, labels),
+            flow,
+        } => board_add(core, column, &title, body, labels, &flow),
         BoardAction::Edit {
             id,
             title,
             body,
             labels,
             clear_labels,
-        } => board_edit(core, id, title, body, labels, clear_labels),
-        BoardAction::Move { id, column, index } => board_move(core, id, column, index),
-        BoardAction::Claim { id, actor } => board_claim(core, id, &actor),
-        BoardAction::Done { id } => board_done(core, id),
-        BoardAction::Verify { id, actor } => board_verify(core, id, &actor),
-        BoardAction::Archive { id, undo } => board_archive(core, id, !undo),
+            flow,
+            no_plan,
+        } => {
+            if flow.plan.is_some() || no_plan {
+                owner_only("putting a card into a plan or taking it out")?;
+            }
+            board_edit(
+                core,
+                id,
+                CardEdit {
+                    title,
+                    body,
+                    labels,
+                    clear_labels,
+                    no_plan,
+                },
+                &flow,
+            )
+        }
+        BoardAction::Move {
+            id,
+            column,
+            index,
+            actor,
+        } => board_move(core, id, column, index, &resolve_actor(actor)?),
+        BoardAction::Claim { id, actor } => board_claim(core, id, &resolve_actor(actor)?),
+        BoardAction::Done { id } => {
+            owner_only("moving a card to done")?;
+            board_done(core, id)
+        }
+        BoardAction::Verify { id, actor } => {
+            owner_only("signing off a card outside the review (agents use `board verdict`)")?;
+            board_verify(core, id, &resolve_actor(actor)?)
+        }
+        BoardAction::Archive { id, undo } => {
+            owner_only("archiving a card")?;
+            board_archive(core, id, !undo)
+        }
+        BoardAction::Plan { action } => board_flow::plan_cmd(core, action),
+        BoardAction::Dep { action } => board_flow::dep_cmd(core, action),
+        BoardAction::Report { id, actor } => board_flow::report(core, id, &resolve_actor(actor)?),
+        BoardAction::Verdict {
+            id,
+            actor,
+            approve,
+            send_back: _,
+            note,
+        } => board_flow::verdict(core, id, &resolve_actor(actor)?, approve, &note),
+        BoardAction::Events { id, limit } => board_flow::events(core, id, limit),
+        BoardAction::Note { id, text, actor } => {
+            board_flow::note(core, id, &resolve_actor(actor)?, &text)
+        }
+        BoardAction::Input {
+            id,
+            ask,
+            clear: _,
+            actor,
+        } => board_flow::input(core, id, &resolve_actor(actor)?, ask.as_deref()),
+        BoardAction::Fail { id, reason, actor } => board_flow::mark(
+            core,
+            id,
+            &resolve_actor(actor)?,
+            board_flow::Mark::Fail,
+            &reason,
+        ),
+        BoardAction::Cancel { id, reason, actor } => board_flow::mark(
+            core,
+            id,
+            &resolve_actor(actor)?,
+            board_flow::Mark::Cancel,
+            &reason,
+        ),
+        BoardAction::Reopen { id, actor } => {
+            owner_only("reopening a card")?;
+            board_flow::mark(
+                core,
+                id,
+                &resolve_actor(actor)?,
+                board_flow::Mark::Reopen,
+                "",
+            )
+        }
+        BoardAction::TakenOver { id, actor } => {
+            owner_only("recording a take-over")?;
+            board_flow::mark(
+                core,
+                id,
+                &resolve_actor(actor)?,
+                board_flow::Mark::TakeOver,
+                "",
+            )
+        }
+        BoardAction::Approve { id, actor } => {
+            owner_only("approving a proposal")?;
+            board_flow::approve_proposal(core, id, &resolve_actor(actor)?)
+        }
     }
 }
 
@@ -2019,7 +2230,7 @@ fn project_delete(core: &AxiomataCore, id: i64) -> Result<()> {
 /// A card's one-line summary. The two signatures are the interesting part on
 /// the command line — they are what a second actor needs to see before
 /// deciding whether to touch the card at all.
-fn card_line(card: &board::Card) -> String {
+pub(crate) fn card_line(card: &board::Card) -> String {
     let mut marks = String::new();
     if let Some(holder) = &card.claimed_by {
         marks.push_str(&format!("  claimed:{holder}"));
@@ -2033,6 +2244,7 @@ fn card_line(card: &board::Card) -> String {
     if !card.labels.is_empty() {
         marks.push_str(&format!("  [{}]", card.labels.join(", ")));
     }
+    marks.push_str(&board_flow::flow_marks(card));
     format!("#{:<4} {}{marks}", card.id, card.title)
 }
 
@@ -2062,8 +2274,11 @@ fn board_list(core: &AxiomataCore, board_id: Option<i64>, archived: bool) -> Res
             .iter()
             .filter(|card| card.column_id == column.id)
             .collect();
+        let role = column
+            .stage
+            .map_or(String::new(), |stage| format!(" · {}", stage.as_str()));
         println!(
-            "\n  {} [#{} · {}]  {} cards",
+            "\n  {} [#{} · {}{role}]  {} cards",
             column.name,
             column.id,
             column.maps_to_status.as_str(),
@@ -2130,19 +2345,28 @@ fn board_add(
     title: &str,
     body: Option<String>,
     labels: Vec<String>,
+    flow: &board_flow::FlowFlags,
 ) -> Result<()> {
     let db = core.db_lock();
+    // An agent proposes: its cards land in the board's proposal column and wait for the owner's yes (a2a.md A7, A17).
+    if axiomata_core::session::session_actor().is_some() {
+        let target = board::store::get_column(&db, column)?;
+        if target.and_then(|c| c.stage) != Some(board::ColumnStage::Proposal) {
+            bail!("an agent adds cards to the proposal column only; the owner approves them");
+        }
+    }
+    let mut fields = board::CardFields {
+        title: title.to_string(),
+        body: body.unwrap_or_default(),
+        labels,
+        ..board::CardFields::default()
+    };
+    flow.apply(&mut fields)?;
     let card = board::store::create_card(
         &db,
         &board::NewCard {
             column_id: column,
-            fields: board::CardFields {
-                title: title.to_string(),
-                body: body.unwrap_or_default(),
-                labels,
-                assignee: None,
-                due_at: None,
-            },
+            fields,
         },
     )
     .with_context(|| format!("failed to add a card to column #{column}"))?;
@@ -2156,39 +2380,58 @@ fn board_add(
 /// because the store's update is a full replace of the writable fields.
 fn edited_fields(
     card: &board::Card,
+    edit: CardEdit,
+    flow: &board_flow::FlowFlags,
+) -> Result<board::CardFields> {
+    let mut fields = board::CardFields {
+        title: edit.title.unwrap_or_else(|| card.title.clone()),
+        body: edit.body.unwrap_or_else(|| card.body.clone()),
+        labels: if edit.clear_labels {
+            Vec::new()
+        } else if edit.labels.is_empty() {
+            card.labels.clone()
+        } else {
+            edit.labels
+        },
+        assignee: card.assignee.clone(),
+        due_at: card.due_at,
+        // The store's update is a full replace, so the agent fields have to be carried over or an edit of the title
+        // would wipe them.
+        plan_id: card.plan_id,
+        agent: card.agent.clone(),
+        agent_reason: card.agent_reason.clone(),
+        tier: card.tier,
+        kind: card.kind.clone(),
+        acceptance: card.acceptance.clone(),
+    };
+    flow.apply(&mut fields)?;
+    if edit.no_plan {
+        fields.plan_id = None;
+    }
+    Ok(fields)
+}
+
+/// What `board edit` was asked to change about the card's own text; the agent fields travel as
+/// [`board_flow::FlowFlags`].
+struct CardEdit {
     title: Option<String>,
     body: Option<String>,
     labels: Vec<String>,
     clear_labels: bool,
-) -> board::CardFields {
-    board::CardFields {
-        title: title.unwrap_or_else(|| card.title.clone()),
-        body: body.unwrap_or_else(|| card.body.clone()),
-        labels: if clear_labels {
-            Vec::new()
-        } else if labels.is_empty() {
-            card.labels.clone()
-        } else {
-            labels
-        },
-        assignee: card.assignee.clone(),
-        due_at: card.due_at,
-    }
+    no_plan: bool,
 }
 
 fn board_edit(
     core: &AxiomataCore,
     id: i64,
-    title: Option<String>,
-    body: Option<String>,
-    labels: Vec<String>,
-    clear_labels: bool,
+    edit: CardEdit,
+    flow: &board_flow::FlowFlags,
 ) -> Result<()> {
     let db = core.db_lock();
     let Some(card) = board::store::get_card(&db, id)? else {
         bail!("no card with id {id}");
     };
-    let fields = edited_fields(&card, title, body, labels, clear_labels);
+    let fields = edited_fields(&card, edit, flow)?;
     let updated = board::store::update_card(&db, id, &fields)
         .with_context(|| format!("failed to edit card #{id}"))?
         .with_context(|| format!("no card with id {id}"))?;
@@ -2197,11 +2440,11 @@ fn board_edit(
     Ok(())
 }
 
-fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize) -> Result<()> {
+fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize, actor: &str) -> Result<()> {
     let mut db = core.db_lock();
     // `usize::MAX` is the "no --index given" sentinel; the store clamps an
     // out-of-range index to the end of the column on its own.
-    if !board::store::move_card(&mut db, id, column, index)? {
+    if !board::store::move_card_as(&mut db, id, column, index, Some(actor))? {
         bail!("no card with id {id}");
     }
     board_mirror::after_card_change(&db, &read_config(core), id);
@@ -2316,13 +2559,97 @@ mod tests {
             archived_at: None,
             created_at: now,
             updated_at: now,
+            plan_id: Some(3),
+            agent: Some("implementer-light".to_string()),
+            agent_reason: Some("klein".to_string()),
+            tier: Some(board::Tier::Light),
+            kind: Some("implement".to_string()),
+            acceptance: "- Tests grün".to_string(),
+            returned_count: 0,
+            input_required: None,
+            taken_over_at: None,
+            failed_at: None,
+            canceled_at: None,
+            depends_on: Vec::new(),
+            waiting_on: Vec::new(),
+            state: board::TaskState::Ready,
         }
+    }
+
+    fn edit(
+        card: &board::Card,
+        title: Option<String>,
+        labels: Vec<String>,
+        clear: bool,
+    ) -> board::CardFields {
+        let change = CardEdit {
+            title,
+            labels,
+            clear_labels: clear,
+            ..untouched()
+        };
+        edited_fields(card, change, &board_flow::FlowFlags::default()).unwrap()
+    }
+
+    fn untouched() -> CardEdit {
+        CardEdit {
+            title: None,
+            body: None,
+            labels: Vec::new(),
+            clear_labels: false,
+            no_plan: false,
+        }
+    }
+
+    #[test]
+    fn an_edit_keeps_the_agent_fields_of_the_card() {
+        let card = card();
+        let fields = edit(&card, Some("Neu".to_string()), Vec::new(), false);
+        assert_eq!(fields.plan_id, Some(3));
+        assert_eq!(fields.agent.as_deref(), Some("implementer-light"));
+        assert_eq!(fields.agent_reason.as_deref(), Some("klein"));
+        assert_eq!(fields.tier, Some(board::Tier::Light));
+        assert_eq!(fields.kind.as_deref(), Some("implement"));
+        assert_eq!(fields.acceptance, "- Tests grün");
+    }
+
+    #[test]
+    fn flow_flags_replace_only_what_was_passed_and_no_plan_removes_the_plan() {
+        let card = card();
+        let flags = board_flow::FlowFlags {
+            tier: Some("heavy".to_string()),
+            acceptance: Some("neu".to_string()),
+            ..board_flow::FlowFlags::default()
+        };
+        let fields = edited_fields(&card, untouched(), &flags).unwrap();
+        assert_eq!(
+            (fields.tier, fields.acceptance.as_str()),
+            (Some(board::Tier::Heavy), "neu")
+        );
+        assert_eq!(fields.kind.as_deref(), Some("implement"));
+
+        let none = edited_fields(
+            &card,
+            CardEdit {
+                no_plan: true,
+                ..untouched()
+            },
+            &board_flow::FlowFlags::default(),
+        )
+        .unwrap();
+        assert_eq!(none.plan_id, None);
+
+        let bad = board_flow::FlowFlags {
+            tier: Some("mighty".to_string()),
+            ..board_flow::FlowFlags::default()
+        };
+        assert!(edited_fields(&card, untouched(), &bad).is_err());
     }
 
     #[test]
     fn an_edit_without_flags_changes_nothing() {
         let card = card();
-        let fields = edited_fields(&card, None, None, Vec::new(), false);
+        let fields = edit(&card, None, Vec::new(), false);
         assert_eq!(fields.title, card.title);
         assert_eq!(fields.body, card.body);
         assert_eq!(fields.labels, card.labels);
@@ -2333,16 +2660,16 @@ mod tests {
     #[test]
     fn labels_are_replaced_as_a_whole_and_can_be_cleared() {
         let card = card();
-        let replaced = edited_fields(&card, None, None, vec!["error".to_string()], false);
+        let replaced = edit(&card, None, vec!["error".to_string()], false);
         assert_eq!(replaced.labels, ["error"]);
-        let cleared = edited_fields(&card, None, None, Vec::new(), true);
+        let cleared = edit(&card, None, Vec::new(), true);
         assert!(cleared.labels.is_empty());
     }
 
     #[test]
     fn a_new_title_keeps_body_labels_assignee_and_due_date() {
         let card = card();
-        let fields = edited_fields(&card, Some("New".to_string()), None, Vec::new(), false);
+        let fields = edit(&card, Some("New".to_string()), Vec::new(), false);
         assert_eq!(fields.title, "New");
         assert_eq!(fields.body, card.body);
         assert_eq!(fields.labels, card.labels);

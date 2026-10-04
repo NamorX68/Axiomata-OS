@@ -22,6 +22,7 @@ function answerWith(board: unknown, columns: unknown[], cards: unknown[]) {
   invoke.mockImplementation((cmd: string) => {
     if (cmd === "get_board") return Promise.resolve(board);
     if (cmd === "list_board_columns") return Promise.resolve(columns);
+    if (cmd === "list_board_plans") return Promise.resolve([]);
     return Promise.resolve(cards);
   });
 }
@@ -35,13 +36,14 @@ describe("refreshBoard", () => {
     expect(data.board).toEqual({ id: 1, name: "B" });
     expect(data.columns).toHaveLength(1);
     expect(data.cards).toHaveLength(1);
+    expect(data.plans).toEqual([]);
     expect(data.loading).toBe(false);
     expect(data.error).toBe("");
   });
 
   /** The case the shared store exists for: a tile and a panel showing the same
    *  board mount together. Without in-flight tracking both fire their own
-   *  three round-trips for the same answer. */
+   *  round-trips for the same answer. */
   it("joins a load already running instead of starting a second one", async () => {
     const gate = deferred<unknown>();
     invoke.mockImplementation(() => gate.promise);
@@ -49,24 +51,24 @@ describe("refreshBoard", () => {
     const first = refreshBoard(1);
     const second = refreshBoard(1);
 
-    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke).toHaveBeenCalledTimes(4);
 
     gate.release([]);
     await Promise.all([first, second]);
-    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke).toHaveBeenCalledTimes(4);
   });
 
   it("starts a fresh load once the previous one has finished", async () => {
     answerWith(null, [], []);
     await refreshBoard(1);
     await refreshBoard(1);
-    expect(invoke).toHaveBeenCalledTimes(6);
+    expect(invoke).toHaveBeenCalledTimes(8);
   });
 
   it("keeps boards apart", async () => {
     answerWith(null, [], []);
     await Promise.all([refreshBoard(1), refreshBoard(2)]);
-    expect(invoke).toHaveBeenCalledTimes(6);
+    expect(invoke).toHaveBeenCalledTimes(8);
   });
 
   it("records a backend failure on the board instead of throwing", async () => {

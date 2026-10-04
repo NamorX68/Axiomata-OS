@@ -17,18 +17,26 @@
 
 import { get, writable, type Readable } from "svelte/store";
 
-import { invokeBackend as invoke, type Board, type BoardCard, type BoardColumn } from "./backend";
+import {
+  invokeBackend as invoke,
+  type Board,
+  type BoardCard,
+  type BoardColumn,
+  type BoardPlan,
+} from "./backend";
 
 export interface BoardData {
   board: Board | null;
   columns: BoardColumn[];
   cards: BoardCard[];
+  /** The board's plans (a2a.md A14), however many cards belong to them. */
+  plans: BoardPlan[];
   /** Backend error text, or "" when the last load succeeded. */
   error: string;
   loading: boolean;
 }
 
-const EMPTY: BoardData = { board: null, columns: [], cards: [], error: "", loading: true };
+const EMPTY: BoardData = { board: null, columns: [], cards: [], plans: [], error: "", loading: true };
 
 const stores = new Map<number, ReturnType<typeof writable<BoardData>>>();
 
@@ -83,12 +91,13 @@ async function load(boardId: number): Promise<void> {
   const store = storeFor(boardId);
   store.update((data) => ({ ...data, loading: true }));
   try {
-    const [board, columns, cards] = await Promise.all([
+    const [board, columns, cards, plans] = await Promise.all([
       invoke<Board | null>("get_board", { id: boardId }),
       invoke<BoardColumn[]>("list_board_columns", { boardId }),
       invoke<BoardCard[]>("list_board_cards", { boardId, includeArchived: true }),
+      invoke<BoardPlan[]>("list_board_plans", { boardId }),
     ]);
-    store.set({ board, columns, cards, error: "", loading: false });
+    store.set({ board, columns, cards, plans, error: "", loading: false });
   } catch (err) {
     store.update((data) => ({ ...data, error: String(err), loading: false }));
   }
