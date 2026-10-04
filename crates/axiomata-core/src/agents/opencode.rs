@@ -494,6 +494,69 @@ pub async fn ide_session(
     Ok(created)
 }
 
+/// Registers the agent MCP server at the location `directory` on the shared service, replacing the one of an earlier
+/// start (`docs/plans/a2a.md` CP-A5, A31). `config` is a local server config; it carries the session's secret, so it
+/// is neither logged nor stored here.
+///
+/// Errors:
+///     A missing `directory` as [`AxiomataError::AgentSpawn`], anything the service refuses — or a server that comes up
+///     `failed` — as [`AxiomataError::AgentApi`].
+pub async fn register_mcp(
+    directory: &std::path::Path,
+    config: &serde_json::Value,
+) -> Result<(), AxiomataError> {
+    /// Looks at the server after the registration, and how far apart: a healthy one connects within a second or two.
+    const CONNECT_LOOKS: u32 = 8;
+    const CONNECT_PAUSE: std::time::Duration = std::time::Duration::from_millis(400);
+
+    check_cwd(directory)?;
+    let service = connect().await?;
+    let location = directory.display().to_string();
+    service
+        .register_mcp(&location, crate::agent_entry::SERVER_NAME, config)
+        .await
+        .map_err(refused_registration)?;
+    service
+        .await_mcp(
+            &location,
+            crate::agent_entry::SERVER_NAME,
+            CONNECT_LOOKS,
+            CONNECT_PAUSE,
+        )
+        .await
+        .map_err(into_axiomata)
+}
+
+/// A refused registration, **without the service's answer**: that body can echo the request, and the request carries
+/// the session's secret. The status says what the owner needs.
+fn refused_registration(err: OpencodeError) -> AxiomataError {
+    match err {
+        OpencodeError::Http { status, .. } => AxiomataError::AgentApi {
+            backend: BACKEND_OPENCODE,
+            message: format!("the service refused the MCP registration (HTTP {status})"),
+        },
+        other => into_axiomata(other),
+    }
+}
+
+/// Takes the agent MCP server off `directory` when its worktree goes away — best effort, and **without starting the
+/// service** for it: a service that is not running has nothing registered. A failure is logged, not returned: the
+/// registration is gone with the service at the latest, and the worktree is already removed.
+pub async fn forget_mcp(directory: &std::path::Path) {
+    let Ok(service) = find().await else {
+        return;
+    };
+    if let Err(err) = service
+        .remove_mcp(
+            &directory.display().to_string(),
+            crate::agent_entry::SERVER_NAME,
+        )
+        .await
+    {
+        tracing::warn!(%err, directory = %directory.display(), "could not remove the agent MCP server");
+    }
+}
+
 /// What to do with a stored session, given what the service knows of it.
 #[derive(Debug, PartialEq, Eq)]
 enum Reuse {
@@ -589,6 +652,19 @@ fn chat_reply(outcome: TurnOutcome) -> Result<ChatReply, AxiomataError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_registration_does_not_repeat_the_services_answer() {
+        let err = refused_registration(OpencodeError::Http {
+            method: "PUT",
+            path: "/api/experimental/mcp/axiomata".into(),
+            status: 400,
+            body: "invalid environment: AXIOMATA_AGENT_TOKEN=s3cret".into(),
+        })
+        .to_string();
+        assert!(err.contains("400"), "{err}");
+        assert!(!err.contains("s3cret") && !err.contains("TOKEN"), "{err}");
+    }
     use std::time::Duration;
 
     fn outcome(reply: &str, failure: Option<&str>) -> TurnOutcome {

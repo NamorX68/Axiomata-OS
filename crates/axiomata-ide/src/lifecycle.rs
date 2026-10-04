@@ -50,7 +50,8 @@
 //! one.
 
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -305,6 +306,49 @@ impl Channel {
             // mapping when it does (E18).
             connected: harness != Harness::Mini,
         })
+    }
+
+    /// Writes `name` into the channel readable by this user only (`0600`), through a temporary file and a rename.
+    ///
+    /// For what holds a session secret — the MCP configuration of Claude Code and the hash of the secret
+    /// ([`crate::session_token`]) — which must not be world-readable on a shared machine. `name` is a plain file name:
+    /// anything with a separator would write outside the channel.
+    pub fn write_private(&self, name: &str, content: &str) -> Result<()> {
+        if name.is_empty() || name == ".." || name.contains('/') || name.contains('\\') {
+            return Err(IdeError::Invalid {
+                field: "channel file",
+                reason: format!("{name:?} is not a plain file name"),
+            });
+        }
+        ensure_plain_dir(&self.dir)?;
+        let path = self.dir.join(name);
+        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+        // A leftover of a crashed start would make `create_new` fail forever.
+        remove_file(&tmp)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)
+            .map_err(io_error(&tmp))?;
+        file.write_all(content.as_bytes()).map_err(io_error(&tmp))?;
+        fs::rename(&tmp, &path).map_err(io_error(&path))
+    }
+
+    /// Adds `extra` to the system prompt Claude Code is started with: the planning hint plus the session's own
+    /// instructions (its role, how to use the mailbox). Written over `planning.md`, the file
+    /// `--append-system-prompt-file`
+    /// already points at, so the launch command does not change. Call it after [`Channel::install`]; an empty `extra`
+    /// leaves the planning hint alone.
+    pub fn append_instructions(&self, extra: &str) -> Result<()> {
+        let extra = extra.trim();
+        if extra.is_empty() {
+            return Ok(());
+        }
+        write_if_changed(
+            &self.dir.join(PLANNING_FILE),
+            &format!("{PLANNING_TEXT}\n\n{extra}\n"),
+        )
     }
 
     /// Reads the agent's state and plan. Never fails: a channel that is
@@ -777,6 +821,62 @@ mod tests {
             })
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn a_private_file_is_owner_only_replaced_whole_and_never_outside_the_channel() {
+        use std::os::unix::fs::PermissionsExt;
+        let channel = Channel::for_agent(&locations(), 6);
+        channel.write_private("mcp.json", "one").unwrap();
+        channel.write_private("mcp.json", "two").unwrap();
+        let path = channel.dir().join("mcp.json");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "two");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        // Nothing of the temporary files is left, and a leftover of a crashed start does not block the next one.
+        fs::write(
+            channel
+                .dir()
+                .join(format!("mcp.{}.tmp", std::process::id())),
+            "stale",
+        )
+        .unwrap();
+        channel.write_private("mcp.json", "three").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "three");
+        let leftovers: Vec<_> = fs::read_dir(channel.dir())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        for bad in ["", "..", "../x", "a/b"] {
+            assert!(channel.write_private(bad, "x").is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_session_instructions_go_after_the_planning_hint_and_replace_the_last_start_s() {
+        let channel = Channel::for_agent(&locations(), 8);
+        channel.install(Harness::ClaudeCode).unwrap();
+        let planning = channel.dir().join(PLANNING_FILE);
+        channel
+            .append_instructions("  You are the reviewer.  ")
+            .unwrap();
+        let text = fs::read_to_string(&planning).unwrap();
+        assert!(text.starts_with(PLANNING_TEXT), "{text}");
+        assert!(text.trim_end().ends_with("You are the reviewer."), "{text}");
+        // The next start installs the plain hint again and appends this start's text: nothing piles up.
+        channel.install(Harness::ClaudeCode).unwrap();
+        channel.append_instructions("You are the builder.").unwrap();
+        let text = fs::read_to_string(&planning).unwrap();
+        assert!(!text.contains("reviewer"), "{text}");
+        assert!(text.contains("You are the builder."), "{text}");
+        // Nothing to add leaves the hint alone.
+        channel.install(Harness::ClaudeCode).unwrap();
+        channel.append_instructions("  \n").unwrap();
+        assert_eq!(fs::read_to_string(&planning).unwrap(), PLANNING_TEXT);
     }
 
     #[test]

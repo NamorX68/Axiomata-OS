@@ -82,6 +82,19 @@ export function newAgentSession(id: number): Promise<boolean> {
   return invoke<boolean>("ide_agent_new_session", { id });
 }
 
+/**
+ * The "you have mail" line to type into this agent's terminal, or `null` when there is nothing to announce
+ * (A2A A8, way 2). `state` is the status the pane shows; the backend only answers for an idle agent.
+ */
+export function mailboxNudge(id: number, state: string): Promise<string | null> {
+  return invoke<string | null>("ide_mailbox_nudge", { id, agentState: state });
+}
+
+/** Notes that the nudge was typed, so a message is announced a limited number of times. */
+export function mailboxNudged(id: number): Promise<void> {
+  return invoke<void>("ide_mailbox_nudged", { id });
+}
+
 /** Whether removing this agent's worktree would throw away uncommitted work. */
 export function agentHasChanges(id: number): Promise<boolean> {
   return invoke<boolean>("ide_agent_has_changes", { id });

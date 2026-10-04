@@ -25,13 +25,15 @@
 -->
 <script lang="ts">
   import type { IdeAgent, ProvisionedAgent } from "../../core/backend";
+  import AgentTeamEntry from "../AgentTeamEntry.svelte";
+  import { ownerIsQuiet, shouldAsk } from "../nudge";
   import { createContext } from "../../core/registry";
   import { toast } from "../../core/toast";
   import type { OutputRef } from "../../core/outputLinks";
   import { relativeInside } from "../outputPath";
   import { renderMarkdown } from "../../core/markdown";
   import Terminal from "../../modules/terminal.svelte";
-  import { newAgentSession, prepareAgent } from "../agents";
+  import { mailboxNudge, mailboxNudged, newAgentSession, prepareAgent } from "../agents";
   import { agentStatus, describeStatus } from "../agentStatus";
   import DiffView from "../DiffView.svelte";
   import Icon from "../../ui/Icon.svelte";
@@ -95,7 +97,7 @@
     { id: "terminal", label: "Terminal", icon: "terminal" },
     { id: "plan", label: "Plan", icon: "list-checks" },
     { id: "diffs", label: "Diffs", icon: "git-compare" },
-    { id: "inbox", label: "Inbox", icon: "inbox", waiting: "Arrives with agent-to-agent messaging (M7.5)" },
+    { id: "inbox", label: "Inbox", icon: "inbox" },
   ];
   /** How many files the agent changed, once the Diffs view has looked (its badge). */
   let changedFiles = $state<number | null>(null);
@@ -146,6 +148,44 @@
 
   const statuses = agentStatus.statuses;
   const status = $derived($statuses.byAgent.get(agent.id));
+
+  /** The terminal's two hands the nudge needs (`modules/terminal.svelte`). */
+  let terminal = $state<{ msSinceInput: () => number | null; typeLine: (line: string) => Promise<boolean> } | null>(
+    null,
+  );
+  let nudgeBusy = false;
+  let lastAskedAt: number | null = null;
+
+  // Mail for an agent that is waiting for its next prompt (A2A A8, way 2): on every status tick, ask whether there is
+  // a line to type — `nudge.ts` holds the rules (idle only, never while the owner types, not more than every few
+  // seconds).
+  $effect(() => {
+    void $statuses.checkedAt;
+    const state = status?.state;
+    if (!ready || !terminal || !state) return;
+    const now = performance.now();
+    const situation = {
+      state,
+      sinceOwnInputMs: terminal.msSinceInput(),
+      sinceAskMs: lastAskedAt === null ? null : now - lastAskedAt,
+      busy: nudgeBusy,
+    };
+    if (!shouldAsk(situation)) return;
+    lastAskedAt = now;
+    nudgeBusy = true;
+    void announceMail(state).finally(() => (nudgeBusy = false));
+  });
+
+  async function announceMail(state: string): Promise<void> {
+    try {
+      const line = await mailboxNudge(agent.id, state);
+      // Things moved while the backend was asked: look again, now, before anything is typed.
+      if (!line || status?.state !== "idle" || !terminal || !ownerIsQuiet(terminal.msSinceInput())) return;
+      if (await terminal.typeLine(line)) await mailboxNudged(agent.id);
+    } catch {
+      // A nudge is a courtesy: the agent reads its inbox itself (way 1), so a failure here loses nothing.
+    }
+  }
   // `checkedAt` moves every tick, which is what lets the "own command stayed
   // silent" rule change its mind without a clock of its own.
   const statusView = $derived(describeStatus(status, agent, $statuses.checkedAt));
@@ -205,7 +245,7 @@
     >
       {#if ready}
         {#key restarts}
-          <Terminal ctx={terminalContext} initialCommand={command} onLink={openOutputLink} />
+          <Terminal bind:this={terminal} ctx={terminalContext} initialCommand={command} onLink={openOutputLink} />
         {/key}
       {:else if failure}
         <p class="pending error">{failure}</p>
@@ -286,6 +326,10 @@
         {:else}
           <p class="note">No plan yet. It appears here as soon as the agent writes one.</p>
         {/if}
+      </div>
+    {:else if sideTab === "inbox"}
+      <div class="inbox" id="agent-view-inbox" role="tabpanel" aria-labelledby="agent-tab-inbox">
+        <AgentTeamEntry entry={ready?.mcp ?? null} />
       </div>
     {:else if sideTab !== "terminal" && sideTab !== "diffs"}
       {@const tab = SIDE_TABS.find((t) => t.id === sideTab)}
@@ -400,6 +444,16 @@
 
   .waiting p {
     margin: 0;
+  }
+
+  .inbox {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    padding: var(--ax-space-4);
+    background: var(--ax-surface-1);
+    color: var(--ax-text);
+    font-size: var(--ax-font-size-sm);
   }
 
   .plan {

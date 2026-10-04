@@ -6,8 +6,11 @@
 //! message is stamped here, the card a message is about is the session's own card, and the tools offered are the ones
 //! the session's role allows (`docs/plans/a2a.md` A39, A28, and the duties the CP-A3 review left for this checkpoint).
 //!
-//! Like [`crate::session`] this guards against mistakes and against agents that follow their instructions, not
-//! against another process of the same user, who could start a server with any id or write the database directly.
+//! The id alone is not believed: the studio also hands the server a **secret issued at every start**
+//! (`AXIOMATA_AGENT_TOKEN`, in the session's MCP configuration and not in the environment the agent's own shell
+//! inherits), and a server that cannot present it refuses to start ([`axiomata_ide::session_token`]). So an agent
+//! cannot become another session by exporting that session's id. Still no sandbox: a process of the same user can read the
+//! configuration the secret sits in, or write the database directly.
 
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
@@ -73,6 +76,30 @@ impl Capabilities {
     }
 }
 
+impl Capabilities {
+    /// The names of the tools these capabilities offer, in the order the server lists them — what the studio shows
+    /// as "what this session can do". Must match [`super::tools::offered`], which a test checks.
+    pub fn tool_names(&self) -> Vec<&'static str> {
+        let mut names = vec![
+            "list_agents",
+            "send_message",
+            "read_inbox",
+            "get_card",
+            "list_cards",
+        ];
+        if self.work {
+            names.extend(["claim_task", "report_done"]);
+        }
+        if self.review {
+            names.push("review_verdict");
+        }
+        if self.create != Creates::Nothing {
+            names.push("create_card");
+        }
+        names
+    }
+}
+
 /// Why a server could not be set up for a session.
 #[derive(Debug, thiserror::Error)]
 pub enum ContextError {
@@ -80,6 +107,11 @@ pub enum ContextError {
         "AXIOMATA_AGENT_ID is not set to a session id — this server is started by the studio for one session"
     )]
     NoIdentity,
+    #[error(
+        "the session secret is missing or wrong — this server only starts from the MCP configuration the studio wrote \
+         for session {0} at its latest start"
+    )]
+    BadSecret(i64),
     #[error("there is no agent session {0}")]
     UnknownSession(i64),
     #[error("database error: {0}")]
@@ -167,15 +199,30 @@ impl Context {
 
     /// [`Context::new`] with the identity read from the environment and the roles in force for the session's project:
     /// the owner's, with the project's own files replacing and adding once the owner confirmed them
-    /// ([`crate::roster::project_roles`]) — the same roles the session was told it plays.
+    /// ([`crate::roster::project_roles`]) — the same roles the session was told it plays. The session secret
+    /// (`AXIOMATA_AGENT_TOKEN`) must be the one issued at the session's latest start.
     ///
     /// # Errors
     ///
-    /// [`ContextError::NoIdentity`] when `AXIOMATA_AGENT_ID` is missing or not a number, otherwise as [`Context::new`].
+    /// [`ContextError::NoIdentity`] when `AXIOMATA_AGENT_ID` is missing or not a number, [`ContextError::BadSecret`]
+    /// when the secret is missing or not the current one, otherwise as [`Context::new`].
     pub fn from_env(core: &AxiomataCore, roots: ChannelRoots) -> Result<Self, ContextError> {
-        let var = |name: &str| std::env::var(name).ok();
+        Self::from_vars(core, roots, |name| std::env::var(name).ok())
+    }
+
+    /// [`Context::from_env`] over any source of variables, so the checks can be tested without touching the process
+    /// environment.
+    pub fn from_vars(
+        core: &AxiomataCore,
+        roots: ChannelRoots,
+        var: impl Fn(&str) -> Option<String>,
+    ) -> Result<Self, ContextError> {
         let agent_id =
             parse_id(var("AXIOMATA_AGENT_ID").as_deref()).ok_or(ContextError::NoIdentity)?;
+        let secret = var("AXIOMATA_AGENT_TOKEN").unwrap_or_default();
+        if !axiomata_ide::session_token::verify(&roots, agent_id, &secret) {
+            return Err(ContextError::BadSecret(agent_id));
+        }
         let roles = effective_roles(core, agent_id);
         Self::new(
             core,

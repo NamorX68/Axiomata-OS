@@ -676,7 +676,10 @@ async fn main() -> Result<()> {
             MemoryAction::Status => memory_status(&core)?,
         },
         Command::Skills { action } => match action {
-            SkillsAction::Reseed { force } => skills_reseed(force)?,
+            SkillsAction::Reseed { force } => {
+                board_flow::owner_only("reseeding the bundled skills")?;
+                skills_reseed(force)?
+            }
         },
         Command::Routines { action } => return routines_cmd(&core, action).await,
         Command::Board { action } => return board_cmd(&core, action),
@@ -1167,6 +1170,10 @@ fn memory_status(core: &AxiomataCore) -> Result<()> {
 
 /// Dispatches the `routines` subcommands.
 async fn routines_cmd(core: &AxiomataCore, action: RoutineAction) -> Result<()> {
+    // A routine runs an agent on a schedule: an agent session does not schedule itself more work.
+    if !matches!(action, RoutineAction::List | RoutineAction::History { .. }) {
+        board_flow::owner_only("changing or running routines")?;
+    }
     match action {
         RoutineAction::List => routines_list(core),
         RoutineAction::Add(args) => routines_add(core, args),
@@ -1366,7 +1373,7 @@ async fn routines_tick(core: &AxiomataCore) -> Result<()> {
 // ----------------------------------------------------------------- board ---
 
 fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
-    use board_flow::{owner_only, resolve_actor};
+    use board_flow::{mcp_only, owner_only, resolve_actor};
     match action {
         BoardAction::List { board, archived } => board_list(core, board, archived),
         BoardAction::New { name } => {
@@ -1387,7 +1394,10 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             body,
             labels,
             flow,
-        } => board_add(core, column, &title, body, labels, &flow),
+        } => {
+            mcp_only("proposing a card")?;
+            board_add(core, column, &title, body, labels, &flow)
+        }
         BoardAction::Edit {
             id,
             title,
@@ -1419,7 +1429,10 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             index,
             actor,
         } => board_move(core, id, column, index, &resolve_actor(actor)?),
-        BoardAction::Claim { id, actor } => board_claim(core, id, &resolve_actor(actor)?),
+        BoardAction::Claim { id, actor } => {
+            mcp_only("taking a card")?;
+            board_claim(core, id, &resolve_actor(actor)?)
+        }
         BoardAction::Done { id } => {
             owner_only("moving a card to done")?;
             board_done(core, id)
@@ -1434,14 +1447,20 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         }
         BoardAction::Plan { action } => board_flow::plan_cmd(core, action),
         BoardAction::Dep { action } => board_flow::dep_cmd(core, action),
-        BoardAction::Report { id, actor } => board_flow::report(core, id, &resolve_actor(actor)?),
+        BoardAction::Report { id, actor } => {
+            mcp_only("reporting a card done")?;
+            board_flow::report(core, id, &resolve_actor(actor)?)
+        }
         BoardAction::Verdict {
             id,
             actor,
             approve,
             send_back: _,
             note,
-        } => board_flow::verdict(core, id, &resolve_actor(actor)?, approve, &note),
+        } => {
+            mcp_only("judging a card")?;
+            board_flow::verdict(core, id, &resolve_actor(actor)?, approve, &note)
+        }
         BoardAction::Events { id, limit } => board_flow::events(core, id, limit),
         BoardAction::Note { id, text, actor } => {
             board_flow::note(core, id, &resolve_actor(actor)?, &text)
@@ -1493,7 +1512,38 @@ fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
     }
 }
 
+/// What an agent session may not do with `ide …`, by command: start sessions (which issues their secrets), change
+/// what a session runs, or edit the owner's projects, engines and roles. Reading stays open (`docs/plans/a2a.md`,
+/// A39/CP-A5: without this an agent could run `ide agents prepare <reviewer>` and read the fresh secret from the
+/// file it writes).
+fn ide_owner_gate(action: &IdeAction) -> Option<&'static str> {
+    match action {
+        IdeAction::Projects { action } => match action {
+            ProjectAction::List => None,
+            _ => Some("changing a project"),
+        },
+        IdeAction::Agents { action } => match action {
+            AgentAction::List { .. }
+            | AgentAction::Status { .. }
+            | AgentAction::Diff { .. }
+            | AgentAction::Base { .. } => None,
+            _ => Some("starting, changing or taking over a session"),
+        },
+        IdeAction::Engines { action } => match action {
+            EngineAction::List => None,
+            _ => Some("changing the engine catalog"),
+        },
+        IdeAction::Roles { action } => match action {
+            RoleAction::List | RoleAction::Show { .. } | RoleAction::Project { .. } => None,
+            _ => Some("changing roles"),
+        },
+    }
+}
+
 async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
+    if let Some(what) = ide_owner_gate(&action) {
+        board_flow::owner_only(what)?;
+    }
     match action {
         IdeAction::Projects { action } => match action {
             ProjectAction::List => project_list(core),
@@ -1520,7 +1570,7 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 model,
                 env,
             } => agent_edit(core, id, name, harness, command, model, env),
-            AgentAction::Delete { id } => agent_delete(core, id),
+            AgentAction::Delete { id } => agent_delete(core, id).await,
             AgentAction::Prepare { id } => agent_prepare(core, id).await,
             AgentAction::NewSession { id } => {
                 if axiomata_core::ide_start::new_session(&core.db, id)? {
@@ -1531,7 +1581,9 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 }
             }
             AgentAction::Status { project } => agent_status(core, project).await,
-            AgentAction::DiscardWorktree { id, force } => agent_discard_worktree(core, id, force),
+            AgentAction::DiscardWorktree { id, force } => {
+                agent_discard_worktree(core, id, force).await
+            }
             AgentAction::Diff { id, file } => agent_diff(core, id, file),
             AgentAction::Base { id, path } => agent_base(core, id, &path),
             AgentAction::Commit { id, message } => {
@@ -1930,7 +1982,7 @@ fn agent_edit(
 }
 
 async fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
-    let ready = axiomata_core::ide_start::start_agent(&core.db, id).await?;
+    let ready = axiomata_core::ide_start::start_agent(core, id).await?;
     println!("agent #{} {}", ready.agent.id, ready.agent.name);
     println!("  runs in: {}", ready.cwd.display());
     if ready.shared_folder {
@@ -1951,6 +2003,15 @@ async fn agent_prepare(core: &AxiomataCore, id: i64) -> Result<()> {
     println!("  command: {}", ready.launch_command);
     if !ready.status_connected {
         println!("  status:  no channel for this harness yet");
+    }
+    let mcp = &ready.mcp;
+    match &mcp.note {
+        Some(note) => println!("  team:    {:?} — {note}", mcp.status),
+        None => println!(
+            "  team:    {:?} — tools: {}",
+            mcp.status,
+            mcp.tools.join(", ")
+        ),
     }
     Ok(())
 }
@@ -2122,14 +2183,23 @@ fn agent_take_over(core: &AxiomataCore, id: i64, message: &str, no_ff: bool) -> 
     Ok(())
 }
 
-fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
-    let db = core.db_lock();
-    if !force && ide::provision::worktree_has_changes(&db, id)? {
-        anyhow::bail!(
-            "agent #{id} has uncommitted work in its worktree — pass --force to discard it"
-        );
-    }
-    if ide::provision::discard_worktree(&db, id, force)? {
+async fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
+    let worktree = ide::agent_store::get_agent(&core.db_lock(), id)?
+        .filter(|agent| agent.harness == ide::model::Harness::Opencode)
+        .and_then(|agent| agent.worktree_path);
+    let removed = {
+        let db = core.db_lock();
+        if !force && ide::provision::worktree_has_changes(&db, id)? {
+            anyhow::bail!(
+                "agent #{id} has uncommitted work in its worktree — pass --force to discard it"
+            );
+        }
+        ide::provision::discard_worktree(&db, id, force)?
+    };
+    if removed {
+        if let Some(worktree) = worktree {
+            axiomata_core::agents::opencode::forget_mcp(&worktree).await;
+        }
         println!("removed the worktree of agent #{id}");
     } else {
         println!("agent #{id} has no worktree");
@@ -2137,13 +2207,21 @@ fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Result<(
     Ok(())
 }
 
-fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
-    let db = core.db_lock();
-    let Some(agent) = ide::agent_store::get_agent(&db, id)? else {
-        anyhow::bail!("no agent #{id}");
+async fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
+    let agent = {
+        let db = core.db_lock();
+        let Some(agent) = ide::agent_store::get_agent(&db, id)? else {
+            anyhow::bail!("no agent #{id}");
+        };
+        if !ide::agent_store::delete_agent(&db, id)? {
+            anyhow::bail!("no agent #{id}");
+        }
+        agent
     };
-    if !ide::agent_store::delete_agent(&db, id)? {
-        anyhow::bail!("no agent #{id}");
+    if agent.harness == ide::model::Harness::Opencode
+        && let Some(worktree) = &agent.worktree_path
+    {
+        axiomata_core::agents::opencode::forget_mcp(worktree).await;
     }
     ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
         .context("the agent was removed, but its status folder was not")?;
@@ -2556,6 +2634,57 @@ fn board_archive(core: &AxiomataCore, id: i64, archived: bool) -> Result<()> {
 mod tests {
     use super::*;
     use chrono::Utc;
+
+    #[test]
+    fn an_agent_session_may_read_the_ide_but_not_start_or_change_anything() {
+        let agents = |action| IdeAction::Agents { action };
+        assert!(ide_owner_gate(&agents(AgentAction::List { project: 1 })).is_none());
+        assert!(ide_owner_gate(&agents(AgentAction::Status { project: 1 })).is_none());
+        // Starting a session issues its secret; deleting or re-opening one changes what runs.
+        for gated in [
+            AgentAction::Prepare { id: 2 },
+            AgentAction::Delete { id: 2 },
+            AgentAction::NewSession { id: 2 },
+        ] {
+            assert!(ide_owner_gate(&agents(gated)).is_some());
+        }
+        assert!(
+            ide_owner_gate(&IdeAction::Projects {
+                action: ProjectAction::List
+            })
+            .is_none()
+        );
+        assert!(
+            ide_owner_gate(&IdeAction::Projects {
+                action: ProjectAction::Delete { id: 1 }
+            })
+            .is_some()
+        );
+        assert!(
+            ide_owner_gate(&IdeAction::Engines {
+                action: EngineAction::List
+            })
+            .is_none()
+        );
+        assert!(
+            ide_owner_gate(&IdeAction::Engines {
+                action: EngineAction::Delete { id: "x".into() }
+            })
+            .is_some()
+        );
+        assert!(
+            ide_owner_gate(&IdeAction::Roles {
+                action: RoleAction::List
+            })
+            .is_none()
+        );
+        assert!(
+            ide_owner_gate(&IdeAction::Roles {
+                action: RoleAction::Delete { name: "x".into() }
+            })
+            .is_some()
+        );
+    }
 
     fn card() -> board::Card {
         let now = Utc::now();

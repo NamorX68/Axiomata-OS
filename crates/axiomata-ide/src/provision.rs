@@ -203,6 +203,11 @@ impl WorktreeToDiscard {
         }))
     }
 
+    /// Where the worktree is.
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
     /// Runs `git worktree remove`. Needs no database.
     pub fn remove(&self, force: bool) -> Result<bool> {
         worktree::remove(&self.repo_root, &self.path, force)

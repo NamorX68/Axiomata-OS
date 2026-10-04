@@ -69,3 +69,6 @@ notify = "8"
 # Content hash of a project's `tasks.json` for `axiomata-tasks`: the owner confirms what a file runs, and the
 # confirmation holds only for exactly that content. SHA-256, so a changed file cannot be made to match.
 sha2 = "0.10"
+# Random bytes for the per-start session secret of an agent's MCP server (`axiomata-ide::session_token`): the OS's
+# generator, no seeding of our own. Already in the tree transitively.
+getrandom = "0.3"

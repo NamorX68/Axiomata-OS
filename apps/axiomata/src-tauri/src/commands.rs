@@ -2092,11 +2092,22 @@ pub fn confirm_project_roles(
 /// Deletes the profile, then its status channel (M7.2 CP6). The row goes
 /// first: a channel without a row is harmless, a row whose plan vanished is not.
 #[tauri::command]
-pub fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
-    let db = state.db_lock();
-    let deleted = ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?;
-    drop(db);
+pub async fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    // The connection is let go of before anything is awaited (a guard held across an await makes the command
+    // unsendable). The worktree is read first: the row is gone afterwards, and the MCP registration is keyed on it.
+    let (deleted, opencode_worktree) = {
+        let db = state.db_lock();
+        let opencode_worktree = ide::agent_store::get_agent(&db, id)
+            .map_err(|err| err.to_string())?
+            .filter(|agent| agent.harness == ide::model::Harness::Opencode)
+            .and_then(|agent| agent.worktree_path);
+        let deleted = ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?;
+        (deleted, opencode_worktree)
+    };
     if deleted {
+        if let Some(worktree) = opencode_worktree {
+            axiomata_core::agents::opencode::forget_mcp(&worktree).await;
+        }
         ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
             .map_err(|err| {
                 format!("the agent was removed, but its status folder was not: {err}")
@@ -2117,8 +2128,8 @@ pub fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bool, St
 pub async fn prepare_ide_agent(
     state: State<'_, CoreState>,
     id: i64,
-) -> Result<ide::provision::Provisioned, String> {
-    axiomata_core::ide_start::start_agent(&state.db, id)
+) -> Result<axiomata_core::ide_start::Started, String> {
+    axiomata_core::ide_start::start_agent(&state, id)
         .await
         .map_err(|err| err.to_string())
 }
@@ -2128,6 +2139,32 @@ pub async fn prepare_ide_agent(
 #[tauri::command]
 pub fn ide_agent_new_session(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
     axiomata_core::ide_start::new_session(&state.db, id).map_err(|err| err.to_string())
+}
+
+/// The "you have mail" line to type into session `id`'s terminal, or `None` when there is nothing to announce
+/// (A2A A8, way 2). `agent_state` is the status the pane already shows; only an idle session qualifies, because typing
+/// into a waiting one would answer a permission prompt. Whether the owner is typing in that pane is for the pane to
+/// check before it types, and it calls [`ide_mailbox_nudged`] for each line it really typed.
+#[tauri::command]
+pub fn ide_mailbox_nudge(
+    state: State<'_, CoreState>,
+    id: i64,
+    agent_state: String,
+) -> Result<Option<String>, String> {
+    let Some(agent_state) = ide::lifecycle::AgentState::parse(&agent_state) else {
+        return Ok(None);
+    };
+    let db = state.db_lock();
+    let due = ide::mailbox::nudges(&db, &ide::mailbox::Limits::default(), &[(id, agent_state)])
+        .map_err(|err| err.to_string())?;
+    Ok(due.into_iter().next().map(|nudge| nudge.line))
+}
+
+/// Notes that the nudge for session `id` was typed, so a message is announced a limited number of times.
+#[tauri::command]
+pub fn ide_mailbox_nudged(state: State<'_, CoreState>, id: i64) -> Result<(), String> {
+    let db = state.db_lock();
+    ide::mailbox::record_nudge(&db, id).map_err(|err| err.to_string())
 }
 
 /// What every agent of a project is doing and planning (M7.2 CP6/CP6b).
@@ -2484,6 +2521,9 @@ pub async fn discard_ide_agent_worktree(
         Ok((target, removed))
     })
     .await?;
+    if removed {
+        axiomata_core::agents::opencode::forget_mcp(target.path()).await;
+    }
     let db = state.db_lock();
     target.forget(&db, removed).map_err(|err| err.to_string())?;
     Ok(removed)

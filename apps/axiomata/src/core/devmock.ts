@@ -1568,6 +1568,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (agent) agent.opencode_session = null;
       return Boolean(agent) as T;
     }
+    // No mail in the browser mock: there is never a line to type.
+    case "ide_mailbox_nudge":
+      return null as T;
+    case "ide_mailbox_nudged":
+      return undefined as T;
     case "prepare_ide_agent": {
       const agent = ideAgents.find((a) => a.id === args.id);
       if (!agent) throw new Error(`no agent ${args.id}`);
@@ -1592,6 +1597,21 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         launch_command: `${agent.effective_command}${hookup}`,
         launch_env: `${agent.effective_env}\nAXIOMATA_EVENTS=${events}\nAXIOMATA_CLAUDE_SETTINGS=${events}/claude-settings.json`,
         status_connected: agent.harness !== "mini",
+        mcp: generated && agent.harness !== "mini"
+          ? {
+              status: "registered",
+              server: "axiomata",
+              command: "/mock/axiomata-cli",
+              tools: ["list_agents", "send_message", "read_inbox", "get_card", "list_cards", "claim_task", "report_done"],
+              note: null,
+            }
+          : {
+              status: "not_applicable",
+              server: "axiomata",
+              command: null,
+              tools: [],
+              note: "this session runs a command of its own, which Axiomata does not touch",
+            },
       } as T;
     }
     // One status per agent: the first fixture is mid-plan, the second waits

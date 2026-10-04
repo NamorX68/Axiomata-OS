@@ -1,4 +1,5 @@
-//! Starting an IDE agent: provisioning plus, for Opencode, its session.
+//! Starting an IDE agent: provisioning, the entry to the agent MCP server (`agent_entry`) and, for Opencode, its
+//! session.
 //!
 //! `axiomata_ide::provision::prepare` gives an agent its worktree, port and
 //! status channel — local, synchronous work. An Opencode agent additionally
@@ -7,17 +8,19 @@
 //! the one place that puts the two together, so the dashboard and the CLI
 //! start agents the same way.
 
-use std::sync::Mutex;
 use std::sync::OnceLock;
 
-use rusqlite::Connection;
+use serde::Serialize;
 
+use crate::AxiomataCore;
 use crate::AxiomataError;
+use crate::agent_entry::{self, AgentEntry};
 use crate::agents::opencode;
 use crate::ide::agent_store;
 use crate::ide::model::Harness;
 use crate::ide::provision::{self, Provisioned};
 use crate::paths;
+use crate::roster;
 
 /// Serialises agent starts in this process: two starts of the same agent at
 /// once (a double-clicked Restart) would otherwise each create a session and
@@ -30,51 +33,109 @@ fn start_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// Provisions agent `id` and, for an Opencode agent on the generated command,
-/// makes sure it has a session and starts the terminal UI on it.
+/// What a start hands to the caller: everything [`provision::prepare`] says, plus what the session was given to reach
+/// the team (CP-A5). Serialised flat, so a client that only knew [`Provisioned`] still reads it.
+#[derive(Debug, Clone, Serialize)]
+pub struct Started {
+    #[serde(flatten)]
+    pub ready: Provisioned,
+    /// The agent MCP server's entry, for the owner to see; the secret is not in it.
+    pub mcp: AgentEntry,
+}
+
+impl std::ops::Deref for Started {
+    type Target = Provisioned;
+
+    fn deref(&self) -> &Provisioned {
+        &self.ready
+    }
+}
+
+/// Provisions agent `id`, wires the agent MCP server into its harness and, for an Opencode agent on the generated
+/// command, makes sure it has a session and starts the terminal UI on it.
 ///
 /// The database lock is held only for the provisioning and for recording the
 /// session — never across the call to the service; [`start_lock`] keeps two
 /// starts from racing in between. An agent with a command of its own is
 /// started as written (the E13 rule: the owner is responsible for it), so it
-/// gets no session from here.
-pub async fn start_agent(db: &Mutex<Connection>, id: i64) -> Result<Provisioned, AxiomataError> {
+/// gets no session and no MCP entry from here.
+pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, AxiomataError> {
     let _start = start_lock().lock().await;
-    let mut ready = {
-        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
-        provision::prepare(&conn, &paths::ide_locations(), id)?
+    let (mut ready, role) = {
+        let conn = core.db_lock();
+        let ready = provision::prepare(&conn, &paths::ide_locations(), id)?;
+        let config = core.config_read().clone();
+        let role = roster::roles_for_project(&conn, &config, ready.agent.project_id)
+            .into_iter()
+            .find(|role| role.name == ready.agent.agent_role);
+        (ready, role)
     };
-    if ready.agent.harness != Harness::Opencode || !ready.agent.command.trim().is_empty() {
-        return Ok(ready);
-    }
-    let session = opencode::ide_session(
-        ready.agent.opencode_session.as_deref(),
-        &ready.cwd,
-        &ready.agent.name,
-        ready.agent.model.as_deref(),
-    )
-    .await?;
-    if ready.agent.opencode_session.as_deref() != Some(session.as_str()) {
-        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
-        agent_store::set_opencode_session(&conn, id, Some(&session))?;
-    }
-    // Typed into a shell as it stands, so only an id of `[A-Za-z0-9_-]` is
-    // ever appended (`ide_session` checks the ones it returns; this keeps the
-    // promise local).
-    if !crate::agents::valid_session_id(&session) {
-        return Err(AxiomataError::AgentApi {
-            backend: crate::agents::BACKEND_OPENCODE,
-            message: format!("refusing to start on a malformed session id {session:?}"),
+    let roots = paths::ide_locations().channels;
+    if !ready.agent.command.trim().is_empty() {
+        return Ok(Started {
+            ready,
+            mcp: AgentEntry::not_applicable(
+                "this session runs a command of its own, which Axiomata does not touch",
+            ),
         });
     }
-    ready.launch_command = with_session(&ready.launch_command, &session);
-    ready.agent.opencode_session = Some(session);
-    Ok(ready)
+    match ready.agent.harness {
+        Harness::ClaudeCode => {
+            let (arg, mcp) = agent_entry::wire_claude(&roots, &ready.agent, role.as_ref());
+            if let Some(arg) = arg {
+                ready.launch_command = format!("{} {arg}", ready.launch_command);
+            }
+            Ok(Started { ready, mcp })
+        }
+        Harness::Opencode => {
+            let session = opencode::ide_session(
+                ready.agent.opencode_session.as_deref(),
+                &ready.cwd,
+                &ready.agent.name,
+                ready.agent.model.as_deref(),
+            )
+            .await?;
+            if ready.agent.opencode_session.as_deref() != Some(session.as_str()) {
+                let conn = core.db_lock();
+                agent_store::set_opencode_session(&conn, id, Some(&session))?;
+            }
+            // Typed into a shell as it stands, so only an id of `[A-Za-z0-9_-]` is
+            // ever appended (`ide_session` checks the ones it returns; this keeps the
+            // promise local).
+            if !crate::agents::valid_session_id(&session) {
+                return Err(AxiomataError::AgentApi {
+                    backend: crate::agents::BACKEND_OPENCODE,
+                    message: format!("refusing to start on a malformed session id {session:?}"),
+                });
+            }
+            ready.launch_command = with_session(&ready.launch_command, &session);
+            ready.agent.opencode_session = Some(session);
+            // The registration is keyed on the directory. Agents of a project that is no repository all share its
+            // folder, so a second start would replace the first one's server with its own id and secret — and the
+            // first session would speak as the second.
+            let mcp = if ready.shared_folder {
+                AgentEntry::not_applicable(
+                    "this project is not a git repository, so its sessions share one folder, and one folder cannot \
+                     carry one identity per session",
+                )
+            } else {
+                agent_entry::wire_opencode(&roots, &ready.agent, &ready.cwd, role.as_ref()).await
+            };
+            Ok(Started { ready, mcp })
+        }
+        Harness::Mini => Ok(Started {
+            ready,
+            mcp: AgentEntry::not_applicable("the mini harness does not exist yet"),
+        }),
+    }
 }
 
 /// Forgets agent `id`'s Opencode session, so its next start creates a fresh
 /// one ("New session", plan Q9). The old session stays in Opencode's list.
-pub fn new_session(db: &Mutex<Connection>, id: i64) -> Result<bool, AxiomataError> {
+pub fn new_session(
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    id: i64,
+) -> Result<bool, AxiomataError> {
     let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
     Ok(agent_store::set_opencode_session(&conn, id, None)?)
 }

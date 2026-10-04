@@ -235,6 +235,20 @@ async fn serve(
                               "cursor": {"next": null}});
             respond(&mut stream, "200 OK", &page).await
         }
+        ("GET", "/api/mcp") => {
+            let servers = json!({"location": {"directory": "/d"}, "data": [
+                {"name": "axiomata", "status": {"status": "connected"}},
+                {"name": "broken", "status": {"status": "failed", "error": "no such file"}},
+                {"name": "slow", "status": {"status": "connecting"}},
+            ]});
+            respond(&mut stream, "200 OK", &servers).await
+        }
+        ("PUT" | "DELETE", "/api/experimental/mcp/axiomata") => {
+            // The real service answers 204 with no body.
+            let _ = stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
+                .await;
+        }
         _ => respond(&mut stream, "404 Not Found", &json!({})).await,
     }
 }
@@ -481,4 +495,77 @@ async fn find_never_starts_a_service_that_is_not_running() {
         !dir.join("state/service.json").exists(),
         "the service was started"
     );
+}
+
+#[tokio::test]
+async fn an_mcp_server_is_registered_and_removed_per_location() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("mcp");
+    let bin = fake_opencode(&dir);
+    write_discovery(&dir, &discovery(mock.port, "pw"));
+    let service = Service::connect(&bin, &env()).await.expect("connect");
+
+    let config = json!({"type": "local", "command": ["/bin/axiomata-cli", "mcp-serve"],
+                        "environment": {"AXIOMATA_AGENT_ID": "7"}});
+    service
+        .register_mcp("/work/tree", "axiomata", &config)
+        .await
+        .expect("registered");
+    service
+        .remove_mcp("/work/tree", "axiomata")
+        .await
+        .expect("removed");
+
+    let requests = mock.requests();
+    let put = requests
+        .iter()
+        .find(|(method, ..)| method == "PUT")
+        .expect("a PUT");
+    assert_eq!(put.1, "/api/experimental/mcp/axiomata");
+    let body: Value = serde_json::from_str(&put.2).unwrap();
+    assert_eq!(body, json!({ "config": config }));
+    assert!(requests.iter().any(|(method, path, _)| method == "DELETE"
+        && path == "/api/experimental/mcp/axiomata"));
+
+    assert!(
+        service
+            .register_mcp("/work/tree", "../session", &config)
+            .await
+            .is_err(),
+        "a name that is no config key never becomes a path"
+    );
+}
+
+#[tokio::test]
+async fn a_registered_server_is_awaited_until_it_connects_or_fails() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("await-mcp");
+    let bin = fake_opencode(&dir);
+    write_discovery(&dir, &discovery(mock.port, "pw"));
+    let service = Service::connect(&bin, &env()).await.expect("connect");
+    let pause = Duration::from_millis(1);
+
+    service
+        .await_mcp("/d", "axiomata", 3, pause)
+        .await
+        .expect("connected");
+    let failed = service
+        .await_mcp("/d", "broken", 3, pause)
+        .await
+        .expect_err("a server that failed is an error")
+        .to_string();
+    assert!(failed.contains("no such file"), "{failed}");
+    // Still starting after the last look is not held against the start.
+    service
+        .await_mcp("/d", "slow", 2, pause)
+        .await
+        .expect("pending is fine");
 }

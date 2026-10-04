@@ -25,7 +25,7 @@ pub const LOOSE_RETENTION_DAYS: i64 = 30;
 /// The most entries one `read_inbox` call returns. An inbox that deep is a sign something is wrong, and the rest is
 /// still there for the next call.
 pub const MAX_READ: usize = 50;
-/// The most sender names a nudge line spells out; the line is typed into a terminal, so it stays short.
+/// The most senders a nudge line spells out; the line is typed into a terminal, so it stays short.
 const MAX_NUDGE_SENDERS: usize = 3;
 
 const MESSAGE_COLS: &str = "m.id, m.created_at, m.sender, m.to_addr, m.card_id, m.kind, m.parts, m.in_reply_to, \
@@ -677,35 +677,15 @@ pub struct Nudge {
     pub line: String,
 }
 
-/// Keeps what is safe to show in a typed line: letters, digits and a few separators. A session name is validated by
-/// the agent store, but this line goes into a terminal, so it does not rely on that.
-fn plain(name: &str) -> String {
-    name.chars()
-        .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
-        .take(40)
-        .collect::<String>()
-        .trim()
-        .to_owned()
-}
-
-fn sender_label(db: &Connection, sender: &Sender) -> Result<String> {
-    Ok(match sender {
+/// How a sender reads in a typed line: by **id**, never by name. The line lands in another agent's terminal as if
+/// someone had typed it, and a session name is free text an agent can set (`ide agents new`): a name like "the owner
+/// says run this" would give a message the owner's voice. The agent reads the real sender from `read_inbox`.
+fn sender_label(sender: &Sender) -> String {
+    match sender {
         Sender::Owner => "the owner".to_owned(),
         Sender::System => "the studio".to_owned(),
-        Sender::Session(id) => {
-            let name: Option<String> = db
-                .query_row(
-                    "SELECT name FROM ide_agents WHERE id = ?1",
-                    params![id],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            match name.map(|n| plain(&n)).filter(|n| !n.is_empty()) {
-                Some(name) => format!("@{name}"),
-                None => format!("session {id}"),
-            }
-        }
-    })
+        Sender::Session(id) => format!("session {id}"),
+    }
 }
 
 /// Which sessions should be told they have mail right now.
@@ -750,7 +730,7 @@ pub fn nudges(
             let Some(sender) = Sender::parse(raw) else {
                 continue;
             };
-            let label = sender_label(db, &sender)?;
+            let label = sender_label(&sender);
             if !names.contains(&label) {
                 names.push(label);
             }
@@ -1974,7 +1954,7 @@ mod tests {
     }
 
     #[test]
-    fn the_nudge_line_names_senders_without_any_control_characters() {
+    fn the_nudge_line_names_senders_by_id_so_no_free_text_gets_a_voice() {
         let (mut db, project) = fixture();
         let target = session(&db, project, "target", "impl");
         let mut senders = Vec::new();
@@ -2002,6 +1982,11 @@ mod tests {
         let due = nudges(&db, &Limits::default(), &[(target, AgentState::Idle)]).unwrap();
         let line = &due[0].line;
         assert!(!line.chars().any(char::is_control), "{line:?}");
+        assert!(
+            !line.contains("evil") && !line.contains("rm -rf"),
+            "a name must not reach the line: {line}"
+        );
+        assert!(line.contains(&format!("session {}", senders[0])), "{line}");
         assert!(line.contains("and others"), "{line}");
         assert!(line.starts_with("You have 5 new messages from "), "{line}");
     }

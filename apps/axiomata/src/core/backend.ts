@@ -237,6 +237,25 @@ export interface IdeAgent {
   effective_env: string;
 }
 
+/** How a session is wired to the agent MCP server. Mirrors `axiomata_core::agent_entry::EntryStatus`. */
+export type AgentEntryStatus = "registered" | "unavailable" | "not_applicable";
+
+/**
+ * What a session was given to reach the other sessions and the board (A2A CP-A5): the MCP server's entry in its
+ * harness. Read-only for the owner — it is what Axiomata wrote, not a setting. Never carries the session's secret.
+ */
+export interface AgentEntry {
+  status: AgentEntryStatus;
+  /** The server's name in the harness (its tools are `mcp__<server>__…` in Claude Code). */
+  server: string;
+  /** The program the harness starts as the server. */
+  command: string | null;
+  /** The tools this session's role gets. */
+  tools: string[];
+  /** Why the entry is unavailable or not applicable. */
+  note: string | null;
+}
+
 /** What an agent needs before it can run — `prepare_ide_agent`. */
 export interface ProvisionedAgent {
   agent: IdeAgent;
@@ -252,6 +271,8 @@ export interface ProvisionedAgent {
   launch_env: string;
   /** Whether this harness reports into the status channel at all. */
   status_connected: boolean;
+  /** The agent MCP server's entry for this start (A2A CP-A5). */
+  mcp: AgentEntry;
 }
 
 /** What an agent is doing. Mirrors `axiomata_ide::lifecycle::AgentState`. */

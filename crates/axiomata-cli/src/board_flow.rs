@@ -46,6 +46,25 @@ fn owner_only_in(session: Option<&str>, what: &str) -> Result<()> {
     }
 }
 
+/// Refuses `what` in an agent session: for an agent it goes through the MCP server, which knows the session by a
+/// secret. This shell only knows it by `AXIOMATA_AGENT_ID`, which every child process of the harness inherits and any
+/// of them can change — so a step that depends on *who* takes it (taking a card, reporting it, judging it, proposing
+/// one) is not taken here (`docs/plans/a2a.md`, A39/CP-A5). The owner's own terminal is not affected.
+pub fn mcp_only(what: &str) -> Result<()> {
+    mcp_only_in(session_actor().as_deref(), what)
+}
+
+fn mcp_only_in(session: Option<&str>, what: &str) -> Result<()> {
+    match session {
+        Some(own) => bail!(
+            "{what} is not taken from the shell of {own}: use the `{}` MCP tools of this session (and if it has none, \
+             ask the owner)",
+            axiomata_core::agent_entry::SERVER_NAME
+        ),
+        None => Ok(()),
+    }
+}
+
 /// The agent fields of a card, shared by `board add` and `board edit`.
 #[derive(Debug, Default, Args)]
 pub struct FlowFlags {
@@ -473,6 +492,16 @@ mod tests {
         for lie in ["human:owner", "agent:reviewer-2", "agent:builder-8"] {
             assert!(actor_in(own.clone(), Some(lie.into())).is_err(), "{lie}");
         }
+    }
+
+    #[test]
+    fn the_steps_that_depend_on_who_takes_them_are_for_the_mcp_server_in_an_agent_session() {
+        assert!(mcp_only_in(None, "claiming a card").is_ok());
+        let refused = mcp_only_in(Some("agent:builder-7"), "claiming a card")
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("claiming a card"), "{refused}");
+        assert!(refused.contains("MCP tools"), "{refused}");
     }
 
     #[test]

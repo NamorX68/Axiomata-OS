@@ -1072,3 +1072,99 @@ fn a_server_needs_a_real_session() {
         .expect("no such session");
     assert!(matches!(err, ContextError::UnknownSession(4242)));
 }
+
+/// What a harness would pass the server: the variables of the MCP configuration, nothing from the shell.
+fn vars(pairs: &[(&str, String)]) -> impl Fn(&str) -> Option<String> {
+    let pairs: Vec<(String, String)> = pairs
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), value.clone()))
+        .collect();
+    move |name| {
+        pairs
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+    }
+}
+
+#[test]
+fn a_server_starts_only_with_the_secret_of_the_latest_start() {
+    let mut w = world();
+    let reviewer = w.session("rev", "reviewer");
+    let worker = w.session("dev", "worker");
+    let secret = axiomata_ide::session_token::issue(&w.roots, reviewer).unwrap();
+    let id = reviewer.to_string();
+
+    let start = |pairs: &[(&str, String)]| {
+        Context::from_vars(&w.core, w.roots.clone(), vars(pairs))
+            .err()
+            .map(|err| err.to_string())
+    };
+    // The right id with the right secret is the only way in.
+    assert!(
+        Context::from_vars(
+            &w.core,
+            w.roots.clone(),
+            vars(&[
+                ("AXIOMATA_AGENT_ID", id.clone()),
+                ("AXIOMATA_AGENT_TOKEN", secret.clone())
+            ])
+        )
+        .is_ok()
+    );
+    // The forgery the secret exists for: the worker exports the reviewer's id, with no secret or its own.
+    let worker_secret = axiomata_ide::session_token::issue(&w.roots, worker).unwrap();
+    for token in [None, Some(String::new()), Some(worker_secret)] {
+        let mut pairs = vec![("AXIOMATA_AGENT_ID", id.clone())];
+        if let Some(token) = token {
+            pairs.push(("AXIOMATA_AGENT_TOKEN", token));
+        }
+        let err = start(&pairs).expect("must be refused");
+        assert!(err.contains("session secret"), "{err}");
+    }
+    // An id without any session behind it is refused the same way (no hash file) — nothing to probe for.
+    assert!(
+        start(&[
+            ("AXIOMATA_AGENT_ID", "999".into()),
+            ("AXIOMATA_AGENT_TOKEN", secret.clone())
+        ])
+        .is_some()
+    );
+    // A restart of the session invalidates the secret of the earlier start.
+    axiomata_ide::session_token::issue(&w.roots, reviewer).unwrap();
+    assert!(start(&[("AXIOMATA_AGENT_ID", id), ("AXIOMATA_AGENT_TOKEN", secret)]).is_some());
+    // No id at all is still its own message.
+    assert!(start(&[]).unwrap().contains("AXIOMATA_AGENT_ID is not set"));
+}
+
+#[test]
+fn the_tool_names_shown_to_the_owner_are_the_ones_the_server_offers() {
+    let mut w = world();
+    let mut seen = Vec::new();
+    for (name, role_name) in [
+        ("a", "builder"),
+        ("b", "reviewer"),
+        ("c", "planner"),
+        ("d", "tester"),
+        ("e", "ghost"),
+    ] {
+        let id = w.session(name, role_name);
+        let client = w.client(id, None, None);
+        let mut served = client.tool_names();
+        let mut shown: Vec<String> = client
+            .ctx
+            .caps
+            .tool_names()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        served.sort();
+        shown.sort();
+        assert_eq!(shown, served, "role {role_name}");
+        seen.push(served.len());
+    }
+    assert!(
+        seen.iter().any(|n| n != &seen[0]),
+        "the roles differ in what they get"
+    );
+}

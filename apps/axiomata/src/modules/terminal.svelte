@@ -611,8 +611,43 @@
     sendBytes(new Uint8Array([0x03]));
   }
 
+  /** When the owner last typed or pasted here (`performance.now()`); the studio's own lines do not count. */
+  let lastInputAt: number | null = null;
+
+  /** How long ago the owner last typed or pasted into this terminal, in ms; `null` if they have not. */
+  export function msSinceInput(): number | null {
+    return lastInputAt === null ? null : performance.now() - lastInputAt;
+  }
+
+  /** The pause between a typed line and its Enter: a TUI that sees both in one write takes them for a paste. */
+  const LINE_ENTER_DELAY_MS = 200;
+
+  /**
+   * Types `line` and presses Enter, as the studio's own hand on the keyboard (a mailbox nudge, A2A A8). The caller
+   * decides whether this is a good moment; this never counts as the owner's own input. Control characters (C0, DEL
+   * and the C1 range) are dropped: the line is shown to a TUI, and nothing in it may act as a key.
+   *
+   * @returns whether a live session took it.
+   */
+  export async function typeLine(line: string): Promise<boolean> {
+    if (!sessionId) return false;
+    const id = sessionId;
+    const text = line.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
+    if (!text) return false;
+    try {
+      await ctx.invoke("terminal_write", { id, data: Array.from(encoder.encode(text)) });
+      await new Promise((resolve) => setTimeout(resolve, LINE_ENTER_DELAY_MS));
+      if (sessionId !== id) return false;
+      await ctx.invoke("terminal_write", { id, data: [0x0d] });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function sendBytes(bytes: Uint8Array): void {
     if (!sessionId) return;
+    lastInputAt = performance.now();
     snapToLive();
     void ctx.invoke("terminal_write", { id: sessionId, data: Array.from(bytes) }).catch(() => {
       sessionId = null;

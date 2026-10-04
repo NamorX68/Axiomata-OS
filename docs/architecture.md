@@ -254,8 +254,20 @@ file means read and write mail, nothing else). Tools: `list_agents`, `send_messa
 card at a time (checked inside `start_card`); `claim_task` is `flow::start_card` (claim + move to work + `started` event in one transaction, idempotent for
 the holder, so the app may claim first, A20). **Liveness is a lock**: while a server runs it holds `<events>/<id>/mcp.lock` (`axiomata_ide::presence`);
 anyone who can take the lock knows the session is gone — the OS drops it when the process dies, so nothing goes stale. Logging of the CLI moved to **stderr**
-(stdout belongs to the protocol). Not built yet: wiring into the harnesses (CP-A5), the CLI mirror `agent send|inbox` (A31), delivery to a working agent
-(hooks), cost and step limits (CP-A6/A8).
+(stdout belongs to the protocol).
+
+**The entry to a session (CP-A5, `axiomata_core::agent_entry`, started from `ide_start::start_agent`).** Every start of a session on the generated command
+wires the server in: **Claude Code** gets `--mcp-config <events>/<id>/mcp.json` (app-owned, `0600`, rewritten per start, nothing in the worktree) and the
+role's instructions plus a mailbox hint appended to the system prompt file it already has; **Opencode** gets the server registered on the shared service for its
+worktree (`PUT /api/experimental/mcp/axiomata`, location = the directory; a repeat replaces it, `DELETE` removes it — measured on 2.0.22, an `opencode.json` in the
+worktree is cached per location and would be part of the take-over). The server's **identity is a secret issued at every start**
+(`axiomata_ide::session_token`: 256 random bits, only its SHA-256 kept in the channel directory, replaced by the next start); the server refuses to start
+without it (`Context::from_vars`), and it travels in the server's own environment (the MCP config), not in the harness's. The CLI therefore closes `board
+claim|report|verdict|add` in an agent shell (`board_flow::mcp_only`) — the MCP server is the one door for steps that depend on *who* takes them. The owner sees
+what a session got (`AgentEntry`, read-only, no secret) in the Inbox tab. Opencode's entry exists for a worktree of its own only (sessions sharing a project folder would overwrite each other's registration); `ide agents prepare|…`, `routines` writes and `skills reseed` are closed in an agent shell too. The server is found as `$AXIOMATA_CLI` or the `axiomata-cli` beside the program; without it
+the session starts without the team tools and says so. Not covered: a same-user process can still read the 0600 config or rewrite the hash file. An idle agent
+with unread mail gets one line typed into its terminal (`mailbox::nudges`, `ide/nudge.ts`, `Terminal.typeLine`; only idle, never while the owner types).
+Not built yet: the CLI mirror `agent send|inbox` (A31), the start prompt of a card session (CP-A6), hooks that announce mail while an agent works, cost and step limits.
 
 ### `axiomata-roster`
 
@@ -1579,10 +1591,17 @@ and role are set in the same transaction. Roles offered are those in force for t
 catalog through `ide/rosterStore.ts`. `axiomata-cli ide agents new` still takes raw fields (the owner's own tool); agents without an engine (older rows) show their profile
 until the profile-derived assignment gives them one. Also: a session may send at most 60 messages in all (`Limits::max_per_sender_total`, owner's choice of "a number", 2026-10-04).
 
+### A2A CP-A5 built (2026-10-04)
+
+Per-harness entry and session scoping: see the CP-A5 paragraph under `axiomata-ide` in §3 and `docs/plans/a2a.md` "CP-A5 im Detail". The Opencode spike is
+settled (dynamic registration per worktree); `start_agent` takes the core now and returns `Started` (`Provisioned` plus the entry); the Inbox tab shows the entry.
+Open: an Opencode session's server outlives its terminal (one server per location), so its presence lock says "alive" after the pane closed — the
+status watcher knows better and is to be consulted in CP-A6/A9.
+
 ### A2A CP-A4 built (2026-10-04)
 
-The MCP server `axiomata-cli mcp-serve` (see its paragraph in §3): protocol, role-scoped tools, presence lock, `flow::start_card`. Nothing starts it yet —
-the per-harness entry is CP-A5.
+The MCP server `axiomata-cli mcp-serve` (see its paragraph in §3): protocol, role-scoped tools, presence lock, `flow::start_card`. The per-harness entry that
+starts it is CP-A5 (above).
 
 ### A2A CP-A3 built (2026-10-04)
 

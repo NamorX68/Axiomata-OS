@@ -23,7 +23,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   2026-09-20) — do not plan around it. Node/TypeScript debugging is parked (owner, 2026-10-02).
 - **Next / open:** Run/Tasks (#50) and Debug (#51) were tested on the Mac and accepted by the owner (2026-10-04); #50
   follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
-  CP-A1 (engines + roles), CP-A2 (the board's agent flow) and CP-A3 (the mailbox core) and CP-A4 (the MCP server) built 2026-10-04, next CP-A5 (per-harness entry, `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
+  CP-A1 (engines + roles), CP-A2 (the board's agent flow), CP-A3 (the mailbox core), CP-A4 (the MCP server) and CP-A5 (per-harness entry + per-session secret) built 2026-10-04, next CP-A6 (start a card, `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
   ⌘K spotlight search and further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
@@ -151,7 +151,9 @@ from the code itself:
 - **In an agent session the CLI acts as that agent** (`axiomata_core::session`, from `AXIOMATA_AGENT_ID`/`_NAME`): `--actor`
   cannot say otherwise, the owner's commands (`board plan approve`, `board approve`, `board taken-over`, deleting/archiving …)
   are closed there, and an agent adds cards only to the board's proposal column. The board store enforces the same gates for
-  any caller (`human:` actor for the owner's steps; an `agent:` actor never moves a card freely). Not a sandbox — see a2a.md A39.
+  any caller (`human:` actor for the owner's steps; an `agent:` actor never moves a card freely). `board claim|report|verdict|add` are closed in an agent shell too
+  (`mcp_only`): the MCP server (`axiomata-cli mcp-serve`) is the door for them, and it only starts with the secret issued at the session's latest start
+  (`axiomata-ide::session_token`, kept out of the harness environment). Not a sandbox — see a2a.md A39 and "CP-A5 im Detail".
 - **Kanban has no tile** — it is the ring entry `view:kanban` that opens a large panel. The agent bridge's manifest lists only
   *mounted instances*, so anything an agent must reach without an open window (the Kanban actions) is a **shell action**
   (`registerShellAction`, prefixed `kanban_`), never a module action.

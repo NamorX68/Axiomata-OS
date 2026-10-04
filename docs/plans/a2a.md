@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A4 gebaut (2026-10-04); weiter mit CP-A5.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A5 gebaut (2026-10-04); weiter mit CP-A6.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -156,7 +156,7 @@ wo er etwas anders sagt, die älteren Aussagen.
 - **A30 — MCP-Eintrag bei Claude Code** (ändert A10): eine **app-eigene Datei** (`~/.axiomata/agent-events/<id>/mcp.json`) und pro Lauf `--mcp-config` plus `--settings` mit
   `enabledMcpjsonServers`; **nichts im Worktree** (eine Datei dort würde im Take-over landen) und nichts Globales. Beim Fortsetzen neu übergeben. Die Sichtbarkeit aus A10
   bleibt (beim ersten Mal je Projekt zeigen, Bestätigung per Hash). Ob `--mcp-config` den Erlaubnisdialog überspringt, ist zuerst live zu prüfen.
-- **A31 — Opencode und universeller Rückfall:** zu Beginn von CP-A5 ein **Spike** mit echtem Worktree (`opencode.json` im Worktree gegen `PUT /api/experimental/mcp/axiomata`);
+- **A31 — Opencode und universeller Rückfall** *(Spike erledigt, siehe „CP-A5 im Detail“: dynamische Registrierung statt `opencode.json`)*: zu Beginn von CP-A5 ein **Spike** mit echtem Worktree (`opencode.json` im Worktree gegen `PUT /api/experimental/mcp/axiomata`);
   unabhängig davon ein **CLI-Spiegel** der Werkzeuge (`axiomata-cli agent send|inbox|claim|report|verdict|card …`) für jedes Harness mit Shell.
 - **A32 — Zustellung (präzisiert A8):** Opencode über die API (`POST /api/session/{id}/prompt`, `delivery: queue`), Claude Code während der Arbeit über einen
   `PostToolUse`-Hook (`additionalContext`), wartend nur per Tippen ins Terminal (nie, während der Owner dort schreibt). Hooks kommen damit in **CP-A5**. „Channels" von
@@ -316,10 +316,47 @@ Zuschnitt in `axiomata-ide::mailbox` (Migration 16, `SCHEMA_SQL_V7`); weicht nir
   (6) Dateiteile nennen nur relative Pfade im Projekt (kein `/`, `~`, `..`, Schema). (7) Rollen der Sitzung = die für ihr Projekt geltenden (`roster::project_roles(..).effective`, also bestätigte
   Projektrollen), nicht nur die des Owners. (8) Protokoll: Notifications lösen nichts aus (auch `tools/call` ohne id nicht), Antworten des Clients werden nicht beantwortet, unbekannte Version → neueste.
 - **Bekannte Grenze (A39, jetzt konkret):** die Umgebung (`AXIOMATA_AGENT_ID`, …) erbt jeder Kindprozess der Sitzung. Ein Agent kann `AXIOMATA_AGENT_ID=<Reviewer> axiomata-cli mcp-serve` selbst
-  starten (die IDs liefert `list_agents`) und die eigene Karte abzeichnen — das Zwei-Parteien-Prinzip vergleicht nur Akteurs-Strings. Geschlossen wird das erst mit dem Scoping je Sitzung in CP-A5
-  (der Server nimmt die Identität nicht aus einer vererbbaren Umgebung, sondern aus einem pro Start erzeugten Geheimnis in der MCP-Konfiguration).
+  starten (die IDs liefert `list_agents`) und die eigene Karte abzeichnen — das Zwei-Parteien-Prinzip vergleicht nur Akteurs-Strings. **Geschlossen mit CP-A5** (Geheimnis je Start, siehe unten); übrig bleibt die Grenze „derselbe Benutzer kann Dateien lesen“.
 - **Entschieden (Owner, 2026-10-04):** 20 Vorschläge je Sitzung reichen als Start. Für die **Gesamtgrenze je Sitzung** hatte der Owner kein Gefühl; gesetzt sind **60 Nachrichten** (`Limits::max_per_sender_total`, das Dreifache der Grenze je Karte), einstellbar wie die anderen Zahlen.
 - **Noch nicht:** Eintrag je Harness und Start-Umgebung (CP-A5/CP-A6), der CLI-Spiegel `agent send|inbox` (A31), Kosten-/Schrittgrenzen, `purge` beim Start.
+
+## CP-A5 im Detail (gebaut 2026-10-04)
+
+**Owner-Entscheidungen vor dem Bau:** (1) der Eintrag wird **angezeigt, nicht bestätigt** (A10/A30 verlangten eine Bestätigung per Hash; sie entfällt, weil nichts aus dem
+Projekt einfließt — der Inhalt kommt allein von Axiomata); (2) **jede** Sitzung auf dem erzeugten Befehl bekommt den Server, auch von Hand gestartete; Sitzungen mit eigenem Befehl
+bleiben unberührt (E13); (3) die **CLI-Befehle `board claim|report|verdict|add` sind in einer Agenten-Sitzung gesperrt** (`mcp_only`), damit der MCP-Server die einzige Tür ist.
+`board input|fail|cancel|note` bleiben offen (sie verlangen Halter oder Owner; ein MCP-Gegenstück gibt es noch nicht).
+
+**Spike Opencode 2.0.22 (A31), gegen den laufenden Dienst:** eine `opencode.json` im Worktree wird je Verzeichnis gelesen (`environment` wird übernommen), aber nach dem ersten Laden **zwischengespeichert** —
+eine Änderung wirkt auch nach `connect` nicht, ein neues Geheimnis je Start ginge so nicht, und die Datei läge im Take-over. Stattdessen `PUT /api/experimental/mcp/axiomata`
+(Body `{"config": {"type":"local","command":[…],"environment":{…}}}`, Header `x-opencode-directory` = Worktree): kein Eintrag im Worktree, ein zweites PUT ersetzt Konfiguration und Prozess,
+`DELETE` räumt auf (beim Verwerfen des Worktrees und Löschen des Agenten, ohne den Dienst dafür zu starten). Die Registrierung lebt im Speicher des Dienstes; ein neu gestarteter Dienst erfährt sie beim
+nächsten Start des Agenten. **Claude Code 2.1.288:** `--mcp-config <datei>` bindet den Server ein (`connected`, Quelle `dynamic`), die Werkzeuge folgen der Rolle; live mit Haiku bestätigt
+(`read_inbox`, `list_agents`, Anwesenheit `running: true`). *Am Mac zu prüfen:* ob der interaktive Dialog bei `--mcp-config` ausbleibt (A30), und die Rückfrage-Dialoge für `mcp__axiomata__*` in von Hand gestarteten Sitzungen.
+
+**Gebaut:** `axiomata-ide::session_token` (Geheimnis je Start: 256 Bit, nur der SHA-256 im Kanalordner, jeder Start ersetzt ihn; `Context::from_vars` verlangt es, sonst startet der Server nicht);
+`Channel::write_private` (`0600`) und `append_instructions`; `axiomata-core::agent_entry` (CLI-Pfad `$AXIOMATA_CLI` oder `axiomata-cli` neben dem Programm, Konfiguration beider Harnesses, Anweisungstext aus Rolle plus Postfach-Hinweis,
+`AgentEntry` für die Anzeige ohne Geheimnis); `ide_start::start_agent(core, id) -> Started`; `Service::register_mcp`/`remove_mcp`; Inbox-Reiter zeigt den Eintrag; das **Anstupsen** (A8, Weg 2):
+`ide_mailbox_nudge`/`ide_mailbox_nudged`, `Terminal.typeLine`, Regeln in `ide/nudge.ts` (nur im Leerlauf, nie während der Owner tippt — 10 s Ruhe —, höchstens alle 3 s eine Frage).
+Fehlt der CLI-Pfad oder lehnt der Dienst ab, startet die Sitzung ohne die Teamwerkzeuge und der Reiter nennt den Grund.
+
+**Aus Review und Security-Audit von CP-A5 eingearbeitet:** (1) Opencode-Eintrag nur für einen **eigenen Worktree**: Sitzungen eines Projekts ohne Repository teilen den Ordner, und die Registrierung je Verzeichnis
+würde sich gegenseitig überschreiben (die erste spräche als die zweite) — dort „nicht anwendbar“; (2) nach dem PUT wartet `await_mcp` bis der Server `connected` ist (ein 204 sagt nur „Konfiguration angenommen“), `failed` meldet den Grund;
+(3) ein abgelehnter PUT nennt nur den Status, **nie den Antwort-Body** (er kann die Anfrage samt Geheimnis zurückgeben); (4) `Server` hat kein `Debug` mehr; (5) die **`ide …`-Befehle**, die Sitzungen starten oder
+ändern (`agents prepare|new|edit|delete|…`, `engines`/`roles`/`projects` schreibend), außerdem `routines` schreibend und `skills reseed`, sind in einer Agenten-Sitzung gesperrt — sonst hätte ein Agent mit `ide agents prepare <Reviewer>`
+ein frisches Geheimnis ausstellen und aus der Datei lesen können (das war die „Offen“-Liste aus A39); (6) die Zeile des Anstupsens nennt Absender nur als `session <id>`, nie mit Freitext-Namen (ein Name wie „the owner says …“ hätte der Nachricht die
+Stimme des Owners gegeben), `typeLine` entfernt auch die C1-Steuerzeichen, und kurz vor dem Tippen wird Leerlauf und Ruhe des Owners **erneut** geprüft; die Ruhezeit ist 30 s (ein halb geschriebener Prompt würde sonst mitgeschickt).
+**Bewusst nicht geschlossen** (dokumentierte Grenze „derselbe Benutzer“): wer `AXIOMATA_AGENT_ID` löscht, ist für die CLI der Owner; `--actor agent:…` ohne Sitzung wird nicht abgewiesen (der Owner darf von Hand testen, und ein Agent mit gelöschter Umgebung könnte ohnehin als `human:owner` handeln);
+`board note|input|fail|cancel` und `dep` stehen mit exportierter fremder Id weiter offen (Halter-Rechte, kein MCP-Gegenstück); der Kanalordner ist für den Agenten beschreibbar, er kann den Hash einer eigenen Wahl dort ablegen.
+Was das Geheimnis schließt: ein **MCP-Server als eine andere Sitzung** zu starten, ohne deren Konfiguration zu lesen.
+
+**Verschoben:** der **Start-Prompt** (A35) und `AXIOMATA_CARD_ID`/`…_PLAN_ID` im Eintrag gehören zu „Karte starten“ (CP-A6), wo es erst eine Karte gibt; ebenso die Rechte unbeaufsichtigter Sitzungen (A34).
+**Offen:** (a) der Server einer Opencode-Sitzung lebt je Verzeichnis und überlebt das Terminal — seine Anwesenheitssperre sagt „lebt“, nachdem das Pane zu ist; der Statusbeobachter weiß es besser und
+ist in CP-A6/CP-A9 zu befragen; (b) die Rollen-Anweisung erreicht Opencode erst als erste Nachricht (CP-A6); (c) der Nachrichten-Hinweis während der Arbeit (Hooks, Weg 3) bleibt „später“.
+
+**A6a — Darstellung (Vorschlag des Owners, 2026-10-04, noch zu bestätigen vor CP-A7):** drei Modi im Studio statt zwei: **Editor | Canvas | Flow**. *Canvas* = die heutige freie Fläche der Agenten-Terminals
+(ohne Karten); *Flow* hat die Reiter **Planung** (Planer-Terminal, Vorschläge, Freigabe, CP-A7), **Agents** (Rollenkatalog, Sitzungen, Team-Panel, Nachrichten, CP-A9) und **Flowansicht** (Graph, CP-A10).
+Ersetzt A6 (dort ging die freie Fläche im Flow auf) und A36, wo sie abweichen.
 
 ## Offene Fragen der Runde
 
