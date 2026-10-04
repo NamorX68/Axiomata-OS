@@ -232,6 +232,79 @@ enum IdeAction {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// Engines: the owner's catalog of harness + model + environment (a2a.md, CP-A1).
+    Engines {
+        #[command(subcommand)]
+        action: EngineAction,
+    },
+    /// Roles: what an agent is for — one `AGENT.md` each under `~/.axiomata/agents/` (a2a.md, CP-A1).
+    Roles {
+        #[command(subcommand)]
+        action: RoleAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum EngineAction {
+    /// List the engines and how many agent sessions run on each.
+    List,
+    /// Add an engine.
+    Add {
+        /// Slug sessions and roles refer to (lower-case letters, digits, - and _).
+        id: String,
+        /// What the UI shows, e.g. "Claude Code · Opus".
+        #[arg(long)]
+        label: String,
+        /// claude_code | opencode | mini.
+        #[arg(long, default_value = "opencode")]
+        harness: String,
+        /// Command line to run. Empty uses the harness's own default.
+        #[arg(long, default_value = "")]
+        command: String,
+        /// Model to pass on (for Opencode the full `provider/model`). Omitted lets the harness pick.
+        #[arg(long)]
+        model: Option<String>,
+        /// Extra environment, `KEY=value` per line.
+        #[arg(long, default_value = "")]
+        env: String,
+        /// metered | subscription.
+        #[arg(long, default_value = "metered")]
+        billing: String,
+    },
+    /// Change an engine. A flag left out **keeps its current value**.
+    Edit {
+        id: String,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long)]
+        harness: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        env: Option<String>,
+        #[arg(long)]
+        billing: Option<String>,
+    },
+    /// Remove an engine. Refused while a session or a role still uses it.
+    Delete { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum RoleAction {
+    /// List the owner's roles, and any that could not be read.
+    List,
+    /// Print a role's `AGENT.md`.
+    Show { name: String },
+    /// Save a role from an `AGENT.md` file (replacing one of the same name).
+    Save { file: PathBuf },
+    /// Delete a role. Refused while an agent session plays it.
+    Delete { name: String },
+    /// What a project brings in roles (`.axiomata/agents/`), whether you confirmed it, and what applies.
+    Project { project: i64 },
+    /// Confirm the project's role files exactly as `roles project` showed them (pass its hash).
+    Confirm { project: i64, hash: String },
 }
 
 /// Agent profiles (M7.2 CP4), on the CLI for the same reason projects are:
@@ -1260,6 +1333,249 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
                 agent_take_over(core, id, &message, no_ff)
             }
         },
+        IdeAction::Engines { action } => engine_cmd(core, action),
+        IdeAction::Roles { action } => role_cmd(core, action),
+    }
+}
+
+fn parse_billing(raw: &str) -> Result<axiomata_roster::Billing> {
+    match raw {
+        "metered" => Ok(axiomata_roster::Billing::Metered),
+        "subscription" => Ok(axiomata_roster::Billing::Subscription),
+        _ => bail!("unknown billing {raw:?} — expected metered or subscription"),
+    }
+}
+
+fn billing_name(billing: axiomata_roster::Billing) -> &'static str {
+    match billing {
+        axiomata_roster::Billing::Metered => "metered",
+        axiomata_roster::Billing::Subscription => "subscription",
+    }
+}
+
+fn config_snapshot(core: &AxiomataCore) -> Config {
+    core.config
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone()
+}
+
+/// Stores `config`'s engines back into the live config after the roster changed them.
+fn adopt_engines(core: &AxiomataCore, config: Config) {
+    core.config
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .agents
+        .engines = config.agents.engines;
+}
+
+fn engine_cmd(core: &AxiomataCore, action: EngineAction) -> Result<()> {
+    use axiomata_core::roster;
+    match action {
+        EngineAction::List => {
+            let config = config_snapshot(core);
+            if config.agents.engines.is_empty() {
+                println!("no engines — add one with `ide engines add <id> --label …`");
+                return Ok(());
+            }
+            let db = core.db_lock();
+            for engine in config.agents.engines.values() {
+                let sessions: i64 = db.query_row(
+                    "SELECT COUNT(*) FROM ide_agents WHERE engine_id = ?1",
+                    [&engine.id],
+                    |row| row.get(0),
+                )?;
+                println!(
+                    "{:<32} {:<12} {:<13} {} session(s)  {}  (model: {})",
+                    engine.id,
+                    engine.harness.as_str(),
+                    billing_name(engine.billing),
+                    sessions,
+                    engine.label,
+                    engine.model.as_deref().unwrap_or("harness default"),
+                );
+            }
+            Ok(())
+        }
+        EngineAction::Add {
+            id,
+            label,
+            harness,
+            command,
+            model,
+            env,
+            billing,
+        } => {
+            let mut config = config_snapshot(core);
+            if config.agents.engines.contains_key(&id) {
+                bail!("there is already an engine {id:?} — use `ide engines edit`");
+            }
+            roster::save_engine(
+                &mut config,
+                axiomata_roster::Engine {
+                    id: id.clone(),
+                    label,
+                    harness: parse_harness(&harness)?,
+                    command,
+                    model,
+                    env,
+                    billing: parse_billing(&billing)?,
+                },
+            )?;
+            adopt_engines(core, config);
+            println!("added engine {id}");
+            Ok(())
+        }
+        EngineAction::Edit {
+            id,
+            label,
+            harness,
+            command,
+            model,
+            env,
+            billing,
+        } => {
+            let mut config = config_snapshot(core);
+            let Some(existing) = config.agents.engines.get(&id).cloned() else {
+                bail!("no engine {id:?}");
+            };
+            roster::save_engine(
+                &mut config,
+                axiomata_roster::Engine {
+                    id: id.clone(),
+                    label: label.unwrap_or(existing.label),
+                    harness: match harness {
+                        Some(raw) => parse_harness(&raw)?,
+                        None => existing.harness,
+                    },
+                    command: command.unwrap_or(existing.command),
+                    model: model.or(existing.model),
+                    env: env.unwrap_or(existing.env),
+                    billing: match billing {
+                        Some(raw) => parse_billing(&raw)?,
+                        None => existing.billing,
+                    },
+                },
+            )?;
+            adopt_engines(core, config);
+            println!("updated engine {id}");
+            Ok(())
+        }
+        EngineAction::Delete { id } => {
+            let mut config = config_snapshot(core);
+            let removed = {
+                let db = core.db_lock();
+                roster::delete_engine(&db, &mut config, &id)?
+            };
+            if !removed {
+                bail!("no engine {id:?}");
+            }
+            adopt_engines(core, config);
+            println!("removed engine {id}");
+            Ok(())
+        }
+    }
+}
+
+fn role_cmd(core: &AxiomataCore, action: RoleAction) -> Result<()> {
+    use axiomata_core::roster;
+    match action {
+        RoleAction::List => {
+            let loaded = roster::list_roles()?;
+            for role in &loaded.roles {
+                println!(
+                    "{:<24} {:<10} {:<7} engine: {:<28} {}",
+                    role.name,
+                    role.kind,
+                    format!("{:?}", role.tier).to_lowercase(),
+                    role.engine.as_deref().unwrap_or("(chosen at start)"),
+                    role.description,
+                );
+            }
+            for skipped in &loaded.skipped {
+                println!(
+                    "skipped {}: {}",
+                    skipped.name.escape_debug(),
+                    skipped.reason.escape_debug()
+                );
+            }
+            if loaded.roles.is_empty() && loaded.skipped.is_empty() {
+                println!("no roles under {}", paths::agent_roles_dir().display());
+            }
+            Ok(())
+        }
+        RoleAction::Show { name } => {
+            let loaded = roster::list_roles()?;
+            let Some(role) = loaded.roles.iter().find(|r| r.name == name) else {
+                bail!("no role {name:?}");
+            };
+            print!("{}", role.to_markdown());
+            Ok(())
+        }
+        RoleAction::Save { file } => {
+            let text = std::fs::read_to_string(&file)
+                .with_context(|| format!("could not read {}", file.display()))?;
+            let role = axiomata_roster::Role::parse(&text)?;
+            let name = role.name.clone();
+            roster::save_role(&config_snapshot(core), role)?;
+            println!("saved role {name}");
+            Ok(())
+        }
+        RoleAction::Delete { name } => {
+            let db = core.db_lock();
+            if !roster::delete_role(&db, &name)? {
+                bail!("no role {name:?}");
+            }
+            println!("deleted role {name}");
+            Ok(())
+        }
+        RoleAction::Project { project } => {
+            let root = project_root(core, project)?;
+            let found = roster::project_roles(&root, &config_snapshot(core))?;
+            if !found.overrides.present {
+                println!("the project brings no roles of its own");
+            } else {
+                println!(
+                    "{} role file(s) in {} — hash {} — {}",
+                    found.overrides.roles.len() + found.overrides.skipped.len(),
+                    found.overrides.dir.display(),
+                    found.overrides.hash,
+                    if found.confirmed {
+                        "confirmed"
+                    } else {
+                        "NOT confirmed, so they do not apply (`ide roles confirm`)"
+                    },
+                );
+                for skipped in &found.overrides.skipped {
+                    println!(
+                        "  skipped {}: {}",
+                        skipped.name.escape_debug(),
+                        skipped.reason.escape_debug()
+                    );
+                }
+            }
+            for role in &found.effective {
+                println!(
+                    "  {:<24} {:?}  {}",
+                    role.name, role.source, role.description
+                );
+            }
+            Ok(())
+        }
+        RoleAction::Confirm { project, hash } => {
+            let root = project_root(core, project)?;
+            roster::confirm_project_roles(&root, &hash)?;
+            println!("confirmed the role files of project #{project}");
+            Ok(())
+        }
+    }
+}
+
+fn project_root(core: &AxiomataCore, project: i64) -> Result<PathBuf> {
+    let db = core.db_lock();
+    match ide::store::get_project(&db, project)? {
+        Some(found) => Ok(found.repo_root),
+        None => bail!("no project #{project}"),
     }
 }
 
@@ -1268,6 +1584,14 @@ fn parse_harness(raw: &str) -> Result<ide::Harness> {
     ide::Harness::parse(raw).ok_or_else(|| {
         anyhow::anyhow!("unknown harness {raw:?} — expected claude_code, opencode or mini")
     })
+}
+
+/// Gives a new or changed agent its engine (a2a.md, CP-A1). A failure only leaves it unassigned until the next
+/// start, so it is reported, not raised.
+fn assign_engines(core: &AxiomataCore, db: &rusqlite::Connection) {
+    if let Err(err) = axiomata_core::roster::sync_live(db, &core.config) {
+        eprintln!("note: could not assign an engine to the agent yet: {err}");
+    }
 }
 
 fn agent_list(core: &AxiomataCore, project_id: i64) -> Result<()> {
@@ -1321,6 +1645,7 @@ fn agent_new(
             },
         },
     )?;
+    assign_engines(core, &db);
     println!(
         "added agent #{} {} ({}, runs `{}`)",
         created.id,
@@ -1362,6 +1687,7 @@ fn agent_edit(
     };
     match ide::agent_store::update_agent(&db, id, fields)? {
         Some(agent) => {
+            assign_engines(core, &db);
             println!(
                 "updated agent #{} {} ({}, runs `{}`)",
                 agent.id,

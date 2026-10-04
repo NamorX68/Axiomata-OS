@@ -38,6 +38,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (12, axiomata_ide::SCHEMA_SQL_V4),
     // The Opencode session an IDE agent runs in (opencode2.md, OC2).
     (13, axiomata_ide::SCHEMA_SQL_V5),
+    // Engine and role of an IDE agent session (a2a.md, CP-A1).
+    (14, axiomata_ide::SCHEMA_SQL_V6),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

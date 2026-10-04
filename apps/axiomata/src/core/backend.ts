@@ -222,6 +222,11 @@ export interface IdeAgent {
    *  Opencode service and continued on every start (opencode2.md OC2). `null`
    *  before the first start, for other harnesses, and after "New session". */
   opencode_session: string | null;
+  /** The engine this session runs on — an id of the owner's catalog (`core/roster.ts`, a2a.md CP-A1). `null`
+   *  while not assigned yet; the profile's own harness/command/model/env stay in force until CP-A6. */
+  engine_id: string | null;
+  /** The role this session plays — a name under `~/.axiomata/agents/`. Existing agents are `allrounder`. */
+  agent_role: string;
   /** Computed on read: what actually runs — `command`, or the harness's own
    *  default when it is empty. Sent along so no frontend keeps a second copy
    *  of that table. */

@@ -48,6 +48,12 @@ pub enum AxiomataError {
     #[error("ide: {0}")]
     Ide(#[from] axiomata_ide::IdeError),
 
+    /// The roster of engines and agent roles (`docs/plans/a2a.md`, CP-A1)
+    /// rejected an operation. Its own variant for the same reason as `Ide`:
+    /// `axiomata_roster` is a pure crate with its own error type.
+    #[error("roster: {0}")]
+    Roster(#[from] axiomata_roster::RosterError),
+
     /// Applying a specific schema migration failed.
     #[error("migration {version} failed: {source}")]
     Migration {

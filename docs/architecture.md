@@ -74,8 +74,9 @@ Axiomata-OS/
     axiomata-board/                 # standalone Kanban core (M7.0), ships migration 8
     axiomata-ide/                   # standalone agentic-IDE core (M7.1/M7.2), migrations 9+10
     axiomata-files/                 # standalone file service of the file app / editor (ED0)
+    axiomata-roster/                # engines + agent roles (AGENT.md), a2a.md CP-A1; ships migration 14 via axiomata-ide
   apps/
-    dashboard/
+    axiomata/
       src/                           # Svelte frontend (core/canvas/shell/modules/themes/graph)
       src-tauri/                     # the Tauri shell (package name "Axiomata-OS")
   docs/architecture.md                # this document
@@ -179,6 +180,35 @@ the row is ours, which is why the UI calls it "remove from the list".
 One promise here is per module rather than crate-wide: the projects store looks at the file
 system but never changes it. That will *not* hold for the worktree module in M7.2, which has
 to create and remove real directories — it states its own contract when it lands.
+
+### `axiomata-roster`
+
+The Studio's **engines and roles** (`docs/plans/a2a.md`, A5, CP-A1) — pure like `axiomata-tasks`: no Tauri, no database,
+no `axiomata-core`, it takes directories and returns data. Three levels, kept apart on purpose: an **engine** is harness +
+model + environment (the owner's catalog, `config.agents.engines`, global so a switch happens in one place), a **role** is
+a kind of work with a tier, an engine, limits and instructions (one `~/.axiomata/agents/<name>/AGENT.md`, YAML
+frontmatter with `deny_unknown_fields` plus a Markdown body), and a **session** is a started agent with its worktree — still
+the `ide_agents` row, which now carries `engine_id` and `agent_role` (migration 14, `axiomata_ide::SCHEMA_SQL_V6`).
+
+Load-bearing: a role names engines **by id and never carries a command line**, so a role file arriving with a cloned
+repository can change what an agent is told but not which program runs. Even so, a project's own roles
+(`<project>/.axiomata/agents/`, `overrides.rs`) apply only after the owner confirmed their exact content: SHA-256 over every
+file read, kept in `~/.axiomata/agent-roles-trust.json` (the store of `axiomata-tasks`, keyed by the overrides directory so it
+cannot collide with `tasks.json`), and `confirm` re-reads the files and refuses if they differ from what was shown. A project's
+files are read the moment the project opens, before any confirmation, so reading is hardened: role files open with
+`O_NOFOLLOW` (symlinked directories/files are never followed), at most 64 directories / 1 MiB in total are read (more makes the
+project *blocked*, i.e. not confirmable), the frontmatter is size- and nesting-capped and **anchors, aliases and tags are
+refused before the YAML parser runs** (it expands aliases without limit — an alias bomb), control and bidi-formatting characters
+are refused in role text, and the hash is over fixed-width digests of each name and content so no choice of names can collide.
+A role name is a lower-case slug because it becomes a directory on a case-insensitive file system. `Harness` is defined here and re-exported by `axiomata-ide`.
+
+`axiomata-core::roster` adds what needs config and database: `sync_agents` derives an engine from every agent profile that has
+none (equal profiles share one; idempotent; at start and after an agent is created or edited), `save_engine`/`delete_engine`
+(refused while a session or a role uses it; every change is applied to the freshly read file config under one lock — rows
+included — and only `agents.engines` is written, never the live config, which would undo a workspace change queued for the next
+start; a derived engine that does not validate leaves its agent unassigned instead of poisoning the config), and the role operations. The old
+`harness`/`command`/`model`/`env` columns stay the fallback until CP-A6 moves starting over to the engine. The webview names a
+project by id, never by path (`project_roles`, `confirm_project_roles`).
 
 ### `axiomata-opencode`
 
@@ -377,6 +407,8 @@ workspace the user currently has configured:
   unsaved text (one entry per file, at most 256, swept after 30 days).
 - `editor-vi.json` — Vi's named registers (so macros), file marks `A`–`Z`, command and
   search histories and last search (0600; a register over 256 KiB is not written).
+- `agents/<name>/AGENT.md` — the Studio's agent roles (`axiomata-roster`, a2a.md CP-A1); the `allrounder` role is seeded if
+  absent. `agent-roles-trust.json` holds the owner's confirmations of project role overrides (by content hash).
 - `file-grants.json` — files and folders picked in the file app's open dialog, the only
   places outside a registered root the file service may touch (`axiomata-files`, §3).
 
@@ -1460,3 +1492,13 @@ compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, 
 **agent-to-agent communication (M7.5)** — planned and approved 2026-10-03, nothing built yet: `docs/plans/a2a.md` (engine / agent /
 session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
+
+### A2A CP-A1 built (2026-10-04)
+
+Engines and roles exist (`docs/plans/a2a.md`, "CP-A1 im Detail"): crate `axiomata-roster`, migration 14, `axiomata-core::roster`,
+CLI `ide engines …` / `ide roles …`, the Studio inspector's *Agents* tab (`ide/AgentsSettings.svelte` over
+`ide/EnginesSection.svelte` and `ide/RolesSection.svelte`, logic in `core/roster.ts`; opened from the Agents panel's
+"Engines & roles…") and the confirmation notice for a project's own roles in the Agents panel
+(`ide/ProjectRolesNotice.svelte`). They sit in the Studio's own settings column, **not** in the app's general settings
+(owner, 2026-10-04): the Studio is to become a program of its own, and its settings move with it. Nothing starts from an engine or a role yet — that is CP-A6. Also this day: the app folder
+`apps/dashboard` became `apps/axiomata` (bundle identifier `com.axiomataos.app`); the dashboard *module canvas* keeps its name.

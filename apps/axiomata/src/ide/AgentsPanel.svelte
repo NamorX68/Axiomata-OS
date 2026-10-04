@@ -9,6 +9,7 @@
   import { HARNESSES, blankFields, fieldsOf } from "./agents";
   import { agentStatus } from "./agentStatus";
   import { cardOf } from "./agentCard";
+  import ProjectRolesNotice from "./ProjectRolesNotice.svelte";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -19,6 +20,8 @@
     agents,
     openAgentIds,
     disabled = false,
+    projectId = null,
+    onManage,
     onOpen,
     onCreate,
     onEdit,
@@ -29,6 +32,10 @@
     openAgentIds: ReadonlySet<number>;
     /** No project open — there is nothing an agent could belong to. */
     disabled?: boolean;
+    /** The open project, for the roles it brings (`ProjectRolesNotice`). */
+    projectId?: number | null;
+    /** Opens the inspector's Agents tab: the engines and roles the agents are built from. */
+    onManage: () => void;
     onOpen: (agent: IdeAgent) => void;
     onCreate: (fields: AgentFields) => void;
     onEdit: (id: number, fields: AgentFields) => void;
@@ -61,6 +68,7 @@
 <div class="panel">
   <p class="title">AGENTS</p>
   <div class="body">
+    <ProjectRolesNotice {projectId} />
     {#if agents.length > 0}
       <ul class="cards">
         {#each agents as agent (agent.id)}
@@ -111,6 +119,7 @@
     {/if}
     {#if editing === undefined}
       <button class="add" type="button" {disabled} onclick={startNew}><Icon name="plus" size="sm" /> New agent…</button>
+      <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Engines &amp; roles…</button>
     {:else}
       <form
         onsubmit={(event) => {
@@ -396,7 +405,7 @@
     outline: var(--ax-focus-ring);
   }
 
-  /* "New agent…": a row of its own, like the agents above it. */
+  /* "New agent…" and "Engines & roles…": rows of their own, like the agents above them. */
   .add {
     display: flex;
     align-items: center;

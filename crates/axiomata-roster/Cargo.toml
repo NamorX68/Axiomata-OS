@@ -1,0 +1,15 @@
+[package]
+name = "axiomata-roster"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The Studio's roster (docs/plans/a2a.md, CP-A1): engines (harness + model + environment, the owner's catalog) and agent roles (AGENT.md files: tier, engine, limits, instructions), with the owner's content-hash confirmation of a project's own role overrides. Pure — no Tauri, no database, no axiomata-core."
+
+[dependencies]
+axiomata-tasks = { path = "../axiomata-tasks" }
+gray_matter.workspace = true
+# `openat` with O_NOFOLLOW for reading a role file: the symlink check alone leaves a window between check and open.
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

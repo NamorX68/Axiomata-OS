@@ -36,6 +36,7 @@ axiomata-terminal = { path = "../../../crates/axiomata-terminal" }
 axiomata-files = { path = "../../../crates/axiomata-files" }
 axiomata-git = { path = "../../../crates/axiomata-git" }
 axiomata-tasks = { path = "../../../crates/axiomata-tasks" }
+axiomata-roster = { path = "../../../crates/axiomata-roster" }
 axiomata-dap = { path = "../../../crates/axiomata-dap" }
 axiomata-macos = { path = "../../../crates/axiomata-macos" }
 rusqlite.workspace = true

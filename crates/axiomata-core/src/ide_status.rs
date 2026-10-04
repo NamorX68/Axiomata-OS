@@ -250,6 +250,8 @@ mod tests {
             port: None,
             base_branch: None,
             opencode_session: session.map(str::to_owned),
+            engine_id: None,
+            agent_role: "allrounder".into(),
             effective_command: String::new(),
             effective_env: String::new(),
         }

@@ -212,6 +212,8 @@ describe("agents", () => {
       port: null,
       base_branch: null,
       opencode_session: null,
+      engine_id: null,
+      agent_role: "allrounder",
       effective_command: "opencode",
       effective_env: `AXIOMATA_AGENT_ID=${id}\nAXIOMATA_AGENT_NAME=${name}`,
     };

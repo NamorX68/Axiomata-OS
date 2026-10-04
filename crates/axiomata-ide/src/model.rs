@@ -46,58 +46,8 @@ pub struct NewProject {
     pub repo_root: PathBuf,
 }
 
-/// Which harness runs an agent.
-///
-/// Stored as text (`schema.sql` says why) and refused rather than defaulted
-/// when it is anything else: a row whose harness nobody recognises is a row
-/// that would otherwise be started with the wrong program.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Harness {
-    /// Anthropic's Claude Code CLI.
-    ClaudeCode,
-    /// The Opencode CLI — the same harness skills and routines already run on.
-    Opencode,
-    /// Axiomata's own agent loop, `axiomata-miniagent` (M7.4). A profile can
-    /// name it before it exists; starting one then fails, which is honest.
-    Mini,
-}
-
-impl Harness {
-    /// The stored spelling, and what the CLI accepts.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Harness::ClaudeCode => "claude_code",
-            Harness::Opencode => "opencode",
-            Harness::Mini => "mini",
-        }
-    }
-
-    /// Parses the stored spelling. `None` for anything else — see the type's docs.
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw {
-            "claude_code" => Some(Harness::ClaudeCode),
-            "opencode" => Some(Harness::Opencode),
-            "mini" => Some(Harness::Mini),
-            _ => None,
-        }
-    }
-
-    /// The command line used when an agent's own `command` is empty.
-    ///
-    /// Resolved here rather than written into every row, so changing what
-    /// "the default Opencode agent" means does not need a data migration —
-    /// and so a row can still pin its own command when the default moves.
-    pub fn default_command(self) -> &'static str {
-        match self {
-            Harness::ClaudeCode => "claude",
-            Harness::Opencode => "opencode",
-            // No binary yet (M7.4). Naming the crate rather than an empty
-            // string makes the failure message say what is missing.
-            Harness::Mini => "axiomata-miniagent",
-        }
-    }
-}
+/// Which harness runs an agent — defined in the roster, which owns the engine catalog (CP-A1).
+pub use axiomata_roster::Harness;
 
 /// An agent profile: what to start, not something running.
 ///
@@ -138,6 +88,12 @@ pub struct Agent {
     /// on every start. `None` before the first start, for other harnesses,
     /// and after "New session".
     pub opencode_session: Option<String>,
+    /// The engine this session runs on, an id of the owner's catalog (`axiomata-roster`, CP-A1). `None` for a row
+    /// that predates the catalog and has not been assigned yet; the profile's own harness, command, model and env
+    /// stay in force until CP-A6 moves starting over to the engine.
+    pub engine_id: Option<String>,
+    /// The role this session plays, a name under `~/.axiomata/agents/`. Existing agents are `allrounder`.
+    pub agent_role: String,
     /// **Computed on read, never stored**: the command line that actually
     /// runs — `command` if it has one, else the harness's default.
     ///

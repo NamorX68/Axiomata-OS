@@ -55,6 +55,7 @@
   } from "./layout";
   import type { AgentFields, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
+  import AgentsSettings from "./AgentsSettings.svelte";
   import TasksPanel from "./TasksPanel.svelte";
   import DebugPanel from "./DebugPanel.svelte";
   import { onDebugReveal, onDebugTerminal } from "./debug";
@@ -822,6 +823,8 @@
           {agents}
           {openAgentIds}
           disabled={!current}
+          projectId={current?.id ?? null}
+          onManage={() => (inspector = "agents")}
           onOpen={openAgent}
           onCreate={(fields) => void addAgent(fields)}
           onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
@@ -907,7 +910,9 @@
   {/if}
   </div>
   {#if inspector}
-    <Inspector tab={inspector} surface={preview.current} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
+    <Inspector tab={inspector} surface={preview.current} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)}>
+      {#snippet agents()}<AgentsSettings />{/snippet}
+    </Inspector>
   {/if}
   </div>
   {#if quickOpen && open}

@@ -78,6 +78,10 @@ pub const SCHEMA_SQL_V4: &str = include_str!("agent_base_branch.sql");
 /// frozen once released.
 pub const SCHEMA_SQL_V5: &str = include_str!("agent_opencode_session.sql");
 
+/// The IDE's **version 6** schema (`engine_id` and `agent_role` on an agent), `docs/plans/a2a.md` CP-A1. Its own
+/// constant and migration number (14), frozen once released.
+pub const SCHEMA_SQL_V6: &str = include_str!("agent_roster.sql");
+
 /// Everything that can go wrong in the IDE core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant, matching
@@ -148,6 +152,7 @@ pub(crate) fn apply_all_schemas(db: &rusqlite::Connection) {
         SCHEMA_SQL_V3,
         SCHEMA_SQL_V4,
         SCHEMA_SQL_V5,
+        SCHEMA_SQL_V6,
     ] {
         db.execute_batch(schema).expect("test schema should apply");
     }
@@ -252,6 +257,20 @@ mod schema_is_frozen {
             "agent_opencode_session.sql changed after it shipped as migration \
              13. It is an ALTER TABLE — add a SCHEMA_SQL_V6 and a new migration \
              number instead. If it has never shipped, update EXPECTED here."
+        );
+    }
+
+    /// And for version 6 (`engine_id`, `agent_role`), migration 14.
+    #[test]
+    fn the_shipped_roster_schema_has_not_been_edited() {
+        const EXPECTED: u64 = 0xd19c_83c0_e9ff_7f12;
+
+        assert_eq!(
+            fnv1a(super::SCHEMA_SQL_V6),
+            EXPECTED,
+            "agent_roster.sql changed after it shipped as migration 14. It is an \
+             ALTER TABLE — add a SCHEMA_SQL_V7 and a new migration number \
+             instead. If it has never shipped, update EXPECTED here."
         );
     }
 }

@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). Umgesetzt wird noch nichts — Beginn mit CP-A1, an einem späteren Tag.**
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 gebaut (2026-10-04); weiter mit CP-A2.**
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -149,7 +149,7 @@ trägt zugleich die Engine-Felder (Harness, Command, Modell, Env). CP-A1 trennt 
   je eindeutiger Kombination Harness/Command/Modell/Env eine Engine in die Config und setzt `engine_id`. Die alten Spalten `harness`/`command`/`model`/`env`
   bleiben bis CP-A6 als Rückfall bestehen (kein Löschen in einer Migration, die Daten verlieren könnte).
 - **Rollen-Ablage:** `~/.axiomata/agents/<name>/AGENT.md`; die Rolle `allrounder` wird wie die Bundled Skills **seed-if-absent** angelegt.
-- **Schnittstellen:** CLI `ide engines list|add|edit|delete`, `ide roles list|show`; Tauri-Commands für Engines (Einstellungen) und Rollen (Formular);
+- **Schnittstellen:** CLI `ide engines list|add|edit|delete`, `ide roles list|show`; Tauri-Commands für Engines und Rollen; die Oberfläche (Engines-Liste, Rollen-Formular) liegt im **Inspektor des Studios** als Reiter „Agents" (nicht in den allgemeinen App-Einstellungen: das Studio wird ein eigenes Programm, Owner 2026-10-04);
   Rolle löschen nur, wenn keine Sitzung sie trägt. Katalog-Ansicht im Rail und Start-Logik bleiben CP-A6/CP-A9.
 - **Tests (inline):** AGENT.md-Parser (Frontmatter, Fehler, Größe, Symlink), Engine-Validierung, Hash-Bestätigung der Überschreibung, Migration auf einer
   Datenbank mit Alt-Zeilen (Ableitung eindeutig, idempotent), Config-Round-Trip; Frontend: Vitest für die Formular-Logik.

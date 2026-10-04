@@ -133,6 +133,18 @@ pub fn global_skills_dir() -> PathBuf {
     axiomata_home().join("skills")
 }
 
+/// Where the owner's agent roles live (`~/.axiomata/agents/<name>/AGENT.md`,
+/// `docs/plans/a2a.md` CP-A1) — one file per role, like skills.
+pub fn agent_roles_dir() -> PathBuf {
+    axiomata_home().join("agents")
+}
+
+/// The owner's confirmations of project role overrides
+/// (`<project>/.axiomata/agents/`), by content hash. Written from Rust only.
+pub fn agent_roles_trust_path() -> PathBuf {
+    axiomata_home().join("agent-roles-trust.json")
+}
+
 /// Where the agentic IDE puts one git worktree per agent
 /// (`~/.axiomata/worktrees/<project>/<agent>-<id>`, M7.2 CP5).
 ///

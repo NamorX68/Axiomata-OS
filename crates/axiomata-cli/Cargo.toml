@@ -9,6 +9,8 @@ serde_json.workspace = true
 chrono.workspace = true
 axiomata-core = { path = "../axiomata-core" }
 axiomata-files = { path = "../axiomata-files" }
+axiomata-roster = { path = "../axiomata-roster" }
+rusqlite.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true

@@ -23,7 +23,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   2026-09-20) — do not plan around it. Node/TypeScript debugging is parked (owner, 2026-10-02).
 - **Next / open:** the owner's Mac test of the Studio, Run/Tasks and Debug (the Tauri glue in `src-tauri` is not
   compilable on the Linux dev box); #50 follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
-  nothing built yet, start with CP-A1 (`docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
+  CP-A1 (engines + roles) built 2026-10-04, next CP-A2 (`docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
   ⌘K spotlight search and further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
@@ -48,6 +48,8 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   ide projects list|new|rename|set-root|delete
 #   ide agents list|new|edit|delete|prepare|new-session|discard-worktree|status|diff|base|commit|discard|discard-hunk|take-over
 #                                            (take-over: squash by default, never pushes)
+#   ide engines list|add|edit|delete         (the owner's engine catalog; delete refused while a session/role uses it)
+#   ide roles list|show|save|delete|project|confirm   (AGENT.md roles; `project`/`confirm`: a project's own roles, by hash)
 #   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>
 
@@ -141,6 +143,9 @@ from the code itself:
   terminal, never a field of its stored config (`modules/terminal.svelte`'s `initialCommand`). A task pane's tab names
   only the task id; its command line is resolved in Rust (`task_command_line`) and kept in memory (`ide/taskRuns.ts`),
   and a project's own `.axiomata/tasks.json` runs only after the owner confirmed its exact bytes (SHA-256, `axiomata-tasks`).
+  Same for roles (`AGENT.md`, `axiomata-roster`): a role names engines by id and never carries a command line, and a project's own
+  roles apply only after the same kind of confirmation. Engines are saved into the *file* config only (`roster::persist_engines`),
+  never by saving the live config — that would undo a workspace change queued for the next start.
 - **The editor engine (`src/editor/`) imports nothing from the app** — no DOM, no Svelte, no
   `core/`; `src/fileapp/` depends on it, never the reverse (D1, extractable for ED7). Its
   `EditorDocument` is a mutable class: a Svelte component redraws via its own counter after

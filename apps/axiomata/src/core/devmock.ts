@@ -5,6 +5,7 @@
  * module's happy path; not a faithful simulation.
  */
 
+import type { Engine, Role } from "./roster";
 import type {
   AppInfo,
   Board,
@@ -393,6 +394,8 @@ let ideAgents: IdeAgent[] = [
     port: null,
     base_branch: null,
     opencode_session: null,
+    engine_id: "opencode",
+    agent_role: "allrounder",
     effective_env: "AXIOMATA_AGENT_ID=1\nAXIOMATA_AGENT_NAME=Builder",
   },
   {
@@ -411,6 +414,8 @@ let ideAgents: IdeAgent[] = [
     port: null,
     base_branch: null,
     opencode_session: null,
+    engine_id: "claude-code-claude-sonnet-5",
+    agent_role: "allrounder",
     effective_env: "REVIEW_MODE=strict\nAXIOMATA_AGENT_ID=2\nAXIOMATA_AGENT_NAME=Reviewer",
   },
 ];
@@ -465,6 +470,8 @@ function mockAgent(id: number, projectId: number, fields: AgentFields): IdeAgent
     port: null,
     base_branch: null,
     opencode_session: null,
+    engine_id: null,
+    agent_role: "allrounder",
     effective_command: mockEffectiveCommand(fields),
     effective_env: mockEffectiveEnv(fields, id, null, null, null),
   };
@@ -933,6 +940,60 @@ let gitAhead = 1;
 let gitIsRepo = true;
 const gitBranches = new Set(['main', 'feature/ui']);
 let tasksTrusted = false;
+
+/* Roster fixtures (a2a.md CP-A1): the two engines the agent fixtures above were derived into, one spare, and the
+ * seeded role plus a reviewer. The mock enforces the same "in use" refusals as the real core. */
+let mockEngines: Engine[] = [
+  { id: "opencode", label: "Opencode", harness: "opencode", command: "", model: null, env: "", billing: "metered" },
+  {
+    id: "claude-code-claude-sonnet-5",
+    label: "Claude Code · claude-sonnet-5",
+    harness: "claude_code",
+    command: "",
+    model: "claude-sonnet-5",
+    env: "REVIEW_MODE=strict",
+    billing: "subscription",
+  },
+  {
+    id: "opencode-flash",
+    label: "Opencode · DeepSeek Flash",
+    harness: "opencode",
+    command: "",
+    model: "openrouter/deepseek/deepseek-v4-flash-0731",
+    env: "",
+    billing: "metered",
+  },
+];
+let mockRoles: Role[] = [
+  {
+    name: "allrounder",
+    description: "Does whatever the card asks for",
+    kind: "implement",
+    tier: "medium",
+    engine: null,
+    fallback_engines: [],
+    permissions: [],
+    limits: {},
+    creates: [],
+    instructions: "Read the card, do what it asks for in your own worktree.",
+    source: "user",
+  },
+  {
+    name: "reviewer",
+    description: "Reviews a finished card with another engine",
+    kind: "review",
+    tier: "heavy",
+    engine: "claude-code-claude-sonnet-5",
+    fallback_engines: [],
+    permissions: [],
+    limits: { max_tokens: 200000 },
+    creates: ["test"],
+    instructions: "Check the diff against the acceptance criteria.",
+    source: "user",
+  },
+];
+let mockRolesConfirmed = false;
+
 let debugTrusted = false;
 /** The mock debugger: stopped on the first breakpoint it was given (or line 1 of the first file). */
 let debugSink: ((event: Record<string, unknown>) => void) | null = null;
@@ -1255,6 +1316,84 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       ideProjects = ideProjects.filter((p) => p.id !== args.id);
       return (ideProjects.length < before) as T;
     }
+
+    // ---- engines and roles (a2a.md CP-A1) ----
+    case "list_engines":
+      return mockEngines.map((e) => ({
+        ...e,
+        sessions: ideAgents.filter((a) => a.engine_id === e.id).length,
+      })) as T;
+    case "save_engine": {
+      const engine = args.engine as Engine;
+      const at = mockEngines.findIndex((e) => e.id === engine.id);
+      if (at === -1) mockEngines = [...mockEngines, engine];
+      else mockEngines[at] = engine;
+      return undefined as T;
+    }
+    case "delete_engine": {
+      const id = String(args.id);
+      if (!mockEngines.some((e) => e.id === id)) return false as T;
+      const sessions = ideAgents.filter((a) => a.engine_id === id).length;
+      if (sessions > 0) {
+        throw new Error(`roster: invalid id: engine "${id}" cannot be removed: ${sessions} agent session(s) run on it`);
+      }
+      const role = mockRoles.find((r) => r.engine === id || r.fallback_engines.includes(id));
+      if (role) throw new Error(`roster: invalid id: engine "${id}" cannot be removed: the role "${role.name}" uses it`);
+      mockEngines = mockEngines.filter((e) => e.id !== id);
+      return true as T;
+    }
+    case "list_roles":
+      return { roles: [...mockRoles].sort((a, b) => a.name.localeCompare(b.name)), skipped: [] } as T;
+    case "save_role": {
+      const role = args.role as Role;
+      for (const id of [role.engine, ...role.fallback_engines]) {
+        if (id && !mockEngines.some((e) => e.id === id)) {
+          throw new Error(`roster: invalid engine: there is no engine "${id}"`);
+        }
+      }
+      const at = mockRoles.findIndex((r) => r.name === role.name);
+      if (at === -1) mockRoles = [...mockRoles, role];
+      else mockRoles[at] = role;
+      return undefined as T;
+    }
+    case "delete_role": {
+      const name = String(args.name);
+      const playing = ideAgents.filter((a) => a.agent_role === name).length;
+      if (playing > 0) {
+        throw new Error(`roster: invalid name: role "${name}" cannot be deleted: ${playing} agent session(s) play it`);
+      }
+      const before = mockRoles.length;
+      mockRoles = mockRoles.filter((r) => r.name !== name);
+      return (mockRoles.length < before) as T;
+    }
+    case "project_roles": {
+      const brought: Role = {
+        ...mockRoles[0],
+        description: "The repository's own idea of an all-rounder",
+        source: "project",
+      };
+      return {
+        overrides: {
+          dir: "/mock/project/.axiomata/agents",
+          present: true,
+          hash: "ab12cd",
+          roles: [{ ...brought, engine: "ghost-engine", limits: { max_cost_usd: 1000 } }],
+          skipped: [],
+          blocked: null,
+        },
+        confirmed: mockRolesConfirmed,
+        effective: mockRolesConfirmed ? [brought, ...mockRoles.slice(1)] : mockRoles,
+        skipped: [],
+        replaces: ["allrounder"],
+        unknown_engines: ["ghost-engine"],
+      } as T;
+    }
+    case "confirm_project_roles":
+      if (args.hash !== "ab12cd") {
+        throw new Error("roster: the project's agent files changed since they were shown; look at them again");
+      }
+      mockRolesConfirmed = true;
+      return undefined as T;
 
     // ---- ide agents ----
     case "list_ide_agents":

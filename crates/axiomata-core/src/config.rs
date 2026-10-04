@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use axiomata_roster::Engine;
 use serde::{Deserialize, Serialize};
 
 use crate::agents::valid_model_name;
@@ -313,6 +314,16 @@ pub struct AgentDefaults {
     /// approver. Connector digests are the common untrusted-input case.
     #[serde(default = "default_auto_approve_tools")]
     pub auto_approve_tools: bool,
+
+    /// The owner's catalog of Studio engines (harness + model + environment,
+    /// keyed by id — `docs/plans/a2a.md` A5, CP-A1). Global, so switching an
+    /// engine happens in one place. Deliberately **not** part of the Settings
+    /// dialog's `ConfigView`/`ConfigUpdate`: the dialog saves a merge onto the
+    /// live config, which keeps this untouched, and engines are edited through
+    /// their own commands (which also check that nothing uses one that is
+    /// removed).
+    #[serde(default)]
+    pub engines: BTreeMap<String, Engine>,
 }
 
 /// Every provider seeded with its starting settings — the shared source for
@@ -400,6 +411,7 @@ impl Default for AgentDefaults {
             daily_usd_cap: default_daily_usd_cap(),
             costs: BTreeMap::new(),
             auto_approve_tools: default_auto_approve_tools(),
+            engines: BTreeMap::new(),
         }
     }
 }
@@ -449,6 +461,19 @@ impl Config {
     pub fn validate_for_save(&self) -> Result<(), String> {
         if self.workspace_root.as_os_str().is_empty() {
             return Err("workspace root must not be empty".to_string());
+        }
+
+        // Engines: the key is what sessions and roles refer to, so it must be the engine's own id.
+        for (key, engine) in &self.agents.engines {
+            if key != &engine.id {
+                return Err(format!(
+                    "engine {key:?} is stored under a different id ({:?})",
+                    engine.id
+                ));
+            }
+            engine
+                .validate()
+                .map_err(|err| format!("engine {key:?}: {err}"))?;
         }
 
         // Providers, one per role (chat, skills). Each role's provider must
@@ -896,6 +921,61 @@ mod tests {
     /// existing per-provider settings, even if they differ from
     /// `default_for` and even if the legacy `claude_model` field disagrees
     /// with them.
+    fn sample_engine(id: &str) -> Engine {
+        Engine {
+            id: id.into(),
+            label: "Claude Code · Opus".into(),
+            harness: axiomata_roster::Harness::ClaudeCode,
+            command: String::new(),
+            model: Some("claude-opus-5-5".into()),
+            env: String::new(),
+            billing: axiomata_roster::Billing::Subscription,
+        }
+    }
+
+    #[test]
+    fn engines_round_trip_through_the_toml_file_and_an_old_file_has_none() {
+        let mut config = Config::default();
+        config
+            .agents
+            .engines
+            .insert("claude-opus".into(), sample_engine("claude-opus"));
+        let text = toml::to_string_pretty(&config).unwrap();
+        assert!(text.contains("[agents.engines.claude-opus]"), "{text}");
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.agents.engines, config.agents.engines);
+
+        let old: Config = toml::from_str("owner = \"x\"\n").unwrap();
+        assert!(old.agents.engines.is_empty());
+    }
+
+    #[test]
+    fn validate_for_save_refuses_a_misfiled_or_invalid_engine() {
+        let mut config = Config::default();
+        config
+            .agents
+            .engines
+            .insert("one".into(), sample_engine("claude-opus"));
+        assert!(
+            config
+                .validate_for_save()
+                .unwrap_err()
+                .contains("different id")
+        );
+
+        config.agents.engines.clear();
+        let mut bad = sample_engine("claude-opus");
+        bad.env = "no equals".into();
+        config.agents.engines.insert("claude-opus".into(), bad);
+        assert!(config.validate_for_save().unwrap_err().contains("env"));
+
+        config
+            .agents
+            .engines
+            .insert("claude-opus".into(), sample_engine("claude-opus"));
+        assert!(config.validate_for_save().is_ok());
+    }
+
     #[test]
     fn migrate_legacy_model_if_needed_is_a_no_op_once_providers_is_populated() {
         let mut defaults = AgentDefaults {

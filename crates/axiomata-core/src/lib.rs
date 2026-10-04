@@ -34,6 +34,7 @@ pub mod json_state;
 pub mod memory;
 pub mod notes;
 pub mod paths;
+pub mod roster;
 pub mod routines;
 pub mod skills;
 pub mod spend;
@@ -86,7 +87,7 @@ impl AxiomataCore {
     /// Safe to call on every app start: every step here is idempotent.
     pub fn init() -> Result<Self, AxiomataError> {
         let config_existed = paths::config_path().exists();
-        let config = Config::load()?;
+        let mut config = Config::load()?;
         if !config_existed {
             config.save()?;
         }
@@ -122,6 +123,20 @@ impl AxiomataCore {
                 "re-metered recorded spend against configured model prices"
             ),
             Err(err) => tracing::warn!(%err, "failed to re-meter recorded spend"),
+        }
+
+        // The Studio's roster (a2a.md, CP-A1): the `allrounder` role every existing agent plays, and an engine
+        // for each agent profile that predates the catalog. Both idempotent and best-effort — a failure here
+        // must not keep the app from starting; the agents simply stay unassigned until the next start.
+        match axiomata_roster::seed_default_roles(&paths::agent_roles_dir()) {
+            Ok(true) => tracing::info!("seeded the default agent role"),
+            Ok(false) => {}
+            Err(err) => tracing::warn!(%err, "failed to seed the default agent role"),
+        }
+        match roster::sync_agents(&db, &mut config) {
+            Ok(0) => {}
+            Ok(assigned) => tracing::info!(assigned, "assigned engines to existing agent profiles"),
+            Err(err) => tracing::warn!(%err, "failed to derive engines from the agent profiles"),
         }
 
         Ok(Self {

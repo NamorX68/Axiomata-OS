@@ -1,13 +1,16 @@
 <!--
   The file app's right-hand column (`docs/plans/editor-look.md`, LK1, K2, K3):
-  the editor's settings and the list of shortcuts as two tabs. A column of its
-  own beside the editors — never over them, so the minimap stays in view.
+  the editor's settings and the list of shortcuts as two tabs, plus an optional
+  third one the host fills (the Studio's agents: engines and roles). A column of
+  its own beside the editors — never over them, so the minimap stays in view.
 -->
 <script lang="ts" module>
-  export type InspectorTab = "settings" | "shortcuts";
+  export type InspectorTab = "settings" | "shortcuts" | "agents";
 </script>
 
 <script lang="ts">
+  import type { Snippet } from "svelte";
+
   import IconButton from "../ui/IconButton.svelte";
   import EditorSettingsPanel from "./EditorSettingsPanel.svelte";
   import ShortcutsPanel from "./ShortcutsPanel.svelte";
@@ -19,14 +22,18 @@
     surface: SurfaceSettings;
     onTab: (tab: InspectorTab) => void;
     onClose: () => void;
+    /** The content of the "Agents" tab; without it the tab is not offered. Supplied by the host so this file app
+     *  column imports nothing from the Studio. */
+    agents?: Snippet;
   }
 
-  let { tab, surface, onTab, onClose }: Props = $props();
+  let { tab, surface, onTab, onClose, agents }: Props = $props();
 
-  const TABS: { id: InspectorTab; label: string }[] = [
+  const TABS = $derived<{ id: InspectorTab; label: string }[]>([
     { id: "settings", label: "Settings" },
     { id: "shortcuts", label: "Shortcuts" },
-  ];
+    ...(agents ? [{ id: "agents" as const, label: "Agents" }] : []),
+  ]);
 </script>
 
 <aside class="inspector" aria-label="Inspector">
@@ -42,6 +49,8 @@
   </header>
   {#if tab === "settings"}
     <EditorSettingsPanel {surface} />
+  {:else if tab === "agents" && agents}
+    {@render agents()}
   {:else}
     <ShortcutsPanel />
   {/if}

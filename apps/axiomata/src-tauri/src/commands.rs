@@ -1761,8 +1761,15 @@ pub fn create_ide_agent(
     fields: ide::AgentFields,
 ) -> Result<ide::Agent, String> {
     let db = state.db_lock();
-    ide::agent_store::create_agent(&db, ide::NewAgent { project_id, fields })
-        .map_err(|err| err.to_string())
+    let created = ide::agent_store::create_agent(&db, ide::NewAgent { project_id, fields })
+        .map_err(|err| err.to_string())?;
+    // Best effort: an agent that could not get its engine now is assigned at the next start.
+    if let Err(err) = axiomata_core::roster::sync_live(&db, &state.config) {
+        tracing::warn!(%err, "could not assign an engine to the new agent");
+    }
+    ide::agent_store::get_agent(&db, created.id)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "the agent vanished after it was created".to_string())
 }
 
 /// A full replace, not a patch — see `AgentFields`. `None` if there is no such agent.
@@ -1773,7 +1780,115 @@ pub fn update_ide_agent(
     fields: ide::AgentFields,
 ) -> Result<Option<ide::Agent>, String> {
     let db = state.db_lock();
-    ide::agent_store::update_agent(&db, id, fields).map_err(|err| err.to_string())
+    let updated = ide::agent_store::update_agent(&db, id, fields).map_err(|err| err.to_string())?;
+    if updated.is_some() {
+        // A changed profile dropped its engine; derive it again (best effort, see `create_ide_agent`).
+        if let Err(err) = axiomata_core::roster::sync_live(&db, &state.config) {
+            tracing::warn!(%err, "could not assign an engine to the edited agent");
+        }
+        return ide::agent_store::get_agent(&db, id).map_err(|err| err.to_string());
+    }
+    Ok(None)
+}
+
+// ---- Engines and roles (a2a.md, CP-A1) ----
+//
+// The webview never names a path: a project's role files are found through the project's id, and a role is
+// named by its slug, which the roster refuses to turn into anything but a directory name.
+
+#[tauri::command]
+pub fn list_engines(
+    state: State<'_, CoreState>,
+) -> Result<Vec<axiomata_core::roster::EngineEntry>, String> {
+    let config = read_config(&state.config);
+    let db = state.db_lock();
+    axiomata_core::roster::engine_overview(&db, &config).map_err(|err| err.to_string())
+}
+
+/// Adds or replaces an engine (the whole object; the id is the key). Only the engines of the live config change.
+#[tauri::command]
+pub fn save_engine(
+    state: State<'_, CoreState>,
+    engine: axiomata_roster::Engine,
+) -> Result<(), String> {
+    let mut config = read_config(&state.config);
+    axiomata_core::roster::save_engine(&mut config, engine).map_err(|err| err.to_string())?;
+    state
+        .config
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .agents
+        .engines = config.agents.engines;
+    Ok(())
+}
+
+/// Removes an engine unless an agent session or a role still uses it.
+#[tauri::command]
+pub fn delete_engine(state: State<'_, CoreState>, id: String) -> Result<bool, String> {
+    let mut config = read_config(&state.config);
+    let removed = {
+        let db = state.db_lock();
+        axiomata_core::roster::delete_engine(&db, &mut config, &id)
+            .map_err(|err| err.to_string())?
+    };
+    if removed {
+        state
+            .config
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .agents
+            .engines = config.agents.engines;
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+pub fn list_roles() -> Result<axiomata_roster::Loaded, String> {
+    axiomata_core::roster::list_roles().map_err(|err| err.to_string())
+}
+
+/// Saves one of the owner's roles; the engines it names must exist.
+#[tauri::command]
+pub fn save_role(state: State<'_, CoreState>, role: axiomata_roster::Role) -> Result<(), String> {
+    axiomata_core::roster::save_role(&read_config(&state.config), role)
+        .map_err(|err| err.to_string())
+}
+
+/// Deletes one of the owner's roles unless an agent session plays it.
+#[tauri::command]
+pub fn delete_role(state: State<'_, CoreState>, name: String) -> Result<bool, String> {
+    let db = state.db_lock();
+    axiomata_core::roster::delete_role(&db, &name).map_err(|err| err.to_string())
+}
+
+fn project_folder(state: &CoreState, project_id: i64) -> Result<PathBuf, String> {
+    let db = state.db_lock();
+    match ide::store::get_project(&db, project_id).map_err(|err| err.to_string())? {
+        Some(project) => Ok(project.repo_root),
+        None => Err(format!("no project {project_id}")),
+    }
+}
+
+/// The roles in force for a project, and what the project itself brings (and whether that is confirmed).
+#[tauri::command]
+pub fn project_roles(
+    state: State<'_, CoreState>,
+    project_id: i64,
+) -> Result<axiomata_core::roster::ProjectRoles, String> {
+    let folder = project_folder(&state, project_id)?;
+    axiomata_core::roster::project_roles(&folder, &read_config(&state.config))
+        .map_err(|err| err.to_string())
+}
+
+/// The owner confirmed the project's role files as shown; accepted only if they still have that content.
+#[tauri::command]
+pub fn confirm_project_roles(
+    state: State<'_, CoreState>,
+    project_id: i64,
+    hash: String,
+) -> Result<(), String> {
+    let folder = project_folder(&state, project_id)?;
+    axiomata_core::roster::confirm_project_roles(&folder, &hash).map_err(|err| err.to_string())
 }
 
 /// Deletes the profile, then its status channel (M7.2 CP6). The row goes

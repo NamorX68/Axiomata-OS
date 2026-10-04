@@ -32,7 +32,7 @@ const MAX_ENV_LEN: usize = 8000;
 
 const AGENT_COLS: &str = "id, project_id, name, harness, command, model, env, created_at, \
                           updated_at, worktree_path, branch, port, base_branch, \
-                          opencode_session";
+                          opencode_session, engine_id, agent_role";
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -64,6 +64,8 @@ struct RawAgent {
     port: Option<i64>,
     base_branch: Option<String>,
     opencode_session: Option<String>,
+    engine_id: Option<String>,
+    agent_role: String,
 }
 
 fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
@@ -82,6 +84,8 @@ fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
         port: row.get(11)?,
         base_branch: row.get(12)?,
         opencode_session: row.get(13)?,
+        engine_id: row.get(14)?,
+        agent_role: row.get(15)?,
     })
 }
 
@@ -128,6 +132,8 @@ impl RawAgent {
             port,
             base_branch: self.base_branch,
             opencode_session: self.opencode_session,
+            engine_id: self.engine_id,
+            agent_role: self.agent_role,
         })
     }
 }
@@ -278,7 +284,11 @@ pub fn update_agent(db: &Connection, id: i64, fields: AgentFields) -> Result<Opt
     };
 
     db.execute(
+        // A changed profile no longer describes the engine it was derived from, so the assignment is dropped and
+        // derived again (the right-hand sides below read the row as it was before this update).
         "UPDATE ide_agents SET name = ?2, harness = ?3, command = ?4, model = ?5, env = ?6, \
+         engine_id = CASE WHEN harness IS NOT ?3 OR command IS NOT ?4 OR model IS NOT ?5 OR env IS NOT ?6 \
+                          THEN NULL ELSE engine_id END, \
          updated_at = ?7 WHERE id = ?1",
         params![
             id,
@@ -367,6 +377,59 @@ pub fn set_opencode_session(db: &Connection, id: i64, session: Option<&str>) -> 
         params![id, session, now()],
     )?;
     Ok(changed == 1)
+}
+
+/// Every agent without an engine yet, across all projects — what the start-up derivation of the engine catalog
+/// works through (CP-A1).
+pub fn unassigned_agents(db: &Connection) -> Result<Vec<Agent>> {
+    let mut stmt = db.prepare(&format!(
+        "SELECT {AGENT_COLS} FROM ide_agents WHERE engine_id IS NULL ORDER BY id"
+    ))?;
+    let raws = stmt
+        .query_map([], row_to_raw)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    raws.into_iter().map(RawAgent::into_agent).collect()
+}
+
+/// Points an agent session at an engine of the owner's catalog; `None` clears it.
+///
+/// Whether the engine exists is the catalog's business (it lives in the config, not here); only the shape is
+/// checked, so a row can never carry something that is not an id.
+pub fn set_engine(db: &Connection, id: i64, engine_id: Option<&str>) -> Result<bool> {
+    if let Some(engine_id) = engine_id {
+        axiomata_roster::check_slug("engine_id", engine_id).map_err(|err| IdeError::Invalid {
+            field: "engine_id",
+            reason: err.to_string(),
+        })?;
+    }
+    let changed = db.execute(
+        "UPDATE ide_agents SET engine_id = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, engine_id, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// Sets the role an agent session plays (a name under `~/.axiomata/agents/`).
+pub fn set_role(db: &Connection, id: i64, role: &str) -> Result<bool> {
+    axiomata_roster::check_slug("agent_role", role).map_err(|err| IdeError::Invalid {
+        field: "agent_role",
+        reason: err.to_string(),
+    })?;
+    let changed = db.execute(
+        "UPDATE ide_agents SET agent_role = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, role, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// How many sessions play `role` — a role may only be deleted when this is 0.
+pub fn count_with_role(db: &Connection, role: &str) -> Result<usize> {
+    let n: i64 = db.query_row(
+        "SELECT COUNT(*) FROM ide_agents WHERE agent_role = ?1",
+        params![role],
+        |row| row.get(0),
+    )?;
+    Ok(usize::try_from(n).unwrap_or(0))
 }
 
 /// Reserves a port for an agent. The UNIQUE index refuses one already taken.
@@ -809,5 +872,130 @@ mod tests {
             .map(|a| a.name)
             .collect();
         assert_eq!(names, vec!["Alpha", "beta", "zeta"]);
+    }
+
+    #[test]
+    fn a_new_agent_is_an_unassigned_allrounder() {
+        let (db, project) = fixture();
+        let agent = create_agent(&db, new_agent(project, "Builder")).unwrap();
+        assert_eq!(agent.engine_id, None);
+        assert_eq!(agent.agent_role, "allrounder");
+        let unassigned = unassigned_agents(&db).unwrap();
+        assert_eq!(unassigned.len(), 1);
+        assert_eq!(unassigned[0].id, agent.id);
+    }
+
+    #[test]
+    fn assigning_an_engine_takes_the_agent_off_the_unassigned_list_and_clearing_puts_it_back() {
+        let (db, project) = fixture();
+        let agent = create_agent(&db, new_agent(project, "Builder")).unwrap();
+
+        assert!(set_engine(&db, agent.id, Some("claude-opus")).unwrap());
+        assert_eq!(
+            get_agent(&db, agent.id)
+                .unwrap()
+                .unwrap()
+                .engine_id
+                .as_deref(),
+            Some("claude-opus")
+        );
+        assert!(unassigned_agents(&db).unwrap().is_empty());
+
+        assert!(set_engine(&db, agent.id, None).unwrap());
+        assert_eq!(unassigned_agents(&db).unwrap().len(), 1);
+        assert!(!set_engine(&db, 9999, Some("x")).unwrap(), "no such agent");
+    }
+
+    #[test]
+    fn engine_and_role_must_look_like_ids() {
+        let (db, project) = fixture();
+        let agent = create_agent(&db, new_agent(project, "Builder")).unwrap();
+        for bad in ["", "Has Space", "../x", "UPPER"] {
+            assert!(
+                matches!(
+                    set_engine(&db, agent.id, Some(bad)),
+                    Err(IdeError::Invalid {
+                        field: "engine_id",
+                        ..
+                    })
+                ),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(
+                    set_role(&db, agent.id, bad),
+                    Err(IdeError::Invalid {
+                        field: "agent_role",
+                        ..
+                    })
+                ),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn roles_are_counted_so_that_a_used_one_is_not_deleted() {
+        let (db, project) = fixture();
+        let a = create_agent(&db, new_agent(project, "A")).unwrap();
+        create_agent(&db, new_agent(project, "B")).unwrap();
+        assert_eq!(count_with_role(&db, "allrounder").unwrap(), 2);
+        assert!(set_role(&db, a.id, "reviewer").unwrap());
+        assert_eq!(count_with_role(&db, "allrounder").unwrap(), 1);
+        assert_eq!(count_with_role(&db, "reviewer").unwrap(), 1);
+        assert_eq!(count_with_role(&db, "planner").unwrap(), 0);
+    }
+
+    #[test]
+    fn rows_from_before_the_migration_become_allrounders_without_an_engine() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        for schema in [
+            crate::SCHEMA_SQL_V1,
+            crate::SCHEMA_SQL_V2,
+            crate::SCHEMA_SQL_V3,
+            crate::SCHEMA_SQL_V4,
+            crate::SCHEMA_SQL_V5,
+        ] {
+            db.execute_batch(schema).unwrap();
+        }
+        db.execute(
+            "INSERT INTO projects (name, repo_root, created_at) VALUES ('P', '/tmp/p', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO ide_agents (project_id, name, harness, created_at, updated_at) \
+             VALUES (1, 'old', 'claude_code', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        db.execute_batch(crate::SCHEMA_SQL_V6).unwrap();
+
+        let agent = get_agent(&db, 1).unwrap().unwrap();
+        assert_eq!(agent.agent_role, "allrounder");
+        assert_eq!(agent.engine_id, None);
+        assert_eq!(agent.harness, Harness::ClaudeCode);
+    }
+
+    #[test]
+    fn changing_the_profile_drops_the_engine_but_a_rename_keeps_it() {
+        let (db, project) = fixture();
+        let agent = create_agent(&db, new_agent(project, "Builder")).unwrap();
+        set_engine(&db, agent.id, Some("opencode")).unwrap();
+
+        let mut renamed = fields("Builder 2");
+        let kept = update_agent(&db, agent.id, renamed.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.engine_id.as_deref(), Some("opencode"));
+
+        renamed.model = Some("other/model".into());
+        let dropped = update_agent(&db, agent.id, renamed).unwrap().unwrap();
+        assert_eq!(
+            dropped.engine_id, None,
+            "a different model is a different engine"
+        );
     }
 }
