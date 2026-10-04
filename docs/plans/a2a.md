@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 und CP-A2 gebaut (2026-10-04); weiter mit CP-A3.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A3 gebaut (2026-10-04); weiter mit CP-A4.** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
@@ -262,6 +262,33 @@ trägt zugleich die Engine-Felder (Harness, Command, Modell, Env). CP-A1 trennt 
   (Dateien aus dem Projekt wirken auf Prozess-Start) — die wird im Review ausdrücklich mitgeprüft.
 
 *Vom Owner bestätigt (2026-10-04):* Crate-Zuschnitt `axiomata-roster` (statt Modul in Core) und die alten Spalten bleiben bis CP-A6.
+
+## CP-A3 im Detail (gebaut 2026-10-04)
+
+Zuschnitt in `axiomata-ide::mailbox` (Migration 16, `SCHEMA_SQL_V7`); weicht nirgends von A8/A29 ab, präzisiert aber:
+
+- **„Aufgaben" sind die Karten.** Eine eigene Aufgaben-Tabelle gibt es nicht: die Aufgabe im A2A-Sinn ist die Karte (Zustand abgeleitet, A12), die Nachricht
+  nennt sie über `card_id` (ohne Fremdschlüssel, A11). Die Artefakte folgen mit CP-A4 als Datei-Teile.
+- **Nachrichtenarten:** `message`, `ack` (reine Bestätigung) und `notice` (vom Studio, z. B. Rückläufer). Auf `ack` und `notice` wird nicht geantwortet (A8).
+- **Antwortrecht:** `in_reply_to` nur auf eine Nachricht, die der Absender selbst **empfangen** hat; sonst ließe sich eine Kette fälschen.
+- **Kettenzähler:** frische Nachricht = 1, Antwort = Zähler des Elternteils + 1, Schreiben des Owners setzt zurück. Über 6 wird die Nachricht **angehalten**
+  (`held`): nur das Postfach des Owners bekommt sie, der Absender ein Notice; `release_held` lässt sie weiterlaufen (Zähler wieder 1). Nachrichten an den Owner
+  werden nie angehalten (er beendet die Kette).
+- **Grenze 20:** je Absender-Sitzung und Karte; Nachrichten ohne Karte zählen als ein eigener Eimer; der Owner ist nicht begrenzt. Eine abgelehnte Nachricht wird nicht gespeichert.
+- **Zustellung:** Rolle → die lebenden Sitzungen dieser Rolle (die Liste der lebenden Sitzungen reicht der Aufrufer herein, der Absender fällt heraus);
+  nicht zustellbar → gespeichert, Notice an Absender (falls Sitzung) und Owner. `nudges` nennt nur `Idle`-Sitzungen (nie `Waiting`: das würde eine
+  Rückfrage beantworten), höchstens 3-mal je Zustellung; die Zeile wird aus gefilterten Namen gebaut, das Tippen und die Prüfung „tippt der Owner gerade?" sind Sache der Oberfläche.
+- **Projektgrenze (aus dem Review):** eine Sitzung erreicht nur Sitzungen **ihres Projekts**; eine Rolle wie `reviewer` gibt es in jedem Projekt, und eine Nachricht trägt Text und
+  Dateipfade eines Repositorys. Eine Sitzung eines anderen Projekts wird mit denselben Worten abgewiesen wie eine, die es nicht gibt. Der Owner ist nicht begrenzt.
+  Sitzungen dürfen kein `notice` senden (das ist die Stimme des Studios).
+- **Pflichten für CP-A4 (aus dem Review, hier festgeschrieben):** (1) Absender, `Inbox` und `card_id` kommen **aus der Sitzung** (`AXIOMATA_AGENT_ID`, geclaimte Karte), nie aus
+  einem Argument des Agenten — sonst setzt ein wechselndes `card_id` die Grenze 20 zurück, und eine frische Nachricht statt einer Antwort umgeht Kettenzähler und Ack-Regel.
+  (2) Der Server setzt `in_reply_to` selbst, wenn der Agent auf eine ungelesene Nachricht derselben Gegenseite und Karte antwortet (oder verlangt es). (3) Die Owner-Operationen
+  (`release_held`, `Inbox::Owner` lesen, `Sender::Owner`) sind in einer Agenten-Sitzung nicht erreichbar, im Test festzuschreiben. (4) **Offen für den Owner:** zusätzlich eine
+  Gesamtgrenze je Sitzung unabhängig von der Karte (der Plan nennt nur „je Agent und Karte")?
+- **Aufbewahrung gelöschter Karten:** das Brett kann von einer gelöschten Karte nicht „abgeschlossen" sagen; der Aufrufer von `purge` listet sie deshalb als geschlossen (CP-A4-Glue).
+- **Einstellbar** sind die Zahlen über `Limits` (6 / 20 / 3); die Einstellungsoberfläche folgt, wenn es sie braucht.
+- **Noch nicht:** MCP-Werkzeuge (CP-A4), CLI-Spiegel `agent send|inbox` (A31), Tauri-Glue, Oberfläche (Team-Panel CP-A9), der Aufruf von `purge` beim Start (braucht die Liste abgeschlossener Karten aus dem Brett — der Glue in `axiomata-core` kommt mit CP-A4).
 
 ## Offene Fragen der Runde
 

@@ -72,7 +72,7 @@ Axiomata-OS/
     axiomata-cli/                   # headless binary that exercises axiomata-core end to end
     axiomata-terminal/              # standalone PTY + VT100 engine for the Terminal module
     axiomata-board/                 # standalone Kanban core (M7.0), ships migration 8
-    axiomata-ide/                   # standalone agentic-IDE core (M7.1/M7.2), migrations 9+10
+    axiomata-ide/                   # standalone agentic-IDE core (M7.1/M7.2), migrations 9–14 and 16 (mailbox, CP-A3)
     axiomata-files/                 # standalone file service of the file app / editor (ED0)
     axiomata-roster/                # engines + agent roles (AGENT.md), a2a.md CP-A1; ships migration 14 via axiomata-ide
   apps/
@@ -220,6 +220,26 @@ the row is ours, which is why the UI calls it "remove from the list".
 One promise here is per module rather than crate-wide: the projects store looks at the file
 system but never changes it. That will *not* hold for the worktree module in M7.2, which has
 to create and remove real directories — it states its own contract when it lands.
+
+**The mailbox (A2A CP-A3, 2026-10-04, `docs/plans/a2a.md` A8/A29, `mailbox/`, migration 16 = `SCHEMA_SQL_V7`).** The conversation
+channel between agent sessions and the owner, independent of the transport (CP-A4 puts an MCP server in front of it, the CLI
+mirrors it, a later A2A endpoint could too). Messages are lists of **parts** (text, a *reference* to a file, JSON data — the
+A2A shapes); the task a message is about is just the **card** it names (`card_id`, a plain number: no foreign key, the board
+and the IDE stay separable and a card is archived long before its mail expires). Two tables, `mail_messages` (as written,
+address kept — a role stays a role) and `mail_deliveries` (one row per concrete inbox, with read and nudge bookkeeping). Addresses
+are a session, a role (resolved to its **live** sessions at send time, the sender left out) or the owner — no broadcast.
+Which sessions are alive is runtime state the caller passes in (`live`), the same reason the status stays out of the
+database. `send` runs in one `IMMEDIATE` transaction because its guards are check-then-act and the MCP server will be a second
+process: a reply must answer a message the sender **received** (so a chain cannot be forged), an **ack** or a system **notice**
+is never answered, the **chain counter** is the parent's plus one and past 6 the message is *held* (only the owner's inbox
+has it, the sender gets a notice, `release_held` lets it go on with the count restarted; the owner writing a message restarts
+it too, and a message to the owner is never held), and a session may send at most 20 messages per card (messages without a
+card are one bucket). A message nobody can receive (ended session, no live role member) is kept as *undeliverable* and a
+notice goes to the sender **and** the owner (A29). `nudges` says which waiting sessions get a "you have mail" line typed into
+their terminal (A8, way 2): only `Idle` — typing into a `Waiting` pane would answer a permission prompt — at most 3 times per
+delivery, and the line is built from names filtered to harmless characters; whether the owner is typing in that pane, and the
+typing itself, are the embedder's. `purge` applies the retention of A29 (card closed + 14 days, no card 30 days) from a list
+of closed cards the caller supplies. Not built yet: the MCP tools (CP-A4), the CLI mirror, Tauri glue and any UI.
 
 ### `axiomata-roster`
 
@@ -1532,6 +1552,11 @@ compilable on the Linux dev box); #50 follow-ups (clickable `file:line` errors, 
 **agent-to-agent communication (M7.5)** — planned and approved 2026-10-03, nothing built yet: `docs/plans/a2a.md` (engine / agent /
 session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
+
+### A2A CP-A3 built (2026-10-04)
+
+The mailbox core in `axiomata-ide::mailbox` (see its paragraph in §3): addresses, parts, send with the chain and per-card guards,
+inbox reads, nudge selection, retention; migration 16. Nothing sends yet — the MCP server is CP-A4.
 
 ### A2A CP-A2 built (2026-10-04)
 

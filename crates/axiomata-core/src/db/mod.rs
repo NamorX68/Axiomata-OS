@@ -42,6 +42,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (14, axiomata_ide::SCHEMA_SQL_V6),
     // The board's agent flow: column roles, plans, card fields, dependencies, history (a2a.md, CP-A2).
     (15, axiomata_board::SCHEMA_SQL_V2),
+    // The mailbox between agent sessions and the owner (a2a.md, CP-A3).
+    (16, axiomata_ide::SCHEMA_SQL_V7),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

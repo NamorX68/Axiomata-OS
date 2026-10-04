@@ -23,7 +23,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   2026-09-20) — do not plan around it. Node/TypeScript debugging is parked (owner, 2026-10-02).
 - **Next / open:** the owner's Mac test of the Studio, Run/Tasks and Debug (the Tauri glue in `src-tauri` is not
   compilable on the Linux dev box); #50 follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
-  CP-A1 (engines + roles) and CP-A2 (the board's agent flow) built 2026-10-04, next CP-A3 (mailbox, `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
+  CP-A1 (engines + roles), CP-A2 (the board's agent flow) and CP-A3 (the mailbox core) built 2026-10-04, next CP-A4 (MCP server, `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
   ⌘K spotlight search and further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial

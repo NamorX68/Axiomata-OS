@@ -8,9 +8,10 @@
 //! `&Connection` supplied by the caller.
 //!
 //! Today it holds projects (M7.1), agent profiles (M7.2 CP4), their worktrees
-//! (CP5), their status channel (CP6, [`lifecycle`]) and, since M7.3 CP7, the
-//! git layer that reads what an agent has changed and acts on it ([`git`]).
-//! Later milestones add the agent supervisor and the mailbox beside them; each
+//! (CP5), their status channel (CP6, [`lifecycle`]), since M7.3 CP7 the
+//! git layer that reads what an agent has changed and acts on it ([`git`]) and,
+//! since A2A CP-A3, the mailbox between sessions ([`mailbox`]).
+//! Later milestones add the agent supervisor beside them; each
 //! that needs a table brings its own schema constant and its own migration
 //! number.
 //!
@@ -29,6 +30,7 @@
 pub mod agent_store;
 pub mod git;
 pub mod lifecycle;
+pub mod mailbox;
 pub mod model;
 pub mod newproject;
 pub mod provision;
@@ -81,6 +83,10 @@ pub const SCHEMA_SQL_V5: &str = include_str!("agent_opencode_session.sql");
 /// The IDE's **version 6** schema (`engine_id` and `agent_role` on an agent), `docs/plans/a2a.md` CP-A1. Its own
 /// constant and migration number (14), frozen once released.
 pub const SCHEMA_SQL_V6: &str = include_str!("agent_roster.sql");
+
+/// The IDE's **version 7** schema (`mail_messages`, `mail_deliveries`), `docs/plans/a2a.md` CP-A3. Its own constant and
+/// migration number (16), frozen once released.
+pub const SCHEMA_SQL_V7: &str = include_str!("mailbox.sql");
 
 /// Everything that can go wrong in the IDE core.
 ///
@@ -153,6 +159,7 @@ pub(crate) fn apply_all_schemas(db: &rusqlite::Connection) {
         SCHEMA_SQL_V4,
         SCHEMA_SQL_V5,
         SCHEMA_SQL_V6,
+        SCHEMA_SQL_V7,
     ] {
         db.execute_batch(schema).expect("test schema should apply");
     }
@@ -257,6 +264,19 @@ mod schema_is_frozen {
             "agent_opencode_session.sql changed after it shipped as migration \
              13. It is an ALTER TABLE — add a SCHEMA_SQL_V6 and a new migration \
              number instead. If it has never shipped, update EXPECTED here."
+        );
+    }
+
+    /// And for version 7 (the mailbox), migration 16.
+    #[test]
+    fn the_shipped_mailbox_schema_has_not_been_edited() {
+        const EXPECTED: u64 = 0xadbc_ca7c_71e9_490f;
+
+        assert_eq!(
+            fnv1a(super::SCHEMA_SQL_V7),
+            EXPECTED,
+            "mailbox.sql changed after it shipped as migration 16. Add a SCHEMA_SQL_V8 and a new migration number \
+             instead. If it has never shipped, update EXPECTED here."
         );
     }
 
