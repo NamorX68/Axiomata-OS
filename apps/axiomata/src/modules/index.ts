@@ -16,7 +16,7 @@ import { todayIso as calendarToday, weekRange } from "../core/monthGrid";
 import { loadLatestMailDigest, MAIL_SKILL_NAME, parseMailDigest } from "../core/mail";
 import { completeReminderTask, createReminderTask, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
 import { resolveSkillName } from "../core/skillRun";
-import type { ModuleContext } from "../core/types";
+import type { ModuleAction, ModuleContext } from "../core/types";
 import {
   addTodo,
   completeTodo,
@@ -31,7 +31,6 @@ import CalendarSettings from "./calendar-settings.svelte";
 import Dummy from "./dummy.svelte";
 import DummySettings from "./dummy-settings.svelte";
 import Kanban from "./kanban.svelte";
-import KanbanSettings from "./kanban-settings.svelte";
 import FilePanel from "../fileapp/FilePanel.svelte";
 import Mail from "./mail.svelte";
 import MailSettings from "./mail-settings.svelte";
@@ -724,7 +723,6 @@ export function registerBuiltins(): void {
       "<rect x='2' y='3' width='3.2' height='10'/><rect x='6.4' y='3' width='3.2' height='7'/>" +
       "<rect x='10.8' y='3' width='3.2' height='5'/></svg>",
     component: Kanban,
-    settings: KanbanSettings,
     // 1024×768. Wide enough that the three default columns sit at roughly
     // 330px of inner width each — far clear of the 200px threshold below
     // which a card drops its label chips, body excerpt and assignee for the
@@ -733,17 +731,17 @@ export function registerBuiltins(): void {
     // cutting the third off, which 420 did.
     defaultSize: { w: 1024, h: 768 },
     minSize: { w: 220, h: 200 },
-    // Not a singleton: two boards side by side is a reasonable thing to want,
-    // and the tile shows one board chosen on its flip side.
-    singleton: false,
-    // The same module serves as the big floating board and as a single card's
-    // detail panel — see its own doc comment.
+    // Kanban is an app, not a tile (owner, 2026-10-04): it opens from the ring as a large panel
+    // (`modules/kanbanApp.ts`) and never as a canvas tile. The same module serves as the big board and as a
+    // single card's detail panel — see its own doc comment.
+    stageOnly: true,
     stageable: true,
-    // These reach the board only while a Kanban tile is actually on the
-    // canvas: the manifest lists mounted instances, not registered types.
-    // Accepted rather than worked around — somebody using the board has it
-    // open — and the proper answer arrives with M7.5's MCP server anyway.
-    actions: [
+  });
+
+  // The assistant's and the agents' way to the board. Shell actions, not module actions: the manifest lists mounted
+  // *instances*, and a board that is an app has none — so these have to exist whether or not the panel is open.
+  // Prefixed because the shell's namespace is flat.
+  const kanbanActions: ModuleAction[] = [
       {
         name: "list_cards",
         description: "List the cards of a board, with their column and status.",
@@ -856,8 +854,9 @@ export function registerBuiltins(): void {
           return ctx.invoke("move_card", { id: p.id, columnId: target.id, index: Number.MAX_SAFE_INTEGER });
         },
       },
-    ],
-  });
+  ];
+  for (const action of kanbanActions) registerShellAction({ ...action, name: `kanban_${action.name}` });
+
 
   if (import.meta.env.DEV) {
     registerModule({

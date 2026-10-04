@@ -1,36 +1,25 @@
-<script lang="ts" module>
-  import { writable } from "svelte/store";
-
-  /**
-   * A card the small tile asked the large board to show (editor-look B4): the
-   * tile opens the board panel and leaves the card here; the panel for that
-   * board takes it into its side panel. Shared by every Kanban instance.
-   */
-  const focusCard = writable<{ boardId: number; cardId: number } | null>(null);
-</script>
-
 <script lang="ts">
   /**
    * kanban — a board of columns and cards.
    *
-   * One module, three shapes, chosen by the instance config rather than by
-   * three registrations: a canvas tile to glance at, the same board as a
-   * floating panel to work in (`openStaged` with `path: "board:<id>"`), and a
+   * One module, two shapes, chosen by the panel config rather than by two
+   * registrations: the board (`openStaged` with `path: "board:<id>"`, opened
+   * from the ring by `kanbanApp.ts` — Kanban is an app and has no tile) and a
    * single card's detail (`path: "card:<id>"`). They share one store per
    * board, so a change in one is a change in all of them.
    *
    * Cards are moved by pointer **and** by keyboard, through the same pure
    * targets in `core/kanban.ts` — the keyboard path is not a consolation
    * prize. Columns are shaped here on the board (you rearrange them while
-   * looking at them); boards themselves are chosen and managed on the flip
-   * side (you switch boards rarely, which is a setting).
+   * looking at them); boards themselves are chosen in the header and managed
+   * in the gear's popover (you switch boards rarely, which is a setting).
    *
    * Appearance follows decisions taken by looking at a preview view in every
    * theme, since deleted — `docs/plans/kanban.md` §6a records *why* each came
    * out this way: the column body is `--ax-bg`, the desk the cards lie on, and
    * the card itself asks the theme how it should sit via `--ax-card-*`. Only
-   * labels carry colour. Nothing here is framed — the tile's front face is
-   * frameless, and a column drawn with a border would fight that.
+   * labels carry colour. Nothing here is framed — the board is frameless,
+   * and a column drawn with a border would fight that.
    */
   import { SvelteSet } from "svelte/reactivity";
 
@@ -63,9 +52,11 @@
     type DropTarget,
   } from "../core/kanban";
   import { listRoles } from "../core/roster";
-  import { closeStaged, openStaged, staged } from "../core/staging";
+  import { closeStaged, staged } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import { cardStripes, lastBoard, rememberLastBoard } from "./kanbanPrefs";
+  import { boardPathPatch } from "./kanbanApp";
+  import KanbanBoards from "./KanbanBoards.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
 
@@ -83,9 +74,6 @@
   const stagedId = $derived(
     $staged.find((panel) => panel.config.cardId === cardId)?.id ?? null,
   );
-  /** True when this instance is a floating panel rather than a canvas tile. */
-  const isPanel = $derived($config.path !== undefined);
-
   let boardId = $state<number | null>(null);
   /** Every board, for the switcher in the header. */
   let boards = $state<{ id: number; name: string }[]>([]);
@@ -94,13 +82,13 @@
   let activeLabels = $state<string[]>([]);
   let showArchived = $state(false);
 
-  // A board id in the config wins; otherwise the first board there is. A board
-  // is only created explicitly (flip side), never implicitly by looking.
+  // A board id in the config wins; otherwise the last used one, else the first.
+  // A board is only created explicitly (the gear's popover), never implicitly
+  // by looking.
   //
-  // This *follows* the config rather than reading it once at mount: the flip
-  // side writes a new board id there when you create or switch, and a front
-  // face that only looked once kept showing the previous board's cards under
-  // the new board's name.
+  // This *follows* the config rather than reading it once at mount: creating
+  // or switching a board writes the new id there, and a view that only looked
+  // once kept showing the previous board's cards under the new board's name.
   const configuredBoard = $derived(
     typeof $config.boardId === "number" ? $config.boardId : null,
   );
@@ -119,52 +107,47 @@
             ? remembered
             : all[0]?.id) ?? null;
         boardId = chosen;
-        // Recorded on the instance too, so this tile keeps showing this board
-        // even after somebody else switches the application-wide default.
+        // Recorded on the panel too, so it keeps showing this board even after
+        // another panel switches the application-wide default.
         if (chosen !== null) config.update((c) => ({ ...c, boardId: chosen }));
       })
       .catch((err) => (listError = String(err)));
   });
 
-  /** The switcher needs every board's name, not just this tile's. Re-read
-   *  whenever the chosen board changes, so a board created on the flip side
-   *  appears in the switcher without a reload. */
-  $effect(() => {
-    void boardId;
+  /** The switcher needs every board's name, not just the shown one's. Re-read whenever the chosen board changes and
+   *  whenever the boards popover created, renamed or deleted one, so the switcher never lists a board that is gone. */
+  function loadBoards(): void {
     void invoke<{ id: number; name: string }[]>("list_boards")
       .then((all) => (boards = all))
       .catch((err) => (listError = String(err)));
+  }
+  $effect(() => {
+    void boardId;
+    loadBoards();
   });
 
   function switchBoard(next: number) {
     boardId = next;
-    config.update((c) => ({ ...c, boardId: next }));
+    // The panel's `path` names the board it shows: that is what makes a second click on the ring entry raise this
+    // panel instead of opening another one on the same board (`openStaged` compares `path`).
+    config.update((c) => ({ ...c, boardId: next, ...boardPathPatch(c, next) }));
     rememberLastBoard(next);
   }
 
-  /** Opens this board as a large floating panel — the place to actually work
-   *  in it, as opposed to the tile, which is for glancing at. */
-  function openAsPanel() {
-    if (boardId === null) return;
-    openStaged("kanban", {
-      path: `board:${boardId}`,
-      boardId,
-      // Deliberately no anchor, unlike the card detail. A card is small and
-      // belongs where the eye already is; a full-size board is not a reply to
-      // the tile you clicked, it is a place to go. Anchored, a tile parked in
-      // a corner opened its big view in that corner — the one spot where the
-      // panel has least room to be big in.
-      //
-      // Its own key, so the big board and a single card do not share one
-      // remembered size — they are the same module but not the same window.
-      sizeKey: "kanban-board",
-      // This is *the* place to work in a board, as opposed to the tile, which
-      // is for glancing at. Full HD is the floor for that: at 1024 it was no
-      // roomier than the tile it was opened from, which made the button
-      // pointless. `StagingPanel` clamps this to the window, so a smaller
-      // screen simply gets as much of it as it has.
-      panelSize: { w: 1920, h: 1080 },
-    });
+  /** The board panel's boards popover: picking, creating, renaming and deleting boards. */
+  let showBoards = $state(false);
+
+  /** The board shown was deleted: forget it and let the first effect pick another (or none). */
+  function boardGone(): void {
+    showBoards = false;
+    boardId = null;
+    config.update((c) => ({ ...c, boardId: undefined, ...boardPathPatch(c, null) }));
+    loadBoards();
+  }
+
+  function chooseBoard(id: number): void {
+    showBoards = false;
+    switchBoard(id);
   }
 
   const data = $derived(boardId === null ? null : boardStore(boardId));
@@ -188,15 +171,6 @@
     shownCardId === null ? null : ($data?.cards.find((card) => card.id === shownCardId) ?? null),
   );
 
-  // The large board takes a card the tile asked for (B4).
-  $effect(() =>
-    focusCard.subscribe((wanted) => {
-      if (!wanted || !isPanel || wanted.boardId !== boardId) return;
-      showInSide(wanted.cardId);
-      focusCard.set(null);
-    }),
-  );
-
   function showInSide(id: number | null): void {
     confirmingDelete = false;
     sideCardId = id;
@@ -209,14 +183,8 @@
       justDragged = false;
       return;
     }
-    // B4: in the large board the card opens in its side panel, the board staying in view; from the
-    // small tile, the large board opens (or comes forward) and shows it there.
-    if (isPanel) {
-      showInSide(sideCardId === card.id ? null : card.id);
-      return;
-    }
-    focusCard.set({ boardId: card.board_id, cardId: card.id });
-    openAsPanel();
+    // B4: the card opens in the side panel, the board staying in view.
+    showInSide(sideCardId === card.id ? null : card.id);
   }
 
   function toggleLabel(label: string) {
@@ -497,9 +465,9 @@
     }
   }
 
-  /* Columns are shaped here, on the board, and not on the flip side where the
-     boards live: you switch boards rarely, which is a setting, but you shape
-     columns while looking at them. */
+  /* Columns are shaped here, on the board, and not in the boards popover:
+     you switch boards rarely, which is a setting, but you shape columns while
+     looking at them. */
 
   let removingColumn = $state<{ id: number; held: number } | null>(null);
 
@@ -1010,7 +978,11 @@
 {#if listError}
   <p class="notice danger">{listError}</p>
 {:else if boardId === null}
-  <p class="notice">Noch kein Brett. Leg auf der Rückseite eines an.</p>
+  <!-- The app opens even with no board at all: it has to offer to create the first one. -->
+  <div class="first-board">
+    <p class="notice">Noch kein Brett.</p>
+    <KanbanBoards current={null} onChoose={switchBoard} onDeleted={boardGone} />
+  </div>
 {:else if $data === null || ($data.loading && $data.board === null)}
   <p class="notice">Lädt …</p>
 {:else if $data.error}
@@ -1024,10 +996,8 @@
   {/if}
 {:else}
   <div class="kanban" class:stripes={$cardStripes} bind:this={rootEl}>
-    <!-- The board says which board it is, and offers the two things you
-         otherwise had to flip the tile to find. Boards are *managed* on the
-         flip side (create, rename, delete — settings); switching between them
-         belongs here, where you can see which one you are looking at. -->
+    <!-- The board says which board it is. Switching between boards belongs here, where you can see which one you
+         are looking at; managing them (create, rename, delete) is the gear's popover. -->
     <div class="board-head">
       {#if boards.length > 1}
         <select
@@ -1043,10 +1013,8 @@
       {:else}
         <span class="board-name">{$data.board?.name ?? ""}</span>
       {/if}
-      {#if isPanel}
-        <!-- One toolbar in the large board (editor-look B5); the filters stay out of the tile,
-             which is for glancing at. -->
-        <label class="filter">
+      <!-- One toolbar (editor-look B5). -->
+      <label class="filter">
           <Icon name="search" size="sm" />
           <input type="search" placeholder="Karten filtern …" bind:value={filterText} aria-label="Karten filtern" />
         </label>
@@ -1069,9 +1037,6 @@
           pressed={showArchived}
           onclick={() => (showArchived = !showArchived)}
         />
-      {:else}
-        <span class="spacer"></span>
-      {/if}
       <IconButton
         icon="refresh-cw"
         label="Brett neu laden"
@@ -1079,15 +1044,21 @@
         onclick={() => boardId !== null && void refreshBoard(boardId)}
       />
       <IconButton icon="columns-3" label="Spalte hinzufügen" onclick={addColumn} />
-      {#if isPanel}
-        <IconButton icon="plus" label="Plan anlegen" pressed={addingPlan} onclick={() => (addingPlan = !addingPlan)} />
-      {/if}
-      {#if !isPanel}
-        <IconButton icon="maximize-2" label="Brett groß öffnen" onclick={openAsPanel} />
-      {/if}
+      <IconButton icon="plus" label="Plan anlegen" pressed={addingPlan} onclick={() => (addingPlan = !addingPlan)} />
+      <IconButton
+        icon="settings"
+        label="Bretter & Ansicht"
+        pressed={showBoards}
+        onclick={() => (showBoards = !showBoards)}
+      />
     </div>
+    {#if showBoards}
+      <div class="boards-pop" role="dialog" aria-label="Bretter & Ansicht">
+        <KanbanBoards current={boardId} onChoose={chooseBoard} onDeleted={boardGone} onChanged={loadBoards} />
+      </div>
+    {/if}
 
-    {#if isPanel && (plans.length > 0 || addingPlan)}
+    {#if plans.length > 0 || addingPlan}
       <div class="plans-bar" aria-label="Pläne">
         {#each plans as plan (plan.id)}
           <span class="plan" data-status={plan.status}>
@@ -1127,7 +1098,7 @@
           >
             <!-- A grip, because the header is almost entirely the name field
                  and form controls never start a drag — without it there is
-                 nothing to take hold of. Same idea as the tile's own grip. -->
+                 nothing to take hold of. Same idea as the panel's own grip. -->
             <span class="col-grip" aria-hidden="true"><Icon name="grip-vertical" size="sm" /></span>
             <span class="role" data-role={column.maps_to_status} title={ROLE_NAMES[column.maps_to_status]}></span>
             <input
@@ -1282,7 +1253,7 @@
       {/each}
 
     </div>
-    {#if isPanel && sideCardId !== null}
+    {#if sideCardId !== null}
       <!-- B4: the card beside the board, which stays in view; another card's click swaps it. -->
       <aside class="side-detail" aria-label="Karte">
         <header class="side-head">
@@ -1377,9 +1348,6 @@
   }
 
   /* The large board's toolbar (B5): the filter field takes what width is left. */
-  .spacer {
-    flex: 1;
-  }
   .filter {
     display: flex;
     flex: 1 1 calc(160px * var(--ax-ui-scale));
@@ -2140,6 +2108,21 @@
     margin: 2px 0 0;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+  .boards-pop {
+    position: absolute;
+    top: calc(44px * var(--ax-ui-scale));
+    right: var(--ax-space-3);
+    z-index: 5;
+    width: min(calc(320px * var(--ax-ui-scale)), 90%);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-surface-1);
+    box-shadow: var(--ax-shadow-pop);
+  }
+  .first-board {
+    max-width: calc(360px * var(--ax-ui-scale));
+    margin: var(--ax-space-5) auto;
   }
   .plans-bar {
     display: flex;

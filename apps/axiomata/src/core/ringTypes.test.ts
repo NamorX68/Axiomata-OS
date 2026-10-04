@@ -6,8 +6,17 @@ import { migrateRingTypes } from "./ringTypes";
 
 describe("ring type migration", () => {
   it("maps the retired Editor entry onto Studio and drops duplicates, keeping order", () => {
-    expect(migrateRingTypes(["terminal", "view:editor", "view:ide", "kanban"])).toEqual(["terminal", "view:ide", "kanban"]);
+    expect(migrateRingTypes(["terminal", "view:editor", "view:ide", "view:kanban"])).toEqual([
+      "terminal",
+      "view:ide",
+      "view:kanban",
+    ]);
     expect(migrateRingTypes(["view:editor"])).toEqual(["view:ide"]);
+  });
+
+  it("maps the retired Kanban tile entry onto the Kanban app, once", () => {
+    expect(migrateRingTypes(["kanban", "terminal"])).toEqual(["view:kanban", "terminal"]);
+    expect(migrateRingTypes(["kanban", "view:kanban"])).toEqual(["view:kanban"]);
   });
 
   it("applies to the members of a builtin group on load, but not a user group's paths", () => {

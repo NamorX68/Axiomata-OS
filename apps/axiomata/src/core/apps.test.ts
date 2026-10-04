@@ -54,9 +54,16 @@ describe("listAllRingEligibleBuiltins / listBuiltinApps", () => {
       "reminders",
       "mail",
       "terminal",
-      "kanban",
       "view:ide",
+      "view:kanban",
     ]);
+  });
+
+  it("Kanban is an app: it is a ring view, and the module itself is not a tile on the ring", () => {
+    const types = listAllRingEligibleBuiltins().map((a) => a.type);
+    expect(types).toContain("view:kanban");
+    expect(types).not.toContain("kanban");
+    expect(ringViewFor("view:kanban")).toMatchObject({ title: "Kanban", event: "shell:kanban" });
   });
 
   it("maps a view entry to its shell event, and a module type to nothing", () => {

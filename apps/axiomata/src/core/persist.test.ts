@@ -10,6 +10,11 @@ describe("sanitizeInstances", () => {
     expect(inst).toEqual({ ...good, z: 0, flipped: false, config: {} });
   });
 
+  it("drops a saved tile of a type that is an app now (Kanban), keeping the others", () => {
+    const rows = [good, { ...good, id: "old-board", type: "kanban" }];
+    expect(sanitizeInstances(rows).map((i) => i.id)).toEqual([good.id]);
+  });
+
   it("drops rows with missing or non-numeric geometry, bad ids, duplicates", () => {
     const rows = [
       good,

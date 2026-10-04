@@ -6,6 +6,7 @@
   import { emit, on } from "./core/bus";
   import { openFilePanel, openNewNote, openStaged } from "./core/staging";
   import { loadInstances } from "./core/stores";
+  import { openKanban } from "./modules/kanbanApp";
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
   import { requestMode } from "./ide/modeRequest";
@@ -42,6 +43,8 @@
         openFilePanel(d.path, d.mode === "edit" ? "edit" : "read");
       }),
       on("shell:settings", () => (settingsOpen = true)),
+      // The ring's "Kanban" entry: the board opens as a large panel (Kanban is an app, it has no tile).
+      on("shell:kanban", () => void openKanban()),
       // The ring's single "Studio" entry opens the workbench in the mode it was left in.
       on("shell:studio", () => {
         ideStarted = true;

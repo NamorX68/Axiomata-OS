@@ -14,6 +14,7 @@ import { get } from "svelte/store";
 import { appGroups, loadAppGroups, type AppGroup } from "./appGroups";
 import { hiddenBuiltins, loadHiddenBuiltins, loadUserApps, userApps, type UserApp } from "./apps";
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
+import { RETIRED_TILE_TYPES } from "./ringTypes";
 import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges, windowTransparency } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
 import { isUiSize, uiSize } from "./uiScale";
@@ -57,6 +58,7 @@ export function sanitizeInstances(raw: unknown): CanvasInstance[] {
     if (typeof item !== "object" || item === null) continue;
     const r = item as Record<string, unknown>;
     if (!isStr(r.id) || !isStr(r.type) || seen.has(r.id)) continue;
+    if (RETIRED_TILE_TYPES.includes(r.type)) continue;
     if (!isNum(r.x) || !isNum(r.y) || !isNum(r.w) || !isNum(r.h)) continue;
     seen.add(r.id);
     const a = r.anchor as Record<string, unknown> | undefined;

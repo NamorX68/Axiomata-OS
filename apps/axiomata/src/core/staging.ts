@@ -25,7 +25,7 @@ import { getModule } from "./registry";
  * Where a panel should come to rest, in viewport coordinates.
  *
  * Passed as `config.anchor` by an opener that knows where the user is
- * looking. A card opened from a Kanban tile belongs over that tile, not
+ * looking. A card opened from a tile belongs over that tile, not
  * halfway across a 21:9 screen — the eye is already on the tile, and sending
  * the panel somewhere else makes the user hunt for what they just asked for.
  * Without an anchor a panel keeps the original behaviour and settles in the

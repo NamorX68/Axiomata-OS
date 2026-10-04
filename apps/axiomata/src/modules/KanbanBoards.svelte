@@ -1,27 +1,36 @@
 <script lang="ts">
   /**
-   * kanban — flip side: which board this tile shows, and managing the boards
-   * themselves.
+   * Kanban — managing the boards themselves (create, rename, delete, pick) and how cards look. It was the flip
+   * side of the Kanban tile; the tile is gone (owner, 2026-10-04), so it is a popover of the board panel now.
    *
-   * Board management lives here rather than on the board because you switch
-   * boards rarely — that is a setting. Columns are the opposite and are shaped
-   * directly on the board: you rearrange them while looking at them. The
-   * asymmetry is deliberate; the handling follows the use, not the symmetry.
+   * Board management lives in a popover rather than in the board's header because you switch boards rarely — that
+   * is a setting. Columns are the opposite and are shaped directly on the board: you rearrange them while looking
+   * at them. The asymmetry is deliberate; the handling follows the use, not the symmetry.
    *
-   * The card treatment is here for the same reason — it is set once and then
-   * left alone — but unlike the board, it applies to the whole application
-   * rather than to this tile (`kanbanPrefs.ts`).
+   * The card treatment is here for the same reason — it is set once and then left alone — and applies to the whole
+   * application (`kanbanPrefs.ts`).
    */
   import { onMount } from "svelte";
 
   import { invokeBackend as invoke, type Board } from "../core/backend";
   import { forgetBoard, refreshBoard } from "../core/boardStore";
-  import type { ModuleContext } from "../core/types";
-  import { cardStripes, rememberLastBoard, setCardStripes } from "./kanbanPrefs";
+  import { cardStripes, setCardStripes } from "./kanbanPrefs";
 
-  let { ctx }: { ctx: ModuleContext } = $props();
-  // svelte-ignore state_referenced_locally
-  const config = ctx.config;
+  let {
+    current,
+    onChoose,
+    onDeleted,
+    onChanged = () => {},
+  }: {
+    /** The board the panel shows. */
+    current: number | null;
+    /** The owner picked or created a board. */
+    onChoose: (id: number) => void;
+    /** The board the panel shows was deleted. */
+    onDeleted: () => void;
+    /** A board was created, renamed or deleted — the panel's switcher re-reads the list. */
+    onChanged?: () => void;
+  } = $props();
 
   let boards = $state<Board[]>([]);
   let error = $state("");
@@ -30,30 +39,16 @@
   /** Board id awaiting a confirmed delete, with its card count. */
   let confirming = $state<{ id: number; cards: number } | null>(null);
 
-  const selected = $derived(typeof $config.boardId === "number" ? $config.boardId : null);
-
   async function load() {
     try {
       boards = await invoke<Board[]>("list_boards");
       error = "";
-      // A tile pointed at a board that no longer exists would render an
-      // error forever; fall back to whatever is there.
-      if (selected !== null && !boards.some((b) => b.id === selected)) {
-        config.update((c) => ({ ...c, boardId: boards[0]?.id ?? undefined }));
-      }
     } catch (err) {
       error = String(err);
     }
   }
 
   onMount(load);
-
-  function choose(id: number) {
-    config.update((c) => ({ ...c, boardId: id }));
-    // Also the application-wide "last used", so the next tile placed opens
-    // this board rather than whichever happens to be first in the list.
-    rememberLastBoard(id);
-  }
 
   async function create() {
     const name = newName.trim();
@@ -62,8 +57,9 @@
     try {
       const created = await invoke<Board>("create_board", { name });
       newName = "";
-      choose(created.id);
+      onChoose(created.id);
       await load();
+      onChanged();
     } catch (err) {
       error = String(err);
     } finally {
@@ -77,6 +73,7 @@
     try {
       await invoke("rename_board", { id: board.id, name: trimmed });
       await Promise.all([load(), refreshBoard(board.id)]);
+      onChanged();
     } catch (err) {
       error = String(err);
     }
@@ -98,8 +95,9 @@
       await invoke("delete_board", { id });
       forgetBoard(id);
       confirming = null;
-      if (selected === id) config.update((c) => ({ ...c, boardId: undefined }));
       await load();
+      onChanged();
+      if (current === id) onDeleted();
     } catch (err) {
       error = String(err);
     } finally {
@@ -108,7 +106,7 @@
   }
 </script>
 
-<div class="settings">
+<div class="boards">
   <h3>Brett</h3>
 
   {#if error}
@@ -121,13 +119,13 @@
 
   <ul>
     {#each boards as board (board.id)}
-      <li class:on={selected === board.id}>
+      <li class:on={current === board.id}>
         <label>
           <input
             type="radio"
-            name="board-{ctx.instanceId}"
-            checked={selected === board.id}
-            onchange={() => choose(board.id)}
+            name="kanban-board"
+            checked={current === board.id}
+            onchange={() => onChoose(board.id)}
           />
           <input
             class="name"
@@ -174,7 +172,7 @@
 </div>
 
 <style>
-  .settings {
+  .boards {
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-2);
@@ -183,7 +181,7 @@
     font-size: var(--ax-font-size-sm);
     color: var(--ax-text);
     overflow-y: auto;
-    height: 100%;
+    max-height: 70vh;
   }
   h3 {
     margin: 0;

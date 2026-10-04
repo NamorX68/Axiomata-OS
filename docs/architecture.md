@@ -188,6 +188,14 @@ against mistakes and against agents that follow their instructions; it is not a 
 can clear the variables or write the database), which is CP-A5's job. Bounds: 2000 cards per board, 100 plans, 50
 dependencies per card; titles and labels are one line.
 
+**Kanban is an app, not a tile** (owner, 2026-10-04). The ring's *Kanban* entry (`view:kanban`, event
+`shell:kanban`) opens the board as the large panel on the board used last (`modules/kanbanApp.ts`); the module `kanban`
+is `stageOnly`, so no tile can be placed and a saved one is dropped when the dashboard loads (`RETIRED_TILE_TYPES`; the old
+ring entry `kanban` migrates to `view:kanban`). Board management and card display moved from the tile's flip side into the
+panel's gear popover (`modules/KanbanBoards.svelte`). The assistant's actions (`kanban_list_cards`, `kanban_add_card`,
+`kanban_move_card`) are **shell actions**: the agent manifest lists mounted instances, and an app has none, so they have to
+exist whether or not the panel is open.
+
 `core/board_mirror.rs` writes each board to `<workspace>/Kanban/<id>-<name>.md` after every
 change, one way only — see the trap list in `AGENTS.md`. Full plan and the list of what came
 out differently in practice: `docs/plans/kanban.md`.

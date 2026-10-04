@@ -346,3 +346,7 @@ die dritte anzuschneiden.
   Gestaltung.
 - Live-Test am echten Mac für alles, was sich *anfühlen* muss: Drag zwischen
   Spalten, Karte anlegen ohne Maus, Lesbarkeit bei kleiner Kachel.
+
+## Nachtrag 2026-10-04 — Kanban ist eine App, keine Kachel
+
+Owner-Entscheidung: Das Kanban hat keine Kachelansicht mehr. Der Ring-Eintrag `view:kanban` öffnet das Brett als großes Panel auf dem zuletzt genutzten Brett (`modules/kanbanApp.ts`); die Rückseite der Kachel (Brettverwaltung, Farbstreifen) wurde zum Zahnrad-Popover des Panels (`KanbanBoards.svelte`); gespeicherte Kanban-Kacheln werden beim Laden entfernt. Die Aktionen des Assistenten heißen jetzt `kanban_list_cards`, `kanban_add_card`, `kanban_move_card` und sind Shell-Aktionen, damit sie auch ohne geöffnetes Brett erreichbar sind (das Manifest listet nur platzierte Instanzen).

@@ -1,5 +1,5 @@
 /**
- * Kanban preferences that belong to the person rather than to one tile.
+ * Kanban preferences that belong to the person rather than to one panel.
  *
  * Kept in one namespaced object under `settings.kanban` in dashboard.json,
  * the way `SecondBrainView` keeps its own under `settings.secondBrain` — not
@@ -42,16 +42,16 @@ function prefs(): KanbanPrefs {
 /**
  * The board most recently chosen in any Kanban switcher.
  *
- * Application-wide on purpose (owner, 2026-09-21): a tile placed a moment ago
- * has no stored choice of its own, so keying this to the instance meant every
- * new tile opened whichever board happened to be first in the list — never the
+ * Application-wide on purpose (owner, 2026-09-21): a panel opened a moment ago
+ * has no stored choice of its own, so keying this to the panel meant every
+ * new panel opened whichever board happened to be first in the list — never the
  * one actually being worked on. "Last used" is a property of the person.
  *
  * The cost of that decision, stated plainly because it is a real one: with two
- * Kanban tiles open, switching one of them to peek at another board also moves
- * the starting point of every tile placed afterwards. Tiles already on the
- * canvas are unaffected — each records its own board in its instance config as
- * soon as it resolves one.
+ * Kanban panels open, switching one of them to peek at another board also moves
+ * the starting point of every panel opened afterwards. Panels already open are
+ * unaffected — each records its own board in its config as soon as it resolves
+ * one.
  */
 export function lastBoard(): number | undefined {
   return prefs().lastBoard ?? getSetting<number>(LEGACY_LAST_BOARD_KEY);
@@ -65,11 +65,9 @@ export function rememberLastBoard(id: number): void {
 /**
  * Whether cards carry their colour stripe, as a store.
  *
- * A store rather than a plain read, because the two sides of a tile are two
- * components: the switch is on the flip side and the cards it changes are on
- * the front, which stays mounted the whole time — and a board opened as a
- * panel is a third instance again. All of them have to change at once, or the
- * setting looks broken until the next reload.
+ * A store rather than a plain read, because the switch (in the boards popover) and the cards it changes (in every
+ * open board panel) are different components, and they have to change at once, or the setting looks broken until the
+ * next reload.
  */
 // Read on first subscribe rather than at module load: this module is imported
 // while the module registry is being built, which happens before

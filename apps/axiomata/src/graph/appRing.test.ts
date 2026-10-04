@@ -81,6 +81,11 @@ describe("buildAppNodes", () => {
     expect(glyphForModuleType("view:ide")).toBe("code-blocks");
   });
 
+  it("draws the Kanban app entry with the kanban glyph", () => {
+    const nodes = buildAppNodes([{ type: "view:kanban", title: "Kanban" }], [], [], null, palette);
+    expect(nodes[0]).toMatchObject({ appType: "view:kanban", glyph: "kanban", label: "Kanban" });
+  });
+
   it("carries a user app's own glyph override, omits it when unset", () => {
     const withGlyph = buildAppNodes(
       [],

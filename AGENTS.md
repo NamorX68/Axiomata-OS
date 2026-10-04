@@ -151,6 +151,9 @@ from the code itself:
   cannot say otherwise, the owner's commands (`board plan approve`, `board approve`, `board taken-over`, deleting/archiving …)
   are closed there, and an agent adds cards only to the board's proposal column. The board store enforces the same gates for
   any caller (`human:` actor for the owner's steps; an `agent:` actor never moves a card freely). Not a sandbox — see a2a.md A39.
+- **Kanban has no tile** — it is the ring entry `view:kanban` that opens a large panel. The agent bridge's manifest lists only
+  *mounted instances*, so anything an agent must reach without an open window (the Kanban actions) is a **shell action**
+  (`registerShellAction`, prefixed `kanban_`), never a module action.
 - **Every board has a Vorschlag and a Review column** (roles `proposal`/`review`, not deletable): "the open column" for a
   new card is the first *plain* open one — `board_move`/`move_to_status` and the assistant's `add_card` skip the roles. A new
   card put in Vorschlag by mistake waits for an approval nobody expects.

@@ -110,8 +110,8 @@ The instructions the skill runs with — written to the agent that will run it.
 List them with `{cli} list-skills`, run one with `{cli} run-skill <name>` (or the Skills Deck's `run` \
 action below). **Routines** run a skill or a prompt on a schedule; cron is six fields, seconds first \
 (`0 0 9 * * *` is 09:00 daily) — see the Routines actions below or `{cli} routines --help`. **The Kanban \
-board** is in the app's database (the `Kanban/` notes are a read-only mirror): use the Kanban actions \
-below or `{cli} board --help`.
+board** is in the app's database (the `Kanban/` notes are a read-only mirror): use the `kanban_…` actions of the Shell \
+below (they work whether or not the Kanban app is open) or `{cli} board --help`.
 
 **How to behave:** ask the owner when something is unclear instead of guessing. Before moving, renaming \
 or deleting files, or changing many things at once, say what you will do and wait for a yes. Keep your \

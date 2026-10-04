@@ -65,6 +65,9 @@ export const RING_VIEWS: readonly RingView[] = [
   // One entry for the whole workbench (`docs/plans/workbench.md`): it opens in the mode the project was left in.
   // The type id stays `view:ide` so stored ring settings keep working; the old Editor entry is `RETIRED_RING_TYPES`.
   { type: "view:ide", title: "Studio", event: "shell:studio" },
+  // Kanban is an app, not a tile (owner, 2026-10-04): the ring opens the board panel on the board used last
+  // (`modules/kanbanApp.ts`). The old module entry `kanban` is `RETIRED_RING_TYPES`.
+  { type: "view:kanban", title: "Kanban", event: "shell:kanban" },
 ];
 
 /** The view a ring `type` opens, or `undefined` for a module type. */

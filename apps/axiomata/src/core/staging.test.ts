@@ -147,7 +147,8 @@ describe("the file panel's openers and close guards (editor plan ED4, W10, W11)"
 
 describe("the shell's openFile action (W2)", () => {
   it("is in the manifest and opens the file panel", async () => {
-    expect(manifest()[0]).toMatchObject({ instance_id: "shell", actions: [{ name: "openFile" }] });
+    expect(manifest()[0]).toMatchObject({ instance_id: "shell" });
+    expect(manifest()[0].actions.map((a) => a.name)).toContain("openFile");
     await invokeAction("shell", "openFile", { path: "Mail/x.md" });
     expect(get(staged)).toMatchObject([{ type: "file", config: { path: "Mail/x.md", mode: "read" } }]);
     await expect(invokeAction("shell", "openFile", { path: " " })).rejects.toThrow(/needs a path/);
