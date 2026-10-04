@@ -197,7 +197,11 @@ fn config_of(bin: &RustBin) -> DebugConfig {
 }
 
 /// The functions a Rust `panic!` passes through; a function breakpoint on them stops the program at the panic.
-pub const PANIC_FUNCTIONS: &[&str] = &["rust_panic"];
+///
+/// Both spellings, because the toolchain decides: newer std versions (checked on 1.99) keep the symbol in the
+/// `__rustc` namespace, where plain `rust_panic` finds no location; older ones export it unqualified. The one
+/// that does not exist stays an unresolved breakpoint and never fires.
+pub const PANIC_FUNCTIONS: &[&str] = &["__rustc::rust_panic", "rust_panic"];
 
 /// A set of tests cargo can build: a package's library, one of its binaries, or one integration-test file.
 #[derive(Debug, Clone, PartialEq, Eq)]
