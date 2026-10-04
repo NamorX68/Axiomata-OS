@@ -18,6 +18,7 @@ import type {
   ConfigUpdate,
   ConfigView,
   AgentFields,
+  AgentSpec,
   GraphFile,
   GraphLink,
   Harness,
@@ -1508,31 +1509,48 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return ideAgents
         .filter((a) => a.project_id === args.projectId)
         .sort((a, b) => a.name.localeCompare(b.name)) as T;
-    case "create_ide_agent": {
-      const fields = args.fields as AgentFields;
+    case "create_ide_agent_on_engine": {
+      const spec = args.spec as AgentSpec;
       const projectId = Number(args.projectId);
-      if (
-        ideAgents.some(
-          (a) => a.project_id === projectId && a.name.toLowerCase() === fields.name.trim().toLowerCase(),
-        )
-      ) {
-        // The real store's UNIQUE(project_id, name COLLATE NOCASE).
-        throw new Error(`this project already has an agent called "${fields.name.trim()}"`);
+      const engine = mockEngines.find((e) => e.id === spec.engine_id);
+      if (!engine) throw new Error(`roster: invalid engine: there is no engine "${spec.engine_id}"`);
+      if (!mockRoles.some((r) => r.name === spec.role)) {
+        throw new Error(`roster: invalid role: there is no role "${spec.role}" for this project`);
       }
-      const created = mockAgent((ideAgents[ideAgents.length - 1]?.id ?? 0) + 1, projectId, {
-        ...fields,
-        name: fields.name.trim(),
-      });
+      if (ideAgents.some((a) => a.project_id === projectId && a.name.toLowerCase() === spec.name.trim().toLowerCase())) {
+        throw new Error(`this project already has an agent called "${spec.name.trim()}"`);
+      }
+      const created = {
+        ...mockAgent((ideAgents[ideAgents.length - 1]?.id ?? 0) + 1, projectId, {
+          name: spec.name.trim(),
+          harness: engine.harness,
+          command: engine.command,
+          model: engine.model,
+          env: engine.env,
+        }),
+        engine_id: engine.id,
+        agent_role: spec.role,
+      };
       ideAgents = [...ideAgents, created];
       return created as T;
     }
-    case "update_ide_agent": {
+    case "update_ide_agent_on_engine": {
       const index = ideAgents.findIndex((a) => a.id === args.id);
       if (index === -1) return null as T;
-      const fields = args.fields as AgentFields;
+      const spec = args.spec as AgentSpec;
+      const engine = mockEngines.find((e) => e.id === spec.engine_id);
+      if (!engine) throw new Error(`roster: invalid engine: there is no engine "${spec.engine_id}"`);
       const replaced = {
-        ...mockAgent(ideAgents[index].id, ideAgents[index].project_id, { ...fields, name: fields.name.trim() }),
+        ...mockAgent(ideAgents[index].id, ideAgents[index].project_id, {
+          name: spec.name.trim(),
+          harness: engine.harness,
+          command: engine.command,
+          model: engine.model,
+          env: engine.env,
+        }),
         created_at: ideAgents[index].created_at,
+        engine_id: engine.id,
+        agent_role: spec.role,
       };
       ideAgents[index] = replaced;
       return replaced as T;

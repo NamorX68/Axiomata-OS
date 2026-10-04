@@ -1933,41 +1933,60 @@ pub fn list_ide_agents(
     ide::agent_store::list_agents(&db, project_id).map_err(|err| err.to_string())
 }
 
-#[tauri::command]
-pub fn create_ide_agent(
-    state: State<'_, CoreState>,
-    project_id: i64,
-    fields: ide::AgentFields,
-) -> Result<ide::Agent, String> {
-    let db = state.db_lock();
-    let created = ide::agent_store::create_agent(&db, ide::NewAgent { project_id, fields })
-        .map_err(|err| err.to_string())?;
-    // Best effort: an agent that could not get its engine now is assigned at the next start.
-    if let Err(err) = axiomata_core::roster::sync_live(&db, &state.config) {
-        tracing::warn!(%err, "could not assign an engine to the new agent");
-    }
-    ide::agent_store::get_agent(&db, created.id)
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| "the agent vanished after it was created".to_string())
+/// What the Agents panel sends: a name, and the engine and role to run on. The harness, command, model and
+/// environment are the engine's — an agent is *made on* an engine, never described from scratch (engines exist only
+/// in the settings).
+#[derive(serde::Deserialize)]
+pub struct AgentSpec {
+    name: String,
+    engine_id: String,
+    role: String,
 }
 
-/// A full replace, not a patch — see `AgentFields`. `None` if there is no such agent.
 #[tauri::command]
-pub fn update_ide_agent(
+pub fn create_ide_agent_on_engine(
+    state: State<'_, CoreState>,
+    project_id: i64,
+    spec: AgentSpec,
+) -> Result<ide::Agent, String> {
+    let config = read_config(&state.config);
+    let db = state.db_lock();
+    let roles = axiomata_core::roster::roles_for_project(&db, &config, project_id);
+    axiomata_core::roster::create_agent_on_engine(
+        &db,
+        &config,
+        &roles,
+        project_id,
+        &spec.name,
+        &spec.engine_id,
+        &spec.role,
+    )
+    .map_err(|err| err.to_string())
+}
+
+/// Renames an agent and moves it to another engine and role. `None` if there is no such agent.
+#[tauri::command]
+pub fn update_ide_agent_on_engine(
     state: State<'_, CoreState>,
     id: i64,
-    fields: ide::AgentFields,
+    spec: AgentSpec,
 ) -> Result<Option<ide::Agent>, String> {
+    let config = read_config(&state.config);
     let db = state.db_lock();
-    let updated = ide::agent_store::update_agent(&db, id, fields).map_err(|err| err.to_string())?;
-    if updated.is_some() {
-        // A changed profile dropped its engine; derive it again (best effort, see `create_ide_agent`).
-        if let Err(err) = axiomata_core::roster::sync_live(&db, &state.config) {
-            tracing::warn!(%err, "could not assign an engine to the edited agent");
-        }
-        return ide::agent_store::get_agent(&db, id).map_err(|err| err.to_string());
-    }
-    Ok(None)
+    let Some(agent) = ide::agent_store::get_agent(&db, id).map_err(|err| err.to_string())? else {
+        return Ok(None);
+    };
+    let roles = axiomata_core::roster::roles_for_project(&db, &config, agent.project_id);
+    axiomata_core::roster::update_agent_on_engine(
+        &db,
+        &config,
+        &roles,
+        id,
+        &spec.name,
+        &spec.engine_id,
+        &spec.role,
+    )
+    .map_err(|err| err.to_string())
 }
 
 // ---- Engines and roles (a2a.md, CP-A1) ----

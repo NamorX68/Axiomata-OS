@@ -383,6 +383,18 @@ pub fn send(
             params![sender.as_text(), new.card_id],
             |r| r.get(0),
         )?;
+        let sent_in_all: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM mail_messages WHERE sender = ?1",
+            params![sender.as_text()],
+            |r| r.get(0),
+        )?;
+        if sent_in_all >= i64::from(limits.max_per_sender_total) {
+            return Ok(SendResult::Refused {
+                refusal: Refusal::SenderTotalLimit {
+                    limit: limits.max_per_sender_total,
+                },
+            });
+        }
         if sent >= i64::from(limits.max_per_sender_and_card) {
             return Ok(SendResult::Refused {
                 refusal: Refusal::SenderLimit {
@@ -1732,6 +1744,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, 5);
+    }
+
+    #[test]
+    fn changing_the_card_does_not_reset_the_total_limit() {
+        let (mut db, project) = fixture();
+        let a = session(&db, project, "a", "impl");
+        let b = session(&db, project, "b", "reviewer");
+        let live = [a, b];
+        let limits = Limits {
+            max_per_sender_and_card: 3,
+            max_per_sender_total: 5,
+            ..Limits::default()
+        };
+        for card in [1, 1, 2, 2, 3] {
+            let new = NewMessage {
+                card_id: Some(card),
+                ..text(Recipient::Session(b), "x")
+            };
+            delivered(send(&mut db, &limits, &Sender::Session(a), new, &live).unwrap());
+        }
+        // Card 4 is fresh for the per-card cap, but five messages are all this session may send.
+        let new = NewMessage {
+            card_id: Some(4),
+            ..text(Recipient::Session(b), "x")
+        };
+        assert_eq!(
+            send(&mut db, &limits, &Sender::Session(a), new, &live).unwrap(),
+            SendResult::Refused {
+                refusal: Refusal::SenderTotalLimit { limit: 5 }
+            }
+        );
+        // The owner is not counted, and neither is the other session.
+        delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Owner,
+                text(Recipient::Session(a), "x"),
+                &live,
+            )
+            .unwrap(),
+        );
+        delivered(
+            send(
+                &mut db,
+                &limits,
+                &Sender::Session(b),
+                text(Recipient::Session(a), "x"),
+                &live,
+            )
+            .unwrap(),
+        );
     }
 
     #[test]

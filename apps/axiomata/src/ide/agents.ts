@@ -10,7 +10,7 @@
 
 import {
   invokeBackend as invoke,
-  type AgentFields,
+  type AgentSpec,
   type AgentStatus,
   type Harness,
   type IdeAgent,
@@ -30,32 +30,33 @@ export const HARNESSES: { id: Harness; label: string; hint: string }[] = [
 // instead of a second table that can drift from the one that starts it. An
 // unsaved profile simply shows its placeholder until it has been saved.
 
-/** A blank profile for the "new agent" form. */
-export function blankFields(): AgentFields {
-  return { name: "", harness: "opencode", command: "", model: null, env: "" };
+/** The Agents panel's blank form: no choice made yet except the role, which is almost always the all-rounder. */
+export function blankSpec(roles: readonly string[]): AgentSpec {
+  return { name: "", engine_id: "", role: roles.includes("allrounder") ? "allrounder" : (roles[0] ?? "") };
 }
 
-/** The editable fields of an existing agent, for the same form. */
-export function fieldsOf(agent: IdeAgent): AgentFields {
-  return {
-    name: agent.name,
-    harness: agent.harness,
-    command: agent.command,
-    model: agent.model,
-    env: agent.env,
-  };
+/** The editable choices of an existing agent, for the same form. */
+export function specOf(agent: IdeAgent): AgentSpec {
+  return { name: agent.name, engine_id: agent.engine_id ?? "", role: agent.agent_role };
+}
+
+/** Whether the form can be saved: a name and an engine and a role chosen. */
+export function specReady(spec: AgentSpec): boolean {
+  return spec.name.trim() !== "" && spec.engine_id !== "" && spec.role !== "";
 }
 
 export function listAgents(projectId: number): Promise<IdeAgent[]> {
   return invoke<IdeAgent[]>("list_ide_agents", { projectId });
 }
 
-export function createAgent(projectId: number, fields: AgentFields): Promise<IdeAgent> {
-  return invoke<IdeAgent>("create_ide_agent", { projectId, fields });
+/** Makes an agent on an engine of the catalog. The engine's harness, model and environment become the agent's. */
+export function createAgent(projectId: number, spec: AgentSpec): Promise<IdeAgent> {
+  return invoke<IdeAgent>("create_ide_agent_on_engine", { projectId, spec });
 }
 
-export function updateAgent(id: number, fields: AgentFields): Promise<IdeAgent | null> {
-  return invoke<IdeAgent | null>("update_ide_agent", { id, fields });
+/** Renames an agent and moves it to another engine and role. */
+export function updateAgent(id: number, spec: AgentSpec): Promise<IdeAgent | null> {
+  return invoke<IdeAgent | null>("update_ide_agent_on_engine", { id, spec });
 }
 
 export function deleteAgent(id: number): Promise<boolean> {

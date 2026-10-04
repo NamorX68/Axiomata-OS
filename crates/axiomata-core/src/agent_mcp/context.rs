@@ -102,32 +102,17 @@ pub struct Context {
     pub limits: Limits,
 }
 
-/// The roles in force for the project of session `agent_id`; the owner's catalog alone when the project cannot be
-/// resolved, and nothing (so no rights) when even that cannot be read.
+/// The roles in force for the project of session `agent_id` (see [`crate::roster::roles_for_project`]).
 fn effective_roles(core: &AxiomataCore, agent_id: i64) -> Vec<Role> {
-    let root = {
-        let db = core.db_lock();
-        agent_store::get_agent(&db, agent_id)
-            .ok()
-            .flatten()
-            .and_then(|agent| {
-                crate::ide::store::get_project(&db, agent.project_id)
-                    .ok()
-                    .flatten()
-            })
-            .map(|project| project.repo_root)
-    };
+    let db = core.db_lock();
     let config = core
         .config
         .read()
         .unwrap_or_else(|poison| poison.into_inner())
         .clone();
-    let project = root.and_then(|root| crate::roster::project_roles(&root, &config).ok());
-    match project {
-        Some(project) => project.effective,
-        None => crate::roster::list_roles()
-            .map(|loaded| loaded.roles)
-            .unwrap_or_default(),
+    match agent_store::get_agent(&db, agent_id).ok().flatten() {
+        Some(agent) => crate::roster::roles_for_project(&db, &config, agent.project_id),
+        None => Vec::new(),
     }
 }
 

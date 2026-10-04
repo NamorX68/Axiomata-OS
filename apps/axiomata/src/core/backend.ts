@@ -295,6 +295,16 @@ export interface PlanDocument {
   from_earlier_session: boolean;
 }
 
+/**
+ * What the Agents panel sends to make or change an agent: a name, and the engine and role it runs on. The harness,
+ * command, model and environment are the engine's (engines exist only in the settings, `core/roster.ts`).
+ */
+export interface AgentSpec {
+  name: string;
+  engine_id: string;
+  role: string;
+}
+
 /** Everything an agent update sets — a full replace, not a patch. */
 export interface AgentFields {
   name: string;

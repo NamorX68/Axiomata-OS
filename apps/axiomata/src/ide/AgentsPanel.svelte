@@ -1,15 +1,21 @@
 <!--
   The Agents panel of the activity rail: which agents this project has (with their live status), the form to
   add or edit one, and the click that puts one into a pane. It is a view of the sidebar column, like Files.
+  An agent is *made on an engine*: the form picks one from the catalog (and a role) and never describes a harness,
+  a command or a model — engines are created only in the settings (`EnginesSection`), so there is one place for it.
   Deleting a profile does not close the panes showing it — those may have something running, and the pane
   says the profile is gone instead of taking a live shell with it. The wording here says as much.
 -->
 <script lang="ts">
-  import type { AgentFields, IdeAgent } from "../core/backend";
-  import { HARNESSES, blankFields, fieldsOf } from "./agents";
+  import { onMount } from "svelte";
+
+  import type { AgentSpec, IdeAgent } from "../core/backend";
+  import { projectRoles } from "../core/roster";
+  import { blankSpec, specOf, specReady } from "./agents";
   import { agentStatus } from "./agentStatus";
   import { cardOf } from "./agentCard";
   import ProjectRolesNotice from "./ProjectRolesNotice.svelte";
+  import { engineCatalog, engineLine, refreshEngines } from "./rosterStore";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -34,34 +40,71 @@
     disabled?: boolean;
     /** The open project, for the roles it brings (`ProjectRolesNotice`). */
     projectId?: number | null;
-    /** Opens the inspector's Agents tab: the engines and roles the agents are built from. */
+    /** Opens the inspector's Agents tab: where engines and roles are made. */
     onManage: () => void;
     onOpen: (agent: IdeAgent) => void;
-    onCreate: (fields: AgentFields) => void;
-    onEdit: (id: number, fields: AgentFields) => void;
+    onCreate: (spec: AgentSpec) => void;
+    onEdit: (id: number, spec: AgentSpec) => void;
     onRemove: (id: number) => void;
   } = $props();
 
   /** `null` = the "new agent" form, a number = editing that agent. */
   let editing = $state<number | null | undefined>(undefined);
+  /** The roles in force for this project — what the role picker offers. */
+  let roleNames = $state<string[]>([]);
 
-  let form = $state<AgentFields>(blankFields());
+  let form = $state<AgentSpec>(blankSpec([]));
+
+  const engines = $derived($engineCatalog);
+
+  async function loadRoles(id: number | null) {
+    if (id === null) {
+      roleNames = [];
+      return;
+    }
+    try {
+      const roles = await projectRoles(id);
+      if (id === projectId) roleNames = roles.effective.map((role) => role.name);
+    } catch {
+      roleNames = [];
+    }
+  }
+
+  onMount(() => {
+    void refreshEngines();
+  });
+
+  $effect(() => {
+    void loadRoles(projectId);
+  });
 
   function startNew() {
     editing = null;
-    form = blankFields();
+    form = blankSpec(roleNames);
+    // Almost always there is exactly one sensible choice: do not make the user pick it.
+    if (engines.length === 1) form.engine_id = engines[0].id;
+    // A catalog edited in the settings since the panel was drawn: look again.
+    void refreshEngines();
   }
 
   function startEdit(agent: IdeAgent) {
     editing = agent.id;
-    form = fieldsOf(agent);
+    form = specOf(agent);
+    void refreshEngines();
   }
 
   function submit() {
-    if (!form.name.trim()) return;
-    if (editing === null) onCreate({ ...form });
-    else if (typeof editing === "number") onEdit(editing, { ...form });
+    if (!specReady(form)) return;
+    if (editing === null) onCreate({ ...form, name: form.name.trim() });
+    else if (typeof editing === "number") onEdit(editing, { ...form, name: form.name.trim() });
     editing = undefined;
+  }
+
+  /** What an agent card says about what it runs on: its engine's label, else the harness and model of its profile. */
+  function runsOn(agent: IdeAgent): string {
+    const engine = engines.find((e) => e.id === agent.engine_id);
+    if (engine) return engine.label;
+    return `${agent.harness === "claude_code" ? "Claude Code" : agent.harness}${agent.model ? ` · ${agent.model}` : ""}`;
   }
 </script>
 
@@ -79,7 +122,7 @@
                 <span class="avatar" aria-hidden="true">{agent.name.trim().charAt(0).toUpperCase() || "?"}</span>
                 <span class="who">
                   <span class="name">{agent.name}</span>
-                  <span class="meta">{agent.harness === "claude_code" ? "Claude Code" : agent.harness}{agent.model ? ` · ${agent.model}` : ""}</span>
+                  <span class="meta">{runsOn(agent)}{agent.agent_role !== "allrounder" ? ` · ${agent.agent_role}` : ""}</span>
                 </span>
                 <span class="state">
                   <StatusDot view={card.status} />
@@ -118,7 +161,12 @@
       <p class="empty">{disabled ? "Open a project to work with agents." : "No agents in this project yet."}</p>
     {/if}
     {#if editing === undefined}
-      <button class="add" type="button" {disabled} onclick={startNew}><Icon name="plus" size="sm" /> New agent…</button>
+      <button class="add" type="button" disabled={disabled || engines.length === 0} onclick={startNew}>
+        <Icon name="plus" size="sm" /> New agent…
+      </button>
+      {#if engines.length === 0 && !disabled}
+        <p class="hint">No engines yet — an agent runs on an engine. Add one under Engines &amp; roles.</p>
+      {/if}
       <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Engines &amp; roles…</button>
     {:else}
       <form
@@ -129,32 +177,23 @@
       >
         <p class="label">{editing === null ? "New agent" : "Edit agent"}</p>
         <input type="text" bind:value={form.name} placeholder="Name" spellcheck="false" />
-        <select bind:value={form.harness}>
-          {#each HARNESSES as harness (harness.id)}
-            <option value={harness.id} title={harness.hint}>{harness.label}</option>
+        <select bind:value={form.engine_id} aria-label="Engine">
+          <option value="" disabled>Engine…</option>
+          {#each engines as engine (engine.id)}
+            <option value={engine.id} title={engineLine(engine)}>{engine.label}</option>
           {/each}
         </select>
-        <input
-          type="text"
-          bind:value={form.command}
-          placeholder="Command — empty runs the harness's own"
-          spellcheck="false"
-        />
-        <input
-          type="text"
-          value={form.model ?? ""}
-          oninput={(event) => (form.model = event.currentTarget.value.trim() || null)}
-          placeholder="Model id, e.g. openrouter/deepseek/deepseek-v4-flash-0731"
-          spellcheck="false"
-        />
-        <textarea bind:value={form.env} rows="2" placeholder="KEY=value per line" spellcheck="false"></textarea>
+        <select bind:value={form.role} aria-label="Role">
+          {#each roleNames as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
         <p class="hint">
-          The model is passed as <code>--model</code>, so it must be the id the harness knows —
-          <code>opencode models</code> lists them. A display name will not work. Left empty, the
-          harness picks; with a command of your own, it is yours to pass.
+          The agent runs on the engine you pick — its harness, model and environment. Engines and roles are made and
+          changed under <button type="button" class="link" onclick={onManage}>Engines &amp; roles</button>.
         </p>
         <div class="form-actions">
-          <button type="submit" class="ax-btn primary" disabled={!form.name.trim()}>Save</button>
+          <button type="submit" class="ax-btn primary" disabled={!specReady(form)}>Save</button>
           <button type="button" class="ax-btn" onclick={() => (editing = undefined)}>Cancel</button>
         </div>
       </form>
@@ -184,6 +223,16 @@
     min-height: 0;
     overflow-y: auto;
     padding: var(--ax-space-3);
+  }
+
+  .link {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--ax-accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   .add:disabled {
@@ -387,8 +436,7 @@
   }
 
   input,
-  select,
-  textarea {
+  select {
     padding: var(--ax-space-1) var(--ax-space-2);
     background: var(--ax-bg);
     border: 1px solid var(--ax-border);
@@ -400,8 +448,7 @@
   }
 
   input:focus-visible,
-  select:focus-visible,
-  textarea:focus-visible {
+  select:focus-visible {
     outline: var(--ax-focus-ring);
   }
 

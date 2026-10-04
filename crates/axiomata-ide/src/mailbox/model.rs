@@ -397,6 +397,9 @@ pub struct Limits {
     pub max_chain: u32,
     /// Messages one session may send about one card (or, with no card, in total).
     pub max_per_sender_and_card: u32,
+    /// Messages one session may send in all, whatever card they are about. The per-card cap alone could be reset by
+    /// changing the card (finishing or failing it), so this is the ceiling over a session's whole life.
+    pub max_per_sender_total: u32,
     /// How often a delivery is announced in a session's terminal before it is left alone.
     pub max_nudges: u32,
 }
@@ -406,6 +409,7 @@ impl Default for Limits {
         Limits {
             max_chain: 6,
             max_per_sender_and_card: 20,
+            max_per_sender_total: 60,
             max_nudges: 3,
         }
     }
@@ -417,6 +421,8 @@ impl Default for Limits {
 pub enum Refusal {
     /// The sender has used up its messages about this card.
     SenderLimit { limit: u32 },
+    /// The sender has used up its messages altogether.
+    SenderTotalLimit { limit: u32 },
     /// The message answers an ack or a notice, which nobody answers (A8).
     NoReplyExpected,
     /// A session wrote to itself.
@@ -429,6 +435,10 @@ impl fmt::Display for Refusal {
             Refusal::SenderLimit { limit } => write!(
                 f,
                 "message limit reached: at most {limit} messages per card; ask the owner if more is needed"
+            ),
+            Refusal::SenderTotalLimit { limit } => write!(
+                f,
+                "message limit reached: at most {limit} messages per session; ask the owner if more is needed"
             ),
             Refusal::NoReplyExpected => {
                 f.write_str("that message is a confirmation or a notice and is not answered")

@@ -188,13 +188,7 @@ describe("remove", () => {
 });
 
 describe("agents", () => {
-  const profile = {
-    name: "Builder",
-    harness: "opencode" as const,
-    command: "",
-    model: null,
-    env: "",
-  };
+  const profile = { name: "Builder", engine_id: "opencode", role: "allrounder" };
 
   function row(id: number, name = "Builder") {
     return {

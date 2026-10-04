@@ -19,6 +19,9 @@
   } from "../core/roster";
   import { toast } from "../core/toast";
   import { HARNESSES } from "./agents";
+  import { engineLine, refreshEngines } from "./rosterStore";
+  import Icon from "../ui/Icon.svelte";
+  import IconButton from "../ui/IconButton.svelte";
 
   /** Called after the catalog changed, so a sibling (the roles' engine picker) can reload. */
   let { onChange = () => {} }: { onChange?: () => void } = $props();
@@ -34,6 +37,8 @@
   async function reload() {
     try {
       engines = await listEngines();
+      // The Agents panel picks from the same catalog.
+      void refreshEngines();
     } catch (err) {
       toast(`Could not load the engines: ${messageOf(err)}`, "warning");
     } finally {
@@ -97,8 +102,8 @@
 <section>
   <h3>Engines</h3>
   <p class="lead">
-    An engine is harness + model + environment — the part that costs money and can be unreachable. Roles and agent
-    sessions refer to it by id, so a switch happens only here. Existing agents got their engine from their profile.
+    An engine is harness + model + environment — the part that costs money and can be unreachable. Engines are made
+    only here; an agent in the Agents panel is built by choosing one, and roles refer to them by id.
   </p>
 
   {#if loading}
@@ -106,19 +111,28 @@
   {:else if engines.length === 0}
     <p class="hint">No engines yet.</p>
   {:else}
-    <ul class="list">
+    <ul class="cards">
       {#each engines as e (e.id)}
-        <li class:editing={form?.id === e.id && !isNew}>
-          <button type="button" class="row" onclick={() => startEdit(e)}>
-            <span class="title">{e.label}</span>
-            <span class="meta">
-              <code>{e.id}</code> · {HARNESSES.find((h) => h.id === e.harness)?.label ?? e.harness}
-              · {e.model ?? "default model"} · {e.sessions} session{e.sessions === 1 ? "" : "s"}
+        <li class="card" class:editing={form?.id === e.id && !isNew} style:--harness="var(--ax-harness-{e.harness})">
+          <button type="button" class="open" onclick={() => startEdit(e)}>
+            <span class="top">
+              <span class="avatar" aria-hidden="true">{e.label.trim().charAt(0).toUpperCase() || "?"}</span>
+              <span class="who">
+                <span class="name">{e.label}</span>
+                <span class="meta">{engineLine(e)}</span>
+              </span>
+            </span>
+            <span class="since">
+              <code>{e.id}</code> · {e.billing === "subscription" ? "subscription" : "metered"} · {e.sessions} agent{e.sessions ===
+              1
+                ? ""
+                : "s"}
             </span>
           </button>
-          <button type="button" class="remove" title="Remove" aria-label="Remove engine" onclick={() => remove(e)}>
-            ✕
-          </button>
+          <div class="row-actions">
+            <IconButton icon="pencil" label="Edit {e.label}" size="sm" onclick={() => startEdit(e)} />
+            <IconButton icon="trash-2" label="Remove {e.label}" size="sm" onclick={() => remove(e)} />
+          </div>
         </li>
       {/each}
     </ul>
@@ -179,7 +193,7 @@
     </div>
   {:else}
     <div class="actions">
-      <button type="button" onclick={startNew}>Add engine</button>
+      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add engine…</button>
     </div>
   {/if}
 </section>
@@ -191,56 +205,117 @@
     font-size: var(--ax-font-size-sm);
     color: var(--ax-text-muted);
   }
-  .list {
+  /* A card per engine, the same look as an agent in the Agents panel: the harness's colour on its edge. */
+  .cards {
     list-style: none;
     margin: 0 0 var(--ax-space-3);
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-1);
+    gap: var(--ax-space-3);
   }
-  .list li {
-    display: flex;
-    align-items: stretch;
-    gap: var(--ax-space-1);
+  .card {
+    position: relative;
+    border: 1px solid var(--ax-border);
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--harness, var(--ax-border-strong));
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-surface-2);
   }
-  .row {
-    flex: 1 1 auto;
+  .card:hover,
+  .card:focus-within {
+    border-color: var(--ax-border-strong);
+    border-left-color: var(--harness, var(--ax-border-strong));
+    background: var(--ax-surface-3);
+  }
+  .card.editing {
+    box-shadow: 0 0 0 1px var(--ax-accent) inset;
+  }
+  .open {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    padding: var(--ax-space-2);
-    text-align: left;
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-  }
-  li.editing .row {
-    border-color: var(--ax-accent);
-    background: var(--ax-accent-muted);
-  }
-  .title {
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-3);
+    background: none;
+    border: none;
     color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    text-align: left;
+    cursor: pointer;
   }
+  .top {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-3);
+  }
+  .avatar {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: calc(28px * var(--ax-ui-scale));
+    height: calc(28px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: color-mix(in srgb, var(--harness, var(--ax-text-muted)) 22%, transparent);
+    color: var(--harness, var(--ax-text-muted));
+    font-weight: 600;
+  }
+  .who {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .name,
   .meta {
-    font-size: var(--ax-font-size-xs);
-    color: var(--ax-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .meta code {
+  .name {
+    font-weight: 600;
+  }
+  .meta,
+  .since {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+  .since code {
     font-family: var(--ax-font-mono);
   }
-  .remove {
-    flex: 0 0 auto;
-    padding: 0 var(--ax-space-2);
-    background: transparent;
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    color: var(--ax-text-muted);
+  /* Quiet until the card is hovered or focused (editor-look I4). */
+  .row-actions {
+    position: absolute;
+    right: var(--ax-space-1);
+    bottom: var(--ax-space-1);
+    display: flex;
+    gap: var(--ax-space-1);
+    opacity: 0;
+    background: var(--ax-surface-3);
+    border-radius: var(--ax-radius-md);
   }
-  .remove:hover {
-    color: var(--ax-danger);
-    border-color: var(--ax-danger);
+  .card:hover .row-actions,
+  .card:focus-within .row-actions {
+    opacity: 1;
+  }
+  .add {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-2);
+    background: none;
+    border: 0;
+    border-radius: var(--ax-radius-md);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .add:hover {
+    background: var(--ax-surface-2);
+    color: var(--ax-text);
   }
   .form {
     padding: var(--ax-space-3);

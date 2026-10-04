@@ -318,8 +318,7 @@ Zuschnitt in `axiomata-ide::mailbox` (Migration 16, `SCHEMA_SQL_V7`); weicht nir
 - **Bekannte Grenze (A39, jetzt konkret):** die Umgebung (`AXIOMATA_AGENT_ID`, …) erbt jeder Kindprozess der Sitzung. Ein Agent kann `AXIOMATA_AGENT_ID=<Reviewer> axiomata-cli mcp-serve` selbst
   starten (die IDs liefert `list_agents`) und die eigene Karte abzeichnen — das Zwei-Parteien-Prinzip vergleicht nur Akteurs-Strings. Geschlossen wird das erst mit dem Scoping je Sitzung in CP-A5
   (der Server nimmt die Identität nicht aus einer vererbbaren Umgebung, sondern aus einem pro Start erzeugten Geheimnis in der MCP-Konfiguration).
-- **Offen für den Owner:** (a) zusätzlich eine **Gesamtgrenze je Sitzung** für Nachrichten, unabhängig von der Karte (der Plan nennt nur „je Agent und Karte“; ein Agent, der seine Karte per CLI auf
-  `fail` setzt, bekommt einen frischen 20er-Eimer)? (b) Reicht „20 Vorschläge je Sitzung“ als Startwert?
+- **Entschieden (Owner, 2026-10-04):** 20 Vorschläge je Sitzung reichen als Start. Für die **Gesamtgrenze je Sitzung** hatte der Owner kein Gefühl; gesetzt sind **60 Nachrichten** (`Limits::max_per_sender_total`, das Dreifache der Grenze je Karte), einstellbar wie die anderen Zahlen.
 - **Noch nicht:** Eintrag je Harness und Start-Umgebung (CP-A5/CP-A6), der CLI-Spiegel `agent send|inbox` (A31), Kosten-/Schrittgrenzen, `purge` beim Start.
 
 ## Offene Fragen der Runde

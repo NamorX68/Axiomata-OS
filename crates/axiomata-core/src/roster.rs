@@ -16,7 +16,7 @@ use rusqlite::Connection;
 use crate::AxiomataError;
 use crate::config::Config;
 use crate::ide::agent_store;
-use crate::ide::model::Agent;
+use crate::ide::model::{Agent, AgentFields};
 use crate::paths;
 
 type Result<T> = std::result::Result<T, AxiomataError>;
@@ -273,6 +273,121 @@ fn engine_user(db: &Connection, roles: &[Role], id: &str) -> Result<Option<Strin
         .iter()
         .find(|r| r.engine.as_deref() == Some(id) || r.fallback_engines.iter().any(|f| f == id));
     Ok(role.map(|r| format!("the role “{}” uses it", r.name)))
+}
+
+/// The roles in force for `project_id`: the owner's, with the project's own once the owner confirmed them
+/// ([`project_roles`]). The owner's alone when the project cannot be resolved, nothing when even that cannot be read.
+pub fn roles_for_project(db: &Connection, config: &Config, project_id: i64) -> Vec<Role> {
+    let root = crate::ide::store::get_project(db, project_id)
+        .ok()
+        .flatten()
+        .map(|project| project.repo_root);
+    match root.and_then(|root| project_roles(&root, config).ok()) {
+        Some(project) => project.effective,
+        None => list_roles().map(|loaded| loaded.roles).unwrap_or_default(),
+    }
+}
+
+/// The profile columns of an agent session, copied from its engine. The columns stay the fallback that starting reads
+/// until CP-A6 starts from the engine itself; copying them here means a session made on an engine runs exactly what the
+/// engine says, and the engine is the only place that is edited.
+fn fields_from_engine(engine: &Engine, name: &str) -> AgentFields {
+    AgentFields {
+        name: name.to_string(),
+        harness: engine.harness,
+        command: engine.command.clone(),
+        model: engine.model.clone(),
+        env: engine.env.clone(),
+    }
+}
+
+fn known_engine<'a>(config: &'a Config, id: &str) -> Result<&'a Engine> {
+    config.agents.engines.get(id).ok_or_else(|| {
+        RosterError::Invalid {
+            field: "engine",
+            reason: format!("there is no engine “{id}”; engines are added in the Studio settings"),
+        }
+        .into()
+    })
+}
+
+fn known_role(roles: &[Role], name: &str) -> Result<()> {
+    if roles.iter().any(|role| role.name == name) {
+        return Ok(());
+    }
+    Err(RosterError::Invalid {
+        field: "role",
+        reason: format!("there is no role “{name}” for this project"),
+    }
+    .into())
+}
+
+/// Creates an agent session in `project_id` that runs on an engine of the owner's catalog and plays `role`.
+///
+/// This is the one way the Studio's Agents panel makes an agent: it **chooses** an engine, it does not describe one —
+/// engines are made only in the settings. `roles` are the roles in force for the project ([`roles_for_project`]).
+///
+/// # Errors
+///
+/// [`RosterError::Invalid`] for an engine or role that does not exist; the agent store's refusals (name clash, bad
+/// name); a failing database write. Nothing is created then.
+pub fn create_agent_on_engine(
+    db: &Connection,
+    config: &Config,
+    roles: &[Role],
+    project_id: i64,
+    name: &str,
+    engine_id: &str,
+    role: &str,
+) -> Result<Agent> {
+    let engine = known_engine(config, engine_id)?;
+    known_role(roles, role)?;
+    let tx = db.unchecked_transaction()?;
+    let created = agent_store::create_agent(
+        &tx,
+        crate::ide::model::NewAgent {
+            project_id,
+            fields: fields_from_engine(engine, name),
+        },
+    )?;
+    agent_store::set_engine(&tx, created.id, Some(engine_id))?;
+    agent_store::set_role(&tx, created.id, role)?;
+    tx.commit()?;
+    agent_store::get_agent(db, created.id)?.ok_or_else(|| {
+        crate::ide::IdeError::CorruptRow {
+            table: "ide_agents",
+            id: created.id,
+            reason: "row vanished after its creation".into(),
+        }
+        .into()
+    })
+}
+
+/// Renames an agent session and moves it to another engine and role. `None` if there is no such agent.
+///
+/// # Errors
+///
+/// As [`create_agent_on_engine`]; nothing changes then.
+pub fn update_agent_on_engine(
+    db: &Connection,
+    config: &Config,
+    roles: &[Role],
+    id: i64,
+    name: &str,
+    engine_id: &str,
+    role: &str,
+) -> Result<Option<Agent>> {
+    let engine = known_engine(config, engine_id)?;
+    known_role(roles, role)?;
+    let tx = db.unchecked_transaction()?;
+    if agent_store::update_agent(&tx, id, fields_from_engine(engine, name))?.is_none() {
+        return Ok(None);
+    }
+    // Changing the profile columns dropped the engine assignment; it is set again, to the engine they came from.
+    agent_store::set_engine(&tx, id, Some(engine_id))?;
+    agent_store::set_role(&tx, id, role)?;
+    tx.commit()?;
+    Ok(agent_store::get_agent(db, id)?)
 }
 
 /// Removes an engine from the config file. `false` if there was no such engine.
@@ -971,5 +1086,150 @@ mod tests {
             );
             assert_eq!(found.unknown_engines, ["ghost", "other-ghost"]);
         });
+    }
+
+    fn engine_on(id: &str, harness: Harness, model: Option<&str>) -> Engine {
+        Engine {
+            id: id.into(),
+            label: id.into(),
+            harness,
+            command: String::new(),
+            model: model.map(String::from),
+            env: "A=1".into(),
+            billing: axiomata_roster::Billing::Metered,
+        }
+    }
+
+    fn plain_role(name: &str) -> Role {
+        Role {
+            name: name.into(),
+            description: String::new(),
+            kind: "implement".into(),
+            tier: axiomata_roster::Tier::Medium,
+            engine: None,
+            fallback_engines: vec![],
+            permissions: vec![],
+            limits: axiomata_roster::Limits::default(),
+            creates: vec![],
+            instructions: String::new(),
+            source: Source::User,
+        }
+    }
+
+    fn catalog() -> (Config, Vec<Role>) {
+        let mut config = Config::default();
+        for e in [
+            engine_on("opus", Harness::ClaudeCode, Some("opus")),
+            engine_on("flash", Harness::Opencode, Some("openrouter/x/flash")),
+        ] {
+            config.agents.engines.insert(e.id.clone(), e);
+        }
+        (
+            config,
+            vec![plain_role("allrounder"), plain_role("reviewer")],
+        )
+    }
+
+    #[test]
+    fn an_agent_made_on_an_engine_runs_what_the_engine_says() {
+        let (conn, project, _dir) = fixture();
+        let (config, roles) = catalog();
+        let agent = create_agent_on_engine(
+            &conn, &config, &roles, project, "builder", "opus", "reviewer",
+        )
+        .unwrap();
+        assert_eq!(agent.engine_id.as_deref(), Some("opus"));
+        assert_eq!(agent.agent_role, "reviewer");
+        assert_eq!(
+            (agent.harness, agent.model.as_deref(), agent.env.as_str()),
+            (Harness::ClaudeCode, Some("opus"), "A=1")
+        );
+        // The engine is already assigned: nothing is left for the profile-derived path to invent.
+        assert!(agent_store::unassigned_agents(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unknown_engine_or_role_creates_nothing() {
+        let (conn, project, _dir) = fixture();
+        let (config, roles) = catalog();
+        for (engine_id, role_name) in [("nope", "allrounder"), ("opus", "nope")] {
+            let err =
+                create_agent_on_engine(&conn, &config, &roles, project, "x", engine_id, role_name)
+                    .unwrap_err();
+            assert!(
+                matches!(err, AxiomataError::Roster(RosterError::Invalid { .. })),
+                "{err:?}"
+            );
+        }
+        assert!(agent_store::list_agents(&conn, project).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_name_clash_leaves_no_half_made_agent() {
+        let (conn, project, _dir) = fixture();
+        let (config, roles) = catalog();
+        create_agent_on_engine(&conn, &config, &roles, project, "dup", "opus", "allrounder")
+            .unwrap();
+        assert!(
+            create_agent_on_engine(
+                &conn,
+                &config,
+                &roles,
+                project,
+                "DUP",
+                "flash",
+                "allrounder"
+            )
+            .is_err()
+        );
+        assert_eq!(agent_store::list_agents(&conn, project).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn editing_an_agent_moves_it_to_another_engine_and_keeps_the_assignment() {
+        let (conn, project, _dir) = fixture();
+        let (config, roles) = catalog();
+        let agent = create_agent_on_engine(
+            &conn,
+            &config,
+            &roles,
+            project,
+            "builder",
+            "opus",
+            "allrounder",
+        )
+        .unwrap();
+        let moved = update_agent_on_engine(
+            &conn, &config, &roles, agent.id, "renamed", "flash", "reviewer",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            (
+                moved.name.as_str(),
+                moved.engine_id.as_deref(),
+                moved.harness,
+                moved.agent_role.as_str()
+            ),
+            ("renamed", Some("flash"), Harness::Opencode, "reviewer")
+        );
+        assert_eq!(moved.model.as_deref(), Some("openrouter/x/flash"));
+        assert!(
+            update_agent_on_engine(&conn, &config, &roles, 9999, "x", "opus", "allrounder")
+                .unwrap()
+                .is_none()
+        );
+        // A refused edit changes nothing.
+        assert!(
+            update_agent_on_engine(&conn, &config, &roles, agent.id, "x", "nope", "allrounder")
+                .is_err()
+        );
+        assert_eq!(
+            agent_store::get_agent(&conn, agent.id)
+                .unwrap()
+                .unwrap()
+                .name,
+            "renamed"
+        );
     }
 }

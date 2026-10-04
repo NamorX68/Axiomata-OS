@@ -53,7 +53,7 @@
     type Layout,
     type PaneTab,
   } from "./layout";
-  import type { AgentFields, IdeAgent } from "../core/backend";
+  import type { AgentSpec, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
   import AgentsSettings from "./AgentsSettings.svelte";
   import TasksPanel from "./TasksPanel.svelte";
@@ -556,8 +556,8 @@
     layout = applyProjectCwd(added, project.repo_root);
   }
 
-  async function addAgent(fields: AgentFields) {
-    const created = await projectSession.addAgent(fields);
+  async function addAgent(spec: AgentSpec) {
+    const created = await projectSession.addAgent(spec);
     if (created) openAgent(created);
   }
 
@@ -826,8 +826,8 @@
           projectId={current?.id ?? null}
           onManage={() => (inspector = "agents")}
           onOpen={openAgent}
-          onCreate={(fields) => void addAgent(fields)}
-          onEdit={(id, fields) => void projectSession.editAgent(id, fields)}
+          onCreate={(spec) => void addAgent(spec)}
+          onEdit={(id, spec) => void projectSession.editAgent(id, spec)}
           onRemove={(id) => void projectSession.removeAgent(id)}
         />
       {/snippet}

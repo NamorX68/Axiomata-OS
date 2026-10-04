@@ -1568,6 +1568,17 @@ whose command line lives only in memory, `ide/taskRuns.ts`; glue `src-tauri/src/
 session, the Flow mode, MCP transport with the A2A data model, build plan CP-A1…CP-A10; start with CP-A1); ED7 (the editor/Studio as a standalone app); a Mac-only-code split for Linux/Windows. Deferred by
 owner decision: ⌘K spotlight search (`docs/plans/spotlight-search.md`) and further model-provider work.
 
+### Agents are made on engines (owner, 2026-10-04)
+
+The Studio had two places that made the same thing: the Agents panel (harness, command, model, environment per agent, from which an engine was *derived*
+behind the owner's back) and the Engines list in the settings. Now **engines are made only in the settings** (`ide/EnginesSection.svelte`, cards in the look
+of the agent cards); the Agents panel *chooses*: a name, an engine of the catalog and a role (`axiomata_core::roster::create_agent_on_engine` /
+`update_agent_on_engine`, Tauri `create_ide_agent_on_engine` / `update_ide_agent_on_engine`; the old `create_ide_agent` / `update_ide_agent` are gone). The
+engine's harness, command, model and environment are copied into the profile columns, which stay the fallback that starting reads until CP-A6; the engine
+and role are set in the same transaction. Roles offered are those in force for the project (`roster::roles_for_project`). The panel and the settings share the
+catalog through `ide/rosterStore.ts`. `axiomata-cli ide agents new` still takes raw fields (the owner's own tool); agents without an engine (older rows) show their profile
+until the profile-derived assignment gives them one. Also: a session may send at most 60 messages in all (`Limits::max_per_sender_total`, owner's choice of "a number", 2026-10-04).
+
 ### A2A CP-A4 built (2026-10-04)
 
 The MCP server `axiomata-cli mcp-serve` (see its paragraph in §3): protocol, role-scoped tools, presence lock, `flow::start_card`. Nothing starts it yet —

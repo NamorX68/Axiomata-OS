@@ -26,7 +26,7 @@
 
 import { get, writable, type Readable } from "svelte/store";
 
-import type { AgentFields, IdeAgent, IdeProject } from "../core/backend";
+import type { AgentSpec, IdeAgent, IdeProject } from "../core/backend";
 import { toast } from "../core/toast";
 
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
@@ -294,12 +294,12 @@ async function refreshAgents(): Promise<void> {
   state.update((s) => (s.current?.id === project.id ? { ...s, agents } : s));
 }
 
-/** Adds an agent profile to the open project. Returns it, or `null` on failure. */
-export async function addAgent(fields: AgentFields): Promise<IdeAgent | null> {
+/** Adds an agent, made on an engine, to the open project. Returns it, or `null` on failure. */
+export async function addAgent(spec: AgentSpec): Promise<IdeAgent | null> {
   const project = get(state).current;
   if (!project) return null;
   try {
-    const created = await createAgent(project.id, fields);
+    const created = await createAgent(project.id, spec);
     await refreshAgents();
     return created;
   } catch (err) {
@@ -308,10 +308,10 @@ export async function addAgent(fields: AgentFields): Promise<IdeAgent | null> {
   }
 }
 
-/** Replaces an agent's fields. A running pane picks the change up on restart. */
-export async function editAgent(id: number, fields: AgentFields): Promise<IdeAgent | null> {
+/** Renames an agent and moves it to another engine or role. A running pane picks the change up on restart. */
+export async function editAgent(id: number, spec: AgentSpec): Promise<IdeAgent | null> {
   try {
-    const updated = await updateAgent(id, fields);
+    const updated = await updateAgent(id, spec);
     await refreshAgents();
     return updated;
   } catch (err) {
