@@ -41,7 +41,7 @@ One-time setup for the desktop app:
 
 ```sh
 cargo install tauri-cli --version "^2" --locked
-cd apps/dashboard && npm install
+cd apps/axiomata && npm install
 ```
 
 Build and check the workspace:
@@ -61,7 +61,7 @@ cargo run -p axiomata-cli
 Run the desktop app in hot-reloading dev mode:
 
 ```sh
-cd apps/dashboard && cargo tauri dev
+cd apps/axiomata && cargo tauri dev
 ```
 
 For the full command reference, workspace conventions, and test conventions, see

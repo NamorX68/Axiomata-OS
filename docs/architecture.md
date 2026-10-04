@@ -128,10 +128,10 @@ on its own (`cargo run -p axiomata-terminal --bin term-poc`). `PtySession` (`por
 owns the shell process; `Terminal`/`Screen` (`vte` for tokenizing, a hand-written
 `vte::Perform` for everything the tokens actually *do*) is the cell-grid state machine —
 cursor, SGR colours/attributes, scrollback, the alternate screen (`vim`/`less`/`htop`),
-bracketed paste, and the visual bell. `apps/dashboard/src-tauri/src/terminal.rs` is the thin
+bracketed paste, and the visual bell. `apps/axiomata/src-tauri/src/terminal.rs` is the thin
 Tauri glue (session registry + `terminal_spawn`/`_write`/`_resize`/`_close`/`_scrollback`
 commands, streaming interpreted `Cell` snapshots — not raw bytes — over a Tauri `Channel`);
-`apps/dashboard/src/modules/terminal.svelte` + `TerminalScreen.ts` render it on a `<canvas>`.
+`apps/axiomata/src/modules/terminal.svelte` + `TerminalScreen.ts` render it on a `<canvas>`.
 Full phased build log and the current checkpoint: `docs/plans/terminal.md`.
 
 ### `axiomata-board`
@@ -171,7 +171,7 @@ Today it holds **projects** — a name, a folder, and the dock layout the user l
 it. Three things are load-bearing. `repo_root` is `UNIQUE` and canonicalised before it is
 stored, so `~/x`, `./x` and `/Users/me/x` cannot become three projects fighting over the same
 worktrees from M7.2 on. `layout_json` is **opaque to Rust** — the dock tree belongs to
-`apps/dashboard/src/ide/layout.ts`, the way a tile's config belongs to the frontend in
+`apps/axiomata/src/ide/layout.ts`, the way a tile's config belongs to the frontend in
 `dashboard.json` — and `NULL` means "never opened", which is what triggers the starting
 layout. And **deleting a project removes a row, never a folder**: the folder is the user's,
 the row is ours, which is why the UI calls it "remove from the list".
@@ -276,7 +276,7 @@ such a file under the read-only root `lsp:<handle>` with the absolute path as `r
 for any unknown root. `tests/lsp_live.rs` checks real `rust-analyzer` (diagnostics, hover,
 a definition into the Rust standard library read back) and `pyright` (`#[ignore]`d).
 
-### The editor (`apps/dashboard/src/editor/` + `src/fileapp/`, ED1)
+### The editor (`apps/axiomata/src/editor/` + `src/fileapp/`, ED1)
 
 The file app's own editor, split along the D1 line: **`src/editor/` is the engine** —
 plain TypeScript with no DOM, no Svelte and no imports from the rest of the app, tested
@@ -301,7 +301,7 @@ schema owned by `fileapp/viPersist.ts`), recent files under `settings.editor.rec
 
 **Syntax (ED2)** lives in `src/editor/syntax/`: tree-sitter via `web-tree-sitter` (the only
 library the engine uses — for a sub-problem, like `vte` for the terminal), grammars built by
-`apps/dashboard/scripts/build-grammars.sh` from pinned tags and checked in under
+`apps/axiomata/scripts/build-grammars.sh` from pinned tags and checked in under
 `public/grammars/`, loaded on first use through an injected `GrammarSource`. The tree follows
 every edit incrementally via `EditorDocument.onTextChange`; only visible lines are queried;
 injected languages (Markdown fences, Svelte `<script>`) are parsed apart and cached by text.
@@ -322,11 +322,11 @@ turn, `--allowed-tools` kept for API symmetry — the opencode harness auto-appr
 `import obsidian`, `graph`, `modules`, `module-action`. Run it with
 `cargo run -p axiomata-cli -- <subcommand>`.
 
-### `apps/dashboard/src-tauri`
+### `apps/axiomata/src-tauri`
 
 The Tauri shell, Cargo package name `Axiomata-OS` (matches what the macOS menu bar shows
 during `cargo tauri dev`, since a dev run has no bundled `.app`/`Info.plist`; the `[lib]`
-target stays `dashboard_lib`). Depends on `axiomata-core` via a path dependency. Its
+target stays `axiomata_lib`). Depends on `axiomata-core` via a path dependency. Its
 `.setup()` hook (`bootstrap.rs`) calls `AxiomataCore::init()`, kicks off a best-effort memory
 sync on a background thread, starts the routine scheduler
 (`tauri::async_runtime::spawn(routines::serve(…))`, stop handle managed), and stores the
@@ -338,7 +338,7 @@ across restarts) and `tauri-plugin-dialog` (the file app's open dialog — calle
 and the managed `FileWatch`; `lib.rs`'s `on_page_load` drops every file subscription when the
 page reloads. See §5 for the full command surface and the Svelte frontend.
 
-### `apps/dashboard/src` (frontend)
+### `apps/axiomata/src` (frontend)
 
 Svelte 5 + Vite + TS: `core/` (stores, registry, lifecycle, persist, commands, chat, staging,
 agent-bridge, backend types + `devmock` for browser-only development), `canvas/` (Canvas,
@@ -738,7 +738,7 @@ carrying its own config.
 `axiomata_core::graph::build` (command `get_workspace_graph`) walks every tracked file
 (reusing the memory walker) plus skills and routines as graph nodes, and every `[[wiki]]` /
 relative Markdown link / relative HTML `href` as an edge, capped at 5000 files. The frontend
-(`apps/dashboard/src/graph/`) renders this with Canvas 2D (no graph library) in three
+(`apps/axiomata/src/graph/`) renders this with Canvas 2D (no graph library) in three
 full-view layouts (Rings, Circle, Hex — a hex-grid mosaic of file cells sized to match Rings'
 band) plus a separate `layoutOrbit` used only by the dashboard-centre background widget (a
 spinning 3-D fibonacci-sphere point cloud inside a wireframe geodesic, with skills/routines/
@@ -830,7 +830,7 @@ folder, `newproject::create_project_folder` makes a new folder (optionally `git 
 database or macOS-only code, so it builds and tests anywhere `git` runs. `axiomata-ide::git` (agent worktrees) sits on
 it through thin wrappers that keep the IDE's error type; the editor's git panel talks to it through `src-tauri/src/git.rs`.
 
-**CP1 is done too**: `apps/dashboard/src/ide/layout.ts` is the dock-layout model — a tree of
+**CP1 is done too**: `apps/axiomata/src/ide/layout.ts` is the dock-layout model — a tree of
 `Split { dir, children, sizes }` and `TabGroup { tabs, active }` with docking, moving,
 closing and divider dragging, plus the serialisation that fills CP0's `layout_json`. Pure
 logic with its own vitest file and no DOM, the same cut as `core/kanban.ts`; `IdeView.svelte`
@@ -847,7 +847,7 @@ dropped or renamed rather than trusted — and returns `null` when nothing usabl
 a truncated `layout_json` opens the starting layout instead of an empty IDE that looks like
 data loss.
 
-**CP2 is the view.** `apps/dashboard/src/ide/` now holds `IdeView.svelte` (full screen, owns
+**CP2 is the view.** `apps/axiomata/src/ide/` now holds `IdeView.svelte` (full screen, owns
 the layout and every drag), `DockNode.svelte` (the tree, drawn recursively; a child's
 `flex-grow` *is* its stored fraction, so there is no second place a size lives),
 `PaneGroup.svelte` (tab bar, stacked panes, drop highlight) and `panes/PaneHost.svelte`. The

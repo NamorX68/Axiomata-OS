@@ -76,7 +76,7 @@ für die IDE muss auch Projektordner und Agenten-Worktrees öffnen.
 **Bauweise**
 
 - **D1 — Engine in TypeScript** (Q1): Puffer, Cursor, Auswahl, Undo, Vi-Automat und
-  Layout leben als eigenständiges Paket `apps/dashboard/src/editor/` — ohne Svelte, mit
+  Layout leben als eigenständiges Paket `apps/axiomata/src/editor/` — ohne Svelte, mit
   `vitest` getestet (wie `ide/layout.ts`). Grund: Der Text lebt, wo er gezeichnet wird;
   Eingabe mit Umlauten, toten Tasten und Mac-Eingabemethode passiert im Webview, und
   jeder Tastendruck ohne IPC-Umlauf hält den animierten Cursor flüssig. Anders als beim
@@ -425,7 +425,7 @@ hier der Stand, damit die Lücke zwischen ED6 und heute sichtbar ist:
   Renderer ist `core/markdown.ts`; relative Bilder über den Dateidienst mit der Wurzel der
   Datei; synchroner Bildlauf über `data-line`-Marken je Block.
 - **G9 — Ablage** (Q11): gebaute Grammatiken und Abfragen eingecheckt unter
-  `apps/dashboard/public/grammars/`, geladen per `fetch` erst beim ersten Bedarf.
+  `apps/axiomata/public/grammars/`, geladen per `fetch` erst beim ersten Bedarf.
 - **G10 — Eingebettete Sprachen** (Q12): `injections.scm` in ED2 (Markdown-Codeblöcke,
   `<script>`/`<style>` in Svelte und HTML).
 - **G11 — Spracherkennung** (Q13): Endung, einige Dateinamen, sonst Shebang; ein manueller

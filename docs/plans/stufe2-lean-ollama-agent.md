@@ -825,7 +825,7 @@ point at `stufe2-cp3-bakeoff.md` for model status.
 
 ### B. Settings hint (small UI)
 
-`apps/dashboard/src/shell/Settings.svelte` (~line 423, under the
+`apps/axiomata/src/shell/Settings.svelte` (~line 423, under the
 `skill_provider` `<select>`): a hint line shown only when
 `config.agents.skill_provider === "ollama"`, e.g. *"Connector digests run
 locally via the tool-call agent — no cloud cost."* All colours/sizes via
@@ -899,7 +899,7 @@ already hand-synced (verified in the CP3 session); the bake-off's scratch
 Docs (§A) updated; the Settings hint (§B) ships and `npm run check` is clean;
 §C polish applied; §D and §E decisions recorded (a note is a valid outcome);
 §F handled (note or `reseed` command). `cargo fmt` / `clippy --all-targets -D
-warnings` / `cargo test --workspace` clean; `cd apps/dashboard && npm run
+warnings` / `cargo test --workspace` clean; `cd apps/axiomata && npm run
 check` clean. Update this plan's status line and check off CP4.
 
 ### After CP4 — operational, not a checkpoint

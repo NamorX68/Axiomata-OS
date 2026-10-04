@@ -250,7 +250,7 @@ Alle drei Anzeigeorte sind vom Owner ausdrücklich gewünscht, nicht optional.
 - `cargo build --workspace`, `cargo test --workspace`,
   `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`
   (gebündelt am Ende, gemäß der Kadenzregel in `CLAUDE.md`).
-- `cd apps/dashboard && npm run check && npx vitest run`.
+- `cd apps/axiomata && npm run check && npx vitest run`.
 - Rust-Tests: Zustands-Parser; tolerantes Plan-Lesen beider Formate (inkl. Müll ⇒
   `None`); `install` ist idempotent; `reset` leert `state`, nicht den Plan;
   `forget` entfernt nur das eigene Task-Verzeichnis. Dazu ein Test, der eine erzeugte Hook-Zeile

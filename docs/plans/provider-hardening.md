@@ -188,7 +188,7 @@ now works.
 
 (Was HIGH in the `settings-provider-overhaul` security audit.) `get_config` used to hand the
 renderer the whole `Config` over IPC — every `providers[*].api_key` and every
-`agents.claude_env` value. Fixed in `apps/dashboard/src-tauri/src/commands.rs`:
+`agents.claude_env` value. Fixed in `apps/axiomata/src-tauri/src/commands.rs`:
 
 - New **`ConfigView`** (`get_config` return): `ProviderSettingsView` carries `has_key: bool`
   instead of the key; `claude_env` is reduced to **`claude_env_keys: Vec<String>`** (names

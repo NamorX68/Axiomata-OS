@@ -75,7 +75,7 @@ die Funktion kann nicht dort leben, wo man sie zuerst vermutet:
 - Verbraucher-Verträge, die stabil bleiben müssen: `mail-digest` emittiert
   exakt ein JSON-Objekt `{"emails": [{id, sender, subject, date, reason,
   topic, summary}]}` (`resources/mail-digest/SKILL.md:76-78`), das
-  `parseMailDigest`/`mail.svelte` (`apps/dashboard/src/modules/`) parsen und
+  `parseMailDigest`/`mail.svelte` (`apps/axiomata/src/modules/`) parsen und
   nach `reason === "important"|"topic"` filtern. **Nur additiv erweitern**
   (z. B. optionales `confidence`-Feld), Parser-Toleranz vorab verifizieren.
 - `cleanup` läuft auf Backend `claude-code` (löst zu `Opencode` auf,

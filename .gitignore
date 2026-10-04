@@ -2,12 +2,12 @@
 /target/
 **/target/
 
-# Node / frontend (apps/dashboard)
+# Node / frontend (apps/axiomata)
 node_modules/
 dist/
 
 # Tauri build output
-apps/dashboard/src-tauri/target/
+apps/axiomata/src-tauri/target/
 
 # macOS
 .DS_Store

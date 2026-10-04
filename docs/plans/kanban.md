@@ -337,7 +337,7 @@ die dritte anzuschneiden.
 
 - `cargo build --workspace`, `cargo test --workspace`,
   `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`.
-- `cd apps/dashboard && npm run check && npx vitest run`.
+- `cd apps/axiomata && npm run check && npx vitest run`.
 - Der Kern ist ab CP-K1 eigenständig testbar, bevor eine Zeile Oberfläche
   existiert — dieselbe Reihenfolge wie beim Terminal.
 - Gebündelte Sub-Agent-Läufe pro Checkpoint und vor jedem Commit, gemäß der

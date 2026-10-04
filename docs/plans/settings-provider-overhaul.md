@@ -218,7 +218,7 @@ fresh snapshot right before each `tick()` call (the guard is a temporary, droppe
 changes — only the four outer loop-owning functions and one scheduler test's `spawn_with_interval`
 call site.
 
-## Phase 4 — Settings UI (`apps/dashboard/src/shell/Settings.svelte`)
+## Phase 4 — Settings UI (`apps/axiomata/src/shell/Settings.svelte`)
 
 - **Vault section**: current path (read-only display, matches today's "About" `Workspace` row),
   a folder picker (check whether the Tauri dialog plugin is already a dependency; add it if not)

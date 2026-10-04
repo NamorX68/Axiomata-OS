@@ -51,11 +51,11 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>
 
-cd apps/dashboard && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
-cd apps/dashboard && npm run check         # svelte-check + tsc (must be clean)
-cd apps/dashboard && npx vite --port 1420  # frontend alone in a browser: Tauri commands are
+cd apps/axiomata && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
+cd apps/axiomata && npm run check         # svelte-check + tsc (must be clean)
+cd apps/axiomata && npx vite --port 1420  # frontend alone in a browser: Tauri commands are
                                            # served by src/core/devmock.ts fixtures (DEV only)
-cd apps/dashboard && npx vitest run        # frontend unit tests (pure TS logic, e.g. core/*.ts)
+cd apps/axiomata && npx vitest run        # frontend unit tests (pure TS logic, e.g. core/*.ts)
 ```
 
 For browser-level checks (`agent-browser` against `vite --port 1420`) the mock backend
@@ -63,9 +63,9 @@ returns fixture data; anything that needs the real Rust side (persistence, file 
 the agent) is verified by launching `cargo tauri dev` under a scratch `AXIOMATA_HOME`.
 
 One-time setup for the Tauri app: `cargo install tauri-cli --version "^2" --locked`, and
-`cd apps/dashboard && npm install`.
+`cd apps/axiomata && npm install`.
 
-Dev-only: a local `apps/dashboard/.env.local` with `VITE_AXIOMATA_DISABLE_AUTO_REFRESH=true`
+Dev-only: a local `apps/axiomata/.env.local` with `VITE_AXIOMATA_DISABLE_AUTO_REFRESH=true`
 skips the calendar/mail/reminders modules' mount-time auto-refresh (each is a billed
 `run_skill` agent turn) on repeated `cargo tauri dev` restarts — cached digests still load,
 and each module's manual ↻ still runs regardless (`core/devFlags.ts`).
@@ -145,7 +145,7 @@ from the code itself:
   `core/`; `src/fileapp/` depends on it, never the reverse (D1, extractable for ED7). Its
   `EditorDocument` is a mutable class: a Svelte component redraws via its own counter after
   every `doc.*` call, not via Svelte reactivity (`EditorSurface.svelte`'s header).
-- **tree-sitter grammars are built, not downloaded at runtime**: `apps/dashboard/scripts/build-grammars.sh
+- **tree-sitter grammars are built, not downloaded at runtime**: `apps/axiomata/scripts/build-grammars.sh
   [name…]` (pinned tags, pinned `tree-sitter-cli`) writes `public/grammars/`, which is checked in. Never read
   a tree-sitter `node.text` — `web-tree-sitter` re-calls the parse callback with a stale position; slice the
   `TextStore` instead (`syntax/highlighter.ts`). The CSP's `'wasm-unsafe-eval'` exists for tree-sitter.

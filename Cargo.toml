@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "apps/dashboard/src-tauri"]
+members = ["crates/*", "apps/axiomata/src-tauri"]
 
 [workspace.package]
 edition = "2024"

@@ -41,7 +41,7 @@ Kern des Konzepts:
 |---|---|---|
 | PTY-/VT100-Engine | `crates/axiomata-terminal` | Trägt jedes Agent-Fenster |
 | `PtySession::spawn(…)` | `crates/axiomata-terminal/src/pty.rs:76` | Startet `claude`/`opencode` im Worktree |
-| Terminal-Frontend | `apps/dashboard/src/modules/terminal.svelte` + `TerminalScreen.ts` | Terminal- und Agent-Pane |
+| Terminal-Frontend | `apps/axiomata/src/modules/terminal.svelte` + `TerminalScreen.ts` | Terminal- und Agent-Pane |
 | Dateibetrachter/-editor | `shell/StagingPanel.svelte`, `core/staging.ts` | Diff → Datei öffnen und bearbeiten |
 | Modul-Kontrakt | `core/types.ts` (`ModuleContext`) | Adapter, um Module ohne `Tile` zu mounten |
 | Agenten-Harness + Sessions | `crates/axiomata-core/src/agents/` | Modellaufrufe, Session-Resume |
@@ -128,10 +128,10 @@ und weitere Provider-Arbeit sind nach hinten gestellt.
 - **`axiomata-core`** — bekommt die Persistenz (Migration für `boards`, `cards`,
   `projects`, `ide_agents`, `plan_steps`, `agent_messages`) und die dritte
   Provider-Rolle.
-- **`apps/dashboard/src-tauri`** — dünne Befehlsschicht wie schon bei
+- **`apps/axiomata/src-tauri`** — dünne Befehlsschicht wie schon bei
   `terminal.rs`.
 
-### Frontend (`apps/dashboard/src/ide/`)
+### Frontend (`apps/axiomata/src/ide/`)
 
 - `IdeView.svelte` — die Vollbild-Ansicht.
 - `layout.ts` — reines Dock-Baum-Modell, unit-testbar ohne DOM:
@@ -452,7 +452,7 @@ und ein Projektwechsel, der das Layout wiederherstellt.
 
 - `cargo build --workspace`, `cargo test --workspace`,
   `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`.
-- `cd apps/dashboard && npm run check && npx vitest run`.
+- `cd apps/axiomata && npm run check && npx vitest run`.
 - Die reinen Modelle (Board-Kern, `ide/layout.ts`, Postfach-Kern, Git-Engine)
   sind von ihrem jeweils ersten Checkpoint an eigenständig testbar — dieselbe
   Reihenfolge, die sich beim Terminal bewährt hat (Engine zuerst, Oberfläche

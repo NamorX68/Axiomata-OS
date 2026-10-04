@@ -94,11 +94,11 @@ späteres Feature, kein rückwirkender Bruch dieser Entscheidung.
   um `json_state` mit dem eigenen Pfad (`~/.axiomata/terminal-settings.json`,
   neu in `paths.rs`) und Default (`{"version":1}`, keine
   vorausgesetzten Felder — jedes Feld ist eine optionale Owner-Präferenz).
-- **`apps/dashboard/src-tauri/src/commands.rs`**: zwei neue Commands
+- **`apps/axiomata/src-tauri/src/commands.rs`**: zwei neue Commands
   `get_terminal_settings`/`save_terminal_settings`, exakt dasselbe
   Übersetzungs-Muster wie `get_dashboard_state`/`save_dashboard_state` —
   registriert in `lib.rs`.
-- **`apps/dashboard/src/modules/terminalSettings.ts`** (neu): der
+- **`apps/axiomata/src/modules/terminalSettings.ts`** (neu): der
   Frontend-Store — `terminalSettings: Writable<Record<string, unknown>>`,
   `ensureTerminalSettingsLoaded()` (einmaliger, idempotenter Lazy-Load beim
   ersten Bedarf, nicht beim App-Start), automatisches debounced Speichern
@@ -648,7 +648,7 @@ eine Font-Fidelity-Lücke.
   Icon-Glyphen auf exakt eine Zeichenzelle Breite, im Unterschied zur
   Standard-Variante) extrahiert, von TTF zu WOFF2 konvertiert
   (`fonttools ttLib.woff2 compress`, ~1 MB pro Gewicht) und unter
-  `apps/dashboard/public/fonts/` gebündelt (Vite-Konvention für
+  `apps/axiomata/public/fonts/` gebündelt (Vite-Konvention für
   unverändert durchgereichte statische Assets — kein npm-Paket für die
   gepatchte Version verfügbar, nur für die ungepatchte Basisschrift). Neue
   `terminal-nerd-fonts.css` mit den drei `@font-face`-Regeln, importiert
@@ -1077,7 +1077,7 @@ System-Ton.
   Tastenkombination mit dem bekannten Systemton ("Beep of Doom"), unabhängig
   davon, dass der Maus-Drag (`handlePointerUp`) die Zwischenablage vorher
   schon korrekt per `navigator.clipboard.writeText` befüllt hatte.
-- **Fix (`apps/dashboard/src/modules/terminal.svelte`)**: neuer
+- **Fix (`apps/axiomata/src/modules/terminal.svelte`)**: neuer
   `oncopy={handleCopy}`-Handler auf demselben versteckten `<input
   class="typer">`, das auch `onpaste` schon trägt — ruft immer
   `e.preventDefault()` (verhindert, dass WKWebViews eigener,
@@ -1116,7 +1116,7 @@ nie beim Hot-Reload während der Entwicklung.
   Hot-Reload ist der Font durch eine frühere Ladung im selben
   Browser-Prozess schon warm (`document.fonts.check` liefert sofort
   `true`), weshalb die Race dort nie auftritt.
-- **Fix (`apps/dashboard/src/modules/terminal.svelte`)**: `spawn()` misst
+- **Fix (`apps/axiomata/src/modules/terminal.svelte`)**: `spawn()` misst
   direkt nachdem `sessionId` gesetzt ist noch einmal
   (`measureAndSize()` + `scheduleResize(...)`) — schließt die Race
   unabhängig davon, in welcher Reihenfolge Font-Laden und IPC-Call
@@ -1176,7 +1176,7 @@ Scroll-Gefühl in `neovim`; Frage, ob GPU-Rendering (à la Ghostty) nötig wäre
 ### Problem 1: Flackern bei Full-Screen-Redraws + unnötiges Idle-Redraw
 
 - **Root Cause**: `terminal_spawn`s Reader-Thread
-  (`apps/dashboard/src-tauri/src/terminal.rs`) sendete pro einzelnem
+  (`apps/axiomata/src-tauri/src/terminal.rs`) sendete pro einzelnem
   PTY-`read()` (bis 4096 Byte) sofort einen vollständigen Grid-Snapshot per
   IPC — völlig ungedrosselt. Ein Full-Screen-Redraw verteilt sich über 5-15
   `read()`-Aufrufe; das Frontend (`terminal.svelte`) überschrieb `liveRows`
@@ -1314,7 +1314,7 @@ Erklär-Exkurse, aber auf Wunsch jederzeit möglich.
 
 Drei Schichten, nach dem im Projekt bereits etablierten Muster "reiner
 Rust-Kern (`crates/axiomata-core`) + dünner Tauri-Kleber
-(`apps/dashboard/src-tauri`) + Frontend" — hier neu für die Terminal-Domäne:
+(`apps/axiomata/src-tauri`) + Frontend" — hier neu für die Terminal-Domäne:
 
 ```
 crates/axiomata-terminal/          Neue, eigenständige Rust-Crate.
@@ -1327,7 +1327,7 @@ crates/axiomata-terminal/          Neue, eigenständige Rust-Crate.
   └─ Terminal-Zustandsmaschine: Bildschirm-Grid, Cursor, Scrollback
      (komplett selbst geschrieben — hier steckt der Lernwert)
 
-apps/dashboard/src-tauri/src/terminal.rs    Neue, eigene Datei (NICHT in die
+apps/axiomata/src-tauri/src/terminal.rs    Neue, eigene Datei (NICHT in die
   │                                          schon sehr große commands.rs
   │                                          hineinwachsen lassen).
   ├─ hält eine Registry laufender Terminal-Sessions (Tauri-managed State,
@@ -1337,7 +1337,7 @@ apps/dashboard/src-tauri/src/terminal.rs    Neue, eigene Datei (NICHT in die
      (die IPC-Streaming-API, extra für genau solche Fälle gedacht — statt
      vieler einzelner `invoke`/Event-Aufrufe für jedes Byte-Häppchen)
 
-apps/dashboard/src/modules/terminal/        Neuer, eigenständiger Modul-
+apps/axiomata/src/modules/terminal/        Neuer, eigenständiger Modul-
   │                                          Ordner (folgt dem bestehenden
   │                                          ModuleDefinition-Vertrag aus
   │                                          core/types.ts).
@@ -1456,9 +1456,9 @@ erst in Checkpoint 3, wenn es ein echtes Bildschirm-Modell gibt, aus dem sich
 sinnvoll etwas zeichnen lässt).
 
 **Neue/geänderte Dateien**:
-- `apps/dashboard/src-tauri/Cargo.toml`: `axiomata-terminal = { path =
+- `apps/axiomata/src-tauri/Cargo.toml`: `axiomata-terminal = { path =
   "../../../crates/axiomata-terminal" }` als Abhängigkeit ergänzen.
-- `apps/dashboard/src-tauri/src/terminal.rs` (neu):
+- `apps/axiomata/src-tauri/src/terminal.rs` (neu):
   - `TerminalSessions` — Tauri-managed State, hält eine
     `HashMap<String, axiomata_terminal::PtySession>` (Session-Id → Session),
     hinter einem `Mutex` (gleiches Muster wie andere gemeinsam genutzte
@@ -1475,17 +1475,17 @@ sinnvoll etwas zeichnen lässt).
   - `#[tauri::command] fn terminal_close(sessions: ..., id: String) ->
     Result<(), String>` — beendet den Shell-Prozess, entfernt die Session
     (Checkpoint-0-Entscheidung: sofort beenden, kein Andocken).
-- `apps/dashboard/src-tauri/src/lib.rs`: die vier neuen Befehle in
+- `apps/axiomata/src-tauri/src/lib.rs`: die vier neuen Befehle in
   `generate_handler!` registrieren, `app.manage(terminal::TerminalSessions::default())`
   im `.setup()`.
-- `apps/dashboard/src/modules/terminal/terminal.svelte` (neu): minimale
+- `apps/axiomata/src/modules/terminal/terminal.svelte` (neu): minimale
   Komponente — ruft beim Mounten `terminal_spawn` auf (Kachel-Größe grob in
   Zeilen/Spalten umgerechnet, exakte Zeichen-Metrik-Berechnung kommt erst in
   Checkpoint 3), hängt jedes über den `Channel` ankommende Byte-Häppchen als
   Text an ein scrollendes `<pre>`-Element an, ein `<input>` (oder
   `contenteditable`) leitet Tastatur-Eingaben roh an `terminal_write`
   weiter. Ruft `terminal_close` beim Zerstören der Komponente (`onDestroy`).
-- `apps/dashboard/src/core/registry.ts` (oder wo auch immer Module aktuell
+- `apps/axiomata/src/core/registry.ts` (oder wo auch immer Module aktuell
   registriert werden — beim Umsetzen den echten Registrierungsort
   verifizieren): neuer Eintrag mit `type: "terminal"`, `icon`: das
   `"terminal"`-Glyph aus `graph/render.ts`s `GLYPH_CODEPOINTS` gibt es
@@ -1552,7 +1552,7 @@ Sub-Agent-Durchlauf und einen eigenen Commit, kein großer Rutsch.
   (ungültiger Pfad = Spawn-Fehler, kein stiller Fallback). Der Standard,
   den die Einstellungsseite vorschlägt (aber nicht erzwingt): der
   Second-Brain-Workspace-Root — das Frontend müsste dafür `config.workspace_root`
-  (schon Teil von `get_app_info`, siehe `apps/dashboard/src-tauri/src/commands.rs`)
+  (schon Teil von `get_app_info`, siehe `apps/axiomata/src-tauri/src/commands.rs`)
   kennen; prüfen, ob `ModuleContext` das schon hergibt oder ob
   `terminal.svelte` dafür `get_app_info` selbst aufrufen muss (kein
   Präzedenzfall bisher — andere Module lesen so etwas nicht direkt).
@@ -1629,7 +1629,7 @@ aller neuen Einstellungen zusammen mit dem damals noch offenen CP4/5-Live-Test (
   die Engine-Crate ist von Checkpoint 0 an eigenständig testbar, unabhängig
   vom Rest der App.
 - Ab Checkpoint 1 zusätzlich: `cargo build --workspace`/`cargo test
-  --workspace` (Tauri-Kleber-Schicht), `cd apps/dashboard && npm run check
+  --workspace` (Tauri-Kleber-Schicht), `cd apps/axiomata && npm run check
   && npx vitest run`.
 - Manuelle Prüfung in `cargo tauri dev` bleibt für alles, was mit echtem
   Terminal-*Gefühl* zu tun hat (Tippgefühl, Darstellung, Farben) unverzichtbar

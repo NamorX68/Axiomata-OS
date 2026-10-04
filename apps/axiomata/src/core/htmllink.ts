@@ -15,7 +15,7 @@
  *    unresolvable: WebKit resolves it against the embedding app's base URL
  *    (`http://localhost:1420/`, say) rather than treating it as an
  *    in-document scroll, and actually navigates the iframe there —
- *    reloading the whole dashboard shell *inside* the lesson frame, which
+ *    reloading the whole app shell *inside* the lesson frame, which
  *    then fails on CORS (opaque `null` origin) and renders blank
  *    (owner-reported, 2026-09-04). Intercepted and handled manually with a
  *    plain `getElementById` + `scrollIntoView`, never letting the browser's

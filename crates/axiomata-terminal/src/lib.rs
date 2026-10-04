@@ -12,7 +12,7 @@
 //! latter only knows about interpreting those bytes, so either is
 //! independently testable (`Terminal` needs no real PTY at all — see
 //! `screen.rs`'s tests) and a caller wires them together (see
-//! `apps/dashboard/src-tauri/src/terminal.rs`). `Screen` itself has since
+//! `apps/axiomata/src-tauri/src/terminal.rs`). `Screen` itself has since
 //! grown scrollback, an alternate screen, and bracketed-paste tracking
 //! (Checkpoint 4) — see its own module doc comment for the current state.
 

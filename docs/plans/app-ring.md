@@ -461,7 +461,7 @@ Geändert:
 - `cargo test --workspace` (neuer Scan-Unit-Test)
 - `cargo clippy --workspace -- -D warnings`
 - `cargo fmt --check`
-- manuell: `cd apps/dashboard && cargo tauri dev`
+- manuell: `cd apps/axiomata && cargo tauri dev`
 
 ## Kurswechsel: Icons doch nicht rasterisiert, sondern Vektor-Glyphen
 
