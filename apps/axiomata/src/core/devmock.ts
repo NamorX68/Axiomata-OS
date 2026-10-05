@@ -1598,6 +1598,23 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "open_card_sessions":
       return [] as T;
+    case "take_over_plan": {
+      const plan = boardPlans.find((p) => p.id === args.id);
+      if (!plan) throw new Error(`no plan ${String(args.id)}`);
+      const taken = boardCards.filter((c) => c.plan_id === plan.id && c.integrated_at);
+      boardCards = boardCards.map((c) =>
+        taken.some((t) => t.id === c.id) ? { ...c, state: "taken_over", archived_at: new Date().toISOString() } : c,
+      );
+      boardPlans = boardPlans.map((p) => (p.id === plan.id ? { ...p, status: "closed" } : p));
+      return {
+        outcome: "done",
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        project_id: plan.project_id ?? 1,
+        plan_id: plan.id,
+        card_ids: taken.map((c) => c.id),
+        cleanup: [],
+      } as T;
+    }
     case "take_over_card":
       return { outcome: "done", commit: "0123456789abcdef0123456789abcdef01234567", project_id: 1, cleanup: [] } as T;
     // No mail in the browser mock: there is never a line to type.

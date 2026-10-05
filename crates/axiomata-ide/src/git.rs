@@ -103,6 +103,9 @@ pub enum TakeOverMode {
     Squash,
     /// A merge commit that keeps the agent's commits.
     NoFf,
+    /// The agent's commits as they are, on top of the base when the base has not moved (a fast-forward), else as
+    /// [`TakeOverMode::NoFf`]. What the take-over of a plan's line uses: every card on it is one commit already.
+    Linear,
 }
 
 /// What [`take_over`] did. A conflict is an ordinary outcome, not an error —
@@ -911,14 +914,37 @@ pub fn take_over(request: TakeOverRequest<'_>) -> Result<TakeOver> {
             // was checked clean above.
             git(worktree, &["reset", "--quiet", "--hard", base_branch])?;
         }
-        TakeOverMode::NoFf => {
-            if let Err(err) = git(
-                repo_root,
-                &["merge", "--no-ff", "--quiet", "-m", message, agent_branch],
-            ) {
+        TakeOverMode::NoFf | TakeOverMode::Linear => {
+            // A plan's line carries what agents wrote: its merge runs without hooks, like every git the studio runs on
+            // agent work (a tracked hook script, a `core.hooksPath` an agent set, would otherwise run inside the click).
+            let linear = mode == TakeOverMode::Linear;
+            let merge = |args: &[&str]| {
+                if linear {
+                    git_agent(repo_root, args)
+                } else {
+                    git(repo_root, args)
+                }
+            };
+            let moves_forward = linear
+                && git_with(
+                    repo_root,
+                    &["merge-base", "--is-ancestor", base_branch, agent_branch],
+                    &[0, 1],
+                )?
+                .0 == 0;
+            if moves_forward {
+                merge(&["merge", "--ff-only", "--quiet", agent_branch])?;
+            } else if let Err(err) =
+                merge(&["merge", "--no-ff", "--quiet", "-m", message, agent_branch])
+            {
                 return undo_or_fail(repo_root, &["merge", "--abort"], err);
             }
-            git(worktree, &["merge", "--quiet", "--ff-only", base_branch])?;
+            let caught_up = git(worktree, &["merge", "--quiet", "--ff-only", base_branch]);
+            // The work is on the base from here on. A line is removed right after, so its catching up is not worth an
+            // error that would leave the plan open with its work already taken over.
+            if !linear {
+                caught_up?;
+            }
         }
     }
     Ok(TakeOver::Done {

@@ -18,6 +18,7 @@
     type CardTier,
     type IdeProject,
     type PlanSession,
+    type PlanTakeOver,
   } from "../../core/backend";
   import { boardStore, refreshBoard, type BoardData } from "../../core/boardStore";
   import { emit } from "../../core/bus";
@@ -37,8 +38,12 @@
     proposalsOf,
     proposalTitle,
     cardsOfPlan,
+    readyToTakeOver,
     runsByItself,
   } from "../planning";
+  import { gitApi } from "../../fileapp/gitBackend";
+  import { projectRootId } from "../../fileapp/projectModel";
+  import { unpushedNote } from "../cardStart";
   import { refreshAgents, session } from "../projectSession";
   import { engineCatalog, engineLine, refreshEngines } from "../rosterStore";
 
@@ -123,6 +128,17 @@
     const id = boardId;
     const timer = setInterval(() => void refreshBoard(id), 3000);
     return () => clearInterval(timer);
+  });
+
+  // The board changes from outside the app too (the CLI, an agent): the plans are read again when the pane is shown and
+  // when the window gets the focus back, as the Kanban does — the shared store does not poll.
+  $effect(() => {
+    if (!visible || boardId === null) return;
+    const id = boardId;
+    void refreshBoard(id);
+    const again = () => void refreshBoard(id);
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
   });
 
   async function run(step: () => Promise<unknown>): Promise<boolean> {
@@ -292,6 +308,39 @@
             : `Plan freigegeben: ${moved} Karte(n) warten in der ersten offenen Spalte.`,
         "info",
       );
+    });
+  }
+
+  /* ----------------------------------------------------- take the plan over --- */
+
+  /** The files that conflict with the project's branch; the plan is as it was. */
+  let takeOverConflict = $state<string[]>([]);
+
+  /** The studio never pushes: the owner is told what waits, and pushes from the Studio's Git tab. */
+  async function sayWhatIsNotPushed(projectId: number): Promise<void> {
+    try {
+      const state = await gitApi.status(projectRootId(projectId));
+      const note = state.state === "ready" ? unpushedNote(state.status) : null;
+      if (note) toast(note, "warning");
+    } catch {
+      // The note is a courtesy; the Git tab shows the same number.
+    }
+  }
+
+  async function takeOverPlan(): Promise<void> {
+    if (!plan) return;
+    const current = plan;
+    takeOverConflict = [];
+    await run(async () => {
+      const result = await invoke<PlanTakeOver>("take_over_plan", { id: current.id });
+      if (result.outcome === "conflict") {
+        takeOverConflict = result.files;
+        return;
+      }
+      await Promise.all([reload(), refreshAgents()]);
+      toast(`Plan „${current.name}“ ist übernommen (${result.commit.slice(0, 8)}): ${result.card_ids.length} Karte(n).`, "info");
+      for (const note of result.cleanup) toast(`Nicht aufgeräumt: ${note}`, "warning");
+      await sayWhatIsNotPushed(result.project_id);
     });
   }
 
@@ -538,6 +587,23 @@
               : "Die Vorschläge wandern in die erste offene Spalte; du startest jede Karte selbst."}
             Der Planer ist danach fertig.
           </span>
+        </div>
+      {/if}
+
+      {#if readyToTakeOver(plan, cards)}
+        <div class="approve">
+          <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverPlan()}>
+            Plan übernehmen
+          </button>
+          <span class="muted">
+            Alle Karten sind auf der Linie des Plans. Die Arbeit geht in den Hauptzweig des Projekts, ihre Commits bleiben
+            einzeln, solange der Zweig sich nicht bewegt hat. Es wird nichts gepusht; ein Konflikt wird zurückgenommen.
+          </span>
+          {#if takeOverConflict.length > 0}
+            <p class="error" role="alert">
+              Konflikt mit dem Hauptzweig, nichts wurde verändert: {takeOverConflict.join(", ")}
+            </p>
+          {/if}
         </div>
       {/if}
 

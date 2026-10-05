@@ -207,6 +207,7 @@ pub fn run() {
             commands::release_card,
             commands::start_review_session,
             commands::take_over_card,
+            commands::take_over_plan,
             commands::open_card_sessions,
             commands::list_card_events,
             commands::card_usage,

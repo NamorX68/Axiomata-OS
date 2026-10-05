@@ -1593,7 +1593,7 @@ until the profile-derived assignment gives them one. Also: a session may send at
 
 ### A2A CP-A8a built (2026-10-05)
 
-A plan that runs by itself (`docs/plans/a2a.md` "CP-A8 im Detail"): migrations 20/21 (`plans.project_id/base_branch/line_tip`, `cards.integrated_at`, `TaskState::Integrated`); `axiomata_ide::plan_line` (the plan's **integration line** `axiomata/line/<id>` with its own worktree (`.lines/<id>`): `ensure`,
+A plan that runs by itself (`docs/plans/a2a.md` "CP-A8 im Detail"): migrations 20/21 (`plans.project_id/base_branch/line_tip`, `cards.integrated_at`, `TaskState::Integrated`); `axiomata_ide::plan_line` (the plan's **integration line** `axiomata/line/<id>` with its own worktree (`.lines/<id>`): `ensure`, CP-A8b: `card_session::take_over_plan` + `plan_line::take_over`/`remove` (`TakeOverMode::Linear`: the cards' commits as they are, a merge commit when the branch moved), Tauri `take_over_plan`, CLI `board take-over-plan`, the Flow's "Plan übernehmen" button.
 `integrate` — squash per card, no hooks), `worktree::add_from`/`provision` (a fresh agent branch is cut from the recorded base); `card_session::{line_for_start, integrate_card}` and `axiomata_core::plan_run::PlanRun` (ready cards start as far as dependencies allow, capped by `agents.max_parallel_sessions`; reviewed
 cards are integrated; a conflicting card is put back once, then left for the owner), run every 5 s by the app's `plan_watch` task with the `plan:run` event; the Flow's "Automatisch abarbeiten". The take-over of the line into the main line is 8b.
 

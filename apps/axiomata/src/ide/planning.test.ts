@@ -19,6 +19,7 @@ import {
   proposalsOf,
   proposalTitle,
   runEventNote,
+  readyToTakeOver,
   runsByItself,
   withPlanPane,
 } from "./planning";
@@ -169,6 +170,31 @@ describe("a plan that runs by itself", () => {
     expect(runsByItself({ ...base, auto_start_max: null })).toBe(false);
     expect(runsByItself({ ...base, project_id: null })).toBe(false);
     expect(runsByItself({ status: "approved", auto_start_max: 1 })).toBe(false);
+  });
+});
+
+describe("a plan that is ready to be taken over", () => {
+  const plan = { status: "approved", auto_start_max: 64, project_id: 3 } as const;
+  const on = { state: "integrated", integrated_at: "2026-10-05T20:05:00Z", archived_at: null } as const;
+  const open = { state: "working", integrated_at: null, archived_at: null } as const;
+  const off = { state: "canceled", integrated_at: null, archived_at: null } as const;
+
+  it("has every card on the line, and a called-off card does not hold it back", () => {
+    expect(readyToTakeOver(plan, [on, on])).toBe(true);
+    expect(readyToTakeOver(plan, [on, off])).toBe(true);
+    expect(readyToTakeOver(plan, [on, open])).toBe(false);
+  });
+
+  it("needs a card on the line, and a plan that runs by itself", () => {
+    expect(readyToTakeOver(plan, [])).toBe(false);
+    expect(readyToTakeOver(plan, [off])).toBe(false);
+    expect(readyToTakeOver({ ...plan, status: "closed" }, [on])).toBe(false);
+    expect(readyToTakeOver({ ...plan, auto_start_max: null }, [on])).toBe(false);
+  });
+
+  it("ignores archived cards, which an earlier take-over closed", () => {
+    expect(readyToTakeOver(plan, [{ ...on, archived_at: "2026-10-05T21:00:00Z" }])).toBe(false);
+    expect(readyToTakeOver(plan, [on, { ...open, archived_at: "2026-10-05T21:00:00Z" }])).toBe(true);
   });
 });
 

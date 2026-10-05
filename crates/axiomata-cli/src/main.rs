@@ -535,6 +535,10 @@ enum BoardAction {
         #[arg(long)]
         message: Option<String>,
     },
+    /// Take a finished plan over into the project's branch: the line of its cards (their commits as they are while the
+    /// branch has not moved, else one merge commit), the cards and the plan are closed, the line is removed. The owner's
+    /// step; never pushes.
+    TakeOverPlan { id: i64 },
     /// What the sessions of a card have used and what they may use (steps, tokens, money). Read from what the
     /// harnesses left behind; a session that is stopped at a limit says so.
     Usage { id: i64 },
@@ -1495,6 +1499,10 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         BoardAction::Integrate { id } => {
             owner_only("integrating a card")?;
             board_integrate(core, id).await
+        }
+        BoardAction::TakeOverPlan { id } => {
+            owner_only("taking a plan over")?;
+            board_take_over_plan(core, id).await
         }
         BoardAction::Usage { id } => board_usage(core, id).await,
         BoardAction::Release { id } => {
@@ -2718,6 +2726,42 @@ async fn board_plan(core: &AxiomataCore, action: board_flow::PlanAction) -> Resu
         let count = axiomata_core::plan_session::forget_plan_sessions(core, id).await;
         if count > 0 {
             println!("{count} planner session(s) of plan #{id} ended");
+        }
+    }
+    Ok(())
+}
+
+async fn board_take_over_plan(core: &AxiomataCore, id: i64) -> Result<()> {
+    use axiomata_core::card_session::PlanTakeOver;
+    let outcome = axiomata_core::card_session::take_over_plan(core, id).await?;
+    match outcome {
+        PlanTakeOver::Done {
+            commit,
+            card_ids,
+            cleanup,
+            ..
+        } => {
+            {
+                let db = core.db_lock();
+                let config = read_config(core);
+                for card in &card_ids {
+                    board_mirror::after_card_change(&db, &config, *card);
+                }
+            }
+            println!(
+                "plan #{id} taken over: {} card(s), the branch is now at {commit}",
+                card_ids.len()
+            );
+            for note in cleanup {
+                println!("  not done: {note}");
+            }
+            println!("not pushed: push from the Studio's Git tab");
+        }
+        PlanTakeOver::Conflict { files } => {
+            println!(
+                "plan #{id} does not fit the branch any more: {}; nothing was changed",
+                files.join(", ")
+            );
         }
     }
     Ok(())

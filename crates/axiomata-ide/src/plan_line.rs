@@ -109,6 +109,98 @@ fn is_studio_subject(subject: &str) -> bool {
         .is_some_and(|(id, _)| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// Takes the whole line over into the project's branch: the cards' commits as they are (a fast-forward) when the branch
+/// has not moved since the line was cut, else one merge commit with `message` that keeps them. A conflict with what the
+/// branch has by now is undone and comes back as an outcome, like a take-over's.
+///
+/// Refused while the repository's config names a program git would run for a merge ([`worktree::unsafe_config`]), or the
+/// line is not on its branch, has changes of its own or is not at `expected_tip` (what the caller checked: taken from
+/// the line again under the lock, then that commit is what goes in, not the branch name); taken one at a time per line,
+/// like an integration. The merge runs without hooks. Never pushes.
+///
+/// # Errors
+///
+/// [`IdeError::Invalid`] for an unsafe config, a moved or dirty line, an empty message; whatever the take-over itself
+/// refuses (the project folder is on another branch, has staged changes, the line has nothing the branch lacks).
+pub fn take_over(
+    repo_root: &Path,
+    line: &Line,
+    expected_tip: &str,
+    message: &str,
+) -> Result<crate::git::TakeOver> {
+    let path = line.path.as_path();
+    let refuse = |reason: String| {
+        Err(IdeError::Invalid {
+            field: "take_over",
+            reason,
+        })
+    };
+    let unsafe_keys = worktree::unsafe_config(repo_root)?;
+    if !unsafe_keys.is_empty() {
+        return refuse(format!(
+            "the repository's config names a program git would run for a merge ({}); the studio does not take a plan \
+             over while it does",
+            unsafe_keys.join(", ")
+        ));
+    }
+    let _lock = LineLock::take(path)?;
+    if worktree::current_branch(path).as_deref() != Some(line.branch.as_str()) {
+        return refuse(format!(
+            "the plan's line worktree is not on {}; something moved it",
+            line.branch
+        ));
+    }
+    if !git_agent(path, &["status", "--porcelain", "--untracked-files=no"])?
+        .trim()
+        .is_empty()
+    {
+        return refuse(
+            "the plan's line has uncommitted changes; something else is working in it".into(),
+        );
+    }
+    // The commit that was checked is the one that goes in: a branch name read again could point somewhere else by now.
+    let tip_now = tip(path)?;
+    if tip_now != expected_tip || !crate::agent_store::is_commit_id(&tip_now) {
+        return refuse(format!(
+            "the plan's line is not where it was checked ({}); something moved it",
+            line.branch
+        ));
+    }
+    crate::git::take_over(crate::git::TakeOverRequest {
+        repo_root,
+        worktree: path,
+        agent_branch: &tip_now,
+        base_branch: &line.base_branch,
+        mode: crate::git::TakeOverMode::Linear,
+        message,
+    })
+}
+
+/// Removes a line that was taken over: its worktree, then its branch (its work is in the project's branch by then).
+/// What cannot be removed is said in the returned notes, never an error — the work is safe either way.
+pub fn remove(repo_root: &Path, line: &Line) -> Vec<String> {
+    // Only a line's own branch name is touched here (`axiomata/line/<digits>`): the check is the guard, checked before
+    // anything is deleted.
+    let ours = line
+        .branch
+        .strip_prefix(LINE_PREFIX)
+        .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()));
+    if !ours {
+        return vec![format!("{:?} is not the branch of a line", line.branch)];
+    }
+    let mut notes = Vec::new();
+    // Not forced: a line that holds something git would lose stays, and says so.
+    if let Err(err) = worktree::remove(repo_root, &line.path, false) {
+        notes.push(format!("the line's worktree stays: {err}"));
+        return notes;
+    }
+    // `-d`, not `-D`: the project's branch is checked out, so git refuses unless the line's work is in it.
+    if let Err(err) = git_agent(repo_root, &["branch", "-d", &line.branch]) {
+        notes.push(format!("the line's branch {} stays: {err}", line.branch));
+    }
+    notes
+}
+
 /// What integrating a card did. A conflict is an ordinary outcome, like a take-over's: the line is as it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Integration {
@@ -538,6 +630,140 @@ mod tests {
             !only_studio_commits_since(&line.path, Some("0".repeat(40).as_str()), "main").unwrap()
         );
         assert!(!only_studio_commits_since(&line.path, Some("main"), "main").unwrap());
+    }
+
+    #[test]
+    fn a_line_is_taken_over_as_the_cards_own_commits_when_the_branch_did_not_move_and_is_removed_after()
+     {
+        let repo = repo();
+        let line = ensure(&repo, &temp_dir("line").join("plan-1"), 1, None).unwrap();
+        let (_, first) = card(&repo, "first", &line.branch, "a.txt", "one\nTWO\nthree\n");
+        integrate(&line, &first, "#1 first").unwrap();
+        let (_, second) = card(&repo, "second", &line.branch, "b.txt", "b\n");
+        integrate(&line, &second, "#2 second").unwrap();
+
+        let done = take_over(&repo, &line, &tip(&line.path).unwrap(), "Plan 1").unwrap();
+        let crate::git::TakeOver::Done { commit } = done else {
+            panic!("{done:?}")
+        };
+        // Both cards' commits, one each, on main — no merge commit.
+        assert_eq!(git(&repo, &["rev-parse", "main"]), commit);
+        assert_eq!(
+            git(&repo, &["log", "--format=%s", "-2", "main"]),
+            "#2 second\n#1 first"
+        );
+        assert_eq!(
+            git(&repo, &["rev-list", "--merges", "--count", "main"]),
+            "0"
+        );
+        assert_eq!(git(&repo, &["show", "main:b.txt"]), "b");
+
+        assert!(remove(&repo, &line).is_empty());
+        assert!(!line.path.exists());
+        assert!(!worktree::branch_exists(&repo, &line.branch));
+    }
+
+    #[test]
+    fn a_line_is_taken_over_as_a_merge_when_the_branch_moved_and_a_conflict_with_it_is_undone() {
+        let repo = repo();
+        let line = ensure(&repo, &temp_dir("line").join("plan-1"), 1, None).unwrap();
+        let (_, first) = card(&repo, "first", &line.branch, "a.txt", "one\nTWO\nthree\n");
+        integrate(&line, &first, "#1 first").unwrap();
+
+        // The owner committed something else meanwhile: a merge keeps the card's commit.
+        fs::write(repo.join("c.txt"), "c\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-q", "-m", "owner"]);
+        let done = take_over(&repo, &line, &tip(&line.path).unwrap(), "Plan 1").unwrap();
+        assert!(
+            matches!(done, crate::git::TakeOver::Done { .. }),
+            "{done:?}"
+        );
+        assert_eq!(
+            git(&repo, &["rev-list", "--merges", "--count", "main"]),
+            "1"
+        );
+        assert_eq!(git(&repo, &["log", "-1", "--format=%s", "main"]), "Plan 1");
+
+        // A second line whose work collides with what main has by now: undone, main as it was.
+        let again = ensure(&repo, &temp_dir("line").join("plan-2"), 2, Some("main")).unwrap();
+        let (_, theirs) = card(
+            &repo,
+            "theirs",
+            &again.branch,
+            "a.txt",
+            "one\nTHREE\nthree\n",
+        );
+        integrate(&again, &theirs, "#3 theirs").unwrap();
+        // Main changes the same line after the line was cut.
+        fs::write(repo.join("a.txt"), "one\nOTHER\nthree\n").unwrap();
+        git(&repo, &["commit", "-q", "-am", "owner again"]);
+        let main_before = git(&repo, &["rev-parse", "main"]);
+        let outcome = take_over(&repo, &again, &tip(&again.path).unwrap(), "Plan 2").unwrap();
+        let crate::git::TakeOver::Conflict { files } = outcome else {
+            panic!("{outcome:?}")
+        };
+        assert_eq!(files, ["a.txt"]);
+        assert_eq!(git(&repo, &["rev-parse", "main"]), main_before);
+        assert_eq!(git(&repo, &["status", "--porcelain"]), "");
+    }
+
+    #[test]
+    fn a_line_is_not_taken_over_while_the_config_names_a_program_or_the_line_is_dirty() {
+        let repo = repo();
+        let line = ensure(&repo, &temp_dir("line").join("plan-1"), 1, None).unwrap();
+        let (_, first) = card(&repo, "first", &line.branch, "a.txt", "one\nTWO\nthree\n");
+        integrate(&line, &first, "#1 first").unwrap();
+
+        fs::write(line.path.join("a.txt"), "changed\n").unwrap();
+        let err = take_over(&repo, &line, &tip(&line.path).unwrap(), "Plan 1")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("uncommitted"), "{err}");
+        git(&line.path, &["checkout", "--", "a.txt"]);
+
+        git(&repo, &["config", "merge.x.driver", "touch /tmp/never"]);
+        let err = take_over(&repo, &line, &tip(&line.path).unwrap(), "Plan 1")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("merge.x.driver"), "{err}");
+        assert_eq!(git(&repo, &["rev-list", "--count", "main"]), "1");
+    }
+
+    #[test]
+    fn a_line_that_moved_after_it_was_checked_is_not_taken_over() {
+        let repo = repo();
+        let line = ensure(&repo, &temp_dir("line").join("plan-1"), 1, None).unwrap();
+        let (_, first) = card(&repo, "first", &line.branch, "a.txt", "one\nTWO\nthree\n");
+        integrate(&line, &first, "#1 first").unwrap();
+        let checked = tip(&line.path).unwrap();
+
+        // Something else committed on the line after the check.
+        fs::write(line.path.join("late.txt"), "late\n").unwrap();
+        git(&line.path, &["add", "."]);
+        git(&line.path, &["commit", "-q", "-m", "late"]);
+
+        let err = take_over(&repo, &line, &checked, "Plan 1")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not where it was checked"), "{err}");
+        assert_eq!(git(&repo, &["rev-list", "--count", "main"]), "1");
+    }
+
+    #[test]
+    fn only_a_line_branch_is_deleted_by_remove() {
+        let repo = repo();
+        let line = ensure(&repo, &temp_dir("line").join("plan-1"), 1, None).unwrap();
+        let wrong = Line {
+            branch: "main".into(),
+            ..line.clone()
+        };
+        let notes = remove(&repo, &wrong);
+        assert!(
+            notes.iter().any(|n| n.contains("not the branch of a line")),
+            "{notes:?}"
+        );
+        assert!(worktree::branch_exists(&repo, "main"));
     }
 
     #[test]

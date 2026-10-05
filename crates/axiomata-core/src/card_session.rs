@@ -1423,10 +1423,10 @@ fn check_line_tip(
     db: &Mutex<Connection>,
     plan: &crate::board::Plan,
     line: &axiomata_ide::plan_line::Line,
-) -> Result<()> {
+) -> Result<String> {
     let tip = axiomata_ide::plan_line::tip(&line.path)?;
     let in_place = match (&plan.line_tip, line.created) {
-        (Some(recorded), _) if *recorded == tip => return Ok(()),
+        (Some(recorded), _) if *recorded == tip => return Ok(tip),
         (None, true) => true,
         // Made just now, yet a tip was recorded: the branch was deleted in between.
         (Some(_), true) => false,
@@ -1450,7 +1450,131 @@ fn check_line_tip(
         ));
     }
     flow::set_line_tip(&lock(db), plan.id, &tip)?;
-    Ok(())
+    Ok(tip)
+}
+
+/// What taking a plan's line over came to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum PlanTakeOver {
+    /// The cards' work is in the project's branch (`commit` is its tip), their cards are closed and archived, the plan is
+    /// closed and its line is gone. `cleanup` lists what could not be done — the work is taken over all the same.
+    Done {
+        commit: String,
+        project_id: i64,
+        plan_id: i64,
+        card_ids: Vec<i64>,
+        cleanup: Vec<String>,
+    },
+    /// The line conflicts with what the project's branch has by now and was undone: nothing changed.
+    Conflict { files: Vec<String> },
+}
+
+/// The owner's one click on a finished plan: its line goes into the project's branch (the cards' commits as they are
+/// while the branch has not moved, else one merge commit), the cards are closed, the plan is closed and the line is
+/// removed. Never pushes. A conflict with the branch is undone and comes back as the outcome.
+///
+/// # Errors
+///
+/// A refusal for a plan that does not run by itself, is not approved or has a card that is neither on the line nor
+/// called off; a line that is not where the studio left it; the git layer's own refusals (the project folder is on
+/// another branch, has staged changes, an unsafe config).
+pub async fn take_over_plan(core: &AxiomataCore, plan_id: i64) -> Result<PlanTakeOver> {
+    let db = Arc::clone(&core.db);
+    let worktrees = crate::paths::ide_locations().worktrees;
+    tokio::task::spawn_blocking(move || take_over_plan_blocking(&db, &worktrees, plan_id))
+        .await
+        .map_err(|err| refusal("take-over", format!("the take-over task failed: {err}")))?
+}
+
+fn take_over_plan_blocking(
+    db: &Mutex<Connection>,
+    worktrees: &std::path::Path,
+    plan_id: i64,
+) -> Result<PlanTakeOver> {
+    let (plan, project, integrated) = {
+        let conn = lock(db);
+        let plan = flow::get_plan(&conn, plan_id)?
+            .ok_or_else(|| refusal("plan", format!("no plan {plan_id}")))?;
+        if !runs_by_itself(&plan) {
+            return Err(refusal(
+                "plan",
+                "only a plan that runs by itself has a line to take over".to_string(),
+            ));
+        }
+        let project_id = plan.project_id.unwrap_or_default();
+        let project = project_store::get_project(&conn, project_id)?
+            .ok_or_else(|| refusal("project", format!("no project {project_id}")))?;
+        let cards: Vec<_> = board_store::list_cards(&conn, plan.board_id, false)?
+            .into_iter()
+            .filter(|card| card.plan_id == Some(plan.id))
+            .collect();
+        if let Some(open) = cards.iter().find(|card| {
+            card.integrated_at.is_none() && card.state != crate::board::TaskState::Canceled
+        }) {
+            return Err(refusal(
+                "plan",
+                format!(
+                    "card #{} is not on the line yet ({}); a plan is taken over when all its cards are",
+                    open.id,
+                    serde_json::to_string(&open.state)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                ),
+            ));
+        }
+        let integrated: Vec<i64> = cards
+            .iter()
+            .filter(|card| card.integrated_at.is_some())
+            .map(|card| card.id)
+            .collect();
+        if integrated.is_empty() {
+            return Err(refusal(
+                "plan",
+                "no card of the plan is on its line: there is nothing to take over".to_string(),
+            ));
+        }
+        (plan, project, integrated)
+    };
+    let path = axiomata_ide::plan_line::line_path(worktrees, &project.name, plan.id);
+    let line = axiomata_ide::plan_line::ensure(
+        &project.repo_root,
+        &path,
+        plan.id,
+        plan.base_branch.as_deref(),
+    )?;
+    // Where the studio left it, like before every integration: work put on the line by something else is work no
+    // reviewer saw.
+    let checked_tip = check_line_tip(db, &plan, &line)?;
+    let first_line = plan.name.lines().next().unwrap_or_default().trim();
+    let message = format!("Plan #{}: {first_line}", plan.id);
+    match axiomata_ide::plan_line::take_over(&project.repo_root, &line, &checked_tip, &message)? {
+        axiomata_ide::git::TakeOver::Conflict { files } => Ok(PlanTakeOver::Conflict { files }),
+        axiomata_ide::git::TakeOver::Done { commit } => {
+            // The work is in the project's branch from here on: nothing below can undo it, so a step that fails is a note.
+            let mut cleanup = Vec::new();
+            for card in &integrated {
+                match flow::mark_taken_over(&lock(db), *card, OWNER) {
+                    Ok(true) => {}
+                    Ok(false) | Err(_) => {
+                        cleanup.push(format!("card #{card} could not be marked as taken over"));
+                    }
+                }
+            }
+            match flow::close_plan(&lock(db), plan.id) {
+                Ok(_) => {}
+                Err(err) => cleanup.push(format!("the plan could not be closed: {err}")),
+            }
+            cleanup.extend(axiomata_ide::plan_line::remove(&project.repo_root, &line));
+            Ok(PlanTakeOver::Done {
+                commit,
+                project_id: project.id,
+                plan_id: plan.id,
+                card_ids: integrated,
+                cleanup,
+            })
+        }
+    }
 }
 
 /// The work is on the line: the card is marked, and the line's commit is the answer.
@@ -2997,6 +3121,61 @@ mod tests {
             axiomata_ide::plan_line::tip(&line.path).unwrap(),
             line_before
         );
+    }
+
+    impl World {
+        fn take_over_plan(&mut self, plan: i64) -> Result<PlanTakeOver> {
+            let worktrees = self.locations().worktrees;
+            self.shared(|db| take_over_plan_blocking(db, &worktrees, plan))
+        }
+    }
+
+    #[test]
+    fn a_finished_plan_is_taken_over_as_the_cards_commits_and_its_cards_plan_and_line_are_closed() {
+        let mut w = world();
+        let (plan, cards, line) = w.line_plan(&["a", "b"]);
+        w.worked_on_the_line(cards[0], &line, "a.txt", "a\n");
+        w.worked_on_the_line(cards[1], &line, "b.txt", "b\n");
+
+        // One card is not on the line yet: nothing is taken over.
+        w.integrate(cards[0]).unwrap();
+        let refused = w.take_over_plan(plan).unwrap_err().to_string();
+        assert!(
+            refused.contains(&format!("card #{}", cards[1])),
+            "{refused}"
+        );
+        assert_eq!(git(&w.repo, &["rev-list", "--count", "main"]), "1");
+
+        w.integrate(cards[1]).unwrap();
+        let taken = w.take_over_plan(plan).unwrap();
+        let PlanTakeOver::Done {
+            commit,
+            card_ids,
+            cleanup,
+            ..
+        } = taken
+        else {
+            panic!("expected the plan to be taken over: {taken:?}");
+        };
+        assert!(cleanup.is_empty(), "{cleanup:?}");
+        assert_eq!(card_ids, cards);
+        assert_eq!(git(&w.repo, &["rev-parse", "main"]), commit);
+        assert_eq!(git(&w.repo, &["show", "main:a.txt"]), "a");
+        assert_eq!(git(&w.repo, &["show", "main:b.txt"]), "b");
+        assert_eq!(git(&w.repo, &["rev-list", "--count", "main"]), "3");
+
+        for card in cards {
+            let closed = store::get_card(&w.db, card).unwrap().unwrap();
+            assert!(closed.taken_over_at.is_some() && closed.archived_at.is_some());
+        }
+        assert_eq!(
+            flow::get_plan(&w.db, plan).unwrap().unwrap().status,
+            crate::board::PlanStatus::Closed
+        );
+        assert!(!line.path.exists());
+        assert!(!worktree::branch_exists(&w.repo, &line.branch));
+        // And a closed plan is not taken over again.
+        assert!(w.take_over_plan(plan).is_err());
     }
 
     #[test]

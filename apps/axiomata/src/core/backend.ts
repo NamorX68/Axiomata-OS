@@ -278,6 +278,11 @@ export type CardTakeOver =
   | { outcome: "done"; commit: string; project_id: number; cleanup: string[] }
   | { outcome: "conflict"; files: string[] };
 
+/** What taking a plan over came to. Mirrors `axiomata_core::card_session::PlanTakeOver`. */
+export type PlanTakeOver =
+  | { outcome: "done"; commit: string; project_id: number; plan_id: number; card_ids: number[]; cleanup: string[] }
+  | { outcome: "conflict"; files: string[] };
+
 /** What a card session may use (`axiomata_roster::ResolvedLimits`). */
 export interface SessionLimits {
   max_cost_usd: number;

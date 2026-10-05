@@ -130,6 +130,23 @@ export function endedSessions(event: PlanRunEvent): number[] {
   return event.event === "integrated" && event.outcome !== "busy" ? event.agent_ids : [];
 }
 
+/**
+ * A plan that runs by itself is ready to be taken over when every card still on the board is on its line or was called
+ * off, and at least one is on it (`card_session::take_over_plan` checks the same, and more).
+ */
+export function readyToTakeOver(
+  plan: Pick<BoardPlan, "status" | "auto_start_max" | "project_id">,
+  cards: Pick<BoardCard, "state" | "integrated_at" | "archived_at">[],
+): boolean {
+  if (!runsByItself(plan)) return false;
+  const active = cards.filter((card) => !card.archived_at);
+  return (
+    active.length > 0 &&
+    active.every((card) => card.integrated_at != null || card.state === "canceled") &&
+    active.some((card) => card.integrated_at != null)
+  );
+}
+
 /** A plan runs by itself once it is approved, set to, and has a project to run in (`card_session::runs_by_itself`). */
 export function runsByItself(plan: Pick<BoardPlan, "status" | "auto_start_max" | "project_id">): boolean {
   return plan.status === "approved" && plan.auto_start_max != null && plan.project_id != null;

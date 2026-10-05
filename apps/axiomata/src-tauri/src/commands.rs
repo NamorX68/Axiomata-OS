@@ -1958,6 +1958,26 @@ pub async fn take_over_card(
     Ok(outcome)
 }
 
+/// The owner takes a finished plan over (CP-A8b): its line goes into the project's branch, the cards and the plan are
+/// closed, the line is removed. A conflict with the branch is undone and comes back as the outcome. Never pushes.
+#[tauri::command]
+pub async fn take_over_plan(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<axiomata_core::card_session::PlanTakeOver, String> {
+    let config = read_config(&state.config);
+    let outcome = axiomata_core::card_session::take_over_plan(&state, id)
+        .await
+        .map_err(|err| err.to_string())?;
+    if let axiomata_core::card_session::PlanTakeOver::Done { card_ids, .. } = &outcome {
+        let db = state.db_lock();
+        for card in card_ids {
+            board_mirror::after_card_change(&db, &config, *card);
+        }
+    }
+    Ok(outcome)
+}
+
 /// The latest `limit` lines of a card's history, oldest first.
 #[tauri::command]
 pub fn list_card_events(
