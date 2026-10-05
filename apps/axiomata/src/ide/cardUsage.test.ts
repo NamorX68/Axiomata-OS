@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionUsage } from "../core/backend";
-import { formatTokens, usageLines } from "./cardUsage";
+import { formatTokens, unmeasuredNote, usageLines } from "./cardUsage";
 
 function session(over: Partial<SessionUsage> = {}): SessionUsage {
   return {
@@ -14,6 +14,7 @@ function session(over: Partial<SessionUsage> = {}): SessionUsage {
     cost_usd: 0.25,
     limits: { max_cost_usd: 0.5, max_tokens: 2_000, max_steps: 60 },
     measured: true,
+    unmeasured: null,
     stopped: null,
     ...over,
   };
@@ -46,5 +47,19 @@ describe("usageLines", () => {
   it("marks a used-up limit and caps the bar", () => {
     const [steps] = usageLines(session({ usage: { input_tokens: 0, output_tokens: 0, steps: 75 } }));
     expect(steps).toMatchObject({ reached: true, share: 1 });
+  });
+});
+
+describe("unmeasuredNote", () => {
+  it("says nothing about a session that was measured", () => {
+    expect(unmeasuredNote({ measured: true, unmeasured: null })).toBeNull();
+  });
+
+  it("tells a session that has just started from one whose record cannot be read, and says what it means for the limit", () => {
+    const fresh = unmeasuredNote({ measured: false, unmeasured: "no_record_yet" })!;
+    expect(fresh).toContain("eben erst gestartet");
+    expect(fresh).toContain("Limit greift erst");
+    expect(unmeasuredNote({ measured: false, unmeasured: "service_down" })).toContain("Opencode-Dienst läuft nicht");
+    expect(unmeasuredNote({ measured: false, unmeasured: null })).toContain("nicht lesen");
   });
 });

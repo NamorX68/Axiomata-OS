@@ -298,9 +298,21 @@ export interface SessionUsage {
   limits: SessionLimits;
   /** `false` when the harness's record could not be read: the figures are then zeros, not a finding. */
   measured: boolean;
+  /** Why it could not be read, when it could not. */
+  unmeasured: Unmeasured | null;
   /** Why the session was stopped, while it is. */
   stopped: string | null;
 }
+
+/** Why a session's usage is unknown. Mirrors `axiomata_core::session_limits::Unmeasured`. */
+export type Unmeasured =
+  | "no_session_id"
+  | "no_record_yet"
+  | "read_failed"
+  | "no_opencode_session"
+  | "service_down"
+  | "service_failed"
+  | "not_measured";
 
 /** How a session is wired to the agent MCP server. Mirrors `axiomata_core::agent_entry::EntryStatus`. */
 export type AgentEntryStatus = "registered" | "unavailable" | "not_applicable";

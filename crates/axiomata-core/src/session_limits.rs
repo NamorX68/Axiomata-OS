@@ -53,8 +53,31 @@ pub struct SessionUsage {
     pub limits: ResolvedLimits,
     /// `false` when the harness's own record could not be read: the figures above are then zeros, not a finding.
     pub measured: bool,
+    /// Why not, when it is not.
+    pub unmeasured: Option<Unmeasured>,
     /// Why the session is stopped, while it is.
     pub stopped: Option<String>,
+}
+
+/// Why a session's usage could not be read, for the owner to be told (the Studio says it in words).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unmeasured {
+    /// No Claude Code session id was noted for the session: it was started before they were, or with a command of its own.
+    NoSessionId,
+    /// Ids were noted, but the harness has written no record under any of them yet — a session that has just started has
+    /// said nothing so far.
+    NoRecordYet,
+    /// A record exists and could not be read.
+    ReadFailed,
+    /// The Opencode session was not made yet.
+    NoOpencodeSession,
+    /// The Opencode service is not running.
+    ServiceDown,
+    /// The Opencode service did not answer, or refused.
+    ServiceFailed,
+    /// This harness is not measured.
+    NotMeasured,
 }
 
 /// A session that was stopped just now.
@@ -201,11 +224,20 @@ impl Meter {
     }
 
     /// What `watched` has used, `None` when the harness's record could not be read.
-    async fn measure(&mut self, watched: &Watched, seen: &mut Vec<PathBuf>) -> Option<Usage> {
+    async fn measure(
+        &mut self,
+        watched: &Watched,
+        seen: &mut Vec<PathBuf>,
+    ) -> Result<Usage, Unmeasured> {
         match watched.agent.harness {
             Harness::ClaudeCode => {
+                let ids = watched.channel.claude_sessions();
+                if ids.is_empty() {
+                    return Err(Unmeasured::NoSessionId);
+                }
                 let mut total: Option<Usage> = None;
-                for id in watched.channel.claude_sessions() {
+                let mut failed = false;
+                for id in ids {
                     let Some(path) = find_transcript(&self.projects, &id) else {
                         continue;
                     };
@@ -217,21 +249,30 @@ impl Meter {
                         (tally, read)
                     })
                     .await
-                    .ok()?;
+                    .map_err(|_| Unmeasured::ReadFailed)?;
                     let usage = tally.usage();
                     self.transcripts.insert(path.clone(), tally);
                     if let Err(err) = read {
                         tracing::debug!(%err, path = %path.display(), "could not read a Claude Code transcript");
+                        failed = true;
                         continue;
                     }
                     total = Some(total.unwrap_or_default().plus(usage));
                     seen.push(path);
                 }
-                total
+                total.ok_or(if failed {
+                    Unmeasured::ReadFailed
+                } else {
+                    Unmeasured::NoRecordYet
+                })
             }
             Harness::Opencode => {
-                let session = watched.agent.opencode_session.as_deref()?;
-                let service = self.service().await?.clone();
+                let session = watched
+                    .agent
+                    .opencode_session
+                    .as_deref()
+                    .ok_or(Unmeasured::NoOpencodeSession)?;
+                let service = self.service().await.ok_or(Unmeasured::ServiceDown)?.clone();
                 match tokio::time::timeout(
                     OPENCODE_TIMEOUT,
                     opencode::session_usage(&service, session),
@@ -241,19 +282,19 @@ impl Meter {
                     Ok(Ok(usage)) => {
                         let floor = self.opencode_floor.entry(session.to_owned()).or_default();
                         *floor = floor.at_least(usage);
-                        Some(*floor)
+                        Ok(*floor)
                     }
                     Ok(Err(err)) => {
                         tracing::debug!(%err, "could not read an Opencode session's messages");
-                        None
+                        Err(Unmeasured::ServiceFailed)
                     }
                     Err(_) => {
                         tracing::debug!("the Opencode service did not answer in time");
-                        None
+                        Err(Unmeasured::ServiceFailed)
                     }
                 }
             }
-            Harness::Mini => None,
+            Harness::Mini => Err(Unmeasured::NotMeasured),
         }
     }
 
@@ -263,7 +304,10 @@ impl Meter {
         config: &Config,
         seen: &mut Vec<PathBuf>,
     ) -> SessionUsage {
-        let usage = self.measure(watched, seen).await;
+        let (usage, unmeasured) = match self.measure(watched, seen).await {
+            Ok(usage) => (Some(usage), None),
+            Err(why) => (None, Some(why)),
+        };
         let cost_usd = usage.and_then(|usage| {
             spend::metered_cost_usd(
                 config,
@@ -286,6 +330,7 @@ impl Meter {
             },
             limits: watched.limits,
             measured: usage.is_some(),
+            unmeasured,
             stopped: watched.channel.limit_reached().map(|text| reason_of(&text)),
         }
     }
@@ -712,6 +757,38 @@ mod tests {
         let read = futures_block(meter.read(&world.watched, &Config::default(), &mut Vec::new()));
         assert!(!read.measured);
         assert_eq!(read.usage, Usage::default());
+        assert_eq!(
+            read.unmeasured,
+            Some(Unmeasured::NoRecordYet),
+            "a session that has just started has written nothing yet"
+        );
+    }
+
+    #[test]
+    fn the_reason_a_session_is_not_measured_is_told_apart() {
+        let world = world(Harness::ClaudeCode);
+        let mut meter = Meter::with_projects(world.dir.join("projects"));
+        let config = Config::default();
+        // No id was ever noted for it.
+        let none = futures_block(meter.read(&world.watched, &config, &mut Vec::new()));
+        assert_eq!(none.unmeasured, Some(Unmeasured::NoSessionId));
+
+        // A record that cannot be read: a link is not a transcript.
+        let id = axiomata_ide::usage::new_claude_session_id().unwrap();
+        world.watched.channel.record_claude_session(&id).unwrap();
+        let folder = world.dir.join("projects").join("-w");
+        std::fs::create_dir_all(&folder).unwrap();
+        let target = world.dir.join("target.jsonl");
+        std::fs::write(&target, "").unwrap();
+        // The link is found, and refused when it is read.
+        std::os::unix::fs::symlink(&target, folder.join(format!("{id}.jsonl"))).unwrap();
+        let linked = futures_block(meter.read(&world.watched, &config, &mut Vec::new()));
+        assert_eq!(linked.unmeasured, Some(Unmeasured::ReadFailed));
+
+        let opencode = self::world(Harness::Opencode);
+        let mut meter = Meter::with_projects(opencode.dir.join("projects"));
+        let unnamed = futures_block(meter.read(&opencode.watched, &config, &mut Vec::new()));
+        assert_eq!(unnamed.unmeasured, Some(Unmeasured::NoOpencodeSession));
     }
 
     #[test]

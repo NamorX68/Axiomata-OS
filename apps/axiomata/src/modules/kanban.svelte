@@ -577,6 +577,13 @@
 
   /** The last refusal of an edit in the card's detail, shown under its fields. */
   let detailError = $state("");
+  // A refusal belongs to the card as it was when the owner clicked: once the card has moved on (another card is open, or
+  // this one changed state) the refusal is history, and would otherwise stand above a card it says nothing about.
+  $effect(() => {
+    void detail?.id;
+    void detail?.state;
+    detailError = "";
+  });
   /** Role names for the suggestions of the "Rolle" field (a2a.md: the card names a role, the catalog lives in the Studio). */
   let roleNames = $state<string[]>([]);
   onMount(() => {

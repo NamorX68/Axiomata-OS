@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import { invokeBackend as invoke, type BoardCard, type SessionUsage } from "../core/backend";
-  import { usageLines } from "../ide/cardUsage";
+  import { unmeasuredNote, usageLines } from "../ide/cardUsage";
 
   let { card }: { card: Pick<BoardCard, "id" | "updated_at" | "state"> } = $props();
 
@@ -47,7 +47,7 @@
           <span class="muted">{session.review ? "Reviewer" : "Arbeiter"} · {session.role}</span>
         </div>
         {#if !session.measured}
-          <p class="warn">Verbrauch unbekannt: die Aufzeichnung der Sitzung ließ sich nicht lesen, ein Limit greift hier nicht.</p>
+          <p class="warn">Verbrauch unbekannt. {unmeasuredNote(session)}</p>
         {/if}
         {#each usageLines(session) as row (row.label)}
           <div class="row" class:reached={row.reached}>

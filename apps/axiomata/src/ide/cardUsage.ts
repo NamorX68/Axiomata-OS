@@ -2,7 +2,7 @@
  * How a card session's usage is shown (A2A CP-A6c): one line per limit, with what is used of what is allowed. Pure, so
  * it is tested without a backend.
  */
-import type { SessionUsage } from "../core/backend";
+import type { SessionUsage, Unmeasured } from "../core/backend";
 
 /** A token count the way a limit is spoken of: `950`, `340 k`, `1,5 M`. */
 export function formatTokens(count: number): string {
@@ -44,4 +44,25 @@ export function usageLines(session: SessionUsage): UsageLine[] {
     lines.push(line("Kosten", session.cost_usd, session.limits.max_cost_usd, (n) => `$${n.toFixed(2)}`));
   }
   return lines;
+}
+
+const UNMEASURED: Record<Unmeasured, string> = {
+  no_session_id: "Für diese Sitzung wurde keine Claude-Code-Sitzung vermerkt (sie lief mit eigenem Befehl).",
+  no_record_yet: "Die Sitzung hat noch nichts aufgezeichnet — sie hat vielleicht eben erst gestartet.",
+  read_failed: "Die Aufzeichnung der Sitzung ließ sich nicht lesen.",
+  no_opencode_session: "Die Opencode-Sitzung ist noch nicht angelegt.",
+  service_down: "Der Opencode-Dienst läuft nicht.",
+  service_failed: "Der Opencode-Dienst hat nicht geantwortet.",
+  not_measured: "Dieses Harness wird nicht gemessen.",
+};
+
+/**
+ * Why a session's figures are not to be believed, in words — and what that means for its limit. Only the one that is
+ * about to matter is said: while the record is simply not there yet nothing has been used, and a limit starts to count
+ * as soon as there is one.
+ */
+export function unmeasuredNote(session: Pick<SessionUsage, "measured" | "unmeasured">): string | null {
+  if (session.measured) return null;
+  const why = UNMEASURED[session.unmeasured ?? "read_failed"];
+  return `${why} Ein Limit greift erst, wenn sich die Sitzung messen lässt.`;
 }
