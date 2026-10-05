@@ -1,8 +1,88 @@
-import { describe, expect, it } from "vitest";
+import { get } from "svelte/store";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatsOnSave, languageList, DEFAULT_EDITOR_SETTINGS, parseEditorSettings } from "./editorSettings";
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  PANEL_FONT_SIZE_MAX,
+  PANEL_FONT_SIZE_MIN,
+  editorSettings,
+  formatsOnSave,
+  languageList,
+  panelFontSizeDown,
+  panelFontSizeReset,
+  panelFontSizeUp,
+  parseEditorSettings,
+  updateEditorSettings,
+} from "./editorSettings";
 import { nearestWeight, realWeights, weightName } from "./fonts";
 import { surfaceSettings } from "./surfaceSettings";
+
+vi.mock("../core/backend", () => ({ invokeBackend: vi.fn(() => Promise.resolve()) }));
+
+describe("the floating window's own font size", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    editorSettings.set({ ...DEFAULT_EDITOR_SETTINGS });
+  });
+
+  afterEach(() => {
+    vi.runAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("is larger than the Studio's by default and used when the field is missing", () => {
+    expect(DEFAULT_EDITOR_SETTINGS.panelFontSize).toBe(16);
+    expect(DEFAULT_EDITOR_SETTINGS.panelFontSize).toBeGreaterThan(DEFAULT_EDITOR_SETTINGS.fontSize);
+    expect(parseEditorSettings({ fontSize: 20 }).panelFontSize).toBe(16);
+  });
+
+  it("keeps the Studio's font size and its 9–32 bounds as they were", () => {
+    expect(DEFAULT_EDITOR_SETTINGS.fontSize).toBe(14);
+    expect(parseEditorSettings({ fontSize: 8 }).fontSize).toBe(9);
+    expect(parseEditorSettings({ fontSize: 33 }).fontSize).toBe(32);
+  });
+
+  it("clamps values beyond the bounds", () => {
+    expect(parseEditorSettings({ panelFontSize: 9 }).panelFontSize).toBe(PANEL_FONT_SIZE_MIN);
+    expect(parseEditorSettings({ panelFontSize: -3 }).panelFontSize).toBe(PANEL_FONT_SIZE_MIN);
+    expect(parseEditorSettings({ panelFontSize: 41 }).panelFontSize).toBe(PANEL_FONT_SIZE_MAX);
+    expect(parseEditorSettings({ panelFontSize: 1000 }).panelFontSize).toBe(PANEL_FONT_SIZE_MAX);
+    expect(parseEditorSettings({ panelFontSize: 10 }).panelFontSize).toBe(10);
+    expect(parseEditorSettings({ panelFontSize: 40 }).panelFontSize).toBe(40);
+  });
+
+  it("falls back to the default for a value that is no finite number", () => {
+    for (const bad of ["18", null, true, {}, [], Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(parseEditorSettings({ panelFontSize: bad }).panelFontSize).toBe(16);
+    }
+  });
+
+  it("rounds to whole points", () => {
+    expect(parseEditorSettings({ panelFontSize: 18.4 }).panelFontSize).toBe(18);
+    expect(parseEditorSettings({ panelFontSize: 18.5 }).panelFontSize).toBe(19);
+  });
+
+  it("steps one size up or down and resets to the default", () => {
+    expect(panelFontSizeUp(16)).toBe(17);
+    expect(panelFontSizeDown(16)).toBe(15);
+    expect(panelFontSizeReset()).toBe(DEFAULT_EDITOR_SETTINGS.panelFontSize);
+    expect(panelFontSizeUp(panelFontSizeDown(20))).toBe(20);
+  });
+
+  it("returns the same value when a step hits the upper or lower bound", () => {
+    expect(panelFontSizeUp(PANEL_FONT_SIZE_MAX)).toBe(PANEL_FONT_SIZE_MAX);
+    expect(panelFontSizeDown(PANEL_FONT_SIZE_MIN)).toBe(PANEL_FONT_SIZE_MIN);
+    expect(panelFontSizeUp(PANEL_FONT_SIZE_MAX - 1)).toBe(PANEL_FONT_SIZE_MAX);
+    expect(panelFontSizeDown(PANEL_FONT_SIZE_MIN + 1)).toBe(PANEL_FONT_SIZE_MIN);
+  });
+
+  it("changes one size without touching the other through updateEditorSettings", () => {
+    updateEditorSettings({ panelFontSize: 22 });
+    expect(get(editorSettings)).toMatchObject({ panelFontSize: 22, fontSize: 14 });
+    updateEditorSettings({ fontSize: 18 });
+    expect(get(editorSettings)).toMatchObject({ panelFontSize: 22, fontSize: 18 });
+  });
+});
 
 describe("format on save (L14)", () => {
   it("is on by default, and a language on the list is saved as it is", () => {

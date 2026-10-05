@@ -92,7 +92,7 @@
     background: var(--ax-surface-1);
     font-family: var(--ax-font-sans);
     /* Reading text one step above the base size: 14px sans read small next to the editor's text. */
-    font-size: var(--ax-font-size-lg);
+    font-size: var(--ax-preview-font-size, var(--ax-font-size-lg));
     line-height: 1.55;
     user-select: text;
   }

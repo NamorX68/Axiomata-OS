@@ -10,7 +10,7 @@
   after the source stops changing, not on every keystroke.
 -->
 <script lang="ts">
-  import { PAGE_MESSAGE_SOURCE, resolveRelativeLink, withNavIntercept } from "../core/htmllink";
+  import { PAGE_MESSAGE_SOURCE, resolveRelativeLink, withNavIntercept, ZOOM_MESSAGE_SOURCE } from "../core/htmllink";
 
   interface Props {
     /** The page's source. */
@@ -19,9 +19,11 @@
     rel: string;
     /** A relative link was clicked: the file it points to, relative to the same root. */
     onOpenLink?: (rel: string) => void;
+    /** Scale of the page (the file window's text size against its base); the page is left as it is without it. */
+    zoom?: number;
   }
 
-  let { text, rel, onOpenLink }: Props = $props();
+  let { text, rel, onOpenLink, zoom }: Props = $props();
 
   /** Pause in typing before the page is rendered again. */
   const RENDER_DELAY_MS = 300;
@@ -37,6 +39,17 @@
     return () => clearTimeout(timer);
   });
 
+  /** Hands the zoom to the page's own script; a freshly loaded page starts at 1 and is told again on `load`. */
+  function sendZoom(): void {
+    if (zoom === undefined) return;
+    frame?.contentWindow?.postMessage({ source: ZOOM_MESSAGE_SOURCE, zoom }, "*");
+  }
+
+  $effect(() => {
+    void zoom;
+    sendZoom();
+  });
+
   /** Only this frame's messages: several pages may be open at once. */
   function onMessage(e: MessageEvent): void {
     if (!frame || e.source !== frame.contentWindow) return;
@@ -49,7 +62,14 @@
 
 <svelte:window onmessage={onMessage} />
 
-<iframe class="page" title={rel} sandbox="allow-scripts" referrerpolicy="no-referrer" srcdoc={doc} bind:this={frame}
+<iframe
+  class="page"
+  title={rel}
+  sandbox="allow-scripts"
+  referrerpolicy="no-referrer"
+  srcdoc={doc}
+  bind:this={frame}
+  onload={sendZoom}
 ></iframe>
 
 <style>

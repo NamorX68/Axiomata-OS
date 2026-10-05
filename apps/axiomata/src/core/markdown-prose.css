@@ -12,12 +12,13 @@
 }
 .ax-prose h1 {
   /* One step above the 20px heading size: the body text is 16px since the preview was enlarged. */
-  font-size: calc(26px * var(--ax-ui-scale));
+  font-size: calc(26px * var(--ax-ui-scale) * var(--ax-prose-zoom, 1));
   padding-bottom: var(--ax-space-2);
   border-bottom: 1px solid var(--ax-border);
 }
 .ax-prose h2 {
-  font-size: var(--ax-font-size-xl);
+  /* `--ax-prose-zoom` is set by the file window's text size (FileEditor); everywhere else it is 1. */
+  font-size: calc(var(--ax-font-size-xl) * var(--ax-prose-zoom, 1));
   color: var(--ax-accent);
 }
 .ax-prose hr {

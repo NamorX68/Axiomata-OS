@@ -19,7 +19,16 @@
 
   import { closeStaged, requestClose, setCloseGuard } from "../core/staging";
   import type { ModuleContext } from "../core/types";
+  import {
+    DEFAULT_EDITOR_SETTINGS,
+    editorSettings,
+    PANEL_FONT_SIZE_MAX,
+    PANEL_FONT_SIZE_MIN,
+    PANEL_FONT_SIZE_STEP,
+    updateEditorSettings,
+  } from "./editorSettings";
   import FileEditor, { type OpenFileState } from "./FileEditor.svelte";
+  import { applyPanelZoomStep, panelZoomStep, type PanelZoomStep } from "./panelZoomKeys";
   import type { OpenIntent } from "./fileKinds";
   import { handToFileApp } from "./handoff";
   import { panelTarget } from "./panelSync";
@@ -106,10 +115,22 @@
     answer(true);
   }
 
+  /** One text-size step, from the header's controls or the keys. */
+  function zoom(step: PanelZoomStep): void {
+    updateEditorSettings({ panelFontSize: applyPanelZoomStep($editorSettings.panelFontSize, step) });
+  }
+
   function onKeydown(e: KeyboardEvent): void {
     // D16: Escape is the editor's (Vi's Normal mode, a completion …), never the panel's.
     if (e.key === "Escape") {
       e.preventDefault();
+      return;
+    }
+    // In the editor the zoom keys are taken (and stopped) there; this is for focus in the header's controls.
+    const step = panelZoomStep(e);
+    if (step) {
+      e.preventDefault();
+      zoom(step);
       return;
     }
     if (e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "w") {
@@ -138,6 +159,43 @@
     </span>
     {#if current?.dirty}<span class="dot" title="Unsaved changes"></span>{/if}
     <span class="spacer"></span>
+    <div class="zoom" role="group" aria-label="Text size">
+      <button
+        type="button"
+        class="zoom-step"
+        aria-label="Smaller text"
+        title="Smaller text (⌘-)"
+        disabled={$editorSettings.panelFontSize <= PANEL_FONT_SIZE_MIN}
+        onclick={() => zoom("down")}>A−</button
+      >
+      <input
+        type="range"
+        class="zoom-range"
+        aria-label="Text size"
+        min={PANEL_FONT_SIZE_MIN}
+        max={PANEL_FONT_SIZE_MAX}
+        step={PANEL_FONT_SIZE_STEP}
+        value={$editorSettings.panelFontSize}
+        oninput={(e) => updateEditorSettings({ panelFontSize: e.currentTarget.valueAsNumber })}
+      />
+      <button
+        type="button"
+        class="zoom-step"
+        aria-label="Larger text"
+        title="Larger text (⌘+)"
+        disabled={$editorSettings.panelFontSize >= PANEL_FONT_SIZE_MAX}
+        onclick={() => zoom("up")}>A+</button
+      >
+      <span class="zoom-size" aria-live="polite">{$editorSettings.panelFontSize}</span>
+      <button
+        type="button"
+        class="zoom-step"
+        aria-label="Reset text size"
+        title="Reset text size (⌘0)"
+        disabled={$editorSettings.panelFontSize === DEFAULT_EDITOR_SETTINGS.panelFontSize}
+        onclick={() => zoom("reset")}>Reset</button
+      >
+    </div>
     <button type="button" class="hand-over" disabled={!current} onclick={handOver}>Open in the file app</button>
   </div>
 
@@ -185,6 +243,45 @@
 
   .spacer {
     flex: 1;
+  }
+
+  .zoom {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+  }
+
+  .zoom-step {
+    padding: 0 var(--ax-space-2);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-xs);
+    cursor: pointer;
+  }
+
+  .zoom-step:hover:not(:disabled) {
+    border-color: var(--ax-accent);
+    color: var(--ax-text);
+  }
+
+  .zoom-step:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .zoom-range {
+    width: calc(80px * var(--ax-ui-scale));
+    accent-color: var(--ax-accent);
+  }
+
+  /* A fixed width, so the header does not shift while the number changes. */
+  .zoom-size {
+    min-width: 2ch;
+    text-align: right;
+    color: var(--ax-text);
   }
 
   .hand-over {

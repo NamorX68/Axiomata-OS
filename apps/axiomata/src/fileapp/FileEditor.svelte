@@ -56,7 +56,8 @@
   import { foldKey, rememberedFolds, rememberFolds, updateRememberedFolds } from "./foldMemory";
   import DiffPanes from "./DiffPanes.svelte";
   import { editorFace } from "./editorFace.svelte";
-  import { editorSettings, ensureEditorSettingsLoaded, formatsOnSave } from "./editorSettings";
+  import { editorSettings, ensureEditorSettingsLoaded, formatsOnSave, updateEditorSettings } from "./editorSettings";
+  import { applyPanelZoomStep, panelZoomStep, previewZoom } from "./panelZoomKeys";
   import { applyTextEdits, storeBody, textChanges } from "../editor/textEdits";
   import { applyWorkspaceEdit, type EditPorts } from "./workspaceEdit";
   import { wordAt } from "../editor/text";
@@ -222,6 +223,8 @@
 
   const settings = $derived({
     ...surfaceSettings($editorSettings, wrap),
+    // The floating window has its own text size (⌘+ ⌘- ⌘0); `rowH` and the font spec follow from it in the surface.
+    ...(compact ? { fontSize: $editorSettings.panelFontSize } : {}),
     fontFamily: face.family,
     fontWeight: face.weight,
     lineNumbers: numbersOverride ?? $editorSettings.lineNumbers,
@@ -1042,13 +1045,25 @@
     compare = { model: new DiffModel({ hunks, oldLines: textLines(disk), newLines: textLines(mine) }), disk, mine };
   }
 
+  /** What the previews draw with in the floating window; `undefined` leaves them as they are (Studio, file app). */
+  const previewZoomFactor = $derived(compact ? previewZoom($editorSettings.panelFontSize) : undefined);
+
   /**
    * ⌘S and ⌘⇧V for the whole editor, so they also work while focus is on a
    * banner button. Handled in the capture phase and stopped there: the
    * surface would otherwise see the same key and save a second time.
+   * ⌘+ ⌘- ⌘0 resize the text of the floating window, and only there.
    */
   function onKeydownCapture(e: KeyboardEvent): void {
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
+    const zoomStep = compact ? panelZoomStep(e) : null;
+    if (zoomStep) {
+      // `preventDefault` keeps the webview from zooming the whole app by itself.
+      e.preventDefault();
+      e.stopPropagation();
+      updateEditorSettings({ panelFontSize: applyPanelZoomStep($editorSettings.panelFontSize, zoomStep) });
+      return;
+    }
     const key = e.key.toLowerCase();
     const previewKey = key === "v" && e.shiftKey && previewKind !== null;
     if (key !== "s" && !previewKey) return;
@@ -1219,7 +1234,11 @@
         />
       {/if}
       {#if previewKind && viewMode !== "source"}
-        <div class="pane preview-pane">
+        <div
+          class="pane preview-pane"
+          style:--ax-preview-font-size={compact ? `calc(${$editorSettings.panelFontSize}px * var(--ax-ui-scale))` : undefined}
+          style:--ax-prose-zoom={previewZoomFactor}
+        >
           {#if previewKind === "markdown"}
             <MarkdownPreview
               bind:this={preview}
@@ -1232,6 +1251,7 @@
             <HtmlPreview
               text={previewText}
               rel={session.rel}
+              zoom={previewZoomFactor}
               onOpenLink={(rel) => void open({ root: session!.root, rel }, null, "read")}
             />
           {:else}
