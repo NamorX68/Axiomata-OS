@@ -287,6 +287,8 @@
   }
   .list.done {
     flex: 0 1 auto;
+    /* A long Done list must not push the open tasks out: it scrolls inside half of the tool's height. */
+    max-height: 50%;
   }
   .list li {
     display: flex;
