@@ -1,40 +1,55 @@
 /**
- * The workbench's two modes and their layouts (`docs/plans/workbench.md`): **Editor** (files, git,
- * diffs) and **Agents** (the full layout with terminals and agents). A project keeps one layout per
- * mode in its `layout_json`; the mode not shown is *parked* — its panes stay mounted, hidden, so
- * a running agent does not die when the user looks at the files for a while.
+ * The workbench's three modes and their layouts (`docs/plans/workbench.md`, `docs/plans/a2a.md` A6a): **Editor** (files,
+ * git, diffs), **Canvas** (the free surface of terminals and agents; stored as `agents`, its name before the Flow existed)
+ * and **Flow** (planning: the plan panel and the planners' panes). A project keeps one layout per mode in its
+ * `layout_json`; the modes not shown are *parked* — their panes stay mounted, hidden, so a running agent does not die
+ * when the user looks at the files, or at the plan, for a while.
  *
- * Stored shape: `{ version, mode, layouts: { editor, agents } }`. A row written before the modes
- * existed holds one bare layout (`{ version, root }`); that was the agents' view, so it reads back
- * as the Agents layout, with an empty Editor layout beside it.
+ * Stored shape: `{ version, mode, layouts: { editor, agents, flow } }`. A row written before the modes existed holds one
+ * bare layout (`{ version, root }`); that was the Agents (now Canvas) view, so it reads back as that layout. A row from
+ * the two-mode time has no `flow`, which is replaced by the starting one.
  */
 
 import { emptyLayout, parseLayout, serializeLayout, type Layout } from "./layout";
 
-export type Mode = "editor" | "agents";
+export type Mode = "editor" | "agents" | "flow";
 
-export const MODES: readonly Mode[] = ["editor", "agents"];
+export const MODES: readonly Mode[] = ["editor", "agents", "flow"];
+
+/** What the header calls each mode. The stored id of the Canvas is still `agents`. */
+export const MODE_LABEL: Record<Mode, string> = { editor: "Editor", agents: "Canvas", flow: "Flow" };
+
+/** The layouts of the modes that are not shown — every mode but the shown one. */
+export type Parked = Partial<Record<Mode, Layout>>;
 
 export interface Workspace {
   mode: Mode;
   /** The layout on screen. */
   active: Layout;
-  /** The other mode's layout, kept (and its panes kept running). */
-  parked: Layout;
+  /** The other modes' layouts, kept (and their panes kept running). */
+  parked: Parked;
 }
 
-export function otherMode(mode: Mode): Mode {
-  return mode === "editor" ? "agents" : "editor";
+/**
+ * Shows `next`: what was on screen is parked, what was parked for `next` is shown. A mode that has no layout yet (a
+ * project from before it existed) starts empty.
+ */
+export function switchMode(ws: Workspace, next: Mode): Workspace {
+  if (next === ws.mode) return ws;
+  const { [next]: shown, ...rest } = ws.parked;
+  return { mode: next, active: shown ?? emptyLayout(), parked: { ...rest, [ws.mode]: ws.active } };
 }
 
-/** Swaps the shown mode: what was on screen is parked, what was parked is shown. */
-export function switchMode(ws: Workspace): Workspace {
-  return { mode: otherMode(ws.mode), active: ws.parked, parked: ws.active };
-}
-
-/** The layouts by mode, whichever is shown. */
+/** The layouts by mode, whichever is shown; a mode with none yet reads as empty. */
 export function layoutsOf(ws: Workspace): Record<Mode, Layout> {
-  return ws.mode === "editor" ? { editor: ws.active, agents: ws.parked } : { editor: ws.parked, agents: ws.active };
+  const all: Record<Mode, Layout> = { editor: emptyLayout(), agents: emptyLayout(), flow: emptyLayout() };
+  for (const mode of MODES) all[mode] = mode === ws.mode ? ws.active : (ws.parked[mode] ?? all[mode]);
+  return all;
+}
+
+/** Every layout that is not on screen, for the view to keep rendering (hidden) the panes of. */
+export function parkedLayouts(parked: Parked): Layout[] {
+  return MODES.flatMap((mode) => (parked[mode] ? [parked[mode]] : []));
 }
 
 export function serializeWorkspace(ws: Workspace): string {
@@ -45,13 +60,20 @@ export function serializeWorkspace(ws: Workspace): string {
     layouts: {
       editor: JSON.parse(serializeLayout(layouts.editor)),
       agents: JSON.parse(serializeLayout(layouts.agents)),
+      flow: JSON.parse(serializeLayout(layouts.flow)),
     },
   });
 }
 
+function parkedOf(all: Record<Mode, Layout>, shown: Mode): Parked {
+  const parked: Parked = {};
+  for (const mode of MODES) if (mode !== shown) parked[mode] = all[mode];
+  return parked;
+}
+
 /**
  * Reads a stored `layout_json`. `null` when nothing usable is in it (the caller starts fresh and
- * says so); a missing half is replaced by `fallback`'s, so one damaged layout does not lose the other.
+ * says so); a missing half is replaced by `fallback`'s, so one damaged layout does not lose the others.
  */
 export function parseWorkspace(raw: unknown, fallback: Record<Mode, () => Layout>): Workspace | null {
   let value = raw;
@@ -70,14 +92,22 @@ export function parseWorkspace(raw: unknown, fallback: Record<Mode, () => Layout
     const l = layouts as Record<string, unknown>;
     const editor = parseLayout(l.editor);
     const agents = parseLayout(l.agents);
-    if (!editor && !agents) return null;
-    const mode: Mode = record.mode === "editor" ? "editor" : "agents";
-    const both = { editor: editor ?? fallback.editor(), agents: agents ?? fallback.agents() };
-    return { mode, active: both[mode], parked: both[otherMode(mode)] };
+    const flow = parseLayout(l.flow);
+    // Nothing usable at all: not even the two older modes' halves.
+    if (!editor && !agents && !flow) return null;
+    const mode: Mode = MODES.includes(record.mode as Mode) ? (record.mode as Mode) : "agents";
+    const all: Record<Mode, Layout> = {
+      editor: editor ?? fallback.editor(),
+      agents: agents ?? fallback.agents(),
+      flow: flow ?? fallback.flow(),
+    };
+    return { mode, active: all[mode], parked: parkedOf(all, mode) };
   }
 
   const legacy = parseLayout(record);
-  return legacy ? { mode: "agents", active: legacy, parked: fallback.editor() } : null;
+  if (!legacy) return null;
+  const all: Record<Mode, Layout> = { editor: fallback.editor(), agents: legacy, flow: fallback.flow() };
+  return { mode: "agents", active: legacy, parked: parkedOf(all, "agents") };
 }
 
 /** The Editor layout of a project that has none yet: nothing open. */

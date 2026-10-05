@@ -231,8 +231,10 @@ export interface IdeAgent {
   card_id?: number | null;
   /** This session reviews that card instead of working on it. */
   card_review?: boolean;
-  /** The commit a reviewer's checkout is cut from. */
+  /** The commit a reviewer's or planner's checkout is cut from. */
   start_ref?: string | null;
+  /** The plan the studio started this session for: a planner (CP-A7). */
+  plan_id?: number | null;
   /** Computed on read: what actually runs — `command`, or the harness's own
    *  default when it is empty. Sent along so no frontend keeps a second copy
    *  of that table. */
@@ -259,6 +261,14 @@ export interface CardSession {
 export interface ReviewSession {
   agent: IdeAgent;
   card_id: number;
+  role: string;
+  engine_id: string;
+}
+
+/** The planner session made for a plan (A2A CP-A7). */
+export interface PlanSession {
+  agent: IdeAgent;
+  plan_id: number;
   role: string;
   engine_id: string;
 }

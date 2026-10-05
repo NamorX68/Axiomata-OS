@@ -1591,6 +1591,12 @@ and role are set in the same transaction. Roles offered are those in force for t
 catalog through `ide/rosterStore.ts`. `axiomata-cli ide agents new` still takes raw fields (the owner's own tool); agents without an engine (older rows) show their profile
 until the profile-derived assignment gives them one. Also: a session may send at most 60 messages in all (`Limits::max_per_sender_total`, owner's choice of "a number", 2026-10-04).
 
+### A2A CP-A7 built (2026-10-05)
+
+The planner (`docs/plans/a2a.md` "CP-A7 im Detail"). **7a, backend:** `plans.goal` (migration 19) and `ide_agents.plan_id` (18); the role `planner` (seeded, kind `plan`, no fixed engine); MCP tool `get_plan`; `agent_entry::Launch` (a session is started for a card *or* a plan; reviewers and planners are `read_only`);
+`axiomata_core::plan_session` makes a planner (a detached read-only checkout of the project's `HEAD`, one planner per plan across projects) and ends them with the plan; CLI `board plan start`, Tauri `start_plan_session`. **7b, the Studio's third mode:** *Editor | Canvas | Flow* (`ide/modes.ts`,
+one layout per mode and project; "Canvas" is what was "Agents"), the pane kind `plan` (`ide/panes/PlanPane.svelte`, `ide/planning.ts`): plans of a board, "Neuer Plan …", the planner's start, the proposals with role/tier and the owner's yes, "Plan freigeben". A planner's pane opens in the Flow beside the plan panel.
+
 ### A2A CP-A6c built (2026-10-05)
 
 Limits per card session (`docs/plans/a2a.md` "CP-A6c im Detail"): `axiomata_ide::usage` counts what a session used (Claude Code transcript, deduplicated per reply; Opencode messages), `axiomata_core::session_limits`

@@ -1581,6 +1581,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         engine_id: (args.engineId as string | null) ?? "mock-engine",
       } as T;
     }
+    // Starting a planner in the browser mock: a session of the planner role for the plan, nothing runs.
+    case "start_plan_session": {
+      const template = ideAgents.find((a) => a.project_id === args.projectId) ?? ideAgents[0];
+      const agent = { ...template, id: 800 + Number(args.planId), name: `planner-${args.planId}`, agent_role: "planner", plan_id: Number(args.planId) };
+      if (!ideAgents.some((a) => a.id === agent.id)) ideAgents.push(agent);
+      return { agent, plan_id: args.planId, role: "planner", engine_id: (args.engineId as string | null) ?? "mock-engine" } as T;
+    }
     case "release_card":
       return true as T;
     case "start_review_session": {
@@ -1967,6 +1974,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         return { ...c, column_id: open.id };
       });
       boardPlans = boardPlans.map((p) => (p.id === plan.id ? { ...p, status: "approved", approved_at: new Date().toISOString() } : p));
+      // The planner has had its say: its session goes, like the backend's `forget_plan_sessions`.
+      for (let i = ideAgents.length - 1; i >= 0; i--) if (ideAgents[i].plan_id === plan.id) ideAgents.splice(i, 1);
       return moved as T;
     }
     case "close_board_plan": {

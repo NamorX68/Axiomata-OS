@@ -31,6 +31,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { fade } from "svelte/transition";
 
+  import { on } from "../core/bus";
   import { toast } from "../core/toast";
 
   import { DockDrag } from "./dockDrag.svelte";
@@ -89,7 +90,8 @@
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
-  import type { Mode } from "./modes";
+  import { MODES, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
+  import { agentTabsOf, modeForAgent } from "./planning";
   import { get } from "svelte/store";
   import { agentRequests, takeAgentRequests } from "./agentRequest";
   import { modeRequest } from "./modeRequest";
@@ -126,7 +128,7 @@
   const current = $derived($sessionState.current);
   const agents = $derived($sessionState.agents);
   const mode = $derived($sessionState.mode);
-  /** The other mode's layout: its panes stay mounted (hidden), so an agent keeps running while the files are shown. */
+  /** The other modes' layouts: their panes stay mounted (hidden), so an agent keeps running while the files are shown. */
   const parked = $derived($sessionState.parked);
 
   let layout = $state<Layout>(projectSession.noProjectLayout());
@@ -163,7 +165,7 @@
   /** The agents with a pane open in either layout (a hidden mode's pane still runs). */
   const openAgentIds = $derived(
     new Set(
-      [...allTabs(layout), ...allTabs(parked)].flatMap((t) =>
+      [...allTabs(layout), ...parkedLayouts(parked).flatMap(allTabs)].flatMap((t) =>
         t.kind === "agent" && typeof t.config?.agentId === "number" ? [t.config.agentId] : [],
       ),
     ),
@@ -512,7 +514,7 @@
   /** Switches the shown mode; the layout on screen is parked, not closed. */
   function switchTo(next: Mode): void {
     if (!current || next === mode) return;
-    layout = projectSession.switchMode(layout);
+    layout = projectSession.switchMode(layout, next);
   }
 
   /**
@@ -524,13 +526,25 @@
    * the agent's *id*; the profile itself stays in one place, so editing it
    * does not mean hunting down copies in a stored layout.
    */
-  function openAgent(agent: IdeAgent) {
-    // Already open in this layout: bring that pane forward instead of starting a second copy of the agent.
-    const existing = allTabs(layout).find((t) => t.kind === "agent" && t.config?.agentId === agent.id);
-    if (existing) {
-      layout = activateTab(layout, existing.id);
+  function openAgent(agent: IdeAgent, preferred?: Mode) {
+    // Already open: bring that pane forward instead of starting a second copy of the agent — a second pane would start
+    // a second harness on the same session. It may sit in a mode that is not shown; then that mode is shown.
+    const here = agentTabsOf(layout, [agent.id])[0];
+    if (here) {
+      layout = activateTab(layout, here.id);
       return;
     }
+    const shown = get(projectSession.session);
+    const elsewhere = MODES.find(
+      (other) => other !== shown.mode && shown.parked[other] && agentTabsOf(shown.parked[other], [agent.id]).length > 0,
+    );
+    if (elsewhere) {
+      layout = projectSession.switchMode(layout, elsewhere);
+      const found = agentTabsOf(layout, [agent.id])[0];
+      if (found) layout = activateTab(layout, found.id);
+      return;
+    }
+    if (preferred && preferred !== shown.mode) layout = projectSession.switchMode(layout, preferred);
     const tab: PaneTab = {
       id: crypto.randomUUID(),
       kind: "agent",
@@ -577,8 +591,8 @@
         await projectSession.refreshAgents();
         const agent = projectSession.agentById(agentId);
         if (!agent) continue;
-        if (get(projectSession.session).mode !== "agents") layout = projectSession.switchMode(layout);
-        openAgent(agent);
+        // A planner belongs to the plan it plans: its pane opens in the Flow, beside the planning panel.
+        openAgent(agent, modeForAgent(agent));
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err);
         toast(`Die Sitzung konnte nicht geöffnet werden: ${why}`, "danger");
@@ -599,6 +613,12 @@
     let unsubscribeHandoffs = () => {};
     let unsubscribeMode = () => {};
     let unsubscribeAgent = () => {};
+    // A plan that has had its say ends its planner; the pane that showed it has nothing left to run.
+    const unsubscribeClose = on("studio:close-agent-panes", (detail) => {
+      const ids = (detail as { agentIds?: number[] } | undefined)?.agentIds ?? [];
+      layout = agentTabsOf(layout, ids).reduce((acc, tab) => closeTab(acc, tab.id), layout);
+      projectSession.closeParkedAgentTabs(ids);
+    });
     let gone = false;
     void projectSession.start().then((next) => {
       if (next) layout = next;
@@ -636,6 +656,7 @@
       unsubscribeHandoffs();
       unsubscribeMode();
       unsubscribeAgent();
+      unsubscribeClose();
       void unlistenRenamed.then((off) => off());
       window.removeEventListener("blur", drag.abandon);
       window.removeEventListener("pagehide", flushOnLeaving);
@@ -692,7 +713,7 @@
   });
 
   /** Every pane in the layout, flat — the store renders exactly this list. */
-  const panes = $derived([...allTabs(layout), ...allTabs(parked)]);
+  const panes = $derived([...allTabs(layout), ...parkedLayouts(parked).flatMap(allTabs)]);
   /** The panes on screen: the active tab of every group, while the view is open. */
   const visibleTabs = $derived(new Set(open ? allGroups(layout).map((g) => g.active) : []));
 
@@ -764,8 +785,9 @@
     <div class="titles">
       <h1>Studio</h1>
       <div class="modes" role="group" aria-label="Mode">
-        <button type="button" class:on={mode === "editor"} disabled={!current} onclick={() => switchTo("editor")}>Editor</button>
-        <button type="button" class:on={mode === "agents"} disabled={!current} onclick={() => switchTo("agents")}>Agents</button>
+        {#each MODES as each (each)}
+          <button type="button" class:on={mode === each} disabled={!current} onclick={() => switchTo(each)}>{MODE_LABEL[each]}</button>
+        {/each}
       </div>
       {#if front && crumbs.length > 0}
         {#each crumbs as crumb (crumb.line + "\0" + crumb.name)}

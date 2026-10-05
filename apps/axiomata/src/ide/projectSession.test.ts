@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IdeProject } from "../core/backend";
 import { toast } from "../core/toast";
-import { allTabs, findTab, singleGroupLayout, type Layout } from "./layout";
+import { addTab, allGroups, allTabs, closeTab, findTab, singleGroupLayout, type Layout } from "./layout";
 import * as session from "./projectSession";
 import * as agentApi from "./agents";
 import * as projects from "./projects";
@@ -282,23 +282,69 @@ describe("close", () => {
 });
 
 describe("modes", () => {
-  it("switching parks the shown layout and saves both under one row", async () => {
+  it("switching parks the shown layout and saves all three under one row", async () => {
     api.openProject.mockResolvedValue(project(1));
     const agents = (await session.open(1))!;
     expect(get(session.session).mode).toBe("agents");
 
-    const editor = session.switchMode(agents);
+    const editor = session.switchMode(agents, "editor");
     expect(allTabs(editor)).toEqual([]);
     expect(get(session.session).mode).toBe("editor");
-    expect(allTabs(get(session.session).parked).map((t) => t.kind)).toEqual(["terminal"]);
+    expect(allTabs(get(session.session).parked.agents!).map((t) => t.kind)).toEqual(["terminal"]);
+    // The Flow of a new project starts with the planning panel, parked until it is asked for.
+    expect(allTabs(get(session.session).parked.flow!).map((t) => t.kind)).toEqual(["plan"]);
 
     session.save(editor);
     const written = JSON.parse(api.saveLayoutSoon.mock.calls[api.saveLayoutSoon.mock.calls.length - 1][1] as string);
     expect(written.mode).toBe("editor");
-    expect(Object.keys(written.layouts)).toEqual(["editor", "agents"]);
+    expect(Object.keys(written.layouts)).toEqual(["editor", "agents", "flow"]);
 
     // And back: the parked terminal is the very layout that was parked.
-    expect(session.switchMode(editor)).toBe(agents);
+    expect(session.switchMode(editor, "agents")).toBe(agents);
+  });
+
+  it("shows the Flow's planning panel and keeps the Canvas parked while it does", async () => {
+    api.openProject.mockResolvedValue(project(1));
+    const agents = (await session.open(1))!;
+    const flow = session.switchMode(agents, "flow");
+    expect(get(session.session).mode).toBe("flow");
+    expect(allTabs(flow).map((t) => t.kind)).toEqual(["plan"]);
+    expect(get(session.session).parked.agents).toBe(agents);
+  });
+
+  it("gives the Flow its planning panel back when the stored layout has none", async () => {
+    const stored = JSON.stringify({
+      mode: "flow",
+      layouts: {
+        agents: { root: { type: "tabs", id: "a", active: "t", tabs: [{ id: "t", kind: "terminal", title: "T" }] } },
+        flow: { root: { type: "tabs", id: "f", active: "p", tabs: [{ id: "p", kind: "agent", title: "planner-1", config: { agentId: 5 } }] } },
+      },
+    });
+    api.openProject.mockResolvedValue(project(1, { layout_json: stored }));
+    const layout = await session.open(1);
+    expect(allTabs(layout!).map((t) => t.kind).sort()).toEqual(["agent", "plan"]);
+  });
+
+  it("repairs the Flow when it is shown, after the panel was closed in the session", async () => {
+    api.openProject.mockResolvedValue(project(1));
+    const agents = (await session.open(1))!;
+    const flow = session.switchMode(agents, "flow");
+    const closed = allTabs(flow).reduce((acc, t) => closeTab(acc, t.id), flow);
+    const canvas = session.switchMode(closed, "agents");
+    expect(allTabs(session.switchMode(canvas, "flow")).map((t) => t.kind)).toEqual(["plan"]);
+  });
+
+  it("closes the panes of ended sessions in the layouts that are not shown", async () => {
+    api.openProject.mockResolvedValue(project(1));
+    const agents = (await session.open(1))!;
+    const withPlanner = addTab(agents, { id: "pl", kind: "agent", title: "planner-1", config: { agentId: 77 } }, {
+      nodeId: allGroups(agents)[0].id,
+      side: "right",
+    });
+    const flow = session.switchMode(withPlanner, "flow");
+    session.closeParkedAgentTabs([77]);
+    const back = session.switchMode(flow, "agents");
+    expect(allTabs(back).map((t) => t.kind)).toEqual(["terminal"]);
   });
 
   it("opens in the mode the project was left in", async () => {
@@ -313,7 +359,9 @@ describe("modes", () => {
     const layout = await session.open(1);
     expect(allTabs(layout!)).toEqual([]);
     expect(get(session.session).mode).toBe("editor");
-    expect(allTabs(get(session.session).parked)).toHaveLength(1);
+    // A row from the two-mode time gets the starting Flow.
+    expect(allTabs(get(session.session).parked.agents!)).toHaveLength(1);
+    expect(allTabs(get(session.session).parked.flow!).map((t) => t.kind)).toEqual(["plan"]);
   });
 });
 
@@ -344,6 +392,6 @@ describe("withoutFilesPanes", () => {
     api.openProject.mockResolvedValue(project(1, { layout_json: stored }));
     const layout = await session.open(1);
     expect(allTabs(layout!).map((t) => t.id)).toEqual(["t"]);
-    expect(allTabs(get(session.session).parked)).toEqual([]);
+    expect(allTabs(get(session.session).parked.editor!)).toEqual([]);
   });
 });

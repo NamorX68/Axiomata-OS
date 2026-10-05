@@ -32,8 +32,17 @@ import { toast } from "../core/toast";
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { allTabs, closeTab, emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
-import { FILES_PANE, TASK_PANE } from "./paneKinds";
-import { emptyEditorLayout, parseWorkspace, serializeWorkspace, switchMode as swapMode, type Mode, type Workspace } from "./modes";
+import { agentTabsOf, withPlanPane } from "./planning";
+import { FILES_PANE, TASK_PANE, planTab } from "./paneKinds";
+import {
+  emptyEditorLayout,
+  parseWorkspace,
+  serializeWorkspace,
+  switchMode as swapMode,
+  type Mode,
+  type Parked,
+  type Workspace,
+} from "./modes";
 import { newProjectFolder, openProjectFolder } from "../fileapp/backend";
 import { applyProjectCwd } from "./paneCwd";
 import {
@@ -55,8 +64,8 @@ export interface ProjectSession {
   switching: boolean;
   /** Which mode's layout the view shows (`ide/modes.ts`). */
   mode: Mode;
-  /** The other mode's layout: not shown, its panes kept mounted and running. */
-  parked: Layout;
+  /** The other modes' layouts: not shown, their panes kept mounted and running. */
+  parked: Parked;
 }
 
 const EMPTY: ProjectSession = {
@@ -65,7 +74,7 @@ const EMPTY: ProjectSession = {
   agents: [],
   switching: false,
   mode: "agents",
-  parked: emptyLayout(),
+  parked: {},
 };
 
 const state = writable<ProjectSession>(EMPTY);
@@ -82,6 +91,11 @@ function report(err: unknown): void {
 /** A fresh terminal pane. Its id is the module's `instanceId` for its lifetime. */
 export function terminalTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: "terminal", title: "Terminal" };
+}
+
+/** What a project's Flow starts with: the planning panel, and nothing else until a planner is started. */
+function startingFlowLayout(): Layout {
+  return singleGroupLayout([planTab()]);
 }
 
 /** What a project gets the first time it is opened: a terminal (the files are in the shared sidebar). */
@@ -108,21 +122,29 @@ export function withoutFilesPanes(layout: Layout): Layout {
  * do for `dashboard.json`, and the same applies here.
  */
 export function workspaceFor(project: IdeProject): Workspace {
-  const starting = (): Workspace => ({ mode: "agents", active: startingLayout(project), parked: emptyEditorLayout() });
+  const starting = (): Workspace => ({
+    mode: "agents",
+    active: startingLayout(project),
+    parked: { editor: emptyEditorLayout(), flow: startingFlowLayout() },
+  });
   if (project.layout_json === null) return starting();
   const parsed = parseWorkspace(project.layout_json, {
     editor: emptyEditorLayout,
     agents: () => startingLayout(project),
+    flow: startingFlowLayout,
   });
   if (!parsed) {
     toast(`The stored layout for “${project.name}” could not be read; starting fresh.`, "warning");
     return starting();
   }
-  return {
-    mode: parsed.mode,
-    active: applyProjectCwd(withoutFilesPanes(parsed.active), project.repo_root),
-    parked: applyProjectCwd(withoutFilesPanes(parsed.parked), project.repo_root),
+  // The Flow always has its planning panel: a closed one would have no way back.
+  const prepared = (layout: Layout, mode: Mode) => {
+    const clean = applyProjectCwd(withoutFilesPanes(layout), project.repo_root);
+    return mode === "flow" ? withPlanPane(clean) : clean;
   };
+  const parked: Parked = {};
+  for (const [mode, layout] of Object.entries(parsed.parked) as [Mode, Layout][]) parked[mode] = prepared(layout, mode);
+  return { mode: parsed.mode, active: prepared(parsed.active, parsed.mode), parked };
 }
 
 async function refresh(): Promise<void> {
@@ -215,7 +237,13 @@ export async function changeRoot(id: number, layout: Layout): Promise<Layout | n
     if (!updated) return null;
     const isOpen = get(state).current?.id === id;
     if (!isOpen) return null;
-    state.update((s) => ({ ...s, current: updated, parked: applyProjectCwd(s.parked, updated.repo_root) }));
+    state.update((s) => {
+      const parked: Parked = {};
+      for (const [mode, layout] of Object.entries(s.parked) as [Mode, Layout][]) {
+        parked[mode] = applyProjectCwd(layout, updated.repo_root);
+      }
+      return { ...s, current: updated, parked };
+    });
     return applyProjectCwd(layout, updated.repo_root);
   } catch (err) {
     report(err);
@@ -237,7 +265,7 @@ export async function remove(id: number): Promise<boolean> {
     await deleteProject(id);
     const wasOpen = get(state).current?.id === id;
     // The agents went with the project — the foreign key cascades.
-    if (wasOpen) state.update((s) => ({ ...s, current: null, agents: [], parked: emptyLayout(), mode: "agents" }));
+    if (wasOpen) state.update((s) => ({ ...s, current: null, agents: [], parked: {}, mode: "agents" }));
     await refresh();
     return wasOpen;
   } catch (err) {
@@ -253,7 +281,7 @@ export async function remove(id: number): Promise<boolean> {
 export async function close(): Promise<void> {
   sequence++;
   await flushLayout();
-  state.update((s) => ({ ...s, current: null, agents: [], switching: false, parked: emptyLayout(), mode: "agents" }));
+  state.update((s) => ({ ...s, current: null, agents: [], switching: false, parked: {}, mode: "agents" }));
 }
 
 /** Queues a debounced write of the open project's layout. */
@@ -263,14 +291,29 @@ export function save(layout: Layout): void {
 }
 
 /**
- * Shows the other mode: `layout` (on screen) is parked and the parked one is returned for the view
- * to show. Nothing is unmounted — the view keeps rendering the parked layout's panes, hidden.
+ * Shows mode `next`: `layout` (on screen) is parked and the one parked for `next` is returned for the view to show.
+ * Nothing is unmounted — the view keeps rendering the parked layouts' panes, hidden.
  */
-export function switchMode(layout: Layout): Layout {
+export function switchMode(layout: Layout, next: Mode): Layout {
   const { mode, parked } = get(state);
-  const next = swapMode({ mode, active: layout, parked });
-  state.update((s) => ({ ...s, mode: next.mode, parked: next.parked }));
-  return next.active;
+  const swapped = swapMode({ mode, active: layout, parked }, next);
+  state.update((s) => ({ ...s, mode: swapped.mode, parked: swapped.parked }));
+  return next === "flow" ? withPlanPane(swapped.active) : swapped.active;
+}
+
+/**
+ * Closes the panes of sessions that are gone in the layouts that are *not* on screen (the shown layout is the view's
+ * to change). A plan that has had its say ends its planner, and a pane of it left in a hidden mode would go on running a
+ * harness for a session the backend has forgotten.
+ */
+export function closeParkedAgentTabs(agentIds: number[]): void {
+  state.update((s) => {
+    const parked: Parked = {};
+    for (const [mode, layout] of Object.entries(s.parked) as [Mode, Layout][]) {
+      parked[mode] = agentTabsOf(layout, agentIds).reduce((acc, tab) => closeTab(acc, tab.id), layout);
+    }
+    return { ...s, parked };
+  });
 }
 
 /** The layout an IDE with no project shows: nothing. */

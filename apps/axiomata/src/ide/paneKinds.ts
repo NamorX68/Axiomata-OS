@@ -42,6 +42,13 @@ export const GIT_PANE = "git";
 /** A task running in a terminal (Run/Tasks, #50): the tab names the task, never the command line (`ide/taskRuns.ts`). */
 export const TASK_PANE = "task";
 
+/** The Flow mode's planning panel (A2A CP-A7b): the plans of a board, their proposals, the owner's yes. One per Flow layout. */
+export const PLAN_PANE = "plan";
+
+export function planTab(): PaneTab {
+  return { id: crypto.randomUUID(), kind: PLAN_PANE, title: "Planung", config: {} };
+}
+
 export function gitTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: GIT_PANE, title: "Git", config: {} };
 }
