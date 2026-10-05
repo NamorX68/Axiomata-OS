@@ -463,6 +463,9 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
                 .map(|pattern| PermissionRule::new("shell", pattern, "deny")),
         );
     }
+    // The push denies once more, last: a broad rule of the role (`Bash(git:*)` is `git *`) that came after the first ones
+    // would otherwise be the later rule, and the later rule is the one that counts.
+    rules.extend(ide_permissions());
     rules
 }
 
@@ -784,6 +787,25 @@ fn chat_reply(outcome: TurnOutcome) -> Result<ChatReply, AxiomataError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_push_denies_come_after_every_allow_a_role_added() {
+        // `Bash(git:*)` is the allow rule `git *`: it must not be the later rule against `git push`.
+        let shell = vec!["git *".to_owned()];
+        for read_only in [false, true] {
+            let rules = card_permissions(&CardRights {
+                tools: &[],
+                read_only,
+                shell: &shell,
+            });
+            let last_allow = rules.iter().rposition(|r| r.effect == "allow").unwrap();
+            let last_push_deny = rules
+                .iter()
+                .rposition(|r| r.resource == "git push" && r.effect == "deny")
+                .unwrap();
+            assert!(last_push_deny > last_allow, "read_only = {read_only}");
+        }
+    }
 
     #[test]
     fn a_card_session_may_use_its_own_tools_by_name_and_still_cannot_push() {

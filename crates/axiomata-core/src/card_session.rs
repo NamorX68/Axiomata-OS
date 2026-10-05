@@ -217,23 +217,36 @@ pub(crate) fn make_line(
     plan: &crate::board::Plan,
     project: &axiomata_ide::Project,
 ) -> Result<axiomata_ide::plan_line::Line> {
-    let path = axiomata_ide::plan_line::line_path(
+    checked_line(
+        &core.db,
         &crate::paths::ide_locations().worktrees,
+        plan,
         &project.name,
-        plan.id,
-    );
-    let line = axiomata_ide::plan_line::ensure(
         &project.repo_root,
-        &path,
-        plan.id,
-        plan.base_branch.as_deref(),
-    )?;
+    )
+    .map(|(line, _)| line)
+}
+
+/// Finds or makes plan `plan`'s line and checks it is where the studio left it — the one place every use of a line starts
+/// from, so a check added here reaches starting a card, integrating one and taking the plan over alike. Returns the line
+/// and the commit it was checked at. Records the branch the line was cut from when it is made.
+fn checked_line(
+    db: &Mutex<Connection>,
+    worktrees: &std::path::Path,
+    plan: &crate::board::Plan,
+    project_name: &str,
+    repo_root: &std::path::Path,
+) -> Result<(axiomata_ide::plan_line::Line, String)> {
+    let path = axiomata_ide::plan_line::line_path(worktrees, project_name, plan.id);
+    let line =
+        axiomata_ide::plan_line::ensure(repo_root, &path, plan.id, plan.base_branch.as_deref())?;
     if plan.base_branch.is_none() {
-        flow::set_plan_base_branch(&core.db_lock(), plan.id, &line.base_branch)?;
+        flow::set_plan_base_branch(&lock(db), plan.id, &line.base_branch)?;
     }
-    // A line the studio just made is at the base; one it did not make must be where it left it.
-    check_line_tip(&core.db, plan, &line)?;
-    Ok(line)
+    // A line the studio just made is at the base; one it did not make must be where it left it: a branch of that name is
+    // a branch like any other, and work put on it by something else is work no reviewer saw.
+    let tip = check_line_tip(db, plan, &line)?;
+    Ok((line, tip))
 }
 
 /// [`start_card_session`] without the checks of the machine (a repository, the CLI), so tests need neither.
@@ -1243,16 +1256,13 @@ fn integrate_blocking(
     ) {
         return Ok((CardIntegration::Busy { card_id }, Vec::new()));
     }
-    let path = axiomata_ide::plan_line::line_path(worktrees, &plan.project.name, plan.plan.id);
-    let line = axiomata_ide::plan_line::ensure(
+    let (line, _) = checked_line(
+        db,
+        worktrees,
+        &plan.plan,
+        &plan.project.name,
         &plan.project.repo_root,
-        &path,
-        plan.plan.id,
-        plan.plan.base_branch.as_deref(),
     )?;
-    // The line must be where the studio left it: a branch of that name is a branch like any other, and work put on it by
-    // something else is work no reviewer saw.
-    check_line_tip(db, &plan.plan, &line)?;
     // What was checked is what goes in: the commit the gate saw, not whatever the branch name points at by now.
     let reviewed_commit = gate_reviewed(&plan.card, &plan.sessions, &plan.repo, &plan.message)?;
     let outcome = axiomata_ide::plan_line::integrate(&line, &reviewed_commit, &plan.message)?;
@@ -1536,16 +1546,8 @@ fn take_over_plan_blocking(
         }
         (plan, project, integrated)
     };
-    let path = axiomata_ide::plan_line::line_path(worktrees, &project.name, plan.id);
-    let line = axiomata_ide::plan_line::ensure(
-        &project.repo_root,
-        &path,
-        plan.id,
-        plan.base_branch.as_deref(),
-    )?;
-    // Where the studio left it, like before every integration: work put on the line by something else is work no
-    // reviewer saw.
-    let checked_tip = check_line_tip(db, &plan, &line)?;
+    let (line, checked_tip) =
+        checked_line(db, worktrees, &plan, &project.name, &project.repo_root)?;
     let first_line = plan.name.lines().next().unwrap_or_default().trim();
     let message = format!("Plan #{}: {first_line}", plan.id);
     match axiomata_ide::plan_line::take_over(&project.repo_root, &line, &checked_tip, &message)? {

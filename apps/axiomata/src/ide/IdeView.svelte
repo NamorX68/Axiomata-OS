@@ -531,7 +531,8 @@
     // a second harness on the same session. It may sit in a mode that is not shown; then that mode is shown.
     const here = agentTabsOf(layout, [agent.id])[0];
     if (here) {
-      layout = activateTab(layout, here.id);
+      // A session the studio started by itself is not brought forward: it has its pane, the owner keeps their own view.
+      if (!background) layout = activateTab(layout, here.id);
       return;
     }
     const shown = get(projectSession.session);
@@ -539,6 +540,7 @@
       (other) => other !== shown.mode && shown.parked[other] && agentTabsOf(shown.parked[other], [agent.id]).length > 0,
     );
     if (elsewhere) {
+      if (background) return;
       layout = projectSession.switchMode(layout, elsewhere);
       const found = agentTabsOf(layout, [agent.id])[0];
       if (found) layout = activateTab(layout, found.id);
