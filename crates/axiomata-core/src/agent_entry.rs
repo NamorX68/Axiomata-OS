@@ -273,6 +273,12 @@ impl CardLaunch {
     }
 }
 
+/// What a card session is told about running commands. Claude Code asks about a command that chains others or starts
+/// with `cd` (its own check, whatever is allowed), and a session nobody watches then stands still on that question: one
+/// simple command at a time, in the directory it is already in, is not asked about.
+const COMMAND_STYLE: &str = "Your shell already starts in your worktree: do not `cd`, and do not chain commands with \
+     `&&`, `;` or `|` — run one simple command at a time, with paths from the worktree's root.";
+
 /// The first thing a session started for a card is told (A35): who it is and which card, never the card's text — that
 /// comes through `get_card`, so no card text ever sits in a shell line. A restart goes through the same words, which is
 /// why they say what to do with work that is already there.
@@ -284,8 +290,8 @@ pub fn start_prompt(agent: &Agent, launch: &CardLaunch) -> String {
              `read_inbox`, then read the card with `get_card` and work on it in your own worktree. Leave the work as \
              changes in the worktree: do not commit and do not push, the studio commits it when the owner takes it \
              over. If you find changes there already you were interrupted: look at `git status` and `git diff` and \
-             carry on instead of starting over. When the acceptance criteria are met, call `report_done` with a short \
-             summary."
+             carry on instead of starting over. {COMMAND_STYLE} When the acceptance criteria are met, call \
+             `report_done` with a short summary."
         ),
         Some(target) => format!(
             "You are the session \"{name}\", role `{role}`, and you review card #{card_id}, which the session \
@@ -293,7 +299,7 @@ pub fn start_prompt(agent: &Agent, launch: &CardLaunch) -> String {
              cannot change it and must not try. Read the card with `get_card` — its acceptance criteria are your \
              standard — then look at what was done: `git log {base}..HEAD` and `git diff {base}...HEAD`. When you have \
              decided, call `review_verdict` with `approve` or `return` and a short note that says exactly what is wrong \
-             and how to see it, so the worker can fix it without asking you.",
+             and how to see it, so the worker can fix it without asking you. {COMMAND_STYLE}",
             worker = target.worker,
             base = target.base,
         ),

@@ -438,12 +438,27 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
             .iter()
             .map(|tool| PermissionRule::new(&format!("{server}_{tool}"), "*", "allow")),
     );
-    // A reviewer judges what it is shown and changes nothing.
+    // A reviewer judges what it is shown and changes nothing — and reads what was done with git, which it is allowed to
+    // do one command at a time without asking. Anything else, and a chain of several commands, is still a question.
     if rights.review {
         rules.push(PermissionRule::new("edit", "*", "deny"));
+        rules.extend(
+            REVIEWER_GIT
+                .iter()
+                .map(|pattern| PermissionRule::new("shell", pattern, "allow")),
+        );
     }
     rules
 }
+
+/// The read-only git commands a reviewer may run without asking (Opencode shell patterns).
+const REVIEWER_GIT: [&str; 5] = [
+    "git log *",
+    "git diff *",
+    "git show *",
+    "git status *",
+    "git rev-parse *",
+];
 
 /// What an unattended card session of Opencode may do without asking.
 #[derive(Debug, Clone, Copy)]
@@ -763,6 +778,23 @@ mod tests {
         };
         assert!(denies_edits(card_permissions(&rights(true))));
         assert!(!denies_edits(card_permissions(&rights(false))));
+        // It reads with git, one command at a time, and cannot push by any of those patterns.
+        let reviewer = card_permissions(&rights(true));
+        for pattern in REVIEWER_GIT {
+            assert!(
+                reviewer
+                    .iter()
+                    .any(|r| r.action == "shell" && r.resource == pattern && r.effect == "allow"),
+                "{pattern}"
+            );
+            assert!(!pattern.contains("push"), "{pattern}");
+        }
+        assert!(
+            !card_permissions(&rights(false))
+                .iter()
+                .any(|r| r.resource == "git log *"),
+            "a worker gets no extra shell rules from this"
+        );
     }
 
     #[test]
