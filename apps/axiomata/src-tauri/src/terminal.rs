@@ -283,8 +283,17 @@ pub struct TerminalSpawnOptions {
     pub scrollback_limit: Option<usize>,
 }
 
+/// How long a terminal may take to start before the pane is told it did not. A start that hangs (the child process stuck
+/// between `fork` and `exec`) is not given up on by the operating system, only by us.
+const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Starts a terminal. `async` on purpose: a synchronous Tauri command runs on the **main thread**, and spawning a process
+/// is a call that can wait on the child — `std::process::Command::spawn` blocks until the child has reached `exec`. A
+/// hang there froze the whole app for minutes (a macOS hang report of 2026-10-05 showed the main thread inside
+/// `terminal_spawn` → `portable_pty` → `spawn`). The spawn runs on a blocking thread now, so the window stays alive
+/// whatever the child does, and the pane gets an error instead of "Preparing …" for ever.
 #[tauri::command]
-pub fn terminal_spawn(
+pub async fn terminal_spawn(
     app: AppHandle,
     sessions: State<'_, TerminalSessions>,
     rows: u16,
@@ -292,10 +301,32 @@ pub fn terminal_spawn(
     options: TerminalSpawnOptions,
     on_output: Channel<TerminalEvent>,
 ) -> Result<String, String> {
-    let cwd_path = options.cwd.as_ref().map(|c| Path::new(c.as_str()));
-    let extra_env = options.env.unwrap_or_default();
-    let pty = PtySession::spawn(rows, cols, options.shell.as_deref(), cwd_path, &extra_env)
-        .map_err(|err| err.to_string())?;
+    let (shell, cwd, extra_env) = (
+        options.shell.clone(),
+        options.cwd.clone(),
+        options.env.clone().unwrap_or_default(),
+    );
+    let starting = tokio::task::spawn_blocking(move || {
+        PtySession::spawn(
+            rows,
+            cols,
+            shell.as_deref(),
+            cwd.as_deref().map(Path::new),
+            &extra_env,
+        )
+    });
+    let pty = match tokio::time::timeout(SPAWN_TIMEOUT, starting).await {
+        Ok(joined) => joined
+            .map_err(|err| format!("the terminal did not start: {err}"))?
+            .map_err(|err| err.to_string())?,
+        Err(_) => {
+            tracing::warn!("a terminal did not start within {SPAWN_TIMEOUT:?}");
+            return Err(format!(
+                "the terminal did not start within {} seconds",
+                SPAWN_TIMEOUT.as_secs()
+            ));
+        }
+    };
     let mut reader = pty.try_clone_reader().map_err(|err| err.to_string())?;
     let terminal = match options.scrollback_limit {
         Some(limit) => Terminal::new(rows, cols).with_scrollback_limit(limit),
