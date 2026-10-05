@@ -31,6 +31,8 @@ export interface EditorSettings {
   /** The owner's choice, 100–900; drawn with the nearest real face (F13). */
   fontWeight: number;
   fontSize: number;
+  /** The floating file window's own text size, so it can read larger than the Studio editor's `fontSize`. */
+  panelFontSize: number;
   lineHeight: number;
   ligatures: boolean;
   lineNumbers: LineNumberMode;
@@ -81,6 +83,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   fontFamily: "JetBrains Mono",
   fontWeight: 400,
   fontSize: 14,
+  panelFontSize: 16,
   lineHeight: 1.5,
   ligatures: true,
   lineNumbers: "hybrid",
@@ -109,6 +112,12 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
 const SETTINGS_VERSION = 1;
 const SAVE_DEBOUNCE_MS = 400;
 
+/** Bounds of the floating file window's text size, wider at the top than the Studio's 9–32 for reading. */
+export const PANEL_FONT_SIZE_MIN = 10;
+export const PANEL_FONT_SIZE_MAX = 40;
+/** One zoom step, in points. */
+export const PANEL_FONT_SIZE_STEP = 1;
+
 function pick<T>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
@@ -128,6 +137,25 @@ export function languageList(value: unknown): string[] {
   return [...new Set(ids.filter((v) => /^[a-z0-9_+-]+$/.test(v)))];
 }
 
+function clampPanelFontSize(size: number): number {
+  return Math.min(PANEL_FONT_SIZE_MAX, Math.max(PANEL_FONT_SIZE_MIN, size));
+}
+
+/** The next larger window text size; at the upper bound it stays where it is. */
+export function panelFontSizeUp(size: number): number {
+  return clampPanelFontSize(size + PANEL_FONT_SIZE_STEP);
+}
+
+/** The next smaller window text size; at the lower bound it stays where it is. */
+export function panelFontSizeDown(size: number): number {
+  return clampPanelFontSize(size - PANEL_FONT_SIZE_STEP);
+}
+
+/** The window text size's default, for the "reset" step. */
+export function panelFontSizeReset(): number {
+  return DEFAULT_EDITOR_SETTINGS.panelFontSize;
+}
+
 /** Whether saving `language` formats first (L14). */
 export function formatsOnSave(settings: EditorSettings, language: string | null): boolean {
   return settings.formatOnSave && language !== null && !settings.formatOnSaveExcept.includes(language);
@@ -144,6 +172,7 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     fontFamily: typeof r.fontFamily === "string" && usableFamilyName(r.fontFamily) ? r.fontFamily : d.fontFamily,
     fontWeight: Math.round(number(r.fontWeight, 100, 900, d.fontWeight) / 100) * 100,
     fontSize: Math.round(number(r.fontSize, 9, 32, d.fontSize)),
+    panelFontSize: Math.round(number(r.panelFontSize, PANEL_FONT_SIZE_MIN, PANEL_FONT_SIZE_MAX, d.panelFontSize)),
     lineHeight: number(r.lineHeight, 1, 2.5, d.lineHeight),
     ligatures: bool(r.ligatures, d.ligatures),
     lineNumbers: pick(r.lineNumbers, ["absolute", "relative", "hybrid"] as const, d.lineNumbers),
