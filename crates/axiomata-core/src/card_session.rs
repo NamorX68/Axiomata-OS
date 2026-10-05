@@ -1389,13 +1389,7 @@ fn plan_integration(db: &Connection, card_id: i64) -> Result<IntegrationPlan> {
         crate::board::EventKind::Released,
         "conflict:",
     )?;
-    let gave_up = flow::count_events(
-        db,
-        card.id,
-        STUDIO,
-        crate::board::EventKind::Note,
-        GAVE_UP_PREFIX,
-    )? > 0;
+    let gave_up = gave_up_on(db, card.id)?;
     Ok(IntegrationPlan {
         card,
         plan,
@@ -1426,6 +1420,297 @@ fn summary_of(files: &[String]) -> String {
 
 /// The start of the history line that says the studio gave up integrating a card.
 const GAVE_UP_PREFIX: &str = "gave up integrating";
+
+/// The start of the history line that says the owner had a card they were left with done again: from then on the studio
+/// looks at the card as at any other, and the next conflict puts it in the owner's hands again at once.
+const REDO_PREFIX: &str = "redo requested by the owner";
+
+/// Whether the studio gave up integrating card `card_id` and the owner has not taken it up again since: the studio gave
+/// up more often than the owner asked for a redo.
+fn gave_up_on(db: &Connection, card_id: i64) -> Result<bool> {
+    let count =
+        |text: &str| flow::count_events(db, card_id, STUDIO, crate::board::EventKind::Note, text);
+    Ok(count(GAVE_UP_PREFIX)? > count(REDO_PREFIX)?)
+}
+
+/// The cards of plan `plan_id` the studio gave up integrating and that wait for the owner (the Flow offers them "integrate
+/// again" and "do again").
+///
+/// # Errors
+///
+/// A database error.
+pub fn cards_left_for_owner(db: &Connection, plan_id: i64) -> Result<Vec<i64>> {
+    let mut left = Vec::new();
+    for board in board_store::list_boards(db)? {
+        for card in board_store::list_cards(db, board.id, false)? {
+            if card.plan_id == Some(plan_id)
+                && card.verified_by.is_some()
+                && card.integrated_at.is_none()
+                && card.taken_over_at.is_none()
+                && card.failed_at.is_none()
+                && card.canceled_at.is_none()
+                && gave_up_on(db, card.id)?
+            {
+                left.push(card.id);
+            }
+        }
+    }
+    Ok(left)
+}
+
+/// The owner has a card the studio gave up integrating done again: it goes back to the top of the open column, its
+/// signature and claim are dropped, its sessions are cleaned up, and the plan starts it again on the line as it is now.
+/// Returns the sessions that are gone, for the Studio to close their panes.
+///
+/// # Errors
+///
+/// A refusal for a card that is not signed off, was integrated or taken over, or that the studio has not given up on (the
+/// studio puts such a card back itself).
+pub async fn redo_card(core: &AxiomataCore, card_id: i64) -> Result<Vec<i64>> {
+    let sessions = {
+        let mut db = core.db_lock();
+        let card = board_store::get_card(&db, card_id)?
+            .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
+        if !gave_up_on(&db, card_id)?
+            || card.integrated_at.is_some()
+            || card.taken_over_at.is_some()
+        {
+            return Err(refusal(
+                "card",
+                "only a card the studio gave up integrating can be done again by hand".to_string(),
+            ));
+        }
+        if !flow::reset_for_rework(
+            &mut db,
+            card_id,
+            OWNER,
+            "redo: the owner has the card done again",
+        )? {
+            return Err(refusal(
+                "card",
+                "the card could not be put back to be done again".to_string(),
+            ));
+        }
+        // A card done anew starts counting its returns from zero. The two steps below are small writes after the reset: if
+        // one fails the card is still put back, and the owner's "integrate again" works whatever the history says.
+        if let Err(err) = flow::clear_returned_count(&db, card_id) {
+            tracing::warn!(%err, "could not reset the returns of a card done again");
+        }
+        if let Err(err) = flow::add_event(
+            &db,
+            card_id,
+            STUDIO,
+            crate::board::EventKind::Note,
+            REDO_PREFIX,
+        ) {
+            tracing::warn!(%err, "could not note that a card was done again");
+        }
+        let sessions: Vec<Agent> = agent_store::card_sessions(&db)?
+            .into_iter()
+            .filter(|agent| agent.card_id == Some(card_id))
+            .collect();
+        crate::board_mirror::after_card_change(&db, &core.config_read().clone(), card_id);
+        sessions
+    };
+    let roots = crate::paths::ide_locations().channels;
+    let locations = remove_sessions(&core.db, &roots, &sessions);
+    for location in &locations {
+        crate::agents::opencode::forget_mcp(location).await;
+    }
+    Ok(sessions.iter().map(|agent| agent.id).collect())
+}
+
+// ------------------------------------------------------------ escalation ---
+
+/// How often a card may be sent back before a stronger role takes it over (A26): the second return is the last one the
+/// same role gets.
+pub const ESCALATE_AFTER_RETURNS: u32 = 2;
+
+/// What an escalation came to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum CardEscalation {
+    /// A stronger role took the card over in the same session: worktree, branch and claim stay, the engine and the role
+    /// change, and the next start of the pane runs the new engine.
+    Done {
+        card_id: i64,
+        plan_id: Option<i64>,
+        project_id: i64,
+        agent_id: i64,
+        from_role: String,
+        role: String,
+        engine_id: String,
+    },
+    /// There is no stronger role of this kind with an engine that can run: said once, and the owner decides.
+    NoStrongerRole { card_id: i64, role: String },
+    /// Nothing to do: the card was not sent back often enough, is not in work, or an escalation was tried already.
+    NotNeeded { card_id: i64 },
+}
+
+/// The role that takes over from `current`: the weakest of the same kind that is stronger and has an engine an unattended
+/// session can run on. Ties in tier go to the name, so the choice does not depend on the order of the files.
+fn stronger_role<'a>(config: &Config, roles: &'a [Role], current: &Role) -> Option<&'a Role> {
+    roles
+        .iter()
+        .filter(|role| {
+            role.kind == current.kind
+                && role.tier > current.tier
+                && Capabilities::of(role).work
+                && choose_engine(config, role, None).is_ok()
+        })
+        .min_by(|a, b| a.tier.cmp(&b.tier).then_with(|| a.name.cmp(&b.name)))
+}
+
+/// Hands a card that was sent back [`ESCALATE_AFTER_RETURNS`] times to a stronger role of the same kind — one try, ever
+/// (A26): the worker's session changes role and engine **in place**, so its worktree, its branch and its claim stay, and
+/// the pane's next start runs the new engine on the work that is there already. The session of an Opencode worker that is
+/// still in a turn is interrupted, since the service would otherwise go on with the old model.
+///
+/// With no stronger role the card stays as it is and the owner decides; that is recorded too, so the same look is not made
+/// again.
+///
+/// # Errors
+///
+/// A refusal for a card without a worker session of the studio's making, or whose role is gone.
+pub async fn escalate_card(core: &AxiomataCore, card_id: i64) -> Result<CardEscalation> {
+    let (outcome, old_opencode) = {
+        let config = core.config_read().clone();
+        let db = core.db_lock();
+        escalate_in(&db, &config, &roster::roles_for_project, card_id)?
+    };
+    if let Some(session) = old_opencode
+        && let Some(service) = crate::agents::opencode::running_service().await
+    {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            crate::agents::opencode::interrupt_session(&service, &session),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                tracing::warn!(%err, "could not interrupt the session of an escalated card")
+            }
+            Err(_) => tracing::warn!("the Opencode service did not answer an interrupt in time"),
+        }
+    }
+    Ok(outcome)
+}
+
+/// [`escalate_card`] without the Opencode interrupt; `roles_of` says which roles a project has (the files on disk in
+/// production), so tests need no home folder.
+fn escalate_in(
+    db: &Connection,
+    config: &Config,
+    roles_of: &dyn Fn(&Connection, &Config, i64) -> Vec<Role>,
+    card_id: i64,
+) -> Result<(CardEscalation, Option<String>)> {
+    let not_needed = Ok((CardEscalation::NotNeeded { card_id }, None));
+    let card = board_store::get_card(db, card_id)?
+        .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
+    let in_work = matches!(
+        card.state,
+        crate::board::TaskState::Working | crate::board::TaskState::InputRequired
+    );
+    if !in_work
+        || card.archived_at.is_some()
+        || card.returned_count < ESCALATE_AFTER_RETURNS
+        || flow::count_events(db, card_id, STUDIO, crate::board::EventKind::Escalated, "")? > 0
+    {
+        return not_needed;
+    }
+    let worker = card
+        .claimed_by
+        .as_deref()
+        .and_then(session_id_of)
+        .and_then(|id| agent_store::get_agent(db, id).ok().flatten())
+        .filter(|worker| worker.card_id == Some(card_id) && !worker.card_review)
+        .ok_or_else(|| {
+            refusal(
+                "card",
+                "the session that works on the card is gone".to_string(),
+            )
+        })?;
+    let roles = roles_of(db, config, worker.project_id);
+    let current = roles
+        .iter()
+        .find(|role| role.name == worker.agent_role)
+        .ok_or_else(|| {
+            refusal(
+                "role",
+                format!("there is no role “{}” for this project", worker.agent_role),
+            )
+        })?;
+    let Some(next) = stronger_role(config, &roles, current) else {
+        let text = format!(
+            "sent back {} times; there is no stronger role of kind “{}” than “{}” with an engine to run on, so the owner \
+             decides: let it go on, take it over, or call it off",
+            card.returned_count, current.kind, current.name
+        );
+        flow::add_event(
+            db,
+            card_id,
+            STUDIO,
+            crate::board::EventKind::Escalated,
+            &text,
+        )?;
+        return Ok((
+            CardEscalation::NoStrongerRole {
+                card_id,
+                role: current.name.clone(),
+            },
+            None,
+        ));
+    };
+    let (engine_id, _) = choose_engine(config, next, None)?;
+    let old_engine = worker.engine_id.clone().unwrap_or_default();
+    roster::update_agent_on_engine(
+        db,
+        config,
+        &roles,
+        worker.id,
+        &worker.name,
+        engine_id,
+        &next.name,
+    )?
+    .ok_or_else(|| {
+        refusal(
+            "card",
+            "the session that works on the card is gone".to_string(),
+        )
+    })?;
+    // The next start is a new conversation on the new engine: it finds the work in the worktree and the reviewers' notes in
+    // the card's history, not the old model's context.
+    agent_store::set_opencode_session(db, worker.id, None)?;
+    let text = format!(
+        "sent back {} times: the role “{}” on “{old_engine}” hands over to “{}” on “{engine_id}”; the worktree, the branch \
+         and the claim stay",
+        card.returned_count, current.name, next.name
+    );
+    flow::add_event(
+        db,
+        card_id,
+        STUDIO,
+        crate::board::EventKind::Escalated,
+        &text,
+    )?;
+    crate::board_mirror::after_card_change(db, config, card_id);
+    let old_opencode = (worker.harness == axiomata_roster::Harness::Opencode)
+        .then(|| worker.opencode_session.clone())
+        .flatten();
+    Ok((
+        CardEscalation::Done {
+            card_id,
+            plan_id: card.plan_id,
+            project_id: worker.project_id,
+            agent_id: worker.id,
+            from_role: current.name.clone(),
+            role: next.name.clone(),
+            engine_id: engine_id.to_owned(),
+        },
+        old_opencode,
+    ))
+}
 
 /// The line is where the studio last left it. A line that was not made by this call and has no recorded tip is refused
 /// too: the branch was there before the studio, and nothing says what is on it.
@@ -3190,5 +3475,229 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(refused.contains("taken over as a whole"), "{refused}");
+    }
+
+    /// Sets how often a card was sent back, as the reviewers' returns would have.
+    fn sent_back(w: &World, card: i64, times: u32) {
+        w.db.execute(
+            "UPDATE cards SET returned_count = ?2 WHERE id = ?1",
+            rusqlite::params![card, times],
+        )
+        .unwrap();
+    }
+
+    fn escalate(w: &World, card: i64) -> Result<(CardEscalation, Option<String>)> {
+        let roles = w.roles.clone();
+        escalate_in(&w.db, &w.config, &move |_, _, _| roles.clone(), card)
+    }
+
+    fn heavy_builder() -> Role {
+        let mut heavy = role("builder-heavy", "implement", Some("opus"));
+        heavy.tier = Tier::Heavy;
+        heavy
+    }
+
+    #[test]
+    fn a_card_sent_back_twice_goes_to_a_stronger_role_in_the_same_session_and_only_once() {
+        let mut w = world();
+        w.roles.push(heavy_builder());
+        let card = w.card(w.open, Some("builder"));
+        let started = w.start(card, None).unwrap();
+        let before = store::get_card(&w.db, card).unwrap().unwrap().claimed_by;
+
+        sent_back(&w, card, 1);
+        assert_eq!(
+            escalate(&w, card).unwrap().0,
+            CardEscalation::NotNeeded { card_id: card },
+            "one return is the same role's second try"
+        );
+
+        sent_back(&w, card, 2);
+        let (outcome, _) = escalate(&w, card).unwrap();
+        assert!(
+            matches!(
+                &outcome,
+                CardEscalation::Done { agent_id, role, engine_id, from_role, .. }
+                    if *agent_id == started.agent.id && role == "builder-heavy"
+                        && engine_id == "opus" && from_role == "builder"
+            ),
+            "{outcome:?}"
+        );
+        let agent = agent_store::get_agent(&w.db, started.agent.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(agent.agent_role, "builder-heavy");
+        assert_eq!(agent.engine_id.as_deref(), Some("opus"));
+        assert_eq!(agent.card_id, Some(card), "the session is still the card's");
+        assert_eq!(
+            store::get_card(&w.db, card).unwrap().unwrap().claimed_by,
+            before,
+            "the claim stays with the same session"
+        );
+        let history = flow::list_events(&w.db, card, 50).unwrap();
+        assert!(
+            history
+                .iter()
+                .any(|e| e.kind == crate::board::EventKind::Escalated)
+        );
+
+        assert_eq!(
+            escalate(&w, card).unwrap().0,
+            CardEscalation::NotNeeded { card_id: card },
+            "one try, ever"
+        );
+    }
+
+    #[test]
+    fn without_a_stronger_role_the_owner_is_told_once_and_the_card_stays() {
+        let mut w = world();
+        let card = w.card(w.open, Some("builder"));
+        let started = w.start(card, None).unwrap();
+        sent_back(&w, card, 2);
+        let (outcome, _) = escalate(&w, card).unwrap();
+        assert_eq!(
+            outcome,
+            CardEscalation::NoStrongerRole {
+                card_id: card,
+                role: "builder".into()
+            }
+        );
+        let agent = agent_store::get_agent(&w.db, started.agent.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(agent.agent_role, "builder", "nothing changed");
+        assert_eq!(
+            escalate(&w, card).unwrap().0,
+            CardEscalation::NotNeeded { card_id: card },
+            "the 'no' is remembered too"
+        );
+    }
+
+    #[test]
+    fn a_stronger_role_without_an_engine_that_can_run_is_not_chosen() {
+        let mut w = world();
+        let mut heavy = heavy_builder();
+        heavy.engine = Some("custom".into());
+        w.roles.push(heavy);
+        let card = w.card(w.open, Some("builder"));
+        w.start(card, None).unwrap();
+        sent_back(&w, card, 2);
+        assert!(matches!(
+            escalate(&w, card).unwrap().0,
+            CardEscalation::NoStrongerRole { .. }
+        ));
+    }
+
+    #[test]
+    fn the_studio_gave_up_on_a_card_until_the_owner_has_it_done_again() {
+        let w = world();
+        let card = w.card(w.open, Some("builder"));
+        assert!(!gave_up_on(&w.db, card).unwrap());
+        flow::add_event(
+            &w.db,
+            card,
+            STUDIO,
+            crate::board::EventKind::Note,
+            &format!("{GAVE_UP_PREFIX}: x"),
+        )
+        .unwrap();
+        assert!(gave_up_on(&w.db, card).unwrap());
+        // Anyone's note with the same words is not the studio's.
+        flow::add_event(
+            &w.db,
+            card,
+            "agent:other-9",
+            crate::board::EventKind::Note,
+            REDO_PREFIX,
+        )
+        .unwrap();
+        assert!(gave_up_on(&w.db, card).unwrap());
+        flow::add_event(
+            &w.db,
+            card,
+            STUDIO,
+            crate::board::EventKind::Note,
+            REDO_PREFIX,
+        )
+        .unwrap();
+        assert!(!gave_up_on(&w.db, card).unwrap());
+        flow::add_event(
+            &w.db,
+            card,
+            STUDIO,
+            crate::board::EventKind::Note,
+            &format!("{GAVE_UP_PREFIX}: again"),
+        )
+        .unwrap();
+        assert!(
+            gave_up_on(&w.db, card).unwrap(),
+            "a second give-up counts again"
+        );
+    }
+
+    #[test]
+    fn only_a_live_signed_off_card_the_studio_gave_up_on_is_left_for_the_owner() {
+        let w = world();
+        let plan = flow::create_plan(
+            &w.db,
+            w.board,
+            &axiomata_board::PlanFields {
+                name: "p".into(),
+                goal: String::new(),
+                project_id: None,
+                auto_start_max: Some(64),
+                max_cost_usd: None,
+                max_tokens: None,
+            },
+        )
+        .unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let card = w.card(w.open, Some("builder"));
+            let mut fields = store::get_card(&w.db, card).unwrap().unwrap();
+            fields.plan_id = Some(plan.id);
+            store::update_card(&w.db, card, &fields_of(&fields)).unwrap();
+            flow::add_event(
+                &w.db,
+                card,
+                STUDIO,
+                crate::board::EventKind::Note,
+                &format!("{GAVE_UP_PREFIX}: x"),
+            )
+            .unwrap();
+            w.db.execute(
+                "UPDATE cards SET claimed_by = 'agent:w-2', claimed_at = '2026-10-05T09:00:00Z', verified_by = 'agent:r-1', verified_at = '2026-10-05T10:00:00Z' WHERE id = ?1",
+                [card],
+            )
+            .unwrap();
+            ids.push(card);
+        }
+        w.db.execute(
+            "UPDATE cards SET taken_over_at = '2026-10-05T11:00:00Z' WHERE id = ?1",
+            [ids[1]],
+        )
+        .unwrap();
+        w.db.execute(
+            "UPDATE cards SET canceled_at = '2026-10-05T11:00:00Z' WHERE id = ?1",
+            [ids[2]],
+        )
+        .unwrap();
+        assert_eq!(cards_left_for_owner(&w.db, plan.id).unwrap(), [ids[0]]);
+    }
+
+    #[test]
+    fn clearing_the_returns_starts_the_count_from_zero() {
+        let w = world();
+        let card = w.card(w.open, Some("builder"));
+        sent_back(&w, card, 3);
+        assert!(flow::clear_returned_count(&w.db, card).unwrap());
+        assert_eq!(
+            store::get_card(&w.db, card)
+                .unwrap()
+                .unwrap()
+                .returned_count,
+            0
+        );
+        assert!(!flow::clear_returned_count(&w.db, 9999).unwrap());
     }
 }

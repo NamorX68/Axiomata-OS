@@ -26,7 +26,8 @@ use serde::Serialize;
 use crate::AxiomataCore;
 use crate::board::{Card, Plan, TaskState, store as board_store};
 use crate::card_session::{
-    CardIntegration, StartRequest, integrate_card, runs_by_itself, start_card_session,
+    CardEscalation, CardIntegration, ESCALATE_AFTER_RETURNS, StartRequest, escalate_card,
+    integrate_card, runs_by_itself, start_card_session,
 };
 use crate::config::Config;
 use crate::studio_spend;
@@ -57,6 +58,17 @@ pub enum RunEvent {
         plan_id: i64,
         name: String,
         reason: String,
+    },
+    /// A card that was sent back twice was handed to a stronger role (A26, one try): its session changed role and engine in
+    /// place, so its pane is to be closed and opened again — the open is what starts the new engine.
+    Escalated {
+        card_id: i64,
+        plan_id: i64,
+        project_id: i64,
+        agent_id: i64,
+        from_role: String,
+        role: String,
+        engine_id: String,
     },
     /// The studio has spent its day's cap: no plan starts anything until tomorrow or until the cap is raised. Said once.
     DayCapReached { reason: String },
@@ -98,6 +110,10 @@ pub struct PlanRun {
     paused: HashSet<i64>,
     /// The day's cap was said to be reached.
     day_capped: bool,
+    /// Cards an escalation was tried for (any outcome): once each, and the card's history remembers it across restarts.
+    escalated: HashSet<i64>,
+    /// Cards already said to have been sent back even after the stronger role: once each.
+    sent_back_again: HashSet<i64>,
 }
 
 fn live(state: TaskState) -> bool {
@@ -218,6 +234,55 @@ fn plan_work(
     work
 }
 
+/// What a tick is going to do about cards that were sent back.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Escalation {
+    /// Cards sent back [`ESCALATE_AFTER_RETURNS`] times, whose handover to a stronger role is not tried yet.
+    try_now: Vec<i64>,
+    /// Cards sent back more often than that — the stronger role got its try and did not settle it — with what is to be said:
+    /// from here on the owner decides.
+    owner_decides: Vec<(i64, String)>,
+}
+
+/// Works out which cards of the plans that run by themselves are to be escalated, or left to the owner. Pure.
+fn escalation_work(
+    plans: &[Plan],
+    cards: &[Card],
+    tried: &HashSet<i64>,
+    said: &HashSet<i64>,
+) -> Escalation {
+    let mut work = Escalation::default();
+    let by_itself: HashSet<i64> = plans
+        .iter()
+        .filter(|plan| runs_by_itself(plan))
+        .map(|plan| plan.id)
+        .collect();
+    for card in cards {
+        let in_work = matches!(card.state, TaskState::Working | TaskState::InputRequired);
+        if !in_work
+            || card.archived_at.is_some()
+            || !card.plan_id.is_some_and(|id| by_itself.contains(&id))
+        {
+            continue;
+        }
+        if card.returned_count > ESCALATE_AFTER_RETURNS {
+            if !said.contains(&card.id) {
+                work.owner_decides.push((
+                    card.id,
+                    format!(
+                        "it was sent back {} times and the work is still not accepted; decide whether it goes on, is \
+                         taken over or is called off",
+                        card.returned_count
+                    ),
+                ));
+            }
+        } else if card.returned_count == ESCALATE_AFTER_RETURNS && !tried.contains(&card.id) {
+            work.try_now.push(card.id);
+        }
+    }
+    work
+}
+
 impl PlanRun {
     /// What one integration came to, as the memory of the tick and the event for the Studio. A card that failed to be
     /// integrated is left alone for a while; one the studio gave up on is left alone for good and said once.
@@ -288,8 +353,14 @@ impl PlanRun {
             .chain(self.given_up.iter())
             .copied()
             .collect();
-        let (work, pauses, names) = match tokio::task::block_in_place(|| {
-            read_work(core, &skip, &self.finished, &self.warned)
+        let read = match tokio::task::block_in_place(|| {
+            read_work(
+                core,
+                &skip,
+                &self.finished,
+                &self.warned,
+                (&self.escalated, &self.sent_back_again),
+            )
         }) {
             Ok(read) => read,
             Err(err) => {
@@ -297,7 +368,54 @@ impl PlanRun {
                 return Vec::new();
             }
         };
+        let Read {
+            work,
+            pauses,
+            names,
+            escalation,
+            verified,
+        } = read;
+        // A card the studio gave up on is left alone until it is signed off and unintegrated no longer: the owner's "do it
+        // again" sends it through the reviewer once more, and a second give-up must be possible then.
+        self.given_up.retain(|id| verified.contains(id));
         let mut events = self.announce_pauses(&pauses, &names);
+        for card_id in escalation.try_now {
+            self.escalated.insert(card_id);
+            match escalate_card(core, card_id).await {
+                Ok(CardEscalation::Done {
+                    card_id,
+                    plan_id,
+                    project_id,
+                    agent_id,
+                    from_role,
+                    role,
+                    engine_id,
+                }) => events.push(RunEvent::Escalated {
+                    card_id,
+                    plan_id: plan_id.unwrap_or_default(),
+                    project_id,
+                    agent_id,
+                    from_role,
+                    role,
+                    engine_id,
+                }),
+                Ok(CardEscalation::NoStrongerRole { card_id, role }) => events.push(RunEvent::Blocked {
+                    card_id,
+                    reason: format!(
+                        "sent back twice and there is no stronger role than “{role}” to hand it to: you decide"
+                    ),
+                }),
+                Ok(CardEscalation::NotNeeded { .. }) => {}
+                Err(err) => events.push(RunEvent::Blocked {
+                    card_id,
+                    reason: format!("could not hand it to a stronger role: {err}"),
+                }),
+            }
+        }
+        for (card_id, reason) in escalation.owner_decides {
+            self.sent_back_again.insert(card_id);
+            events.push(RunEvent::Blocked { card_id, reason });
+        }
         for card_id in work.integrate {
             let result = integrate_card(core, card_id).await;
             events.extend(self.absorb(card_id, result, now));
@@ -336,14 +454,23 @@ impl PlanRun {
     }
 }
 
-/// What a tick is going to do, which plans and the day are held back by their spending, and the plans' names.
-type Read = (Work, Pauses, HashMap<i64, String>);
+/// What one look at the board found, for the tick to act on.
+struct Read {
+    work: Work,
+    pauses: Pauses,
+    /// The plans' names, for what is said about them.
+    names: HashMap<i64, String>,
+    escalation: Escalation,
+    /// The cards that are signed off and not on the line yet.
+    verified: HashSet<i64>,
+}
 
 fn read_work(
     core: &AxiomataCore,
     skip: &HashSet<i64>,
     finished: &HashSet<i64>,
     warned: &HashSet<i64>,
+    (escalated, sent_back_again): (&HashSet<i64>, &HashSet<i64>),
 ) -> Result<Read, crate::AxiomataError> {
     let config: Config = core.config_read().clone();
     let db = core.db_lock();
@@ -382,7 +509,19 @@ fn read_work(
         .map(|plan| (plan.id, plan.name.clone()))
         .collect();
     let work = plan_work(&plans, &cards, cap, skip, finished, warned, &pauses);
-    Ok((work, pauses, names))
+    let escalation = escalation_work(&plans, &cards, escalated, sent_back_again);
+    let verified = cards
+        .iter()
+        .filter(|card| card.state == TaskState::Verified && card.integrated_at.is_none())
+        .map(|card| card.id)
+        .collect();
+    Ok(Read {
+        work,
+        pauses,
+        names,
+        escalation,
+        verified,
+    })
 }
 
 #[cfg(test)]
@@ -872,5 +1011,38 @@ mod tests {
         assert!(run.announce_pauses(&paused, &names).is_empty());
         assert!(run.announce_pauses(&Pauses::default(), &names).is_empty());
         assert_eq!(run.announce_pauses(&paused, &names).len(), 2);
+    }
+
+    #[test]
+    fn a_card_sent_back_twice_is_escalated_once_and_one_sent_back_again_is_left_to_the_owner() {
+        let plans = [plan(1, Some(64))];
+        let mut twice = card(1, 1, TaskState::Working);
+        twice.returned_count = ESCALATE_AFTER_RETURNS;
+        let mut often = card(2, 1, TaskState::Working);
+        often.returned_count = ESCALATE_AFTER_RETURNS + 1;
+        let mut once = card(3, 1, TaskState::Working);
+        once.returned_count = 1;
+        let mut review = card(4, 1, TaskState::InReview);
+        review.returned_count = ESCALATE_AFTER_RETURNS;
+        let cards = vec![twice, often, once, review];
+
+        let work = escalation_work(&plans, &cards, &none(), &none());
+        assert_eq!(work.try_now, [1]);
+        assert_eq!(work.owner_decides.len(), 1);
+        assert_eq!(work.owner_decides[0].0, 2);
+
+        let again = escalation_work(&plans, &cards, &HashSet::from([1]), &HashSet::from([2]));
+        assert_eq!(again, Escalation::default(), "each is said and tried once");
+    }
+
+    #[test]
+    fn a_card_of_a_plan_that_does_not_run_by_itself_is_not_escalated() {
+        let manual = [plan(1, None)];
+        let mut sent_back = card(1, 1, TaskState::Working);
+        sent_back.returned_count = ESCALATE_AFTER_RETURNS;
+        assert_eq!(
+            escalation_work(&manual, &[sent_back], &none(), &none()),
+            Escalation::default()
+        );
     }
 }

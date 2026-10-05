@@ -15,6 +15,7 @@
     type Board,
     type BoardCard,
     type BoardPlan,
+    type CardIntegrationResult,
     type CardTier,
     type IdeProject,
     type PlanSession,
@@ -371,6 +372,53 @@
     return () => clearInterval(timer);
   });
 
+  // Cards the studio gave up integrating (they did not fit the plan's line twice): they wait for the owner (CP-A8c).
+  let leftCards = $state<number[]>([]);
+  $effect(() => {
+    const current = plan;
+    if (!visible || !current || !runsByItself(current)) {
+      leftCards = [];
+      return;
+    }
+    const read = (): void => {
+      invoke<number[]>("plan_cards_left_for_owner", { id: current.id })
+        .then((ids) => (leftCards = ids))
+        .catch(() => {
+          // The buttons are a courtesy; the CLI (`board integrate`, `board redo`) does the same.
+        });
+    };
+    read();
+    const timer = setInterval(read, 5000);
+    return () => clearInterval(timer);
+  });
+
+  function closePanesOf(ids: number[]): void {
+    if (ids.length > 0) emit("studio:close-agent-panes", { agentIds: ids });
+  }
+
+  async function integrateAgain(card: BoardCard): Promise<void> {
+    await run(async () => {
+      const result = await invoke<CardIntegrationResult>("integrate_card", { cardId: card.id });
+      if (result.outcome === "done") {
+        closePanesOf(result.agent_ids);
+        toast(`Karte #${card.id} ist im Plan integriert.`, "info");
+      } else if (result.outcome === "conflict") {
+        toast(`Karte #${card.id} passt immer noch nicht in den Plan (${result.files.join(", ")}).`, "warning");
+      } else if (result.outcome === "busy") {
+        toast(`Der Arbeiter von Karte #${card.id} ist noch im Zug; versuch es gleich noch einmal.`, "warning");
+      }
+      await Promise.all([reload(), refreshAgents()]);
+    });
+  }
+
+  async function redo(card: BoardCard): Promise<void> {
+    await run(async () => {
+      closePanesOf(await invoke<number[]>("redo_card", { cardId: card.id }));
+      await Promise.all([reload(), refreshAgents()]);
+      toast(`Karte #${card.id} wird auf dem neuen Stand des Plans noch einmal gemacht.`, "info");
+    });
+  }
+
   async function resumePlan(): Promise<void> {
     if (!plan) return;
     const current = plan;
@@ -668,7 +716,15 @@
         <h3>Karten des Plans</h3>
         <ul class="cards">
           {#each working as card (card.id)}
-            <li><span>#{card.id} {proposalTitle(card)}</span> <span class="muted">{card.agent ?? "—"} · {STATE_LABEL[card.state]}</span></li>
+            <li>
+              <span>#{card.id} {proposalTitle(card)}</span>
+              <span class="muted">{card.agent ?? "—"} · {STATE_LABEL[card.state]}</span>
+              {#if leftCards.includes(card.id)}
+                <span class="error" role="status">Passt zweimal nicht in den Plan; das Studio hat aufgegeben.</span>
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(card)}>Erneut integrieren</button>
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(card)}>Neu machen</button>
+              {/if}
+            </li>
           {/each}
         </ul>
       {/if}
@@ -830,6 +886,8 @@
   }
   .cards li {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: space-between;
     gap: var(--ax-space-2);
   }

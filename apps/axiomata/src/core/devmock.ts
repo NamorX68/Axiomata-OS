@@ -1615,6 +1615,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         cleanup: [],
       } as T;
     }
+    case "plan_cards_left_for_owner":
+      return [] as T;
+    case "integrate_card":
+      return { outcome: "done", card_id: args.cardId, plan_id: 1, project_id: 1, commit: null, agent_ids: [] } as T;
+    case "redo_card":
+      return [] as T;
     case "plan_spend":
       return {
         spent: { tokens: 6_000_000, steps: 210, cost_usd: 4.2 },

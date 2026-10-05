@@ -1978,6 +1978,37 @@ pub async fn take_over_plan(
     Ok(outcome)
 }
 
+/// The owner merges a signed-off card into its plan's line by hand — the retry of a card the studio gave up on (CP-A8c).
+/// Returns what happened, as the studio's own looks would: the Flow closes the panes of the sessions that are gone.
+#[tauri::command]
+pub async fn integrate_card(
+    state: State<'_, CoreState>,
+    card_id: i64,
+) -> Result<axiomata_core::card_session::CardIntegration, String> {
+    let config = read_config(&state.config);
+    let outcome = axiomata_core::card_session::integrate_card_with(&state, card_id, true)
+        .await
+        .map_err(|err| err.to_string())?;
+    let db = state.db_lock();
+    board_mirror::after_card_change(&db, &config, card_id);
+    Ok(outcome)
+}
+
+/// The owner has a card the studio gave up integrating done again (CP-A8c). Returns the sessions that are gone.
+#[tauri::command]
+pub async fn redo_card(state: State<'_, CoreState>, card_id: i64) -> Result<Vec<i64>, String> {
+    axiomata_core::card_session::redo_card(&state, card_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// The cards of a plan the studio gave up integrating, which wait for the owner (CP-A8c).
+#[tauri::command]
+pub fn plan_cards_left_for_owner(state: State<'_, CoreState>, id: i64) -> Result<Vec<i64>, String> {
+    let db = state.db_lock();
+    axiomata_core::card_session::cards_left_for_owner(&db, id).map_err(|err| err.to_string())
+}
+
 /// What a plan's sessions spent against its limits, and what the studio spent today against the day's cap (CP-A8c).
 #[tauri::command]
 pub fn plan_spend(

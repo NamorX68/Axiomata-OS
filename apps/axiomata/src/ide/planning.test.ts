@@ -244,6 +244,24 @@ describe("what the owner is told about a plan's run", () => {
     expect(runEventNote({ event: "ready_to_take_over", plan_id: 1, name: "Docs" })?.text).toContain("Docs");
   });
 
+  it("tells an escalation, and closes the pane of the session that is handed over", () => {
+    const escalated: PlanRunEvent = {
+      event: "escalated",
+      card_id: 7,
+      plan_id: 1,
+      project_id: 2,
+      agent_id: 31,
+      from_role: "builder",
+      role: "builder-heavy",
+      engine_id: "opus",
+    };
+    const note = runEventNote(escalated)!;
+    expect(note.text).toContain("#7");
+    expect(note.text).toContain("builder-heavy");
+    expect(note.text).toContain("entscheidest du");
+    expect(endedSessions(escalated)).toEqual([31]);
+  });
+
   it("tells a paused plan and the day's cap apart, both as a warning", () => {
     const paused = runEventNote({ event: "paused", plan_id: 1, name: "Docs", reason: "6000000 tokens of 6000000 used" })!;
     expect(paused.tone).toBe("warning");

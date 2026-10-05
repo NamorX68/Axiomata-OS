@@ -545,6 +545,9 @@ enum BoardAction {
     /// Merge a card the reviewer signed off into the line of its plan (a plan that runs by itself does this on its own).
     /// The owner's step; for a card the studio has not got to yet, or after a conflict was looked at.
     Integrate { id: i64 },
+    /// Have a card the studio gave up integrating (it did not fit the plan's line twice) done again: it goes back to the
+    /// open column, its sessions are cleaned up, and the plan starts it again on the line as it is now. The owner's step.
+    Redo { id: i64 },
     /// Give a started card back: the claim is dropped and the card waits in its open column again. The owner's step.
     Release { id: i64 },
     /// Move a card into this board's first done column.
@@ -1499,6 +1502,15 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         BoardAction::Integrate { id } => {
             owner_only("integrating a card")?;
             board_integrate(core, id).await
+        }
+        BoardAction::Redo { id } => {
+            owner_only("having a card done again")?;
+            let ended = axiomata_core::card_session::redo_card(core, id).await?;
+            println!(
+                "card #{id} goes back to the open column; {} session(s) ended",
+                ended.len()
+            );
+            Ok(())
         }
         BoardAction::TakeOverPlan { id } => {
             owner_only("taking a plan over")?;

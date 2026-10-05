@@ -125,6 +125,11 @@
         }
         const ended = endedSessions(event);
         if (ended.length > 0) emit("studio:close-agent-panes", { agentIds: ended });
+        // An escalated card keeps its session: the pane that ran the old engine is closed above and opened again here.
+        if (event.event === "escalated") {
+          requestAgent({ projectId: event.project_id, agentId: event.agent_id, background: true });
+          ideStarted = true;
+        }
         const note = runEventNote(event);
         if (note) toast(note.text, note.tone);
       }),

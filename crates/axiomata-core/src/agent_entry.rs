@@ -354,7 +354,8 @@ pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
              `read_inbox`, then read the card with `get_card` and work on it in your own worktree. Leave the work as \
              changes in the worktree: do not commit and do not push, the studio commits it when the owner takes it \
              over. If you find changes there already you were interrupted: look at `git status` and `git diff` and \
-             carry on instead of starting over. {COMMAND_STYLE} {RUN_STYLE} When the acceptance criteria are met, call \
+             carry on instead of starting over. If `get_card` shows that the card was sent back, its history holds what the \
+             reviewer found wrong: fix exactly that. {COMMAND_STYLE} {RUN_STYLE} When the acceptance criteria are met, call \
              `report_done` with a short summary."
         ),
         Some(target) => format!(

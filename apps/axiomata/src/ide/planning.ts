@@ -127,6 +127,11 @@ export function runEventNote(event: PlanRunEvent): { text: string; tone: "info" 
       return { text: `Karte #${event.card_id} kam nicht voran: ${event.reason}`, tone: "warning" };
     case "ready_to_take_over":
       return { text: `Der Plan „${event.name}“ ist fertig: alle Karten sind integriert. Bereit zum Übernehmen.`, tone: "info" };
+    case "escalated":
+      return {
+        text: `Karte #${event.card_id} wurde zweimal zurückgegeben: „${event.role}“ auf „${event.engine_id}“ übernimmt von „${event.from_role}“ (gleicher Worktree, gleicher Zweig). Klappt auch das nicht, entscheidest du.`,
+        tone: "info",
+      };
     case "paused":
       return {
         text: `Plan „${event.name}“ pausiert: ${event.reason}. Es startet nichts Neues, bis du im Flow „Weiter“ sagst.`,
@@ -155,8 +160,12 @@ export function spendLine(spend: Pick<PlanSpend, "spent" | "limits">): string {
   return `${tokens} · $${spend.spent.cost_usd.toFixed(2)} von $${spend.limits.max_cost_usd.toFixed(2)}`;
 }
 
-/** The sessions whose panes are to be closed after an event: a card that was integrated, or put back, has none left. */
+/**
+ * The sessions whose panes are to be closed after an event: a card that was integrated, or put back, has none left; an
+ * escalated one is closed to be opened again — the open is what starts the new engine.
+ */
 export function endedSessions(event: PlanRunEvent): number[] {
+  if (event.event === "escalated") return [event.agent_id];
   return event.event === "integrated" && event.outcome !== "busy" ? event.agent_ids : [];
 }
 

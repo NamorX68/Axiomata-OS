@@ -836,6 +836,17 @@ pub fn reset_for_rework(
     Ok(true)
 }
 
+/// Counts a card's returns from zero again: the owner had it done anew, so what earlier reviewers sent back is no longer
+/// the count the next escalation and the "sent back again" notice are measured against. The history keeps the lines.
+/// `false` if there is no such card.
+pub fn clear_returned_count(db: &Connection, card_id: i64) -> Result<bool> {
+    let changed = db.execute(
+        "UPDATE cards SET returned_count = 0, updated_at = ?2 WHERE id = ?1",
+        params![card_id, now()],
+    )?;
+    Ok(changed == 1)
+}
+
 /// The cards `actor` holds that are still live work: not archived, not failed, canceled or taken over, not signed off,
 /// and not lying in a done column (the owner may drag an unsigned card there, A18 — it is finished work all the same).
 /// What "one card at a time" for an agent counts.

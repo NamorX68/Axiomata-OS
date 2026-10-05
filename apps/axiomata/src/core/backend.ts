@@ -901,8 +901,16 @@ export type PlanRunEvent =
   | { event: "integrated"; outcome: "busy"; card_id: number }
   | { event: "blocked"; card_id: number; reason: string }
   | { event: "ready_to_take_over"; plan_id: number; name: string }
+  | { event: "escalated"; card_id: number; plan_id: number; project_id: number; agent_id: number; from_role: string; role: string; engine_id: string }
   | { event: "paused"; plan_id: number; name: string; reason: string }
   | { event: "day_cap_reached"; reason: string };
+
+/** What an integration the owner asked for came to (`card_session::CardIntegration`; the Tauri command returns it flat). */
+export type CardIntegrationResult =
+  | { outcome: "done"; card_id: number; plan_id: number; project_id: number; commit: string | null; agent_ids: number[] }
+  | { outcome: "conflict"; card_id: number; plan_id: number; files: string[]; gave_up: boolean; agent_ids: number[] }
+  | { outcome: "busy"; card_id: number }
+  | { outcome: "left_for_owner"; card_id: number };
 
 /** What was spent: tokens of every engine, tool calls, and dollars of the engines that could be priced. */
 export interface Spent {
