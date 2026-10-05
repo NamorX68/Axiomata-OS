@@ -760,6 +760,7 @@
 <!-- A card's detail: in a stand-alone card panel, and in the large board's side panel (editor-look B4). -->
 {#snippet cardDetail(detail: BoardCard)}
     <article class="detail">
+    <span class="detail-num">Karte #{detail.id}</span>
     <!-- Edited in place rather than behind an edit mode: there is no reading
          state worth protecting on a card, and a mode would make the common
          act (fix a typo) cost two extra clicks. Saved on blur, so nothing
@@ -1255,7 +1256,7 @@
                   onclick={() => openCard(card)}
                   onkeydown={(event) => onCardKey(event, card, column.id, index)}
                 >
-                  <span class="title">{card.title}</span>
+                  <span class="title"><span class="num">#{card.id}</span> {card.title}</span>
                 </button>
                 {@render cardFace(card)}
               </article>
@@ -1793,6 +1794,13 @@
   .title {
     font-size: var(--ax-font-size-base);
     line-height: var(--ax-line-height);
+  }
+  /* The card's number: what the CLI, the history and a planner's proposals call it. */
+  .num,
+  .detail-num {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    font-variant-numeric: tabular-nums;
   }
   .card .body {
     margin: var(--ax-space-1) 0 0;
