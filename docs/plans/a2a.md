@@ -1,6 +1,6 @@
 # Plan: Agent-zu-Agent-Kommunikation (M7.5)
 
-Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A5, CP-A6a, CP-A6b und CP-A6c gebaut (2026-10-04/05); CP-A7 (Planer + Flow-Modus) und CP-A8a (Plan läuft von selbst) gebaut 2026-10-05, weiter mit CP-A8b (Plan übernehmen) und CP-A8c (Eskalation, Plan-/Tageslimit).** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
+Status: **Bauplan vom Owner freigegeben (2026-10-03). CP-A1 bis CP-A5, CP-A6a, CP-A6b und CP-A6c gebaut (2026-10-04/05); CP-A7 (Planer + Flow-Modus) und CP-A8a–c (Plan läuft von selbst, Plan übernehmen, Kostenbuch/Limits/Eskalation/Grenzen für Vorschläge) gebaut 2026-10-05/06, weiter mit CP-A9 (Flow: Team-Panel, Reiter Agents).** CP-A2 weicht in einem Punkt von A18 ab: `verify_card` bleibt unverändert (Fertig-Spalte); das Abzeichnen in der Review-Spalte läuft über `review_verdict` (Verschieben nach Fertig und Signatur in einer Transaktion), damit eine Signatur nie auf einer Karte liegt, die noch als „in Arbeit“ zählt.
 Grundlage ist `agentic-ide.md` (E3, M7.5, §9); dieser Plan hält die in der Runde getroffenen Entscheidungen fest und ersetzt dort,
 wo er etwas anders sagt, die älteren Aussagen.
 
