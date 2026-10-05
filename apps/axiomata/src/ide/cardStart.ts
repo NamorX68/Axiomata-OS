@@ -33,3 +33,17 @@ export function canTakeOver(card: Pick<BoardCard, "state">): boolean {
 export function defaultTakeOverMessage(card: Pick<BoardCard, "id" | "title">): string {
   return `#${card.id} ${card.title.split("\n")[0].trim()}`;
 }
+
+/**
+ * The engine a card's role would run on by itself: its own, else the first fallback that is in the catalog. `null` when
+ * the role names none that exists — then the owner has to pick one when the card starts, and the form must not offer
+ * "the role's own" as if there were one.
+ */
+export function roleEngine(
+  role: { engine: string | null; fallback_engines: string[] } | undefined,
+  catalog: { id: string }[],
+): string | null {
+  if (!role) return null;
+  const known = new Set(catalog.map((engine) => engine.id));
+  return [role.engine, ...role.fallback_engines].find((id): id is string => id !== null && known.has(id)) ?? null;
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IdeProject } from "../core/backend";
-import { canReview, canStart, canTakeOver, defaultTakeOverMessage, startableProjects } from "./cardStart";
+import { canReview, canStart, canTakeOver, defaultTakeOverMessage, roleEngine, startableProjects } from "./cardStart";
 
 const project = (id: number, opened: string | null, exists = true): IdeProject => ({
   id,
@@ -48,5 +48,22 @@ describe("review and take-over", () => {
   it("proposes the card's number and first line as the commit message", () => {
     expect(defaultTakeOverMessage({ id: 56, title: "Editor: Textgröße erhöhen" })).toBe("#56 Editor: Textgröße erhöhen");
     expect(defaultTakeOverMessage({ id: 7, title: "  First\nsecond " })).toBe("#7 First");
+  });
+});
+
+describe("roleEngine", () => {
+  const catalog = [{ id: "sonnet" }, { id: "opus" }];
+
+  it("is the role's own engine, else the first fallback that exists", () => {
+    expect(roleEngine({ engine: "opus", fallback_engines: [] }, catalog)).toBe("opus");
+    expect(roleEngine({ engine: "gone", fallback_engines: ["nope", "sonnet"] }, catalog)).toBe("sonnet");
+    expect(roleEngine({ engine: null, fallback_engines: ["opus"] }, catalog)).toBe("opus");
+  });
+
+  it("is null when the role names none that exists, which is when the owner has to pick", () => {
+    expect(roleEngine({ engine: null, fallback_engines: [] }, catalog)).toBeNull();
+    expect(roleEngine({ engine: "gone", fallback_engines: [] }, catalog)).toBeNull();
+    expect(roleEngine(undefined, catalog)).toBeNull();
+    expect(roleEngine({ engine: "sonnet", fallback_engines: [] }, [])).toBeNull();
   });
 });

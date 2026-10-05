@@ -9,7 +9,8 @@
   import { emit } from "../core/bus";
   import { messageOf } from "../core/errors";
   import { toast } from "../core/toast";
-  import { startableProjects } from "../ide/cardStart";
+  import { roleEngine, startableProjects } from "../ide/cardStart";
+  import { listRoles, type Role } from "../core/roster";
   import { listProjects } from "../ide/projects";
   import { engineCatalog, engineLine, refreshEngines } from "../ide/rosterStore";
 
@@ -17,13 +18,34 @@
 
   let projects = $state<IdeProject[]>([]);
   let projectId = $state<number | null>(null);
-  /** Empty = the role's own engine. */
+  /** Empty = the role's own engine, offered only when the role has one. */
   let engineId = $state("");
+  let roles = $state<Role[]>([]);
+  /** The role the card names, else the one every card without a role is given. */
+  const roleName = $derived(card.agent || "allrounder");
+  const ownEngine = $derived(
+    roleEngine(
+      roles.find((role) => role.name === roleName),
+      $engineCatalog,
+    ),
+  );
+  const ownEngineLabel = $derived($engineCatalog.find((engine) => engine.id === ownEngine)?.label ?? null);
   let error = $state("");
   let busy = $state(false);
 
+  // A role that names no engine leaves the choice to the owner: the first engine is preselected, so the form never
+  // starts on an empty choice that the backend would refuse.
+  $effect(() => {
+    if (engineId === "" && ownEngine === null && $engineCatalog.length > 0) engineId = $engineCatalog[0].id;
+  });
+
   $effect(() => {
     void refreshEngines();
+    listRoles()
+      .then((loaded) => (roles = loaded.roles))
+      .catch(() => {
+        // Without the roles the form still works: the backend says what is missing.
+      });
     listProjects()
       .then((all) => {
         projects = startableProjects(all);
@@ -72,12 +94,17 @@
     <label>
       Engine
       <select bind:value={engineId} aria-label="Engine">
-        <option value="">Die der Rolle{card.agent ? ` (${card.agent})` : ""}</option>
+        {#if ownEngine !== null}
+          <option value="">Die der Rolle {roleName}{ownEngineLabel ? ` (${ownEngineLabel})` : ""}</option>
+        {/if}
         {#each $engineCatalog as engine (engine.id)}
           <option value={engine.id}>{engine.label} — {engineLine(engine)}</option>
         {/each}
       </select>
     </label>
+    {#if ownEngine === null && roles.length > 0}
+      <p class="hint">Die Rolle „{roleName}“ nennt keine Engine — wähle eine.</p>
+    {/if}
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
