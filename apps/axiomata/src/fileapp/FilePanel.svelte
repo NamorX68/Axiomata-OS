@@ -15,7 +15,7 @@
     and asks first when there is unsaved text (W11) or an unfiled note (W4).
 -->
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import { closeStaged, requestClose, setCloseGuard } from "../core/staging";
   import type { ModuleContext } from "../core/types";
@@ -139,14 +139,22 @@
     }
   }
 
+  /** The panel's own element: the zoom keys and ⌘W are heard only while focus is inside it. */
+  let panel = $state<HTMLDivElement | null>(null);
+
   onMount(() => {
+    // Opened from the Second Brain or the Orbit, focus would stay where the click was and the keys of this window would
+    // never reach it (a rendered page has nothing to focus). The editor takes it for itself when it is to be typed in.
+    void tick().then(() => {
+      if (panel && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true });
+    });
     setCloseGuard(ctx.instanceId, async () => (editor?.hasUnsaved() ? ask() : true));
     return () => setCloseGuard(ctx.instanceId, null);
   });
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="file-panel" onkeydown={onKeydown}>
+<div class="file-panel" bind:this={panel} tabindex="-1" onkeydown={onKeydown}>
   <div class="title">
     <span class="name">
       {#if current?.untitled}
@@ -218,6 +226,7 @@
 
 <style>
   .file-panel {
+    outline: none;
     display: flex;
     flex-direction: column;
     height: 100%;
