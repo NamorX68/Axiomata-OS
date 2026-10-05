@@ -202,9 +202,13 @@
     }
     // First-ever drag: the panel is still positioned by the centring CSS
     // (no inline left/top yet), so its current on-screen box is the base
-    // to apply the drag delta to — from here on it's `.positioned`.
+    // to apply the drag delta to — from here on it's `.positioned`. `pos` is
+    // set right now, not only in `endMove`: `liveX`/`liveY` are `null` while
+    // it is `null`, so the panel would not follow the pointer during the
+    // very first drag and only jump to its target on release.
     const rect = panelEl?.getBoundingClientRect();
     moveBase = rect ? { x: rect.left, y: rect.top } : { x: 0, y: 0 };
+    pos = moveBase;
   }
 
   function endMove(delta: DragDelta) {
