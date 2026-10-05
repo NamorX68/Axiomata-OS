@@ -734,6 +734,8 @@ fn create_card(ctx: &Context, args: &Value) -> ToolResult {
     // A card is proposed onto the board and plan of the work it grew out of: the session's own card, or the plan a
     // planner was started for (A17).
     let own = card_context(ctx, &db)?.and_then(|id| store::get_card(&db, id).ok().flatten());
+    // A session working a card proposes one level below it (A7); a planner proposes the plan's own cards.
+    let parent = own.as_ref().map(|card| card.id);
     let (board_id, plan_id) = match (own, ctx.plan_env) {
         (Some(card), _) => (card.board_id, card.plan_id),
         (None, Some(plan)) => {
@@ -761,7 +763,7 @@ fn create_card(ctx: &Context, args: &Value) -> ToolResult {
     };
     // The card, its edges and the line saying who proposed it are one transaction, and one session proposes only so
     // many cards: a retry cannot double a proposal and a loop cannot fill the owner's board.
-    let card = flow::propose_card(&mut db, &new, &needs, &ctx.actor).map_err(text)?;
+    let card = flow::propose_card_from(&mut db, &new, &needs, &ctx.actor, parent).map_err(text)?;
     mirror(ctx, &db, card.id);
     Ok(
         json!({"card_id": card.id, "state": "proposed", "note": "It waits in the proposal column for the \

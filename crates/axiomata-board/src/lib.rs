@@ -56,6 +56,10 @@ pub const SCHEMA_SQL_V4: &str = include_str!("plan_line.sql");
 /// owner's database had applied migration 20 before the column was added to it.
 pub const SCHEMA_SQL_V5: &str = include_str!("plan_line_tip.sql");
 
+/// The board's **version 6** schema (`card_proposal_depth`), `docs/plans/a2a.md` CP-A8c. Its own constant and migration
+/// number (23), frozen once released.
+pub const SCHEMA_SQL_V6: &str = include_str!("proposal_depth.sql");
+
 /// Everything that can go wrong in the board core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant: "no such row"

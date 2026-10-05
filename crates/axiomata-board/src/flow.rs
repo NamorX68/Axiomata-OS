@@ -33,6 +33,12 @@ const MAX_QUESTION_LEN: usize = 2_000;
 /// How many cards one agent session may propose over its life. A session in a loop would otherwise fill the board
 /// (2000 cards) and the owner's proposal column; the owner can lift it by approving or deleting proposals.
 pub const MAX_PROPOSALS_PER_ACTOR: i64 = 20;
+/// How deep a chain of proposals may go (A7): a session working a planner's card may propose (depth 1), the session
+/// working *that* card may propose once more (depth 2), and no further.
+pub const MAX_PROPOSAL_DEPTH: i64 = 2;
+/// How many cards sessions that work cards may have proposed in one plan, all together (A7): the planner's own cards do
+/// not count, they are what the owner approved the plan for.
+pub const MAX_SELF_PROPOSED_PER_PLAN: i64 = 30;
 /// The history line [`propose_card`] writes — also what the cap counts.
 const PROPOSED_NOTE: &str = "proposed by the session";
 
@@ -633,6 +639,19 @@ pub fn propose_card(
     needs: &[i64],
     actor: &str,
 ) -> Result<Card> {
+    propose_card_from(db, new, needs, actor, None)
+}
+
+/// [`propose_card`], where `parent` is the card the proposing session is working on, if it is working one (a planner has
+/// none). The proposal lies one level below it ([`MAX_PROPOSAL_DEPTH`]), and a plan takes only so many such proposals
+/// ([`MAX_SELF_PROPOSED_PER_PLAN`]): a refusal says which bound was hit, and the session is a model that can read it.
+pub fn propose_card_from(
+    db: &mut Connection,
+    new: &NewCard,
+    needs: &[i64],
+    actor: &str,
+    parent: Option<i64>,
+) -> Result<Card> {
     let actor = normalize_actor(actor)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let proposed: i64 = tx.query_row(
@@ -649,9 +668,46 @@ pub fn propose_card(
             ),
         );
     }
+    let depth = match parent {
+        Some(parent) => Some(proposal_depth_in(&tx, parent)? + 1),
+        None => None,
+    };
+    if let Some(depth) = depth {
+        if depth > MAX_PROPOSAL_DEPTH {
+            return invalid(
+                "actor",
+                format!(
+                    "a card a session proposed may itself lead to proposals only {MAX_PROPOSAL_DEPTH} levels deep; \
+                     put what you found in the card's history or a message to the owner instead"
+                ),
+            );
+        }
+        if let Some(plan_id) = new.fields.plan_id {
+            let so_far: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM card_proposal_depth d JOIN cards c ON c.id = d.card_id WHERE c.plan_id = ?1",
+                params![plan_id],
+                |row| row.get(0),
+            )?;
+            if so_far >= MAX_SELF_PROPOSED_PER_PLAN {
+                return invalid(
+                    "actor",
+                    format!(
+                        "sessions have proposed {MAX_SELF_PROPOSED_PER_PLAN} cards in this plan already; the owner \
+                         has to approve or delete some first"
+                    ),
+                );
+            }
+        }
+    }
     let card = create_card(&tx, new)?;
     for need in needs {
         add_dependency_in(&tx, card.id, *need)?;
+    }
+    if let Some(depth) = depth {
+        tx.execute(
+            "INSERT INTO card_proposal_depth (card_id, depth) VALUES (?1, ?2)",
+            params![card.id, depth],
+        )?;
     }
     insert_event(&tx, card.id, &actor, EventKind::Note, PROPOSED_NOTE)?;
     tx.commit()?;
@@ -661,6 +717,22 @@ pub fn propose_card(
         id: card.id,
         reason: "vanished immediately after its proposal".to_string(),
     })
+}
+
+/// How deep card `card_id` lies in a chain of proposals by working sessions: 0 for a card nobody proposed from a card.
+pub fn proposal_depth(db: &Connection, card_id: i64) -> Result<i64> {
+    proposal_depth_in(db, card_id)
+}
+
+fn proposal_depth_in(db: &Connection, card_id: i64) -> Result<i64> {
+    Ok(db
+        .query_row(
+            "SELECT depth FROM card_proposal_depth WHERE card_id = ?1",
+            params![card_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(0))
 }
 
 /// What [`start_card`] did.
@@ -1341,7 +1413,9 @@ mod tests {
         claim_card, create_board, create_card, create_column, delete_column, move_card,
         move_to_status, release_card, set_card_archived, update_card, update_column, verify_card,
     };
-    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5};
+    use crate::{
+        SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5, SCHEMA_SQL_V6,
+    };
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1384,6 +1458,7 @@ mod tests {
         db.execute_batch(SCHEMA_SQL_V3).unwrap();
         db.execute_batch(SCHEMA_SQL_V4).unwrap();
         db.execute_batch(SCHEMA_SQL_V5).unwrap();
+        db.execute_batch(SCHEMA_SQL_V6).unwrap();
         let board = create_board(&mut db, "Flow").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
@@ -1674,6 +1749,86 @@ mod tests {
         let err = propose_card(&mut f.db, &new(99), &[], "agent:p-1").unwrap_err();
         assert!(err.to_string().contains("proposed"), "{err}");
         propose_card(&mut f.db, &new(100), &[], "agent:q-2").unwrap();
+    }
+
+    #[test]
+    fn a_proposal_lies_one_level_below_the_card_it_grew_out_of_and_only_so_deep() {
+        let mut f = fixture();
+        let new = |n: &str| NewCard {
+            column_id: f.proposal,
+            fields: fields(n),
+        };
+        let root = card_in(&f, f.proposal, "root");
+        assert_eq!(proposal_depth(&f.db, root.id).unwrap(), 0);
+        let one =
+            propose_card_from(&mut f.db, &new("one"), &[], "agent:a-1", Some(root.id)).unwrap();
+        assert_eq!(proposal_depth(&f.db, one.id).unwrap(), 1);
+        let two =
+            propose_card_from(&mut f.db, &new("two"), &[], "agent:b-2", Some(one.id)).unwrap();
+        assert_eq!(proposal_depth(&f.db, two.id).unwrap(), 2);
+        let err = propose_card_from(&mut f.db, &new("three"), &[], "agent:c-3", Some(two.id))
+            .unwrap_err();
+        assert!(err.to_string().contains("levels deep"), "{err}");
+        // A planner proposes from no card: depth 0, no row.
+        let planned =
+            propose_card_from(&mut f.db, &new("planned"), &[], "agent:p-4", None).unwrap();
+        assert_eq!(proposal_depth(&f.db, planned.id).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_plan_takes_only_so_many_proposals_from_working_sessions() {
+        let mut f = fixture();
+        let plan = create_plan(
+            &f.db,
+            f.board,
+            &PlanFields {
+                name: "p".into(),
+                goal: String::new(),
+                project_id: None,
+                auto_start_max: None,
+                max_cost_usd: None,
+                max_tokens: None,
+            },
+        )
+        .unwrap();
+        let root = card_in(&f, f.proposal, "root");
+        for n in 0..MAX_SELF_PROPOSED_PER_PLAN {
+            let mut fields = fields(&format!("s{n}"));
+            fields.plan_id = Some(plan.id);
+            let new = NewCard {
+                column_id: f.proposal,
+                fields,
+            };
+            // Another actor each time: this is the plan's bound, not the one per session.
+            propose_card_from(&mut f.db, &new, &[], &format!("agent:w-{n}"), Some(root.id))
+                .unwrap();
+        }
+        let mut over = fields("over");
+        over.plan_id = Some(plan.id);
+        let err = propose_card_from(
+            &mut f.db,
+            &NewCard {
+                column_id: f.proposal,
+                fields: over.clone(),
+            },
+            &[],
+            "agent:w-999",
+            Some(root.id),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("in this plan"), "{err}");
+        // The planner's own cards are not counted.
+        propose_card_from(
+            &mut f.db,
+            &NewCard {
+                column_id: f.proposal,
+                fields: over,
+            },
+            &[],
+            "agent:planner-5",
+            None,
+        )
+        .unwrap();
     }
 
     // ------------------------------------------------------------ states ---

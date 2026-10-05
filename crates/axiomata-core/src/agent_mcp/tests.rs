@@ -852,6 +852,32 @@ fn a_role_proposes_only_the_kinds_it_is_allowed() {
 }
 
 #[test]
+fn a_proposal_of_a_working_session_is_one_level_deeper_and_the_chain_stops_at_the_limit() {
+    let mut w = world();
+    // Three sessions of one role, each working the card the one before proposed.
+    let mut card = w.card(w.open, "source");
+    let mut depths = Vec::new();
+    for n in 0..=flow::MAX_PROPOSAL_DEPTH {
+        let tester = w.session(&format!("t{n}"), "tester");
+        let c = w.client(tester, Some(card), None);
+        match c.call(
+            "create_card",
+            json!({"title": format!("deeper {n}"), "kind": "test"}),
+        ) {
+            Ok(made) => {
+                card = made["card_id"].as_i64().unwrap();
+                depths.push(flow::proposal_depth(&w.core.db_lock(), card).unwrap());
+            }
+            Err(refused) => {
+                assert!(refused.contains("levels deep"), "{refused}");
+                depths.push(-1);
+            }
+        }
+    }
+    assert_eq!(depths, [1, 2, -1]);
+}
+
+#[test]
 fn a_proposal_with_a_bad_dependency_is_not_left_behind() {
     let mut w = world();
     let planner = w.session("plan", "planner");

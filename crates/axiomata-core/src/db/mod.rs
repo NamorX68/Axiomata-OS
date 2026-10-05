@@ -57,6 +57,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     // What the studio's sessions spent, kept beyond the sessions for the limit of a plan and of a day (a2a.md, CP-A8c).
     // Owned by the core, not by the board or the IDE: it joins a session (IDE) to a plan (board).
     (22, include_str!("migrations/0008_session_spend.sql")),
+    // How deep a card a working session proposed lies (a2a.md, CP-A8c).
+    (23, axiomata_board::SCHEMA_SQL_V6),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
