@@ -30,7 +30,12 @@
 /** The `source` of the message the framed page posts for a clicked link. */
 export const PAGE_MESSAGE_SOURCE = "ax-page";
 
-const NAV_SCRIPT = `<script>document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(!a)return;var href=a.getAttribute("href");if(!href)return;if(href.charAt(0)==="#"){e.preventDefault();var id=href.slice(1);var el=id?document.getElementById(id):null;if(el)el.scrollIntoView({behavior:"smooth",block:"start"});return;}if(/^[a-z][a-z0-9+.-]*:/i.test(href))return;e.preventDefault();parent.postMessage({source:"ax-page",href:href},"*");});</script>`;
+/** The `source` of the message the file window posts *into* the framed page to scale it (`{ source, zoom }`). */
+export const ZOOM_MESSAGE_SOURCE = "ax-zoom";
+
+// The zoom listener takes messages from the parent only, and sets the page's CSS `zoom` — a resize of the window's
+// text then scales the page in place, without reloading it (which would lose its scroll position and script state).
+const NAV_SCRIPT = `<script>document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(!a)return;var href=a.getAttribute("href");if(!href)return;if(href.charAt(0)==="#"){e.preventDefault();var id=href.slice(1);var el=id?document.getElementById(id):null;if(el)el.scrollIntoView({behavior:"smooth",block:"start"});return;}if(/^[a-z][a-z0-9+.-]*:/i.test(href))return;e.preventDefault();parent.postMessage({source:"ax-page",href:href},"*");});window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.source!=="ax-zoom"||typeof d.zoom!=="number"||!(d.zoom>0))return;document.documentElement.style.zoom=String(d.zoom);});</script>`;
 
 /** Appends the click-intercept script just before `</body>` (or at the end
  *  if the page has none — course pages always do, but don't assume it). */

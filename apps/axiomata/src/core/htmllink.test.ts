@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PAGE_MESSAGE_SOURCE, resolveRelativeLink, withNavIntercept } from "./htmllink";
+import { PAGE_MESSAGE_SOURCE, ZOOM_MESSAGE_SOURCE, resolveRelativeLink, withNavIntercept } from "./htmllink";
 
 describe("withNavIntercept", () => {
   it("inserts the script before </body>", () => {
@@ -78,6 +78,29 @@ describe("the injected click handler (run for real in jsdom)", () => {
     document.getElementById("link")!.click();
 
     expect(post).not.toHaveBeenCalled();
+  });
+
+  // In jsdom the test window is its own parent, so a message "from the parent" has `window` as its source.
+  function zoomMessage(data: unknown, source: MessageEventSource | null = window): void {
+    window.dispatchEvent(new MessageEvent("message", { data, source }));
+  }
+
+  it("scales the page when the parent posts a zoom, and lets go of it again", () => {
+    zoomMessage({ source: ZOOM_MESSAGE_SOURCE, zoom: 1.5 });
+    expect(document.documentElement.style.zoom).toBe("1.5");
+    zoomMessage({ source: ZOOM_MESSAGE_SOURCE, zoom: 1 });
+    expect(document.documentElement.style.zoom).toBe("1");
+  });
+
+  it("ignores a zoom that is not from the parent, is not a positive number, or has another source", () => {
+    document.documentElement.style.zoom = "";
+    zoomMessage({ source: ZOOM_MESSAGE_SOURCE, zoom: 2 }, null);
+    zoomMessage({ source: ZOOM_MESSAGE_SOURCE, zoom: "2" });
+    zoomMessage({ source: ZOOM_MESSAGE_SOURCE, zoom: 0 });
+    zoomMessage({ source: ZOOM_MESSAGE_SOURCE, zoom: -1 });
+    zoomMessage({ source: "something-else", zoom: 2 });
+    zoomMessage(null);
+    expect(document.documentElement.style.zoom).toBe("");
   });
 });
 
