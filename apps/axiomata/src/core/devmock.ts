@@ -1615,6 +1615,20 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         cleanup: [],
       } as T;
     }
+    case "plan_spend":
+      return {
+        spent: { tokens: 6_000_000, steps: 210, cost_usd: 4.2 },
+        limits: { max_cost_usd: 15, max_tokens: 6_000_000 },
+        plan_over: "6000000 tokens of 6000000 used",
+        day_over: null,
+        today: { tokens: 6_000_000, steps: 210, cost_usd: 4.2 },
+        day_cap_usd: 20,
+      } as T;
+    case "resume_plan": {
+      const plan = boardPlans.find((p) => p.id === args.id);
+      if (!plan) throw new Error(`no plan ${String(args.id)}`);
+      return plan as T;
+    }
     case "take_over_card":
       return { outcome: "done", commit: "0123456789abcdef0123456789abcdef01234567", project_id: 1, cleanup: [] } as T;
     // No mail in the browser mock: there is never a line to type.

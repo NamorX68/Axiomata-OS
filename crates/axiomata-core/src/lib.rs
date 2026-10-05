@@ -45,6 +45,7 @@ pub mod session;
 pub mod session_limits;
 pub mod skills;
 pub mod spend;
+pub mod studio_spend;
 pub mod terminal_settings;
 pub mod workspace;
 

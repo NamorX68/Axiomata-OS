@@ -175,6 +175,10 @@ pub enum PlanAction {
         #[arg(long)]
         actor: Option<String>,
     },
+    /// What a plan's sessions spent, against its limits, and what the studio spent today against the day's cap.
+    Spend { id: i64 },
+    /// Go on after a plan reached its limit: a fresh allowance on top of what it spent. The owner's step.
+    Resume { id: i64 },
     /// Close a plan: nothing starts from it any more.
     Close { id: i64 },
     /// Delete a plan. Its cards stay, without a plan.
@@ -221,6 +225,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         PlanAction::Edit { .. } => owner_only("changing a plan's settings")?,
         PlanAction::Start { .. } => owner_only("starting a planner")?,
         PlanAction::Approve { .. } => owner_only("approving a plan")?,
+        PlanAction::Resume { .. } => owner_only("giving a plan a new allowance")?,
         PlanAction::Close { .. } => owner_only("closing a plan")?,
         PlanAction::Delete { .. } => owner_only("deleting a plan")?,
         _ => {}
@@ -290,6 +295,36 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             )?
             .with_context(|| format!("no plan with id {id}"))?;
             println!("updated plan {}", plan_line(&updated));
+        }
+        PlanAction::Spend { id } => {
+            let config = crate::read_config(core);
+            let spend = axiomata_core::studio_spend::plan_spend(&db, &config, id)?;
+            println!(
+                "plan #{id}: {} tokens of {}, ${:.2} of ${:.2}",
+                spend.spent.tokens,
+                spend.limits.max_tokens,
+                spend.spent.cost_usd,
+                spend.limits.max_cost_usd
+            );
+            if let Some(why) = &spend.plan_over {
+                println!("  held back: {why} (`board plan resume {id}` goes on)");
+            }
+            match spend.day_cap_usd {
+                Some(cap) => println!("today: ${:.2} of the day's ${cap:.2}", spend.today.cost_usd),
+                None => println!("today: ${:.2} (no daily cap)", spend.today.cost_usd),
+            }
+            if let Some(why) = &spend.day_over {
+                println!("  held back for today: {why}");
+            }
+        }
+        PlanAction::Resume { id } => {
+            let config = crate::read_config(core);
+            let plan = axiomata_core::studio_spend::resume_plan(&db, &config, id)?;
+            println!(
+                "plan #{id} goes on: limits now ${:.2} and {} tokens",
+                plan.max_cost_usd.unwrap_or_default(),
+                plan.max_tokens.unwrap_or_default()
+            );
         }
         PlanAction::Start { .. } => {
             bail!("starting a planner is an asynchronous step and is handled before this point")

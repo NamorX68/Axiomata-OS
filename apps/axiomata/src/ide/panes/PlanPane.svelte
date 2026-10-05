@@ -18,6 +18,7 @@
     type CardTier,
     type IdeProject,
     type PlanSession,
+    type PlanSpend,
     type PlanTakeOver,
   } from "../../core/backend";
   import { boardStore, refreshBoard, type BoardData } from "../../core/boardStore";
@@ -41,6 +42,7 @@
     cardsOfPlan,
     readyToTakeOver,
     runsByItself,
+    spendLine,
   } from "../planning";
   import { gitApi } from "../../fileapp/gitBackend";
   import { projectRootId } from "../../fileapp/projectModel";
@@ -348,6 +350,38 @@
     });
   }
 
+  // What a plan that runs by itself has spent (CP-A8c): read again while the pane is shown, since the sessions that spend
+  // it live in other processes. A failed read leaves the last figures.
+  let spend = $state<PlanSpend | null>(null);
+  $effect(() => {
+    const current = plan;
+    if (!visible || !current || !runsByItself(current)) {
+      spend = null;
+      return;
+    }
+    const read = (): void => {
+      invoke<PlanSpend>("plan_spend", { id: current.id })
+        .then((value) => (spend = value))
+        .catch(() => {
+          // The figures are a courtesy; the limits are enforced without them.
+        });
+    };
+    read();
+    const timer = setInterval(read, 5000);
+    return () => clearInterval(timer);
+  });
+
+  async function resumePlan(): Promise<void> {
+    if (!plan) return;
+    const current = plan;
+    await run(async () => {
+      await invoke("resume_plan", { id: current.id });
+      await reload();
+      spend = await invoke<PlanSpend>("plan_spend", { id: current.id });
+      toast(`Plan „${current.name}“ läuft weiter: neues Limit auf dem aktuellen Verbrauch aufgesetzt.`, "info");
+    });
+  }
+
   async function closePlan(): Promise<void> {
     if (!plan) return;
     const current = plan;
@@ -591,6 +625,25 @@
               : "Die Vorschläge wandern in die erste offene Spalte; du startest jede Karte selbst."}
             Der Planer ist danach fertig.
           </span>
+        </div>
+      {/if}
+
+      {#if spend}
+        <div class="approve">
+          <span>Verbrauch: {spendLine(spend)}</span>
+          {#if spend.plan_over}
+            <span class="error" role="status">Pausiert: {spend.plan_over}.</span>
+            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void resumePlan()}>Weiter</button>
+            <span class="muted">Setzt das Limit des Plans auf den bisherigen Verbrauch plus eine neue Zuteilung.</span>
+          {/if}
+          {#if spend.day_over}
+            <span class="error" role="status">
+              Tageslimit der Studio-Sitzungen erreicht: {spend.day_over}. Bis morgen startet nichts Neues; anheben:
+              <code>studio_daily_usd_cap</code> in der Config.
+            </span>
+          {:else if spend.day_cap_usd !== null}
+            <span class="muted">Heute: ${spend.today.cost_usd.toFixed(2)} von ${spend.day_cap_usd.toFixed(2)}</span>
+          {/if}
         </div>
       {/if}
 

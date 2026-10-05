@@ -900,4 +900,26 @@ export type PlanRunEvent =
   | { event: "integrated"; outcome: "conflict"; card_id: number; plan_id: number; files: string[]; gave_up: boolean; agent_ids: number[] }
   | { event: "integrated"; outcome: "busy"; card_id: number }
   | { event: "blocked"; card_id: number; reason: string }
-  | { event: "ready_to_take_over"; plan_id: number; name: string };
+  | { event: "ready_to_take_over"; plan_id: number; name: string }
+  | { event: "paused"; plan_id: number; name: string; reason: string }
+  | { event: "day_cap_reached"; reason: string };
+
+/** What was spent: tokens of every engine, tool calls, and dollars of the engines that could be priced. */
+export interface Spent {
+  tokens: number;
+  steps: number;
+  cost_usd: number;
+}
+
+/** What a plan's sessions spent against its limits (`studio_spend::PlanSpend`, CP-A8c). */
+export interface PlanSpend {
+  spent: Spent;
+  limits: { max_cost_usd: number; max_tokens: number };
+  /** Which limit of the plan is reached, while one is: the plan starts nothing more. */
+  plan_over: string | null;
+  /** The day's cap, once it is reached: it holds back every plan. */
+  day_over: string | null;
+  today: Spent;
+  /** The day's cap in dollars; `null` when it is off. */
+  day_cap_usd: number | null;
+}

@@ -2,7 +2,7 @@
  * What the Flow's planning panel decides before it asks the backend (A2A CP-A7b): which plan to show first, which cards
  * of it are proposals, who plans it, which roles a card may be given. Pure, so it is tested without a backend.
  */
-import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent, PlanStatus } from "../core/backend";
+import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent, PlanSpend, PlanStatus } from "../core/backend";
 import type { Role } from "../core/roster";
 import { addTab, allGroups, allTabs, type Layout, type PaneTab } from "./layout";
 import type { Mode } from "./modes";
@@ -127,7 +127,32 @@ export function runEventNote(event: PlanRunEvent): { text: string; tone: "info" 
       return { text: `Karte #${event.card_id} kam nicht voran: ${event.reason}`, tone: "warning" };
     case "ready_to_take_over":
       return { text: `Der Plan „${event.name}“ ist fertig: alle Karten sind integriert. Bereit zum Übernehmen.`, tone: "info" };
+    case "paused":
+      return {
+        text: `Plan „${event.name}“ pausiert: ${event.reason}. Es startet nichts Neues, bis du im Flow „Weiter“ sagst.`,
+        tone: "warning",
+      };
+    case "day_cap_reached":
+      return {
+        text: `Tageslimit der Studio-Sitzungen erreicht (${event.reason}). Es startet nichts Neues bis morgen oder bis du es in der Config anhebst.`,
+        tone: "warning",
+      };
   }
+}
+
+/** Tokens in the owner's reading size: `1.2 M`, `340 k`. */
+export function tokensLabel(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)} M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)} k`;
+  return String(tokens);
+}
+
+/** One line for a plan's spending: tokens and — only when something was priced — dollars, each against its limit. */
+export function spendLine(spend: Pick<PlanSpend, "spent" | "limits">): string {
+  const tokens = `${tokensLabel(spend.spent.tokens)} von ${tokensLabel(spend.limits.max_tokens)} Token`;
+  // A subscription engine has no dollar figure: nothing is shown rather than "$0.00", which would read as "free".
+  if (spend.spent.cost_usd <= 0) return tokens;
+  return `${tokens} · $${spend.spent.cost_usd.toFixed(2)} von $${spend.limits.max_cost_usd.toFixed(2)}`;
 }
 
 /** The sessions whose panes are to be closed after an event: a card that was integrated, or put back, has none left. */

@@ -50,6 +50,21 @@ fn default_max_parallel_sessions() -> u32 {
     4
 }
 
+/// Default for [`AgentDefaults::plan_max_cost_usd`] (`docs/plans/a2a.md`, A27).
+fn default_plan_max_cost_usd() -> f64 {
+    15.0
+}
+
+/// Default for [`AgentDefaults::plan_max_tokens`] (`docs/plans/a2a.md`, A27).
+fn default_plan_max_tokens() -> u64 {
+    6_000_000
+}
+
+/// Default for [`AgentDefaults::studio_daily_usd_cap`] (`docs/plans/a2a.md`, A27).
+fn default_studio_daily_usd_cap() -> Option<f64> {
+    Some(20.0)
+}
+
 /// Default daily spend cap (USD) for paid model-routing providers. Applies to
 /// every non-Anthropic active provider combined (the Anthropic path is
 /// subscription-billed and never metered here). Deliberately low: the
@@ -335,6 +350,22 @@ pub struct AgentDefaults {
     /// starting more agents than the machine and the account can carry. Read as at least 1.
     #[serde(default = "default_max_parallel_sessions")]
     pub max_parallel_sessions: u32,
+
+    /// What a plan's sessions may spend in dollars (engines paid per token, priced models only) before the plan stops
+    /// starting cards and asks. A plan's own `max_cost_usd` wins; see [`crate::studio_spend`].
+    #[serde(default = "default_plan_max_cost_usd")]
+    pub plan_max_cost_usd: f64,
+
+    /// What a plan's sessions may use in tokens, every engine, before the plan stops starting cards and asks. A plan's
+    /// own `max_tokens` wins.
+    #[serde(default = "default_plan_max_tokens")]
+    pub plan_max_tokens: u64,
+
+    /// The most the studio's sessions may spend in dollars in one local day, all plans and cards together; over it
+    /// nothing new starts and metered sessions are stopped. Separate from [`Self::daily_usd_cap`], which holds skills and
+    /// chat. `None` disables it.
+    #[serde(default = "default_studio_daily_usd_cap")]
+    pub studio_daily_usd_cap: Option<f64>,
 }
 
 /// Every provider seeded with its starting settings — the shared source for
@@ -424,6 +455,9 @@ impl Default for AgentDefaults {
             auto_approve_tools: default_auto_approve_tools(),
             engines: BTreeMap::new(),
             max_parallel_sessions: default_max_parallel_sessions(),
+            plan_max_cost_usd: default_plan_max_cost_usd(),
+            plan_max_tokens: default_plan_max_tokens(),
+            studio_daily_usd_cap: default_studio_daily_usd_cap(),
         }
     }
 }
@@ -563,6 +597,26 @@ impl Config {
             return Err(format!(
                 "daily spend cap must be a positive dollar amount (got {cap}) — \
                  leave it unset to disable the cap"
+            ));
+        }
+
+        // The studio's limits: a limit of zero would stop every plan before its first card.
+        if !self.agents.plan_max_cost_usd.is_finite() || self.agents.plan_max_cost_usd <= 0.0 {
+            return Err(format!(
+                "the plan cost limit must be a positive dollar amount (got {})",
+                self.agents.plan_max_cost_usd
+            ));
+        }
+        if self.agents.plan_max_tokens == 0 {
+            return Err("the plan token limit must be above zero".to_owned());
+        }
+        if let Some(cap) = self
+            .agents
+            .studio_daily_usd_cap
+            .filter(|c| !c.is_finite() || *c <= 0.0)
+        {
+            return Err(format!(
+                "the studio's daily cap must be a positive dollar amount (got {cap}) — leave it unset to disable it"
             ));
         }
 

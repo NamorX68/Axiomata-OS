@@ -21,6 +21,8 @@ import {
   runEventNote,
   allCardsOfPlan,
   readyToTakeOver,
+  spendLine,
+  tokensLabel,
   runsByItself,
   withPlanPane,
 } from "./planning";
@@ -240,6 +242,27 @@ describe("what the owner is told about a plan's run", () => {
     expect(runEventNote({ event: "integrated", outcome: "busy", card_id: 1 })).toBeNull();
     expect(runEventNote({ event: "blocked", card_id: 5, reason: "no engine" })?.text).toContain("no engine");
     expect(runEventNote({ event: "ready_to_take_over", plan_id: 1, name: "Docs" })?.text).toContain("Docs");
+  });
+
+  it("tells a paused plan and the day's cap apart, both as a warning", () => {
+    const paused = runEventNote({ event: "paused", plan_id: 1, name: "Docs", reason: "6000000 tokens of 6000000 used" })!;
+    expect(paused.tone).toBe("warning");
+    expect(paused.text).toContain("Docs");
+    expect(paused.text).toContain("Weiter");
+    const day = runEventNote({ event: "day_cap_reached", reason: "$20.00 of the day's $20.00" })!;
+    expect(day.tone).toBe("warning");
+    expect(day.text).toContain("Tageslimit");
+  });
+
+  it("writes tokens in a reading size and shows dollars only when something was priced", () => {
+    expect(tokensLabel(950)).toBe("950");
+    expect(tokensLabel(340_400)).toBe("340 k");
+    expect(tokensLabel(1_250_000)).toBe("1.3 M");
+    const limits = { max_cost_usd: 15, max_tokens: 6_000_000 };
+    expect(spendLine({ spent: { tokens: 1_500_000, steps: 3, cost_usd: 0 }, limits })).toBe("1.5 M von 6.0 M Token");
+    expect(spendLine({ spent: { tokens: 1_500_000, steps: 3, cost_usd: 2.5 }, limits })).toBe(
+      "1.5 M von 6.0 M Token · $2.50 von $15.00",
+    );
   });
 
   it("closes the panes of the sessions that are gone, after an integration or a put-back", () => {

@@ -37,6 +37,7 @@ use crate::ide::agent_store;
 use crate::paths;
 use crate::session::actor_from;
 use crate::spend;
+use crate::studio_spend;
 
 /// What a session was used for and what it has used, for the owner to read.
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +137,8 @@ struct Watched {
     channel: Channel,
     /// The studio still wants this session: its card is where it works on it. Only such a session is stopped.
     wanted: bool,
+    /// The plan the session's spending is booked to: its card's plan, or the plan a planner works on.
+    plan_id: Option<i64>,
 }
 
 fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, AxiomataError> {
@@ -165,7 +168,14 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
             .engine_id
             .as_deref()
             .and_then(|id| config.agents.engines.get(id));
+        let plan_id = agent.plan_id.or_else(|| {
+            agent
+                .card_id
+                .and_then(|id| crate::board::store::get_card(&db, id).ok().flatten())
+                .and_then(|card| card.plan_id)
+        });
         watched.push(Watched {
+            plan_id,
             billing: engine.map_or_else(Billing::default, |engine| engine.billing),
             model: agent
                 .model
@@ -376,19 +386,51 @@ impl Meter {
         self.service = None;
         let mut seen = Vec::new();
         let mut breaches = Vec::new();
+        // Every reading goes into the ledger first, so the day's total below includes this look.
+        let now = chrono::Utc::now();
+        let mut reads = Vec::new();
         for entry in watched.iter().filter(|entry| entry.wanted) {
             let read = self.read(entry, &config, &mut seen).await;
-            let hit = if read.measured {
+            if read.measured {
+                let db = core.db_lock();
+                if let Err(err) = studio_spend::record_look(
+                    &db,
+                    entry.agent.id,
+                    entry.plan_id,
+                    read.usage,
+                    read.cost_usd,
+                    now,
+                ) {
+                    tracing::warn!(%err, "could not write a session's usage into the ledger");
+                }
+            }
+            reads.push((entry, read));
+        }
+        // The day's cap (A9, the emergency brake): over it, a session paid per token is stopped like at a limit of its
+        // own. A subscription session spends no dollars, so stopping it would save nothing.
+        let day = {
+            let db = core.db_lock();
+            studio_spend::spent_today(&db, now)
+                .map(|today| studio_spend::day_over(&config, today))
+                .unwrap_or_else(|err| {
+                    tracing::warn!(%err, "could not add up today's spending of the studio");
+                    None
+                })
+        };
+        for (entry, read) in reads {
+            let own = if read.measured {
                 reached(read.usage, read.cost_usd, read.limits, read.billing)
             } else {
                 None
             };
+            let by_day = studio_spend::stopped_by_day(own.is_some(), read.cost_usd, day.as_deref());
+            let hit = own.or_else(|| day.clone().filter(|_| by_day));
             match decide(hit, read.stopped.is_some(), read.measured) {
                 Step::Stop(reason) => {
                     let breach = {
                         let config = core.config_read().clone();
                         let db = core.db_lock();
-                        stop(&db, &config, entry, &reason)
+                        stop(&db, &config, entry, &reason, by_day)
                     };
                     breaches.extend(breach);
                     self.interrupt(entry).await;
@@ -469,16 +511,24 @@ fn stop(
     config: &Config,
     entry: &Watched,
     reason: &str,
+    by_day: bool,
 ) -> Option<Breach> {
     if let Err(err) = entry.channel.set_limit_reached(&marker_text(reason)) {
         tracing::warn!(%err, "could not stop a session at its limit");
         return None;
     }
     if let Some(card_id) = entry.agent.card_id {
+        let advice = if by_day {
+            "To go on, raise the studio's daily cap in the settings or wait for tomorrow".to_owned()
+        } else {
+            format!(
+                "To go on, raise the limit of the role \"{}\"",
+                entry.role_name
+            )
+        };
         let text = format!(
-            "{} was stopped: {reason}. The card stays with it. To go on, raise the limit of the role \"{}\"; \
-             otherwise release the card.",
-            entry.agent.name, entry.role_name
+            "{} was stopped: {reason}. The card stays with it. {advice}; otherwise release the card.",
+            entry.agent.name
         );
         let actor = actor_from(Some(&entry.agent.id.to_string()), Some(&entry.agent.name))
             .unwrap_or_else(|| "human:owner".to_owned());
@@ -675,6 +725,7 @@ mod tests {
                 model: agent.model.clone(),
                 channel,
                 wanted: true,
+                plan_id: None,
                 agent,
             },
             dir,
@@ -831,6 +882,7 @@ mod tests {
             &Config::default(),
             &world.watched,
             "60 steps of 60 used",
+            false,
         )
         .unwrap();
         assert_eq!(breach.card_id, Some(world.card));
@@ -876,6 +928,7 @@ mod tests {
             &Config::default(),
             watched,
             "40 steps of 40 used",
+            false,
         )
         .unwrap();
         assert_eq!((breach.card_id, breach.plan_id), (None, Some(5)));

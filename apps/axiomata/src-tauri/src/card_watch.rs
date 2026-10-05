@@ -84,6 +84,12 @@ async fn tick(app: &AppHandle, tried: &mut HashSet<AwaitingReview>) -> Vec<Event
     };
     // Reports that are not waiting any more need no memory.
     tried.retain(|entry| waiting.contains(entry));
+    // At the day's cap no new paid session starts, a reviewer's included; the report is not marked as tried, so the
+    // review starts at the next look after the cap is lifted. A plan that is only over its own limit still gets its
+    // reviews: the work they judge is done, and the review is what lets it be integrated.
+    if axiomata_core::studio_spend::day_cap_reached(&core).is_some() {
+        return events;
+    }
     for entry in waiting {
         if !tried.insert(entry) {
             continue;

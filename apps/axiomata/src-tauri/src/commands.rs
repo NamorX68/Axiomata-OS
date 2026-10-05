@@ -1978,6 +1978,25 @@ pub async fn take_over_plan(
     Ok(outcome)
 }
 
+/// What a plan's sessions spent against its limits, and what the studio spent today against the day's cap (CP-A8c).
+#[tauri::command]
+pub fn plan_spend(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<axiomata_core::studio_spend::PlanSpend, String> {
+    let config = read_config(&state.config);
+    let db = state.db_lock();
+    axiomata_core::studio_spend::plan_spend(&db, &config, id).map_err(|err| err.to_string())
+}
+
+/// The owner's "go on" for a plan that reached its limit: a fresh allowance on top of what it spent (CP-A8c).
+#[tauri::command]
+pub fn resume_plan(state: State<'_, CoreState>, id: i64) -> Result<board::Plan, String> {
+    let config = read_config(&state.config);
+    let db = state.db_lock();
+    axiomata_core::studio_spend::resume_plan(&db, &config, id).map_err(|err| err.to_string())
+}
+
 /// The latest `limit` lines of a card's history, oldest first.
 #[tauri::command]
 pub fn list_card_events(

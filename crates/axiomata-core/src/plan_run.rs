@@ -29,6 +29,7 @@ use crate::card_session::{
     CardIntegration, StartRequest, integrate_card, runs_by_itself, start_card_session,
 };
 use crate::config::Config;
+use crate::studio_spend;
 
 /// How long a card that could not be started or integrated is left alone before the next try.
 const RETRY_AFTER: Duration = Duration::from_secs(300);
@@ -50,6 +51,24 @@ pub enum RunEvent {
     Blocked { card_id: i64, reason: String },
     /// Every card of the plan is on its line: the owner can take the plan over.
     ReadyToTakeOver { plan_id: i64, name: String },
+    /// The plan has spent what it may (A9, A27): it starts nothing more and asks. Said once; the owner's "go on"
+    /// ([`crate::studio_spend::resume_plan`]) gives it a fresh allowance.
+    Paused {
+        plan_id: i64,
+        name: String,
+        reason: String,
+    },
+    /// The studio has spent its day's cap: no plan starts anything until tomorrow or until the cap is raised. Said once.
+    DayCapReached { reason: String },
+}
+
+/// Which plans are held back by what they spent, and whether the whole day is.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Pauses {
+    /// Plan id → which of its limits it has reached.
+    pub plans: HashMap<i64, String>,
+    /// The day's cap, once it is reached.
+    pub day: Option<String>,
 }
 
 /// What one tick is going to do, read under the lock.
@@ -75,6 +94,10 @@ pub struct PlanRun {
     finished: HashSet<i64>,
     /// Cards already said to be stuck: once each.
     warned: HashSet<i64>,
+    /// Plans already said to be paused; forgotten when they are not, so a second pause is said again.
+    paused: HashSet<i64>,
+    /// The day's cap was said to be reached.
+    day_capped: bool,
 }
 
 fn live(state: TaskState) -> bool {
@@ -106,6 +129,7 @@ fn plan_work(
     skip: &HashSet<i64>,
     already_finished: &HashSet<i64>,
     already_warned: &HashSet<i64>,
+    pauses: &Pauses,
 ) -> Work {
     let mut work = Work::default();
     // Every harness that runs counts against the machine's cap, across all plans.
@@ -138,8 +162,11 @@ fn plan_work(
             })
             .collect();
         ready.sort_by(|a, b| a.position.total_cmp(&b.position).then(a.id.cmp(&b.id)));
+        // A plan over its limit, or a day over its cap, starts nothing; what is integrated and finished goes on, it costs
+        // nothing.
+        let paused = pauses.day.is_some() || pauses.plans.contains_key(&plan.id);
         for card in ready {
-            if running >= cap || in_plan >= limit {
+            if paused || running >= cap || in_plan >= limit {
                 break;
             }
             if let Some(project) = plan.project_id {
@@ -222,6 +249,34 @@ impl PlanRun {
         }
     }
 
+    /// Says which plan, or the day, has just been held back — once each — and forgets the ones that are free again.
+    fn announce_pauses(&mut self, pauses: &Pauses, names: &HashMap<i64, String>) -> Vec<RunEvent> {
+        self.paused.retain(|id| pauses.plans.contains_key(id));
+        let mut events = Vec::new();
+        let mut ids: Vec<&i64> = pauses.plans.keys().collect();
+        ids.sort();
+        for id in ids {
+            if self.paused.insert(*id) {
+                events.push(RunEvent::Paused {
+                    plan_id: *id,
+                    name: names.get(id).cloned().unwrap_or_default(),
+                    reason: pauses.plans[id].clone(),
+                });
+            }
+        }
+        match (&pauses.day, self.day_capped) {
+            (Some(reason), false) => {
+                self.day_capped = true;
+                events.push(RunEvent::DayCapReached {
+                    reason: reason.clone(),
+                });
+            }
+            (None, true) => self.day_capped = false,
+            _ => {}
+        }
+        events
+    }
+
     /// One look at every plan that runs by itself. See the module documentation.
     pub async fn tick(&mut self, core: &AxiomataCore) -> Vec<RunEvent> {
         let now = Instant::now();
@@ -233,16 +288,16 @@ impl PlanRun {
             .chain(self.given_up.iter())
             .copied()
             .collect();
-        let work = match tokio::task::block_in_place(|| {
+        let (work, pauses, names) = match tokio::task::block_in_place(|| {
             read_work(core, &skip, &self.finished, &self.warned)
         }) {
-            Ok(work) => work,
+            Ok(read) => read,
             Err(err) => {
                 tracing::warn!(%err, "could not look at the plans that run by themselves");
                 return Vec::new();
             }
         };
-        let mut events = Vec::new();
+        let mut events = self.announce_pauses(&pauses, &names);
         for card_id in work.integrate {
             let result = integrate_card(core, card_id).await;
             events.extend(self.absorb(card_id, result, now));
@@ -281,12 +336,15 @@ impl PlanRun {
     }
 }
 
+/// What a tick is going to do, which plans and the day are held back by their spending, and the plans' names.
+type Read = (Work, Pauses, HashMap<i64, String>);
+
 fn read_work(
     core: &AxiomataCore,
     skip: &HashSet<i64>,
     finished: &HashSet<i64>,
     warned: &HashSet<i64>,
-) -> Result<Work, crate::AxiomataError> {
+) -> Result<Read, crate::AxiomataError> {
     let config: Config = core.config_read().clone();
     let db = core.db_lock();
     let mut plans = Vec::new();
@@ -296,7 +354,35 @@ fn read_work(
         cards.extend(board_store::list_cards(&db, board.id, false)?);
     }
     let cap = config.agents.max_parallel_sessions.max(1) as usize;
-    Ok(plan_work(&plans, &cards, cap, skip, finished, warned))
+    let mut pauses = Pauses {
+        day: studio_spend::day_over(&config, studio_spend::spent_today(&db, chrono::Utc::now())?),
+        ..Pauses::default()
+    };
+    for plan in plans.iter().filter(|plan| runs_by_itself(plan)) {
+        // A plan with nothing left to start is not "paused": it only waits for the owner's take-over.
+        let unsettled = cards.iter().any(|card| {
+            card.plan_id == Some(plan.id)
+                && card.archived_at.is_none()
+                && card.integrated_at.is_none()
+                && card.taken_over_at.is_none()
+                && card.state != TaskState::Canceled
+        });
+        if !unsettled {
+            continue;
+        }
+        let spent = studio_spend::plan_spent(&db, plan.id)?;
+        if let Some(reason) =
+            studio_spend::plan_over(spent, studio_spend::plan_limits(&config, plan))
+        {
+            pauses.plans.insert(plan.id, reason);
+        }
+    }
+    let names = plans
+        .iter()
+        .map(|plan| (plan.id, plan.name.clone()))
+        .collect();
+    let work = plan_work(&plans, &cards, cap, skip, finished, warned, &pauses);
+    Ok((work, pauses, names))
 }
 
 #[cfg(test)]
@@ -349,12 +435,28 @@ mod tests {
     fn independent_cards_all_start_at_once_up_to_the_machines_cap() {
         let plans = [plan(1, Some(64))];
         let cards: Vec<Card> = (1..=5).map(|id| card(id, 1, TaskState::Ready)).collect();
-        let work = plan_work(&plans, &cards, 3, &none(), &none(), &none());
+        let work = plan_work(
+            &plans,
+            &cards,
+            3,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(
             work.start.iter().map(|s| s.0).collect::<Vec<_>>(),
             [1, 2, 3]
         );
-        let wide = plan_work(&plans, &cards, 10, &none(), &none(), &none());
+        let wide = plan_work(
+            &plans,
+            &cards,
+            10,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(wide.start.len(), 5, "as many as the dependencies allow");
     }
 
@@ -369,7 +471,15 @@ mod tests {
             third.clone(),
         ];
         // The second is signed off but not integrated: the third is not started, the second is integrated.
-        let work = plan_work(&plans, &cards, 9, &none(), &none(), &none());
+        let work = plan_work(
+            &plans,
+            &cards,
+            9,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(work.integrate, [2]);
         assert!(work.start.is_empty());
 
@@ -378,7 +488,15 @@ mod tests {
             integrated(card(2, 1, TaskState::Verified)),
             third,
         ];
-        let work = plan_work(&plans, &cards, 9, &none(), &none(), &none());
+        let work = plan_work(
+            &plans,
+            &cards,
+            9,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(work.start.iter().map(|s| s.0).collect::<Vec<_>>(), [3]);
     }
 
@@ -394,9 +512,25 @@ mod tests {
         ];
         // Plan 1 is at its own limit of one. A card in review has a worker and a reviewer running: that is three of the
         // machine's four harnesses, so one more may start, from plan 2.
-        let work = plan_work(&plans, &cards, 4, &none(), &none(), &none());
+        let work = plan_work(
+            &plans,
+            &cards,
+            4,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(work.start.iter().map(|s| s.0).collect::<Vec<_>>(), [4]);
-        let full = plan_work(&plans, &cards, 3, &none(), &none(), &none());
+        let full = plan_work(
+            &plans,
+            &cards,
+            3,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert!(full.start.is_empty());
     }
 
@@ -420,6 +554,7 @@ mod tests {
             &none(),
             &none(),
             &none(),
+            &Pauses::default(),
         );
         assert_eq!(work, Work::default());
     }
@@ -433,10 +568,26 @@ mod tests {
             integrated(card(3, 2, TaskState::Verified)),
         ];
         let skip = HashSet::from([1]);
-        let work = plan_work(&plans, &cards, 9, &skip, &none(), &none());
+        let work = plan_work(
+            &plans,
+            &cards,
+            9,
+            &skip,
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(work.start.iter().map(|s| s.0).collect::<Vec<_>>(), [2]);
         assert_eq!(work.finished, [(2, "plan 2".to_owned())]);
-        let again = plan_work(&plans, &cards, 9, &skip, &HashSet::from([2]), &none());
+        let again = plan_work(
+            &plans,
+            &cards,
+            9,
+            &skip,
+            &HashSet::from([2]),
+            &none(),
+            &Pauses::default(),
+        );
         assert!(again.finished.is_empty());
     }
 
@@ -447,7 +598,15 @@ mod tests {
         first.position = 1.0;
         let mut second = card(2, 1, TaskState::Ready);
         second.position = 2.0;
-        let work = plan_work(&plans, &[second, first], 1, &none(), &none(), &none());
+        let work = plan_work(
+            &plans,
+            &[second, first],
+            1,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(work.start.iter().map(|s| s.0).collect::<Vec<_>>(), [7]);
     }
     #[test]
@@ -458,14 +617,30 @@ mod tests {
             card(2, 1, TaskState::Ready),
         ];
         assert!(
-            plan_work(&plans, &cards, 2, &none(), &none(), &none())
-                .start
-                .is_empty()
+            plan_work(
+                &plans,
+                &cards,
+                2,
+                &none(),
+                &none(),
+                &none(),
+                &Pauses::default()
+            )
+            .start
+            .is_empty()
         );
         assert_eq!(
-            plan_work(&plans, &cards, 3, &none(), &none(), &none())
-                .start
-                .len(),
+            plan_work(
+                &plans,
+                &cards,
+                3,
+                &none(),
+                &none(),
+                &none(),
+                &Pauses::default()
+            )
+            .start
+            .len(),
             1
         );
         // Once it is on the line its sessions are gone.
@@ -474,9 +649,17 @@ mod tests {
             card(2, 1, TaskState::Ready),
         ];
         assert_eq!(
-            plan_work(&plans, &done, 1, &none(), &none(), &none())
-                .start
-                .len(),
+            plan_work(
+                &plans,
+                &done,
+                1,
+                &none(),
+                &none(),
+                &none(),
+                &Pauses::default()
+            )
+            .start
+            .len(),
             1
         );
     }
@@ -512,9 +695,17 @@ mod tests {
         let cards = vec![card(5, 1, TaskState::Verified)];
         let skip: HashSet<i64> = run.given_up.iter().copied().collect();
         assert!(
-            plan_work(&[plan(1, Some(64))], &cards, 9, &skip, &none(), &none())
-                .integrate
-                .is_empty()
+            plan_work(
+                &[plan(1, Some(64))],
+                &cards,
+                9,
+                &skip,
+                &none(),
+                &none(),
+                &Pauses::default()
+            )
+            .integrate
+            .is_empty()
         );
     }
 
@@ -586,12 +777,28 @@ mod tests {
         let mut next = card(2, 1, TaskState::Blocked);
         next.depends_on = vec![1];
         let cards = [card(1, 1, TaskState::Failed), next];
-        let work = plan_work(&plans, &cards, 9, &none(), &none(), &none());
+        let work = plan_work(
+            &plans,
+            &cards,
+            9,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(work.stuck.len(), 1);
         assert_eq!(work.stuck[0].0, 2);
         assert!(work.stuck[0].1.contains("#1") && work.stuck[0].1.contains("failed"));
         assert!(work.start.is_empty());
-        let again = plan_work(&plans, &cards, 9, &none(), &none(), &HashSet::from([2]));
+        let again = plan_work(
+            &plans,
+            &cards,
+            9,
+            &none(),
+            &none(),
+            &HashSet::from([2]),
+            &Pauses::default(),
+        );
         assert!(again.stuck.is_empty());
     }
 
@@ -603,13 +810,67 @@ mod tests {
             integrated(card(1, 1, TaskState::Verified)),
             card(2, 1, TaskState::Canceled),
         ];
-        let work = plan_work(&plans, &cards, 9, &none(), &none(), &none());
+        let work = plan_work(
+            &plans,
+            &cards,
+            9,
+            &none(),
+            &none(),
+            &none(),
+            &Pauses::default(),
+        );
         assert_eq!(work.finished.len(), 1);
         let nothing = [card(1, 1, TaskState::Canceled)];
         assert!(
-            plan_work(&plans, &nothing, 9, &none(), &none(), &none())
-                .finished
-                .is_empty()
+            plan_work(
+                &plans,
+                &nothing,
+                9,
+                &none(),
+                &none(),
+                &none(),
+                &Pauses::default()
+            )
+            .finished
+            .is_empty()
         );
+    }
+
+    #[test]
+    fn a_plan_over_its_limit_or_a_day_over_its_cap_starts_nothing_but_still_integrates() {
+        let plans = [plan(1, Some(64)), plan(2, Some(64))];
+        let cards = vec![
+            card(1, 1, TaskState::Ready),
+            card(2, 1, TaskState::Verified),
+            card(3, 2, TaskState::Ready),
+        ];
+        let one_paused = Pauses {
+            plans: HashMap::from([(1, "6000000 tokens of 6000000 used".to_owned())]),
+            day: None,
+        };
+        let work = plan_work(&plans, &cards, 9, &none(), &none(), &none(), &one_paused);
+        assert_eq!(work.start.iter().map(|s| s.0).collect::<Vec<_>>(), [3]);
+        assert_eq!(work.integrate, [2], "integrating costs nothing");
+        let day = Pauses {
+            plans: HashMap::new(),
+            day: Some("$20.00 of the day's $20.00 for studio sessions spent".to_owned()),
+        };
+        let work = plan_work(&plans, &cards, 9, &none(), &none(), &none(), &day);
+        assert!(work.start.is_empty());
+        assert_eq!(work.integrate, [2]);
+    }
+
+    #[test]
+    fn a_pause_is_said_once_and_again_after_the_plan_was_free_in_between() {
+        let mut run = PlanRun::default();
+        let names = HashMap::from([(1, "Plan".to_owned())]);
+        let paused = Pauses {
+            plans: HashMap::from([(1, "reason".to_owned())]),
+            day: Some("cap".to_owned()),
+        };
+        assert_eq!(run.announce_pauses(&paused, &names).len(), 2);
+        assert!(run.announce_pauses(&paused, &names).is_empty());
+        assert!(run.announce_pauses(&Pauses::default(), &names).is_empty());
+        assert_eq!(run.announce_pauses(&paused, &names).len(), 2);
     }
 }
