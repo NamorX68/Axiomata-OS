@@ -6,7 +6,7 @@ import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent, PlanSpend, PlanStatu
 import type { Role } from "../core/roster";
 import { addTab, allGroups, allTabs, type Layout, type PaneTab } from "./layout";
 import type { Mode } from "./modes";
-import { PLAN_PANE, planTab } from "./paneKinds";
+import { PLAN_PANE, TEAM_PANE, planTab, teamTab } from "./paneKinds";
 
 /** The role kinds that do not take cards: a reviewer judges them, a planner makes them. */
 const NOT_ASSIGNABLE = new Set(["review", "plan"]);
@@ -99,6 +99,17 @@ export function withPlanPane(layout: Layout): Layout {
   if (allTabs(layout).some((tab) => tab.kind === PLAN_PANE)) return layout;
   const first = allGroups(layout)[0];
   return addTab(layout, planTab(), { nodeId: first ? first.id : layout.root.id, side: "center" });
+}
+
+/**
+ * The layout with the Flow's two panels in it: planning, and — to its right, so both are in view — the team's tiles. Both
+ * are repaired on load and whenever the Flow is shown, since nothing else opens a closed one.
+ */
+export function withFlowPanes(layout: Layout): Layout {
+  const planned = withPlanPane(layout);
+  if (allTabs(planned).some((tab) => tab.kind === TEAM_PANE)) return planned;
+  const plan = allGroups(planned).find((group) => group.tabs.some((tab) => tab.kind === PLAN_PANE));
+  return addTab(planned, teamTab(), { nodeId: plan ? plan.id : planned.root.id, side: "right" });
 }
 
 /** What the owner is told about one thing the plans that run by themselves did — `null` for what needs no word. */

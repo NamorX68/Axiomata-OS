@@ -453,7 +453,7 @@ impl Meter {
 /// The transcript of Claude Code session `id`: the file `<id>.jsonl` in one of the folders under `projects` (one per
 /// working directory, named after it in a way that is Claude's to change). `id` is a UUID, so the match is exact and
 /// cannot leave the folder.
-fn find_transcript(projects: &Path, id: &str) -> Option<PathBuf> {
+pub(crate) fn find_transcript(projects: &Path, id: &str) -> Option<PathBuf> {
     if !axiomata_ide::usage::is_claude_session_id(id) {
         return None;
     }

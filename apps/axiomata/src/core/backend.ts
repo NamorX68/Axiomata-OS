@@ -905,6 +905,42 @@ export type PlanRunEvent =
   | { event: "paused"; plan_id: number; name: string; reason: string }
   | { event: "day_cap_reached"; reason: string };
 
+/** One thing a session did (`axiomata_ide::activity::Activity`). */
+export interface SessionActivityStep {
+  kind: "tool" | "say";
+  /** The tool's name; empty for something the session said. */
+  name: string;
+  /** What the tool was pointed at, or the first line of what was said. */
+  detail: string;
+  at: string | null;
+}
+
+/** What a session is doing right now, oldest step first (`session_activity::SessionActivity`). */
+export interface SessionActivity {
+  agent_id: number;
+  steps: SessionActivityStep[];
+  /** `false` when the harness's record could not be read: no steps then does not mean idle. */
+  readable: boolean;
+}
+
+/** One message of a session's conversation (`session_mail::MailLine`). */
+export interface MailLine {
+  id: number;
+  at: string;
+  from: string;
+  to: string;
+  /** Reached this session (`true`), or was written by it. */
+  incoming: boolean;
+  card_id: number | null;
+  kind: "message" | "ack" | "notice" | string;
+  text: string;
+  status: "delivered" | "held" | "undeliverable" | string;
+  read: boolean;
+}
+
+/** What the owner's message came to (`session_mail::OwnerSend`). */
+export type OwnerSend = { outcome: "delivered"; id: number } | { outcome: "undeliverable"; id: number; reason: string };
+
 /** What an integration the owner asked for came to (`card_session::CardIntegration`; the Tauri command returns it flat). */
 export type CardIntegrationResult =
   | { outcome: "done"; card_id: number; plan_id: number; project_id: number; commit: string | null; agent_ids: number[] }

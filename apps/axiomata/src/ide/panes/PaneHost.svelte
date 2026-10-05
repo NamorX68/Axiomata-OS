@@ -36,6 +36,7 @@
     fileTab,
     GIT_PANE,
     PLAN_PANE,
+    TEAM_PANE,
     projectRoot,
     SEARCH_PANE,
     showsFile,
@@ -50,6 +51,7 @@
   import TaskPane from "./TaskPane.svelte";
   import GitPane from "./GitPane.svelte";
   import PlanPane from "./PlanPane.svelte";
+  import TeamPane from "./TeamPane.svelte";
   import { getDock } from "../dockContext";
   import { openFileBeside } from "./openFile";
 
@@ -179,6 +181,12 @@
       <PlanPane project={$session.current} tabId={tab.id} {visible} />
     {:else}
       <p class="unknown">No project is open to plan for.</p>
+    {/if}
+  {:else if tab.kind === TEAM_PANE}
+    {#if $session.current}
+      <TeamPane project={$session.current} tabId={tab.id} {visible} />
+    {:else}
+      <p class="unknown">No project is open to show a team for.</p>
     {/if}
   {:else if tab.kind === SEARCH_PANE}
     {#if $session.current}

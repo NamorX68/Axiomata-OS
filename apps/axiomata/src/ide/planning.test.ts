@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent } from "../core/backend";
 import type { Role } from "../core/roster";
-import { addTab, allTabs, closeTab, emptyLayout, singleGroupLayout, type PaneTab } from "./layout";
+import { addTab, allGroups, allTabs, closeTab, emptyLayout, singleGroupLayout, type PaneTab } from "./layout";
 import {
   agentTabsOf,
   assignableRoles,
@@ -24,6 +24,7 @@ import {
   spendLine,
   tokensLabel,
   runsByItself,
+  withFlowPanes,
   withPlanPane,
 } from "./planning";
 
@@ -140,6 +141,26 @@ describe("where a session's pane belongs", () => {
     // Closing what was found leaves the rest.
     const closed = agentTabsOf(layout, [1, 2]).reduce((acc, t) => closeTab(acc, t.id), layout);
     expect(allTabs(closed).map((t) => t.id)).toEqual(["t"]);
+  });
+});
+
+describe("the Flow's two panels", () => {
+  it("adds the team panel beside planning, once, and brings both back after they were closed", () => {
+    const both = withFlowPanes(emptyLayout());
+    expect(allTabs(both).map((t) => t.kind).sort()).toEqual(["plan", "team"]);
+    // Beside, not behind: two groups, so both are in view.
+    expect(allGroups(both)).toHaveLength(2);
+    expect(withFlowPanes(both)).toBe(both);
+    const closed = allTabs(both).reduce((acc, t) => closeTab(acc, t.id), both);
+    expect(allTabs(withFlowPanes(closed)).map((t) => t.kind).sort()).toEqual(["plan", "team"]);
+  });
+
+  it("keeps a team panel the owner moved into the planning group", () => {
+    const together = singleGroupLayout([
+      { id: "p", kind: "plan", title: "Planung" },
+      { id: "t", kind: "team", title: "Agents" },
+    ]);
+    expect(withFlowPanes(together)).toBe(together);
   });
 });
 

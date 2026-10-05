@@ -45,6 +45,13 @@ export const TASK_PANE = "task";
 /** The Flow mode's planning panel (A2A CP-A7b): the plans of a board, their proposals, the owner's yes. One per Flow layout. */
 export const PLAN_PANE = "plan";
 
+/** The Flow mode's team pane (A2A CP-A9): what the studio's sessions are doing right now. One per Flow layout. */
+export const TEAM_PANE = "team";
+
+export function teamTab(): PaneTab {
+  return { id: crypto.randomUUID(), kind: TEAM_PANE, title: "Agents", config: {} };
+}
+
 export function planTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: PLAN_PANE, title: "Planung", config: {} };
 }

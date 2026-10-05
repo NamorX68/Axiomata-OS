@@ -667,6 +667,28 @@ pub fn read_inbox(
     Ok(entries)
 }
 
+/// The messages `sender` wrote, oldest first, at most `limit` (and [`MAX_READ`]) of the newest. Read-only: for the owner
+/// to see what a session said, whoever it said it to.
+///
+/// # Errors
+///
+/// [`IdeError::Database`] or [`IdeError::CorruptRow`].
+pub fn sent_by(db: &Connection, sender: &Sender, limit: usize) -> Result<Vec<Message>> {
+    let limit = limit.clamp(1, MAX_READ);
+    let mut stmt = db.prepare(&format!(
+        "SELECT {MESSAGE_COLS} FROM mail_messages m WHERE m.sender = ?1 ORDER BY m.id DESC LIMIT ?2"
+    ))?;
+    let raws = stmt
+        .query_map(params![sender.as_text(), limit as i64], row_to_raw)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut messages = raws
+        .into_iter()
+        .map(RawMessage::into_message)
+        .collect::<Result<Vec<_>>>()?;
+    messages.reverse();
+    Ok(messages)
+}
+
 /// Marks the given deliveries of an inbox read — the owner's "mark as read". Only deliveries that belong to this
 /// inbox are touched, so one inbox cannot clear another's mail. Returns how many changed.
 ///

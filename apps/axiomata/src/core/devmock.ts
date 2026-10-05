@@ -400,6 +400,8 @@ let ideAgents: IdeAgent[] = [
     opencode_session: null,
     engine_id: "opencode",
     agent_role: "allrounder",
+    // A session the studio started for a card, so the Flow's team pane has a tile to show in the browser.
+    card_id: 9,
     effective_env: "AXIOMATA_AGENT_ID=1\nAXIOMATA_AGENT_NAME=Builder",
   },
   {
@@ -1615,6 +1617,26 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         cleanup: [],
       } as T;
     }
+    case "session_activity":
+      return (args.agentIds as number[]).map((id) => ({
+        agent_id: id,
+        readable: true,
+        steps: [
+          { kind: "say", name: "", detail: "Ich lese zuerst die Karte.", at: new Date(Date.now() - 90_000).toISOString() },
+          { kind: "tool", name: "Read", detail: "/work/tree/src/lib.rs", at: new Date(Date.now() - 60_000).toISOString() },
+          { kind: "tool", name: "Edit", detail: "/work/tree/src/lib.rs", at: new Date(Date.now() - 20_000).toISOString() },
+          { kind: "tool", name: "Bash", detail: "cargo test -p core", at: new Date(Date.now() - 5_000).toISOString() },
+        ],
+      })) as T;
+    case "ide_mailbox_messages":
+      return [
+        { id: 1, at: new Date(Date.now() - 600_000).toISOString(), from: "Owner", to: "Builder", incoming: true, card_id: 9, kind: "message", text: "Bitte zuerst den leeren Fall testen.", status: "delivered", read: false },
+        { id: 2, at: new Date(Date.now() - 300_000).toISOString(), from: "Builder", to: "Owner", incoming: false, card_id: 9, kind: "message", text: "Mache ich.", status: "delivered", read: true },
+      ] as T;
+    case "ide_mailbox_unread":
+      return Object.fromEntries((args.ids as number[]).map((id) => [id, 1])) as T;
+    case "ide_mailbox_send":
+      return { outcome: "delivered", id: 3 } as T;
     case "plan_cards_left_for_owner":
       return [] as T;
     case "integrate_card":

@@ -26,6 +26,7 @@
 <script lang="ts">
   import type { IdeAgent, ProvisionedAgent } from "../../core/backend";
   import AgentTeamEntry from "../AgentTeamEntry.svelte";
+  import SessionMail from "../SessionMail.svelte";
   import { ownerIsQuiet, shouldAsk } from "../nudge";
   import { createContext } from "../../core/registry";
   import { toast } from "../../core/toast";
@@ -330,6 +331,7 @@
     {:else if sideTab === "inbox"}
       <div class="inbox" id="agent-view-inbox" role="tabpanel" aria-labelledby="agent-tab-inbox">
         <AgentTeamEntry entry={ready?.mcp ?? null} />
+        <SessionMail agentId={agent.id} />
       </div>
     {:else if sideTab !== "terminal" && sideTab !== "diffs"}
       {@const tab = SIDE_TABS.find((t) => t.id === sideTab)}
@@ -450,6 +452,9 @@
     position: absolute;
     inset: 0;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-3);
     padding: var(--ax-space-4);
     background: var(--ax-surface-1);
     color: var(--ax-text);

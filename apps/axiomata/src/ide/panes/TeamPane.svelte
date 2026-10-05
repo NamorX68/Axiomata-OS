@@ -1,0 +1,337 @@
+<!--
+  The Flow's team pane (A2A CP-A9): what the studio's sessions are doing right now. A tile per session — a worker, a
+  reviewer, a planner — grouped by the plan its card belongs to: who it is, the card it works on, and a live line with
+  its newest step ("Edit …/src/a.rs"). A click on a tile opens the trail of its last steps and what it has used against
+  its limits; "Terminal" puts its pane in front, as the Canvas shows it.
+
+  The steps come from the harness's own record (`session_activity`: the Claude Code transcript, the Opencode messages),
+  read every few seconds while the pane is shown. Nothing here starts, stops or changes a session.
+-->
+<script lang="ts">
+    import {
+    invokeBackend as invoke,
+    type Board,
+    type BoardCard,
+    type BoardPlan,
+    type IdeProject,
+    type SessionActivity,
+  } from "../../core/backend";
+  import { boardStore, type BoardData } from "../../core/boardStore";
+  import { emit } from "../../core/bus";
+  import { relativeTime } from "../../core/format";
+  import { STATE_LABEL } from "../../core/kanban";
+  import CardUsage from "../../modules/CardUsage.svelte";
+  import { agentStatus, describeStatus } from "../agentStatus";
+  import { session } from "../projectSession";
+  import SessionMail from "../SessionMail.svelte";
+  import StatusDot from "../StatusDot.svelte";
+  import { dutyLabel, groupsOf, nowAt, nowLine, stepLabel } from "../team";
+
+  let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
+
+  const statuses = agentStatus.statuses;
+  /** How often the sessions' records are read while the pane is shown: a step is seconds long, a poll costs a file tail. */
+  const POLL_MS = 3000;
+
+  // The cards and plans of every board: a session's card may lie on any of them. The subscriptions end with the effect — also
+  // when it ends before the list of boards has come back.
+  let boardData = $state<Record<number, BoardData>>({});
+  $effect(() => {
+    let ended = false;
+    let stops: (() => void)[] = [];
+    invoke<Board[]>("list_boards")
+      .then((boards) => {
+        if (ended) return;
+        stops = boards.map((board) =>
+          boardStore(board.id).subscribe((value) => (boardData = { ...boardData, [board.id]: value })),
+        );
+      })
+      .catch(() => {
+        // Without the boards the tiles show the sessions without their cards.
+      });
+    return () => {
+      ended = true;
+      for (const stop of stops) stop();
+    };
+  });
+
+  const cards = $derived<BoardCard[]>(Object.values(boardData).flatMap((data) => data.cards));
+  const plans = $derived<BoardPlan[]>(Object.values(boardData).flatMap((data) => data.plans));
+  const groups = $derived(groupsOf($session.agents, cards, plans));
+  // The ids as one string: a recompute of the groups (a card moved, a plan renamed) gives a new array of the same ids, and
+  // the polls below must not restart for that — a poll that is restarted before its answer comes back never shows one.
+  const idKey = $derived(groups.flatMap((group) => group.tiles.map((tile) => tile.agent.id)).join(","));
+
+  let activity = $state<Record<number, SessionActivity>>({});
+  $effect(() => {
+    const ids = idKey === "" ? [] : idKey.split(",").map(Number);
+    if (!visible || ids.length === 0) return;
+    let stale = false;
+    // One look at a time: a slow service must not pile calls up behind each other.
+    let looking = false;
+    const read = (): void => {
+      if (looking) return;
+      looking = true;
+      invoke<SessionActivity[]>("session_activity", { agentIds: ids })
+        .then((list) => {
+          if (!stale) activity = Object.fromEntries(list.map((entry) => [entry.agent_id, entry]));
+        })
+        .catch(() => {
+          // A failed look leaves what the tiles show.
+        })
+        .finally(() => {
+          looking = false;
+        });
+    };
+    read();
+    const timer = setInterval(read, POLL_MS);
+    return () => {
+      stale = true;
+      clearInterval(timer);
+    };
+  });
+
+  // How many messages wait unread in each session's inbox: a badge on the tile, so mail is seen without opening it.
+  let unread = $state<Record<number, number>>({});
+  $effect(() => {
+    const ids = idKey === "" ? [] : idKey.split(",").map(Number);
+    if (!visible || ids.length === 0) return;
+    let stale = false;
+    const read = (): void => {
+      invoke<Record<number, number>>("ide_mailbox_unread", { ids })
+        .then((counts) => {
+          if (!stale) unread = counts;
+        })
+        .catch(() => {
+          // A badge is a courtesy.
+        });
+    };
+    read();
+    const timer = setInterval(read, POLL_MS);
+    return () => {
+      stale = true;
+      clearInterval(timer);
+    };
+  });
+
+  let open = $state<Record<number, boolean>>({});
+  function toggle(agentId: number): void {
+    open = { ...open, [agentId]: !open[agentId] };
+  }
+
+  function showTerminal(agentId: number): void {
+    emit("shell:agent", { projectId: project.id, agentId });
+  }
+
+  const now = $derived($statuses.checkedAt || Date.now());
+</script>
+
+<div class="team">
+  {#if groups.length === 0}
+    <p class="empty">
+      Noch läuft hier nichts. Sobald ein Plan freigegeben ist und seine Karten starten (oder ein Planer arbeitet), erscheint
+      jede Sitzung hier als Kachel — mit dem, was sie gerade tut.
+    </p>
+  {/if}
+  {#each groups as group (group.planId ?? "none")}
+    <section class="group" aria-label={group.title}>
+      <h3>{group.title}</h3>
+      <div class="tiles">
+        {#each group.tiles as tile (tile.agent.id)}
+          {@const status = describeStatus($statuses.byAgent.get(tile.agent.id), tile.agent, now)}
+          {@const live = activity[tile.agent.id]}
+          <article class="tile" class:needs={tile.card?.state === "input_required"}>
+            <header>
+              <StatusDot view={status} />
+              <span class="name">{tile.agent.name}</span>
+              <span class="chip">{tile.agent.agent_role}</span>
+              {#if tile.agent.engine_id}<span class="chip muted">{tile.agent.engine_id}</span>{/if}
+              {#if (unread[tile.agent.id] ?? 0) > 0}
+                <span class="chip mail" title="Ungelesene Nachrichten in der Inbox der Sitzung">✉ {unread[tile.agent.id]}</span>
+              {/if}
+              <span class="spacer"></span>
+              <button class="ax-btn small" type="button" onclick={() => showTerminal(tile.agent.id)}>Terminal</button>
+            </header>
+
+            {#if tile.card}
+              <p class="card-line">
+                <span class="muted">{dutyLabel(tile.duty)}</span>
+                <strong>#{tile.card.id}</strong>
+                <span class="title">{tile.card.title}</span>
+                <span class="state">{STATE_LABEL[tile.card.state]}</span>
+              </p>
+              {#if tile.card.input_required}
+                <p class="question" role="status">Fragt: {tile.card.input_required}</p>
+              {/if}
+            {:else if tile.duty === "planner"}
+              <p class="card-line"><span class="muted">{dutyLabel("planner")}</span> den Plan</p>
+            {/if}
+
+            <button class="now" type="button" aria-expanded={open[tile.agent.id] ?? false} onclick={() => toggle(tile.agent.id)}>
+              <span class="now-label">{status.label}</span>
+              <span class="now-text">{nowLine(live) || "…"}</span>
+              {#if nowAt(live)}
+                <span class="muted">{relativeTime(nowAt(live), now)}</span>
+              {/if}
+            </button>
+
+            {#if open[tile.agent.id]}
+              {#if live && live.steps.length > 1}
+                <ol class="trail" aria-label="Letzte Schritte">
+                  {#each live.steps.slice(0, -1).reverse() as step, index (index)}
+                    <li class:said={step.kind === "say"}>{stepLabel(step)}</li>
+                  {/each}
+                </ol>
+              {/if}
+              {#if tile.card}<CardUsage card={tile.card} />{/if}
+              <SessionMail agentId={tile.agent.id} {visible} />
+            {/if}
+          </article>
+        {/each}
+      </div>
+    </section>
+  {/each}
+</div>
+
+<style>
+  .team {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    padding: var(--ax-space-3) var(--ax-space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-4);
+    background: var(--ax-surface-1);
+    color: var(--ax-text);
+    font-size: var(--ax-font-size-sm);
+  }
+  .empty {
+    margin: 0;
+    color: var(--ax-text-muted);
+  }
+  h3 {
+    margin: 0 0 var(--ax-space-2);
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text-muted);
+    font-weight: 600;
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(calc(300px * var(--ax-ui-scale)), 1fr));
+    gap: var(--ax-space-3);
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    min-width: 0;
+  }
+  .tile.needs {
+    border-color: var(--ax-warning);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+  }
+  .name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .chip {
+    padding: 0 var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    font-size: var(--ax-font-size-xs);
+    white-space: nowrap;
+  }
+  .muted {
+    color: var(--ax-text-muted);
+  }
+  .chip.mail {
+    border-color: var(--ax-accent);
+    color: var(--ax-accent);
+  }
+  .card-line,
+  .question {
+    margin: 0;
+    display: flex;
+    gap: var(--ax-space-2);
+    align-items: baseline;
+    min-width: 0;
+  }
+  .title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .state {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    white-space: nowrap;
+  }
+  .question {
+    color: var(--ax-warning);
+    word-break: break-word;
+  }
+  .now {
+    display: flex;
+    gap: var(--ax-space-2);
+    align-items: baseline;
+    width: 100%;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: var(--ax-surface-1);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+  }
+  .now:hover {
+    border-color: var(--ax-accent);
+  }
+  .now-label {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    white-space: nowrap;
+  }
+  .now-text {
+    flex: 1;
+    font-family: var(--ax-font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trail {
+    margin: 0;
+    padding: 0 0 0 var(--ax-space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+  }
+  .trail li {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trail li.said {
+    font-family: inherit;
+    font-style: italic;
+  }
+</style>

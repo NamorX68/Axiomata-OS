@@ -32,7 +32,7 @@ import { toast } from "../core/toast";
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { addTab, allGroups, allTabs, closeTab, emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
-import { agentTabsOf, withPlanPane } from "./planning";
+import { agentTabsOf, withFlowPanes } from "./planning";
 import { FILES_PANE, TASK_PANE, planTab } from "./paneKinds";
 import {
   emptyEditorLayout,
@@ -137,10 +137,10 @@ export function workspaceFor(project: IdeProject): Workspace {
     toast(`The stored layout for “${project.name}” could not be read; starting fresh.`, "warning");
     return starting();
   }
-  // The Flow always has its planning panel: a closed one would have no way back.
+  // The Flow always has its planning and team panels: a closed one would have no way back.
   const prepared = (layout: Layout, mode: Mode) => {
     const clean = applyProjectCwd(withoutFilesPanes(layout), project.repo_root);
-    return mode === "flow" ? withPlanPane(clean) : clean;
+    return mode === "flow" ? withFlowPanes(clean) : clean;
   };
   const parked: Parked = {};
   for (const [mode, layout] of Object.entries(parsed.parked) as [Mode, Layout][]) parked[mode] = prepared(layout, mode);
@@ -298,7 +298,7 @@ export function switchMode(layout: Layout, next: Mode): Layout {
   const { mode, parked } = get(state);
   const swapped = swapMode({ mode, active: layout, parked }, next);
   state.update((s) => ({ ...s, mode: swapped.mode, parked: swapped.parked }));
-  return next === "flow" ? withPlanPane(swapped.active) : swapped.active;
+  return next === "flow" ? withFlowPanes(swapped.active) : swapped.active;
 }
 
 /**

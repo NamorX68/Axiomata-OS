@@ -31,7 +31,6 @@
   {#if entry?.command}
     <p class="command" title="The program the harness starts as the {entry.server} MCP server">{entry.command}</p>
   {/if}
-  <p class="note later">Messages and the board's cards arrive here with the Flow view.</p>
 </section>
 
 <style>

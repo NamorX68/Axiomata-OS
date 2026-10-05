@@ -2009,6 +2009,15 @@ pub fn plan_cards_left_for_owner(state: State<'_, CoreState>, id: i64) -> Result
     axiomata_core::card_session::cards_left_for_owner(&db, id).map_err(|err| err.to_string())
 }
 
+/// What sessions are doing right now: their last few steps, read from the harness's own record (CP-A9).
+#[tauri::command]
+pub async fn session_activity(
+    state: State<'_, CoreState>,
+    agent_ids: Vec<i64>,
+) -> Result<Vec<axiomata_core::session_activity::SessionActivity>, String> {
+    Ok(axiomata_core::session_activity::read(&state, &agent_ids).await)
+}
+
 /// What a plan's sessions spent against its limits, and what the studio spent today against the day's cap (CP-A8c).
 #[tauri::command]
 pub fn plan_spend(
@@ -2473,6 +2482,42 @@ pub fn ide_mailbox_nudge(
     let due = ide::mailbox::nudges(&db, &ide::mailbox::Limits::default(), &[(id, agent_state)])
         .map_err(|err| err.to_string())?;
     Ok(due.into_iter().next().map(|nudge| nudge.line))
+}
+
+/// A session's conversation, oldest first: what reached it and what it wrote. Nothing is marked read (CP-A9).
+#[tauri::command]
+pub fn ide_mailbox_messages(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<Vec<axiomata_core::session_mail::MailLine>, String> {
+    let db = state.db_lock();
+    axiomata_core::session_mail::conversation(&db, id).map_err(|err| err.to_string())
+}
+
+/// How many messages wait unread in each of the sessions' inboxes (CP-A9).
+#[tauri::command]
+pub fn ide_mailbox_unread(
+    state: State<'_, CoreState>,
+    ids: Vec<i64>,
+) -> Result<std::collections::HashMap<i64, usize>, String> {
+    let db = state.db_lock();
+    ids.into_iter()
+        .map(|id| {
+            axiomata_core::session_mail::unread(&db, id)
+                .map(|count| (id, count))
+                .map_err(|err| err.to_string())
+        })
+        .collect()
+}
+
+/// The owner writes to a session, about its card (CP-A9).
+#[tauri::command]
+pub fn ide_mailbox_send(
+    state: State<'_, CoreState>,
+    id: i64,
+    message: String,
+) -> Result<axiomata_core::session_mail::OwnerSend, String> {
+    axiomata_core::session_mail::send_as_owner(&state, id, &message).map_err(|err| err.to_string())
 }
 
 /// Notes that the nudge for session `id` was typed, so a message is announced a limited number of times.

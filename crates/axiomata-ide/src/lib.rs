@@ -27,6 +27,7 @@
 //! `axiomata_core::db`, which ships it as migration 9). Once released it is
 //! frozen — see the constant's own docs.
 
+pub mod activity;
 pub mod agent_store;
 pub mod git;
 pub mod lifecycle;
