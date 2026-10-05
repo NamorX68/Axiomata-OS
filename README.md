@@ -26,11 +26,12 @@ Svelte front end, macOS first). What exists today:
 - **Agentic IDE** (M7) — projects with a dock layout, agent harnesses (Claude Code, Opencode)
   in PTY panes, one git worktree per agent with a live status and plan, and a git layer for
   diffs, commits and take-over.
-- **Own editor** (ED0–ED5) — a file service guarded per root, a TypeScript editor engine on a
+- **Own editor** (ED0–ED6) — a file service guarded per root, a TypeScript editor engine on a
   rope, tree-sitter highlighting, Vi mode, multiple cursors, find bar and project search,
-  folding, sticky scroll, minimap, installed Mac fonts, file tree with tabs and quick open.
+  folding, sticky scroll, minimap, installed Mac fonts, file tree with tabs, quick open, and
+  language server support (hover, definition, implementations, completion, formatting, rename).
 
-Next: language servers in the editor (ED6). M4 (always-on background scheduling) was dropped.
+Next: live testing and app bundling. M4 (always-on background scheduling) was dropped.
 See [`docs/architecture.md`](./docs/architecture.md) for the full design and milestone history,
 and `docs/plans/` for the detailed plans.
 
