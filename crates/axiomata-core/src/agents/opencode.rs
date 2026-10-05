@@ -438,14 +438,22 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
             .iter()
             .map(|tool| PermissionRule::new(&format!("{server}_{tool}"), "*", "allow")),
     );
-    // A reviewer judges what it is shown and changes nothing — and reads what was done with git, which it is allowed to
+    // A reviewer judges what it is shown and changes nothing — and so does a planner; both read with git, which it is
+    // allowed to
     // do one command at a time without asking. Anything else, and a chain of several commands, is still a question.
-    if rights.review {
+    if rights.read_only {
         rules.push(PermissionRule::new("edit", "*", "deny"));
         rules.extend(
             REVIEWER_GIT
                 .iter()
                 .map(|pattern| PermissionRule::new("shell", pattern, "allow")),
+        );
+        // `git diff --no-index` reads any file the user can read, and `--output=<path>` writes one: neither is a way of
+        // looking at the checkout. Denied after the allows, where the later rule is the one that counts.
+        rules.extend(
+            READ_ONLY_GIT_DENIED
+                .iter()
+                .map(|pattern| PermissionRule::new("shell", pattern, "deny")),
         );
     }
     rules
@@ -460,13 +468,16 @@ const REVIEWER_GIT: [&str; 5] = [
     "git rev-parse *",
 ];
 
+/// Options of the read-only git commands that reach beyond the checkout.
+const READ_ONLY_GIT_DENIED: [&str; 2] = ["git * --no-index*", "git * --output*"];
+
 /// What an unattended card session of Opencode may do without asking.
 #[derive(Debug, Clone, Copy)]
 pub struct CardRights<'a> {
     /// The tools of the agent MCP server its role has.
     pub tools: &'a [&'a str],
-    /// A reviewer: no edits at all.
-    pub review: bool,
+    /// A reviewer or a planner: no edits at all.
+    pub read_only: bool,
 }
 
 /// A session of an IDE agent on the service, and whether this start made it.
@@ -769,7 +780,7 @@ mod tests {
     fn a_card_session_may_use_its_own_tools_by_name_and_still_cannot_push() {
         let rules = card_permissions(&CardRights {
             tools: &["read_inbox", "claim_task"],
-            review: false,
+            read_only: false,
         });
         let has = |action: &str, effect: &str| {
             rules
@@ -796,10 +807,41 @@ mod tests {
     }
 
     #[test]
+    fn a_read_only_session_may_read_with_git_but_not_reach_beyond_the_checkout() {
+        let rules = |read_only| {
+            card_permissions(&CardRights {
+                tools: &["get_plan"],
+                read_only,
+            })
+        };
+        let position = |rules: &[PermissionRule], resource: &str, effect: &str| {
+            rules
+                .iter()
+                .position(|r| r.action == "shell" && r.resource == resource && r.effect == effect)
+        };
+        let planner = rules(true);
+        for denied in READ_ONLY_GIT_DENIED {
+            let deny = position(&planner, denied, "deny")
+                .unwrap_or_else(|| panic!("{denied} is not denied"));
+            // After the allows: a later rule is the one that counts.
+            assert!(
+                deny > position(&planner, "git diff *", "allow").unwrap(),
+                "{denied}"
+            );
+        }
+        assert!(
+            READ_ONLY_GIT_DENIED
+                .iter()
+                .all(|p| position(&rules(false), p, "deny").is_none()),
+            "a worker's shell is not limited to reading"
+        );
+    }
+
+    #[test]
     fn a_reviewer_may_not_edit_anything() {
         let rights = |review| CardRights {
             tools: &["review_verdict"],
-            review,
+            read_only: review,
         };
         let denies_edits = |rules: Vec<PermissionRule>| {
             rules

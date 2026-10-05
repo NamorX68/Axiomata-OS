@@ -255,6 +255,7 @@ mod tests {
             card_id: None,
             card_review: false,
             start_ref: None,
+            plan_id: None,
             effective_command: String::new(),
             effective_env: String::new(),
         }

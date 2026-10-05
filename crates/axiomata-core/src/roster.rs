@@ -1062,11 +1062,13 @@ mod tests {
                 delete_role(&conn, "allrounder"),
                 Err(AxiomataError::Roster(_))
             ));
-            // The reviewer is seeded beside it (CP-A6b); like the bundled skills, a missing one is seeded again at the next start.
+            // The reviewer (CP-A6b) and the planner (CP-A7) are seeded beside it; like the bundled skills, a missing
+            // one
+            // is seeded again at the next start.
             let roles = list_roles().unwrap().roles;
             assert_eq!(
                 roles.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-                ["allrounder", "reviewer"]
+                ["allrounder", "planner", "reviewer"]
             );
         });
     }

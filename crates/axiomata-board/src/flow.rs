@@ -21,6 +21,8 @@ use crate::store::{
 use crate::{BoardError, Result};
 
 const MAX_PLAN_NAME_LEN: usize = 200;
+/// Longest goal of a plan, in bytes: a few pages of the owner's words, and a bound on what a tool call hands an agent.
+const MAX_PLAN_GOAL_LEN: usize = 16 * 1024;
 /// Most plans one board holds, and most cards one card may wait for: bounds on what a runaway agent can pile up.
 const MAX_PLANS_PER_BOARD: i64 = 100;
 const MAX_DEPS_PER_CARD: i64 = 50;
@@ -194,7 +196,7 @@ pub fn latest_event(db: &Connection, card_id: i64, kind: EventKind) -> Result<Op
 // ----------------------------------------------------------------- plans ---
 
 const PLAN_COLS: &str = "id, board_id, name, status, auto_start_max, max_cost_usd, max_tokens, \
-     created_at, updated_at, approved_at";
+     created_at, updated_at, approved_at, goal";
 
 fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Result<Vec<Plan>> {
     let sql = format!("SELECT {PLAN_COLS} FROM plans {sql_tail}");
@@ -211,11 +213,13 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             row.get::<_, String>(7)?,
             row.get::<_, String>(8)?,
             row.get::<_, Option<String>>(9)?,
+            row.get::<_, String>(10)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, board_id, name, status, auto, cost, tokens, created, updated, approved) = row?;
+        let (id, board_id, name, status, auto, cost, tokens, created, updated, approved, goal) =
+            row?;
         let status = PlanStatus::parse(&status).ok_or_else(|| BoardError::CorruptRow {
             table: "plans",
             id,
@@ -225,6 +229,7 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             id,
             board_id,
             name,
+            goal,
             status,
             auto_start_max: auto.and_then(|n| u32::try_from(n).ok()),
             max_cost_usd: cost,
@@ -239,6 +244,10 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
 
 fn check_plan_fields(fields: &PlanFields) -> Result<()> {
     check_len("name", &fields.name, MAX_PLAN_NAME_LEN)?;
+    // May be empty (a plan made without a goal), which `check_len` refuses.
+    if fields.goal.len() > MAX_PLAN_GOAL_LEN {
+        return invalid("goal", format!("longer than {MAX_PLAN_GOAL_LEN} bytes"));
+    }
     if fields.auto_start_max == Some(0) {
         return invalid(
             "auto_start_max",
@@ -294,15 +303,16 @@ pub fn create_plan(db: &Connection, board_id: i64, fields: &PlanFields) -> Resul
     }
     let stamp = now();
     db.execute(
-        "INSERT INTO plans (board_id, name, auto_start_max, max_cost_usd, max_tokens, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        "INSERT INTO plans (board_id, name, goal, auto_start_max, max_cost_usd, max_tokens, created_at, updated_at)
+         VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6, ?6)",
         params![
             board_id,
             fields.name,
             fields.auto_start_max,
             fields.max_cost_usd,
             fields.max_tokens.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
-            stamp
+            stamp,
+            fields.goal
         ],
     )?;
     let id = db.last_insert_rowid();
@@ -317,7 +327,7 @@ pub fn create_plan(db: &Connection, board_id: i64, fields: &PlanFields) -> Resul
 pub fn update_plan(db: &Connection, id: i64, fields: &PlanFields) -> Result<Option<Plan>> {
     check_plan_fields(fields)?;
     let changed = db.execute(
-        "UPDATE plans SET name = ?2, auto_start_max = ?3, max_cost_usd = ?4, max_tokens = ?5, updated_at = ?6
+        "UPDATE plans SET name = ?2, auto_start_max = ?3, max_cost_usd = ?4, max_tokens = ?5, updated_at = ?6, goal = ?7
          WHERE id = ?1",
         params![
             id,
@@ -325,7 +335,8 @@ pub fn update_plan(db: &Connection, id: i64, fields: &PlanFields) -> Result<Opti
             fields.auto_start_max,
             fields.max_cost_usd,
             fields.max_tokens.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
-            now()
+            now(),
+            fields.goal
         ],
     )?;
     if changed == 0 {
@@ -1178,7 +1189,7 @@ mod tests {
         claim_card, create_board, create_card, create_column, delete_column, move_card,
         move_to_status, release_card, set_card_archived, update_card, update_column, verify_card,
     };
-    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2};
+    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3};
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1218,6 +1229,7 @@ mod tests {
         let mut db = open(&path);
         db.execute_batch(SCHEMA_SQL_V1).unwrap();
         db.execute_batch(SCHEMA_SQL_V2).unwrap();
+        db.execute_batch(SCHEMA_SQL_V3).unwrap();
         let board = create_board(&mut db, "Flow").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
@@ -1270,6 +1282,7 @@ mod tests {
             &f.db,
             f.board,
             &PlanFields {
+                goal: String::new(),
                 name: "Plan".into(),
                 auto_start_max: None,
                 max_cost_usd: None,
@@ -1620,6 +1633,7 @@ mod tests {
         )
         .unwrap();
         db.execute_batch(SCHEMA_SQL_V2).unwrap();
+        db.execute_batch(SCHEMA_SQL_V3).unwrap();
 
         assert_eq!(ensure_flow_columns_all(&mut db).unwrap(), 1);
         let names: Vec<String> = list_columns(&db, 1)
@@ -1648,6 +1662,7 @@ mod tests {
         )
         .unwrap();
         db.execute_batch(SCHEMA_SQL_V2).unwrap();
+        db.execute_batch(SCHEMA_SQL_V3).unwrap();
         ensure_flow_columns(&mut db, 1).unwrap();
         let columns = list_columns(&db, 1).unwrap();
         assert_eq!(
@@ -1842,10 +1857,33 @@ mod tests {
     }
 
     #[test]
+    fn a_plans_goal_is_kept_replaced_and_bounded() {
+        let f = fixture();
+        let fields = |goal: &str| PlanFields {
+            goal: goal.into(),
+            name: "p".into(),
+            auto_start_max: None,
+            max_cost_usd: None,
+            max_tokens: None,
+        };
+        let made = create_plan(&f.db, f.board, &fields("Add a dark mode")).unwrap();
+        assert_eq!(made.goal, "Add a dark mode");
+        let changed = update_plan(&f.db, made.id, &fields("Add a dark mode, then a light one"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(changed.goal, "Add a dark mode, then a light one");
+        // A plan may be made without one.
+        assert_eq!(create_plan(&f.db, f.board, &fields("")).unwrap().goal, "");
+        let too_long = "x".repeat(MAX_PLAN_GOAL_LEN + 1);
+        assert!(create_plan(&f.db, f.board, &fields(&too_long)).is_err());
+    }
+
+    #[test]
     fn plan_settings_are_checked_and_a_closed_plan_stays_closed() {
         let f = fixture();
         let bad = |change: fn(&mut PlanFields)| {
             let mut fields = PlanFields {
+                goal: String::new(),
                 name: "p".into(),
                 auto_start_max: None,
                 max_cost_usd: None,
@@ -1866,6 +1904,7 @@ mod tests {
                 &f.db,
                 9999,
                 &PlanFields {
+                    goal: String::new(),
                     name: "x".into(),
                     auto_start_max: None,
                     max_cost_usd: None,
@@ -1884,6 +1923,7 @@ mod tests {
             &f.db,
             other_board.id,
             &PlanFields {
+                goal: String::new(),
                 name: "fremd".into(),
                 auto_start_max: None,
                 max_cost_usd: None,
@@ -2512,6 +2552,7 @@ mod tests {
                 &f.db,
                 f.board,
                 &PlanFields {
+                    goal: String::new(),
                     name: format!("p{n}"),
                     auto_start_max: None,
                     max_cost_usd: None,
@@ -2528,6 +2569,7 @@ mod tests {
             &f.db,
             f.board,
             &PlanFields {
+                goal: String::new(),
                 name: "zu viel".into(),
                 auto_start_max: None,
                 max_cost_usd: None,

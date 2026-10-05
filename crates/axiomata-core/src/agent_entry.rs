@@ -148,6 +148,7 @@ impl Server {
         agent_id: i64,
         secret: &str,
         card: Option<i64>,
+        plan: Option<i64>,
         forwarded: impl Fn(&str) -> Option<String>,
     ) -> Self {
         let mut env = vec![
@@ -158,6 +159,10 @@ impl Server {
         // than one it holds itself, and a session cannot be steered to another card by a tool argument.
         if let Some(card) = card {
             env.push(("AXIOMATA_CARD_ID".to_owned(), card.to_string()));
+        }
+        // The plan a planner works on, likewise: `create_card` and `get_plan` act on it, whatever a tool argument says.
+        if let Some(plan) = plan {
+            env.push(("AXIOMATA_PLAN_ID".to_owned(), plan.to_string()));
         }
         env.extend(
             FORWARDED_ENV
@@ -273,6 +278,52 @@ impl CardLaunch {
     }
 }
 
+/// The plan a planner session was started for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanLaunch {
+    pub plan_id: i64,
+}
+
+/// What the studio started a session for: a card (to work on or to review) or a plan (to cut into cards). The studio
+/// writes it into the session's row, and a start reads it from there — never from anything the session says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Launch {
+    Card(CardLaunch),
+    Plan(PlanLaunch),
+}
+
+impl From<CardLaunch> for Launch {
+    fn from(card: CardLaunch) -> Self {
+        Launch::Card(card)
+    }
+}
+
+impl Launch {
+    /// The card, for the server's environment (`AXIOMATA_CARD_ID`).
+    pub fn card_id(&self) -> Option<i64> {
+        match self {
+            Launch::Card(card) => Some(card.card_id),
+            Launch::Plan(_) => None,
+        }
+    }
+
+    /// The plan, for the server's environment (`AXIOMATA_PLAN_ID`).
+    pub fn plan_id(&self) -> Option<i64> {
+        match self {
+            Launch::Card(_) => None,
+            Launch::Plan(plan) => Some(plan.plan_id),
+        }
+    }
+
+    /// A reviewer and a planner change nothing: no automatic edits, no editing tool, and a checkout nobody takes over.
+    pub fn read_only(&self) -> bool {
+        match self {
+            Launch::Card(card) => card.review.is_some(),
+            Launch::Plan(_) => true,
+        }
+    }
+}
+
 /// What a card session is told about running commands. Claude Code asks about a command that chains others or starts
 /// with `cd` (its own check, whatever is allowed), and a session nobody watches then stands still on that question: one
 /// simple command at a time, in the directory it is already in, is not asked about.
@@ -282,7 +333,11 @@ const COMMAND_STYLE: &str = "Your shell already starts in your worktree: do not 
 /// The first thing a session started for a card is told (A35): who it is and which card, never the card's text — that
 /// comes through `get_card`, so no card text ever sits in a shell line. A restart goes through the same words, which is
 /// why they say what to do with work that is already there.
-pub fn start_prompt(agent: &Agent, launch: &CardLaunch) -> String {
+pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
+    let launch = match launch {
+        Launch::Card(card) => card,
+        Launch::Plan(plan) => return planner_prompt(agent, plan),
+    };
     let (name, role, card_id) = (&agent.name, &agent.agent_role, launch.card_id);
     match &launch.review {
         None => format!(
@@ -304,6 +359,20 @@ pub fn start_prompt(agent: &Agent, launch: &CardLaunch) -> String {
             base = target.base,
         ),
     }
+}
+
+/// What a planner is told first: who it is and which plan — never the plan's text, which comes through `get_plan`.
+fn planner_prompt(agent: &Agent, launch: &PlanLaunch) -> String {
+    let (name, role, plan_id) = (&agent.name, &agent.agent_role, launch.plan_id);
+    format!(
+        "You are the session \"{name}\", role `{role}`, and you plan #{plan_id}. Read your inbox with `read_inbox`, then \
+         read the plan with `get_plan`: its goal, the roles you may assign cards to and the cards proposed so far (a \
+         restart finds your earlier ones there: carry on, do not propose them again). Your worktree is a read-only \
+         checkout of the project as it was when you started — read it as far as you need, change nothing. Cut the \
+         goal into cards with `create_card`: each names a role in `agent`, a `tier`, the acceptance criteria and, in \
+         `needs`, the cards that have to be done first. {COMMAND_STYLE} The owner reads your proposals and approves \
+         the plan; you start and change nothing else. Say in a few lines what the plan consists of when you are done."
+    )
 }
 
 /// Whether a rule of a role file may be granted without asking: `Tool(spec)` with a spec that narrows something. A bare
@@ -365,7 +434,7 @@ fn claude_card_options(role: Option<&Role>, review: bool) -> String {
 
 /// The end of the launch command of a card session: `--` and the start prompt, so that nothing after it can be taken
 /// for an option (and `--allowedTools` does not swallow it).
-pub fn claude_prompt_tail(agent: &Agent, launch: &CardLaunch) -> String {
+pub fn claude_prompt_tail(agent: &Agent, launch: &Launch) -> String {
     format!("-- {}", shell_quote(&start_prompt(agent, launch)))
 }
 
@@ -377,7 +446,7 @@ pub fn wire_claude(
     roots: &ChannelRoots,
     agent: &Agent,
     role: Option<&Role>,
-    card: Option<&CardLaunch>,
+    card: Option<&Launch>,
 ) -> (Option<String>, AgentEntry) {
     wire_claude_with(cli_path(), roots, agent, role, card)
 }
@@ -388,7 +457,7 @@ fn wire_claude_with(
     roots: &ChannelRoots,
     agent: &Agent,
     role: Option<&Role>,
-    card: Option<&CardLaunch>,
+    card: Option<&Launch>,
 ) -> (Option<String>, AgentEntry) {
     let Some(cli) = cli else {
         return (None, AgentEntry::unavailable(no_cli_note()));
@@ -400,7 +469,8 @@ fn wire_claude_with(
             cli.clone(),
             agent.id,
             &secret,
-            card.map(|launch| launch.card_id),
+            card.and_then(Launch::card_id),
+            card.and_then(Launch::plan_id),
             forwarded_from_process,
         );
         channel.write_private(CLAUDE_CONFIG_FILE, &server.claude_config())?;
@@ -411,10 +481,7 @@ fn wire_claude_with(
             let path = channel.dir().join(CLAUDE_CONFIG_FILE);
             let mut arg = format!("--mcp-config {}", shell_quote(&path.display().to_string()));
             if let Some(launch) = card {
-                arg = format!(
-                    "{arg} {}",
-                    claude_card_options(role, launch.review.is_some())
-                );
+                arg = format!("{arg} {}", claude_card_options(role, launch.read_only()));
             }
             (
                 Some(arg),
@@ -434,7 +501,7 @@ pub async fn wire_opencode(
     agent: &Agent,
     directory: &Path,
     role: Option<&Role>,
-    card: Option<&CardLaunch>,
+    card: Option<&Launch>,
 ) -> AgentEntry {
     let Some(cli) = cli_path() else {
         return AgentEntry::unavailable(no_cli_note());
@@ -449,7 +516,8 @@ pub async fn wire_opencode(
         cli.clone(),
         agent.id,
         &secret,
-        card.map(|launch| launch.card_id),
+        card.and_then(Launch::card_id),
+        card.and_then(Launch::plan_id),
         forwarded_from_process,
     );
     match crate::agents::opencode::register_mcp(directory, &server.opencode_config()).await {
@@ -504,6 +572,7 @@ mod tests {
             PathBuf::from("/opt/ax/axiomata-cli"),
             7,
             "s3cret",
+            None,
             None,
             |name| (name == AXIOMATA_HOME_ENV).then(|| "/scratch/home".to_owned()),
         )
@@ -758,7 +827,7 @@ mod tests {
             &roots,
             &agent,
             Some(&role),
-            Some(&CardLaunch::work(12)),
+            Some(&CardLaunch::work(12).into()),
         );
         let arg = arg.unwrap();
 
@@ -807,7 +876,7 @@ mod tests {
         let cli = fake_cli(&dir);
         let (agent, roots) = agent_in(&dir, "reviewer-3", "reviewer");
         let role = reviewer();
-        let launch = CardLaunch::review(3, "worker-3", "main");
+        let launch: Launch = CardLaunch::review(3, "worker-3", "main").into();
         let (arg, _) = wire_claude_with(Some(cli), &roots, &agent, Some(&role), Some(&launch));
         let arg = arg.unwrap();
         assert!(arg.contains("--setting-sources user"), "{arg}");
@@ -821,6 +890,64 @@ mod tests {
         let prompt = start_prompt(&agent, &launch);
         assert!(
             prompt.contains("worker-3") && prompt.contains("git diff main...HEAD"),
+            "{prompt}"
+        );
+    }
+
+    fn planner() -> Role {
+        Role {
+            name: "planner".into(),
+            kind: "plan".into(),
+            instructions: "Cut the goal into cards.".into(),
+            ..reviewer()
+        }
+    }
+
+    #[test]
+    fn a_planner_is_read_only_gets_its_plan_in_the_server_environment_and_is_told_no_goal() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (agent, roots) = agent_in(&dir, "planner-4", "planner");
+        let role = planner();
+        let launch = Launch::Plan(PlanLaunch { plan_id: 4 });
+        assert!(launch.read_only());
+        assert_eq!((launch.card_id(), launch.plan_id()), (None, Some(4)));
+
+        let (arg, entry) = wire_claude_with(Some(cli), &roots, &agent, Some(&role), Some(&launch));
+        let arg = arg.unwrap();
+        assert!(
+            arg.contains("--setting-sources user") && arg.contains("--strict-mcp-config"),
+            "{arg}"
+        );
+        assert!(!arg.contains("acceptEdits"), "{arg}");
+        assert!(
+            arg.contains(",Edit'") || arg.contains(",Edit,"),
+            "no editing tool at all: {arg}"
+        );
+        assert!(
+            arg.contains("mcp__axiomata__get_plan") && arg.contains("mcp__axiomata__create_card"),
+            "{arg}"
+        );
+        assert!(entry.tools.contains(&"get_plan".to_owned()));
+
+        // The plan is in the server's environment, from where `get_plan` and `create_card` take it.
+        let config: Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                Channel::for_agent(&roots, agent.id)
+                    .dir()
+                    .join(CLAUDE_CONFIG_FILE),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let env = &config["mcpServers"][SERVER_NAME]["env"];
+        assert_eq!(env["AXIOMATA_PLAN_ID"], "4");
+        assert!(env.get("AXIOMATA_CARD_ID").is_none());
+
+        // What it is told names the plan and the tool; the goal is never in it.
+        let prompt = start_prompt(&agent, &launch);
+        assert!(
+            prompt.contains("plan #4") && prompt.contains("get_plan"),
             "{prompt}"
         );
     }
@@ -842,7 +969,7 @@ mod tests {
     fn the_start_prompt_names_the_card_and_never_carries_its_text() {
         let dir = temp_dir();
         let (agent, _) = agent_in(&dir, "it's-a-name", "allrounder");
-        let prompt = start_prompt(&agent, &CardLaunch::work(12));
+        let prompt = start_prompt(&agent, &CardLaunch::work(12).into());
         assert!(
             prompt.contains("#12") && prompt.contains("get_card") && prompt.contains("report_done"),
             "{prompt}"
@@ -852,7 +979,7 @@ mod tests {
             "a restart must not start over: {prompt}"
         );
         // After `--`, whole and quoted, even with a quote in the name.
-        let tail = claude_prompt_tail(&agent, &CardLaunch::work(12));
+        let tail = claude_prompt_tail(&agent, &CardLaunch::work(12).into());
         assert!(tail.starts_with("-- '") && tail.ends_with('\''), "{tail}");
         assert!(tail.contains(r"it'\''s-a-name"), "{tail}");
     }

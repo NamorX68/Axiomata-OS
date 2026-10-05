@@ -46,6 +46,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (16, axiomata_ide::SCHEMA_SQL_V7),
     // The card a session was started for, and whether it reviews it (a2a.md, CP-A6b).
     (17, axiomata_ide::SCHEMA_SQL_V8),
+    // The plan a planner session was started for (a2a.md, CP-A7).
+    (18, axiomata_ide::SCHEMA_SQL_V9),
+    // What a plan is for (a2a.md, CP-A7).
+    (19, axiomata_board::SCHEMA_SQL_V3),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

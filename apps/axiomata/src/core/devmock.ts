@@ -507,6 +507,7 @@ let boardPlans: BoardPlan[] = [
     id: 1,
     board_id: 1,
     name: "Studio-Ablauf",
+    goal: "",
     status: "approved",
     auto_start_max: null,
     max_cost_usd: null,
@@ -1919,12 +1920,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "list_board_plans":
       return boardPlans.filter((p) => p.board_id === args.boardId) as T;
     case "create_board_plan": {
-      const f = args.fields as { name: string; auto_start_max?: number | null; max_cost_usd?: number | null; max_tokens?: number | null };
+      const f = args.fields as { name: string; goal?: string; auto_start_max?: number | null; max_cost_usd?: number | null; max_tokens?: number | null };
       if (!f.name.trim()) throw new Error("invalid name: must not be empty");
       const created: BoardPlan = {
         id: Math.max(0, ...boardPlans.map((p) => p.id)) + 1,
         board_id: Number(args.boardId),
         name: f.name,
+        goal: f.goal ?? "",
         status: "draft",
         auto_start_max: f.auto_start_max ?? null,
         max_cost_usd: f.max_cost_usd ?? null,
@@ -1939,10 +1941,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "update_board_plan": {
       const target = boardPlans.find((p) => p.id === args.id);
       if (!target) return null as T;
-      const f = args.fields as { name: string; auto_start_max?: number | null; max_cost_usd?: number | null; max_tokens?: number | null };
+      const f = args.fields as { name: string; goal?: string; auto_start_max?: number | null; max_cost_usd?: number | null; max_tokens?: number | null };
       const updated: BoardPlan = {
         ...target,
         name: f.name,
+        // Left out keeps the plan's own, like the real command.
+        goal: f.goal ?? target.goal,
         auto_start_max: f.auto_start_max ?? null,
         max_cost_usd: f.max_cost_usd ?? null,
         max_tokens: f.max_tokens ?? null,

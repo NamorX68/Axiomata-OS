@@ -37,6 +37,7 @@ pub mod json_state;
 pub mod memory;
 pub mod notes;
 pub mod paths;
+pub mod plan_session;
 pub mod roster;
 pub mod routines;
 pub mod session;

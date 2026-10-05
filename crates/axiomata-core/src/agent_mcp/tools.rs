@@ -54,6 +54,7 @@ pub fn offered(ctx: &Context, name: &str) -> bool {
         "list_agents" | "send_message" | "read_inbox" | "get_card" | "list_cards" => true,
         "claim_task" | "report_done" => ctx.caps.work,
         "review_verdict" => ctx.caps.review,
+        "get_plan" => ctx.caps.plan,
         "create_card" => ctx.caps.create != Creates::Nothing,
         _ => false,
     }
@@ -122,6 +123,13 @@ pub fn definitions(ctx: &Context) -> Vec<Value> {
             &[],
         ),
         tool(
+            "get_plan",
+            "Read the plan you were started for: its name and goal, the roles you may assign cards to, and the cards \
+                proposed so far.",
+            json!({}),
+            &[],
+        ),
+        tool(
             "claim_task",
             "Take a ready card and start working on it. You hold one card at a time. Confirms a card the \
                 studio already \
@@ -182,6 +190,7 @@ pub fn call(ctx: &Context, name: &str, args: &Value) -> ToolResult {
         "read_inbox" => read_inbox(ctx, args),
         "get_card" => get_card(ctx, args),
         "list_cards" => list_cards(ctx, args),
+        "get_plan" => get_plan(ctx),
         "claim_task" => claim_task(ctx, args),
         "report_done" => report_done(ctx, args),
         "review_verdict" => review_verdict(ctx, args),
@@ -436,6 +445,47 @@ fn card_view(card: &board::Card) -> Value {
     })
 }
 
+/// The plan the session was started for, if it is still a draft: the studio wrote the plan into the session's row and
+/// into its server's environment, and a server that lives on after the owner said yes (or after the plan was closed or
+/// deleted) must not go on proposing cards into it — they would wait for an approval nobody expects.
+fn own_draft_plan(ctx: &Context, db: &Connection, plan_id: i64) -> Result<board::Plan, String> {
+    if ctx.agent.plan_id != Some(plan_id) {
+        return Err("this session was not started for that plan".to_owned());
+    }
+    let plan = flow::get_plan(db, plan_id)
+        .map_err(text)?
+        .ok_or_else(|| format!("no plan {plan_id}"))?;
+    if plan.status != board::PlanStatus::Draft {
+        return Err(format!(
+            "plan #{plan_id} is {}: its planning is over",
+            plan.status.as_str()
+        ));
+    }
+    Ok(plan)
+}
+
+/// The plan a planner was started for: name and goal, the roles to assign by, and the cards proposed so far. The plan
+/// is the session's own ([`Context::plan_env`]), never an argument.
+fn get_plan(ctx: &Context) -> ToolResult {
+    let plan_id = ctx.plan_env.ok_or("you were not started for a plan")?;
+    let db = ctx.db();
+    let plan = own_draft_plan(ctx, &db, plan_id)?;
+    let cards: Vec<Value> = store::list_cards(&db, plan.board_id, true)
+        .map_err(text)?
+        .iter()
+        .filter(|card| card.plan_id == Some(plan.id))
+        .map(card_view)
+        .collect();
+    Ok(json!({
+        "plan": {"id": plan.id, "name": plan.name, "goal": plan.goal, "status": plan.status.as_str()},
+        "roles": ctx.catalog,
+        "cards": cards,
+    "note": "The goal is what the owner wrote when they made the plan. Assign each card to a role of kind implement (or \
+        the kind its work \
+            needs); roles of kind review and plan do not take cards. Your cards wait for the owner's yes.",
+    }))
+}
+
 /// The board this session's work is on: the board of its card, else of its plan.
 fn session_board(ctx: &Context, db: &Connection) -> Result<Option<i64>, String> {
     if let Some(card) = card_context(ctx, db)?
@@ -658,9 +708,7 @@ fn create_card(ctx: &Context, args: &Value) -> ToolResult {
     let (board_id, plan_id) = match (own, ctx.plan_env) {
         (Some(card), _) => (card.board_id, card.plan_id),
         (None, Some(plan)) => {
-            let plan = flow::get_plan(&db, plan)
-                .map_err(text)?
-                .ok_or_else(|| format!("no plan {plan}"))?;
+            let plan = own_draft_plan(ctx, &db, plan)?;
             (plan.board_id, Some(plan.id))
         }
         (None, None) => return Err("you have no card or plan to attach a proposal to".to_owned()),

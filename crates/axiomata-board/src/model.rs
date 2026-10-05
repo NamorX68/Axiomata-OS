@@ -249,6 +249,8 @@ pub struct Plan {
     pub id: i64,
     pub board_id: i64,
     pub name: String,
+    /// What the plan is for, in the owner's words; the planner reads it (`get_plan`).
+    pub goal: String,
     pub status: PlanStatus,
     /// `None` = cards are started by hand; a number = start ready cards by themselves, up to that many at once.
     pub auto_start_max: Option<u32>,
@@ -264,6 +266,8 @@ pub struct Plan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanFields {
     pub name: String,
+    #[serde(default)]
+    pub goal: String,
     #[serde(default)]
     pub auto_start_max: Option<u32>,
     #[serde(default)]

@@ -32,7 +32,7 @@ const MAX_ENV_LEN: usize = 8000;
 
 const AGENT_COLS: &str = "id, project_id, name, harness, command, model, env, created_at, \
                           updated_at, worktree_path, branch, port, base_branch, \
-                          opencode_session, engine_id, agent_role, card_id, card_review, start_ref";
+                          opencode_session, engine_id, agent_role, card_id, card_review, start_ref, plan_id";
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -69,6 +69,7 @@ struct RawAgent {
     card_id: Option<i64>,
     card_review: bool,
     start_ref: Option<String>,
+    plan_id: Option<i64>,
 }
 
 fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
@@ -92,6 +93,7 @@ fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawAgent> {
         card_id: row.get(16)?,
         card_review: row.get::<_, i64>(17)? != 0,
         start_ref: row.get(18)?,
+        plan_id: row.get(19)?,
     })
 }
 
@@ -143,6 +145,7 @@ impl RawAgent {
             card_id: self.card_id,
             card_review: self.card_review,
             start_ref: self.start_ref,
+            plan_id: self.plan_id,
         })
     }
 }
@@ -469,6 +472,44 @@ pub fn set_card(
         params![id, card_id, i64::from(review), start_ref, now()],
     )?;
     Ok(changed == 1)
+}
+
+/// Records the plan the studio started this session for — a planner — and the commit its detached worktree is cut from:
+/// the project's state when it started. `None` for both clears them.
+///
+/// # Errors
+///
+/// [`IdeError::Invalid`] for a `start_ref` that is not a full commit id: it ends up as an argument of `git`.
+pub fn set_plan(
+    db: &Connection,
+    id: i64,
+    plan_id: Option<i64>,
+    start_ref: Option<&str>,
+) -> Result<bool> {
+    if let Some(reference) = start_ref
+        && !is_commit_id(reference)
+    {
+        return Err(IdeError::Invalid {
+            field: "start_ref",
+            reason: "must be a full commit id".into(),
+        });
+    }
+    let changed = db.execute(
+        "UPDATE ide_agents SET plan_id = ?2, start_ref = ?3, updated_at = ?4 WHERE id = ?1",
+        params![id, plan_id, start_ref, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// Every session the studio started for a plan (planners), across all projects.
+pub fn plan_sessions(db: &Connection) -> Result<Vec<Agent>> {
+    let mut stmt = db.prepare(&format!(
+        "SELECT {AGENT_COLS} FROM ide_agents WHERE plan_id IS NOT NULL ORDER BY id"
+    ))?;
+    let raws = stmt
+        .query_map([], row_to_raw)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    raws.into_iter().map(RawAgent::into_agent).collect()
 }
 
 /// Whether `text` is a full commit id: 40 lower-case hex digits (a SHA-256 repository would have 64).
@@ -1027,6 +1068,7 @@ mod tests {
 
         db.execute_batch(crate::SCHEMA_SQL_V6).unwrap();
         db.execute_batch(crate::SCHEMA_SQL_V8).unwrap();
+        db.execute_batch(crate::SCHEMA_SQL_V9).unwrap();
 
         let agent = get_agent(&db, 1).unwrap().unwrap();
         assert_eq!(agent.agent_role, "allrounder");
@@ -1057,6 +1099,39 @@ mod tests {
             dropped.engine_id, None,
             "a different model is a different engine"
         );
+    }
+
+    #[test]
+    fn the_plan_of_a_planner_is_kept_listed_and_its_reference_must_be_a_commit_id() {
+        let (db, project) = fixture();
+        let planner = create_agent(&db, new_agent(project, "planner-1"))
+            .unwrap()
+            .id;
+        let other = create_agent(&db, new_agent(project, "builder-9"))
+            .unwrap()
+            .id;
+        assert_eq!(get_agent(&db, planner).unwrap().unwrap().plan_id, None);
+        assert!(plan_sessions(&db).unwrap().is_empty());
+
+        let commit = "b".repeat(40);
+        assert!(set_plan(&db, planner, Some(4), Some(&commit)).unwrap());
+        let got = get_agent(&db, planner).unwrap().unwrap();
+        assert_eq!(
+            (got.plan_id, got.start_ref.as_deref()),
+            (Some(4), Some(commit.as_str()))
+        );
+        let listed: Vec<i64> = plan_sessions(&db)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(listed, vec![planner]);
+        assert_ne!(listed, vec![other]);
+
+        assert!(matches!(
+            set_plan(&db, planner, Some(4), Some("main; rm")),
+            Err(IdeError::Invalid { .. })
+        ));
     }
 
     #[test]

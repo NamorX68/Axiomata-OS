@@ -363,6 +363,7 @@ describe("agent flow helpers", () => {
       id: 1,
       board_id: 1,
       name: "P",
+      goal: "",
       status: "draft",
       auto_start_max: null,
       max_cost_usd: null,

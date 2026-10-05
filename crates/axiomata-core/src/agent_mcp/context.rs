@@ -48,6 +48,8 @@ pub struct Capabilities {
     pub work: bool,
     /// `review_verdict`: a session that judges the work of others.
     pub review: bool,
+    /// `get_plan`: a session that plans — the plan it was started for and the catalog of roles to cut it by.
+    pub plan: bool,
     pub create: Creates,
 }
 
@@ -56,6 +58,7 @@ impl Capabilities {
     pub const NONE: Capabilities = Capabilities {
         work: false,
         review: false,
+        plan: false,
         create: Creates::Nothing,
     };
 
@@ -65,6 +68,7 @@ impl Capabilities {
         Capabilities {
             work: kind != KIND_REVIEW && kind != KIND_PLAN,
             review: kind == KIND_REVIEW,
+            plan: kind == KIND_PLAN,
             create: if kind == KIND_PLAN {
                 Creates::Any
             } else if role.creates.is_empty() {
@@ -92,6 +96,9 @@ impl Capabilities {
         }
         if self.review {
             names.push("review_verdict");
+        }
+        if self.plan {
+            names.push("get_plan");
         }
         if self.create != Creates::Nothing {
             names.push("create_card");
@@ -131,7 +138,18 @@ pub struct Context {
     pub card_env: Option<i64>,
     /// The plan a planner session works on, if the studio said so.
     pub plan_env: Option<i64>,
+    /// The roles in force for the session's project, in brief: what a planner assigns cards from.
+    pub catalog: Vec<RoleEntry>,
     pub limits: Limits,
+}
+
+/// One role of the catalog as a planner sees it: who does what, not how.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RoleEntry {
+    pub name: String,
+    pub description: String,
+    pub kind: String,
+    pub tier: String,
 }
 
 /// The roles in force for the project of session `agent_id` (see [`crate::roster::roles_for_project`]).
@@ -193,6 +211,20 @@ impl Context {
             caps,
             card_env,
             plan_env,
+            catalog: roles
+                .iter()
+                .map(|role| RoleEntry {
+                    name: role.name.clone(),
+                    description: role.description.clone(),
+                    kind: role.kind.clone(),
+                    tier: match role.tier {
+                        axiomata_roster::Tier::Light => "light",
+                        axiomata_roster::Tier::Medium => "medium",
+                        axiomata_roster::Tier::Heavy => "heavy",
+                    }
+                    .to_owned(),
+                })
+                .collect(),
             limits: Limits::default(),
         })
     }

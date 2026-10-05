@@ -341,6 +341,35 @@ mod tests {
     use std::env;
     use std::path::PathBuf;
 
+    #[test]
+    fn changing_a_plan_without_naming_its_goal_keeps_the_goal() {
+        // Built from JSON: the shape the webview sends, and the one a `Plan` is read back from.
+        let current: board::Plan = serde_json::from_value(serde_json::json!({
+            "id": 1, "board_id": 1, "name": "P", "goal": "Add a dark mode", "status": "draft",
+            "auto_start_max": null, "max_cost_usd": null, "max_tokens": null,
+            "created_at": "2026-10-05T10:00:00Z", "updated_at": "2026-10-05T10:00:00Z", "approved_at": null
+        }))
+        .unwrap();
+        let keep: PlanUpdate = serde_json::from_value(serde_json::json!({"name": "P2"})).unwrap();
+        let kept = keep.into_fields(&current);
+        assert_eq!(
+            (kept.name.as_str(), kept.goal.as_str()),
+            ("P2", "Add a dark mode")
+        );
+
+        let change: PlanUpdate =
+            serde_json::from_value(serde_json::json!({"name": "P", "goal": "Another"})).unwrap();
+        assert_eq!(change.into_fields(&current).goal, "Another");
+
+        let clear: PlanUpdate =
+            serde_json::from_value(serde_json::json!({"name": "P", "goal": ""})).unwrap();
+        assert_eq!(
+            clear.into_fields(&current).goal,
+            "",
+            "an empty goal is a goal the owner cleared"
+        );
+    }
+
     /// Serializes tests in this module that set `AXIOMATA_HOME` — same
     /// reasoning as `axiomata_core::test_support::ENV_MUTEX`, which isn't
     /// exported from that crate, so this module keeps its own.
@@ -1636,49 +1665,126 @@ pub fn create_board_plan(
     board::flow::create_plan(&db, board_id, &fields).map_err(|err| err.to_string())
 }
 
+/// What the frontend sends to change a plan. `goal` left out keeps the plan's own: `PlanFields` is a full replace,
+/// and a
+/// caller that does not know about the goal must not wipe it.
+#[derive(serde::Deserialize)]
+pub struct PlanUpdate {
+    name: String,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    auto_start_max: Option<u32>,
+    #[serde(default)]
+    max_cost_usd: Option<f64>,
+    #[serde(default)]
+    max_tokens: Option<u64>,
+}
+
+impl PlanUpdate {
+    fn into_fields(self, current: &board::Plan) -> board::PlanFields {
+        board::PlanFields {
+            goal: self.goal.unwrap_or_else(|| current.goal.clone()),
+            name: self.name,
+            auto_start_max: self.auto_start_max,
+            max_cost_usd: self.max_cost_usd,
+            max_tokens: self.max_tokens,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn update_board_plan(
     state: State<'_, CoreState>,
     id: i64,
-    fields: board::PlanFields,
+    fields: PlanUpdate,
 ) -> Result<Option<board::Plan>, String> {
     let db = state.db_lock();
+    let Some(current) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())? else {
+        return Ok(None);
+    };
+    let fields = fields.into_fields(&current);
     board::flow::update_plan(&db, id, &fields).map_err(|err| err.to_string())
 }
 
-/// The owner's yes to a plan: its proposals move to Offen. `None` if there is no such draft plan.
+/// The owner's yes to a plan: its proposals move to Offen, and the planner that proposed them is done — its session
+/// goes.
+/// `None` if there is no such draft plan.
 #[tauri::command]
-pub fn approve_board_plan(state: State<'_, CoreState>, id: i64) -> Result<Option<usize>, String> {
+pub async fn approve_board_plan(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<Option<usize>, String> {
     let config = read_config(&state.config);
-    let mut db = state.db_lock();
-    let moved =
-        board::flow::approve_plan(&mut db, id, OWNER_ACTOR).map_err(|err| err.to_string())?;
-    if moved.is_some()
-        && let Some(plan) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())?
-    {
-        board_mirror::after_change(&db, &config, plan.board_id);
+    let moved = {
+        let mut db = state.db_lock();
+        let moved =
+            board::flow::approve_plan(&mut db, id, OWNER_ACTOR).map_err(|err| err.to_string())?;
+        if moved.is_some()
+            && let Some(plan) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())?
+        {
+            board_mirror::after_change(&db, &config, plan.board_id);
+        }
+        moved
+    };
+    if moved.is_some() {
+        axiomata_core::plan_session::forget_plan_sessions(&state, id).await;
     }
     Ok(moved)
 }
 
 #[tauri::command]
-pub fn close_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
-    let db = state.db_lock();
-    board::flow::close_plan(&db, id).map_err(|err| err.to_string())
+pub async fn close_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let closed = {
+        let db = state.db_lock();
+        board::flow::close_plan(&db, id).map_err(|err| err.to_string())?
+    };
+    if closed {
+        axiomata_core::plan_session::forget_plan_sessions(&state, id).await;
+    }
+    Ok(closed)
 }
 
 #[tauri::command]
-pub fn delete_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+pub async fn delete_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
     let config = read_config(&state.config);
-    let mut db = state.db_lock();
-    let board_id = board::flow::get_plan(&db, id)
-        .map_err(|err| err.to_string())?
-        .map(|plan| plan.board_id);
-    let gone = board::flow::delete_plan(&mut db, id).map_err(|err| err.to_string())?;
-    if let Some(board_id) = board_id.filter(|_| gone) {
-        board_mirror::after_change(&db, &config, board_id);
+    let gone = {
+        let mut db = state.db_lock();
+        let board_id = board::flow::get_plan(&db, id)
+            .map_err(|err| err.to_string())?
+            .map(|plan| plan.board_id);
+        let gone = board::flow::delete_plan(&mut db, id).map_err(|err| err.to_string())?;
+        if let Some(board_id) = board_id.filter(|_| gone) {
+            board_mirror::after_change(&db, &config, board_id);
+        }
+        gone
+    };
+    if gone {
+        axiomata_core::plan_session::forget_plan_sessions(&state, id).await;
     }
     Ok(gone)
+}
+
+/// The owner starts a planner for a draft plan (CP-A7): a session of the planner role on the engine they picked,
+/// reading a read-only checkout of the chosen project. Its harness starts when its pane opens
+/// (`prepare_ide_agent`), which sees that the session holds a plan and starts it unattended.
+#[tauri::command]
+pub async fn start_plan_session(
+    state: State<'_, CoreState>,
+    plan_id: i64,
+    project_id: i64,
+    engine_id: Option<String>,
+) -> Result<axiomata_core::plan_session::PlanSession, String> {
+    axiomata_core::plan_session::start_plan_session(
+        &state,
+        &axiomata_core::plan_session::PlanStartRequest {
+            plan_id,
+            project_id,
+            engine_id,
+        },
+    )
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// Every "needs first" edge on a board, as `[card, needs]` pairs.

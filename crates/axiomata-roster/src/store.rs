@@ -337,7 +337,39 @@ pub fn reviewer_role() -> Role {
     }
 }
 
-/// Seeds [`default_role`] and [`reviewer_role`] where they are missing — never overwrites, like the bundled skills.
+/// The role that plans (A5, A24): kind `plan`, without an engine — the owner picks the model at every start. It works
+/// in a
+/// read-only checkout of the project and makes cards; what it makes and for which plan comes through `get_plan`.
+pub fn planner_role() -> Role {
+    Role {
+        name: "planner".into(),
+        description: "Cuts a plan's goal into cards for the other roles".into(),
+        kind: "plan".into(),
+        tier: Tier::Heavy,
+        engine: None,
+        fallback_engines: Vec::new(),
+        permissions: Vec::new(),
+        limits: Limits::default(),
+        creates: Vec::new(),
+        instructions: "You plan; you do not build. Read the plan's goal and the catalog of roles with `get_plan`, then \
+                       read the project — your checkout is read-only — as far as you need to cut the work well. A card \
+is one concern a single session can finish and a reviewer can judge in one sitting: a title that \
+                       says what changes, a body that says why, and acceptance criteria that can be checked without \
+                       asking you (a command to run, a behaviour to see). Name for every card the role that should do \
+                       it (`agent`, from the catalog) and why in a sentence (`agent_reason`); set `tier` by how hard \
+                       the card is, not how long, and `kind` by the sort of work (implement, test, doc). Order the \
+                       work with `needs`: a card that cannot start before another one is merged names it, and nothing \
+                       else does. Every card is a session that costs money, so a few well-cut cards beat many small \
+                       ones. Your cards are proposals: the owner reads them and approves the plan, and you start and \
+                       change nothing else. When you are done, say in a few lines what the plan consists of and in \
+                       what order it should run."
+            .into(),
+        source: Source::User,
+    }
+}
+
+/// Seeds [`default_role`], [`reviewer_role`] and [`planner_role`] where they are missing — never overwrites, like the
+/// bundled skills.
 /// Returns whether it wrote anything.
 ///
 /// # Errors
@@ -345,7 +377,7 @@ pub fn reviewer_role() -> Role {
 /// As [`save_role`].
 pub fn seed_default_roles(dir: &Path) -> Result<bool> {
     let mut wrote = false;
-    for role in [default_role(), reviewer_role()] {
+    for role in [default_role(), reviewer_role(), planner_role()] {
         if fs::symlink_metadata(dir.join(&role.name)).is_ok() {
             continue;
         }
@@ -514,6 +546,20 @@ pub(crate) mod tests {
         fs::remove_dir_all(tmp.0.join("reviewer")).unwrap();
         assert!(seed_default_roles(&tmp.0).unwrap());
         assert!(!seed_default_roles(&tmp.0).unwrap());
+    }
+
+    #[test]
+    fn the_planner_is_seeded_as_a_valid_role_that_plans_and_that_picks_its_engine_at_every_start() {
+        let tmp = Tmp::new();
+        assert!(seed_default_roles(&tmp.0).unwrap());
+        let loaded = load_roles(&tmp.0, Source::User).unwrap();
+        let planner = loaded.roles.iter().find(|r| r.name == "planner").unwrap();
+        assert_eq!(planner.kind, "plan");
+        assert_eq!(planner.engine, None);
+        assert!(planner.instructions.contains("get_plan"));
+        // A planner of an install that has the other two gets seeded without touching them.
+        fs::remove_dir_all(tmp.0.join("planner")).unwrap();
+        assert!(seed_default_roles(&tmp.0).unwrap());
     }
 
     #[test]

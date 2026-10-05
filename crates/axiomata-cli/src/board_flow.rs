@@ -123,6 +123,9 @@ pub enum PlanAction {
     New {
         board: i64,
         name: String,
+        /// What the plan is for; the planner reads it.
+        #[arg(long, default_value = "")]
+        goal: String,
         /// Start ready cards by themselves, up to this many at once. Omitted = start by hand.
         #[arg(long)]
         auto: Option<u32>,
@@ -139,6 +142,8 @@ pub enum PlanAction {
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
+        goal: Option<String>,
+        #[arg(long)]
         auto: Option<u32>,
         /// Go back to starting cards by hand.
         #[arg(long, conflicts_with = "auto")]
@@ -147,6 +152,17 @@ pub enum PlanAction {
         max_cost: Option<f64>,
         #[arg(long)]
         max_tokens: Option<u64>,
+    },
+    /// Start a planner for a draft plan: a session that reads the project (read-only) and proposes cards. The owner's
+    /// step; a session needs an engine, since the planner role names none.
+    Start {
+        id: i64,
+        /// The project (repository) the planner reads.
+        #[arg(long)]
+        project: i64,
+        /// An engine of the catalog (`ide engines list`).
+        #[arg(long)]
+        engine: Option<String>,
     },
     /// Say yes to a plan: its proposals move to Offen and it becomes approved.
     Approve {
@@ -193,7 +209,10 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         } if auto.is_some() || max_cost.is_some() || max_tokens.is_some() => {
             owner_only("setting automatic starts or limits on a plan")?
         }
+        // The goal is what a planner is told to do: an agent that could write it would be writing the owner's brief.
+        PlanAction::New { goal, .. } if !goal.is_empty() => owner_only("writing a plan's goal")?,
         PlanAction::Edit { .. } => owner_only("changing a plan's settings")?,
+        PlanAction::Start { .. } => owner_only("starting a planner")?,
         PlanAction::Approve { .. } => owner_only("approving a plan")?,
         PlanAction::Close { .. } => owner_only("closing a plan")?,
         PlanAction::Delete { .. } => owner_only("deleting a plan")?,
@@ -213,6 +232,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         PlanAction::New {
             board,
             name,
+            goal,
             auto,
             max_cost,
             max_tokens,
@@ -221,6 +241,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
                 &db,
                 board,
                 &board::PlanFields {
+                    goal,
                     name,
                     auto_start_max: auto,
                     max_cost_usd: max_cost,
@@ -232,6 +253,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         PlanAction::Edit {
             id,
             name,
+            goal,
             auto,
             manual,
             max_cost,
@@ -244,6 +266,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
                 &db,
                 id,
                 &board::PlanFields {
+                    goal: goal.unwrap_or(plan.goal),
                     name: name.unwrap_or(plan.name),
                     auto_start_max: if manual {
                         None
@@ -256,6 +279,9 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             )?
             .with_context(|| format!("no plan with id {id}"))?;
             println!("updated plan {}", plan_line(&updated));
+        }
+        PlanAction::Start { .. } => {
+            bail!("starting a planner is an asynchronous step and is handled before this point")
         }
         PlanAction::Approve { id, actor } => {
             let actor = resolve_actor(actor)?;

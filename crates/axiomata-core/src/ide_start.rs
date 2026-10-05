@@ -68,7 +68,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
         let role = roster::roles_for_project(&conn, &config, ready.agent.project_id)
             .into_iter()
             .find(|role| role.name == ready.agent.agent_role);
-        let launch = card_launch(&conn, &ready.agent);
+        let launch = launch_of(&conn, &ready.agent);
         (ready, role, launch)
     };
     let roots = paths::ide_locations().channels;
@@ -123,7 +123,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                 ready.agent.model.as_deref(),
                 launch.as_ref().map(|launch| opencode::CardRights {
                     tools: tools.as_slice(),
-                    review: launch.review.is_some(),
+                    read_only: launch.read_only(),
                 }),
             )
             .await?;
@@ -223,6 +223,25 @@ fn typeable(
         "sh {}",
         agent_entry::shell_quote(&path.display().to_string())
     ))
+}
+
+/// What a session was started for, if the studio started it for something that still wants it: a plan that is still a
+/// draft (a planner), or a card ([`card_launch`]).
+pub(crate) fn launch_of(
+    db: &rusqlite::Connection,
+    agent: &crate::ide::model::Agent,
+) -> Option<agent_entry::Launch> {
+    if let Some(plan_id) = agent.plan_id {
+        return plan_launch(db, plan_id).map(agent_entry::Launch::Plan);
+    }
+    card_launch(db, agent).map(agent_entry::Launch::Card)
+}
+
+/// A planner is wanted while its plan is a draft: an approved or closed plan has had its say, and a restarted pane must
+/// not go on proposing cards into it.
+fn plan_launch(db: &rusqlite::Connection, plan_id: i64) -> Option<agent_entry::PlanLaunch> {
+    let plan = crate::board::flow::get_plan(db, plan_id).ok()??;
+    (plan.status == crate::board::PlanStatus::Draft).then_some(agent_entry::PlanLaunch { plan_id })
 }
 
 /// What a session was started for, if the studio started it for a card and that card still wants it: a worker's card

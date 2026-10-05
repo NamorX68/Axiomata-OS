@@ -175,6 +175,7 @@ impl World {
             &self.core.db_lock(),
             self.board,
             &board::PlanFields {
+                goal: String::new(),
                 name: "Plan".into(),
                 auto_start_max: None,
                 max_cost_usd: None,
@@ -183,6 +184,12 @@ impl World {
         )
         .unwrap()
         .id
+    }
+
+    /// A planner's server: the studio writes the plan into the session's row and into its environment alike.
+    fn planner_client(&self, session: i64, plan: i64) -> Client {
+        agent_store::set_plan(&self.core.db_lock(), session, Some(plan), None).unwrap();
+        self.client(session, None, Some(plan))
     }
 
     fn client(&self, session: i64, card_env: Option<i64>, plan_env: Option<i64>) -> Client {
@@ -305,7 +312,7 @@ fn the_tools_offered_follow_the_role() {
         with(&["claim_task", "create_card", "report_done"])
     );
     assert_eq!(names(reviewer), with(&["review_verdict"]));
-    assert_eq!(names(planner), with(&["create_card"]));
+    assert_eq!(names(planner), with(&["create_card", "get_plan"]));
     assert_eq!(
         names(ghost),
         with(&[]),
@@ -745,7 +752,7 @@ fn a_planner_proposes_cards_into_the_proposal_column_of_its_plan() {
     let mut w = world();
     let planner = w.session("plan", "planner");
     let plan = w.plan();
-    let c = w.client(planner, None, Some(plan));
+    let c = w.planner_client(planner, plan);
 
     let first = c
         .call(
@@ -849,7 +856,7 @@ fn a_proposal_with_a_bad_dependency_is_not_left_behind() {
     let planner = w.session("plan", "planner");
     let plan = w.plan();
     let stranger = w.card(w.open, "not in the plan");
-    let c = w.client(planner, None, Some(plan));
+    let c = w.planner_client(planner, plan);
     let before = store::list_cards(&w.core.db_lock(), w.board, false)
         .unwrap()
         .len();
@@ -1054,7 +1061,7 @@ fn a_session_proposes_a_limited_number_of_cards() {
     let mut w = world();
     let planner = w.session("plan", "planner");
     let plan = w.plan();
-    let c = w.client(planner, None, Some(plan));
+    let c = w.planner_client(planner, plan);
     for n in 0..flow::MAX_PROPOSALS_PER_ACTOR {
         c.call(
             "create_card",
@@ -1235,5 +1242,109 @@ fn the_tool_names_shown_to_the_owner_are_the_ones_the_server_offers() {
     assert!(
         seen.iter().any(|n| n != &seen[0]),
         "the roles differ in what they get"
+    );
+}
+
+#[test]
+fn a_planner_reads_its_plan_with_the_goal_the_catalog_and_the_cards_so_far() {
+    let mut w = world();
+    let planner = w.session("plan", "planner");
+    let plan = flow::create_plan(
+        &w.core.db_lock(),
+        w.board,
+        &board::PlanFields {
+            goal: "Add a dark mode".into(),
+            name: "Dark mode".into(),
+            auto_start_max: None,
+            max_cost_usd: None,
+            max_tokens: None,
+        },
+    )
+    .unwrap()
+    .id;
+    let c = w.planner_client(planner, plan);
+    assert!(c.tool_names().contains(&"get_plan".to_owned()));
+
+    let none_yet = c.call("get_plan", json!({})).unwrap();
+    assert_eq!(none_yet["plan"]["goal"], "Add a dark mode");
+    assert_eq!(none_yet["plan"]["status"], "draft");
+    assert_eq!(none_yet["cards"].as_array().unwrap().len(), 0);
+    let catalog: Vec<&str> = none_yet["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|role| role["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(catalog, ["builder", "tester", "reviewer", "planner"]);
+
+    c.call(
+        "create_card",
+        json!({"title": "Colour tokens", "kind": "implement", "agent": "builder"}),
+    )
+    .unwrap();
+    let after = c.call("get_plan", json!({})).unwrap();
+    assert_eq!(after["cards"].as_array().unwrap().len(), 1);
+    assert_eq!(after["cards"][0]["state"], "proposed");
+}
+
+#[test]
+fn only_a_planning_role_has_get_plan_and_it_never_takes_the_plan_from_an_argument() {
+    let mut w = world();
+    let plan = w.plan();
+    let other_plan = w.plan();
+    let worker = w.session("w", "builder");
+    assert!(
+        !w.client(worker, None, Some(plan))
+            .tool_names()
+            .contains(&"get_plan".to_owned())
+    );
+    let planner = w.session("plan", "planner");
+    // The tool belongs to the role; without a plan it has nothing to read and says so.
+    assert!(
+        w.client(planner, None, None)
+            .call("get_plan", json!({}))
+            .unwrap_err()
+            .contains("not started for a plan")
+    );
+    let c = w.planner_client(planner, plan);
+    let read = c.call("get_plan", json!({"plan_id": other_plan})).unwrap();
+    assert_eq!(read["plan"]["id"], plan);
+}
+
+#[test]
+fn a_planner_whose_plan_was_approved_proposes_nothing_more_and_a_plan_that_is_not_its_own_is_refused()
+ {
+    let mut w = world();
+    let planner = w.session("plan", "planner");
+    let plan = w.plan();
+    let other = w.plan();
+    let c = w.planner_client(planner, plan);
+    c.call("create_card", json!({"title": "First", "kind": "doc"}))
+        .unwrap();
+
+    // The owner said yes while the harness was still running: its server lives on, the plan is not a draft any more.
+    flow::approve_plan(&mut w.core.db_lock(), plan, "human:owner").unwrap();
+    let late = c
+        .call("create_card", json!({"title": "Late", "kind": "doc"}))
+        .unwrap_err();
+    assert!(late.contains("planning is over"), "{late}");
+    assert!(
+        c.call("get_plan", json!({}))
+            .unwrap_err()
+            .contains("planning is over")
+    );
+
+    // A server whose environment names a plan the session was not started for is believed no further.
+    let mismatched = w.client(planner, None, Some(other));
+    assert!(
+        mismatched
+            .call("get_plan", json!({}))
+            .unwrap_err()
+            .contains("not started for that plan")
+    );
+    assert!(
+        mismatched
+            .call("create_card", json!({"title": "x", "kind": "doc"}))
+            .is_err()
     );
 }

@@ -581,6 +581,8 @@ export interface BoardPlan {
   id: number;
   board_id: number;
   name: string;
+  /** What the plan is for, in the owner's words; the planner reads it. */
+  goal: string;
   status: PlanStatus;
   /** `null` = cards are started by hand; a number = up to that many start by themselves. */
   auto_start_max: number | null;

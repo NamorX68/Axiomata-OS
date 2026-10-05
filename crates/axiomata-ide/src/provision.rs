@@ -109,8 +109,11 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
     let (cwd, shared_folder) = if worktree::is_repo(&project.repo_root) {
         let path =
             worktree::worktree_path(&locations.worktrees, &project.name, &agent.name, agent.id);
-        // A reviewer looks at one state and writes to no branch: a detached checkout of the snapshot it was made for.
-        let snapshot = agent.start_ref.as_deref().filter(|_| agent.card_review);
+        // A reviewer looks at one state, a planner at the state the project was in; neither writes to a branch.
+        let snapshot = agent
+            .start_ref
+            .as_deref()
+            .filter(|_| agent.card_review || agent.plan_id.is_some());
         if let Some(commit) = snapshot {
             let created = worktree::add_detached(&project.repo_root, &path, commit)?;
             agent_store::set_worktree(db, agent.id, Some(&created.path), None)?;
@@ -526,6 +529,27 @@ mod tests {
         assert_ne!(first.agent.branch, second.agent.branch);
         assert_ne!(first.agent.port, second.agent.port);
         assert!(first.agent.port.is_some());
+    }
+
+    #[test]
+    fn a_planner_gets_a_detached_checkout_of_the_commit_it_was_started_at_even_after_the_project_moves_on()
+     {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let agent = add_agent(&db, project, "planner-1");
+        let at_start = worktree::head_commit(&repo).unwrap();
+        agent_store::set_plan(&db, agent, Some(7), Some(&at_start)).unwrap();
+
+        // The owner commits after the planner was made: what it reads is the state it was started at.
+        std::fs::write(repo.join("later.txt"), "later\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "later"]);
+
+        let ready = prepare(&db, &base, agent).unwrap();
+        assert_eq!(ready.agent.branch, None, "a planner writes to no branch");
+        assert_eq!(worktree::head_commit(&ready.cwd).unwrap(), at_start);
+        assert!(!ready.cwd.join("later.txt").exists());
     }
 
     #[test]

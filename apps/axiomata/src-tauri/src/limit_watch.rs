@@ -23,7 +23,8 @@ const TICK: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LimitReached {
-    card_id: i64,
+    card_id: Option<i64>,
+    plan_id: Option<i64>,
     agent_name: String,
     reason: String,
 }
@@ -39,6 +40,7 @@ pub fn start(app: &AppHandle) {
             for breach in meter.check(&core).await {
                 let payload = LimitReached {
                     card_id: breach.card_id,
+                    plan_id: breach.plan_id,
                     agent_name: breach.agent_name,
                     reason: breach.reason,
                 };

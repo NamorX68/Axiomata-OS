@@ -43,6 +43,11 @@ pub const SCHEMA_SQL_V1: &str = include_str!("schema.sql");
 /// chain, frozen once released like version 1.
 pub const SCHEMA_SQL_V2: &str = include_str!("flow.sql");
 
+/// The board's **version 3** schema (`goal` on a plan), `docs/plans/a2a.md` CP-A7. Its own constant and migration
+/// number
+/// (19), frozen once released.
+pub const SCHEMA_SQL_V3: &str = include_str!("plan_goal.sql");
+
 /// Everything that can go wrong in the board core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant: "no such row"
@@ -122,7 +127,7 @@ mod schema_is_frozen {
         assert_eq!(
             hash, EXPECTED,
             "flow.sql changed after it shipped as migration 15. It is an ALTER-and-ADD migration — add a \
-             SCHEMA_SQL_V3 and a new migration number instead. If it has never shipped, update EXPECTED here."
+             SCHEMA_SQL_V4 and a new migration number instead. If it has never shipped, update EXPECTED here."
         );
     }
 }

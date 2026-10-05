@@ -57,7 +57,7 @@ pub struct CardSession {
 /// # Errors
 ///
 /// A refusal naming what to do when the choice is empty or the engine cannot carry an unattended session.
-fn choose_engine<'a>(
+pub(crate) fn choose_engine<'a>(
     config: &'a Config,
     role: &Role,
     requested: Option<&str>,
@@ -84,7 +84,7 @@ fn choose_engine<'a>(
         return Err(refusal(
             "engine",
             format!(
-                "the role “{}” names no engine that exists; pick one when you start the card",
+                "the role “{}” names no engine that exists; pick one when you start it",
                 role.name
             ),
         ));
@@ -403,7 +403,7 @@ fn awaiting_in(db: &Connection) -> Result<Vec<AwaitingReview>> {
 }
 
 /// Locks the shared connection, recovering a poisoned guard like [`AxiomataCore::db_lock`].
-fn lock(db: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
+pub(crate) fn lock(db: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
     db.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
@@ -956,7 +956,7 @@ fn finish_removal(
 
 /// Ends sessions in the three steps above, taking the lock only for the first and the last. Returns the Opencode
 /// locations whose registration is to go. Problems are logged: a retired reviewer that lingers is no reason to refuse.
-fn remove_sessions(
+pub(crate) fn remove_sessions(
     db: &Mutex<Connection>,
     roots: &axiomata_ide::lifecycle::ChannelRoots,
     sessions: &[Agent],
@@ -1381,6 +1381,7 @@ mod tests {
             &w.db,
             w.board,
             &axiomata_board::PlanFields {
+                goal: String::new(),
                 name: "p".into(),
                 auto_start_max: None,
                 max_cost_usd: None,

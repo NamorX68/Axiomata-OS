@@ -279,6 +279,24 @@ pub fn delete_branch(repo_root: &Path, branch: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// The full id of the commit `HEAD` points at: what a planner's detached checkout is cut from.
+///
+/// # Errors
+///
+/// [`IdeError::Git`] when there is no commit yet (a repository nobody committed to) or `git` fails.
+pub fn head_commit(repo: &Path) -> Result<String> {
+    let out = git(repo, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])?;
+    let commit = out.trim().to_owned();
+    if crate::agent_store::is_commit_id(&commit) {
+        Ok(commit)
+    } else {
+        Err(IdeError::Git {
+            command: "git rev-parse HEAD".into(),
+            reason: format!("{commit:?} is not a commit id"),
+        })
+    }
+}
+
 /// The branch checked out in `repo`, or `None` for a detached HEAD.
 pub fn current_branch(repo: &Path) -> Option<String> {
     git(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"])
@@ -387,6 +405,18 @@ mod tests {
         git(&dir, &["add", "."]).unwrap();
         git(&dir, &["commit", "-m", "first"]).unwrap();
         dir
+    }
+
+    #[test]
+    fn head_is_a_full_commit_id_and_a_repository_without_a_commit_has_none() {
+        let repo = repo();
+        let head = head_commit(&repo).unwrap();
+        assert_eq!(head, git(&repo, &["rev-parse", "HEAD"]).unwrap().trim());
+        assert!(crate::agent_store::is_commit_id(&head));
+
+        let empty = temp_dir("empty-repo");
+        git(&empty, &["init", "--initial-branch=main"]).unwrap();
+        assert!(matches!(head_commit(&empty), Err(IdeError::Git { .. })));
     }
 
     #[test]

@@ -105,6 +105,12 @@ pub struct Agent {
     /// The commit a reviewer's worktree is cut from: the snapshot of the work under review.
     #[serde(default)]
     pub start_ref: Option<String>,
+    /// The plan the studio started this session for: a **planner**. Its worktree is a detached checkout of the
+    /// project's
+    /// state at the start ([`Agent::start_ref`]); it reads the code and writes to no branch. `None` for everything
+    /// else.
+    #[serde(default)]
+    pub plan_id: Option<i64>,
     /// **Computed on read, never stored**: the command line that actually
     /// runs — `command` if it has one, else the harness's default.
     ///

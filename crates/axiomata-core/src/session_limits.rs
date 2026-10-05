@@ -60,7 +60,10 @@ pub struct SessionUsage {
 /// A session that was stopped just now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Breach {
-    pub card_id: i64,
+    /// The card the session worked on, or reviewed; `None` for a planner.
+    pub card_id: Option<i64>,
+    /// The plan a planner works on; `None` for a card session.
+    pub plan_id: Option<i64>,
     pub project_id: i64,
     pub agent_id: i64,
     pub agent_name: String,
@@ -118,7 +121,10 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
     let roots = paths::ide_locations().channels;
     let mut roles: HashMap<i64, Vec<Role>> = HashMap::new();
     let mut watched = Vec::new();
-    for agent in agent_store::card_sessions(&db)? {
+    for agent in agent_store::card_sessions(&db)?
+        .into_iter()
+        .chain(agent_store::plan_sessions(&db)?)
+    {
         if only_card.is_some_and(|card| agent.card_id != Some(card)) {
             continue;
         }
@@ -144,7 +150,7 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
                 .or_else(|| engine.and_then(|engine| engine.model.clone())),
             role_name: agent.agent_role.clone(),
             channel: Channel::for_agent(&roots, agent.id),
-            wanted: crate::ide_start::card_launch(&db, &agent).is_some(),
+            wanted: crate::ide_start::launch_of(&db, &agent).is_some(),
             limits,
             agent,
         });
@@ -419,24 +425,28 @@ fn stop(
     entry: &Watched,
     reason: &str,
 ) -> Option<Breach> {
-    let card_id = entry.agent.card_id?;
     if let Err(err) = entry.channel.set_limit_reached(&marker_text(reason)) {
         tracing::warn!(%err, "could not stop a session at its limit");
         return None;
     }
-    let text = format!(
-        "{} was stopped: {reason}. The card stays with it. To go on, raise the limit of the role \"{}\"; otherwise \
-         release the card.",
-        entry.agent.name, entry.role_name
-    );
-    let actor = actor_from(Some(&entry.agent.id.to_string()), Some(&entry.agent.name))
-        .unwrap_or_else(|| "human:owner".to_owned());
-    if let Err(err) = flow::add_event(db, card_id, &actor, EventKind::LimitStop, &text) {
-        tracing::warn!(%err, "could not write the limit stop into the card's history");
+    if let Some(card_id) = entry.agent.card_id {
+        let text = format!(
+            "{} was stopped: {reason}. The card stays with it. To go on, raise the limit of the role \"{}\"; \
+             otherwise release the card.",
+            entry.agent.name, entry.role_name
+        );
+        let actor = actor_from(Some(&entry.agent.id.to_string()), Some(&entry.agent.name))
+            .unwrap_or_else(|| "human:owner".to_owned());
+        if let Err(err) = flow::add_event(db, card_id, &actor, EventKind::LimitStop, &text) {
+            tracing::warn!(%err, "could not write the limit stop into the card's history");
+        }
+        crate::board_mirror::after_card_change(db, config, card_id);
     }
-    crate::board_mirror::after_card_change(db, config, card_id);
+    // A planner has no card to write the stop on: the owner hears of it through the notice, and the plan's panel shows
+    // the session stopped.
     Some(Breach {
-        card_id,
+        card_id: entry.agent.card_id,
+        plan_id: entry.agent.plan_id,
         project_id: entry.agent.project_id,
         agent_id: entry.agent.id,
         agent_name: entry.agent.name.clone(),
@@ -746,7 +756,7 @@ mod tests {
             "60 steps of 60 used",
         )
         .unwrap();
-        assert_eq!(breach.card_id, world.card);
+        assert_eq!(breach.card_id, Some(world.card));
         assert_eq!(breach.agent_name, "builder-1");
         let marker = world.watched.channel.limit_reached().unwrap();
         assert!(
@@ -772,6 +782,35 @@ mod tests {
                 true
             ),
             Step::KeepStopped
+        );
+    }
+
+    #[test]
+    fn a_planner_has_no_card_to_write_the_stop_on_but_is_stopped_and_reported_with_its_plan() {
+        let mut world = world(Harness::ClaudeCode);
+        let id = world.watched.agent.id;
+        agent_store::set_card(&world.db, id, None, false, None).unwrap();
+        agent_store::set_plan(&world.db, id, Some(5), None).unwrap();
+        world.watched.agent = agent_store::get_agent(&world.db, id).unwrap().unwrap();
+        let watched = &world.watched;
+
+        let breach = stop(
+            &world.db,
+            &Config::default(),
+            watched,
+            "40 steps of 40 used",
+        )
+        .unwrap();
+        assert_eq!((breach.card_id, breach.plan_id), (None, Some(5)));
+        assert!(
+            watched.channel.limit_reached().is_some(),
+            "the session is stopped all the same"
+        );
+        assert!(
+            flow::list_events(&world.db, world.card, 50)
+                .unwrap()
+                .is_empty(),
+            "nothing is written on a card that is not its own"
         );
     }
 

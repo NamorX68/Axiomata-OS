@@ -95,6 +95,11 @@ pub const SCHEMA_SQL_V7: &str = include_str!("mailbox.sql");
 /// constant and migration number (17), frozen once released.
 pub const SCHEMA_SQL_V8: &str = include_str!("agent_card.sql");
 
+/// The IDE's **version 9** schema (`plan_id` on an agent), `docs/plans/a2a.md` CP-A7. Its own constant and migration
+/// number
+/// (18), frozen once released.
+pub const SCHEMA_SQL_V9: &str = include_str!("agent_plan.sql");
+
 /// Everything that can go wrong in the IDE core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant, matching
@@ -168,6 +173,7 @@ pub(crate) fn apply_all_schemas(db: &rusqlite::Connection) {
         SCHEMA_SQL_V6,
         SCHEMA_SQL_V7,
         SCHEMA_SQL_V8,
+        SCHEMA_SQL_V9,
     ] {
         db.execute_batch(schema).expect("test schema should apply");
     }

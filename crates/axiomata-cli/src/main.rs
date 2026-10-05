@@ -1506,7 +1506,7 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             owner_only("archiving a card")?;
             board_archive(core, id, !undo)
         }
-        BoardAction::Plan { action } => board_flow::plan_cmd(core, action),
+        BoardAction::Plan { action } => board_plan(core, action).await,
         BoardAction::Dep { action } => board_flow::dep_cmd(core, action),
         BoardAction::Report { id, actor } => {
             mcp_only("reporting a card done")?;
@@ -2663,6 +2663,55 @@ async fn board_review(
     if let Err(err) = agent_prepare(core, session.agent.id).await {
         axiomata_core::card_session::discard_session(core, session.agent.id).await?;
         return Err(err.context("the reviewer did not start"));
+    }
+    Ok(())
+}
+
+/// `board plan …`: the asynchronous steps around a plan — starting its planner and ending the planners of a plan that
+/// was
+/// approved, closed or deleted — and the rest as [`board_flow::plan_cmd`].
+async fn board_plan(core: &AxiomataCore, action: board_flow::PlanAction) -> Result<()> {
+    use board_flow::PlanAction;
+    if let PlanAction::Start {
+        id,
+        project,
+        engine,
+    } = action
+    {
+        board_flow::owner_only("starting a planner")?;
+        let session = axiomata_core::plan_session::start_plan_session(
+            core,
+            &axiomata_core::plan_session::PlanStartRequest {
+                plan_id: id,
+                project_id: project,
+                engine_id: engine,
+            },
+        )
+        .await?;
+        println!(
+            "plan #{id} has the new planner #{} {} (role {}, engine {})",
+            session.agent.id, session.agent.name, session.role, session.engine_id
+        );
+        if let Err(err) = agent_prepare(core, session.agent.id).await {
+            axiomata_core::plan_session::forget_plan_sessions(core, id).await;
+            return Err(err.context(format!(
+                "the planner did not start; plan #{id} has no planner again"
+            )));
+        }
+        return Ok(());
+    }
+    let ended = match &action {
+        PlanAction::Approve { id, .. } | PlanAction::Close { id } | PlanAction::Delete { id } => {
+            Some(*id)
+        }
+        _ => None,
+    };
+    board_flow::plan_cmd(core, action)?;
+    if let Some(id) = ended {
+        let count = axiomata_core::plan_session::forget_plan_sessions(core, id).await;
+        if count > 0 {
+            println!("{count} planner session(s) of plan #{id} ended");
+        }
     }
     Ok(())
 }
