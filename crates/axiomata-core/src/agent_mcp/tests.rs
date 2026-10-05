@@ -1348,3 +1348,38 @@ fn a_planner_whose_plan_was_approved_proposes_nothing_more_and_a_plan_that_is_no
             .is_err()
     );
 }
+
+#[test]
+fn a_card_goes_to_a_role_that_does_work_never_to_a_reviewer_a_planner_or_a_role_that_is_not_there()
+{
+    let mut w = world();
+    let planner = w.session("plan", "planner");
+    let plan = w.plan();
+    let c = w.planner_client(planner, plan);
+    for bad in ["reviewer", "planner", "nobody"] {
+        let refused = c
+            .call(
+                "create_card",
+                json!({"title": "x", "kind": "implement", "agent": bad}),
+            )
+            .unwrap_err();
+        assert!(
+            refused.contains("a role that does work: builder, tester")
+                && refused.contains("reviewing"),
+            "{bad}: {refused}"
+        );
+    }
+    // Nothing was proposed by the refusals, and a role that works is taken.
+    assert_eq!(
+        c.call("get_plan", json!({})).unwrap()["cards"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    c.call(
+        "create_card",
+        json!({"title": "Docs", "kind": "doc", "agent": "tester"}),
+    )
+    .unwrap();
+}

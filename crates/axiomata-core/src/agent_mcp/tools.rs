@@ -169,7 +169,7 @@ pub fn definitions(ctx: &Context) -> Vec<Value> {
                 "kind": {"type": "string", "description": "A lower-case word such as implement, test, doc, review."},
                 "acceptance": {"type": "string", "description": "Acceptance criteria, Markdown."},
                 "tier": {"type": "string", "enum": ["light", "medium", "heavy"]},
-                "agent": {"type": "string", "description": "The role this card is meant for."},
+                "agent": {"type": "string", "description": "The role this card is meant for: one that does work (not a reviewer or planner)."},
                 "agent_reason": {"type": "string"},
                 "needs": {"type": "array", "items": {"type": "integer"}, "description": "Cards of the same \
                     plan to finish first."},
@@ -445,6 +445,32 @@ fn card_view(card: &board::Card) -> Value {
     })
 }
 
+/// A card is given to a role that does work. A reviewer judges every card on its own once it is reported, and a planner
+/// makes cards: a card for either could not be started, and a card "for reviewing" would be reviewed again. A role the
+/// project does not have is refused too, with the ones it has — the proposing session is a model that can correct itself.
+fn check_assignable(ctx: &Context, role: &str) -> Result<(), String> {
+    // No catalog (the roles could not be read): the board's own checks at the start of the card say the rest.
+    if ctx.catalog.is_empty() {
+        return Ok(());
+    }
+    let working: Vec<&str> = ctx
+        .catalog
+        .iter()
+        .filter(|entry| {
+            entry.kind != super::context::KIND_REVIEW && entry.kind != super::context::KIND_PLAN
+        })
+        .map(|entry| entry.name.as_str())
+        .collect();
+    if working.contains(&role) {
+        return Ok(());
+    }
+    Err(format!(
+        "`agent` must be a role that does work: {}. Every card is reviewed automatically afterwards, so do not propose \
+         a card for reviewing",
+        working.join(", ")
+    ))
+}
+
 /// The plan the session was started for, if it is still a draft: the studio wrote the plan into the session's row and
 /// into its server's environment, and a server that lives on after the owner said yes (or after the plan was closed or
 /// deleted) must not go on proposing cards into it — they would wait for an approval nobody expects.
@@ -482,7 +508,8 @@ fn get_plan(ctx: &Context) -> ToolResult {
         "cards": cards,
     "note": "The goal is what the owner wrote when they made the plan. Assign each card to a role of kind implement (or \
         the kind its work \
-            needs); roles of kind review and plan do not take cards. Your cards wait for the owner's yes.",
+            needs); roles of kind review and plan do not take cards, and reviewing is automatic: never propose a card \
+            for reviewing. Your cards wait for the owner's yes.",
     }))
 }
 
@@ -687,6 +714,7 @@ fn create_card(ctx: &Context, args: &Value) -> ToolResult {
     let agent = opt_str(args, "agent")?;
     if let Some(role) = agent {
         axiomata_roster::check_slug("agent", role).map_err(text)?;
+        check_assignable(ctx, role)?;
     }
     let needs: Vec<i64> = match args.get("needs") {
         None | Some(Value::Null) => Vec::new(),
