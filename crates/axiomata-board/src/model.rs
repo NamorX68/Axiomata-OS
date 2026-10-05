@@ -127,6 +127,8 @@ pub enum TaskState {
     Done,
     /// Signed off by somebody other than the one who did the work.
     Verified,
+    /// Signed off and merged into its plan's integration line; the cards that build on it start from there.
+    Integrated,
     /// Taken over into the main line by the owner.
     TakenOver,
     Failed,
@@ -159,6 +161,8 @@ pub enum EventKind {
     Released,
     /// The owner took the work over into the main line.
     TakenOver,
+    /// The work was merged into its plan's integration line.
+    Integrated,
     /// Anything written down in words.
     Note,
 }
@@ -178,6 +182,7 @@ impl EventKind {
             EventKind::Canceled => "canceled",
             EventKind::Released => "released",
             EventKind::TakenOver => "taken_over",
+            EventKind::Integrated => "integrated",
             EventKind::Note => "note",
         }
     }
@@ -196,6 +201,7 @@ impl EventKind {
             "canceled" => EventKind::Canceled,
             "released" => EventKind::Released,
             "taken_over" => EventKind::TakenOver,
+            "integrated" => EventKind::Integrated,
             "note" => EventKind::Note,
             _ => return None,
         })
@@ -251,6 +257,13 @@ pub struct Plan {
     pub name: String,
     /// What the plan is for, in the owner's words; the planner reads it (`get_plan`).
     pub goal: String,
+    /// The project (repository) the plan's sessions run in; `None` until the owner says (the Flow does when it makes the
+    /// plan). A plan that runs by itself needs one.
+    pub project_id: Option<i64>,
+    /// The branch the plan's integration line was cut from, once there is one.
+    pub base_branch: Option<String>,
+    /// The commit the studio last made on the line; the line is refused when it is anywhere else.
+    pub line_tip: Option<String>,
     pub status: PlanStatus,
     /// `None` = cards are started by hand; a number = start ready cards by themselves, up to that many at once.
     pub auto_start_max: Option<u32>,
@@ -268,6 +281,8 @@ pub struct PlanFields {
     pub name: String,
     #[serde(default)]
     pub goal: String,
+    #[serde(default)]
+    pub project_id: Option<i64>,
     #[serde(default)]
     pub auto_start_max: Option<u32>,
     #[serde(default)]
@@ -336,6 +351,9 @@ pub struct Card {
     /// What the working agent asked and waits for.
     #[serde(default)]
     pub input_required: Option<String>,
+    /// The work is on its plan's integration line (CP-A8): reviewed and merged, but not yet in the main line.
+    #[serde(default)]
+    pub integrated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub taken_over_at: Option<DateTime<Utc>>,
     #[serde(default)]

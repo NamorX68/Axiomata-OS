@@ -47,12 +47,66 @@ pub(crate) fn git(repo: &Path, args: &[&str]) -> Result<String> {
 /// in that directory is the agent's — a tracked hook script (`.husky/`, a relative `core.hooksPath`) or a repository
 /// setting it could edit would otherwise run, as the user and inside the app, the moment the studio commits or asks for
 /// the status, with nobody clicking anything.
-const AGENT_GIT_OPTIONS: [&str; 4] = [
+const AGENT_GIT_OPTIONS: [&str; 10] = [
     "-c",
     "core.hooksPath=/dev/null",
     "-c",
     "core.fsmonitor=false",
+    // Signing runs a program (`gpg.program`) and may ask for a passphrase; an unattended commit does neither.
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "tag.gpgsign=false",
+    // The owner's global attributes file is not what the studio merges by.
+    "-c",
+    "core.attributesFile=/dev/null",
 ];
+
+/// Settings of the repository's own config that make git run a program of the config's choosing during a merge, a commit
+/// or a diff: a filter, a merge driver, a text conversion, an external diff, a signing or ssh program, an included file.
+/// The options above switch off hooks, the file-system monitor and signing; these cannot be switched off by an option
+/// when the config names them, so work that the studio does by itself in a worktree is refused while the repository has
+/// one (an agent shares the repository's config and could have written it). Git LFS and the like belong in the owner's
+/// *global* config, which this does not read.
+///
+/// # Errors
+///
+/// [`IdeError::Git`] if git cannot be run.
+pub fn unsafe_config(repo: &Path) -> Result<Vec<String>> {
+    const KEYS: &str = r"^(filter\..+|merge\..+\.(driver|recursivedriver)|diff\..+\.(textconv|command)|diff\.external|gpg\..*program|core\.sshcommand|core\.worktree|submodule\..+\.update|include\..+|includeif\..+)$";
+    // The repository's own file, and the one of this worktree once `extensions.worktreeConfig` is on — an agent can write
+    // that one, and git then reads it.
+    let (_, extension) = git_with(
+        repo,
+        &[
+            "config",
+            "--local",
+            "--bool",
+            "--get",
+            "extensions.worktreeconfig",
+        ],
+        &[0, 1],
+    )?;
+    let mut scopes = vec!["--local"];
+    // Git refuses `--worktree` while the extension is off and there are several worktrees.
+    if extension.trim() == "true" {
+        scopes.push("--worktree");
+    }
+    let mut found = Vec::new();
+    for scope in scopes {
+        let (_, out) = git_with(
+            repo,
+            &["config", scope, "--name-only", "--get-regexp", KEYS],
+            &[0, 1],
+        )?;
+        for key in out.lines().map(str::trim).filter(|key| !key.is_empty()) {
+            if !found.iter().any(|known| known == key) {
+                found.push(key.to_owned());
+            }
+        }
+    }
+    Ok(found)
+}
 
 /// [`git`] for a command the studio runs in an agent's worktree by itself; see [`AGENT_GIT_OPTIONS`].
 pub(crate) fn git_agent(worktree: &Path, args: &[&str]) -> Result<String> {
@@ -160,6 +214,42 @@ pub fn branch_name(agent_name: &str, agent_id: i64) -> String {
 /// `/var/…` on macOS and get `/private/var/…` back. Store that, so later
 /// comparisons are against what git will say next time too.
 pub fn add(repo_root: &Path, path: &Path, branch: &str) -> Result<Worktree> {
+    add_from(repo_root, path, branch, None)
+}
+
+/// Whether `name` can be handed to `git` as a branch to start from: letters, digits and `/ _ . -`, not starting with
+/// `-` or `.`, no `..`. A branch the studio made always is; anything else is not trusted to be an argument.
+pub fn is_safe_ref(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && !name.starts_with(['-', '.', '/'])
+        && !name.contains("..")
+        && !name.ends_with(['/', '.'])
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'.' | b'-'))
+}
+
+/// [`add`], cutting a **new** branch from `start` (a branch) instead of the current `HEAD`. An existing branch is checked
+/// out as it is, whatever `start` says: it holds work, and a start point is only for the day a branch is born.
+///
+/// # Errors
+///
+/// [`IdeError::Git`] for a `start` that is not a safe ref name ([`is_safe_ref`]), or as [`add`].
+pub fn add_from(
+    repo_root: &Path,
+    path: &Path,
+    branch: &str,
+    start: Option<&str>,
+) -> Result<Worktree> {
+    if let Some(start) = start
+        && !is_safe_ref(start)
+    {
+        return Err(IdeError::Git {
+            command: "git worktree add".into(),
+            reason: format!("{start:?} is not a branch name the studio starts from"),
+        });
+    }
     if path.exists() {
         if let Some(existing) = list(repo_root)?
             .into_iter()
@@ -185,6 +275,11 @@ pub fn add(repo_root: &Path, path: &Path, branch: &str) -> Result<Worktree> {
         reason: format!("path is not valid UTF-8: {}", path.display()),
     })?;
 
+    // A worktree whose directory was deleted by hand is still registered, and git then says the branch "is already used by
+    // worktree at …" for ever: forget the ones that are gone first. (It drops only registrations whose directory is
+    // missing; it touches no checkout.)
+    git_agent(repo_root, &["worktree", "prune"])?;
+
     // An existing branch is *checked out*, never reset.
     //
     // This used to pass `-B`, on the reasoning that a leftover branch must not
@@ -199,9 +294,14 @@ pub fn add(repo_root: &Path, path: &Path, branch: &str) -> Result<Worktree> {
     // If that branch is checked out in another worktree, git refuses — which
     // is right: two worktrees on one branch is how they diverge.
     if branch_exists(repo_root, branch) {
-        git(repo_root, &["worktree", "add", path_arg, branch])?;
+        git_agent(repo_root, &["worktree", "add", path_arg, branch])?;
+    } else if let Some(start) = start {
+        git_agent(
+            repo_root,
+            &["worktree", "add", "-b", branch, path_arg, start],
+        )?;
     } else {
-        git(repo_root, &["worktree", "add", "-b", branch, path_arg])?;
+        git_agent(repo_root, &["worktree", "add", "-b", branch, path_arg])?;
     }
 
     list(repo_root)?

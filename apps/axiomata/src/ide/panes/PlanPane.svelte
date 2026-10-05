@@ -22,7 +22,7 @@
   import { boardStore, refreshBoard, type BoardData } from "../../core/boardStore";
   import { emit } from "../../core/bus";
   import { messageOf } from "../../core/errors";
-  import { fieldsOf } from "../../core/kanban";
+  import { STATE_LABEL, fieldsOf } from "../../core/kanban";
   import { listRoles, type Role } from "../../core/roster";
   import { toast } from "../../core/toast";
   import {
@@ -37,6 +37,7 @@
     proposalsOf,
     proposalTitle,
     cardsOfPlan,
+    runsByItself,
   } from "../planning";
   import { refreshAgents, session } from "../projectSession";
   import { engineCatalog, engineLine, refreshEngines } from "../rosterStore";
@@ -154,7 +155,14 @@
     const made = await run(async () => {
       const created = await invoke<BoardPlan>("create_board_plan", {
         boardId,
-        fields: { name: newName.trim(), goal: newGoal.trim(), auto_start_max: null, max_cost_usd: null, max_tokens: null },
+        fields: {
+          name: newName.trim(),
+          goal: newGoal.trim(),
+          project_id: project.id,
+          auto_start_max: null,
+          max_cost_usd: null,
+          max_tokens: null,
+        },
       });
       await reload();
       planId = created.id;
@@ -255,15 +263,33 @@
 
   /* --------------------------------------------------------- the owner's --- */
 
+  /**
+   * Whether the plan, once approved, runs by itself (A4, CP-A8): its cards start as soon as what they build on is done —
+   * as many at once as the dependencies allow —, are reviewed and are integrated into the plan's line. On by default:
+   * a plan the owner has to feed card by card is what this panel exists to avoid.
+   */
+  let runByItself = $state(true);
+
   async function approvePlan(): Promise<void> {
     if (!plan) return;
     const current = plan;
+    await saveGoal();
     await run(async () => {
-      const moved = await invoke<number | null>("approve_board_plan", { id: current.id });
+      // One step in the backend: the setting and the yes go together, so a yes that fails leaves no setting behind, and an
+      // unchecked box makes the plan manual even if it was set to run by itself before.
+      const moved = await invoke<number | null>("approve_board_plan", {
+        id: current.id,
+        runByItself,
+        projectId: project.id,
+      });
       endPlanner(current.id);
       await Promise.all([reload(), refreshAgents()]);
       toast(
-        moved === null ? "Der Plan ist kein Entwurf mehr." : `Plan freigegeben: ${moved} Karte(n) warten in Offen.`,
+        moved === null
+          ? "Der Plan ist kein Entwurf mehr."
+          : runByItself
+            ? `Plan freigegeben: ${moved} Karte(n) werden abgearbeitet.`
+            : `Plan freigegeben: ${moved} Karte(n) warten in der ersten offenen Spalte.`,
         "info",
       );
     });
@@ -388,6 +414,7 @@
       <header>
         <h2>{plan.name}</h2>
         <span class="status {plan.status}">{planStatusLabel(plan.status)}</span>
+        {#if runsByItself(plan)}<span class="status auto">läuft automatisch</span>{/if}
         <span class="spacer"></span>
         {#if plan.status === "draft"}
           <button class="ax-btn" type="button" disabled={busy} onclick={() => void closePlan()}>Schließen</button>
@@ -501,7 +528,16 @@
           <button class="ax-btn primary" type="button" disabled={busy || !canApprove(plan, cards)} onclick={() => void approvePlan()}>
             Plan freigeben
           </button>
-          <span class="muted">Die angenommenen und die offenen Vorschläge wandern nach Offen, der Planer ist fertig.</span>
+          <label class="check">
+            <input type="checkbox" bind:checked={runByItself} />
+            Automatisch abarbeiten
+          </label>
+          <span class="muted">
+            {runByItself
+              ? "Karten starten von selbst, sobald ihre Vorgänger fertig sind, so viele gleichzeitig wie möglich; der Review läuft von selbst."
+              : "Die Vorschläge wandern in die erste offene Spalte; du startest jede Karte selbst."}
+            Der Planer ist danach fertig.
+          </span>
         </div>
       {/if}
 
@@ -509,7 +545,7 @@
         <h3>Karten des Plans</h3>
         <ul class="cards">
           {#each working as card (card.id)}
-            <li><span>#{card.id} {proposalTitle(card)}</span> <span class="muted">{card.agent ?? "—"} · {card.state}</span></li>
+            <li><span>#{card.id} {proposalTitle(card)}</span> <span class="muted">{card.agent ?? "—"} · {STATE_LABEL[card.state]}</span></li>
           {/each}
         </ul>
       {/if}
@@ -673,6 +709,12 @@
     display: flex;
     justify-content: space-between;
     gap: var(--ax-space-2);
+  }
+  .check {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--ax-space-1);
+    color: var(--ax-text);
   }
   .muted,
   .hint {

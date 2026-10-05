@@ -50,7 +50,7 @@ const COLUMN_COLS: &str = "id, board_id, name, position, maps_to_status, stage";
 const CARD_COLS: &str = "id, board_id, column_id, position, title, body, labels, assignee, \
      claimed_by, claimed_at, verified_by, verified_at, due_at, archived_at, created_at, updated_at, \
      plan_id, agent, agent_reason, tier, kind, acceptance, returned_count, input_required, \
-     taken_over_at, failed_at, canceled_at";
+     taken_over_at, failed_at, canceled_at, integrated_at";
 
 /// Most cards one board holds, archived ones included. A runaway agent could otherwise fill a board until every read —
 /// and the Markdown mirror rewritten after every change — becomes slow. Far above anything a person keeps.
@@ -533,6 +533,7 @@ struct RawCard {
     taken_over_at: Option<String>,
     failed_at: Option<String>,
     canceled_at: Option<String>,
+    integrated_at: Option<String>,
 }
 
 impl RawCard {
@@ -583,6 +584,7 @@ impl RawCard {
             taken_over_at: parse_opt_ts(self.taken_over_at, "cards", id, "taken_over_at")?,
             failed_at: parse_opt_ts(self.failed_at, "cards", id, "failed_at")?,
             canceled_at: parse_opt_ts(self.canceled_at, "cards", id, "canceled_at")?,
+            integrated_at: parse_opt_ts(self.integrated_at, "cards", id, "integrated_at")?,
             // Filled in by `decorate`, which knows the columns and the edges.
             depends_on: Vec::new(),
             waiting_on: Vec::new(),
@@ -620,6 +622,7 @@ fn read_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawCard> {
         taken_over_at: row.get(24)?,
         failed_at: row.get(25)?,
         canceled_at: row.get(26)?,
+        integrated_at: row.get(27)?,
     })
 }
 
@@ -1325,7 +1328,7 @@ pub fn explain_verify_refusal(
 mod tests {
     use super::*;
     use crate::model::CardFields;
-    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2};
+    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1353,6 +1356,9 @@ mod tests {
         let conn = open(path);
         conn.execute_batch(SCHEMA_SQL_V1).expect("schema");
         conn.execute_batch(SCHEMA_SQL_V2).expect("flow schema");
+        conn.execute_batch(SCHEMA_SQL_V3).expect("plan goal schema");
+        conn.execute_batch(SCHEMA_SQL_V4).expect("plan line schema");
+        conn.execute_batch(SCHEMA_SQL_V5).expect("plan line schema");
         conn
     }
 

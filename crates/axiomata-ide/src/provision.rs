@@ -125,7 +125,11 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
             // down, and guessing now would be worse than the documented fallback.
             let fresh_branch = !worktree::branch_exists(&project.repo_root, &branch);
             let base = worktree::current_branch(&project.repo_root);
-            let created = worktree::add(&project.repo_root, &path, &branch)?;
+            // A session made for a card of a plan that runs by itself has its base recorded before it starts: the
+            // plan's integration line, which holds what the cards it builds on already did. A new branch is cut from
+            // it; anything else is cut from where the project is.
+            let start = agent.base_branch.as_deref().filter(|_| fresh_branch);
+            let created = worktree::add_from(&project.repo_root, &path, &branch, start)?;
             agent_store::set_worktree(
                 db,
                 agent.id,

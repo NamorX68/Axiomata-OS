@@ -70,6 +70,9 @@ pub fn derive_state(card: &Card, column: &Column) -> TaskState {
     if card.taken_over_at.is_some() {
         return TaskState::TakenOver;
     }
+    if card.integrated_at.is_some() {
+        return TaskState::Integrated;
+    }
     if card.canceled_at.is_some() {
         return TaskState::Canceled;
     }
@@ -196,7 +199,7 @@ pub fn latest_event(db: &Connection, card_id: i64, kind: EventKind) -> Result<Op
 // ----------------------------------------------------------------- plans ---
 
 const PLAN_COLS: &str = "id, board_id, name, status, auto_start_max, max_cost_usd, max_tokens, \
-     created_at, updated_at, approved_at, goal";
+     created_at, updated_at, approved_at, goal, project_id, base_branch, line_tip";
 
 fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Result<Vec<Plan>> {
     let sql = format!("SELECT {PLAN_COLS} FROM plans {sql_tail}");
@@ -214,12 +217,29 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             row.get::<_, String>(8)?,
             row.get::<_, Option<String>>(9)?,
             row.get::<_, String>(10)?,
+            row.get::<_, Option<i64>>(11)?,
+            row.get::<_, Option<String>>(12)?,
+            row.get::<_, Option<String>>(13)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, board_id, name, status, auto, cost, tokens, created, updated, approved, goal) =
-            row?;
+        let (
+            id,
+            board_id,
+            name,
+            status,
+            auto,
+            cost,
+            tokens,
+            created,
+            updated,
+            approved,
+            goal,
+            project_id,
+            base_branch,
+            line_tip,
+        ) = row?;
         let status = PlanStatus::parse(&status).ok_or_else(|| BoardError::CorruptRow {
             table: "plans",
             id,
@@ -230,6 +250,9 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             board_id,
             name,
             goal,
+            project_id,
+            base_branch,
+            line_tip,
             status,
             auto_start_max: auto.and_then(|n| u32::try_from(n).ok()),
             max_cost_usd: cost,
@@ -303,8 +326,8 @@ pub fn create_plan(db: &Connection, board_id: i64, fields: &PlanFields) -> Resul
     }
     let stamp = now();
     db.execute(
-        "INSERT INTO plans (board_id, name, goal, auto_start_max, max_cost_usd, max_tokens, created_at, updated_at)
-         VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6, ?6)",
+        "INSERT INTO plans (board_id, name, goal, auto_start_max, max_cost_usd, max_tokens, created_at, updated_at, project_id)
+         VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6, ?6, ?8)",
         params![
             board_id,
             fields.name,
@@ -312,7 +335,8 @@ pub fn create_plan(db: &Connection, board_id: i64, fields: &PlanFields) -> Resul
             fields.max_cost_usd,
             fields.max_tokens.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
             stamp,
-            fields.goal
+            fields.goal,
+            fields.project_id
         ],
     )?;
     let id = db.last_insert_rowid();
@@ -326,9 +350,20 @@ pub fn create_plan(db: &Connection, board_id: i64, fields: &PlanFields) -> Resul
 /// Full replace of the plan's settings; the status only moves through [`approve_plan`] and [`close_plan`].
 pub fn update_plan(db: &Connection, id: i64, fields: &PlanFields) -> Result<Option<Plan>> {
     check_plan_fields(fields)?;
+    // The project is where the plan's sessions run and where its line is a branch: once the plan is approved, or its line
+    // exists, it does not move to another repository.
+    if let Some(current) = get_plan(db, id)?
+        && fields.project_id != current.project_id
+        && (current.status != PlanStatus::Draft || current.base_branch.is_some())
+    {
+        return invalid(
+            "project_id",
+            "an approved plan, or one with a line, stays in its project",
+        );
+    }
     let changed = db.execute(
-        "UPDATE plans SET name = ?2, auto_start_max = ?3, max_cost_usd = ?4, max_tokens = ?5, updated_at = ?6, goal = ?7
-         WHERE id = ?1",
+        "UPDATE plans SET name = ?2, auto_start_max = ?3, max_cost_usd = ?4, max_tokens = ?5, updated_at = ?6, goal = ?7,
+         project_id = ?8 WHERE id = ?1",
         params![
             id,
             fields.name,
@@ -336,7 +371,8 @@ pub fn update_plan(db: &Connection, id: i64, fields: &PlanFields) -> Result<Opti
             fields.max_cost_usd,
             fields.max_tokens.map(|n| i64::try_from(n).unwrap_or(i64::MAX)),
             now(),
-            fields.goal
+            fields.goal,
+            fields.project_id
         ],
     )?;
     if changed == 0 {
@@ -759,6 +795,47 @@ pub fn release_started(db: &mut Connection, card_id: i64, actor: &str) -> Result
     Ok(true)
 }
 
+/// Puts a **signed-off** card back to the top of the plain open column to be done again (CP-A8): its claim and its
+/// signature are dropped and `reason` goes into its history as a `released` line. For the studio's own use when a reviewed
+/// card does not fit the plan's line any more — what it did was reviewed against a base that has moved, and doing it again
+/// on the line as it is now is the honest repair.
+///
+/// `false` for a card that is not signed off, was integrated or taken over already, or is failed or called off.
+pub fn reset_for_rework(
+    db: &mut Connection,
+    card_id: i64,
+    actor: &str,
+    reason: &str,
+) -> Result<bool> {
+    let actor = normalize_actor(actor)?;
+    check_event_text(reason)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let Some(card) = get_card(&tx, card_id)? else {
+        return invalid("card_id", format!("no card {card_id}"));
+    };
+    if card.verified_by.is_none()
+        || card.integrated_at.is_some()
+        || card.taken_over_at.is_some()
+        || card.failed_at.is_some()
+        || card.canceled_at.is_some()
+    {
+        return Ok(false);
+    }
+    let columns = list_columns(&tx, card.board_id)?;
+    let Some(open) = column_with(&columns, CardStatus::Open, None) else {
+        return invalid("column_id", "the board has no plain open column");
+    };
+    tx.execute(
+        "UPDATE cards SET claimed_by = NULL, claimed_at = NULL, verified_by = NULL, verified_at = NULL,
+                input_required = NULL, updated_at = ?2 WHERE id = ?1",
+        params![card_id, now()],
+    )?;
+    move_card_in(&tx, card_id, open.id, 0, None)?;
+    insert_event(&tx, card_id, &actor, EventKind::Released, reason)?;
+    tx.commit()?;
+    Ok(true)
+}
+
 /// The cards `actor` holds that are still live work: not archived, not failed, canceled or taken over, not signed off,
 /// and not lying in a done column (the owner may drag an unsigned card there, A18 — it is finished work all the same).
 /// What "one card at a time" for an agent counts.
@@ -1046,6 +1123,70 @@ pub fn mark_taken_over(db: &Connection, card_id: i64, actor: &str) -> Result<boo
     Ok(changed == 1)
 }
 
+/// A reviewed card's work was merged into its plan's integration line (CP-A8). Only a signed-off card of a plan can be
+/// integrated, and only once; the card stays on the board (it is archived when the plan is taken over).
+///
+/// Returns `false` for a card that is not signed off, has no plan, or was integrated or taken over already.
+pub fn mark_integrated(db: &Connection, card_id: i64, actor: &str) -> Result<bool> {
+    let actor = normalize_actor(actor)?;
+    let tx = immediate(db)?;
+    let changed = tx.execute(
+        "UPDATE cards SET integrated_at = ?2, updated_at = ?2
+         WHERE id = ?1 AND verified_by IS NOT NULL AND plan_id IS NOT NULL
+           AND integrated_at IS NULL AND taken_over_at IS NULL",
+        params![card_id, now()],
+    )?;
+    if changed == 1 {
+        insert_event(&tx, card_id, &actor, EventKind::Integrated, "")?;
+    }
+    tx.commit()?;
+    Ok(changed == 1)
+}
+
+/// Records the branch a plan's integration line was cut from. Written once, when the line is made; `false` if the plan
+/// does not exist or has one already.
+pub fn set_plan_base_branch(db: &Connection, plan_id: i64, base_branch: &str) -> Result<bool> {
+    check_len("base_branch", base_branch, 255)?;
+    let changed = db.execute(
+        "UPDATE plans SET base_branch = ?2, updated_at = ?3 WHERE id = ?1 AND base_branch IS NULL",
+        params![plan_id, base_branch, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// Records the commit the studio last made on a plan's line. `false` if there is no such plan.
+pub fn set_line_tip(db: &Connection, plan_id: i64, tip: &str) -> Result<bool> {
+    check_len("line_tip", tip, 64)?;
+    let changed = db.execute(
+        "UPDATE plans SET line_tip = ?2, updated_at = ?3 WHERE id = ?1",
+        params![plan_id, tip, now()],
+    )?;
+    Ok(changed == 1)
+}
+
+/// How many lines of a card's history are of `kind`, were written by `actor` and start with `text_prefix`. Counted in the
+/// database, not out of the latest few lines: a history that grows must not make an old line forgotten. The actor is
+/// part of the question because a note is anyone's to write — a session could write the studio's own words.
+pub fn count_events(
+    db: &Connection,
+    card_id: i64,
+    actor: &str,
+    kind: EventKind,
+    text_prefix: &str,
+) -> Result<usize> {
+    let escaped = text_prefix
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let n: i64 = db.query_row(
+        "SELECT COUNT(*) FROM card_events \
+         WHERE card_id = ?1 AND actor = ?2 AND kind = ?3 AND text LIKE ?4 || '%' ESCAPE '\\'",
+        params![card_id, actor, kind.as_str(), escaped],
+        |row| row.get(0),
+    )?;
+    Ok(usize::try_from(n).unwrap_or(0))
+}
+
 // -------------------------------------------------------- standard columns ---
 
 /// Gives a board the two columns the agent flow needs (A13), without touching anything already there: a column named
@@ -1189,7 +1330,7 @@ mod tests {
         claim_card, create_board, create_card, create_column, delete_column, move_card,
         move_to_status, release_card, set_card_archived, update_card, update_column, verify_card,
     };
-    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3};
+    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5};
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1230,6 +1371,8 @@ mod tests {
         db.execute_batch(SCHEMA_SQL_V1).unwrap();
         db.execute_batch(SCHEMA_SQL_V2).unwrap();
         db.execute_batch(SCHEMA_SQL_V3).unwrap();
+        db.execute_batch(SCHEMA_SQL_V4).unwrap();
+        db.execute_batch(SCHEMA_SQL_V5).unwrap();
         let board = create_board(&mut db, "Flow").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
@@ -1282,6 +1425,7 @@ mod tests {
             &f.db,
             f.board,
             &PlanFields {
+                project_id: None,
                 goal: String::new(),
                 name: "Plan".into(),
                 auto_start_max: None,
@@ -1634,6 +1778,8 @@ mod tests {
         .unwrap();
         db.execute_batch(SCHEMA_SQL_V2).unwrap();
         db.execute_batch(SCHEMA_SQL_V3).unwrap();
+        db.execute_batch(SCHEMA_SQL_V4).unwrap();
+        db.execute_batch(SCHEMA_SQL_V5).unwrap();
 
         assert_eq!(ensure_flow_columns_all(&mut db).unwrap(), 1);
         let names: Vec<String> = list_columns(&db, 1)
@@ -1663,6 +1809,8 @@ mod tests {
         .unwrap();
         db.execute_batch(SCHEMA_SQL_V2).unwrap();
         db.execute_batch(SCHEMA_SQL_V3).unwrap();
+        db.execute_batch(SCHEMA_SQL_V4).unwrap();
+        db.execute_batch(SCHEMA_SQL_V5).unwrap();
         ensure_flow_columns(&mut db, 1).unwrap();
         let columns = list_columns(&db, 1).unwrap();
         assert_eq!(
@@ -1857,9 +2005,235 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_keeps_its_project_and_records_the_branch_its_line_was_cut_from_once() {
+        let f = fixture();
+        let fields = PlanFields {
+            project_id: Some(7),
+            goal: String::new(),
+            name: "p".into(),
+            auto_start_max: None,
+            max_cost_usd: None,
+            max_tokens: None,
+        };
+        let made = create_plan(&f.db, f.board, &fields).unwrap();
+        assert_eq!(
+            (made.project_id, made.base_branch.as_deref()),
+            (Some(7), None)
+        );
+
+        assert!(set_plan_base_branch(&f.db, made.id, "main").unwrap());
+        assert!(
+            !set_plan_base_branch(&f.db, made.id, "other").unwrap(),
+            "written once"
+        );
+        let read = get_plan(&f.db, made.id).unwrap().unwrap();
+        assert_eq!(read.base_branch.as_deref(), Some("main"));
+        assert!(!set_plan_base_branch(&f.db, 9999, "main").unwrap());
+        assert!(set_plan_base_branch(&f.db, made.id, &"x".repeat(300)).is_err());
+    }
+
+    #[test]
+    fn a_signed_off_card_of_a_plan_is_integrated_once_and_then_says_so() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        let worker = "agent:w-1";
+        let card = planned_card(&f, f.proposal, plan.id, "a");
+        approve_plan(&mut f.db, plan.id, "human:owner").unwrap();
+        start_card(&mut f.db, card.id, worker).unwrap();
+        report_done(&mut f.db, card.id, worker).unwrap();
+
+        // Not signed off yet: nothing to integrate.
+        assert!(!mark_integrated(&f.db, card.id, "human:owner").unwrap());
+        review_verdict(&mut f.db, card.id, "agent:r-2", Verdict::Approve, "").unwrap();
+        assert!(mark_integrated(&f.db, card.id, "human:owner").unwrap());
+        assert!(
+            !mark_integrated(&f.db, card.id, "human:owner").unwrap(),
+            "only once"
+        );
+        assert_eq!(state_of(&f, card.id), TaskState::Integrated);
+        let events = list_events(&f.db, card.id, 20).unwrap();
+        assert!(events.iter().any(|e| e.kind == EventKind::Integrated));
+
+        // A card of no plan has no line to be on.
+        let loose = card_in(&f, f.open, "loose");
+        assert!(!mark_integrated(&f.db, loose.id, "human:owner").unwrap());
+    }
+
+    #[test]
+    fn a_signed_off_card_that_does_not_fit_the_line_is_put_back_to_be_done_again() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        let card = planned_card(&f, f.proposal, plan.id, "a");
+        approve_plan(&mut f.db, plan.id, "human:owner").unwrap();
+        start_card(&mut f.db, card.id, "agent:w-1").unwrap();
+        // Not signed off: nothing to put back.
+        assert!(!reset_for_rework(&mut f.db, card.id, "agent:studio", "conflict: a.txt").unwrap());
+        report_done(&mut f.db, card.id, "agent:w-1").unwrap();
+        review_verdict(&mut f.db, card.id, "agent:r-2", Verdict::Approve, "").unwrap();
+        assert_eq!(state_of(&f, card.id), TaskState::Verified);
+
+        assert!(reset_for_rework(&mut f.db, card.id, "agent:studio", "conflict: a.txt").unwrap());
+        let back = get_card(&f.db, card.id).unwrap().unwrap();
+        assert_eq!(back.state, TaskState::Ready);
+        assert!(back.claimed_by.is_none() && back.verified_by.is_none());
+        let events = list_events(&f.db, card.id, 20).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.kind == EventKind::Released && e.text == "conflict: a.txt")
+        );
+
+        // An integrated card stays where it is.
+        start_card(&mut f.db, card.id, "agent:w-3").unwrap();
+        report_done(&mut f.db, card.id, "agent:w-3").unwrap();
+        review_verdict(&mut f.db, card.id, "agent:r-4", Verdict::Approve, "").unwrap();
+        assert!(mark_integrated(&f.db, card.id, "agent:studio").unwrap());
+        assert!(!reset_for_rework(&mut f.db, card.id, "agent:studio", "x").unwrap());
+    }
+
+    #[test]
+    fn the_line_tip_is_kept_and_events_are_counted_in_the_database_whatever_the_history_holds() {
+        let f = fixture();
+        let made = plan(&f);
+        assert_eq!(made.line_tip, None);
+        assert!(set_line_tip(&f.db, made.id, &"a".repeat(40)).unwrap());
+        assert_eq!(
+            get_plan(&f.db, made.id)
+                .unwrap()
+                .unwrap()
+                .line_tip
+                .as_deref(),
+            Some("a".repeat(40).as_str())
+        );
+        assert!(!set_line_tip(&f.db, 9999, "x").unwrap());
+
+        let card = card_in(&f, f.open, "c");
+        for _ in 0..3 {
+            add_event(
+                &f.db,
+                card.id,
+                "agent:studio",
+                EventKind::Released,
+                "conflict: a.txt",
+            )
+            .unwrap();
+        }
+        add_event(
+            &f.db,
+            card.id,
+            "agent:studio",
+            EventKind::Released,
+            "released",
+        )
+        .unwrap();
+        // Far more than any window of recent lines.
+        for _ in 0..300 {
+            add_event(
+                &f.db,
+                card.id,
+                "agent:studio",
+                EventKind::Note,
+                "gave up integrating: x",
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            count_events(
+                &f.db,
+                card.id,
+                "agent:studio",
+                EventKind::Released,
+                "conflict:"
+            )
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            count_events(
+                &f.db,
+                card.id,
+                "agent:studio",
+                EventKind::Note,
+                "gave up integrating"
+            )
+            .unwrap(),
+            300
+        );
+        // The studio's words in somebody else's mouth are not the studio's.
+        add_event(
+            &f.db,
+            card.id,
+            "agent:builder-1",
+            EventKind::Note,
+            "gave up integrating: forged",
+        )
+        .unwrap();
+        assert_eq!(
+            count_events(
+                &f.db,
+                card.id,
+                "agent:studio",
+                EventKind::Note,
+                "gave up integrating"
+            )
+            .unwrap(),
+            300
+        );
+        assert_eq!(
+            count_events(&f.db, card.id, "agent:studio", EventKind::Note, "50%_").unwrap(),
+            0,
+            "a prefix is not a pattern"
+        );
+    }
+
+    #[test]
+    fn the_project_of_a_plan_is_not_changed_once_it_is_approved_or_has_a_line() {
+        let mut f = fixture();
+        let fields = |project: Option<i64>| PlanFields {
+            project_id: project,
+            goal: String::new(),
+            name: "p".into(),
+            auto_start_max: None,
+            max_cost_usd: None,
+            max_tokens: None,
+        };
+        let made = create_plan(&f.db, f.board, &fields(None)).unwrap();
+        // A draft may still be pointed at its project, and elsewhere.
+        assert_eq!(
+            update_plan(&f.db, made.id, &fields(Some(1)))
+                .unwrap()
+                .unwrap()
+                .project_id,
+            Some(1)
+        );
+        assert_eq!(
+            update_plan(&f.db, made.id, &fields(Some(2)))
+                .unwrap()
+                .unwrap()
+                .project_id,
+            Some(2)
+        );
+        // Not once its line exists.
+        set_plan_base_branch(&f.db, made.id, "main").unwrap();
+        assert!(update_plan(&f.db, made.id, &fields(Some(3))).is_err());
+        assert!(
+            update_plan(&f.db, made.id, &fields(Some(2))).is_ok(),
+            "the same project is no change"
+        );
+
+        // Nor once it is approved.
+        let other = create_plan(&f.db, f.board, &fields(Some(1))).unwrap();
+        planned_card(&f, f.proposal, other.id, "a");
+        approve_plan(&mut f.db, other.id, "human:owner").unwrap();
+        assert!(update_plan(&f.db, other.id, &fields(Some(2))).is_err());
+        assert!(update_plan(&f.db, other.id, &fields(Some(1))).is_ok());
+    }
+
+    #[test]
     fn a_plans_goal_is_kept_replaced_and_bounded() {
         let f = fixture();
         let fields = |goal: &str| PlanFields {
+            project_id: None,
             goal: goal.into(),
             name: "p".into(),
             auto_start_max: None,
@@ -1883,6 +2257,7 @@ mod tests {
         let f = fixture();
         let bad = |change: fn(&mut PlanFields)| {
             let mut fields = PlanFields {
+                project_id: None,
                 goal: String::new(),
                 name: "p".into(),
                 auto_start_max: None,
@@ -1904,6 +2279,7 @@ mod tests {
                 &f.db,
                 9999,
                 &PlanFields {
+                    project_id: None,
                     goal: String::new(),
                     name: "x".into(),
                     auto_start_max: None,
@@ -1923,6 +2299,7 @@ mod tests {
             &f.db,
             other_board.id,
             &PlanFields {
+                project_id: None,
                 goal: String::new(),
                 name: "fremd".into(),
                 auto_start_max: None,
@@ -2552,6 +2929,7 @@ mod tests {
                 &f.db,
                 f.board,
                 &PlanFields {
+                    project_id: None,
                     goal: String::new(),
                     name: format!("p{n}"),
                     auto_start_max: None,
@@ -2569,6 +2947,7 @@ mod tests {
             &f.db,
             f.board,
             &PlanFields {
+                project_id: None,
                 goal: String::new(),
                 name: "zu viel".into(),
                 auto_start_max: None,

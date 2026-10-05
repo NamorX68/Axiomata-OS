@@ -111,7 +111,7 @@
   import type { OutlineInfo } from "../fileapp/outlineModel";
   import { pathAt } from "../editor/syntax/outline";
   import { listRoots, pickFile, type FileRenamed } from "../fileapp/backend";
-  import { listenBackend } from "../core/backend";
+  import { invokeBackend, listenBackend } from "../core/backend";
   import { treeRootsOf } from "../fileapp/projectModel";
   import { loadTreePrefs, saveTreePrefs, type SidebarView, type TreePrefs } from "../fileapp/treeModel";
   import type { FileRootInfo } from "../core/backend";
@@ -526,7 +526,7 @@
    * the agent's *id*; the profile itself stays in one place, so editing it
    * does not mean hunting down copies in a stored layout.
    */
-  function openAgent(agent: IdeAgent, preferred?: Mode) {
+  function openAgent(agent: IdeAgent, preferred?: Mode, background = false) {
     // Already open: bring that pane forward instead of starting a second copy of the agent — a second pane would start
     // a second harness on the same session. It may sit in a mode that is not shown; then that mode is shown.
     const here = agentTabsOf(layout, [agent.id])[0];
@@ -544,13 +544,20 @@
       if (found) layout = activateTab(layout, found.id);
       return;
     }
-    if (preferred && preferred !== shown.mode) layout = projectSession.switchMode(layout, preferred);
     const tab: PaneTab = {
       id: crypto.randomUUID(),
       kind: "agent",
       title: agent.name,
       config: { agentId: agent.id },
     };
+    // A session the studio started by itself is put where it belongs and the owner stays where they are.
+    if (background && preferred && preferred !== shown.mode) {
+      projectSession.addTabParked(preferred, tab);
+      // The layout of the mode shown is saved with every change, the hidden ones only through it: written now.
+      projectSession.save(layout);
+      return;
+    }
+    if (preferred && preferred !== shown.mode) layout = projectSession.switchMode(layout, preferred);
     const groups = allGroups(layout);
     const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
     layout = addTab(layout, tab, { nodeId: target, side: "right" });
@@ -582,9 +589,18 @@
    * pane docked. The agent list is read again first — the session did not exist when it was last read.
    */
   async function showRequestedAgents(): Promise<void> {
-    for (const { projectId, agentId } of takeAgentRequests()) {
+    for (const { projectId, agentId, background } of takeAgentRequests()) {
       try {
         if (get(projectSession.session).current?.id !== projectId) {
+          // A session the studio started by itself in another project does not take the owner out of theirs: it is said,
+          // and its pane opens when the project does (`openCardPanesOf`, run whenever a project opens).
+          if (background === true) {
+            toast(
+              `Eine Karte läuft in einem anderen Projekt (Sitzung #${agentId}); ihr Pane erscheint, sobald du es öffnest.`,
+              "info",
+            );
+            continue;
+          }
           const next = await projectSession.open(projectId);
           if (next) layout = next;
         }
@@ -592,13 +608,41 @@
         const agent = projectSession.agentById(agentId);
         if (!agent) continue;
         // A planner belongs to the plan it plans: its pane opens in the Flow, beside the planning panel.
-        openAgent(agent, modeForAgent(agent));
+        openAgent(agent, modeForAgent(agent), background === true);
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err);
         toast(`Die Sitzung konnte nicht geöffnet werden: ${why}`, "danger");
       }
     }
   }
+
+  /**
+   * The panes of the card sessions that run in `projectId` and have none yet. A card the studio started while another
+   * project was open has a session whose harness starts only when its pane does; the request that named it was answered
+   * with a note, so it is made good here, when its project opens.
+   */
+  async function openCardPanesOf(projectId: number): Promise<void> {
+    try {
+      const open = await invokeBackend<{ card_id: number; project_id: number; agent_id: number }[]>("open_card_sessions");
+      const mine = open.filter((session) => session.project_id === projectId);
+      if (mine.length === 0) return;
+      await projectSession.refreshAgents();
+      for (const session of mine) {
+        const agent = projectSession.agentById(session.agent_id);
+        if (agent) openAgent(agent, modeForAgent(agent), true);
+      }
+    } catch {
+      // Without the list the sessions can still be opened from the Agents list.
+    }
+  }
+
+  let lastCatchUp: number | null = null;
+  $effect(() => {
+    const id = current?.id ?? null;
+    if (id === null || id === lastCatchUp) return;
+    lastCatchUp = id;
+    untrack(() => void openCardPanesOf(id));
+  });
 
   /** The last arrangement must not be left in a timer when the app goes away. */
   function flushOnLeaving() {

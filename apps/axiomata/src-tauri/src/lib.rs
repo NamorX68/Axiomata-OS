@@ -11,6 +11,7 @@ mod limit_watch;
 mod lsp;
 #[cfg(target_os = "macos")]
 mod menu;
+mod plan_watch;
 mod tasks;
 mod terminal;
 
@@ -206,7 +207,7 @@ pub fn run() {
             commands::release_card,
             commands::start_review_session,
             commands::take_over_card,
-            commands::open_review_sessions,
+            commands::open_card_sessions,
             commands::list_card_events,
             commands::card_usage,
             commands::start_plan_session,
@@ -274,6 +275,7 @@ pub fn run() {
             app.manage(debug::DebugState::default());
             card_watch::start(app.handle());
             limit_watch::start(app.handle());
+            plan_watch::start(app.handle());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

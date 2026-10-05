@@ -31,7 +31,7 @@ import { toast } from "../core/toast";
 
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
-import { allTabs, closeTab, emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
+import { addTab, allGroups, allTabs, closeTab, emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
 import { agentTabsOf, withPlanPane } from "./planning";
 import { FILES_PANE, TASK_PANE, planTab } from "./paneKinds";
 import {
@@ -299,6 +299,21 @@ export function switchMode(layout: Layout, next: Mode): Layout {
   const swapped = swapMode({ mode, active: layout, parked }, next);
   state.update((s) => ({ ...s, mode: swapped.mode, parked: swapped.parked }));
   return next === "flow" ? withPlanPane(swapped.active) : swapped.active;
+}
+
+/**
+ * Adds a pane to the layout of a mode that is *not* on screen, beside what is in it — a session the studio started by
+ * itself gets its pane without the owner being taken out of the mode they are in. The pane is mounted at once (a
+ * hidden layout's panes are), so its harness starts.
+ */
+export function addTabParked(mode: Mode, tab: PaneTab): void {
+  state.update((s) => {
+    if (mode === s.mode) return s;
+    const layout = s.parked[mode] ?? emptyLayout();
+    const groups = allGroups(layout);
+    const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
+    return { ...s, parked: { ...s.parked, [mode]: addTab(layout, tab, { nodeId: target, side: "right" }) } };
+  });
 }
 
 /**

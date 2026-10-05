@@ -390,6 +390,7 @@ mod tests {
             &conn,
             board,
             &PlanFields {
+                project_id: None,
                 goal: "Add a dark mode".into(),
                 name: "Dark".into(),
                 auto_start_max: None,

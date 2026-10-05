@@ -126,6 +126,9 @@ pub enum PlanAction {
         /// What the plan is for; the planner reads it.
         #[arg(long, default_value = "")]
         goal: String,
+        /// The project (repository) the plan's sessions run in.
+        #[arg(long)]
+        project: Option<i64>,
         /// Start ready cards by themselves, up to this many at once. Omitted = start by hand.
         #[arg(long)]
         auto: Option<u32>,
@@ -143,6 +146,8 @@ pub enum PlanAction {
         name: Option<String>,
         #[arg(long)]
         goal: Option<String>,
+        #[arg(long)]
+        project: Option<i64>,
         #[arg(long)]
         auto: Option<u32>,
         /// Go back to starting cards by hand.
@@ -205,9 +210,11 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             auto,
             max_cost,
             max_tokens,
+            project,
             ..
-        } if auto.is_some() || max_cost.is_some() || max_tokens.is_some() => {
-            owner_only("setting automatic starts or limits on a plan")?
+        } if auto.is_some() || max_cost.is_some() || max_tokens.is_some() || project.is_some() => {
+            // The project is where the plan's sessions will run: choosing it is choosing where an agent may work.
+            owner_only("setting a plan's project, automatic starts or limits")?
         }
         // The goal is what a planner is told to do: an agent that could write it would be writing the owner's brief.
         PlanAction::New { goal, .. } if !goal.is_empty() => owner_only("writing a plan's goal")?,
@@ -233,6 +240,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             board,
             name,
             goal,
+            project,
             auto,
             max_cost,
             max_tokens,
@@ -241,6 +249,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
                 &db,
                 board,
                 &board::PlanFields {
+                    project_id: project,
                     goal,
                     name,
                     auto_start_max: auto,
@@ -254,6 +263,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             id,
             name,
             goal,
+            project,
             auto,
             manual,
             max_cost,
@@ -266,6 +276,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
                 &db,
                 id,
                 &board::PlanFields {
+                    project_id: project.or(plan.project_id),
                     goal: goal.unwrap_or(plan.goal),
                     name: name.unwrap_or(plan.name),
                     auto_start_max: if manual {
@@ -488,6 +499,7 @@ fn state_name(state: board::TaskState) -> &'static str {
         board::TaskState::InReview => "in-review",
         board::TaskState::Done => "done",
         board::TaskState::Verified => "verified",
+        board::TaskState::Integrated => "integrated",
         board::TaskState::TakenOver => "taken-over",
         board::TaskState::Failed => "failed",
         board::TaskState::Canceled => "canceled",

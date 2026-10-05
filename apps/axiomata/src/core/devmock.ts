@@ -1596,7 +1596,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (!ideAgents.some((a) => a.id === agent.id)) ideAgents.push(agent);
       return { agent, card_id: args.cardId, role: "reviewer", engine_id: (args.engineId as string | null) ?? "mock-engine" } as T;
     }
-    case "open_review_sessions":
+    case "open_card_sessions":
       return [] as T;
     case "take_over_card":
       return { outcome: "done", commit: "0123456789abcdef0123456789abcdef01234567", project_id: 1, cleanup: [] } as T;
@@ -1934,6 +1934,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         board_id: Number(args.boardId),
         name: f.name,
         goal: f.goal ?? "",
+        project_id: (f as { project_id?: number | null }).project_id ?? null,
+        base_branch: null,
         status: "draft",
         auto_start_max: f.auto_start_max ?? null,
         max_cost_usd: f.max_cost_usd ?? null,
@@ -1954,6 +1956,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         name: f.name,
         // Left out keeps the plan's own, like the real command.
         goal: f.goal ?? target.goal,
+        project_id: (f as { project_id?: number | null }).project_id ?? target.project_id ?? null,
         auto_start_max: f.auto_start_max ?? null,
         max_cost_usd: f.max_cost_usd ?? null,
         max_tokens: f.max_tokens ?? null,
@@ -1973,7 +1976,14 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         moved += 1;
         return { ...c, column_id: open.id };
       });
-      boardPlans = boardPlans.map((p) => (p.id === plan.id ? { ...p, status: "approved", approved_at: new Date().toISOString() } : p));
+      const runByItself = args.runByItself as boolean | null | undefined;
+      const settings =
+        runByItself === undefined || runByItself === null
+          ? {}
+          : { auto_start_max: runByItself ? 64 : null, project_id: runByItself ? (plan.project_id ?? (args.projectId as number)) : plan.project_id };
+      boardPlans = boardPlans.map((p) =>
+        p.id === plan.id ? { ...p, ...settings, status: "approved", approved_at: new Date().toISOString() } : p,
+      );
       // The planner has had its say: its session goes, like the backend's `forget_plan_sessions`.
       for (let i = ideAgents.length - 1; i >= 0; i--) if (ideAgents[i].plan_id === plan.id) ideAgents.splice(i, 1);
       return moved as T;

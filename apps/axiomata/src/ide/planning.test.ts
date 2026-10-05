@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { BoardCard, BoardPlan, IdeAgent } from "../core/backend";
+import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent } from "../core/backend";
 import type { Role } from "../core/roster";
 import { addTab, allTabs, closeTab, emptyLayout, singleGroupLayout, type PaneTab } from "./layout";
 import {
@@ -10,6 +10,7 @@ import {
   canStartPlanner,
   cardsOfPlan,
   defaultPlanId,
+  endedSessions,
   modeForAgent,
   needsLabel,
   newestFirst,
@@ -17,6 +18,8 @@ import {
   planStatusLabel,
   proposalsOf,
   proposalTitle,
+  runEventNote,
+  runsByItself,
   withPlanPane,
 } from "./planning";
 
@@ -155,5 +158,57 @@ describe("the Flow's planning panel", () => {
     const base = singleGroupLayout([{ id: "t", kind: "terminal", title: "T" }]);
     const split = addTab(base, agentTab("a", 1), { nodeId: (base.root as { id: string }).id, side: "right" });
     expect(allTabs(withPlanPane(split)).map((t) => t.kind).sort()).toEqual(["agent", "plan", "terminal"]);
+  });
+});
+
+describe("a plan that runs by itself", () => {
+  it("is an approved plan with a project that is set to start its cards", () => {
+    const base = { status: "approved", auto_start_max: 64, project_id: 3 } as const;
+    expect(runsByItself(base)).toBe(true);
+    expect(runsByItself({ ...base, status: "draft" })).toBe(false);
+    expect(runsByItself({ ...base, auto_start_max: null })).toBe(false);
+    expect(runsByItself({ ...base, project_id: null })).toBe(false);
+    expect(runsByItself({ status: "approved", auto_start_max: 1 })).toBe(false);
+  });
+});
+
+describe("what the owner is told about a plan's run", () => {
+  const done: PlanRunEvent = { event: "integrated", outcome: "done", card_id: 59, plan_id: 1, project_id: 1, commit: "abc", agent_ids: [23, 24] };
+  const conflict = (gaveUp: boolean): PlanRunEvent => ({
+    event: "integrated",
+    outcome: "conflict",
+    card_id: 60,
+    plan_id: 1,
+    files: ["a.txt", "b.txt"],
+    gave_up: gaveUp,
+    agent_ids: [25],
+  });
+
+  it("says a card started by itself and one that was integrated", () => {
+    expect(runEventNote({ event: "started", card_id: 59, plan_id: 1, project_id: 1, agent_id: 23 })?.text).toContain("#59");
+    expect(runEventNote(done)).toMatchObject({ tone: "info" });
+    expect(runEventNote(done)?.text).toContain("integriert");
+  });
+
+  it("tells a card that is done again from one that is left for the owner", () => {
+    const again = runEventNote(conflict(false))!;
+    expect(again.text).toContain("noch einmal gemacht");
+    expect(again.text).toContain("a.txt, b.txt");
+    const gaveUp = runEventNote(conflict(true))!;
+    expect(gaveUp.text).toContain("Entscheide du");
+    expect(gaveUp.tone).toBe("warning");
+  });
+
+  it("says nothing about a card whose worker was merely busy, and names what blocked a card", () => {
+    expect(runEventNote({ event: "integrated", outcome: "busy", card_id: 1 })).toBeNull();
+    expect(runEventNote({ event: "blocked", card_id: 5, reason: "no engine" })?.text).toContain("no engine");
+    expect(runEventNote({ event: "ready_to_take_over", plan_id: 1, name: "Docs" })?.text).toContain("Docs");
+  });
+
+  it("closes the panes of the sessions that are gone, after an integration or a put-back", () => {
+    expect(endedSessions(done)).toEqual([23, 24]);
+    expect(endedSessions(conflict(false))).toEqual([25]);
+    expect(endedSessions({ event: "integrated", outcome: "busy", card_id: 1 })).toEqual([]);
+    expect(endedSessions({ event: "blocked", card_id: 5, reason: "x" })).toEqual([]);
   });
 });

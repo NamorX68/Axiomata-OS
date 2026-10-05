@@ -346,6 +346,7 @@ mod tests {
         // Built from JSON: the shape the webview sends, and the one a `Plan` is read back from.
         let current: board::Plan = serde_json::from_value(serde_json::json!({
             "id": 1, "board_id": 1, "name": "P", "goal": "Add a dark mode", "status": "draft",
+            "project_id": 3, "base_branch": null,
             "auto_start_max": null, "max_cost_usd": null, "max_tokens": null,
             "created_at": "2026-10-05T10:00:00Z", "updated_at": "2026-10-05T10:00:00Z", "approved_at": null
         }))
@@ -1673,6 +1674,9 @@ pub struct PlanUpdate {
     name: String,
     #[serde(default)]
     goal: Option<String>,
+    /// Left out keeps the plan's own, like the goal.
+    #[serde(default)]
+    project_id: Option<i64>,
     #[serde(default)]
     auto_start_max: Option<u32>,
     #[serde(default)]
@@ -1685,6 +1689,7 @@ impl PlanUpdate {
     fn into_fields(self, current: &board::Plan) -> board::PlanFields {
         board::PlanFields {
             goal: self.goal.unwrap_or_else(|| current.goal.clone()),
+            project_id: self.project_id.or(current.project_id),
             name: self.name,
             auto_start_max: self.auto_start_max,
             max_cost_usd: self.max_cost_usd,
@@ -1707,17 +1712,46 @@ pub fn update_board_plan(
     board::flow::update_plan(&db, id, &fields).map_err(|err| err.to_string())
 }
 
-/// The owner's yes to a plan: its proposals move to Offen, and the planner that proposed them is done — its session
-/// goes.
-/// `None` if there is no such draft plan.
+/// The owner's yes to a plan: its proposals move to Offen, and the planner that proposed them is done — its session goes.
+///
+/// `run_by_itself` decides, in the same step, whether the plan then runs by itself (A4, CP-A8): `true` sets it to start
+/// its cards on its own (in `project_id`, or the one it has), `false` makes it manual — written either way, so a plan the
+/// owner unchecked does not run because of an earlier setting. Left out, the plan's settings are not touched. `None` if
+/// there is no such draft plan; nothing is changed then.
 #[tauri::command]
 pub async fn approve_board_plan(
     state: State<'_, CoreState>,
     id: i64,
+    run_by_itself: Option<bool>,
+    project_id: Option<i64>,
 ) -> Result<Option<usize>, String> {
     let config = read_config(&state.config);
     let moved = {
         let mut db = state.db_lock();
+        let Some(current) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())? else {
+            return Ok(None);
+        };
+        if current.status != board::PlanStatus::Draft {
+            return Ok(None);
+        }
+        if let Some(run) = run_by_itself {
+            let fields = board::PlanFields {
+                goal: current.goal.clone(),
+                project_id: if run {
+                    current.project_id.or(project_id)
+                } else {
+                    current.project_id
+                },
+                name: current.name.clone(),
+                auto_start_max: run.then_some(AUTO_UNBOUNDED),
+                max_cost_usd: current.max_cost_usd,
+                max_tokens: current.max_tokens,
+            };
+            if run && fields.project_id.is_none() {
+                return Err("a plan that runs by itself needs a project".to_owned());
+            }
+            board::flow::update_plan(&db, id, &fields).map_err(|err| err.to_string())?;
+        }
         let moved =
             board::flow::approve_plan(&mut db, id, OWNER_ACTOR).map_err(|err| err.to_string())?;
         if moved.is_some()
@@ -1732,6 +1766,9 @@ pub async fn approve_board_plan(
     }
     Ok(moved)
 }
+
+/// `auto_start_max` of a plan that runs by itself: no limit of its own — the dependencies and the machine's cap decide.
+const AUTO_UNBOUNDED: u32 = 64;
 
 #[tauri::command]
 pub async fn close_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
@@ -1895,13 +1932,13 @@ pub async fn start_review_session(
     Ok(session)
 }
 
-/// The reviewer sessions that are judging a card right now, for the Studio to open their panes on when the page starts —
-/// the watcher's event may have come before the page was listening (A2A CP-A6b).
+/// The card sessions that are at work right now (workers and reviewers), for the Studio to open their panes on when the
+/// page starts — a watcher's event may have come before the page was listening (A2A CP-A6b, CP-A8a).
 #[tauri::command]
-pub fn open_review_sessions(
+pub fn open_card_sessions(
     state: State<'_, CoreState>,
-) -> Result<Vec<axiomata_core::card_session::OpenReview>, String> {
-    axiomata_core::card_session::open_reviews(&state).map_err(|err| err.to_string())
+) -> Result<Vec<axiomata_core::card_session::OpenCardSession>, String> {
+    axiomata_core::card_session::open_card_sessions(&state).map_err(|err| err.to_string())
 }
 
 /// The owner takes a reviewed card over (A3, A22): the work lands in the project's main line as one commit, the card is

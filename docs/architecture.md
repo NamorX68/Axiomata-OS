@@ -1591,6 +1591,12 @@ and role are set in the same transaction. Roles offered are those in force for t
 catalog through `ide/rosterStore.ts`. `axiomata-cli ide agents new` still takes raw fields (the owner's own tool); agents without an engine (older rows) show their profile
 until the profile-derived assignment gives them one. Also: a session may send at most 60 messages in all (`Limits::max_per_sender_total`, owner's choice of "a number", 2026-10-04).
 
+### A2A CP-A8a built (2026-10-05)
+
+A plan that runs by itself (`docs/plans/a2a.md` "CP-A8 im Detail"): migrations 20/21 (`plans.project_id/base_branch/line_tip`, `cards.integrated_at`, `TaskState::Integrated`); `axiomata_ide::plan_line` (the plan's **integration line** `axiomata/line/<id>` with its own worktree (`.lines/<id>`): `ensure`,
+`integrate` — squash per card, no hooks), `worktree::add_from`/`provision` (a fresh agent branch is cut from the recorded base); `card_session::{line_for_start, integrate_card}` and `axiomata_core::plan_run::PlanRun` (ready cards start as far as dependencies allow, capped by `agents.max_parallel_sessions`; reviewed
+cards are integrated; a conflicting card is put back once, then left for the owner), run every 5 s by the app's `plan_watch` task with the `plan:run` event; the Flow's "Automatisch abarbeiten". The take-over of the line into the main line is 8b.
+
 ### A2A CP-A7 built (2026-10-05)
 
 The planner (`docs/plans/a2a.md` "CP-A7 im Detail"). **7a, backend:** `plans.goal` (migration 19) and `ide_agents.plan_id` (18); the role `planner` (seeded, kind `plan`, no fixed engine); MCP tool `get_plan`; `agent_entry::Launch` (a session is started for a card *or* a plan; reviewers and planners are `read_only`);

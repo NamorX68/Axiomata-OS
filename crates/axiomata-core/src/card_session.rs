@@ -132,6 +132,9 @@ fn free_name(taken: &[Agent], role: &str, card_id: i64) -> Result<String> {
 /// predecessors (see below). Nothing is left behind then: no session row, no claim.
 pub fn start_card_session(core: &AxiomataCore, request: &StartRequest) -> Result<CardSession> {
     let config = core.config_read().clone();
+    // A card of a plan that runs by itself starts from the plan's line; making it runs git, so it is done before the
+    // database is locked.
+    let line = line_for_start(core, request)?;
     let mut db = core.db_lock();
     let project = project_store::get_project(&db, request.project_id)?
         .ok_or_else(|| refusal("project", format!("no project {}", request.project_id)))?;
@@ -150,7 +153,87 @@ pub fn start_card_session(core: &AxiomataCore, request: &StartRequest) -> Result
         ));
     }
     let roles = roster::roles_for_project(&db, &config, request.project_id);
-    start_in(&mut db, &config, &roles, request)
+    start_in(
+        &mut db,
+        &config,
+        &roles,
+        request,
+        line.as_ref().map(|line| line.branch.as_str()),
+    )
+}
+
+/// Whether a plan runs by itself: approved, set to start its cards on its own, and with a project to run them in.
+pub fn runs_by_itself(plan: &crate::board::Plan) -> bool {
+    plan.status == crate::board::PlanStatus::Approved
+        && plan.auto_start_max.is_some()
+        && plan.project_id.is_some()
+}
+
+/// The integration line of the plan the card belongs to, made if it is not there yet — `None` for a card of no plan or of
+/// a plan that does not run by itself. The card must be started in the plan's own project: the line is a branch of
+/// that repository.
+fn line_for_start(
+    core: &AxiomataCore,
+    request: &StartRequest,
+) -> Result<Option<axiomata_ide::plan_line::Line>> {
+    let (plan, project) = {
+        let db = core.db_lock();
+        let Some(card) = board_store::get_card(&db, request.card_id)? else {
+            return Ok(None);
+        };
+        // A database error is an error: read as "no plan" the card would start off the main branch.
+        let Some(plan) = card
+            .plan_id
+            .map(|id| flow::get_plan(&db, id))
+            .transpose()?
+            .flatten()
+        else {
+            return Ok(None);
+        };
+        if !runs_by_itself(&plan) {
+            return Ok(None);
+        }
+        if plan.project_id != Some(request.project_id) {
+            return Err(refusal(
+                "project",
+                format!(
+                    "card #{} belongs to plan #{}, which runs in project {}; start it there",
+                    card.id,
+                    plan.id,
+                    plan.project_id.unwrap_or_default()
+                ),
+            ));
+        }
+        let project = project_store::get_project(&db, request.project_id)?
+            .ok_or_else(|| refusal("project", format!("no project {}", request.project_id)))?;
+        (plan, project)
+    };
+    make_line(core, &plan, &project).map(Some)
+}
+
+/// Makes plan `plan`'s line in `project`'s repository (or finds it) and records the branch it was cut from.
+pub(crate) fn make_line(
+    core: &AxiomataCore,
+    plan: &crate::board::Plan,
+    project: &axiomata_ide::Project,
+) -> Result<axiomata_ide::plan_line::Line> {
+    let path = axiomata_ide::plan_line::line_path(
+        &crate::paths::ide_locations().worktrees,
+        &project.name,
+        plan.id,
+    );
+    let line = axiomata_ide::plan_line::ensure(
+        &project.repo_root,
+        &path,
+        plan.id,
+        plan.base_branch.as_deref(),
+    )?;
+    if plan.base_branch.is_none() {
+        flow::set_plan_base_branch(&core.db_lock(), plan.id, &line.base_branch)?;
+    }
+    // A line the studio just made is at the base; one it did not make must be where it left it.
+    check_line_tip(&core.db, plan, &line)?;
+    Ok(line)
 }
 
 /// [`start_card_session`] without the checks of the machine (a repository, the CLI), so tests need neither.
@@ -159,19 +242,41 @@ fn start_in(
     config: &Config,
     roles: &[Role],
     request: &StartRequest,
+    line_base: Option<&str>,
 ) -> Result<CardSession> {
     let card = board_store::get_card(db, request.card_id)?
         .ok_or_else(|| refusal("card", format!("no card {}", request.card_id)))?;
     // The first step of a stacked card is the branch of the predecessor (A16); that comes with the next stage, and a
     // session cut from the main branch would work without what the card builds on.
-    if !card.depends_on.is_empty() {
-        return Err(refusal(
-            "card",
-            format!(
-                "card #{} builds on card #{}; starting on the branch of a predecessor is not there yet",
-                card.id, card.depends_on[0]
-            ),
-        ));
+    // On the line of its plan, a card that builds on others starts from what they did: it waits until their work is on
+    // the line. Anywhere else a card with predecessors cannot be started by the studio.
+    match line_base {
+        None if !card.depends_on.is_empty() => {
+            return Err(refusal(
+                "card",
+                format!(
+                    "card #{} builds on card #{}; only a plan that runs by itself starts cards on the work of their \
+                     predecessors",
+                    card.id, card.depends_on[0]
+                ),
+            ));
+        }
+        Some(_) => {
+            for dep in &card.depends_on {
+                let integrated =
+                    board_store::get_card(db, *dep)?.is_some_and(|dep| dep.integrated_at.is_some());
+                if !integrated {
+                    return Err(refusal(
+                        "card",
+                        format!(
+                            "card #{} builds on card #{dep}, whose work is not on the plan's line yet",
+                            card.id
+                        ),
+                    ));
+                }
+            }
+        }
+        None => {}
     }
     let role_name = card
         .agent
@@ -216,6 +321,10 @@ fn start_in(
     };
     // The studio started this session for this card; the pane's start reads it from here.
     agent_store::set_card(db, agent.id, Some(card.id), false, None)?;
+    // Its branch is cut from the plan's line when it is made, and what it is reviewed against is the line.
+    if let Some(base) = line_base {
+        agent_store::set_base_branch(db, agent.id, Some(base))?;
+    }
     // The claim is the whole check: ready, not held, not a proposal, not called off — the board says which.
     if let Err(err) = flow::start_card(db, card.id, &actor) {
         agent_store::delete_agent(db, agent.id)?;
@@ -418,31 +527,31 @@ struct ReviewPlan {
     engine_id: String,
 }
 
-/// A reviewer session whose card still wants it, for a pane to be opened on.
+/// A card session — worker or reviewer — whose card still wants it, for a pane to be opened on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct OpenReview {
+pub struct OpenCardSession {
     pub card_id: i64,
     pub project_id: i64,
     pub agent_id: i64,
 }
 
-/// The reviewer sessions that are judging a card right now. The watcher tells the frontend when it makes one, but the
-/// frontend may not be listening yet (the first tick can come before the page has loaded) or may have been reloaded:
-/// asked once when the page starts, this makes sure no reviewer is left without its pane — the pane is what starts it.
+/// The card sessions that are at work right now, workers and reviewers. The watchers tell the frontend when they make one,
+/// but the frontend may not be listening yet (the first tick can come before the page has loaded) or may have been
+/// reloaded: asked once when the page starts, this makes sure no session is left without its pane — the pane is what
+/// starts it, and a card that is "in work" with no harness holds its place for ever.
 ///
 /// # Errors
 ///
 /// A database error.
-pub fn open_reviews(core: &AxiomataCore) -> Result<Vec<OpenReview>> {
+pub fn open_card_sessions(core: &AxiomataCore) -> Result<Vec<OpenCardSession>> {
     let db = core.db_lock();
     let mut open = Vec::new();
     for project in project_store::list_projects(&db)? {
         for agent in agent_store::list_agents(&db, project.id)? {
-            if agent.card_review
-                && let Some(card_id) = agent.card_id
+            if let Some(card_id) = agent.card_id
                 && crate::ide_start::card_launch(&db, &agent).is_some()
             {
-                open.push(OpenReview {
+                open.push(OpenCardSession {
                     card_id,
                     project_id: project.id,
                     agent_id: agent.id,
@@ -778,6 +887,19 @@ fn plan_take_over(db: &Connection, card_id: i64, message: Option<&str>) -> Resul
             "the card was taken over already".to_string(),
         ));
     }
+    // A card of a plan that runs by itself goes into the plan's line, and the line is taken over as a whole.
+    if card
+        .plan_id
+        .and_then(|id| flow::get_plan(db, id).ok().flatten())
+        .is_some_and(|plan| runs_by_itself(&plan))
+    {
+        return Err(refusal(
+            "card",
+            "this card belongs to a plan that runs by itself: its work is integrated into the plan's line, and the plan \
+             is taken over as a whole"
+                .to_string(),
+        ));
+    }
     // Only a session the studio started for this card is a worker the studio takes work from: a card claimed by hand
     // through `claim_task` is the owner's to merge.
     let worker = card
@@ -813,31 +935,51 @@ fn plan_take_over(db: &Connection, card_id: i64, message: Option<&str>) -> Resul
     })
 }
 
-/// Phase two of a take-over, no lock: the gate, and the squash.
-fn squash(
-    plan: &TakeOverPlan,
-    roots: &axiomata_ide::lifecycle::ChannelRoots,
-) -> Result<axiomata_ide::git::TakeOver> {
+/// The gate before work leaves its worker: that what ships is **exactly what was reviewed**. The worktree must sit on the
+/// worker's branch, and the branch must be where the signing reviewer was shown it; a card the owner signed off without a
+/// reviewer has nothing to compare with, and its uncommitted work is committed as it stands.
+fn gate_reviewed(
+    card: &crate::board::Card,
+    sessions: &[Agent],
+    repo: &axiomata_ide::git::AgentRepo,
+    message: &str,
+) -> Result<String> {
+    // Before anything runs in the agent's tree: `status` and `add -A` there run what its config names.
+    repo.ensure_safe_config()?;
     // What ships is the branch, so the gate looks at the branch: that the worktree sits on it, and where it is. The
     // worktree's HEAD alone could be somewhere else while the branch was moved.
-    plan.repo.ensure_on_own_branch()?;
+    repo.ensure_on_own_branch()?;
     // The state that was reviewed: the snapshot of the session that signed the card off — not "the latest reviewer", a
     // reviewer of an earlier report must not be the one whose snapshot is compared. A card the owner signed off has no
     // reviewer session to compare with.
-    let reviewed = plan
-        .card
+    let reviewed = card
         .verified_by
         .as_deref()
         .and_then(session_id_of)
         .and_then(|id| {
-            plan.sessions
+            sessions
                 .iter()
                 .find(|agent| agent.id == id && agent.card_review)
         })
         .and_then(|reviewer| reviewer.start_ref.clone());
+    // A signature of another session whose record is gone has nothing to be compared with, and "nothing to compare" must
+    // not read as "the owner signed it off": only a person's own signature goes without a reviewer's snapshot.
+    if reviewed.is_none()
+        && card
+            .verified_by
+            .as_deref()
+            .is_some_and(|signer| signer.starts_with("agent:"))
+    {
+        return Err(refusal(
+            "card",
+            "the reviewer that signed the card off is gone, so there is no way to tell that the work is what it saw; send \
+             the card back for a new review"
+                .to_string(),
+        ));
+    }
     match reviewed {
         Some(reviewed) => {
-            if plan.repo.is_dirty()? || plan.repo.branch_tip()? != reviewed {
+            if repo.is_dirty()? || repo.branch_tip()? != reviewed {
                 return Err(refusal(
                     "card",
                     "the work changed after it was reviewed; send the card back for a new review instead of taking it \
@@ -845,13 +987,26 @@ fn squash(
                         .to_string(),
                 ));
             }
+            // The commit that was checked, by its id: the worker's harness may still be alive, and a branch name read
+            // again after the gate could point at a commit nobody reviewed.
+            Ok(reviewed)
         }
         None => {
-            if plan.repo.is_dirty()? {
-                plan.repo.commit_all(&plan.message)?;
+            if repo.is_dirty()? {
+                // `commit_all` answers with the commit it made: no second read of the branch.
+                return Ok(repo.commit_all(message)?);
             }
+            Ok(repo.branch_tip()?)
         }
     }
+}
+
+/// Phase two of a take-over, no lock: the gate, and the squash.
+fn squash(
+    plan: &TakeOverPlan,
+    roots: &axiomata_ide::lifecycle::ChannelRoots,
+) -> Result<axiomata_ide::git::TakeOver> {
+    gate_reviewed(&plan.card, &plan.sessions, &plan.repo, &plan.message)?;
     Ok(plan.target.run(
         roots,
         axiomata_ide::git::TakeOverMode::Squash,
@@ -972,6 +1127,358 @@ pub(crate) fn remove_sessions(
         tracing::warn!(%note, "retiring a session");
     }
     locations
+}
+
+// ------------------------------------------------------------------ the line ---
+
+/// The studio's own actor, for what it does by itself: integrating a reviewed card, putting one back.
+pub const STUDIO: &str = "agent:studio";
+
+/// How often a card may be put back because it does not fit the line before it is given up on.
+const MAX_LINE_CONFLICTS: usize = 2;
+
+/// What integrating a card into the line of its plan came to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum CardIntegration {
+    /// The card's work is on the line; its sessions are cleaned up. `agent_ids` are the sessions that are gone, for the
+    /// Studio to close their panes.
+    Done {
+        card_id: i64,
+        plan_id: i64,
+        project_id: i64,
+        /// `None` when the card changed nothing compared to the line.
+        commit: Option<String>,
+        agent_ids: Vec<i64>,
+    },
+    /// The work does not fit what the line has by now. The card was put back to be done again on the line as it is, or —
+    /// after [`MAX_LINE_CONFLICTS`] such tries — left as it is for the owner.
+    Conflict {
+        card_id: i64,
+        plan_id: i64,
+        files: Vec<String>,
+        /// The card was not put back: it has failed to fit the line twice and is left for the owner.
+        gave_up: bool,
+        agent_ids: Vec<i64>,
+    },
+    /// The worker is in the middle of a turn: nothing was done, the next look tries again.
+    Busy { card_id: i64 },
+    /// The studio gave up on this card earlier (see `gave_up`): it is left for the owner and only an owner's own request
+    /// ([`integrate_card_with`]) tries it again.
+    LeftForOwner { card_id: i64 },
+}
+
+/// What integrating needs, read under the lock.
+struct IntegrationPlan {
+    card: crate::board::Card,
+    plan: crate::board::Plan,
+    project: axiomata_ide::Project,
+    worker: Agent,
+    sessions: Vec<Agent>,
+    repo: axiomata_ide::git::AgentRepo,
+    message: String,
+    conflicts_so_far: usize,
+    /// The studio gave up on this card (a note says so).
+    gave_up: bool,
+}
+
+/// Merges a card that the reviewer signed off into the line of its plan: one commit, the card marked integrated, its
+/// sessions cleaned up. The same gate as a take-over (what was reviewed is what goes in), and the database is locked only
+/// to read and to write, never while git runs.
+///
+/// # Errors
+///
+/// A refusal for a card that is not signed off, was integrated or taken over already, belongs to no plan that runs by
+/// itself, or whose worker session is gone; the git layer's own refusals.
+pub async fn integrate_card(core: &AxiomataCore, card_id: i64) -> Result<CardIntegration> {
+    integrate_card_with(core, card_id, false).await
+}
+
+/// [`integrate_card`], where `owner` says the owner asked for it by hand: a card the studio gave up on is tried again then,
+/// and only then — the studio's own looks leave it alone ([`CardIntegration::LeftForOwner`]).
+///
+/// # Errors
+///
+/// As [`integrate_card`].
+pub async fn integrate_card_with(
+    core: &AxiomataCore,
+    card_id: i64,
+    owner: bool,
+) -> Result<CardIntegration> {
+    let db = Arc::clone(&core.db);
+    let roots = crate::paths::ide_locations().channels;
+    let locations = crate::paths::ide_locations();
+    let worktrees = locations.worktrees.clone();
+    let done = tokio::task::spawn_blocking(move || {
+        integrate_blocking(&db, &roots, &worktrees, card_id, owner)
+    })
+    .await
+    .map_err(|err| refusal("integration", format!("the integration task failed: {err}")))??;
+    for location in &done.1 {
+        crate::agents::opencode::forget_mcp(location).await;
+    }
+    Ok(done.0)
+}
+
+fn integrate_blocking(
+    db: &Mutex<Connection>,
+    roots: &axiomata_ide::lifecycle::ChannelRoots,
+    worktrees: &std::path::Path,
+    card_id: i64,
+    owner: bool,
+) -> Result<(CardIntegration, Vec<std::path::PathBuf>)> {
+    let plan = plan_integration(&lock(db), card_id)?;
+    // A card the studio gave up on stays with the owner: looked at again every few seconds it would be put back, redone and
+    // paid for again and again.
+    if plan.gave_up && !owner {
+        return Ok((CardIntegration::LeftForOwner { card_id }, Vec::new()));
+    }
+    // The worker is idle once it has reported and been reviewed; one that is still in a turn is left alone until it is.
+    let state = axiomata_ide::lifecycle::Channel::for_agent(roots, plan.worker.id)
+        .read_status(plan.worker.harness)
+        .state;
+    if matches!(
+        state,
+        axiomata_ide::lifecycle::AgentState::Working | axiomata_ide::lifecycle::AgentState::Waiting
+    ) {
+        return Ok((CardIntegration::Busy { card_id }, Vec::new()));
+    }
+    let path = axiomata_ide::plan_line::line_path(worktrees, &plan.project.name, plan.plan.id);
+    let line = axiomata_ide::plan_line::ensure(
+        &plan.project.repo_root,
+        &path,
+        plan.plan.id,
+        plan.plan.base_branch.as_deref(),
+    )?;
+    // The line must be where the studio left it: a branch of that name is a branch like any other, and work put on it by
+    // something else is work no reviewer saw.
+    check_line_tip(db, &plan.plan, &line)?;
+    // What was checked is what goes in: the commit the gate saw, not whatever the branch name points at by now.
+    let reviewed_commit = gate_reviewed(&plan.card, &plan.sessions, &plan.repo, &plan.message)?;
+    let outcome = axiomata_ide::plan_line::integrate(&line, &reviewed_commit, &plan.message)?;
+    let agent_ids: Vec<i64> = plan.sessions.iter().map(|agent| agent.id).collect();
+    let mut notes = Vec::new();
+    let result = match outcome {
+        axiomata_ide::plan_line::Integration::Done { commit } => {
+            if let Err(err) = flow::set_line_tip(&lock(db), plan.plan.id, &commit) {
+                notes.push(format!("the line's tip could not be recorded: {err}"));
+            }
+            finish_integration(db, &plan, Some(commit), &agent_ids)?
+        }
+        axiomata_ide::plan_line::Integration::Empty => {
+            finish_integration(db, &plan, None, &agent_ids)?
+        }
+        axiomata_ide::plan_line::Integration::Conflict { files } => {
+            let text = format!(
+                "conflict: its work does not fit the plan's line any more ({})",
+                summary_of(&files)
+            );
+            // After the second such try the studio stops putting the card back (a card redone for ever is money spent
+            // for nothing): it stays as it is, signed off and not on the line, with the reason in its history. A signed-off
+            // card cannot be failed, and the owner decides what to do with it.
+            let gave_up = plan.conflicts_so_far + 1 >= MAX_LINE_CONFLICTS || plan.gave_up;
+            {
+                let mut conn = lock(db);
+                if gave_up && plan.gave_up {
+                    // Said once, when the studio gave up; an owner's retry that conflicts again adds nothing.
+                } else if gave_up {
+                    flow::add_event(
+                        &conn,
+                        plan.card.id,
+                        STUDIO,
+                        crate::board::EventKind::Note,
+                        &format!("{GAVE_UP_PREFIX}: {text}"),
+                    )?;
+                } else if !flow::reset_for_rework(&mut conn, plan.card.id, STUDIO, &text)? {
+                    return Err(refusal(
+                        "card",
+                        "the card does not fit the line, and could not be put back".to_string(),
+                    ));
+                }
+            }
+            CardIntegration::Conflict {
+                card_id: plan.card.id,
+                plan_id: plan.plan.id,
+                files,
+                gave_up,
+                // Its sessions stay when the studio gave up: their panes are what the owner looks at.
+                agent_ids: if gave_up {
+                    Vec::new()
+                } else {
+                    agent_ids.clone()
+                },
+            }
+        }
+    };
+    // Its sessions are of no use any more either way: done, or to be made anew on the line as it is now (a card the
+    // studio gave up on keeps them — they are what the owner looks at).
+    let keep = matches!(&result, CardIntegration::Conflict { gave_up: true, .. });
+    let locations = if keep {
+        Vec::new()
+    } else {
+        remove_sessions(db, roots, &plan.sessions)
+    };
+    for note in notes {
+        tracing::warn!(%note, "integrating a card");
+    }
+    Ok((result, locations))
+}
+
+/// Phase one, under the lock: everything that can be refused.
+fn plan_integration(db: &Connection, card_id: i64) -> Result<IntegrationPlan> {
+    let card = board_store::get_card(db, card_id)?
+        .ok_or_else(|| refusal("card", format!("no card {card_id}")))?;
+    if card.verified_by.is_none() {
+        return Err(refusal(
+            "card",
+            "only a card the reviewer signed off can be integrated".to_string(),
+        ));
+    }
+    if card.integrated_at.is_some() || card.taken_over_at.is_some() {
+        return Err(refusal(
+            "card",
+            "the card was integrated or taken over already".to_string(),
+        ));
+    }
+    let plan = card
+        .plan_id
+        .and_then(|id| flow::get_plan(db, id).ok().flatten())
+        .filter(runs_by_itself)
+        .ok_or_else(|| {
+            refusal(
+                "card",
+                "the card belongs to no plan that runs by itself".to_string(),
+            )
+        })?;
+    let worker = card
+        .claimed_by
+        .as_deref()
+        .and_then(session_id_of)
+        .and_then(|id| agent_store::get_agent(db, id).ok().flatten())
+        .filter(|worker| worker.card_id == Some(card.id) && !worker.card_review)
+        .ok_or_else(|| {
+            refusal(
+                "card",
+                "the session that worked on the card is gone".to_string(),
+            )
+        })?;
+    let project = project_store::get_project(db, plan.project_id.unwrap_or_default())?
+        .ok_or_else(|| refusal("project", "the plan's project is gone".to_string()))?;
+    let sessions: Vec<Agent> = agent_store::list_agents(db, worker.project_id)?
+        .into_iter()
+        .filter(|agent| agent.card_id == Some(card.id))
+        .collect();
+    let repo = crate::ide::provision::agent_repo(db, worker.id)?.ready()?;
+    let first_line = card.title.lines().next().unwrap_or_default().trim();
+    let message = format!("#{} {first_line}", card.id);
+    // Counted in the database: a long history must not make the first conflict forgotten.
+    let conflicts_so_far = flow::count_events(
+        db,
+        card.id,
+        STUDIO,
+        crate::board::EventKind::Released,
+        "conflict:",
+    )?;
+    let gave_up = flow::count_events(
+        db,
+        card.id,
+        STUDIO,
+        crate::board::EventKind::Note,
+        GAVE_UP_PREFIX,
+    )? > 0;
+    Ok(IntegrationPlan {
+        card,
+        plan,
+        project,
+        worker,
+        sessions,
+        repo,
+        message,
+        conflicts_so_far,
+        gave_up,
+    })
+}
+
+/// The files of a conflict for a line of history: the first few, and how many more. A history line is bounded.
+fn summary_of(files: &[String]) -> String {
+    const SHOWN: usize = 8;
+    let shown = files
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    match files.len().saturating_sub(SHOWN) {
+        0 => shown,
+        more => format!("{shown}, and {more} more"),
+    }
+}
+
+/// The start of the history line that says the studio gave up integrating a card.
+const GAVE_UP_PREFIX: &str = "gave up integrating";
+
+/// The line is where the studio last left it. A line that was not made by this call and has no recorded tip is refused
+/// too: the branch was there before the studio, and nothing says what is on it.
+fn check_line_tip(
+    db: &Mutex<Connection>,
+    plan: &crate::board::Plan,
+    line: &axiomata_ide::plan_line::Line,
+) -> Result<()> {
+    let tip = axiomata_ide::plan_line::tip(&line.path)?;
+    let in_place = match (&plan.line_tip, line.created) {
+        (Some(recorded), _) if *recorded == tip => return Ok(()),
+        (None, true) => true,
+        // Made just now, yet a tip was recorded: the branch was deleted in between.
+        (Some(_), true) => false,
+        // The studio commits first and writes the tip down second: a crash or a failed write in between leaves the line
+        // ahead of the record by commits that are the studio's own. Those — and a line nobody put anything on yet — are
+        // taken as it is; anything else is not.
+        (recorded, false) => axiomata_ide::plan_line::only_studio_commits_since(
+            &line.path,
+            recorded.as_deref(),
+            &line.base_branch,
+        )?,
+    };
+    if !in_place {
+        return Err(refusal(
+            "plan",
+            format!(
+                "the line of plan #{} is not where the studio left it: something else moved or made the branch {}; look at \
+                 it before anything is merged into it",
+                plan.id, line.branch
+            ),
+        ));
+    }
+    flow::set_line_tip(&lock(db), plan.id, &tip)?;
+    Ok(())
+}
+
+/// The work is on the line: the card is marked, and the line's commit is the answer.
+///
+/// # Errors
+///
+/// A card that cannot be marked is an error and its sessions are kept: the work is on the line, and the next look finds
+/// that out ([`axiomata_ide::plan_line::Integration::Empty`]) and marks the card, whereas a card whose worker is gone
+/// could be neither integrated nor marked ever again.
+fn finish_integration(
+    db: &Mutex<Connection>,
+    plan: &IntegrationPlan,
+    commit: Option<String>,
+    agent_ids: &[i64],
+) -> Result<CardIntegration> {
+    if !flow::mark_integrated(&lock(db), plan.card.id, STUDIO)? {
+        return Err(refusal(
+            "card",
+            "the work is on the line, but the card could not be marked as integrated".to_string(),
+        ));
+    }
+    Ok(CardIntegration::Done {
+        card_id: plan.card.id,
+        plan_id: plan.plan.id,
+        project_id: plan.project.id,
+        commit,
+        agent_ids: agent_ids.to_vec(),
+    })
 }
 
 /// Forgets a session made for a card that never ran — its start failed — with its worktree, secret and channel, and its
@@ -1180,6 +1687,15 @@ mod tests {
         }
 
         fn start(&mut self, card_id: i64, engine: Option<&str>) -> Result<CardSession> {
+            self.start_on(card_id, engine, None)
+        }
+
+        fn start_on(
+            &mut self,
+            card_id: i64,
+            engine: Option<&str>,
+            line_base: Option<&str>,
+        ) -> Result<CardSession> {
             start_in(
                 &mut self.db,
                 &self.config,
@@ -1189,6 +1705,7 @@ mod tests {
                     project_id: self.project,
                     engine_id: engine.map(str::to_owned),
                 },
+                line_base,
             )
         }
 
@@ -1381,6 +1898,7 @@ mod tests {
             &w.db,
             w.board,
             &axiomata_board::PlanFields {
+                project_id: None,
                 goal: String::new(),
                 name: "p".into(),
                 auto_start_max: None,
@@ -2037,5 +2555,459 @@ mod tests {
         w.roles = vec![gone];
         let card = w.card(w.open, Some("builder"));
         assert_eq!(w.start(card, None).unwrap().engine_id, "sonnet");
+    }
+    // ------------------------------------------------------------- the line ---
+
+    impl World {
+        /// An approved plan that runs by itself, in the project of the world, with `titles` as its cards (none depends on
+        /// another), and its line made. Returns the plan, the cards and the line.
+        fn line_plan(&mut self, titles: &[&str]) -> (i64, Vec<i64>, axiomata_ide::plan_line::Line) {
+            let plan = flow::create_plan(
+                &self.db,
+                self.board,
+                &axiomata_board::PlanFields {
+                    project_id: Some(self.project),
+                    goal: String::new(),
+                    name: "P".into(),
+                    auto_start_max: Some(64),
+                    max_cost_usd: None,
+                    max_tokens: None,
+                },
+            )
+            .unwrap()
+            .id;
+            let cards: Vec<i64> = titles
+                .iter()
+                .map(|title| {
+                    store::create_card(
+                        &self.db,
+                        &NewCard {
+                            column_id: self.proposal,
+                            fields: CardFields {
+                                title: (*title).into(),
+                                agent: Some("builder".into()),
+                                plan_id: Some(plan),
+                                ..CardFields::default()
+                            },
+                        },
+                    )
+                    .unwrap()
+                    .id
+                })
+                .collect();
+            flow::approve_plan(&mut self.db, plan, "human:owner").unwrap();
+            let line = axiomata_ide::plan_line::ensure(
+                &self.repo,
+                &axiomata_ide::plan_line::line_path(&self.locations().worktrees, "P", plan),
+                plan,
+                None,
+            )
+            .unwrap();
+            // The studio records where it left the line when it makes it (`make_line`).
+            flow::set_line_tip(
+                &self.db,
+                plan,
+                &axiomata_ide::plan_line::tip(&line.path).unwrap(),
+            )
+            .unwrap();
+            (plan, cards, line)
+        }
+
+        /// Starts `card` on the line, makes its worktree, writes `content` into `file` there and reports it done; the card is
+        /// then signed off by a reviewer that has no session (so what was reviewed is the work as it stands).
+        fn worked_on_the_line(
+            &mut self,
+            card: i64,
+            line: &axiomata_ide::plan_line::Line,
+            file: &str,
+            content: &str,
+        ) -> CardSession {
+            let started = self
+                .start_on(card, Some("sonnet"), Some(&line.branch))
+                .unwrap();
+            let ready =
+                crate::ide::provision::prepare(&self.db, &self.locations(), started.agent.id)
+                    .unwrap();
+            std::fs::write(ready.cwd.join(file), content).unwrap();
+            let actor = actor_from(
+                Some(&started.agent.id.to_string()),
+                Some(&started.agent.name),
+            )
+            .unwrap();
+            flow::report_done(&mut self.db, card, &actor).unwrap();
+            flow::review_verdict(
+                &mut self.db,
+                card,
+                "human:owner",
+                flow::Verdict::Approve,
+                "",
+            )
+            .unwrap();
+            started
+        }
+
+        fn integrate(&mut self, card: i64) -> Result<CardIntegration> {
+            let roots = self.locations().channels;
+            let worktrees = self.locations().worktrees;
+            self.shared(|db| {
+                integrate_blocking(db, &roots, &worktrees, card, false).map(|(outcome, _)| outcome)
+            })
+        }
+    }
+
+    #[test]
+    fn a_card_of_a_plan_that_runs_by_itself_starts_from_the_line_and_its_work_is_integrated_into_it()
+     {
+        let mut w = world();
+        let (plan, cards, line) = w.line_plan(&["one"]);
+        let started = w.worked_on_the_line(cards[0], &line, "one.txt", "one\n");
+        // Its branch was cut from the line, which is also what it is reviewed against.
+        assert_eq!(
+            started.agent.base_branch.as_deref(),
+            Some(line.branch.as_str())
+        );
+        let tree = agent_store::get_agent(&w.db, started.agent.id)
+            .unwrap()
+            .unwrap()
+            .worktree_path
+            .unwrap();
+        assert_eq!(
+            axiomata_ide::worktree::current_branch(&tree).as_deref(),
+            Some(
+                axiomata_ide::worktree::branch_name(&started.agent.name, started.agent.id).as_str()
+            )
+        );
+
+        let outcome = w.integrate(cards[0]).unwrap();
+        let CardIntegration::Done {
+            commit,
+            agent_ids,
+            plan_id,
+            ..
+        } = outcome
+        else {
+            panic!("{outcome:?}")
+        };
+        assert_eq!((plan_id, agent_ids), (plan, vec![started.agent.id]));
+        let commit = commit.expect("it changed something");
+        assert_eq!(git(&line.path, &["rev-parse", "HEAD"]), commit);
+        assert_eq!(git(&line.path, &["show", "HEAD:one.txt"]), "one");
+        // The card says so, and the main line has not moved.
+        let card = store::get_card(&w.db, cards[0]).unwrap().unwrap();
+        assert_eq!(card.state, crate::board::TaskState::Integrated);
+        assert_eq!(git(&w.repo, &["rev-list", "--count", "main"]), "1");
+        // The session is gone with its worktree and branch.
+        assert!(
+            agent_store::get_agent(&w.db, started.agent.id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(!tree.exists());
+    }
+
+    #[test]
+    fn a_card_that_builds_on_another_is_started_only_once_that_ones_work_is_on_the_line() {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["first", "second"]);
+        flow::add_dependency(&mut w.db, cards[1], cards[0]).unwrap();
+        // Signed off is not enough: the work must be on the line.
+        w.worked_on_the_line(cards[0], &line, "first.txt", "first\n");
+        let early = w
+            .start_on(cards[1], Some("sonnet"), Some(&line.branch))
+            .unwrap_err()
+            .to_string();
+        assert!(early.contains("not on the plan's line yet"), "{early}");
+        // Outside a plan that runs by itself it is refused all the same.
+        assert!(
+            w.start(cards[1], Some("sonnet"))
+                .unwrap_err()
+                .to_string()
+                .contains("only a plan that runs by itself")
+        );
+
+        w.integrate(cards[0]).unwrap();
+        let second = w
+            .start_on(cards[1], Some("sonnet"), Some(&line.branch))
+            .unwrap();
+        let ready = crate::ide::provision::prepare(&w.db, &w.locations(), second.agent.id).unwrap();
+        // It starts from what the first card did.
+        assert_eq!(
+            std::fs::read_to_string(ready.cwd.join("first.txt")).unwrap(),
+            "first\n"
+        );
+    }
+
+    #[test]
+    fn two_cards_that_changed_the_same_file_the_second_is_put_back_and_the_next_conflict_gives_it_up()
+     {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["a", "b", "c"]);
+        // Two run side by side from the same line.
+        let a = w.worked_on_the_line(cards[0], &line, "same.txt", "from a\n");
+        let b = w.worked_on_the_line(cards[1], &line, "same.txt", "from b\n");
+        assert!(matches!(
+            w.integrate(cards[0]).unwrap(),
+            CardIntegration::Done { .. }
+        ));
+        let tip = git(&line.path, &["rev-parse", "HEAD"]);
+
+        let conflict = w.integrate(cards[1]).unwrap();
+        let CardIntegration::Conflict {
+            files,
+            gave_up,
+            agent_ids,
+            ..
+        } = conflict
+        else {
+            panic!("{conflict:?}")
+        };
+        assert_eq!((files, gave_up), (vec!["same.txt".to_owned()], false));
+        assert_eq!(agent_ids, vec![b.agent.id]);
+        assert_eq!(
+            git(&line.path, &["rev-parse", "HEAD"]),
+            tip,
+            "the line is as it was"
+        );
+        // The card is open again to be done on the line as it is, and its old session is gone.
+        let card = store::get_card(&w.db, cards[1]).unwrap().unwrap();
+        assert_eq!(card.state, crate::board::TaskState::Ready);
+        assert!(agent_store::get_agent(&w.db, b.agent.id).unwrap().is_none());
+        assert!(agent_store::get_agent(&w.db, a.agent.id).unwrap().is_none());
+
+        // Done again on the line, and meanwhile a third card changed the same file and went in first: the second try
+        // conflicts again and the studio gives up.
+        let second_try = w.worked_on_the_line(cards[1], &line, "same.txt", "from b, again\n");
+        w.worked_on_the_line(cards[2], &line, "same.txt", "from c\n");
+        assert!(matches!(
+            w.integrate(cards[2]).unwrap(),
+            CardIntegration::Done { .. }
+        ));
+        let again = w.integrate(cards[1]).unwrap();
+        let CardIntegration::Conflict {
+            gave_up, agent_ids, ..
+        } = again
+        else {
+            panic!("{again:?}")
+        };
+        assert!(gave_up);
+        // Its session is kept, so nothing is to be closed.
+        assert!(agent_ids.is_empty());
+        // Left as it is: signed off, not on the line, with the reason in its history — and its session kept to look at.
+        let card = store::get_card(&w.db, cards[1]).unwrap().unwrap();
+        assert_eq!(card.state, crate::board::TaskState::Verified);
+        let events = flow::list_events(&w.db, cards[1], 50).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.text.starts_with("gave up integrating"))
+        );
+        assert!(
+            agent_store::get_agent(&w.db, second_try.agent.id)
+                .unwrap()
+                .is_some()
+        );
+
+        // The studio's own looks leave it alone from now on, and say so without touching anything.
+        let events_before = flow::list_events(&w.db, cards[1], 50).unwrap().len();
+        let roots = w.locations().channels;
+        let worktrees = w.locations().worktrees;
+        let left = w
+            .shared(|db| integrate_blocking(db, &roots, &worktrees, cards[1], false))
+            .unwrap()
+            .0;
+        assert_eq!(left, CardIntegration::LeftForOwner { card_id: cards[1] });
+        assert_eq!(
+            flow::list_events(&w.db, cards[1], 50).unwrap().len(),
+            events_before
+        );
+        assert_eq!(
+            store::get_card(&w.db, cards[1]).unwrap().unwrap().state,
+            crate::board::TaskState::Verified
+        );
+    }
+
+    #[test]
+    fn a_card_that_is_not_signed_off_or_whose_work_changed_after_the_review_is_not_integrated() {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["a"]);
+        w.start_on(cards[0], Some("sonnet"), Some(&line.branch))
+            .unwrap();
+        let refused = w.integrate(cards[0]).unwrap_err().to_string();
+        assert!(refused.contains("signed off"), "{refused}");
+    }
+
+    impl World {
+        /// [`World::worked_on_the_line`], but a reviewer *session* signs the card off, so the gate has a snapshot to hold the
+        /// work against.
+        fn reviewed_on_the_line(
+            &mut self,
+            card: i64,
+            line: &axiomata_ide::plan_line::Line,
+        ) -> (CardSession, ReviewSession) {
+            self.roles.retain(|r| r.name != "reviewer");
+            self.roles.push(role("reviewer", "review", Some("opus")));
+            let started = self
+                .start_on(card, Some("sonnet"), Some(&line.branch))
+                .unwrap();
+            let ready =
+                crate::ide::provision::prepare(&self.db, &self.locations(), started.agent.id)
+                    .unwrap();
+            std::fs::write(ready.cwd.join("a.txt"), "a\n").unwrap();
+            let worker = actor_from(
+                Some(&started.agent.id.to_string()),
+                Some(&started.agent.name),
+            )
+            .unwrap();
+            flow::report_done(&mut self.db, card, &worker).unwrap();
+            let review = self.review(card, None).unwrap();
+            let reviewer =
+                actor_from(Some(&review.agent.id.to_string()), Some(&review.agent.name)).unwrap();
+            flow::review_verdict(&mut self.db, card, &reviewer, flow::Verdict::Approve, "")
+                .unwrap();
+            (started, review)
+        }
+    }
+
+    #[test]
+    fn work_that_changed_after_the_review_is_not_integrated() {
+        let mut w = world();
+        let (plan, cards, line) = w.line_plan(&["a"]);
+        let (started, _) = w.reviewed_on_the_line(cards[0], &line);
+        let tree = agent_store::get_agent(&w.db, started.agent.id)
+            .unwrap()
+            .unwrap()
+            .worktree_path
+            .unwrap();
+        let line_before = axiomata_ide::plan_line::tip(&line.path).unwrap();
+
+        std::fs::write(tree.join("late.txt"), "sneaked in\n").unwrap();
+        let refused = w.integrate(cards[0]).unwrap_err().to_string();
+        assert!(
+            refused.contains("changed after it was reviewed"),
+            "{refused}"
+        );
+
+        assert_eq!(
+            axiomata_ide::plan_line::tip(&line.path).unwrap(),
+            line_before,
+            "nothing reached the line"
+        );
+        let card = store::get_card(&w.db, cards[0]).unwrap().unwrap();
+        assert!(card.integrated_at.is_none());
+        assert_eq!(card.plan_id, Some(plan));
+        assert_eq!(w.sessions(), 2, "the sessions are still there");
+    }
+
+    #[test]
+    fn a_signature_of_a_reviewer_session_that_is_gone_is_not_enough_to_integrate() {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["a"]);
+        let (_, review) = w.reviewed_on_the_line(cards[0], &line);
+        // Nothing is left to say what the reviewer saw: that must not read as "the owner signed it off".
+        assert!(agent_store::delete_agent(&w.db, review.agent.id).unwrap());
+
+        let refused = w.integrate(cards[0]).unwrap_err().to_string();
+        assert!(refused.contains("is gone"), "{refused}");
+        assert!(
+            store::get_card(&w.db, cards[0])
+                .unwrap()
+                .unwrap()
+                .integrated_at
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_card_that_changed_nothing_is_integrated_without_a_commit() {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["a"]);
+        let started = w
+            .start_on(cards[0], Some("sonnet"), Some(&line.branch))
+            .unwrap();
+        crate::ide::provision::prepare(&w.db, &w.locations(), started.agent.id).unwrap();
+        let worker = actor_from(
+            Some(&started.agent.id.to_string()),
+            Some(&started.agent.name),
+        )
+        .unwrap();
+        flow::report_done(&mut w.db, cards[0], &worker).unwrap();
+        flow::review_verdict(
+            &mut w.db,
+            cards[0],
+            "human:owner",
+            flow::Verdict::Approve,
+            "",
+        )
+        .unwrap();
+        let line_before = axiomata_ide::plan_line::tip(&line.path).unwrap();
+
+        let outcome = w.integrate(cards[0]).unwrap();
+        let CardIntegration::Done { commit, .. } = outcome else {
+            panic!("expected the card to be integrated: {outcome:?}");
+        };
+        assert_eq!(commit, None);
+        assert_eq!(
+            axiomata_ide::plan_line::tip(&line.path).unwrap(),
+            line_before
+        );
+        let card = store::get_card(&w.db, cards[0]).unwrap().unwrap();
+        assert!(card.integrated_at.is_some());
+        assert_eq!(w.sessions(), 0);
+    }
+
+    #[test]
+    fn a_line_that_is_ahead_of_its_record_by_the_studios_own_commit_is_taken_up_again() {
+        let mut w = world();
+        let (plan, cards, line) = w.line_plan(&["a", "b"]);
+        let start = axiomata_ide::plan_line::tip(&line.path).unwrap();
+        w.worked_on_the_line(cards[0], &line, "a.txt", "a\n");
+        assert!(matches!(
+            w.integrate(cards[0]).unwrap(),
+            CardIntegration::Done { .. }
+        ));
+        // The record is lost, as after a crash between the commit and the write.
+        flow::set_line_tip(&w.db, plan, &start).unwrap();
+
+        w.worked_on_the_line(cards[1], &line, "b.txt", "b\n");
+        assert!(matches!(
+            w.integrate(cards[1]).unwrap(),
+            CardIntegration::Done { .. }
+        ));
+        let recorded = flow::get_plan(&w.db, plan).unwrap().unwrap().line_tip;
+        assert_eq!(
+            recorded,
+            Some(axiomata_ide::plan_line::tip(&line.path).unwrap())
+        );
+    }
+
+    #[test]
+    fn a_repository_that_names_a_filter_is_not_staged_in_and_nothing_is_integrated() {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["a"]);
+        w.worked_on_the_line(cards[0], &line, "a.txt", "a\n");
+        git(
+            &w.repo,
+            &["config", "filter.evil.clean", "touch /tmp/never"],
+        );
+        let line_before = axiomata_ide::plan_line::tip(&line.path).unwrap();
+
+        let refused = w.integrate(cards[0]).unwrap_err().to_string();
+        assert!(refused.contains("filter.evil.clean"), "{refused}");
+        assert_eq!(
+            axiomata_ide::plan_line::tip(&line.path).unwrap(),
+            line_before
+        );
+    }
+
+    #[test]
+    fn the_cards_of_a_plan_that_runs_by_itself_are_not_taken_over_one_by_one() {
+        let mut w = world();
+        let (_, cards, line) = w.line_plan(&["a"]);
+        w.worked_on_the_line(cards[0], &line, "a.txt", "a\n");
+        let refused = plan_take_over(&w.db, cards[0], None)
+            .map(|_| ())
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("taken over as a whole"), "{refused}");
     }
 }

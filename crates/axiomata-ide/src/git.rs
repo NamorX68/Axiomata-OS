@@ -225,7 +225,25 @@ impl AgentRepo {
     /// onto something that is not the agent's.
     pub fn commit_all(&self, message: &str) -> Result<String> {
         self.ensure_on_own_branch()?;
+        self.ensure_safe_config()?;
         commit_all(&self.worktree, message)
+    }
+
+    /// Refuses while the repository's config names a program git would run when the studio stages or commits in this
+    /// worktree ([`worktree::unsafe_config`]): the agent shares that config, and `git add -A` runs a clean filter.
+    pub fn ensure_safe_config(&self) -> Result<()> {
+        let keys = worktree::unsafe_config(&self.worktree)?;
+        if keys.is_empty() {
+            return Ok(());
+        }
+        Err(IdeError::Invalid {
+            field: "worktree",
+            reason: format!(
+                "the repository's config names a program git would run when the studio stages or commits ({}); the \
+                 studio does not do that while it does",
+                keys.join(", ")
+            ),
+        })
     }
 
     /// Refuses unless the worktree is checked out on the agent's own branch.
@@ -274,6 +292,7 @@ impl AgentRepo {
         if !worktree::has_uncommitted_changes(&self.worktree)? {
             return self.branch_tip();
         }
+        self.ensure_safe_config()?;
         commit_all(&self.worktree, message)
     }
 
@@ -740,7 +759,7 @@ fn base_blob_size(worktree: &Path, base: &str, path: &str) -> Result<Option<u64>
 }
 /// Whether a path is somewhere an agent harness reads configuration, rules or plugins from: Claude Code's `.claude/` and
 /// `.mcp.json`, Opencode's `opencode.json(c)` and `.opencode/`, and the `CLAUDE.md` / `AGENTS.md` instruction files, at
-/// any depth. A checkout that contains a changed one is not a neutral place to start another agent in.
+/// any depth — and what runs at take-over (`.husky/`, `.githooks/`, `.gitattributes`, `.gitmodules`, `.envrc`). A checkout that contains a changed one is not a neutral place to start another agent in.
 pub fn is_agent_config(path: &str) -> bool {
     let components: Vec<&str> = path.split('/').collect();
     let Some(name) = components.last() else {
@@ -748,10 +767,19 @@ pub fn is_agent_config(path: &str) -> bool {
     };
     matches!(
         *name,
-        ".mcp.json" | "opencode.json" | "opencode.jsonc" | "CLAUDE.md" | "AGENTS.md"
+        ".mcp.json"
+            | "opencode.json"
+            | "opencode.jsonc"
+            | "CLAUDE.md"
+            | "AGENTS.md"
+            // Not a harness's own, but what runs when the work is taken over or a directory is entered: the project's
+            // hooks (the owner's take-over runs them), attribute and submodule files, direnv.
+            | ".gitattributes"
+            | ".gitmodules"
+            | ".envrc"
     ) || components[..components.len() - 1]
         .iter()
-        .any(|dir| matches!(*dir, ".claude" | ".opencode"))
+        .any(|dir| matches!(*dir, ".claude" | ".opencode" | ".husky" | ".githooks"))
 }
 
 /// Commits everything uncommitted in the worktree (G3) — what the agent left

@@ -48,6 +48,14 @@ pub const SCHEMA_SQL_V2: &str = include_str!("flow.sql");
 /// (19), frozen once released.
 pub const SCHEMA_SQL_V3: &str = include_str!("plan_goal.sql");
 
+/// The board's **version 4** schema (`project_id`, `base_branch` on a plan, `integrated_at` on a card), `docs/plans/a2a.md`
+/// CP-A8. Its own constant and migration number (20), frozen once released.
+pub const SCHEMA_SQL_V4: &str = include_str!("plan_line.sql");
+
+/// The board's **version 5** schema (`line_tip` on a plan), `docs/plans/a2a.md` CP-A8. A migration of its own (21): the
+/// owner's database had applied migration 20 before the column was added to it.
+pub const SCHEMA_SQL_V5: &str = include_str!("plan_line_tip.sql");
+
 /// Everything that can go wrong in the board core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant: "no such row"
@@ -127,7 +135,7 @@ mod schema_is_frozen {
         assert_eq!(
             hash, EXPECTED,
             "flow.sql changed after it shipped as migration 15. It is an ALTER-and-ADD migration — add a \
-             SCHEMA_SQL_V4 and a new migration number instead. If it has never shipped, update EXPECTED here."
+             SCHEMA_SQL_V6 and a new migration number instead. If it has never shipped, update EXPECTED here."
         );
     }
 }
@@ -286,6 +294,7 @@ mod render_tests {
             acceptance: String::new(),
             returned_count: 0,
             input_required: None,
+            integrated_at: None,
             taken_over_at: None,
             failed_at: None,
             canceled_at: None,

@@ -50,6 +50,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (18, axiomata_ide::SCHEMA_SQL_V9),
     // What a plan is for (a2a.md, CP-A7).
     (19, axiomata_board::SCHEMA_SQL_V3),
+    // The integration line of a plan: its project and base branch, and when a card is on it (a2a.md, CP-A8).
+    (20, axiomata_board::SCHEMA_SQL_V4),
+    // Where the studio left a plan's line (a2a.md, CP-A8).
+    (21, axiomata_board::SCHEMA_SQL_V5),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

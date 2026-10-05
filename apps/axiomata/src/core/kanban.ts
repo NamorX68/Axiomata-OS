@@ -250,6 +250,7 @@ export const STATE_LABEL: Record<TaskState, string> = {
   in_review: "im Review",
   done: "fertig",
   verified: "geprüft",
+  integrated: "im Plan",
   taken_over: "übernommen",
   failed: "gescheitert",
   canceled: "abgebrochen",
@@ -266,6 +267,7 @@ export function isNotableState(state: TaskState): boolean {
     state === "input_required" ||
     state === "failed" ||
     state === "canceled" ||
+    state === "integrated" ||
     state === "taken_over"
   );
 }
@@ -276,6 +278,7 @@ export function stateTone(state: TaskState): "warn" | "bad" | "muted" {
     case "failed":
     case "canceled":
       return "bad";
+    case "integrated":
     case "taken_over":
       return "muted";
     default:
@@ -375,5 +378,6 @@ export const EVENT_LABEL: Record<CardEventKind, string> = {
   canceled: "abgesagt",
   released: "freigegeben",
   taken_over: "übernommen",
+  integrated: "in den Plan übernommen",
   note: "Notiz",
 };

@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
 
   import Canvas from "./canvas/Canvas.svelte";
-  import { invokeBackend, listenBackend } from "./core/backend";
+  import { invokeBackend, listenBackend, type PlanRunEvent } from "./core/backend";
   import { emit, on } from "./core/bus";
   import { openFilePanel, openNewNote, openStaged } from "./core/staging";
   import { loadInstances } from "./core/stores";
@@ -12,6 +12,7 @@
   import AssistantBar from "./shell/AssistantBar.svelte";
   import ChatPanel from "./shell/ChatPanel.svelte";
   import { requestAgent } from "./ide/agentRequest";
+  import { endedSessions, runEventNote } from "./ide/planning";
   import { requestMode } from "./ide/modeRequest";
   import IdeView from "./ide/IdeView.svelte";
   import IconBar from "./shell/IconBar.svelte";
@@ -108,12 +109,24 @@
     // screen — the pane is what starts the harness, so it has to exist, but the owner is not pulled out of what they do.
     const review = [
       listenBackend<{ cardId: number; projectId: number; agentId: number }>("card:review-started", (started) => {
-        requestAgent({ projectId: started.projectId, agentId: started.agentId });
+        requestAgent({ projectId: started.projectId, agentId: started.agentId, background: true });
         ideStarted = true;
         toast(`Karte #${started.cardId}: Ein Reviewer prüft sie (Studio, Agents).`, "info");
       }),
       listenBackend<{ cardId: number; reason: string }>("card:review-blocked", (blocked) => {
         toast(`Karte #${blocked.cardId} wartet auf ein Review: ${blocked.reason}`, "warning");
+      }),
+      // A plan that runs by itself did something (A2A CP-A8): a started card's pane opens in the background — opening it
+      // is what starts the harness —, the panes of integrated cards close, and what needs the owner is said.
+      listenBackend<PlanRunEvent>("plan:run", (event) => {
+        if (event.event === "started") {
+          requestAgent({ projectId: event.project_id, agentId: event.agent_id, background: true });
+          ideStarted = true;
+        }
+        const ended = endedSessions(event);
+        if (ended.length > 0) emit("studio:close-agent-panes", { agentIds: ended });
+        const note = runEventNote(event);
+        if (note) toast(note.text, note.tone);
       }),
       // A card session used up a limit and was stopped (A2A CP-A6c): the card keeps it, the owner decides.
       listenBackend<{ cardId: number | null; planId: number | null; agentName: string; reason: string }>(
@@ -124,19 +137,20 @@
         },
       ),
     ];
-    // Reviewers made before the page was listening (or before a reload) still need their panes: asked once, after the
-    // listeners are in, so none is lost between the two.
+    // Card sessions (workers and reviewers) made before the page was listening (or before a reload) still need their
+    // panes: asked once, after the listeners are in, so none is lost between the two.
     void Promise.all(review).then(async () => {
       try {
         const open = await invokeBackend<{ card_id: number; project_id: number; agent_id: number }[]>(
-          "open_review_sessions",
+          "open_card_sessions",
         );
         for (const session of open) {
-          requestAgent({ projectId: session.project_id, agentId: session.agent_id });
+          // Background: the owner's project and mode stay as they are.
+          requestAgent({ projectId: session.project_id, agentId: session.agent_id, background: true });
           ideStarted = true;
         }
       } catch {
-        // Without the list the watcher's events still arrive; a reviewer's pane can be opened from the Agents list.
+        // Without the list the watcher's events still arrive; a session's pane can be opened from the Agents list.
       }
     });
     return () => {

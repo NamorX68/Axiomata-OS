@@ -10,6 +10,11 @@ import { get, writable } from "svelte/store";
 export interface AgentRequest {
   projectId: number;
   agentId: number;
+  /**
+   * The pane is for a session the studio started by itself (a reviewer, a card of a plan that runs by itself): it is
+   * put where it belongs without taking the owner out of the mode they are in.
+   */
+  background?: boolean;
 }
 
 export const agentRequests = writable<AgentRequest[]>([]);

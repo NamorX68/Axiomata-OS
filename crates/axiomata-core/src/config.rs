@@ -45,6 +45,11 @@ fn default_skill_timeout_secs() -> u64 {
     300
 }
 
+/// Default for [`AgentDefaults::max_parallel_sessions`].
+fn default_max_parallel_sessions() -> u32 {
+    4
+}
+
 /// Default daily spend cap (USD) for paid model-routing providers. Applies to
 /// every non-Anthropic active provider combined (the Anthropic path is
 /// subscription-billed and never metered here). Deliberately low: the
@@ -324,6 +329,12 @@ pub struct AgentDefaults {
     /// removed).
     #[serde(default)]
     pub engines: BTreeMap<String, Engine>,
+
+    /// The most card sessions that run at the same time across all plans that run by themselves (a worker or a reviewer
+    /// each count). A plan starts as many cards at once as its dependencies allow; this only keeps a wide plan from
+    /// starting more agents than the machine and the account can carry. Read as at least 1.
+    #[serde(default = "default_max_parallel_sessions")]
+    pub max_parallel_sessions: u32,
 }
 
 /// Every provider seeded with its starting settings — the shared source for
@@ -412,6 +423,7 @@ impl Default for AgentDefaults {
             costs: BTreeMap::new(),
             auto_approve_tools: default_auto_approve_tools(),
             engines: BTreeMap::new(),
+            max_parallel_sessions: default_max_parallel_sessions(),
         }
     }
 }

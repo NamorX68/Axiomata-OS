@@ -538,6 +538,9 @@ enum BoardAction {
     /// What the sessions of a card have used and what they may use (steps, tokens, money). Read from what the
     /// harnesses left behind; a session that is stopped at a limit says so.
     Usage { id: i64 },
+    /// Merge a card the reviewer signed off into the line of its plan (a plan that runs by itself does this on its own).
+    /// The owner's step; for a card the studio has not got to yet, or after a conflict was looked at.
+    Integrate { id: i64 },
     /// Give a started card back: the claim is dropped and the card waits in its open column again. The owner's step.
     Release { id: i64 },
     /// Move a card into this board's first done column.
@@ -1488,6 +1491,10 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         BoardAction::TakeOver { id, message } => {
             owner_only("taking a card over")?;
             board_take_over(core, id, message).await
+        }
+        BoardAction::Integrate { id } => {
+            owner_only("integrating a card")?;
+            board_integrate(core, id).await
         }
         BoardAction::Usage { id } => board_usage(core, id).await,
         BoardAction::Release { id } => {
@@ -2716,6 +2723,39 @@ async fn board_plan(core: &AxiomataCore, action: board_flow::PlanAction) -> Resu
     Ok(())
 }
 
+async fn board_integrate(core: &AxiomataCore, id: i64) -> Result<()> {
+    use axiomata_core::card_session::CardIntegration;
+    let outcome = axiomata_core::card_session::integrate_card_with(core, id, true).await?;
+    board_mirror::after_card_change(&core.db_lock(), &read_config(core), id);
+    match outcome {
+        CardIntegration::Done {
+            plan_id, commit, ..
+        } => match commit {
+            Some(commit) => println!("card #{id} is on the line of plan #{plan_id} as {commit}"),
+            None => println!("card #{id} changed nothing compared to the line of plan #{plan_id}"),
+        },
+        CardIntegration::Conflict { files, gave_up, .. } => {
+            println!(
+                "card #{id} does not fit the line any more: {}",
+                files.join(", ")
+            );
+            if gave_up {
+                println!("it was not put back again; its session stays for you to look at");
+            } else {
+                println!("it was put back to be done again on the line as it is");
+            }
+        }
+        CardIntegration::Busy { .. } => {
+            println!("its worker is in the middle of a turn; try again in a moment")
+        }
+        // Only the studio's own looks leave a card alone; this is the owner's request.
+        CardIntegration::LeftForOwner { .. } => {
+            println!("the studio gave up on card #{id}; nothing was done")
+        }
+    }
+    Ok(())
+}
+
 async fn board_usage(core: &AxiomataCore, id: i64) -> Result<()> {
     if board::store::get_card(&core.db_lock(), id)?.is_none() {
         bail!("no card with id {id}");
@@ -2971,6 +3011,7 @@ mod tests {
             acceptance: "- Tests grün".to_string(),
             returned_count: 0,
             input_required: None,
+            integrated_at: None,
             taken_over_at: None,
             failed_at: None,
             canceled_at: None,

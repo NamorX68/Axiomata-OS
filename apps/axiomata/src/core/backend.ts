@@ -518,6 +518,7 @@ export type TaskState =
   | "in_review"
   | "done"
   | "verified"
+  | "integrated"
   | "taken_over"
   | "failed"
   | "canceled";
@@ -570,6 +571,8 @@ export interface BoardCard {
   returned_count: number;
   /** What the working agent asked and waits for an answer to. */
   input_required: string | null;
+  /** The work is on its plan's integration line: reviewed and merged, not yet in the main line (CP-A8). */
+  integrated_at?: string | null;
   taken_over_at: string | null;
   failed_at: string | null;
   canceled_at: string | null;
@@ -605,6 +608,10 @@ export interface BoardPlan {
   name: string;
   /** What the plan is for, in the owner's words; the planner reads it. */
   goal: string;
+  /** The project (repository) the plan's sessions run in; a plan that runs by itself needs one (CP-A8). */
+  project_id?: number | null;
+  /** The branch the plan's integration line was cut from, once there is one. */
+  base_branch?: string | null;
   status: PlanStatus;
   /** `null` = cards are started by hand; a number = up to that many start by themselves. */
   auto_start_max: number | null;
@@ -628,6 +635,7 @@ export type CardEventKind =
   | "canceled"
   | "released"
   | "taken_over"
+  | "integrated"
   | "note";
 
 /** One line of a card's history. */
@@ -876,3 +884,15 @@ export const invokeBackend: InvokeFn = async <T>(
   }
   throw new Error(`invoke(${cmd}): not running inside Tauri`);
 };
+
+/**
+ * What one look at the plans that run by themselves did (A2A CP-A8, `plan:run`). Mirrors
+ * `axiomata_core::plan_run::RunEvent` with the card integration flattened into it.
+ */
+export type PlanRunEvent =
+  | { event: "started"; card_id: number; plan_id: number; project_id: number; agent_id: number }
+  | { event: "integrated"; outcome: "done"; card_id: number; plan_id: number; project_id: number; commit: string | null; agent_ids: number[] }
+  | { event: "integrated"; outcome: "conflict"; card_id: number; plan_id: number; files: string[]; gave_up: boolean; agent_ids: number[] }
+  | { event: "integrated"; outcome: "busy"; card_id: number }
+  | { event: "blocked"; card_id: number; reason: string }
+  | { event: "ready_to_take_over"; plan_id: number; name: string };

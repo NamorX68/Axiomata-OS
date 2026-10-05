@@ -175,6 +175,7 @@ impl World {
             &self.core.db_lock(),
             self.board,
             &board::PlanFields {
+                project_id: None,
                 goal: String::new(),
                 name: "Plan".into(),
                 auto_start_max: None,
@@ -1253,6 +1254,7 @@ fn a_planner_reads_its_plan_with_the_goal_the_catalog_and_the_cards_so_far() {
         &w.core.db_lock(),
         w.board,
         &board::PlanFields {
+            project_id: None,
             goal: "Add a dark mode".into(),
             name: "Dark mode".into(),
             auto_start_max: None,

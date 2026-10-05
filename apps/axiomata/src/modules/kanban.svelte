@@ -979,7 +979,7 @@
       {/if}
       {#if detail.state === "failed" || detail.state === "canceled"}
         <button class="ax-btn" onclick={() => markCard(detail, "reopen")}>Wieder öffnen</button>
-      {:else if detail.state !== "taken_over" && detail.state !== "verified"}
+      {:else if detail.state !== "taken_over" && detail.state !== "integrated" && detail.state !== "verified"}
         <button class="ax-btn" onclick={() => markCard(detail, "cancel")}>Absagen</button>
       {/if}
       <button class="ax-btn" onclick={() => setArchived(detail, detail.archived_at === null)}>
