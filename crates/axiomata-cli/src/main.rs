@@ -2668,10 +2668,29 @@ async fn board_take_over(core: &AxiomataCore, id: i64, message: Option<String>) 
     let outcome = axiomata_core::card_session::take_over_card(core, id, message.as_deref()).await?;
     board_mirror::after_card_change(&core.db_lock(), &read_config(core), id);
     match outcome {
-        CardTakeOver::Done { commit, cleanup } => {
+        CardTakeOver::Done {
+            commit,
+            project_id,
+            cleanup,
+        } => {
             println!("card #{id} taken over as {commit}; its sessions are cleaned up");
             for note in cleanup {
                 println!("  not removed: {note}");
+            }
+            // The studio never pushes; say what is waiting, so it is not forgotten.
+            let root = ide::store::get_project(&core.db_lock(), project_id)?
+                .map(|project| project.repo_root);
+            if let Some(status) = root.and_then(|root| axiomata_git::repo::status(&root).ok()) {
+                match (status.ahead, status.upstream.as_deref()) {
+                    (0, Some(_)) => {}
+                    (0, None) => println!(
+                        "not pushed yet: the branch has no upstream — push it from the Studio's Git tab"
+                    ),
+                    (ahead, _) => println!(
+                        "not pushed yet: {ahead} commit(s) ahead of {} — push from the Studio's Git tab",
+                        status.upstream.as_deref().unwrap_or("the upstream")
+                    ),
+                }
             }
             Ok(())
         }

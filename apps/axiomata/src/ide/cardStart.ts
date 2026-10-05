@@ -47,3 +47,19 @@ export function roleEngine(
   const known = new Set(catalog.map((engine) => engine.id));
   return [role.engine, ...role.fallback_engines].find((id): id is string => id !== null && known.has(id)) ?? null;
 }
+
+/**
+ * What the owner is told after a take-over about the commit that now waits on their branch. The studio never pushes —
+ * the Push button of the Studio's Git tab does, when the owner clicks it — so the note only says what is waiting and
+ * where to push. `null` when nothing waits.
+ */
+export function unpushedNote(status: { ahead: number; upstream: string | null }): string | null {
+  if (status.ahead > 0) {
+    const target = status.upstream ?? "dem Upstream";
+    return `Noch nicht gepusht: ↑${status.ahead} auf ${target}. Push im Git-Reiter des Studios.`;
+  }
+  if (status.upstream === null) {
+    return "Noch nicht gepusht: der Branch hat noch keinen Upstream. Push im Git-Reiter des Studios legt ihn an.";
+  }
+  return null;
+}

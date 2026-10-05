@@ -353,6 +353,7 @@ dependencies = [
  "anyhow",
  "axiomata-core",
  "axiomata-files",
+ "axiomata-git",
  "axiomata-roster",
  "chrono",
  "clap",

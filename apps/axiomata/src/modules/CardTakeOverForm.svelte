@@ -9,7 +9,9 @@
   import { invokeBackend as invoke, type BoardCard, type CardTakeOver } from "../core/backend";
   import { messageOf } from "../core/errors";
   import { toast } from "../core/toast";
-  import { defaultTakeOverMessage } from "../ide/cardStart";
+  import { gitApi } from "../fileapp/gitBackend";
+  import { projectRootId } from "../fileapp/projectModel";
+  import { defaultTakeOverMessage, unpushedNote } from "../ide/cardStart";
 
   let { card, onDone }: { card: BoardCard; onDone: () => void } = $props();
 
@@ -18,6 +20,17 @@
   let error = $state("");
   let conflict = $state<string[]>([]);
   let busy = $state(false);
+
+  /** The studio never pushes: the owner is told what waits, and pushes from the Studio's Git tab. */
+  async function sayWhatIsNotPushed(projectId: number): Promise<void> {
+    try {
+      const state = await gitApi.status(projectRootId(projectId));
+      const note = state.state === "ready" ? unpushedNote(state.status) : null;
+      if (note) toast(note, "warning");
+    } catch {
+      // The note is a courtesy; the Git tab shows the same number.
+    }
+  }
 
   async function takeOver(): Promise<void> {
     if (busy) return;
@@ -32,6 +45,7 @@
       }
       toast(`Karte #${card.id} ist übernommen (${result.commit.slice(0, 8)}).`, "info");
       for (const note of result.cleanup) toast(`Nicht aufgeräumt: ${note}`, "warning");
+      await sayWhatIsNotPushed(result.project_id);
       onDone();
     } catch (err) {
       error = messageOf(err);

@@ -8,6 +8,7 @@ license.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 axiomata-core = { path = "../axiomata-core" }
+axiomata-git = { path = "../axiomata-git" }
 axiomata-files = { path = "../axiomata-files" }
 axiomata-roster = { path = "../axiomata-roster" }
 rusqlite.workspace = true

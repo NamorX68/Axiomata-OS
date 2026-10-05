@@ -265,7 +265,7 @@ export interface ReviewSession {
 
 /** What taking a card over came to. Mirrors `axiomata_core::card_session::CardTakeOver`. */
 export type CardTakeOver =
-  | { outcome: "done"; commit: string; cleanup: string[] }
+  | { outcome: "done"; commit: string; project_id: number; cleanup: string[] }
   | { outcome: "conflict"; files: string[] };
 
 /** How a session is wired to the agent MCP server. Mirrors `axiomata_core::agent_entry::EntryStatus`. */

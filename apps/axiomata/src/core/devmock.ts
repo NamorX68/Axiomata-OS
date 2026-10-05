@@ -1591,7 +1591,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "open_review_sessions":
       return [] as T;
     case "take_over_card":
-      return { outcome: "done", commit: "0123456789abcdef0123456789abcdef01234567", cleanup: [] } as T;
+      return { outcome: "done", commit: "0123456789abcdef0123456789abcdef01234567", project_id: 1, cleanup: [] } as T;
     // No mail in the browser mock: there is never a line to type.
     case "ide_mailbox_nudge":
       return null as T;

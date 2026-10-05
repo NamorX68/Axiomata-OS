@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IdeProject } from "../core/backend";
-import { canReview, canStart, canTakeOver, defaultTakeOverMessage, roleEngine, startableProjects } from "./cardStart";
+import { canReview, canStart, canTakeOver, defaultTakeOverMessage, roleEngine, startableProjects, unpushedNote } from "./cardStart";
 
 const project = (id: number, opened: string | null, exists = true): IdeProject => ({
   id,
@@ -65,5 +65,23 @@ describe("roleEngine", () => {
     expect(roleEngine({ engine: "gone", fallback_engines: [] }, catalog)).toBeNull();
     expect(roleEngine(undefined, catalog)).toBeNull();
     expect(roleEngine({ engine: "sonnet", fallback_engines: [] }, [])).toBeNull();
+  });
+});
+
+describe("unpushedNote", () => {
+  it("says how many commits wait and where the owner pushes", () => {
+    const note = unpushedNote({ ahead: 2, upstream: "origin/main" });
+    expect(note).toContain("↑2");
+    expect(note).toContain("origin/main");
+    expect(note).toContain("Git-Reiter");
+  });
+
+  it("says a branch without an upstream is not published yet", () => {
+    expect(unpushedNote({ ahead: 0, upstream: null })).toContain("keinen Upstream");
+    expect(unpushedNote({ ahead: 1, upstream: null })).toContain("↑1");
+  });
+
+  it("is silent when everything is on the upstream", () => {
+    expect(unpushedNote({ ahead: 0, upstream: "origin/main" })).toBeNull();
   });
 });

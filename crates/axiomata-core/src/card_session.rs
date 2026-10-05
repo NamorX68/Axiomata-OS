@@ -659,6 +659,8 @@ pub enum CardTakeOver {
     /// it are gone. `cleanup` lists what could not be done — the work is taken over all the same.
     Done {
         commit: String,
+        /// The project the work went into — where the commit is waiting to be pushed.
+        project_id: i64,
         cleanup: Vec<String>,
     },
     /// The squash conflicted and was undone: the project folder is as it was (G9). Nothing else changed.
@@ -676,6 +678,8 @@ struct Taken {
 /// What a take-over needs, read under the lock.
 struct TakeOverPlan {
     card: crate::board::Card,
+    /// The project of the session that worked on the card.
+    card_project: i64,
     sessions: Vec<Agent>,
     repo: axiomata_ide::git::AgentRepo,
     target: crate::ide::provision::TakeOverTarget,
@@ -747,7 +751,11 @@ fn take_over_blocking(
             remove_trees(&mut removals, &mut cleanup);
             let opencode_locations = finish_removal(&lock(db), roots, &removals, &mut cleanup);
             Ok(Taken {
-                outcome: CardTakeOver::Done { commit, cleanup },
+                outcome: CardTakeOver::Done {
+                    commit,
+                    project_id: plan.card_project,
+                    cleanup,
+                },
                 opencode_locations,
             })
         }
@@ -796,6 +804,7 @@ fn plan_take_over(db: &Connection, card_id: i64, message: Option<&str>) -> Resul
     let repo = crate::ide::provision::agent_repo(db, worker.id)?.ready()?;
     let target = crate::ide::provision::TakeOverTarget::read(db, worker.id)?;
     Ok(TakeOverPlan {
+        card_project: worker.project_id,
         card,
         sessions,
         repo,
@@ -1694,7 +1703,10 @@ mod tests {
         let main_before = git(&w.repo, &["rev-parse", "main"]);
 
         let taken = w.take_over(card, None).unwrap();
-        let CardTakeOver::Done { commit, cleanup } = taken.outcome else {
+        let CardTakeOver::Done {
+            commit, cleanup, ..
+        } = taken.outcome
+        else {
             panic!("expected the work to be taken over: {:?}", taken.outcome);
         };
         assert!(cleanup.is_empty(), "{cleanup:?}");
