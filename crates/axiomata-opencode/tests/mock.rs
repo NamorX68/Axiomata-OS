@@ -229,7 +229,8 @@ async fn serve(
             };
             respond(&mut stream, "200 OK", &page).await
         }
-        ("GET", "/api/session/ses_mock1/message?order=desc&limit=50&cursor=page%202") => {
+        // The real service refuses `order` together with `cursor` (HTTP 400, measured against 2.0.23).
+        ("GET", "/api/session/ses_mock1/message?limit=50&cursor=page%202") => {
             let page = json!({"data": [assistant("tool-calls", "", 10, 2, 0.001), {"id": "msg_user", "type": "user"},
                                        assistant("stop", "an earlier turn", 99, 99, 9.0)],
                               "cursor": {"next": null}});

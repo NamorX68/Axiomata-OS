@@ -23,7 +23,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   2026-09-20) — do not plan around it. Node/TypeScript debugging is parked (owner, 2026-10-02).
 - **Next / open:** Run/Tasks (#50) and Debug (#51) were tested on the Mac and accepted by the owner (2026-10-04); #50
   follow-ups; **agent-to-agent communication (M7.5)** — approved 2026-10-03,
-  CP-A1 (engines + roles), CP-A2 (the board's agent flow), CP-A3 (the mailbox core), CP-A4 (the MCP server) CP-A5 (per-harness entry + per-session secret) and CP-A6a (start a card) and CP-A6b (reviewer, return, take-over) built 2026-10-04/05, next CP-A6c (limits per session; `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
+  CP-A1 (engines + roles), CP-A2 (the board's agent flow), CP-A3 (the mailbox core), CP-A4 (the MCP server) CP-A5 (per-harness entry + per-session secret) and CP-A6a (start a card), CP-A6b (reviewer, return, take-over) and CP-A6c (limits per session) built 2026-10-04/05, next CP-A7 (the planner; `docs/plans/a2a.md`); ED7; a Mac-only-code split. Deferred by owner decision:
   ⌘K spotlight search and further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
@@ -46,6 +46,7 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   routines list|add|edit|delete|tick       (cron is 6–7 fields, seconds first)
 #   board list|new|rename|delete|add|edit|move|claim|done|verify|archive   (Kanban; claim is a CAS)
 #   board plan|dep|report|verdict|events|note|input|fail|cancel|reopen|taken-over|approve   (agent flow, a2a.md CP-A2)
+#   board start|release|review|take-over|usage   (card sessions, a2a.md CP-A6; usage = steps/tokens/money against the limits)
 #   mcp-serve                                (MCP server of one agent session on stdio; needs AXIOMATA_AGENT_ID; logs go to stderr)
 #   ide projects list|new|rename|set-root|delete
 #   ide agents list|new|edit|delete|prepare|new-session|discard-worktree|status|diff|base|commit|discard|discard-hunk|take-over

@@ -71,6 +71,14 @@ const CLAUDE_SETTINGS_FILE: &str = "claude-settings.json";
 /// Where the v1 Opencode plugin and its `node_modules/` used to live; removed
 /// on the next start of an agent that still has it (OC3).
 const LEGACY_OPENCODE_DIR: &str = "opencode";
+/// Present while the session has used up a limit (`docs/plans/a2a.md`, A9); its text is what Claude Code is told when
+/// the `PreToolUse` hook refuses a tool call because of it.
+const LIMIT_FILE: &str = "limit-reached";
+/// The Claude Code session ids a card session was started with, one per line: every start is a new transcript, and the
+/// usage of the card is the sum of them all.
+const CLAUDE_SESSIONS_FILE: &str = "claude-sessions";
+/// The most session ids read back. The file is reachable by the session itself, so the real ids are the *first* ones.
+const MAX_CLAUDE_SESSIONS: usize = 100;
 /// The instruction that asks an agent to keep a visible plan (M7.2 CP6, (b)).
 const PLANNING_FILE: &str = "planning.md";
 /// The last `Write`/`Edit` payload that touched Claude Code's plan folder.
@@ -268,6 +276,8 @@ impl Channel {
     pub fn reset(&self) -> Result<()> {
         ensure_plain_dir(&self.dir)?;
         remove_file(&self.dir.join(STATE_FILE))?;
+        // The stop (`limit-reached`) is left alone: a restarted pane over its limit is refused from its first call, and
+        // only a look that finds the session within its limits again lifts it.
         remove_dir(&self.dir.join(LEGACY_OPENCODE_DIR))?;
         write_atomic(&self.dir.join(STARTED_FILE), &format!("{}\n", unix_now()))
     }
@@ -375,6 +385,66 @@ impl Channel {
         }
     }
 
+    /// Marks the session as having used up a limit: from now on the `PreToolUse` hook of Claude Code refuses every tool
+    /// call and shows `text` as the reason. Opencode has no such hook; the studio interrupts it instead.
+    pub fn set_limit_reached(&self, text: &str) -> Result<()> {
+        ensure_plain_dir(&self.dir)?;
+        write_atomic(&self.dir.join(LIMIT_FILE), &format!("{}\n", text.trim()))
+    }
+
+    /// The reason the session was stopped for, if it was.
+    pub fn limit_reached(&self) -> Option<String> {
+        read_to_string(&self.dir.join(LIMIT_FILE)).map(|text| text.trim().to_owned())
+    }
+
+    /// Lifts the stop: the limit was raised, or the session no longer reaches it.
+    pub fn clear_limit_reached(&self) -> Result<()> {
+        remove_file(&self.dir.join(LIMIT_FILE))
+    }
+
+    /// Remembers a Claude Code session id this agent was started with, so its transcript can be found later.
+    ///
+    /// # Errors
+    ///
+    /// [`IdeError::Invalid`] for anything that is not a session id of [`crate::usage::new_claude_session_id`]'s
+    /// shape — it ends up in a file name — and [`IdeError::Io`].
+    pub fn record_claude_session(&self, id: &str) -> Result<()> {
+        use std::io::Write;
+        if !crate::usage::is_claude_session_id(id) {
+            return Err(IdeError::Invalid {
+                field: "claude session id",
+                reason: "not a session id".into(),
+            });
+        }
+        ensure_plain_dir(&self.dir)?;
+        let path = self.dir.join(CLAUDE_SESSIONS_FILE);
+        // The channel is reachable by the session: a link put in place of the file would take the line elsewhere.
+        if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            remove_file(&path)?;
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(io_error(&path))?;
+        writeln!(file, "{id}").map_err(io_error(&path))
+    }
+
+    /// The Claude Code session ids this agent was started with, oldest first. Lines that are not session ids are
+    /// skipped: the file is read back as a source of file names.
+    pub fn claude_sessions(&self) -> Vec<String> {
+        let text = read_to_string(&self.dir.join(CLAUDE_SESSIONS_FILE)).unwrap_or_default();
+        let mut ids: Vec<String> = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| crate::usage::is_claude_session_id(line))
+            .map(str::to_owned)
+            .collect();
+        // The oldest are kept: lines appended to the file by a session must not push the real ids out.
+        ids.truncate(MAX_CLAUDE_SESSIONS);
+        ids
+    }
+
     /// Removes the channel and the agent's own Claude Code task list, and
     /// nothing else. Called when the agent is deleted. Missing is fine.
     pub fn forget(&self) -> Result<()> {
@@ -443,6 +513,7 @@ impl Channel {
             |state: AgentState| json!([{ "type": "command", "command": self.state_line(state) }]);
         let waiting = json!([{ "type": "command", "command": self.waiting_line() }]);
         let plan_pointer = json!([{ "type": "command", "command": self.plan_pointer_line() }]);
+        let limit = json!([{ "type": "command", "command": self.limit_line() }]);
         let settings = json!({
             "_axiomata": format!(
                 "Written by Axiomata-OS for agent {} on every start; edits are overwritten.",
@@ -451,6 +522,8 @@ impl Channel {
             "hooks": {
                 "SessionStart": [{ "hooks": hook(AgentState::Idle) }],
                 "UserPromptSubmit": [{ "hooks": hook(AgentState::Working) }],
+                // A session that used up a limit may finish the step it is in and then call nothing more (A9).
+                "PreToolUse": [{ "matcher": "*", "hooks": limit }],
                 // Every tool call, so an approved permission prompt leaves
                 // `waiting` again instead of lasting until the turn ends.
                 "PostToolUse": [
@@ -470,6 +543,15 @@ impl Channel {
         let mut text = serde_json::to_string_pretty(&settings).unwrap_or_default();
         text.push('\n');
         text
+    }
+
+    /// The `PreToolUse` hook: refuses the call (exit code 2, the reason on stderr goes to the model) while the limit
+    /// marker exists, and does nothing otherwise. A plain file test, so it costs a tool call no more than a `stat`.
+    fn limit_line(&self) -> String {
+        let dir = shell_quote(&self.dir.display().to_string());
+        format!(
+            "d={dir}; if [ -e \"$d/{LIMIT_FILE}\" ]; then cat \"$d/{LIMIT_FILE}\" >&2; exit 2; fi"
+        )
     }
 
     /// One hook line: write `<state> <unix time>` atomically.
@@ -821,6 +903,77 @@ mod tests {
             })
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn the_limit_hook_lets_every_call_pass_until_the_marker_exists_and_then_refuses_with_its_text()
+    {
+        let channel = Channel::for_agent(&locations(), 8);
+        channel.reset().unwrap();
+        channel.install(Harness::ClaudeCode).unwrap();
+        let settings = fs::read_to_string(channel.dir().join(CLAUDE_SETTINGS_FILE)).unwrap();
+        let command = hook_command(&settings, "PreToolUse");
+        let run = || Command::new("sh").arg("-c").arg(&command).output().unwrap();
+
+        let open = run();
+        assert!(open.status.success() && open.stderr.is_empty());
+
+        channel.set_limit_reached("steps: 60 of 60").unwrap();
+        assert_eq!(channel.limit_reached().as_deref(), Some("steps: 60 of 60"));
+        let refused = run();
+        assert_eq!(
+            refused.status.code(),
+            Some(2),
+            "exit 2 is how a hook refuses a call"
+        );
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("steps: 60 of 60"));
+
+        channel.clear_limit_reached().unwrap();
+        assert!(run().status.success());
+        assert_eq!(channel.limit_reached(), None);
+    }
+
+    #[test]
+    fn a_new_start_does_not_lift_the_stop() {
+        let channel = Channel::for_agent(&locations(), 9);
+        channel.reset().unwrap();
+        channel.set_limit_reached("tokens").unwrap();
+        channel.reset().unwrap();
+        assert_eq!(channel.limit_reached().as_deref(), Some("tokens"));
+    }
+
+    #[test]
+    fn the_claude_sessions_of_an_agent_are_kept_across_starts_and_only_real_ids_are_read_back() {
+        let channel = Channel::for_agent(&locations(), 10);
+        channel.reset().unwrap();
+        let first = crate::usage::new_claude_session_id().unwrap();
+        let second = crate::usage::new_claude_session_id().unwrap();
+        channel.record_claude_session(&first).unwrap();
+        channel.reset().unwrap();
+        channel.record_claude_session(&second).unwrap();
+        assert_eq!(channel.claude_sessions(), vec![first, second.clone()]);
+
+        assert!(matches!(
+            channel.record_claude_session("../../etc/passwd"),
+            Err(IdeError::Invalid { .. })
+        ));
+        // A line somebody else put there is not a file name to look up.
+        let path = channel.dir().join(CLAUDE_SESSIONS_FILE);
+        let mut text = fs::read_to_string(&path).unwrap();
+        text.push_str("../../secret\n");
+        fs::write(&path, text).unwrap();
+        assert_eq!(channel.claude_sessions().len(), 2);
+
+        // Nor may a flood of well-formed ids push the real ones out: the oldest are the ones kept.
+        let mut text = fs::read_to_string(&path).unwrap();
+        for _ in 0..(MAX_CLAUDE_SESSIONS + 20) {
+            text.push_str(&crate::usage::new_claude_session_id().unwrap());
+            text.push('\n');
+        }
+        fs::write(&path, text).unwrap();
+        let kept = channel.claude_sessions();
+        assert_eq!(kept.len(), MAX_CLAUDE_SESSIONS);
+        assert_eq!(kept[1], second);
     }
 
     #[test]

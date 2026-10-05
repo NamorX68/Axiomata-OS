@@ -1826,6 +1826,17 @@ pub fn list_card_events(
     board::flow::list_events(&db, card_id, limit).map_err(|err| err.to_string())
 }
 
+/// What the sessions of a card have used and what they may use (A9), read fresh from what their harnesses left behind.
+#[tauri::command]
+pub async fn card_usage(
+    state: State<'_, CoreState>,
+    card_id: i64,
+) -> Result<Vec<axiomata_core::session_limits::SessionUsage>, String> {
+    axiomata_core::session_limits::card_usage(&state, card_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// The owner writes a line into a card's history.
 #[tauri::command]
 pub fn add_card_note(

@@ -388,6 +388,18 @@ pub fn set_opencode_session(db: &Connection, id: i64, session: Option<&str>) -> 
     Ok(changed == 1)
 }
 
+/// Every session the studio started for a card (worker or reviewer), across all projects — what the limit watcher looks
+/// at. A session of the owner's own making has no card and is not in it.
+pub fn card_sessions(db: &Connection) -> Result<Vec<Agent>> {
+    let mut stmt = db.prepare(&format!(
+        "SELECT {AGENT_COLS} FROM ide_agents WHERE card_id IS NOT NULL ORDER BY id"
+    ))?;
+    let raws = stmt
+        .query_map([], row_to_raw)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    raws.into_iter().map(RawAgent::into_agent).collect()
+}
+
 /// Every agent without an engine yet, across all projects — what the start-up derivation of the engine catalog
 /// works through (CP-A1).
 pub fn unassigned_agents(db: &Connection) -> Result<Vec<Agent>> {

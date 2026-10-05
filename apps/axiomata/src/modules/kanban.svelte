@@ -31,6 +31,7 @@
   import CardReviewForm from "./CardReviewForm.svelte";
   import CardStartForm from "./CardStartForm.svelte";
   import CardTakeOverForm from "./CardTakeOverForm.svelte";
+  import CardUsage from "./CardUsage.svelte";
   import { canReview, canStart, canTakeOver } from "../ide/cardStart";
   import { boardStore, refreshBoard } from "../core/boardStore";
   import {
@@ -983,6 +984,8 @@
         <button class="ax-btn danger" onclick={() => (confirmingDelete = true)}>Löschen</button>
       {/if}
     </div>
+
+    <CardUsage card={detail} />
 
     <section class="history" aria-label="Verlauf">
       <h4 class="flow-head">Verlauf</h4>

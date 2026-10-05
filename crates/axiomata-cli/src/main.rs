@@ -535,6 +535,9 @@ enum BoardAction {
         #[arg(long)]
         message: Option<String>,
     },
+    /// What the sessions of a card have used and what they may use (steps, tokens, money). Read from what the
+    /// harnesses left behind; a session that is stopped at a limit says so.
+    Usage { id: i64 },
     /// Give a started card back: the claim is dropped and the card waits in its open column again. The owner's step.
     Release { id: i64 },
     /// Move a card into this board's first done column.
@@ -1486,6 +1489,7 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             owner_only("taking a card over")?;
             board_take_over(core, id, message).await
         }
+        BoardAction::Usage { id } => board_usage(core, id).await,
         BoardAction::Release { id } => {
             owner_only("giving a card back")?;
             board_release(core, id)
@@ -2659,6 +2663,42 @@ async fn board_review(
     if let Err(err) = agent_prepare(core, session.agent.id).await {
         axiomata_core::card_session::discard_session(core, session.agent.id).await?;
         return Err(err.context("the reviewer did not start"));
+    }
+    Ok(())
+}
+
+async fn board_usage(core: &AxiomataCore, id: i64) -> Result<()> {
+    if board::store::get_card(&core.db_lock(), id)?.is_none() {
+        bail!("no card with id {id}");
+    }
+    let sessions = axiomata_core::session_limits::card_usage(core, id).await?;
+    if sessions.is_empty() {
+        println!("no session was started for card #{id}");
+    }
+    for session in sessions {
+        let kind = if session.review { "reviewer" } else { "worker" };
+        println!("{} ({kind}, role {})", session.name, session.role);
+        if !session.measured {
+            println!(
+                "  usage unknown: the harness's record could not be read, so no limit can stop it"
+            );
+        }
+        println!(
+            "  steps  {} of {}",
+            session.usage.steps, session.limits.max_steps
+        );
+        println!(
+            "  tokens {} of {}",
+            session.usage.tokens(),
+            session.limits.max_tokens
+        );
+        match session.cost_usd {
+            Some(cost) => println!("  money  ${cost:.2} of ${:.2}", session.limits.max_cost_usd),
+            None => println!("  money  not metered (subscription, or no price for its model)"),
+        }
+        if let Some(reason) = session.stopped {
+            println!("  STOPPED: {reason}");
+        }
     }
     Ok(())
 }

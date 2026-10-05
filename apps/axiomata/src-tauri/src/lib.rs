@@ -7,6 +7,7 @@ mod commands;
 mod debug;
 mod files;
 mod git;
+mod limit_watch;
 mod lsp;
 #[cfg(target_os = "macos")]
 mod menu;
@@ -207,6 +208,7 @@ pub fn run() {
             commands::take_over_card,
             commands::open_review_sessions,
             commands::list_card_events,
+            commands::card_usage,
             commands::add_card_note,
             commands::approve_card_proposal,
             commands::mark_card,
@@ -270,6 +272,7 @@ pub fn run() {
             app.manage(lsp::LspState::new());
             app.manage(debug::DebugState::default());
             card_watch::start(app.handle());
+            limit_watch::start(app.handle());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

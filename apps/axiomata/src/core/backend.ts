@@ -268,6 +268,30 @@ export type CardTakeOver =
   | { outcome: "done"; commit: string; project_id: number; cleanup: string[] }
   | { outcome: "conflict"; files: string[] };
 
+/** What a card session may use (`axiomata_roster::ResolvedLimits`). */
+export interface SessionLimits {
+  max_cost_usd: number;
+  max_tokens: number;
+  max_steps: number;
+}
+
+/** What one session of a card has used (A2A CP-A6c). Mirrors `axiomata_core::session_limits::SessionUsage`. */
+export interface SessionUsage {
+  agent_id: number;
+  name: string;
+  role: string;
+  review: boolean;
+  billing: "metered" | "subscription";
+  usage: { input_tokens: number; output_tokens: number; steps: number };
+  /** Money, for an engine paid per token whose model has a price; `null` otherwise. */
+  cost_usd: number | null;
+  limits: SessionLimits;
+  /** `false` when the harness's record could not be read: the figures are then zeros, not a finding. */
+  measured: boolean;
+  /** Why the session was stopped, while it is. */
+  stopped: string | null;
+}
+
 /** How a session is wired to the agent MCP server. Mirrors `axiomata_core::agent_entry::EntryStatus`. */
 export type AgentEntryStatus = "registered" | "unavailable" | "not_applicable";
 

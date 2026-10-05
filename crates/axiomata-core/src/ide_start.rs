@@ -84,21 +84,33 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
     }
     match ready.agent.harness {
         Harness::ClaudeCode => {
+            let channel = axiomata_ide::lifecycle::Channel::for_agent(&roots, ready.agent.id);
             let (arg, mcp) =
                 agent_entry::wire_claude(&roots, &ready.agent, role.as_ref(), launch.as_ref());
             if let Some(launch) = &launch {
                 require_entry(&mcp)?;
+                // The transcript is named after the session id, so the card's usage can be read back (A33). Every
+                // start is a new session; the channel keeps them all, and a card's usage is their sum. An engine
+                // whose command resumes a session names its own id: it would clash, and its usage reads as unknown.
+                let session_option = if resumes_a_session(&ready.launch_command) {
+                    String::new()
+                } else {
+                    let session = axiomata_ide::usage::new_claude_session_id().map_err(|err| {
+                        unattended_needs_the_entry(&format!("no session id could be made: {err}"))
+                    })?;
+                    channel.record_claude_session(&session)?;
+                    format!(" --session-id {session}")
+                };
                 // The prompt goes last, behind `--`: nothing after it may be read as an option.
                 let tail = agent_entry::claude_prompt_tail(&ready.agent, launch);
                 ready.launch_command = format!(
-                    "{} {} {tail}",
+                    "{} {}{session_option} {tail}",
                     ready.launch_command,
                     arg.unwrap_or_default()
                 );
             } else if let Some(arg) = arg {
                 ready.launch_command = format!("{} {arg}", ready.launch_command);
             }
-            let channel = axiomata_ide::lifecycle::Channel::for_agent(&roots, ready.agent.id);
             ready.launch_command = typeable(&channel, &ready.launch_command)?;
             Ok(Started { ready, mcp })
         }
@@ -173,6 +185,17 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             mcp: AgentEntry::not_applicable("the mini harness does not exist yet"),
         }),
     }
+}
+
+/// Whether a Claude Code command line already names or continues a session (`--resume`, `--continue`, `--session-id`),
+/// which `--session-id` cannot be combined with.
+fn resumes_a_session(command: &str) -> bool {
+    command.split_whitespace().any(|word| {
+        matches!(
+            word,
+            "--resume" | "-r" | "--continue" | "-c" | "--session-id" | "--from-pr"
+        )
+    })
 }
 
 /// The longest launch command typed into a pane as it is. A terminal in line mode takes at most 1024 bytes per line and
@@ -342,6 +365,14 @@ mod tests {
             again.ends_with("more\n") && again.matches("exec").count() == 1,
             "{again}"
         );
+    }
+
+    #[test]
+    fn a_command_that_resumes_a_session_gets_no_session_id_of_ours() {
+        assert!(resumes_a_session("claude --resume"));
+        assert!(resumes_a_session("claude --model 'x' --continue"));
+        assert!(resumes_a_session("claude --session-id abc"));
+        assert!(!resumes_a_session("claude --model 'x' --settings '/a/b'"));
     }
 
     #[test]

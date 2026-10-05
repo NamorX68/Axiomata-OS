@@ -2008,6 +2008,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       boardDeps = boardDeps.filter(([a, b]) => !(a === args.cardId && b === args.needs));
       return (boardDeps.length < before) as T;
     }
+    case "card_usage":
+      return [] as T;
     case "list_card_events":
       return boardEvents.filter((e) => e.card_id === args.cardId).slice(-Number(args.limit ?? 50)) as T;
     case "add_card_note": {

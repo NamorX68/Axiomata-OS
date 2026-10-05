@@ -183,6 +183,12 @@ pub fn claude_tasks_dir() -> PathBuf {
     claude_home().join("tasks")
 }
 
+/// Where Claude Code keeps its session transcripts (`<folder of the working directory>/<session id>.jsonl`); read only,
+/// to count what a card session used.
+pub fn claude_projects_dir() -> PathBuf {
+    claude_home().join("projects")
+}
+
 /// Where Claude Code writes plan-mode plans; read only.
 pub fn claude_plans_dir() -> PathBuf {
     claude_home().join("plans")

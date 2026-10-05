@@ -115,6 +115,10 @@
       listenBackend<{ cardId: number; reason: string }>("card:review-blocked", (blocked) => {
         toast(`Karte #${blocked.cardId} wartet auf ein Review: ${blocked.reason}`, "warning");
       }),
+      // A card session used up a limit and was stopped (A2A CP-A6c): the card keeps it, the owner decides.
+      listenBackend<{ cardId: number; agentName: string; reason: string }>("card:limit-reached", (stopped) => {
+        toast(`Karte #${stopped.cardId}: ${stopped.agentName} ist am Limit gestoppt (${stopped.reason}).`, "warning");
+      }),
     ];
     // Reviewers made before the page was listening (or before a reload) still need their panes: asked once, after the
     // listeners are in, so none is lost between the two.

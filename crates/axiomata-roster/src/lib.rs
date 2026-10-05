@@ -23,7 +23,7 @@ pub use engine::{Billing, Engine, MAX_LABEL_CHARS};
 pub use error::{Result, RosterError};
 pub use harness::Harness;
 pub use ident::{MAX_IDENT_LEN, check_slug};
-pub use role::{Limits, MAX_INSTRUCTIONS_BYTES, Role, Source, Tier};
+pub use role::{Limits, MAX_INSTRUCTIONS_BYTES, ResolvedLimits, Role, Source, Tier};
 pub use store::{
     Loaded, ROLE_FILE, Skipped, default_role, delete_role, load_roles, reviewer_role, save_role,
     seed_default_roles,

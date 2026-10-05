@@ -576,6 +576,36 @@ pub async fn send_prompt(session_id: &str, text: &str) -> Result<(), AxiomataErr
         .map_err(into_axiomata)
 }
 
+/// The running Opencode service, without starting it: what a look at card sessions asks once and then uses for every
+/// session in it (`None` when it is not running). Under `cfg(test)` it never connects.
+pub async fn running_service() -> Option<Service> {
+    find().await.ok()
+}
+
+/// What an Opencode session has used so far (A33), read from its messages.
+///
+/// Errors:
+///     A malformed `session_id` or anything the service refuses as [`AxiomataError::AgentApi`].
+pub async fn session_usage(
+    service: &Service,
+    session_id: &str,
+) -> Result<axiomata_ide::usage::Usage, AxiomataError> {
+    let messages = service
+        .all_messages(session_id)
+        .await
+        .map_err(into_axiomata)?;
+    Ok(axiomata_ide::usage::opencode_usage(&messages))
+}
+
+/// Interrupts what an Opencode session is running (a no-op when it is idle). A session that used up a limit is stopped
+/// this way (A9).
+///
+/// Errors:
+///     A malformed `session_id` or anything the service refuses as [`AxiomataError::AgentApi`].
+pub async fn interrupt_session(service: &Service, session_id: &str) -> Result<(), AxiomataError> {
+    service.interrupt(session_id).await.map_err(into_axiomata)
+}
+
 /// Registers the agent MCP server at the location `directory` on the shared service, replacing the one of an earlier
 /// start (`docs/plans/a2a.md` CP-A5, A31). `config` is a local server config; it carries the session's secret, so it
 /// is neither logged nor stored here.

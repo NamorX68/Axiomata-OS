@@ -192,3 +192,30 @@ async fn the_tracker_follows_a_plan_agent_turn_and_seeding_finds_its_plan() {
     assert_eq!(snapshot.plan.map(|p| p.markdown), Some(plan.markdown));
     service.delete_session(&session).await.expect("delete");
 }
+
+#[tokio::test]
+#[ignore = "talks to the real Opencode service"]
+async fn a_session_can_be_read_whole_and_interrupted_while_idle() {
+    let (bin, env) = opencode();
+    let service = Service::connect(&bin, &env).await.expect("connect");
+    let dir = scratch_dir("limits");
+    // No model call: a limit stop reads and interrupts a session, it never needs one to run.
+    let id = service
+        .create_session(&NewSession {
+            directory: dir.display().to_string(),
+            title: Some("axiomata-opencode live test".into()),
+            ..NewSession::default()
+        })
+        .await
+        .expect("create");
+    let messages = service.all_messages(&id).await.expect("all messages");
+    assert!(
+        messages.iter().all(|message| message.get("type").is_some()),
+        "{messages:?}"
+    );
+    service
+        .interrupt(&id)
+        .await
+        .expect("interrupt an idle session");
+    service.delete_session(&id).await.expect("delete");
+}

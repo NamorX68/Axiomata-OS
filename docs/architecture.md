@@ -1591,6 +1591,14 @@ and role are set in the same transaction. Roles offered are those in force for t
 catalog through `ide/rosterStore.ts`. `axiomata-cli ide agents new` still takes raw fields (the owner's own tool); agents without an engine (older rows) show their profile
 until the profile-derived assignment gives them one. Also: a session may send at most 60 messages in all (`Limits::max_per_sender_total`, owner's choice of "a number", 2026-10-04).
 
+### A2A CP-A6c built (2026-10-05)
+
+Limits per card session (`docs/plans/a2a.md` "CP-A6c im Detail"): `axiomata_ide::usage` counts what a session used (Claude Code transcript, deduplicated per reply; Opencode messages), `axiomata_core::session_limits`
+resolves the limits (role over tier default, `Limits::resolve`) and stops a session that used them up — a `limit-reached` marker in its channel that a generated `PreToolUse` hook turns into a refusal of every tool
+call (Claude Code), an interrupt through the service (Opencode), a `limit_stop` line in the card's history. The app's `limit_watch` task looks every 5 s; the card keeps its claim, the owner raises the role's limit or
+releases the card. Claude card sessions now start with `--session-id` so the transcript can be found. CLI `board usage`, Tauri `card_usage`, the Kanban's "Verbrauch" section. Plan and day limits, escalation and the
+team panel are CP-A8/CP-A9.
+
 ### A2A CP-A6b built (2026-10-05)
 
 Reviewer, return, take-over (`docs/plans/a2a.md` "CP-A6b im Detail"): `ide_agents` remembers its card (`card_id`, `card_review`, `start_ref`, migration 17); `card_session::start_review_session`

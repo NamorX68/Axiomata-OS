@@ -37,6 +37,7 @@ pub mod presence;
 pub mod provision;
 pub mod session_token;
 pub mod store;
+pub mod usage;
 pub mod worktree;
 
 pub use model::{Agent, AgentFields, Harness, NewAgent, NewProject, Project};

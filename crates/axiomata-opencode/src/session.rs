@@ -12,7 +12,7 @@ use crate::service::Service;
 
 /// Messages read per page when walking a session backwards.
 const PAGE_SIZE: u32 = 50;
-/// Upper bound on pages walked for one turn's messages (a turn is far shorter).
+/// Upper bound on pages walked: for one turn's messages (a turn is far shorter) and for a whole card session's.
 const MAX_PAGES: u32 = 40;
 
 /// A model as the service names it: provider plus model id.
@@ -225,6 +225,32 @@ impl Service {
             .unwrap_or_default())
     }
 
+    /// Every message of the session, newest first, up to a bound of `MAX_PAGES` pages. For counting what a session used:
+    /// a session past the bound reads as having used what its newest part did, so a caller keeps the highest figure it
+    /// ever read (`Meter` does) rather than trusting one reading to fall no further.
+    pub async fn all_messages(&self, session_id: &str) -> Result<Vec<Value>, OpencodeError> {
+        let base = session_path(session_id, "/message")?;
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..MAX_PAGES {
+            let path = page_path(&base, cursor.as_deref());
+            let page = self.get(&path).await?;
+            let items = page
+                .get("data")
+                .and_then(Value::as_array)
+                .ok_or_else(|| OpencodeError::Protocol("message list has no data".into()))?;
+            all.extend(items.iter().cloned());
+            cursor = page
+                .pointer("/cursor/next")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if cursor.is_none() || items.is_empty() {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
     /// The messages after `after_message_id`, oldest first. Walks the
     /// session backwards page by page until it reaches that message, so a
     /// long chat session is not read in full for one turn.
@@ -237,11 +263,7 @@ impl Service {
         let mut newer = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..MAX_PAGES {
-            let mut path = format!("{base}?order=desc&limit={PAGE_SIZE}");
-            if let Some(cursor) = &cursor {
-                path.push_str("&cursor=");
-                path.push_str(&percent_encode(cursor));
-            }
+            let path = page_path(&base, cursor.as_deref());
             let page = self.get(&path).await?;
             let items = page
                 .get("data")
@@ -268,6 +290,16 @@ impl Service {
     }
 }
 
+/// The path of one page of a session's messages, newest first. The first page names the order; a later page names only
+/// its cursor, which carries the order itself — the service refuses `cursor` together with `order` (HTTP 400,
+/// `InvalidCursorError`, Opencode 2.0.23).
+fn page_path(base: &str, cursor: Option<&str>) -> String {
+    match cursor {
+        None => format!("{base}?order=desc&limit={PAGE_SIZE}"),
+        Some(cursor) => format!("{base}?limit={PAGE_SIZE}&cursor={}", percent_encode(cursor)),
+    }
+}
+
 /// Percent-encodes a query value (the cursor is opaque and may hold anything).
 fn percent_encode(value: &str) -> String {
     value
@@ -284,6 +316,20 @@ fn percent_encode(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_first_page_names_the_order_a_later_one_names_its_cursor() {
+        let first = page_path("/api/session/s/message", None);
+        assert!(
+            first.contains("order=desc") && !first.contains("cursor"),
+            "{first}"
+        );
+        let later = page_path("/api/session/s/message", Some("a b+c"));
+        assert!(
+            later.contains("cursor=a%20b%2Bc") && !later.contains("order"),
+            "{later}"
+        );
+    }
 
     #[test]
     fn model_refs_split_at_the_first_slash() {

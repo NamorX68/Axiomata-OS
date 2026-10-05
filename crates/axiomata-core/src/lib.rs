@@ -40,6 +40,7 @@ pub mod paths;
 pub mod roster;
 pub mod routines;
 pub mod session;
+pub mod session_limits;
 pub mod skills;
 pub mod spend;
 pub mod terminal_settings;

@@ -66,6 +66,54 @@ pub struct Limits {
     pub max_steps: Option<u32>,
 }
 
+/// The limits a session is held to: a role's own ([`Limits`]) over the default of its tier. Every field is set, so a
+/// caller never has to decide what "no limit" would mean.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ResolvedLimits {
+    /// Money, applied only to an engine that is paid per token.
+    pub max_cost_usd: f64,
+    /// Tokens: input, output and cache writes, not cache reads (they cost a fraction and would swamp the count).
+    pub max_tokens: u64,
+    /// Tool calls.
+    pub max_steps: u32,
+}
+
+impl Tier {
+    /// The default limits of a session of this tier (`docs/plans/a2a.md`, A27): a light role is meant for small
+    /// changes, so a session that spends more than this has lost its way rather than found a hard card.
+    pub fn default_limits(self) -> ResolvedLimits {
+        match self {
+            Tier::Light => ResolvedLimits {
+                max_cost_usd: 0.5,
+                max_tokens: 400_000,
+                max_steps: 60,
+            },
+            Tier::Medium => ResolvedLimits {
+                max_cost_usd: 2.0,
+                max_tokens: 1_500_000,
+                max_steps: 120,
+            },
+            Tier::Heavy => ResolvedLimits {
+                max_cost_usd: 6.0,
+                max_tokens: 4_000_000,
+                max_steps: 250,
+            },
+        }
+    }
+}
+
+impl Limits {
+    /// What a session of `tier` is held to: each field this role sets, the tier's default for the rest.
+    pub fn resolve(&self, tier: Tier) -> ResolvedLimits {
+        let default = tier.default_limits();
+        ResolvedLimits {
+            max_cost_usd: self.max_cost_usd.unwrap_or(default.max_cost_usd),
+            max_tokens: self.max_tokens.unwrap_or(default.max_tokens),
+            max_steps: self.max_steps.unwrap_or(default.max_steps),
+        }
+    }
+}
+
 /// One role.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Role {
@@ -429,6 +477,36 @@ fn one_line(field: &'static str, value: &str, max: usize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn limits_a_role_leaves_open_come_from_its_tier() {
+        let own = Limits {
+            max_steps: Some(10),
+            ..Limits::default()
+        };
+        let resolved = own.resolve(Tier::Heavy);
+        assert_eq!(resolved.max_steps, 10);
+        assert_eq!(resolved.max_tokens, 4_000_000);
+        assert_eq!(resolved.max_cost_usd, 6.0);
+        assert_eq!(
+            Limits::default().resolve(Tier::Light),
+            Tier::Light.default_limits()
+        );
+    }
+
+    #[test]
+    fn a_stronger_tier_may_spend_more() {
+        let (light, medium, heavy) = (
+            Tier::Light.default_limits(),
+            Tier::Medium.default_limits(),
+            Tier::Heavy.default_limits(),
+        );
+        assert!(light.max_steps < medium.max_steps && medium.max_steps < heavy.max_steps);
+        assert!(light.max_tokens < medium.max_tokens && medium.max_tokens < heavy.max_tokens);
+        assert!(
+            light.max_cost_usd < medium.max_cost_usd && medium.max_cost_usd < heavy.max_cost_usd
+        );
+    }
 
     /// A field name and a change to a valid role that must break exactly that field.
     type Case = (&'static str, Box<dyn Fn(&mut Role)>);
