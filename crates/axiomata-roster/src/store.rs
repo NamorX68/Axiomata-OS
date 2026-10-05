@@ -355,7 +355,9 @@ pub fn planner_role() -> Role {
                        read the project — your checkout is read-only — as far as you need to cut the work well. A card \
 is one concern a single session can finish and a reviewer can judge in one sitting: a title that \
                        says what changes, a body that says why, and acceptance criteria that can be checked without \
-                       asking you (a command to run, a behaviour to see). Name for every card the role that should do \
+                       asking you (a command to run, a behaviour to see) and are proportionate: a change that cannot break the \
+                       build or the tests (documentation) gets no build or test criterion — its check is reading the \
+                       diff. Name for every card the role that should do \
                        it (`agent`, from the catalog) and why in a sentence (`agent_reason`); set `tier` by how hard \
                        the card is, not how long, and `kind` by the sort of work (implement, test, doc). Every card is reviewed \
                        automatically once its session reports it done, so never make a card for reviewing. Order the \

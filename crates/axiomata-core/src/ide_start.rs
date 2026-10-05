@@ -116,12 +116,17 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
         }
         Harness::Opencode => {
             let tools = agent_entry::role_tools(role.as_ref());
+            let shell = role
+                .as_ref()
+                .map(|role| agent_entry::opencode_shell_patterns(&role.permissions))
+                .unwrap_or_default();
             let session = opencode::ide_session(
                 ready.agent.opencode_session.as_deref(),
                 &ready.cwd,
                 &ready.agent.name,
                 ready.agent.model.as_deref(),
                 launch.as_ref().map(|launch| opencode::CardRights {
+                    shell: shell.as_slice(),
                     tools: tools.as_slice(),
                     read_only: launch.read_only(),
                 }),

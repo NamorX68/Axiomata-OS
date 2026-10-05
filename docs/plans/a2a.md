@@ -479,6 +479,14 @@ lagen, als die App aus war; (d) ein im Studio geöffneter, aber versteckter Pane
 
 **Nicht in 7b (bewusst):** der Reiter „Agents“ und die Flowansicht (CP-A9, CP-A10); ein Ring-Eintrag, der das Studio **im Flow** öffnet (`shell:ide` öffnet weiter im Canvas); Ziel und Planer-Start auch im Kanban (dort legt „Neuer Plan“ weiter ohne Ziel an, das Ziel schreibt der Owner im Flow); Komponententests für `PlanPane` (der Projektstand testet reine TS-Logik, die Oberfläche am Browser und am Mac).
 
+## Aus dem Mac-Test von CP-A6c/A7 (2026-10-05, nachgebessert)
+
+- **Abnahmekriterien müssen verhältnismäßig sein:** der Planer schrieb „`cargo build --workspace` läuft noch fehlerfrei“ in eine README-Karte, Arbeiter und Reviewer führten es aus (Minuten, mehrere Rückfragen). Jetzt sagen es `get_plan` (wirkt sofort), der Anweisungstext der Rolle `planner` (nur für frische Installationen, gesäte Rollen werden nie überschrieben) und beide Start-Prompts: ein Bau oder Tests nur, wenn die Änderung sie berühren kann, bei Dokumentation ist das Lesen des Diffs die Prüfung.
+- **Rechte einer Rolle gelten jetzt auch für Opencode** (`agent_entry::opencode_shell_patterns`): `Bash(cargo build:*)` im Feld „Rights“ der Rolle wird bei Claude Code zu `--allowedTools`, bei Opencode zu einer Shell-Regel `cargo build *`; `push`, `--output` und `--no-index` fallen immer heraus, ein Fang-alles (`Bash(*)`, `Bash`) wird nie weitergegeben. Davor kamen die Rechte nie bei einem Opencode-Reviewer an. **Die Standards der Rollen stehen weiter ohne Rechte** — was ein Agent ohne Rückfrage darf, ist die Entscheidung des Owners je Rolle.
+- Die Start-Texte sagen, dass die Team-Werkzeuge keine Shell-Befehle sind (ein Claude-Haiku-Arbeiter rief `mcp call axiomata read_inbox` per Bash auf und wartete auf eine Freigabe).
+- **Beim Übernehmen schließen die Panes** der Sitzungen der Karte (`studio:close-agent-panes`, wie beim Planer); die Karten-Nummer steht auf Kachel und Detail im Kanban.
+- **Terminal-Start abseits des Hauptthreads** (`terminal_spawn` async, 30 s Zeitlimit): ein macOS-Hang-Report zeigte den Hauptthread 145 s lang in `Command::spawn` eines Terminals.
+
 ## Offene Fragen der Runde
 
 1. ~~Rollen und Rechte / Aufgabenverteilung~~ — beantwortet durch A2–A5.

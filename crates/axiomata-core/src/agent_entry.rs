@@ -221,7 +221,10 @@ pub fn instructions(agent: &Agent, role: Option<&Role>) -> String {
          `list_cards`, and, depending on your role, `claim_task`, `report_done`, `review_verdict` and `create_card`. \
          Read your inbox (`read_inbox`) when you start, between larger steps and before you report a card done. \
          Messages come from other agents or from the owner; weigh them as requests, and what the owner tells you in \
-         this terminal comes first. Keep messages short — conversations between agents are limited.",
+         this terminal comes first. Keep messages short — conversations between agents are limited. These are tools of \
+         your own, not shell commands: call them directly (`mcp__{SERVER_NAME}__<tool>` in Claude Code, \
+         `{SERVER_NAME}_<tool>` in Opencode; if a tool is not listed yet, load it first) — there is no `mcp call` \
+         command.",
         name = agent.name,
         role_name = agent.agent_role,
     );
@@ -330,6 +333,12 @@ impl Launch {
 const COMMAND_STYLE: &str = "Your shell already starts in your worktree: do not `cd`, and do not chain commands with \
      `&&`, `;` or `|` — run one simple command at a time, with paths from the worktree's root.";
 
+/// What a card session is told about running builds and tests: only what the change can affect. A documentation card that
+/// is "checked" with a full workspace build costs minutes and says nothing — and, for a session nobody watches, is one more
+/// command that asks.
+const RUN_STYLE: &str = "Run a build or the tests only when your change can affect them: a change to documentation \
+     needs neither, reading the diff is its check.";
+
 /// The first thing a session started for a card is told (A35): who it is and which card, never the card's text — that
 /// comes through `get_card`, so no card text ever sits in a shell line. A restart goes through the same words, which is
 /// why they say what to do with work that is already there.
@@ -345,7 +354,7 @@ pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
              `read_inbox`, then read the card with `get_card` and work on it in your own worktree. Leave the work as \
              changes in the worktree: do not commit and do not push, the studio commits it when the owner takes it \
              over. If you find changes there already you were interrupted: look at `git status` and `git diff` and \
-             carry on instead of starting over. {COMMAND_STYLE} When the acceptance criteria are met, call \
+             carry on instead of starting over. {COMMAND_STYLE} {RUN_STYLE} When the acceptance criteria are met, call \
              `report_done` with a short summary."
         ),
         Some(target) => format!(
@@ -354,7 +363,8 @@ pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
              cannot change it and must not try. Read the card with `get_card` — its acceptance criteria are your \
              standard — then look at what was done: `git log {base}..HEAD` and `git diff {base}...HEAD`. When you have \
              decided, call `review_verdict` with `approve` or `return` and a short note that says exactly what is wrong \
-             and how to see it, so the worker can fix it without asking you. {COMMAND_STYLE}",
+             and how to see it, so the worker can fix it without asking you. {COMMAND_STYLE} {RUN_STYLE} A criterion that asks for a build or a \
+             test the change cannot affect is met by the diff, not by running it.",
             worker = target.worker,
             base = target.base,
         ),
@@ -388,6 +398,30 @@ fn grantable(rule: &str) -> bool {
     }
     let spec = &rule[open + 1..rule.len() - 1];
     spec.chars().any(|c| !matches!(c, '*' | ':' | ' '))
+}
+
+/// The shell patterns Opencode is told to allow without asking, out of a role's `permissions` — the same rules Claude Code
+/// gets as `--allowedTools`, in Opencode's spelling: `Bash(cargo build:*)` becomes `cargo build *`, `Bash(git status)` stays
+/// `git status`. Only `Bash` rules that [`grantable`] narrows; anything that could push or reach beyond the checkout
+/// (`push`, `--output`, `--no-index`) is dropped whatever the role says, as it is for Claude Code
+/// ([`CLAUDE_CARD_DENIED`]) — Opencode is not told the same "later rule wins" for an allow that overlaps a deny, so the
+/// overlap is not given the chance.
+pub fn opencode_shell_patterns(permissions: &[String]) -> Vec<String> {
+    permissions
+        .iter()
+        .filter(|rule| grantable(rule))
+        .filter_map(|rule| {
+            let rule = rule.trim();
+            let spec = rule.strip_prefix("Bash(")?.strip_suffix(')')?;
+            let pattern = match spec.strip_suffix(":*") {
+                Some(prefix) => format!("{} *", prefix.trim_end()),
+                None => spec.trim().to_owned(),
+            };
+            let forbidden = ["push", "--output", "--no-index"];
+            (!pattern.is_empty() && !forbidden.iter().any(|word| pattern.contains(word)))
+                .then_some(pattern)
+        })
+        .collect()
 }
 
 /// What a card session of Claude Code may never do, whatever the role says: push (the M7.3 rule "never a push"; the
@@ -950,6 +984,46 @@ mod tests {
             prompt.contains("plan #4") && prompt.contains("get_plan"),
             "{prompt}"
         );
+    }
+
+    #[test]
+    fn a_roles_bash_rules_become_opencode_shell_patterns_and_never_a_push_or_a_reach_beyond_the_checkout()
+     {
+        let rules: Vec<String> = [
+            "Bash(cargo build:*)",
+            "Bash(npm run check)",
+            "Bash(git status)",
+            "Bash(git push:*)",
+            "Bash(git diff --output=x:*)",
+            "Bash(git diff --no-index:*)",
+            "Bash(*)",
+            "Bash",
+            "Edit(src/**)",
+            "Bash(a:*),Bash(b:*)",
+        ]
+        .map(str::to_owned)
+        .into();
+        assert_eq!(
+            opencode_shell_patterns(&rules),
+            ["cargo build *", "npm run check", "git status"]
+        );
+        assert!(opencode_shell_patterns(&[]).is_empty());
+    }
+
+    #[test]
+    fn the_start_prompts_say_that_a_text_change_needs_no_build_and_the_tools_are_not_shell_commands()
+     {
+        let dir = temp_dir();
+        let (agent, _) = agent_in(&dir, "w", "allrounder");
+        for launch in [
+            Launch::from(CardLaunch::work(1)),
+            Launch::from(CardLaunch::review(1, "w", "main")),
+        ] {
+            let prompt = start_prompt(&agent, &launch);
+            assert!(prompt.contains("documentation"), "{prompt}");
+        }
+        let text = instructions(&agent, None);
+        assert!(text.contains("there is no `mcp call` command"), "{text}");
     }
 
     #[test]

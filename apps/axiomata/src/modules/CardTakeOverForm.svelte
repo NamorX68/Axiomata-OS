@@ -5,13 +5,16 @@
 -->
 <script lang="ts">
   import { untrack } from "svelte";
+  import { get } from "svelte/store";
 
   import { invokeBackend as invoke, type BoardCard, type CardTakeOver } from "../core/backend";
+  import { emit } from "../core/bus";
   import { messageOf } from "../core/errors";
   import { toast } from "../core/toast";
   import { gitApi } from "../fileapp/gitBackend";
   import { projectRootId } from "../fileapp/projectModel";
   import { defaultTakeOverMessage, unpushedNote } from "../ide/cardStart";
+  import { refreshAgents, session } from "../ide/projectSession";
 
   let { card, onDone }: { card: BoardCard; onDone: () => void } = $props();
 
@@ -37,12 +40,16 @@
     busy = true;
     error = "";
     conflict = [];
+    // The sessions made for the card, read before they are gone: a take-over ends them, and their panes have nothing left to run.
+    const sessions = get(session).agents.filter((agent) => agent.card_id === card.id).map((agent) => agent.id);
     try {
       const result = await invoke<CardTakeOver>("take_over_card", { cardId: card.id, message: message.trim() || null });
       if (result.outcome === "conflict") {
         conflict = result.files;
         return;
       }
+      if (sessions.length > 0) emit("studio:close-agent-panes", { agentIds: sessions });
+      void refreshAgents().catch(() => {});
       toast(`Karte #${card.id} ist übernommen (${result.commit.slice(0, 8)}).`, "info");
       for (const note of result.cleanup) toast(`Nicht aufgeräumt: ${note}`, "warning");
       await sayWhatIsNotPushed(result.project_id);

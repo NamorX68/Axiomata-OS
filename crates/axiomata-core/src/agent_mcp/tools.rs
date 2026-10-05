@@ -509,7 +509,8 @@ fn get_plan(ctx: &Context) -> ToolResult {
     "note": "The goal is what the owner wrote when they made the plan. Assign each card to a role of kind implement (or \
         the kind its work \
             needs); roles of kind review and plan do not take cards, and reviewing is automatic: never propose a card \
-            for reviewing. Your cards wait for the owner's yes.",
+            for reviewing. Acceptance criteria must be proportionate: do not ask for a build or the tests when the change \
+            cannot affect them (a documentation card is checked by reading the diff). Your cards wait for the owner's yes.",
     }))
 }
 

@@ -438,6 +438,13 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
             .iter()
             .map(|tool| PermissionRule::new(&format!("{server}_{tool}"), "*", "allow")),
     );
+    // What the role file lets the session run — a build, the tests — is the owner's choice and given by name.
+    rules.extend(
+        rights
+            .shell
+            .iter()
+            .map(|pattern| PermissionRule::new("shell", pattern, "allow")),
+    );
     // A reviewer judges what it is shown and changes nothing — and so does a planner; both read with git, which it is
     // allowed to
     // do one command at a time without asking. Anything else, and a chain of several commands, is still a question.
@@ -478,6 +485,8 @@ pub struct CardRights<'a> {
     pub tools: &'a [&'a str],
     /// A reviewer or a planner: no edits at all.
     pub read_only: bool,
+    /// Shell patterns the owner's role file lets the session run without asking (`agent_entry::opencode_shell_patterns`).
+    pub shell: &'a [String],
 }
 
 /// A session of an IDE agent on the service, and whether this start made it.
@@ -781,6 +790,7 @@ mod tests {
         let rules = card_permissions(&CardRights {
             tools: &["read_inbox", "claim_task"],
             read_only: false,
+            shell: &[],
         });
         let has = |action: &str, effect: &str| {
             rules
@@ -807,11 +817,32 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_patterns_of_a_role_are_allowed_by_name_for_a_worker_and_a_reviewer() {
+        let shell = vec!["cargo build *".to_owned(), "npm run check".to_owned()];
+        for read_only in [false, true] {
+            let rules = card_permissions(&CardRights {
+                tools: &[],
+                read_only,
+                shell: &shell,
+            });
+            for pattern in &shell {
+                assert!(
+                    rules.iter().any(|r| r.action == "shell"
+                        && &r.resource == pattern
+                        && r.effect == "allow"),
+                    "{pattern} (read_only: {read_only})"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_read_only_session_may_read_with_git_but_not_reach_beyond_the_checkout() {
         let rules = |read_only| {
             card_permissions(&CardRights {
                 tools: &["get_plan"],
                 read_only,
+                shell: &[],
             })
         };
         let position = |rules: &[PermissionRule], resource: &str, effect: &str| {
@@ -842,6 +873,7 @@ mod tests {
         let rights = |review| CardRights {
             tools: &["review_verdict"],
             read_only: review,
+            shell: &[],
         };
         let denies_edits = |rules: Vec<PermissionRule>| {
             rules
