@@ -37,6 +37,7 @@
     planStatusLabel,
     proposalsOf,
     proposalTitle,
+    allCardsOfPlan,
     cardsOfPlan,
     readyToTakeOver,
     runsByItself,
@@ -119,7 +120,10 @@
   const cards = $derived(plan && data ? cardsOfPlan(data.cards, plan.id) : []);
   const proposals = $derived(plan && data ? proposalsOf(data.cards, plan.id) : []);
   const planner = $derived(plan ? plannerOf($session.agents, plan.id) : null);
-  const working = $derived(cards.filter((card) => card.state !== "proposed"));
+  // Cards that left the board when the plan was taken over are still the plan's: a finished plan shows what it did.
+  const working = $derived(
+    plan && data ? allCardsOfPlan(data.cards, plan.id).filter((card) => card.state !== "proposed") : [],
+  );
   const loadError = $derived(data?.error ?? "");
 
   // A planner writes its cards from another process: while one is at work the board is read again every few seconds.

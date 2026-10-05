@@ -2361,6 +2361,19 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "task_command_line":
       if (String(args.id).startsWith("project:") && !tasksTrusted) throw { kind: "NeedsTrust", message: "not confirmed" };
       return `echo running ${args.id}` as T;
+    case "git_outgoing":
+      return [
+        { id: "6fa75d8", subject: "Plan #2: Schrift im Datei-Fenster", when: "2 minutes ago", files: [] },
+        {
+          id: "906f3bb",
+          subject: "#63 Datei-Fenster: eigene Schrift",
+          when: "3 minutes ago",
+          files: [
+            { status: "M", path: "apps/axiomata/src/fileapp/FilePanel.svelte" },
+            { status: "A", path: "apps/axiomata/src/fileapp/panelZoomKeys.ts" },
+          ],
+        },
+      ] as T;
     case "git_branches":
       return [...gitBranches].sort().map((name) => ({ name, current: name === gitBranch, upstream: name === "main" ? "origin/main" : null })) as T;
     case "git_switch":

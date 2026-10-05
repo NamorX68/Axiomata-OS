@@ -476,6 +476,86 @@ pub struct Branch {
     pub upstream: Option<String>,
 }
 
+/// One file a commit changed, as `git log --name-status` says it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutgoingFile {
+    /// `A`dded, `M`odified, `D`eleted, `T`ype changed.
+    pub status: String,
+    pub path: String,
+}
+
+/// One commit that is on the checked-out branch and not on its upstream yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutgoingCommit {
+    /// The short id.
+    pub id: String,
+    pub subject: String,
+    /// When it was made, as git says it ("2 hours ago").
+    pub when: String,
+    pub files: Vec<OutgoingFile>,
+}
+
+/// How many commits [`outgoing`] reads at most: the panel lists what a push would publish, not a history.
+pub const OUTGOING_LIMIT: usize = 200;
+
+/// The commits a push of the checked-out branch would publish — those after its upstream — newest first, each with the
+/// files it changed. Empty when the branch has no upstream (a push would publish all of it, which is no list worth
+/// showing) or `HEAD` has no commit. Read-only.
+pub fn outgoing(repo: &Path) -> Result<Vec<OutgoingCommit>> {
+    if !has_head(repo) {
+        return Ok(Vec::new());
+    }
+    let (code, _) = git_with(
+        repo,
+        &["rev-parse", "--verify", "--quiet", "@{upstream}"],
+        &[0, 1],
+    )?;
+    if code != 0 {
+        return Ok(Vec::new());
+    }
+    let limit = format!("-n{OUTGOING_LIMIT}");
+    let raw = git(
+        repo,
+        &[
+            "log",
+            &limit,
+            "--no-renames",
+            "--name-status",
+            "--format=%x01%h%x00%s%x00%cr",
+            "@{upstream}..HEAD",
+        ],
+    )?;
+    Ok(parse_outgoing(&raw))
+}
+
+fn parse_outgoing(raw: &str) -> Vec<OutgoingCommit> {
+    raw.split('\u{1}')
+        .filter(|chunk| !chunk.trim().is_empty())
+        .filter_map(|chunk| {
+            let mut lines = chunk.lines();
+            let mut head = lines.next()?.split('\0');
+            let id = head.next()?.to_string();
+            let subject = head.next()?.to_string();
+            let when = head.next().unwrap_or_default().to_string();
+            let files = lines
+                .filter_map(|line| {
+                    let (status, path) = line.split_once('\t')?;
+                    Some(OutgoingFile {
+                        status: status.to_string(),
+                        path: path.to_string(),
+                    })
+                })
+                .collect();
+            Some(OutgoingCommit {
+                id,
+                subject,
+                when,
+                files,
+            })
+        })
+        .collect()
+}
+
 /// Makes `path` a git repository (`git init`). Refuses a folder that already is one — or lies inside
 /// one — so a nested repository is never made by accident. **Creates `.git`.**
 pub fn init(path: &Path) -> Result<()> {
@@ -1205,6 +1285,38 @@ mod tests {
             "second"
         );
         assert_eq!(status(&work.0).unwrap().ahead, 0);
+    }
+
+    #[test]
+    fn outgoing_lists_the_commits_a_push_would_publish_with_their_files() {
+        let (_bare, work) = with_remote("outgoing");
+        // No upstream yet: no list.
+        assert!(outgoing(&work.0).unwrap().is_empty());
+        push(&work.0).unwrap();
+        assert!(outgoing(&work.0).unwrap().is_empty());
+
+        work.write("a.txt", "2\n");
+        work.write("dir/b.txt", "b\n");
+        work.commit_all("second: two files");
+        work.run(&["rm", "--quiet", "a.txt"]);
+        work.run(&["commit", "--quiet", "-m", "third"]);
+
+        let list = outgoing(&work.0).unwrap();
+        assert_eq!(
+            list.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(),
+            ["third", "second: two files"]
+        );
+        assert_eq!(
+            list[0].files,
+            [OutgoingFile {
+                status: "D".into(),
+                path: "a.txt".into()
+            }]
+        );
+        let mut paths: Vec<_> = list[1].files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, ["a.txt", "dir/b.txt"]);
+        assert!(list[1].id.len() >= 7 && !list[1].when.is_empty());
     }
 
     #[test]

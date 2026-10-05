@@ -12,7 +12,9 @@ use std::path::PathBuf;
 
 use axiomata_git::GitError;
 use axiomata_git::diff::FileDiff;
-use axiomata_git::repo::{self, Blob, Branch, PushResult, RepoStatus, Side, Source};
+use axiomata_git::repo::{
+    self, Blob, Branch, OutgoingCommit, PushResult, RepoStatus, Side, Source,
+};
 use serde::Serialize;
 use tauri::State;
 
@@ -174,6 +176,15 @@ pub async fn git_branches(
     root: String,
 ) -> Result<Vec<Branch>, FileError> {
     on_repo(&state, root, |dir| repo::branches(&dir)).await
+}
+
+/// The commits a push of the checked-out branch would publish, each with the files it changed.
+#[tauri::command]
+pub async fn git_outgoing(
+    state: State<'_, CoreState>,
+    root: String,
+) -> Result<Vec<OutgoingCommit>, FileError> {
+    on_repo(&state, root, |dir| repo::outgoing(&dir)).await
 }
 
 /// Switches to a local branch; git refuses when uncommitted changes are in the way.

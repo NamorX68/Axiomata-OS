@@ -39,6 +39,20 @@ export interface Branch {
   upstream: string | null;
 }
 
+/** One file a commit that is not on the upstream yet changed (`A`dded, `M`odified, `D`eleted, `T`ype changed). */
+export interface OutgoingFile {
+  status: string;
+  path: string;
+}
+
+/** A commit a push would publish (`axiomata_git::repo::OutgoingCommit`). */
+export interface OutgoingCommit {
+  id: string;
+  subject: string;
+  when: string;
+  files: OutgoingFile[];
+}
+
 export interface PushResult {
   remote: string;
   branch: string;
@@ -67,6 +81,8 @@ export interface GitApi {
   discard(root: string, paths: string[]): Promise<void>;
   /** Throws away one hunk of a file's unstaged diff. Destroys work. */
   discardHunk(root: string, path: string, index: number, header: string): Promise<void>;
+  /** The commits a push of the checked-out branch would publish, newest first; empty without an upstream. */
+  outgoing(root: string): Promise<OutgoingCommit[]>;
   branches(root: string): Promise<Branch[]>;
   switchBranch(root: string, name: string): Promise<void>;
   createBranch(root: string, name: string): Promise<void>;
@@ -90,6 +106,7 @@ export const gitApi: GitApi = {
   init: (root) => invoke<void>("git_init", { root }),
   discard: (root, paths) => invoke<void>("git_discard", { root, paths }),
   discardHunk: (root, path, index, header) => invoke<void>("git_discard_hunk", { root, path, index, header }),
+  outgoing: (root) => invoke<OutgoingCommit[]>("git_outgoing", { root }),
   branches: (root) => invoke<Branch[]>("git_branches", { root }),
   switchBranch: (root, name) => invoke<void>("git_switch", { root, name }),
   createBranch: (root, name) => invoke<void>("git_create_branch", { root, name }),

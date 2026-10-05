@@ -33,6 +33,11 @@ export function cardsOfPlan(cards: BoardCard[], planId: number): BoardCard[] {
   return cards.filter((card) => card.plan_id === planId && card.archived_at === null);
 }
 
+/** Every card of a plan, the archived ones (taken over) included: what a finished plan did is still its own. */
+export function allCardsOfPlan(cards: BoardCard[], planId: number): BoardCard[] {
+  return cards.filter((card) => card.plan_id === planId).sort((a, b) => a.id - b.id);
+}
+
 /** The cards of a plan that wait for the owner's yes. */
 export function proposalsOf(cards: BoardCard[], planId: number): BoardCard[] {
   return cardsOfPlan(cards, planId).filter((card) => card.state === "proposed");

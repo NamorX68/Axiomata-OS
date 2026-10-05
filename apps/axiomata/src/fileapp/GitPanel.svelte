@@ -17,7 +17,7 @@
 
   import { messageOf } from "../core/errors";
   import IconButton from "../ui/IconButton.svelte";
-  import { gitApi, type Branch, type RepoStatus, type Side } from "./gitBackend";
+  import { gitApi, type Branch, type OutgoingCommit, type RepoStatus, type Side } from "./gitBackend";
   import { canCommit, groupEntries, markOf, pushState, splitPath, type GitRow } from "./gitModel";
 
   interface Props {
@@ -49,6 +49,11 @@
   let branchList = $state<Branch[]>([]);
   let newBranch = $state("");
   let branchBox = $state<HTMLElement | undefined>();
+  /** What a push would publish: the commits after the upstream, read with the status while there are any. */
+  let outgoing = $state.raw<OutgoingCommit[]>([]);
+  let outgoingOpen = $state(false);
+  /** The commits whose files are shown. */
+  let openCommits = $state<Record<string, boolean>>({});
   let timer: ReturnType<typeof setInterval> | undefined;
   let generation = 0;
 
@@ -70,6 +75,8 @@
       notARepo = state.state === "not_a_repo";
       status = state.state === "ready" ? state.status : null;
       error = "";
+      outgoing = status && status.ahead > 0 ? await gitApi.outgoing(root).catch(() => []) : [];
+      if (mine !== generation) return;
       onStatus?.(status?.entries.length ?? 0, status);
     } catch (err) {
       if (mine === generation) error = messageOf(err);
@@ -338,6 +345,45 @@
     </header>
 
     <div class="scroll">
+      {#if outgoing.length > 0}
+        <div class="group-head">
+          <button
+            type="button"
+            class="link"
+            aria-expanded={outgoingOpen}
+            title="What a push would publish"
+            onclick={() => (outgoingOpen = !outgoingOpen)}
+          >
+            {outgoingOpen ? "▾" : "▸"} To push <small>{outgoing.length}</small>
+          </button>
+        </div>
+        {#if outgoingOpen}
+          <ul class="outgoing">
+            {#each outgoing as commit (commit.id)}
+              <li>
+                <button
+                  type="button"
+                  class="commit-line"
+                  aria-expanded={openCommits[commit.id] === true}
+                  onclick={() => (openCommits = { ...openCommits, [commit.id]: !openCommits[commit.id] })}
+                >
+                  <span class="sha">{commit.id}</span>
+                  <span class="subject">{commit.subject}</span>
+                  <small>{commit.when} · {commit.files.length} {commit.files.length === 1 ? "file" : "files"}</small>
+                </button>
+                {#if openCommits[commit.id]}
+                  <ul class="files">
+                    {#if commit.files.length === 0}<li class="muted">No file changes (a merge).</li>{/if}
+                    {#each commit.files as file (file.path)}
+                      <li><span class="mark">{file.status}</span> {file.path}</li>
+                    {/each}
+                  </ul>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/if}
       <div class="group-head">
         <span>Staged <small>{groups.staged.length}</small></span>
         {#if groups.staged.length > 0}
@@ -543,6 +589,55 @@
     font-size: var(--ax-font-size-xs);
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
+  }
+
+  .outgoing,
+  .files {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .commit-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-1) var(--ax-space-3);
+    background: none;
+    border: 0;
+    color: var(--ax-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .commit-line:hover {
+    background: var(--ax-accent-muted);
+  }
+  .commit-line .sha {
+    font-family: var(--ax-font-mono);
+    color: var(--ax-text-muted);
+  }
+  .commit-line .subject {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .files li {
+    padding: 0 var(--ax-space-3) 0 calc(28px * var(--ax-ui-scale));
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+    overflow-wrap: anywhere;
+  }
+  .files .mark {
+    display: inline-block;
+    width: 1.2em;
+    color: var(--ax-accent);
+  }
+  .files .muted {
+    color: var(--ax-text-muted);
   }
 
   .group-head small {

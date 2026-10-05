@@ -130,6 +130,7 @@ pub fn run() {
             git::git_discard,
             git::git_discard_hunk,
             git::git_branches,
+            git::git_outgoing,
             git::git_switch,
             git::git_create_branch,
             tasks::tasks_list,

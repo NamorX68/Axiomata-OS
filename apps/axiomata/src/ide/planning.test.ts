@@ -19,6 +19,7 @@ import {
   proposalsOf,
   proposalTitle,
   runEventNote,
+  allCardsOfPlan,
   readyToTakeOver,
   runsByItself,
   withPlanPane,
@@ -170,6 +171,16 @@ describe("a plan that runs by itself", () => {
     expect(runsByItself({ ...base, auto_start_max: null })).toBe(false);
     expect(runsByItself({ ...base, project_id: null })).toBe(false);
     expect(runsByItself({ status: "approved", auto_start_max: 1 })).toBe(false);
+  });
+});
+
+describe("the cards of a finished plan", () => {
+  it("include the archived ones a take-over closed, in the order they were made", () => {
+    const card = (id: number, plan: number | null, archived: string | null) =>
+      ({ id, plan_id: plan, archived_at: archived }) as Parameters<typeof allCardsOfPlan>[0][number];
+    const cards = [card(63, 2, "2026-10-05T20:30:00Z"), card(7, 1, null), card(62, 2, "2026-10-05T20:30:00Z")];
+    expect(allCardsOfPlan(cards, 2).map((c) => c.id)).toEqual([62, 63]);
+    expect(allCardsOfPlan(cards, 3)).toEqual([]);
   });
 });
 
