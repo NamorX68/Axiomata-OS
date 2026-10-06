@@ -47,7 +47,9 @@ pub struct PlanStartRequest {
     pub project_id: i64,
     /// An engine of the catalog to run on; the planner role names none, so this is what the owner picked.
     pub engine_id: Option<String>,
-    /// A session that grills the plan's goal (the role of kind `grill`) instead of one that cuts it into cards.
+    /// A session that grills the cards proposed for the plan (the role of kind `grill`) instead of one that cuts the
+    /// goal
+    /// into cards.
     pub grill: bool,
     /// The role to play, by name; it must be of the kind the start is for. `None` takes the seeded one.
     pub role: Option<String>,
@@ -287,6 +289,9 @@ fn finish(
     if let Err(err) = agent_store::set_plan(db, agent.id, Some(current.id), Some(commit)) {
         agent_store::delete_agent(db, agent.id)?;
         return Err(err.into());
+    }
+    if request.grill {
+        flow::mark_plan_grilled(db, current.id)?;
     }
     Ok(PlanSession {
         agent: agent_store::get_agent(db, agent.id)?.unwrap_or(agent),
@@ -568,11 +573,19 @@ mod tests {
     fn a_plan_may_have_a_grilling_session_beside_its_planner_but_only_one_of_each() {
         let w = world(true);
         let planner = w.start(Some("opus")).unwrap();
+        assert!(
+            !flow::plan_grilled(&lock(&w.db), w.plan).unwrap(),
+            "a planner alone does not grill"
+        );
         let grill = w.start_grill(Some("opus")).unwrap();
         assert_eq!(grill.role, "grill");
         assert_eq!(grill.agent.name, format!("grill-{}", w.plan));
         assert_eq!(grill.agent.plan_id, Some(w.plan));
         assert_ne!(grill.agent.id, planner.agent.id);
+        assert!(
+            flow::plan_grilled(&lock(&w.db), w.plan).unwrap(),
+            "starting a grill is what the approval's 'not grilled' hint reads"
+        );
         let again = w.start_grill(Some("opus")).unwrap_err().to_string();
         assert!(again.contains("has such a session already"), "{again}");
         assert!(w.start(Some("opus")).is_err(), "still only one planner");

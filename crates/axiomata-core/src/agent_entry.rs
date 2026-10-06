@@ -285,8 +285,9 @@ impl CardLaunch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanLaunch {
     pub plan_id: i64,
-    /// The session grills the plan's goal (interviews the owner) instead of cutting it into cards: told by the role's kind
-    /// when the session starts ([`Launch::for_role`]), not stored.
+    /// The session grills the cards proposed for the plan (interviews the owner) instead of cutting the goal into
+    /// cards:
+    /// told by the role's kind when the session starts ([`Launch::for_role`]), not stored.
     pub interview: bool,
 }
 
@@ -347,6 +348,12 @@ impl Launch {
 const COMMAND_STYLE: &str = "Your shell already starts in your worktree: do not `cd`, and do not chain commands with \
      `&&`, `;` or `|` — run one simple command at a time, with paths from the worktree's root.";
 
+/// What a card session is told about changing files. Claude Code asks about a shell command that writes a file
+/// (`cat >>`, a heredoc, `sed -i`) however its edits are allowed, and a session nobody watches then stands still on that
+/// question: its own edit tools are what the worktree's edits are allowed for.
+const FILE_STYLE: &str = "Change files with your edit tools, never with a shell command that writes them (`cat >`, \
+     `>>`, a heredoc, `tee`, `sed -i`).";
+
 /// What a card session is told about running builds and tests: only what the change can affect. A documentation card that
 /// is "checked" with a full workspace build costs minutes and says nothing — and, for a session nobody watches, is one more
 /// command that asks.
@@ -370,7 +377,8 @@ pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
              changes in the worktree: do not commit and do not push, the studio commits it when the owner takes it \
              over. If you find changes there already you were interrupted: look at `git status` and `git diff` and \
              carry on instead of starting over. If `get_card` shows that the card was sent back, its history holds what the \
-             reviewer found wrong: fix exactly that. {COMMAND_STYLE} {RUN_STYLE} When the acceptance criteria are met, call \
+             reviewer found wrong: fix exactly that. {COMMAND_STYLE} {FILE_STYLE} {RUN_STYLE} When the acceptance \
+             criteria are met, call \
              `report_done` with a short summary."
         ),
         Some(target) => format!(
@@ -391,12 +399,14 @@ pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
 fn grill_prompt(agent: &Agent, launch: &PlanLaunch) -> String {
     let (name, role, plan_id) = (&agent.name, &agent.agent_role, launch.plan_id);
     format!(
-        "You are the session \"{name}\", role `{role}`, and you grill plan #{plan_id}. Read your inbox with `read_inbox`, \
-         then read the plan with `get_plan`: its goal, and what was proposed so far. Your worktree is a read-only checkout \
-         of the project as it was when you started — read it to answer your own questions, change nothing. Then interview \
-         the owner here in the terminal about the goal, in rounds, as your role describes: write your round, wait for the \
-         answers. {COMMAND_STYLE} When the owner agrees the interview is done, call `propose_goal` once with the \
-         sharpened goal; the owner decides whether it replaces theirs. You make no cards and start nothing."
+        "You are the session \"{name}\", role `{role}`, and you grill the cards proposed for plan #{plan_id}. Read \
+         your inbox with `read_inbox`, then read the plan with `get_plan`: its goal, and the cards proposed so far. \
+         Your worktree is a read-only checkout of the project as it was when you started — read it to answer your \
+         own questions, change nothing. Then interview the owner here in the terminal about the cards, in rounds, \
+         as your role describes: write your round, wait for the answers. {COMMAND_STYLE} The planner session owns \
+         the proposals: when the owner agrees on changes, send them to it with `send_message` (find it with \
+         `list_agents`); you make no cards yourself and start nothing. Only if the goal itself is wrong, call \
+         `propose_goal` once with the sharpened goal; the owner decides whether it replaces theirs."
     )
 }
 
@@ -433,10 +443,11 @@ fn grantable(rule: &str) -> bool {
 
 /// The shell patterns Opencode is told to allow without asking, out of a role's `permissions` — the same rules Claude Code
 /// gets as `--allowedTools`, in Opencode's spelling: `Bash(cargo build:*)` becomes `cargo build *`, `Bash(git status)` stays
-/// `git status`. Only `Bash` rules that [`grantable`] narrows; anything that could push or reach beyond the checkout
-/// (`push`, `--output`, `--no-index`) is dropped whatever the role says, as it is for Claude Code
-/// ([`CLAUDE_CARD_DENIED`]) — Opencode is not told the same "later rule wins" for an allow that overlaps a deny, so the
-/// overlap is not given the chance.
+/// `git status`. Only `Bash` rules that [`grantable`] narrows; a rule that itself names `push`, `--output` or
+/// `--no-index`
+/// is dropped whatever the role says. That filter reads the rule's text only: what a broad rule (`git diff *`) takes
+/// in at run
+/// time is held back by the deny rules every card session gets (`opencode::card_permissions`, [`CLAUDE_CARD_DENIED`]).
 pub fn opencode_shell_patterns(permissions: &[String]) -> Vec<String> {
     permissions
         .iter()
@@ -456,10 +467,16 @@ pub fn opencode_shell_patterns(permissions: &[String]) -> Vec<String> {
 }
 
 /// What a card session of Claude Code may never do, whatever the role says: push (the M7.3 rule "never a push"; the
-/// Opencode session gets the same as a rule), and write its own rules — `acceptEdits` takes edits without asking, and a
+/// Opencode session gets the same as a rule), write or read a file outside the checkout with git (`--output`,
+/// `--no-index`,
+/// which the role's own `git diff:*`/`git show:*` would take in), and write its own rules — `acceptEdits` takes edits
+/// without asking, and a
 /// session that can write `.claude/settings*.json` or a `.mcp.json` of its worktree could widen its own rights next
 /// time.
-const CLAUDE_CARD_DENIED: &str = "Bash(git push),Bash(git push *),Bash(git * push),Bash(git * push *),Edit(.claude/**),Edit(.mcp.json)";
+const CLAUDE_CARD_DENIED: &str = concat!(
+    "Bash(git push),Bash(git push *),Bash(git * push),Bash(git * push *),",
+    "Bash(git * --output*),Bash(git * --no-index*),Edit(.claude/**),Edit(.mcp.json)"
+);
 
 /// What an unattended Claude Code session may do without asking (A34): edits in its worktree, the server's own tools
 /// for its role — each one listed, so no wildcard grants a tool the role does not have — and what the role file adds
@@ -978,6 +995,49 @@ mod tests {
     }
 
     #[test]
+    fn a_claude_card_session_may_not_make_git_write_or_read_outside_its_checkout() {
+        let options = claude_card_options(Some(&axiomata_roster::default_role()), false);
+        assert!(options.contains("Bash(git * --output*)"), "{options}");
+        assert!(options.contains("Bash(git * --no-index*)"), "{options}");
+        let review = claude_card_options(Some(&axiomata_roster::reviewer_role()), true);
+        assert!(review.contains("Bash(git * --output*)"), "{review}");
+    }
+
+    #[test]
+    fn a_worker_is_told_to_change_files_with_its_edit_tools_and_a_reviewer_is_not() {
+        let dir = temp_dir();
+        let (agent, _) = agent_in(&dir, "allrounder-7", "allrounder");
+        let work = start_prompt(&agent, &Launch::from(CardLaunch::work(7)));
+        assert!(
+            work.contains("never with a shell command that writes them"),
+            "{work}"
+        );
+        let review = start_prompt(&agent, &Launch::from(CardLaunch::review(7, "w", "base")));
+        assert!(!review.contains("edit tools"), "{review}");
+    }
+
+    #[test]
+    fn every_rule_the_seeded_roles_carry_is_one_a_session_is_given_without_asking() {
+        for role in [
+            axiomata_roster::default_role(),
+            axiomata_roster::reviewer_role(),
+            axiomata_roster::implementer_light_role(),
+            axiomata_roster::implementer_heavy_role(),
+            axiomata_roster::documenter_role(),
+            axiomata_roster::tester_role(),
+            axiomata_roster::reviewer_light_role(),
+            axiomata_roster::reviewer_heavy_role(),
+        ] {
+            assert_eq!(
+                opencode_shell_patterns(&role.permissions).len(),
+                role.permissions.len(),
+                "{}: a rule that `grantable` or the push filter drops would be a question in the pane",
+                role.name
+            );
+        }
+    }
+
+    #[test]
     fn a_session_of_a_grilling_role_interviews_and_gets_the_goal_tools_but_not_the_card_tool() {
         let dir = temp_dir();
         let cli = fake_cli(&dir);
@@ -1011,7 +1071,9 @@ mod tests {
         assert!(launch.read_only());
         let prompt = start_prompt(&agent, &launch);
         assert!(
-            prompt.contains("grill plan #4") && prompt.contains("propose_goal"),
+            prompt.contains("cards proposed for plan #4")
+                && prompt.contains("propose_goal")
+                && prompt.contains("send_message"),
             "{prompt}"
         );
         assert!(!prompt.contains("create_card"), "{prompt}");

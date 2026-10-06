@@ -22,7 +22,9 @@ import {
   cardsOfPlan,
   defaultPlanId,
   endedSessions,
+  flowAgentTarget,
   modeForAgent,
+  plannerDone,
   needsLabel,
   newestFirst,
   plannerOf,
@@ -191,6 +193,72 @@ describe("the Flow's three panels", () => {
     const first = allGroups(base)[0];
     const layout = addTab(base, agentTab("a", 5), { nodeId: first.id, side: "center" });
     expect(allTabs(resetFlowPanes(layout)).map((t) => t.kind).sort()).toEqual(["agent", "graph", "plan", "team"]);
+  });
+});
+
+describe("when a planner is done", () => {
+  it("is when it waits for the next prompt and the plan holds a proposal", () => {
+    expect(plannerDone("idle", 3)).toBe(true);
+    expect(plannerDone("idle", 0)).toBe(false);
+    expect(plannerDone("working", 3)).toBe(false);
+    expect(plannerDone("waiting", 3)).toBe(false);
+    expect(plannerDone(undefined, 3)).toBe(false);
+  });
+});
+
+describe("where a session's pane docks in the Flow", () => {
+  it("is right of the team's group first, then right of the newest session pane, never beside the graph", () => {
+    const base = withFlowPanes(emptyLayout());
+    const teamGroup = allGroups(base).find((g) => g.tabs.some((t) => t.kind === "team"))!;
+    expect(flowAgentTarget(base)).toEqual({ nodeId: teamGroup.id, side: "right" });
+
+    const one = addTab(base, agentTab("a", 5), { nodeId: teamGroup.id, side: "right" });
+    const first = allGroups(one).find((g) => g.tabs.some((t) => t.kind === "agent"))!;
+    expect(flowAgentTarget(one)).toEqual({ nodeId: first.id, side: "right" });
+
+    const two = addTab(one, agentTab("b", 6), { nodeId: first.id, side: "right" });
+    const second = allGroups(two).find((g) => g.tabs.some((t) => t.id === "b"))!;
+    expect(flowAgentTarget(two)).toEqual({ nodeId: second.id, side: "right" });
+  });
+
+  it("puts a fourth pane into the newest group as a tab instead of a fourth column", () => {
+    let layout = withFlowPanes(emptyLayout());
+    for (const [id, agentId] of [["a", 1], ["b", 2], ["c", 3]] as const) {
+      layout = addTab(layout, agentTab(id, agentId), flowAgentTarget(layout)!);
+    }
+    const target = flowAgentTarget(layout)!;
+    expect(target.side).toBe("center");
+    const grown = addTab(layout, agentTab("d", 4), target);
+    expect(allGroups(grown).filter((g) => g.tabs.some((t) => t.kind === "agent"))).toHaveLength(3);
+    expect(allTabs(grown).some((t) => t.id === "d")).toBe(true);
+  });
+
+  it("has no opinion outside the Flow, where there is no team panel", () => {
+    expect(flowAgentTarget(singleGroupLayout([agentTab("a", 5)]))).toBeNull();
+  });
+
+  it("gives the graph the lower part of the Flow's height, a smaller share than the tiles", () => {
+    const layout = withFlowPanes(emptyLayout());
+    const split = (function find(node: typeof layout.root): { sizes: number[]; children: unknown[] } | null {
+      if (node.type !== "split") return null;
+      if (node.dir === "col") return node;
+      for (const child of node.children) {
+        const hit = find(child);
+        if (hit) return hit;
+      }
+      return null;
+    })(layout.root)!;
+    expect(split.sizes[1]).toBeLessThan(split.sizes[0]);
+    expect(split.sizes[1]).toBeCloseTo(0.4);
+  });
+});
+
+describe("the mode of a session's pane", () => {
+  it("is the Flow for a plan's planner and for the workers and reviewers of a plan's cards, else the Canvas", () => {
+    expect(modeForAgent({ plan_id: 4 })).toBe("flow");
+    expect(modeForAgent({ plan_id: null }, 4)).toBe("flow");
+    expect(modeForAgent({ plan_id: null }, null)).toBe("agents");
+    expect(modeForAgent({ plan_id: null })).toBe("agents");
   });
 });
 

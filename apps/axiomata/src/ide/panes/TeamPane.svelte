@@ -18,6 +18,7 @@
   import { relativeTime } from "../../core/format";
   import { STATE_LABEL } from "../../core/kanban";
   import CardUsage from "../../modules/CardUsage.svelte";
+  import Icon from "../../ui/Icon.svelte";
   import { agentStatus, describeStatus } from "../agentStatus";
   import { session } from "../projectSession";
   import SessionMail from "../SessionMail.svelte";
@@ -129,7 +130,7 @@
         {#each group.tiles as tile (tile.agent.id)}
           {@const status = describeStatus($statuses.byAgent.get(tile.agent.id), tile.agent, now)}
           {@const live = activity[tile.agent.id]}
-          <article class="tile" class:needs={tile.card?.state === "input_required"}>
+          <article class="tile" class:needs={tile.card?.state === "input_required" || status.tone === "waiting"}>
             <header>
               <StatusDot view={status} />
               <span class="name">{tile.agent.name}</span>
@@ -139,8 +140,21 @@
                 <span class="chip mail" title="Ungelesene Nachrichten in der Inbox der Sitzung">✉ {unread[tile.agent.id]}</span>
               {/if}
               <span class="spacer"></span>
-              <button class="ax-btn small" type="button" onclick={() => showTerminal(tile.agent.id)}>Terminal</button>
+              <button
+                class="ax-btn terminal"
+                class:primary={status.tone === "waiting"}
+                type="button"
+                title="Das Terminal dieser Sitzung nach vorn holen; es startet keine neue"
+                onclick={() => showTerminal(tile.agent.id)}
+              >
+                <Icon name="terminal" size="sm" />
+                Terminal
+              </button>
             </header>
+
+            {#if status.tone === "waiting"}
+              <p class="waiting" role="status">Wartet auf dich: eine Rückfrage oder eine Freigabe im Terminal.</p>
+            {/if}
 
             {#if tile.card}
               <p class="card-line">
@@ -207,7 +221,9 @@
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(calc(300px * var(--ax-ui-scale)), 1fr));
+    /* One tile fills the row until a second fits beside it (auto-fit); in a narrow pane the tiles wrap under each
+     * other. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(420px * var(--ax-ui-scale))), 1fr));
     gap: var(--ax-space-3);
   }
   .tile {
@@ -222,11 +238,25 @@
   }
   .tile.needs {
     border-color: var(--ax-warning);
+    box-shadow: 0 0 0 1px var(--ax-warning);
+  }
+  .waiting {
+    margin: 0;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border-radius: var(--ax-radius-sm);
+    background: color-mix(in srgb, var(--ax-warning) 18%, var(--ax-surface-2));
+    color: var(--ax-warning);
+    font-weight: 600;
   }
   header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--ax-space-2);
+  }
+  .ax-btn.terminal {
+    flex: none;
+    white-space: nowrap;
   }
   .name {
     font-weight: 600;
@@ -297,12 +327,18 @@
     font-size: var(--ax-font-size-xs);
     white-space: nowrap;
   }
+  /* The newest step is what the tile is for: it wraps (three lines, the trail below has the rest) instead of being
+   * cut off. */
   .now-text {
     flex: 1;
+    min-width: 0;
     font-family: var(--ax-font-mono);
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow-wrap: anywhere;
   }
   .trail {
     margin: 0;

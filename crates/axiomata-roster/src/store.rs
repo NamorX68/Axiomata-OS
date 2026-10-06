@@ -290,6 +290,51 @@ pub fn delete_role(dir: &Path, name: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// What a session of a working or judging role may run without asking, in Claude Code's spelling (`Bash(prefix:*)`; the
+/// studio gives Opencode the same as shell patterns): the builds and checks of the stacks the owner works in. Each is
+/// narrow
+/// on purpose — no `Bash(*)`, nothing that pushes or reaches beyond the checkout (`agent_entry::grantable` drops what
+/// is not).
+/// A session that has to ask for `cargo test` stands still in a pane nobody watches.
+const BUILD_AND_TEST: [&str; 18] = [
+    "Bash(cargo build:*)",
+    "Bash(cargo check:*)",
+    "Bash(cargo clippy:*)",
+    "Bash(cargo test:*)",
+    "Bash(cargo fmt --check)",
+    "Bash(cargo fmt --check:*)",
+    "Bash(npm run check)",
+    "Bash(npm run build)",
+    "Bash(npm test)",
+    "Bash(npx vitest run)",
+    "Bash(npx vitest run:*)",
+    "Bash(uv run pytest:*)",
+    "Bash(uv run ruff check:*)",
+    "Bash(uv run ruff format --check:*)",
+    "Bash(uv run pyright:*)",
+    "Bash(pytest:*)",
+    "Bash(ruff check:*)",
+    "Bash(pyright:*)",
+];
+
+/// The git commands that only read: the roles that have shell rules at all may run them without asking. The studio
+/// holds back
+/// `--output` and `--no-index` for every session, which these rules would otherwise take in.
+const READ_GIT: [&str; 4] = [
+    "Bash(git status:*)",
+    "Bash(git diff:*)",
+    "Bash(git log:*)",
+    "Bash(git show:*)",
+];
+
+fn rules(lists: &[&[&str]]) -> Vec<String> {
+    lists
+        .iter()
+        .flat_map(|list| list.iter())
+        .map(|rule| (*rule).to_owned())
+        .collect()
+}
+
 /// The role every existing Studio agent is given (CP-A1 migration) and every fresh install starts with.
 ///
 /// Without an engine: a session already carries the engine it was started with, and a new session picks one.
@@ -301,7 +346,7 @@ pub fn default_role() -> Role {
         tier: Tier::Medium,
         engine: None,
         fallback_engines: Vec::new(),
-        permissions: Vec::new(),
+        permissions: rules(&[&BUILD_AND_TEST, &READ_GIT]),
         limits: Limits::default(),
         creates: Vec::new(),
         instructions: "Read the card, do what it asks for in your own worktree, and keep to its acceptance \
@@ -322,7 +367,12 @@ pub fn reviewer_role() -> Role {
         tier: Tier::Medium,
         engine: None,
         fallback_engines: Vec::new(),
-        permissions: Vec::new(),
+        // Reads with git only. A build or a test runs the code under review — `build.rs`, a proc-macro, a test config
+        // — as
+        // the owner, and a reviewer reads text that may try to talk it into that; whoever wants its reviewers to run
+        // the
+        // tests adds `BUILD_AND_TEST`-style rules to the role file, knowing that.
+        permissions: rules(&[&READ_GIT]),
         limits: Limits::default(),
         creates: Vec::new(),
         instructions: "You judge work somebody else did; you do not do it again. The card's acceptance criteria are the \
@@ -348,7 +398,7 @@ pub fn planner_role() -> Role {
         tier: Tier::Heavy,
         engine: None,
         fallback_engines: Vec::new(),
-        permissions: Vec::new(),
+        permissions: rules(&[&READ_GIT]),
         limits: Limits::default(),
         creates: Vec::new(),
         instructions: "You plan; you do not build. Read the plan's goal and the catalog of roles with `get_plan`, then \
@@ -371,40 +421,49 @@ is one concern a single session can finish and a reviewer can judge in one sitti
     }
 }
 
-/// The role that grills a plan's goal (`docs/plans/a2a.md`, "Plan bearbeiten und grillen"): kind `grill`, without an
-/// engine — the owner picks the model at every start, as for the planner. An interactive session: it interviews the owner
-/// in its terminal, in rounds, until the goal holds no open decision, and hands the result back as a *proposal* for a
-/// sharper goal (`propose_goal`). The method is the `grilling` skill's; it is the role's text because a skill run is a
-/// single turn and an interview is not.
+/// The role that grills a plan's proposed cards (`docs/plans/a2a.md`, "Plan bearbeiten und grillen"): kind `grill`,
+/// without
+/// an engine — the owner picks the model at every start, as for the planner. It runs *after* the planner has proposed
+/// the
+/// cards, as an interactive session: it interviews the owner in its terminal, in rounds, about what the cards leave
+/// open, and
+/// hands what was agreed to the planner by mail — the planner owns the proposals and is the only one that mends them.
+/// The
+/// method is the `grilling` skill's; it is the role's text because a skill run is a single turn and an interview is
+/// not.
 pub fn grill_role() -> Role {
     Role {
         name: "grill".into(),
-        description: "Questions a plan's goal until nothing is left open, then proposes a sharper one".into(),
+        description: "Questions the cards a planner proposed until nothing is left open; the planner mends them".into(),
         kind: "grill".into(),
         tier: Tier::Heavy,
         engine: None,
         fallback_engines: Vec::new(),
-        permissions: Vec::new(),
+        permissions: rules(&[&READ_GIT]),
         limits: Limits::default(),
         creates: Vec::new(),
-        instructions: "You interview the owner about a plan's goal until you share one understanding of it; you do not \
-                       plan and you build nothing. Read the goal with `get_plan` and look at the project (your checkout \
-                       is read-only) — finding facts is your job, never the owner's: do not ask what the code or the \
-                       files can tell you. Map the goal as a design tree: every decision branches into the decisions \
-                       that hang off it. Work it in rounds. The frontier is every decision whose prerequisites are \
-                       settled; ask the whole frontier in one round, numbered, each question with your recommended \
-                       answer and why, and wait for the owner's answers before the next round. A question whose answer \
-                       depends on another open one belongs to a later round. Ask in the language the goal is written \
-                       in. Answers reshape the tree: settled decisions unblock the next questions. You are done when \
-                       the frontier is empty — every branch visited, nothing silently assumed — and the owner agrees. \
-                       Then call `propose_goal` once with the sharpened goal: the owner's own aim first, then the \
-                       decisions you settled together, each as a short line, and what was left out on purpose. It is a \
-                       proposal; the owner reads it and decides whether it replaces their goal, and nothing else \
-                       changes."
-            .into(),
+        instructions: GRILL_INSTRUCTIONS.into(),
         source: Source::User,
     }
 }
+
+/// The grilling method, as the text of the `grill` role.
+const GRILL_INSTRUCTIONS: &str = "\
+    You interview the owner about the cards a planner proposed for a plan, until you share one understanding of \
+     them; you do not plan and you build nothing. Read the goal and the proposed cards with `get_plan` and look \
+     at the project (your checkout is read-only) — finding facts is your job, never the owner's: do not ask what \
+     the code or the files can tell you. Look for what the cards leave open: a card that is too big or too vague \
+     to be checked, acceptance criteria nobody could test, a missing or wrong order between cards, a role or tier\
+      that does not fit the work, work the goal needs and no card does, a card the goal does not need. Work in \
+     rounds: ask everything whose answer does not depend on another open question in one round, numbered, each \
+     question with your recommended answer and why, and wait for the owner's answers before the next round. Ask \
+     in the language the goal is written in. You are done when nothing is left open and the owner agrees. You \
+     change no card yourself — the planner owns its proposals. Find it with `list_agents` and send it the agreed \
+     changes with `send_message`, one message, card by card (what to change, in which words); it mends its \
+     proposals with `update_proposal` and `withdraw_proposal` and adds missing cards with `create_card`. Then \
+     tell the owner what you sent. If the planner is not running any more, give the owner the changes as a list \
+     instead — they edit the proposals in the plan panel. If the goal itself turns out to be the problem, say so \
+     and, when the owner agrees, call `propose_goal` once.";
 
 /// A role that works cards, in one of three strengths (`docs/plans/a2a.md`, "Rollen und Engines"): the same job at the tier
 /// the card calls for. Without an engine — the first start asks once and saves the pick into the role.
@@ -416,7 +475,12 @@ fn working_role(name: &str, description: &str, tier: Tier, kind: &str, instructi
         tier,
         engine: None,
         fallback_engines: Vec::new(),
-        permissions: Vec::new(),
+        // A documenter reads the diff and builds nothing (its text says so); every other working role builds and tests.
+        permissions: if kind == "doc" {
+            rules(&[&READ_GIT])
+        } else {
+            rules(&[&BUILD_AND_TEST, &READ_GIT])
+        },
         limits: Limits::default(),
         creates: Vec::new(),
         instructions: instructions.into(),
@@ -708,7 +772,14 @@ pub(crate) mod tests {
             reviewer.engine, None,
             "the studio picks an engine that is not the worker's"
         );
-        assert!(reviewer.creates.is_empty() && reviewer.permissions.is_empty());
+        assert!(reviewer.creates.is_empty());
+        assert!(
+            reviewer
+                .permissions
+                .iter()
+                .all(|rule| rule.starts_with("Bash(git ")),
+            "a reviewer reads with git and runs nothing of the work it judges"
+        );
         // A role that was seeded earlier gets the other one without losing its own edits.
         fs::remove_dir_all(tmp.0.join("reviewer")).unwrap();
         assert!(seed_default_roles(&tmp.0).unwrap());
@@ -730,7 +801,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_grill_is_seeded_as_a_role_that_interviews_and_proposes_and_picks_its_engine_at_every_start()
+    fn the_grill_is_seeded_as_a_role_that_interviews_and_mails_the_planner_and_picks_its_engine_at_every_start()
      {
         let tmp = Tmp::new();
         assert!(seed_default_roles(&tmp.0).unwrap());
@@ -738,9 +809,17 @@ pub(crate) mod tests {
         let grill = loaded.roles.iter().find(|r| r.name == "grill").unwrap();
         assert_eq!(grill.kind, "grill");
         assert_eq!(grill.engine, None);
-        assert!(grill.creates.is_empty() && grill.permissions.is_empty());
+        assert!(grill.creates.is_empty());
         assert!(
-            grill.instructions.contains("propose_goal") && grill.instructions.contains("frontier")
+            grill
+                .permissions
+                .iter()
+                .all(|rule| rule.starts_with("Bash(git "))
+        );
+        assert!(
+            grill.instructions.contains("propose_goal")
+                && grill.instructions.contains("send_message")
+                && grill.instructions.contains("`get_plan`")
         );
         // An install that has the others gets the grill without touching them.
         fs::remove_dir_all(tmp.0.join("grill")).unwrap();
@@ -775,12 +854,41 @@ pub(crate) mod tests {
         assert_eq!(shape("reviewer"), ("review".to_owned(), Tier::Medium));
         assert_eq!(shape("reviewer-heavy"), ("review".to_owned(), Tier::Heavy));
         // None names an engine: the first start asks once and saves it into the role.
+        assert!(loaded.roles.iter().all(|r| r.engine.is_none()));
+        // The roles that read only (planner, grill, documenter, reviewers) get git reads and nothing that runs the
+        // project;
+        // the workers may also build and test.
+        let permissions = |name: &str| role(name).permissions.clone();
+        for name in ["planner", "grill"] {
+            assert!(
+                permissions(name)
+                    .iter()
+                    .all(|rule| rule.starts_with("Bash(git ")),
+                "{name} only reads"
+            );
+        }
         assert!(
-            loaded
-                .roles
+            permissions("documenter")
                 .iter()
-                .all(|r| r.engine.is_none() && r.permissions.is_empty())
+                .all(|rule| rule.starts_with("Bash(git "))
         );
+        for name in ["implementer-light", "implementer-heavy", "tester"] {
+            assert!(
+                permissions(name)
+                    .iter()
+                    .any(|rule| rule == "Bash(cargo test:*)"),
+                "{name} runs the tests without asking"
+            );
+        }
+        // A reviewer runs nothing of the work it judges without asking: it only reads with git.
+        for name in ["reviewer", "reviewer-light", "reviewer-heavy"] {
+            assert!(
+                permissions(name)
+                    .iter()
+                    .all(|rule| rule.starts_with("Bash(git ")),
+                "{name} reads with git only"
+            );
+        }
         // A reviewer keeps the review method and adds what its strength looks for.
         assert!(
             role("reviewer-heavy")

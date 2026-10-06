@@ -400,7 +400,19 @@ pub fn apply_goal_suggestion(db: &mut Connection, plan_id: i64, at: &str) -> Res
     Ok(updated)
 }
 
-/// Whether the owner took a sharpened goal over for this plan — for the hint at the approval, nothing more.
+/// Notes that a grilling session was started for the plan: the approval then no longer says "not grilled". Asked
+/// again for
+/// a plan that has the note already, it changes nothing.
+pub fn mark_plan_grilled(db: &Connection, plan_id: i64) -> Result<()> {
+    db.execute(
+        "INSERT OR IGNORE INTO plan_grilled (plan_id, at) VALUES (?1, ?2)",
+        params![plan_id, now()],
+    )?;
+    Ok(())
+}
+
+/// Whether the plan was grilled (a grilling session was started for it, or the owner took a sharpened goal over) —
+/// for the hint at the approval, nothing more.
 pub fn plan_grilled(db: &Connection, plan_id: i64) -> Result<bool> {
     Ok(db.query_row(
         "SELECT EXISTS (SELECT 1 FROM plan_grilled WHERE plan_id = ?1)",

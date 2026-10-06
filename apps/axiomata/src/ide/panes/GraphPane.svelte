@@ -19,9 +19,10 @@
   import { relativeTime } from "../../core/format";
   import { STATE_LABEL } from "../../core/kanban";
   import { toast } from "../../core/toast";
-  import { NODE_H, NODE_W, clip, layoutGraph, toneOf } from "../flowGraph";
+  import { NODE_H, NODE_W, clip, layoutGraph, reviewLabel, reviewToneOf, toneOf } from "../flowGraph";
   import { allCardsOfPlan } from "../planning";
   import { flowSelection, resolvePlan } from "../flowSelection";
+  import { agentStatus } from "../agentStatus";
   import { refreshAgents, session } from "../projectSession";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
@@ -44,8 +45,27 @@
   let selectedId = $state<number | null>(null);
   const selected = $derived(cards.find((card) => card.id === selectedId) ?? null);
   const sessions = $derived(selected ? $session.agents.filter((agent) => agent.card_id === selected.id) : []);
-  /** Cards with a live session: a small dot on the node. */
-  const livingCards = $derived(new Set($session.agents.map((agent) => agent.card_id).filter((id) => id != null)));
+  // A session started to review the card is the reviewer; the card's other sessions are the worker.
+  const isReviewer = (agent: { card_review?: boolean }): boolean => agent.card_review === true;
+  /** Cards with a live worker session, and cards with a live reviewer: a small dot on the node. */
+  const livingCards = $derived(
+    new Set($session.agents.filter((a) => !isReviewer(a)).map((a) => a.card_id).filter((id) => id != null)),
+  );
+  const reviewedNow = $derived(
+    new Set($session.agents.filter(isReviewer).map((a) => a.card_id).filter((id) => id != null)),
+  );
+
+  // A session that waits for the owner (a question, a permission) turns its node into a "Rückfrage": nobody else will
+  // answer it.
+  const statuses = agentStatus.statuses;
+  const waitingOn = (review: boolean): Set<number | null | undefined> =>
+    new Set(
+      $session.agents
+        .filter((a) => isReviewer(a) === review && $statuses.byAgent.get(a.id)?.state === "waiting")
+        .map((a) => a.card_id),
+    );
+  const waitingWorkers = $derived(waitingOn(false));
+  const waitingReviewers = $derived(waitingOn(true));
 
   // The board is read again while the pane is shown: the cards move from other processes (agents, the CLI).
   $effect(() => {
@@ -189,7 +209,7 @@
           <path
             d={edge.path}
             class="edge"
-            class:lit={selectedId !== null && (selectedId === edge.from || selectedId === edge.to)}
+            class:lit={selectedId !== null && (selectedId === Math.abs(edge.from) || selectedId === Math.abs(edge.to))}
             marker-end="url(#arrow)"
           />
         {/each}
@@ -199,27 +219,41 @@
             <text x={graph.start.w / 2} y={graph.start.h / 2 + 4} text-anchor="middle">Start</text>
           </g>
         {/if}
-        {#each graph.nodes as node (node.card.id)}
+        {#each graph.nodes as node (node.key)}
+          {@const review = node.kind === "review"}
           <g
-            class="node {toneOf(node.card.state)}"
+            class="node {(review ? waitingReviewers : waitingWorkers).has(node.card.id)
+              ? 'attention'
+              : review
+                ? reviewToneOf(node.card.state)
+                : toneOf(node.card.state)}"
+            class:review-node={review}
             class:proposed={node.card.state === "proposed"}
             class:selected={selectedId === node.card.id}
             transform="translate({node.x} {node.y})"
             role="button"
             tabindex="0"
-            aria-label="Karte {node.card.id}, {STATE_LABEL[node.card.state]}"
+            aria-label={review
+              ? `Review von Karte ${node.card.id}, ${reviewLabel(node.card)}`
+              : `Karte ${node.card.id}, ${STATE_LABEL[node.card.state]}`}
             aria-pressed={selectedId === node.card.id}
             onclick={() => (selectedId = selectedId === node.card.id ? null : node.card.id)}
             onkeydown={(e) => onKey(e, node.card.id)}
           >
-            <rect width={NODE_W} height={NODE_H} rx="8" />
-            <text x="12" y="22" class="title">#{node.card.id} {clip(node.card.title)}</text>
-            <text x="12" y="42" class="sub">
-              {node.card.agent ?? "—"} · {STATE_LABEL[node.card.state]}{node.card.returned_count > 0
-                ? ` · ${node.card.returned_count}× zurück`
-                : ""}
-            </text>
-            {#if livingCards.has(node.card.id)}<circle cx={NODE_W - 14} cy="14" r="4" class="live" />{/if}
+            <rect width={NODE_W} height={NODE_H} rx="10" />
+            {#if review}
+              <text x="14" y="30" class="title">Review #{node.card.id}</text>
+              <text x="14" y="56" class="sub">{reviewLabel(node.card)} · {clip(node.card.title, 26)}</text>
+              {#if reviewedNow.has(node.card.id)}<circle cx={NODE_W - 16} cy="16" r="5" class="live" />{/if}
+            {:else}
+              <text x="14" y="30" class="title">#{node.card.id} {clip(node.card.title)}</text>
+              <text x="14" y="56" class="sub">
+                {node.card.agent ?? "—"} · {STATE_LABEL[node.card.state]}{node.card.returned_count > 0
+                  ? ` · ${node.card.returned_count}× zurück`
+                  : ""}
+              </text>
+              {#if livingCards.has(node.card.id)}<circle cx={NODE_W - 16} cy="16" r="5" class="live" />{/if}
+            {/if}
           </g>
         {/each}
       </svg>
@@ -380,6 +414,11 @@
   .node.proposed rect {
     stroke-dasharray: 5 4;
   }
+  /* A review is a stage of its card, not a card: a little lighter, its lines dashed like a proposal's but finer. */
+  .node.review-node rect {
+    fill: var(--ax-surface-1);
+    stroke-dasharray: 2 3;
+  }
   .node.selected rect,
   .node:focus-visible rect {
     fill: var(--ax-accent-muted);
@@ -387,11 +426,13 @@
   }
   .node text {
     fill: var(--ax-text);
-    font-size: 12px;
+    font-size: 15px;
+    font-weight: 600;
   }
   .node .sub {
     fill: var(--ax-text-muted);
-    font-size: 11px;
+    font-size: 13px;
+    font-weight: 400;
   }
   .node .live {
     fill: var(--ax-success);

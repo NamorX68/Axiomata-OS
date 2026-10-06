@@ -5,16 +5,20 @@
  */
 import type { BoardCard, TaskState } from "../core/backend";
 
-export const NODE_W = 210;
-export const NODE_H = 58;
-const COL_GAP = 72;
+export const NODE_W = 300;
+export const NODE_H = 78;
+const COL_GAP = 80;
 const ROW_GAP = 16;
 const PAD = 16;
 export const START_W = 64;
 export const START_H = 36;
 
 export interface GraphNode {
+  /** The node's id in an edge: the card's id, or minus the card's id for the review stage after it. */
+  key: number;
   card: BoardCard;
+  /** A card of the plan, or the review that comes after it (drawn as a node of its own). */
+  kind: "card" | "review";
   /** How many cards are, at the longest, before this one: its column. */
   layer: number;
   x: number;
@@ -33,7 +37,7 @@ export interface StartNode {
 }
 
 export interface GraphEdge {
-  /** The card the line leaves, or [`START`] for a card that needs none. */
+  /** The node the line leaves ([`GraphNode.key`]), or [`START`] for a card that needs none. */
   from: number;
   to: number;
   /** An SVG path from the right side of `from` to the left side of `to`. */
@@ -47,6 +51,40 @@ export interface Graph {
   edges: GraphEdge[];
   width: number;
   height: number;
+}
+
+/** The states in which a card has a review stage: it was handed in, and is judged or was. */
+const REVIEWED = new Set<TaskState>(["in_review", "verified", "integrated", "taken_over"]);
+
+/**
+ * Whether the card shows a review node after it: it is in review, was signed off, or was sent back at least once (a
+ * card
+ * returned to its worker has had a review even though it is "working" again).
+ */
+export function hasReviewStage(card: Pick<BoardCard, "state" | "returned_count">): boolean {
+  return REVIEWED.has(card.state) || card.returned_count > 0;
+}
+
+/** What the layout places: a card, or the review after it. `id` is the node's key, `depends_on` the keys it waits
+ * for. */
+interface Item {
+  id: number;
+  depends_on: number[];
+  card: BoardCard;
+  kind: "card" | "review";
+}
+
+/** The items of `cards`: each card, and after a card with a review stage its review node, which the cards that need
+ * it wait for instead. */
+function itemsOf(cards: BoardCard[]): Item[] {
+  const reviewed = new Set(cards.filter(hasReviewStage).map((card) => card.id));
+  const items: Item[] = [];
+  for (const card of cards) {
+    const depends_on = card.depends_on.map((dep) => (reviewed.has(dep) ? -dep : dep));
+    items.push({ id: card.id, depends_on, card, kind: "card" });
+    if (reviewed.has(card.id)) items.push({ id: -card.id, depends_on: [card.id], card, kind: "review" });
+  }
+  return items;
 }
 
 /**
@@ -73,11 +111,11 @@ export function layersOf(cards: Pick<BoardCard, "id" | "depends_on">[]): Map<num
 }
 
 /** Orders the cards inside each column by the average row of the cards they need, so the lines cross as little as a cheap pass can. */
-function orderColumns(columns: BoardCard[][]): void {
+function orderColumns(columns: Item[][]): void {
   const rowOf = new Map<number, number>();
   columns[0]?.forEach((card, row) => rowOf.set(card.id, row));
   for (let col = 1; col < columns.length; col++) {
-    const barycentre = (card: BoardCard): number => {
+    const barycentre = (card: Item): number => {
       const rows = card.depends_on.map((id) => rowOf.get(id)).filter((row): row is number => row !== undefined);
       return rows.length === 0 ? Number.MAX_SAFE_INTEGER : rows.reduce((a, b) => a + b, 0) / rows.length;
     };
@@ -89,10 +127,13 @@ function orderColumns(columns: BoardCard[][]): void {
 /** The graph of `cards`: a start node, positions, and one curve per "needs first" line — and per card that needs none, one from the start. */
 export function layoutGraph(cards: BoardCard[]): Graph {
   if (cards.length === 0) return { start: null, nodes: [], edges: [], width: 0, height: 0 };
-  const layers = layersOf(cards);
+  const items = itemsOf(cards);
+  const layers = layersOf(items);
   const depth = Math.max(...layers.values());
-  const columns: BoardCard[][] = Array.from({ length: depth + 1 }, () => []);
-  for (const card of [...cards].sort((a, b) => a.id - b.id)) columns[layers.get(card.id) ?? 0].push(card);
+  const columns: Item[][] = Array.from({ length: depth + 1 }, () => []);
+  // By the card's id, a card before its review: the review node has the card's id with the sign turned.
+  const order = (item: Item): number => Math.abs(item.id) * 2 + (item.kind === "review" ? 1 : 0);
+  for (const item of [...items].sort((a, b) => order(a) - order(b))) columns[layers.get(item.id) ?? 0].push(item);
   orderColumns(columns);
 
   const widest = Math.max(...columns.map((column) => column.length));
@@ -105,9 +146,11 @@ export function layoutGraph(cards: BoardCard[]): Graph {
   columns.forEach((column, layer) => {
     // Each column hangs around the middle of the tallest one, so the tree grows out of the centre line.
     const top = PAD + (inner - heightOf(column.length, NODE_H)) / 2;
-    column.forEach((card, row) =>
+    column.forEach((item, row) =>
       nodes.push({
-        card,
+        key: item.id,
+        card: item.card,
+        kind: item.kind,
         layer,
         x: firstX + layer * (NODE_W + COL_GAP),
         y: top + row * (NODE_H + ROW_GAP),
@@ -116,18 +159,19 @@ export function layoutGraph(cards: BoardCard[]): Graph {
   });
   const start: StartNode = { x: PAD, y: PAD + (inner - START_H) / 2, w: START_W, h: START_H };
 
-  const at = new Map(nodes.map((node) => [node.card.id, node]));
+  const at = new Map(nodes.map((node) => [node.key, node]));
+  const needs = new Map(items.map((item) => [item.id, item.depends_on]));
   const curve = (x1: number, y1: number, x2: number, y2: number): string => {
     const bend = (x2 - x1) / 2;
     return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
   };
   const edges: GraphEdge[] = [];
   for (const node of nodes) {
-    const sources = node.card.depends_on.filter((dep) => at.has(dep));
+    const sources = (needs.get(node.key) ?? []).filter((dep) => at.has(dep));
     if (sources.length === 0) {
       edges.push({
         from: START,
-        to: node.card.id,
+        to: node.key,
         path: curve(start.x + start.w, start.y + start.h / 2, node.x, node.y + NODE_H / 2),
       });
     }
@@ -135,7 +179,7 @@ export function layoutGraph(cards: BoardCard[]): Graph {
       const from = at.get(dep)!;
       edges.push({
         from: dep,
-        to: node.card.id,
+        to: node.key,
         path: curve(from.x + NODE_W, from.y + NODE_H / 2, node.x, node.y + NODE_H / 2),
       });
     }
@@ -147,6 +191,24 @@ export function layoutGraph(cards: BoardCard[]): Graph {
     width: firstX + columns.length * NODE_W + (columns.length - 1) * COL_GAP + PAD,
     height,
   };
+}
+
+/**
+ * How the review node of a card is drawn: in review is the review's own colour, a card signed off or integrated is
+ * done, a
+ * card sent back and working again leaves its review waiting (idle).
+ */
+export function reviewToneOf(state: TaskState): Tone {
+  if (state === "in_review") return "review";
+  if (state === "verified" || state === "integrated" || state === "taken_over") return "done";
+  return "idle";
+}
+
+/** What the review node says about its card: judged now, signed off, or sent back. */
+export function reviewLabel(card: Pick<BoardCard, "state" | "returned_count">): string {
+  if (card.state === "in_review") return "wird geprüft";
+  if (card.state === "verified" || card.state === "integrated" || card.state === "taken_over") return "abgezeichnet";
+  return card.returned_count > 0 ? `zurückgegeben (${card.returned_count}×)` : "";
 }
 
 /** How a state is drawn: one class per family, so the colours stay in the stylesheet and the tokens. */
@@ -174,7 +236,7 @@ export function toneOf(state: TaskState): Tone {
 }
 
 /** A title cut to what fits a node. */
-export function clip(text: string, max = 27): string {
+export function clip(text: string, max = 32): string {
   const line = text.split("\n")[0].trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }

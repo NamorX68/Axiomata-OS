@@ -91,7 +91,7 @@
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import { MODES, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
-  import { agentTabsOf, modeForAgent, resetFlowPanes } from "./planning";
+  import { agentTabsOf, flowAgentTarget, modeForAgent, resetFlowPanes } from "./planning";
   import { get } from "svelte/store";
   import { agentRequests, takeAgentRequests } from "./agentRequest";
   import { modeRequest } from "./modeRequest";
@@ -561,8 +561,12 @@
     }
     if (preferred && preferred !== shown.mode) layout = projectSession.switchMode(layout, preferred);
     const groups = allGroups(layout);
-    const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
-    layout = addTab(layout, tab, { nodeId: target, side: "right" });
+    // In the Flow the pane goes beside the team's tiles; elsewhere beside the last group.
+    const target = flowAgentTarget(layout) ?? {
+      nodeId: groups.length > 0 ? groups[groups.length - 1].id : layout.root.id,
+      side: "right",
+    };
+    layout = addTab(layout, tab, target);
   }
 
   /**
@@ -584,6 +588,25 @@
   async function addAgent(spec: AgentSpec) {
     const created = await projectSession.addAgent(spec);
     if (created) openAgent(created);
+  }
+
+  /** The plan a card belongs to, or `null` (no card, no plan, or a board that cannot be read): found on the boards. */
+  async function planOfCard(cardId: number | null): Promise<number | null> {
+    if (cardId === null) return null;
+    try {
+      const boards = await invokeBackend<{ id: number }[]>("list_boards");
+      for (const board of boards) {
+        const cards = await invokeBackend<{ id: number; plan_id: number | null }[]>("list_board_cards", {
+          boardId: board.id,
+          includeArchived: false,
+        });
+        const found = cards.find((card) => card.id === cardId);
+        if (found) return found.plan_id;
+      }
+    } catch {
+      // Without the lookup the pane opens on the Canvas, as it did before.
+    }
+    return null;
   }
 
   /**
@@ -610,7 +633,7 @@
         const agent = projectSession.agentById(agentId);
         if (!agent) continue;
         // A planner belongs to the plan it plans: its pane opens in the Flow, beside the planning panel.
-        openAgent(agent, modeForAgent(agent), background === true);
+        openAgent(agent, modeForAgent(agent, await planOfCard(agent.card_id ?? null)), background === true);
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err);
         toast(`Die Sitzung konnte nicht geöffnet werden: ${why}`, "danger");

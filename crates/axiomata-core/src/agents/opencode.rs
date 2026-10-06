@@ -455,14 +455,17 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
                 .iter()
                 .map(|pattern| PermissionRule::new("shell", pattern, "allow")),
         );
-        // `git diff --no-index` reads any file the user can read, and `--output=<path>` writes one: neither is a way of
-        // looking at the checkout. Denied after the allows, where the later rule is the one that counts.
-        rules.extend(
-            READ_ONLY_GIT_DENIED
-                .iter()
-                .map(|pattern| PermissionRule::new("shell", pattern, "deny")),
-        );
     }
+    // `git diff --no-index` reads any file the user can read, and `--output=<path>` writes one: neither is a way of
+    // looking at
+    // the checkout, for any role — the role's own git rules (`git diff *`, `git show *`) are broad enough to take
+    // them in. Denied
+    // after every allow, where the later rule is the one that counts.
+    rules.extend(
+        GIT_OUTSIDE_DENIED
+            .iter()
+            .map(|pattern| PermissionRule::new("shell", pattern, "deny")),
+    );
     // The push denies once more, last: a broad rule of the role (`Bash(git:*)` is `git *`) that came after the first ones
     // would otherwise be the later rule, and the later rule is the one that counts.
     rules.extend(ide_permissions());
@@ -479,7 +482,7 @@ const REVIEWER_GIT: [&str; 5] = [
 ];
 
 /// Options of the read-only git commands that reach beyond the checkout.
-const READ_ONLY_GIT_DENIED: [&str; 2] = ["git * --no-index*", "git * --output*"];
+const GIT_OUTSIDE_DENIED: [&str; 2] = ["git * --no-index*", "git * --output*"];
 
 /// What an unattended card session of Opencode may do without asking.
 #[derive(Debug, Clone, Copy)]
@@ -873,7 +876,7 @@ mod tests {
                 .position(|r| r.action == "shell" && r.resource == resource && r.effect == effect)
         };
         let planner = rules(true);
-        for denied in READ_ONLY_GIT_DENIED {
+        for denied in GIT_OUTSIDE_DENIED {
             let deny = position(&planner, denied, "deny")
                 .unwrap_or_else(|| panic!("{denied} is not denied"));
             // After the allows: a later rule is the one that counts.
@@ -882,12 +885,14 @@ mod tests {
                 "{denied}"
             );
         }
-        assert!(
-            READ_ONLY_GIT_DENIED
-                .iter()
-                .all(|p| position(&rules(false), p, "deny").is_none()),
-            "a worker's shell is not limited to reading"
-        );
+        // A worker is not limited to reading, but git does not reach outside its checkout for it either.
+        let worker = rules(false);
+        for denied in GIT_OUTSIDE_DENIED {
+            assert!(
+                position(&worker, denied, "deny").is_some(),
+                "{denied} is not denied for a worker"
+            );
+        }
     }
 
     #[test]

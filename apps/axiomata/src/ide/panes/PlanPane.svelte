@@ -32,12 +32,12 @@
   import {
     assignableRoles,
     canApprove,
-    canStartGrill,
     canStartPlanner,
     grillerOf,
     defaultPlanId,
     needsLabel,
     newestFirst,
+    plannerDone,
     plannerOf,
     planStatusLabel,
     proposalsOf,
@@ -56,6 +56,8 @@
   import { gitApi } from "../../fileapp/gitBackend";
   import { projectRootId } from "../../fileapp/projectModel";
   import { unpushedNote } from "../cardStart";
+  import { agentStatus } from "../agentStatus";
+  import { grillAfter, setGrillWish } from "../grillAfter";
   import { refreshAgents, session } from "../projectSession";
   import { flowSelection } from "../flowSelection";
   import ProposalEditor from "./ProposalEditor.svelte";
@@ -318,10 +320,45 @@
     if (made) toast(`Der Planer ${made.agent.name} liest das Projekt.`, "info");
   }
 
-  async function startGrill(): Promise<void> {
+  async function startGrill(): Promise<boolean> {
     const made = await startSession(grillRole || grillNames[0] || "", grillEngine, true);
-    if (made) toast(`${made.agent.name} fragt dich jetzt im Terminal nach dem Ziel aus.`, "info");
+    if (made) toast(`${made.agent.name} fragt dich jetzt im Terminal zu den Karten aus.`, "info");
+    return made !== null;
   }
+
+  // "Danach grillen": the grilling session starts by itself once the planner has proposed cards and waits — or, when
+  // the
+  // planner is gone (a restart ended it), as soon as there are proposals: the grill then hands its findings to the
+  // owner.
+  // A plain flag guards against a second start while the first is on its way; the tick is cleared once the start is
+  // over,
+  // whichever way it went, and a start that did not happen says so (the picks or the goal may be wrong) instead of
+  // retrying
+  // in a loop. Only while the panel is open — an effect of an unmounted panel does not run, and the grill then starts
+  // when
+  // the owner is back.
+  let grillStarting = false;
+  const statuses = agentStatus.statuses;
+  const grillWanted = $derived(plan ? ($grillAfter[plan.id] ?? false) : false);
+  const grillEngineChosen = $derived(
+    sessionEngine(
+      roles.find((r) => r.name === (grillRole || grillNames[0])) ?? null,
+      $engineCatalog,
+      grillEngine,
+    ).engineId !== "",
+  );
+  $effect(() => {
+    const current = plan;
+    if (!current || current.status !== "draft" || !grillWanted || !grillEngineChosen || busy) return;
+    if (griller !== null || grillStarting || proposals.length === 0) return;
+    if (planner !== null && !plannerDone($statuses.byAgent.get(planner.id)?.state, proposals.length)) return;
+    grillStarting = true;
+    void startGrill().then((started) => {
+      grillStarting = false;
+      setGrillWish(current.id, false);
+      if (!started) toast("Der Grill konnte nicht gestartet werden; setze den Haken noch einmal.", "warning");
+    });
+  });
 
   // A sharper goal a grilling session proposed: it waits for the owner, who takes it over or discards it. Read again while
   // a grilling session exists (it writes from another process) and whenever the plan changes.
@@ -356,6 +393,8 @@
   $effect(() => {
     const current = plan;
     void suggestion;
+    // Starting a grilling session marks the plan as grilled in the backend.
+    void griller?.id;
     if (!current || current.status !== "draft") return;
     let stale = false;
     invoke<boolean>("plan_grilled", { id: current.id })
@@ -683,7 +722,13 @@
         </label>
         <label>
           Ziel
-          <textarea bind:value={newGoal} rows="5" maxlength="8000" aria-label="Ziel des Plans" placeholder="Was soll am Ende da sein?"></textarea>
+          <textarea
+            bind:value={newGoal}
+            rows="10"
+            maxlength="8000"
+            aria-label="Ziel des Plans"
+            placeholder="Was soll am Ende da sein?"
+          ></textarea>
         </label>
         <div class="row">
           <button class="ax-btn primary" type="submit" disabled={busy || newName.trim() === ""}>Anlegen</button>
@@ -695,8 +740,11 @@
       {#each plans as item (item.id)}
         <li>
           <button type="button" class:on={item.id === openPlanId} onclick={() => void openPlan(item.id)}>
-            <span class="name">{item.name}</span>
-            <span class="status {item.status}">{planStatusLabel(item.status)}</span>
+            <span class="head">
+              <span class="name">{item.name}</span>
+              <span class="status {item.status}">{planStatusLabel(item.status)}</span>
+            </span>
+            {#if item.goal.trim() !== ""}<span class="goal-line">{item.goal}</span>{/if}
           </button>
         </li>
       {/each}
@@ -748,7 +796,7 @@
         Ziel
         <textarea
           bind:value={goalDraft}
-          rows="4"
+          rows="7"
           maxlength="8000"
           aria-label="Ziel"
           disabled={plan.status !== "draft"}
@@ -772,57 +820,69 @@
 
       {#if plan.status === "draft"}
         <div class="planner">
-          {#if griller}
-            <span>Grill: <strong>{griller.name}</strong></span>
-            <button class="ax-btn" type="button" onclick={() => showPlanner(griller.id)}>Pane zeigen</button>
-          {/if}
           {#if planner}
             <span>Planer: <strong>{planner.name}</strong></span>
             <button class="ax-btn" type="button" onclick={() => showPlanner(planner.id)}>Pane zeigen</button>
           {/if}
-          {#if rolesLoaded && canStartGrill(plan, $session.agents, roles) && grillNames.length > 0}
-            <div class="start">
-              <SessionPicker
-                label="Rolle zum Grillen"
-                names={grillNames}
-                {roles}
-                catalog={$engineCatalog}
-                bind:role={grillRole}
-                bind:engine={grillEngine}
-              />
-              <button
-                class="ax-btn"
-                type="button"
-                disabled={busy || goalDraft.trim() === ""}
-                title={goalDraft.trim() === ""
-                  ? "Schreibe erst ein Ziel, das sich hinterfragen lässt."
-                  : "Eine Sitzung fragt dich im Terminal nach dem Ziel aus, bis nichts offen ist, und schlägt ein geschärftes Ziel vor"}
-                onclick={() => void startGrill()}
-              >
-                Plan grillen
-              </button>
-            </div>
+          {#if griller}
+            <span>Grill: <strong>{griller.name}</strong></span>
+            <button class="ax-btn" type="button" onclick={() => showPlanner(griller.id)}>Pane zeigen</button>
           {/if}
-          {#if rolesLoaded && canStartPlanner(plan, $session.agents, roles) && plannerNames.length > 0}
+          {#if rolesLoaded}
             <div class="start">
-              <SessionPicker
-                label="Rolle des Planers"
-                names={plannerNames}
-                {roles}
-                catalog={$engineCatalog}
-                bind:role={plannerRole}
-                bind:engine={plannerEngine}
-              />
-              <button
-                class="ax-btn primary"
-                type="button"
-                disabled={busy || goalDraft.trim() === ""}
-                title={goalDraft.trim() === "" ? "Der Planer braucht ein Ziel." : ""}
-                onclick={() => void startPlanner()}
-              >
-                Planer starten
-              </button>
+              {#if canStartPlanner(plan, $session.agents, roles) && plannerNames.length > 0}
+                <SessionPicker
+                  label="Rolle des Planers"
+                  names={plannerNames}
+                  {roles}
+                  catalog={$engineCatalog}
+                  bind:role={plannerRole}
+                  bind:engine={plannerEngine}
+                />
+              {/if}
+              {#if griller === null && grillNames.length > 0}
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    checked={grillWanted}
+                    onchange={(event) => setGrillWish(plan.id, event.currentTarget.checked)}
+                  />
+                  Danach grillen
+                </label>
+                {#if grillWanted}
+                  <SessionPicker
+                    label="Rolle zum Grillen"
+                    names={grillNames}
+                    {roles}
+                    catalog={$engineCatalog}
+                    bind:role={grillRole}
+                    bind:engine={grillEngine}
+                  />
+                {/if}
+              {/if}
+              {#if canStartPlanner(plan, $session.agents, roles) && plannerNames.length > 0}
+                <button
+                  class="ax-btn primary"
+                  type="button"
+                  disabled={busy || goalDraft.trim() === ""}
+                  title={goalDraft.trim() === "" ? "Der Planer braucht ein Ziel." : ""}
+                  onclick={() => void startPlanner()}
+                >
+                  Planer starten
+                </button>
+              {/if}
             </div>
+            {#if grillWanted && griller === null}
+              <span class="muted hint-line">
+                {!grillEngineChosen
+                  ? "Wähle für die Grill-Rolle eine Engine, sonst startet der Grill nicht."
+                  : planner
+                    ? "Der Grill startet, sobald der Planer seine Karten vorgeschlagen hat und auf dich wartet."
+                    : proposals.length > 0
+                      ? "Der Grill startet gleich: die Karten sind da, der Planer läuft nicht mehr."
+                      : "Nach dem Planen fragt dich eine Grill-Sitzung zu den Karten aus."}
+              </span>
+            {/if}
           {/if}
         </div>
       {/if}
@@ -1024,7 +1084,7 @@
     position: absolute;
     inset: 0;
     display: grid;
-    grid-template-columns: calc(240px * var(--ax-ui-scale)) 1fr;
+    grid-template-columns: calc(340px * var(--ax-ui-scale)) 1fr;
     overflow: hidden;
     background: var(--ax-surface-1);
     color: var(--ax-text);
@@ -1044,24 +1104,40 @@
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-1);
+    gap: var(--ax-space-2);
   }
   .plans li button {
     width: 100%;
     display: flex;
-    justify-content: space-between;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    background: none;
-    border: 1px solid transparent;
-    border-radius: var(--ax-radius-sm);
+    flex-direction: column;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-2) var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
     color: inherit;
     font: inherit;
     text-align: left;
     cursor: pointer;
   }
   .plans li button:hover {
-    background: var(--ax-surface-2);
+    background: var(--ax-surface-3);
+  }
+  .plans li .head {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--ax-space-2);
+    min-width: 0;
+  }
+  .plans li .goal-line {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
   }
   .plans li button.on {
     background: var(--ax-accent-muted);

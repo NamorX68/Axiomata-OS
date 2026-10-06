@@ -573,7 +573,7 @@ Branch-Technik: Ultra vergleicht den ausgecheckten Branch mit einer **Basis** (L
 - **Gelieferte Rollen** (beim Start angelegt, wo sie fehlen, nie überschrieben): `implementer-light`, `allrounder` (mittel, bestehend), `implementer-heavy`, `documenter` (Art `doc`, leicht; Text zum Schreiben statt Bauen, Diff lesen), `tester` (Art `test`, mittel), `reviewer-light`, `reviewer` (mittel), `reviewer-heavy`, dazu `planner` und `grill`. Die Stufen ergeben die Kette der **Eskalation** von selbst (die schwächste stärkere Rolle gleicher Art). Die Texte sind eigene, an die Sub-Agenten des Owners (`~/.claude/agents`: docs-writer, test-engineer …) angelehnt; Projekt-Konventionen (AGENTS.md/CLAUDE.md) lesen die Sitzungen selbst, die Rollentexte wiederholen sie nicht.
 - **Reviewer nach Stufe der Karte** (`card_session::choose_reviewer`): gebraucht wird die Stufe der Karte (sonst die der Rolle, die sie arbeitet); es wird **der schwächste Reviewer genommen, der mindestens so stark ist**, dann die stärkeren, zuletzt die nächstschwächeren; ein Reviewer, dessen Engine die des Arbeiters ist, wird übersprungen (A21 bleibt). Eine leichte Doku-Karte wird so billig geprüft, eine schwere gründlich.
 - **Engines der Rollen am Install des Owners** (aus dem OpenRouter-Katalog, die er freigegeben hat; änderbar unter „Engines & roles“): `implementer-light` und `documenter` → MiMo V2.6 Flash / Ling 3.0 Flash; `allrounder`, `tester` → Sonnet; `implementer-heavy`, `planner`, `grill` → Opus; `reviewer-light` → GLM 5.3 Flash; `reviewer` → DeepSeek V4.1 Flash; `reviewer-heavy` → Sonnet; Ausweich-Engines aus Qwen3.8 Flash, GPT-6 Luna, GLM, MiMo. Neue Engines `opencode-openrouter-ling-3-0-flash`, `…-qwen3-8-flash`, `…-gpt-6-luna`.
-- **Preise** (`agents.costs`, je Million Token, **Mittel über die Anbieter** der OpenRouter-Endpunkte vom 2026-10-06; die Spanne ist groß, bei DeepSeek 0,02–0,45 Eingabe): DeepSeek V4.1 Flash 0,19/0,97; Ling 3.0 Flash 0,04/0,12; MiMo V2.6 Flash 0,14/0,29; GLM 5.3 Flash 0,14/0,55; Qwen3.8 Flash 0,15/0,47; GPT-6 Luna 0,11/0,56 (Eingabe/Ausgabe, USD).
+- **Preise** (`agents.costs`, je Million Token, **Listenpreis von OpenRouter** — der Preis, den die Modellseite bzw. `https://openrouter.ai/api/v1/models` nennt, nicht das Mittel über die Anbieter; Stand 2026-10-06, Owner-Entscheid): DeepSeek V4.1 Flash 0,0182/1,32; Ling 3.0 Flash 0,021/0,063; MiMo V2.6 Flash 0,14/0,28; GLM 5.3 Flash 0,15/0,50; Qwen3.8 Flash 0,15/0,47; GPT-6 Luna 0,10/0,50 (Eingabe/Ausgabe, USD; Luna kostet über 272 k Prompt-Token 0,20/0,75 — nicht abgebildet). Cache-Lese-/Schreibpreise werden nicht getrennt gemessen. Einstufung und Kontextgrößen der Modelle: https://llm-stats.com/ (Ling 3.0 Flash hat nur 131 k Kontext, die anderen etwa 1 M).
 - **Einschätzung der Modelle** (Drittquellen, uneinheitliche Benchmarks, Zahlen nicht verglichen — nur Größenordnung): DeepSeek V4.1 Flash gilt auf Deep-SWE als am stärksten (≈ 74), MiMo V2.6 Flash ≈ 68, GLM 5.3 Flash ≈ 63, Qwen3.8 Flash ≈ 59, Ling 3.0 Flash am schwächsten bei agentischen Aufgaben (≈ 43) und am billigsten, für GPT-6 Luna fanden sich keine Werte. Daraus: Ling nur für Text (documenter), MiMo für leichte Karten, GLM für leichte Reviews, DeepSeek als mittlerer Reviewer.
 - **Opencode-Konfiguration** (`~/.config/opencode/opencode.json`, Git-Repo des Owners): der OpenRouter-Block listete `qwen/qwen3.8-27b` und `deepseek/deepseek-v4-flash-0731`, die nicht zu den freigegebenen Modellen gehören; jetzt die sechs freigegebenen (DeepSeek V4.1, MiMo V2.6, GLM 5.3, Qwen3.8 Flash, Ling 3.0, GPT-6 Luna), die Ollama-Modelle unverändert. Nicht committet (`git checkout` stellt es her).
 - **Offen:** Konfigurations-Prüfung von Claude Code und Opencode (Effort je Stufe, Rechte aus dem Projekt, Rollentext bei Opencode als erste Nachricht statt System-Prompt) — Q7; eigene Skills — Q8/Q9 (Empfehlung: erst Rollentexte, Skills später und mit Ja des Owners, da Opencode und Claude Code beide `~/.claude/skills`/`.claude/skills` lesen); Planer wählt Rollen nach Beschreibung — die Beschreibungen sollten nach dem ersten Test geschärft werden; `allrounder-heavy` (Owner-eigene Rolle) und `implementer-heavy` sind beide Ziel der Eskalation (Gleichstand nach Name).
@@ -593,3 +593,57 @@ Branch-Technik: Ultra vergleicht den ausgecheckten Branch mit einer **Basis** (L
 3. ~~Zustellung / Schleifen~~ — beantwortet durch A8. 4. ~~Kostenlimits~~ — beantwortet durch A9.
 6. ~~MCP-Eintrag~~ — beantwortet durch A10.
 7. ~~Eigenständiges Studio~~ — beantwortet durch A11. **Die Runde ist damit durch; der Bauplan ist freigegeben.**
+
+## Grillen nach dem Planen, Agents-Kacheln, Plan-Spalte (2026-10-06, Owner-Runde am Mac)
+
+- **Ein Knopf, Grillen als Option danach.** Der Startblock der Planung hat die Rolle des Planers, den Haken „Danach grillen“
+  (mit der Rolle des Grills) und einen Knopf „Planer starten“. Mit dem Haken startet die Grill-Sitzung **von selbst**, sobald
+  der Planer wartet (`idle`) und mindestens einen Vorschlag gemacht hat (`plannerDone`, `ide/planning.ts`); der Haken lebt
+  in `ide/grillAfter.ts` (überlebt das Umschalten des Modus, nicht den App-Neustart) und der Start läuft nur bei offenem Pane.
+- **Der Grill hinterfragt die Karten, nicht das Ziel.** Auftrag (`agent_entry::grill_prompt`) und Rollentext
+  (`axiomata_roster::store::GRILL_INSTRUCTIONS`) befragen den Owner zu den vorgeschlagenen Karten (zu groß, nicht prüfbar,
+  Reihenfolge, Rolle/Stufe, Fehlendes, Überflüssiges). Er ändert **keine** Karte: Besitzer der Vorschläge ist der Planer
+  (`card_proposers`), also schickt der Grill die vereinbarten Änderungen per `send_message` an die Planer-Sitzung, die sie mit
+  `update_proposal`/`withdraw_proposal`/`create_card` einarbeitet. Läuft der Planer nicht mehr, gibt der Grill dem Owner eine
+  Liste. `propose_goal` bleibt für den Fall, dass das Ziel selbst falsch ist. Eine installierte `grill`-Rolle wird nicht
+  überschrieben (seed-if-absent): ihr Text liegt in `~/.axiomata/agents/grill/AGENT.md`.
+- **„Nicht gegrillt“-Hinweis** liest jetzt auch den **Start** einer Grill-Sitzung (`flow::mark_plan_grilled`), nicht nur das
+  Übernehmen eines Zielvorschlags.
+- **Agents-Pane:** Kacheln füllen die Zeile, bis daneben eine zweite mit 420 px passt (`auto-fit`), der aktuelle Schritt bricht
+  auf drei Zeilen um; der Kopf bricht um, „Terminal“ holt das Terminal der Sitzung nach vorn (startet keine neue).
+  Ein Agent-Pane dockt im Flow **rechts neben dem Agents-Pane** an, weitere rechts neben dem jeweils neuesten
+  (`flowAgentDock`), nicht mehr neben der Flowansicht.
+- **Planung:** linke Spalte 340 px, Plan-Liste als Karten (Name, Status, zwei Zeilen Ziel), größere Zielfelder.
+
+## Mac-Runde 2 (2026-10-06, Plan #4): Rechte, Flowansicht, wartende Sitzungen
+
+- **Rechte der Rollen** (`axiomata_roster::store`, `BUILD_AND_TEST`/`READ_GIT`): die **arbeitenden** Rollen (Implementer,
+  Allrounder, Tester) tragen Build-/Test-Befehle (`cargo build|check|clippy|test|fmt --check`, `npm run check|build`,
+  `npm test`, `npx vitest run`, `uv run pytest|ruff|pyright`) und lesendes Git als `permissions`; Documenter, Planer, Grill
+  und **Reviewer** nur `git status|diff|log|show`. Grund (Security-Audit): ein Build oder Test führt den geprüften Code
+  (`build.rs`, Proc-Macros, Testkonfiguration) als Owner aus, und ein Reviewer liest Text, der ihn dazu überreden kann;
+  wer seine Reviewer testen lassen will, trägt die Regeln in die Rollendatei ein und weiß, was er damit freigibt (die
+  Rollen des Owners tun das seit 2026-10-06). Für **jede** Karten-Sitzung sperrt das Studio zusätzlich `git * --output*` und
+  `git * --no-index*` (Claude `CLAUDE_CARD_DENIED`, Opencode `GIT_OUTSIDE_DENIED` für alle Rollen): die breiten Regeln
+  `git diff:*`/`git show:*` nähmen sie sonst auf, und sie schreiben bzw. lesen außerhalb des Checkouts. Eine Rolle liest ihre
+  Rechte beim **Start** der Sitzung: eine laufende bleibt bei den alten. Installierte Rollen überschreibt der Seed nie
+  (kein Reseed-Pfad für Rollen): die Dateien in `~/.axiomata/agents/` wurden von Hand nachgezogen.
+  Befehle mit Kette (`cd x && npx vitest run`) passen nicht auf die Muster — Projekt-Rechte (AGENTS.md/projekteigene Rollen)
+  sind offen. Bekannt und nicht gelöst: `cargo --config`, `--manifest-path`, `--fix` u. ä. in den `:*`-Regeln der Worker; ob
+  Opencode verkettete Befehle gegen `cargo test *` einzeln prüft, ist per Live-Test zu belegen (`cargo test $(touch x)`).
+- **Start-Prompt der Worker:** „Dateien mit den Edit-Werkzeugen ändern, nie mit `cat >`/Heredoc/`tee`/`sed -i`“ (`FILE_STYLE`);
+  Claude Code fragt bei solchen Shell-Befehlen trotz `acceptEdits`.
+- **Flowansicht:** Knoten 300×78 mit 15/13 px Schrift; **ein Review ist ein eigener Knoten** nach seiner Karte
+  (`flowGraph.hasReviewStage`: in Review, abgezeichnet, integriert, übernommen oder schon einmal zurückgegeben), Abhängige hängen am
+  Review-Knoten; Farbe nach Zustand der Prüfung. Eine Sitzung im Zustand `waiting` färbt ihren Knoten als „Rückfrage“.
+  Der Graph bekommt in neuen Flow-Layouts 40 % der Höhe (`GRAPH_SHARE`); ein gespeichertes Layout ändert „Anordnung zurücksetzen“.
+- **Agents-Kachel:** wartet die Sitzung auf den Owner, trägt die Kachel einen Warnrahmen, die Zeile „Wartet auf dich …“ und
+  den Terminal-Knopf in Akzentfarbe.
+- **Terminal im Flow:** Worker und Reviewer der Karten eines Plans öffnen ihr Pane im **Flow** (`modeForAgent(agent, cardPlanId)`),
+  nicht mehr im Canvas; der Terminal-Knopf holt es dort nach vorn. Bis zu drei Session-Panes stehen nebeneinander, weitere
+  als Tab im neuesten (`flowAgentTarget`).
+- **Beobachtung (Plan übernehmen):** Übernimmt ein Plan Änderungen an Rust-Quellen in `main`, baut `cargo tauri dev`
+  neu und startet die App neu — das ist kein Absturz. Der Übernehmen-Lauf war vorher fertig (Commits, Karten, Plan).
+- **Offen:** Opencode-Reviewer zeigte „starting / noch nichts aufgezeichnet“, obwohl er an einer Rückfrage stand (der
+  Statusüberlagerung aus dem Dienst fehlte das Ereignis); `node_modules`-Symlink im Worktree bricht vitest (Vite verbietet
+  Pfade außerhalb des Worktrees), der Reviewer musste kopieren.

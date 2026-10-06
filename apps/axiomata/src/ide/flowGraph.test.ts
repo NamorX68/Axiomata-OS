@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import type { BoardCard, TaskState } from "../core/backend";
-import { NODE_H, NODE_W, START, START_H, clip, layersOf, layoutGraph, toneOf } from "./flowGraph";
+import {
+  NODE_H,
+  NODE_W,
+  START,
+  START_H,
+  clip,
+  hasReviewStage,
+  layersOf,
+  layoutGraph,
+  reviewLabel,
+  reviewToneOf,
+  toneOf,
+} from "./flowGraph";
 
 function card(id: number, depends_on: number[] = [], state: TaskState = "ready"): BoardCard {
-  return { id, depends_on, state, title: `c${id}` } as BoardCard;
+  return { id, depends_on, state, title: `c${id}`, returned_count: 0 } as BoardCard;
 }
 
 describe("the columns of a plan", () => {
@@ -98,5 +110,51 @@ describe("how it is drawn", () => {
     expect(clip("short")).toBe("short");
     expect(clip("first\nsecond")).toBe("first");
     expect(clip("x".repeat(50), 10)).toBe(`${"x".repeat(9)}…`);
+  });
+});
+
+describe("the review after a card", () => {
+  it("shows once a card is handed in, signed off or was sent back, and not before", () => {
+    expect(hasReviewStage({ state: "working", returned_count: 0 })).toBe(false);
+    expect(hasReviewStage({ state: "ready", returned_count: 0 })).toBe(false);
+    expect(hasReviewStage({ state: "in_review", returned_count: 0 })).toBe(true);
+    expect(hasReviewStage({ state: "integrated", returned_count: 0 })).toBe(true);
+    expect(hasReviewStage({ state: "working", returned_count: 1 })).toBe(true);
+  });
+
+  it("is a node of its own between the card and the cards that wait for it", () => {
+    // 1 is in review, 2 needs 1: 1 | review of 1 | 2.
+    const graph = layoutGraph([card(1, [], "in_review"), card(2, [1], "blocked")]);
+    expect(graph.nodes.map((n) => [n.key, n.kind, n.layer])).toEqual([
+      [1, "card", 0],
+      [-1, "review", 1],
+      [2, "card", 2],
+    ]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, -1], [-1, 2]]);
+  });
+
+  it("hangs a card that needs a reviewed and an unreviewed card on the review of the one and on the other itself", () => {
+    // 1 is signed off, 2 is still working, 3 needs both: 3 waits for the review of 1 and for 2.
+    const graph = layoutGraph([card(1, [], "verified"), card(2, [], "working"), card(3, [1, 2], "blocked")]);
+    expect(graph.edges.filter((e) => e.to === 3).map((e) => e.from).sort()).toEqual([-1, 2]);
+    // 3 sits behind the review of 1, two columns right of it, and so right of 2 as well.
+    const column = (key: number) => graph.nodes.find((n) => n.key === key)!.layer;
+    expect(column(3)).toBe(column(-1) + 1);
+    expect(column(3)).toBeGreaterThan(column(2));
+  });
+
+  it("leaves a card without a review stage as it was drawn before", () => {
+    const graph = layoutGraph([card(1), card(2, [1])]);
+    expect(graph.nodes.map((n) => n.kind)).toEqual(["card", "card"]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, 2]]);
+  });
+
+  it("is coloured and worded by what the review is doing", () => {
+    expect(reviewToneOf("in_review")).toBe("review");
+    expect(reviewToneOf("integrated")).toBe("done");
+    expect(reviewToneOf("working")).toBe("idle");
+    expect(reviewLabel({ state: "in_review", returned_count: 0 })).toBe("wird geprüft");
+    expect(reviewLabel({ state: "verified", returned_count: 1 })).toBe("abgezeichnet");
+    expect(reviewLabel({ state: "working", returned_count: 2 })).toBe("zurückgegeben (2×)");
   });
 });

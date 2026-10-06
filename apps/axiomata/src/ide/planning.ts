@@ -2,9 +2,33 @@
  * What the Flow's planning panel decides before it asks the backend (A2A CP-A7b): which plan to show first, which cards
  * of it are proposals, who plans it, which roles a card may be given. Pure, so it is tested without a backend.
  */
-import type { BoardCard, BoardColumn, BoardPlan, CardTier, IdeAgent, PlanRunEvent, PlanSpend, PlanStatus } from "../core/backend";
+import type {
+  AgentState,
+  BoardCard,
+  BoardColumn,
+  BoardPlan,
+  CardTier,
+  IdeAgent,
+  PlanRunEvent,
+  PlanSpend,
+  PlanStatus,
+} from "../core/backend";
 import type { Role } from "../core/roster";
-import { addTab, allGroups, allTabs, forceCloseTab, mapTabs, type Layout, type PaneTab } from "./layout";
+import {
+  addTab,
+  allGroups,
+  allTabs,
+  forceCloseTab,
+  isGroup,
+  isSplit,
+  mapTabs,
+  setSplitSizes,
+  type DockTarget,
+  type Layout,
+  type LayoutNode,
+  type PaneTab,
+  type Split,
+} from "./layout";
 import type { Mode } from "./modes";
 import { GRAPH_PANE, PLAN_PANE, TEAM_PANE, graphTab, planTab, teamTab } from "./paneKinds";
 
@@ -248,9 +272,46 @@ export function proposalTitle(card: Pick<BoardCard, "id" | "title">): string {
   return first === "" ? `Karte #${card.id}` : first;
 }
 
-/** The mode a session's pane belongs in: a planner in the Flow beside the plan panel, everything else on the Canvas. */
-export function modeForAgent(agent: Pick<IdeAgent, "plan_id">): Mode {
-  return agent.plan_id != null ? "flow" : "agents";
+/**
+ * The mode a session's pane belongs in: everything that works for a plan — its planner and grill, and the workers and
+ * reviewers of its cards (`cardPlanId`, the plan the session's card belongs to) — in the Flow, the rest on the Canvas.
+ */
+export function modeForAgent(agent: Pick<IdeAgent, "plan_id">, cardPlanId: number | null = null): Mode {
+  return agent.plan_id != null || cardPlanId !== null ? "flow" : "agents";
+}
+
+/** How many session panes sit side by side in the Flow before a further one joins the newest as a tab: more columns
+ * are too narrow to read. */
+const MAX_AGENT_COLUMNS = 3;
+
+/**
+ * Where a new session pane goes in the Flow: to the right of the team's tiles, then to the right of the newest
+ * session pane
+ * — and, once [`MAX_AGENT_COLUMNS`] stand side by side, as a tab in the newest. Never beside the graph, which is the
+ * last group
+ * and put the terminal under the plan's width. `null` outside the Flow (a layout without the team panel), where the
+ * Canvas's
+ * own rule holds.
+ */
+export function flowAgentTarget(layout: Layout): DockTarget | null {
+  const groups = allGroups(layout);
+  const team = groups.find((group) => group.tabs.some((tab) => tab.kind === TEAM_PANE));
+  if (!team) return null;
+  const withAgent = groups.filter((group) => group.tabs.some((tab) => tab.kind === "agent"));
+  if (withAgent.length === 0) return { nodeId: team.id, side: "right" };
+  const newest = withAgent[withAgent.length - 1];
+  return withAgent.length >= MAX_AGENT_COLUMNS
+    ? { nodeId: newest.id, side: "center" }
+    : { nodeId: newest.id, side: "right" };
+}
+
+/**
+ * Whether a planner is done with its turn and has something to be grilled: it waits for the next prompt (`idle`) and
+ * the plan
+ * holds at least one proposal. A planner that only asked a question has no card yet and is not done.
+ */
+export function plannerDone(state: AgentState | undefined, proposalCount: number): boolean {
+  return state === "idle" && proposalCount > 0;
 }
 
 /** The agent panes of `layout` that show one of `agentIds`. */
@@ -271,6 +332,21 @@ export function withPlanPane(layout: Layout): Layout {
   return addTab(layout, planTab(), { nodeId: first ? first.id : layout.root.id, side: "center" });
 }
 
+/** The share of the Flow's height the graph gets under the team's tiles: the tiles and the sessions beside them need
+ * more. */
+const GRAPH_SHARE = 0.4;
+
+/** The split that has a group holding a tab of `kind` as a direct child. */
+function splitHolding(node: LayoutNode, kind: string): Split | null {
+  if (!isSplit(node)) return null;
+  if (node.children.some((child) => isGroup(child) && child.tabs.some((tab) => tab.kind === kind))) return node;
+  for (const child of node.children) {
+    const found = splitHolding(child, kind);
+    if (found) return found;
+  }
+  return null;
+}
+
 /** The panes the Flow is built from: pinned, so they cannot be closed — a pane with no way back is a Flow with a hole in it. */
 const FLOW_PANES = [PLAN_PANE, TEAM_PANE, GRAPH_PANE];
 
@@ -289,6 +365,8 @@ export function withFlowPanes(layout: Layout): Layout {
   if (!allTabs(next).some((tab) => tab.kind === GRAPH_PANE)) {
     const team = groupOf(TEAM_PANE);
     next = addTab(next, graphTab(), { nodeId: team ? team.id : next.root.id, side: "bottom" });
+    const split = splitHolding(next.root, GRAPH_PANE);
+    if (split && split.children.length === 2) next = setSplitSizes(next, split.id, [1 - GRAPH_SHARE, GRAPH_SHARE]);
   }
   return mapTabs(next, (tab) => (FLOW_PANES.includes(tab.kind) && !tab.pinned ? { ...tab, pinned: true } : tab));
 }
