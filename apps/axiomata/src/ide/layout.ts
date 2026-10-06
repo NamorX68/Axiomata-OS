@@ -45,6 +45,12 @@ export interface PaneTab {
   title: string;
   /** The pane's own state (file path, module instance, …). Carried, never read or written. */
   config?: Record<string, unknown>;
+  /**
+   * A pane the mode is built from (the Flow's planning, team and graph panels): it has no close button and
+   * [`closeTab`] leaves it where it is. It can still be moved and resized; [`forceCloseTab`] is for the one place that
+   * rebuilds the arrangement.
+   */
+  pinned?: boolean;
 }
 
 /** A stack of tabs, one of them visible. The only node that holds content. */
@@ -239,6 +245,13 @@ export function moveTab(layout: Layout, tabId: string, target: DockTarget): Layo
  * than nothing.
  */
 export function closeTab(layout: Layout, tabId: string): Layout {
+  const hit = findTab(layout, tabId);
+  if (!hit || hit.tab.pinned) return layout;
+  return forceCloseTab(layout, tabId);
+}
+
+/** [`closeTab`] for a pinned tab too: only for rebuilding the arrangement a mode is made of. */
+export function forceCloseTab(layout: Layout, tabId: string): Layout {
   const hit = findTab(layout, tabId);
   if (!hit) return layout;
   const root = replaceNode(layout.root, hit.group.id, (node) => (isGroup(node) ? withoutTab(node, tabId) : node));

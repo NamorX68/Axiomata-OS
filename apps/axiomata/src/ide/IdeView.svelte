@@ -91,7 +91,7 @@
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import { MODES, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
-  import { agentTabsOf, modeForAgent } from "./planning";
+  import { agentTabsOf, modeForAgent, resetFlowPanes } from "./planning";
   import { get } from "svelte/store";
   import { agentRequests, takeAgentRequests } from "./agentRequest";
   import { modeRequest } from "./modeRequest";
@@ -665,6 +665,11 @@
       layout = agentTabsOf(layout, ids).reduce((acc, tab) => closeTab(acc, tab.id), layout);
       projectSession.closeParkedAgentTabs(ids);
     });
+    // "Anordnung zurücksetzen" in the Flow's bar: the three panels go back where they started.
+    const unsubscribeReset = on("studio:reset-flow", () => {
+      if (get(sessionState).mode !== "flow") return;
+      projectSession.save((layout = resetFlowPanes(layout)));
+    });
     let gone = false;
     void projectSession.start().then((next) => {
       if (next) layout = next;
@@ -703,6 +708,7 @@
       unsubscribeMode();
       unsubscribeAgent();
       unsubscribeClose();
+      unsubscribeReset();
       void unlistenRenamed.then((off) => off());
       window.removeEventListener("blur", drag.abandon);
       window.removeEventListener("pagehide", flushOnLeaving);

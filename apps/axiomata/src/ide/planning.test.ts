@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent } from "../core/backend";
 import type { Role } from "../core/roster";
-import { addTab, allGroups, allTabs, closeTab, emptyLayout, singleGroupLayout, type PaneTab } from "./layout";
+import { addTab, allGroups, allTabs, closeTab, forceCloseTab, emptyLayout, singleGroupLayout, type PaneTab } from "./layout";
 import {
   agentTabsOf,
+  canDeletePlan,
   assignableRoles,
   canApprove,
   canStartPlanner,
@@ -24,6 +25,7 @@ import {
   spendLine,
   tokensLabel,
   runsByItself,
+  resetFlowPanes,
   withFlowPanes,
   withPlanPane,
 } from "./planning";
@@ -145,25 +147,40 @@ describe("where a session's pane belongs", () => {
 });
 
 describe("the Flow's three panels", () => {
-  it("adds the graph beside planning as a tab and the team panel to its right, once, and brings all back after they were closed", () => {
+  it("builds planning | team over graph, pinned, and repairs only what is missing", () => {
     const all = withFlowPanes(emptyLayout());
     expect(allTabs(all).map((t) => t.kind).sort()).toEqual(["graph", "plan", "team"]);
-    // Planning and the graph share a group; the team panel has one of its own: two groups, both in view.
-    expect(allGroups(all)).toHaveLength(2);
-    const planGroup = allGroups(all).find((g) => g.tabs.some((t) => t.kind === "plan"))!;
-    expect(planGroup.tabs.map((t) => t.kind).sort()).toEqual(["graph", "plan"]);
+    expect(allTabs(all).every((t) => t.pinned)).toBe(true);
+    // Three groups: planning, the team's tiles, the graph.
+    expect(allGroups(all)).toHaveLength(3);
     expect(withFlowPanes(all)).toBe(all);
-    const closed = allTabs(all).reduce((acc, t) => closeTab(acc, t.id), all);
-    expect(allTabs(withFlowPanes(closed)).map((t) => t.kind).sort()).toEqual(["graph", "plan", "team"]);
   });
 
-  it("keeps panels the owner moved into one group", () => {
+  it("cannot be closed, but can be forced shut, and comes back where it started after a reset", () => {
+    const all = withFlowPanes(emptyLayout());
+    const team = allTabs(all).find((t) => t.kind === "team")!;
+    expect(closeTab(all, team.id)).toBe(all);
+    const reset = resetFlowPanes(forceCloseTab(all, team.id));
+    expect(allTabs(reset).map((t) => t.kind).sort()).toEqual(["graph", "plan", "team"]);
+    expect(allGroups(reset)).toHaveLength(3);
+  });
+
+  it("pins panels an older layout had and leaves them where the owner put them", () => {
     const together = singleGroupLayout([
       { id: "p", kind: "plan", title: "Planung" },
       { id: "g", kind: "graph", title: "Flowansicht" },
       { id: "t", kind: "team", title: "Agents" },
     ]);
-    expect(withFlowPanes(together)).toBe(together);
+    const pinned = withFlowPanes(together);
+    expect(allGroups(pinned)).toHaveLength(1);
+    expect(allTabs(pinned).every((t) => t.pinned)).toBe(true);
+  });
+
+  it("keeps the sessions' panes through a reset", () => {
+    const base = withFlowPanes(emptyLayout());
+    const first = allGroups(base)[0];
+    const layout = addTab(base, agentTab("a", 5), { nodeId: first.id, side: "center" });
+    expect(allTabs(resetFlowPanes(layout)).map((t) => t.kind).sort()).toEqual(["agent", "graph", "plan", "team"]);
   });
 });
 
@@ -312,5 +329,25 @@ describe("what the owner is told about a plan's run", () => {
     expect(endedSessions(conflict(false))).toEqual([25]);
     expect(endedSessions({ event: "integrated", outcome: "busy", card_id: 1 })).toEqual([]);
     expect(endedSessions({ event: "blocked", card_id: 5, reason: "x" })).toEqual([]);
+  });
+});
+
+describe("deleting a plan", () => {
+  const card = (state: string, claimed: string | null = null, archived: string | null = null) =>
+    ({ state, claimed_by: claimed, archived_at: archived }) as Pick<BoardCard, "state" | "claimed_by" | "archived_at">;
+
+  it("is always possible for a draft or a closed plan", () => {
+    expect(canDeletePlan({ status: "draft", base_branch: null }, [card("proposed")])).toBe(true);
+    expect(canDeletePlan({ status: "closed", base_branch: "main" }, [card("integrated", "agent:x-1")])).toBe(true);
+  });
+
+  it("is refused for an approved plan while a card is held or in work, and once it has a line", () => {
+    const approved = { status: "approved" as const, base_branch: null };
+    expect(canDeletePlan(approved, [card("ready")])).toBe(true);
+    expect(canDeletePlan(approved, [card("working", "agent:x-1")])).toBe(false);
+    expect(canDeletePlan(approved, [card("in_review")])).toBe(false);
+    expect(canDeletePlan(approved, [card("ready", "agent:x-1")])).toBe(false);
+    expect(canDeletePlan(approved, [card("working", "agent:x-1", "2026-10-06T10:00:00Z")])).toBe(true);
+    expect(canDeletePlan({ ...approved, base_branch: "main" }, [card("ready")])).toBe(false);
   });
 });

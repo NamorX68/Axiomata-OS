@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IdeProject } from "../core/backend";
 import { toast } from "../core/toast";
-import { addTab, allGroups, allTabs, closeTab, findTab, singleGroupLayout, type Layout } from "./layout";
+import { addTab, allGroups, allTabs, closeTab, findTab, forceCloseTab, singleGroupLayout, type Layout } from "./layout";
 import * as session from "./projectSession";
 import * as agentApi from "./agents";
 import * as projects from "./projects";
@@ -308,7 +308,7 @@ describe("modes", () => {
     const agents = (await session.open(1))!;
     const flow = session.switchMode(agents, "flow");
     expect(get(session.session).mode).toBe("flow");
-    expect(allTabs(flow).map((t) => t.kind)).toEqual(["plan", "graph", "team"]);
+    expect(allTabs(flow).map((t) => t.kind)).toEqual(["plan", "team", "graph"]);
     expect(get(session.session).parked.agents).toBe(agents);
   });
 
@@ -325,13 +325,15 @@ describe("modes", () => {
     expect(allTabs(layout!).map((t) => t.kind).sort()).toEqual(["agent", "graph", "plan", "team"]);
   });
 
-  it("repairs the Flow when it is shown, after the panel was closed in the session", async () => {
+  it("repairs the Flow when it is shown, after its panels were lost, and no close removes them", async () => {
     api.openProject.mockResolvedValue(project(1));
     const agents = (await session.open(1))!;
     const flow = session.switchMode(agents, "flow");
-    const closed = allTabs(flow).reduce((acc, t) => closeTab(acc, t.id), flow);
+    const tried = allTabs(flow).reduce((acc, t) => closeTab(acc, t.id), flow);
+    expect(allTabs(tried)).toHaveLength(3);
+    const closed = allTabs(flow).reduce((acc, t) => forceCloseTab(acc, t.id), flow);
     const canvas = session.switchMode(closed, "agents");
-    expect(allTabs(session.switchMode(canvas, "flow")).map((t) => t.kind)).toEqual(["plan", "graph", "team"]);
+    expect(allTabs(session.switchMode(canvas, "flow")).map((t) => t.kind)).toEqual(["plan", "team", "graph"]);
   });
 
   it("closes the panes of ended sessions in the layouts that are not shown", async () => {
@@ -361,7 +363,7 @@ describe("modes", () => {
     expect(get(session.session).mode).toBe("editor");
     // A row from the two-mode time gets the starting Flow.
     expect(allTabs(get(session.session).parked.agents!)).toHaveLength(1);
-    expect(allTabs(get(session.session).parked.flow!).map((t) => t.kind)).toEqual(["plan", "graph", "team"]);
+    expect(allTabs(get(session.session).parked.flow!).map((t) => t.kind)).toEqual(["plan", "team", "graph"]);
   });
 });
 

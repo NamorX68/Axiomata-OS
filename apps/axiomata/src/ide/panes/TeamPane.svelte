@@ -10,9 +10,6 @@
 <script lang="ts">
     import {
     invokeBackend as invoke,
-    type Board,
-    type BoardCard,
-    type BoardPlan,
     type IdeProject,
     type SessionActivity,
   } from "../../core/backend";
@@ -25,6 +22,7 @@
   import { session } from "../projectSession";
   import SessionMail from "../SessionMail.svelte";
   import StatusDot from "../StatusDot.svelte";
+  import { flowSelection, resolvePlan } from "../flowSelection";
   import { dutyLabel, groupsOf, nowAt, nowLine, stepLabel } from "../team";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
@@ -33,33 +31,24 @@
   /** How often the sessions' records are read while the pane is shown: a step is seconds long, a poll costs a file tail. */
   const POLL_MS = 3000;
 
-  // The cards and plans of every board: a session's card may lie on any of them. The subscriptions end with the effect — also
-  // when it ends before the list of boards has come back.
-  let boardData = $state<Record<number, BoardData>>({});
+  // The board and plan are the Flow's, chosen in the bar above it (`ide/flowSelection.ts`): the tiles are those of the
+  // plan shown, and of sessions that belong to no plan.
+  let data = $state<BoardData | null>(null);
   $effect(() => {
-    let ended = false;
-    let stops: (() => void)[] = [];
-    invoke<Board[]>("list_boards")
-      .then((boards) => {
-        if (ended) return;
-        stops = boards.map((board) =>
-          boardStore(board.id).subscribe((value) => (boardData = { ...boardData, [board.id]: value })),
-        );
-      })
-      .catch(() => {
-        // Without the boards the tiles show the sessions without their cards.
-      });
-    return () => {
-      ended = true;
-      for (const stop of stops) stop();
-    };
+    const id = $flowSelection.boardId;
+    if (id === null) {
+      data = null;
+      return;
+    }
+    return boardStore(id).subscribe((value) => (data = value));
   });
 
-  const cards = $derived<BoardCard[]>(Object.values(boardData).flatMap((data) => data.cards));
-  const plans = $derived<BoardPlan[]>(Object.values(boardData).flatMap((data) => data.plans));
-  const groups = $derived(groupsOf($session.agents, cards, plans));
-  // The ids as one string: a recompute of the groups (a card moved, a plan renamed) gives a new array of the same ids, and
-  // the polls below must not restart for that — a poll that is restarted before its answer comes back never shows one.
+  const shown = $derived(resolvePlan(data?.plans ?? [], $flowSelection.planId));
+  const groups = $derived(
+    groupsOf($session.agents, data?.cards ?? [], data?.plans ?? []).filter(
+      (group) => group.planId === null || shown === null || group.planId === shown.id,
+    ),
+  );
   const idKey = $derived(groups.flatMap((group) => group.tiles.map((tile) => tile.agent.id)).join(","));
 
   let activity = $state<Record<number, SessionActivity>>({});

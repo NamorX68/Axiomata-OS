@@ -4,7 +4,7 @@
  */
 import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent, PlanSpend, PlanStatus } from "../core/backend";
 import type { Role } from "../core/roster";
-import { addTab, allGroups, allTabs, type Layout, type PaneTab } from "./layout";
+import { addTab, allGroups, allTabs, forceCloseTab, mapTabs, type Layout, type PaneTab } from "./layout";
 import type { Mode } from "./modes";
 import { GRAPH_PANE, PLAN_PANE, TEAM_PANE, graphTab, planTab, teamTab } from "./paneKinds";
 
@@ -31,6 +31,24 @@ export function defaultPlanId(plans: BoardPlan[]): number | null {
 /** The cards of a plan that are still on the board, in board order. */
 export function cardsOfPlan(cards: BoardCard[], planId: number): BoardCard[] {
   return cards.filter((card) => card.plan_id === planId && card.archived_at === null);
+}
+
+/**
+ * Whether a plan may be deleted: a draft or a closed plan always; an approved one only while nothing of it is under way —
+ * no card held by a session and no integration line (`board::flow::delete_plan` refuses the same, so the button is not a
+ * promise the backend breaks). A running plan is taken over or closed first.
+ */
+export function canDeletePlan(
+  plan: Pick<BoardPlan, "status" | "base_branch">,
+  cards: Pick<BoardCard, "claimed_by" | "archived_at" | "state">[],
+): boolean {
+  if (plan.status !== "approved") return true;
+  const underWay = cards.some(
+    (card) =>
+      card.archived_at === null &&
+      (card.claimed_by != null || card.state === "working" || card.state === "in_review" || card.state === "input_required"),
+  );
+  return !underWay && !plan.base_branch;
 }
 
 /** Every card of a plan, the archived ones (taken over) included: what a finished plan did is still its own. */
@@ -101,23 +119,34 @@ export function withPlanPane(layout: Layout): Layout {
   return addTab(layout, planTab(), { nodeId: first ? first.id : layout.root.id, side: "center" });
 }
 
+/** The panes the Flow is built from: pinned, so they cannot be closed — a pane with no way back is a Flow with a hole in it. */
+const FLOW_PANES = [PLAN_PANE, TEAM_PANE, GRAPH_PANE];
+
 /**
- * The layout with the Flow's three panels in it: planning and, as a tab beside it, the graph of the plan — and, to their
- * right so both are in view, the team's tiles. Each is repaired on load and whenever the Flow is shown, since nothing else
- * opens a closed one.
+ * The layout with the Flow's three panels in it, pinned: planning on the left, the team's tiles top right and the graph
+ * below them. A missing one is added in that place — on load and whenever the Flow is shown — and one the owner moved
+ * stays where it was put; they can be resized and moved, not closed (`resetFlowPanes` puts them back).
  */
 export function withFlowPanes(layout: Layout): Layout {
   let next = withPlanPane(layout);
-  const planGroup = () => allGroups(next).find((group) => group.tabs.some((tab) => tab.kind === PLAN_PANE));
-  if (!allTabs(next).some((tab) => tab.kind === GRAPH_PANE)) {
-    const plan = planGroup();
-    next = addTab(next, graphTab(), { nodeId: plan ? plan.id : next.root.id, side: "center" });
-  }
+  const groupOf = (kind: string) => allGroups(next).find((group) => group.tabs.some((tab) => tab.kind === kind));
   if (!allTabs(next).some((tab) => tab.kind === TEAM_PANE)) {
-    const plan = planGroup();
+    const plan = groupOf(PLAN_PANE);
     next = addTab(next, teamTab(), { nodeId: plan ? plan.id : next.root.id, side: "right" });
   }
-  return next;
+  if (!allTabs(next).some((tab) => tab.kind === GRAPH_PANE)) {
+    const team = groupOf(TEAM_PANE);
+    next = addTab(next, graphTab(), { nodeId: team ? team.id : next.root.id, side: "bottom" });
+  }
+  return mapTabs(next, (tab) => (FLOW_PANES.includes(tab.kind) && !tab.pinned ? { ...tab, pinned: true } : tab));
+}
+
+/** The three panels back in their starting places, whatever the owner did with them; the sessions' panes stay as they are. */
+export function resetFlowPanes(layout: Layout): Layout {
+  const stripped = allTabs(layout)
+    .filter((tab) => FLOW_PANES.includes(tab.kind))
+    .reduce((acc, tab) => forceCloseTab(acc, tab.id), layout);
+  return withFlowPanes(stripped);
 }
 
 /** What the owner is told about one thing the plans that run by themselves did — `null` for what needs no word. */

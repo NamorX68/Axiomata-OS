@@ -67,6 +67,7 @@
         class:active={tab.id === group.active}
         class:dragging={dock.draggingTab() === tab.id}
         class:preview={filePaneConfig(tab)?.preview === true}
+        class:pinned={tab.pinned}
         style:--lang={tint(tab)}
         data-ide-tab={tab.id}
         id="ide-tab-{tab.id}"
@@ -85,13 +86,15 @@
       >
         {#if view}<StatusDot {view} />{/if}
         <span class="title">{tab.title}</span>
-        <button
-          class="close"
-          type="button"
-          aria-label="Close {tab.title}"
-          onpointerdown={(event) => event.stopPropagation()}
-          onclick={() => dock.requestClose(tab.id)}><Icon name="x" size="sm" /></button
-        >
+        {#if !tab.pinned}
+          <button
+            class="close"
+            type="button"
+            aria-label="Close {tab.title}"
+            onpointerdown={(event) => event.stopPropagation()}
+            onclick={() => dock.requestClose(tab.id)}><Icon name="x" size="sm" /></button
+          >
+        {/if}
       </div>
     {/each}
   </div>
@@ -168,6 +171,11 @@
     transition:
       background var(--ax-dur-fast) var(--ax-ease),
       border-color var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  /* No close button to leave room for: the label sits in the middle of its pill. */
+  .tab.pinned {
+    padding-right: var(--ax-space-3);
   }
 
   .tab:hover {

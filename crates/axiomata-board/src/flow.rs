@@ -389,8 +389,28 @@ pub fn update_plan(db: &Connection, id: i64, fields: &PlanFields) -> Result<Opti
 
 /// Deletes a plan. Its cards stay on the board without a plan, and the edges between them go — an edge only means
 /// something inside a plan (A16).
+///
+/// Refused for an approved plan that is under way — a card held by a session, or an integration line made for it: the
+/// sessions and the line's worktree would be left with nothing that owns them. Take the plan over (or close it) first.
 pub fn delete_plan(db: &mut Connection, id: i64) -> Result<bool> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if let Some(plan) = get_plan(&tx, id)?
+        && plan.status == PlanStatus::Approved
+    {
+        let held: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM cards
+             WHERE plan_id = ?1 AND claimed_by IS NOT NULL AND archived_at IS NULL AND taken_over_at IS NULL
+               AND failed_at IS NULL AND canceled_at IS NULL",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if held > 0 || plan.base_branch.is_some() {
+            return invalid(
+                "plan_id",
+                "the plan is under way (a card is held by a session, or its line exists); take it over or close it first",
+            );
+        }
+    }
     tx.execute(
         "DELETE FROM card_deps
          WHERE card_id IN (SELECT id FROM cards WHERE plan_id = ?1)
@@ -2505,6 +2525,40 @@ mod tests {
         let b_after = get_card(&f.db, b.id).unwrap().unwrap();
         assert_eq!((b_after.plan_id, b_after.depends_on.len()), (None, 0));
         assert!(get_card(&f.db, a.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn an_approved_plan_under_way_is_not_deleted_but_a_draft_a_closed_and_an_idle_one_are() {
+        let mut f = fixture();
+        // A draft: always.
+        let draft = plan(&f);
+        assert!(delete_plan(&mut f.db, draft.id).unwrap());
+
+        // Approved, a card held by a session: refused, and nothing is touched.
+        let busy = plan(&f);
+        let card = planned_card(&f, f.open, busy.id, "held");
+        approve_plan(&mut f.db, busy.id, "human:owner").unwrap();
+        claim_card(&f.db, card.id, "agent:w-1").unwrap();
+        let refused = delete_plan(&mut f.db, busy.id).unwrap_err();
+        assert!(refused.to_string().contains("under way"), "{refused}");
+        assert!(get_plan(&f.db, busy.id).unwrap().is_some());
+        assert_eq!(
+            get_card(&f.db, card.id).unwrap().unwrap().plan_id,
+            Some(busy.id)
+        );
+
+        // Approved with a line: refused too; closed afterwards: allowed.
+        let lined = plan(&f);
+        approve_plan(&mut f.db, lined.id, "human:owner").unwrap();
+        set_plan_base_branch(&f.db, lined.id, "main").unwrap();
+        assert!(delete_plan(&mut f.db, lined.id).is_err());
+        close_plan(&f.db, lined.id).unwrap();
+        assert!(delete_plan(&mut f.db, lined.id).unwrap());
+
+        // Approved and idle: allowed.
+        let idle = plan(&f);
+        approve_plan(&mut f.db, idle.id, "human:owner").unwrap();
+        assert!(delete_plan(&mut f.db, idle.id).unwrap());
     }
 
     // ------------------------------------------------------ dependencies ---

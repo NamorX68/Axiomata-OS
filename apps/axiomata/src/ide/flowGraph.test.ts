@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BoardCard, TaskState } from "../core/backend";
-import { NODE_H, NODE_W, clip, layersOf, layoutGraph, toneOf } from "./flowGraph";
+import { NODE_H, NODE_W, START, START_H, clip, layersOf, layoutGraph, toneOf } from "./flowGraph";
 
 function card(id: number, depends_on: number[] = [], state: TaskState = "ready"): BoardCard {
   return { id, depends_on, state, title: `c${id}` } as BoardCard;
@@ -23,13 +23,13 @@ describe("the columns of a plan", () => {
 
 describe("the layout", () => {
   it("is empty for no cards", () => {
-    expect(layoutGraph([])).toEqual({ nodes: [], edges: [], width: 0, height: 0 });
+    expect(layoutGraph([])).toEqual({ start: null, nodes: [], edges: [], width: 0, height: 0 });
   });
 
   it("gives each card a place, a line for each edge, and room for all of them", () => {
     const graph = layoutGraph([card(1), card(2, [1]), card(3, [1]), card(4, [2, 3])]);
     expect(graph.nodes).toHaveLength(4);
-    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[1, 2], [1, 3], [2, 4], [3, 4]]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, 2], [1, 3], [2, 4], [3, 4]]);
     const nodes = new Map(graph.nodes.map((n) => [n.card.id, n]));
     expect(nodes.get(2)!.x).toBeGreaterThan(nodes.get(1)!.x + NODE_W - 1);
     // 2 and 3 share a column: different rows, no overlap.
@@ -50,10 +50,36 @@ describe("the layout", () => {
 
   it("draws a line from the right side of the card needed to the left side of the card that needs it", () => {
     const graph = layoutGraph([card(1), card(2, [1])]);
-    const [edge] = graph.edges;
+    const edge = graph.edges.find((e) => e.from === 1)!;
     const [from, to] = [graph.nodes[0], graph.nodes[1]];
     expect(edge.path.startsWith(`M ${from.x + NODE_W} ${from.y + NODE_H / 2}`)).toBe(true);
     expect(edge.path.endsWith(`${to.x} ${to.y + NODE_H / 2}`)).toBe(true);
+  });
+});
+
+describe("the start and the middle line", () => {
+  it("lets every card that needs none grow out of one start node left of the first column", () => {
+    const graph = layoutGraph([card(1), card(2), card(3, [1, 2])]);
+    const starts = graph.edges.filter((e) => e.from === START).map((e) => e.to);
+    expect(starts).toEqual([1, 2]);
+    const first = Math.min(...graph.nodes.map((n) => n.x));
+    expect(graph.start!.x + graph.start!.w).toBeLessThanOrEqual(first);
+  });
+
+  it("treats a card whose predecessors are all outside the plan as one that needs none", () => {
+    const graph = layoutGraph([card(1, [99])]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1]]);
+  });
+
+  it("hangs every column around the middle of the tallest one, and the start on the same line", () => {
+    // Column 0 has three cards, column 1 has one: the single card sits level with the middle of the three.
+    const graph = layoutGraph([card(1), card(2), card(3), card(4, [1, 2, 3])]);
+    const centre = (y: number, h: number) => y + h / 2;
+    const middle = graph.nodes.find((n) => n.card.id === 2)!;
+    const alone = graph.nodes.find((n) => n.card.id === 4)!;
+    expect(centre(alone.y, NODE_H)).toBeCloseTo(centre(middle.y, NODE_H));
+    expect(centre(graph.start!.y, START_H)).toBeCloseTo(centre(middle.y, NODE_H));
+    for (const node of graph.nodes) expect(node.y + NODE_H).toBeLessThanOrEqual(graph.height);
   });
 });
 

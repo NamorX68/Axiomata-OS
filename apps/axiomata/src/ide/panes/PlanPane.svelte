@@ -40,6 +40,7 @@
     proposalsOf,
     proposalTitle,
     allCardsOfPlan,
+    canDeletePlan,
     cardsOfPlan,
     readyToTakeOver,
     runsByItself,
@@ -49,6 +50,7 @@
   import { projectRootId } from "../../fileapp/projectModel";
   import { unpushedNote } from "../cardStart";
   import { refreshAgents, session } from "../projectSession";
+  import { flowSelection } from "../flowSelection";
   import { engineCatalog, engineLine, refreshEngines } from "../rosterStore";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
@@ -119,6 +121,8 @@
     planId !== null && plans.some((p) => p.id === planId) ? planId : defaultPlanId(plans),
   );
   const plan = $derived(plans.find((p) => p.id === openPlanId) ?? null);
+  // The team's tiles and the graph show this plan: they have no selector of their own (`ide/flowSelection.ts`).
+  $effect(() => flowSelection.set({ boardId, planId: plan?.id ?? null }));
 
   const cards = $derived(plan && data ? cardsOfPlan(data.cards, plan.id) : []);
   const proposals = $derived(plan && data ? proposalsOf(data.cards, plan.id) : []);
@@ -430,6 +434,26 @@
     });
   }
 
+  let deleting = $state(false);
+  // The confirmation is for the plan it was asked about: another plan opened in between starts without it.
+  $effect(() => {
+    void plan?.id;
+    deleting = false;
+  });
+
+  async function deletePlan(): Promise<void> {
+    if (!plan) return;
+    const current = plan;
+    await run(async () => {
+      await invoke("delete_board_plan", { id: current.id });
+      endPlanner(current.id);
+      deleting = false;
+      planId = null;
+      await Promise.all([reload(), refreshAgents()]);
+      toast(`Plan „${current.name}“ ist gelöscht; seine Karten bleiben auf dem Brett, ohne Plan.`, "info");
+    });
+  }
+
   async function closePlan(): Promise<void> {
     if (!plan) return;
     const current = plan;
@@ -537,6 +561,13 @@
     {#if data && plans.length === 0 && !creating}
       <p class="hint">Noch kein Plan auf diesem Brett.</p>
     {/if}
+    <span class="grow"></span>
+    <button
+      class="ax-btn"
+      type="button"
+      title="Planung, Agents und Flowansicht wieder an ihren Platz legen"
+      onclick={() => emit("studio:reset-flow")}>Anordnung zurücksetzen</button
+    >
   </aside>
 
   <section class="detail" aria-label="Plan">
@@ -553,6 +584,20 @@
         <span class="spacer"></span>
         {#if plan.status === "draft"}
           <button class="ax-btn" type="button" disabled={busy} onclick={() => void closePlan()}>Schließen</button>
+        {/if}
+        {#if deleting}
+          <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void deletePlan()}>Wirklich löschen</button>
+          <button class="ax-btn" type="button" onclick={() => (deleting = false)}>Abbrechen</button>
+        {:else}
+          <button
+            class="ax-btn"
+            type="button"
+            disabled={busy || !canDeletePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))}
+            title={canDeletePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))
+              ? "Den Plan löschen; seine Karten bleiben ohne Plan auf dem Brett"
+              : "Der Plan läuft noch: erst übernehmen oder schließen"}
+            onclick={() => (deleting = true)}>Löschen</button
+          >
         {/if}
       </header>
 
@@ -779,6 +824,9 @@
   .plans li button.on {
     background: var(--ax-accent-muted);
     border-color: var(--ax-accent);
+  }
+  .grow {
+    flex: 1;
   }
   .name {
     overflow: hidden;

@@ -10,6 +10,8 @@ export const NODE_H = 58;
 const COL_GAP = 72;
 const ROW_GAP = 16;
 const PAD = 16;
+export const START_W = 64;
+export const START_H = 36;
 
 export interface GraphNode {
   card: BoardCard;
@@ -19,7 +21,19 @@ export interface GraphNode {
   y: number;
 }
 
+/** The id the start node has in an edge's `from`. */
+export const START = 0;
+
+/** The point the tree grows from: a small node left of the first column. */
+export interface StartNode {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface GraphEdge {
+  /** The card the line leaves, or [`START`] for a card that needs none. */
   from: number;
   to: number;
   /** An SVG path from the right side of `from` to the left side of `to`. */
@@ -27,6 +41,8 @@ export interface GraphEdge {
 }
 
 export interface Graph {
+  /** `null` for no cards. */
+  start: StartNode | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
   width: number;
@@ -70,46 +86,66 @@ function orderColumns(columns: BoardCard[][]): void {
   }
 }
 
-/** The graph of `cards`: positions, and one curve per "needs first" line between two of them. */
+/** The graph of `cards`: a start node, positions, and one curve per "needs first" line — and per card that needs none, one from the start. */
 export function layoutGraph(cards: BoardCard[]): Graph {
-  if (cards.length === 0) return { nodes: [], edges: [], width: 0, height: 0 };
+  if (cards.length === 0) return { start: null, nodes: [], edges: [], width: 0, height: 0 };
   const layers = layersOf(cards);
   const depth = Math.max(...layers.values());
   const columns: BoardCard[][] = Array.from({ length: depth + 1 }, () => []);
   for (const card of [...cards].sort((a, b) => a.id - b.id)) columns[layers.get(card.id) ?? 0].push(card);
   orderColumns(columns);
 
+  const widest = Math.max(...columns.map((column) => column.length));
+  const heightOf = (rows: number, row: number) => rows * row + (rows - 1) * ROW_GAP;
+  const inner = Math.max(heightOf(widest, NODE_H), START_H);
+  const height = PAD * 2 + inner;
+  const firstX = PAD + START_W + COL_GAP;
+
   const nodes: GraphNode[] = [];
-  columns.forEach((column, layer) =>
+  columns.forEach((column, layer) => {
+    // Each column hangs around the middle of the tallest one, so the tree grows out of the centre line.
+    const top = PAD + (inner - heightOf(column.length, NODE_H)) / 2;
     column.forEach((card, row) =>
       nodes.push({
         card,
         layer,
-        x: PAD + layer * (NODE_W + COL_GAP),
-        y: PAD + row * (NODE_H + ROW_GAP),
+        x: firstX + layer * (NODE_W + COL_GAP),
+        y: top + row * (NODE_H + ROW_GAP),
       }),
-    ),
-  );
+    );
+  });
+  const start: StartNode = { x: PAD, y: PAD + (inner - START_H) / 2, w: START_W, h: START_H };
+
   const at = new Map(nodes.map((node) => [node.card.id, node]));
+  const curve = (x1: number, y1: number, x2: number, y2: number): string => {
+    const bend = (x2 - x1) / 2;
+    return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+  };
   const edges: GraphEdge[] = [];
   for (const node of nodes) {
-    for (const dep of node.card.depends_on) {
-      const from = at.get(dep);
-      if (!from) continue;
-      const x1 = from.x + NODE_W;
-      const y1 = from.y + NODE_H / 2;
-      const x2 = node.x;
-      const y2 = node.y + NODE_H / 2;
-      const bend = (x2 - x1) / 2;
-      edges.push({ from: dep, to: node.card.id, path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}` });
+    const sources = node.card.depends_on.filter((dep) => at.has(dep));
+    if (sources.length === 0) {
+      edges.push({
+        from: START,
+        to: node.card.id,
+        path: curve(start.x + start.w, start.y + start.h / 2, node.x, node.y + NODE_H / 2),
+      });
+    }
+    for (const dep of sources) {
+      const from = at.get(dep)!;
+      edges.push({
+        from: dep,
+        to: node.card.id,
+        path: curve(from.x + NODE_W, from.y + NODE_H / 2, node.x, node.y + NODE_H / 2),
+      });
     }
   }
-  const widest = Math.max(...columns.map((column) => column.length));
   return {
+    start,
     nodes,
     edges,
-    width: PAD * 2 + columns.length * NODE_W + (columns.length - 1) * COL_GAP,
-    height: PAD * 2 + widest * NODE_H + (widest - 1) * ROW_GAP,
+    width: firstX + columns.length * NODE_W + (columns.length - 1) * COL_GAP + PAD,
+    height,
   };
 }
 

@@ -8,9 +8,7 @@
 <script lang="ts">
   import {
     invokeBackend as invoke,
-    type Board,
     type BoardCard,
-    type BoardPlan,
     type CardEvent,
     type CardIntegrationResult,
     type IdeProject,
@@ -22,44 +20,25 @@
   import { STATE_LABEL } from "../../core/kanban";
   import { toast } from "../../core/toast";
   import { NODE_H, NODE_W, clip, layoutGraph, toneOf } from "../flowGraph";
-  import { allCardsOfPlan, defaultPlanId, newestFirst, planStatusLabel } from "../planning";
+  import { allCardsOfPlan } from "../planning";
+  import { flowSelection, resolvePlan } from "../flowSelection";
   import { refreshAgents, session } from "../projectSession";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
 
-  // The cards and plans of every board; the subscriptions end with the effect, also when it ends before the boards came.
-  let boardData = $state<Record<number, BoardData>>({});
+  // The board and plan are the Flow's, chosen in the bar above it (`ide/flowSelection.ts`): this pane has no selector.
+  let data = $state<BoardData | null>(null);
   $effect(() => {
-    let ended = false;
-    let stops: (() => void)[] = [];
-    invoke<Board[]>("list_boards")
-      .then((boards) => {
-        if (ended) return;
-        stops = boards.map((board) =>
-          boardStore(board.id).subscribe((value) => (boardData = { ...boardData, [board.id]: value })),
-        );
-      })
-      .catch(() => {
-        // Without the boards there is nothing to draw.
-      });
-    return () => {
-      ended = true;
-      for (const stop of stops) stop();
-    };
+    const id = $flowSelection.boardId;
+    if (id === null) {
+      data = null;
+      return;
+    }
+    return boardStore(id).subscribe((value) => (data = value));
   });
 
-  const allCards = $derived<BoardCard[]>(Object.values(boardData).flatMap((data) => data.cards));
-  const plans = $derived<BoardPlan[]>(newestFirst(Object.values(boardData).flatMap((data) => data.plans)));
-
-  let chosen = $state<number | null>(null);
-  // The plan shown: the one picked while it exists, else a plan that is running, else the newest.
-  const planId = $derived(
-    chosen !== null && plans.some((p) => p.id === chosen)
-      ? chosen
-      : (plans.find((p) => p.status === "approved")?.id ?? defaultPlanId(plans)),
-  );
-  const plan = $derived(plans.find((p) => p.id === planId) ?? null);
-  const cards = $derived(plan ? allCardsOfPlan(allCards, plan.id) : []);
+  const plan = $derived(resolvePlan(data?.plans ?? [], $flowSelection.planId));
+  const cards = $derived(plan && data ? allCardsOfPlan(data.cards, plan.id) : []);
   const graph = $derived(layoutGraph(cards));
 
   let selectedId = $state<number | null>(null);
@@ -70,9 +49,9 @@
 
   // The board is read again while the pane is shown: the cards move from other processes (agents, the CLI).
   $effect(() => {
-    if (!visible) return;
-    const ids = Object.keys(boardData).map(Number);
-    const timer = setInterval(() => ids.forEach((id) => void refreshBoard(id)), 5000);
+    const id = $flowSelection.boardId;
+    if (!visible || id === null) return;
+    const timer = setInterval(() => void refreshBoard(id), 5000);
     return () => clearInterval(timer);
   });
 
@@ -153,16 +132,21 @@
       } else if (result.outcome === "conflict") {
         toast(`Karte #${card.id} passt immer noch nicht in den Plan (${result.files.join(", ")}).`, "warning");
       }
-      await Promise.all([...Object.keys(boardData).map((id) => refreshBoard(Number(id))), refreshAgents()]);
+      await Promise.all([reloadBoard(), refreshAgents()]);
     });
   }
 
   async function redo(card: BoardCard): Promise<void> {
     await act(async () => {
       closePanesOf(await invoke<number[]>("redo_card", { cardId: card.id }));
-      await Promise.all([...Object.keys(boardData).map((id) => refreshBoard(Number(id))), refreshAgents()]);
+      await Promise.all([reloadBoard(), refreshAgents()]);
       toast(`Karte #${card.id} wird auf dem neuen Stand des Plans noch einmal gemacht.`, "info");
     });
+  }
+
+  async function reloadBoard(): Promise<void> {
+    const id = $flowSelection.boardId;
+    if (id !== null) await refreshBoard(id);
   }
 
   function showSession(agentId: number): void {
@@ -179,14 +163,6 @@
 
 <div class="graph-pane">
   <header>
-    <label>
-      <span class="muted">Plan</span>
-      <select value={planId ?? ""} onchange={(e) => (chosen = Number((e.currentTarget as HTMLSelectElement).value))}>
-        {#each plans as p (p.id)}
-          <option value={p.id}>#{p.id} · {p.name} ({planStatusLabel(p.status)})</option>
-        {/each}
-      </select>
-    </label>
     <ul class="legend" aria-label="Farben">
       <li class="idle">bereit / wartet</li>
       <li class="active">in Arbeit</li>
@@ -213,10 +189,16 @@
           <path
             d={edge.path}
             class="edge"
-            class:lit={selectedId === edge.from || selectedId === edge.to}
+            class:lit={selectedId !== null && (selectedId === edge.from || selectedId === edge.to)}
             marker-end="url(#arrow)"
           />
         {/each}
+        {#if graph.start}
+          <g class="start" transform="translate({graph.start.x} {graph.start.y})" aria-label="Start des Plans">
+            <rect width={graph.start.w} height={graph.start.h} rx={graph.start.h / 2} />
+            <text x={graph.start.w / 2} y={graph.start.h / 2 + 4} text-anchor="middle">Start</text>
+          </g>
+        {/if}
         {#each graph.nodes as node (node.card.id)}
           <g
             class="node {toneOf(node.card.state)}"
@@ -305,19 +287,6 @@
     padding: var(--ax-space-2) var(--ax-space-3);
     border-bottom: 1px solid var(--ax-border);
   }
-  header label {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-  }
-  select {
-    background: var(--ax-surface-2);
-    color: var(--ax-text);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    font: inherit;
-  }
   .legend {
     display: flex;
     gap: var(--ax-space-3);
@@ -344,13 +313,28 @@
     margin: var(--ax-space-4);
     color: var(--ax-text-muted);
   }
+  /* The graph sits in the middle of the pane, both ways; `margin: auto` (not `align-items: center`) so that one larger than
+     the pane scrolls from its top left instead of being cut off at the top. */
   .canvas {
     flex: 1;
     min-height: 0;
     overflow: auto;
+    display: flex;
   }
   svg {
     display: block;
+    flex: none;
+    margin: auto;
+  }
+  .start rect {
+    fill: var(--ax-accent-muted);
+    stroke: var(--ax-accent);
+    stroke-width: 1.5;
+  }
+  .start text {
+    fill: var(--ax-text);
+    font-size: 12px;
+    font-weight: 600;
   }
 
   /* One colour per family of states, from the theme's tokens. */
