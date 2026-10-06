@@ -456,6 +456,13 @@ across restarts) and `tauri-plugin-dialog` (the file app's open dialog — calle
 and the managed `FileWatch`; `lib.rs`'s `on_page_load` drops every file subscription when the
 page reloads. See §5 for the full command surface and the Svelte frontend.
 
+Tracing writes to the daily-rotating app log `~/.axiomata/logs/app.log.YYYY-MM-DD`
+(`init_tracing` in `lib.rs`, `tracing-appender` with `Rotation::DAILY`, keeping
+`APP_LOG_MAX_FILES = 7` older files); when the log directory is unusable the app
+falls back to stderr only. A bundled `.app` has no terminal, so the file log is
+the only place to inspect runtime output in production (the CLI run still logs
+to stderr).
+
 ### `apps/axiomata/src` (frontend)
 
 Svelte 5 + Vite + TS: `core/` (stores, registry, lifecycle, persist, commands, chat, staging,
@@ -478,7 +485,7 @@ workspace the user currently has configured:
 
 - `config.toml` — the app config (agent backend defaults, model, `workspace_root`).
 - `axiomata.db` — the SQLite database (skill runs, routines + their history).
-- `logs/` — `runs.log` (JSONL skill-run mirror, 0600).
+- `logs/` — `runs.log` (JSONL skill-run mirror, 0600) and `app.log.YYYY-MM-DD` (daily-rotating tracing output, 7 files kept, fallback to stderr-only when the directory is unusable).
 - `skills/` — **all** skills. Skills are application-level: always available regardless of
   which Second Brain is active, and managed only by the user. There is no second,
   workspace-local skill location — see "Why one skill location" below.
@@ -691,9 +698,9 @@ and cost into the run (a repair that times out is paid for but not recorded). Th
 balanced `{…}` that parses; a balanced `{…}` of prose is stepped over, a truncated object is none
 (where they differ, Rust errs towards repairing).
 Ollama ignores the field. On the dashboard side `loadLatestSkillRun` reports the newer run it passed
-over (`skipped`), and the Mail tile says so (`staleDigestNote`) instead of quietly showing an older
-digest. Bundled skills are seed-if-absent: an edited `SKILL.md` reaches an install through
-`skills reseed --force`.
+over (`skipped`), and the Mail, Calendar and Reminders tiles say so (`staleDigestNote`,
+now in `core/skillRun.ts`) instead of quietly showing an older digest. Bundled skills are
+seed-if-absent: an edited `SKILL.md` reaches an install through `skills reseed --force`.
 
 ### Skills runner (`skills/`)
 
@@ -1437,6 +1444,10 @@ fire **once per plan checkpoint and always before a commit**, not after every in
 tests are already being written inline as each function lands. The trigger stays mandatory;
 only its timing is batched. This is a project-local override, not an edit to the global agent
 definitions: a fresh Rust project without it keeps the tighter per-edit cadence.
+
+### docs/architecture.md: App-Logdatei und Stale-Hinweis (#41, #42), 2026-10-06
+
+Documented the tracing app-log (`~/.axiomata/logs/app.log.YYYY-MM-DD`, daily rotation, 7 files kept, stderr fallback) in §3 and the `logs/` entry in §4; extended the `staleDigestNote` sentence in §5 to cover Calendar and Reminders tiles and updated the location to `core/skillRun.ts`.
 
 ### Debug (#51), 2026-10-02
 
