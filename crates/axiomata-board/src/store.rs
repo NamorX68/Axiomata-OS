@@ -867,12 +867,28 @@ pub fn update_card(db: &Connection, id: i64, fields: &CardFields) -> Result<Opti
     // One transaction: the plan checks read edges and plans, and an edge added (or a plan deleted) between the check
     // and the write would leave a card whose plan and edges disagree.
     let tx = immediate(db)?;
-    let Some(existing) = get_card(&tx, id)? else {
+    let changed = write_card_fields(&tx, id, fields)?;
+    tx.commit()?;
+    if !changed {
         return Ok(None);
+    }
+    get_card(db, id)
+}
+
+/// [`update_card`] inside a transaction the caller already holds, for a change that is one step of a larger one (a session
+/// mending its proposal and its edges together). `false` if there is no such card.
+pub(crate) fn update_card_in(tx: &Connection, id: i64, fields: &CardFields) -> Result<bool> {
+    validate_fields(fields)?;
+    write_card_fields(tx, id, fields)
+}
+
+fn write_card_fields(tx: &Connection, id: i64, fields: &CardFields) -> Result<bool> {
+    let Some(existing) = get_card(tx, id)? else {
+        return Ok(false);
     };
-    check_plan_of_board(&tx, fields.plan_id, existing.board_id)?;
+    check_plan_of_board(tx, fields.plan_id, existing.board_id)?;
     if fields.plan_id != existing.plan_id {
-        crate::flow::check_plan_change_keeps_edges(&tx, id)?;
+        crate::flow::check_plan_change_keeps_edges(tx, id)?;
     }
     let changed = tx.execute(
         "UPDATE cards SET title = ?2, body = ?3, labels = ?4, assignee = ?5, due_at = ?6,
@@ -895,11 +911,7 @@ pub fn update_card(db: &Connection, id: i64, fields: &CardFields) -> Result<Opti
             fields.acceptance,
         ],
     )?;
-    tx.commit()?;
-    if changed == 0 {
-        return Ok(None);
-    }
-    get_card(db, id)
+    Ok(changed != 0)
 }
 
 pub fn delete_card(db: &Connection, id: i64) -> Result<bool> {

@@ -1637,6 +1637,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return Object.fromEntries((args.ids as number[]).map((id) => [id, 1])) as T;
     case "ide_mailbox_send":
       return { outcome: "delivered", id: 3 } as T;
+    case "plan_changed_proposals":
+      return [7] as T;
     case "plan_cards_left_for_owner":
       return [] as T;
     case "integrate_card":

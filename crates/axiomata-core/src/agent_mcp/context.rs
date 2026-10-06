@@ -101,7 +101,7 @@ impl Capabilities {
             names.push("get_plan");
         }
         if self.create != Creates::Nothing {
-            names.push("create_card");
+            names.extend(["create_card", "update_proposal", "withdraw_proposal"]);
         }
         names
     }

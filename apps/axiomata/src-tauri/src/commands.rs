@@ -2009,6 +2009,13 @@ pub fn plan_cards_left_for_owner(state: State<'_, CoreState>, id: i64) -> Result
     axiomata_core::card_session::cards_left_for_owner(&db, id).map_err(|err| err.to_string())
 }
 
+/// The proposals of a plan that a session changed after proposing them, for the planning panel to say so (CP-A9).
+#[tauri::command]
+pub fn plan_changed_proposals(state: State<'_, CoreState>, id: i64) -> Result<Vec<i64>, String> {
+    let db = state.db_lock();
+    board::flow::changed_proposals(&db, id).map_err(|err| err.to_string())
+}
+
 /// What sessions are doing right now: their last few steps, read from the harness's own record (CP-A9).
 #[tauri::command]
 pub async fn session_activity(

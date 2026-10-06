@@ -310,10 +310,24 @@ fn the_tools_offered_follow_the_role() {
     assert_eq!(names(worker), with(&["claim_task", "report_done"]));
     assert_eq!(
         names(tester),
-        with(&["claim_task", "create_card", "report_done"])
+        with(&[
+            "claim_task",
+            "create_card",
+            "report_done",
+            "update_proposal",
+            "withdraw_proposal"
+        ])
     );
     assert_eq!(names(reviewer), with(&["review_verdict"]));
-    assert_eq!(names(planner), with(&["create_card", "get_plan"]));
+    assert_eq!(
+        names(planner),
+        with(&[
+            "create_card",
+            "get_plan",
+            "update_proposal",
+            "withdraw_proposal"
+        ])
+    );
     assert_eq!(
         names(ghost),
         with(&[]),
@@ -1081,6 +1095,78 @@ fn a_refused_summary_moves_nothing_and_a_reply_cannot_be_steered() {
         .call("read_inbox", json!({}))
         .unwrap();
     assert_eq!(seen["messages"][0]["in_reply_to"], Value::Null);
+}
+
+#[test]
+fn a_planner_changes_and_takes_back_its_own_proposals_while_the_plan_is_a_draft() {
+    let mut w = world();
+    let planner = w.session("plan", "planner");
+    let plan = w.plan();
+    let c = w.planner_client(planner, plan);
+    let one = c
+        .call("create_card", json!({"title": "one", "kind": "doc"}))
+        .unwrap()["card_id"]
+        .as_i64()
+        .unwrap();
+    let two = c
+        .call("create_card", json!({"title": "two", "kind": "doc"}))
+        .unwrap()["card_id"]
+        .as_i64()
+        .unwrap();
+
+    let changed = c
+        .call(
+            "update_proposal",
+            json!({"card_id": two, "title": "two, split", "acceptance": "Builds.", "needs": [one]}),
+        )
+        .unwrap();
+    assert_eq!(changed["title"], "two, split");
+    assert_eq!(changed["acceptance"], "Builds.");
+    assert_eq!(changed["depends_on"], json!([one]));
+    assert_eq!(changed["body"], "", "what is not named stays");
+    assert_eq!(
+        flow::changed_proposals(&w.core.db_lock(), plan).unwrap(),
+        [two]
+    );
+
+    // Another planner's proposal is not this one's to change; neither is a card it never proposed.
+    let outsider = w.card(w.open, "not a proposal");
+    let refused = c
+        .call(
+            "update_proposal",
+            json!({"card_id": outsider, "title": "x"}),
+        )
+        .unwrap_err();
+    assert!(
+        refused.contains("proposal") || refused.contains("propose"),
+        "{refused}"
+    );
+
+    c.call("withdraw_proposal", json!({"card_id": one}))
+        .unwrap();
+    assert!(store::get_card(&w.core.db_lock(), one).unwrap().is_none());
+}
+
+#[test]
+fn a_planner_whose_plan_was_approved_no_longer_changes_its_proposals() {
+    let mut w = world();
+    let planner = w.session("plan", "planner");
+    let plan = w.plan();
+    let c = w.planner_client(planner, plan);
+    let card = c
+        .call("create_card", json!({"title": "one", "kind": "doc"}))
+        .unwrap()["card_id"]
+        .as_i64()
+        .unwrap();
+    flow::approve_plan(&mut w.core.db_lock(), plan, "human:owner").unwrap();
+    let refused = c
+        .call("update_proposal", json!({"card_id": card, "title": "late"}))
+        .unwrap_err();
+    assert!(refused.contains("planning is over"), "{refused}");
+    assert!(
+        c.call("withdraw_proposal", json!({"card_id": card}))
+            .is_err()
+    );
 }
 
 #[test]

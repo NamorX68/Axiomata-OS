@@ -214,6 +214,7 @@ pub fn run() {
             commands::integrate_card,
             commands::redo_card,
             commands::plan_cards_left_for_owner,
+            commands::plan_changed_proposals,
             commands::resume_plan,
             commands::open_card_sessions,
             commands::list_card_events,

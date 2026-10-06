@@ -480,6 +480,27 @@
 
   // The proposal being edited (its id), or "new" for a card the owner adds; at most one at a time.
   let editing = $state<number | "new" | null>(null);
+  // The proposals a session changed after proposing them: the owner re-reads those (`plan_changed_proposals`).
+  let changedByPlanner = $state<number[]>([]);
+  $effect(() => {
+    const current = plan;
+    void data?.cards;
+    if (!current) {
+      changedByPlanner = [];
+      return;
+    }
+    let stale = false;
+    invoke<number[]>("plan_changed_proposals", { id: current.id })
+      .then((ids) => {
+        if (!stale) changedByPlanner = ids;
+      })
+      .catch(() => {
+        // A marker is a courtesy.
+      });
+    return () => {
+      stale = true;
+    };
+  });
   // Another plan opened in between must not keep an editor open for a card that is not on screen.
   $effect(() => {
     void plan?.id;
@@ -682,6 +703,7 @@
             <div class="title">
               <strong>{proposalTitle(card)}</strong>
               <span class="muted">#{card.id}{needsLabel(card) ? ` · braucht ${needsLabel(card)}` : ""}</span>
+              {#if changedByPlanner.includes(card.id)}<span class="status auto" title="Der Planer hat diesen Vorschlag nach dem Anlegen geändert">vom Planer geändert</span>{/if}
             </div>
             <div class="fields">
               <label>

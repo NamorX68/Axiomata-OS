@@ -372,6 +372,25 @@ pub struct Card {
     pub state: TaskState,
 }
 
+impl Card {
+    /// The writable fields of the card as they are now: what an edit starts from.
+    pub fn fields(&self) -> CardFields {
+        CardFields {
+            title: self.title.clone(),
+            body: self.body.clone(),
+            labels: self.labels.clone(),
+            assignee: self.assignee.clone(),
+            due_at: self.due_at,
+            plan_id: self.plan_id,
+            agent: self.agent.clone(),
+            agent_reason: self.agent_reason.clone(),
+            tier: self.tier,
+            kind: self.kind.clone(),
+            acceptance: self.acceptance.clone(),
+        }
+    }
+}
+
 /// The writable fields of a card. Used for both create and update; update is a
 /// full replace of these fields, matching how `routines::store::update` works,
 /// so there is one shape to reason about rather than a partial-patch grammar.

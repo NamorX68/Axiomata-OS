@@ -382,7 +382,9 @@ fn planner_prompt(agent: &Agent, launch: &PlanLaunch) -> String {
          checkout of the project as it was when you started — read it as far as you need, change nothing. Cut the \
          goal into cards with `create_card`: each names a role in `agent`, a `tier`, the acceptance criteria and, in \
          `needs`, the cards that have to be done first. {COMMAND_STYLE} The owner reads your proposals and approves \
-         the plan; you start and change nothing else. Say in a few lines what the plan consists of when you are done."
+         the plan; if they write to you with changes, mend your own proposals with `update_proposal` (only what you name \
+         changes) or take one back with `withdraw_proposal` — both only while the plan is a draft. You start and change \
+         nothing else. Say in a few lines what the plan consists of when you are done."
     )
 }
 

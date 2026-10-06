@@ -11,8 +11,8 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::model::{
-    Card, CardEvent, CardStatus, Column, ColumnStage, EventKind, NewCard, Plan, PlanFields,
-    PlanStatus, TaskState,
+    Card, CardEvent, CardFields, CardStatus, Column, ColumnStage, EventKind, NewCard, Plan,
+    PlanFields, PlanStatus, TaskState,
 };
 use crate::store::{
     check_len, create_card, get_card, immediate, list_columns, move_card_in, normalize_actor, now,
@@ -753,6 +753,99 @@ fn proposal_depth_in(db: &Connection, card_id: i64) -> Result<i64> {
         )
         .optional()?
         .unwrap_or(0))
+}
+
+/// The history line [`edit_own_proposal`] writes: the owner reads who changed a proposal and that it was not the owner.
+const CHANGED_NOTE: &str = "changed by the session";
+
+/// The proposal `card_id`, if it is one — in the board's proposal column, not archived — **and `actor` is the one who proposed
+/// it**: a session mends its own proposals, never another's, and never a card the owner already said yes to.
+fn own_proposal(tx: &Connection, card_id: i64, actor: &str) -> Result<Card> {
+    let Some(card) = get_card(tx, card_id)? else {
+        return invalid("card_id", format!("no card {card_id}"));
+    };
+    let in_proposal = list_columns(tx, card.board_id)?
+        .iter()
+        .any(|c| c.id == card.column_id && c.stage == Some(ColumnStage::Proposal));
+    if !in_proposal || card.archived_at.is_some() {
+        return invalid(
+            "card_id",
+            "the card is no proposal any more (the owner has approved it); it cannot be changed from here",
+        );
+    }
+    let proposed_by_actor: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM card_events WHERE card_id = ?1 AND actor = ?2 AND kind = 'note' AND text = ?3",
+        params![card_id, actor, PROPOSED_NOTE],
+        |row| row.get(0),
+    )?;
+    if proposed_by_actor == 0 {
+        return invalid("card_id", "you did not propose that card");
+    }
+    Ok(card)
+}
+
+/// A session changes a proposal **it made itself**, while it still waits for the owner's yes: the new `fields` replace the
+/// old ones, `needs` (when given) replaces the card's "needs first" edges. The card, its edges and a history line
+/// ("changed by the session", by the actor) are one transaction, so a refused edge leaves the proposal as it was.
+pub fn edit_own_proposal(
+    db: &mut Connection,
+    card_id: i64,
+    actor: &str,
+    fields: &CardFields,
+    needs: Option<&[i64]>,
+) -> Result<Card> {
+    let actor = normalize_actor(actor)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let card = own_proposal(&tx, card_id, &actor)?;
+    // The plan and the column stay: a proposal that moved itself to another plan would be a way round the owner's reading.
+    let fields = CardFields {
+        plan_id: card.plan_id,
+        ..fields.clone()
+    };
+    crate::store::update_card_in(&tx, card_id, &fields)?;
+    if let Some(wanted) = needs {
+        for have in &card.depends_on {
+            if !wanted.contains(have) {
+                remove_dependency(&tx, card_id, *have)?;
+            }
+        }
+        for need in wanted {
+            if !card.depends_on.contains(need) {
+                add_dependency_in(&tx, card_id, *need)?;
+            }
+        }
+    }
+    insert_event(&tx, card_id, &actor, EventKind::Note, CHANGED_NOTE)?;
+    tx.commit()?;
+    get_card(db, card_id)?.ok_or_else(|| BoardError::CorruptRow {
+        table: "cards",
+        id: card_id,
+        reason: "vanished after its change".to_string(),
+    })
+}
+
+/// A session takes back a proposal **it made itself** that still waits for the owner's yes. The card is deleted, with
+/// its edges and history — it was never part of anything.
+pub fn withdraw_own_proposal(db: &mut Connection, card_id: i64, actor: &str) -> Result<()> {
+    let actor = normalize_actor(actor)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    own_proposal(&tx, card_id, &actor)?;
+    crate::store::delete_card(&tx, card_id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The ids of the cards of plan `plan_id` that a session changed after proposing them: for the planning panel to say "by the
+/// planner changed", so the owner re-reads them.
+pub fn changed_proposals(db: &Connection, plan_id: i64) -> Result<Vec<i64>> {
+    let mut stmt = db.prepare(
+        "SELECT DISTINCT e.card_id FROM card_events e JOIN cards c ON c.id = e.card_id
+         WHERE c.plan_id = ?1 AND e.kind = 'note' AND e.text = ?2 ORDER BY e.card_id",
+    )?;
+    let ids = stmt
+        .query_map(params![plan_id, CHANGED_NOTE], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
 }
 
 /// What [`start_card`] did.
@@ -2559,6 +2652,71 @@ mod tests {
         let idle = plan(&f);
         approve_plan(&mut f.db, idle.id, "human:owner").unwrap();
         assert!(delete_plan(&mut f.db, idle.id).unwrap());
+    }
+
+    #[test]
+    fn a_session_mends_its_own_proposal_and_nobody_elses_and_not_after_the_owners_yes() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        let mut new = |title: &str, actor: &str| {
+            let mut fields = fields(title);
+            fields.plan_id = Some(plan.id);
+            propose_card(
+                &mut f.db,
+                &NewCard {
+                    column_id: f.proposal,
+                    fields,
+                },
+                &[],
+                actor,
+            )
+            .unwrap()
+        };
+        let mine = new("mine", "agent:p-1");
+        let other = new("other", "agent:q-2");
+        let first = new("first", "agent:p-1");
+
+        let mut changed = fields("mine, better");
+        changed.acceptance = "It builds.".to_owned();
+        let edited =
+            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, Some(&[first.id]))
+                .unwrap();
+        assert_eq!(
+            (edited.title.as_str(), edited.acceptance.as_str()),
+            ("mine, better", "It builds.")
+        );
+        assert_eq!(edited.depends_on, [first.id]);
+        assert_eq!(edited.plan_id, Some(plan.id), "the plan cannot be changed");
+        assert_eq!(changed_proposals(&f.db, plan.id).unwrap(), [mine.id]);
+
+        // Another session's proposal is not mine to change or take back.
+        assert!(edit_own_proposal(&mut f.db, other.id, "agent:p-1", &changed, None).is_err());
+        assert!(withdraw_own_proposal(&mut f.db, other.id, "agent:p-1").is_err());
+
+        // A refused edge leaves the proposal as it was: a card cannot wait for itself.
+        let refused =
+            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, Some(&[mine.id]));
+        assert!(refused.is_err());
+        assert_eq!(
+            get_card(&f.db, mine.id).unwrap().unwrap().depends_on,
+            [first.id]
+        );
+
+        // Needs dropped when an empty list is given, kept when none is.
+        let kept = edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, None).unwrap();
+        assert_eq!(kept.depends_on, [first.id]);
+        let dropped =
+            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, Some(&[])).unwrap();
+        assert!(dropped.depends_on.is_empty());
+
+        // After the owner's yes it is a card like any other.
+        approve_proposal(&mut f.db, mine.id, "human:owner").unwrap();
+        assert!(edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, None).is_err());
+        assert!(withdraw_own_proposal(&mut f.db, mine.id, "agent:p-1").is_err());
+
+        // Taking back an open proposal removes the card.
+        withdraw_own_proposal(&mut f.db, first.id, "agent:p-1").unwrap();
+        assert!(get_card(&f.db, first.id).unwrap().is_none());
     }
 
     // ------------------------------------------------------ dependencies ---

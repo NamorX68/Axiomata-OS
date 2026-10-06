@@ -55,7 +55,9 @@ pub fn offered(ctx: &Context, name: &str) -> bool {
         "claim_task" | "report_done" => ctx.caps.work,
         "review_verdict" => ctx.caps.review,
         "get_plan" => ctx.caps.plan,
-        "create_card" => ctx.caps.create != Creates::Nothing,
+        "create_card" | "update_proposal" | "withdraw_proposal" => {
+            ctx.caps.create != Creates::Nothing
+        }
         _ => false,
     }
 }
@@ -176,6 +178,29 @@ pub fn definitions(ctx: &Context) -> Vec<Value> {
             }),
             &["title", "kind"],
         ),
+        tool(
+            "update_proposal",
+            "Change a card you proposed yourself, while it still waits for the owner's yes: only the fields you \
+                name change. `needs` replaces the cards it waits for. A card the owner has approved, or one another \
+                session proposed, cannot be changed.",
+            json!({
+                "card_id": {"type": "integer"},
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+                "acceptance": {"type": "string", "description": "Acceptance criteria, Markdown."},
+                "tier": {"type": "string", "enum": ["light", "medium", "heavy"]},
+                "agent": {"type": "string", "description": "The role this card is meant for."},
+                "agent_reason": {"type": "string"},
+                "needs": {"type": "array", "items": {"type": "integer"}, "description": "Replaces the cards to finish first."},
+            }),
+            &["card_id"],
+        ),
+        tool(
+            "withdraw_proposal",
+            "Take back a card you proposed yourself that still waits for the owner's yes. The card is deleted.",
+            json!({"card_id": {"type": "integer"}}),
+            &["card_id"],
+        ),
     ];
     all.into_iter()
         .filter(|def| def["name"].as_str().is_some_and(|name| offered(ctx, name)))
@@ -195,6 +220,8 @@ pub fn call(ctx: &Context, name: &str, args: &Value) -> ToolResult {
         "report_done" => report_done(ctx, args),
         "review_verdict" => review_verdict(ctx, args),
         "create_card" => create_card(ctx, args),
+        "update_proposal" => update_proposal(ctx, args),
+        "withdraw_proposal" => withdraw_proposal(ctx, args),
         other => Err(format!("unknown tool {other:?}")),
     }
 }
@@ -695,6 +722,85 @@ fn tell_worker_it_was_returned(ctx: &Context, db: &Connection, card: &Card, note
     }
 }
 
+/// The `needs` argument: a list of card ids, `None` when it is not there.
+fn needs_arg(args: &Value) -> Result<Option<Vec<i64>>, String> {
+    match args.get("needs") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(items)) if items.len() <= MAX_NEEDS => items
+            .iter()
+            .map(|v| {
+                v.as_i64()
+                    .filter(|n| *n > 0)
+                    .ok_or("`needs` holds card ids".to_owned())
+            })
+            .collect::<Result<_, _>>()
+            .map(Some),
+        Some(_) => Err(format!("`needs` is a list of at most {MAX_NEEDS} card ids")),
+    }
+}
+
+/// Changes a proposal the session made itself (A7): only what is named changes, the plan and the column stay. A planner may
+/// only do it while its plan is a draft. The owner sees "changed by the session" on the card.
+fn update_proposal(ctx: &Context, args: &Value) -> ToolResult {
+    let card_id = opt_int(args, "card_id")?.ok_or("`card_id` is required")?;
+    let needs = needs_arg(args)?;
+    let tier = match opt_str(args, "tier")? {
+        Some(raw) => Some(Tier::parse(raw).ok_or("`tier` is light, medium or heavy")?),
+        None => None,
+    };
+    if let Some(role) = opt_str(args, "agent")? {
+        axiomata_roster::check_slug("agent", role).map_err(text)?;
+        check_assignable(ctx, role)?;
+    }
+    let mut db = ctx.db();
+    if let Some(plan) = ctx.plan_env {
+        own_draft_plan(ctx, &db, plan)?;
+    }
+    let card = store::get_card(&db, card_id)
+        .map_err(text)?
+        .ok_or_else(|| format!("no card {card_id}"))?;
+    let mut fields = card.fields();
+    if let Some(title) = opt_str(args, "title")? {
+        fields.title = title.to_owned();
+    }
+    if let Some(body) = opt_str(args, "body")? {
+        fields.body = body.to_owned();
+    }
+    if let Some(acceptance) = opt_str(args, "acceptance")? {
+        fields.acceptance = acceptance.to_owned();
+    }
+    if let Some(agent) = opt_str(args, "agent")? {
+        fields.agent = Some(agent.to_owned());
+    }
+    if let Some(reason) = opt_str(args, "agent_reason")? {
+        fields.agent_reason = Some(reason.to_owned());
+    }
+    if tier.is_some() {
+        fields.tier = tier;
+    }
+    let changed = flow::edit_own_proposal(&mut db, card_id, &ctx.actor, &fields, needs.as_deref())
+        .map_err(text)?;
+    mirror(ctx, &db, changed.id);
+    Ok(card_view(&changed))
+}
+
+/// Takes back a proposal the session made itself and that still waits for the owner's yes.
+fn withdraw_proposal(ctx: &Context, args: &Value) -> ToolResult {
+    let card_id = opt_int(args, "card_id")?.ok_or("`card_id` is required")?;
+    let mut db = ctx.db();
+    if let Some(plan) = ctx.plan_env {
+        own_draft_plan(ctx, &db, plan)?;
+    }
+    let board_id = store::get_card(&db, card_id)
+        .map_err(text)?
+        .map(|card| card.board_id);
+    flow::withdraw_own_proposal(&mut db, card_id, &ctx.actor).map_err(text)?;
+    if let Some(board_id) = board_id {
+        board_mirror::after_change(&db, &ctx.config(), board_id);
+    }
+    Ok(json!({"withdrawn": card_id}))
+}
+
 fn create_card(ctx: &Context, args: &Value) -> ToolResult {
     let kind = req_str(args, "kind")?;
     axiomata_roster::check_slug("kind", kind).map_err(text)?;
@@ -717,18 +823,7 @@ fn create_card(ctx: &Context, args: &Value) -> ToolResult {
         axiomata_roster::check_slug("agent", role).map_err(text)?;
         check_assignable(ctx, role)?;
     }
-    let needs: Vec<i64> = match args.get("needs") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(items)) if items.len() <= MAX_NEEDS => items
-            .iter()
-            .map(|v| {
-                v.as_i64()
-                    .filter(|n| *n > 0)
-                    .ok_or("`needs` holds card ids")
-            })
-            .collect::<Result<_, _>>()?,
-        Some(_) => return Err(format!("`needs` is a list of at most {MAX_NEEDS} card ids")),
-    };
+    let needs = needs_arg(args)?.unwrap_or_default();
 
     let mut db = ctx.db();
     // A card is proposed onto the board and plan of the work it grew out of: the session's own card, or the plan a
