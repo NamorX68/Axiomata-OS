@@ -63,6 +63,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (24, axiomata_board::SCHEMA_SQL_V7),
     // Who proposed a card: the proof a session needs to change or take back its own proposal (a2a.md).
     (25, axiomata_board::SCHEMA_SQL_V8),
+    // Plans the owner sharpened with a grilling session: the approval's "not grilled" hint reads it (a2a.md).
+    (26, axiomata_board::SCHEMA_SQL_V9),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

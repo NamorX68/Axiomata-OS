@@ -68,6 +68,10 @@ pub const SCHEMA_SQL_V7: &str = include_str!("plan_goal_suggestion.sql");
 /// and migration number (25), frozen once released.
 pub const SCHEMA_SQL_V8: &str = include_str!("card_proposers.sql");
 
+/// The board's **version 9** schema (`plan_grilled`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own constant
+/// and migration number (26), frozen once released.
+pub const SCHEMA_SQL_V9: &str = include_str!("plan_grilled.sql");
+
 /// Everything that can go wrong in the board core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant: "no such row"

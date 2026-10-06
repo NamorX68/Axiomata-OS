@@ -2039,6 +2039,13 @@ pub fn apply_goal_suggestion(
     Ok(applied)
 }
 
+/// Whether the owner sharpened this plan's goal with a grilling session: the approval's "not grilled" hint reads it.
+#[tauri::command]
+pub fn plan_grilled(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db_lock();
+    board::flow::plan_grilled(&db, id).map_err(|err| err.to_string())
+}
+
 /// The owner discards the proposed goal.
 #[tauri::command]
 pub fn discard_goal_suggestion(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {

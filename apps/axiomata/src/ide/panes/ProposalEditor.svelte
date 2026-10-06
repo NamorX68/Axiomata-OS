@@ -11,13 +11,13 @@
   import { messageOf } from "../../core/errors";
   import { fieldsOf } from "../../core/kanban";
   import type { Role } from "../../core/roster";
-  import { assignableRoles, needsCandidates, needsDiff, proposalForm, proposalSavable, proposalTitle } from "../planning";
+  import { assignableRoles, cardEditable, needsCandidates, needsDiff, proposalForm, proposalSavable, proposalTitle } from "../planning";
 
   let {
     card,
     plan,
     planCards,
-    proposalColumnId,
+    columnId,
     roles,
     freshCard,
     onSaved,
@@ -28,8 +28,8 @@
     plan: BoardPlan;
     /** Every card of the plan. */
     planCards: BoardCard[];
-    /** The board's proposal column, where a new card goes. */
-    proposalColumnId: number | null;
+    /** Where a new card goes: the proposal column of a draft, the first plain open column of a running plan. */
+    columnId: number | null;
     roles: Role[];
     /** The card as the board has it now: a planner may have rewritten it since the list was drawn. */
     freshCard: (id: number) => Promise<BoardCard | null>;
@@ -68,7 +68,7 @@
       let have: number[] = [];
       if (card) {
         const fresh = (await freshCard(card.id)) ?? card;
-        if (fresh.state !== "proposed") throw new Error("Die Karte ist kein Vorschlag mehr; ändere sie im Kanban.");
+        if (!cardEditable(fresh)) throw new Error("Die Karte ist schon in Arbeit oder erledigt; sie lässt sich hier nicht mehr ändern.");
         await invoke("update_card", {
           id: card.id,
           fields: {
@@ -83,10 +83,10 @@
         id = card.id;
         have = fresh.depends_on;
       } else {
-        if (proposalColumnId === null) throw new Error("Das Brett hat keine Vorschlags-Spalte.");
+        if (columnId === null) throw new Error("Das Brett hat dafür keine Spalte.");
         const created = await invoke<BoardCard>("create_card", {
           new: {
-            column_id: proposalColumnId,
+            column_id: columnId,
             title: form.title.trim(),
             body: form.body,
             labels: [],

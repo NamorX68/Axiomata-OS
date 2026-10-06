@@ -44,6 +44,8 @@
     proposalTitle,
     allCardsOfPlan,
     canDeletePlan,
+    cardEditable,
+    newCardColumn,
     cardsOfPlan,
     readyToTakeOver,
     runsByItself,
@@ -338,6 +340,25 @@
     };
   });
 
+  // Whether the goal was sharpened in an interview: the approval says so when it was not (a hint, never a gate).
+  let grilled = $state(true);
+  $effect(() => {
+    const current = plan;
+    void suggestion;
+    if (!current || current.status !== "draft") return;
+    let stale = false;
+    invoke<boolean>("plan_grilled", { id: current.id })
+      .then((value) => {
+        if (!stale) grilled = value;
+      })
+      .catch(() => {
+        // The hint is a courtesy.
+      });
+    return () => {
+      stale = true;
+    };
+  });
+
   async function takeOverGoal(): Promise<void> {
     if (!plan) return;
     const current = plan;
@@ -585,7 +606,8 @@
     void plan?.id;
     editing = null;
   });
-  const proposalColumnId = $derived(data?.columns.find((column) => column.stage === "proposal")?.id ?? null);
+  // Where a card the owner adds goes: the proposal column of a draft, the first plain open column of a running plan.
+  const newColumnId = $derived(plan && data ? newCardColumn(data.columns, plan) : null);
 
   let discarding = $state<number | null>(null);
   async function discardProposal(card: BoardCard): Promise<void> {
@@ -802,7 +824,7 @@
                 {card}
                 {plan}
                 planCards={allCardsOfPlan(data?.cards ?? [], plan.id)}
-                {proposalColumnId}
+                columnId={newColumnId}
                 {roles}
                 {freshCard}
                 onSaved={reload}
@@ -862,13 +884,13 @@
         {/each}
       </ul>
 
-      {#if plan.status === "draft"}
+      {#if plan.status !== "closed"}
         {#if editing === "new"}
           <ProposalEditor
             card={null}
             {plan}
             planCards={allCardsOfPlan(data?.cards ?? [], plan.id)}
-            {proposalColumnId}
+            columnId={newColumnId}
             {roles}
             {freshCard}
             onSaved={reload}
@@ -876,8 +898,8 @@
           />
         {:else}
           <div class="row">
-            <button class="ax-btn" type="button" disabled={busy || proposalColumnId === null} onclick={() => (editing = "new")}>
-              Karte hinzufügen
+            <button class="ax-btn" type="button" disabled={busy || newColumnId === null} onclick={() => (editing = "new")}>
+              {plan.status === "draft" ? "Karte hinzufügen" : "Karte zum laufenden Plan hinzufügen"}
             </button>
           </div>
         {/if}
@@ -898,6 +920,11 @@
               : "Die Vorschläge wandern in die erste offene Spalte; du startest jede Karte selbst."}
             Der Planer ist danach fertig.
           </span>
+          {#if !grilled}
+            <span class="muted hint-line">
+              Dieser Plan wurde nicht gegrillt: sein Ziel ist noch nicht hinterfragt. Du kannst trotzdem freigeben.
+            </span>
+          {/if}
         </div>
       {/if}
 
@@ -941,15 +968,33 @@
         <h3>Karten des Plans</h3>
         <ul class="cards">
           {#each working as card (card.id)}
+            {#if editing === card.id}
+              <li class="editing">
+                <ProposalEditor
+                  {card}
+                  {plan}
+                  planCards={allCardsOfPlan(data?.cards ?? [], plan.id)}
+                  columnId={newColumnId}
+                  {roles}
+                  {freshCard}
+                  onSaved={reload}
+                  onCancel={() => (editing = null)}
+                />
+              </li>
+            {:else}
             <li>
               <span>#{card.id} {proposalTitle(card)}</span>
               <span class="muted">{card.agent ?? "—"} · {STATE_LABEL[card.state]}</span>
+              {#if plan.status !== "closed" && cardEditable(card)}
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Bearbeiten</button>
+              {/if}
               {#if leftCards.includes(card.id)}
                 <span class="error" role="status">Passt zweimal nicht in den Plan; das Studio hat aufgegeben.</span>
                 <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(card)}>Erneut integrieren</button>
                 <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(card)}>Neu machen</button>
               {/if}
             </li>
+            {/if}
           {/each}
         </ul>
       {/if}
@@ -1007,6 +1052,9 @@
   }
   .grow {
     flex: 1;
+  }
+  .hint-line {
+    flex-basis: 100%;
   }
   .suggestion {
     display: flex;

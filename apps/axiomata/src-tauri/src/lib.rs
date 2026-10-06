@@ -216,6 +216,7 @@ pub fn run() {
             commands::plan_cards_left_for_owner,
             commands::plan_changed_proposals,
             commands::plan_goal_suggestion,
+            commands::plan_grilled,
             commands::apply_goal_suggestion,
             commands::discard_goal_suggestion,
             commands::resume_plan,

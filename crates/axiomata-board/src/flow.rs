@@ -391,8 +391,22 @@ pub fn apply_goal_suggestion(db: &mut Connection, plan_id: i64, at: &str) -> Res
         },
     )?;
     clear_goal_suggestion(&tx, plan_id)?;
+    // The goal came out of an interview: the approval no longer says "not grilled".
+    tx.execute(
+        "INSERT OR REPLACE INTO plan_grilled (plan_id, at) VALUES (?1, ?2)",
+        params![plan_id, now()],
+    )?;
     tx.commit()?;
     Ok(updated)
+}
+
+/// Whether the owner took a sharpened goal over for this plan — for the hint at the approval, nothing more.
+pub fn plan_grilled(db: &Connection, plan_id: i64) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM plan_grilled WHERE plan_id = ?1)",
+        params![plan_id],
+        |row| row.get(0),
+    )?)
 }
 
 /// Creates a plan as a draft on a board.
@@ -1642,7 +1656,7 @@ mod tests {
     };
     use crate::{
         SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5, SCHEMA_SQL_V6,
-        SCHEMA_SQL_V7, SCHEMA_SQL_V8,
+        SCHEMA_SQL_V7, SCHEMA_SQL_V8, SCHEMA_SQL_V9,
     };
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1689,6 +1703,7 @@ mod tests {
         db.execute_batch(SCHEMA_SQL_V6).unwrap();
         db.execute_batch(SCHEMA_SQL_V7).unwrap();
         db.execute_batch(SCHEMA_SQL_V8).unwrap();
+        db.execute_batch(SCHEMA_SQL_V9).unwrap();
         let board = create_board(&mut db, "Flow").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
@@ -2942,6 +2957,23 @@ mod tests {
         set_goal_suggestion(&f.db, plan.id, "idea").unwrap();
         assert!(delete_plan(&mut f.db, plan.id).unwrap());
         assert_eq!(goal_suggestion(&f.db, plan.id).unwrap(), None);
+    }
+
+    #[test]
+    fn the_owner_adds_a_card_to_a_running_plan_and_makes_it_wait_for_another() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        let first = planned_card(&f, f.open, plan.id, "first");
+        approve_plan(&mut f.db, plan.id, "human:owner").unwrap();
+
+        // Added to the open column of the running plan; it waits for the card it needs, like any card of the plan.
+        let added = planned_card(&f, f.open, plan.id, "added later");
+        assert_eq!(state_of(&f, added.id), TaskState::Ready);
+        assert!(add_dependency(&mut f.db, added.id, first.id).unwrap());
+        assert_eq!(state_of(&f, added.id), TaskState::Blocked);
+        // And the edge can be taken away again while it has not started.
+        assert!(remove_dependency(&f.db, added.id, first.id).unwrap());
+        assert_eq!(state_of(&f, added.id), TaskState::Ready);
     }
 
     // ------------------------------------------------------ dependencies ---

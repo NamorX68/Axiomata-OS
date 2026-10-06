@@ -1639,6 +1639,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return { outcome: "delivered", id: 3 } as T;
     case "plan_goal_suggestion":
       return { goal: "Das Brett zeigt Pläne als Graph.\n\nEntschieden: nur Lesen, keine Kabel.\nBewusst weggelassen: Zoom.", at: new Date().toISOString() } as T;
+    case "plan_grilled":
+      return false as T;
     case "apply_goal_suggestion":
     case "discard_goal_suggestion":
       return null as T;

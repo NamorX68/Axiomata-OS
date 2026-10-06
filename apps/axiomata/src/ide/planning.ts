@@ -2,7 +2,7 @@
  * What the Flow's planning panel decides before it asks the backend (A2A CP-A7b): which plan to show first, which cards
  * of it are proposals, who plans it, which roles a card may be given. Pure, so it is tested without a backend.
  */
-import type { BoardCard, BoardPlan, CardTier, IdeAgent, PlanRunEvent, PlanSpend, PlanStatus } from "../core/backend";
+import type { BoardCard, BoardColumn, BoardPlan, CardTier, IdeAgent, PlanRunEvent, PlanSpend, PlanStatus } from "../core/backend";
 import type { Role } from "../core/roster";
 import { addTab, allGroups, allTabs, forceCloseTab, mapTabs, type Layout, type PaneTab } from "./layout";
 import type { Mode } from "./modes";
@@ -111,6 +111,38 @@ export function assignableRoles(roles: Role[], current: string | null): string[]
 /** The ids of the cards a proposal waits for, as the proposal row shows them: `#12, #14`, or nothing. */
 export function needsLabel(card: Pick<BoardCard, "depends_on">): string {
   return card.depends_on.map((id) => `#${id}`).join(", ");
+}
+
+/**
+ * Whether the owner may still rework a card of a plan: it waits (a proposal, or ready or blocked in an open column), nobody
+ * holds it and its work is not on the line. A card a session is working on, or has finished, is not changed from here.
+ */
+export function cardEditable(
+  card: Pick<BoardCard, "state" | "claimed_by" | "integrated_at" | "archived_at">,
+): boolean {
+  return (
+    (card.state === "proposed" || card.state === "ready" || card.state === "blocked") &&
+    card.claimed_by == null &&
+    card.integrated_at == null &&
+    card.archived_at == null
+  );
+}
+
+/**
+ * The column a card the owner adds goes to: the proposal column while the plan is a draft (it is approved with the rest),
+ * the first plain open column once the plan runs (the owner wrote it, there is nothing to say yes to). `null` for a closed
+ * plan, or a board that lacks the column.
+ */
+export function newCardColumn(
+  columns: Pick<BoardColumn, "id" | "position" | "maps_to_status" | "stage">[],
+  plan: Pick<BoardPlan, "status">,
+): number | null {
+  if (plan.status === "closed") return null;
+  if (plan.status === "draft") return columns.find((column) => column.stage === "proposal")?.id ?? null;
+  const open = columns
+    .filter((column) => column.maps_to_status === "open" && column.stage === null)
+    .sort((a, b) => a.position - b.position);
+  return open[0]?.id ?? null;
 }
 
 /** What the owner can change on a proposal: its text, its role and level, and which cards it waits for. */

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent } from "../core/backend";
+import type { BoardCard, BoardColumn, BoardPlan, IdeAgent, PlanRunEvent } from "../core/backend";
 import type { Role } from "../core/roster";
 import { addTab, allGroups, allTabs, closeTab, forceCloseTab, emptyLayout, singleGroupLayout, type PaneTab } from "./layout";
 import {
   agentTabsOf,
   canDeletePlan,
+  cardEditable,
+  newCardColumn,
   canStartGrill,
   grillerOf,
   needsCandidates,
@@ -411,5 +413,36 @@ describe("the sessions of a plan", () => {
 
   it("never offers the grilling role for a card", () => {
     expect(assignableRoles([{ name: "grill", kind: "grill" } as Role, { name: "b", kind: "implement" } as Role], null)).toEqual(["b"]);
+  });
+});
+
+describe("changing a plan that is already running", () => {
+  const card = (state: string, extra: Record<string, unknown> = {}) =>
+    ({ state, claimed_by: null, integrated_at: null, archived_at: null, ...extra }) as Pick<
+      BoardCard,
+      "state" | "claimed_by" | "integrated_at" | "archived_at"
+    >;
+
+  it("lets the owner rework a card that still waits and no other", () => {
+    for (const waiting of ["proposed", "ready", "blocked"]) expect(cardEditable(card(waiting))).toBe(true);
+    for (const going of ["working", "input_required", "in_review", "verified", "integrated", "done", "failed"]) {
+      expect(cardEditable(card(going))).toBe(false);
+    }
+    expect(cardEditable(card("ready", { claimed_by: "agent:w-1" }))).toBe(false);
+    expect(cardEditable(card("ready", { integrated_at: "2026-10-06T10:00:00Z" }))).toBe(false);
+    expect(cardEditable(card("ready", { archived_at: "2026-10-06T10:00:00Z" }))).toBe(false);
+  });
+
+  it("puts a new card into the proposal column of a draft and the first plain open column of a running plan", () => {
+    const columns = [
+      { id: 1, position: 0, maps_to_status: "open", stage: "proposal" },
+      { id: 2, position: 2, maps_to_status: "open", stage: null },
+      { id: 3, position: 1, maps_to_status: "open", stage: null },
+      { id: 4, position: 3, maps_to_status: "doing", stage: null },
+    ] as Pick<BoardColumn, "id" | "position" | "maps_to_status" | "stage">[];
+    expect(newCardColumn(columns, { status: "draft" })).toBe(1);
+    expect(newCardColumn(columns, { status: "approved" })).toBe(3);
+    expect(newCardColumn(columns, { status: "closed" })).toBeNull();
+    expect(newCardColumn([], { status: "approved" })).toBeNull();
   });
 });
