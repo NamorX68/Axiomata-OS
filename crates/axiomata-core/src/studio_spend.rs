@@ -34,10 +34,18 @@ pub struct Spent {
     pub cost_usd: f64,
 }
 
-/// What one session used in all, for the increase against the ledger.
-fn session_total(db: &Connection, agent_id: i64) -> Result<Spent, AxiomataError> {
-    sum(db, "WHERE agent_id = ?1", params![agent_id])
+/// What the ledger holds for one source of one session, for the increase against it. Rows without a source (written before
+/// there was one) count toward every source: their origin is unknown, and counting them twice would be the worse mistake.
+fn session_total(db: &Connection, agent_id: i64, source: &str) -> Result<Spent, AxiomataError> {
+    sum(
+        db,
+        "WHERE agent_id = ?1 AND (source = ?2 OR source = '')",
+        params![agent_id, source],
+    )
 }
+
+/// The source of a Claude Code session's figures: all the session's transcripts together.
+pub const SOURCE_CLAUDE: &str = "claude";
 
 fn sum(db: &Connection, filter: &str, args: impl rusqlite::Params) -> Result<Spent, AxiomataError> {
     let (tokens, steps, cost): (i64, i64, f64) = db.query_row(
@@ -56,7 +64,8 @@ fn sum(db: &Connection, filter: &str, args: impl rusqlite::Params) -> Result<Spe
 }
 
 /// Writes down what session `agent_id` used since the last look: the difference between what `usage` (and `cost_usd`)
-/// say it used in all and what the ledger already holds for it. Nothing is written when nothing grew, and a reading
+/// say and what the ledger already holds for the same `source` — [`SOURCE_CLAUDE`], or the Opencode session id, since an
+/// escalation starts a new Opencode session whose figure begins near zero. Nothing is written when nothing grew, and a reading
 /// that fell (a window that moved on) writes nothing either — the ledger never takes spending back.
 ///
 /// # Errors
@@ -65,12 +74,13 @@ fn sum(db: &Connection, filter: &str, args: impl rusqlite::Params) -> Result<Spe
 pub fn record_look(
     db: &Connection,
     agent_id: i64,
+    source: &str,
     plan_id: Option<i64>,
     usage: Usage,
     cost_usd: Option<f64>,
     now: DateTime<Utc>,
 ) -> Result<(), AxiomataError> {
-    let before = session_total(db, agent_id)?;
+    let before = session_total(db, agent_id, source)?;
     let tokens = usage.tokens().saturating_sub(before.tokens);
     let steps = u64::from(usage.steps).saturating_sub(before.steps);
     let cost = cost_usd.map(|cost| (cost - before.cost_usd).max(0.0));
@@ -78,10 +88,11 @@ pub fn record_look(
         return Ok(());
     }
     db.execute(
-        "INSERT INTO session_spend (agent_id, plan_id, tokens, steps, cost_usd, at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO session_spend (agent_id, source, plan_id, tokens, steps, cost_usd, at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             agent_id,
+            source,
             plan_id,
             i64::try_from(tokens).unwrap_or(i64::MAX),
             i64::try_from(steps).unwrap_or(i64::MAX),
@@ -268,6 +279,8 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(include_str!("db/migrations/0008_session_spend.sql"))
             .unwrap();
+        conn.execute_batch(include_str!("db/migrations/0009_session_spend_source.sql"))
+            .unwrap();
         conn
     }
 
@@ -283,9 +296,36 @@ mod tests {
     fn a_look_writes_only_what_grew_since_the_last_one() {
         let db = db();
         let now = Utc::now();
-        record_look(&db, 1, Some(7), usage(100, 50, 3), Some(0.10), now).unwrap();
-        record_look(&db, 1, Some(7), usage(100, 50, 3), Some(0.10), now).unwrap();
-        record_look(&db, 1, Some(7), usage(300, 70, 5), Some(0.25), now).unwrap();
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(100, 50, 3),
+            Some(0.10),
+            now,
+        )
+        .unwrap();
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(100, 50, 3),
+            Some(0.10),
+            now,
+        )
+        .unwrap();
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(300, 70, 5),
+            Some(0.25),
+            now,
+        )
+        .unwrap();
         let spent = plan_spent(&db, 7).unwrap();
         assert_eq!(spent.tokens, 370);
         assert_eq!(spent.steps, 5);
@@ -297,11 +337,119 @@ mod tests {
     }
 
     #[test]
+    fn a_new_opencode_session_after_an_escalation_counts_from_its_own_zero() {
+        let db = db();
+        let now = Utc::now();
+        record_look(
+            &db,
+            1,
+            "ses_old",
+            Some(7),
+            usage(900_000, 100_000, 40),
+            None,
+            now,
+        )
+        .unwrap();
+        // The escalation made a new Opencode session: its figure starts near zero. Against everything the agent spent, its
+        // first looks would write nothing until it passed a million tokens.
+        record_look(
+            &db,
+            1,
+            "ses_new",
+            Some(7),
+            usage(30_000, 5_000, 3),
+            None,
+            now,
+        )
+        .unwrap();
+        assert_eq!(plan_spent(&db, 7).unwrap().tokens, 1_035_000);
+        record_look(
+            &db,
+            1,
+            "ses_new",
+            Some(7),
+            usage(50_000, 9_000, 6),
+            None,
+            now,
+        )
+        .unwrap();
+        assert_eq!(plan_spent(&db, 7).unwrap().tokens, 1_059_000);
+        // A change of harness (Claude Code to Opencode and back) is a change of source too.
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(1_000, 0, 1),
+            None,
+            now,
+        )
+        .unwrap();
+        assert_eq!(plan_spent(&db, 7).unwrap().tokens, 1_060_000);
+    }
+
+    #[test]
+    fn rows_from_before_the_source_existed_count_toward_every_source_of_their_agent() {
+        let db = db();
+        let now = Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT INTO session_spend (agent_id, plan_id, tokens, steps, cost_usd, at) VALUES (1, 7, 500, 5, NULL, ?1)",
+            [&now],
+        )
+        .unwrap();
+        // The same session read again under a source: only what is more than the old rows holds is new.
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(500, 0, 5),
+            None,
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(
+            plan_spent(&db, 7).unwrap().tokens,
+            500,
+            "nothing counted twice"
+        );
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(700, 0, 6),
+            None,
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(plan_spent(&db, 7).unwrap().tokens, 700);
+    }
+
+    #[test]
     fn a_reading_that_fell_takes_nothing_back() {
         let db = db();
         let now = Utc::now();
-        record_look(&db, 1, Some(7), usage(500, 100, 9), Some(1.0), now).unwrap();
-        record_look(&db, 1, Some(7), usage(200, 50, 4), Some(0.4), now).unwrap();
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(500, 100, 9),
+            Some(1.0),
+            now,
+        )
+        .unwrap();
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(200, 50, 4),
+            Some(0.4),
+            now,
+        )
+        .unwrap();
         let spent = plan_spent(&db, 7).unwrap();
         assert_eq!(spent.tokens, 600);
         assert!((spent.cost_usd - 1.0).abs() < 1e-9);
@@ -311,9 +459,27 @@ mod tests {
     fn sessions_and_plans_add_up_separately_and_an_unmetered_session_has_no_dollars() {
         let db = db();
         let now = Utc::now();
-        record_look(&db, 1, Some(7), usage(100, 0, 1), Some(0.5), now).unwrap();
-        record_look(&db, 2, Some(7), usage(100, 0, 1), None, now).unwrap();
-        record_look(&db, 3, Some(8), usage(100, 0, 1), Some(0.5), now).unwrap();
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            Some(7),
+            usage(100, 0, 1),
+            Some(0.5),
+            now,
+        )
+        .unwrap();
+        record_look(&db, 2, SOURCE_CLAUDE, Some(7), usage(100, 0, 1), None, now).unwrap();
+        record_look(
+            &db,
+            3,
+            SOURCE_CLAUDE,
+            Some(8),
+            usage(100, 0, 1),
+            Some(0.5),
+            now,
+        )
+        .unwrap();
         let seven = plan_spent(&db, 7).unwrap();
         assert_eq!(seven.tokens, 200);
         assert!((seven.cost_usd - 0.5).abs() < 1e-9);
@@ -325,8 +491,26 @@ mod tests {
         let db = db();
         let now = Utc::now();
         let long_ago = now - chrono::Duration::days(3);
-        record_look(&db, 1, None, usage(100, 0, 1), Some(5.0), long_ago).unwrap();
-        record_look(&db, 2, None, usage(100, 0, 1), Some(1.5), now).unwrap();
+        record_look(
+            &db,
+            1,
+            SOURCE_CLAUDE,
+            None,
+            usage(100, 0, 1),
+            Some(5.0),
+            long_ago,
+        )
+        .unwrap();
+        record_look(
+            &db,
+            2,
+            SOURCE_CLAUDE,
+            None,
+            usage(100, 0, 1),
+            Some(1.5),
+            now,
+        )
+        .unwrap();
         let today = spent_today(&db, now).unwrap();
         assert!((today.cost_usd - 1.5).abs() < 1e-9);
     }
@@ -409,6 +593,7 @@ mod tests {
         record_look(
             &db,
             1,
+            SOURCE_CLAUDE,
             Some(plan.id),
             usage(900, 300, 4),
             Some(1.2),
@@ -473,6 +658,7 @@ mod tests {
         record_look(
             &db,
             1,
+            SOURCE_CLAUDE,
             Some(plan.id),
             usage(900, 300, 4),
             Some(10.0),

@@ -146,6 +146,7 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
     let db = core.db_lock();
     let roots = paths::ide_locations().channels;
     let mut roles: HashMap<i64, Vec<Role>> = HashMap::new();
+    let mut plans_of_cards: HashMap<i64, Option<i64>> = HashMap::new();
     let mut watched = Vec::new();
     for agent in agent_store::card_sessions(&db)?
         .into_iter()
@@ -168,11 +169,15 @@ fn gather(core: &AxiomataCore, only_card: Option<i64>) -> Result<Vec<Watched>, A
             .engine_id
             .as_deref()
             .and_then(|id| config.agents.engines.get(id));
+        // Two sessions of one card (its worker and its reviewer) look the card up once.
         let plan_id = agent.plan_id.or_else(|| {
-            agent
-                .card_id
-                .and_then(|id| crate::board::store::get_card(&db, id).ok().flatten())
-                .and_then(|card| card.plan_id)
+            let card_id = agent.card_id?;
+            *plans_of_cards.entry(card_id).or_insert_with(|| {
+                crate::board::store::get_card(&db, card_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|card| card.plan_id)
+            })
         });
         watched.push(Watched {
             plan_id,
@@ -393,9 +398,19 @@ impl Meter {
             let read = self.read(entry, &config, &mut seen).await;
             if read.measured {
                 let db = core.db_lock();
+                // Claude Code's figure is one ever-growing sum; an Opencode session is its own, and an escalation makes a new one.
+                let source = match entry.agent.harness {
+                    Harness::Opencode => entry
+                        .agent
+                        .opencode_session
+                        .as_deref()
+                        .unwrap_or(studio_spend::SOURCE_CLAUDE),
+                    _ => studio_spend::SOURCE_CLAUDE,
+                };
                 if let Err(err) = studio_spend::record_look(
                     &db,
                     entry.agent.id,
+                    source,
                     entry.plan_id,
                     read.usage,
                     read.cost_usd,

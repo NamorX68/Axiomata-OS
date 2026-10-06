@@ -65,6 +65,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (25, axiomata_board::SCHEMA_SQL_V8),
     // Plans the owner sharpened with a grilling session: the approval's "not grilled" hint reads it (a2a.md).
     (26, axiomata_board::SCHEMA_SQL_V9),
+    // Where a spending reading came from, so an escalation's new Opencode session starts its own baseline (a2a.md).
+    (27, include_str!("migrations/0009_session_spend_source.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

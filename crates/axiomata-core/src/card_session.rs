@@ -1578,21 +1578,28 @@ pub async fn escalate_card(core: &AxiomataCore, card_id: i64) -> Result<CardEsca
         let db = core.db_lock();
         escalate_in(&db, &config, &roster::roles_for_project, card_id)?
     };
-    if let Some(session) = old_opencode
-        && let Some(service) = crate::agents::opencode::running_service().await
-    {
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            crate::agents::opencode::interrupt_session(&service, &session),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                tracing::warn!(%err, "could not interrupt the session of an escalated card")
+    // Interrupting the old Opencode session may take a service that does not answer up to ten seconds: it is done off the
+    // plan's tick, which has other plans' cards to start and integrate.
+    if let Some(session) = old_opencode {
+        tokio::spawn(async move {
+            let Some(service) = crate::agents::opencode::running_service().await else {
+                return;
+            };
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                crate::agents::opencode::interrupt_session(&service, &session),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "could not interrupt the session of an escalated card");
+                }
+                Err(_) => {
+                    tracing::warn!("the Opencode service did not answer an interrupt in time")
+                }
             }
-            Err(_) => tracing::warn!("the Opencode service did not answer an interrupt in time"),
-        }
+        });
     }
     Ok(outcome)
 }
