@@ -19,7 +19,7 @@
   import { relativeTime } from "../../core/format";
   import { STATE_LABEL } from "../../core/kanban";
   import { toast } from "../../core/toast";
-  import { NODE_H, NODE_W, clip, layoutGraph, reviewLabel, reviewToneOf, toneOf } from "../flowGraph";
+  import { NODE_H, NODE_W, clip, endOf, layoutGraph, reviewLabel, reviewToneOf, toneOf } from "../flowGraph";
   import { allCardsOfPlan } from "../planning";
   import { flowSelection, resolvePlan } from "../flowSelection";
   import { agentStatus } from "../agentStatus";
@@ -41,6 +41,7 @@
   const plan = $derived(resolvePlan(data?.plans ?? [], $flowSelection.planId));
   const cards = $derived(plan && data ? allCardsOfPlan(data.cards, plan.id) : []);
   const graph = $derived(layoutGraph(cards));
+  const goal = $derived(plan ? endOf(cards, plan.status) : null);
 
   let selectedId = $state<number | null>(null);
   const selected = $derived(cards.find((card) => card.id === selectedId) ?? null);
@@ -219,6 +220,17 @@
             <text x={graph.start.w / 2} y={graph.start.h / 2 + 4} text-anchor="middle">Start</text>
           </g>
         {/if}
+        {#if graph.end && goal}
+          <g
+            class="goal {goal.tone}"
+            transform="translate({graph.end.x} {graph.end.y})"
+            aria-label="Ziel des Plans: {goal.label}"
+          >
+            <rect width={graph.end.w} height={graph.end.h} rx={graph.end.h / 2} />
+            <text x={graph.end.w / 2} y="22" text-anchor="middle" class="goal-title">Ziel</text>
+            <text x={graph.end.w / 2} y="40" text-anchor="middle" class="goal-sub">{goal.label}</text>
+          </g>
+        {/if}
         {#each graph.nodes as node (node.key)}
           {@const review = node.kind === "review"}
           <g
@@ -369,6 +381,23 @@
     fill: var(--ax-text);
     font-size: 12px;
     font-weight: 600;
+  }
+  .goal rect {
+    fill: var(--ax-surface-2);
+    stroke: var(--tone);
+    stroke-width: 2;
+  }
+  .goal.done rect {
+    fill: color-mix(in srgb, var(--tone) 18%, var(--ax-surface-2));
+  }
+  .goal-title {
+    fill: var(--ax-text);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .goal-sub {
+    fill: var(--ax-text-muted);
+    font-size: 12px;
   }
 
   /* One colour per family of states, from the theme's tokens. */

@@ -98,9 +98,12 @@ function startingFlowLayout(): Layout {
   return singleGroupLayout([planTab()]);
 }
 
-/** What a project gets the first time it is opened: a terminal (the files are in the shared sidebar). */
-function startingLayout(project: IdeProject): Layout {
-  return applyProjectCwd(singleGroupLayout([terminalTab()]), project.repo_root);
+/**
+ * What a project's Canvas starts with: nothing. The agents the studio starts fill it, and a terminal is one click away
+ * (the files are in the shared sidebar) — a terminal nobody asked for would take a quarter of the width for good.
+ */
+function startingLayout(_project: IdeProject): Layout {
+  return emptyLayout();
 }
 
 /**

@@ -71,10 +71,10 @@ describe("open", () => {
     expect(order).toEqual(["flush", "open"]);
   });
 
-  it("returns a starting layout for a project that has none: a terminal; the files are in the shared sidebar", async () => {
+  it("returns an empty Canvas for a project that has none: agents fill it, a terminal is one click away", async () => {
     api.openProject.mockResolvedValue(project(1));
     const layout = await session.open(1);
-    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["terminal"]);
+    expect(allTabs(layout!)).toEqual([]);
     expect(get(session.session).current?.id).toBe(1);
   });
 
@@ -98,7 +98,7 @@ describe("open", () => {
     api.openProject.mockResolvedValue(project(1, { layout_json: "{ this is not a layout" }));
     const layout = await session.open(1);
 
-    expect(allTabs(layout!).map((t) => t.kind)).toEqual(["terminal"]);
+    expect(allTabs(layout!)).toEqual([]);
     expect(toasted).toHaveBeenCalledWith(expect.stringContaining("could not be read"), "warning");
   });
 
@@ -290,7 +290,7 @@ describe("modes", () => {
     const editor = session.switchMode(agents, "editor");
     expect(allTabs(editor)).toEqual([]);
     expect(get(session.session).mode).toBe("editor");
-    expect(allTabs(get(session.session).parked.agents!).map((t) => t.kind)).toEqual(["terminal"]);
+    expect(allTabs(get(session.session).parked.agents!)).toEqual([]);
     // The Flow of a new project starts with the planning panel, parked until it is asked for.
     expect(allTabs(get(session.session).parked.flow!).map((t) => t.kind)).toEqual(["plan"]);
 
@@ -346,7 +346,7 @@ describe("modes", () => {
     const flow = session.switchMode(withPlanner, "flow");
     session.closeParkedAgentTabs([77]);
     const back = session.switchMode(flow, "agents");
-    expect(allTabs(back).map((t) => t.kind)).toEqual(["terminal"]);
+    expect(allTabs(back)).toEqual([]);
   });
 
   it("opens in the mode the project was left in", async () => {

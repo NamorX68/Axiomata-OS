@@ -12,6 +12,8 @@ const ROW_GAP = 16;
 const PAD = 16;
 export const START_W = 64;
 export const START_H = 36;
+export const END_W = 150;
+export const END_H = 52;
 
 export interface GraphNode {
   /** The node's id in an edge: the card's id, or minus the card's id for the review stage after it. */
@@ -27,6 +29,9 @@ export interface GraphNode {
 
 /** The id the start node has in an edge's `from`. */
 export const START = 0;
+
+/** The id the end node has in an edge's `to`: no card or review has it. */
+export const END = Number.MAX_SAFE_INTEGER;
 
 /** The point the tree grows from: a small node left of the first column. */
 export interface StartNode {
@@ -47,6 +52,8 @@ export interface GraphEdge {
 export interface Graph {
   /** `null` for no cards. */
   start: StartNode | null;
+  /** Where the lines of every node that nothing waits for come together: the plan's goal. `null` for no cards. */
+  end: StartNode | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
   width: number;
@@ -126,7 +133,7 @@ function orderColumns(columns: Item[][]): void {
 
 /** The graph of `cards`: a start node, positions, and one curve per "needs first" line — and per card that needs none, one from the start. */
 export function layoutGraph(cards: BoardCard[]): Graph {
-  if (cards.length === 0) return { start: null, nodes: [], edges: [], width: 0, height: 0 };
+  if (cards.length === 0) return { start: null, end: null, nodes: [], edges: [], width: 0, height: 0 };
   const items = itemsOf(cards);
   const layers = layersOf(items);
   const depth = Math.max(...layers.values());
@@ -138,7 +145,7 @@ export function layoutGraph(cards: BoardCard[]): Graph {
 
   const widest = Math.max(...columns.map((column) => column.length));
   const heightOf = (rows: number, row: number) => rows * row + (rows - 1) * ROW_GAP;
-  const inner = Math.max(heightOf(widest, NODE_H), START_H);
+  const inner = Math.max(heightOf(widest, NODE_H), START_H, END_H);
   const height = PAD * 2 + inner;
   const firstX = PAD + START_W + COL_GAP;
 
@@ -158,6 +165,8 @@ export function layoutGraph(cards: BoardCard[]): Graph {
     );
   });
   const start: StartNode = { x: PAD, y: PAD + (inner - START_H) / 2, w: START_W, h: START_H };
+  const columnsEnd = firstX + columns.length * NODE_W + (columns.length - 1) * COL_GAP;
+  const end: StartNode = { x: columnsEnd + COL_GAP, y: PAD + (inner - END_H) / 2, w: END_W, h: END_H };
 
   const at = new Map(nodes.map((node) => [node.key, node]));
   const needs = new Map(items.map((item) => [item.id, item.depends_on]));
@@ -184,13 +193,17 @@ export function layoutGraph(cards: BoardCard[]): Graph {
       });
     }
   }
-  return {
-    start,
-    nodes,
-    edges,
-    width: firstX + columns.length * NODE_W + (columns.length - 1) * COL_GAP + PAD,
-    height,
-  };
+  // Every node that nothing waits for ends in the goal.
+  const waitedFor = new Set(items.flatMap((item) => item.depends_on));
+  for (const node of nodes) {
+    if (waitedFor.has(node.key)) continue;
+    edges.push({
+      from: node.key,
+      to: END,
+      path: curve(node.x + NODE_W, node.y + NODE_H / 2, end.x, end.y + end.h / 2),
+    });
+  }
+  return { start, end, nodes, edges, width: end.x + end.w + PAD, height };
 }
 
 /**
@@ -202,6 +215,23 @@ export function reviewToneOf(state: TaskState): Tone {
   if (state === "in_review") return "review";
   if (state === "verified" || state === "integrated" || state === "taken_over") return "done";
   return "idle";
+}
+
+/**
+ * The end node of a plan: the plan is done when every card that still counts (not called off) is integrated or taken
+ * over, and closed when the owner took it over (or closed it). Anything else is still open.
+ */
+export function endOf(
+  cards: Pick<BoardCard, "state">[],
+  planStatus: "draft" | "approved" | "closed",
+): { tone: Tone; label: string } {
+  if (planStatus === "closed") return { tone: "done", label: "abgeschlossen" };
+  const counting = cards.filter((card) => card.state !== "canceled");
+  const allIn =
+    counting.length > 0 && counting.every((card) => card.state === "integrated" || card.state === "taken_over");
+  if (allIn) return { tone: "done", label: "bereit zum Übernehmen" };
+  if (counting.some((card) => card.state === "failed")) return { tone: "failed", label: "blockiert" };
+  return { tone: "idle", label: "offen" };
 }
 
 /** What the review node says about its card: judged now, signed off, or sent back. */

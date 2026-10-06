@@ -91,6 +91,7 @@
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
   import { MODES, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
+  import { balanceCanvas, canvasAgentTarget } from "./canvasLayout";
   import { agentTabsOf, flowAgentTarget, modeForAgent, resetFlowPanes } from "./planning";
   import { get } from "svelte/store";
   import { agentRequests, takeAgentRequests } from "./agentRequest";
@@ -560,13 +561,10 @@
       return;
     }
     if (preferred && preferred !== shown.mode) layout = projectSession.switchMode(layout, preferred);
-    const groups = allGroups(layout);
-    // In the Flow the pane goes beside the team's tiles; elsewhere beside the last group.
-    const target = flowAgentTarget(layout) ?? {
-      nodeId: groups.length > 0 ? groups[groups.length - 1].id : layout.root.id,
-      side: "right",
-    };
-    layout = addTab(layout, tab, target);
+    // In the Flow the pane goes beside the team's tiles; on the Canvas the agents share the width (`canvasLayout.ts`).
+    const flowTarget = flowAgentTarget(layout);
+    const added = addTab(layout, tab, flowTarget ?? canvasAgentTarget(layout));
+    layout = flowTarget ? added : balanceCanvas(added);
   }
 
   /**

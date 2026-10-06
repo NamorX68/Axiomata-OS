@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { BoardCard, TaskState } from "../core/backend";
 import {
+  END,
   NODE_H,
   NODE_W,
   START,
   START_H,
   clip,
+  endOf,
   hasReviewStage,
   layersOf,
   layoutGraph,
@@ -35,13 +37,13 @@ describe("the columns of a plan", () => {
 
 describe("the layout", () => {
   it("is empty for no cards", () => {
-    expect(layoutGraph([])).toEqual({ start: null, nodes: [], edges: [], width: 0, height: 0 });
+    expect(layoutGraph([])).toEqual({ start: null, end: null, nodes: [], edges: [], width: 0, height: 0 });
   });
 
   it("gives each card a place, a line for each edge, and room for all of them", () => {
     const graph = layoutGraph([card(1), card(2, [1]), card(3, [1]), card(4, [2, 3])]);
     expect(graph.nodes).toHaveLength(4);
-    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, 2], [1, 3], [2, 4], [3, 4]]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, 2], [1, 3], [2, 4], [3, 4], [4, END]]);
     const nodes = new Map(graph.nodes.map((n) => [n.card.id, n]));
     expect(nodes.get(2)!.x).toBeGreaterThan(nodes.get(1)!.x + NODE_W - 1);
     // 2 and 3 share a column: different rows, no overlap.
@@ -80,7 +82,7 @@ describe("the start and the middle line", () => {
 
   it("treats a card whose predecessors are all outside the plan as one that needs none", () => {
     const graph = layoutGraph([card(1, [99])]);
-    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1]]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, END]]);
   });
 
   it("hangs every column around the middle of the tallest one, and the start on the same line", () => {
@@ -130,7 +132,7 @@ describe("the review after a card", () => {
       [-1, "review", 1],
       [2, "card", 2],
     ]);
-    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, -1], [-1, 2]]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, -1], [-1, 2], [2, END]]);
   });
 
   it("hangs a card that needs a reviewed and an unreviewed card on the review of the one and on the other itself", () => {
@@ -146,7 +148,7 @@ describe("the review after a card", () => {
   it("leaves a card without a review stage as it was drawn before", () => {
     const graph = layoutGraph([card(1), card(2, [1])]);
     expect(graph.nodes.map((n) => n.kind)).toEqual(["card", "card"]);
-    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, 2]]);
+    expect(graph.edges.map((e) => [e.from, e.to])).toEqual([[START, 1], [1, 2], [2, END]]);
   });
 
   it("is coloured and worded by what the review is doing", () => {
@@ -156,5 +158,25 @@ describe("the review after a card", () => {
     expect(reviewLabel({ state: "in_review", returned_count: 0 })).toBe("wird geprüft");
     expect(reviewLabel({ state: "verified", returned_count: 1 })).toBe("abgezeichnet");
     expect(reviewLabel({ state: "working", returned_count: 2 })).toBe("zurückgegeben (2×)");
+  });
+});
+
+describe("the end of a plan", () => {
+  it("collects the lines of every node nothing waits for, right of the last column", () => {
+    // 2 and 3 both end the plan; 1 has followers and does not.
+    const graph = layoutGraph([card(1), card(2, [1]), card(3, [1])]);
+    expect(graph.edges.filter((e) => e.to === END).map((e) => e.from).sort()).toEqual([2, 3]);
+    const lastRight = Math.max(...graph.nodes.map((n) => n.x + NODE_W));
+    expect(graph.end!.x).toBeGreaterThan(lastRight);
+    expect(graph.end!.x + graph.end!.w).toBeLessThanOrEqual(graph.width);
+  });
+
+  it("is open until every card that counts is integrated, then ready, and closed with the plan", () => {
+    const open = endOf([{ state: "integrated" }, { state: "working" }], "approved");
+    expect(open).toEqual({ tone: "idle", label: "offen" });
+    expect(endOf([{ state: "integrated" }, { state: "canceled" }], "approved").label).toBe("bereit zum Übernehmen");
+    expect(endOf([{ state: "failed" }, { state: "integrated" }], "approved").tone).toBe("failed");
+    expect(endOf([], "approved").label).toBe("offen");
+    expect(endOf([{ state: "taken_over" }], "closed")).toEqual({ tone: "done", label: "abgeschlossen" });
   });
 });

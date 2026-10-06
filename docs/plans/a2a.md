@@ -647,3 +647,14 @@ Branch-Technik: Ultra vergleicht den ausgecheckten Branch mit einer **Basis** (L
 - **Offen:** Opencode-Reviewer zeigte „starting / noch nichts aufgezeichnet“, obwohl er an einer Rückfrage stand (der
   Statusüberlagerung aus dem Dienst fehlte das Ereignis); `node_modules`-Symlink im Worktree bricht vitest (Vite verbietet
   Pfade außerhalb des Worktrees), der Reviewer musste kopieren.
+
+## Ziel-Knoten und Canvas-Aufteilung (2026-10-07)
+
+- **Ziel-Knoten in der Flowansicht** (`flowGraph.END`, `endOf`): rechts von der letzten Spalte; jeder Knoten, auf den nichts
+  mehr wartet (Karte oder Review), mündet in ihn. „offen“, „blockiert“ (eine Karte gescheitert), „bereit zum Übernehmen“ (alle
+  zählenden Karten integriert/übernommen, abgesagte zählen nicht) und „abgeschlossen“ (Plan zu).
+- **Canvas** (`ide/canvasLayout.ts`): ein neues Projekt startet **leer** (kein Terminal mehr; ein Terminal öffnet der Knopf in
+  der Kopfzeile). Öffnet der erste Agent, behält alles, was schon da war (ein Terminal), 25 % der Breite; die laufenden
+  Agenten teilen den Rest gleichmäßig (`balanceCanvas`, bei jedem Öffnen). Ohne anderes Pane teilen sie die ganze Breite. Bis
+  vier Spalten nebeneinander, dann beginnt eine zweite Zeile unter der Spalte mit den wenigsten Agenten
+  (`canvasAgentTarget`). Gespeicherte Layouts bleiben, wie sie sind; das Schließen eines Agenten gleicht nicht aus.
