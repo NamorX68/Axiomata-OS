@@ -2714,6 +2714,7 @@ async fn board_plan(core: &AxiomataCore, action: board_flow::PlanAction) -> Resu
                 project_id: project,
                 engine_id: engine,
                 grill,
+                role: None,
             },
         )
         .await?;

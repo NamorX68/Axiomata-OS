@@ -6,6 +6,8 @@ import { addTab, allGroups, allTabs, closeTab, forceCloseTab, emptyLayout, singl
 import {
   agentTabsOf,
   canDeletePlan,
+  rolesOfKind,
+  sessionEngine,
   cardEditable,
   newCardColumn,
   canStartGrill,
@@ -444,5 +446,28 @@ describe("changing a plan that is already running", () => {
     expect(newCardColumn(columns, { status: "approved" })).toBe(3);
     expect(newCardColumn(columns, { status: "closed" })).toBeNull();
     expect(newCardColumn([], { status: "approved" })).toBeNull();
+  });
+});
+
+describe("what a session started from a role runs on", () => {
+  const catalog = [{ id: "opus" }, { id: "sonnet" }];
+
+  it("takes the role's own engine and asks only when the role has none or its engine is gone", () => {
+    expect(sessionEngine({ engine: "sonnet" }, catalog, "")).toEqual({ engineId: "sonnet", ask: false });
+    expect(sessionEngine({ engine: null }, catalog, "")).toEqual({ engineId: "opus", ask: true });
+    expect(sessionEngine({ engine: null }, catalog, "sonnet")).toEqual({ engineId: "sonnet", ask: true });
+    expect(sessionEngine({ engine: "removed" }, catalog, "")).toEqual({ engineId: "opus", ask: true });
+    expect(sessionEngine(null, [], "")).toEqual({ engineId: "", ask: true });
+  });
+
+  it("offers the roles of one kind, the seeded one first", () => {
+    const roles = [
+      { name: "planner-heavy", kind: "plan" },
+      { name: "planner", kind: "plan" },
+      { name: "grill", kind: "grill" },
+    ];
+    expect(rolesOfKind(roles, "plan", "planner")).toEqual(["planner", "planner-heavy"]);
+    expect(rolesOfKind(roles, "grill", "grill")).toEqual(["grill"]);
+    expect(rolesOfKind(roles, "review", "reviewer")).toEqual([]);
   });
 });

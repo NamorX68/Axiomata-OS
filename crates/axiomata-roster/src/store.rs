@@ -406,7 +406,125 @@ pub fn grill_role() -> Role {
     }
 }
 
-/// Seeds [`default_role`], [`reviewer_role`], [`planner_role`] and [`grill_role`] where they are missing — never overwrites, like the
+/// A role that works cards, in one of three strengths (`docs/plans/a2a.md`, "Rollen und Engines"): the same job at the tier
+/// the card calls for. Without an engine — the first start asks once and saves the pick into the role.
+fn working_role(name: &str, description: &str, tier: Tier, kind: &str, instructions: &str) -> Role {
+    Role {
+        name: name.into(),
+        description: description.into(),
+        kind: kind.into(),
+        tier,
+        engine: None,
+        fallback_engines: Vec::new(),
+        permissions: Vec::new(),
+        limits: Limits::default(),
+        creates: Vec::new(),
+        instructions: instructions.into(),
+        source: Source::User,
+    }
+}
+
+/// The light implementer: small, well-specified changes — a rename, a missing guard, a text, a small component — done
+/// exactly as the card says. Cheap and fast; a card that turns out larger is sent back (and, after two returns, to a
+/// stronger role).
+pub fn implementer_light_role() -> Role {
+    working_role(
+        "implementer-light",
+        "Small, well-specified changes, exactly as the card says",
+        Tier::Light,
+        "implement",
+        "You make small, well-specified changes. Do exactly what the card asks and nothing around it: no refactoring you were \
+         not asked for, no new abstractions, no renames beyond the card. Follow the project's own conventions \
+         (AGENTS.md, CLAUDE.md, the code around yours) rather than your habits. If the card turns out to need a design \
+         decision, a change across several modules or something its criteria do not cover, stop and say so in your report \
+         instead of guessing: a stronger role takes it from there.",
+    )
+}
+
+/// The heavy implementer: cross-cutting or delicate work — a change that touches several modules, concurrency, data
+/// migrations, security-relevant code. The target of the escalation from the lighter roles.
+pub fn implementer_heavy_role() -> Role {
+    working_role(
+        "implementer-heavy",
+        "Cross-cutting or delicate changes: several modules, concurrency, migrations, security",
+        Tier::Heavy,
+        "implement",
+        "You take the cards that need judgement: a change across several modules, concurrency, a data migration, \
+         security-relevant code, or work an earlier session got wrong. Read the code and its tests first, and the history \
+         of the card if it was sent back — it says what was wrong. Work out the design before you touch a file, keep the \
+         change as small as the problem allows, and say in your report what you decided and why. Write the tests that \
+         would have caught the problem. Follow the project's conventions (AGENTS.md, CLAUDE.md). If acceptance criteria \
+         contradict each other, report that instead of satisfying one of them.",
+    )
+}
+
+/// The documenter: documentation, comments and README text — not code. Light by default: reading the diff is its check.
+pub fn documenter_role() -> Role {
+    working_role(
+        "documenter",
+        "Writes documentation, doc comments and README sections; changes no behaviour",
+        Tier::Light,
+        "doc",
+        "You write documentation and change no behaviour. Read the code you document and write what it does and why — for the \
+         next reader, not the author. Public items get the project's doc-comment format (rustdoc, TSDoc, docstrings as the \
+         project uses), a module gets a short purpose and usage, and a comment explains *why*, never what the code already \
+         says. Keep to the language and the line length the project's AGENTS.md or CLAUDE.md names. Do not run builds or \
+         tests for a text change; reading the diff is its check. Never document what you did not verify in the code.",
+    )
+}
+
+/// The tester: tests and their gaps. Medium: a test that cannot fail is worse than none.
+pub fn tester_role() -> Role {
+    working_role(
+        "tester",
+        "Writes tests and closes gaps in them; changes no behaviour",
+        Tier::Medium,
+        "test",
+        "You write tests and change no production behaviour. Find what the code does that no test would notice if it broke, \
+         and test that: the edge cases, the refusals, the errors — assert on what is returned or stored, not on text that \
+         could change. A test touches no real user state (home folder, network) and runs alone and in any order. Run the \
+         tests you wrote, and the ones around them. A test that cannot fail is worse than none: make sure yours fails when \
+         the behaviour it guards is removed. If you find a bug, report it with the failing test instead of fixing it \
+         silently.",
+    )
+}
+
+fn reviewer_with(name: &str, description: &str, tier: Tier, focus: &str) -> Role {
+    let mut role = reviewer_role();
+    role.name = name.into();
+    role.description = description.into();
+    role.tier = tier;
+    role.instructions = format!("{}\n\n{focus}", role.instructions);
+    role
+}
+
+/// The light reviewer: judges small cards against their criteria — what was asked, nothing less, nothing more.
+pub fn reviewer_light_role() -> Role {
+    reviewer_with(
+        "reviewer-light",
+        "Judges small cards against their acceptance criteria",
+        Tier::Light,
+        "This card is small: check that it does what the criteria say and nothing around it, that it builds or reads \
+         correctly where that can be seen at once, and that no unrelated file changed. Do not hold a small change to the \
+         standard of a redesign.",
+    )
+}
+
+/// The heavy reviewer: for cards where being wrong is expensive — design, concurrency, security, migrations.
+pub fn reviewer_heavy_role() -> Role {
+    reviewer_with(
+        "reviewer-heavy",
+        "Judges delicate cards: design, concurrency, security, migrations",
+        Tier::Heavy,
+        "This card is delicate: besides the criteria, look for what the author may not have thought of — a state that is \
+         not handled, a race, an input that is not checked, a migration that cannot be undone, a refusal that is missing. \
+         Read the code the change touches, not just the diff, and run the tests that can show a problem. Return the card \
+         for a defect you can name; do not return it for taste.",
+    )
+}
+
+/// Seeds the roles every install starts with — the allrounder, the reviewers, the planner, the grill, the implementers of
+/// two other strengths, the documenter and the tester — where they are missing — never overwrites, like the
 /// bundled skills.
 /// Returns whether it wrote anything.
 ///
@@ -420,6 +538,12 @@ pub fn seed_default_roles(dir: &Path) -> Result<bool> {
         reviewer_role(),
         planner_role(),
         grill_role(),
+        implementer_light_role(),
+        implementer_heavy_role(),
+        documenter_role(),
+        tester_role(),
+        reviewer_light_role(),
+        reviewer_heavy_role(),
     ] {
         if fs::symlink_metadata(dir.join(&role.name)).is_ok() {
             continue;
@@ -622,6 +746,50 @@ pub(crate) mod tests {
         fs::remove_dir_all(tmp.0.join("grill")).unwrap();
         assert!(seed_default_roles(&tmp.0).unwrap());
         assert!(!seed_default_roles(&tmp.0).unwrap());
+    }
+
+    #[test]
+    fn the_seeded_set_has_the_working_roles_in_their_strengths_and_the_reviewers_to_match() {
+        let tmp = Tmp::new();
+        assert!(seed_default_roles(&tmp.0).unwrap());
+        let loaded = load_roles(&tmp.0, Source::User).unwrap();
+        assert!(
+            loaded.skipped.is_empty(),
+            "every seeded role is a valid one: {:?}",
+            loaded.skipped
+        );
+        let role = |name: &str| loaded.roles.iter().find(|r| r.name == name).unwrap();
+        let shape = |name: &str| (role(name).kind.clone(), role(name).tier);
+        assert_eq!(
+            shape("implementer-light"),
+            ("implement".to_owned(), Tier::Light)
+        );
+        assert_eq!(shape("allrounder"), ("implement".to_owned(), Tier::Medium));
+        assert_eq!(
+            shape("implementer-heavy"),
+            ("implement".to_owned(), Tier::Heavy)
+        );
+        assert_eq!(shape("documenter"), ("doc".to_owned(), Tier::Light));
+        assert_eq!(shape("tester"), ("test".to_owned(), Tier::Medium));
+        assert_eq!(shape("reviewer-light"), ("review".to_owned(), Tier::Light));
+        assert_eq!(shape("reviewer"), ("review".to_owned(), Tier::Medium));
+        assert_eq!(shape("reviewer-heavy"), ("review".to_owned(), Tier::Heavy));
+        // None names an engine: the first start asks once and saves it into the role.
+        assert!(
+            loaded
+                .roles
+                .iter()
+                .all(|r| r.engine.is_none() && r.permissions.is_empty())
+        );
+        // A reviewer keeps the review method and adds what its strength looks for.
+        assert!(
+            role("reviewer-heavy")
+                .instructions
+                .contains("review_verdict")
+                == role("reviewer").instructions.contains("review_verdict")
+        );
+        assert!(role("reviewer-heavy").instructions.contains("delicate"));
+        assert!(role("reviewer-light").instructions.contains("small"));
     }
 
     #[test]

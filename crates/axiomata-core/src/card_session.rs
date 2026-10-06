@@ -374,17 +374,69 @@ pub struct ReviewSession {
     pub engine_id: String,
 }
 
-/// The reviewer role: the one of kind `review`, and with several the strongest (A21).
-fn pick_reviewer(roles: &[Role]) -> Result<&Role> {
-    roles
+/// The tier of role a card calls for: the card's own tier (the planner sets it by how hard the card is), else the tier of the
+/// role that works it. A review of a light card by a heavy reviewer is money spent for nothing; a heavy card judged by a
+/// light one is a review that finds little.
+fn needed_tier(card: &crate::board::Card, worker_role: Option<&Role>) -> axiomata_roster::Tier {
+    use axiomata_roster::Tier;
+    match card.tier {
+        Some(crate::board::Tier::Light) => Tier::Light,
+        Some(crate::board::Tier::Medium) => Tier::Medium,
+        Some(crate::board::Tier::Heavy) => Tier::Heavy,
+        None => worker_role.map_or(Tier::Medium, |role| role.tier),
+    }
+}
+
+/// The reviewers of kind `review` in the order they are tried for a card of tier `needed`: **the weakest that is at least as
+/// strong as the card**, then the stronger ones, and last — a card for which nobody is strong enough — the strongest of the
+/// weaker ones first. Ties go by name, so the choice does not depend on the order of the files.
+fn reviewers_for(roles: &[Role], needed: axiomata_roster::Tier) -> Vec<&Role> {
+    let mut reviewers: Vec<&Role> = roles
         .iter()
         .filter(|role| role.kind == KIND_REVIEW)
-        .max_by_key(|role| role.tier)
-        .ok_or_else(|| {
-            refuse_review(
-                "there is no role of kind `review` for this project; add one in the Studio",
-            )
-        })
+        .collect();
+    reviewers.sort_by_key(|role| {
+        let weaker = role.tier < needed;
+        // Strong enough first, the weakest of those first; then the weaker ones, the nearest to the card first.
+        let rank = if weaker {
+            2 - role.tier as u8
+        } else {
+            role.tier as u8
+        };
+        (weaker, rank, role.name.clone())
+    });
+    reviewers
+}
+
+/// The reviewer for a card of tier `needed` and the engine it runs on: the first of [`reviewers_for`] that has an engine other
+/// than the worker's (A21), or the engine the owner asked for. A refusal names what to do when none has.
+///
+/// # Errors
+///
+/// No role of kind `review`, or nothing usable for any of them (the first refusal is the one returned).
+fn choose_reviewer<'a>(
+    config: &'a Config,
+    roles: &'a [Role],
+    needed: axiomata_roster::Tier,
+    worker_engine: Option<&str>,
+    requested: Option<&str>,
+) -> Result<(&'a Role, &'a str)> {
+    let candidates = reviewers_for(roles, needed);
+    if candidates.is_empty() {
+        return Err(refuse_review(
+            "there is no role of kind `review` for this project; add one in the Studio",
+        ));
+    }
+    let mut first_refusal = None;
+    for role in candidates {
+        match choose_review_engine(config, role, worker_engine, requested) {
+            Ok(engine) => return Ok((role, engine)),
+            Err(err) => {
+                first_refusal.get_or_insert(err);
+            }
+        }
+    }
+    Err(first_refusal.unwrap_or_else(|| refuse_review("no reviewer could be chosen")))
 }
 
 fn refuse_review(reason: &str) -> AxiomataError {
@@ -685,14 +737,15 @@ fn plan_review(
         )));
     }
     let roles = roles_of(db, worker.project_id);
-    let role = pick_reviewer(&roles)?.clone();
-    let engine_id = choose_review_engine(
+    let worker_role = roles.iter().find(|role| role.name == worker.agent_role);
+    let (role, engine_id) = choose_reviewer(
         config,
-        &role,
+        &roles,
+        needed_tier(&card, worker_role),
         worker.engine_id.as_deref(),
         request.engine_id.as_deref(),
-    )?
-    .to_owned();
+    )?;
+    let (role, engine_id) = (role.clone(), engine_id.to_owned());
     // The name is asked now too, so that a refusal does not come after the snapshot commit.
     free_name(&sessions, &role.name, card.id)?;
     let repo = crate::ide::provision::agent_repo(db, worker.id)?.ready()?;
@@ -2454,6 +2507,78 @@ mod tests {
 
         // The owner's pick works.
         assert_eq!(w.review(card, Some("opus")).unwrap().engine_id, "opus");
+    }
+
+    fn reviewer_of(name: &str, tier: Tier, engine: &str) -> Role {
+        let mut role = role(name, "review", Some(engine));
+        role.tier = tier;
+        role
+    }
+
+    #[test]
+    fn the_reviewer_is_the_weakest_that_is_strong_enough_for_the_card_then_the_stronger_then_the_nearest_weaker()
+     {
+        let roles = vec![
+            reviewer_of("heavy", Tier::Heavy, "opus"),
+            reviewer_of("light", Tier::Light, "sonnet"),
+            reviewer_of("medium", Tier::Medium, "sonnet"),
+            role("builder", "implement", Some("sonnet")),
+        ];
+        let order = |needed| {
+            reviewers_for(&roles, needed)
+                .iter()
+                .map(|r| r.name.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order(Tier::Light), ["light", "medium", "heavy"]);
+        assert_eq!(order(Tier::Medium), ["medium", "heavy", "light"]);
+        assert_eq!(order(Tier::Heavy), ["heavy", "medium", "light"]);
+        assert!(reviewers_for(&[role("builder", "implement", None)], Tier::Medium).is_empty());
+    }
+
+    #[test]
+    fn a_reviewer_whose_engine_is_the_workers_is_passed_over_for_the_next_one() {
+        let mut w = world();
+        w.roles = vec![
+            reviewer_of("light", Tier::Light, "sonnet"),
+            reviewer_of("heavy", Tier::Heavy, "opus"),
+        ];
+        // The worker ran on sonnet: the light reviewer is on the same engine, so the heavy one takes the card even though a
+        // light one would have been enough.
+        let (role, engine) =
+            choose_reviewer(&w.config, &w.roles, Tier::Light, Some("sonnet"), None).unwrap();
+        assert_eq!((role.name.as_str(), engine), ("heavy", "opus"));
+        // On another engine the weakest strong-enough reviewer is the one.
+        let (role, engine) =
+            choose_reviewer(&w.config, &w.roles, Tier::Light, Some("opus"), None).unwrap();
+        assert_eq!((role.name.as_str(), engine), ("light", "sonnet"));
+        // Nobody left: the refusal says what to do.
+        w.roles = vec![reviewer_of("only", Tier::Medium, "sonnet")];
+        assert!(choose_reviewer(&w.config, &w.roles, Tier::Light, Some("sonnet"), None).is_err());
+    }
+
+    #[test]
+    fn a_card_calls_for_its_own_tier_else_the_tier_of_the_role_that_works_it() {
+        let w = world();
+        let id = w.card(w.open, Some("builder"));
+        let mut card = store::get_card(&w.db, id).unwrap().unwrap();
+        let heavy_role = {
+            let mut role = role("builder", "implement", None);
+            role.tier = Tier::Heavy;
+            role
+        };
+        assert_eq!(
+            needed_tier(&card, Some(&heavy_role)),
+            Tier::Heavy,
+            "no tier on the card: the role's"
+        );
+        assert_eq!(needed_tier(&card, None), Tier::Medium);
+        card.tier = Some(crate::board::Tier::Light);
+        assert_eq!(
+            needed_tier(&card, Some(&heavy_role)),
+            Tier::Light,
+            "the card's own tier wins"
+        );
     }
 
     #[test]

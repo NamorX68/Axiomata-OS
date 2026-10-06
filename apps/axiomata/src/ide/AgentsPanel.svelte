@@ -50,8 +50,9 @@
 
   /** `null` = the "new agent" form, a number = editing that agent. */
   let editing = $state<number | null | undefined>(undefined);
-  /** The roles in force for this project — what the role picker offers. */
+  /** The roles in force for this project — what the role picker offers — and the engine each carries. */
   let roleNames = $state<string[]>([]);
+  let roleEngines = $state<Record<string, string | null>>({});
 
   let form = $state<AgentSpec>(blankSpec([]));
 
@@ -60,13 +61,18 @@
   async function loadRoles(id: number | null) {
     if (id === null) {
       roleNames = [];
+      roleEngines = {};
       return;
     }
     try {
       const roles = await projectRoles(id);
-      if (id === projectId) roleNames = roles.effective.map((role) => role.name);
+      if (id === projectId) {
+        roleNames = roles.effective.map((role) => role.name);
+        roleEngines = Object.fromEntries(roles.effective.map((role) => [role.name, role.engine]));
+      }
     } catch {
       roleNames = [];
+      roleEngines = {};
     }
   }
 
@@ -81,10 +87,18 @@
   function startNew() {
     editing = null;
     form = blankSpec(roleNames);
-    // Almost always there is exactly one sensible choice: do not make the user pick it.
-    if (engines.length === 1) form.engine_id = engines[0].id;
+    // The role carries its engine: starting from the role, the engine is already there. Without one, and with a single
+    // engine in the catalog, there is exactly one sensible choice: do not make the user pick it.
+    adoptEngineOfRole();
+    if (form.engine_id === "" && engines.length === 1) form.engine_id = engines[0].id;
     // A catalog edited in the settings since the panel was drawn: look again.
     void refreshEngines();
+  }
+
+  /** The engine the picked role carries, when the catalog still has it; otherwise the choice stays as it is. */
+  function adoptEngineOfRole() {
+    const own = roleEngines[form.role];
+    if (own && engines.some((engine) => engine.id === own)) form.engine_id = own;
   }
 
   function startEdit(agent: IdeAgent) {
@@ -177,19 +191,19 @@
       >
         <p class="label">{editing === null ? "New agent" : "Edit agent"}</p>
         <input type="text" bind:value={form.name} placeholder="Name" spellcheck="false" />
+        <select bind:value={form.role} aria-label="Role" onchange={adoptEngineOfRole}>
+          {#each roleNames as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
         <select bind:value={form.engine_id} aria-label="Engine">
           <option value="" disabled>Engine…</option>
           {#each engines as engine (engine.id)}
             <option value={engine.id} title={engineLine(engine)}>{engine.label}</option>
           {/each}
         </select>
-        <select bind:value={form.role} aria-label="Role">
-          {#each roleNames as name (name)}
-            <option value={name}>{name}</option>
-          {/each}
-        </select>
         <p class="hint">
-          The agent runs on the engine you pick — its harness, model and environment. Engines and roles are made and
+          The role brings its engine; pick another one here only for this agent. Roles and engines are made and
           changed under <button type="button" class="link" onclick={onManage}>Engines &amp; roles</button>.
         </p>
         <div class="form-actions">

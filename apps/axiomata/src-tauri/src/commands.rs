@@ -1812,6 +1812,7 @@ pub async fn start_plan_session(
     project_id: i64,
     engine_id: Option<String>,
     grill: Option<bool>,
+    role: Option<String>,
 ) -> Result<axiomata_core::plan_session::PlanSession, String> {
     axiomata_core::plan_session::start_plan_session(
         &state,
@@ -1820,6 +1821,7 @@ pub async fn start_plan_session(
             project_id,
             engine_id,
             grill: grill.unwrap_or(false),
+            role,
         },
     )
     .await

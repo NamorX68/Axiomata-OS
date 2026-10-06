@@ -108,6 +108,36 @@ export function assignableRoles(roles: Role[], current: string | null): string[]
   return current && !names.includes(current) ? [current, ...names] : names;
 }
 
+/** What a session started from a role runs on: the role's own engine, or — a role without one — the engine to ask for. */
+export interface SessionEngine {
+  /** The engine the session runs on; empty while there is none to pick from. */
+  engineId: string;
+  /** The role names none: the owner picks one, and it is saved into the role so the next start is one click. */
+  ask: boolean;
+}
+
+/**
+ * The engine for a session of `role`. The role carries its engine (a catalog entry that still exists); a role without one,
+ * or whose engine was removed from the catalog, asks — with `picked` (else the first of the catalog) preselected.
+ */
+export function sessionEngine(
+  role: Pick<Role, "engine"> | null,
+  catalog: { id: string }[],
+  picked: string,
+): SessionEngine {
+  if (role?.engine && catalog.some((engine) => engine.id === role.engine)) {
+    return { engineId: role.engine, ask: false };
+  }
+  const chosen = catalog.some((engine) => engine.id === picked) ? picked : (catalog[0]?.id ?? "");
+  return { engineId: chosen, ask: true };
+}
+
+/** The roles a start can offer: those of `kind`, the seeded one (`preferred`) first. */
+export function rolesOfKind(roles: Pick<Role, "name" | "kind">[], kind: string, preferred: string): string[] {
+  const names = roles.filter((role) => role.kind === kind).map((role) => role.name);
+  return names.includes(preferred) ? [preferred, ...names.filter((name) => name !== preferred)] : names;
+}
+
 /** The ids of the cards a proposal waits for, as the proposal row shows them: `#12, #14`, or nothing. */
 export function needsLabel(card: Pick<BoardCard, "depends_on">): string {
   return card.depends_on.map((id) => `#${id}`).join(", ");

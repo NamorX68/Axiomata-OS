@@ -1068,7 +1068,18 @@ mod tests {
             let roles = list_roles().unwrap().roles;
             assert_eq!(
                 roles.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-                ["allrounder", "grill", "planner", "reviewer"]
+                [
+                    "allrounder",
+                    "documenter",
+                    "grill",
+                    "implementer-heavy",
+                    "implementer-light",
+                    "planner",
+                    "reviewer",
+                    "reviewer-heavy",
+                    "reviewer-light",
+                    "tester"
+                ]
             );
         });
     }

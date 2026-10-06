@@ -25,6 +25,7 @@ pub use harness::Harness;
 pub use ident::{MAX_IDENT_LEN, check_slug};
 pub use role::{Limits, MAX_INSTRUCTIONS_BYTES, ResolvedLimits, Role, Source, Tier};
 pub use store::{
-    Loaded, ROLE_FILE, Skipped, default_role, delete_role, grill_role, load_roles, planner_role,
-    reviewer_role, save_role, seed_default_roles,
+    Loaded, ROLE_FILE, Skipped, default_role, delete_role, documenter_role, grill_role,
+    implementer_heavy_role, implementer_light_role, load_roles, planner_role, reviewer_heavy_role,
+    reviewer_light_role, reviewer_role, save_role, seed_default_roles, tester_role,
 };

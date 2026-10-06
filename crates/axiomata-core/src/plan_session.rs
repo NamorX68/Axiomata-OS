@@ -49,6 +49,8 @@ pub struct PlanStartRequest {
     pub engine_id: Option<String>,
     /// A session that grills the plan's goal (the role of kind `grill`) instead of one that cuts it into cards.
     pub grill: bool,
+    /// The role to play, by name; it must be of the kind the start is for. `None` takes the seeded one.
+    pub role: Option<String>,
 }
 
 /// The session that was made for the plan.
@@ -60,14 +62,26 @@ pub struct PlanSession {
     pub engine_id: String,
 }
 
-/// The role that plans — the one called `planner`, else the first of kind `plan` — or, for `grill`, the one that grills: the
-/// one called `grill`, else the first of kind `grill`.
-fn pick_planner(roles: &[Role], grill: bool) -> Result<&Role> {
+/// The role that plans — the one asked for, else the one called `planner`, else the first of kind `plan` — or, for `grill`,
+/// the same of kind `grill`. A role asked for by name must be of the kind the start is for: the owner picks a planner for a
+/// planner's start, and a reviewer cannot be handed a plan.
+fn pick_planner<'a>(roles: &'a [Role], grill: bool, asked: Option<&str>) -> Result<&'a Role> {
     let (kind, default) = if grill {
         (KIND_GRILL, DEFAULT_GRILL)
     } else {
         (KIND_PLAN, DEFAULT_PLANNER)
     };
+    if let Some(name) = asked {
+        return roles
+            .iter()
+            .find(|role| role.name == name && role.kind == kind)
+            .ok_or_else(|| {
+                refusal(
+                    "role",
+                    format!("there is no role “{name}” of kind {kind} for this project"),
+                )
+            });
+    }
     roles
         .iter()
         .find(|role| role.kind == kind && role.name == default)
@@ -227,7 +241,7 @@ fn prepare(
     }
     let sessions = agent_store::list_agents(db, request.project_id)?;
     let roles = roles_of(db, request.project_id);
-    let role = pick_planner(&roles, request.grill)?.clone();
+    let role = pick_planner(&roles, request.grill, request.role.as_deref())?.clone();
     refuse_second_planner(db, plan.id, &roles, &role)?;
     let engine_id = choose_engine(config, &role, request.engine_id.as_deref())?
         .0
@@ -451,6 +465,23 @@ mod tests {
             self.start_with(engine, true)
         }
 
+        fn start_role(&self, role: &str, grill: bool) -> Result<PlanSession> {
+            let roles = self.roles.clone();
+            plan_blocking(
+                &self.db,
+                &self.config,
+                &|_, _| roles.clone(),
+                &PlanStartRequest {
+                    plan_id: self.plan,
+                    project_id: self.project,
+                    engine_id: Some("opus".into()),
+                    grill,
+                    role: Some(role.to_owned()),
+                },
+                true,
+            )
+        }
+
         fn start_grill(&self, engine: Option<&str>) -> Result<PlanSession> {
             let roles = self.roles.clone();
             plan_blocking(
@@ -462,6 +493,7 @@ mod tests {
                     project_id: self.project,
                     engine_id: engine.map(str::to_owned),
                     grill: true,
+                    role: None,
                 },
                 true,
             )
@@ -478,6 +510,7 @@ mod tests {
                     project_id: self.project,
                     engine_id: engine.map(str::to_owned),
                     grill: false,
+                    role: None,
                 },
                 cli,
             )
@@ -546,6 +579,21 @@ mod tests {
     }
 
     #[test]
+    fn the_owner_picks_the_role_and_only_one_of_the_kind_the_start_is_for() {
+        let mut w = world(true);
+        w.roles.push(role("planner-heavy", "plan"));
+        let made = w.start_role("planner-heavy", false).unwrap();
+        assert_eq!(made.role, "planner-heavy");
+        assert_eq!(made.agent.agent_role, "planner-heavy");
+        // A reviewer is not a planner, a planner is not a grill, and a role that is not there is refused.
+        let other = world(true);
+        assert!(other.start_role("reviewer", false).is_err());
+        assert!(other.start_role("planner", true).is_err());
+        assert!(other.start_role("ghost", false).is_err());
+        assert!(other.start_role("grill", true).is_ok());
+    }
+
+    #[test]
     fn a_grilling_session_needs_a_role_of_kind_grill() {
         let mut w = world(true);
         w.roles.retain(|role| role.kind != "grill");
@@ -585,6 +633,7 @@ mod tests {
                 project_id: other,
                 engine_id: Some("opus".into()),
                 grill: false,
+                role: None,
             },
             true,
         )
@@ -599,6 +648,7 @@ mod tests {
             project_id: w.project,
             engine_id: Some("opus".into()),
             grill: false,
+            role: None,
         };
         let roles = w.roles.clone();
         let plan = prepare(

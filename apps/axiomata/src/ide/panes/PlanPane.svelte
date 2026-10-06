@@ -44,6 +44,8 @@
     proposalTitle,
     allCardsOfPlan,
     canDeletePlan,
+    rolesOfKind,
+    sessionEngine,
     cardEditable,
     newCardColumn,
     cardsOfPlan,
@@ -57,7 +59,8 @@
   import { refreshAgents, session } from "../projectSession";
   import { flowSelection } from "../flowSelection";
   import ProposalEditor from "./ProposalEditor.svelte";
-  import { engineCatalog, engineLine, refreshEngines } from "../rosterStore";
+  import SessionPicker from "./SessionPicker.svelte";
+  import { engineCatalog, refreshEngines } from "../rosterStore";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
 
@@ -267,49 +270,57 @@
 
   /* ----------------------------------------------------------- planner --- */
 
-  let pickedEngine = $state("");
-  // The planner role names no engine, so one must be chosen: the first is preselected, and the form never starts empty.
-  const engineId = $derived(
-    $engineCatalog.some((engine) => engine.id === pickedEngine) ? pickedEngine : ($engineCatalog[0]?.id ?? ""),
-  );
+  // A session starts from a ROLE, which carries its engine; only a role that names none asks for one — once, and the pick is
+  // saved into the role (`SessionPicker.svelte`). Engines and roles are changed under "Engines & roles".
+  let plannerRole = $state("");
+  let plannerEngine = $state("");
+  let grillRole = $state("");
+  let grillEngine = $state("");
+  const plannerNames = $derived(rolesOfKind(roles, "plan", "planner"));
+  const grillNames = $derived(rolesOfKind(roles, "grill", "grill"));
 
   function showPlanner(agentId: number): void {
     emit("shell:agent", { projectId: project.id, agentId });
   }
 
-  async function startPlanner(): Promise<void> {
-    if (!plan || engineId === "") return;
-    const current = plan;
-    // The planner reads the goal from the database: what was typed and not yet written would not reach it.
-    await saveGoal();
-    await run(async () => {
-      const made = await invoke<PlanSession>("start_plan_session", {
-        planId: current.id,
-        projectId: project.id,
-        engineId,
-      });
-      await refreshAgents();
-      toast(`Der Planer ${made.agent.name} liest das Projekt.`, "info");
-      showPlanner(made.agent.id);
-    });
-  }
-
-  async function startGrill(): Promise<void> {
-    if (!plan || engineId === "") return;
+  /**
+   * Starts a session of `roleName` for the plan. A role without an engine gets the picked one written into it first, so the
+   * next start is one click; a role with one is started as it is.
+   */
+  async function startSession(roleName: string, pickedEngine: string, grill: boolean): Promise<PlanSession | null> {
+    const role = roles.find((r) => r.name === roleName);
+    if (!plan || !role) return null;
+    const choice = sessionEngine(role, $engineCatalog, pickedEngine);
+    if (choice.engineId === "") return null;
     const current = plan;
     // The session reads the goal from the database: what was typed and not yet written would not reach it.
     await saveGoal();
+    let made: PlanSession | null = null;
     await run(async () => {
-      const made = await invoke<PlanSession>("start_plan_session", {
+      if (choice.ask) {
+        await invoke("save_role", { role: { ...role, engine: choice.engineId } });
+        roles = (await listRoles()).roles;
+      }
+      made = await invoke<PlanSession>("start_plan_session", {
         planId: current.id,
         projectId: project.id,
-        engineId,
-        grill: true,
+        grill,
+        role: roleName,
       });
       await refreshAgents();
-      toast(`${made.agent.name} fragt dich jetzt im Terminal nach dem Ziel aus.`, "info");
       showPlanner(made.agent.id);
     });
+    return made;
+  }
+
+  async function startPlanner(): Promise<void> {
+    const made = await startSession(plannerRole || plannerNames[0] || "", plannerEngine, false);
+    if (made) toast(`Der Planer ${made.agent.name} liest das Projekt.`, "info");
+  }
+
+  async function startGrill(): Promise<void> {
+    const made = await startSession(grillRole || grillNames[0] || "", grillEngine, true);
+    if (made) toast(`${made.agent.name} fragt dich jetzt im Terminal nach dem Ziel aus.`, "info");
   }
 
   // A sharper goal a grilling session proposed: it waits for the owner, who takes it over or discards it. Read again while
@@ -769,43 +780,49 @@
             <span>Planer: <strong>{planner.name}</strong></span>
             <button class="ax-btn" type="button" onclick={() => showPlanner(planner.id)}>Pane zeigen</button>
           {/if}
-          {#if rolesLoaded && (canStartPlanner(plan, $session.agents, roles) || canStartGrill(plan, $session.agents, roles))}
-            <label class="engine">
-              Engine
-              <select
-                value={engineId}
-                aria-label="Engine der Sitzung"
-                onchange={(event) => (pickedEngine = (event.currentTarget as HTMLSelectElement).value)}
+          {#if rolesLoaded && canStartGrill(plan, $session.agents, roles) && grillNames.length > 0}
+            <div class="start">
+              <SessionPicker
+                label="Rolle zum Grillen"
+                names={grillNames}
+                {roles}
+                catalog={$engineCatalog}
+                bind:role={grillRole}
+                bind:engine={grillEngine}
+              />
+              <button
+                class="ax-btn"
+                type="button"
+                disabled={busy || goalDraft.trim() === ""}
+                title={goalDraft.trim() === ""
+                  ? "Schreibe erst ein Ziel, das sich hinterfragen lässt."
+                  : "Eine Sitzung fragt dich im Terminal nach dem Ziel aus, bis nichts offen ist, und schlägt ein geschärftes Ziel vor"}
+                onclick={() => void startGrill()}
               >
-                {#each $engineCatalog as engine (engine.id)}
-                  <option value={engine.id}>{engine.label} — {engineLine(engine)}</option>
-                {/each}
-              </select>
-            </label>
+                Plan grillen
+              </button>
+            </div>
           {/if}
-          {#if rolesLoaded && canStartGrill(plan, $session.agents, roles)}
-            <button
-              class="ax-btn"
-              type="button"
-              disabled={busy || engineId === "" || goalDraft.trim() === ""}
-              title={goalDraft.trim() === ""
-                ? "Schreibe erst ein Ziel, das sich hinterfragen lässt."
-                : "Eine Sitzung fragt dich im Terminal nach dem Ziel aus, bis nichts offen ist, und schlägt ein geschärftes Ziel vor"}
-              onclick={() => void startGrill()}
-            >
-              Plan grillen
-            </button>
-          {/if}
-          {#if rolesLoaded && canStartPlanner(plan, $session.agents, roles)}
-            <button
-              class="ax-btn primary"
-              type="button"
-              disabled={busy || engineId === "" || goalDraft.trim() === ""}
-              title={goalDraft.trim() === "" ? "Der Planer braucht ein Ziel." : ""}
-              onclick={() => void startPlanner()}
-            >
-              Planer starten
-            </button>
+          {#if rolesLoaded && canStartPlanner(plan, $session.agents, roles) && plannerNames.length > 0}
+            <div class="start">
+              <SessionPicker
+                label="Rolle des Planers"
+                names={plannerNames}
+                {roles}
+                catalog={$engineCatalog}
+                bind:role={plannerRole}
+                bind:engine={plannerEngine}
+              />
+              <button
+                class="ax-btn primary"
+                type="button"
+                disabled={busy || goalDraft.trim() === ""}
+                title={goalDraft.trim() === "" ? "Der Planer braucht ein Ziel." : ""}
+                onclick={() => void startPlanner()}
+              >
+                Planer starten
+              </button>
+            </div>
           {/if}
         </div>
       {/if}
@@ -1052,6 +1069,12 @@
   }
   .grow {
     flex: 1;
+  }
+  .start {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--ax-space-2);
+    flex-wrap: wrap;
   }
   .hint-line {
     flex-basis: 100%;
