@@ -2,7 +2,7 @@
  * What the Flow's planning panel decides before it asks the backend (A2A CP-A7b): which plan to show first, which cards
  * of it are proposals, who plans it, which roles a card may be given. Pure, so it is tested without a backend.
  */
-import type { BoardCard, BoardPlan, IdeAgent, PlanRunEvent, PlanSpend, PlanStatus } from "../core/backend";
+import type { BoardCard, BoardPlan, CardTier, IdeAgent, PlanRunEvent, PlanSpend, PlanStatus } from "../core/backend";
 import type { Role } from "../core/roster";
 import { addTab, allGroups, allTabs, forceCloseTab, mapTabs, type Layout, type PaneTab } from "./layout";
 import type { Mode } from "./modes";
@@ -88,6 +88,73 @@ export function assignableRoles(roles: Role[], current: string | null): string[]
 /** The ids of the cards a proposal waits for, as the proposal row shows them: `#12, #14`, or nothing. */
 export function needsLabel(card: Pick<BoardCard, "depends_on">): string {
   return card.depends_on.map((id) => `#${id}`).join(", ");
+}
+
+/** What the owner can change on a proposal: its text, its role and level, and which cards it waits for. */
+export interface ProposalForm {
+  title: string;
+  body: string;
+  acceptance: string;
+  agent: string;
+  tier: CardTier | "";
+  needs: number[];
+}
+
+/** The form of an existing proposal, or an empty one for a card the owner adds. */
+export function proposalForm(card?: BoardCard): ProposalForm {
+  return {
+    title: card?.title ?? "",
+    body: card?.body ?? "",
+    acceptance: card?.acceptance ?? "",
+    agent: card?.agent ?? "",
+    tier: card?.tier ?? "",
+    needs: [...(card?.depends_on ?? [])].sort((a, b) => a - b),
+  };
+}
+
+/** A form can be saved with a title: a card with none could not be told from the next one. */
+export function proposalSavable(form: ProposalForm): boolean {
+  return form.title.trim() !== "";
+}
+
+/** The "needs first" edges to add and to remove to get from `have` to `want`; sorted, so the order of the changes is the same every time. */
+export function needsDiff(have: number[], want: number[]): { add: number[]; remove: number[] } {
+  const haveSet = new Set(have);
+  const wantSet = new Set(want);
+  return {
+    add: [...wantSet].filter((id) => !haveSet.has(id)).sort((a, b) => a - b),
+    remove: [...haveSet].filter((id) => !wantSet.has(id)).sort((a, b) => a - b),
+  };
+}
+
+/**
+ * The cards a proposal may wait for: every other live card of its plan. A card that already waits for this one is left
+ * out — the edge would close a cycle, which the board refuses; offering it only to refuse it is no help.
+ */
+export function needsCandidates(
+  cards: Pick<BoardCard, "id" | "depends_on" | "archived_at">[],
+  selfId: number | null,
+): number[] {
+  const live = cards.filter((card) => card.archived_at === null);
+  const waitsForSelf = new Set<number>();
+  if (selfId !== null) {
+    // Everything that waits for this card, through any chain.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const card of live) {
+        if (waitsForSelf.has(card.id)) continue;
+        if (card.depends_on.some((id) => id === selfId || waitsForSelf.has(id))) {
+          waitsForSelf.add(card.id);
+          grew = true;
+        }
+      }
+    }
+  }
+  return live
+    .filter((card) => card.id !== selfId && !waitsForSelf.has(card.id))
+    .map((card) => card.id)
+    .sort((a, b) => a - b);
 }
 
 /** What the Studio calls a proposal whose card has no title worth reading (a planner may send an empty line). */

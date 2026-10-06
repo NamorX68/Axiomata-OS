@@ -6,6 +6,10 @@ import { addTab, allGroups, allTabs, closeTab, forceCloseTab, emptyLayout, singl
 import {
   agentTabsOf,
   canDeletePlan,
+  needsCandidates,
+  needsDiff,
+  proposalForm,
+  proposalSavable,
   assignableRoles,
   canApprove,
   canStartPlanner,
@@ -349,5 +353,32 @@ describe("deleting a plan", () => {
     expect(canDeletePlan(approved, [card("ready", "agent:x-1")])).toBe(false);
     expect(canDeletePlan(approved, [card("working", "agent:x-1", "2026-10-06T10:00:00Z")])).toBe(true);
     expect(canDeletePlan({ ...approved, base_branch: "main" }, [card("ready")])).toBe(false);
+  });
+});
+
+describe("editing a proposal", () => {
+  const c = (id: number, depends_on: number[] = [], archived: string | null = null) =>
+    ({ id, depends_on, archived_at: archived }) as Pick<BoardCard, "id" | "depends_on" | "archived_at">;
+
+  it("starts from the card's own values, or empty for a card the owner adds", () => {
+    expect(proposalForm()).toEqual({ title: "", body: "", acceptance: "", agent: "", tier: "", needs: [] });
+    const card = { title: "T", body: "B", acceptance: "A", agent: "builder", tier: "heavy", depends_on: [9, 3] } as BoardCard;
+    expect(proposalForm(card)).toEqual({ title: "T", body: "B", acceptance: "A", agent: "builder", tier: "heavy", needs: [3, 9] });
+    expect(proposalSavable(proposalForm())).toBe(false);
+    expect(proposalSavable({ ...proposalForm(), title: "  x " })).toBe(true);
+  });
+
+  it("works out which edges to add and which to remove", () => {
+    expect(needsDiff([1, 2], [2, 3])).toEqual({ add: [3], remove: [1] });
+    expect(needsDiff([], [5, 4, 5])).toEqual({ add: [4, 5], remove: [] });
+    expect(needsDiff([1], [1])).toEqual({ add: [], remove: [] });
+  });
+
+  it("offers every other live card, but not one that already waits for this one, however indirectly", () => {
+    // 2 needs 1; 3 needs 2: for card 1, neither 2 nor 3 may be needed (cycle); 4 is free; 5 is archived.
+    const cards = [c(1), c(2, [1]), c(3, [2]), c(4), c(5, [], "2026-10-06T10:00:00Z")];
+    expect(needsCandidates(cards, 1)).toEqual([4]);
+    expect(needsCandidates(cards, 3)).toEqual([1, 2, 4]);
+    expect(needsCandidates(cards, null)).toEqual([1, 2, 3, 4]);
   });
 });

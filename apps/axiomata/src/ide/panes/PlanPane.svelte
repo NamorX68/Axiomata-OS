@@ -51,6 +51,7 @@
   import { unpushedNote } from "../cardStart";
   import { refreshAgents, session } from "../projectSession";
   import { flowSelection } from "../flowSelection";
+  import ProposalEditor from "./ProposalEditor.svelte";
   import { engineCatalog, engineLine, refreshEngines } from "../rosterStore";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
@@ -477,6 +478,15 @@
     return data?.cards.find((card) => card.id === id) ?? null;
   }
 
+  // The proposal being edited (its id), or "new" for a card the owner adds; at most one at a time.
+  let editing = $state<number | "new" | null>(null);
+  // Another plan opened in between must not keep an editor open for a card that is not on screen.
+  $effect(() => {
+    void plan?.id;
+    editing = null;
+  });
+  const proposalColumnId = $derived(data?.columns.find((column) => column.stage === "proposal")?.id ?? null);
+
   let discarding = $state<number | null>(null);
   async function discardProposal(card: BoardCard): Promise<void> {
     await run(async () => {
@@ -654,6 +664,20 @@
       {/if}
       <ul class="proposals">
         {#each proposals as card (card.id)}
+          {#if editing === card.id && plan}
+            <li class="editing">
+              <ProposalEditor
+                {card}
+                {plan}
+                planCards={allCardsOfPlan(data?.cards ?? [], plan.id)}
+                {proposalColumnId}
+                {roles}
+                {freshCard}
+                onSaved={reload}
+                onCancel={() => (editing = null)}
+              />
+            </li>
+          {:else}
           <li>
             <div class="title">
               <strong>{proposalTitle(card)}</strong>
@@ -692,6 +716,7 @@
             {#if card.acceptance}<p class="acceptance">{card.acceptance}</p>{/if}
             <div class="row">
               <button class="ax-btn" type="button" disabled={busy} onclick={() => void approveProposal(card)}>Annehmen</button>
+              <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Bearbeiten</button>
               {#if discarding === card.id}
                 <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void discardProposal(card)}>Wirklich verwerfen</button>
                 <button class="ax-btn" type="button" onclick={() => (discarding = null)}>Abbrechen</button>
@@ -700,8 +725,30 @@
               {/if}
             </div>
           </li>
+          {/if}
         {/each}
       </ul>
+
+      {#if plan.status === "draft"}
+        {#if editing === "new"}
+          <ProposalEditor
+            card={null}
+            {plan}
+            planCards={allCardsOfPlan(data?.cards ?? [], plan.id)}
+            {proposalColumnId}
+            {roles}
+            {freshCard}
+            onSaved={reload}
+            onCancel={() => (editing = null)}
+          />
+        {:else}
+          <div class="row">
+            <button class="ax-btn" type="button" disabled={busy || proposalColumnId === null} onclick={() => (editing = "new")}>
+              Karte hinzufügen
+            </button>
+          </div>
+        {/if}
+      {/if}
 
       {#if plan.status === "draft"}
         <div class="approve">
