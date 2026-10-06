@@ -332,9 +332,11 @@ export function withPlanPane(layout: Layout): Layout {
   return addTab(layout, planTab(), { nodeId: first ? first.id : layout.root.id, side: "center" });
 }
 
-/** The share of the Flow's height the graph gets under the team's tiles: the tiles and the sessions beside them need
- * more. */
+/** The share of the Flow's height the graph gets under the team's tiles: the tiles and the sessions need more. */
 const GRAPH_SHARE = 0.4;
+
+/** The share of the Flow's width the planning panel gets: the sessions and the graph on the right need the room. */
+const PLAN_SHARE = 0.3;
 
 /** The split that has a group holding a tab of `kind` as a direct child. */
 function splitHolding(node: LayoutNode, kind: string): Split | null {
@@ -361,6 +363,8 @@ export function withFlowPanes(layout: Layout): Layout {
   if (!allTabs(next).some((tab) => tab.kind === TEAM_PANE)) {
     const plan = groupOf(PLAN_PANE);
     next = addTab(next, teamTab(), { nodeId: plan ? plan.id : next.root.id, side: "right" });
+    const row = splitHolding(next.root, TEAM_PANE);
+    if (row && row.children.length === 2) next = setSplitSizes(next, row.id, [PLAN_SHARE, 1 - PLAN_SHARE]);
   }
   if (!allTabs(next).some((tab) => tab.kind === GRAPH_PANE)) {
     const team = groupOf(TEAM_PANE);

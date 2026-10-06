@@ -253,6 +253,17 @@ describe("where a session's pane docks in the Flow", () => {
   });
 });
 
+describe("the Flow's starting proportions", () => {
+  it("gives the planning panel about a third of the width and leaves the rest to the sessions and the graph", () => {
+    const layout = withFlowPanes(emptyLayout());
+    expect(layout.root.type).toBe("split");
+    const row = layout.root as { dir: string; sizes: number[] };
+    expect(row.dir).toBe("row");
+    expect(row.sizes[0]).toBeCloseTo(0.3);
+    expect(row.sizes[1]).toBeCloseTo(0.7);
+  });
+});
+
 describe("the mode of a session's pane", () => {
   it("is the Flow for a plan's planner and for the workers and reviewers of a plan's cards, else the Canvas", () => {
     expect(modeForAgent({ plan_id: 4 })).toBe("flow");
