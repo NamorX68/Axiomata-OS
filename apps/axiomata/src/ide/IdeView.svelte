@@ -578,8 +578,13 @@
     const project = current;
     if (!project) return;
     const groups = allGroups(layout);
-    const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
-    const added = addTab(layout, projectSession.terminalTab(), { nodeId: target, side: "right" });
+    const tab = projectSession.terminalTab();
+    // On a Canvas with agents the terminal takes the left quarter, as it does when an agent opens beside one.
+    const beside = mode === "agents" && allTabs(layout).some((t) => t.kind === "agent");
+    const last = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
+    const added = beside
+      ? balanceCanvas(addTab(layout, tab, { nodeId: layout.root.id, side: "left" }))
+      : addTab(layout, tab, { nodeId: last, side: "right" });
     layout = applyProjectCwd(added, project.repo_root);
   }
 
@@ -1006,6 +1011,13 @@
       <DockNode node={layout.root} onDividerDown={(splitId, boundary, event) => drag.startDivider(splitId, boundary, event)}>
         {#snippet group(g)}<PaneGroup group={g} />{/snippet}
       </DockNode>
+      {#if mode === "agents" && current && allTabs(layout).length === 0}
+        <!-- A new project's Canvas is empty on purpose (no terminal nobody asked for): say so, and offer the terminal. -->
+        <div class="canvas-empty">
+          <p>Das Canvas ist leer. Agenten erscheinen hier, sobald eine Karte oder eine Sitzung startet.</p>
+          <button class="ax-btn primary" type="button" onclick={openTerminal}>Terminal öffnen</button>
+        </div>
+      {/if}
       {#if drag.rootHint && drag.rootHint !== "center"}
         <div class="root-highlight {drag.rootHint}" transition:fade={{ duration: 80 }}></div>
       {/if}
@@ -1197,6 +1209,26 @@
   .pane-slot {
     position: absolute;
     inset: 0;
+  }
+
+  /* Over the empty dock, but not in the way of it: a pane can still be dropped here, only the button takes the pointer. */
+  .canvas-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ax-space-3);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+    pointer-events: none;
+  }
+  .canvas-empty p {
+    margin: 0;
+  }
+  .canvas-empty button {
+    pointer-events: auto;
   }
 
   .empty {
