@@ -45,7 +45,7 @@
   } from "../core/calendar";
   import { dayLabel, relativeTime } from "../core/format";
   import { monthDiff, monthOf, shiftMonth, todayIso, weekRange, type YearMonth } from "../core/monthGrid";
-  import { resolveSkillName, watchSkillRuns } from "../core/skillRun";
+  import { resolveSkillName, staleDigestNote, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
   import CalendarCreateForm from "./CalendarCreateForm.svelte";
   import Clock from "./Clock.svelte";
@@ -63,6 +63,8 @@
   let loading = $state(true);
   let running = $state(false);
   let error = $state("");
+  /** Set while the digest on screen is older than the newest run (see `staleDigestNote`). */
+  let staleNote = $state("");
   let selectedCalendar = $state(typeof $config.calendar === "string" ? $config.calendar : "");
 
   const filteredEvents = $derived(filterByCalendar(digest.events, selectedCalendar === "" ? null : selectedCalendar));
@@ -218,6 +220,7 @@
       digest = parseCalendarDigest(run.stdout);
       lastRun = run;
       error = "";
+      staleNote = "";
     } catch {
       await loadLatest();
     }
@@ -230,8 +233,10 @@
       lastRun = result.run;
       digest = result.digest;
       error = result.error ?? "";
+      staleNote = staleDigestNote(result);
     } catch (err) {
       error = String(err);
+      staleNote = "";
     } finally {
       loading = false;
     }
@@ -334,6 +339,7 @@
   {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
+  {#if staleNote}<p class="muted">{staleNote}</p>{/if}
 
   {#if loading}
     <p class="muted">Loading…</p>

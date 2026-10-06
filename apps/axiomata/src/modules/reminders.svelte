@@ -45,7 +45,7 @@
     type ReminderDigest,
     type ReminderTask,
   } from "../core/reminders";
-  import { resolveSkillName, watchSkillRuns } from "../core/skillRun";
+  import { resolveSkillName, staleDigestNote, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -60,6 +60,8 @@
   let loading = $state(true);
   let running = $state(false);
   let error = $state("");
+  /** Set while the digest on screen is older than the newest run (see `staleDigestNote`). */
+  let staleNote = $state("");
   let selectedList = $state(typeof $config.list === "string" ? $config.list : "");
 
   const tasks = $derived(selectedList ? tasksForList(digest.tasks, selectedList) : []);
@@ -168,6 +170,7 @@
       digest = parseReminderDigest(run.stdout);
       lastRun = run;
       error = "";
+      staleNote = "";
     } catch {
       await loadLatest();
       return;
@@ -182,9 +185,11 @@
       lastRun = result.run;
       digest = result.digest;
       error = result.error ?? "";
+      staleNote = staleDigestNote(result);
       settleSelection();
     } catch (err) {
       error = String(err);
+      staleNote = "";
     } finally {
       loading = false;
     }
@@ -262,6 +267,7 @@
   {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
+  {#if staleNote}<p class="muted">{staleNote}</p>{/if}
 
   {#if loading}
     <p class="muted">Loading…</p>

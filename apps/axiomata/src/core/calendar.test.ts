@@ -166,7 +166,7 @@ describe("loadLatestCalendarDigest", () => {
 
   it("returns an empty digest with no error when the skill has never run", async () => {
     const result = await loadLatestCalendarDigest(fakeInvoke([], {}));
-    expect(result).toEqual({ run: null, digest: { calendars: [], events: [] }, error: null });
+    expect(result).toEqual({ run: null, digest: { calendars: [], events: [] }, error: null, skipped: null });
   });
 
   it("ignores other skills' runs and picks the newest calendar-digest one", async () => {
@@ -205,6 +205,8 @@ describe("loadLatestCalendarDigest", () => {
     expect(result.run?.id).toBe(1);
     expect(result.error).toBeNull();
     expect(result.digest.events).toHaveLength(3);
+    expect(result.skipped?.run.id).toBe(3);
+    expect(result.skipped?.reason).toBe("it produced no output");
   });
 
   it("skips a failed run and still serves the previous non-empty run", async () => {
@@ -217,6 +219,15 @@ describe("loadLatestCalendarDigest", () => {
     expect(result.run?.id).toBe(1);
     expect(result.error).toBeNull();
     expect(result.digest.events).toHaveLength(3);
+    expect(result.skipped).toEqual({ run: runs[0], reason: "agent timed out" });
+  });
+
+  it("passes over nothing when the newest run is the usable one", async () => {
+    const runs = [summary({ id: 2 }), summary({ id: 1 })];
+    const records = { 2: { ...summary({ id: 2 }), stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestCalendarDigest(fakeInvoke(runs, records));
+    expect(result.run?.id).toBe(2);
+    expect(result.skipped).toBeNull();
   });
 
   it("keeps scanning past a missing record to the previous non-empty run", async () => {

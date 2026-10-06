@@ -13,7 +13,6 @@
  */
 
 import type { RunSummary } from "./backend";
-import { relativeTime } from "./format";
 import { cut } from "./markdown";
 import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke, type SkippedRun } from "./skillRun";
 import { openFilePanel } from "./staging";
@@ -221,15 +220,6 @@ export async function saveTopics(invoke: Invoke, topics: string[]): Promise<void
     ...topics.map((t) => t.trim()).filter((t) => t.length > 0),
   ];
   await invoke("write_workspace_file", { rel: TOPICS_PATH, content: `${lines.join("\n")}\n` });
-}
-
-/** The tile's note that its digest is older than the newest run, or `""` when it is not.
- *  `now` is a parameter so the wording can be tested. */
-export function staleDigestNote(latest: Pick<LatestMailDigest, "run" | "skipped">, now: number = Date.now()): string {
-  const { run, skipped } = latest;
-  if (!skipped) return "";
-  const shown = run ? ` — showing the digest from ${relativeTime(run.started_at, now)}` : "";
-  return `The latest run (${relativeTime(skipped.run.started_at, now)}) could not be used: ${skipped.reason}${shown}.`;
 }
 
 /** Word-boundary truncation for the tile's one-line summary preview — the

@@ -14,7 +14,7 @@
 
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
-import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
+import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke, type SkippedRun } from "./skillRun";
 
 /** One reminders priority, normalised by the skill's SOP onto exactly one
  *  of these four (whatever the underlying tool actually returns). */
@@ -121,6 +121,9 @@ export interface LatestReminderDigest {
   /** The failed run's own error, or a parse failure's message; `null` on
    *  a clean success (including the "never run yet" case). */
   error: string | null;
+  /** A newer run the digest was *not* taken from (it failed, or its output was
+   *  unreadable) — `null` when `run` is the newest. See `staleDigestNote`. */
+  skipped: SkippedRun | null;
 }
 
 /**
@@ -132,12 +135,12 @@ export interface LatestReminderDigest {
  * module's own contract.
  */
 export async function loadLatestReminderDigest(invoke: Invoke, skillName: string = REMINDERS_SKILL_NAME): Promise<LatestReminderDigest> {
-  const { run, stdout, error } = await loadLatestSkillRun(invoke, skillName);
-  if (error || stdout === null) return { run, digest: EMPTY_REMINDER_DIGEST, error };
+  const { run, stdout, error, skipped } = await loadLatestSkillRun(invoke, skillName);
+  if (error || stdout === null) return { run, digest: EMPTY_REMINDER_DIGEST, error, skipped };
   try {
-    return { run, digest: parseReminderDigest(stdout), error: null };
+    return { run, digest: parseReminderDigest(stdout), error: null, skipped };
   } catch (err) {
-    return { run, digest: EMPTY_REMINDER_DIGEST, error: err instanceof Error ? err.message : String(err) };
+    return { run, digest: EMPTY_REMINDER_DIGEST, error: err instanceof Error ? err.message : String(err), skipped };
   }
 }
 

@@ -17,6 +17,7 @@
  */
 
 import type { RunRecord, RunSummary } from "./backend";
+import { relativeTime } from "./format";
 
 /** The subset of `ModuleContext["invoke"]` this needs — spelled out by hand
  *  instead of importing `core/types` so this file stays Svelte-agnostic. */
@@ -134,6 +135,18 @@ export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Pro
   }
   if (newestEmpty) return { run: newestEmpty, stdout: null, error: "Last run produced no output.", skipped: null };
   return { run: null, stdout: null, error: null, skipped: null };
+}
+
+/** A connector tile's note that its digest is older than the newest run, or `""` when it is not.
+ *  `now` is a parameter so the wording can be tested. */
+export function staleDigestNote(
+  latest: { run: RunSummary | null; skipped: SkippedRun | null },
+  now: number = Date.now(),
+): string {
+  const { run, skipped } = latest;
+  if (!skipped) return "";
+  const shown = run ? ` — showing the digest from ${relativeTime(run.started_at, now)}` : "";
+  return `The latest run (${relativeTime(skipped.run.started_at, now)}) could not be used: ${skipped.reason}${shown}.`;
 }
 
 /**

@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { firstJsonObject } from "./skillRun";
+import type { RunSummary } from "./backend";
+import { firstJsonObject, staleDigestNote } from "./skillRun";
+
+describe("staleDigestNote", () => {
+  const now = Date.parse("2026-09-29T12:00:00Z");
+  const run = (started_at: string) => ({ started_at }) as RunSummary;
+
+  it("is empty when no run was passed over", () => {
+    expect(staleDigestNote({ run: run("2026-09-29T09:00:00Z"), skipped: null }, now)).toBe("");
+  });
+
+  it("says which run was unusable and how old the shown digest is", () => {
+    const note = staleDigestNote(
+      { run: run("2026-09-29T09:00:00Z"), skipped: { run: run("2026-09-29T11:00:00Z"), reason: "it produced no output" } },
+      now,
+    );
+    expect(note).toBe("The latest run (1 h ago) could not be used: it produced no output — showing the digest from 3 h ago.");
+  });
+});
 
 describe("firstJsonObject", () => {
   it("finds the object behind leading prose", () => {

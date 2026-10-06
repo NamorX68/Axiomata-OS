@@ -95,7 +95,7 @@ describe("loadLatestReminderDigest", () => {
 
   it("returns an empty digest with no error when the skill has never run", async () => {
     const result = await loadLatestReminderDigest(fakeInvoke([], {}));
-    expect(result).toEqual({ run: null, digest: { lists: [], tasks: [] }, error: null });
+    expect(result).toEqual({ run: null, digest: { lists: [], tasks: [] }, error: null, skipped: null });
   });
 
   it("parses the latest successful run", async () => {
@@ -109,6 +109,37 @@ describe("loadLatestReminderDigest", () => {
     const runs = [summary({ status: "failed", error: "agent timed out" })];
     const result = await loadLatestReminderDigest(fakeInvoke(runs, {}));
     expect(result.error).toBe("agent timed out");
+    expect(result.skipped).toBeNull(); // nothing older to fall back to, so nothing was passed over
+  });
+
+  it("serves the older digest and reports the newer run it passed over", async () => {
+    const newer = summary({ id: 2, started_at: "2026-09-05T12:00:00Z" });
+    const older = summary({ id: 1, started_at: "2026-09-05T09:00:00Z" });
+    const records = {
+      2: { ...newer, stdout: "All done, the JSON has been produced as specified.", stderr: "", finished_at: "" },
+      1: { ...older, stdout: DIGEST_JSON, stderr: "", finished_at: "" },
+    };
+    const result = await loadLatestReminderDigest(fakeInvoke([newer, older], records));
+    expect(result.run?.id).toBe(1);
+    expect(result.digest.lists).toEqual(["Einkaufen", "Arbeit", "Baumarkt"]);
+    expect(result.error).toBeNull();
+    expect(result.skipped?.run.id).toBe(2);
+    expect(result.skipped?.reason).toMatch(/no readable JSON/);
+  });
+
+  it("names a failed newer run as the one passed over", async () => {
+    const failed = summary({ id: 2, status: "failed", error: "the opencode agent timed out after 900s" });
+    const good = summary({ id: 1 });
+    const records = { 1: { ...good, stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestReminderDigest(fakeInvoke([failed, good], records));
+    expect(result.skipped).toEqual({ run: failed, reason: "the opencode agent timed out after 900s" });
+  });
+
+  it("passes over nothing when the newest run is the usable one", async () => {
+    const newest = summary({ id: 2 });
+    const records = { 2: { ...newest, stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
+    const result = await loadLatestReminderDigest(fakeInvoke([newest, summary({ id: 1 })], records));
+    expect(result.skipped).toBeNull();
   });
 });
 

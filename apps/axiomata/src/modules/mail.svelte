@@ -32,8 +32,8 @@
   import type { RunRecord, RunSummary } from "../core/backend";
   import { runUnlessAutoRefreshDisabled } from "../core/devFlags";
   import { relativeTime } from "../core/format";
-  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, staleDigestNote, summaryPreview, writeAllMailSummaries, type MailDigest, type MailItem } from "../core/mail";
-  import { resolveSkillName, watchSkillRuns } from "../core/skillRun";
+  import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, writeAllMailSummaries, type MailDigest, type MailItem } from "../core/mail";
+  import { resolveSkillName, staleDigestNote, watchSkillRuns } from "../core/skillRun";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();

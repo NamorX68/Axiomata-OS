@@ -3,7 +3,7 @@ import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
 import type { RunRecord, RunSummary } from "./backend";
-import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailMix, mailNotePath, openMailSummary, parseMailDigest, saveTopics, staleDigestNote, summaryPreview, TOPICS_PATH, writeAllMailSummaries, writeMailSummary, type MailDigest, type MailItem } from "./mail";
+import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, loadTopics, mailMix, mailNotePath, openMailSummary, parseMailDigest, saveTopics, summaryPreview, TOPICS_PATH, writeAllMailSummaries, writeMailSummary, type MailDigest, type MailItem } from "./mail";
 import { staged } from "./staging";
 
 const DIGEST_JSON = JSON.stringify({
@@ -315,23 +315,6 @@ describe("loadLatestMailDigest", () => {
     const records = { 2: { ...newest, stdout: DIGEST_JSON, stderr: "", finished_at: "" } };
     const result = await loadLatestMailDigest(fakeInvoke([newest, summary({ id: 1 })], records));
     expect(result.skipped).toBeNull();
-  });
-});
-
-describe("staleDigestNote", () => {
-  const now = Date.parse("2026-09-29T12:00:00Z");
-  const run = (started_at: string) => ({ started_at }) as RunSummary;
-
-  it("is empty when no run was passed over", () => {
-    expect(staleDigestNote({ run: run("2026-09-29T09:00:00Z"), skipped: null }, now)).toBe("");
-  });
-
-  it("says which run was unusable and how old the shown digest is", () => {
-    const note = staleDigestNote(
-      { run: run("2026-09-29T09:00:00Z"), skipped: { run: run("2026-09-29T11:00:00Z"), reason: "it produced no output" } },
-      now,
-    );
-    expect(note).toBe("The latest run (1 h ago) could not be used: it produced no output — showing the digest from 3 h ago.");
   });
 });
 

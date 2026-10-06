@@ -14,7 +14,7 @@
 
 import type { RunSummary } from "./backend";
 import { buildToolCallInstruction, quoteForInstruction, runInstructWrite } from "./instruct";
-import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke } from "./skillRun";
+import { firstJsonObject, loadLatestSkillRun, stripCodeFence, type Invoke, type SkippedRun } from "./skillRun";
 
 /** One event from the digest, already whatever the skill's SOP promises:
  *  `start`/`end` are `YYYY-MM-DD` for an all-day event, full ISO 8601
@@ -135,6 +135,9 @@ export interface LatestDigest {
   /** The failed run's own error, or a parse failure's message; `null` on
    *  a clean success (including the "never run yet" case). */
   error: string | null;
+  /** A newer run the digest was *not* taken from (it failed, or its output was
+   *  unreadable) — `null` when `run` is the newest. See `staleDigestNote`. */
+  skipped: SkippedRun | null;
 }
 
 /**
@@ -149,12 +152,12 @@ export interface LatestDigest {
  * instance's `config.skillName` (see `resolveSkillName`).
  */
 export async function loadLatestCalendarDigest(invoke: Invoke, skillName: string = CALENDAR_SKILL_NAME): Promise<LatestDigest> {
-  const { run, stdout, error } = await loadLatestSkillRun(invoke, skillName);
-  if (error || stdout === null) return { run, digest: EMPTY_DIGEST, error };
+  const { run, stdout, error, skipped } = await loadLatestSkillRun(invoke, skillName);
+  if (error || stdout === null) return { run, digest: EMPTY_DIGEST, error, skipped };
   try {
-    return { run, digest: parseCalendarDigest(stdout), error: null };
+    return { run, digest: parseCalendarDigest(stdout), error: null, skipped };
   } catch (err) {
-    return { run, digest: EMPTY_DIGEST, error: err instanceof Error ? err.message : String(err) };
+    return { run, digest: EMPTY_DIGEST, error: err instanceof Error ? err.message : String(err), skipped };
   }
 }
 
