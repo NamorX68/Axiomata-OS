@@ -1637,6 +1637,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return Object.fromEntries((args.ids as number[]).map((id) => [id, 1])) as T;
     case "ide_mailbox_send":
       return { outcome: "delivered", id: 3 } as T;
+    case "plan_goal_suggestion":
+      return { goal: "Das Brett zeigt Pläne als Graph.\n\nEntschieden: nur Lesen, keine Kabel.\nBewusst weggelassen: Zoom.", at: new Date().toISOString() } as T;
+    case "apply_goal_suggestion":
+    case "discard_goal_suggestion":
+      return null as T;
     case "plan_changed_proposals":
       return [7] as T;
     case "plan_cards_left_for_owner":

@@ -2703,6 +2703,7 @@ async fn board_plan(core: &AxiomataCore, action: board_flow::PlanAction) -> Resu
         id,
         project,
         engine,
+        grill,
     } = action
     {
         board_flow::owner_only("starting a planner")?;
@@ -2712,6 +2713,7 @@ async fn board_plan(core: &AxiomataCore, action: board_flow::PlanAction) -> Resu
                 plan_id: id,
                 project_id: project,
                 engine_id: engine,
+                grill,
             },
         )
         .await?;

@@ -60,6 +60,14 @@ pub const SCHEMA_SQL_V5: &str = include_str!("plan_line_tip.sql");
 /// number (23), frozen once released.
 pub const SCHEMA_SQL_V6: &str = include_str!("proposal_depth.sql");
 
+/// The board's **version 7** schema (`plan_goal_suggestions`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own
+/// constant and migration number (24), frozen once released.
+pub const SCHEMA_SQL_V7: &str = include_str!("plan_goal_suggestion.sql");
+
+/// The board's **version 8** schema (`card_proposers`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own constant
+/// and migration number (25), frozen once released.
+pub const SCHEMA_SQL_V8: &str = include_str!("card_proposers.sql");
+
 /// Everything that can go wrong in the board core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant: "no such row"

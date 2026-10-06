@@ -168,6 +168,20 @@ pub enum PlanAction {
         /// An engine of the catalog (`ide engines list`).
         #[arg(long)]
         engine: Option<String>,
+        /// Start a session that grills the plan's goal (interviews you, then proposes a sharper goal) instead of a planner.
+        #[arg(long)]
+        grill: bool,
+    },
+    /// The sharper goal a grilling session proposed for a plan. Without a flag it is shown; `--accept` makes it the plan's
+    /// goal, `--discard` drops it. The owner's step: the goal is the owner's own words.
+    Goal {
+        id: i64,
+        /// Take the proposal over as the plan's goal.
+        #[arg(long, conflicts_with = "discard")]
+        accept: bool,
+        /// Drop the proposal.
+        #[arg(long)]
+        discard: bool,
     },
     /// Say yes to a plan: its proposals move to Offen and it becomes approved.
     Approve {
@@ -226,6 +240,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         PlanAction::Start { .. } => owner_only("starting a planner")?,
         PlanAction::Approve { .. } => owner_only("approving a plan")?,
         PlanAction::Resume { .. } => owner_only("giving a plan a new allowance")?,
+        PlanAction::Goal { .. } => owner_only("reading or taking over a proposed goal")?,
         PlanAction::Close { .. } => owner_only("closing a plan")?,
         PlanAction::Delete { .. } => owner_only("deleting a plan")?,
         _ => {}
@@ -315,6 +330,41 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             }
             if let Some(why) = &spend.day_over {
                 println!("  held back for today: {why}");
+            }
+        }
+        PlanAction::Goal {
+            id,
+            accept,
+            discard,
+        } => {
+            if accept {
+                // Taking over from the command line is taking over what is there now: the proposal is read in the same breath.
+                let Some(read) = flow::goal_suggestion(&db, id)? else {
+                    println!("plan #{id} has no proposed goal");
+                    return Ok(());
+                };
+                match flow::apply_goal_suggestion(&mut db, id, &read.at)? {
+                    Some(plan) => println!(
+                        "plan #{id}: the proposed goal is now the goal\n\n{}",
+                        plan.goal
+                    ),
+                    None => println!("plan #{id} has no proposed goal"),
+                }
+            } else if discard {
+                let gone = flow::clear_goal_suggestion(&db, id)?;
+                println!(
+                    "{}",
+                    if gone {
+                        "proposed goal discarded"
+                    } else {
+                        "there was none"
+                    }
+                );
+            } else {
+                match flow::goal_suggestion(&db, id)? {
+                    Some(proposed) => println!("proposed {}:\n\n{}", proposed.at, proposed.goal),
+                    None => println!("plan #{id} has no proposed goal"),
+                }
             }
         }
         PlanAction::Resume { id } => {

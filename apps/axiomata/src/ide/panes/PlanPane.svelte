@@ -17,6 +17,7 @@
     type BoardPlan,
     type CardIntegrationResult,
     type CardTier,
+    type GoalSuggestion,
     type IdeProject,
     type PlanSession,
     type PlanSpend,
@@ -31,7 +32,9 @@
   import {
     assignableRoles,
     canApprove,
+    canStartGrill,
     canStartPlanner,
+    grillerOf,
     defaultPlanId,
     needsLabel,
     newestFirst,
@@ -67,6 +70,8 @@
   let boardId = $state<number | null>(null);
   let data = $state<BoardData | null>(null);
   let roles = $state<Role[]>([]);
+  // The planner and the grilling session are told apart by their roles' kinds: until the roles are in, neither can be started.
+  let rolesLoaded = $state(false);
   let planId = $state<number | null>(null);
   let error = $state("");
   let busy = $state(false);
@@ -94,7 +99,10 @@
   $effect(() => {
     void refreshEngines();
     listRoles()
-      .then((loaded) => (roles = loaded.roles))
+      .then((loaded) => {
+        roles = loaded.roles;
+        rolesLoaded = true;
+      })
       .catch(() => {
         // Without the roles a proposal's role is shown, not changed.
       });
@@ -127,7 +135,8 @@
 
   const cards = $derived(plan && data ? cardsOfPlan(data.cards, plan.id) : []);
   const proposals = $derived(plan && data ? proposalsOf(data.cards, plan.id) : []);
-  const planner = $derived(plan ? plannerOf($session.agents, plan.id) : null);
+  const planner = $derived(plan ? plannerOf($session.agents, plan.id, roles) : null);
+  const griller = $derived(plan ? grillerOf($session.agents, plan.id, roles) : null);
   // Cards that left the board when the plan was taken over are still the plan's: a finished plan shows what it did.
   const working = $derived(
     plan && data ? allCardsOfPlan(data.cards, plan.id).filter((card) => card.state !== "proposed") : [],
@@ -136,7 +145,7 @@
 
   // A planner writes its cards from another process: while one is at work the board is read again every few seconds.
   $effect(() => {
-    if (!visible || boardId === null || plan?.status !== "draft" || planner === null) return;
+    if (!visible || boardId === null || plan?.status !== "draft" || (planner === null && griller === null)) return;
     const id = boardId;
     const timer = setInterval(() => void refreshBoard(id), 3000);
     return () => clearInterval(timer);
@@ -280,6 +289,76 @@
       await refreshAgents();
       toast(`Der Planer ${made.agent.name} liest das Projekt.`, "info");
       showPlanner(made.agent.id);
+    });
+  }
+
+  async function startGrill(): Promise<void> {
+    if (!plan || engineId === "") return;
+    const current = plan;
+    // The session reads the goal from the database: what was typed and not yet written would not reach it.
+    await saveGoal();
+    await run(async () => {
+      const made = await invoke<PlanSession>("start_plan_session", {
+        planId: current.id,
+        projectId: project.id,
+        engineId,
+        grill: true,
+      });
+      await refreshAgents();
+      toast(`${made.agent.name} fragt dich jetzt im Terminal nach dem Ziel aus.`, "info");
+      showPlanner(made.agent.id);
+    });
+  }
+
+  // A sharper goal a grilling session proposed: it waits for the owner, who takes it over or discards it. Read again while
+  // a grilling session exists (it writes from another process) and whenever the plan changes.
+  let suggestion = $state<GoalSuggestion | null>(null);
+  $effect(() => {
+    const current = plan;
+    const grilling = griller !== null;
+    if (!current || current.status !== "draft") {
+      suggestion = null;
+      return;
+    }
+    let stale = false;
+    const read = (): void => {
+      invoke<GoalSuggestion | null>("plan_goal_suggestion", { id: current.id })
+        .then((value) => {
+          if (!stale) suggestion = value;
+        })
+        .catch(() => {
+          // The box is a courtesy; `board plan goal` shows the same.
+        });
+    };
+    read();
+    const timer = grilling && visible ? setInterval(read, 3000) : null;
+    return () => {
+      stale = true;
+      if (timer !== null) clearInterval(timer);
+    };
+  });
+
+  async function takeOverGoal(): Promise<void> {
+    if (!plan) return;
+    const current = plan;
+    const read = suggestion;
+    if (!read) return;
+    await run(async () => {
+      // `at` is the proposal on screen: one a session has replaced since is refused, not applied unseen.
+      await invoke("apply_goal_suggestion", { id: current.id, at: read.at });
+      // What the owner typed since is replaced on purpose: they chose the proposal over it.
+      goalDirty = false;
+      suggestion = null;
+      await reload();
+    });
+  }
+
+  async function discardGoal(): Promise<void> {
+    if (!plan) return;
+    const current = plan;
+    await run(async () => {
+      await invoke("discard_goal_suggestion", { id: current.id });
+      suggestion = null;
     });
   }
 
@@ -646,17 +725,34 @@
         ></textarea>
       </label>
 
+      {#if suggestion && plan.status === "draft"}
+        <section class="suggestion" aria-label="Vorgeschlagenes Ziel">
+          <h3>Geschärftes Ziel vorgeschlagen</h3>
+          <p class="muted">Aus dem Gespräch mit der Grill-Sitzung. Es ersetzt dein Ziel erst, wenn du es übernimmst.</p>
+          <pre class="proposed-goal">{suggestion.goal}</pre>
+          <div class="row">
+            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverGoal()}>Übernehmen</button>
+            <button class="ax-btn" type="button" disabled={busy} onclick={() => void discardGoal()}>Verwerfen</button>
+          </div>
+        </section>
+      {/if}
+
       {#if plan.status === "draft"}
         <div class="planner">
+          {#if griller}
+            <span>Grill: <strong>{griller.name}</strong></span>
+            <button class="ax-btn" type="button" onclick={() => showPlanner(griller.id)}>Pane zeigen</button>
+          {/if}
           {#if planner}
             <span>Planer: <strong>{planner.name}</strong></span>
             <button class="ax-btn" type="button" onclick={() => showPlanner(planner.id)}>Pane zeigen</button>
-          {:else if canStartPlanner(plan, $session.agents)}
+          {/if}
+          {#if rolesLoaded && (canStartPlanner(plan, $session.agents, roles) || canStartGrill(plan, $session.agents, roles))}
             <label class="engine">
-              Engine des Planers
+              Engine
               <select
                 value={engineId}
-                aria-label="Engine des Planers"
+                aria-label="Engine der Sitzung"
                 onchange={(event) => (pickedEngine = (event.currentTarget as HTMLSelectElement).value)}
               >
                 {#each $engineCatalog as engine (engine.id)}
@@ -664,6 +760,21 @@
                 {/each}
               </select>
             </label>
+          {/if}
+          {#if rolesLoaded && canStartGrill(plan, $session.agents, roles)}
+            <button
+              class="ax-btn"
+              type="button"
+              disabled={busy || engineId === "" || goalDraft.trim() === ""}
+              title={goalDraft.trim() === ""
+                ? "Schreibe erst ein Ziel, das sich hinterfragen lässt."
+                : "Eine Sitzung fragt dich im Terminal nach dem Ziel aus, bis nichts offen ist, und schlägt ein geschärftes Ziel vor"}
+              onclick={() => void startGrill()}
+            >
+              Plan grillen
+            </button>
+          {/if}
+          {#if rolesLoaded && canStartPlanner(plan, $session.agents, roles)}
             <button
               class="ax-btn primary"
               type="button"
@@ -896,6 +1007,31 @@
   }
   .grow {
     flex: 1;
+  }
+  .suggestion {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-accent);
+    border-radius: var(--ax-radius-md);
+  }
+  .suggestion h3 {
+    margin: 0;
+  }
+  .proposed-goal {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: calc(260px * var(--ax-ui-scale));
+    overflow-y: auto;
+    padding: var(--ax-space-2);
+    background: var(--ax-surface-1);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-sm);
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
   }
   .name {
     overflow: hidden;

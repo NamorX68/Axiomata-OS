@@ -39,7 +39,7 @@ pub const MAX_PROPOSAL_DEPTH: i64 = 2;
 /// How many cards sessions that work cards may have proposed in one plan, all together (A7): the planner's own cards do
 /// not count, they are what the owner approved the plan for.
 pub const MAX_SELF_PROPOSED_PER_PLAN: i64 = 30;
-/// The history line [`propose_card`] writes — also what the cap counts.
+/// The history line [`propose_card`] writes, for the owner to read; ownership and the cap rest on `card_proposers`.
 const PROPOSED_NOTE: &str = "proposed by the session";
 
 /// Only the owner (a `human:` actor) may do this: it is a gate the agents work behind (a2a.md A7, A17), not a step
@@ -306,6 +306,95 @@ pub fn list_plans(db: &Connection, board_id: i64) -> Result<Vec<Plan>> {
     read_plan(db, "WHERE board_id = ?1 ORDER BY id", params![board_id])
 }
 
+/// A sharper goal a session proposed for a plan (Q4): the text and when it came.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GoalSuggestion {
+    pub goal: String,
+    pub at: String,
+}
+
+/// Files a proposal for a plan's goal, replacing an earlier one. Only for a plan that is still a draft: an approved plan's
+/// goal is history. The text is bounded like the goal itself.
+pub fn set_goal_suggestion(db: &Connection, plan_id: i64, goal: &str) -> Result<()> {
+    check_len("goal", goal, MAX_PLAN_GOAL_LEN)?;
+    if goal.trim().is_empty() {
+        return invalid("goal", "a proposed goal must not be empty");
+    }
+    match get_plan(db, plan_id)? {
+        Some(plan) if plan.status == PlanStatus::Draft => {}
+        Some(_) => return invalid("plan_id", "only a draft plan's goal can be sharpened"),
+        None => return invalid("plan_id", format!("no plan {plan_id}")),
+    }
+    db.execute(
+        "INSERT INTO plan_goal_suggestions (plan_id, goal, at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(plan_id) DO UPDATE SET goal = excluded.goal, at = excluded.at",
+        params![plan_id, goal, now()],
+    )?;
+    Ok(())
+}
+
+/// The proposal waiting for the owner, if there is one.
+pub fn goal_suggestion(db: &Connection, plan_id: i64) -> Result<Option<GoalSuggestion>> {
+    Ok(db
+        .query_row(
+            "SELECT goal, at FROM plan_goal_suggestions WHERE plan_id = ?1",
+            params![plan_id],
+            |row| {
+                Ok(GoalSuggestion {
+                    goal: row.get(0)?,
+                    at: row.get(1)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// The owner discards the proposal. `false` if there was none.
+pub fn clear_goal_suggestion(db: &Connection, plan_id: i64) -> Result<bool> {
+    Ok(db.execute(
+        "DELETE FROM plan_goal_suggestions WHERE plan_id = ?1",
+        params![plan_id],
+    )? == 1)
+}
+
+/// The owner takes the proposal over: it becomes the plan's goal (the rest of the plan's settings stay) and the proposal
+/// goes, in one transaction. `at` is the time of the proposal **the owner read**: a session that proposed again in between
+/// has replaced the text, and the owner must not approve what they did not see. `None` if there is no proposal; only a
+/// draft's goal is changed.
+pub fn apply_goal_suggestion(db: &mut Connection, plan_id: i64, at: &str) -> Result<Option<Plan>> {
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let Some(suggestion) = goal_suggestion(&tx, plan_id)? else {
+        return Ok(None);
+    };
+    if suggestion.at != at {
+        return invalid(
+            "at",
+            "the proposed goal changed since you read it; read it again before you take it over",
+        );
+    }
+    let Some(plan) = get_plan(&tx, plan_id)? else {
+        return Ok(None);
+    };
+    if plan.status != PlanStatus::Draft {
+        return invalid("plan_id", "only a draft plan's goal can be changed");
+    }
+    let updated = update_plan(
+        &tx,
+        plan_id,
+        &PlanFields {
+            name: plan.name,
+            goal: suggestion.goal,
+            project_id: plan.project_id,
+            auto_start_max: plan.auto_start_max,
+            max_cost_usd: plan.max_cost_usd,
+            max_tokens: plan.max_tokens,
+        },
+    )?;
+    clear_goal_suggestion(&tx, plan_id)?;
+    tx.commit()?;
+    Ok(updated)
+}
+
 /// Creates a plan as a draft on a board.
 pub fn create_plan(db: &Connection, board_id: i64, fields: &PlanFields) -> Result<Plan> {
     check_plan_fields(fields)?;
@@ -503,16 +592,20 @@ pub fn approve_plan(db: &mut Connection, plan_id: i64, actor: &str) -> Result<Op
         "UPDATE plans SET status = 'approved', approved_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![plan_id, stamp],
     )?;
+    // The goal is history now: a proposal for a sharper one has nothing left to change.
+    clear_goal_suggestion(&tx, plan_id)?;
     tx.commit()?;
     Ok(Some(moved))
 }
 
 /// Closes a plan: nothing starts from it any more. `false` if there is no such plan or it is closed already.
 pub fn close_plan(db: &Connection, plan_id: i64) -> Result<bool> {
-    Ok(db.execute(
+    let closed = db.execute(
         "UPDATE plans SET status = 'closed', updated_at = ?2 WHERE id = ?1 AND status <> 'closed'",
         params![plan_id, now()],
-    )? == 1)
+    )? == 1;
+    clear_goal_suggestion(db, plan_id)?;
+    Ok(closed)
 }
 
 // ---------------------------------------------------------- dependencies ---
@@ -675,8 +768,8 @@ pub fn propose_card_from(
     let actor = normalize_actor(actor)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let proposed: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM card_events WHERE actor = ?1 AND kind = 'note' AND text = ?2",
-        params![actor, PROPOSED_NOTE],
+        "SELECT COUNT(*) FROM card_proposers WHERE actor = ?1",
+        params![actor],
         |row| row.get(0),
     )?;
     if proposed >= MAX_PROPOSALS_PER_ACTOR {
@@ -729,6 +822,10 @@ pub fn propose_card_from(
             params![card.id, depth],
         )?;
     }
+    tx.execute(
+        "INSERT INTO card_proposers (card_id, actor) VALUES (?1, ?2)",
+        params![card.id, actor],
+    )?;
     insert_event(&tx, card.id, &actor, EventKind::Note, PROPOSED_NOTE)?;
     tx.commit()?;
     // Read again: the dependencies are part of what a card shows.
@@ -773,9 +870,10 @@ fn own_proposal(tx: &Connection, card_id: i64, actor: &str) -> Result<Card> {
             "the card is no proposal any more (the owner has approved it); it cannot be changed from here",
         );
     }
+    // Ownership is the table `propose_card_from` writes, never a history line: a note is anyone's to write.
     let proposed_by_actor: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM card_events WHERE card_id = ?1 AND actor = ?2 AND kind = 'note' AND text = ?3",
-        params![card_id, actor, PROPOSED_NOTE],
+        "SELECT COUNT(*) FROM card_proposers WHERE card_id = ?1 AND actor = ?2",
+        params![card_id, actor],
         |row| row.get(0),
     )?;
     if proposed_by_actor == 0 {
@@ -784,24 +882,40 @@ fn own_proposal(tx: &Connection, card_id: i64, actor: &str) -> Result<Card> {
     Ok(card)
 }
 
-/// A session changes a proposal **it made itself**, while it still waits for the owner's yes: the new `fields` replace the
-/// old ones, `needs` (when given) replaces the card's "needs first" edges. The card, its edges and a history line
-/// ("changed by the session", by the actor) are one transaction, so a refused edge leaves the proposal as it was.
+/// How often a session may change one proposal: every change is a line of history, and a loop must not fill it.
+const MAX_CHANGES_PER_PROPOSAL: i64 = 30;
+
+/// A session changes a proposal **it made itself**, while it still waits for the owner's yes: `change` is applied to the
+/// card's fields **as they are inside the transaction** (an edit the owner made a moment ago to a field the session does
+/// not name is kept), and `needs` (when given) replaces the card's "needs first" edges. The card, its edges and a history
+/// line ("changed by the session", by the actor) are one transaction, so a refused edge leaves the proposal as it was.
 pub fn edit_own_proposal(
     db: &mut Connection,
     card_id: i64,
     actor: &str,
-    fields: &CardFields,
+    change: &dyn Fn(&mut CardFields),
     needs: Option<&[i64]>,
 ) -> Result<Card> {
     let actor = normalize_actor(actor)?;
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let card = own_proposal(&tx, card_id, &actor)?;
+    let changes: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM card_events WHERE card_id = ?1 AND actor = ?2 AND kind = 'note' AND text = ?3",
+        params![card_id, actor, CHANGED_NOTE],
+        |row| row.get(0),
+    )?;
+    if changes >= MAX_CHANGES_PER_PROPOSAL {
+        return invalid(
+            "card_id",
+            format!(
+                "you have changed this proposal {MAX_CHANGES_PER_PROPOSAL} times; leave the rest to the owner"
+            ),
+        );
+    }
+    let mut fields = card.fields();
+    change(&mut fields);
     // The plan and the column stay: a proposal that moved itself to another plan would be a way round the owner's reading.
-    let fields = CardFields {
-        plan_id: card.plan_id,
-        ..fields.clone()
-    };
+    fields.plan_id = card.plan_id;
     crate::store::update_card_in(&tx, card_id, &fields)?;
     if let Some(wanted) = needs {
         for have in &card.depends_on {
@@ -1528,6 +1642,7 @@ mod tests {
     };
     use crate::{
         SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5, SCHEMA_SQL_V6,
+        SCHEMA_SQL_V7, SCHEMA_SQL_V8,
     };
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1572,6 +1687,8 @@ mod tests {
         db.execute_batch(SCHEMA_SQL_V4).unwrap();
         db.execute_batch(SCHEMA_SQL_V5).unwrap();
         db.execute_batch(SCHEMA_SQL_V6).unwrap();
+        db.execute_batch(SCHEMA_SQL_V7).unwrap();
+        db.execute_batch(SCHEMA_SQL_V8).unwrap();
         let board = create_board(&mut db, "Flow").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
@@ -2676,11 +2793,12 @@ mod tests {
         let other = new("other", "agent:q-2");
         let first = new("first", "agent:p-1");
 
-        let mut changed = fields("mine, better");
-        changed.acceptance = "It builds.".to_owned();
+        let apply = |c: &mut CardFields| {
+            c.title = "mine, better".to_owned();
+            c.acceptance = "It builds.".to_owned();
+        };
         let edited =
-            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, Some(&[first.id]))
-                .unwrap();
+            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &apply, Some(&[first.id])).unwrap();
         assert_eq!(
             (edited.title.as_str(), edited.acceptance.as_str()),
             ("mine, better", "It builds.")
@@ -2689,13 +2807,18 @@ mod tests {
         assert_eq!(edited.plan_id, Some(plan.id), "the plan cannot be changed");
         assert_eq!(changed_proposals(&f.db, plan.id).unwrap(), [mine.id]);
 
+        // A history line is anyone's to write: a session that forges "proposed by the session" on another's card still does
+        // not own it.
+        insert_event(&f.db, other.id, "agent:p-1", EventKind::Note, PROPOSED_NOTE).unwrap();
+        assert!(edit_own_proposal(&mut f.db, other.id, "agent:p-1", &apply, None).is_err());
+        assert!(withdraw_own_proposal(&mut f.db, other.id, "agent:p-1").is_err());
+
         // Another session's proposal is not mine to change or take back.
-        assert!(edit_own_proposal(&mut f.db, other.id, "agent:p-1", &changed, None).is_err());
+        assert!(edit_own_proposal(&mut f.db, other.id, "agent:p-1", &apply, None).is_err());
         assert!(withdraw_own_proposal(&mut f.db, other.id, "agent:p-1").is_err());
 
         // A refused edge leaves the proposal as it was: a card cannot wait for itself.
-        let refused =
-            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, Some(&[mine.id]));
+        let refused = edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &apply, Some(&[mine.id]));
         assert!(refused.is_err());
         assert_eq!(
             get_card(&f.db, mine.id).unwrap().unwrap().depends_on,
@@ -2703,20 +2826,122 @@ mod tests {
         );
 
         // Needs dropped when an empty list is given, kept when none is.
-        let kept = edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, None).unwrap();
+        let kept = edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &apply, None).unwrap();
         assert_eq!(kept.depends_on, [first.id]);
         let dropped =
-            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, Some(&[])).unwrap();
+            edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &apply, Some(&[])).unwrap();
         assert!(dropped.depends_on.is_empty());
 
         // After the owner's yes it is a card like any other.
         approve_proposal(&mut f.db, mine.id, "human:owner").unwrap();
-        assert!(edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &changed, None).is_err());
+        assert!(edit_own_proposal(&mut f.db, mine.id, "agent:p-1", &apply, None).is_err());
         assert!(withdraw_own_proposal(&mut f.db, mine.id, "agent:p-1").is_err());
 
         // Taking back an open proposal removes the card.
         withdraw_own_proposal(&mut f.db, first.id, "agent:p-1").unwrap();
         assert!(get_card(&f.db, first.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_proposed_goal_waits_for_the_owner_who_takes_it_over_or_discards_it() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        assert_eq!(goal_suggestion(&f.db, plan.id).unwrap(), None);
+        set_goal_suggestion(&f.db, plan.id, "first idea").unwrap();
+        set_goal_suggestion(&f.db, plan.id, "sharper goal").unwrap();
+        assert_eq!(
+            goal_suggestion(&f.db, plan.id).unwrap().unwrap().goal,
+            "sharper goal"
+        );
+        // The plan's own goal is untouched until the owner says yes.
+        assert_eq!(get_plan(&f.db, plan.id).unwrap().unwrap().goal, plan.goal);
+
+        let at = goal_suggestion(&f.db, plan.id).unwrap().unwrap().at;
+        let applied = apply_goal_suggestion(&mut f.db, plan.id, &at)
+            .unwrap()
+            .unwrap();
+        assert_eq!(applied.goal, "sharper goal");
+        assert_eq!(
+            applied.name, plan.name,
+            "nothing else about the plan changes"
+        );
+        assert_eq!(goal_suggestion(&f.db, plan.id).unwrap(), None);
+        assert!(
+            apply_goal_suggestion(&mut f.db, plan.id, &at)
+                .unwrap()
+                .is_none()
+        );
+
+        set_goal_suggestion(&f.db, plan.id, "another").unwrap();
+        assert!(clear_goal_suggestion(&f.db, plan.id).unwrap());
+        assert!(!clear_goal_suggestion(&f.db, plan.id).unwrap());
+    }
+
+    #[test]
+    fn the_owner_takes_over_the_proposal_they_read_and_only_for_a_draft_and_the_row_goes_with_the_plan_s_say()
+     {
+        let mut f = fixture();
+        let plan = plan(&f);
+        set_goal_suggestion(&f.db, plan.id, "first").unwrap();
+        let read = goal_suggestion(&f.db, plan.id).unwrap().unwrap().at;
+        // A session proposes again between the owner's reading and their click: the old reading no longer matches.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        set_goal_suggestion(&f.db, plan.id, "second").unwrap();
+        assert!(apply_goal_suggestion(&mut f.db, plan.id, &read).is_err());
+        assert_eq!(
+            get_plan(&f.db, plan.id).unwrap().unwrap().goal,
+            plan.goal,
+            "nothing was applied"
+        );
+        let now_read = goal_suggestion(&f.db, plan.id).unwrap().unwrap().at;
+        assert_eq!(
+            apply_goal_suggestion(&mut f.db, plan.id, &now_read)
+                .unwrap()
+                .unwrap()
+                .goal,
+            "second"
+        );
+
+        // A proposal still there when the plan is approved or closed goes with it.
+        set_goal_suggestion(&f.db, plan.id, "late").unwrap();
+        approve_plan(&mut f.db, plan.id, "human:owner").unwrap();
+        assert_eq!(goal_suggestion(&f.db, plan.id).unwrap(), None);
+        let other = create_plan(
+            &f.db,
+            f.board,
+            &PlanFields {
+                project_id: None,
+                goal: String::new(),
+                name: "Other".into(),
+                auto_start_max: None,
+                max_cost_usd: None,
+                max_tokens: None,
+            },
+        )
+        .unwrap();
+        set_goal_suggestion(&f.db, other.id, "x").unwrap();
+        close_plan(&f.db, other.id).unwrap();
+        assert_eq!(goal_suggestion(&f.db, other.id).unwrap(), None);
+    }
+
+    #[test]
+    fn a_goal_is_proposed_only_for_a_draft_and_only_with_text() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        assert!(set_goal_suggestion(&f.db, plan.id, "  ").is_err());
+        assert!(set_goal_suggestion(&f.db, plan.id, &"x".repeat(MAX_PLAN_GOAL_LEN + 1)).is_err());
+        assert!(set_goal_suggestion(&f.db, 9999, "text").is_err());
+        approve_plan(&mut f.db, plan.id, "human:owner").unwrap();
+        assert!(set_goal_suggestion(&f.db, plan.id, "late").is_err());
+    }
+
+    #[test]
+    fn deleting_a_plan_takes_its_proposed_goal_with_it() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        set_goal_suggestion(&f.db, plan.id, "idea").unwrap();
+        assert!(delete_plan(&mut f.db, plan.id).unwrap());
+        assert_eq!(goal_suggestion(&f.db, plan.id).unwrap(), None);
     }
 
     // ------------------------------------------------------ dependencies ---

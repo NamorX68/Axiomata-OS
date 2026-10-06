@@ -59,6 +59,10 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (22, include_str!("migrations/0008_session_spend.sql")),
     // How deep a card a working session proposed lies (a2a.md, CP-A8c).
     (23, axiomata_board::SCHEMA_SQL_V6),
+    // A sharper goal proposed for a plan by a session that grilled it; the owner decides (a2a.md).
+    (24, axiomata_board::SCHEMA_SQL_V7),
+    // Who proposed a card: the proof a session needs to change or take back its own proposal (a2a.md).
+    (25, axiomata_board::SCHEMA_SQL_V8),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

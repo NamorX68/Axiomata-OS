@@ -18,7 +18,7 @@ mod tests;
 
 use std::io::{self, BufRead, Write};
 
-pub use context::{Capabilities, Context, ContextError, Creates};
+pub use context::{Capabilities, Context, ContextError, Creates, KIND_GRILL};
 pub use protocol::{MAX_LINE_BYTES, handle_line, run};
 
 /// Serves one session on stdin and stdout until the client closes them, holding the session's presence lock for as long

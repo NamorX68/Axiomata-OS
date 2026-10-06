@@ -29,6 +29,8 @@ use crate::session::actor_from;
 pub const KIND_REVIEW: &str = "review";
 /// The role kind of a planner: the only one that may propose cards of any kind.
 pub const KIND_PLAN: &str = "plan";
+/// The role kind of a session that grills a plan's goal: it reads the plan and may propose a sharper goal, nothing else.
+pub const KIND_GRILL: &str = "grill";
 
 /// What a role may propose with `create_card`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +52,8 @@ pub struct Capabilities {
     pub review: bool,
     /// `get_plan`: a session that plans — the plan it was started for and the catalog of roles to cut it by.
     pub plan: bool,
+    /// `propose_goal`: a session that grills the plan's goal; it reads the plan with `get_plan` too.
+    pub grill: bool,
     pub create: Creates,
 }
 
@@ -59,6 +63,7 @@ impl Capabilities {
         work: false,
         review: false,
         plan: false,
+        grill: false,
         create: Creates::Nothing,
     };
 
@@ -66,12 +71,14 @@ impl Capabilities {
     pub fn of(role: &Role) -> Self {
         let kind = role.kind.as_str();
         Capabilities {
-            work: kind != KIND_REVIEW && kind != KIND_PLAN,
+            work: kind != KIND_REVIEW && kind != KIND_PLAN && kind != KIND_GRILL,
             review: kind == KIND_REVIEW,
             plan: kind == KIND_PLAN,
+            grill: kind == KIND_GRILL,
+            // A grilling session proposes a goal and nothing else, whatever `creates:` its role file names.
             create: if kind == KIND_PLAN {
                 Creates::Any
-            } else if role.creates.is_empty() {
+            } else if role.creates.is_empty() || kind == KIND_GRILL {
                 Creates::Nothing
             } else {
                 Creates::Kinds(role.creates.clone())
@@ -97,8 +104,11 @@ impl Capabilities {
         if self.review {
             names.push("review_verdict");
         }
-        if self.plan {
+        if self.plan || self.grill {
             names.push("get_plan");
+        }
+        if self.grill {
+            names.push("propose_goal");
         }
         if self.create != Creates::Nothing {
             names.extend(["create_card", "update_proposal", "withdraw_proposal"]);

@@ -54,7 +54,8 @@ pub fn offered(ctx: &Context, name: &str) -> bool {
         "list_agents" | "send_message" | "read_inbox" | "get_card" | "list_cards" => true,
         "claim_task" | "report_done" => ctx.caps.work,
         "review_verdict" => ctx.caps.review,
-        "get_plan" => ctx.caps.plan,
+        "get_plan" => ctx.caps.plan || ctx.caps.grill,
+        "propose_goal" => ctx.caps.grill,
         "create_card" | "update_proposal" | "withdraw_proposal" => {
             ctx.caps.create != Creates::Nothing
         }
@@ -179,6 +180,15 @@ pub fn definitions(ctx: &Context) -> Vec<Value> {
             &["title", "kind"],
         ),
         tool(
+            "propose_goal",
+            "Hand the owner the sharpened goal of the plan you grilled: their own aim first, then the decisions you \
+                settled together, each as a short line, and what was left out on purpose. It is a proposal only — the \
+                owner reads it and decides whether it replaces their goal. Call it once, when the owner agrees the \
+                interview is done; a second call replaces the first.",
+            json!({"goal": {"type": "string", "description": "The proposed goal, Markdown."}}),
+            &["goal"],
+        ),
+        tool(
             "update_proposal",
             "Change a card you proposed yourself, while it still waits for the owner's yes: only the fields you \
                 name change. `needs` replaces the cards it waits for. A card the owner has approved, or one another \
@@ -216,6 +226,7 @@ pub fn call(ctx: &Context, name: &str, args: &Value) -> ToolResult {
         "get_card" => get_card(ctx, args),
         "list_cards" => list_cards(ctx, args),
         "get_plan" => get_plan(ctx),
+        "propose_goal" => propose_goal(ctx, args),
         "claim_task" => claim_task(ctx, args),
         "report_done" => report_done(ctx, args),
         "review_verdict" => review_verdict(ctx, args),
@@ -484,7 +495,9 @@ fn check_assignable(ctx: &Context, role: &str) -> Result<(), String> {
         .catalog
         .iter()
         .filter(|entry| {
-            entry.kind != super::context::KIND_REVIEW && entry.kind != super::context::KIND_PLAN
+            entry.kind != super::context::KIND_REVIEW
+                && entry.kind != super::context::KIND_PLAN
+                && entry.kind != super::context::KIND_GRILL
         })
         .map(|entry| entry.name.as_str())
         .collect();
@@ -739,6 +752,19 @@ fn needs_arg(args: &Value) -> Result<Option<Vec<i64>>, String> {
     }
 }
 
+/// Files the sharpened goal of the plan a grilling session was started for. The plan is the session's own
+/// ([`Context::plan_env`]), never an argument; the owner's goal is untouched until they take the proposal over.
+fn propose_goal(ctx: &Context, args: &Value) -> ToolResult {
+    let plan_id = ctx.plan_env.ok_or("you were not started for a plan")?;
+    let goal = req_str(args, "goal")?;
+    let db = ctx.db();
+    own_draft_plan(ctx, &db, plan_id)?;
+    flow::set_goal_suggestion(&db, plan_id, goal).map_err(text)?;
+    Ok(
+        json!({"proposed": true, "note": "The owner reads it in the plan's panel and decides whether it replaces their goal."}),
+    )
+}
+
 /// Changes a proposal the session made itself (A7): only what is named changes, the plan and the column stay. A planner may
 /// only do it while its plan is a draft. The owner sees "changed by the session" on the card.
 fn update_proposal(ctx: &Context, args: &Value) -> ToolResult {
@@ -759,26 +785,39 @@ fn update_proposal(ctx: &Context, args: &Value) -> ToolResult {
     let card = store::get_card(&db, card_id)
         .map_err(text)?
         .ok_or_else(|| format!("no card {card_id}"))?;
-    let mut fields = card.fields();
-    if let Some(title) = opt_str(args, "title")? {
-        fields.title = title.to_owned();
+    // A planner mends the proposals of its own plan; a card that lies elsewhere is not its to touch.
+    if let Some(plan) = ctx.plan_env
+        && card.plan_id != Some(plan)
+    {
+        return Err("that card does not belong to your plan".to_owned());
     }
-    if let Some(body) = opt_str(args, "body")? {
-        fields.body = body.to_owned();
-    }
-    if let Some(acceptance) = opt_str(args, "acceptance")? {
-        fields.acceptance = acceptance.to_owned();
-    }
-    if let Some(agent) = opt_str(args, "agent")? {
-        fields.agent = Some(agent.to_owned());
-    }
-    if let Some(reason) = opt_str(args, "agent_reason")? {
-        fields.agent_reason = Some(reason.to_owned());
-    }
-    if tier.is_some() {
-        fields.tier = tier;
-    }
-    let changed = flow::edit_own_proposal(&mut db, card_id, &ctx.actor, &fields, needs.as_deref())
+    let title = opt_str(args, "title")?.map(str::to_owned);
+    let body = opt_str(args, "body")?.map(str::to_owned);
+    let acceptance = opt_str(args, "acceptance")?.map(str::to_owned);
+    let agent = opt_str(args, "agent")?.map(str::to_owned);
+    let reason = opt_str(args, "agent_reason")?.map(str::to_owned);
+    // Applied to the card as it is inside the board's transaction: an edit the owner made a moment ago stays.
+    let change = |fields: &mut board::CardFields| {
+        if let Some(title) = &title {
+            fields.title.clone_from(title);
+        }
+        if let Some(body) = &body {
+            fields.body.clone_from(body);
+        }
+        if let Some(acceptance) = &acceptance {
+            fields.acceptance.clone_from(acceptance);
+        }
+        if let Some(agent) = &agent {
+            fields.agent = Some(agent.clone());
+        }
+        if let Some(reason) = &reason {
+            fields.agent_reason = Some(reason.clone());
+        }
+        if tier.is_some() {
+            fields.tier = tier;
+        }
+    };
+    let changed = flow::edit_own_proposal(&mut db, card_id, &ctx.actor, &change, needs.as_deref())
         .map_err(text)?;
     mirror(ctx, &db, changed.id);
     Ok(card_view(&changed))
@@ -791,9 +830,13 @@ fn withdraw_proposal(ctx: &Context, args: &Value) -> ToolResult {
     if let Some(plan) = ctx.plan_env {
         own_draft_plan(ctx, &db, plan)?;
     }
-    let board_id = store::get_card(&db, card_id)
-        .map_err(text)?
-        .map(|card| card.board_id);
+    let card = store::get_card(&db, card_id).map_err(text)?;
+    if let (Some(plan), Some(card)) = (ctx.plan_env, &card)
+        && card.plan_id != Some(plan)
+    {
+        return Err("that card does not belong to your plan".to_owned());
+    }
+    let board_id = card.map(|card| card.board_id);
     flow::withdraw_own_proposal(&mut db, card_id, &ctx.actor).map_err(text)?;
     if let Some(board_id) = board_id {
         board_mirror::after_change(&db, &ctx.config(), board_id);

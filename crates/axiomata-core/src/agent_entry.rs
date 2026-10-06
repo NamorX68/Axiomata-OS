@@ -285,6 +285,9 @@ impl CardLaunch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanLaunch {
     pub plan_id: i64,
+    /// The session grills the plan's goal (interviews the owner) instead of cutting it into cards: told by the role's kind
+    /// when the session starts ([`Launch::for_role`]), not stored.
+    pub interview: bool,
 }
 
 /// What the studio started a session for: a card (to work on or to review) or a plan (to cut into cards). The studio
@@ -302,6 +305,17 @@ impl From<CardLaunch> for Launch {
 }
 
 impl Launch {
+    /// The launch with what the session's role says about it: a plan session whose role is of kind `grill` interviews.
+    pub fn for_role(self, role: Option<&Role>) -> Launch {
+        match self {
+            Launch::Plan(plan) => Launch::Plan(PlanLaunch {
+                interview: role.is_some_and(|role| role.kind == crate::agent_mcp::KIND_GRILL),
+                ..plan
+            }),
+            card => card,
+        }
+    }
+
     /// The card, for the server's environment (`AXIOMATA_CARD_ID`).
     pub fn card_id(&self) -> Option<i64> {
         match self {
@@ -345,6 +359,7 @@ const RUN_STYLE: &str = "Run a build or the tests only when your change can affe
 pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
     let launch = match launch {
         Launch::Card(card) => card,
+        Launch::Plan(plan) if plan.interview => return grill_prompt(agent, plan),
         Launch::Plan(plan) => return planner_prompt(agent, plan),
     };
     let (name, role, card_id) = (&agent.name, &agent.agent_role, launch.card_id);
@@ -370,6 +385,19 @@ pub fn start_prompt(agent: &Agent, launch: &Launch) -> String {
             base = target.base,
         ),
     }
+}
+
+/// What a grilling session is told first: who it is, which plan, and what is its job — the method itself is in its role's text.
+fn grill_prompt(agent: &Agent, launch: &PlanLaunch) -> String {
+    let (name, role, plan_id) = (&agent.name, &agent.agent_role, launch.plan_id);
+    format!(
+        "You are the session \"{name}\", role `{role}`, and you grill plan #{plan_id}. Read your inbox with `read_inbox`, \
+         then read the plan with `get_plan`: its goal, and what was proposed so far. Your worktree is a read-only checkout \
+         of the project as it was when you started — read it to answer your own questions, change nothing. Then interview \
+         the owner here in the terminal about the goal, in rounds, as your role describes: write your round, wait for the \
+         answers. {COMMAND_STYLE} When the owner agrees the interview is done, call `propose_goal` once with the \
+         sharpened goal; the owner decides whether it replaces theirs. You make no cards and start nothing."
+    )
 }
 
 /// What a planner is told first: who it is and which plan — never the plan's text, which comes through `get_plan`.
@@ -940,13 +968,73 @@ mod tests {
         }
     }
 
+    fn griller() -> Role {
+        Role {
+            name: "grill".into(),
+            kind: "grill".into(),
+            instructions: "Interview the owner.".into(),
+            ..reviewer()
+        }
+    }
+
+    #[test]
+    fn a_session_of_a_grilling_role_interviews_and_gets_the_goal_tools_but_not_the_card_tool() {
+        let dir = temp_dir();
+        let cli = fake_cli(&dir);
+        let (agent, roots) = agent_in(&dir, "grill-4", "grill");
+        let role = griller();
+        let plain = Launch::Plan(PlanLaunch {
+            plan_id: 4,
+            interview: false,
+        });
+        // The role's kind decides; the same plan with a planner's role stays a planner.
+        assert!(matches!(
+            plain.clone().for_role(Some(&role)),
+            Launch::Plan(PlanLaunch {
+                interview: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            plain.clone().for_role(Some(&planner())),
+            Launch::Plan(PlanLaunch {
+                interview: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            Launch::from(CardLaunch::work(1)).for_role(Some(&role)),
+            Launch::Card(_)
+        ));
+
+        let launch = plain.for_role(Some(&role));
+        assert!(launch.read_only());
+        let prompt = start_prompt(&agent, &launch);
+        assert!(
+            prompt.contains("grill plan #4") && prompt.contains("propose_goal"),
+            "{prompt}"
+        );
+        assert!(!prompt.contains("create_card"), "{prompt}");
+        let (arg, entry) = wire_claude_with(Some(cli), &roots, &agent, Some(&role), Some(&launch));
+        let arg = arg.unwrap();
+        assert!(
+            arg.contains("mcp__axiomata__propose_goal") && arg.contains("mcp__axiomata__get_plan"),
+            "{arg}"
+        );
+        assert!(!arg.contains("mcp__axiomata__create_card"), "{arg}");
+        assert!(entry.tools.contains(&"propose_goal".to_owned()));
+    }
+
     #[test]
     fn a_planner_is_read_only_gets_its_plan_in_the_server_environment_and_is_told_no_goal() {
         let dir = temp_dir();
         let cli = fake_cli(&dir);
         let (agent, roots) = agent_in(&dir, "planner-4", "planner");
         let role = planner();
-        let launch = Launch::Plan(PlanLaunch { plan_id: 4 });
+        let launch = Launch::Plan(PlanLaunch {
+            plan_id: 4,
+            interview: false,
+        });
         assert!(launch.read_only());
         assert_eq!((launch.card_id(), launch.plan_id()), (None, Some(4)));
 

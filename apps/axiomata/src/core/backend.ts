@@ -923,6 +923,12 @@ export interface SessionActivity {
   readable: boolean;
 }
 
+/** A sharper goal a grilling session proposed for a plan (`board::flow::GoalSuggestion`); the owner decides. */
+export interface GoalSuggestion {
+  goal: string;
+  at: string;
+}
+
 /** One message of a session's conversation (`session_mail::MailLine`). */
 export interface MailLine {
   id: number;

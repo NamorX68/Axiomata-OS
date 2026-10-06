@@ -33,6 +33,9 @@ use crate::roster::{self, refusal};
 const KIND_PLAN: &str = "plan";
 /// The role a plan is given when there is more than one of kind `plan`: the one every install is seeded with.
 const DEFAULT_PLANNER: &str = "planner";
+/// The role kind of a session that grills a plan, and the one every install is seeded with.
+const KIND_GRILL: &str = "grill";
+const DEFAULT_GRILL: &str = "grill";
 
 type Result<T> = std::result::Result<T, AxiomataError>;
 
@@ -44,6 +47,8 @@ pub struct PlanStartRequest {
     pub project_id: i64,
     /// An engine of the catalog to run on; the planner role names none, so this is what the owner picked.
     pub engine_id: Option<String>,
+    /// A session that grills the plan's goal (the role of kind `grill`) instead of one that cuts it into cards.
+    pub grill: bool,
 }
 
 /// The session that was made for the plan.
@@ -55,18 +60,25 @@ pub struct PlanSession {
     pub engine_id: String,
 }
 
-/// The role that plans: the one called `planner`, else the first of kind `plan`.
-fn pick_planner(roles: &[Role]) -> Result<&Role> {
+/// The role that plans — the one called `planner`, else the first of kind `plan` — or, for `grill`, the one that grills: the
+/// one called `grill`, else the first of kind `grill`.
+fn pick_planner(roles: &[Role], grill: bool) -> Result<&Role> {
+    let (kind, default) = if grill {
+        (KIND_GRILL, DEFAULT_GRILL)
+    } else {
+        (KIND_PLAN, DEFAULT_PLANNER)
+    };
     roles
         .iter()
-        .find(|role| role.kind == KIND_PLAN && role.name == DEFAULT_PLANNER)
-        .or_else(|| roles.iter().find(|role| role.kind == KIND_PLAN))
+        .find(|role| role.kind == kind && role.name == default)
+        .or_else(|| roles.iter().find(|role| role.kind == kind))
         .ok_or_else(|| {
             refusal(
                 "role",
-                "there is no role of kind plan for this project; the planner role is seeded at the next start of the \
-                 app, or add one in Engines & roles"
-                    .to_string(),
+                format!(
+                    "there is no role of kind {kind} for this project; the {default} role is seeded at the next start of \
+                     the app, or add one in Engines & roles"
+                ),
             )
         })
 }
@@ -90,16 +102,29 @@ fn free_name(taken: &[Agent], role: &str, plan_id: i64) -> Result<String> {
     ))
 }
 
-/// A plan has one planner, in whichever project it runs: two would propose the same cards twice.
-fn refuse_second_planner(db: &Connection, plan_id: i64) -> Result<()> {
+/// A plan has one planner and one grilling session, in whichever project they run: two planners would propose the same
+/// cards twice. The two duties are asked apart — grilling the goal and cutting it are different sessions.
+fn refuse_second_planner(
+    db: &Connection,
+    plan_id: i64,
+    roles: &[Role],
+    wanted: &Role,
+) -> Result<()> {
+    let kind_of = |agent: &Agent| {
+        roles
+            .iter()
+            .find(|role| role.name == agent.agent_role)
+            .map_or(KIND_PLAN, |role| role.kind.as_str())
+            .to_owned()
+    };
     match agent_store::plan_sessions(db)?
         .into_iter()
-        .find(|agent| agent.plan_id == Some(plan_id))
+        .find(|agent| agent.plan_id == Some(plan_id) && kind_of(agent) == wanted.kind)
     {
         Some(existing) => Err(refusal(
             "plan",
             format!(
-                "plan #{plan_id} has a planner already, {}; open its pane in the Studio",
+                "plan #{plan_id} has such a session already, {}; open its pane in the Studio",
                 existing.name
             ),
         )),
@@ -121,7 +146,7 @@ struct Plan {
 ///
 /// A refusal that says why: no such project or plan, a plan that is not a draft (an approved plan has had its say), a
 /// project that is no repository or has no commit yet, no `axiomata-cli` for the team tools, no role of kind `plan`, no
-/// usable engine, a plan that has a planner already. Nothing is left behind then.
+/// usable engine, a plan that has such a session already. Nothing is left behind then.
 pub async fn start_plan_session(
     core: &AxiomataCore,
     request: &PlanStartRequest,
@@ -201,9 +226,9 @@ fn prepare(
         ));
     }
     let sessions = agent_store::list_agents(db, request.project_id)?;
-    refuse_second_planner(db, plan.id)?;
     let roles = roles_of(db, request.project_id);
-    let role = pick_planner(&roles)?.clone();
+    let role = pick_planner(&roles, request.grill)?.clone();
+    refuse_second_planner(db, plan.id, &roles, &role)?;
     let engine_id = choose_engine(config, &role, request.engine_id.as_deref())?
         .0
         .to_owned();
@@ -234,7 +259,7 @@ fn finish(
         ));
     }
     let sessions = agent_store::list_agents(db, request.project_id)?;
-    refuse_second_planner(db, current.id)?;
+    refuse_second_planner(db, current.id, &plan.roles, &plan.role)?;
     let name = free_name(&sessions, &plan.role.name, current.id)?;
     let agent = roster::create_agent_on_engine(
         db,
@@ -412,6 +437,7 @@ mod tests {
                 role("allrounder", "implement"),
                 role("planner", "plan"),
                 role("reviewer", "review"),
+                role("grill", "grill"),
             ],
             project,
             plan,
@@ -425,6 +451,22 @@ mod tests {
             self.start_with(engine, true)
         }
 
+        fn start_grill(&self, engine: Option<&str>) -> Result<PlanSession> {
+            let roles = self.roles.clone();
+            plan_blocking(
+                &self.db,
+                &self.config,
+                &|_, _| roles.clone(),
+                &PlanStartRequest {
+                    plan_id: self.plan,
+                    project_id: self.project,
+                    engine_id: engine.map(str::to_owned),
+                    grill: true,
+                },
+                true,
+            )
+        }
+
         fn start_with(&self, engine: Option<&str>, cli: bool) -> Result<PlanSession> {
             let roles = self.roles.clone();
             plan_blocking(
@@ -435,6 +477,7 @@ mod tests {
                     plan_id: self.plan,
                     project_id: self.project,
                     engine_id: engine.map(str::to_owned),
+                    grill: false,
                 },
                 cli,
             )
@@ -479,13 +522,36 @@ mod tests {
         let w = world(true);
         w.start(Some("opus")).unwrap();
         let again = w.start(Some("opus")).unwrap_err().to_string();
-        assert!(again.contains("has a planner already"), "{again}");
+        assert!(again.contains("has such a session already"), "{again}");
 
         let other = world(true);
         flow::close_plan(&lock(&other.db), other.plan).unwrap();
         let closed = other.start(Some("opus")).unwrap_err().to_string();
         assert!(closed.contains("only a draft"), "{closed}");
         assert!(other.start(Some("opus")).is_err());
+    }
+
+    #[test]
+    fn a_plan_may_have_a_grilling_session_beside_its_planner_but_only_one_of_each() {
+        let w = world(true);
+        let planner = w.start(Some("opus")).unwrap();
+        let grill = w.start_grill(Some("opus")).unwrap();
+        assert_eq!(grill.role, "grill");
+        assert_eq!(grill.agent.name, format!("grill-{}", w.plan));
+        assert_eq!(grill.agent.plan_id, Some(w.plan));
+        assert_ne!(grill.agent.id, planner.agent.id);
+        let again = w.start_grill(Some("opus")).unwrap_err().to_string();
+        assert!(again.contains("has such a session already"), "{again}");
+        assert!(w.start(Some("opus")).is_err(), "still only one planner");
+    }
+
+    #[test]
+    fn a_grilling_session_needs_a_role_of_kind_grill() {
+        let mut w = world(true);
+        w.roles.retain(|role| role.kind != "grill");
+        let refused = w.start_grill(Some("opus")).unwrap_err().to_string();
+        assert!(refused.contains("no role of kind grill"), "{refused}");
+        assert!(w.start(Some("opus")).is_ok(), "the planner is not affected");
     }
 
     #[test]
@@ -518,12 +584,13 @@ mod tests {
                 plan_id: w.plan,
                 project_id: other,
                 engine_id: Some("opus".into()),
+                grill: false,
             },
             true,
         )
         .unwrap_err()
         .to_string();
-        assert!(refused.contains("has a planner already"), "{refused}");
+        assert!(refused.contains("has such a session already"), "{refused}");
     }
 
     fn prepared(w: &World) -> (PlanStartRequest, Plan, String) {
@@ -531,6 +598,7 @@ mod tests {
             plan_id: w.plan,
             project_id: w.project,
             engine_id: Some("opus".into()),
+            grill: false,
         };
         let roles = w.roles.clone();
         let plan = prepare(
@@ -566,7 +634,7 @@ mod tests {
         let again = finish(&lock(&w.db), &w.config, &request, &plan, &commit)
             .unwrap_err()
             .to_string();
-        assert!(again.contains("has a planner already"), "{again}");
+        assert!(again.contains("has such a session already"), "{again}");
     }
 
     #[test]

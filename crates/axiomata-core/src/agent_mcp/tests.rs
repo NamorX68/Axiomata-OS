@@ -53,6 +53,8 @@ fn roles() -> Vec<Role> {
         role("tester", "implement", &["test"]),
         role("reviewer", "review", &[]),
         role("planner", "plan", &[]),
+        role("griller", "grill", &[]),
+        role("greedy-griller", "grill", &["doc"]),
     ]
 }
 
@@ -285,6 +287,8 @@ fn the_tools_offered_follow_the_role() {
     let tester = w.session("t", "tester");
     let reviewer = w.session("r", "reviewer");
     let planner = w.session("p", "planner");
+    let griller = w.session("gr", "griller");
+    let greedy = w.session("gg", "greedy-griller");
     let ghost = {
         let id = w.session("g", "builder");
         agent_store::set_role(&w.core.db_lock(), id, "no-such-role").unwrap();
@@ -327,6 +331,16 @@ fn the_tools_offered_follow_the_role() {
             "update_proposal",
             "withdraw_proposal"
         ])
+    );
+    assert_eq!(
+        names(griller),
+        with(&["get_plan", "propose_goal"]),
+        "a grilling session reads the plan and proposes a goal; it makes no cards and does no work"
+    );
+    assert_eq!(
+        names(greedy),
+        with(&["get_plan", "propose_goal"]),
+        "a role of kind grill gets no card tools, whatever `creates:` its file names"
     );
     assert_eq!(
         names(ghost),
@@ -1098,6 +1112,42 @@ fn a_refused_summary_moves_nothing_and_a_reply_cannot_be_steered() {
 }
 
 #[test]
+fn a_grilling_session_proposes_a_goal_which_waits_for_the_owner() {
+    let mut w = world();
+    let griller = w.session("gr", "griller");
+    let plan = w.plan();
+    let c = w.planner_client(griller, plan);
+    let before = flow::get_plan(&w.core.db_lock(), plan)
+        .unwrap()
+        .unwrap()
+        .goal;
+    let said = c
+        .call("propose_goal", json!({"goal": "Sharper: do X, not Y."}))
+        .unwrap();
+    assert_eq!(said["proposed"], true);
+    let db = w.core.db_lock();
+    assert_eq!(
+        flow::goal_suggestion(&db, plan).unwrap().unwrap().goal,
+        "Sharper: do X, not Y."
+    );
+    assert_eq!(
+        flow::get_plan(&db, plan).unwrap().unwrap().goal,
+        before,
+        "the owner's goal is untouched until they take the proposal over"
+    );
+    drop(db);
+    // The plan is readable, no card can be made, and an empty goal is refused.
+    assert!(c.call("get_plan", json!({})).is_ok());
+    assert!(
+        !c.tool_names().contains(&"create_card".to_owned()),
+        "a grilling session makes no cards"
+    );
+    assert!(c.call("propose_goal", json!({"goal": "  "})).is_err());
+    flow::approve_plan(&mut w.core.db_lock(), plan, "human:owner").unwrap();
+    assert!(c.call("propose_goal", json!({"goal": "late"})).is_err());
+}
+
+#[test]
 fn a_planner_changes_and_takes_back_its_own_proposals_while_the_plan_is_a_draft() {
     let mut w = world();
     let planner = w.session("plan", "planner");
@@ -1137,10 +1187,7 @@ fn a_planner_changes_and_takes_back_its_own_proposals_while_the_plan_is_a_draft(
             json!({"card_id": outsider, "title": "x"}),
         )
         .unwrap_err();
-    assert!(
-        refused.contains("proposal") || refused.contains("propose"),
-        "{refused}"
-    );
+    assert!(refused.contains("your plan"), "{refused}");
 
     c.call("withdraw_proposal", json!({"card_id": one}))
         .unwrap();
@@ -1389,7 +1436,17 @@ fn a_planner_reads_its_plan_with_the_goal_the_catalog_and_the_cards_so_far() {
         .iter()
         .map(|role| role["name"].as_str().unwrap())
         .collect();
-    assert_eq!(catalog, ["builder", "tester", "reviewer", "planner"]);
+    assert_eq!(
+        catalog,
+        [
+            "builder",
+            "tester",
+            "reviewer",
+            "planner",
+            "griller",
+            "greedy-griller"
+        ]
+    );
 
     c.call(
         "create_card",

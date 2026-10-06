@@ -6,6 +6,8 @@ import { addTab, allGroups, allTabs, closeTab, forceCloseTab, emptyLayout, singl
 import {
   agentTabsOf,
   canDeletePlan,
+  canStartGrill,
+  grillerOf,
   needsCandidates,
   needsDiff,
   proposalForm,
@@ -380,5 +382,34 @@ describe("editing a proposal", () => {
     expect(needsCandidates(cards, 1)).toEqual([4]);
     expect(needsCandidates(cards, 3)).toEqual([1, 2, 4]);
     expect(needsCandidates(cards, null)).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("the sessions of a plan", () => {
+  const roles = [
+    { name: "planner", kind: "plan" },
+    { name: "grill", kind: "grill" },
+  ];
+  const session = (id: number, role: string, plan: number | null) =>
+    ({ id, agent_role: role, plan_id: plan, name: `${role}-${id}` }) as IdeAgent;
+
+  it("tells the planner from the grilling session by the kind of their roles", () => {
+    const agents = [session(1, "grill", 5), session(2, "planner", 5), session(3, "planner", 6)];
+    expect(plannerOf(agents, 5, roles)?.id).toBe(2);
+    expect(grillerOf(agents, 5, roles)?.id).toBe(1);
+    expect(grillerOf(agents, 6, roles)).toBeNull();
+    expect(plannerOf([session(1, "grill", 5)], 5, roles)).toBeNull();
+  });
+
+  it("lets each be started on a draft until that session exists", () => {
+    const draft = { status: "draft" as const, id: 5 };
+    expect(canStartPlanner(draft, [session(1, "grill", 5)], roles)).toBe(true);
+    expect(canStartGrill(draft, [session(1, "grill", 5)], roles)).toBe(false);
+    expect(canStartGrill(draft, [session(2, "planner", 5)], roles)).toBe(true);
+    expect(canStartGrill({ status: "approved", id: 5 }, [], roles)).toBe(false);
+  });
+
+  it("never offers the grilling role for a card", () => {
+    expect(assignableRoles([{ name: "grill", kind: "grill" } as Role, { name: "b", kind: "implement" } as Role], null)).toEqual(["b"]);
   });
 });

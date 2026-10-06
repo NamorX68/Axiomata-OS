@@ -371,7 +371,42 @@ is one concern a single session can finish and a reviewer can judge in one sitti
     }
 }
 
-/// Seeds [`default_role`], [`reviewer_role`] and [`planner_role`] where they are missing — never overwrites, like the
+/// The role that grills a plan's goal (`docs/plans/a2a.md`, "Plan bearbeiten und grillen"): kind `grill`, without an
+/// engine — the owner picks the model at every start, as for the planner. An interactive session: it interviews the owner
+/// in its terminal, in rounds, until the goal holds no open decision, and hands the result back as a *proposal* for a
+/// sharper goal (`propose_goal`). The method is the `grilling` skill's; it is the role's text because a skill run is a
+/// single turn and an interview is not.
+pub fn grill_role() -> Role {
+    Role {
+        name: "grill".into(),
+        description: "Questions a plan's goal until nothing is left open, then proposes a sharper one".into(),
+        kind: "grill".into(),
+        tier: Tier::Heavy,
+        engine: None,
+        fallback_engines: Vec::new(),
+        permissions: Vec::new(),
+        limits: Limits::default(),
+        creates: Vec::new(),
+        instructions: "You interview the owner about a plan's goal until you share one understanding of it; you do not \
+                       plan and you build nothing. Read the goal with `get_plan` and look at the project (your checkout \
+                       is read-only) — finding facts is your job, never the owner's: do not ask what the code or the \
+                       files can tell you. Map the goal as a design tree: every decision branches into the decisions \
+                       that hang off it. Work it in rounds. The frontier is every decision whose prerequisites are \
+                       settled; ask the whole frontier in one round, numbered, each question with your recommended \
+                       answer and why, and wait for the owner's answers before the next round. A question whose answer \
+                       depends on another open one belongs to a later round. Ask in the language the goal is written \
+                       in. Answers reshape the tree: settled decisions unblock the next questions. You are done when \
+                       the frontier is empty — every branch visited, nothing silently assumed — and the owner agrees. \
+                       Then call `propose_goal` once with the sharpened goal: the owner's own aim first, then the \
+                       decisions you settled together, each as a short line, and what was left out on purpose. It is a \
+                       proposal; the owner reads it and decides whether it replaces their goal, and nothing else \
+                       changes."
+            .into(),
+        source: Source::User,
+    }
+}
+
+/// Seeds [`default_role`], [`reviewer_role`], [`planner_role`] and [`grill_role`] where they are missing — never overwrites, like the
 /// bundled skills.
 /// Returns whether it wrote anything.
 ///
@@ -380,7 +415,12 @@ is one concern a single session can finish and a reviewer can judge in one sitti
 /// As [`save_role`].
 pub fn seed_default_roles(dir: &Path) -> Result<bool> {
     let mut wrote = false;
-    for role in [default_role(), reviewer_role(), planner_role()] {
+    for role in [
+        default_role(),
+        reviewer_role(),
+        planner_role(),
+        grill_role(),
+    ] {
         if fs::symlink_metadata(dir.join(&role.name)).is_ok() {
             continue;
         }
@@ -563,6 +603,25 @@ pub(crate) mod tests {
         // A planner of an install that has the other two gets seeded without touching them.
         fs::remove_dir_all(tmp.0.join("planner")).unwrap();
         assert!(seed_default_roles(&tmp.0).unwrap());
+    }
+
+    #[test]
+    fn the_grill_is_seeded_as_a_role_that_interviews_and_proposes_and_picks_its_engine_at_every_start()
+     {
+        let tmp = Tmp::new();
+        assert!(seed_default_roles(&tmp.0).unwrap());
+        let loaded = load_roles(&tmp.0, Source::User).unwrap();
+        let grill = loaded.roles.iter().find(|r| r.name == "grill").unwrap();
+        assert_eq!(grill.kind, "grill");
+        assert_eq!(grill.engine, None);
+        assert!(grill.creates.is_empty() && grill.permissions.is_empty());
+        assert!(
+            grill.instructions.contains("propose_goal") && grill.instructions.contains("frontier")
+        );
+        // An install that has the others gets the grill without touching them.
+        fs::remove_dir_all(tmp.0.join("grill")).unwrap();
+        assert!(seed_default_roles(&tmp.0).unwrap());
+        assert!(!seed_default_roles(&tmp.0).unwrap());
     }
 
     #[test]

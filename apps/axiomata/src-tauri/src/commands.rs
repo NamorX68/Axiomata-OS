@@ -1811,6 +1811,7 @@ pub async fn start_plan_session(
     plan_id: i64,
     project_id: i64,
     engine_id: Option<String>,
+    grill: Option<bool>,
 ) -> Result<axiomata_core::plan_session::PlanSession, String> {
     axiomata_core::plan_session::start_plan_session(
         &state,
@@ -1818,6 +1819,7 @@ pub async fn start_plan_session(
             plan_id,
             project_id,
             engine_id,
+            grill: grill.unwrap_or(false),
         },
     )
     .await
@@ -2007,6 +2009,41 @@ pub async fn redo_card(state: State<'_, CoreState>, card_id: i64) -> Result<Vec<
 pub fn plan_cards_left_for_owner(state: State<'_, CoreState>, id: i64) -> Result<Vec<i64>, String> {
     let db = state.db_lock();
     axiomata_core::card_session::cards_left_for_owner(&db, id).map_err(|err| err.to_string())
+}
+
+/// The sharper goal a grilling session proposed for a plan, if one waits for the owner.
+#[tauri::command]
+pub fn plan_goal_suggestion(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<Option<board::flow::GoalSuggestion>, String> {
+    let db = state.db_lock();
+    board::flow::goal_suggestion(&db, id).map_err(|err| err.to_string())
+}
+
+/// The owner takes the proposed goal over: it becomes the plan's goal and the proposal goes. `at` is the proposal the owner
+/// read; one that changed since is refused.
+#[tauri::command]
+pub fn apply_goal_suggestion(
+    state: State<'_, CoreState>,
+    id: i64,
+    at: String,
+) -> Result<Option<board::Plan>, String> {
+    let config = read_config(&state.config);
+    let mut db = state.db_lock();
+    let applied =
+        board::flow::apply_goal_suggestion(&mut db, id, &at).map_err(|err| err.to_string())?;
+    if let Some(plan) = &applied {
+        board_mirror::after_change(&db, &config, plan.board_id);
+    }
+    Ok(applied)
+}
+
+/// The owner discards the proposed goal.
+#[tauri::command]
+pub fn discard_goal_suggestion(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+    let db = state.db_lock();
+    board::flow::clear_goal_suggestion(&db, id).map_err(|err| err.to_string())
 }
 
 /// The proposals of a plan that a session changed after proposing them, for the planning panel to say so (CP-A9).

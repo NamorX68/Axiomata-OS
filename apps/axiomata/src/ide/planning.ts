@@ -9,7 +9,7 @@ import type { Mode } from "./modes";
 import { GRAPH_PANE, PLAN_PANE, TEAM_PANE, graphTab, planTab, teamTab } from "./paneKinds";
 
 /** The role kinds that do not take cards: a reviewer judges them, a planner makes them. */
-const NOT_ASSIGNABLE = new Set(["review", "plan"]);
+const NOT_ASSIGNABLE = new Set(["review", "plan", "grill"]);
 
 const STATUS_LABEL: Record<PlanStatus, string> = { draft: "Entwurf", approved: "freigegeben", closed: "abgeschlossen" };
 
@@ -61,14 +61,37 @@ export function proposalsOf(cards: BoardCard[], planId: number): BoardCard[] {
   return cardsOfPlan(cards, planId).filter((card) => card.state === "proposed");
 }
 
-/** The session the studio started to plan `planId`, if there is one. */
-export function plannerOf(agents: IdeAgent[], planId: number): IdeAgent | null {
-  return agents.find((agent) => agent.plan_id === planId) ?? null;
+/** Whether the session plays a role of kind `grill`; the role is told by name, and a role this list lacks is a planner. */
+function isGriller(agent: IdeAgent, roles: Pick<Role, "name" | "kind">[]): boolean {
+  return roles.find((role) => role.name === agent.agent_role)?.kind === "grill";
+}
+
+/** The session the studio started to plan `planId` — one that cuts the goal into cards — if there is one. */
+export function plannerOf(agents: IdeAgent[], planId: number, roles: Pick<Role, "name" | "kind">[] = []): IdeAgent | null {
+  return agents.find((agent) => agent.plan_id === planId && !isGriller(agent, roles)) ?? null;
+}
+
+/** The session that grills `planId`'s goal — interviews the owner about it — if there is one. */
+export function grillerOf(agents: IdeAgent[], planId: number, roles: Pick<Role, "name" | "kind">[] = []): IdeAgent | null {
+  return agents.find((agent) => agent.plan_id === planId && isGriller(agent, roles)) ?? null;
 }
 
 /** A planner can be started for a draft that has none. */
-export function canStartPlanner(plan: Pick<BoardPlan, "status" | "id">, agents: IdeAgent[]): boolean {
-  return plan.status === "draft" && plannerOf(agents, plan.id) === null;
+export function canStartPlanner(
+  plan: Pick<BoardPlan, "status" | "id">,
+  agents: IdeAgent[],
+  roles: Pick<Role, "name" | "kind">[] = [],
+): boolean {
+  return plan.status === "draft" && plannerOf(agents, plan.id, roles) === null;
+}
+
+/** A grilling session can be started for a draft that has none. */
+export function canStartGrill(
+  plan: Pick<BoardPlan, "status" | "id">,
+  agents: IdeAgent[],
+  roles: Pick<Role, "name" | "kind">[] = [],
+): boolean {
+  return plan.status === "draft" && grillerOf(agents, plan.id, roles) === null;
 }
 
 /**

@@ -68,7 +68,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
         let role = roster::roles_for_project(&conn, &config, ready.agent.project_id)
             .into_iter()
             .find(|role| role.name == ready.agent.agent_role);
-        let launch = launch_of(&conn, &ready.agent);
+        let launch = launch_of(&conn, &ready.agent).map(|launch| launch.for_role(role.as_ref()));
         (ready, role, launch)
     };
     let roots = paths::ide_locations().channels;
@@ -246,7 +246,10 @@ pub(crate) fn launch_of(
 /// not go on proposing cards into it.
 fn plan_launch(db: &rusqlite::Connection, plan_id: i64) -> Option<agent_entry::PlanLaunch> {
     let plan = crate::board::flow::get_plan(db, plan_id).ok()??;
-    (plan.status == crate::board::PlanStatus::Draft).then_some(agent_entry::PlanLaunch { plan_id })
+    (plan.status == crate::board::PlanStatus::Draft).then_some(agent_entry::PlanLaunch {
+        plan_id,
+        interview: false,
+    })
 }
 
 /// What a session was started for, if the studio started it for a card and that card still wants it: a worker's card
