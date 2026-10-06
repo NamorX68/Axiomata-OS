@@ -1,5 +1,14 @@
 use axiomata_core::routines::SchedulerHandle;
+use std::path::Path;
+use std::sync::OnceLock;
 use tauri::Manager;
+use tracing::Subscriber;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::rolling::{InitError, RollingFileAppender, Rotation};
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::util::SubscriberInitExt;
 
 mod bootstrap;
 mod card_watch;
@@ -15,15 +24,71 @@ mod plan_watch;
 mod tasks;
 mod terminal;
 
+/// File-name prefix of the app log; `tracing-appender` appends the date (`app.log.YYYY-MM-DD`).
+/// Distinct from `runs.log`, so the rotation's clean-up (it matches the prefix plus a dot) never
+/// touches the run log that lives in the same directory.
+const APP_LOG_PREFIX: &str = "app.log";
+
+/// How many daily app-log files are kept; older ones are deleted by the appender on rotation.
+const APP_LOG_MAX_FILES: usize = 7;
+
+/// Keeps the file writer's background thread alive until the process ends: dropping the guard
+/// stops it and loses the lines still queued.
+static APP_LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
+
+/// Builds a `fmt` layer that writes ANSI-free lines to a daily-rotating `app.log.*` file in `dir`
+/// (created if missing), keeping [`APP_LOG_MAX_FILES`] files.
+///
+/// Returns the layer together with the guard of its non-blocking writer.
+///
+/// # Errors
+///
+/// Fails when the directory cannot be created or the log file cannot be opened.
+fn app_log_layer<S>(dir: &Path) -> Result<(Box<dyn Layer<S> + Send + Sync>, WorkerGuard), InitError>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    let appender = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix(APP_LOG_PREFIX)
+        .max_log_files(APP_LOG_MAX_FILES)
+        .build(dir)?;
+    let (writer, guard) = tracing_appender::non_blocking(appender);
+    let layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(writer)
+        .boxed();
+    Ok((layer, guard))
+}
+
 /// Initializes `tracing`'s output so `axiomata_core`'s `tracing::info!`/
 /// `warn!` calls (the routine scheduler's tick/reconcile summaries, in
-/// particular) actually go somewhere — `tracing-subscriber` was a declared
-/// workspace dependency that nothing ever called `.init()` on. Defaults to
-/// `info`; override with `RUST_LOG` (e.g. `RUST_LOG=debug`).
+/// particular) actually go somewhere. Lines go to stderr (`cargo tauri dev`) and
+/// to the daily-rotating `~/.axiomata/logs/app.log.*` — a bundled `.app` has no
+/// terminal. Defaults to `info` for both; override with `RUST_LOG` (e.g.
+/// `RUST_LOG=debug`).
+///
+/// When the log directory is unusable the app still starts, on stderr only.
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    let log_dir = axiomata_core::paths::logs_dir();
+    let (file_layer, file_error) = match app_log_layer(&log_dir) {
+        Ok((layer, guard)) => {
+            // `set` only fails if the guard was stored already; the first one stays alive.
+            let _ = APP_LOG_GUARD.set(guard);
+            (Some(layer), None)
+        }
+        Err(error) => (None, Some(error)),
+    };
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(filter)
+        .init();
+    if let Some(error) = file_error {
+        tracing::warn!(dir = %log_dir.display(), %error, "app log file unavailable, logging to stderr only");
+    }
 }
 
 /// Variables that mark a process as **part of a running Claude Code session**.
@@ -319,4 +384,91 @@ pub fn run() {
             scheduler.shutdown();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tracing_subscriber::Registry;
+
+    /// A fresh directory under the system temp dir; `app_log_layer` must create it itself.
+    fn unique_log_dir() -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("axiomata-app-log-{}-{nanos}", std::process::id()))
+    }
+
+    fn files_in(dir: &Path) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir)
+            .expect("log dir is readable")
+            .map(|entry| entry.expect("dir entry").path())
+            .collect()
+    }
+
+    #[test]
+    fn app_log_layer_writes_a_plain_line_into_a_dated_app_log_file() {
+        let dir = unique_log_dir();
+        let (layer, guard) = app_log_layer::<Registry>(&dir).expect("layer builds");
+        let subscriber = tracing_subscriber::registry().with(layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!("hello from the app log test");
+        });
+        // Dropping the guard flushes the non-blocking writer's queue.
+        drop(guard);
+
+        let files = files_in(&dir);
+        assert_eq!(files.len(), 1, "exactly one log file: {files:?}");
+        let name = files[0]
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("utf-8 name");
+        assert!(name.starts_with("app.log."), "dated name, got {name}");
+
+        let content = std::fs::read_to_string(&files[0]).expect("log file is readable");
+        assert!(
+            content.contains("hello from the app log test"),
+            "line is logged: {content}"
+        );
+        assert!(
+            !content.contains('\u{1b}'),
+            "no ANSI escape sequences: {content:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn app_log_layer_leaves_other_files_in_the_directory_alone() {
+        let dir = unique_log_dir();
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let runs_log = dir.join("runs.log");
+        std::fs::write(&runs_log, "{}\n").expect("seed runs.log");
+
+        let (layer, guard) = app_log_layer::<Registry>(&dir).expect("layer builds");
+        let subscriber = tracing_subscriber::registry().with(layer);
+        tracing::subscriber::with_default(subscriber, || tracing::info!("x"));
+        drop(guard);
+
+        assert_eq!(
+            std::fs::read_to_string(&runs_log).expect("runs.log survives"),
+            "{}\n"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn app_log_layer_fails_instead_of_panicking_when_the_directory_cannot_exist() {
+        // A regular file where the directory should be: `create_dir_all` cannot succeed.
+        let blocker = unique_log_dir();
+        std::fs::write(&blocker, "not a directory").expect("create blocker file");
+
+        let result = app_log_layer::<Registry>(&blocker.join("logs"));
+
+        assert!(result.is_err());
+        std::fs::remove_file(&blocker).expect("clean up");
+    }
 }
