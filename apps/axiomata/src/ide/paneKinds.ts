@@ -48,6 +48,13 @@ export const PLAN_PANE = "plan";
 /** The Flow mode's team pane (A2A CP-A9): what the studio's sessions are doing right now. One per Flow layout. */
 export const TEAM_PANE = "team";
 
+/** The Flow mode's graph of a plan (A2A CP-A10, A6): the cards as nodes, "needs first" as lines. One per Flow layout. */
+export const GRAPH_PANE = "graph";
+
+export function graphTab(): PaneTab {
+  return { id: crypto.randomUUID(), kind: GRAPH_PANE, title: "Flowansicht", config: {} };
+}
+
 export function teamTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: TEAM_PANE, title: "Agents", config: {} };
 }

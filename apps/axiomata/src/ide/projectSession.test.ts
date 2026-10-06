@@ -303,16 +303,16 @@ describe("modes", () => {
     expect(session.switchMode(editor, "agents")).toBe(agents);
   });
 
-  it("shows the Flow's planning and team panels and keeps the Canvas parked while it does", async () => {
+  it("shows the Flow's planning, graph and team panels and keeps the Canvas parked while it does", async () => {
     api.openProject.mockResolvedValue(project(1));
     const agents = (await session.open(1))!;
     const flow = session.switchMode(agents, "flow");
     expect(get(session.session).mode).toBe("flow");
-    expect(allTabs(flow).map((t) => t.kind)).toEqual(["plan", "team"]);
+    expect(allTabs(flow).map((t) => t.kind)).toEqual(["plan", "graph", "team"]);
     expect(get(session.session).parked.agents).toBe(agents);
   });
 
-  it("gives the Flow its planning and team panels back when the stored layout has none", async () => {
+  it("gives the Flow its planning, graph and team panels back when the stored layout has none", async () => {
     const stored = JSON.stringify({
       mode: "flow",
       layouts: {
@@ -322,7 +322,7 @@ describe("modes", () => {
     });
     api.openProject.mockResolvedValue(project(1, { layout_json: stored }));
     const layout = await session.open(1);
-    expect(allTabs(layout!).map((t) => t.kind).sort()).toEqual(["agent", "plan", "team"]);
+    expect(allTabs(layout!).map((t) => t.kind).sort()).toEqual(["agent", "graph", "plan", "team"]);
   });
 
   it("repairs the Flow when it is shown, after the panel was closed in the session", async () => {
@@ -331,7 +331,7 @@ describe("modes", () => {
     const flow = session.switchMode(agents, "flow");
     const closed = allTabs(flow).reduce((acc, t) => closeTab(acc, t.id), flow);
     const canvas = session.switchMode(closed, "agents");
-    expect(allTabs(session.switchMode(canvas, "flow")).map((t) => t.kind)).toEqual(["plan", "team"]);
+    expect(allTabs(session.switchMode(canvas, "flow")).map((t) => t.kind)).toEqual(["plan", "graph", "team"]);
   });
 
   it("closes the panes of ended sessions in the layouts that are not shown", async () => {
@@ -361,7 +361,7 @@ describe("modes", () => {
     expect(get(session.session).mode).toBe("editor");
     // A row from the two-mode time gets the starting Flow.
     expect(allTabs(get(session.session).parked.agents!)).toHaveLength(1);
-    expect(allTabs(get(session.session).parked.flow!).map((t) => t.kind)).toEqual(["plan", "team"]);
+    expect(allTabs(get(session.session).parked.flow!).map((t) => t.kind)).toEqual(["plan", "graph", "team"]);
   });
 });
 

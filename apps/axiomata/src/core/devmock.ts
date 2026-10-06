@@ -520,7 +520,7 @@ let boardPlans: BoardPlan[] = [
   },
 ];
 /** `[card, needs]` pairs. */
-let boardDeps: [number, number][] = [[8, 4]];
+let boardDeps: [number, number][] = [[8, 4], [10, 9], [8, 9]];
 let boardEvents: CardEvent[] = [
   { id: 1, card_id: 9, at: new Date(Date.now() - 3_600_000).toISOString(), actor: "agent:reviewer-1", kind: "returned", text: "Der Test für den leeren Fall fehlt." },
 ];

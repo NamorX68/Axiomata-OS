@@ -144,20 +144,23 @@ describe("where a session's pane belongs", () => {
   });
 });
 
-describe("the Flow's two panels", () => {
-  it("adds the team panel beside planning, once, and brings both back after they were closed", () => {
-    const both = withFlowPanes(emptyLayout());
-    expect(allTabs(both).map((t) => t.kind).sort()).toEqual(["plan", "team"]);
-    // Beside, not behind: two groups, so both are in view.
-    expect(allGroups(both)).toHaveLength(2);
-    expect(withFlowPanes(both)).toBe(both);
-    const closed = allTabs(both).reduce((acc, t) => closeTab(acc, t.id), both);
-    expect(allTabs(withFlowPanes(closed)).map((t) => t.kind).sort()).toEqual(["plan", "team"]);
+describe("the Flow's three panels", () => {
+  it("adds the graph beside planning as a tab and the team panel to its right, once, and brings all back after they were closed", () => {
+    const all = withFlowPanes(emptyLayout());
+    expect(allTabs(all).map((t) => t.kind).sort()).toEqual(["graph", "plan", "team"]);
+    // Planning and the graph share a group; the team panel has one of its own: two groups, both in view.
+    expect(allGroups(all)).toHaveLength(2);
+    const planGroup = allGroups(all).find((g) => g.tabs.some((t) => t.kind === "plan"))!;
+    expect(planGroup.tabs.map((t) => t.kind).sort()).toEqual(["graph", "plan"]);
+    expect(withFlowPanes(all)).toBe(all);
+    const closed = allTabs(all).reduce((acc, t) => closeTab(acc, t.id), all);
+    expect(allTabs(withFlowPanes(closed)).map((t) => t.kind).sort()).toEqual(["graph", "plan", "team"]);
   });
 
-  it("keeps a team panel the owner moved into the planning group", () => {
+  it("keeps panels the owner moved into one group", () => {
     const together = singleGroupLayout([
       { id: "p", kind: "plan", title: "Planung" },
+      { id: "g", kind: "graph", title: "Flowansicht" },
       { id: "t", kind: "team", title: "Agents" },
     ]);
     expect(withFlowPanes(together)).toBe(together);
