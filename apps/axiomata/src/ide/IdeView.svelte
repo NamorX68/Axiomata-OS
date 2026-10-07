@@ -96,6 +96,7 @@
   import { get } from "svelte/store";
   import { agentRequests, takeAgentRequests } from "./agentRequest";
   import { modeRequest } from "./modeRequest";
+  import { projectRequest } from "./projectRequest";
   import { fileHandle, stashHandover } from "./fileHandles";
   import { takeHandoffs, handoffs } from "../fileapp/handoff";
   import { recentFiles, rememberRecent } from "../fileapp/recent";
@@ -687,6 +688,7 @@
     // Hand-overs wait until the project's own layout is in place — it would replace them otherwise.
     let unsubscribeHandoffs = () => {};
     let unsubscribeMode = () => {};
+    let unsubscribeProject = () => {};
     let unsubscribeAgent = () => {};
     // A plan that has had its say ends its planner; the pane that showed it has nothing left to run.
     const unsubscribeClose = on("studio:close-agent-panes", (detail) => {
@@ -710,6 +712,11 @@
         if (!wanted) return;
         modeRequest.set(null);
         switchTo(wanted);
+      });
+      unsubscribeProject = projectRequest.subscribe((wanted) => {
+        if (wanted === null) return;
+        projectRequest.set(null);
+        void openProjectById(wanted);
       });
       unsubscribeAgent = agentRequests.subscribe((waiting) => {
         if (waiting.length > 0) void showRequestedAgents();
@@ -735,6 +742,7 @@
       onDebugTerminal(null);
       unsubscribeHandoffs();
       unsubscribeMode();
+      unsubscribeProject();
       unsubscribeAgent();
       unsubscribeClose();
       unsubscribeReset();

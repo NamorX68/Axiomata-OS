@@ -50,7 +50,12 @@ place, a shell action — without leaving the current view.
 - Tests: prefix beats substring, name hit beats content-only file hit, empty query returns
   the S5 suggestions, cap + grouping, a query matching nothing returns `[]`.
 
-## Checkpoint 2 — `Spotlight.svelte` shell (instant sources)
+## Checkpoint 2 — `Spotlight.svelte` shell (instant sources) — **built 2026-10-07**
+
+Files: `core/spotlightItems.ts` (pure adapters + the `SpotlightAction` payload), `core/spotlightRun.ts` (loads the lists on every open, carries
+an action out), `shell/Spotlight.svelte`, `ide/projectRequest.ts` (a project hit waits there until the Studio is mounted, like `modeRequest`).
+⌘K is only ⌘ on a Mac: Ctrl+K is "kill line" in a shell. Scattered letters match in a title only, never in a description. A card hit opens the
+Kanban on the last board (not yet *at* the card); choosing a skill runs it at once, as in the Second Brain.
 
 - Pill (S4): backdrop (click-to-close), `role="dialog"` + `aria-modal`, focus trapped, one `<input>` autofocused, the
   results `<ul role="listbox">` with `aria-activedescendant` below the pill.
@@ -66,7 +71,12 @@ place, a shell action — without leaving the current view.
   behind `/brain` only.
 - All `--ax-*` tokens; light + dark.
 
-## Checkpoint 3 — async file search
+## Checkpoint 3 — async file search — **built 2026-10-07**
+
+Names come from the workspace graph (`get_workspace_graph`, loaded with the other lists on every open; `search_workspace` is *content only* and
+never found a file by its name — the owner's "ToDo.md" test). The content search runs on top (≥ 2 chars, 180 ms debounce, stale answers
+dropped) and is merged by `withContentHits`; a content-only file shows its matching line as `detail` (displayed, never matched). ⌘Return shows a
+file in the Second Brain. The graph is capped (`truncated`), so a file beyond the cap is found by content only.
 
 - On input (debounced ~180 ms, and only for queries ≥ 2 chars) call
   `search_workspace(query, limit ~30)`; merge the hits through `rankItems` alongside the

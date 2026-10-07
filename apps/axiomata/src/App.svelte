@@ -19,6 +19,7 @@
   import ModulePicker from "./shell/ModulePicker.svelte";
   import SecondBrainView from "./shell/SecondBrainView.svelte";
   import Settings from "./shell/Settings.svelte";
+  import Spotlight from "./shell/Spotlight.svelte";
   import StagingLayer from "./shell/StagingLayer.svelte";
   import Toasts from "./shell/Toasts.svelte";
   import TopBar from "./shell/TopBar.svelte";
@@ -33,9 +34,22 @@
   // wanted at all; `ideOpen` is what it listens to afterwards.
   let ideStarted = $state(false);
   let ideOpen = $state(false);
+  let spotlightOpen = $state(false);
   let brainOpen = $state(false);
   let brainFocus = $state<string | null>(null);
   let brainQuery = $state("");
+
+  /**
+   * ⌘K (Ctrl+K elsewhere than on a Mac) toggles the spotlight from every view. Only ⌘ on a Mac: Ctrl+K is "kill to end
+   * of line" in a shell, and the terminal panes must keep it.
+   */
+  function onWindowKeydown(event: KeyboardEvent): void {
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const modifier = isMac ? event.metaKey : event.ctrlKey;
+    if (!modifier || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
+    event.preventDefault();
+    spotlightOpen = !spotlightOpen;
+  }
 
   onMount(() => {
     const offs = [
@@ -73,13 +87,8 @@
         ideStarted = true;
         ideOpen = true;
       }),
-      // The top-bar search icon → the Second Brain, focused on its search
-      // box (SecondBrainView autofocuses when opened with no query/target).
-      on("shell:search", () => {
-        brainFocus = null;
-        brainQuery = "";
-        brainOpen = true;
-      }),
+      // The top-bar search icon and ⌘K: the spotlight (the Second Brain keeps its own way in: the cloud, `/brain`).
+      on("shell:spotlight", () => (spotlightOpen = !spotlightOpen)),
       // Reuses the Document module's own compose mode instead of a bespoke
       // dialog — same viewer, same Save-picks-the-folder agent flow.
       on("shell:new-note", () => openNewNote()),
@@ -165,11 +174,14 @@
   });
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 <TopBar />
 <IconBar />
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />
 <Settings bind:open={settingsOpen} />
+<Spotlight bind:open={spotlightOpen} />
 {#if brainOpen}
   <SecondBrainView bind:open={brainOpen} focus={brainFocus} initialQuery={brainQuery} />
 {/if}

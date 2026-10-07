@@ -1,6 +1,6 @@
 <!--
   Icon buttons directly under the top bar: Settings, Add module, New note,
-  Search, Theme. Settings / Add / New note / Search only fire a shell-bus
+  Search (the spotlight), Theme. Settings / Add / New note / Search only fire a shell-bus
   event — their dialogs land elsewhere (steps 7, 11, 13; New note opens the
   Document module in compose mode, see `App.svelte`). Theme cycles the
   built-in themes.
@@ -49,7 +49,7 @@
       id: "search",
       label: "Search",
       path: "M11 4a7 7 0 100 14 7 7 0 000-14z M20 20l-4-4",
-      onClick: () => emit("shell:search"),
+      onClick: () => emit("shell:spotlight"),
     },
     {
       id: "theme",

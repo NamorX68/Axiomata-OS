@@ -140,6 +140,12 @@ describe("rankItems", () => {
     expect(titles(rows)).toEqual(["mail", "mail beta", "mail zeta", "mail alpha"]);
   });
 
+  it("does not match scattered letters in a subtitle, only in a title", () => {
+    const description = item("skill", "d", "newsletter", { subtitle: "Summarise the week into a newsletter" });
+    expect(rankItems("kan", { skill: [description] })).toEqual([]);
+    expect(rankItems("nwl", { skill: [item("skill", "n", "newsletter")] })).toHaveLength(1);
+  });
+
   it("matches the keywords too, but below the title", () => {
     const rows = rankItems("cron", {
       routine: [item("routine", "k", "Nightly", { keywords: "cron 0 0 * * *" }), item("routine", "t", "cron check")],

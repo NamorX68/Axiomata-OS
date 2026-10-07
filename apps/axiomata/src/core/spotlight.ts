@@ -18,6 +18,8 @@ export interface SpotlightItem {
   title: string;
   /** Shown under the title and matched too, but weighs less than a title hit. */
   subtitle?: string;
+  /** Shown instead of the subtitle when set, and never matched (the line a content search found a file by). */
+  detail?: string;
   /** Matched like the subtitle, never shown (a skill's description, a card's labels). */
   keywords?: string;
   /**
@@ -98,8 +100,11 @@ export function normalize(text: string): string {
 
 const isWordChar = (char: string): boolean => /[a-z0-9]/.test(char);
 
-/** The score of one already-normalised word `query` against one already-normalised `text`; `null` for no match. */
-function scoreWord(query: string, text: string): number | null {
+/**
+ * The score of one already-normalised word `query` against one already-normalised `text`; `null` for no match. `scattered`
+ * allows the letters to be spread over the text (a title only: in a long text they would match nearly anything).
+ */
+function scoreWord(query: string, text: string, scattered = true): number | null {
   if (text === query) return EXACT;
   if (text.startsWith(query)) return PREFIX;
   let wordStart = -1;
@@ -113,7 +118,7 @@ function scoreWord(query: string, text: string): number | null {
   }
   if (wordStart !== -1) return WORD_START - Math.min(wordStart, POSITION_CAP) / 2;
   if (first !== -1) return SUBSTRING - Math.min(first, POSITION_CAP) / 2;
-  if (query.length < MIN_SUBSEQUENCE_LENGTH) return null;
+  if (!scattered || query.length < MIN_SUBSEQUENCE_LENGTH) return null;
   let at = 0;
   let begin = -1;
   for (const char of query) {
@@ -151,7 +156,8 @@ function scoreItem(query: string, item: SpotlightItem): number | null {
   let total = 0;
   for (const word of words) {
     const inTitle = scoreWord(word, title);
-    const inSecondary = secondary === "" ? null : scoreWord(word, secondary);
+    // Scattered letters in a long description match almost any short word: only text counts there.
+    const inSecondary = secondary === "" ? null : scoreWord(word, secondary, false);
     const best = Math.max(inTitle ?? -1, inSecondary === null ? -1 : inSecondary * SECONDARY_WEIGHT);
     if (best < 0) {
       // Only the full-text search can answer for a word that is in no name: the content it found.
