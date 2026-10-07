@@ -39,7 +39,9 @@ place, a shell action — without leaving the current view.
 
 ## Checkpoint 1 — `core/spotlight.ts` (pure model + tests)
 
-- `type SpotlightItem = { id; kind: "command"|"module"|"skill"|"routine"|"file"; title; subtitle?; hint?; score; run: () => void | Promise<void> }` (the `run` closure is injected by the caller so the pure module never imports the bus / staging).
+- `SpotlightItem = { id; kind; title; subtitle?; keywords?; contentMatches?; payload? }` — **built 2026-10-07**. The item carries an opaque
+  `payload` instead of a `run` closure: CP2 switches on `kind`, so the pure module never imports the bus / staging. Per-kind cap of
+  8 rows (`MAX_PER_KIND`) on top of the 20 in all, so 300 cards cannot push the other groups out.
 - `rankItems(query, sources) → SpotlightItem[]` — the scoring + sort + type-order + cap +
   group boundaries. `sources` is a plain record of the already-fetched raw lists
   (`commands`, `modules`, `skills`, `routines`, `fileHits`), so this is fully unit-testable.
