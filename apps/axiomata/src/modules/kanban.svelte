@@ -664,25 +664,6 @@
     events = await invoke<CardEvent[]>("list_card_events", { cardId: card.id, limit: 30 });
   }
 
-  /** Plans: a draft is approved with one click, which moves its proposals to Offen (a2a.md A17). */
-  let addingPlan = $state(false);
-  let planName = $state("");
-
-  async function createPlan(): Promise<void> {
-    const name = planName.trim();
-    if (!name || boardId === null) return;
-    planName = "";
-    addingPlan = false;
-    await runFlow(
-      invoke("create_board_plan", {
-        boardId,
-        fields: { name, auto_start_max: null, max_cost_usd: null, max_tokens: null },
-      }),
-    );
-  }
-  const approvePlan = (id: number) => runFlow(invoke("approve_board_plan", { id }));
-  const closePlan = (id: number) => runFlow(invoke("close_board_plan", { id }));
-
   function titleOf(id: number): string {
     return $data?.cards.find((c) => c.id === id)?.title ?? "gelöscht";
   }
@@ -1093,7 +1074,6 @@
         onclick={() => boardId !== null && void refreshBoard(boardId)}
       />
       <IconButton icon="columns-3" label="Spalte hinzufügen" onclick={addColumn} />
-      <IconButton icon="plus" label="Plan anlegen" pressed={addingPlan} onclick={() => (addingPlan = !addingPlan)} />
       <IconButton
         icon="settings"
         label="Bretter & Ansicht"
@@ -1107,32 +1087,6 @@
       </div>
     {/if}
 
-    {#if plans.length > 0 || addingPlan}
-      <div class="plans-bar" aria-label="Pläne">
-        {#each plans as plan (plan.id)}
-          <span class="plan" data-status={plan.status}>
-            {planLabel(plan)}
-            {#if plan.status === "draft"}
-              <button type="button" class="ax-btn primary" onclick={() => approvePlan(plan.id)}>Freigeben</button>
-            {/if}
-            {#if plan.status !== "closed"}
-              <button type="button" class="ax-btn" onclick={() => closePlan(plan.id)}>Abschließen</button>
-            {/if}
-          </span>
-        {/each}
-        {#if addingPlan}
-          <form
-            onsubmit={(event) => {
-              event.preventDefault();
-              void createPlan();
-            }}
-          >
-            <!-- svelte-ignore a11y_autofocus -->
-            <input autofocus bind:value={planName} placeholder="Name des Plans, Enter" aria-label="Name des neuen Plans" />
-          </form>
-        {/if}
-      </div>
-    {/if}
     <div class="work">
     <div class="board" style="--min-col: calc({MIN_COL_PX}px * var(--ax-ui-scale))" bind:this={boardEl}>
       {#each grouped as { column, cards } (column.id)}
@@ -2179,36 +2133,5 @@
   .first-board {
     max-width: calc(360px * var(--ax-ui-scale));
     margin: var(--ax-space-5) auto;
-  }
-  .plans-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: 0 var(--ax-space-3) var(--ax-space-2);
-    font-size: var(--ax-font-size-sm);
-  }
-  .plans-bar .plan {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-pill);
-  }
-  .plans-bar .plan[data-status="draft"] {
-    border-color: var(--ax-warning);
-  }
-  .plans-bar .plan[data-status="closed"] {
-    color: var(--ax-text-muted);
-  }
-  .plans-bar input {
-    padding: var(--ax-space-1) var(--ax-space-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    background: var(--ax-surface-2);
-    color: inherit;
-    font: inherit;
-    font-size: var(--ax-font-size-sm);
   }
 </style>
