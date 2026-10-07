@@ -1,0 +1,85 @@
+/*
+ * catppuccin-latte — Catppuccin Latte: soft light, mauve accent. The scheme's own published colours, mapped onto the
+ * app tokens; its syntax palette doubles as the editor theme of the same id (`editor-themes.css`).
+ * Generated once from the palette tables, then kept by hand like every other theme file.
+ *
+ * Scoped to `[data-theme="catppuccin-latte"]`, not `:root[…]` — see `graphite.css` for why.
+ */
+
+[data-theme="catppuccin-latte"] {
+  --ax-color-scheme: light;
+
+  --ax-bg: #e6e9ef;
+  --ax-surface-1: #eff1f5;
+  --ax-surface-2: #f7f8fb;
+  --ax-surface-3: #dce0e8;
+  --ax-overlay: rgba(31, 35, 40, 0.35);
+  --ax-tile-glass-bg: rgba(239, 241, 245, calc(0.62 * var(--ax-tile-glass-opacity)));
+
+  --ax-text: #4c4f69;
+  --ax-text-muted: #6c6f85;
+  --ax-text-invert: #eff1f5;
+
+  --ax-accent: #8839ef;
+  --ax-accent-hover: #7527d6;
+  --ax-accent-muted: rgba(136, 57, 239, 0.15);
+  --ax-success: #40a02b;
+  --ax-warning: #df8e1d;
+  --ax-danger: #d20f39;
+
+  --ax-border: #ccd0da;
+  --ax-border-strong: #bcc0cc;
+  --ax-focus-ring: rgba(136, 57, 239, 0.55);
+
+  --ax-shadow-tile: 0 1px 1px rgba(31, 35, 40, 0.06), 0 6px 18px rgba(31, 35, 40, 0.1);
+  --ax-shadow-pop: 0 16px 44px rgba(31, 35, 40, 0.18);
+  --ax-shadow-drag: 0 20px 52px rgba(31, 35, 40, 0.22);
+
+  --ax-card-bg: var(--ax-surface-2);
+  --ax-card-shadow: 0 1px 1px rgba(31, 35, 40, 0.07), 0 2px 5px rgba(31, 35, 40, 0.06);
+  --ax-card-shadow-raised: 0 1px 2px rgba(31, 35, 40, 0.12), 0 5px 14px rgba(31, 35, 40, 0.12);
+
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.15 0 0 0 0 0.1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  /* Editor: syntax colours, then the editor's own (the same values as the editor theme of this id). */
+  --ax-syntax-keyword: #8839ef;
+  --ax-syntax-string: #40a02b;
+  --ax-syntax-number: #fe640b;
+  --ax-syntax-comment: #9ca0b0;
+  --ax-syntax-function: #1e66f5;
+  --ax-syntax-type: #df8e1d;
+  --ax-syntax-variable: #4c4f69;
+  --ax-syntax-constant: #fe640b;
+  --ax-syntax-property: #7287fd;
+  --ax-syntax-operator: #04a5e5;
+  --ax-syntax-punctuation: #6c6f85;
+  --ax-syntax-tag: #d20f39;
+  --ax-syntax-attribute: #df8e1d;
+  --ax-syntax-heading: #8839ef;
+  --ax-syntax-link: #1e66f5;
+  --ax-syntax-emphasis: #dd7878;
+  --ax-syntax-code: #40a02b;
+  --ax-editor-bg: #eff1f5;
+  --ax-editor-current-line: rgba(76, 79, 105, 0.06);
+  --ax-editor-indent-guide: rgba(76, 79, 105, 0.12);
+  --ax-editor-bracket-1: #df8e1d;
+  --ax-editor-bracket-2: #1e66f5;
+  --ax-editor-bracket-3: #8839ef;
+  --ax-editor-glow: rgba(136, 57, 239, 0.7);
+  --ax-diff-add: rgba(64, 160, 43, 0.12);
+  --ax-diff-remove: rgba(210, 15, 57, 0.12);
+  --ax-diff-add-word: rgba(64, 160, 43, 0.3);
+  --ax-diff-remove-word: rgba(210, 15, 57, 0.3);
+  --ax-diff-hunk: rgba(30, 102, 245, 0.08);
+  --ax-vi-normal: var(--ax-accent);
+  --ax-vi-insert: var(--ax-syntax-function);
+  --ax-vi-visual: var(--ax-syntax-keyword);
+  --ax-vi-replace: var(--ax-danger);
+  --ax-search-match: color-mix(in srgb, var(--ax-accent) 26%, transparent);
+  --ax-search-current: color-mix(in srgb, var(--ax-accent) 62%, transparent);
+  --ax-search-scope: color-mix(in srgb, var(--ax-accent) 9%, transparent);
+  --ax-minimap-slider: color-mix(in srgb, var(--ax-text) 9%, transparent);
+  --ax-minimap-slider-active: color-mix(in srgb, var(--ax-text) 17%, transparent);
+  --ax-sticky-shadow: 0 6px 8px -6px rgba(31, 35, 40, 0.55);
+  --ax-editor-whitespace: color-mix(in srgb, var(--ax-text-muted) 55%, transparent);
+}

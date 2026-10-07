@@ -21,6 +21,11 @@ export const THEMES: readonly ThemeInfo[] = [
   { id: "steampunk", label: "Steampunk", blurb: "Bronze and leather, brass accent" },
   { id: "forest", label: "Forest", blurb: "Pine and moss, autumn-amber accent" },
   { id: "ocean", label: "Ocean", blurb: "Deep-sea navy, coral accent" },
+  { id: "catppuccin-mocha", label: "Catppuccin Mocha", blurb: "Soft dark, mauve accent" },
+  { id: "catppuccin-latte", label: "Catppuccin Latte", blurb: "Soft light, mauve accent" },
+  { id: "tokyo-night", label: "Tokyo Night", blurb: "Deep indigo, blue accent" },
+  { id: "github-dark", label: "GitHub Dark", blurb: "Familiar dark, blue accent" },
+  { id: "github-light", label: "GitHub Light", blurb: "Familiar light, blue accent" },
 ];
 
 export const DEFAULT_THEME = THEMES[0].id;

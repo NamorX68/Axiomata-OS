@@ -17,6 +17,8 @@ export default defineConfig(async () => ({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.ts"],
+    // Vitest blanks every stylesheet by default; the theme tests read the theme files' text (`?raw`).
+    css: { include: [/themes\/.*\.css/] },
     // Vitest loads `.env.local` the same way the dev server does, so a
     // developer's own dev flag would otherwise decide test outcomes — and
     // `VITE_AXIOMATA_DISABLE_AUTO_REFRESH=true` (the flag CLAUDE.md suggests

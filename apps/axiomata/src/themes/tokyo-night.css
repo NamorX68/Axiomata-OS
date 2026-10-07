@@ -1,0 +1,79 @@
+/*
+ * tokyo-night — Tokyo Night: deep indigo, blue accent. The scheme's own published colours, mapped onto the
+ * app tokens; its syntax palette doubles as the editor theme of the same id (`editor-themes.css`).
+ * Generated once from the palette tables, then kept by hand like every other theme file.
+ *
+ * Scoped to `[data-theme="tokyo-night"]`, not `:root[…]` — see `graphite.css` for why.
+ */
+
+[data-theme="tokyo-night"] {
+  --ax-bg: #16161e;
+  --ax-surface-1: #1a1b26;
+  --ax-surface-2: #202335;
+  --ax-surface-3: #292e42;
+  --ax-overlay: rgba(0, 0, 0, 0.66);
+  --ax-tile-glass-bg: rgba(26, 27, 38, calc(0.62 * var(--ax-tile-glass-opacity)));
+
+  --ax-text: #c0caf5;
+  --ax-text-muted: #8089b3;
+  --ax-text-invert: #16161e;
+
+  --ax-accent: #7aa2f7;
+  --ax-accent-hover: #9db8fa;
+  --ax-accent-muted: rgba(122, 162, 247, 0.15);
+  --ax-success: #9ece6a;
+  --ax-warning: #e0af68;
+  --ax-danger: #f7768e;
+
+  --ax-border: #292e42;
+  --ax-border-strong: #3b4261;
+  --ax-focus-ring: rgba(122, 162, 247, 0.55);
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 22px rgba(0, 0, 0, 0.38);
+  --ax-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.58);
+  --ax-shadow-drag: 0 20px 56px rgba(0, 0, 0, 0.62);
+
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='64' viewBox='0 0 56 64'%3E%3Cpath fill='none' stroke='%23ffffff' stroke-opacity='0.03' stroke-width='1' d='M28 0l24 14v28L28 56 4 42V14z M28 56v8'/%3E%3C/svg%3E");
+
+  /* Editor: syntax colours, then the editor's own (the same values as the editor theme of this id). */
+  --ax-syntax-keyword: #bb9af7;
+  --ax-syntax-string: #9ece6a;
+  --ax-syntax-number: #ff9e64;
+  --ax-syntax-comment: #565f89;
+  --ax-syntax-function: #7aa2f7;
+  --ax-syntax-type: #2ac3de;
+  --ax-syntax-variable: #c0caf5;
+  --ax-syntax-constant: #ff9e64;
+  --ax-syntax-property: #7dcfff;
+  --ax-syntax-operator: #89ddff;
+  --ax-syntax-punctuation: #8089b3;
+  --ax-syntax-tag: #f7768e;
+  --ax-syntax-attribute: #e0af68;
+  --ax-syntax-heading: #7aa2f7;
+  --ax-syntax-link: #7dcfff;
+  --ax-syntax-emphasis: #c0caf5;
+  --ax-syntax-code: #9ece6a;
+  --ax-editor-bg: #1a1b26;
+  --ax-editor-current-line: rgba(192, 202, 245, 0.05);
+  --ax-editor-indent-guide: rgba(192, 202, 245, 0.08);
+  --ax-editor-bracket-1: #e0af68;
+  --ax-editor-bracket-2: #7aa2f7;
+  --ax-editor-bracket-3: #bb9af7;
+  --ax-editor-glow: rgba(122, 162, 247, 0.7);
+  --ax-diff-add: rgba(158, 206, 106, 0.12);
+  --ax-diff-remove: rgba(247, 118, 142, 0.12);
+  --ax-diff-add-word: rgba(158, 206, 106, 0.3);
+  --ax-diff-remove-word: rgba(247, 118, 142, 0.3);
+  --ax-diff-hunk: rgba(122, 162, 247, 0.08);
+  --ax-vi-normal: var(--ax-accent);
+  --ax-vi-insert: var(--ax-syntax-function);
+  --ax-vi-visual: var(--ax-syntax-keyword);
+  --ax-vi-replace: var(--ax-danger);
+  --ax-search-match: color-mix(in srgb, var(--ax-accent) 26%, transparent);
+  --ax-search-current: color-mix(in srgb, var(--ax-accent) 62%, transparent);
+  --ax-search-scope: color-mix(in srgb, var(--ax-accent) 9%, transparent);
+  --ax-minimap-slider: color-mix(in srgb, var(--ax-text) 9%, transparent);
+  --ax-minimap-slider-active: color-mix(in srgb, var(--ax-text) 17%, transparent);
+  --ax-sticky-shadow: 0 6px 8px -6px rgba(0, 0, 0, 0.55);
+  --ax-editor-whitespace: color-mix(in srgb, var(--ax-text-muted) 55%, transparent);
+}

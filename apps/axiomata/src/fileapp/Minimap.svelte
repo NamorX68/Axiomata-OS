@@ -268,7 +268,7 @@
     position: relative;
     width: 100%;
     height: 100%;
-    background: var(--ax-surface-1);
+    background: var(--ax-editor-bg);
     border-left: 1px solid var(--ax-border);
   }
 

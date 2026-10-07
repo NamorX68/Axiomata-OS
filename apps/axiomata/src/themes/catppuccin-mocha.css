@@ -1,0 +1,79 @@
+/*
+ * catppuccin-mocha — Catppuccin Mocha: soft dark, mauve accent. The scheme's own published colours, mapped onto the
+ * app tokens; its syntax palette doubles as the editor theme of the same id (`editor-themes.css`).
+ * Generated once from the palette tables, then kept by hand like every other theme file.
+ *
+ * Scoped to `[data-theme="catppuccin-mocha"]`, not `:root[…]` — see `graphite.css` for why.
+ */
+
+[data-theme="catppuccin-mocha"] {
+  --ax-bg: #181825;
+  --ax-surface-1: #1e1e2e;
+  --ax-surface-2: #242438;
+  --ax-surface-3: #313244;
+  --ax-overlay: rgba(0, 0, 0, 0.66);
+  --ax-tile-glass-bg: rgba(30, 30, 46, calc(0.62 * var(--ax-tile-glass-opacity)));
+
+  --ax-text: #cdd6f4;
+  --ax-text-muted: #9399b2;
+  --ax-text-invert: #181825;
+
+  --ax-accent: #cba6f7;
+  --ax-accent-hover: #d7bbfa;
+  --ax-accent-muted: rgba(203, 166, 247, 0.15);
+  --ax-success: #a6e3a1;
+  --ax-warning: #f9e2af;
+  --ax-danger: #f38ba8;
+
+  --ax-border: #313244;
+  --ax-border-strong: #45475a;
+  --ax-focus-ring: rgba(203, 166, 247, 0.55);
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 22px rgba(0, 0, 0, 0.38);
+  --ax-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.58);
+  --ax-shadow-drag: 0 20px 56px rgba(0, 0, 0, 0.62);
+
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='64' viewBox='0 0 56 64'%3E%3Cpath fill='none' stroke='%23ffffff' stroke-opacity='0.03' stroke-width='1' d='M28 0l24 14v28L28 56 4 42V14z M28 56v8'/%3E%3C/svg%3E");
+
+  /* Editor: syntax colours, then the editor's own (the same values as the editor theme of this id). */
+  --ax-syntax-keyword: #cba6f7;
+  --ax-syntax-string: #a6e3a1;
+  --ax-syntax-number: #fab387;
+  --ax-syntax-comment: #6c7086;
+  --ax-syntax-function: #89b4fa;
+  --ax-syntax-type: #f9e2af;
+  --ax-syntax-variable: #cdd6f4;
+  --ax-syntax-constant: #fab387;
+  --ax-syntax-property: #b4befe;
+  --ax-syntax-operator: #89dceb;
+  --ax-syntax-punctuation: #9399b2;
+  --ax-syntax-tag: #f38ba8;
+  --ax-syntax-attribute: #f9e2af;
+  --ax-syntax-heading: #cba6f7;
+  --ax-syntax-link: #89b4fa;
+  --ax-syntax-emphasis: #f2cdcd;
+  --ax-syntax-code: #a6e3a1;
+  --ax-editor-bg: #1e1e2e;
+  --ax-editor-current-line: rgba(205, 214, 244, 0.045);
+  --ax-editor-indent-guide: rgba(205, 214, 244, 0.08);
+  --ax-editor-bracket-1: #f9e2af;
+  --ax-editor-bracket-2: #89b4fa;
+  --ax-editor-bracket-3: #cba6f7;
+  --ax-editor-glow: rgba(203, 166, 247, 0.7);
+  --ax-diff-add: rgba(166, 227, 161, 0.12);
+  --ax-diff-remove: rgba(243, 139, 168, 0.12);
+  --ax-diff-add-word: rgba(166, 227, 161, 0.3);
+  --ax-diff-remove-word: rgba(243, 139, 168, 0.3);
+  --ax-diff-hunk: rgba(137, 180, 250, 0.08);
+  --ax-vi-normal: var(--ax-accent);
+  --ax-vi-insert: var(--ax-syntax-function);
+  --ax-vi-visual: var(--ax-syntax-keyword);
+  --ax-vi-replace: var(--ax-danger);
+  --ax-search-match: color-mix(in srgb, var(--ax-accent) 26%, transparent);
+  --ax-search-current: color-mix(in srgb, var(--ax-accent) 62%, transparent);
+  --ax-search-scope: color-mix(in srgb, var(--ax-accent) 9%, transparent);
+  --ax-minimap-slider: color-mix(in srgb, var(--ax-text) 9%, transparent);
+  --ax-minimap-slider-active: color-mix(in srgb, var(--ax-text) 17%, transparent);
+  --ax-sticky-shadow: 0 6px 8px -6px rgba(0, 0, 0, 0.55);
+  --ax-editor-whitespace: color-mix(in srgb, var(--ax-text-muted) 55%, transparent);
+}

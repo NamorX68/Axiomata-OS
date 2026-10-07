@@ -11,6 +11,13 @@ import "./themes/paper.css";
 import "./themes/steampunk.css";
 import "./themes/forest.css";
 import "./themes/ocean.css";
+import "./themes/catppuccin-mocha.css";
+import "./themes/catppuccin-latte.css";
+import "./themes/tokyo-night.css";
+import "./themes/github-dark.css";
+import "./themes/github-light.css";
+// After every app theme: an editor theme overrides the editor tokens at equal specificity.
+import "./themes/editor-themes.css";
 import "./styles.css";
 import "./core/markdown-syntax.css";
 import "./core/markdown-prose.css";
@@ -96,6 +103,8 @@ import "./modules/terminal-nerd-fonts.css";
 
 import App from "./App.svelte";
 import { startAgentBridge } from "./core/agent-bridge";
+import { applyEditorTheme } from "./core/editorThemes";
+import { editorSettings, ensureEditorSettingsLoaded } from "./fileapp/editorSettings";
 import { loadCustomTheme } from "./core/custom-theme";
 import { initPersistence } from "./core/persist";
 import { DEFAULT_THEME, applyTheme } from "./core/themes";
@@ -108,6 +117,9 @@ applyTheme(DEFAULT_THEME);
 // The UI scale for the window's display (LK0, K9), before the first paint settles;
 // the saved "UI size" (`initPersistence`) may override it a moment later.
 startUiScale();
+// The editor's own colour theme follows its setting from the first paint; the file is read once at start.
+editorSettings.subscribe((settings) => applyEditorTheme(settings.editorTheme));
+void ensureEditorSettingsLoaded();
 
 registerBuiltins();
 

@@ -22,6 +22,7 @@
   import { ensureInstalledFonts, installedFonts } from "../core/installedFonts";
   import { DEFAULT_FONT_FAMILY, drawnFamily, EDITOR_FONTS, nearestWeight, realWeights, weightName } from "./fonts";
   import { highlightFor } from "./highlighting";
+  import { EDITOR_THEMES, FOLLOW_APP_THEME } from "../core/editorThemes";
   import { FILE_ICON_STYLE_NAMES, FILE_ICON_STYLES, type FileIconStyle } from "../core/fileIcons";
   import type { SurfaceSettings } from "./surfaceSettings";
 
@@ -295,6 +296,15 @@
         >
           {#each CURSOR as option (option.value)}
             <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        <span>Editor theme</span>
+        <select value={s.editorTheme} onchange={(e) => updateEditorSettings({ editorTheme: e.currentTarget.value })}>
+          <option value={FOLLOW_APP_THEME}>Follow the app theme</option>
+          {#each EDITOR_THEMES as theme (theme.id)}
+            <option value={theme.id}>{theme.label}{theme.light ? " (light)" : ""}</option>
           {/each}
         </select>
       </label>

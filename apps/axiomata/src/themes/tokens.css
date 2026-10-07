@@ -208,6 +208,9 @@
   --ax-syntax-link: #7cb8ff;
   --ax-syntax-emphasis: #f2c79c;
   --ax-syntax-code: #9ad48a;
+  /* The editor surface's own background and text: the app's, unless an editor theme (`editor-themes.css`) sets them. */
+  --ax-editor-bg: var(--ax-surface-1);
+  --ax-editor-fg: var(--ax-text);
   --ax-editor-current-line: rgba(255, 255, 255, 0.035);
   --ax-editor-indent-guide: rgba(255, 255, 255, 0.07);
   --ax-editor-bracket-1: #ffb86b;

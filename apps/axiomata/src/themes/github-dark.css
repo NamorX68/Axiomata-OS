@@ -1,0 +1,79 @@
+/*
+ * github-dark — GitHub Dark: familiar dark, blue accent. The scheme's own published colours, mapped onto the
+ * app tokens; its syntax palette doubles as the editor theme of the same id (`editor-themes.css`).
+ * Generated once from the palette tables, then kept by hand like every other theme file.
+ *
+ * Scoped to `[data-theme="github-dark"]`, not `:root[…]` — see `graphite.css` for why.
+ */
+
+[data-theme="github-dark"] {
+  --ax-bg: #010409;
+  --ax-surface-1: #0d1117;
+  --ax-surface-2: #161b22;
+  --ax-surface-3: #21262d;
+  --ax-overlay: rgba(0, 0, 0, 0.66);
+  --ax-tile-glass-bg: rgba(13, 17, 23, calc(0.62 * var(--ax-tile-glass-opacity)));
+
+  --ax-text: #e6edf3;
+  --ax-text-muted: #8b949e;
+  --ax-text-invert: #010409;
+
+  --ax-accent: #58a6ff;
+  --ax-accent-hover: #79c0ff;
+  --ax-accent-muted: rgba(88, 166, 255, 0.15);
+  --ax-success: #3fb950;
+  --ax-warning: #d29922;
+  --ax-danger: #f85149;
+
+  --ax-border: #30363d;
+  --ax-border-strong: #484f58;
+  --ax-focus-ring: rgba(88, 166, 255, 0.55);
+
+  --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.45), 0 8px 22px rgba(0, 0, 0, 0.38);
+  --ax-shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.58);
+  --ax-shadow-drag: 0 20px 56px rgba(0, 0, 0, 0.62);
+
+  --ax-texture-url: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='64' viewBox='0 0 56 64'%3E%3Cpath fill='none' stroke='%23ffffff' stroke-opacity='0.03' stroke-width='1' d='M28 0l24 14v28L28 56 4 42V14z M28 56v8'/%3E%3C/svg%3E");
+
+  /* Editor: syntax colours, then the editor's own (the same values as the editor theme of this id). */
+  --ax-syntax-keyword: #ff7b72;
+  --ax-syntax-string: #a5d6ff;
+  --ax-syntax-number: #79c0ff;
+  --ax-syntax-comment: #8b949e;
+  --ax-syntax-function: #d2a8ff;
+  --ax-syntax-type: #ffa657;
+  --ax-syntax-variable: #e6edf3;
+  --ax-syntax-constant: #79c0ff;
+  --ax-syntax-property: #79c0ff;
+  --ax-syntax-operator: #ff7b72;
+  --ax-syntax-punctuation: #8b949e;
+  --ax-syntax-tag: #7ee787;
+  --ax-syntax-attribute: #79c0ff;
+  --ax-syntax-heading: #79c0ff;
+  --ax-syntax-link: #58a6ff;
+  --ax-syntax-emphasis: #e6edf3;
+  --ax-syntax-code: #a5d6ff;
+  --ax-editor-bg: #0d1117;
+  --ax-editor-current-line: rgba(177, 186, 196, 0.07);
+  --ax-editor-indent-guide: rgba(177, 186, 196, 0.1);
+  --ax-editor-bracket-1: #e3b341;
+  --ax-editor-bracket-2: #58a6ff;
+  --ax-editor-bracket-3: #d2a8ff;
+  --ax-editor-glow: rgba(88, 166, 255, 0.7);
+  --ax-diff-add: rgba(63, 185, 80, 0.12);
+  --ax-diff-remove: rgba(248, 81, 73, 0.12);
+  --ax-diff-add-word: rgba(63, 185, 80, 0.3);
+  --ax-diff-remove-word: rgba(248, 81, 73, 0.3);
+  --ax-diff-hunk: rgba(210, 168, 255, 0.08);
+  --ax-vi-normal: var(--ax-accent);
+  --ax-vi-insert: var(--ax-syntax-function);
+  --ax-vi-visual: var(--ax-syntax-keyword);
+  --ax-vi-replace: var(--ax-danger);
+  --ax-search-match: color-mix(in srgb, var(--ax-accent) 26%, transparent);
+  --ax-search-current: color-mix(in srgb, var(--ax-accent) 62%, transparent);
+  --ax-search-scope: color-mix(in srgb, var(--ax-accent) 9%, transparent);
+  --ax-minimap-slider: color-mix(in srgb, var(--ax-text) 9%, transparent);
+  --ax-minimap-slider-active: color-mix(in srgb, var(--ax-text) 17%, transparent);
+  --ax-sticky-shadow: 0 6px 8px -6px rgba(0, 0, 0, 0.55);
+  --ax-editor-whitespace: color-mix(in srgb, var(--ax-text-muted) 55%, transparent);
+}

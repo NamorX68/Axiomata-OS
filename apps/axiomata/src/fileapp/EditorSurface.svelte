@@ -1985,8 +1985,8 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
-    color: var(--ax-text);
-    background: var(--ax-surface-1);
+    color: var(--ax-editor-fg);
+    background: var(--ax-editor-bg);
     line-height: var(--row);
   }
 
@@ -2019,7 +2019,7 @@
     height: 100%;
     float: left;
     z-index: 2;
-    background: var(--ax-surface-1);
+    background: var(--ax-editor-bg);
     cursor: default;
   }
 
@@ -2524,7 +2524,7 @@
     right: var(--minimap-w);
     z-index: 3;
     overflow: hidden;
-    background: var(--ax-surface-1);
+    background: var(--ax-editor-bg);
     box-shadow: var(--ax-sticky-shadow);
   }
 
@@ -2535,7 +2535,7 @@
     height: var(--row);
     padding: 0;
     border: 0;
-    background: var(--ax-surface-1);
+    background: var(--ax-editor-bg);
     color: var(--ax-text);
     font: inherit;
     line-height: var(--row);

@@ -16,6 +16,7 @@ import type { LineNumberMode } from "../editor/gutter";
 import { toast } from "../core/toast";
 import { usableFamilyName } from "../core/installedFonts";
 import { FILE_ICON_STYLES, type FileIconStyle } from "../core/fileIcons";
+import { editorThemeOr, FOLLOW_APP_THEME } from "../core/editorThemes";
 
 export type EditorMode = "normal" | "vi";
 export type Autosave = "off" | "delay" | "leave";
@@ -74,6 +75,8 @@ export interface EditorSettings {
   tabColors: boolean;
   /** editor-look K5: the file tree's icons — Catppuccin, Git (Octicons), JetBrains, monochrome or none. */
   fileIcons: FileIconStyle;
+  /** `"follow"` (the app theme's editor colours) or the id of an editor theme (`core/editorThemes.ts`). */
+  editorTheme: string;
 }
 
 /** F12's defaults, confirmed by the owner. */
@@ -106,6 +109,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   formatOnSave: true,
   tabColors: true,
   fileIcons: "catppuccin",
+  editorTheme: FOLLOW_APP_THEME,
   formatOnSaveExcept: [],
 };
 
@@ -200,6 +204,7 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     formatOnSave: bool(r.formatOnSave, d.formatOnSave),
     tabColors: bool(r.tabColors, d.tabColors),
     fileIcons: pick(r.fileIcons, FILE_ICON_STYLES, d.fileIcons),
+    editorTheme: editorThemeOr(r.editorTheme),
     formatOnSaveExcept: languageList(r.formatOnSaveExcept),
   };
 }
