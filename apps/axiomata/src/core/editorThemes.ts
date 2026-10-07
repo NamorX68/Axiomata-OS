@@ -15,7 +15,10 @@ export interface EditorThemeInfo {
 /** Every id has a `[data-editor-theme="…"]` block in `themes/editor-themes.css` (checked by `editorThemes.test.ts`). */
 export const EDITOR_THEMES: readonly EditorThemeInfo[] = [
   { id: "catppuccin-mocha", label: "Catppuccin Mocha", light: false },
+  { id: "catppuccin-macchiato", label: "Catppuccin Macchiato", light: false },
+  { id: "catppuccin-frappe", label: "Catppuccin Frappé", light: false },
   { id: "catppuccin-latte", label: "Catppuccin Latte", light: true },
+  { id: "catppuccin-espresso", label: "Catppuccin Espresso", light: false },
   { id: "tokyo-night", label: "Tokyo Night", light: false },
   { id: "github-dark", label: "GitHub Dark", light: false },
   { id: "github-light", label: "GitHub Light", light: true },

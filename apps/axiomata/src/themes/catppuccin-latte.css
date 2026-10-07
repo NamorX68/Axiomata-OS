@@ -1,6 +1,6 @@
 /*
  * catppuccin-latte — Catppuccin Latte: soft light, mauve accent. The scheme's own published colours, mapped onto the
- * app tokens; its syntax palette doubles as the editor theme of the same id (`editor-themes.css`).
+ * app tokens (source: https://github.com/catppuccin/palette (palette.json)); its syntax palette doubles as the editor theme of the same id (`editor-themes.css`).
  * Generated once from the palette tables, then kept by hand like every other theme file.
  *
  * Scoped to `[data-theme="catppuccin-latte"]`, not `:root[…]` — see `graphite.css` for why.
@@ -11,17 +11,17 @@
 
   --ax-bg: #e6e9ef;
   --ax-surface-1: #eff1f5;
-  --ax-surface-2: #f7f8fb;
-  --ax-surface-3: #dce0e8;
+  --ax-surface-2: color-mix(in srgb, #eff1f5 65%, white);
+  --ax-surface-3: #ccd0da;
   --ax-overlay: rgba(31, 35, 40, 0.35);
   --ax-tile-glass-bg: rgba(239, 241, 245, calc(0.62 * var(--ax-tile-glass-opacity)));
 
   --ax-text: #4c4f69;
-  --ax-text-muted: #6c6f85;
-  --ax-text-invert: #eff1f5;
+  --ax-text-muted: #5c5f77;
+  --ax-text-invert: #ffffff;
 
   --ax-accent: #8839ef;
-  --ax-accent-hover: #7527d6;
+  --ax-accent-hover: color-mix(in srgb, var(--ax-accent) 78%, black);
   --ax-accent-muted: rgba(136, 57, 239, 0.15);
   --ax-success: #40a02b;
   --ax-warning: #df8e1d;
@@ -52,16 +52,16 @@
   --ax-syntax-constant: #fe640b;
   --ax-syntax-property: #7287fd;
   --ax-syntax-operator: #04a5e5;
-  --ax-syntax-punctuation: #6c6f85;
+  --ax-syntax-punctuation: #7c7f93;
   --ax-syntax-tag: #d20f39;
   --ax-syntax-attribute: #df8e1d;
   --ax-syntax-heading: #8839ef;
   --ax-syntax-link: #1e66f5;
-  --ax-syntax-emphasis: #dd7878;
+  --ax-syntax-emphasis: #e64553;
   --ax-syntax-code: #40a02b;
   --ax-editor-bg: #eff1f5;
-  --ax-editor-current-line: rgba(76, 79, 105, 0.06);
-  --ax-editor-indent-guide: rgba(76, 79, 105, 0.12);
+  --ax-editor-current-line: color-mix(in srgb, #4c4f69 6%, transparent);
+  --ax-editor-indent-guide: color-mix(in srgb, #4c4f69 10%, transparent);
   --ax-editor-bracket-1: #df8e1d;
   --ax-editor-bracket-2: #1e66f5;
   --ax-editor-bracket-3: #8839ef;
