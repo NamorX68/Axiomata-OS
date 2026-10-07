@@ -4,6 +4,7 @@
  */
 
 import { invokeBackend as invoke } from "../core/backend";
+import { emit } from "../core/bus";
 import { openStaged } from "../core/staging";
 import { toast } from "../core/toast";
 import { lastBoard } from "./kanbanPrefs";
@@ -33,8 +34,15 @@ export function boardPathPatch(config: Record<string, unknown>, boardId: number 
     : {};
 }
 
-/** Opens the Kanban panel on the right board. */
-export async function openKanban(): Promise<void> {
+/** The bus event that asks an already open board panel to show a card in its side panel. */
+export const KANBAN_SHOW_CARD = "kanban:show-card";
+
+/**
+ * Opens the Kanban panel on the right board — the last one, or `target.boardId` — and, with `target.cardId`, shows that card
+ * in its side panel (the spotlight's card hits). A panel opened just now reads the card from its config; one that was
+ * already open is told by the bus.
+ */
+export async function openKanban(target: { boardId?: number; cardId?: number } = {}): Promise<void> {
   let boards: { id: number }[];
   try {
     boards = await invoke<{ id: number }[]>("list_boards");
@@ -43,12 +51,14 @@ export async function openKanban(): Promise<void> {
     toast(`Kanban konnte die Bretter nicht laden: ${String(err)}`, "warning");
     return;
   }
-  const boardId = boardToOpen(boards, lastBoard());
+  const boardId = target.boardId ?? boardToOpen(boards, lastBoard());
   openStaged("kanban", {
     // One panel per board (a second click raises it); with no board at all, one panel to create the first in.
     path: boardId === null ? "board:none" : `board:${boardId}`,
     ...(boardId === null ? {} : { boardId }),
+    ...(target.cardId === undefined ? {} : { focusCard: target.cardId }),
     sizeKey: KANBAN_BOARD_SIZE_KEY,
     panelSize: KANBAN_BOARD_SIZE,
   });
+  if (target.cardId !== undefined) emit(KANBAN_SHOW_CARD, { cardId: target.cardId });
 }

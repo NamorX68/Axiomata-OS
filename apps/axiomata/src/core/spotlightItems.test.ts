@@ -50,6 +50,7 @@ describe("spotlight items", () => {
     const cards = [{ id: 57, board_id: 1, title: "Tools einklappbar", labels: ["ui"] }] as BoardCard[];
     const items = cardItems(cards, new Map([[1, "Axiomata-OS"]]));
     expect(items[0].subtitle).toBe("#57 · Axiomata-OS");
+    expect(items[0].payload).toEqual({ type: "kanban", boardId: 1, cardId: 57 });
     expect(rankItems("#57", { card: items })).toHaveLength(1);
     expect(rankItems("ui", { card: items })).toHaveLength(1);
   });

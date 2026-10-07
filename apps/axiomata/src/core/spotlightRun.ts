@@ -134,7 +134,7 @@ export async function runSpotlightAction(action: SpotlightAction, secondary = fa
       showRoutines();
       return;
     case "kanban":
-      await openKanban();
+      await openKanban({ boardId: action.boardId, cardId: action.cardId });
       return;
     case "studio":
       if (action.projectId !== undefined) requestProject(action.projectId);

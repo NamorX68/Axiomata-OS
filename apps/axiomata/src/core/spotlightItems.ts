@@ -13,7 +13,7 @@ export type SpotlightAction =
   | { type: "module"; moduleType: string }
   | { type: "skill"; name: string }
   | { type: "routines" }
-  | { type: "kanban" }
+  | { type: "kanban"; boardId?: number; cardId?: number }
   | { type: "file"; path: string }
   | { type: "studio"; mode?: "editor" | "agents" | "flow"; projectId?: number };
 
@@ -84,7 +84,7 @@ export function routineItems(routines: Routine[]): SpotlightItem[] {
 /** Cards of the boards, `boardNames` naming the board each one is on. Title and `#id` are matched; labels as keywords. */
 export function cardItems(cards: BoardCard[], boardNames: Map<number, string>): SpotlightItem[] {
   return cards.map((card) =>
-    item("card", String(card.id), card.title, { type: "kanban" }, {
+    item("card", String(card.id), card.title, { type: "kanban", boardId: card.board_id, cardId: card.id }, {
       subtitle: `#${card.id} · ${boardNames.get(card.board_id) ?? "Brett"}`,
       keywords: [`#${card.id}`, ...card.labels].join(" "),
     }),

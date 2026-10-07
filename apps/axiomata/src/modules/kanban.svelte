@@ -21,6 +21,7 @@
    * labels carry colour. Nothing here is framed — the board is frameless,
    * and a column drawn with a border would fight that.
    */
+  import { get } from "svelte/store";
   import { SvelteSet } from "svelte/reactivity";
 
   import { draggable, type DragDelta, type DragPoint } from "../canvas/drag";
@@ -60,7 +61,8 @@
   import { closeStaged, staged } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import { cardStripes, lastBoard, rememberLastBoard } from "./kanbanPrefs";
-  import { boardPathPatch } from "./kanbanApp";
+  import { boardPathPatch, KANBAN_SHOW_CARD } from "./kanbanApp";
+  import { on } from "../core/bus";
   import KanbanBoards from "./KanbanBoards.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -169,7 +171,10 @@
   const allLabels = $derived($data ? collectLabels($data.cards) : []);
   const boardEmpty = $derived($data !== null && $data.cards.length === 0);
   /** The card in the large board's side panel (editor-look B4), if one is open. */
-  let sideCardId = $state<number | null>(null);
+  let sideCardId = $state<number | null>(
+    // Opened by the spotlight on a card: shown at once (`kanbanApp.openKanban`).
+    typeof get(config).focusCard === "number" ? (get(config).focusCard as number) : null,
+  );
   /** The card the detail shows: a stand-alone card panel's, else the side panel's. */
   const shownCardId = $derived(cardId ?? sideCardId);
   const detail = $derived<BoardCard | null>(
@@ -587,11 +592,17 @@
   /** Role names for the suggestions of the "Rolle" field (a2a.md: the card names a role, the catalog lives in the Studio). */
   let roleNames = $state<string[]>([]);
   onMount(() => {
+    // The spotlight opened this panel again for a card: show it.
+    const stopShowCard = on(KANBAN_SHOW_CARD, (detail) => {
+      const wanted = (detail as { cardId?: number } | undefined)?.cardId;
+      if (typeof wanted === "number") sideCardId = wanted;
+    });
     listRoles()
       .then((loaded) => (roleNames = loaded.roles.map((role) => role.name)))
       .catch(() => {
         // Suggestions are a convenience; the field works without them.
       });
+    return stopShowCard;
   });
 
   /** The history of the card in the detail. Re-read when the card changes, which includes every flow step. */

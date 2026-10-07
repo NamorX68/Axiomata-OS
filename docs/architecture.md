@@ -468,10 +468,20 @@ to stderr).
 Svelte 5 + Vite + TS: `core/` (stores, registry, lifecycle, persist, commands, chat, staging,
 agent-bridge, backend types + `devmock` for browser-only development), `canvas/` (Canvas,
 Tile, drag/resize actions, snap physics), `shell/` (TopBar, IconBar, ModulePicker, Settings,
-AssistantBar, ChatPanel, StagingLayer, Toasts, SecondBrainView), `modules/` (one `.svelte` +
+AssistantBar, ChatPanel, StagingLayer, Toasts, SecondBrainView, Spotlight), `modules/` (one `.svelte` +
 optional settings face per module type, registered in `modules/index.ts`), `themes/`
 (`tokens.css` + one file per theme), `graph/` (the particle-graph model/layout/render, shared
 between the dashboard-centre background and the full-screen Second Brain view). Details in §5.
+
+**Spotlight (⌘K, built 2026-10-07, `docs/plans/spotlight-search.md`).** One search for the whole app: a pill in the middle of the screen
+(`shell/Spotlight.svelte`), opened by ⌘K from every view (only ⌘ on a Mac — Ctrl+K is "kill line" in a shell) and by the top-bar 🔍.
+Three layers keep the logic testable: `core/spotlight.ts` ranks (pure: tiers exact > prefix > word start > substring > scattered
+letters, scattered only in titles; groups in a fixed order; 20 rows, 8 per kind), `core/spotlightItems.ts` turns skills, routines,
+modules, cards, plans, projects, files and the shell's own actions into items whose payload is a `SpotlightAction` (data, never a
+closure), `core/spotlightRun.ts` loads the lists on every open and carries an action out. File *names* come from the workspace graph
+(`search_workspace` searches contents only); the content search runs on top, debounced. ↑/↓ only select; Return or a double click
+runs, ⌘Return shows a file in the Second Brain. A project hit reaches the Studio through `ide/projectRequest.ts`, a card hit opens
+the Kanban on its board with the card in the side panel (`kanbanApp.openKanban({ boardId, cardId })`).
 
 ## 4. Two separate data locations
 

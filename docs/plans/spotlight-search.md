@@ -87,7 +87,8 @@ file in the Second Brain. The graph is capped (`truncated`), so a file beyond th
 - `devmock.ts` already answers `search_workspace` from its fixture `files` map — nothing to
   add.
 
-## Checkpoint 4 — polish, a11y, docs
+## Checkpoint 4 — polish, a11y, docs — **built 2026-10-07** (focus is given back on close, Esc does not leak to the chain behind it, ⌘K toggles;
+card hits open the Kanban *at* the card; `docs/architecture.md` §3 describes the spotlight)
 
 - Focus returns to the previously-focused element on close. `Esc` doesn't leak to the
   Escape chain (StagingLayer / SB) — consume it.
