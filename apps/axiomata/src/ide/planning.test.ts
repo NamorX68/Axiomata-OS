@@ -180,8 +180,8 @@ describe("the Flow's three panels", () => {
 
   it("pins panels an older layout had and leaves them where the owner put them", () => {
     const together = singleGroupLayout([
-      { id: "p", kind: "plan", title: "Planung" },
-      { id: "g", kind: "graph", title: "Flowansicht" },
+      { id: "p", kind: "plan", title: "Planning" },
+      { id: "g", kind: "graph", title: "Flow view" },
       { id: "t", kind: "team", title: "Agents" },
     ]);
     const pinned = withFlowPanes(together);
@@ -304,7 +304,7 @@ describe("the Flow's planning panel", () => {
   });
 
   it("comes back in a layout whose last tab was closed", () => {
-    const closed = closeTab(singleGroupLayout([{ id: "x", kind: "plan", title: "Planung" }]), "x");
+    const closed = closeTab(singleGroupLayout([{ id: "x", kind: "plan", title: "Planning" }]), "x");
     expect(allTabs(closed)).toEqual([]);
     expect(allTabs(withPlanPane(closed)).map((t) => t.kind)).toEqual(["plan"]);
     expect(allTabs(withPlanPane(emptyLayout())).map((t) => t.kind)).toEqual(["plan"]);

@@ -52,7 +52,7 @@ export const TEAM_PANE = "team";
 export const GRAPH_PANE = "graph";
 
 export function graphTab(): PaneTab {
-  return { id: crypto.randomUUID(), kind: GRAPH_PANE, title: "Flowansicht", config: {} };
+  return { id: crypto.randomUUID(), kind: GRAPH_PANE, title: "Flow view", config: {} };
 }
 
 export function teamTab(): PaneTab {

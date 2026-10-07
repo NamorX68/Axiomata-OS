@@ -609,13 +609,17 @@ function sanitizeNode(raw: unknown, seen: SeenIds): LayoutNode | null {
   return null;
 }
 
+/** The German titles the Flow tabs were saved with before the interface became English; a stored layout keeps them otherwise. */
+const LEGACY_TAB_TITLES: Record<string, string> = { Planung: "Planning", Flowansicht: "Flow view" };
+
 /** One tab from stored JSON, or `null` if it lacks an id or kind, or reuses an id. */
 function sanitizeTab(raw: unknown, seen: SeenIds): PaneTab | null {
   if (typeof raw !== "object" || raw === null) return null;
   const record = raw as Record<string, unknown>;
   if (!isStr(record.id) || !isStr(record.kind) || seen.tabs.has(record.id)) return null;
   seen.tabs.add(record.id);
-  const tab: PaneTab = { id: record.id, kind: record.kind, title: isStr(record.title) ? record.title : record.kind };
+  const title = isStr(record.title) ? (LEGACY_TAB_TITLES[record.title] ?? record.title) : record.kind;
+  const tab: PaneTab = { id: record.id, kind: record.kind, title };
   if (typeof record.config === "object" && record.config !== null && !Array.isArray(record.config)) {
     tab.config = record.config as Record<string, unknown>;
   }

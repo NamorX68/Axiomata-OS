@@ -188,9 +188,9 @@
       <li class="idle">ready / waiting</li>
       <li class="active">in progress</li>
       <li class="attention">question</li>
-      <li class="review">im Review</li>
+      <li class="review">in review</li>
       <li class="done">checked / in the plan</li>
-      <li class="failed">gescheitert</li>
+      <li class="failed">failed</li>
     </ul>
   </header>
 

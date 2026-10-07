@@ -119,6 +119,25 @@ describe("addTab", () => {
   });
 });
 
+describe("stored titles", () => {
+  it("shows the Flow tabs saved with German titles under their English ones", () => {
+    const stored = {
+      root: {
+        type: "tabs",
+        id: "g",
+        tabs: [
+          { id: "a", kind: "plan", title: "Planung" },
+          { id: "b", kind: "graph", title: "Flowansicht" },
+          { id: "c", kind: "terminal", title: "Terminal 1" },
+        ],
+        active: "a",
+      },
+    };
+    const parsed = parseLayout(stored);
+    expect(parsed && allTabs(parsed).map((tab) => tab.title)).toEqual(["Planning", "Flow view", "Terminal 1"]);
+  });
+});
+
 describe("normalisation", () => {
   it("flattens a split nested in a split of the same direction", () => {
     const base = singleGroupLayout([tab("a")]);
