@@ -518,11 +518,16 @@
     pointer-events: none;
     white-space: nowrap;
   }
+  /* The only way into the Second Brain, so it reads from across the screen — and over the cloud's dots. */
   .hint {
     top: 50%;
+    font-size: var(--ax-font-size-base);
+    font-weight: 600;
+    text-shadow: 0 0 calc(10px * var(--ax-ui-scale)) var(--ax-bg), 0 0 calc(3px * var(--ax-ui-scale)) var(--ax-bg);
   }
   .summary {
     top: 50%;
+    font-size: var(--ax-font-size-sm);
     text-transform: none;
     letter-spacing: 0.04em;
     color: var(--ax-text-muted);

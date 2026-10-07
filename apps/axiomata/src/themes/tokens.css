@@ -93,7 +93,7 @@
   /* Letter-spacing for the uppercase panel headings ("SKILLS DECK"). */
   --ax-tracking-wide: 0.14em;
   /* The type scale (K11): reading text never below `sm`; `xs` only for tags and counts. */
-  --ax-font-size-xs: calc(12px * var(--ax-ui-scale));
+  --ax-font-size-xs: calc(12.5px * var(--ax-ui-scale));
   --ax-font-size-sm: calc(13px * var(--ax-ui-scale));
   --ax-font-size-base: calc(14px * var(--ax-ui-scale));
   --ax-font-size-lg: calc(16px * var(--ax-ui-scale));

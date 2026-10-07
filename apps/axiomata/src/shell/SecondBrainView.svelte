@@ -17,7 +17,7 @@
   import { absoluteTime, formatBytes, relativeTime } from "../core/format";
   import { BRAIN_DISC, brainView, spinOf } from "../core/brainView";
   import { getSetting, setSetting } from "../core/persist";
-  import { openFilePanel } from "../core/staging";
+  import { openFilePanel, staged } from "../core/staging";
   import { toast } from "../core/toast";
   import { applyLayout, type LayoutKind } from "../graph/layout";
   import {
@@ -436,7 +436,7 @@
     {#if error}<p class="error">{error}</p>{/if}
   </div>
 
-  <aside class="controls">
+  <aside class="controls" class:away={$staged.length > 0}>
     <div class="group">
       <span class="label">Layout</span>
       <div class="seg">
@@ -646,8 +646,14 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--ax-space-3);
-    max-width: calc(100vw - 2 * var(--ax-space-5) - calc(64px * var(--ax-ui-scale)));
+    /* Ends before the assistant bar, which is centred over the same strip: the two used to overlap (the bar clipped the
+       note count). The row wraps instead; where there is no room left beside the bar (a narrow window), see below. */
+    max-width: max(
+      calc(50vw - var(--ax-assistant-width) / 2 - var(--ax-space-3) - calc(64px * var(--ax-ui-scale)) - var(--ax-space-4)),
+      calc(240px * var(--ax-ui-scale))
+    );
     padding: var(--ax-space-2) var(--ax-space-3);
+    transition: opacity var(--ax-dur-med) var(--ax-ease);
     /* Same glass/hairline/elevated-shadow language as Window.svelte and
        every other panel in the app. */
     background: var(--ax-tile-glass-bg);
@@ -658,6 +664,18 @@
     border-radius: var(--ax-radius-lg);
     box-shadow: var(--ax-shadow-drag);
     font-size: var(--ax-font-size-sm);
+  }
+  /* A window lies over the Orbit (the Kanban, a file, a card): these controls belong to the Orbit and step back. */
+  .controls.away {
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* Narrower than the assistant bar plus the controls: sit above the bar instead of beside it. */
+  @media (max-width: 1320px) {
+    .controls {
+      bottom: calc(var(--ax-space-3) + 64px * var(--ax-ui-scale));
+      max-width: calc(100vw - 2 * var(--ax-space-5) - calc(64px * var(--ax-ui-scale)));
+    }
   }
   .help-btn {
     width: calc(30px * var(--ax-ui-scale));
