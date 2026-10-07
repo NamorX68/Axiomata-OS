@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import mainSource from "../main.ts?raw";
 import { SYNTAX_TOKENS } from "../editor/syntax/tokens";
+import { THEMES as TERMINAL_THEMES } from "../modules/terminalThemes";
 import { applyEditorTheme, EDITOR_THEMES, editorThemeOr, FOLLOW_APP_THEME } from "./editorThemes";
 import { THEMES } from "./themes";
 
@@ -32,6 +33,10 @@ describe("editor themes", () => {
   it("has no block for an id that is not listed", () => {
     const ids = [...css.matchAll(/\[data-editor-theme="([^"]+)"\]/g)].map((m) => m[1]);
     expect(ids.sort()).toEqual(EDITOR_THEMES.map((t) => t.id).sort());
+  });
+
+  it("every editor theme is also a terminal theme", () => {
+    for (const theme of EDITOR_THEMES) expect(Object.keys(TERMINAL_THEMES), theme.id).toContain(theme.id);
   });
 
   it("applies a theme to <html>, and clears it for follow or an unknown id", () => {

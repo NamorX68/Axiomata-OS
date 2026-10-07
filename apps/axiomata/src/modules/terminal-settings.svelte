@@ -74,6 +74,14 @@
     "gruvbox-dark": "Gruvbox Dark",
     "catppuccin-mocha": "Catppuccin Mocha",
     "tokyo-night": "Tokyo Night",
+    "catppuccin-macchiato": "Catppuccin Macchiato",
+    "catppuccin-frappe": "Catppuccin Frappé",
+    "catppuccin-latte": "Catppuccin Latte",
+    "catppuccin-espresso": "Catppuccin Espresso",
+    "github-dark": "GitHub Dark",
+    "github-light": "GitHub Light",
+    "rose-pine": "Rosé Pine",
+    "one-dark": "One Dark",
   };
   const themeNames = Object.keys(THEMES);
 
