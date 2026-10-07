@@ -47,7 +47,7 @@ fn slug(name: &str) -> String {
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let trimmed = collapsed.trim_matches(['-', ' ']).to_string();
     if trimmed.is_empty() {
-        "Brett".to_string()
+        "Board".to_string()
     } else {
         trimmed.chars().take(60).collect()
     }
@@ -171,9 +171,9 @@ mod tests {
 
     #[test]
     fn a_nameless_board_still_gets_a_file_name() {
-        assert_eq!(slug(""), "Brett");
-        assert_eq!(slug("---"), "Brett");
-        assert_eq!(slug("   "), "Brett");
+        assert_eq!(slug(""), "Board");
+        assert_eq!(slug("---"), "Board");
+        assert_eq!(slug("   "), "Board");
     }
 
     #[test]

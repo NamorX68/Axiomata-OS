@@ -1423,10 +1423,7 @@ mod tests {
         let columns = list_columns(&db, board.id).unwrap();
 
         let names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(
-            names,
-            ["Vorschlag", "Offen", "In Arbeit", "Review", "Fertig"]
-        );
+        assert_eq!(names, ["Proposal", "Open", "In Progress", "Review", "Done"]);
         let statuses: Vec<CardStatus> = columns.iter().map(|c| c.maps_to_status).collect();
         assert_eq!(
             statuses,
@@ -1778,14 +1775,14 @@ mod tests {
                 .map(|c| c.name)
                 .collect()
         };
-        let start = ["Vorschlag", "Offen", "In Arbeit", "Review", "Fertig"];
+        let start = ["Proposal", "Open", "In Progress", "Review", "Done"];
         assert_eq!(names(&db), start);
 
         let fertig = plain_columns(&db, board.id)[2].id;
         assert!(move_column(&mut db, fertig, 0).unwrap());
         assert_eq!(
             names(&db),
-            ["Fertig", "Vorschlag", "Offen", "In Arbeit", "Review"]
+            ["Done", "Proposal", "Open", "In Progress", "Review"]
         );
 
         // Moving down its own list: the slot counts the *other* columns.

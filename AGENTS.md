@@ -168,9 +168,9 @@ from the code itself:
 - **Kanban has no tile** — it is the ring entry `view:kanban` that opens a large panel. The agent bridge's manifest lists only
   *mounted instances*, so anything an agent must reach without an open window (the Kanban actions) is a **shell action**
   (`registerShellAction`, prefixed `kanban_`), never a module action.
-- **Every board has a Vorschlag and a Review column** (roles `proposal`/`review`, not deletable): "the open column" for a
+- **Every board has a Proposal and a Review column** (roles `proposal`/`review`, not deletable): "the open column" for a
   new card is the first *plain* open one — `board_move`/`move_to_status` and the assistant's `add_card` skip the roles. A new
-  card put in Vorschlag by mistake waits for an approval nobody expects.
+  card put in Proposal by mistake waits for an approval nobody expects.
 - **The editor engine (`src/editor/`) imports nothing from the app** — no DOM, no Svelte, no
   `core/`; `src/fileapp/` depends on it, never the reverse (D1, extractable for ED7). Its
   `EditorDocument` is a mutable class: a Svelte component redraws via its own counter after

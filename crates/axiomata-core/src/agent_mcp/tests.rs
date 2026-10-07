@@ -99,7 +99,7 @@ fn world() -> World {
         let board = store::create_board(&mut db, "B").unwrap();
         let columns = store::list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
-        (project.id, board.id, id("Offen"), id("Vorschlag"))
+        (project.id, board.id, id("Open"), id("Proposal"))
     };
     World {
         roots: ChannelRoots {
@@ -981,7 +981,7 @@ fn a_session_reaches_only_the_cards_of_its_own_board_or_role() {
         store::list_columns(&db, board.id)
             .unwrap()
             .into_iter()
-            .find(|c| c.name == "Offen")
+            .find(|c| c.name == "Open")
             .unwrap()
     };
     let private = w.card(other_board.id, "buy milk");

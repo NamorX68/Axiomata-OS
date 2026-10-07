@@ -442,21 +442,21 @@ pub struct NewColumn {
 }
 
 /// The columns a freshly created board starts with (A13): the smallest board that works with the agent flow, each
-/// status once plus the two roles. "Vorschlag" sits at the left edge and is hidden by the views while empty.
+/// status once plus the two roles. "Proposal" sits at the left edge and is hidden by the views while empty.
 pub fn default_columns() -> Vec<NewColumn> {
     vec![
         NewColumn {
-            name: "Vorschlag".to_string(),
+            name: "Proposal".to_string(),
             maps_to_status: CardStatus::Open,
             stage: Some(ColumnStage::Proposal),
         },
         NewColumn {
-            name: "Offen".to_string(),
+            name: "Open".to_string(),
             maps_to_status: CardStatus::Open,
             stage: None,
         },
         NewColumn {
-            name: "In Arbeit".to_string(),
+            name: "In Progress".to_string(),
             maps_to_status: CardStatus::Doing,
             stage: None,
         },
@@ -466,7 +466,7 @@ pub fn default_columns() -> Vec<NewColumn> {
             stage: Some(ColumnStage::Review),
         },
         NewColumn {
-            name: "Fertig".to_string(),
+            name: "Done".to_string(),
             maps_to_status: CardStatus::Done,
             stage: None,
         },

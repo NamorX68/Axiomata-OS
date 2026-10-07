@@ -67,6 +67,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (26, axiomata_board::SCHEMA_SQL_V9),
     // Where a spending reading came from, so an escalation's new Opencode session starts its own baseline (a2a.md).
     (27, include_str!("migrations/0009_session_spend_source.sql")),
+    // The default board columns renamed to English (the German default names only; a column the owner named stays).
+    (28, include_str!("migrations/0010_column_names_english.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -329,5 +331,49 @@ mod tests {
         }
 
         let _ = fs::remove_file(&temp_db);
+    }
+
+    #[test]
+    fn migration_28_renames_only_the_untouched_german_default_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(axiomata_board::SCHEMA_SQL_V1).unwrap();
+        conn.execute_batch(axiomata_board::SCHEMA_SQL_V2).unwrap();
+        conn.execute(
+            "INSERT INTO boards (id, name, created_at, updated_at) VALUES (1, 'b', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // The five defaults as they were created, then a column of the owner's own that happens to use a default's name
+        // for another status, and a second board's "Fertig" that was turned into a review column.
+        conn.execute_batch(
+            "INSERT INTO board_columns (id, board_id, name, position, maps_to_status, stage) VALUES
+               (1, 1, 'Vorschlag', 0, 'open', 'proposal'), (2, 1, 'Offen', 1, 'open', NULL),
+               (3, 1, 'In Arbeit', 2, 'doing', NULL), (4, 1, 'Review', 3, 'doing', 'review'),
+               (5, 1, 'Fertig', 4, 'done', NULL), (6, 1, 'Fertig', 5, 'open', NULL), (7, 1, 'Mein Brett', 6, 'open', NULL);",
+        )
+        .unwrap();
+
+        let sql = MIGRATIONS.last().expect("migrations must not be empty").1;
+        conn.execute_batch(sql).unwrap();
+
+        let names: Vec<String> = conn
+            .prepare("SELECT name FROM board_columns ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            names,
+            [
+                "Proposal",
+                "Open",
+                "In Progress",
+                "Review",
+                "Done",
+                "Fertig",
+                "Mein Brett"
+            ]
+        );
     }
 }

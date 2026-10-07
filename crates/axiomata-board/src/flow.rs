@@ -1526,8 +1526,8 @@ pub fn count_events(
 // -------------------------------------------------------- standard columns ---
 
 /// Gives a board the two columns the agent flow needs (A13), without touching anything already there: a column named
-/// "Review" that maps to doing gets the review role (so does a "Vorschlag" that maps to open the proposal role),
-/// otherwise a new one is inserted — Review right after the last "doing" column, Vorschlag at the left edge. Returns
+/// "Review" that maps to doing gets the review role (so does a "Proposal" — or the former German "Vorschlag" — that maps to open the proposal role),
+/// otherwise a new one is inserted — Review right after the last "doing" column, Proposal at the left edge. Returns
 /// whether anything changed.
 pub fn ensure_flow_columns(db: &mut Connection, board_id: i64) -> Result<bool> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1608,7 +1608,8 @@ pub fn ensure_flow_columns(db: &mut Connection, board_id: i64) -> Result<bool> {
         let existing = columns.iter().find(|c| {
             c.stage.is_none()
                 && c.maps_to_status == CardStatus::Open
-                && c.name.trim().eq_ignore_ascii_case("vorschlag")
+                && (c.name.trim().eq_ignore_ascii_case("proposal")
+                    || c.name.trim().eq_ignore_ascii_case("vorschlag"))
         });
         match existing {
             Some(column) => {
@@ -1621,7 +1622,7 @@ pub fn ensure_flow_columns(db: &mut Connection, board_id: i64) -> Result<bool> {
                 let first = columns.iter().map(|c| c.position).fold(f64::MAX, f64::min);
                 tx.execute(
                     "INSERT INTO board_columns (board_id, name, position, maps_to_status, stage)
-                     VALUES (?1, 'Vorschlag', ?2, 'open', 'proposal')",
+                     VALUES (?1, 'Proposal', ?2, 'open', 'proposal')",
                     params![board_id, first - 1.0],
                 )?;
             }
@@ -1721,11 +1722,11 @@ mod tests {
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
         Fixture {
             board: board.id,
-            proposal: id("Vorschlag"),
-            open: id("Offen"),
-            doing: id("In Arbeit"),
+            proposal: id("Proposal"),
+            open: id("Open"),
+            doing: id("In Progress"),
             review: id("Review"),
-            done: id("Fertig"),
+            done: id("Done"),
             db,
             path,
         }
@@ -2212,7 +2213,7 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["Vorschlag", "Offen", "In Arbeit", "Review", "Fertig"]
+            ["Proposal", "Offen", "In Arbeit", "Review", "Fertig"]
         );
         assert_eq!(ensure_flow_columns_all(&mut db).unwrap(), 0, "idempotent");
         let _ = std::fs::remove_file(&path);
@@ -3401,7 +3402,7 @@ mod tests {
         let other_open = list_columns(&f.db, other.id)
             .unwrap()
             .into_iter()
-            .find(|c| c.name == "Offen")
+            .find(|c| c.name == "Open")
             .unwrap();
         move_card(&mut f.db, a.id, other_open.id, 0).unwrap();
 

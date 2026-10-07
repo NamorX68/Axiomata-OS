@@ -497,11 +497,11 @@ let boards: Board[] = [
   },
 ];
 let boardColumns: BoardColumn[] = [
-  { id: 4, board_id: 1, name: "Vorschlag", position: 0, maps_to_status: "open", stage: "proposal" },
-  { id: 1, board_id: 1, name: "Offen", position: 1, maps_to_status: "open", stage: null },
-  { id: 2, board_id: 1, name: "In Arbeit", position: 2, maps_to_status: "doing", stage: null },
+  { id: 4, board_id: 1, name: "Proposal", position: 0, maps_to_status: "open", stage: "proposal" },
+  { id: 1, board_id: 1, name: "Open", position: 1, maps_to_status: "open", stage: null },
+  { id: 2, board_id: 1, name: "In Progress", position: 2, maps_to_status: "doing", stage: null },
   { id: 5, board_id: 1, name: "Review", position: 2.5, maps_to_status: "doing", stage: "review" },
-  { id: 3, board_id: 1, name: "Fertig", position: 3, maps_to_status: "done", stage: null },
+  { id: 3, board_id: 1, name: "Done", position: 3, maps_to_status: "done", stage: null },
 ];
 /* The agent flow (a2a.md CP-A2): one plan, the edges between its cards and a little history. */
 let boardPlans: BoardPlan[] = [
@@ -1816,11 +1816,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       const base = (boardColumns[boardColumns.length - 1]?.id ?? 0) + 1;
       boardColumns = [
         ...boardColumns,
-        { id: base, board_id: created.id, name: "Vorschlag", position: 1, maps_to_status: "open", stage: "proposal" },
-        { id: base + 1, board_id: created.id, name: "Offen", position: 2, maps_to_status: "open", stage: null },
-        { id: base + 2, board_id: created.id, name: "In Arbeit", position: 3, maps_to_status: "doing", stage: null },
+        { id: base, board_id: created.id, name: "Proposal", position: 1, maps_to_status: "open", stage: "proposal" },
+        { id: base + 1, board_id: created.id, name: "Open", position: 2, maps_to_status: "open", stage: null },
+        { id: base + 2, board_id: created.id, name: "In Progress", position: 3, maps_to_status: "doing", stage: null },
         { id: base + 3, board_id: created.id, name: "Review", position: 4, maps_to_status: "doing", stage: "review" },
-        { id: base + 4, board_id: created.id, name: "Fertig", position: 5, maps_to_status: "done", stage: null },
+        { id: base + 4, board_id: created.id, name: "Done", position: 5, maps_to_status: "done", stage: null },
       ];
       return created as T;
     }
