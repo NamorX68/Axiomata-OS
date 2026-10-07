@@ -60,7 +60,7 @@ export function teamTab(): PaneTab {
 }
 
 export function planTab(): PaneTab {
-  return { id: crypto.randomUUID(), kind: PLAN_PANE, title: "Planung", config: {} };
+  return { id: crypto.randomUUID(), kind: PLAN_PANE, title: "Planning", config: {} };
 }
 
 export function gitTab(): PaneTab {

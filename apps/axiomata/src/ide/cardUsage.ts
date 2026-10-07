@@ -32,28 +32,28 @@ function line(label: string, used: number, allowed: number, show: (n: number) =>
  */
 export function usageLines(session: SessionUsage): UsageLine[] {
   const lines = [
-    line("Schritte", session.usage.steps, session.limits.max_steps, String),
+    line("Steps", session.usage.steps, session.limits.max_steps, String),
     line(
-      "Token",
+      "Tokens",
       session.usage.input_tokens + session.usage.output_tokens,
       session.limits.max_tokens,
       formatTokens,
     ),
   ];
   if (session.cost_usd !== null) {
-    lines.push(line("Kosten", session.cost_usd, session.limits.max_cost_usd, (n) => `$${n.toFixed(2)}`));
+    lines.push(line("Cost", session.cost_usd, session.limits.max_cost_usd, (n) => `$${n.toFixed(2)}`));
   }
   return lines;
 }
 
 const UNMEASURED: Record<Unmeasured, string> = {
-  no_session_id: "Für diese Sitzung wurde keine Claude-Code-Sitzung vermerkt (sie lief mit eigenem Befehl).",
-  no_record_yet: "Die Sitzung hat noch nichts aufgezeichnet — sie hat vielleicht eben erst gestartet.",
-  read_failed: "Die Aufzeichnung der Sitzung ließ sich nicht lesen.",
-  no_opencode_session: "Die Opencode-Sitzung ist noch nicht angelegt.",
-  service_down: "Der Opencode-Dienst läuft nicht.",
-  service_failed: "Der Opencode-Dienst hat nicht geantwortet.",
-  not_measured: "Dieses Harness wird nicht gemessen.",
+  no_session_id: "No Claude Code session was recorded for this session (it ran with its own command).",
+  no_record_yet: "The session has not recorded anything yet — it may have just started.",
+  read_failed: "The session's record could not be read.",
+  no_opencode_session: "The Opencode session has not been created yet.",
+  service_down: "The Opencode service is not running.",
+  service_failed: "The Opencode service did not answer.",
+  not_measured: "This harness is not measured.",
 };
 
 /**
@@ -64,5 +64,5 @@ const UNMEASURED: Record<Unmeasured, string> = {
 export function unmeasuredNote(session: Pick<SessionUsage, "measured" | "unmeasured">): string | null {
   if (session.measured) return null;
   const why = UNMEASURED[session.unmeasured ?? "read_failed"];
-  return `${why} Ein Limit greift erst, wenn sich die Sitzung messen lässt.`;
+  return `${why} A limit only applies once the session can be measured.`;
 }

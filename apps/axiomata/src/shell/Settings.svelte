@@ -30,10 +30,10 @@
 
   type TabId = "appearance" | "workspace" | "providers" | "about";
   const TABS: { id: TabId; label: string }[] = [
-    { id: "appearance", label: "Darstellung" },
+    { id: "appearance", label: "Appearance" },
     { id: "workspace", label: "Workspace" },
-    { id: "providers", label: "KI-Provider" },
-    { id: "about", label: "Über" },
+    { id: "providers", label: "AI providers" },
+    { id: "about", label: "About" },
   ];
   let tab = $state<TabId>("appearance");
 
@@ -78,9 +78,9 @@
    *  required = OpenRouter; optional = local Ollama (a placeholder token,
    *  never a real credential). */
   const PROVIDERS: { id: ProviderId; label: string; blurb: string; key: "none" | "required" | "optional" }[] = [
-    { id: "anthropic", label: "Anthropic", blurb: "Über das Abo abgerechnet — kein Schlüssel", key: "none" },
+    { id: "anthropic", label: "Anthropic", blurb: "Billed through the subscription — no key", key: "none" },
     { id: "open_router", label: "OpenRouter", blurb: "Anthropic-kompatibler Endpoint", key: "required" },
-    { id: "ollama", label: "Ollama", blurb: "Lokales Modell auf diesem Rechner", key: "optional" },
+    { id: "ollama", label: "Ollama", blurb: "Local model on this machine", key: "optional" },
   ];
 
   /** Which provider's settings the form below edits. The provider list is now
@@ -152,7 +152,7 @@
 
   async function saveVault() {
     if (!config?.workspace_root.trim()) {
-      toast("Vault-Pfad darf nicht leer sein.", "warning");
+      toast("The vault path must not be empty.", "warning");
       return;
     }
     savingVault = true;
@@ -160,12 +160,12 @@
       const restartNeeded = await persist();
       toast(
         restartNeeded
-          ? "Vault-Pfad gespeichert — Axiomata-OS neu starten, um zu wechseln."
-          : "Vault-Pfad gespeichert.",
+          ? "Vault path saved — restart Axiomata-OS to switch."
+          : "Vault path saved.",
         "info",
       );
     } catch (e) {
-      toast(`Speichern fehlgeschlagen: ${e}`, "warning");
+      toast(`Saving failed: ${e}`, "warning");
     } finally {
       savingVault = false;
     }
@@ -179,23 +179,23 @@
     const meta = metaFor(id);
     if (id === "anthropic") return null; // blank models = free CLI default
     const s = config.agents.providers[id];
-    if (!s) return `${roleLabel}: Provider „${id}“ hat keine Einstellungen.`;
+    if (!s) return `${roleLabel}: provider “${id}” has no settings.`;
     const hasKey = s.has_key || keyUpdateFor(id).kind === "set";
-    if (meta.key === "required" && !hasKey) return `${roleLabel} (${meta.label}) braucht einen API-Schlüssel.`;
+    if (meta.key === "required" && !hasKey) return `${roleLabel} (${meta.label}) needs an API key.`;
 
     const v = (modelLabel === "chat_model" ? s.chat_model : s.skill_model).trim();
     const human = modelLabel === "chat_model" ? "Chat-Modell" : "Skills-Modell";
-    if (!v) return `${roleLabel} (${meta.label}): ${human} darf nicht leer sein.`;
-    if (/\s/.test(v)) return `${roleLabel} (${meta.label}): ${human} enthält Leerzeichen.`;
+    if (!v) return `${roleLabel} (${meta.label}): ${human} must not be empty.`;
+    if (/\s/.test(v)) return `${roleLabel} (${meta.label}): ${human} contains spaces.`;
     const opens = (v.match(/\[/g) ?? []).length;
     const closes = (v.match(/\]/g) ?? []).length;
     if (opens !== closes || /[()]/.test(v)) {
-      return `${roleLabel} (${meta.label}): ${human} hat unausgeglichene Klammern — „${v}“.`;
+      return `${roleLabel} (${meta.label}): ${human} has unbalanced brackets — “${v}”.`;
     }
     const url = s.base_url?.trim();
     if (!url || !/^https:\/\/.+/.test(url)) {
       const loopback = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/.test(url ?? "");
-      if (!loopback) return `${roleLabel} (${meta.label}): Basis-URL muss mit https:// beginnen.`;
+      if (!loopback) return `${roleLabel} (${meta.label}): Base URL must start with https://.`;
     }
     return null;
   }
@@ -221,12 +221,12 @@
     savingProvider = true;
     try {
       await persist();
-      toast("Provider-Einstellungen gespeichert — gelten ab dem nächsten Agenten-Aufruf.", "info");
+      toast("Provider settings saved — they apply from the next agent call.", "info");
       keyEdits = {};
       await loadConfig();
       await refreshSpend();
     } catch (e) {
-      toast(`Speichern fehlgeschlagen: ${e}`, "warning");
+      toast(`Saving failed: ${e}`, "warning");
     } finally {
       savingProvider = false;
     }
@@ -305,19 +305,19 @@
 
         <section>
           <h3>Orbit &amp; Second Brain</h3>
-          <label class="opt"><input type="checkbox" bind:checked={$brainView.motion} /> Bewegung <span class="hint">(der Schalter unten links im Orbit tut dasselbe)</span></label>
+          <label class="opt"><input type="checkbox" bind:checked={$brainView.motion} /> Motion <span class="hint">(the switch at the bottom left of the Orbit does the same)</span></label>
           <label class="opt">
-            Tempo
+            Speed
             <input class="speed" type="range" min="0.005" max={SPEED_MAX} step="0.005" bind:value={$brainView.speed} disabled={!$brainView.motion} />
           </label>
-          <label class="opt"><input type="checkbox" bind:checked={$brainView.labels} /> Beschriftungen <span class="hint">(Skills, Bereiche und der Hub)</span></label>
-          <label class="opt"><input type="checkbox" bind:checked={$brainView.fileNames} /> Dateinamen <span class="hint">(im Second Brain neben jeder Notiz)</span></label>
+          <label class="opt"><input type="checkbox" bind:checked={$brainView.labels} /> Labels <span class="hint">(skills, areas and the hub)</span></label>
+          <label class="opt"><input type="checkbox" bind:checked={$brainView.fileNames} /> File names <span class="hint">(next to every note in the Second Brain)</span></label>
         </section>
 
         <section>
-          <h3>UI-Größe</h3>
+          <h3>UI size</h3>
           <label class="row">
-            <span class="label">Schrift und Bedienelemente</span>
+            <span class="label">Text and controls</span>
             <select
               value={String($uiSize)}
               onchange={(e) => {
@@ -341,13 +341,13 @@
         <section>
           <h3>Transparenz</h3>
           <label class="row">
-            <span class="label">Fenster-Transparenz</span>
+            <span class="label">Window transparency</span>
             <input type="range" min="0" max="100" step="5" bind:value={$windowTransparency} />
             <span class="readout">{$windowTransparency}%</span>
           </label>
           <p class="hint">
-            Wie durchsichtig Fenster, Dialoge und gezogene Kacheln wirken — 0% eine deckende Fläche,
-            100% vollständig durchsichtig, 50% der unveränderte Standard-Look des jeweiligen Themes.
+            How see-through windows, dialogs and dragged tiles look — 0% an opaque surface,
+            100% fully transparent, 50% the unchanged default look of the theme.
           </p>
         </section>
 
@@ -373,14 +373,14 @@
         {#if config}
           <section>
             <h3>Vault</h3>
-            <p class="lead">Wurzelordner des Second-Brain-Workspace. Ein Wechsel greift erst nach einem Neustart.</p>
+            <p class="lead">Root folder of the Second Brain workspace. A change takes effect after a restart.</p>
             <label class="field">
-              <span>Pfad</span>
+              <span>Path</span>
               <input type="text" spellcheck="false" bind:value={config.workspace_root} placeholder="/Users/…/Vault" />
             </label>
             <div class="actions">
               <button type="button" disabled={savingVault} onclick={saveVault}>
-                {savingVault ? "Speichern…" : "Speichern & Neustart"}
+                {savingVault ? "Saving…" : "Save & restart"}
               </button>
             </div>
           </section>
@@ -388,11 +388,11 @@
       {:else if tab === "providers"}
         {#if config}
           <section>
-            <h3>Provider bearbeiten</h3>
+            <h3>Edit providers</h3>
             <p class="lead">
-              Die Ausführung bleibt immer der Claude-Code-Agent — der Provider wählt nur den Upstream-Endpoint,
-              an den <code>claude</code> zeigt. Jeder Provider wird hier unabhängig konfiguriert;
-              welcher wofür genutzt wird, steuert der nächste Abschnitt.
+              The execution is always the Claude Code agent — the provider only picks the upstream endpoint
+              <code>claude</code> points to. Every provider is configured independently here;
+              which one is used for what is set in the next section.
             </p>
             <ul class="providers">
               {#each PROVIDERS as p (p.id)}
@@ -434,11 +434,11 @@
                   </p>
                 {:else}
                   <label class="field">
-                    <span>Basis-URL</span>
+                    <span>Base URL</span>
                     <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].base_url} placeholder="https://…" />
                   </label>
                   <label class="field">
-                    <span>API-Schlüssel {editingMeta.key === "optional" ? "(optional)" : ""}</span>
+                    <span>API key {editingMeta.key === "optional" ? "(optional)" : ""}</span>
                     <input
                       type="password"
                       autocomplete="off"
@@ -446,25 +446,25 @@
                       value={keyEdits[pid] ?? ""}
                       oninput={(e) => setKeyEdit(pid, e.currentTarget.value)}
                       placeholder={config.agents.providers[pid].has_key
-                        ? "•••••• gespeichert — leer lassen zum Behalten"
+                        ? "•••••• saved — leave empty to keep"
                         : editingMeta.key === "optional"
-                          ? "Platzhalter genügt für lokales Ollama"
-                          : "erforderlich"}
+                          ? "A placeholder is enough for a local Ollama"
+                          : "required"}
                     />
                     {#if config.agents.providers[pid].has_key && (keyEdits[pid] ?? "") === "" && pid in keyEdits}
-                      <span class="hint">Schlüssel wird beim Speichern gelöscht.</span>
+                      <span class="hint">The key is deleted on save.</span>
                     {/if}
                   </label>
                 {/if}
                 <label class="field">
-                  <span>Chat-Modell</span>
-                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].chat_model} placeholder="z. B. claude-sonnet-5" />
+                  <span>Chat model</span>
+                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].chat_model} placeholder="e.g. claude-sonnet-5" />
                 </label>
                 <label class="field">
-                  <span>Skills-/Routinen-Modell</span>
-                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].skill_model} placeholder="z. B. claude-haiku-4-5" />
+                  <span>Skills/routines model</span>
+                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].skill_model} placeholder="e.g. claude-haiku-4-5" />
                 </label>
-                <p class="hint">Ein <code>model:</code> im SKILL.md-Frontmatter überschreibt das Skills-Modell weiterhin.</p>
+                <p class="hint">Ein <code>model:</code> in the SKILL.md frontmatter still overrides the skills model.</p>
               </div>
             {:else}
               <p class="status error">
@@ -475,33 +475,33 @@
 
             <div class="actions">
               <button type="button" disabled={savingProvider} onclick={saveProvider}>
-                {savingProvider ? "Speichern…" : "Provider speichern"}
+                {savingProvider ? "Saving…" : "Save provider"}
               </button>
             </div>
           </section>
 
           <section>
-            <h3>Provider-Zuordnung</h3>
+            <h3>Provider assignment</h3>
             <p class="lead">
-              Welcher Provider den interaktiven Chat bedient und welcher die Skills &amp; Routinen — das dürfen
-              verschiedene sein, z. B. Anthropic für den Chat und lokales Ollama für die Digests.
+              Which provider serves the interactive chat and which one the skills &amp; routines — they may
+              differ, e.g. Anthropic for the chat and a local Ollama for the digests.
             </p>
             <div class="role-picks">
               <label class="field">
-                <span>Provider für Chat</span>
+                <span>Provider for chat</span>
                 <select bind:value={config.agents.chat_provider}>
                   {#each PROVIDERS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
                 </select>
               </label>
               <label class="field">
-                <span>Provider für Skills &amp; Routinen</span>
+                <span>Provider for skills &amp; routines</span>
                 <select bind:value={config.agents.skill_provider}>
                   {#each PROVIDERS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
                 </select>
                 {#if config.agents.skill_provider === "ollama"}
                   <p class="hint">
-                    Ollama → die Connector-Digests (Calendar/Reminders/Mail) laufen lokal über den
-                    Tool-Call-Agenten — keine Cloud-Kosten.
+                    Ollama → the connector digests (Calendar/Reminders/Mail) run locally through the
+                    tool-call agent — no cloud costs.
                   </p>
                 {/if}
               </label>
@@ -511,32 +511,32 @@
               {#each spend as s (s.role)}
                 {#if s.metered}
                   <p class="hint">
-                    Ausgaben <strong>{s.role} → {s.provider}</strong>:
-                    <strong>${s.today_usd.toFixed(4)}</strong> heute{#if s.daily_cap_usd != null}
-                      &nbsp;/&nbsp;${s.daily_cap_usd.toFixed(2)} Limit{/if}
-                    &nbsp;·&nbsp;${s.month_usd.toFixed(2)} diesen Monat
+                    Spend <strong>{s.role} → {s.provider}</strong>:
+                    <strong>${s.today_usd.toFixed(4)}</strong> today{#if s.daily_cap_usd != null}
+                      &nbsp;/&nbsp;${s.daily_cap_usd.toFixed(2)} limit{/if}
+                    &nbsp;·&nbsp;${s.month_usd.toFixed(2)} this month
                   </p>
                 {:else}
-                  <p class="hint">{s.role} → {s.provider} wird übers Abo abgerechnet — keine Kostenerfassung.</p>
+                  <p class="hint">{s.role} → {s.provider} is billed through the subscription — no cost tracking.</p>
                 {/if}
               {/each}
               <label class="field">
-                <span>Tageslimit (USD, bezahlte Provider)</span>
+                <span>Daily limit (USD, paid providers)</span>
                 <input
                   type="number"
                   min="0"
                   step="0.5"
-                  placeholder="leer = kein Limit"
+                  placeholder="empty = no limit"
                   value={config.agents.daily_usd_cap ?? ""}
                   oninput={(e) => setDailyCap(e.currentTarget.value)}
                 />
               </label>
-              <p class="hint">Erreicht die heutige Summe das Limit, wird der nächste Agenten-Aufruf über einen bezahlten Provider abgelehnt.</p>
+              <p class="hint">Once today's total reaches the limit, the next agent call through a paid provider is refused.</p>
             </div>
 
             <div class="actions">
               <button type="button" disabled={savingProvider} onclick={saveProvider}>
-                {savingProvider ? "Speichern…" : "Zuordnung speichern"}
+                {savingProvider ? "Saving…" : "Save assignment"}
               </button>
             </div>
           </section>

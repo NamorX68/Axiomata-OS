@@ -95,29 +95,29 @@
   {#if stage === "menu"}
     {#each actions as action}
       {#if action.kind === "addToNewGroup"}
-        <button type="button" class="item" onclick={onAddToNewGroup}>Zu neuer Gruppe hinzufügen</button>
+        <button type="button" class="item" onclick={onAddToNewGroup}>Add to a new group</button>
       {:else if action.kind === "addToGroup"}
         <button type="button" class="item" onclick={() => onAddToGroup(action.groupId)}>
-          Zu Gruppe „{action.groupName}" hinzufügen
+          Add to group “{action.groupName}”
         </button>
       {:else if action.kind === "removeFromGroup"}
         <button type="button" class="item" onclick={onRemoveFromGroup}>Aus Gruppe entfernen</button>
       {:else if action.kind === "rename"}
         <button type="button" class="item" onclick={() => (stage = "rename")}>Umbenennen</button>
       {:else if action.kind === "changeIcon"}
-        <button type="button" class="item" onclick={() => (stage = "changeIcon")}>Symbol ändern</button>
+        <button type="button" class="item" onclick={() => (stage = "changeIcon")}>Change icon</button>
       {:else if action.kind === "remove"}
         <button type="button" class="item" onclick={() => (stage = "confirmRemove")}>Entfernen</button>
       {/if}
     {/each}
   {:else if stage === "confirmRemove"}
-    <p class="confirm">„{label}" aus dem Ring entfernen?</p>
+    <p class="confirm">Remove “{label}” from the ring?</p>
     <div class="row">
       <button type="button" class="danger" onclick={onRemove}>Entfernen</button>
-      <button type="button" onclick={onCancel}>Abbrechen</button>
+      <button type="button" onclick={onCancel}>Cancel</button>
     </div>
   {:else if stage === "rename"}
-    <label class="field-label" for="app-context-rename">Neuer Name</label>
+    <label class="field-label" for="app-context-rename">New name</label>
     <input
       id="app-context-rename"
       class="rename-input"
@@ -126,11 +126,11 @@
       onkeydown={(e) => e.key === "Enter" && submitRename()}
     />
     <div class="row">
-      <button type="button" onclick={submitRename}>Übernehmen</button>
-      <button type="button" onclick={onCancel}>Abbrechen</button>
+      <button type="button" onclick={submitRename}>Apply</button>
+      <button type="button" onclick={onCancel}>Cancel</button>
     </div>
   {:else if stage === "changeIcon"}
-    <span class="field-label">Symbol wählen</span>
+    <span class="field-label">Choose an icon</span>
     <GlyphPicker selected={glyph} onPick={onChangeIcon} />
   {/if}
 </div>

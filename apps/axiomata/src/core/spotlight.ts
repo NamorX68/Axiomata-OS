@@ -55,15 +55,15 @@ export const KIND_ORDER: readonly SpotlightKind[] = [
 ];
 
 export const GROUP_LABEL: Record<SpotlightGroup, string> = {
-  suggestion: "Springe zu",
+  suggestion: "Jump to",
   command: "Befehle",
   module: "Module",
   skill: "Skills",
   routine: "Routinen",
-  card: "Karten",
-  plan: "Pläne",
+  card: "Cards",
+  plan: "Plans",
   project: "Projekte",
-  file: "Dateien",
+  file: "Files",
 };
 
 /** Rows in the list in all. */

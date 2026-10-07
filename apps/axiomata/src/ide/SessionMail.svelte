@@ -73,10 +73,10 @@
   }
 </script>
 
-<section class="mail" aria-label="Nachrichten">
-  <h4>Nachrichten</h4>
+<section class="mail" aria-label="Messages">
+  <h4>Messages</h4>
   {#if lines.length === 0}
-    <p class="muted">Noch keine Nachrichten.</p>
+    <p class="muted">No messages yet.</p>
   {:else}
     <ul>
       {#each lines as line (`${line.incoming ? "in" : "out"}-${line.id}`)}
@@ -95,12 +95,12 @@
   <div class="write">
     <textarea
       rows="2"
-      placeholder="An die Sitzung schreiben … (⌘↩ sendet)"
+      placeholder="Write to the session … (⌘↩ sends)"
       bind:value={draft}
       onkeydown={onKey}
       disabled={busy}
     ></textarea>
-    <button class="ax-btn" type="button" disabled={busy || draft.trim() === ""} onclick={() => void send()}>Senden</button>
+    <button class="ax-btn" type="button" disabled={busy || draft.trim() === ""} onclick={() => void send()}>Send</button>
   </div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 </section>

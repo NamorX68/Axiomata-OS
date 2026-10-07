@@ -31,7 +31,7 @@ describe("formatTokens", () => {
 describe("usageLines", () => {
   it("shows steps, tokens and money with the share of each limit that is used", () => {
     const lines = usageLines(session());
-    expect(lines.map((l) => l.label)).toEqual(["Schritte", "Token", "Kosten"]);
+    expect(lines.map((l) => l.label)).toEqual(["Steps", "Tokens", "Cost"]);
     expect(lines[0]).toMatchObject({ used: "30", allowed: "60", share: 0.5, reached: false });
     expect(lines[1]).toMatchObject({ used: "1 k", allowed: "2 k", share: 0.5 });
     expect(lines[2]).toMatchObject({ used: "$0.25", allowed: "$0.50", share: 0.5 });
@@ -39,8 +39,8 @@ describe("usageLines", () => {
 
   it("has no money line where nothing was metered", () => {
     expect(usageLines(session({ cost_usd: null, billing: "subscription" })).map((l) => l.label)).toEqual([
-      "Schritte",
-      "Token",
+      "Steps",
+      "Tokens",
     ]);
   });
 
@@ -57,9 +57,9 @@ describe("unmeasuredNote", () => {
 
   it("tells a session that has just started from one whose record cannot be read, and says what it means for the limit", () => {
     const fresh = unmeasuredNote({ measured: false, unmeasured: "no_record_yet" })!;
-    expect(fresh).toContain("eben erst gestartet");
-    expect(fresh).toContain("Limit greift erst");
-    expect(unmeasuredNote({ measured: false, unmeasured: "service_down" })).toContain("Opencode-Dienst läuft nicht");
-    expect(unmeasuredNote({ measured: false, unmeasured: null })).toContain("nicht lesen");
+    expect(fresh).toContain("just started");
+    expect(fresh).toContain("limit only applies");
+    expect(unmeasuredNote({ measured: false, unmeasured: "service_down" })).toContain("Opencode service is not running");
+    expect(unmeasuredNote({ measured: false, unmeasured: null })).toContain("could not be read");
   });
 });

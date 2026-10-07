@@ -107,13 +107,13 @@
   let areaFilter = $state("");
 
   const HELP = [
-    ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring. Zeigt die Größe je Bereich."],
+    ["Rings", "Notes sit on arcs inside their area's segment; skills inside, areas on the next ring. Shows the size of each area."],
     [
       "Hex",
-      "Honeycomb statt Bögen: jede Notiz eine eigene Hex-Zelle, dicht an dicht, im selben Bereichs-Segment wie bei Rings. Skills und Bereiche bleiben wie in Rings.",
+      "Honeycomb instead of arcs: every note its own hex cell, packed tight, in the same area segment as in Rings. Skills and areas stay as in Rings.",
     ],
-    ["Areas", "Ein Segment je oberstem Vault-Ordner."],
-    ["Folders", "Ein Segment je tiefstem Ordner, z. B. Learning/Rust/lessons. Feinere Aufteilung großer Bereiche."],
+    ["Areas", "One segment per top-level vault folder."],
+    ["Folders", "One segment per deepest folder, e.g. Learning/Rust/lessons. A finer split of large areas."],
   ] as const;
   /** Looks up a HELP entry's text by its term, so the buttons below reference
    *  entries by name instead of a fragile array index. */
@@ -308,11 +308,11 @@
     deleting = true;
     try {
       await invokeBackend("delete_workspace_file", { rel: path });
-      toast("Datei gelöscht.");
+      toast("File deleted.");
       select(null); // also clears confirmDelete
       await load(); // rebuild the graph without the deleted node
     } catch (err) {
-      toast(`Löschen fehlgeschlagen: ${err}`, "warning");
+      toast(`Deleting failed: ${err}`, "warning");
     } finally {
       deleting = false;
     }
@@ -452,10 +452,10 @@
       </div>
     </div>
     <div class="row">
-      <button type="button" title="Zoom und Verschiebung zurücksetzen" onclick={resetView}>Reset view</button>
-      <button type="button" title="Graph neu aus dem Workspace laden" onclick={() => void load()}>Reload</button>
+      <button type="button" title="Reset zoom and pan" onclick={resetView}>Reset view</button>
+      <button type="button" title="Reload the graph from the workspace" onclick={() => void load()}>Reload</button>
     </div>
-    <button type="button" class="help-btn" class:on={helpOpen} title="Was bedeuten die Optionen?" aria-label="Hilfe" onclick={() => (helpOpen = !helpOpen)}>?</button>
+    <button type="button" class="help-btn" class:on={helpOpen} title="What do the options mean?" aria-label="Help" onclick={() => (helpOpen = !helpOpen)}>?</button>
     {#if model}
       <p class="stats">{model.totalFiles} notes · {model.areas.length} {grouping} · {model.edges.length} links{model.truncated ? " · truncated" : ""}</p>
     {/if}
@@ -521,11 +521,11 @@
           <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
           {#if confirmDelete}
             <button type="button" class="danger" disabled={deleting} onclick={() => deleteFile(selected!.path!)}>
-              {deleting ? "Löschen…" : "Wirklich löschen"}
+              {deleting ? "Deleting…" : "Really delete"}
             </button>
-            <button type="button" disabled={deleting} onclick={() => (confirmDelete = false)}>Abbrechen</button>
+            <button type="button" disabled={deleting} onclick={() => (confirmDelete = false)}>Cancel</button>
           {:else}
-            <button type="button" class="danger-ghost" onclick={() => (confirmDelete = true)}>Löschen</button>
+            <button type="button" class="danger-ghost" onclick={() => (confirmDelete = true)}>Delete</button>
           {/if}
         </div>
       {:else if selected.kind === "area"}

@@ -26,9 +26,9 @@
   <div class="corner" data-no-drag>
     <button
       type="button"
-      aria-label="Bewegung"
+      aria-label="Motion"
       aria-pressed={$brainView.motion}
-      title={$brainView.motion ? "Bewegung anhalten" : "Bewegung starten"}
+      title={$brainView.motion ? "Pause motion" : "Start motion"}
       onclick={() => brainView.update((v) => ({ ...v, motion: !v.motion }))}>{$brainView.motion ? "⏸" : "▶"}</button
     >
     {#if def?.settings}

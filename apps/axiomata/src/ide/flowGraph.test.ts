@@ -155,9 +155,9 @@ describe("the review after a card", () => {
     expect(reviewToneOf("in_review")).toBe("review");
     expect(reviewToneOf("integrated")).toBe("done");
     expect(reviewToneOf("working")).toBe("idle");
-    expect(reviewLabel({ state: "in_review", returned_count: 0 })).toBe("wird geprüft");
+    expect(reviewLabel({ state: "in_review", returned_count: 0 })).toBe("being reviewed");
     expect(reviewLabel({ state: "verified", returned_count: 1 })).toBe("abgezeichnet");
-    expect(reviewLabel({ state: "working", returned_count: 2 })).toBe("zurückgegeben (2×)");
+    expect(reviewLabel({ state: "working", returned_count: 2 })).toBe("returned (2×)");
   });
 });
 
@@ -174,9 +174,9 @@ describe("the end of a plan", () => {
   it("is open until every card that counts is integrated, then ready, and closed with the plan", () => {
     const open = endOf([{ state: "integrated" }, { state: "working" }], "approved");
     expect(open).toEqual({ tone: "idle", label: "offen" });
-    expect(endOf([{ state: "integrated" }, { state: "canceled" }], "approved").label).toBe("bereit zum Übernehmen");
+    expect(endOf([{ state: "integrated" }, { state: "canceled" }], "approved").label).toBe("ready to take over");
     expect(endOf([{ state: "failed" }, { state: "integrated" }], "approved").tone).toBe("failed");
     expect(endOf([], "approved").label).toBe("offen");
-    expect(endOf([{ state: "taken_over" }], "closed")).toEqual({ tone: "done", label: "abgeschlossen" });
+    expect(endOf([{ state: "taken_over" }], "closed")).toEqual({ tone: "done", label: "closed" });
   });
 });

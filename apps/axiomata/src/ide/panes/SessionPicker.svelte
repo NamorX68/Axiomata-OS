@@ -42,17 +42,17 @@
 </label>
 {#if choice.ask}
   <label class="picker">
-    Engine für „{picked}“ <span class="muted">(wird in der Rolle gespeichert)</span>
+    Engine for “{picked}” <span class="muted">(saved in the role)</span>
     <select
       value={choice.engineId}
-      aria-label="Engine für {picked}"
+      aria-label="Engine for {picked}"
       onchange={(event) => (engine = (event.currentTarget as HTMLSelectElement).value)}
     >
       {#each catalog as e (e.id)}<option value={e.id}>{e.label} — {engineLine(e)}</option>{/each}
     </select>
   </label>
 {:else if engineLabel}
-  <span class="muted on" title="Die Engine gehört zur Rolle; ändern unter Engines &amp; roles">läuft auf {engineLabel.label}</span>
+  <span class="muted on" title="The engine belongs to the role; change it under Engines &amp; roles">runs on {engineLabel.label}</span>
 {/if}
 
 <style>

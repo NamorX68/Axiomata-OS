@@ -137,14 +137,14 @@
               <span class="chip">{tile.agent.agent_role}</span>
               {#if tile.agent.engine_id}<span class="chip muted">{tile.agent.engine_id}</span>{/if}
               {#if (unread[tile.agent.id] ?? 0) > 0}
-                <span class="chip mail" title="Ungelesene Nachrichten in der Inbox der Sitzung">✉ {unread[tile.agent.id]}</span>
+                <span class="chip mail" title="Unread messages in the session's inbox">✉ {unread[tile.agent.id]}</span>
               {/if}
               <span class="spacer"></span>
               <button
                 class="ax-btn terminal"
                 class:primary={status.tone === "waiting"}
                 type="button"
-                title="Das Terminal dieser Sitzung nach vorn holen; es startet keine neue"
+                title="Bring this session's terminal to the front; it does not start a new one"
                 onclick={() => showTerminal(tile.agent.id)}
               >
                 <Icon name="terminal" size="sm" />
@@ -153,7 +153,7 @@
             </header>
 
             {#if status.tone === "waiting"}
-              <p class="waiting" role="status">Wartet auf dich: eine Rückfrage oder eine Freigabe im Terminal.</p>
+              <p class="waiting" role="status">Waiting for you: a question or an approval in the terminal.</p>
             {/if}
 
             {#if tile.card}
@@ -167,7 +167,7 @@
                 <p class="question" role="status">Fragt: {tile.card.input_required}</p>
               {/if}
             {:else if tile.duty === "planner"}
-              <p class="card-line"><span class="muted">{dutyLabel("planner")}</span> den Plan</p>
+              <p class="card-line"><span class="muted">{dutyLabel("planner")}</span> the plan</p>
             {/if}
 
             <button class="now" type="button" aria-expanded={open[tile.agent.id] ?? false} onclick={() => toggle(tile.agent.id)}>
@@ -180,7 +180,7 @@
 
             {#if open[tile.agent.id]}
               {#if live && live.steps.length > 1}
-                <ol class="trail" aria-label="Letzte Schritte">
+                <ol class="trail" aria-label="Latest steps">
                   {#each live.steps.slice(0, -1).reverse() as step, index (index)}
                     <li class:said={step.kind === "say"}>{stepLabel(step)}</li>
                   {/each}

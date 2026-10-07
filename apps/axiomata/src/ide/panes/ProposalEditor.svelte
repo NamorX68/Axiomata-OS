@@ -39,9 +39,9 @@
 
   const TIERS: { id: CardTier | ""; label: string }[] = [
     { id: "", label: "—" },
-    { id: "light", label: "leicht" },
-    { id: "medium", label: "mittel" },
-    { id: "heavy", label: "schwer" },
+    { id: "light", label: "light" },
+    { id: "medium", label: "medium" },
+    { id: "heavy", label: "heavy" },
   ];
 
   // The form starts from the card as it is when the editor opens; the editor is re-made for another card, not updated.
@@ -68,7 +68,7 @@
       let have: number[] = [];
       if (card) {
         const fresh = (await freshCard(card.id)) ?? card;
-        if (!cardEditable(fresh)) throw new Error("Die Karte ist schon in Arbeit oder erledigt; sie lässt sich hier nicht mehr ändern.");
+        if (!cardEditable(fresh)) throw new Error("The card is already in progress or done; it can no longer be changed here.");
         await invoke("update_card", {
           id: card.id,
           fields: {
@@ -83,7 +83,7 @@
         id = card.id;
         have = fresh.depends_on;
       } else {
-        if (columnId === null) throw new Error("Das Brett hat dafür keine Spalte.");
+        if (columnId === null) throw new Error("The board has no column for it.");
         const created = await invoke<BoardCard>("create_card", {
           new: {
             column_id: columnId,
@@ -125,36 +125,36 @@
   }}
 >
   <label>
-    Titel
-    <input bind:value={form.title} aria-label="Titel" maxlength="200" />
+    Title
+    <input bind:value={form.title} aria-label="Title" maxlength="200" />
   </label>
   <label>
-    Beschreibung
-    <textarea bind:value={form.body} rows="4" aria-label="Beschreibung"></textarea>
+    Description
+    <textarea bind:value={form.body} rows="4" aria-label="Description"></textarea>
   </label>
   <label>
-    Abnahmekriterien
-    <textarea bind:value={form.acceptance} rows="3" aria-label="Abnahmekriterien" placeholder="Woran sieht man, dass die Karte fertig ist?"></textarea>
+    Acceptance criteria
+    <textarea bind:value={form.acceptance} rows="3" aria-label="Acceptance criteria" placeholder="How do you tell the card is done?"></textarea>
   </label>
   <div class="two">
     <label>
-      Rolle
-      <select bind:value={form.agent} aria-label="Rolle">
+      Role
+      <select bind:value={form.agent} aria-label="Role">
         <option value="">—</option>
         {#each assignableRoles(roles, form.agent || null) as name (name)}<option value={name}>{name}</option>{/each}
       </select>
     </label>
     <label>
-      Stufe
-      <select bind:value={form.tier} aria-label="Stufe">
+      Level
+      <select bind:value={form.tier} aria-label="Level">
         {#each TIERS as tier (tier.id)}<option value={tier.id}>{tier.label}</option>{/each}
       </select>
     </label>
   </div>
   <fieldset>
-    <legend>Braucht zuerst</legend>
+    <legend>Needs first</legend>
     {#if candidates.length === 0}
-      <p class="muted">Der Plan hat keine andere Karte, auf die diese warten könnte.</p>
+      <p class="muted">The plan has no other card this one could wait for.</p>
     {/if}
     {#each candidates as id (id)}
       <label class="check">
@@ -166,9 +166,9 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
     <button class="ax-btn primary" type="submit" disabled={busy || !proposalSavable(form)}>
-      {card ? "Speichern" : "Karte hinzufügen"}
+      {card ? "Save" : "Add card"}
     </button>
-    <button class="ax-btn" type="button" disabled={busy} onclick={onCancel}>Abbrechen</button>
+    <button class="ax-btn" type="button" disabled={busy} onclick={onCancel}>Cancel</button>
   </div>
 </form>
 

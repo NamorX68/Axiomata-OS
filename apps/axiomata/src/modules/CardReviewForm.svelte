@@ -55,7 +55,7 @@
         engineId: engineId || null,
         allowAgentConfig,
       });
-      toast(`Karte #${card.id} wird von ${session.agent.name} geprüft.`, "info");
+      toast(`Card #${card.id} is being reviewed by ${session.agent.name}.`, "info");
       emit("shell:agent", { projectId: session.agent.project_id, agentId: session.agent.id });
       onDone();
     } catch (err) {
@@ -77,7 +77,7 @@
     Engine des Reviewers
     <select bind:value={engineId} aria-label="Engine des Reviewers">
       {#if ownEngine !== null}
-        <option value="">Die der Reviewer-Rolle{ownEngineLabel ? ` (${ownEngineLabel})` : ""}</option>
+        <option value="">The reviewer role's own{ownEngineLabel ? ` (${ownEngineLabel})` : ""}</option>
       {/if}
       {#each $engineCatalog as engine (engine.id)}
         <option value={engine.id}>{engine.label} — {engineLine(engine)}</option>
@@ -90,8 +90,8 @@
   </label>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
-    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? "Startet …" : "Review starten"}</button>
-    <button class="ax-btn" type="button" onclick={onDone}>Abbrechen</button>
+    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? "Starting …" : "Start review"}</button>
+    <button class="ax-btn" type="button" onclick={onDone}>Cancel</button>
   </div>
 </form>
 

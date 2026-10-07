@@ -70,8 +70,8 @@ describe("plans", () => {
   });
 
   it("labels a status in the owner's words", () => {
-    expect(planStatusLabel("draft")).toBe("Entwurf");
-    expect(planStatusLabel("approved")).toBe("freigegeben");
+    expect(planStatusLabel("draft")).toBe("draft");
+    expect(planStatusLabel("approved")).toBe("released");
   });
 });
 
@@ -98,7 +98,7 @@ describe("a plan's cards", () => {
   });
 
   it("falls back to the number for a title with nothing to read", () => {
-    expect(proposalTitle({ id: 9, title: "  \nbody" })).toBe("Karte #9");
+    expect(proposalTitle({ id: 9, title: "  \nbody" })).toBe("Card #9");
     expect(proposalTitle({ id: 9, title: "Add tokens\nmore" })).toBe("Add tokens");
   });
 });
@@ -378,15 +378,15 @@ describe("what the owner is told about a plan's run", () => {
   it("says a card started by itself and one that was integrated", () => {
     expect(runEventNote({ event: "started", card_id: 59, plan_id: 1, project_id: 1, agent_id: 23 })?.text).toContain("#59");
     expect(runEventNote(done)).toMatchObject({ tone: "info" });
-    expect(runEventNote(done)?.text).toContain("integriert");
+    expect(runEventNote(done)?.text).toContain("integrated");
   });
 
   it("tells a card that is done again from one that is left for the owner", () => {
     const again = runEventNote(conflict(false))!;
-    expect(again.text).toContain("noch einmal gemacht");
+    expect(again.text).toContain("redone");
     expect(again.text).toContain("a.txt, b.txt");
     const gaveUp = runEventNote(conflict(true))!;
-    expect(gaveUp.text).toContain("Entscheide du");
+    expect(gaveUp.text).toContain("You decide");
     expect(gaveUp.tone).toBe("warning");
   });
 
@@ -410,7 +410,7 @@ describe("what the owner is told about a plan's run", () => {
     const note = runEventNote(escalated)!;
     expect(note.text).toContain("#7");
     expect(note.text).toContain("builder-heavy");
-    expect(note.text).toContain("entscheidest du");
+    expect(note.text).toContain("you decide");
     expect(endedSessions(escalated)).toEqual([31]);
   });
 
@@ -418,10 +418,10 @@ describe("what the owner is told about a plan's run", () => {
     const paused = runEventNote({ event: "paused", plan_id: 1, name: "Docs", reason: "6000000 tokens of 6000000 used" })!;
     expect(paused.tone).toBe("warning");
     expect(paused.text).toContain("Docs");
-    expect(paused.text).toContain("Weiter");
+    expect(paused.text).toContain("Continue");
     const day = runEventNote({ event: "day_cap_reached", reason: "$20.00 of the day's $20.00" })!;
     expect(day.tone).toBe("warning");
-    expect(day.text).toContain("Tageslimit");
+    expect(day.text).toContain("Daily limit");
   });
 
   it("writes tokens in a reading size and shows dollars only when something was priced", () => {
@@ -429,9 +429,9 @@ describe("what the owner is told about a plan's run", () => {
     expect(tokensLabel(340_400)).toBe("340 k");
     expect(tokensLabel(1_250_000)).toBe("1.3 M");
     const limits = { max_cost_usd: 15, max_tokens: 6_000_000 };
-    expect(spendLine({ spent: { tokens: 1_500_000, steps: 3, cost_usd: 0 }, limits })).toBe("1.5 M von 6.0 M Token");
+    expect(spendLine({ spent: { tokens: 1_500_000, steps: 3, cost_usd: 0 }, limits })).toBe("1.5 M of 6.0 M tokens");
     expect(spendLine({ spent: { tokens: 1_500_000, steps: 3, cost_usd: 2.5 }, limits })).toBe(
-      "1.5 M von 6.0 M Token · $2.50 von $15.00",
+      "1.5 M of 6.0 M tokens · $2.50 of $15.00",
     );
   });
 

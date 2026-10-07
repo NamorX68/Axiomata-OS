@@ -373,9 +373,9 @@
 
   function announce(title: string) {
     const where = target
-      ? ` — ${$data?.columns.find((c) => c.id === target!.columnId)?.name ?? ""}, Platz ${target.index + 1}`
+      ? ` — ${$data?.columns.find((c) => c.id === target!.columnId)?.name ?? ""}, position ${target.index + 1}`
       : "";
-    announcement = `${title} aufgenommen${where}. Pfeiltasten bewegen, Leertaste legt ab, Escape bricht ab.`;
+    announcement = `${title} picked up${where}. Arrow keys move, Space drops, Escape cancels.`;
   }
 
   function onCardKey(event: KeyboardEvent, card: BoardCard, column: number, index: number) {
@@ -398,14 +398,14 @@
       const held = carrying;
       carrying = null;
       target = null;
-      announcement = `${held.title} abgelegt.`;
+      announcement = `${held.title} dropped.`;
       if (to) void commitMove(held.id, to);
       return;
     }
 
     if (event.key === "Escape" && carrying) {
       event.preventDefault();
-      announcement = `${carrying.title} bleibt, wo sie war.`;
+      announcement = `${carrying.title} stays where it was.`;
       carrying = null;
       target = null;
       return;
@@ -426,7 +426,7 @@
   let colMenu = $state<number | null>(null);
   type Role = BoardColumn["maps_to_status"];
   const ROLES: Role[] = ["open", "doing", "done"];
-  const ROLE_NAMES: Record<Role, string> = { open: "offen", doing: "in Arbeit", done: "fertig" };
+  const ROLE_NAMES: Record<Role, string> = { open: "open", doing: "in progress", done: "done" };
 
   /** The menu's "Umbenennen": the column's own name field, selected. */
   function renameColumn(id: number): void {
@@ -499,7 +499,7 @@
     try {
       await invoke("create_board_column", {
         boardId,
-        new: { name: "Neue Spalte", maps_to_status: "open" },
+        new: { name: "New column", maps_to_status: "open" },
       });
       await refreshBoard(boardId);
     } catch (err) {
@@ -515,7 +515,7 @@
         moveCardsTo: moveTo,
       });
       if (!gone) {
-        listError = "Die Spalte hält noch Karten — wähle, wohin sie sollen.";
+        listError = "The column still holds cards — choose where they should go.";
         return;
       }
       removingColumn = null;
@@ -676,7 +676,7 @@
   }
 
   function titleOf(id: number): string {
-    return $data?.cards.find((c) => c.id === id)?.title ?? "gelöscht";
+    return $data?.cards.find((c) => c.id === id)?.title ?? "deleted";
   }
 </script>
 
@@ -701,7 +701,7 @@
         {/each}
       </span>
       {#if card.verified_by}
-        <span class="verified" title="abgenommen von {actorLabel(card.verified_by)}">✓</span>
+        <span class="verified" title="approved by {actorLabel(card.verified_by)}">✓</span>
       {/if}
       {#if card.due_at}
         {@const due = dueState(card.due_at)}
@@ -721,12 +721,12 @@
     <p class="flow-line">
       {#if isNotableState(card.state)}
         <span class="state-badge" data-state-tone={stateTone(card.state)} title={card.input_required ?? undefined}>
-          {STATE_LABEL[card.state]}{#if card.state === "blocked"}&nbsp;auf&nbsp;{card.waiting_on.map((id) => `#${id}`).join(", ")}{/if}
+          {STATE_LABEL[card.state]}{#if card.state === "blocked"}&nbsp;on&nbsp;{card.waiting_on.map((id) => `#${id}`).join(", ")}{/if}
         </span>
       {/if}
       {#if card.kind}<span class="flow-tag">{card.kind}</span>{/if}
-      {#if card.agent}<span class="flow-tag" title="Rolle">{card.agent}</span>{/if}
-      {#if card.returned_count > 0}<span class="flow-tag" title="vom Reviewer zurückgegeben">↩ {card.returned_count}</span>{/if}
+      {#if card.agent}<span class="flow-tag" title="Role">{card.agent}</span>{/if}
+      {#if card.returned_count > 0}<span class="flow-tag" title="returned by the reviewer">↩ {card.returned_count}</span>{/if}
     </p>
   {/if}
 {/snippet}
@@ -752,7 +752,7 @@
 <!-- A card's detail: in a stand-alone card panel, and in the large board's side panel (editor-look B4). -->
 {#snippet cardDetail(detail: BoardCard)}
     <article class="detail">
-    <span class="detail-num">Karte #{detail.id}</span>
+    <span class="detail-num">Card #{detail.id}</span>
     <!-- Edited in place rather than behind an edit mode: there is no reading
          state worth protecting on a card, and a mode would make the common
          act (fix a typo) cost two extra clicks. Saved on blur, so nothing
@@ -760,7 +760,7 @@
     <input
       class="detail-title"
       value={detail.title}
-      aria-label="Titel"
+      aria-label="Title"
       onblur={(event) => saveDetail({ title: event.currentTarget.value })}
     />
     {#if detail.labels.length > 0}
@@ -773,7 +773,7 @@
     <textarea
       class="detail-body"
       value={detail.body}
-      placeholder="Kein Text."
+      placeholder="No text."
       aria-label="Text"
       onblur={(event) => saveDetail({ body: event.currentTarget.value })}
     ></textarea>
@@ -787,7 +787,7 @@
         />
       </label>
       <label>
-        <span>Fällig</span>
+        <span>Due</span>
         <input
           type="date"
           value={dueToInput(detail.due_at)}
@@ -795,10 +795,10 @@
         />
       </label>
       <label>
-        <span>Zuständig</span>
+        <span>Assigned to</span>
         <input
           value={detail.assignee ?? ""}
-          placeholder="human:owner oder agent:name"
+          placeholder="human:owner or agent:name"
           onblur={(event) =>
             saveDetail({ assignee: event.currentTarget.value.trim() || null })}
         />
@@ -817,7 +817,7 @@
         />
       </label>
       <label>
-        <span>Stufe</span>
+        <span>Level</span>
         <select
           value={detail.tier ?? ""}
           onchange={(event) => {
@@ -833,7 +833,7 @@
         </select>
       </label>
       <label>
-        <span>Rolle</span>
+        <span>Role</span>
         <input
           list="kanban-roles"
           value={detail.agent ?? ""}
@@ -842,10 +842,10 @@
         />
       </label>
       <label>
-        <span>Begründung</span>
+        <span>Reason</span>
         <input
           value={detail.agent_reason ?? ""}
-          placeholder="warum diese Rolle"
+          placeholder="why this role"
           onblur={(event) => saveDetail({ agent_reason: event.currentTarget.value.trim() || null })}
         />
       </label>
@@ -859,7 +859,7 @@
             settle(select, detail.id, (card) => String(card.plan_id ?? ""));
           }}
         >
-          <option value="">kein Plan</option>
+          <option value="">no plan</option>
           {#each plans as plan (plan.id)}
             <option value={plan.id}>{planLabel(plan)}</option>
           {/each}
@@ -872,7 +872,7 @@
     <textarea
       class="detail-body"
       value={detail.acceptance}
-      placeholder="Abnahmekriterien — woran der Reviewer erkennt, dass die Karte fertig ist."
+      placeholder="Acceptance criteria — how the reviewer tells the card is done."
       aria-label="Abnahmekriterien"
       onblur={(event) => saveDetail({ acceptance: event.currentTarget.value })}
     ></textarea>
@@ -884,7 +884,7 @@
         {#each detail.depends_on as needs (needs)}
           <span class="dep-chip" class:waiting={detail.waiting_on.includes(needs)} title={titleOf(needs)}>
             #{needs} {titleOf(needs)}
-            <button type="button" aria-label="Abhängigkeit von #{needs} entfernen" onclick={() => removeDependency(detail, needs)}>
+            <button type="button" aria-label="Remove dependency on #{needs}" onclick={() => removeDependency(detail, needs)}>
               ×
             </button>
           </span>
@@ -892,47 +892,47 @@
         {#if candidates.length > 0}
           <select
             class="dep-add"
-            aria-label="Abhängigkeit hinzufügen"
+            aria-label="Add dependency"
             onchange={(event) => {
               const picked = Number(event.currentTarget.value);
               event.currentTarget.value = "";
               if (picked) void addDependency(detail, picked);
             }}
           >
-            <option value="">+ Abhängigkeit …</option>
+            <option value="">+ Dependency …</option>
             {#each candidates as other (other.id)}<option value={other.id}>#{other.id} {other.title}</option>{/each}
           </select>
         {:else if detail.depends_on.length === 0}
-          <span class="deps-none">keine</span>
+          <span class="deps-none">none</span>
         {/if}
       </div>
     {/if}
     {#if detailError}<p class="detail-error" role="alert">{detailError}</p>{/if}
 
     <dl>
-      <dt>Zustand</dt>
+      <dt>State</dt>
       <dd>
-        {STATE_LABEL[detail.state]}{#if detail.returned_count > 0} · {detail.returned_count}× zurückgegeben{/if}
+        {STATE_LABEL[detail.state]}{#if detail.returned_count > 0} · {detail.returned_count}× returned{/if}
       </dd>
       {#if detail.input_required}
-        <dt>Rückfrage</dt>
+        <dt>Question</dt>
         <dd>{detail.input_required}</dd>
       {/if}
       {#if detail.due_at}
         {@const due = dueState(detail.due_at)}
-        <dt>Fällig in</dt>
+        <dt>Due in</dt>
         <dd class:over={due.overdue}>{due.label}</dd>
       {/if}
       {#if detail.claimed_by}
-        <dt>Übernommen</dt>
+        <dt>Claimed by</dt>
         <dd>{actorLabel(detail.claimed_by)}</dd>
       {/if}
       {#if detail.verified_by}
-        <dt>Abgenommen</dt>
+        <dt>Approved by</dt>
         <dd>✓ {actorLabel(detail.verified_by)}</dd>
       {/if}
       {#if detail.archived_at}
-        <dt>Archiviert</dt>
+        <dt>Archived</dt>
         <dd>ja</dd>
       {/if}
     </dl>
@@ -956,32 +956,32 @@
     <div class="detail-actions">
       {#if !(stepForm?.card === detail.id && stepForm.state === detail.state)}
         {#if canStart(detail)}
-          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "start", state: detail.state })}>Starten …</button>
+          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "start", state: detail.state })}>Start …</button>
         {:else if canReview(detail)}
-          <button class="ax-btn" title="Der Reviewer startet von selbst; hier mit einer Engine deiner Wahl" onclick={() => (stepForm = { card: detail.id, step: "review", state: detail.state })}>Review starten …</button>
+          <button class="ax-btn" title="The reviewer starts by itself; here with an engine of your choice" onclick={() => (stepForm = { card: detail.id, step: "review", state: detail.state })}>Start review …</button>
         {:else if canTakeOver(detail)}
-          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "take-over", state: detail.state })}>Übernehmen …</button>
+          <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "take-over", state: detail.state })}>Take over …</button>
         {/if}
       {/if}
       {#if detail.state === "working" && detail.claimed_by}
-        <button class="ax-btn" title="Die Karte wartet wieder in Offen; das Geheimnis der Sitzung wird zurückgenommen" onclick={() => releaseCard(detail)}>Freigeben</button>
+        <button class="ax-btn" title="The card waits in Open again; the session's secret is withdrawn" onclick={() => releaseCard(detail)}>Release</button>
       {/if}
       {#if detail.state === "proposed"}
-        <button class="ax-btn primary" onclick={() => approveProposal(detail)}>Vorschlag annehmen</button>
+        <button class="ax-btn primary" onclick={() => approveProposal(detail)}>Accept proposal</button>
       {/if}
       {#if detail.state === "failed" || detail.state === "canceled"}
-        <button class="ax-btn" onclick={() => markCard(detail, "reopen")}>Wieder öffnen</button>
+        <button class="ax-btn" onclick={() => markCard(detail, "reopen")}>Reopen</button>
       {:else if detail.state !== "taken_over" && detail.state !== "integrated" && detail.state !== "verified"}
         <button class="ax-btn" onclick={() => markCard(detail, "cancel")}>Absagen</button>
       {/if}
       <button class="ax-btn" onclick={() => setArchived(detail, detail.archived_at === null)}>
-        {detail.archived_at === null ? "Archivieren" : "Zurückholen"}
+        {detail.archived_at === null ? "Archive" : "Restore"}
       </button>
       {#if confirmingDelete}
-        <button class="ax-btn danger" onclick={() => removeCard(detail)}>Wirklich löschen</button>
-        <button class="ax-btn" onclick={() => (confirmingDelete = false)}>Abbrechen</button>
+        <button class="ax-btn danger" onclick={() => removeCard(detail)}>Really delete</button>
+        <button class="ax-btn" onclick={() => (confirmingDelete = false)}>Cancel</button>
       {:else}
-        <button class="ax-btn danger" onclick={() => (confirmingDelete = true)}>Löschen</button>
+        <button class="ax-btn danger" onclick={() => (confirmingDelete = true)}>Delete</button>
       {/if}
     </div>
 
@@ -996,7 +996,7 @@
           void writeNote(detail);
         }}
       >
-        <input bind:value={note} placeholder="Notiz schreiben …" aria-label="Notiz zum Verlauf" />
+        <input bind:value={note} placeholder="Write a note …" aria-label="Note for the history" />
       </form>
       {#if events.length === 0}
         <p class="history-empty">Noch nichts passiert.</p>
@@ -1021,17 +1021,17 @@
 {:else if boardId === null}
   <!-- The app opens even with no board at all: it has to offer to create the first one. -->
   <div class="first-board">
-    <p class="notice">Noch kein Brett.</p>
+    <p class="notice">No board yet.</p>
     <KanbanBoards current={null} onChoose={switchBoard} onDeleted={boardGone} />
   </div>
 {:else if $data === null || ($data.loading && $data.board === null)}
-  <p class="notice">Lädt …</p>
+  <p class="notice">Loading …</p>
 {:else if $data.error}
   <p class="notice danger">{$data.error}</p>
 {:else if cardId !== null}
   <!-- Detail of a single card. -->
   {#if detail === null}
-    <p class="notice">Diese Karte gibt es nicht mehr.</p>
+    <p class="notice">This card no longer exists.</p>
   {:else}
     {@render cardDetail(detail)}
   {/if}
@@ -1043,7 +1043,7 @@
       {#if boards.length > 1}
         <select
           class="board-pick"
-          aria-label="Brett wählen"
+          aria-label="Choose a board"
           value={boardId}
           onchange={(event) => switchBoard(Number(event.currentTarget.value))}
         >
@@ -1057,7 +1057,7 @@
       <!-- One toolbar (editor-look B5). -->
       <label class="filter">
           <Icon name="search" size="sm" />
-          <input type="search" placeholder="Karten filtern …" bind:value={filterText} aria-label="Karten filtern" />
+          <input type="search" placeholder="Filter cards …" bind:value={filterText} aria-label="Filter cards" />
         </label>
         <span class="label-filters">
           {#each allLabels as label (label)}
@@ -1074,26 +1074,26 @@
         </span>
         <IconButton
           icon="archive"
-          label={showArchived ? "Archivierte Karten ausblenden" : "Archivierte Karten zeigen"}
+          label={showArchived ? "Hide archived cards" : "Show archived cards"}
           pressed={showArchived}
           onclick={() => (showArchived = !showArchived)}
         />
       <IconButton
         icon="refresh-cw"
-        label="Brett neu laden"
+        label="Reload the board"
         disabled={$data.loading}
         onclick={() => boardId !== null && void refreshBoard(boardId)}
       />
-      <IconButton icon="columns-3" label="Spalte hinzufügen" onclick={addColumn} />
+      <IconButton icon="columns-3" label="Add a column" onclick={addColumn} />
       <IconButton
         icon="settings"
-        label="Bretter & Ansicht"
+        label="Boards & view"
         pressed={showBoards}
         onclick={() => (showBoards = !showBoards)}
       />
     </div>
     {#if showBoards}
-      <div class="boards-pop" role="dialog" aria-label="Bretter & Ansicht">
+      <div class="boards-pop" role="dialog" aria-label="Boards & view">
         <KanbanBoards current={boardId} onChoose={chooseBoard} onDeleted={boardGone} onChanged={loadBoards} />
       </div>
     {/if}
@@ -1119,7 +1119,7 @@
               class="name"
               value={column.name}
               data-no-drag
-              aria-label="Name der Spalte"
+              aria-label="Name of the column"
               onblur={(event) => saveColumn(column, { name: event.currentTarget.value })}
             />
             <span class="count">{cards.length}</span>
@@ -1129,14 +1129,14 @@
               <IconButton
                 icon="ellipsis"
                 size="sm"
-                label="Spalte {column.name}: Aktionen"
+                label="Column {column.name}: actions"
                 pressed={colMenu === column.id}
                 onclick={() => (colMenu = colMenu === column.id ? null : column.id)}
               />
             </span>
             {#if colMenu === column.id}
               <div class="col-menu" role="menu" data-no-drag>
-                <p class="menu-label">Rolle</p>
+                <p class="menu-label">Role</p>
                 {#each column.stage ? [column.maps_to_status] : ROLES as role (role)}
                   <button
                     type="button"
@@ -1154,7 +1154,7 @@
                 {/each}
                 <hr />
                 <button type="button" role="menuitem" onclick={() => renameColumn(column.id)}>
-                  <Icon name="pencil" size="sm" />Umbenennen
+                  <Icon name="pencil" size="sm" />Rename
                 </button>
                 {#if column.stage === null}
                   <button
@@ -1166,11 +1166,11 @@
                       removingColumn = { id: column.id, held: cards.length };
                     }}
                   >
-                    <Icon name="trash-2" size="sm" />Entfernen
+                    <Icon name="trash-2" size="sm" />Remove
                   </button>
                 {:else}
                   <p class="menu-label">
-                    {column.stage === "review" ? "Review-Spalte des Ablaufs" : "Vorschlag-Spalte des Ablaufs"} — bleibt bei jedem Brett
+                    {column.stage === "review" ? "Review column of the flow" : "Proposal column of the flow"} — stays on every board
                   </p>
                 {/if}
               </div>
@@ -1180,21 +1180,21 @@
           {#if removingColumn?.id === column.id}
             <div class="col-remove">
               {#if removingColumn.held === 0}
-                <span>Spalte entfernen?</span>
-                <button class="ax-btn danger" onclick={() => removeColumn(column, null)}>Entfernen</button>
+                <span>Remove the column?</span>
+                <button class="ax-btn danger" onclick={() => removeColumn(column, null)}>Remove</button>
               {:else}
-                <span>{removingColumn.held} Karten wohin?</span>
+                <span>{removingColumn.held} cards — where to?</span>
                 <select
                   aria-label="Zielspalte"
                   onchange={(event) => removeColumn(column, Number(event.currentTarget.value))}
                 >
-                  <option value="">wählen …</option>
+                  <option value="">choose …</option>
                   {#each grouped.filter((g) => g.column.id !== column.id) as other (other.column.id)}
                     <option value={other.column.id}>{other.column.name}</option>
                   {/each}
                 </select>
               {/if}
-              <button class="ax-btn" onclick={() => (removingColumn = null)}>Abbrechen</button>
+              <button class="ax-btn" onclick={() => (removingColumn = null)}>Cancel</button>
             </div>
           {/if}
           <div class="cards">
@@ -1226,7 +1226,7 @@
                 {@render cardFace(card)}
               </article>
             {:else}
-              <p class="empty">Keine Karten</p>
+              <p class="empty">No cards</p>
             {/each}
             {#if marksEndOf(column.id, cards)}
               <div class="marker" aria-hidden="true"></div>
@@ -1246,9 +1246,9 @@
                 autofocus
                 data-no-drag
                 class="quick-field"
-                placeholder="Titel, Enter"
+                placeholder="Title, Enter"
                 bind:value={newTitle}
-                aria-label="Titel der neuen Karte"
+                aria-label="Title of the new card"
                 onblur={() => (addingTo = newTitle.trim() ? addingTo : null)}
                 onkeydown={(event) => {
                   if (event.key === "Escape") {
@@ -1260,7 +1260,7 @@
             </form>
           {:else}
             <button class="add" data-no-drag onclick={() => ((addingTo = column.id), (newTitle = ""))}>
-              <Icon name="plus" size="sm" /> Karte
+              <Icon name="plus" size="sm" /> Card
             </button>
           {/if}
         </section>
@@ -1269,15 +1269,15 @@
     </div>
     {#if sideCardId !== null}
       <!-- B4: the card beside the board, which stays in view; another card's click swaps it. -->
-      <aside class="side-detail" aria-label="Karte">
+      <aside class="side-detail" aria-label="Card">
         <header class="side-head">
-          <span>Karte</span>
-          <IconButton icon="x" size="sm" label="Karte schließen (Esc)" onclick={() => showInSide(null)} />
+          <span>Card</span>
+          <IconButton icon="x" size="sm" label="Close the card (Esc)" onclick={() => showInSide(null)} />
         </header>
         {#if detail}
           {@render cardDetail(detail)}
         {:else}
-          <p class="notice">Diese Karte gibt es nicht mehr.</p>
+          <p class="notice">This card no longer exists.</p>
         {/if}
       </aside>
     {/if}
@@ -1302,7 +1302,7 @@
     <p class="sr-only" aria-live="polite">{announcement}</p>
 
     {#if boardEmpty}
-      <p class="notice">Noch nichts hier — leg unten in einer Spalte die erste Karte an.</p>
+      <p class="notice">Nothing here yet — create the first card in a column below.</p>
     {/if}
   </div>
 {/if}

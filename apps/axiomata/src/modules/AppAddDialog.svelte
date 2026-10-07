@@ -122,7 +122,7 @@
     style="width: min(calc(420px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5))); height: min(calc(560px * var(--ax-ui-scale)), calc(100vh - 2 * var(--ax-space-5)));"
   >
     <div class="content">
-      <div class="mode-switch" role="radiogroup" aria-label="Intern oder extern">
+      <div class="mode-switch" role="radiogroup" aria-label="Internal or external">
         <label class:active={mode === "intern"}>
           <input type="radio" name="app-add-dialog-mode" checked={mode === "intern"} onchange={() => setMode("intern")} />
           Intern
@@ -135,7 +135,7 @@
       <input type="search" class="filter" placeholder="Search…" aria-label="Filter apps" bind:value={query} />
       {#if mode === "intern"}
         {#if filteredIntern.length === 0}
-          <p class="muted">Keine Module gefunden.</p>
+          <p class="muted">No modules found.</p>
         {:else}
           <ul>
             {#each filteredIntern as app (app.type)}
@@ -153,20 +153,20 @@
       {:else if error}
         <p class="muted">{error}</p>
       {:else if filteredExtern.length === 0}
-        <p class="muted">Keine Apps gefunden.</p>
+        <p class="muted">No apps found.</p>
       {:else}
         <ul>
           {#each filteredExtern as app (app.path)}
             <li>
               <span class="name">{app.name}</span>
               <button type="button" class="toggle" onclick={() => toggleExtern(app)}>
-                {addedPaths.has(app.path) ? "Entfernen" : "Hinzufügen"}
+                {addedPaths.has(app.path) ? "Remove" : "Add"}
               </button>
             </li>
           {/each}
         </ul>
         {#if truncated}
-          <p class="muted hint">Weitere Apps nicht angezeigt — Suchfeld nutzen.</p>
+          <p class="muted hint">More apps not shown — use the search field.</p>
         {/if}
       {/if}
     </div>

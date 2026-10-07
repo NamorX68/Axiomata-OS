@@ -39,11 +39,11 @@
   </label>
 
   <label class="check">
-    Uhr neben dem Kalender
+    Clock next to the calendar
     <input type="checkbox" checked={showClock} onchange={(e) => set("showClock", e.currentTarget.checked)} />
   </label>
   {#if showClock}
-    <div class="radios" role="radiogroup" aria-label="Uhr-Stil">
+    <div class="radios" role="radiogroup" aria-label="Clock style">
       <label>
         <input
           type="radio"

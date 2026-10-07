@@ -122,24 +122,24 @@
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="scrim" onpointerdown={(event) => event.target === event.currentTarget && close()}>
-    <div class="spot" role="dialog" aria-modal="true" aria-label="Suche">
+    <div class="spot" role="dialog" aria-modal="true" aria-label="Search">
       <input
         bind:this={input}
         bind:value={query}
         class="pill"
         type="text"
         role="combobox"
-        aria-label="Suche"
+        aria-label="Search"
         aria-expanded={rows.length > 0}
         aria-controls="spotlight-list"
         aria-activedescendant={rows.length > 0 ? `spotlight-row-${active}` : undefined}
-        placeholder="Suchen …"
+        placeholder="Search …"
         autocomplete="off"
         spellcheck="false"
         onkeydown={onKeydown}
       />
       {#if rows.length > 0}
-        <ul id="spotlight-list" class="results" role="listbox" aria-label="Treffer" bind:this={list}>
+        <ul id="spotlight-list" class="results" role="listbox" aria-label="Results" bind:this={list}>
           {#each rows as row, index (row.group + ":" + row.item.id)}
             {#if row.groupStart}
               <li class="group" role="presentation">{GROUP_LABEL[row.group]}</li>
@@ -159,9 +159,9 @@
             </li>
           {/each}
         </ul>
-        {#if searching}<p class="busy">Durchsuche Dateien …</p>{/if}
+        {#if searching}<p class="busy">Searching files …</p>{/if}
       {:else if query.trim() !== ""}
-        <p class="none">{searching ? "Durchsuche Dateien …" : "Keine Treffer"}</p>
+        <p class="none">{searching ? "Searching files …" : "No results"}</p>
       {/if}
     </div>
   </div>

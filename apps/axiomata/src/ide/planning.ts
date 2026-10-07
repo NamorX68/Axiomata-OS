@@ -35,7 +35,7 @@ import { GRAPH_PANE, PLAN_PANE, TEAM_PANE, graphTab, planTab, teamTab } from "./
 /** The role kinds that do not take cards: a reviewer judges them, a planner makes them. */
 const NOT_ASSIGNABLE = new Set(["review", "plan", "grill"]);
 
-const STATUS_LABEL: Record<PlanStatus, string> = { draft: "Entwurf", approved: "freigegeben", closed: "abgeschlossen" };
+const STATUS_LABEL: Record<PlanStatus, string> = { draft: "draft", approved: "released", closed: "closed" };
 
 export function planStatusLabel(status: PlanStatus): string {
   return STATUS_LABEL[status];
@@ -269,7 +269,7 @@ export function needsCandidates(
 /** What the Studio calls a proposal whose card has no title worth reading (a planner may send an empty line). */
 export function proposalTitle(card: Pick<BoardCard, "id" | "title">): string {
   const first = card.title.split("\n")[0].trim();
-  return first === "" ? `Karte #${card.id}` : first;
+  return first === "" ? `Card #${card.id}` : first;
 }
 
 /**
@@ -425,41 +425,41 @@ export function resetFlowPanes(layout: Layout): Layout {
 export function runEventNote(event: PlanRunEvent): { text: string; tone: "info" | "warning" } | null {
   switch (event.event) {
     case "started":
-      return { text: `Plan #${event.plan_id}: Karte #${event.card_id} läuft von selbst an.`, tone: "info" };
+      return { text: `Plan #${event.plan_id}: card #${event.card_id} starts by itself.`, tone: "info" };
     case "integrated":
       if (event.outcome === "done") {
-        return { text: `Karte #${event.card_id} ist im Plan #${event.plan_id} integriert.`, tone: "info" };
+        return { text: `Card #${event.card_id} is integrated into plan #${event.plan_id}.`, tone: "info" };
       }
       if (event.outcome === "conflict") {
         const files = event.files.join(", ");
         return event.gave_up
           ? {
-              text: `Karte #${event.card_id} passt auch beim zweiten Mal nicht in den Plan (${files}); sie bleibt, wie sie ist. Entscheide du.`,
+              text: `Card #${event.card_id} does not fit the plan the second time either (${files}); it stays as it is. You decide.`,
               tone: "warning",
             }
           : {
-              text: `Karte #${event.card_id} passte nicht mehr in den Plan (${files}) und wird auf dem neuen Stand noch einmal gemacht.`,
+              text: `Card #${event.card_id} no longer fit the plan (${files}) and will be redone on the new state.`,
               tone: "warning",
             };
       }
       return null;
     case "blocked":
-      return { text: `Karte #${event.card_id} kam nicht voran: ${event.reason}`, tone: "warning" };
+      return { text: `Card #${event.card_id} made no progress: ${event.reason}`, tone: "warning" };
     case "ready_to_take_over":
-      return { text: `Der Plan „${event.name}“ ist fertig: alle Karten sind integriert. Bereit zum Übernehmen.`, tone: "info" };
+      return { text: `The plan “${event.name}” is finished: all cards are integrated. Ready to take over.`, tone: "info" };
     case "escalated":
       return {
-        text: `Karte #${event.card_id} wurde zweimal zurückgegeben: „${event.role}“ auf „${event.engine_id}“ übernimmt von „${event.from_role}“ (gleicher Worktree, gleicher Zweig). Klappt auch das nicht, entscheidest du.`,
+        text: `Card #${event.card_id} was returned twice: “${event.role}” on “${event.engine_id}” takes over from “${event.from_role}” (same worktree, same branch). If that does not work either, you decide.`,
         tone: "info",
       };
     case "paused":
       return {
-        text: `Plan „${event.name}“ pausiert: ${event.reason}. Es startet nichts Neues, bis du im Flow „Weiter“ sagst.`,
+        text: `Plan “${event.name}” is paused: ${event.reason}. Nothing new starts until you say “Continue” in the Flow.`,
         tone: "warning",
       };
     case "day_cap_reached":
       return {
-        text: `Tageslimit der Studio-Sitzungen erreicht (${event.reason}). Es startet nichts Neues bis morgen oder bis du es in der Config anhebst.`,
+        text: `Daily limit of the Studio sessions reached (${event.reason}). Nothing new starts until tomorrow or until you raise it in the config.`,
         tone: "warning",
       };
   }
@@ -474,10 +474,10 @@ export function tokensLabel(tokens: number): string {
 
 /** One line for a plan's spending: tokens and — only when something was priced — dollars, each against its limit. */
 export function spendLine(spend: Pick<PlanSpend, "spent" | "limits">): string {
-  const tokens = `${tokensLabel(spend.spent.tokens)} von ${tokensLabel(spend.limits.max_tokens)} Token`;
+  const tokens = `${tokensLabel(spend.spent.tokens)} of ${tokensLabel(spend.limits.max_tokens)} tokens`;
   // A subscription engine has no dollar figure: nothing is shown rather than "$0.00", which would read as "free".
   if (spend.spent.cost_usd <= 0) return tokens;
-  return `${tokens} · $${spend.spent.cost_usd.toFixed(2)} von $${spend.limits.max_cost_usd.toFixed(2)}`;
+  return `${tokens} · $${spend.spent.cost_usd.toFixed(2)} of $${spend.limits.max_cost_usd.toFixed(2)}`;
 }
 
 /**

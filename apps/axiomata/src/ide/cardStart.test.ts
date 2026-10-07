@@ -73,11 +73,11 @@ describe("unpushedNote", () => {
     const note = unpushedNote({ ahead: 2, upstream: "origin/main" });
     expect(note).toContain("↑2");
     expect(note).toContain("origin/main");
-    expect(note).toContain("Git-Reiter");
+    expect(note).toContain("Git tab");
   });
 
   it("says a branch without an upstream is not published yet", () => {
-    expect(unpushedNote({ ahead: 0, upstream: null })).toContain("keinen Upstream");
+    expect(unpushedNote({ ahead: 0, upstream: null })).toContain("no upstream");
     expect(unpushedNote({ ahead: 1, upstream: null })).toContain("↑1");
   });
 

@@ -55,11 +55,11 @@ export function roleEngine(
  */
 export function unpushedNote(status: { ahead: number; upstream: string | null }): string | null {
   if (status.ahead > 0) {
-    const target = status.upstream ?? "dem Upstream";
-    return `Noch nicht gepusht: ↑${status.ahead} auf ${target}. Push im Git-Reiter des Studios.`;
+    const target = status.upstream ?? "the upstream";
+    return `Not pushed yet: ↑${status.ahead} to ${target}. Push in the Studio's Git tab.`;
   }
   if (status.upstream === null) {
-    return "Noch nicht gepusht: der Branch hat noch keinen Upstream. Push im Git-Reiter des Studios legt ihn an.";
+    return "Not pushed yet: the branch has no upstream yet. Pushing in the Studio's Git tab creates it.";
   }
   return null;
 }

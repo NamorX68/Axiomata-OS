@@ -149,9 +149,9 @@
       const result = await invoke<CardIntegrationResult>("integrate_card", { cardId: card.id });
       if (result.outcome === "done") {
         closePanesOf(result.agent_ids);
-        toast(`Karte #${card.id} ist im Plan integriert.`, "info");
+        toast(`Card #${card.id} is integrated into the plan.`, "info");
       } else if (result.outcome === "conflict") {
-        toast(`Karte #${card.id} passt immer noch nicht in den Plan (${result.files.join(", ")}).`, "warning");
+        toast(`Card #${card.id} still does not fit into the plan (${result.files.join(", ")}).`, "warning");
       }
       await Promise.all([reloadBoard(), refreshAgents()]);
     });
@@ -161,7 +161,7 @@
     await act(async () => {
       closePanesOf(await invoke<number[]>("redo_card", { cardId: card.id }));
       await Promise.all([reloadBoard(), refreshAgents()]);
-      toast(`Karte #${card.id} wird auf dem neuen Stand des Plans noch einmal gemacht.`, "info");
+      toast(`Card #${card.id} will be redone on the plan's new state.`, "info");
     });
   }
 
@@ -185,19 +185,19 @@
 <div class="graph-pane">
   <header>
     <ul class="legend" aria-label="Farben">
-      <li class="idle">bereit / wartet</li>
-      <li class="active">in Arbeit</li>
-      <li class="attention">Rückfrage</li>
+      <li class="idle">ready / waiting</li>
+      <li class="active">in progress</li>
+      <li class="attention">question</li>
       <li class="review">im Review</li>
-      <li class="done">geprüft / im Plan</li>
+      <li class="done">checked / in the plan</li>
       <li class="failed">gescheitert</li>
     </ul>
   </header>
 
   {#if !plan}
-    <p class="empty">Es gibt noch keinen Plan. Lege im Reiter „Planung“ einen an; seine Karten erscheinen hier als Graph.</p>
+    <p class="empty">There is no plan yet. Create one in the “Planning” tab; its cards appear here as a graph.</p>
   {:else if cards.length === 0}
-    <p class="empty">Der Plan hat noch keine Karten. Der Planer legt sie als Vorschläge an.</p>
+    <p class="empty">The plan has no cards yet. The planner creates them as proposals.</p>
   {:else}
     <div class="canvas">
       <svg width={graph.width} height={graph.height} role="img" aria-label="Graph des Plans {plan.name}">
@@ -224,10 +224,10 @@
           <g
             class="goal {goal.tone}"
             transform="translate({graph.end.x} {graph.end.y})"
-            aria-label="Ziel des Plans: {goal.label}"
+            aria-label="Goal of the plan: {goal.label}"
           >
             <rect width={graph.end.w} height={graph.end.h} rx={graph.end.h / 2} />
-            <text x={graph.end.w / 2} y="22" text-anchor="middle" class="goal-title">Ziel</text>
+            <text x={graph.end.w / 2} y="22" text-anchor="middle" class="goal-title">Goal</text>
             <text x={graph.end.w / 2} y="40" text-anchor="middle" class="goal-sub">{goal.label}</text>
           </g>
         {/if}
@@ -246,8 +246,8 @@
             role="button"
             tabindex="0"
             aria-label={review
-              ? `Review von Karte ${node.card.id}, ${reviewLabel(node.card)}`
-              : `Karte ${node.card.id}, ${STATE_LABEL[node.card.state]}`}
+              ? `Review of card ${node.card.id}, ${reviewLabel(node.card)}`
+              : `Card ${node.card.id}, ${STATE_LABEL[node.card.state]}`}
             aria-pressed={selectedId === node.card.id}
             onclick={() => (selectedId = selectedId === node.card.id ? null : node.card.id)}
             onkeydown={(e) => onKey(e, node.card.id)}
@@ -261,7 +261,7 @@
               <text x="14" y="30" class="title">#{node.card.id} {clip(node.card.title)}</text>
               <text x="14" y="56" class="sub">
                 {node.card.agent ?? "—"} · {STATE_LABEL[node.card.state]}{node.card.returned_count > 0
-                  ? ` · ${node.card.returned_count}× zurück`
+                  ? ` · ${node.card.returned_count}× returned`
                   : ""}
               </text>
               {#if livingCards.has(node.card.id)}<circle cx={NODE_W - 16} cy="16" r="5" class="live" />{/if}
@@ -271,12 +271,12 @@
       </svg>
     </div>
 
-    <section class="detail" aria-label="Karte">
+    <section class="detail" aria-label="Card">
       {#if selected}
         <h3>#{selected.id} {selected.title}</h3>
         <p class="meta">
           <span class="chip {toneOf(selected.state)}">{STATE_LABEL[selected.state]}</span>
-          {#if selected.agent}<span class="muted">Rolle {selected.agent}{selected.tier ? ` · ${selected.tier}` : ""}</span>{/if}
+          {#if selected.agent}<span class="muted">Role {selected.agent}{selected.tier ? ` · ${selected.tier}` : ""}</span>{/if}
           {#if selected.depends_on.length > 0}
             <span class="muted">braucht zuerst: {selected.depends_on.map((id) => `#${id}`).join(", ")}</span>
           {/if}
@@ -289,7 +289,7 @@
             </button>
           {/each}
           {#if leftForOwner.includes(selected.id)}
-            <span class="error" role="status">Passt zweimal nicht in den Plan; das Studio hat aufgegeben.</span>
+            <span class="error" role="status">Does not fit the plan twice; the Studio gave up.</span>
             <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(selected)}>Erneut integrieren</button>
             <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(selected)}>Neu machen</button>
           {/if}
@@ -308,7 +308,7 @@
           </ol>
         {/if}
       {:else}
-        <p class="muted">Klicke eine Karte an, um ihren Verlauf und ihre Sitzungen zu sehen.</p>
+        <p class="muted">Click a card to see its history and its sessions.</p>
       {/if}
     </section>
   {/if}

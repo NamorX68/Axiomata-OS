@@ -64,7 +64,7 @@
         projectId,
         engineId: engineId || null,
       });
-      toast(`Karte #${card.id} läuft in der Sitzung ${session.agent.name}.`, "info");
+      toast(`Card #${card.id} runs in the session ${session.agent.name}.`, "info");
       emit("shell:agent", { projectId, agentId: session.agent.id });
       onDone();
     } catch (err) {
@@ -83,7 +83,7 @@
   }}
 >
   {#if projects.length === 0}
-    <p class="hint">Es gibt kein Projekt, in dem die Karte laufen könnte. Lege im Studio eines an.</p>
+    <p class="hint">There is no project the card could run in. Create one in the Studio.</p>
   {:else}
     <label>
       Projekt
@@ -95,7 +95,7 @@
       Engine
       <select bind:value={engineId} aria-label="Engine">
         {#if ownEngine !== null}
-          <option value="">Die der Rolle {roleName}{ownEngineLabel ? ` (${ownEngineLabel})` : ""}</option>
+          <option value="">The role {roleName}'s own{ownEngineLabel ? ` (${ownEngineLabel})` : ""}</option>
         {/if}
         {#each $engineCatalog as engine (engine.id)}
           <option value={engine.id}>{engine.label} — {engineLine(engine)}</option>
@@ -103,15 +103,15 @@
       </select>
     </label>
     {#if ownEngine === null && roles.length > 0}
-      <p class="hint">Die Rolle „{roleName}“ nennt keine Engine — wähle eine.</p>
+      <p class="hint">The role “{roleName}” names no engine — pick one.</p>
     {/if}
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
     <button class="ax-btn primary" type="submit" disabled={busy || projectId === null}>
-      {busy ? "Startet …" : "Starten"}
+      {busy ? "Starting …" : "Start"}
     </button>
-    <button class="ax-btn" type="button" onclick={onDone}>Abbrechen</button>
+    <button class="ax-btn" type="button" onclick={onDone}>Cancel</button>
   </div>
 </form>
 

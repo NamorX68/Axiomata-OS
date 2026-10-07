@@ -48,7 +48,7 @@ export async function openKanban(target: { boardId?: number; cardId?: number } =
     boards = await invoke<{ id: number }[]>("list_boards");
   } catch (err) {
     // Opening on "no board" because the list failed would offer to create a board that probably exists.
-    toast(`Kanban konnte die Bretter nicht laden: ${String(err)}`, "warning");
+    toast(`Kanban could not load the boards: ${String(err)}`, "warning");
     return;
   }
   const boardId = target.boardId ?? boardToOpen(boards, lastBoard());

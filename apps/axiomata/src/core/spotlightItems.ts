@@ -36,15 +36,15 @@ const item = (
 /** The shell's own actions: what the icon bar and the ring offer, reachable from the keyboard. */
 export function commandItems(): SpotlightItem[] {
   return [
-    item("command", "new-note", "Neue Notiz", { type: "event", event: "shell:new-note" }, { keywords: "new note" }),
-    item("command", "settings", "Einstellungen", { type: "event", event: "shell:settings" }, { keywords: "settings" }),
-    item("command", "kanban", "Kanban öffnen", { type: "kanban" }, { keywords: "board karten" }),
-    item("command", "studio", "Studio öffnen", { type: "studio" }, { keywords: "ide editor flow canvas" }),
-    item("command", "add-module", "Modul hinzufügen", { type: "event", event: "shell:add-module" }, { keywords: "add" }),
+    item("command", "new-note", "New note", { type: "event", event: "shell:new-note" }, { keywords: "new note" }),
+    item("command", "settings", "Settings", { type: "event", event: "shell:settings" }, { keywords: "settings" }),
+    item("command", "kanban", "Open Kanban", { type: "kanban" }, { keywords: "board cards karten" }),
+    item("command", "studio", "Open Studio", { type: "studio" }, { keywords: "ide editor flow canvas" }),
+    item("command", "add-module", "Add module", { type: "event", event: "shell:add-module" }, { keywords: "add" }),
     item(
       "command",
       "brain",
-      "Second Brain öffnen",
+      "Open Second Brain",
       { type: "event", event: "open-second-brain" },
       { keywords: "graph orbit notizen" },
     ),
@@ -85,7 +85,7 @@ export function routineItems(routines: Routine[]): SpotlightItem[] {
 export function cardItems(cards: BoardCard[], boardNames: Map<number, string>): SpotlightItem[] {
   return cards.map((card) =>
     item("card", String(card.id), card.title, { type: "kanban", boardId: card.board_id, cardId: card.id }, {
-      subtitle: `#${card.id} · ${boardNames.get(card.board_id) ?? "Brett"}`,
+      subtitle: `#${card.id} · ${boardNames.get(card.board_id) ?? "Board"}`,
       keywords: [`#${card.id}`, ...card.labels].join(" "),
     }),
   );

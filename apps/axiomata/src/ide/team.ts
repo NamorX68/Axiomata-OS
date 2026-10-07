@@ -65,7 +65,7 @@ export function groupsOf(agents: IdeAgent[], cards: BoardCard[], plans: BoardPla
   const rank = (tile: Tile): number => (tile.card ? ORDER[tile.card.state] : -1);
   const result: TeamGroup[] = [...groups.entries()].map(([planId, tiles]) => ({
     planId,
-    title: planId === null ? "Ohne Plan" : `Plan #${planId} · ${planName.get(planId) ?? "?"}`,
+    title: planId === null ? "No plan" : `Plan #${planId} · ${planName.get(planId) ?? "?"}`,
     tiles: tiles.sort(
       (a, b) =>
         rank(a) - rank(b) ||
@@ -82,11 +82,11 @@ export function groupsOf(agents: IdeAgent[], cards: BoardCard[], plans: BoardPla
 export function dutyLabel(duty: Duty): string {
   switch (duty) {
     case "worker":
-      return "arbeitet an";
+      return "works on";
     case "reviewer":
-      return "prüft";
+      return "reviews";
     case "planner":
-      return "plant";
+      return "plans";
     case "own":
       return "";
   }
@@ -111,9 +111,9 @@ export function stepLabel(step: SessionActivityStep): string {
 /** What the tile's live line says: the newest step, or why there is none. */
 export function nowLine(activity: { readable: boolean; steps: SessionActivityStep[] } | undefined): string {
   if (!activity) return "";
-  if (!activity.readable) return "noch nichts aufgezeichnet";
+  if (!activity.readable) return "nothing recorded yet";
   const last = activity.steps[activity.steps.length - 1];
-  return last ? stepLabel(last) : "noch kein Schritt";
+  return last ? stepLabel(last) : "no step yet";
 }
 
 /** When the newest step happened, as the harness wrote it; `null` where there is no step or the record has no time. */

@@ -154,24 +154,24 @@ describe("dueState", () => {
   const local = (day: number, hour: number) => new Date(2026, 8, day, hour).toISOString();
   const now = new Date(2026, 8, 20, 12);
 
-  it("calls something due late today 'heute', not 'in 0 T'", () => {
-    expect(dueState(local(20, 23), now)).toEqual({ label: "heute", overdue: false, soon: true });
+  it("calls something due late today 'today', not 'in 0 d'", () => {
+    expect(dueState(local(20, 23), now)).toEqual({ label: "today", overdue: false, soon: true });
   });
 
   it("counts calendar days, so tomorrow early is still tomorrow", () => {
-    expect(dueState(local(21, 6), now)).toEqual({ label: "morgen", overdue: false, soon: true });
+    expect(dueState(local(21, 6), now)).toEqual({ label: "tomorrow", overdue: false, soon: true });
   });
 
   it("marks a past date overdue with how far past it is", () => {
     expect(dueState(local(18, 12), now)).toEqual({
-      label: "2 T überfällig",
+      label: "2 d overdue",
       overdue: true,
       soon: false,
     });
   });
 
   it("counts further-out dates in days", () => {
-    expect(dueState(local(25, 12), now)).toEqual({ label: "in 5 T", overdue: false, soon: false });
+    expect(dueState(local(25, 12), now)).toEqual({ label: "in 5 d", overdue: false, soon: false });
   });
 });
 
@@ -322,7 +322,7 @@ describe("agent flow helpers", () => {
     expect(stateTone("failed")).toBe("bad");
     expect(stateTone("blocked")).toBe("warn");
     expect(stateTone("taken_over")).toBe("muted");
-    expect(STATE_LABEL.in_review).toBe("im Review");
+    expect(STATE_LABEL.in_review).toBe("in review");
   });
 
   it("hides the proposal column only while it is empty, whatever the filter says", () => {
@@ -372,7 +372,7 @@ describe("agent flow helpers", () => {
       updated_at: "",
       approved_at: null,
     } as const;
-    expect(planLabel(plan)).toBe("P · Entwurf");
-    expect(planLabel({ ...plan, status: "approved" })).toBe("P · freigegeben");
+    expect(planLabel(plan)).toBe("P · draft");
+    expect(planLabel({ ...plan, status: "approved" })).toBe("P · released");
   });
 });

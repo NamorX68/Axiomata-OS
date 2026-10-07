@@ -225,20 +225,20 @@ export function endOf(
   cards: Pick<BoardCard, "state">[],
   planStatus: "draft" | "approved" | "closed",
 ): { tone: Tone; label: string } {
-  if (planStatus === "closed") return { tone: "done", label: "abgeschlossen" };
+  if (planStatus === "closed") return { tone: "done", label: "closed" };
   const counting = cards.filter((card) => card.state !== "canceled");
   const allIn =
     counting.length > 0 && counting.every((card) => card.state === "integrated" || card.state === "taken_over");
-  if (allIn) return { tone: "done", label: "bereit zum Übernehmen" };
+  if (allIn) return { tone: "done", label: "ready to take over" };
   if (counting.some((card) => card.state === "failed")) return { tone: "failed", label: "blockiert" };
   return { tone: "idle", label: "offen" };
 }
 
 /** What the review node says about its card: judged now, signed off, or sent back. */
 export function reviewLabel(card: Pick<BoardCard, "state" | "returned_count">): string {
-  if (card.state === "in_review") return "wird geprüft";
+  if (card.state === "in_review") return "being reviewed";
   if (card.state === "verified" || card.state === "integrated" || card.state === "taken_over") return "abgezeichnet";
-  return card.returned_count > 0 ? `zurückgegeben (${card.returned_count}×)` : "";
+  return card.returned_count > 0 ? `returned (${card.returned_count}×)` : "";
 }
 
 /** How a state is drawn: one class per family, so the colours stay in the stylesheet and the tokens. */

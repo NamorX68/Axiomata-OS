@@ -107,14 +107,14 @@
 </script>
 
 <div class="boards">
-  <h3>Brett</h3>
+  <h3>Boards</h3>
 
   {#if error}
     <p class="error">{error}</p>
   {/if}
 
   {#if boards.length === 0}
-    <p class="hint">Noch kein Brett angelegt.</p>
+    <p class="hint">No board created yet.</p>
   {/if}
 
   <ul>
@@ -130,24 +130,24 @@
           <input
             class="name"
             value={board.name}
-            aria-label="Name des Bretts"
+            aria-label="Name of the board"
             onblur={(event) => rename(board, event.currentTarget.value)}
           />
         </label>
-        <button class="remove" onclick={() => askDelete(board)} aria-label="Brett löschen">✕</button>
+        <button class="remove" onclick={() => askDelete(board)} aria-label="Delete the board">✕</button>
       </li>
 
       {#if confirming?.id === board.id}
         <li class="confirm">
           <span>
             {confirming.cards === 0
-              ? "Brett löschen?"
-              : `${confirming.cards} ${confirming.cards === 1 ? "Karte wird" : "Karten werden"} mitgelöscht.`}
+              ? "Delete the board?"
+              : `${confirming.cards} ${confirming.cards === 1 ? "card is" : "cards are"} deleted with it.`}
           </span>
           <button class="danger" disabled={busy} onclick={() => confirmDelete(board.id)}>
             Löschen
           </button>
-          <button onclick={() => (confirming = null)}>Abbrechen</button>
+          <button onclick={() => (confirming = null)}>Cancel</button>
         </li>
       {/if}
     {/each}
@@ -159,16 +159,16 @@
       void create();
     }}
   >
-    <input placeholder="Neues Brett …" bind:value={newName} aria-label="Name des neuen Bretts" />
+    <input placeholder="New board …" bind:value={newName} aria-label="Name of the new board" />
     <button type="submit" disabled={busy || newName.trim() === ""}>Anlegen</button>
   </form>
 
-  <h3>Karten</h3>
+  <h3>Cards</h3>
   <label class="stripes">
     <input type="checkbox" checked={$cardStripes} onchange={(e) => setCardStripes(e.currentTarget.checked)} />
-    <span>Farbstreifen nach dem ersten Label</span>
+    <span>Colour stripe by the first label</span>
   </label>
-  <p class="hint">Gilt für alle Bretter.</p>
+  <p class="hint">Applies to all boards.</p>
 </div>
 
 <style>

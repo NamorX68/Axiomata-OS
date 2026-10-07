@@ -66,7 +66,7 @@
     <button
       type="button"
       class="toggle"
-      title="{$turns.length} Nachrichten in dieser Unterhaltung"
+      title="{$turns.length} messages in this conversation"
       onclick={() => panelOpen.update((v) => !v)}
     >
       <span class="toggle-label">{$panelOpen ? "hide chat" : "chat"}</span>

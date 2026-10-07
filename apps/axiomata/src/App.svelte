@@ -137,10 +137,10 @@ import { emit, on } from "./core/bus";
       listenBackend<{ cardId: number; projectId: number; agentId: number }>("card:review-started", (started) => {
         requestAgent({ projectId: started.projectId, agentId: started.agentId, background: true });
         ideStarted = true;
-        toast(`Karte #${started.cardId}: Ein Reviewer prüft sie (Studio, Agents).`, "info");
+        toast(`Card #${started.cardId}: a reviewer is checking it (Studio, Agents).`, "info");
       }),
       listenBackend<{ cardId: number; reason: string }>("card:review-blocked", (blocked) => {
-        toast(`Karte #${blocked.cardId} wartet auf ein Review: ${blocked.reason}`, "warning");
+        toast(`Card #${blocked.cardId} waits for a review: ${blocked.reason}`, "warning");
       }),
       // A plan that runs by itself did something (A2A CP-A8): a started card's pane opens in the background — opening it
       // is what starts the harness —, the panes of integrated cards close, and what needs the owner is said.
@@ -163,8 +163,8 @@ import { emit, on } from "./core/bus";
       listenBackend<{ cardId: number | null; planId: number | null; agentName: string; reason: string }>(
         "card:limit-reached",
         (stopped) => {
-          const what = stopped.cardId !== null ? `Karte #${stopped.cardId}` : `Plan #${stopped.planId}`;
-          toast(`${what}: ${stopped.agentName} ist am Limit gestoppt (${stopped.reason}).`, "warning");
+          const what = stopped.cardId !== null ? `Card #${stopped.cardId}` : `Plan #${stopped.planId}`;
+          toast(`${what}: ${stopped.agentName} was stopped at the limit (${stopped.reason}).`, "warning");
         },
       ),
     ];

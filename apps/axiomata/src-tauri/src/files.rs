@@ -585,9 +585,9 @@ pub async fn file_pick(
         let _ = tx.send(picked.and_then(|p| p.into_path().ok()));
     };
     if folder {
-        dialog.set_title("Ordner öffnen").pick_folder(answer);
+        dialog.set_title("Open folder").pick_folder(answer);
     } else {
-        dialog.set_title("Datei öffnen").pick_file(answer);
+        dialog.set_title("Open file").pick_file(answer);
     }
     let Some(path) = rx.await.ok().flatten() else {
         return Ok(None);

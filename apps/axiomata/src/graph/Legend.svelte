@@ -21,8 +21,8 @@
 
   const KINDS: { kind: LegendKind; label: string }[] = [
     { kind: "hub", label: "AGENTS.md (hub)" },
-    { kind: "area", label: "Bereich (Ordner)" },
-    { kind: "file", label: "Notiz / Seite" },
+    { kind: "area", label: "Area (folder)" },
+    { kind: "file", label: "Note / page" },
     { kind: "skill", label: "Skill" },
   ];
 

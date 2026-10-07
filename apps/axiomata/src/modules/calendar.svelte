@@ -323,7 +323,7 @@
   </div>
 
   {#if atRangeEnd}
-    <p class="range-hint muted">Nur dieser und der nächste Monat werden geladen — ↻ aktualisiert.</p>
+    <p class="range-hint muted">Only this and the next month are loaded — ↻ refreshes.</p>
   {/if}
 
   {#if showCreate}
@@ -354,7 +354,7 @@
     <div class="agenda-caption muted">{agendaCaption}</div>
     {#if agendaEmpty}
       <p class="muted empty">
-        Keine Termine {selectedCalendar ? `in „${selectedCalendar}" ` : ""}in diesem Zeitraum.
+        No events {selectedCalendar ? `in “${selectedCalendar}” ` : ""}in this period.
       </p>
     {:else}
       <ul class="agenda">

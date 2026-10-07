@@ -50,8 +50,8 @@
       }
       if (sessions.length > 0) emit("studio:close-agent-panes", { agentIds: sessions });
       void refreshAgents().catch(() => {});
-      toast(`Karte #${card.id} ist übernommen (${result.commit.slice(0, 8)}).`, "info");
-      for (const note of result.cleanup) toast(`Nicht aufgeräumt: ${note}`, "warning");
+      toast(`Card #${card.id} was taken over (${result.commit.slice(0, 8)}).`, "info");
+      for (const note of result.cleanup) toast(`Not cleaned up: ${note}`, "warning");
       await sayWhatIsNotPushed(result.project_id);
       onDone();
     } catch (err) {
@@ -71,7 +71,7 @@
 >
   <label>
     Commit-Nachricht
-    <input bind:value={message} aria-label="Commit-Nachricht" />
+    <input bind:value={message} aria-label="Commit message" />
   </label>
   <p class="hint">
     Übernommen wird genau der Stand, den der Reviewer gesehen hat, als ein Commit auf dem Hauptzweig des Projekts.
@@ -85,8 +85,8 @@
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="row">
-    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? "Übernimmt …" : "Übernehmen"}</button>
-    <button class="ax-btn" type="button" onclick={onDone}>Abbrechen</button>
+    <button class="ax-btn primary" type="submit" disabled={busy}>{busy ? "Taking over …" : "Take over"}</button>
+    <button class="ax-btn" type="button" onclick={onDone}>Cancel</button>
   </div>
 </form>
 

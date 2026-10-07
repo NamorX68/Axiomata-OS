@@ -19,7 +19,7 @@ describe("who a session is", () => {
     expect(dutyOf(agent(2, { card_id: 5 }))).toBe("worker");
     expect(dutyOf(agent(3, { card_id: 5, card_review: true }))).toBe("reviewer");
     expect(dutyOf(agent(4))).toBe("own");
-    expect(dutyLabel("reviewer")).toBe("prüft");
+    expect(dutyLabel("reviewer")).toBe("reviews");
   });
 });
 
@@ -36,7 +36,7 @@ describe("the team's groups", () => {
       [null, [5]],
     ]);
     expect(groups[0].title).toContain("Docs");
-    expect(groups[2].title).toBe("Ohne Plan");
+    expect(groups[2].title).toBe("No plan");
   });
 
   it("puts the one that needs the owner first, and a reviewer after the worker it judges", () => {
@@ -67,8 +67,8 @@ describe("what a tile says it is doing", () => {
 
   it("says why there is no live line instead of leaving it blank", () => {
     expect(nowLine(undefined)).toBe("");
-    expect(nowLine({ readable: false, steps: [] })).toBe("noch nichts aufgezeichnet");
-    expect(nowLine({ readable: true, steps: [] })).toBe("noch kein Schritt");
+    expect(nowLine({ readable: false, steps: [] })).toBe("nothing recorded yet");
+    expect(nowLine({ readable: true, steps: [] })).toBe("no step yet");
     expect(nowLine({ readable: true, steps: [edit] })).toBe("Edit …/deep/a.rs");
   });
 

@@ -51,7 +51,7 @@
   });
 </script>
 
-<div class="picker" role="listbox" aria-label="Symbol wählen">
+<div class="picker" role="listbox" aria-label="Choose an icon">
   {#each APP_GROUP_GLYPHS as g, i (g)}
     <button
       type="button"

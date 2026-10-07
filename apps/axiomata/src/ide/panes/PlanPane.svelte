@@ -317,12 +317,12 @@
 
   async function startPlanner(): Promise<void> {
     const made = await startSession(plannerRole || plannerNames[0] || "", plannerEngine, false);
-    if (made) toast(`Der Planer ${made.agent.name} liest das Projekt.`, "info");
+    if (made) toast(`The planner ${made.agent.name} is reading the project.`, "info");
   }
 
   async function startGrill(): Promise<boolean> {
     const made = await startSession(grillRole || grillNames[0] || "", grillEngine, true);
-    if (made) toast(`${made.agent.name} fragt dich jetzt im Terminal zu den Karten aus.`, "info");
+    if (made) toast(`${made.agent.name} is now questioning you about the cards in the terminal.`, "info");
     return made !== null;
   }
 
@@ -356,7 +356,7 @@
     void startGrill().then((started) => {
       grillStarting = false;
       setGrillWish(current.id, false);
-      if (!started) toast("Der Grill konnte nicht gestartet werden; setze den Haken noch einmal.", "warning");
+      if (!started) toast("The grilling could not be started; tick the box again.", "warning");
     });
   });
 
@@ -464,10 +464,10 @@
       await Promise.all([reload(), refreshAgents()]);
       toast(
         moved === null
-          ? "Der Plan ist kein Entwurf mehr."
+          ? "The plan is no longer a draft."
           : runByItself
-            ? `Plan freigegeben: ${moved} Karte(n) werden abgearbeitet.`
-            : `Plan freigegeben: ${moved} Karte(n) warten in der ersten offenen Spalte.`,
+            ? `Plan released: ${moved} card(s) are being worked on.`
+            : `Plan released: ${moved} card(s) wait in the first open column.`,
         "info",
       );
     });
@@ -500,8 +500,8 @@
         return;
       }
       await Promise.all([reload(), refreshAgents()]);
-      toast(`Plan „${current.name}“ ist übernommen (${result.commit.slice(0, 8)}): ${result.card_ids.length} Karte(n).`, "info");
-      for (const note of result.cleanup) toast(`Nicht aufgeräumt: ${note}`, "warning");
+      toast(`Plan “${current.name}” was taken over (${result.commit.slice(0, 8)}): ${result.card_ids.length} card(s).`, "info");
+      for (const note of result.cleanup) toast(`Not cleaned up: ${note}`, "warning");
       await sayWhatIsNotPushed(result.project_id);
     });
   }
@@ -556,11 +556,11 @@
       const result = await invoke<CardIntegrationResult>("integrate_card", { cardId: card.id });
       if (result.outcome === "done") {
         closePanesOf(result.agent_ids);
-        toast(`Karte #${card.id} ist im Plan integriert.`, "info");
+        toast(`Card #${card.id} is integrated into the plan.`, "info");
       } else if (result.outcome === "conflict") {
-        toast(`Karte #${card.id} passt immer noch nicht in den Plan (${result.files.join(", ")}).`, "warning");
+        toast(`Card #${card.id} still does not fit into the plan (${result.files.join(", ")}).`, "warning");
       } else if (result.outcome === "busy") {
-        toast(`Der Arbeiter von Karte #${card.id} ist noch im Zug; versuch es gleich noch einmal.`, "warning");
+        toast(`The worker of card #${card.id} is still moving; try again in a moment.`, "warning");
       }
       await Promise.all([reload(), refreshAgents()]);
     });
@@ -570,7 +570,7 @@
     await run(async () => {
       closePanesOf(await invoke<number[]>("redo_card", { cardId: card.id }));
       await Promise.all([reload(), refreshAgents()]);
-      toast(`Karte #${card.id} wird auf dem neuen Stand des Plans noch einmal gemacht.`, "info");
+      toast(`Card #${card.id} will be redone on the plan's new state.`, "info");
     });
   }
 
@@ -581,7 +581,7 @@
       await invoke("resume_plan", { id: current.id });
       await reload();
       spend = await invoke<PlanSpend>("plan_spend", { id: current.id });
-      toast(`Plan „${current.name}“ läuft weiter: neues Limit auf dem aktuellen Verbrauch aufgesetzt.`, "info");
+      toast(`Plan “${current.name}” keeps running: a new limit was set on top of the current spend.`, "info");
     });
   }
 
@@ -601,7 +601,7 @@
       deleting = false;
       planId = null;
       await Promise.all([reload(), refreshAgents()]);
-      toast(`Plan „${current.name}“ ist gelöscht; seine Karten bleiben auf dem Brett, ohne Plan.`, "info");
+      toast(`Plan “${current.name}” was deleted; its cards stay on the board, without a plan.`, "info");
     });
   }
 
@@ -666,7 +666,7 @@
       discarding = null;
       // A card that was approved in the Kanban meanwhile is a live card, not a proposal to throw away.
       if (!fresh || fresh.state !== "proposed") {
-        error = "Die Karte ist kein Vorschlag mehr und bleibt.";
+        error = "The card is no longer a proposal and stays.";
         return;
       }
       await invoke("delete_card", { id: card.id });
@@ -695,10 +695,10 @@
 </script>
 
 <div class="plan-pane">
-  <aside class="plans" aria-label="Pläne">
+  <aside class="plans" aria-label="Plans">
     {#if boards.length > 1}
       <select
-        aria-label="Brett"
+        aria-label="Board"
         value={boardId}
         onchange={(event) => chooseBoard(Number((event.currentTarget as HTMLSelectElement).value))}
       >
@@ -706,7 +706,7 @@
       </select>
     {/if}
     <button class="ax-btn primary" type="button" disabled={boardId === null} onclick={() => (creating = !creating)}>
-      Neuer Plan …
+      New plan …
     </button>
     {#if creating}
       <form
@@ -721,18 +721,18 @@
           <input bind:value={newName} aria-label="Name des Plans" maxlength="200" />
         </label>
         <label>
-          Ziel
+          Goal
           <textarea
             bind:value={newGoal}
             rows="10"
             maxlength="8000"
-            aria-label="Ziel des Plans"
+            aria-label="Goal of the plan"
             placeholder="Was soll am Ende da sein?"
           ></textarea>
         </label>
         <div class="row">
           <button class="ax-btn primary" type="submit" disabled={busy || newName.trim() === ""}>Anlegen</button>
-          <button class="ax-btn" type="button" onclick={() => (creating = false)}>Abbrechen</button>
+          <button class="ax-btn" type="button" onclick={() => (creating = false)}>Cancel</button>
         </div>
       </form>
     {/if}
@@ -750,55 +750,55 @@
       {/each}
     </ul>
     {#if data && plans.length === 0 && !creating}
-      <p class="hint">Noch kein Plan auf diesem Brett.</p>
+      <p class="hint">No plan on this board yet.</p>
     {/if}
     <span class="grow"></span>
     <button
       class="ax-btn"
       type="button"
-      title="Planung, Agents und Flowansicht wieder an ihren Platz legen"
-      onclick={() => emit("studio:reset-flow")}>Anordnung zurücksetzen</button
+      title="Put Planning, Agents and the Flow view back in their places"
+      onclick={() => emit("studio:reset-flow")}>Reset layout</button
     >
   </aside>
 
   <section class="detail" aria-label="Plan">
     {#if error || loadError}<p class="error" role="alert">{error || loadError}</p>{/if}
     {#if boardId === null}
-      <p class="hint">Es gibt noch kein Brett. Lege im Kanban eines an.</p>
+      <p class="hint">There is no board yet. Create one in the Kanban.</p>
     {:else if !plan}
-      <p class="hint">Wähle einen Plan oder lege einen an: Das Ziel schreibst du, der Planer schneidet es in Karten.</p>
+      <p class="hint">Pick a plan or create one: you write the goal, the planner cuts it into cards.</p>
     {:else}
       <header>
         <h2>{plan.name}</h2>
         <span class="status {plan.status}">{planStatusLabel(plan.status)}</span>
-        {#if runsByItself(plan)}<span class="status auto">läuft automatisch</span>{/if}
+        {#if runsByItself(plan)}<span class="status auto">runs by itself</span>{/if}
         <span class="spacer"></span>
         {#if plan.status === "draft"}
-          <button class="ax-btn" type="button" disabled={busy} onclick={() => void closePlan()}>Schließen</button>
+          <button class="ax-btn" type="button" disabled={busy} onclick={() => void closePlan()}>Close</button>
         {/if}
         {#if deleting}
-          <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void deletePlan()}>Wirklich löschen</button>
-          <button class="ax-btn" type="button" onclick={() => (deleting = false)}>Abbrechen</button>
+          <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void deletePlan()}>Really delete</button>
+          <button class="ax-btn" type="button" onclick={() => (deleting = false)}>Cancel</button>
         {:else}
           <button
             class="ax-btn"
             type="button"
             disabled={busy || !canDeletePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))}
             title={canDeletePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))
-              ? "Den Plan löschen; seine Karten bleiben ohne Plan auf dem Brett"
-              : "Der Plan läuft noch: erst übernehmen oder schließen"}
-            onclick={() => (deleting = true)}>Löschen</button
+              ? "Delete the plan; its cards stay on the board without a plan"
+              : "The plan is still running: take it over or close it first"}
+            onclick={() => (deleting = true)}>Delete</button
           >
         {/if}
       </header>
 
       <label class="goal">
-        Ziel
+        Goal
         <textarea
           bind:value={goalDraft}
           rows="7"
           maxlength="8000"
-          aria-label="Ziel"
+          aria-label="Goal"
           disabled={plan.status !== "draft"}
           oninput={() => (goalDirty = true)}
           onblur={() => void saveGoal()}
@@ -807,13 +807,13 @@
       </label>
 
       {#if suggestion && plan.status === "draft"}
-        <section class="suggestion" aria-label="Vorgeschlagenes Ziel">
-          <h3>Geschärftes Ziel vorgeschlagen</h3>
-          <p class="muted">Aus dem Gespräch mit der Grill-Sitzung. Es ersetzt dein Ziel erst, wenn du es übernimmst.</p>
+        <section class="suggestion" aria-label="Suggested goal">
+          <h3>Sharpened goal suggested</h3>
+          <p class="muted">From the conversation with the grill session. It replaces your goal only when you take it over.</p>
           <pre class="proposed-goal">{suggestion.goal}</pre>
           <div class="row">
-            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverGoal()}>Übernehmen</button>
-            <button class="ax-btn" type="button" disabled={busy} onclick={() => void discardGoal()}>Verwerfen</button>
+            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverGoal()}>Take over</button>
+            <button class="ax-btn" type="button" disabled={busy} onclick={() => void discardGoal()}>Discard</button>
           </div>
         </section>
       {/if}
@@ -822,17 +822,17 @@
         <div class="planner">
           {#if planner}
             <span>Planer: <strong>{planner.name}</strong></span>
-            <button class="ax-btn" type="button" onclick={() => showPlanner(planner.id)}>Pane zeigen</button>
+            <button class="ax-btn" type="button" onclick={() => showPlanner(planner.id)}>Show pane</button>
           {/if}
           {#if griller}
             <span>Grill: <strong>{griller.name}</strong></span>
-            <button class="ax-btn" type="button" onclick={() => showPlanner(griller.id)}>Pane zeigen</button>
+            <button class="ax-btn" type="button" onclick={() => showPlanner(griller.id)}>Show pane</button>
           {/if}
           {#if rolesLoaded}
             <div class="start">
               {#if canStartPlanner(plan, $session.agents, roles) && plannerNames.length > 0}
                 <SessionPicker
-                  label="Rolle des Planers"
+                  label="Role of the planner"
                   names={plannerNames}
                   {roles}
                   catalog={$engineCatalog}
@@ -851,7 +851,7 @@
                 </label>
                 {#if grillWanted}
                   <SessionPicker
-                    label="Rolle zum Grillen"
+                    label="Role for grilling"
                     names={grillNames}
                     {roles}
                     catalog={$engineCatalog}
@@ -865,7 +865,7 @@
                   class="ax-btn primary"
                   type="button"
                   disabled={busy || goalDraft.trim() === ""}
-                  title={goalDraft.trim() === "" ? "Der Planer braucht ein Ziel." : ""}
+                  title={goalDraft.trim() === "" ? "The planner needs a goal." : ""}
                   onclick={() => void startPlanner()}
                 >
                   Planer starten
@@ -875,22 +875,22 @@
             {#if grillWanted && griller === null}
               <span class="muted hint-line">
                 {!grillEngineChosen
-                  ? "Wähle für die Grill-Rolle eine Engine, sonst startet der Grill nicht."
+                  ? "Pick an engine for the grill role, or the grilling will not start."
                   : planner
-                    ? "Der Grill startet, sobald der Planer seine Karten vorgeschlagen hat und auf dich wartet."
+                    ? "The grilling starts as soon as the planner has proposed its cards and waits for you."
                     : proposals.length > 0
-                      ? "Der Grill startet gleich: die Karten sind da, der Planer läuft nicht mehr."
-                      : "Nach dem Planen fragt dich eine Grill-Sitzung zu den Karten aus."}
+                      ? "The grilling starts in a moment: the cards are there, the planner is no longer running."
+                      : "After planning, a grill session questions you about the cards."}
               </span>
             {/if}
           {/if}
         </div>
       {/if}
 
-      <h3>Vorschläge {proposals.length > 0 ? `(${proposals.length})` : ""}</h3>
+      <h3>Proposals {proposals.length > 0 ? `(${proposals.length})` : ""}</h3>
       {#if proposals.length === 0}
         <p class="hint">
-          {planner ? "Der Planer hat noch nichts vorgeschlagen." : "Keine Vorschläge, die auf dein Ja warten."}
+          {planner ? "The planner has not proposed anything yet." : "No proposals waiting for your yes."}
         </p>
       {/if}
       <ul class="proposals">
@@ -913,14 +913,14 @@
             <div class="title">
               <strong>{proposalTitle(card)}</strong>
               <span class="muted">#{card.id}{needsLabel(card) ? ` · braucht ${needsLabel(card)}` : ""}</span>
-              {#if changedByPlanner.includes(card.id)}<span class="status auto" title="Der Planer hat diesen Vorschlag nach dem Anlegen geändert">vom Planer geändert</span>{/if}
+              {#if changedByPlanner.includes(card.id)}<span class="status auto" title="The planner changed this proposal after creating it">changed by the planner</span>{/if}
             </div>
             <div class="fields">
               <label>
-                Rolle
+                Role
                 <select
                   value={card.agent ?? ""}
-                  aria-label="Rolle von {proposalTitle(card)}"
+                  aria-label="Role of {proposalTitle(card)}"
                   onchange={(event) => {
                     const select = event.currentTarget as HTMLSelectElement;
                     void changeProposal(card, select, { agent: select.value || null });
@@ -931,10 +931,10 @@
                 </select>
               </label>
               <label>
-                Stufe
+                Level
                 <select
                   value={card.tier ?? ""}
-                  aria-label="Stufe von {proposalTitle(card)}"
+                  aria-label="Level of {proposalTitle(card)}"
                   onchange={(event) => {
                     const select = event.currentTarget as HTMLSelectElement;
                     void changeProposal(card, select, { tier: (select.value || null) as CardTier | null });
@@ -947,13 +947,13 @@
             {#if card.agent_reason}<p class="reason">{card.agent_reason}</p>{/if}
             {#if card.acceptance}<p class="acceptance">{card.acceptance}</p>{/if}
             <div class="row">
-              <button class="ax-btn" type="button" disabled={busy} onclick={() => void approveProposal(card)}>Annehmen</button>
-              <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Bearbeiten</button>
+              <button class="ax-btn" type="button" disabled={busy} onclick={() => void approveProposal(card)}>Accept</button>
+              <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Edit</button>
               {#if discarding === card.id}
                 <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void discardProposal(card)}>Wirklich verwerfen</button>
-                <button class="ax-btn" type="button" onclick={() => (discarding = null)}>Abbrechen</button>
+                <button class="ax-btn" type="button" onclick={() => (discarding = null)}>Cancel</button>
               {:else}
-                <button class="ax-btn" type="button" disabled={busy} onclick={() => (discarding = card.id)}>Verwerfen</button>
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => (discarding = card.id)}>Discard</button>
               {/if}
             </div>
           </li>
@@ -976,7 +976,7 @@
         {:else}
           <div class="row">
             <button class="ax-btn" type="button" disabled={busy || newColumnId === null} onclick={() => (editing = "new")}>
-              {plan.status === "draft" ? "Karte hinzufügen" : "Karte zum laufenden Plan hinzufügen"}
+              {plan.status === "draft" ? "Add card" : "Add card to the running plan"}
             </button>
           </div>
         {/if}
@@ -985,7 +985,7 @@
       {#if plan.status === "draft"}
         <div class="approve">
           <button class="ax-btn primary" type="button" disabled={busy || !canApprove(plan, cards)} onclick={() => void approvePlan()}>
-            Plan freigeben
+            Release plan
           </button>
           <label class="check">
             <input type="checkbox" bind:checked={runByItself} />
@@ -993,13 +993,13 @@
           </label>
           <span class="muted">
             {runByItself
-              ? "Karten starten von selbst, sobald ihre Vorgänger fertig sind, so viele gleichzeitig wie möglich; der Review läuft von selbst."
-              : "Die Vorschläge wandern in die erste offene Spalte; du startest jede Karte selbst."}
+              ? "Cards start by themselves as soon as their predecessors are done, as many at once as possible; the review runs by itself."
+              : "The proposals move to the first open column; you start every card yourself."}
             Der Planer ist danach fertig.
           </span>
           {#if !grilled}
             <span class="muted hint-line">
-              Dieser Plan wurde nicht gegrillt: sein Ziel ist noch nicht hinterfragt. Du kannst trotzdem freigeben.
+              This plan was not grilled: its goal has not been questioned yet. You can still release it.
             </span>
           {/if}
         </div>
@@ -1010,12 +1010,12 @@
           <span>Verbrauch: {spendLine(spend)}</span>
           {#if spend.plan_over}
             <span class="error" role="status">Pausiert: {spend.plan_over}.</span>
-            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void resumePlan()}>Weiter</button>
-            <span class="muted">Setzt das Limit des Plans auf den bisherigen Verbrauch plus eine neue Zuteilung.</span>
+            <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void resumePlan()}>Continue</button>
+            <span class="muted">Sets the plan's limit to the spend so far plus a new allowance.</span>
           {/if}
           {#if spend.day_over}
             <span class="error" role="status">
-              Tageslimit der Studio-Sitzungen erreicht: {spend.day_over}. Bis morgen startet nichts Neues; anheben:
+              Daily limit of the Studio sessions reached: {spend.day_over}. Nothing new starts until tomorrow; raise it:
               <code>studio_daily_usd_cap</code> in der Config.
             </span>
           {:else if spend.day_cap_usd !== null}
@@ -1027,22 +1027,22 @@
       {#if readyToTakeOver(plan, cards)}
         <div class="approve">
           <button class="ax-btn primary" type="button" disabled={busy} onclick={() => void takeOverPlan()}>
-            Plan übernehmen
+            Take over plan
           </button>
           <span class="muted">
-            Alle Karten sind auf der Linie des Plans. Die Arbeit geht in den Hauptzweig des Projekts, ihre Commits bleiben
-            einzeln, solange der Zweig sich nicht bewegt hat. Es wird nichts gepusht; ein Konflikt wird zurückgenommen.
+            All cards are on the plan's line. The work goes into the project's main branch, its commits stay
+            separate as long as the branch has not moved. Nothing is pushed; a conflict is rolled back.
           </span>
           {#if takeOverConflict.length > 0}
             <p class="error" role="alert">
-              Konflikt mit dem Hauptzweig, nichts wurde verändert: {takeOverConflict.join(", ")}
+              Conflict with the main branch, nothing was changed: {takeOverConflict.join(", ")}
             </p>
           {/if}
         </div>
       {/if}
 
       {#if working.length > 0}
-        <h3>Karten des Plans</h3>
+        <h3>Cards of the plan</h3>
         <ul class="cards">
           {#each working as card (card.id)}
             {#if editing === card.id}
@@ -1063,10 +1063,10 @@
               <span>#{card.id} {proposalTitle(card)}</span>
               <span class="muted">{card.agent ?? "—"} · {STATE_LABEL[card.state]}</span>
               {#if plan.status !== "closed" && cardEditable(card)}
-                <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Bearbeiten</button>
+                <button class="ax-btn" type="button" disabled={busy} onclick={() => (editing = card.id)}>Edit</button>
               {/if}
               {#if leftCards.includes(card.id)}
-                <span class="error" role="status">Passt zweimal nicht in den Plan; das Studio hat aufgegeben.</span>
+                <span class="error" role="status">Does not fit the plan twice; the Studio gave up.</span>
                 <button class="ax-btn" type="button" disabled={busy} onclick={() => void integrateAgain(card)}>Erneut integrieren</button>
                 <button class="ax-btn" type="button" disabled={busy} onclick={() => void redo(card)}>Neu machen</button>
               {/if}

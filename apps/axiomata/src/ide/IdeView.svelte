@@ -628,7 +628,7 @@
           // and its pane opens when the project does (`openCardPanesOf`, run whenever a project opens).
           if (background === true) {
             toast(
-              `Eine Karte läuft in einem anderen Projekt (Sitzung #${agentId}); ihr Pane erscheint, sobald du es öffnest.`,
+              `A card is running in another project (session #${agentId}); its pane appears as soon as you open it.`,
               "info",
             );
             continue;
@@ -643,7 +643,7 @@
         openAgent(agent, modeForAgent(agent, await planOfCard(agent.card_id ?? null)), background === true);
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err);
-        toast(`Die Sitzung konnte nicht geöffnet werden: ${why}`, "danger");
+        toast(`The session could not be opened: ${why}`, "danger");
       }
     }
   }
@@ -1025,8 +1025,8 @@
       {#if mode === "agents" && current && allTabs(layout).length === 0}
         <!-- A new project's Canvas is empty on purpose (no terminal nobody asked for): say so, and offer the terminal. -->
         <div class="canvas-empty">
-          <p>Das Canvas ist leer. Agenten erscheinen hier, sobald eine Karte oder eine Sitzung startet.</p>
-          <button class="ax-btn primary" type="button" onclick={openTerminal}>Terminal öffnen</button>
+          <p>The canvas is empty. Agents appear here as soon as a card or a session starts.</p>
+          <button class="ax-btn primary" type="button" onclick={openTerminal}>Open terminal</button>
         </div>
       {/if}
       {#if drag.rootHint && drag.rootHint !== "center"}
