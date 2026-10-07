@@ -8,6 +8,7 @@
 import runtimeWasm from "web-tree-sitter/web-tree-sitter.wasm?url";
 
 import { GrammarRuntime, type GrammarSource } from "../editor/syntax/runtime";
+import { queryTextOrNull } from "./grammarFetch";
 
 const BASE = `${import.meta.env.BASE_URL}grammars/`;
 
@@ -20,10 +21,9 @@ const browserGrammars: GrammarSource = {
   },
   async query(path) {
     const response = await fetch(`${BASE}${path}`);
-    // The dev server answers a missing file with the app's index.html and 200,
-    // which must not be mistaken for a query (an absent *.local.scm, say).
-    if (!response.ok || (response.headers.get("content-type") ?? "").includes("text/html")) return null;
-    return response.text();
+    // A missing file may come back as the app's index.html with 200 — by its body, not its Content-Type (see there).
+    if (!response.ok) return null;
+    return queryTextOrNull(await response.text());
   },
 };
 
