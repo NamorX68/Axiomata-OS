@@ -36,11 +36,22 @@ Spotlight-Suche (`docs/plans/spotlight-search.md`, CP1–CP4), dann dieser Umbau
    in der Ecke unten links des Orbits (`BackgroundHost`); die Kachel-Einstellungen „Slow spin / Labels" (`second-brain-settings.svelte`)
    und Rotation/File-names im 2Brain-Panel sind weg. **Darstellung (Rings/Hex) und Gruppierung** bleiben bis Schritt 3 im 2Brain-Panel und
    ziehen dann in die Leiste unten links (B6).
-3. **Ein Orbit:** die Interaktion aus `SecondBrainView` (Schwenken, Zoom, Hover, Auswahl, Detailfenster) in eine gemeinsame
+3. **Ein Orbit — gebaut 2026-10-07 (erste Fassung, am Mac noch nicht gesehen):** statt die Interaktion in eine neue Komponente zu ziehen,
+   wurde `SecondBrainView` selbst zur **Schicht über der Wolke**: kein Vollbild, keine Kopfzeile, kein „Back to the OS"; der Graph sitzt in
+   einer **Scheibe** (Radius `BRAIN_DISC` = 0,4 der kürzeren Seite des Orbit-Canvas, deren Mitte und Größe das Orbit-Modul über
+   `orbitFrame` meldet) und deckt die Wolke ab; ob die Kacheln davor stehen, siehe Offenes. Zoom/Schwenken sind im Kreis abgeschnitten. Das Suchfeld samt Suchlogik ist raus (Spotlight); die Leiste (Layout, Gruppierung, Reset, Reload, ?) sitzt unten
+   links neben den Ecken-Knöpfen; das **Detailfenster** ist verschiebbar und an den vier Kanten in der Größe änderbar, Rechteck gemerkt
+   (`shell/floatingRect.ts`, Einstellung `brainDetail`). Esc: erst Auswahl, dann zurück zur Wolke; ein Klick auf den freien Orbit-Hintergrund
+   (Bus-Ereignis `close-second-brain`) ebenfalls. Die alte Idee dieses Schritts: die Interaktion aus `SecondBrainView` (Schwenken, Zoom, Hover, Auswahl, Detailfenster) in eine gemeinsame
    Komponente ziehen und im Orbit-Widget einhängen; Klick in die Wolke/auf Hintergrund/Esc (B1–B3, B7–B9); die alte Vollbild-Ansicht
    samt `open-second-brain`-Weg entfernen — Spotlight-Einträge „Graph durchsuchen"/„im 2Brain zeigen" zeigen darauf.
 
 ## Offenes / Risiken
+
+- **Scheibe und Kacheln:** die Scheibe ist ein `fixed`-Element mit `z-index` 2 im Hauptkontext; Kacheln liegen im Canvas (z-index ab 10). Ob
+  Kacheln wirklich *vor* der Scheibe stehen, ist im Browser-Mock (ohne Kacheln) nicht prüfbar — am Mac ansehen.
+- Die Leiste unten links kann in schmalen Fenstern unter der Chat-Leiste liegen.
+- `/brain ? <Suche>` und die Modul-Aktion `search` öffnen das 2Brain jetzt ohne Suchtext (die Suche ist Spotlight).
 
 - Der **größte Brocken** ist CP 3: die Interaktion steckt heute in einer 1179-Zeilen-Komponente, und das Orbit-Widget liegt
   „full-bleed" hinter den Kacheln (Klicks müssen die Kachel bevorzugen).

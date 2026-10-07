@@ -40,7 +40,7 @@
   } from "../core/appGroups";
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import type { WorkspaceGraph } from "../core/backend";
-  import { brainView, spinOf } from "../core/brainView";
+  import { brainActive, brainView, orbitFrame, spinOf } from "../core/brainView";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
   import { openFilePanel } from "../core/staging";
@@ -277,6 +277,11 @@
       return;
     }
     if (wasExpanded) return;
+    // The Second Brain layer is up: a click on the Orbit's background is the way back to the cloud.
+    if (get(brainActive)) {
+      ctx.emit("close-second-brain");
+      return;
+    }
     open(hover);
   }
 
@@ -357,6 +362,7 @@
       renderer?.resize();
       const r = canvas!.getBoundingClientRect();
       discR = Math.min(r.width, r.height) * ORBIT_FIT;
+      orbitFrame.set({ cx: r.left + r.width / 2, cy: r.top + r.height / 2, side: Math.min(r.width, r.height) });
     });
     ro.observe(canvas);
     const mo = new MutationObserver(() => rebuild());
@@ -412,7 +418,7 @@
   <canvas bind:this={canvas}></canvas>
   {#if error}
     <p class="error">{error}</p>
-  {:else}
+  {:else if !$brainActive}
     <p class="hint" style:top="calc(50% + {discR * 0.72}px)">{hover ? hover.label : "CLICK TO OPEN SECOND BRAIN"}</p>
     <p class="summary" style:top="calc(50% + {discR * 0.72 + 20}px)">{summary}</p>
   {/if}

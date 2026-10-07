@@ -4,7 +4,8 @@
 
   import Canvas from "./canvas/Canvas.svelte";
   import { invokeBackend, listenBackend, type PlanRunEvent } from "./core/backend";
-  import { emit, on } from "./core/bus";
+  import { brainActive } from "./core/brainView";
+import { emit, on } from "./core/bus";
   import { openFilePanel, openNewNote, openStaged } from "./core/staging";
   import { loadInstances } from "./core/stores";
   import { toast } from "./core/toast";
@@ -37,7 +38,6 @@
   let spotlightOpen = $state(false);
   let brainOpen = $state(false);
   let brainFocus = $state<string | null>(null);
-  let brainQuery = $state("");
 
   /**
    * ⌘K (Ctrl+K elsewhere than on a Mac) toggles the spotlight from every view. Only ⌘ on a Mac: Ctrl+K is "kill to end
@@ -50,6 +50,9 @@
     event.preventDefault();
     spotlightOpen = !spotlightOpen;
   }
+
+  // The Orbit's own click handler needs to know whether the layer is up (`core/brainView.ts`).
+  $effect(() => brainActive.set(brainOpen));
 
   onMount(() => {
     const offs = [
@@ -92,11 +95,12 @@
       // Reuses the Document module's own compose mode instead of a bespoke
       // dialog — same viewer, same Save-picks-the-folder agent flow.
       on("shell:new-note", () => openNewNote()),
-      // The background graph (or /brain) → full-screen Second Brain.
+      // A click on the Orbit's empty background closes the Second Brain layer again.
+      on("close-second-brain", () => (brainOpen = false)),
+      // The background graph (or /brain) → the Second Brain layer over the cloud.
       on("open-second-brain", (detail) => {
         const d = (detail ?? {}) as { focus?: string | null; query?: string };
         brainFocus = typeof d.focus === "string" ? d.focus : null;
-        brainQuery = typeof d.query === "string" ? d.query : "";
         brainOpen = true;
       }),
     ];
@@ -183,7 +187,7 @@
 <Settings bind:open={settingsOpen} />
 <Spotlight bind:open={spotlightOpen} />
 {#if brainOpen}
-  <SecondBrainView bind:open={brainOpen} focus={brainFocus} initialQuery={brainQuery} />
+  <SecondBrainView bind:open={brainOpen} focus={brainFocus} />
 {/if}
 {#if ideStarted}
   <IdeView bind:open={ideOpen} />

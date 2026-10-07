@@ -1,6 +1,6 @@
 <!--
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
-  labels, search (dims non-matches), layout Rings / Hex, grouping
+  labels, layout Rings / Hex, grouping
   by areas or folders, spin + file-name toggles, and a detail panel for the
   selected node (file → open in the file panel / copy path / fly to / connections;
   skill → run; hub → open). "Back to the OS" closes.
@@ -10,11 +10,12 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import { get } from "svelte/store";
   import { fade } from "svelte/transition";
 
-  import { invokeBackend, type RunSummary, type SearchHit, type WorkspaceGraph } from "../core/backend";
+  import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime } from "../core/format";
-  import { brainView, spinOf } from "../core/brainView";
+  import { BRAIN_DISC, brainView, orbitFrame, spinOf } from "../core/brainView";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel } from "../core/staging";
   import { toast } from "../core/toast";
@@ -24,26 +25,54 @@
     neighbours,
     readPalette,
     regroup,
-    searchNodes,
     type GraphModel,
     type GraphNode,
     type Grouping,
   } from "../graph/model";
+  import { draggable, type DragDelta } from "../canvas/drag";
+  import { resizable, type ResizeDelta } from "../canvas/resize";
+  import { uiScale } from "../core/uiScale";
   import FilePeek from "../fileapp/FilePeek.svelte";
+  import { clampRect, moved, readRect, resizedEdge, type Edge, type Rect } from "./floatingRect";
   import Legend from "../graph/Legend.svelte";
   import { GraphRenderer, type RenderMode } from "../graph/render";
 
   let {
     open = $bindable(false),
     focus = null,
-    initialQuery = "",
-  }: { open?: boolean; focus?: string | null; initialQuery?: string } = $props();
+  }: { open?: boolean; focus?: string | null } = $props();
 
   interface Prefs {
     layout?: LayoutKind;
     grouping?: Grouping;
     help?: boolean;
   }
+  // The detail window: movable by its head, resizable from its four edges, remembered (B8 of `docs/plans/orbit-brain.md`).
+  // Unscaled units, drawn times the UI scale.
+  const DETAIL_KEY = "brainDetail";
+  const DEFAULT_DETAIL: Rect = { x: 24, y: 72, w: 380, h: 520 };
+  const EDGES: Edge[] = ["n", "e", "s", "w"];
+  const screenSize = () => ({ w: window.innerWidth / get(uiScale), h: window.innerHeight / get(uiScale) });
+  let detailRect = $state<Rect>(clampRect(readRect(getSetting<unknown>(DETAIL_KEY)) ?? DEFAULT_DETAIL, screenSize()));
+  let detailBase: Rect = { ...DEFAULT_DETAIL };
+  const startPull = () => (detailBase = detailRect);
+  const saveDetail = () => setSetting(DETAIL_KEY, detailRect);
+  function moveDetail(d: DragDelta) {
+    const s = get(uiScale);
+    detailRect = clampRect(moved(detailBase, d.dx / s, d.dy / s), screenSize());
+  }
+  function pullEdge(edge: Edge, d: ResizeDelta) {
+    const grow = edge === "e" || edge === "w" ? d.dw : d.dh;
+    detailRect = clampRect(resizedEdge(detailBase, edge, grow / get(uiScale)), screenSize());
+  }
+
+  /** The graph's outermost radius is the disc's edge: the renderer's `fit` is the share of the canvas (the disc's own
+   *  square) that one graph unit takes. */
+  const DISC_FIT = 0.5;
+  /** Where the disc goes: over the Orbit's cloud, else (the Orbit not laid out) the middle of the window. */
+  const discFrame = $derived(
+    $orbitFrame ?? { cx: window.innerWidth / 2, cy: window.innerHeight / 2, side: Math.min(window.innerWidth, window.innerHeight) },
+  );
   const prefs = getSetting<Prefs>("secondBrain") ?? {};
 
   let canvas = $state<HTMLCanvasElement | null>(null);
@@ -57,101 +86,14 @@
   // that comparison silently (property reads like `selected.label` still
   // work fine through a proxy, which is why this went unnoticed).
   let selected = $state.raw<GraphNode | null>(null);
-  let searchInput = $state<HTMLInputElement | null>(null);
   let hover = $state.raw<GraphNode | null>(null);
-  // svelte-ignore state_referenced_locally
-  let query = $state(initialQuery);
   let layout = $state<LayoutKind>(prefs.layout === "hex" ? "hex" : "rings");
   // The one place the layout is mapped to a renderer mode, so the mount-time renderer options and the reactive
   // `$effect` below can't drift apart.
   const renderMode = $derived<RenderMode>(layout === "hex" ? "hex" : "rings");
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
-  let helpOpen = $state(prefs.help !== false);
+  let helpOpen = $state(prefs.help === true);
   let areaFilter = $state("");
-
-  /** Full-text hits from the workspace for the current query (debounced). */
-  let contentHits = $state<SearchHit[]>([]);
-  let searchBusy = $state(false);
-  let resultsOpen = $state(false);
-  let activeResult = $state(0);
-  const RESULT_LIMIT = 25;
-
-  interface Result {
-    node: GraphNode;
-    snippet: string | null;
-    line: number | null;
-  }
-  /** Title/path matches first, then content-only matches, each once. */
-  const results = $derived.by((): Result[] => {
-    if (!model || !query.trim()) return [];
-    const out: Result[] = [];
-    const seen = new Set<string>();
-    const byPath = new Map(contentHits.map((h) => [h.path, h]));
-    const titleHits = model.nodes.filter((n) => hits?.has(n.id)).sort((a, b) => (a.kind === "file" ? 1 : 0) - (b.kind === "file" ? 1 : 0) || a.label.localeCompare(b.label));
-    for (const n of titleHits) {
-      const h = n.path ? byPath.get(n.path) : undefined;
-      out.push({ node: n, snippet: h?.snippet ?? null, line: h?.line ?? null });
-      seen.add(n.id);
-    }
-    for (const h of contentHits) {
-      const n = model.byId.get(`file:${h.path}`);
-      if (n && !seen.has(n.id)) {
-        out.push({ node: n, snippet: h.snippet, line: h.line });
-        seen.add(n.id);
-      }
-    }
-    return out.slice(0, RESULT_LIMIT);
-  });
-  /** Everything that should stay lit: title hits plus content hits. */
-  const lit = $derived.by(() => {
-    if (!query.trim()) return null;
-    const set = new Set(hits ?? []);
-    for (const h of contentHits) set.add(`file:${h.path}`);
-    return set;
-  });
-
-  let searchTimer: ReturnType<typeof setTimeout> | null = null;
-  $effect(() => {
-    const q = query.trim();
-    if (searchTimer) clearTimeout(searchTimer);
-    if (!q) {
-      contentHits = [];
-      return;
-    }
-    searchTimer = setTimeout(async () => {
-      searchBusy = true;
-      try {
-        const found = await invokeBackend<SearchHit[]>("search_workspace", { query: q, limit: 40 });
-        if (query.trim() === q) contentHits = found;
-      } catch {
-        if (query.trim() === q) contentHits = [];
-      } finally {
-        searchBusy = false;
-      }
-    }, 250);
-  });
-
-  function pickResult(r: Result) {
-    goTo(r.node);
-    resultsOpen = false;
-  }
-  function onSearchKey(e: KeyboardEvent) {
-    if (results.length === 0) return;
-    if (e.key === "ArrowDown") {
-      activeResult = (activeResult + 1) % results.length;
-      e.preventDefault();
-    } else if (e.key === "ArrowUp") {
-      activeResult = (activeResult - 1 + results.length) % results.length;
-      e.preventDefault();
-    } else if (e.key === "Enter") {
-      pickResult(results[Math.min(activeResult, results.length - 1)]);
-      e.preventDefault();
-    } else if (e.key === "Escape" && query) {
-      query = "";
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  }
 
   const HELP = [
     ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring. Zeigt die Größe je Bereich."],
@@ -198,7 +140,6 @@
   });
   const areaNode = $derived(model && selected?.area ? (model.byId.get(`area:${selected.area}`) ?? null) : null);
   const folderOf = $derived(selected?.path?.includes("/") ? selected.path.slice(0, selected.path.lastIndexOf("/")) : "");
-  const hits = $derived(model && query.trim() ? searchNodes(model, query) : null);
 
   function rebuild() {
     if (!renderer || !graph) return;
@@ -416,17 +357,9 @@
     });
   }
   $effect(() => {
-    const h = lit;
-    if (renderer) renderer.highlight = h;
-  });
-  $effect(() => {
     void layout;
     void grouping;
     untrack(rebuild);
-  });
-  // A new query from `/brain ? …` or the module's search action while open.
-  $effect(() => {
-    if (initialQuery) query = initialQuery;
   });
   // `/brain <path>` while the view is already open re-targets the focus —
   // once per focus value, not on every model rebuild.
@@ -448,7 +381,7 @@
       spin: spinOf($brainView),
       labels: $brainView.labels,
       fileLabels: $brainView.fileNames,
-      fit: 0.44,
+      fit: DISC_FIT,
       mode: renderMode,
     };
     renderer.resize();
@@ -463,10 +396,6 @@
     };
     raf = requestAnimationFrame(tick);
     void load();
-    // Opened straight to search (the top-bar icon, `/brain` with no path) —
-    // put the cursor in the search box. A node-targeted open passes `focus`
-    // and is left alone.
-    if (!focus && !initialQuery) queueMicrotask(() => searchInput?.focus());
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
@@ -478,19 +407,12 @@
 <svelte:window onkeydown={onKeydown} />
 
 <section class="brain" aria-label="Second Brain">
-  <header>
-    <h1>
-      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-      </svg>
-      <span>Axiomata</span> <em>Second Brain</em>
-    </h1>
-    <button type="button" class="back" onclick={() => (open = false)}>← Back to the OS</button>
-  </header>
-
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="stage"
+    style:left="{discFrame.cx}px"
+    style:top="{discFrame.cy}px"
+    style:width="{discFrame.side * BRAIN_DISC * 2}px"
     class:hovering={hover !== null}
     onmousedown={onDown}
     onmousemove={onMove}
@@ -503,50 +425,6 @@
   </div>
 
   <aside class="controls">
-    <div class="controls-head">
-      <input
-        type="search"
-        bind:this={searchInput}
-        placeholder={model ? `Search ${model.totalFiles} notes…` : "Search…"}
-        aria-label="Search nodes"
-        title="Titel, Pfad, Bereich und Inhalt; Treffer bleiben hell, der Rest wird gedimmt. ↑↓ wählen, Enter springt hin"
-        bind:value={query}
-        onfocus={() => (resultsOpen = true)}
-        oninput={() => (resultsOpen = true)}
-        onkeydown={onSearchKey}
-      />
-      <button type="button" class="help-btn" class:on={helpOpen} title="Was bedeuten die Optionen?" aria-label="Help" onclick={() => (helpOpen = !helpOpen)}>?</button>
-    </div>
-    {#if query.trim()}
-      <div class="results" role="listbox" aria-label="Search results">
-        <p class="results-head">
-          {results.length}{results.length === RESULT_LIMIT ? "+" : ""} {results.length === 1 ? "match" : "matches"}
-          {#if searchBusy}<span class="dim"> · searching…</span>{/if}
-        </p>
-        {#if results.length === 0 && !searchBusy}
-          <p class="dim small">Nothing found.</p>
-        {/if}
-        {#if resultsOpen}
-          <ul>
-            {#each results as r, i (r.node.id)}
-              <li>
-                <button type="button" class="result" class:active={i === activeResult} role="option" aria-selected={i === activeResult} onclick={() => pickResult(r)} onmouseenter={() => (activeResult = i)}>
-                  <span class="dot" style:background={r.node.color}></span>
-                  <span class="result-text">
-                    <span class="result-title">{r.node.label}</span>
-                    {#if r.snippet}
-                      <span class="result-snippet">{r.line ? `L${r.line} · ` : ""}{r.snippet}</span>
-                    {:else if r.node.path}
-                      <span class="result-snippet mono">{r.node.path}</span>
-                    {/if}
-                  </span>
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
-    {/if}
     <div class="group">
       <span class="label">Layout</span>
       <div class="seg">
@@ -565,6 +443,7 @@
       <button type="button" title="Zoom und Verschiebung zurücksetzen" onclick={resetView}>Reset view</button>
       <button type="button" title="Graph neu aus dem Workspace laden" onclick={() => void load()}>Reload</button>
     </div>
+    <button type="button" class="help-btn" class:on={helpOpen} title="Was bedeuten die Optionen?" aria-label="Hilfe" onclick={() => (helpOpen = !helpOpen)}>?</button>
     {#if model}
       <p class="stats">{model.totalFiles} notes · {model.areas.length} {grouping} · {model.edges.length} links{model.truncated ? " · truncated" : ""}</p>
     {/if}
@@ -581,8 +460,23 @@
   <div class="legend-slot"><Legend hex={layout === "hex"} /></div>
 
   {#if selected}
-    <aside class="detail" transition:fade={{ duration: 120 }}>
-      <header>
+    <aside
+      class="detail"
+      transition:fade={{ duration: 120 }}
+      style:left="{detailRect.x * $uiScale}px"
+      style:top="{detailRect.y * $uiScale}px"
+      style:width="{detailRect.w * $uiScale}px"
+      style:height="{detailRect.h * $uiScale}px"
+      use:draggable={{ handle: ".detail-head", onStart: startPull, onMove: moveDetail, onEnd: (d) => { moveDetail(d); saveDetail(); } }}
+    >
+      {#each EDGES as edge (edge)}
+        <div
+          class="edge edge-{edge}"
+          use:resizable={{ dir: edge, onStart: startPull, onMove: (d) => pullEdge(edge, d), onEnd: (d) => { pullEdge(edge, d); saveDetail(); } }}
+        ></div>
+      {/each}
+      <div class="detail-scroll">
+      <header class="detail-head">
         <div class="eyebrow">
           <span class="tag kind">{selected.kind}</span>
           {#if selected.area && selected.kind !== "area"}
@@ -672,62 +566,30 @@
           {/each}
         </ul>
       {/if}
+      </div>
     </aside>
   {/if}
 </section>
 
 <style>
+  /* No box of its own: the layer is the disc below and the panels, each fixed on its own, so that the tiles of the Orbit
+     stand between the disc (below them) and the panels (above them). */
   .brain {
-    position: fixed;
-    inset: 0;
-    /* Below the staging layer so "View here" panels slide in on top. */
-    z-index: calc(var(--ax-z-staging) - 1);
-    background: var(--ax-bg);
-    background-image: var(--ax-texture-url);
+    display: contents;
     color: var(--ax-text);
   }
-  .brain > header {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 2;
-    display: flex;
-    align-items: center;
-    padding: var(--ax-space-4) var(--ax-space-5);
-    pointer-events: none;
-  }
-  h1 {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    font-size: var(--ax-font-size-xl);
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  h1 em {
-    font-style: normal;
-    font-weight: 400;
-    color: var(--ax-text-muted);
-  }
-  .logo {
-    width: calc(22px * var(--ax-ui-scale));
-    height: calc(22px * var(--ax-ui-scale));
-    color: var(--ax-accent);
-  }
-  .back {
-    margin-left: auto;
-    pointer-events: auto;
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
-    font-size: var(--ax-font-size-sm);
-    border-color: var(--ax-accent);
-  }
 
+  /* The graph sits in a disc over the cloud it replaces, and under the tiles. Radius `BRAIN_DISC` of the shorter side:
+     big enough to cover the cloud (0.36), small enough to stay inside the App Ring (0.425). Zoom and pan are clipped to it. */
   .stage {
-    position: absolute;
-    inset: 0;
+    position: fixed;
+    z-index: 2;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--ax-bg);
+    box-shadow: 0 0 0 1px var(--ax-border);
     cursor: grab;
   }
   .stage.hovering {
@@ -749,18 +611,18 @@
     color: var(--ax-danger);
   }
 
+  /* The bar bottom left, beside the Orbit's own corner buttons (motion, ×). */
   .controls {
-    position: absolute;
-    z-index: 2;
-    top: calc(72px * var(--ax-ui-scale));
-    right: var(--ax-space-5);
-    width: calc(270px * var(--ax-ui-scale));
-    max-height: calc(100vh - calc(100px * var(--ax-ui-scale)));
-    overflow: auto;
+    position: fixed;
+    z-index: calc(var(--ax-z-staging) - 2);
+    left: calc(var(--ax-space-3) + calc(64px * var(--ax-ui-scale)));
+    bottom: var(--ax-space-3);
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    align-items: center;
     gap: var(--ax-space-3);
-    padding: var(--ax-space-3);
+    max-width: calc(100vw - 2 * var(--ax-space-5) - calc(64px * var(--ax-ui-scale)));
+    padding: var(--ax-space-2) var(--ax-space-3);
     /* Same glass/hairline/elevated-shadow language as Window.svelte and
        every other panel in the app. */
     background: var(--ax-tile-glass-bg);
@@ -771,74 +633,6 @@
     border-radius: var(--ax-radius-lg);
     box-shadow: var(--ax-shadow-drag);
     font-size: var(--ax-font-size-sm);
-  }
-  .controls-head {
-    display: flex;
-    gap: var(--ax-space-2);
-  }
-  .controls-head input {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .results {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ax-space-1);
-    max-height: 40vh;
-    overflow: auto;
-    padding-bottom: var(--ax-space-2);
-    border-bottom: 1px solid var(--ax-border);
-  }
-  .results-head {
-    margin: 0;
-    font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
-    color: var(--ax-text-muted);
-  }
-  .results ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .result {
-    width: 100%;
-    display: flex;
-    align-items: flex-start;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    text-align: left;
-    background: transparent;
-    border-color: transparent;
-    border-radius: var(--ax-radius-sm);
-  }
-  .result.active,
-  .result:hover {
-    background: var(--ax-surface-3);
-    border-color: var(--ax-border);
-  }
-  .result .dot {
-    margin-top: calc(6px * var(--ax-ui-scale));
-  }
-  .result-text {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .result-title {
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .result-snippet {
-    font-size: var(--ax-font-size-xs);
-    color: var(--ax-text-muted);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
   }
   .help-btn {
     width: calc(30px * var(--ax-ui-scale));
@@ -852,8 +646,8 @@
   }
   .group {
     display: flex;
-    flex-direction: column;
-    gap: var(--ax-space-1);
+    align-items: center;
+    gap: var(--ax-space-2);
   }
   .label {
     font-size: var(--ax-font-size-xs);
@@ -881,17 +675,28 @@
     gap: var(--ax-space-2);
   }
   .row button {
-    flex: 1 1 0;
     font-size: var(--ax-font-size-sm);
   }
   .stats {
     margin: 0;
     color: var(--ax-text-muted);
   }
+  /* The explanations open above the bar. */
   .help {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + var(--ax-space-2));
+    width: calc(380px * var(--ax-ui-scale));
+    max-height: 50vh;
+    overflow: auto;
     margin: 0;
-    padding-top: var(--ax-space-2);
-    border-top: 1px solid var(--ax-border);
+    padding: var(--ax-space-3);
+    background: var(--ax-tile-glass-bg);
+    -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
+    backdrop-filter: blur(var(--ax-tile-glass-blur));
+    border-bottom: 2px solid var(--ax-border-strong);
+    border-radius: var(--ax-radius-lg);
+    box-shadow: var(--ax-shadow-drag);
     display: grid;
     grid-template-columns: 5.5em 1fr;
     gap: var(--ax-space-1) var(--ax-space-2);
@@ -908,22 +713,16 @@
   }
 
   .legend-slot {
-    position: absolute;
-    z-index: 2;
+    position: fixed;
+    z-index: calc(var(--ax-z-staging) - 2);
     left: var(--ax-space-5);
     bottom: calc(80px * var(--ax-ui-scale));
   }
 
   /* ---- detail panel ---- */
   .detail {
-    position: absolute;
-    z-index: 2;
-    top: calc(72px * var(--ax-ui-scale));
-    left: var(--ax-space-5);
-    width: calc(360px * var(--ax-ui-scale));
-    max-height: calc(100vh - calc(100px * var(--ax-ui-scale)));
-    overflow: auto;
-    padding: var(--ax-space-4) var(--ax-space-5) var(--ax-space-5);
+    position: fixed;
+    z-index: calc(var(--ax-z-staging) - 2);
     /* Same glass/hairline/elevated-shadow language as Window.svelte and
        every other panel in the app. */
     background: var(--ax-tile-glass-bg);
@@ -935,6 +734,37 @@
     box-shadow: var(--ax-shadow-drag);
     font-size: var(--ax-font-size-base);
     line-height: 1.6;
+  }
+  /* Thin grips along the four edges. They belong to the window, not to its scrolling content (`.detail-scroll`). */
+  .edge {
+    position: absolute;
+    z-index: 3;
+  }
+  .edge-n,
+  .edge-s {
+    left: 0;
+    right: 0;
+    height: 6px;
+    cursor: ns-resize;
+  }
+  .edge-e,
+  .edge-w {
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: ew-resize;
+  }
+  .edge-n { top: 0; }
+  .edge-s { bottom: 0; }
+  .edge-e { right: 0; }
+  .edge-w { left: 0; }
+  .detail-scroll {
+    height: 100%;
+    overflow: auto;
+    padding: var(--ax-space-4) var(--ax-space-5) var(--ax-space-5);
+  }
+  .detail-head {
+    cursor: grab;
   }
   .detail header {
     position: relative;
