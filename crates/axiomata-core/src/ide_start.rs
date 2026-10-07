@@ -145,6 +145,9 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                 });
             }
             ready.launch_command = with_session(&ready.launch_command, &session.id);
+            // Taken before the line below overwrites it: the "remember only now" check at the end compares against what
+            // the database holds, and would otherwise never store a session made in this start.
+            let remembered = ready.agent.opencode_session.clone();
             ready.agent.opencode_session = Some(session.id.clone());
             // The registration is keyed on the directory. Agents of a project that is no repository all share its
             // folder, so a second start would replace the first one's server with its own id and secret — and the
@@ -179,7 +182,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
             }
             // Remembered only now: a start that failed on the way (the entry, the first message) must not leave a
             // session behind that the next start would take for one that was told its card — it would sit empty.
-            if ready.agent.opencode_session.as_deref() != Some(session.id.as_str()) {
+            if remembered.as_deref() != Some(session.id.as_str()) {
                 let conn = core.db_lock();
                 agent_store::set_opencode_session(&conn, id, Some(&session.id))?;
             }

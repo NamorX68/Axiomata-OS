@@ -92,7 +92,7 @@
   import { applyProjectCwd } from "./paneCwd";
   import { MODES, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
   import { balanceCanvas, canvasAgentTarget } from "./canvasLayout";
-  import { agentTabsOf, flowAgentTarget, modeForAgent, resetFlowPanes } from "./planning";
+  import { agentTabsOf, balanceFlow, flowAgentTarget, modeForAgent, resetFlowPanes } from "./planning";
   import { get } from "svelte/store";
   import { agentRequests, takeAgentRequests } from "./agentRequest";
   import { modeRequest } from "./modeRequest";
@@ -561,10 +561,13 @@
       return;
     }
     if (preferred && preferred !== shown.mode) layout = projectSession.switchMode(layout, preferred);
-    // In the Flow the pane goes beside the team's tiles; on the Canvas the agents share the width (`canvasLayout.ts`).
+    // In the Flow the pane goes beside the team's tiles and the session columns share their room evenly
+    // (`balanceFlow`); on the Canvas the agents share the width (`canvasLayout.ts`).
     const flowTarget = flowAgentTarget(layout);
     const added = addTab(layout, tab, flowTarget ?? canvasAgentTarget(layout));
-    layout = flowTarget ? added : balanceCanvas(added);
+    // A fourth Flow pane becomes a tab in the newest column: no new column, so the owner's sizes stay.
+    const flowBalanced = flowTarget?.side === "center" ? added : balanceFlow(added);
+    layout = flowTarget ? flowBalanced : balanceCanvas(added);
   }
 
   /**

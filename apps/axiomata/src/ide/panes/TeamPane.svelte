@@ -221,9 +221,12 @@
   }
   .tiles {
     display: grid;
-    /* One tile fills the row until a second fits beside it (auto-fit); in a narrow pane the tiles wrap under each
-     * other. */
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(420px * var(--ax-ui-scale))), 1fr));
+    /* One tile fills the row until a second fits beside it (auto-fit), never more than two side by side — a third
+     * would leave each too narrow to read; in a narrow pane the tiles wrap under each other. */
+    grid-template-columns: repeat(
+      auto-fit,
+      minmax(min(100%, max(calc(420px * var(--ax-ui-scale)), calc(50% - var(--ax-space-3) / 2))), 1fr)
+    );
     gap: var(--ax-space-3);
   }
   .tile {

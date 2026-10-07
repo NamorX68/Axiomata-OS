@@ -640,7 +640,8 @@ Branch-Technik: Ultra vergleicht den ausgecheckten Branch mit einer **Basis** (L
 - **Agents-Kachel:** wartet die Sitzung auf den Owner, trägt die Kachel einen Warnrahmen, die Zeile „Wartet auf dich …“ und
   den Terminal-Knopf in Akzentfarbe.
 - **Terminal im Flow:** Worker und Reviewer der Karten eines Plans öffnen ihr Pane im **Flow** (`modeForAgent(agent, cardPlanId)`),
-  nicht mehr im Canvas; der Terminal-Knopf holt es dort nach vorn. Bis zu drei Session-Panes stehen nebeneinander, weitere
+  nicht mehr im Canvas; der Terminal-Knopf holt es dort nach vorn. Bis zu drei Session-Panes stehen nebeneinander und teilen ihren Platz gleichmäßig (`planning.balanceFlow`: 45/60/75 % der Reihe
+  für 1/2/3 Spalten, der Rest bleibt beim Team-Pane), weitere
   als Tab im neuesten (`flowAgentTarget`).
 - **Beobachtung (Plan übernehmen):** Übernimmt ein Plan Änderungen an Rust-Quellen in `main`, baut `cargo tauri dev`
   neu und startet die App neu — das ist kein Absturz. Der Übernehmen-Lauf war vorher fertig (Commits, Karten, Plan).
@@ -658,3 +659,11 @@ Branch-Technik: Ultra vergleicht den ausgecheckten Branch mit einer **Basis** (L
   Agenten teilen den Rest gleichmäßig (`balanceCanvas`, bei jedem Öffnen). Ohne anderes Pane teilen sie die ganze Breite. Bis
   vier Spalten nebeneinander, dann beginnt eine zweite Zeile unter der Spalte mit den wenigsten Agenten
   (`canvasAgentTarget`). Gespeicherte Layouts bleiben, wie sie sind; das Schließen eines Agenten gleicht nicht aus.
+
+## Fund der Mac-Runde 3 (2026-10-07)
+
+- **Opencode-Sitzung einer Karte wurde nie gespeichert** (`ide_start.rs`, seit CP-A6a): die ID wurde dem Agenten zugewiesen, bevor
+  verglichen wurde, ob die Datenbank sie schon kennt — der Vergleich war nie wahr. Folge: die Statusüberlagerung übersprang solche
+  Agenten (Kachel „starting“, nie „wartet“), das war der offene Punkt „Opencode-Reviewer zeigt starting“. Laufende Sitzungen heilt
+  das nicht; erst neu gestartete zeigen den Zustand.
+- **Agents-Kacheln:** höchstens zwei nebeneinander (`TeamPane.svelte`, Owner: drei sind zu schmal).

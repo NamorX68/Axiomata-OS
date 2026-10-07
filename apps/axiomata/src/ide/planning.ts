@@ -335,6 +335,11 @@ export function withPlanPane(layout: Layout): Layout {
 /** The share of the Flow's height the graph gets under the team's tiles: the tiles and the sessions need more. */
 const GRAPH_SHARE = 0.4;
 
+/** The share of the Flow's width the session columns take together: this much for none, plus a step for each, up to a cap. */
+const FLOW_AGENT_SHARE_BASE = 0.3;
+const FLOW_AGENT_SHARE_STEP = 0.15;
+const FLOW_AGENT_SHARE_MAX = 0.75;
+
 /** The share of the Flow's width the planning panel gets: the sessions and the graph on the right need the room. */
 const PLAN_SHARE = 0.3;
 
@@ -351,6 +356,39 @@ function splitHolding(node: LayoutNode, kind: string): Split | null {
 
 /** The panes the Flow is built from: pinned, so they cannot be closed — a pane with no way back is a Flow with a hole in it. */
 const FLOW_PANES = [PLAN_PANE, TEAM_PANE, GRAPH_PANE];
+
+/** Whether `node` holds a session pane anywhere below it. */
+const holdsAgent = (node: LayoutNode): boolean =>
+  isGroup(node) ? node.tabs.some((tab) => tab.kind === "agent") : node.children.some(holdsAgent);
+
+/** The Flow's row of columns that the session panes stand in: the one whose children include the agents' columns. */
+function agentRow(node: LayoutNode): Split | null {
+  if (!isSplit(node)) return null;
+  for (const child of node.children) {
+    const found = agentRow(child);
+    if (found) return found;
+  }
+  return node.dir === "row" && node.children.some(holdsAgent) ? node : null;
+}
+
+/**
+ * The layout with the session columns of equal width. They stand in a row beside the team's tiles (above the graph);
+ * what is no session keeps its proportions among itself and gives them room: 45 % of the row for one column, 60 % for
+ * two, 75 % for three ([`FLOW_AGENT_SHARE_MAX`]). A layout without a session column stays as it is.
+ */
+export function balanceFlow(layout: Layout): Layout {
+  const row = agentRow(layout.root);
+  if (!row) return layout;
+  const agents = row.children.filter(holdsAgent).length;
+  const others = row.children.length - agents;
+  if (others === 0) return setSplitSizes(layout, row.id, row.children.map(() => 1 / agents));
+  const agentShare = Math.min(FLOW_AGENT_SHARE_MAX, FLOW_AGENT_SHARE_BASE + FLOW_AGENT_SHARE_STEP * agents);
+  const otherTotal = row.children.reduce((sum, child, i) => (holdsAgent(child) ? sum : sum + row.sizes[i]), 0);
+  const sizes = row.children.map((child, i) =>
+    holdsAgent(child) ? agentShare / agents : ((1 - agentShare) * row.sizes[i]) / otherTotal,
+  );
+  return setSplitSizes(layout, row.id, sizes);
+}
 
 /**
  * The layout with the Flow's three panels in it, pinned: planning on the left, the team's tiles top right and the graph

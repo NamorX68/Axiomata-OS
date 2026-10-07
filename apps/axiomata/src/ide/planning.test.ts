@@ -5,6 +5,7 @@ import type { Role } from "../core/roster";
 import { addTab, allGroups, allTabs, closeTab, forceCloseTab, emptyLayout, singleGroupLayout, type PaneTab } from "./layout";
 import {
   agentTabsOf,
+  balanceFlow,
   canDeletePlan,
   rolesOfKind,
   sessionEngine,
@@ -231,6 +232,27 @@ describe("where a session's pane docks in the Flow", () => {
     const grown = addTab(layout, agentTab("d", 4), target);
     expect(allGroups(grown).filter((g) => g.tabs.some((t) => t.kind === "agent"))).toHaveLength(3);
     expect(allTabs(grown).some((t) => t.id === "d")).toBe(true);
+  });
+
+  it("gives the session columns equal widths and the team's tiles the rest of their row", () => {
+    let layout = withFlowPanes(emptyLayout());
+    for (const [id, agentId] of [["a", 1], ["b", 2], ["c", 3]] as const) {
+      layout = balanceFlow(addTab(layout, agentTab(id, agentId), flowAgentTarget(layout)!));
+    }
+    const row = (function find(node: typeof layout.root): Extract<typeof layout.root, { type: "split" }> | null {
+      if (node.type !== "split") return null;
+      return node.dir === "row" && node.children.length === 4 ? node : node.children.map(find).find(Boolean) ?? null;
+    })(layout.root)!;
+    const [team, a, b, c] = row.sizes;
+    expect(a).toBeCloseTo(0.25);
+    expect(b).toBeCloseTo(a);
+    expect(c).toBeCloseTo(a);
+    expect(team).toBeCloseTo(0.25);
+  });
+
+  it("leaves a layout without session columns as it is", () => {
+    const base = withFlowPanes(emptyLayout());
+    expect(balanceFlow(base)).toBe(base);
   });
 
   it("has no opinion outside the Flow, where there is no team panel", () => {
