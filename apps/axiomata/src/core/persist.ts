@@ -9,6 +9,7 @@
  * through untouched.
  */
 
+import { brainView, readBrainView } from "./brainView";
 import { get } from "svelte/store";
 
 import { appGroups, loadAppGroups, type AppGroup } from "./appGroups";
@@ -252,6 +253,11 @@ export async function initPersistence(): Promise<void> {
   windowTransparency.set(getSetting<number>("windowTransparency") ?? 50);
   const savedUiSize = getSetting<unknown>("uiSize");
   uiSize.set(isUiSize(savedUiSize) ? savedUiSize : "auto");
+  // Written back at once: the Second Brain view rewrites its own preferences, and the old rotation/file-names values that
+  // this is taken over from would be gone before the first change.
+  const savedBrainView = readBrainView(getSetting<unknown>("brainView"), getSetting<unknown>("secondBrain"));
+  brainView.set(savedBrainView);
+  setSetting("brainView", savedBrainView);
   loading = false;
   onDirty(scheduleSave);
   // Svelte stores call the subscriber once immediately, so this also
@@ -274,6 +280,9 @@ export async function initPersistence(): Promise<void> {
   });
   snapEdges.subscribe((v) => {
     if (!first) setSetting("snapEdges", v);
+  });
+  brainView.subscribe((v) => {
+    if (!first) setSetting("brainView", v);
   });
   // `uiScale.ts` applies it; only its persistence is here.
   uiSize.subscribe((v) => {

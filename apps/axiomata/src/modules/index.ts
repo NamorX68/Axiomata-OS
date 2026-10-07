@@ -40,7 +40,6 @@ import Reminders from "./reminders.svelte";
 import RemindersSettings from "./reminders-settings.svelte";
 import RoutinesBoard from "./routines-board.svelte";
 import SecondBrain from "./second-brain.svelte";
-import SecondBrainSettings from "./second-brain-settings.svelte";
 import RoutinesBoardSettings from "./routines-board-settings.svelte";
 import SkillsDeck from "./skills-deck.svelte";
 import SkillsDeckSettings from "./skills-deck-settings.svelte";
@@ -320,7 +319,6 @@ export function registerBuiltins(): void {
     title: "Second Brain",
     icon: "<svg viewBox='0 0 16 16' fill='none' stroke='currentColor' stroke-width='1.3'><circle cx='8' cy='8' r='6.2'/><circle cx='8' cy='8' r='3'/><circle cx='8' cy='8' r='0.9' fill='currentColor'/></svg>",
     component: SecondBrain,
-    settings: SecondBrainSettings,
     defaultSize: { w: 0, h: 0 },
     singleton: true,
     background: true,

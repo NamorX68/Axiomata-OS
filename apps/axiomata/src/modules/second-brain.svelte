@@ -22,8 +22,7 @@
   (full-bleed behind every tile), so a click has to be checked against the
   cloud's actual footprint explicitly — otherwise any click on empty
   dashboard background would open Second Brain too (owner feedback: "egal
-  wo ich auf den Hintergrund klicke ich im Brain lande"). Config: `spin`,
-  `labels`.
+  wo ich auf den Hintergrund klicke ich im Brain lande"). The motion and the labels come from `core/brainView.ts`.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -41,6 +40,7 @@
   } from "../core/appGroups";
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import type { WorkspaceGraph } from "../core/backend";
+  import { brainView, spinOf } from "../core/brainView";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
   import { openFilePanel } from "../core/staging";
@@ -67,9 +67,6 @@
   const MENU_H = 110;
 
   let { ctx }: { ctx: ModuleContext } = $props();
-  // `ctx` is created once per mounted instance and never swapped.
-  // svelte-ignore state_referenced_locally
-  const config = ctx.config;
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   /** Outer disc radius in px (`ORBIT_FIT` × the shorter side) — positions
@@ -107,8 +104,9 @@
    *  it rather than tracking a set. */
   let expandedGroupId = $state<string | null>(null);
 
-  const spin = $derived($config.spin !== false);
-  const labels = $derived($config.labels !== false);
+  // The motion and the captions are app settings now (`core/brainView.ts`), not this instance's config.
+  const spin = $derived(spinOf($brainView));
+  const labels = $derived($brainView.labels);
   /** The "+" button's diameter, in lockstep with the App Ring's own icon
    *  nodes (`appNodeRadiusPx`) — so it reads as one of the ring's slots
    *  instead of a separately-sized piece of UI chrome dropped on top of it. */
@@ -346,14 +344,14 @@
   $effect(() => {
     // Read the reactive inputs first — an early return on a missing renderer
     // would otherwise leave the effect without dependencies.
-    const next = { mode: "orbit" as const, spin: spin ? 0.02 : 0, labels };
+    const next = { mode: "orbit" as const, spin, labels };
     if (renderer) renderer.options = { ...renderer.options, ...next };
   });
 
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { mode: "orbit", spin: spin ? 0.02 : 0, labels, fileLabels: false, fit: ORBIT_FIT };
+    renderer.options = { mode: "orbit", spin, labels, fileLabels: false, fit: ORBIT_FIT };
     renderer.resize();
     const ro = new ResizeObserver(() => {
       renderer?.resize();

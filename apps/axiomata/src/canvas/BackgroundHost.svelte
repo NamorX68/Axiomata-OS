@@ -4,6 +4,7 @@
   pops the module's settings face, and × to remove it.
 -->
 <script lang="ts">
+  import { brainView } from "../core/brainView";
   import { getModule, makeContext } from "../core/registry";
   import { removeInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
@@ -23,6 +24,13 @@
     <def.component {ctx} />
   {/if}
   <div class="corner" data-no-drag>
+    <button
+      type="button"
+      aria-label="Bewegung"
+      aria-pressed={$brainView.motion}
+      title={$brainView.motion ? "Bewegung anhalten" : "Bewegung starten"}
+      onclick={() => brainView.update((v) => ({ ...v, motion: !v.motion }))}>{$brainView.motion ? "⏸" : "▶"}</button
+    >
     {#if def?.settings}
       <button type="button" aria-label="Background settings" title={def.title} onclick={() => (settingsOpen = !settingsOpen)}>⚙</button>
     {/if}

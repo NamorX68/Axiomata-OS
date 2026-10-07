@@ -14,6 +14,7 @@
 
   import { invokeBackend, type RunSummary, type SearchHit, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime } from "../core/format";
+  import { brainView, spinOf } from "../core/brainView";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel } from "../core/staging";
   import { toast } from "../core/toast";
@@ -41,8 +42,6 @@
   interface Prefs {
     layout?: LayoutKind;
     grouping?: Grouping;
-    spin?: number;
-    fileNames?: boolean;
     help?: boolean;
   }
   const prefs = getSetting<Prefs>("secondBrain") ?? {};
@@ -67,8 +66,6 @@
   // `$effect` below can't drift apart.
   const renderMode = $derived<RenderMode>(layout === "hex" ? "hex" : "rings");
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
-  let spin = $state(typeof prefs.spin === "number" ? prefs.spin : 0.02);
-  let fileNames = $state(prefs.fileNames === true);
   let helpOpen = $state(prefs.help !== false);
   let areaFilter = $state("");
 
@@ -156,8 +153,6 @@
     }
   }
 
-  const rotationLabel = $derived(spin === 0 ? "off" : spin < 0.03 ? "slow" : spin < 0.07 ? "medium" : "fast");
-
   const HELP = [
     ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring. Zeigt die Größe je Bereich."],
     [
@@ -166,8 +161,6 @@
     ],
     ["Areas", "Ein Segment je oberstem Vault-Ordner."],
     ["Folders", "Ein Segment je tiefstem Ordner, z. B. Learning/Rust/lessons. Feinere Aufteilung großer Bereiche."],
-    ["Rotation", "Drehgeschwindigkeit des ganzen Graphen; greift sofort, ganz links steht er still. Bei kleinen Werten sieht man die Drehung erst über Sekunden."],
-    ["File names", "Zeigt jeden Notiztitel dauerhaft; sonst erscheinen Titel bei Hover, Suche und Auswahl."],
   ] as const;
   /** Looks up a HELP entry's text by its term, so the buttons below reference
    *  entries by name instead of a fragile array index. */
@@ -395,12 +388,20 @@
   }
 
   $effect(() => {
-    if (renderer) renderer.options = { ...renderer.options, spin, fileLabels: fileNames, mode: renderMode };
+    if (renderer) {
+      renderer.options = {
+        ...renderer.options,
+        spin: spinOf($brainView),
+        labels: $brainView.labels,
+        fileLabels: $brainView.fileNames,
+        mode: renderMode,
+      };
+    }
   });
   // Remember the view preferences in dashboard.json (settings.secondBrain).
   let prefsReady = false;
   $effect(() => {
-    const next: Prefs = { layout, grouping, spin, fileNames, help: helpOpen };
+    const next: Prefs = { layout, grouping, help: helpOpen };
     if (prefsReady) setSetting("secondBrain", next);
     prefsReady = true;
   });
@@ -443,7 +444,13 @@
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { spin, labels: true, fileLabels: fileNames, fit: 0.44, mode: renderMode };
+    renderer.options = {
+      spin: spinOf($brainView),
+      labels: $brainView.labels,
+      fileLabels: $brainView.fileNames,
+      fit: 0.44,
+      mode: renderMode,
+    };
     renderer.resize();
     const ro = new ResizeObserver(() => renderer?.resize());
     ro.observe(canvas);
@@ -554,12 +561,6 @@
         <button type="button" class:on={grouping === "folders"} title={helpText("Folders")} aria-describedby="help-folders" onclick={() => (grouping = "folders")}>Folders</button>
       </div>
     </div>
-    <label class="row" title={helpText("Rotation")}>
-      <span class="label">Rotation</span>
-      <input type="range" min="0" max="0.12" step="0.005" bind:value={spin} aria-describedby="help-rotation" />
-      <span class="readout">{rotationLabel}</span>
-    </label>
-    <label class="row check" title={helpText("File names")}><input type="checkbox" bind:checked={fileNames} aria-describedby="help-file-names" /> File names</label>
     <div class="row">
       <button type="button" title="Zoom und Verschiebung zurücksetzen" onclick={resetView}>Reset view</button>
       <button type="button" title="Graph neu aus dem Workspace laden" onclick={() => void load()}>Reload</button>
@@ -878,16 +879,6 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-  }
-  .row input[type="range"] {
-    flex: 1 1 auto;
-    accent-color: var(--ax-accent);
-  }
-  .readout {
-    min-width: calc(44px * var(--ax-ui-scale));
-    text-align: right;
-    font-size: var(--ax-font-size-xs);
-    color: var(--ax-text-muted);
   }
   .row button {
     flex: 1 1 0;

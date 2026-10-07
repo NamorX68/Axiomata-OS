@@ -30,8 +30,12 @@ Spotlight-Suche (`docs/plans/spotlight-search.md`, CP1–CP4), dann dieser Umbau
 ## Checkpoints (nach Spotlight)
 
 1. **Aufräumen — gebaut 2026-10-07:** Circle und Routine-Knoten aus Modell, Layout, Renderer, Legende, 2Brain-Detailfenster und Tests gestrichen (B4, B5). Ein gespeichertes `layout: "circle"` fällt auf Rings zurück. Das Glyph `routine` bleibt: der App-Ring nutzt es für das Routinen-Board.
-2. **Einstellungen umziehen:** Leiste unten links, Bewegungsschalter, Abschnitt „Ansicht" in den App-Einstellungen,
-   Kachel-Einstellungen weg (B6).
+2. **Einstellungen umziehen — gebaut 2026-10-07 (ohne die Darstellungs-Leiste, die erst mit Schritt 3 einen Platz hat):** neuer Store
+   `core/brainView.ts` (Bewegung an/aus, Tempo, Beschriftungen, Dateinamen; gespeichert unter `settings.brainView`, die alten Werte des
+   2Brain `spin`/`fileNames` werden übernommen); Abschnitt „Orbit & Second Brain" in den App-Einstellungen; der Bewegungsschalter ⏸/▶
+   in der Ecke unten links des Orbits (`BackgroundHost`); die Kachel-Einstellungen „Slow spin / Labels" (`second-brain-settings.svelte`)
+   und Rotation/File-names im 2Brain-Panel sind weg. **Darstellung (Rings/Hex) und Gruppierung** bleiben bis Schritt 3 im 2Brain-Panel und
+   ziehen dann in die Leiste unten links (B6).
 3. **Ein Orbit:** die Interaktion aus `SecondBrainView` (Schwenken, Zoom, Hover, Auswahl, Detailfenster) in eine gemeinsame
    Komponente ziehen und im Orbit-Widget einhängen; Klick in die Wolke/auf Hintergrund/Esc (B1–B3, B7–B9); die alte Vollbild-Ansicht
    samt `open-second-brain`-Weg entfernen — Spotlight-Einträge „Graph durchsuchen"/„im 2Brain zeigen" zeigen darauf.

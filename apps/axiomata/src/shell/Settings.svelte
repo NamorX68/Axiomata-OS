@@ -17,6 +17,7 @@
     type SpendSummary,
     invokeBackend,
   } from "../core/backend";
+  import { brainView, SPEED_MAX } from "../core/brainView";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
   import { UI_SIZES, uiScaleAuto, uiSize, type UiSize } from "../core/uiScale";
@@ -300,6 +301,17 @@
           <h3>Canvas</h3>
           <label class="opt"><input type="checkbox" bind:checked={$showGrid} /> Show dot grid <span class="hint">(tiles snap to it either way)</span></label>
           <label class="opt"><input type="checkbox" bind:checked={$snapEdges} /> Magnetic edges <span class="hint">(tiles stick to their neighbours within 8 px)</span></label>
+        </section>
+
+        <section>
+          <h3>Orbit &amp; Second Brain</h3>
+          <label class="opt"><input type="checkbox" bind:checked={$brainView.motion} /> Bewegung <span class="hint">(der Schalter unten links im Orbit tut dasselbe)</span></label>
+          <label class="opt">
+            Tempo
+            <input class="speed" type="range" min="0.005" max={SPEED_MAX} step="0.005" bind:value={$brainView.speed} disabled={!$brainView.motion} />
+          </label>
+          <label class="opt"><input type="checkbox" bind:checked={$brainView.labels} /> Beschriftungen <span class="hint">(Skills, Bereiche und der Hub)</span></label>
+          <label class="opt"><input type="checkbox" bind:checked={$brainView.fileNames} /> Dateinamen <span class="hint">(im Second Brain neben jeder Notiz)</span></label>
         </section>
 
         <section>
@@ -824,5 +836,8 @@
   dd {
     margin: 0;
     word-break: break-all;
+  }
+  .speed {
+    accent-color: var(--ax-accent);
   }
 </style>
