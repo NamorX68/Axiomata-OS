@@ -141,7 +141,8 @@ für die IDE muss auch Projektordner und Agenten-Worktrees öffnen.
 
 **Bedienung**
 
-- **D16 — Tasten** (Q14): Esc gehört immer dem Editor (Panel schließt mit ⌘W oder ×);
+- **D16 — Tasten** (Q14): Esc gehört dem Editor, solange die Quelle zu sehen ist (Panel schließt mit ⌘W oder ×);
+  im gerenderten Lesemodus und bei Bildern schließt ein blankes Esc das Panel (2026-10-07, `isReadOnlyView`);
   im normalen Modus gehören ⌘S/⌘F/⌘Z dem Editor, im Vi-Modus die Vi-Tasten und ⌘-Tasten
   bleiben nutzbar; app-weite Tasten (⌘K, wenn es kommt) gehen vor. Dieselbe Regel wie
   in der IDE.

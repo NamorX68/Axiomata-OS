@@ -406,6 +406,15 @@
     if (previewKind) viewMode = handed.viewMode;
   }
 
+  /**
+   * Whether only a rendered view or a picture is on screen, so no editing key map (Vi's Normal mode, a completion)
+   * can need Escape — the panel may then take it to close itself.
+   */
+  export function isReadOnlyView(): boolean {
+    if (image) return true;
+    return !!session && previewKind !== null && viewMode === "preview";
+  }
+
   /** Whether closing now would leave unsaved text (or an unfiled note) behind. */
   export function hasUnsaved(): boolean {
     return !!session && session.doc.dirty;

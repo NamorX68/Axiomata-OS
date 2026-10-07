@@ -11,8 +11,9 @@
   * **The config follows the editor**: a filed note, or a link followed inside
     an HTML page, points the panel at its new file — so opening that file
     again brings this panel forward instead of a second one.
-  * **Escape belongs to the editor** (D16); the panel closes with ⌘W or ×,
-    and asks first when there is unsaved text (W11) or an unfiled note (W4).
+  * **Escape belongs to the editor** (D16) while the source is shown; on a rendered page or a picture it closes the
+    panel. ⌘W or × close it always,
+    and it asks first when there is unsaved text (W11) or an unfiled note (W4).
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
@@ -121,9 +122,12 @@
   }
 
   function onKeydown(e: KeyboardEvent): void {
-    // D16: Escape is the editor's (Vi's Normal mode, a completion …), never the panel's.
+    // D16: Escape is the editor's (Vi's Normal mode, a completion …) — except on a rendered page or a picture, where
+    // the editor has no use for it and a bare Escape closes the window like the Kanban's.
     if (e.key === "Escape") {
       e.preventDefault();
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if (!typing && editor?.isReadOnlyView()) void requestClose(ctx.instanceId);
       return;
     }
     // In the editor the zoom keys are taken (and stopped) there; this is for focus in the header's controls.
