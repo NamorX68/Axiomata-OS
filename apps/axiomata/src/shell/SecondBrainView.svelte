@@ -15,7 +15,7 @@
 
   import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime } from "../core/format";
-  import { BRAIN_DISC, brainView, orbitFrame, spinOf } from "../core/brainView";
+  import { BRAIN_DISC, brainView, spinOf } from "../core/brainView";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel } from "../core/staging";
   import { toast } from "../core/toast";
@@ -69,10 +69,21 @@
   /** The graph's outermost radius is the disc's edge: the renderer's `fit` is the share of the canvas (the disc's own
    *  square) that one graph unit takes. */
   const DISC_FIT = 0.5;
-  /** Where the disc goes: over the Orbit's cloud, else (the Orbit not laid out) the middle of the window. */
-  const discFrame = $derived(
-    $orbitFrame ?? { cx: window.innerWidth / 2, cy: window.innerHeight / 2, side: Math.min(window.innerWidth, window.innerHeight) },
-  );
+
+  /**
+   * The disc lives inside the Orbit's own container (`[data-background]`), moved there on mount: it then has the cloud's box —
+   * the centre and the size units are the very same, by CSS, with nothing measured that could go stale — and it stands in
+   * the particle layer, under the tiles like the cloud it replaces. Without an Orbit it is centred on the window.
+   */
+  let inOrbit = $state(false);
+  function inOrbitHost(node: HTMLElement) {
+    const host = document.querySelector("[data-background]");
+    if (host) {
+      host.appendChild(node);
+      inOrbit = true;
+    }
+    return { destroy: () => node.remove() };
+  }
   const prefs = getSetting<Prefs>("secondBrain") ?? {};
 
   let canvas = $state<HTMLCanvasElement | null>(null);
@@ -410,9 +421,10 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="stage"
-    style:left="{discFrame.cx}px"
-    style:top="{discFrame.cy}px"
-    style:width="{discFrame.side * BRAIN_DISC * 2}px"
+    style:--disc-vmin="{BRAIN_DISC * 200}vmin"
+    style:--disc-cqmin="{BRAIN_DISC * 200}cqmin"
+    class:in-orbit={inOrbit}
+    use:inOrbitHost
     class:hovering={hover !== null}
     onmousedown={onDown}
     onmousemove={onMove}
@@ -448,16 +460,17 @@
       <p class="stats">{model.totalFiles} notes · {model.areas.length} {grouping} · {model.edges.length} links{model.truncated ? " · truncated" : ""}</p>
     {/if}
     {#if helpOpen}
-      <dl class="help">
-        {#each HELP as [term, text] (term)}
-          <dt id="help-{term.toLowerCase().replace(' ', '-')}">{term}</dt>
-          <dd>{text}</dd>
-        {/each}
-      </dl>
+      <div class="help">
+        <Legend hex={layout === "hex"} />
+        <dl class="help-terms">
+          {#each HELP as [term, text] (term)}
+            <dt id="help-{term.toLowerCase().replace(' ', '-')}">{term}</dt>
+            <dd>{text}</dd>
+          {/each}
+        </dl>
+      </div>
     {/if}
   </aside>
-
-  <div class="legend-slot"><Legend hex={layout === "hex"} /></div>
 
   {#if selected}
     <aside
@@ -584,13 +597,25 @@
   .stage {
     position: fixed;
     z-index: 2;
+    left: 50%;
+    top: 50%;
+    width: var(--disc-vmin);
     aspect-ratio: 1;
     transform: translate(-50%, -50%);
     border-radius: 50%;
+    /* `border-radius` only rounds what is painted: WebKit still hands the element's whole box the pointer events, so the
+       corners of the square would swallow the clicks of the App Ring's icons lying diagonally outside the circle. The clip
+       path makes the circle the element's shape for hit testing too. */
+    clip-path: circle(50%);
     overflow: hidden;
     background: var(--ax-bg);
     box-shadow: 0 0 0 1px var(--ax-border);
     cursor: grab;
+  }
+  /* In the Orbit's container (`container-type: size` there): its own box is the unit, the same one the cloud is sized from. */
+  .stage.in-orbit {
+    position: absolute;
+    width: var(--disc-cqmin);
   }
   .stage.hovering {
     cursor: pointer;
@@ -697,26 +722,25 @@
     border-bottom: 2px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-lg);
     box-shadow: var(--ax-shadow-drag);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-3);
+  }
+  .help-terms {
+    margin: 0;
     display: grid;
     grid-template-columns: 5.5em 1fr;
     gap: var(--ax-space-1) var(--ax-space-2);
     font-size: var(--ax-font-size-xs);
     line-height: 1.5;
   }
-  .help dt {
+  .help-terms dt {
     color: var(--ax-accent);
     font-weight: 600;
   }
-  .help dd {
+  .help-terms dd {
     margin: 0;
     color: var(--ax-text-muted);
-  }
-
-  .legend-slot {
-    position: fixed;
-    z-index: calc(var(--ax-z-staging) - 2);
-    left: var(--ax-space-5);
-    bottom: calc(80px * var(--ax-ui-scale));
   }
 
   /* ---- detail panel ---- */

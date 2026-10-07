@@ -21,7 +21,7 @@ export interface BrainView {
 export const DEFAULT_BRAIN_VIEW: BrainView = { motion: true, speed: 0.02, labels: true, fileNames: false };
 
 /**
- * The radius of the disc the Second Brain graph is drawn in, as a share of the shorter screen side. The cloud it replaces has
+ * The radius of the disc the Second Brain graph is drawn in, as a share of the shorter side of the Orbit's own box (the one the cloud is sized from). The cloud it replaces has
  * 0.36 and the App Ring lies at 0.425 (`graph/layout.ts`'s `APP_RING` × the cloud's radius): in between, so that no tile is
  * covered that the cloud did not cover and the ring stays free.
  */
@@ -29,18 +29,6 @@ export const BRAIN_DISC = 0.4;
 
 /** The slider's range, shared by the settings and the validation. */
 export const SPEED_MAX = 0.12;
-
-/**
- * Where the Orbit's cloud is on screen, in CSS px: the centre of its canvas and the shorter side (the cloud and the disc of
- * the Second Brain are fractions of it). The Orbit's canvas is the area below the title, not the whole window, so the disc
- * cannot be placed from the window alone. `null` until the Orbit has been laid out.
- */
-export interface OrbitFrame {
-  cx: number;
-  cy: number;
-  side: number;
-}
-export const orbitFrame: Writable<OrbitFrame | null> = writable(null);
 
 /** Whether the Second Brain layer is up over the Orbit (set by the shell). */
 export const brainActive: Writable<boolean> = writable(false);

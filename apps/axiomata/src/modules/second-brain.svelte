@@ -40,7 +40,7 @@
   } from "../core/appGroups";
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import type { WorkspaceGraph } from "../core/backend";
-  import { brainActive, brainView, orbitFrame, spinOf } from "../core/brainView";
+  import { brainActive, brainView, spinOf } from "../core/brainView";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
   import { openFilePanel } from "../core/staging";
@@ -362,7 +362,6 @@
       renderer?.resize();
       const r = canvas!.getBoundingClientRect();
       discR = Math.min(r.width, r.height) * ORBIT_FIT;
-      orbitFrame.set({ cx: r.left + r.width / 2, cy: r.top + r.height / 2, side: Math.min(r.width, r.height) });
     });
     ro.observe(canvas);
     const mo = new MutationObserver(() => rebuild());

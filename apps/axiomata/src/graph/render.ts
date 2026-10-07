@@ -368,30 +368,6 @@ export class GraphRenderer {
     const cx = width / 2 + this.view.x;
     const cy = height / 2 + this.view.y;
 
-    // Area segments: a faint band on the outer rim; the name sits at the
-    // area node (inside), counts at the band's start.
-    for (const seg of model.areas) {
-      const s = seg.start + this.angle;
-      const e = seg.end + this.angle;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R * 0.88, s + 0.01, e - 0.01);
-      ctx.strokeStyle = seg.color;
-      ctx.globalAlpha = 0.22;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      if (this.options.labels && e - s > 0.08) {
-        const a = s + 0.02;
-        ctx.font = this.font(Math.max(8, Math.min(10, R * 0.035)), 500);
-        ctx.fillStyle = seg.color;
-        ctx.globalAlpha = 0.7;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(String(seg.count), cx + Math.cos(a) * R * 0.92, cy + Math.sin(a) * R * 0.92);
-        ctx.globalAlpha = 1;
-      }
-    }
-
     // Ring captions at 12 o'clock (they don't spin — they name the rings).
     if (this.options.labels) {
       ctx.textAlign = "center";

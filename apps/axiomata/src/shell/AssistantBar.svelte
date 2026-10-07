@@ -45,8 +45,7 @@
     }
   }
 
-  // `shell:search` (the top-bar search icon) opens the Second Brain search
-  // now — handled in `App.svelte` — not this chat field.
+  // The top-bar search icon opens the spotlight (`shell:spotlight`, `App.svelte`), not this chat field.
 </script>
 
 <div class="dock">

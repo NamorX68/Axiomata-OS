@@ -48,8 +48,16 @@ Spotlight-Suche (`docs/plans/spotlight-search.md`, CP1–CP4), dann dieser Umbau
 
 ## Offenes / Risiken
 
-- **Scheibe und Kacheln:** die Scheibe ist ein `fixed`-Element mit `z-index` 2 im Hauptkontext; Kacheln liegen im Canvas (z-index ab 10). Ob
-  Kacheln wirklich *vor* der Scheibe stehen, ist im Browser-Mock (ohne Kacheln) nicht prüfbar — am Mac ansehen.
+- **App-Ring-Symbole unter der Scheibe (Mac-Test 2026-10-07):** im Brain-Zustand waren nur Terminal, „+" und die Symbole auf Höhe der Mitte
+  klickbar, alle auf den Diagonalen nicht (offene Hand). **Ursache:** WebKit gibt einem Element mit `border-radius` + `overflow: hidden` für
+  Mausereignisse die ganze *rechteckige* Box; die Ecken des Quadrats (±0,4 × Seite) deckten die diagonalen Symbole des Rings (bei 0,425) ab.
+  Chromium (Browser-Mock) nimmt den Kreis, deshalb zeigte der Mock nichts. Mit Radius 0,3 war das Quadrat kleiner als der Ring — das bestätigte es.
+  **Lösung:** `clip-path: circle(50%)` an der Scheibe (macht den Kreis zur Form auch für den Treffertest) bei Radius 0,4. Davor waren zwei
+  falsche Wege nötig: eine gemessene Orbit-Geometrie (veraltet) und ein Treffertest-Umweg (vom Owner verworfen). Die Scheibe wird in den Container des
+  Orbits verschoben (`[data-background]`, Aktion `inOrbitHost`) und per CSS mittig gelegt, ihre Größe in `cqmin` (`container-type: size` am Host):
+  derselbe Mittelpunkt und dieselbe Bezugsgröße wie die Wolke. Ohne Orbit bleibt sie in der Fenstermitte (`vmin`). Die Legende liegt im „?";
+  der Ring mit den Bereichszahlen ist weg. **Am Mac mit 0,4 gegenprüfen** (clip-path-Treffertest in WebKit ungeprüft).
+- **Scheibe und Kacheln:** im Mock mit einer ToDo-Kachel geprüft (die Kachel liegt vor der Scheibe); am Mac gegenprüfen.
 - Die Leiste unten links kann in schmalen Fenstern unter der Chat-Leiste liegen.
 - `/brain ? <Suche>` und die Modul-Aktion `search` öffnen das 2Brain jetzt ohne Suchtext (die Suche ist Spotlight).
 

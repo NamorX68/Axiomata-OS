@@ -44,9 +44,11 @@
 </div>
 
 <style>
+  /* A size container: what is hosted here (the Orbit's cloud, the Second Brain's disc) is sized in `cqmin` of this one box. */
   .host {
     position: absolute;
     inset: 0;
+    container-type: size;
   }
   .corner {
     position: absolute;
