@@ -1,12 +1,14 @@
 <!-- Shell composition: TopBar → IconBar → Canvas → AssistantBar, plus overlays. -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { get } from "svelte/store";
 
   import Canvas from "./canvas/Canvas.svelte";
   import { invokeBackend, listenBackend, type PlanRunEvent } from "./core/backend";
   import { brainActive } from "./core/brainView";
 import { emit, on } from "./core/bus";
-  import { openFilePanel, openNewNote, openStaged } from "./core/staging";
+  import { openFilePanel, openNewNote, openStaged, requestClose, staged } from "./core/staging";
+  import { globalKeyAction } from "./core/globalKeys";
   import { loadInstances } from "./core/stores";
   import { toast } from "./core/toast";
   import { openKanban } from "./modules/kanbanApp";
@@ -40,15 +42,26 @@ import { emit, on } from "./core/bus";
   let brainFocus = $state<string | null>(null);
 
   /**
-   * ⌘K (Ctrl+K elsewhere than on a Mac) toggles the spotlight from every view. Only ⌘ on a Mac: Ctrl+K is "kill to end
-   * of line" in a shell, and the terminal panes must keep it.
+   * The window-wide keys (`core/globalKeys.ts`): ⌘K toggles the spotlight from every view, ⌘, opens the settings and ⌘W
+   * closes the topmost thing — the spotlight, else the top staged panel (a panel that answers ⌘W itself, like the file
+   * window, has marked the key as handled). Not while a terminal pane has the focus: ⌘W there is nobody's business.
    */
   function onWindowKeydown(event: KeyboardEvent): void {
-    const isMac = navigator.platform.toLowerCase().includes("mac");
-    const modifier = isMac ? event.metaKey : event.ctrlKey;
-    if (!modifier || event.altKey || event.shiftKey || event.key.toLowerCase() !== "k") return;
+    const action = globalKeyAction(event, navigator.platform.toLowerCase().includes("mac"));
+    if (!action || event.defaultPrevented) return;
+    if (action === "close") {
+      if ((event.target as Element | null)?.closest?.(".terminal")) return;
+      const open = get(staged);
+      const top = open[open.length - 1];
+      if (!spotlightOpen && !top) return;
+      event.preventDefault();
+      if (spotlightOpen) spotlightOpen = false;
+      else if (top) void requestClose(top.id);
+      return;
+    }
     event.preventDefault();
-    spotlightOpen = !spotlightOpen;
+    if (action === "spotlight") spotlightOpen = !spotlightOpen;
+    else settingsOpen = true;
   }
 
   // The Orbit's own click handler needs to know whether the layer is up (`core/brainView.ts`).

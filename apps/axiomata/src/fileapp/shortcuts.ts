@@ -124,6 +124,16 @@ export const SHORTCUTS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Everywhere in the app",
+    items: [
+      { keys: "⌘K", what: "Open / close the search (the spotlight)" },
+      { keys: "⌘,", what: "Open the settings" },
+      { keys: "⌘W", what: "Close the topmost window (the spotlight, else the top panel); not in a terminal" },
+      { keys: "Esc", what: "Close the topmost window — in a file window only on a rendered page or a picture" },
+      { keys: "F1 / F5, F2 / F10, F3, F4", what: "While the debugger is stopped: continue, step over, out, into" },
+    ],
+  },
+  {
     title: "Studio",
     items: [
       { keys: "⌘P", what: "Open a file by name (name:12 goes to line 12)" },
