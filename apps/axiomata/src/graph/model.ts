@@ -8,7 +8,7 @@ import type { AppGroup } from "../core/appGroups";
 import type { BuiltinApp, UserApp } from "../core/apps";
 import type { WorkspaceGraph } from "../core/backend";
 
-export type NodeKind = "hub" | "area" | "file" | "skill" | "routine" | "app";
+export type NodeKind = "hub" | "area" | "file" | "skill" | "app";
 
 export interface GraphNode {
   id: string;
@@ -18,7 +18,6 @@ export interface GraphNode {
   /** Workspace-relative path for files / hub. */
   path?: string;
   bytes: number;
-  enabled?: boolean;
   /** Layout position in graph units (0,0 = centre). */
   x: number;
   y: number;
@@ -34,8 +33,7 @@ export interface GraphNode {
   /** Area nodes: which icon to draw (see `glyphForArea`). Builtin `"app"`
    *  nodes: which icon to draw (see `glyphForModuleType`) — a hand-drawn
    *  vector glyph, not a rasterized image; see that function's doc comment
-   *  for why. Every other kind is keyed by `kind` itself ("hub" / "skill" /
-   *  "routine"). */
+   *  for why. Every other kind is keyed by `kind` itself ("hub" / "skill"). */
   glyph?: string;
   /** Orbit mode: 3-D point of the particle cloud (graph units). */
   p3?: [number, number, number];
@@ -378,23 +376,6 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     });
   }
 
-  for (const r of g.routines) {
-    add({
-      id: `routine:${r.id}`,
-      kind: "routine",
-      label: r.name,
-      area: null,
-      bytes: 0,
-      enabled: r.enabled,
-      x: 0,
-      y: 0,
-      r: 13, // see the hub's own `r` comment above
-      color: palette.warning,
-      phase: phase(r.name),
-      degree: 0,
-    });
-  }
-
   const edges: GraphEdge[] = [];
   for (const l of g.links) {
     const from = `file:${l.from}`;
@@ -406,10 +387,10 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
     a.degree++;
     b.degree++;
   }
-  // Hub spokes: skills, routines and areas hang off the hub; files off
+  // Hub spokes: skills and areas hang off the hub; files off
   // their area node (drawn very faintly).
   for (const n of nodes) {
-    if (n.kind === "skill" || n.kind === "routine" || n.kind === "area") edges.push({ from: "hub", to: n.id });
+    if (n.kind === "skill" || n.kind === "area") edges.push({ from: "hub", to: n.id });
     if (n.kind === "file" && n.area) edges.push({ from: `area:${n.area}`, to: n.id });
   }
 

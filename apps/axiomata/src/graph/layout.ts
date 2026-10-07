@@ -1,7 +1,7 @@
 /**
  * Ring layout (the reference look): hub at the centre, skills on an inner
- * ring, files on concentric arcs inside their area's angular segment,
- * routines on the outer ring. Positions are in graph units where 1 = the
+ * ring, files on concentric arcs inside their area's angular segment.
+ * Routines are not drawn (owner, 2026-10-07: they live on the Routines board). Positions are in graph units where 1 = the
  * outer radius; the renderer scales to the canvas.
  */
 
@@ -12,12 +12,11 @@ export const RING = {
   areas: 0.3,
   filesInner: 0.39,
   filesOuter: 0.84,
-  routines: 0.95,
 } as const;
 
 /** Hex's own file-band inner radius, deliberately independent of
- *  `RING.filesInner` (Rings/Circle only) rather than derived from it —
- *  owner feedback was that Rings/Circle's gap to the hub cluster was too
+ *  `RING.filesInner` (Rings only) rather than derived from it —
+ *  owner feedback was that Rings' gap to the hub cluster was too
  *  large (fixed by shrinking `RING.filesInner` above) while Hex's existing
  *  gap already looked right, so the two must not move together. This is
  *  the same absolute radius Hex used before that change (was
@@ -38,15 +37,15 @@ function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2
   });
 }
 
-export type LayoutKind = "rings" | "circle" | "hex";
+export type LayoutKind = "rings" | "hex";
 
 /** Most icon nodes on the dashboard orbit ring (the inner of the two rings
- *  now that the App Ring sits outside it) — skills and routines always get
+ *  now that the App Ring sits outside it) — skills always get
  *  a slot each; recent files fill the rest up to this cap. Raised from the
  *  original `36` on owner feedback that too few recent files were showing. */
 export const ORBIT_MAX = 60;
 
-/** Dashboard-centre layout (the reference look): skills, routines and the
+/** Dashboard-centre layout (the reference look): skills and the
  *  most recently changed notes as icon nodes on the outer ring; every file
  *  as a point of a 3-D cloud (fibonacci sphere, denser towards the centre)
  *  that the renderer spins and projects. */
@@ -60,10 +59,7 @@ export function layoutOrbit(model: GraphModel): void {
   const recent = [...files]
     .filter((n) => n.modified)
     .sort((a, b) => Date.parse(b.modified!) - Date.parse(a.modified!));
-  const ring = [
-    ...model.nodes.filter((n) => n.kind === "skill"),
-    ...model.nodes.filter((n) => n.kind === "routine"),
-  ];
+  const ring = model.nodes.filter((n) => n.kind === "skill");
   for (const n of recent) {
     if (ring.length >= ORBIT_MAX) break;
     ring.push(n);
@@ -163,31 +159,7 @@ export function layoutExpandedGroup(members: GraphNode[], anchorAngle: number): 
 
 export function applyLayout(model: GraphModel, kind: LayoutKind): void {
   if (kind === "hex") layoutHex(model);
-  else if (kind === "circle") layoutCircle(model);
   else layoutRings(model);
-}
-
-/** All files on one ring, grouped by area segment; skills / routines as in
- *  the ring layout. Good for spotting links. */
-export function layoutCircle(model: GraphModel): void {
-  layoutRings(model);
-  const files = model.nodes.filter((n) => n.kind === "file");
-  // Anchored near the inner edge of the file band, not its midpoint — the
-  // midpoint (close to `filesOuter`) left a wide, visually empty annulus
-  // between the hub/skill cluster and the file ring, which owner feedback
-  // flagged as too large a gap.
-  const radius = RING.filesInner + 0.15;
-  for (const seg of model.areas) {
-    const mine = files
-      .filter((n) => n.area === seg.name)
-      .sort((a, b) => a.label.localeCompare(b.label));
-    const span = seg.end - seg.start;
-    mine.forEach((node, i) => {
-      const a = mine.length > 1 ? seg.start + (i / (mine.length - 1)) * span : (seg.start + seg.end) / 2;
-      node.x = Math.cos(a) * radius;
-      node.y = Math.sin(a) * radius;
-    });
-  }
 }
 
 export function layoutRings(model: GraphModel): void {
@@ -200,11 +172,6 @@ export function layoutRings(model: GraphModel): void {
     model.nodes.filter((n) => n.kind === "skill"),
     RING.skills,
     -Math.PI / 2 + 0.6,
-  );
-  placeRing(
-    model.nodes.filter((n) => n.kind === "routine"),
-    RING.routines,
-    -Math.PI / 2 + 0.45,
   );
   // Area nodes sit at the middle angle of their own segment.
   for (const seg of model.areas) {

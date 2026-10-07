@@ -1,11 +1,11 @@
 <!--
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
-  labels, search (dims non-matches), layout Rings / Circle / Hex, grouping
+  labels, search (dims non-matches), layout Rings / Hex, grouping
   by areas or folders, spin + file-name toggles, and a detail panel for the
   selected node (file → open in the file panel / copy path / fly to / connections;
-  skill → run; routine → toggle; hub → open). "Back to the OS" closes.
+  skill → run; hub → open). "Back to the OS" closes.
   Hex tiles every note into its own honeycomb cell, same area wedges as
-  Rings/Circle. Orbit (the dashboard-centre widget's 3-D cloud) lives only
+  Rings. Orbit (the dashboard-centre widget's 3-D cloud) lives only
   there now, not as a full-view option here.
 -->
 <script lang="ts">
@@ -13,7 +13,7 @@
   import { fade } from "svelte/transition";
 
   import { invokeBackend, type RunSummary, type SearchHit, type WorkspaceGraph } from "../core/backend";
-  import { absoluteTime, formatBytes, relativeTime, untilTime } from "../core/format";
+  import { absoluteTime, formatBytes, relativeTime } from "../core/format";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel } from "../core/staging";
   import { toast } from "../core/toast";
@@ -62,10 +62,9 @@
   let hover = $state.raw<GraphNode | null>(null);
   // svelte-ignore state_referenced_locally
   let query = $state(initialQuery);
-  let layout = $state<LayoutKind>(prefs.layout === "circle" || prefs.layout === "hex" ? prefs.layout : "rings");
-  // "circle" collapses onto the "rings" renderer (same dots, different
-  // coordinates) — the one place that mapping is written, so the mount-time
-  // renderer options and the reactive `$effect` below can't drift apart.
+  let layout = $state<LayoutKind>(prefs.layout === "hex" ? "hex" : "rings");
+  // The one place the layout is mapped to a renderer mode, so the mount-time renderer options and the reactive
+  // `$effect` below can't drift apart.
   const renderMode = $derived<RenderMode>(layout === "hex" ? "hex" : "rings");
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let spin = $state(typeof prefs.spin === "number" ? prefs.spin : 0.02);
@@ -160,11 +159,10 @@
   const rotationLabel = $derived(spin === 0 ? "off" : spin < 0.03 ? "slow" : spin < 0.07 ? "medium" : "fast");
 
   const HELP = [
-    ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring, Routinen außen. Zeigt die Größe je Bereich."],
-    ["Circle", "Alle Notizen auf einem Ring, nach Bereich sortiert. Flacher, am besten um Verbindungen zwischen Bereichen zu sehen."],
+    ["Rings", "Notizen liegen auf Bögen innerhalb ihres Bereichs-Segments; Skills innen, Bereiche auf dem nächsten Ring. Zeigt die Größe je Bereich."],
     [
       "Hex",
-      "Honeycomb statt Bögen: jede Notiz eine eigene Hex-Zelle, dicht an dicht, im selben Bereichs-Segment wie bei Rings/Circle. Skills/Bereiche/Routinen bleiben wie in Rings.",
+      "Honeycomb statt Bögen: jede Notiz eine eigene Hex-Zelle, dicht an dicht, im selben Bereichs-Segment wie bei Rings. Skills und Bereiche bleiben wie in Rings.",
     ],
     ["Areas", "Ein Segment je oberstem Vault-Ordner."],
     ["Folders", "Ein Segment je tiefstem Ordner, z. B. Learning/Rust/lessons. Feinere Aufteilung großer Bereiche."],
@@ -345,19 +343,6 @@
     try {
       const r = await invokeBackend<RunSummary>("run_skill", { name });
       toast(`/${name}: ${r.status} (${r.duration_ms} ms)`, r.status === "success" ? "info" : "warning");
-    } catch (err) {
-      toast(String(err), "danger");
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function toggleRoutine(node: GraphNode) {
-    const id = Number(node.id.slice("routine:".length));
-    busy = true;
-    try {
-      await invokeBackend("set_routine_enabled", { id, enabled: !node.enabled });
-      await load();
     } catch (err) {
       toast(String(err), "danger");
     } finally {
@@ -559,7 +544,6 @@
       <span class="label">Layout</span>
       <div class="seg">
         <button type="button" class:on={layout === "rings"} title={helpText("Rings")} aria-describedby="help-rings" onclick={() => (layout = "rings")}>Rings</button>
-        <button type="button" class:on={layout === "circle"} title={helpText("Circle")} aria-describedby="help-circle" onclick={() => (layout = "circle")}>Circle</button>
         <button type="button" class:on={layout === "hex"} title={helpText("Hex")} aria-describedby="help-hex" onclick={() => (layout = "hex")}>Hex</button>
       </div>
     </div>
@@ -667,20 +651,6 @@
         <p class="body">{graph?.skills.find((s) => `/${s.name}` === selected!.label)?.description ?? ""}</p>
         <div class="actions">
           <button type="button" class="primary" disabled={busy} onclick={() => runSkill(selected!.label.slice(1))}>▶ Run</button>
-          <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
-        </div>
-      {:else if selected.kind === "routine"}
-        {@const r = graph?.routines.find((x) => `routine:${x.id}` === selected!.id)}
-        {#if r}
-          <dl class="meta">
-            <dt>Cron</dt><dd class="mono">{r.cron_expr}</dd>
-            <dt>Target</dt><dd>{r.target.type}: {r.target.value}</dd>
-            <dt>Next</dt><dd>{r.enabled ? untilTime(r.next_fire_at) : "—"}</dd>
-            <dt>Last</dt><dd>{relativeTime(r.last_fired_at)}</dd>
-          </dl>
-        {/if}
-        <div class="actions">
-          <button type="button" class="primary" disabled={busy} onclick={() => toggleRoutine(selected!)}>{selected.enabled ? "Disable" : "Enable"}</button>
           <button type="button" onclick={() => flyTo(selected!)}>Fly to</button>
         </div>
       {/if}

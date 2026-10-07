@@ -29,7 +29,7 @@ Spotlight-Suche (`docs/plans/spotlight-search.md`, CP1–CP4), dann dieser Umbau
 
 ## Checkpoints (nach Spotlight)
 
-1. **Aufräumen:** Circle und Routine-Knoten aus Modell, Layout, Renderer und Tests streichen (B4, B5).
+1. **Aufräumen — gebaut 2026-10-07:** Circle und Routine-Knoten aus Modell, Layout, Renderer, Legende, 2Brain-Detailfenster und Tests gestrichen (B4, B5). Ein gespeichertes `layout: "circle"` fällt auf Rings zurück. Das Glyph `routine` bleibt: der App-Ring nutzt es für das Routinen-Board.
 2. **Einstellungen umziehen:** Leiste unten links, Bewegungsschalter, Abschnitt „Ansicht" in den App-Einstellungen,
    Kachel-Einstellungen weg (B6).
 3. **Ein Orbit:** die Interaktion aus `SecondBrainView` (Schwenken, Zoom, Hover, Auswahl, Detailfenster) in eine gemeinsame

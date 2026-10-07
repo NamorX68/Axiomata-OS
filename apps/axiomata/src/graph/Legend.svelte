@@ -8,7 +8,7 @@
   import { drawGlyph } from "./render";
 
   /** `app` nodes only exist in orbit mode (the dashboard background's App
-   *  Ring) — this legend covers the Second Brain's own rings/circle/hex
+   *  Ring) — this legend covers the Second Brain's own rings/hex
    *  views, which never show one. Excluding it from the type (rather than
    *  giving `NodeKind`'s full `Record` a phantom, never-read `app` entry)
    *  keeps the exhaustiveness check meaningful: a kind this legend actually
@@ -24,7 +24,6 @@
     { kind: "area", label: "Bereich (Ordner)" },
     { kind: "file", label: "Notiz / Seite" },
     { kind: "skill", label: "Skill" },
-    { kind: "routine", label: "Routine" },
   ];
 
   let canvases: HTMLCanvasElement[] = $state([]);
@@ -36,7 +35,6 @@
       area: p.accent,
       file: p.muted,
       skill: p.accent,
-      routine: p.warning,
     };
     KINDS.forEach(({ kind }, i) => {
       const c = canvases[i];

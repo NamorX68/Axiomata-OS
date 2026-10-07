@@ -1,6 +1,6 @@
 <!--
   second-brain — the particle graph behind the tiles: the workspace as
-  rings (skills inner, areas as coloured segments, routines outer, CLAUDE.md
+  rings (skills inner, areas as coloured segments, CLAUDE.md
   hub), plus the App Ring around the outside (builtin modules left of the
   "+", externally added Mac apps right of it — see docs/plans/app-ring.md).
   Loads `get_workspace_graph` on mount and every REFRESH_MS, redraws on
@@ -252,7 +252,7 @@
    *  click on: it falls through to `open`, landing in the full Second Brain
    *  graph to browse/select from instead of blindly opening whatever point
    *  the cursor happened to land nearest to. A click that only closed an
-   *  expanded ring (hub/skill/routine/background otherwise) is swallowed —
+   *  expanded ring (hub/skill/background otherwise) is swallowed —
    *  it must not also open Second Brain, same reasoning as the `menu`
    *  dismiss above. */
   function onClick(): void {

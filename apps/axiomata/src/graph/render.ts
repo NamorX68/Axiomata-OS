@@ -156,7 +156,7 @@ export const APP_GROUP_GLYPHS: readonly string[] = [
 ];
 
 /**
- * The glyph id for a node: structural for hub/skill/routine; for an area,
+ * The glyph id for a node: structural for hub/skill; for an area,
  * its own icon (falling back to "folder"); for a file, the icon of the
  * area it belongs to — same lookup, so a note's ring icon always matches
  * its area node's icon. Only meaningful where a file is actually big
@@ -193,7 +193,7 @@ export class GraphRenderer {
   private accentColor = "#ff7a1a";
   private lightScheme = false;
   /** Ring captions (rings mode). */
-  captions = { skills: "SKILLS", memory: "MEMORY", routines: "ROUTINES" };
+  captions = { skills: "SKILLS", memory: "MEMORY" };
   /** In-flight `flyTo` pan/zoom tween, consumed by `frame`. */
   private flyAnim: { fromX: number; fromY: number; fromZoom: number; toX: number; toY: number; toZoom: number; start: number; duration: number } | null = null;
   /** The node `flyTo` last landed on, pulsed for a moment so it's easy to
@@ -412,7 +412,6 @@ export class GraphRenderer {
       };
       cap(this.captions.skills, R * 0.17 + 10, this.accentColor, Math.max(10, Math.min(15, R * 0.05)));
       cap(this.captions.memory, R * 0.84 + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
-      cap(this.captions.routines, R * 0.95 + 4, this.mutedColor, Math.max(11, Math.min(18, R * 0.06)));
       ctx.globalAlpha = 1;
     }
 
@@ -458,7 +457,7 @@ export class GraphRenderer {
         ctx.arc(p.x, p.y, r * 3.2, 0, TWO_PI);
         ctx.fill();
       }
-      ctx.globalAlpha = dimmed ? 0.12 : n.kind === "routine" && n.enabled === false ? 0.35 : twinkle;
+      ctx.globalAlpha = dimmed ? 0.12 : twinkle;
       ctx.fillStyle = n.color;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, TWO_PI);
@@ -905,7 +904,6 @@ export class GraphRenderer {
       if (days < 1) return "NEW";
       return days < 30 ? `${days}D` : days < 365 ? `${Math.floor(days / 30)}M` : `${Math.floor(days / 365)}Y`;
     }
-    if (n.kind === "routine") return n.enabled === false ? "OFF" : "ON";
     return null;
   }
 }
@@ -921,7 +919,7 @@ export function appNodeRadiusPx(R: number): number {
 }
 
 /** The orbit ring's own icon-node radius in px, given the ring's radius `R`
- *  and how many icon nodes (`onOrbit: true` — skills, routines, recent
+ *  and how many icon nodes (`onOrbit: true` — skills, recent
  *  files) currently share its circumference.
  *
  *  A plain `R`-only formula assumed a roughly-constant node count; once
@@ -936,7 +934,7 @@ export function appNodeRadiusPx(R: number): number {
 export function rimNodeRadiusPx(R: number, onOrbitCount: number): number {
   // Owner feedback (2026-09-13, two rounds): the App Ring (outside this
   // rim, see `appNodeRadiusPx`) reads well as-is; this inner rim's own icon
-  // nodes (skills/routines/recent files on the orbit sphere's own surface)
+  // nodes (skills/recent files on the orbit sphere's own surface)
   // kept reading too big next to it, so its size cap sits further below the
   // App Ring's own `Math.max(14, Math.min(26, R * 0.075))` than the first
   // pass (`Math.max(14, Math.min(26, R * 0.08))`).

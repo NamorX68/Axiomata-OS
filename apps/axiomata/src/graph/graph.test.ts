@@ -48,6 +48,16 @@ function fixture(): WorkspaceGraph {
 }
 
 describe("buildModel", () => {
+  it("draws no routines: they live on the Routines board, not in the graph", () => {
+    const graph = fixture();
+    graph.routines = [
+      { id: 1, name: "Nightly", cron_expr: "0 0 3 * * *", target: { type: "skill", value: "a" }, backend: null, enabled: true, next_fire_at: null, last_fired_at: null },
+    ];
+    const m = buildModel(graph, palette);
+    expect(m.nodes.map((n) => n.id).filter((id) => id.startsWith("routine"))).toEqual([]);
+    expect(m.edges).toHaveLength(1 + 3 + 40);
+  });
+
   it("creates hub, skill and file nodes with segments proportional to counts", () => {
     const m = buildModel(fixture(), palette);
     expect(m.nodes.filter((n) => n.kind === "hub")).toHaveLength(1);
@@ -78,15 +88,6 @@ describe("layouts", () => {
       expect(r).toBeGreaterThanOrEqual(RING.filesInner - 1e-9);
       expect(r).toBeLessThanOrEqual(RING.filesOuter + 1e-9);
     }
-  });
-
-  it("circle puts every area file on one radius", () => {
-    const m = buildModel(fixture(), palette);
-    applyLayout(m, "circle");
-    const radii = new Set(
-      m.nodes.filter((n) => n.kind === "file" && n.area).map((n) => Math.hypot(n.x, n.y).toFixed(6)),
-    );
-    expect(radii.size).toBe(1);
   });
 
   it("orbit puts the hub at the centre, gives every file a 3-D cloud point, and marks the rim", () => {
