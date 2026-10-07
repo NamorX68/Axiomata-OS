@@ -58,6 +58,7 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>
 
 cd apps/axiomata && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
+cd apps/axiomata && scripts/build-app.sh [--install]   # the installable Axiomata-OS.app (ad-hoc signed); --install copies it to /Applications
 cd apps/axiomata && npm run check         # svelte-check + tsc (must be clean)
 cd apps/axiomata && npx vite --port 1420  # frontend alone in a browser: Tauri commands are
                                            # served by src/core/devmock.ts fixtures (DEV only)
@@ -86,6 +87,13 @@ from the code itself:
   workspace folder (`config.workspace_root`, memory-router content only). Override with
   `AXIOMATA_HOME` in tests. New shared Cargo deps go in the root `Cargo.toml` under
   `[workspace.dependencies]`, referenced per-crate as `some_crate.workspace = true`.
+- **The installed app is a second front end on the same `~/.axiomata`** (`apps/axiomata/scripts/build-app.sh`): never run it and
+  `cargo tauri dev` at once (one database, one Opencode service, doubled watchers). Started from the Finder it has only
+  `/usr/bin:/bin:…` as `PATH`, so `login_path::adopt` (src-tauri, first thing in `run`) takes the login shell's `PATH`; the CLI
+  goes in as a sidecar (`tauri.bundle.conf.json`, merged only by the script — in the base config `externalBin` would break every
+  ordinary build while the copied binary is missing) and is found next to the executable (`agent_entry::cli_path`). Ad-hoc
+  signature, no notarization: the macOS may ask again for file/automation access after each new build. The icon's source is
+  `apps/axiomata/app-icon.svg` (`cargo tauri icon app-icon.svg` regenerates `src-tauri/icons/`).
 - **Skills live in one place only**, `~/.axiomata/skills/<name>/SKILL.md` — there is no
   workspace-local skill location (dropped deliberately; `docs/architecture.md` §4 explains
   why).

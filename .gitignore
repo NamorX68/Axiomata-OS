@@ -22,3 +22,6 @@ apps/axiomata/src-tauri/target/
 # Owner's local screenshot dump (Bildschirmfotos) — not project content,
 # just where ad-hoc screenshots for live-testing feedback land locally.
 /Screenshots/
+
+# The CLI copied next to the app as the bundle's sidecar (scripts/build-app.sh)
+apps/axiomata/src-tauri/binaries/

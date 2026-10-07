@@ -17,6 +17,8 @@ mod debug;
 mod files;
 mod git;
 mod limit_watch;
+#[cfg(unix)]
+mod login_path;
 mod lsp;
 #[cfg(target_os = "macos")]
 mod menu;
@@ -127,6 +129,8 @@ fn forget_inherited_claude_session() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     forget_inherited_claude_session();
+    #[cfg(unix)]
+    login_path::adopt();
     init_tracing();
 
     let app = tauri::Builder::default()
