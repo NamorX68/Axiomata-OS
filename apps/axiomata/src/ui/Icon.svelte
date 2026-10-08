@@ -12,7 +12,7 @@
 
   interface Props {
     name: IconName;
-    size?: "sm" | "md" | "lg";
+    size?: "sm" | "md" | "lg" | "xl";
     /** Read out by assistive technology; without it the icon is decorative. */
     label?: string;
   }
@@ -51,5 +51,9 @@
   .lg {
     width: var(--ax-icon-lg);
     height: var(--ax-icon-lg);
+  }
+  .xl {
+    width: var(--ax-icon-xl);
+    height: var(--ax-icon-xl);
   }
 </style>

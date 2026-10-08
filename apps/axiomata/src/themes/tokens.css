@@ -48,6 +48,7 @@
   --ax-icon-sm: calc(14px * var(--ax-ui-scale));
   --ax-icon-md: calc(16px * var(--ax-ui-scale));
   --ax-icon-lg: calc(20px * var(--ax-ui-scale));
+  --ax-icon-xl: calc(24px * var(--ax-ui-scale));
   --ax-hit-min: calc(28px * var(--ax-ui-scale));
   /* Line weight of the UI icons, in their own 24-unit grid: a touch lighter than Lucide's 2, as in Zed. */
   --ax-icon-stroke: 1.75;

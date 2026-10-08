@@ -38,6 +38,8 @@
   import { setDock } from "./dockContext";
   import DockNode from "./DockNode.svelte";
   import PaneGroup from "./PaneGroup.svelte";
+  import { uiScale } from "../core/uiScale";
+  import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Inspector, { type InspectorTab } from "../fileapp/Inspector.svelte";
   import { inspectorSurface } from "../fileapp/inspectorSurface.svelte";
@@ -90,7 +92,7 @@
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
-  import { MODES, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
+  import { MODES, MODE_ICON, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
   import { balanceCanvas, canvasAgentTarget } from "./canvasLayout";
   import { agentTabsOf, balanceFlow, flowAgentTarget, modeForAgent, resetFlowPanes } from "./planning";
   import { get } from "svelte/store";
@@ -872,11 +874,22 @@
 <section class="ide" class:hidden={!open} inert={!open} aria-label="Studio" onkeydowncapture={onViewKeydown}>
   <header>
     <div class="titles">
-      <h1>Studio</h1>
-      <div class="modes" role="group" aria-label="Mode">
-        {#each MODES as each (each)}
-          <button type="button" class:on={mode === each} disabled={!current} onclick={() => switchTo(each)}>{MODE_LABEL[each]}</button>
-        {/each}
+      <div class="brand" style:--tree-w="{tree.visible ? tree.width * $uiScale : 0}px">
+        <h1>Studio</h1>
+        <div class="modes" role="group" aria-label="Mode">
+          {#each MODES as each (each)}
+            <button
+              type="button"
+              class:on={mode === each}
+              disabled={!current}
+              title={MODE_LABEL[each]}
+              aria-label={MODE_LABEL[each]}
+              onclick={() => switchTo(each)}
+            >
+              <Icon name={MODE_ICON[each]} size="md" />{#if mode === each}{MODE_LABEL[each]}{/if}
+            </button>
+          {/each}
+        </div>
       </div>
       {#if front && crumbs.length > 0}
         {#each crumbs as crumb (crumb.line + "\0" + crumb.name)}
@@ -888,19 +901,21 @@
     </div>
     <div class="actions">
       <IconButton
+        size="lg"
         icon="settings"
         label="Editor settings"
         pressed={inspector === "settings"}
         onclick={() => (inspector = inspector === "settings" ? null : "settings")}
       />
       <IconButton
+        size="lg"
         icon="keyboard"
         label="Keyboard shortcuts"
         pressed={inspector === "shortcuts"}
         onclick={() => (inspector = inspector === "shortcuts" ? null : "shortcuts")}
       />
       <span class="separator" aria-hidden="true"></span>
-      <IconButton icon="layout-grid" label="Back to the OS" onclick={() => (open = false)} />
+      <IconButton size="lg" icon="layout-grid" label="Back to the OS" onclick={() => (open = false)} />
     </div>
   </header>
 
@@ -1075,6 +1090,8 @@
 
 <style>
   .ide {
+    /* The rail's width, shared with the header block that is centred over the rail and the tree. */
+    --ide-rail-w: calc(57px * var(--ax-ui-scale));
     position: fixed;
     inset: 0;
     z-index: calc(var(--ax-z-staging) - 1);
@@ -1104,7 +1121,7 @@
 
   .titles {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--ax-space-3);
     min-width: 0;
   }
@@ -1129,36 +1146,63 @@
     color: var(--ax-text);
   }
 
+  /* The name stays at the left edge; the mode switch is centred in what is left over the rail and the tree, and follows
+     the tree's width when it is dragged (owner, 2026-10-08). Only the mode shown carries its name, so the row fits. */
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-4);
+    min-width: calc(var(--ide-rail-w) + var(--tree-w, 0px));
+    /* The block starts at the window's edge, over the rail: the header's own side padding is taken back. */
+    margin-left: calc(-1 * var(--ax-space-5));
+    padding: 0 var(--ax-space-4);
+    box-sizing: border-box;
+  }
+
   h1 {
     margin: 0;
     font-family: var(--ax-font-display);
-    font-size: var(--ax-font-size-lg);
+    font-size: var(--ax-font-size-xl);
     letter-spacing: var(--ax-tracking-wide);
   }
 
+  /* The mode switch is the Studio's main choice: the same filled-accent selection as the Second Brain bar's toggles,
+     larger than the quiet icon buttons around it (owner, 2026-10-08: the buttons were easy to overlook). */
   .modes {
     display: flex;
-    gap: 1px;
-    padding: 2px;
-    border: 1px solid var(--ax-border);
+    gap: var(--ax-space-1);
+    padding: calc(3px * var(--ax-ui-scale));
+    border: 1px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-md);
-    align-self: center;
+    background: var(--ax-surface-2);
+    margin-inline: auto;
   }
 
   .modes button {
-    padding: calc(2px * var(--ax-ui-scale)) var(--ax-space-3);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-3);
     border: 0;
     border-radius: var(--ax-radius-sm);
     background: transparent;
-    color: var(--ax-text-muted);
+    color: var(--ax-text);
     font: inherit;
-    font-size: var(--ax-font-size-sm);
+    font-size: var(--ax-font-size-base);
+    font-weight: 600;
     cursor: pointer;
+    transition:
+      background var(--ax-dur-fast) var(--ax-ease),
+      color var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  .modes button:hover:not(:disabled):not(.on) {
+    background: var(--ax-surface-3);
   }
 
   .modes button.on {
-    background: var(--ax-accent-muted);
-    color: var(--ax-text);
+    background: var(--ax-accent);
+    color: var(--ax-text-invert);
   }
 
   .modes button:disabled {
@@ -1167,6 +1211,8 @@
   }
 
   .actions {
+    /* The header's icons follow the rail's bigger ones (owner, 2026-10-08). */
+    --ax-hit-min: calc(34px * var(--ax-ui-scale));
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
@@ -1174,7 +1220,7 @@
 
   .separator {
     width: 1px;
-    height: var(--ax-icon-md);
+    height: var(--ax-icon-lg);
     margin: 0 var(--ax-space-1);
     background: var(--ax-border);
   }

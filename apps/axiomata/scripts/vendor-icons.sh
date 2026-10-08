@@ -75,6 +75,7 @@ ICONS=(
   minimize-2
   panel-left
   panel-right
+  panels-top-left
   pause
   pencil
   play
@@ -93,6 +94,7 @@ ICONS=(
   trash-2
   undo-2
   user
+  workflow
   wrap-text
   x
 )

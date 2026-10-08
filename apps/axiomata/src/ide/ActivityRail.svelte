@@ -41,10 +41,10 @@
 <nav class="rail" aria-label="Views">
   <!-- Working on the code: where it is, what is in it, what changed. -->
   <div class="group" role="tablist" aria-orientation="vertical">
-    <IconButton icon="folder-tree" size="lg" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
+    <IconButton icon="folder-tree" size="xl" label="Files" tab pressed={shown("files")} onclick={() => onSelect("files")} />
     <IconButton
       icon="search"
-      size="lg"
+      size="xl"
       label="Search the project (⇧⌘F)"
       tab
       pressed={shown("search")}
@@ -53,7 +53,7 @@
     <span class="slot">
       <IconButton
         icon="git-branch"
-        size="lg"
+        size="xl"
         label={gitCount > 0 ? `Git — ${gitCount} changed` : "Git"}
         tab
         pressed={shown("git")}
@@ -65,12 +65,12 @@
   <span class="rule" aria-hidden="true"></span>
   <!-- Making things run: tasks and agents. -->
   <div class="group" role="tablist" aria-orientation="vertical">
-    <IconButton icon="play" size="lg" label="Run — build, test, start" tab pressed={shown("tasks")} onclick={() => onSelect("tasks")} />
-    <IconButton icon="bug" size="lg" label="Debug" tab pressed={shown("debug")} onclick={() => onSelect("debug")} />
+    <IconButton icon="play" size="xl" label="Run — build, test, start" tab pressed={shown("tasks")} onclick={() => onSelect("tasks")} />
+    <IconButton icon="bug" size="xl" label="Debug" tab pressed={shown("debug")} onclick={() => onSelect("debug")} />
     <span class="slot">
       <IconButton
         icon="bot"
-        size="lg"
+        size="xl"
         label={agentsRunning > 0 ? `Agents — ${agentsRunning} working` : "Agents"}
         tab
         pressed={shown("agents")}
@@ -81,14 +81,18 @@
   </div>
   <!-- Actions, not views: they never stay pressed. -->
   <div class="foot">
-    <IconButton icon="terminal" size="lg" label="New terminal" {disabled} onclick={onTerminal} />
-    <IconButton icon="folder-open" size="lg" label="Open a file… (⌘O)" onclick={onOpenFile} />
+    <IconButton icon="terminal" size="xl" label="New terminal" {disabled} onclick={onTerminal} />
+    <IconButton icon="folder-open" size="xl" label="Open a file… (⌘O)" onclick={onOpenFile} />
   </div>
 </nav>
 
 <style>
   .rail {
+    /* Bigger targets for the Studio's main navigation (owner, 2026-10-08: the icons were too small). */
+    --ax-hit-min: calc(40px * var(--ax-ui-scale));
     flex: 0 0 auto;
+    box-sizing: border-box;
+    width: var(--ide-rail-w, auto);
     display: flex;
     flex-direction: column;
     align-items: center;

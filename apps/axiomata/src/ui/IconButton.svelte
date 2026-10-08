@@ -18,7 +18,7 @@
     /** One tab of a tab list: `role="tab"` and `aria-selected` from `pressed`. */
     tab?: boolean;
     disabled?: boolean;
-    size?: "sm" | "md" | "lg";
+    size?: "sm" | "md" | "lg" | "xl";
     onclick?: (e: MouseEvent) => void;
   }
 

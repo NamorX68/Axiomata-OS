@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { allTabs, serializeLayout, singleGroupLayout, type PaneTab } from "./layout";
 import {
+  MODE_ICON,
   MODE_LABEL,
   MODES,
   emptyEditorLayout,
@@ -30,6 +31,10 @@ describe("modes", () => {
   it("names the Canvas for what is stored as `agents`", () => {
     expect(MODES).toEqual(["editor", "agents", "flow"]);
     expect(MODE_LABEL).toEqual({ editor: "Editor", agents: "Canvas", flow: "Flow" });
+  });
+
+  it("gives every mode its own icon", () => {
+    expect(new Set(MODES.map((m) => MODE_ICON[m])).size).toBe(MODES.length);
   });
 
   it("switching parks the shown layout and shows the one parked for the target", () => {
