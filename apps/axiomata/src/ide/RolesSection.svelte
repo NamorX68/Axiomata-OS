@@ -22,6 +22,8 @@
     type SkippedRole,
   } from "../core/roster";
   import { toast } from "../core/toast";
+  import Icon from "../ui/Icon.svelte";
+  import IconButton from "../ui/IconButton.svelte";
 
   /** Bumped by the parent when the engine catalog changed, so the picker reloads. */
   let { enginesVersion = 0 }: { enginesVersion?: number } = $props();
@@ -127,19 +129,30 @@
     {#if roles.length === 0}
       <p class="hint">No roles yet.</p>
     {:else}
-      <ul class="list">
+      <ul class="cards">
         {#each roles as r (r.name)}
-          <li class:editing={form?.name === r.name && !isNew}>
-            <button type="button" class="row" onclick={() => startEdit(r)}>
-              <span class="title">{r.name} <span class="tier">{tierLabel(r.tier)}</span></span>
-              <span class="meta">
-                {r.kind} · {r.engine ? (engines.find((e) => e.id === r.engine)?.label ?? r.engine) : "engine chosen at start"}
-                {#if r.description} · {r.description}{/if}
+          {@const engine = engines.find((e) => e.id === r.engine)}
+          <li
+            class="card"
+            class:editing={form?.name === r.name && !isNew}
+            style:--harness={engine ? `var(--ax-harness-${engine.harness})` : undefined}
+          >
+            <button type="button" class="open" onclick={() => startEdit(r)}>
+              <span class="top">
+                <span class="avatar" aria-hidden="true">{r.name.trim().charAt(0).toUpperCase() || "?"}</span>
+                <span class="who">
+                  <span class="name">{r.name} <span class="tier">{tierLabel(r.tier)}</span></span>
+                  <span class="meta">
+                    {r.kind} · {r.engine ? (engine?.label ?? r.engine) : "engine chosen at start"}
+                  </span>
+                </span>
               </span>
+              {#if r.description}<span class="since">{r.description}</span>{/if}
             </button>
-            <button type="button" class="remove" title="Delete" aria-label="Delete role" onclick={() => remove(r)}>
-              ✕
-            </button>
+            <div class="row-actions">
+              <IconButton icon="pencil" label="Edit {r.name}" size="sm" onclick={() => startEdit(r)} />
+              <IconButton icon="trash-2" label="Delete {r.name}" size="sm" onclick={() => remove(r)} />
+            </div>
           </li>
         {/each}
       </ul>
@@ -229,7 +242,7 @@
     </div>
   {:else if !loading}
     <div class="actions">
-      <button type="button" onclick={startNew}>Add role</button>
+      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add role…</button>
     </div>
   {/if}
 </section>
@@ -246,61 +259,123 @@
     font-family: var(--ax-font-mono);
     color: var(--ax-text);
   }
-  .list {
+  /* A card per role, the same look as an engine's (and an agent's in the Agents panel): the engine's colour on its edge. */
+  .cards {
     list-style: none;
     margin: 0 0 var(--ax-space-3);
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-1);
+    gap: var(--ax-space-3);
   }
-  .list li {
-    display: flex;
-    align-items: stretch;
-    gap: var(--ax-space-1);
+  .card {
+    position: relative;
+    border: 1px solid var(--ax-border);
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--harness, var(--ax-border-strong));
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-surface-2);
   }
-  .row {
-    flex: 1 1 auto;
+  .card:hover,
+  .card:focus-within {
+    border-color: var(--ax-border-strong);
+    border-left-color: var(--harness, var(--ax-border-strong));
+    background: var(--ax-surface-3);
+  }
+  .card.editing {
+    box-shadow: 0 0 0 1px var(--ax-accent) inset;
+  }
+  .open {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    padding: var(--ax-space-2);
-    text-align: left;
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-  }
-  li.editing .row {
-    border-color: var(--ax-accent);
-    background: var(--ax-accent-muted);
-  }
-  .title {
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-3);
+    background: none;
+    border: none;
     color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .top {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-3);
+  }
+  .avatar {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: calc(28px * var(--ax-ui-scale));
+    height: calc(28px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: color-mix(in srgb, var(--harness, var(--ax-text-muted)) 22%, transparent);
+    color: var(--harness, var(--ax-text-muted));
+    font-weight: 600;
+  }
+  .who {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .name,
+  .meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .name {
+    font-weight: 600;
   }
   .tier {
     margin-left: var(--ax-space-1);
     padding: 0 var(--ax-space-1);
     font-size: var(--ax-font-size-xs);
+    font-weight: 400;
     color: var(--ax-accent);
     background: var(--ax-accent-muted);
     border-radius: var(--ax-radius-sm);
   }
-  .meta {
+  .meta,
+  .since {
+    color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
-    color: var(--ax-text-muted);
   }
-  .remove {
-    flex: 0 0 auto;
-    padding: 0 var(--ax-space-2);
-    background: transparent;
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    color: var(--ax-text-muted);
+  /* Quiet until the card is hovered or focused (editor-look I4). */
+  .row-actions {
+    position: absolute;
+    right: var(--ax-space-1);
+    bottom: var(--ax-space-1);
+    display: flex;
+    gap: var(--ax-space-1);
+    opacity: 0;
+    background: var(--ax-surface-3);
+    border-radius: var(--ax-radius-md);
   }
-  .remove:hover {
-    color: var(--ax-danger);
-    border-color: var(--ax-danger);
+  .card:hover .row-actions,
+  .card:focus-within .row-actions {
+    opacity: 1;
+  }
+  .add {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    width: 100%;
+    padding: var(--ax-space-2);
+    background: none;
+    border: 0;
+    border-radius: var(--ax-radius-md);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .add:hover {
+    background: var(--ax-surface-2);
+    color: var(--ax-text);
   }
   .form {
     padding: var(--ax-space-3);
