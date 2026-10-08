@@ -607,7 +607,7 @@ skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
-session's model points at (`openrouter/deepseek/…`, `anthropic/claude-haiku-4-5`,
+session's model points at (`openrouter/deepseek/…`, `anthropic/claude-haiku-5-5`,
 `ollama/qwen3.8:27b-mlx`). Opencode resolves the provider's auth/keys itself from its own
 credential store, so Axiomata carries no `ANTHROPIC_*` env plumbing. Not to be confused with
 `AgentBackend::Ollama` (`agents/ollama.rs`), the separate raw/tool-free completion backend

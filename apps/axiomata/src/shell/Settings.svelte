@@ -462,7 +462,7 @@
                 </label>
                 <label class="field">
                   <span>Skills/routines model</span>
-                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].skill_model} placeholder="e.g. claude-haiku-4-5" />
+                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].skill_model} placeholder="e.g. claude-haiku-5-5" />
                 </label>
                 <p class="hint">Ein <code>model:</code> in the SKILL.md frontmatter still overrides the skills model.</p>
               </div>

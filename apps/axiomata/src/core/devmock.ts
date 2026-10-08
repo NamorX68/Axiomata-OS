@@ -86,7 +86,7 @@ let configState: {
     chat_provider: "anthropic",
     skill_provider: "anthropic",
     providers: {
-      anthropic: { base_url: null, api_key: null, chat_model: "claude-sonnet-5", skill_model: "claude-haiku-4-5" },
+      anthropic: { base_url: null, api_key: null, chat_model: "claude-sonnet-5", skill_model: "claude-haiku-5-5" },
       open_router: { base_url: "https://openrouter.ai/api", api_key: null, chat_model: "", skill_model: "" },
       ollama: { base_url: "http://localhost:11434", api_key: "ollama", chat_model: "", skill_model: "" },
     },

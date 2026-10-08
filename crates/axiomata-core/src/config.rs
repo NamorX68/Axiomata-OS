@@ -37,7 +37,7 @@ fn default_ollama_model() -> String {
 /// never read this: [`ProviderSettings::default_for`] carries the real
 /// per-provider, per-task defaults instead.
 fn default_claude_model() -> String {
-    "claude-haiku-4-5".to_string()
+    "claude-haiku-5-5".to_string()
 }
 
 /// Default hard wall-clock limit for a single skill run.
@@ -203,7 +203,7 @@ impl ProviderSettings {
                 base_url: None,
                 api_key: None,
                 chat_model: "claude-sonnet-5".to_string(),
-                skill_model: "claude-haiku-4-5".to_string(),
+                skill_model: "claude-haiku-5-5".to_string(),
             },
             ProviderId::OpenRouter => Self {
                 base_url: Some("https://openrouter.ai/api".to_string()),
@@ -928,7 +928,7 @@ mod tests {
         assert_eq!(settings.base_url, None);
         assert_eq!(settings.api_key, None);
         assert_eq!(settings.chat_model, "claude-sonnet-5");
-        assert_eq!(settings.skill_model, "claude-haiku-4-5");
+        assert_eq!(settings.skill_model, "claude-haiku-5-5");
     }
 
     #[test]

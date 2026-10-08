@@ -122,7 +122,7 @@ from the code itself:
   go through a silent one-shot instruct turn, not the skill. Follow this pattern for the next
   integration rather than hand-rolling Tauri commands for it (`docs/architecture.md` §5).
   The digests run on the single agent harness — an Opencode session on whatever
-  `skill_provider` routes to (`openrouter/deepseek/...`, `anthropic/claude-haiku-4-5`, or a
+  `skill_provider` routes to (`openrouter/deepseek/...`, `anthropic/claude-haiku-5-5`, or a
   local `ollama/<model>`), the same way opencode itself would run them; that harness is what
   replaced both the Claude Code CLI and the Stufe 2 `ollama-agent` tool loop.
   `mail-digest` also uses `prepend_files: ["Mail/.topics.md"]` to inline its workspace topics
@@ -208,7 +208,7 @@ from the code itself:
   re-meter already-recorded runs at startup. v1 providers: `Anthropic`
   (default; no base URL/key, subscription-billed via the CLI login) | `OpenRouter` | `Ollama`
   — all `ProviderSettings` fields kept per provider even while unused. Anthropic's defaults
-  are `claude-sonnet-5` (chat) / `claude-haiku-4-5` (skills). The old flat `agents.claude_model`
+  are `claude-sonnet-5` (chat) / `claude-haiku-5-5` (skills). The old flat `agents.claude_model`
   and single `agents.active_provider` are both migration-only now (`active_provider` folds
   into both role fields on load, then `save()` drops it). Details: `docs/architecture.md` §5
   "Model providers"; `docs/plans/per-role-provider.md`;

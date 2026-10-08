@@ -1205,10 +1205,10 @@ mod tests {
             .providers
             .get_mut(&crate::config::ProviderId::Anthropic)
             .unwrap()
-            .chat_model = "claude-haiku-4-5".to_string();
+            .chat_model = "claude-haiku-5-5".to_string();
         assert_eq!(
             chat_model_id(&config).unwrap(),
-            "anthropic/claude-haiku-4-5"
+            "anthropic/claude-haiku-5-5"
         );
     }
 
