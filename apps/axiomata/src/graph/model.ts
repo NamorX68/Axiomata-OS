@@ -109,23 +109,81 @@ export interface Palette {
   invert: string;
   /** Tile surface (`--ax-surface-1`), used for orbit-node fills. */
   surface: string;
+  /** The colours areas, folders and user apps pick from (`themeSwatches`). */
+  areaSwatches: string[];
   light: boolean;
+}
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+/** Reads `#rgb`, `#rrggbb` and `rgb(r, g, b)` into 0…255 channels; null for anything else (named, `hsl()`, …). */
+function parseRgb(css: string): [number, number, number] | null {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(css.trim());
+  if (hex?.[1]) {
+    const digits = hex[1].length === 3 ? [...hex[1]].map((d) => d + d).join("") : hex[1];
+    return [0, 2, 4].map((i) => parseInt(digits.slice(i, i + 2), 16)) as [number, number, number];
+  }
+  const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(css.trim());
+  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null;
+}
+
+/** Hue (0–360), saturation and lightness (0–100) of a colour given as 0…255 channels. */
+function toHsl([r, g, b]: [number, number, number]): { h: number; s: number; l: number } {
+  const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return { h: 0, s: 0, l: l * 100 };
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === rn ? ((gn - bn) / d) % 6 : max === gn ? (bn - rn) / d + 2 : (rn - gn) / d + 4;
+  return { h: (h * 60 + 360) % 360, s: s * 100, l: l * 100 };
+}
+
+const SWATCH_COUNT = 12;
+/** The hue range (degrees) that reads as green and is calmed on dark grounds. */
+const GREEN_FROM = 60;
+const GREEN_TO = 170;
+
+/**
+ * The colours areas, folders and user apps are drawn in: twelve hues around the whole wheel, so neighbouring areas stay
+ * apart in every theme, with the saturation and lightness of the theme's accent — pastel where the theme is soft, deep
+ * where it is strong, always readable on its background. (The theme's syntax colours were tried and are too close
+ * together in themes such as GitHub's, where nearly all of them are blue.) An accent that cannot be read gives the
+ * standard tones of the scheme.
+ */
+export function themeSwatches(accent: string, light: boolean): string[] {
+  const rgb = parseRgb(accent);
+  const accentHsl = rgb ? toHsl(rgb) : null;
+  const s = accentHsl ? clamp(accentHsl.s, 45, 80) : light ? 55 : 70;
+  const l = accentHsl ? (light ? clamp(accentHsl.l * 0.85, 34, 48) : clamp(accentHsl.l, 60, 74)) : light ? 42 : 68;
+  // Never exactly the accent's own hue.
+  const start = (accentHsl?.h ?? 0) + 15;
+  return Array.from({ length: SWATCH_COUNT }, (_, i) => {
+    const hue = Math.round((start + (360 / SWATCH_COUNT) * i) % 360);
+    // On a dark ground the greens (yellow to cyan) shine far brighter than the other hues at the same lightness.
+    const calm = !light && hue >= GREEN_FROM && hue <= GREEN_TO;
+    return `hsl(${hue} ${Math.round(calm ? s * 0.68 : s)}% ${Math.round(calm ? l - 8 : l)}%)`;
+  });
 }
 
 /** Reads the palette from the `--ax-*` tokens currently in effect. */
 export function readPalette(): Palette {
   const cs = getComputedStyle(document.documentElement);
   const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+  const accent = v("--ax-accent", "#ff7a1a");
+  const light = v("--ax-color-scheme", "dark") === "light";
   return {
     text: v("--ax-text", "#f5f5f7"),
     muted: v("--ax-text-muted", "#94949c"),
-    accent: v("--ax-accent", "#ff7a1a"),
+    accent,
     warning: v("--ax-warning", "#e6b45f"),
     success: v("--ax-success", "#4fd67f"),
     border: v("--ax-border-strong", "#3b3b43"),
     invert: v("--ax-text-invert", "#0b0b0d"),
     surface: v("--ax-surface-1", "#121216"),
-    light: v("--ax-color-scheme", "dark") === "light",
+    areaSwatches: themeSwatches(accent, light),
+    light,
   };
 }
 
@@ -206,10 +264,16 @@ export function glyphForModuleType(type: string): string {
   }
 }
 
-/** Stable per-area hue from the name; saturation/lightness by scheme. */
-export function areaColor(name: string, light: boolean): string {
+/**
+ * Stable per-area colour from the name. With `swatches` (the theme's own hues, see {@link Palette.areaSwatches}) the
+ * name picks one of them, so the cloud follows the theme; without any, a hue from the wheel stands in
+ * (saturation/lightness by scheme).
+ */
+export function areaColor(name: string, light: boolean, swatches: readonly string[] = []): string {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const swatch = swatches[h % swatches.length];
+  if (swatch !== undefined) return swatch;
   const hue = (h % 12) * 30 + 200; // spread across the wheel, offset from the orange accent
   return light ? `hsl(${hue % 360} 55% 42%)` : `hsl(${hue % 360} 70% 68%)`;
 }
@@ -332,7 +396,8 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
   let angle = -Math.PI / 2 + CAPTION_GAP;
   const areas: AreaSegment[] = counted.map((a) => {
     const span = (a.files / total) * usable;
-    const seg = { name: a.name, color: areaColor(a.name, palette.light), count: a.files, start: angle, end: angle + span };
+    const color = areaColor(a.name, palette.light, palette.areaSwatches);
+    const seg = { name: a.name, color, count: a.files, start: angle, end: angle + span };
     angle += span + AREA_GAP;
     return seg;
   });
@@ -425,7 +490,7 @@ function userAppNode(a: UserApp, palette: Palette): GraphNode {
     x: 0,
     y: 0,
     r: 9,
-    color: areaColor(a.path, palette.light),
+    color: areaColor(a.path, palette.light, palette.areaSwatches),
     phase: nodePhase(a.path),
     degree: 0,
     userApp: true,
@@ -488,7 +553,7 @@ export function buildAppNodes(
       x: 0,
       y: 0,
       r: 12, // somewhat bigger than a solo app's 9 — matches render.ts's drawAppRing scaling for isGroup nodes
-      color: g.side === "user" ? areaColor(g.id, palette.light) : palette.accent,
+      color: g.side === "user" ? areaColor(g.id, palette.light, palette.areaSwatches) : palette.accent,
       phase: nodePhase(g.id),
       degree: 0,
       userApp: g.side === "user",

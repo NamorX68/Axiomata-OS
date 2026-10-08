@@ -288,7 +288,7 @@
         <span>Start directory</span>
         <input type="text" placeholder={workspaceRootHint || "app default"} bind:value={cwdText} onchange={setCwd} />
       </label>
-      <label class="field field-inline">
+      <label class="field">
         <span>Scrollback (lines)</span>
         <input
           type="number"
@@ -298,11 +298,11 @@
           onchange={setScrollbackLimit}
         />
       </label>
-      <label class="field">
+      <label class="field field-block">
         <span>Environment variables</span>
         <textarea rows="3" placeholder={"KEY=value\nANOTHER=value"} bind:value={envText} onchange={setEnv}></textarea>
       </label>
-      <label class="field field-inline">
+      <label class="field">
         <span>Visual bell</span>
         <input type="checkbox" checked={$terminalSettings.bellEnabled !== false} onchange={setBellEnabled} />
       </label>
@@ -342,7 +342,7 @@
         <input type="text" placeholder="theme default" bind:value={fontFamilyText} onchange={setFontFamily} />
       </label>
       <div class="field-row">
-        <label class="field field-inline">
+        <label class="field">
           <span>Size (px)</span>
           <input
             type="number"
@@ -353,7 +353,7 @@
             onchange={setFontSize}
           />
         </label>
-        <label class="field field-inline">
+        <label class="field">
           <span>Weight</span>
           <select
             value={typeof $terminalSettings.fontWeight === "number" ? String($terminalSettings.fontWeight) : ""}
@@ -378,7 +378,7 @@
           {/each}
         </select>
       </label>
-      <label class="field field-inline">
+      <label class="field">
         <span>Background opacity</span>
         <input
           type="range"
@@ -389,7 +389,7 @@
         />
       </label>
       <div class="field-row">
-        <label class="field field-inline">
+        <label class="field">
           <span>Cursor style</span>
           <select
             value={typeof $terminalSettings.cursorStyle === "string" ? $terminalSettings.cursorStyle : DEFAULT_CURSOR_STYLE}
@@ -401,12 +401,12 @@
             <option value="bar">Bar</option>
           </select>
         </label>
-        <label class="field field-inline">
+        <label class="field">
           <span>Cursor blink</span>
           <input type="checkbox" checked={$terminalSettings.cursorBlink !== false} onchange={setCursorBlink} />
         </label>
       </div>
-      <label class="field field-inline">
+      <label class="field">
         <span>Bold text in bright colour</span>
         <input type="checkbox" checked={$terminalSettings.boldIsBright !== false} onchange={setBoldIsBright} />
       </label>
@@ -420,37 +420,11 @@
 {/if}
 
 <style>
-  /* Checkpoint 5o (owner feedback: "Viele Felder/Dropdown zu klein...
-   *  Anfänger Design") — full redesign of this page's layout, no
-   *  behavioural change (every `on*`/`bind:value` wire-up above is
-   *  untouched). The previous version put every field — text, select,
-   *  number, checkbox alike — through one shared `<label>` flex row with a
-   *  hardcoded `width: 9em` control column, regardless of what the control
-   *  actually was or how wide the panel itself happened to be (this page
-   *  is the back face of a user-resizable tile, so that panel width varies
-   *  a lot). Two concrete failures that caused, not just "some text/select
-   *  fields (font family, theme, bundled font names) routinely got cut off
-   *  mid-word — "JetBrainsMono Nerd Font Mono" had no way to ever fit in
-   *  9em; and a wide/resized tile left a large, unbalanced gap between the
-   *  label and its tiny control instead of using the space.
-   *
-   *  Fix: `.field` (a labeled text/select/number/checkbox/textarea group)
-   *  defaults to *stacked* — label on its own line, control below at
-   *  `width: 100%` — for every field type where a fixed small width was
-   *  the actual bug (text inputs, selects, the textarea). `.field-inline`
-   *  opts a field back into the old label-left/control-right row, but only
-   *  for control types a fixed, modest width is genuinely correct for
-   *  (numbers, checkboxes, the range slider, and the two short-option
-   *  selects grouped into a `.field-row` below) — not applied by mistake
-   *  to anything that can hold arbitrary-length text. Related fields are
-   *  grouped into `<section>`s with a heading, matching this app's
-   *  existing settings-panel convention (see e.g.
-   *  `routines-board-settings.svelte`'s own `h3`) instead of one flat,
-   *  ungrouped list of a dozen rows — also fixes a small pre-existing
-   *  content bug: "Visual bell" is documented (this page's own hint text)
-   *  as a next-spawn-only setting, but was visually grouped with the
-   *  live-apply fields before this reorganization; it's in the "Session"
-   *  section now, where it behaviourally belongs. */
+  /* Cards in columns: the page is the back face of a tile that can be resized from a thumbnail to a whole screen, so the
+   * sections flow into as many columns as fit (one in a narrow tile) instead of one fixed-width strip on the left.
+   * Inside a card every field is the same row — label left, control in a column of its own — so the controls line up;
+   * only the multi-line environment field stacks its label above. `column-width` (not a grid) lets the short cards
+   * pack under each other without holes. */
   .muted {
     padding: var(--ax-space-3);
     margin: 0;
@@ -458,79 +432,60 @@
     font-size: var(--ax-font-size-sm);
   }
   .settings {
-    padding: var(--ax-space-3) var(--ax-space-4) var(--ax-space-4);
-    max-width: 34rem;
-    display: flex;
-    flex-direction: column;
-    gap: var(--ax-space-5);
+    padding: var(--ax-space-4);
+    column-width: calc(380px * var(--ax-ui-scale));
+    column-gap: var(--ax-space-4);
     font-size: var(--ax-font-size-sm);
   }
   section {
+    break-inside: avoid;
+    margin-bottom: var(--ax-space-4);
+    padding: var(--ax-space-4);
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-3);
+    background: var(--ax-surface-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-lg);
   }
   h3 {
-    margin: 0;
-    font-size: var(--ax-font-size-xs);
+    margin: 0 0 var(--ax-space-1);
+    font-size: var(--ax-font-size-sm);
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
-    color: var(--ax-text-muted);
-    border-bottom: 1px solid var(--ax-border);
-    padding-bottom: var(--ax-space-2);
+    color: var(--ax-accent);
   }
 
   .field {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--ax-space-1);
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    align-items: center;
+    gap: var(--ax-space-3);
   }
   .field > span {
     color: var(--ax-text-muted);
   }
-  .field input,
+  .field input:not([type="checkbox"]):not([type="number"]),
   .field select,
   .field textarea {
     width: 100%;
     box-sizing: border-box;
   }
-
-  /* Two or more short, genuinely-fixed-width fields side by side, instead
-   *  of each claiming a full stacked row it doesn't need — "Size (px)" +
-   *  "Weight", "Cursor style" + "Cursor blink". */
+  .field input[type="number"] {
+    width: calc(96px * var(--ax-ui-scale));
+  }
+  .field input[type="checkbox"] {
+    justify-self: start;
+  }
+  /* The pairs the markup groups in a row are ordinary rows of the card here. */
   .field-row {
-    display: flex;
-    gap: var(--ax-space-4);
+    display: contents;
   }
-  .field-row .field {
-    flex: 1;
-  }
-
-  /* Back to the original label-left/control-right row, for control types a
-   *  small fixed width is actually correct for — see this `<style>`
-   *  block's own doc comment above for which ones and why. */
-  .field-inline {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--ax-space-3);
-  }
-  .field-inline input,
-  .field-inline select {
-    width: auto;
-    min-width: 7em;
-  }
-  .field-inline input[type="checkbox"] {
-    min-width: 0;
-    flex: 0 0 auto;
-  }
-  .field-inline input[type="range"] {
-    flex: 1;
-    min-width: 0;
-  }
-  .field-inline input[type="number"] {
-    min-width: 5em;
+  /* A multi-line field takes the card's width, with its label above. */
+  .field-block {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: var(--ax-space-1);
   }
 
   textarea {
@@ -540,7 +495,10 @@
   }
   .hint {
     margin: 0;
+    padding-top: var(--ax-space-3);
+    border-top: 1px solid var(--ax-border);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+    line-height: 1.5;
   }
 </style>

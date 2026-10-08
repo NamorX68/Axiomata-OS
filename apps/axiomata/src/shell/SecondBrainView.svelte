@@ -724,11 +724,12 @@
     margin: 0;
     color: var(--ax-text-muted);
   }
-  /* The explanations open above the bar. */
+  /* The explanations open beside the bar, to its right: above the bar they covered the cloud's lower rim. They are lifted
+     by the assistant bar's height so they do not run under that bar (it is centred over the same strip, z above these). */
   .help {
     position: absolute;
-    left: 0;
-    bottom: calc(100% + var(--ax-space-2));
+    left: calc(100% + var(--ax-space-3));
+    bottom: calc(64px * var(--ax-ui-scale));
     width: calc(380px * var(--ax-ui-scale));
     max-height: 50vh;
     overflow: auto;
@@ -743,6 +744,13 @@
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-3);
+  }
+  /* After the base rule above, or it would win by order: the bar spans the width here, so there is no room beside it. */
+  @media (max-width: 1320px) {
+    .help {
+      left: 0;
+      bottom: calc(100% + var(--ax-space-2));
+    }
   }
   .help-terms {
     margin: 0;

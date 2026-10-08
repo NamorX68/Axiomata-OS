@@ -1676,3 +1676,15 @@ CLI `ide engines …` / `ide roles …`, the Studio inspector's *Engines & roles
 (`ide/ProjectRolesNotice.svelte`). They sit in the Studio's own settings column, **not** in the app's general settings
 (owner, 2026-10-04): the Studio is to become a program of its own, and its settings move with it. Nothing starts from an engine or a role yet — that is CP-A6. Also this day: the app folder
 `apps/dashboard` became `apps/axiomata` (bundle identifier `com.axiomataos.app`); the dashboard *module canvas* keeps its name.
+
+### Orbit: live status and theme colours (2026-10-08)
+
+The Orbit shows what the Studio is doing without the Studio being open: `core/studioActivity.ts` asks the backend's
+`open_card_sessions` every 5 s (not while the window is hidden; a failed call keeps the last count), and
+`graph/render.ts` draws a slow heartbeat ring from the cloud's centre plus a breathing halo and a count badge on the
+Studio's icon while any card session is at work. The motion switch (`brainView.motion`) stills it to a plain halo.
+The cloud's area, folder and user-app colours follow the theme: twelve hues around the whole wheel with the saturation and
+lightness of the theme's accent (`themeSwatches`, `Palette.areaSwatches`, `areaColor(name, light, swatches)`; without swatches
+the old fixed wheel hue stays as the fallback). The theme's syntax colours were tried first and dropped — in GitHub's theme
+nearly all of them are blue, so the cloud turned monotone with two outliers. The Second Brain bar's
+"?" legend opens to the right of the bar (above the assistant bar), above it in narrow windows.

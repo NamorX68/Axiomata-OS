@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AppGroup } from "../core/appGroups";
 import type { BuiltinApp, UserApp } from "../core/apps";
 import { APP_RING, EXPANDED_GROUP_RING, layoutAppRing, layoutExpandedGroup } from "./layout";
-import { areaColor, buildAppNodes, glyphForModuleType, type GraphNode, type Palette } from "./model";
+import { areaColor, buildAppNodes, glyphForModuleType, themeSwatches, type GraphNode, type Palette } from "./model";
 
 const palette: Palette = {
   text: "#fff",
@@ -14,6 +14,7 @@ const palette: Palette = {
   border: "#444",
   invert: "#000",
   surface: "#111",
+  areaSwatches: ["#a00", "#0a0", "#00a"],
   light: false,
 };
 
@@ -72,7 +73,28 @@ describe("buildAppNodes", () => {
     // ...and specifically the same formula/value area nodes use, per
     // `render.ts`'s own doc comment — not merely "some" stable colour a
     // different, undocumented formula could also have produced.
-    expect(a[0].color).toBe(areaColor("/Applications/Foo.app", palette.light));
+    expect(a[0].color).toBe(areaColor("/Applications/Foo.app", palette.light, palette.areaSwatches));
+  });
+
+  it("picks area colours from the theme's swatches, and falls back to a wheel hue without any", () => {
+    expect(palette.areaSwatches).toContain(areaColor("Projects", false, palette.areaSwatches));
+    expect(areaColor("Projects", false, palette.areaSwatches)).toBe(areaColor("Projects", true, palette.areaSwatches));
+    expect(areaColor("Projects", false, [])).toMatch(/^hsl\(/);
+  });
+
+  it("spreads the swatches over the whole wheel and takes saturation and lightness from the accent", () => {
+    const swatches = themeSwatches("#58a6ff", false);
+    const hues = swatches.map((c) => Number(/hsl\((\d+)/.exec(c)?.[1]));
+    expect(new Set(swatches).size).toBe(12);
+    expect(Math.min(...hues.slice(1).map((h, i) => Math.abs(h - (hues[i] ?? 0)) % 360))).toBeGreaterThanOrEqual(29);
+    // One saturation and lightness for all but the greens, which are calmed on a dark ground.
+    const tone = (c: string) => c.slice(c.indexOf(" "));
+    const calmed = swatches.filter((_, i) => hues[i]! >= 60 && hues[i]! <= 170);
+    expect(new Set(swatches.filter((c) => !calmed.includes(c)).map(tone)).size).toBe(1);
+    expect(calmed.length).toBeGreaterThan(0);
+    expect(new Set(themeSwatches("#58a6ff", true).map(tone)).size).toBe(1);
+    expect(themeSwatches("not a colour", true)[0]).toMatch(/55% 42%\)$/);
+    expect(themeSwatches("rgb(255, 122, 26)", false)).toHaveLength(12);
   });
 
   it("draws the IDE view entry with its own code_blocks glyph", () => {

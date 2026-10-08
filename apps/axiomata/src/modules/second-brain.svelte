@@ -39,12 +39,13 @@
     setGroupGlyph,
   } from "../core/appGroups";
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
-  import type { WorkspaceGraph } from "../core/backend";
+  import { invokeBackend, type WorkspaceGraph } from "../core/backend";
   import { brainActive, brainView, spinOf } from "../core/brainView";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
   import { openFilePanel } from "../core/staging";
   import { bringToFront, instances } from "../core/stores";
+  import { startActivityPoll, studioActivity } from "../core/studioActivity";
   import { toast } from "../core/toast";
   import type { ModuleContext } from "../core/types";
   import { APP_RING, layoutAppRing, layoutExpandedGroup, layoutOrbit } from "../graph/layout";
@@ -349,8 +350,12 @@
   $effect(() => {
     // Read the reactive inputs first — an early return on a missing renderer
     // would otherwise leave the effect without dependencies.
-    const next = { mode: "orbit" as const, spin, labels };
+    const next = { mode: "orbit" as const, spin, labels, pulse: $brainView.motion };
     if (renderer) renderer.options = { ...renderer.options, ...next };
+  });
+
+  $effect(() => {
+    if (renderer) renderer.activity = $studioActivity;
   });
 
   onMount(() => {
@@ -390,7 +395,13 @@
     // itself. Toggling `expandedGroupId` is *not* a store change, so
     // `onClick` below calls `rebuild()` directly for that.
     const unsubAppGroups = appGroups.subscribe(() => rebuild());
+    // The live pulse: the Studio's open card sessions, asked for in the background (no Studio window needed).
+    const stopActivityPoll = startActivityPoll(
+      () => invokeBackend("open_card_sessions"),
+      (count) => studioActivity.set(count),
+    );
     return () => {
+      stopActivityPoll();
       cancelAnimationFrame(raf);
       clearInterval(refresh);
       ro.disconnect();

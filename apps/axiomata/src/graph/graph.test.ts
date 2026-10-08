@@ -13,6 +13,7 @@ const palette: Palette = {
   border: "#444",
   invert: "#000",
   surface: "#111",
+  areaSwatches: ["#a00", "#0a0", "#00a"],
   light: false,
 };
 

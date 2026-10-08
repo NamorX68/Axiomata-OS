@@ -22,6 +22,8 @@ export interface RenderOptions {
   fileLabels: boolean;
   /** Fraction of the shorter canvas side used as the outer radius. */
   fit: number;
+  /** Orbit only: let the live-status pulse breathe. Off, it stays a still halo (the motion switch). */
+  pulse?: boolean;
 }
 
 export interface View {
@@ -182,6 +184,8 @@ export class GraphRenderer {
   selected: GraphNode | null = null;
   /** When set, only these ids draw at full strength (search results). */
   highlight: Set<string> | null = null;
+  /** Orbit only: how many card sessions are at work right now (0 = quiet, nothing is drawn). */
+  activity = 0;
   private angle = 0;
   private last = 0;
   private textColor = "#fff";
@@ -654,6 +658,8 @@ export class GraphRenderer {
       ctx.fill();
     }
 
+    this.drawHeartbeat(cx, cy, R, t);
+
     // Icon nodes on the rim.
     const onOrbitCount = model.nodes.reduce((n, node) => n + (node.onOrbit ? 1 : 0), 0);
     const nodeR = rimNodeRadiusPx(R, onOrbitCount);
@@ -681,7 +687,7 @@ export class GraphRenderer {
       if (hot) this.drawHotLabel(x, y, nodeR, n.label, 0.7, 0.55);
     }
 
-    this.drawAppRing(cx, cy, R);
+    this.drawAppRing(cx, cy, R, t);
     this.drawExpandedGroupRing(cx, cy, R);
   }
 
@@ -747,7 +753,7 @@ export class GraphRenderer {
    *  spin the way the loop above does (see `layout.ts`'s `layoutAppRing`
    *  doc comment for why that's required, not just the lack of a time
    *  dependency in the layout itself). */
-  private drawAppRing(cx: number, cy: number, R: number): void {
+  private drawAppRing(cx: number, cy: number, R: number, t: number): void {
     const { ctx } = this;
     const model = this.model!;
     const ringR = R * APP_RING;
@@ -782,6 +788,8 @@ export class GraphRenderer {
       // disc/glyph/hot-label below all key off this per-node `r` instead of
       // the shared `nodeR`, so they scale together consistently.
       const r = n.isGroup ? nodeR * 1.25 : nodeR;
+      const working = n.appType === "view:ide" && this.activity > 0;
+      if (working) this.drawActivityHalo(x, y, r, t);
       this.drawNodeDisc(x, y, r, n.color, hot);
 
       if (n.userApp && !n.glyph) {
@@ -809,9 +817,65 @@ export class GraphRenderer {
       } else {
         drawGlyph(ctx, n.glyph ?? "folder", x, y, r * 0.62, hot ? this.accentColor : n.color);
       }
+      if (working) this.drawActivityBadge(x, y, r);
 
       if (hot) this.drawHotLabel(x, y, r, n.label, 0.75, 0.5);
     }
+  }
+
+  /** Seconds one breath of the live-status pulse takes — slow enough to stay in the corner of the eye. */
+  private static readonly PULSE_PERIOD = 3.6;
+
+  /** 0…1 position within the current breath; a still 0.5 while the motion is off. */
+  private pulsePhase(t: number): number {
+    return this.options.pulse === false ? 0.5 : (t % GraphRenderer.PULSE_PERIOD) / GraphRenderer.PULSE_PERIOD;
+  }
+
+  /** Quiet heartbeat: while sessions work, a faint ring leaves the cloud's centre and fades before it reaches the rim.
+   *  Not drawn while the motion is off — a ring frozen mid-way would look like a stray circle. */
+  private drawHeartbeat(cx: number, cy: number, R: number, t: number): void {
+    if (this.activity <= 0 || this.options.pulse === false) return;
+    const { ctx } = this;
+    const phase = this.pulsePhase(t);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6 + (R * 0.62 - 6) * phase, 0, TWO_PI);
+    ctx.strokeStyle = this.accentColor;
+    ctx.globalAlpha = 0.32 * (1 - phase) ** 2;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  /** A soft accent glow behind the Studio's icon: breathes with the heartbeat, or stays lit when the motion is off. */
+  private drawActivityHalo(x: number, y: number, r: number, t: number): void {
+    const { ctx } = this;
+    const breath = this.options.pulse === false ? 0.6 : 0.5 + 0.5 * Math.sin(this.pulsePhase(t) * TWO_PI);
+    const g = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 2.4);
+    g.addColorStop(0, this.accentColor);
+    g.addColorStop(1, "transparent");
+    ctx.globalAlpha = 0.25 + 0.3 * breath;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 2.4, 0, TWO_PI);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  /** The number of sessions at work, in a small accent dot at the icon's upper right. */
+  private drawActivityBadge(x: number, y: number, r: number): void {
+    const { ctx } = this;
+    const br = Math.max(6, r * 0.4);
+    const bx = x + r * 0.78;
+    const by = y - r * 0.78;
+    ctx.fillStyle = this.accentColor;
+    ctx.beginPath();
+    ctx.arc(bx, by, br, 0, TWO_PI);
+    ctx.fill();
+    ctx.fillStyle = this.glyphColor;
+    ctx.font = this.font(Math.max(8, br * 1.15), 700);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.activity > 9 ? "9+" : String(this.activity), bx, by + 0.5);
   }
 
   /** A group's expanded secondary ring: its member nodes (`onExpandedRing`),
