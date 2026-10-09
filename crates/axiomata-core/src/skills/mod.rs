@@ -70,6 +70,11 @@ const DEFAULT_SKILLS: &[(&str, &str)] = &[
         "news-web",
         include_str!("../../resources/news-web/SKILL.md"),
     ),
+    // Newly released AI models from the well-known makers, into the same turquoise `News/` area (owner, 2026-10-10).
+    (
+        "model-news",
+        include_str!("../../resources/model-news/SKILL.md"),
+    ),
 ];
 
 /// Writes `content` into `~/.axiomata/skills/<name>/SKILL.md` if it isn't

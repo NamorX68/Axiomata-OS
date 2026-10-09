@@ -1708,6 +1708,19 @@ The skills may write only into `News/`, and treat fetched text as data. A first 
 theme swatch nearest to hue 180) instead of coming from the name's hash. No routine is set up yet — the skills run by hand
 (`run-skill news-rss`) or from a routine the owner adds.
 
+### AI model skill (2026-10-10)
+
+A third skill of the same family, `model-news`, finds **newly released AI models** instead of news: it fetches the two
+aggregators' JSON APIs first (Hugging Face `api/models?sort=createdAt` and `sort=trendingScore`, OpenRouter
+`api/v1/models`), then up to six of the big makers' model/changelog pages (OpenAI, Anthropic, Google, Meta, Mistral, xAI,
+DeepSeek, Qwen, and the image/video houses). It keeps releases of the last 14 days that a reader would care about —
+primarily LLMs, but also image and video models, each marked `LLM`/`Bild`/`Video` — and skips embeddings, quants, LoRAs,
+repacks and fine-tunes of fine-tunes, and the throwaway uploads the newest sort is full of. Each model lands as one entry
+with maker, category, release date and the link to the model (`huggingface.co/<id>`, `openrouter.ai/<id>`, or the maker's
+own link) in one running file, `News/KI-Modelle.md`, newest section on top — the same running-file shape as the two news
+skills. It writes inside `News/`, so it shares their turquoise area colour without any new pin. Bundled like the others
+(`DEFAULT_SKILLS`, seed-if-absent, `skills reseed --force`).
+
 ### Ausblick (2026-10-09)
 
 The agent-to-agent build plan CP-A1…CP-A10 is through (`docs/plans/a2a.md`); what is open next:
