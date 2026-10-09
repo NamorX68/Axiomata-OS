@@ -88,6 +88,12 @@ Do exactly this and nothing more:
    - `summary` — **2–4 plain-text sentences** on the message's actual
      content (not a restatement of the subject): what it is about, the key
      facts, and any date, amount or question it contains.
+     **Always write the summary in German**, whatever language the email is
+     in — translate English or any other language into natural German. Keep
+     names of people, companies and products, amounts, dates and quoted
+     titles as they stand in the email. `sender` and `subject` stay exactly
+     as the email has them, untranslated; the `Link: ` prefix below stays
+     literal, too.
      **Links belong in the summary**: if the email body contains a URL that
      matters to the reader (registration, document, article, tracking, …),
      append the URL(s) at the end of the summary as plain text, each on its
