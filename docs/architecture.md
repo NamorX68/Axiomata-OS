@@ -1309,6 +1309,12 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **M7.3 CP9 — acting from the diff: done** (2026-09-24): the `file` and `agent-diff` dock
   panes, discard per file and per hunk, commit, take over with prefilled messages. M7.3 is
   complete; next per editor plan D15: ED3 (Vi mode).
+- **Agent-to-agent communication (A2A, M7.5, `docs/plans/a2a.md`): CP-A1–CP-A7b done, CP-A8–CP-A10 built**
+  (2026-10-04/06). Engines and roles (CP-A1), the board's agent flow (CP-A2), the mailbox (CP-A3), the MCP
+  server (CP-A4) and per-harness session entry (CP-A5), then card sessions — starting (CP-A6a), review and
+  take-over (CP-A6b), limits per session (CP-A6c) — and the **planner with the Flow mode** (CP-A7a/b);
+  CP-A8–CP-A10 followed with a self-running plan on an integration line, its spend ledger with plan and day
+  limits, and the Flow's team pane and graph. Open: the Mac tests and the UI/UX polish rounds.
 - **Editor ED3 — Vi mode: done** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
   ED3.1: the Vi machine in `src/editor/vi/` (pure TS, table-tested). ED3.2: wired to every
   editor surface (`fileapp/viKeys`, `viSurface`, `viScroll`, `viShared`), cursor shapes, the
@@ -1373,7 +1379,7 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   pickers offer them (the terminal monospaced only), a missing chosen font draws the default.
   ED5.9: moving in the tree: drag a file or folder onto a folder of the same root (pointer events,
   `treeModel.moveTarget`, the existing `file_rename`); a closed folder opens after half a second.
-- **Editor ED6 — language servers: under way** (2026-09-28, `docs/plans/editor.md` "ED6 im
+- **Editor ED6 — language servers: done** (2026-09-28, `docs/plans/editor.md` "ED6 im
   Detail", L0–L11). L0: `$HOME`, `/Users` and `/` are refused as IDE project roots
   (`store::too_wide`; with no resolvable `$HOME` no root is accepted at all). ED6.1 (server host + protocol base + diagnostics): Rust side above
   (`axiomata-files::lsp`); the protocol is the engine's, `src/editor/lsp/` (no app imports):
@@ -1489,13 +1495,13 @@ available.
 
 **M7 — the agentic IDE is under way** (`docs/plans/agentic-ide.md`): M7.1 is complete (the
 `axiomata-ide` crate with projects, the dock-layout model, the full-screen IDE view, and
-per-project layouts), and M7.2 is under way: agent profiles (CP4), a git worktree plus reserved port per agent
+per-project layouts). M7.2 is done: agent profiles (CP4), a git worktree plus reserved port per agent
 (CP5, the repo's first git integration — `git` as a subprocess, not `git2`), and a live status plus Plan tab
 per agent (CP6/CP6b, `docs/plans/agent-lifecycle.md` — a file channel under `~/.axiomata/agent-events/`, no DB
-column; nothing is ever written into a worktree). M7.2 is done; **M7.3 (git layer, `docs/plans/git-layer.md`)** is
-under way: CP7's git engine (diff against the recorded base branch, discard, commit, take-over into the project
+column; nothing is ever written into a worktree). **M7.3 (git layer, `docs/plans/git-layer.md`) is complete**:
+CP7's git engine (diff against the recorded base branch, discard, commit, take-over into the project
 folder — squash by default, never a push), CP8's Diffs tab (drawn on the editor, H1–H16) and CP9 (file and
-agent-diff dock panes, discard per file/hunk, commit, take-over dialogs) are built — M7.3 is complete. The plan below
+agent-diff dock panes, discard per file/hunk, commit, take-over dialogs) are built. The plan below
 describes the whole chain: an own full-screen IDE
 view with a dock/split/tab layout, foreign agent harnesses (Claude Code, Opencode) hosted as
 PTY tiles, A2A over an own MCP server rather than screen-scraping, one git worktree per
@@ -1520,7 +1526,7 @@ ED4.2–ED4.6 are done too — **ED4 is complete**: the Second Brain shows files
 app (`fileapp/tabs.ts`; `src-tauri/src/menu.rs` drops the menu's ⌘W "Close Window"), the file tree on
 `axiomata-files::dir` (renames and deletes are broadcast as `files:renamed`/`files:removed`), ⌘P quick open
 (`axiomata-files::index`), and the IDE's Files pane (`ide/panes/FilesPane.svelte`, ⌘P over the project). **ED5
-(tools, T1–T19)** is under way: ED5.1 put documents on an immutable rope (`editor/rope.ts`; `LineStore` stays as the
+(tools, T1–T19)** is done: ED5.1 put documents on an immutable rope (`editor/rope.ts`; `LineStore` stays as the
 tests' reference) and made files up to 16 MiB editable, over 2 MiB in a "light mode" (`FileSession.light`, no
 tree-sitter). ED5.2: every search pattern is first run by a worker with a 1 s limit (`editor/search/guard.ts`
 `SearchGuard`, a verdict per rope version; Vi's key queue pauses on `SearchPending` like on the clipboard), plus Vi's
@@ -1537,7 +1543,7 @@ app's Files | Search column and the IDE's `search` pane, ⇧⌘F). ED5.8: instal
 tree by dragging (`FileTree.svelte`, pointer events, `treeModel.moveTarget`) — **ED5 is complete**. **Opencode 2
 (`docs/plans/opencode2.md`, OC1–OC4) is done**: Axiomata is a client of Opencode 2's shared background service
 (crate `axiomata-opencode`) — skills and chat run as sessions on it, IDE Opencode agents start on a session the IDE
-keeps (`opencode --session <id>`), and their status comes from the service's event stream. **ED6 (LSP) is under way**
+keeps (`opencode --session <id>`), and their status comes from the service's event stream. **ED6 (LSP) is done**
 (`docs/plans/editor.md` "ED6 im Detail", L0–L11): L0 refuses `$HOME` and above as a project root; ED6.1 runs language
 servers from Rust (`axiomata-files::lsp` — which program, only from a built-in table or `~/.axiomata/lsp.json`; only
 the methods the client speaks pass) with the protocol in `src/editor/lsp/`, and shows diagnostics; ED6.2 adds hover
@@ -1701,3 +1707,17 @@ The skills may write only into `News/`, and treat fetched text as data. A first 
 `News/` is its own area in the Orbit's cloud; its colour is pinned to turquoise (`graph/model.ts` `PINNED_AREA_HUES`: the
 theme swatch nearest to hue 180) instead of coming from the name's hash. No routine is set up yet — the skills run by hand
 (`run-skill news-rss`) or from a routine the owner adds.
+
+### Ausblick (2026-10-09)
+
+The agent-to-agent build plan CP-A1…CP-A10 is through (`docs/plans/a2a.md`); what is open next:
+
+- the Mac tests and the UI/UX polish rounds of the A2A work (`docs/plans/a2a.md`);
+- **ED7** — extracting the editor and the Studio into a standalone app, the engine in `src/editor/` already
+  importing nothing from the app (D1);
+- the ⌘K spotlight (`docs/plans/spotlight-search.md`), then Orbit and 2Brain merged into one view
+  (`docs/plans/orbit-brain.md`), then an app-wide UI/UX round;
+- a Mac-only-code split for Linux/Windows;
+- in `docs/plans/agentic-ide.md`, **M7.4 (mini-harness)** and **M7.6 (extraction)** are still open.
+
+Deferred by owner decision: further model-provider work.
