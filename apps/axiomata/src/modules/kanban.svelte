@@ -34,6 +34,7 @@
   import CardTakeOverForm from "./CardTakeOverForm.svelte";
   import CardUsage from "./CardUsage.svelte";
   import { canReview, canStart, canTakeOver } from "../ide/cardStart";
+  import { refreshAgents } from "../ide/projectSession";
   import { boardStore, refreshBoard } from "../core/boardStore";
   import {
     actorLabel,
@@ -62,7 +63,7 @@
   import type { ModuleContext } from "../core/types";
   import { cardStripes, lastBoard, rememberLastBoard } from "./kanbanPrefs";
   import { boardPathPatch, KANBAN_SHOW_CARD } from "./kanbanApp";
-  import { on } from "../core/bus";
+  import { emit, on } from "../core/bus";
   import KanbanBoards from "./KanbanBoards.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -456,7 +457,11 @@
 
   async function removeCard(card: BoardCard) {
     try {
-      await invoke("delete_card", { id: card.id });
+      // The sessions the studio made for the card end with it (Rust); their panes in the Studio have nothing left to
+      // run, and the tiles must not outlive the card.
+      const ended = await invoke<number[]>("delete_card", { id: card.id });
+      if (ended.length > 0) emit("studio:close-agent-panes", { agentIds: ended });
+      void refreshAgents().catch(() => {});
       confirmingDelete = false;
       if (boardId !== null) await refreshBoard(boardId);
       // The panel is showing a card that no longer exists; close it.

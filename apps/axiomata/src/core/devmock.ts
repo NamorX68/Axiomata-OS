@@ -1832,11 +1832,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return renamed as T;
     }
     case "delete_board": {
-      const before = boards.length;
       boards = boards.filter((b) => b.id !== args.id);
       boardColumns = boardColumns.filter((c) => c.board_id !== args.id);
       boardCards = boardCards.filter((c) => c.board_id !== args.id);
-      return (boards.length < before) as T;
+      // No card sessions in the mock: the backend answers with the card sessions it ended.
+      return [] as T;
     }
     case "count_board_cards":
       return boardCards.filter((c) => c.board_id === args.boardId).length as T;
@@ -1918,9 +1918,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return true as T;
     }
     case "delete_card": {
-      const before = boardCards.length;
       boardCards = boardCards.filter((c) => c.id !== args.id);
-      return (boardCards.length < before) as T;
+      // No card sessions in the mock: the backend answers with the sessions it ended.
+      return [] as T;
     }
     case "set_card_archived": {
       const target = boardCards.find((c) => c.id === args.id);

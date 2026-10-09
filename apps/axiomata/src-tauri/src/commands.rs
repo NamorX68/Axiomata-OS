@@ -1520,17 +1520,30 @@ pub fn rename_board(
     Ok(renamed)
 }
 
-/// Deletes a board with its columns and cards. Returns `false` if there is no
-/// such board. The caller is expected to have shown `count_board_cards` first.
+/// Deletes a board with its columns and cards. Returns the ids of the card sessions that ended with them, for the
+/// Studio to close their panes; empty if there was no such board. The caller is expected to have shown
+/// `count_board_cards` first.
 #[tauri::command]
-pub fn delete_board(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+pub async fn delete_board(state: State<'_, CoreState>, id: i64) -> Result<Vec<i64>, String> {
     let config = read_config(&state.config);
-    let mut db = state.db_lock();
-    let gone = board::store::delete_board(&mut db, id).map_err(|err| err.to_string())?;
-    if gone {
+    // The cards' ids have to be read *before* the board goes, and like the delete itself before anything is awaited:
+    // the lock is not held across one. Archived cards go with the board, so they are in the list.
+    let card_ids = {
+        let mut db = state.db_lock();
+        let card_ids: Vec<i64> = board::store::list_cards(&db, id, true)
+            .map_err(|err| err.to_string())?
+            .into_iter()
+            .map(|card| card.id)
+            .collect();
+        let gone = board::store::delete_board(&mut db, id).map_err(|err| err.to_string())?;
+        if !gone {
+            return Ok(Vec::new());
+        }
         board_mirror::remove(&config, id);
-    }
-    Ok(gone)
+        card_ids
+    };
+    // The cards are gone: their sessions can be neither claimed nor restarted, so they end with them.
+    Ok(axiomata_core::card_session::forget_sessions_of_cards(&state, &card_ids).await)
 }
 
 #[tauri::command]
@@ -1610,19 +1623,32 @@ pub fn move_card(
     Ok(moved)
 }
 
+/// Deletes a card (the Kanban panel's "Really delete"). The sessions the studio made for it end with it (A2A CP-A6):
+/// a worker and its reviewers would otherwise linger as tiles in the Studio's Flow for a card that no longer exists.
+/// Returns the ids of the sessions that are gone, for the Studio to close their panes; empty if there was no such card.
 #[tauri::command]
-pub fn delete_card(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
+pub async fn delete_card(state: State<'_, CoreState>, id: i64) -> Result<Vec<i64>, String> {
     let config = read_config(&state.config);
+    // The board has to be read, and the card deleted, *before* anything is awaited: the lock is not held across one.
+    let (board_id, gone) = {
+        let db = state.db_lock();
+        let board_id = board::store::get_card(&db, id)
+            .map_err(|err| err.to_string())?
+            .map(|card| card.board_id);
+        let gone = board::store::delete_card(&db, id).map_err(|err| err.to_string())?;
+        (board_id, gone)
+    };
+    if !gone {
+        return Ok(Vec::new());
+    }
+    // The card is gone: its sessions can be neither claimed nor restarted, so they end with it — worktrees, secrets,
+    // channels and Opencode registrations go too.
+    let ended = axiomata_core::card_session::forget_sessions_of_cards(&state, &[id]).await;
     let db = state.db_lock();
-    // The board has to be read *before* the card is gone with it.
-    let board_id = board::store::get_card(&db, id)
-        .map_err(|err| err.to_string())?
-        .map(|card| card.board_id);
-    let gone = board::store::delete_card(&db, id).map_err(|err| err.to_string())?;
-    if let Some(board_id) = board_id.filter(|_| gone) {
+    if let Some(board_id) = board_id {
         board_mirror::after_change(&db, &config, board_id);
     }
-    Ok(gone)
+    Ok(ended)
 }
 
 #[tauri::command]
