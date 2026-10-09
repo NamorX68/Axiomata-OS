@@ -13,7 +13,9 @@
   import { onMount } from "svelte";
 
   import { invokeBackend as invoke, type Board } from "../core/backend";
+  import { emit } from "../core/bus";
   import { forgetBoard, refreshBoard } from "../core/boardStore";
+  import { refreshAgents } from "../ide/projectSession";
   import { cardStripes, setCardStripes } from "./kanbanPrefs";
 
   let {
@@ -92,7 +94,11 @@
   async function confirmDelete(id: number) {
     busy = true;
     try {
-      await invoke("delete_board", { id });
+      // The board's cards take their sessions with them (Rust); the panes of those sessions in the Studio have
+      // nothing left to run, and their tiles must not outlive the cards.
+      const ended = await invoke<number[]>("delete_board", { id });
+      if (ended.length > 0) emit("studio:close-agent-panes", { agentIds: ended });
+      void refreshAgents().catch(() => {});
       forgetBoard(id);
       confirming = null;
       await load();

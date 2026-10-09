@@ -1432,7 +1432,7 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         }
         BoardAction::Delete { id, force } => {
             owner_only("deleting a board")?;
-            board_delete(core, id, force)
+            board_delete(core, id, force).await
         }
         BoardAction::Add {
             column,
@@ -2505,20 +2505,33 @@ fn board_rename(core: &AxiomataCore, id: i64, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn board_delete(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
-    let mut db = core.db_lock();
-    if board::store::get_board(&db, id)?.is_none() {
-        bail!("no board with id {id}");
-    }
-    // Deleting a board takes its cards with it, so the count has to be said
-    // out loud before it happens rather than reported afterwards.
-    let cards = board::store::count_cards(&db, id)?;
-    if cards > 0 && !force {
-        bail!("board #{id} holds {cards} cards — pass --force to delete it with them");
-    }
-    board::store::delete_board(&mut db, id)?;
-    board_mirror::remove(&read_config(core), id);
+async fn board_delete(core: &AxiomataCore, id: i64, force: bool) -> Result<()> {
+    // The cards' ids are read before the board goes — archived cards among them, because the delete takes those too.
+    let (cards, card_ids) = {
+        let mut db = core.db_lock();
+        if board::store::get_board(&db, id)?.is_none() {
+            bail!("no board with id {id}");
+        }
+        // Deleting a board takes its cards with it, so the count has to be said
+        // out loud before it happens rather than reported afterwards.
+        let cards = board::store::count_cards(&db, id)?;
+        if cards > 0 && !force {
+            bail!("board #{id} holds {cards} cards — pass --force to delete it with them");
+        }
+        let ids: Vec<i64> = board::store::list_cards(&db, id, true)?
+            .into_iter()
+            .map(|card| card.id)
+            .collect();
+        board::store::delete_board(&mut db, id)?;
+        board_mirror::remove(&read_config(core), id);
+        (cards, ids)
+    };
+    // The cards are gone: their sessions can be neither claimed nor restarted, so they end with them.
+    let ended = axiomata_core::card_session::forget_sessions_of_cards(core, &card_ids).await;
     println!("board #{id} deleted ({cards} cards)");
+    if !ended.is_empty() {
+        println!("ended {} card session(s) that went with it", ended.len());
+    }
     Ok(())
 }
 

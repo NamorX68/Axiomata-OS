@@ -2000,6 +2000,50 @@ pub fn release_card_session(core: &AxiomataCore, card_id: i64) -> Result<bool> {
     Ok(true)
 }
 
+/// Ends every session the studio made for cards that are going away (A2A CP-A6): the workers and their reviewers.
+/// A card's row takes its claim with it; what is left is the session's own — its worktree, branch, secret, channel and
+/// Opencode registration. Takes the whole set at once because a board takes every card on it with it. Returns the ids
+/// of the sessions that are gone, for the Studio to close their panes. A session that lingers is logged, never a
+/// reason to refuse the owner's delete.
+pub async fn forget_sessions_of_cards(core: &AxiomataCore, card_ids: &[i64]) -> Vec<i64> {
+    if card_ids.is_empty() {
+        return Vec::new();
+    }
+    let db = Arc::clone(&core.db);
+    let roots = crate::paths::ide_locations().channels;
+    let wanted = card_ids.to_vec();
+    let ended = tokio::task::spawn_blocking(move || {
+        let sessions = sessions_of_cards(&lock(&db), &wanted);
+        let ids: Vec<i64> = sessions.iter().map(|session| session.id).collect();
+        let locations = remove_sessions(&db, &roots, &sessions);
+        (ids, locations)
+    })
+    .await;
+    let Ok((ids, locations)) = ended else {
+        tracing::warn!("ending the sessions of cards {card_ids:?} failed");
+        return Vec::new();
+    };
+    for location in &locations {
+        crate::agents::opencode::forget_mcp(location).await;
+    }
+    ids
+}
+
+/// The sessions made for the given cards: a worker and, after a report, its reviewers — one agent row per session.
+/// Read in one query across all projects and filtered here, the same way `redo_card` does it; an error is logged, not
+/// returned, because `forget_sessions_of_cards` cannot fail the owner's delete either way.
+fn sessions_of_cards(db: &Connection, card_ids: &[i64]) -> Vec<Agent> {
+    let wanted: std::collections::HashSet<i64> = card_ids.iter().copied().collect();
+    let sessions = agent_store::card_sessions(db).unwrap_or_else(|err| {
+        tracing::warn!(%err, cards = ?card_ids, "could not read the sessions of cards");
+        Vec::new()
+    });
+    sessions
+        .into_iter()
+        .filter(|agent| agent.card_id.is_some_and(|id| wanted.contains(&id)))
+        .collect()
+}
+
 /// The session id at the end of an actor string, if it is one of a session's.
 pub(crate) fn session_id_of(actor: &str) -> Option<i64> {
     let rest = actor.strip_prefix("agent:")?;
@@ -2476,6 +2520,138 @@ mod tests {
         });
         assert_eq!(git(&w.repo, &["rev-parse", &branch.unwrap()]), snapshot);
         assert!(git(&w.repo, &["show", "--stat", "--format=%s", &snapshot]).contains("change.txt"));
+    }
+
+    #[test]
+    fn deleting_a_card_ends_the_sessions_made_for_it() {
+        let mut w = world();
+        // A worker and, after a report, its reviewer: both sessions carry the card's id and both end with it.
+        w.roles.retain(|r| r.name != "reviewer");
+        w.roles.push(role("reviewer", "review", Some("opus")));
+        let (card, worker) = w.reported("sonnet");
+        let reviewer = w.review(card, None).unwrap();
+        let worker_row = agent_store::get_agent(&w.db, worker.agent.id)
+            .unwrap()
+            .unwrap();
+        let branch = worker_row.branch.clone().unwrap();
+        // Both panes have started, so both have their checkout on disk.
+        let worker_cwd = crate::ide::provision::prepare(&w.db, &w.locations(), worker.agent.id)
+            .unwrap()
+            .cwd;
+        let reviewer_cwd = crate::ide::provision::prepare(&w.db, &w.locations(), reviewer.agent.id)
+            .unwrap()
+            .cwd;
+        assert!(worker_cwd.is_dir() && reviewer_cwd.is_dir());
+        // A session of another card is not this card's and must survive the delete.
+        let other = w.card(w.open, Some("builder"));
+        let theirs = w.start(other, Some("sonnet")).unwrap();
+
+        let roots = w.locations().channels;
+        let mut gone = w.shared(|db| {
+            // The command's order: the card goes first, and only then are its sessions looked up. That the lookup
+            // still finds them is the load-bearing fact — `card_id` on a session has no foreign key to the card
+            // (`agent_card.sql`), so the card's row takes its claim with it while the sessions stay to be ended.
+            assert!(
+                store::delete_card(&lock(db), card).unwrap(),
+                "the card is gone before its sessions are"
+            );
+            let sessions = sessions_of_cards(&lock(db), &[card]);
+            let ids: Vec<i64> = sessions.iter().map(|session| session.id).collect();
+            remove_sessions(db, &roots, &sessions);
+            ids
+        });
+        gone.sort_unstable();
+
+        let mut both = vec![worker.agent.id, reviewer.agent.id];
+        both.sort_unstable();
+        assert_eq!(gone, both, "the worker and its reviewer are both ended");
+        assert!(
+            agent_store::get_agent(&w.db, worker.agent.id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            agent_store::get_agent(&w.db, reviewer.agent.id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(!worker_cwd.exists(), "the worker's worktree went with it");
+        assert!(
+            !reviewer_cwd.exists(),
+            "the reviewer's checkout went with it"
+        );
+        assert!(
+            !worktree::branch_exists(&w.repo, &branch),
+            "the worker's branch went with it"
+        );
+        assert!(
+            agent_store::get_agent(&w.db, theirs.agent.id)
+                .unwrap()
+                .is_some(),
+            "the other card's session is untouched"
+        );
+    }
+
+    #[test]
+    fn deleting_a_board_ends_the_sessions_of_every_card_on_it() {
+        let mut w = world();
+        // Two cards, each with a worker of its own: a board takes every card on it with it, and their sessions too.
+        let first = w.card(w.open, Some("builder"));
+        let one = w.start(first, Some("sonnet")).unwrap();
+        let second = w.card(w.open, Some("builder"));
+        let two = w.start(second, Some("sonnet")).unwrap();
+        // A third card on another board must not be caught by the set.
+        let bystander = store::create_board(&mut w.db, "Other").unwrap().id;
+        let column = store::list_columns(&w.db, bystander)
+            .unwrap()
+            .into_iter()
+            .find(|column| column.name == "Open")
+            .unwrap()
+            .id;
+        let theirs = w
+            .start(w.card(column, Some("builder")), Some("sonnet"))
+            .unwrap();
+
+        let (board, roots) = (w.board, w.locations().channels);
+        // What the board command does: the ids are read before the board goes, then the set is handed over at once.
+        let mut gone = w.shared(|db| {
+            let ids: Vec<i64> = store::list_cards(&lock(db), board, true)
+                .unwrap()
+                .into_iter()
+                .map(|card| card.id)
+                .collect();
+            assert_eq!(
+                ids,
+                vec![first, second],
+                "the board's cards are read before it goes"
+            );
+            store::delete_board(&mut db.lock().unwrap(), board).unwrap();
+            let sessions = sessions_of_cards(&lock(db), &ids);
+            let ended: Vec<i64> = sessions.iter().map(|session| session.id).collect();
+            remove_sessions(db, &roots, &sessions);
+            ended
+        });
+        gone.sort_unstable();
+
+        let mut both = vec![one.agent.id, two.agent.id];
+        both.sort_unstable();
+        assert_eq!(gone, both, "every card's session on the board is ended");
+        assert!(
+            agent_store::get_agent(&w.db, one.agent.id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            agent_store::get_agent(&w.db, two.agent.id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            agent_store::get_agent(&w.db, theirs.agent.id)
+                .unwrap()
+                .is_some(),
+            "a session of a card on another board is untouched"
+        );
     }
 
     #[test]
