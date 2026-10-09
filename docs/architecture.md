@@ -1688,3 +1688,16 @@ lightness of the theme's accent (`themeSwatches`, `Palette.areaSwatches`, `areaC
 the old fixed wheel hue stays as the fallback). The theme's syntax colours were tried first and dropped — in GitHub's theme
 nearly all of them are blue, so the cloud turned monotone with two outliers. The Second Brain bar's
 "?" legend opens to the right of the bar (above the assistant bar), above it in narrow windows.
+
+### AI news skills (2026-10-09)
+
+Two bundled skills write the owner's AI news into the vault, no module code: `news-rss` reads the feeds of the source list
+`KI/ai-llm-agents-quellenliste.md` (inlined with `prepend_files`, so the owner's edits to the list count), `news-web`
+visits the sources that list marks without a feed. Each new article becomes one note
+`News/<date>/<source> – <title>.md` (frontmatter `title/source/url/published/tags`, the keyword `#ki-news`, a German
+summary of 2–4 sentences and the link to the original); a link already present anywhere under `News/` is skipped.
+The skills may write only into `News/`, and treat fetched text as data. A first run: `news-rss` wrote 20 notes in 114 s,
+`news-web` 12 in 90 s, on the skill provider (OpenRouter, Ling Flash). Feeds that fail are skipped and named in the report.
+`News/` is its own area in the Orbit's cloud; its colour is pinned to turquoise (`graph/model.ts` `PINNED_AREA_HUES`: the
+theme swatch nearest to hue 180) instead of coming from the name's hash. No routine is set up yet — the skills run by hand
+(`run-skill news-rss`) or from a routine the owner adds.

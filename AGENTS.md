@@ -135,7 +135,7 @@ from the code itself:
 - **Bundled skills are seed-if-absent**: a `resources/<name>/SKILL.md` edit does **not**
   reach an install whose `~/.axiomata/skills/<name>/SKILL.md` already exists (the seed never
   overwrites). Bring it up to date with `cargo run -p axiomata-cli -- skills reseed --force`
-  (re-copies only the bundled ones — the four digests/cleanup plus `inbox-sort` and `todo-to-kanban`; user skills untouched).
+  (re-copies only the bundled ones — the four digests/cleanup plus `inbox-sort`, `todo-to-kanban`, `news-rss` and `news-web`; user skills untouched).
 - **HTML/course pages render via `<iframe sandbox srcdoc=…>`, not `asset://`** — an
   `asset://` + `<iframe src=…>` design was tried first and never actually worked (silent
   WebKit sandboxing wall); don't re-attempt it without reading the postmortem in

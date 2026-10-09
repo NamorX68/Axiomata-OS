@@ -265,11 +265,40 @@ export function glyphForModuleType(type: string): string {
 }
 
 /**
+ * Areas whose colour the owner chose, by lower-case name, as a hue in degrees: an area that should be known at a glance
+ * (the AI news, turquoise) does not leave its colour to the name's hash.
+ */
+const PINNED_AREA_HUES: ReadonlyMap<string, number> = new Map([["news", 180]]);
+
+/** The swatch whose hue lies nearest to `hue` (around the wheel), or undefined when the theme gave none that reads. */
+function nearestSwatch(swatches: readonly string[], hue: number): string | undefined {
+  let best: string | undefined;
+  let bestDistance = Infinity;
+  for (const swatch of swatches) {
+    const match = /^hsl\((\d+)/.exec(swatch);
+    if (!match?.[1]) continue;
+    const gap = Math.abs(Number(match[1]) - hue);
+    const distance = Math.min(gap, 360 - gap);
+    if (distance < bestDistance) {
+      best = swatch;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/**
  * Stable per-area colour from the name. With `swatches` (the theme's own hues, see {@link Palette.areaSwatches}) the
  * name picks one of them, so the cloud follows the theme; without any, a hue from the wheel stands in
  * (saturation/lightness by scheme).
  */
 export function areaColor(name: string, light: boolean, swatches: readonly string[] = []): string {
+  const pinned = PINNED_AREA_HUES.get(name.toLowerCase());
+  if (pinned !== undefined) {
+    const nearest = nearestSwatch(swatches, pinned);
+    if (nearest) return nearest;
+    return light ? `hsl(${pinned} 55% 42%)` : `hsl(${pinned} 70% 68%)`;
+  }
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   const swatch = swatches[h % swatches.length];

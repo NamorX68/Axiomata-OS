@@ -97,6 +97,19 @@ describe("buildAppNodes", () => {
     expect(themeSwatches("rgb(255, 122, 26)", false)).toHaveLength(12);
   });
 
+  it("pins the News area to the swatch nearest to turquoise, whatever its hash or case", () => {
+    const wheel = themeSwatches("#ff7a1a", false);
+    const hueOf = (c: string) => Number(/hsl\((\d+)/.exec(c)?.[1]);
+    const news = areaColor("News", false, wheel);
+    expect(news).toBe(areaColor("news", false, wheel));
+    const distance = (h: number) => Math.min(Math.abs(h - 180), 360 - Math.abs(h - 180));
+    expect(Math.min(...wheel.map((c) => distance(hueOf(c))))).toBe(distance(hueOf(news)));
+    expect(areaColor("News", false, [])).toBe("hsl(180 70% 68%)");
+    expect(areaColor("News", true, [])).toBe("hsl(180 55% 42%)");
+    // Names that exist on every object are no pins.
+    expect(wheel).toContain(areaColor("constructor", false, wheel));
+  });
+
   it("draws the IDE view entry with its own code_blocks glyph", () => {
     const nodes = buildAppNodes([{ type: "view:ide", title: "IDE" }], [], [], null, palette);
     expect(nodes[0]).toMatchObject({ appType: "view:ide", glyph: "code-blocks", label: "IDE" });

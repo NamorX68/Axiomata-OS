@@ -60,6 +60,16 @@ const DEFAULT_SKILLS: &[(&str, &str)] = &[
         "todo-to-kanban",
         include_str!("../../resources/todo-to-kanban/SKILL.md"),
     ),
+    // The owner's AI news, written as notes into the vault's `News/` folder (owner, 2026-10-09): the sources with a
+    // feed, and the ones without.
+    (
+        "news-rss",
+        include_str!("../../resources/news-rss/SKILL.md"),
+    ),
+    (
+        "news-web",
+        include_str!("../../resources/news-web/SKILL.md"),
+    ),
 ];
 
 /// Writes `content` into `~/.axiomata/skills/<name>/SKILL.md` if it isn't
