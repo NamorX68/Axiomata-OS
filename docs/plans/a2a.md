@@ -708,3 +708,15 @@ Agenten sind“.
 - **Der Zweig steht auf Kachel und Liste** (`TeamPane.svelte`, `AgentsPanel.svelte`): die Kachel im Flow und die Zeile
   in der Agents-Liste tragen den ausgecheckten Zweig der Sitzung (Monospace, gekürzt, voll im Tooltip) — bisher stand
   er nur in der Fußzeile des eigenen Panes. Ein Reviewer hat keinen (detached), dann steht nichts da.
+
+## Fund der Mac-Runde 4 (2026-10-10): Karte löschen beendet die Sitzungen
+
+- **„Karte löschen“ beendet jetzt die Sitzungen der Karte** (`commands::delete_card` → `card_session::forget_card_sessions`,
+  Tauri-Befehl jetzt `async`): bisher entfernte das Löschen nur die Kartenzeile. Die Sitzung, die das Studio für die Karte
+  gestartet hatte (Arbeiter und Reviewer), blieb als Agentenzeile stehen — und damit als Kachel im Agentenbereich des Flow,
+  obwohl es die Karte nicht mehr gab (Fund: Karte #60, ihre Sitzungen `allrounder-60` und `reviewer-60-2`). Jetzt enden die
+  Sitzungen mit der Karte; wie beim Plan-Löschen und beim Übernehmen gehen Worktree, Zweig, Geheimnis, Kanal und die
+  Opencode-Registrierung mit, und was sich nicht entfernen lässt, wird protokolliert, nie als Fehler. Der Befehl gibt die
+  IDs der beendeten Sitzungen zurück; der Kanban-Bereich schließt darauf ihre Panes (`studio:close-agent-panes`) und lädt
+  die Agenten neu. **Nicht migriert:** schon verwaiste Sitzungen bleiben; sie sind im Agentenbereich (Papierkorb) oder mit
+  `ide agents delete <id>` zu entfernen.
