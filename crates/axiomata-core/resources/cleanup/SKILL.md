@@ -1,6 +1,6 @@
 ---
 name: cleanup
-description: "General workspace-maintenance skill for tidying up files/entries the app itself doesn't manage the lifecycle of. Job 1 deletes Mail summary notes older than 3 days (by the email's date in the filename); Job 2 removes ToDo.md Done entries older than 3 days (by their completion-date stamp). Always writes a dated Markdown report of what it did, in addition to its reply. More jobs get their own numbered section as they're added; keep the name generic (cleanup), not tied to any one job."
+description: "General workspace-maintenance skill for tidying up files/entries the app itself doesn't manage the lifecycle of. Job 1 deletes Mail summary notes older than 3 days (by the email's date in the filename); Job 2 removes ToDo.md Done entries older than 3 days (by their completion-date stamp); Job 3 deletes Cleanup/ reports older than 3 days (by the date in the filename). Always writes a dated Markdown report of what it did, in addition to its reply. More jobs get their own numbered section as they're added; keep the name generic (cleanup), not tied to any one job."
 backend: claude-code
 allowed_tools: Bash(rm:*) Edit Write
 ---
@@ -78,6 +78,37 @@ Do exactly this and nothing more:
    were removed (quote their text), and how many were kept (in-cutoff or
    undated).
 
+## Job 3: old Cleanup reports
+
+Delete old report files from `Cleanup/` so the folder doesn't accumulate them
+forever. Deliberately narrow — **only** files directly under `Cleanup/` whose
+name matches `Cleanup/YYYY-MM-DD-report.md`. Anything else inside `Cleanup/`,
+and everything outside it, is left alone entirely.
+
+Do exactly this and nothing more:
+
+1. List the files directly in the `Cleanup/` folder (your current directory
+   is the workspace root) whose name matches `Cleanup/YYYY-MM-DD-report.md` —
+   a 4-digit year, 2-digit month, 2-digit day, then the literal `-report.md`,
+   e.g. `Cleanup/2026-09-06-report.md`. Skip any file that does not match
+   this exact shape (no leading date, a different suffix, a subfolder, …) —
+   leave those alone entirely.
+2. Compute today's date and the cutoff date 3 days ago, both as
+   `YYYY-MM-DD`, exactly as in Jobs 1 and 2 (`date +%Y-%m-%d` and
+   `date -v-3d +%Y-%m-%d`, the BSD `-v` flag — this is macOS).
+3. For each matching file, compare its `YYYY-MM-DD` date prefix against the
+   cutoff as plain strings, exactly as in Jobs 1 and 2 (ISO dates sort
+   lexicographically the same as chronologically).
+4. Delete every file whose date is strictly older than the cutoff (i.e.
+   `file_date < cutoff_date`) with `rm`. Keep every report from the cutoff
+   date onward — including today's, which this very run may not have written
+   yet (Reporting below writes it afterwards, so ordering within one run is
+   safe).
+5. Note for the report: how many dated report files were found, how many
+   were deleted (their filenames), and how many were kept. If `Cleanup/`
+   doesn't exist or has no matching files, note that plainly instead of
+   treating it as an error.
+
 ## Reporting
 
 Whichever job(s) you ran, always do both of these at the end, in order:
@@ -89,6 +120,8 @@ Whichever job(s) you ran, always do both of these at the end, in order:
    skill more than once on the same day overwrites that day's report, which
    is fine. If a job you didn't run has an earlier report entry from a
    previous day, don't touch previous reports — each day's report is its
-   own file.
+   own file. Removing an old report is Job 3's job and nothing else's, and
+   Job 3 only ever deletes reports strictly older than the cutoff — so this
+   run's report and every in-cutoff one stay, whoever ran last.
 2. Reply with a short plain-text summary of what happened, ending with the
    report's path so the owner can open it (e.g. "See Cleanup/2026-09-06-report.md.").
