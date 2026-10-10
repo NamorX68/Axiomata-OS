@@ -7,10 +7,23 @@
 <script lang="ts">
   import type { AgentEntry } from "../core/backend";
   import { describeEntry } from "./agentEntry";
+  import type { ReachView } from "./reach";
 
-  let { entry }: { entry: AgentEntry | null } = $props();
+  let {
+    entry,
+    reach = "unknown",
+    reason = null,
+    onreconnect,
+  }: {
+    entry: AgentEntry | null;
+    /** What the pane found out about the running server, beyond the entry written at the start (card #72). */
+    reach?: ReachView;
+    reason?: string | null;
+    /** Registers the tools again; offered while they are not reachable. */
+    onreconnect?: () => void;
+  } = $props();
 
-  const view = $derived(describeEntry(entry));
+  const view = $derived(describeEntry(entry, reach, reason));
 </script>
 
 <section class="team" aria-label="Team tools">
@@ -20,6 +33,9 @@
   </header>
   {#if view.detail}
     <p class="note">{view.detail}</p>
+  {/if}
+  {#if onreconnect && entry?.status === "registered" && reach === "unreachable"}
+    <button class="ax-btn reconnect" type="button" onclick={onreconnect}>Reconnect</button>
   {/if}
   {#if entry && entry.tools.length > 0}
     <ul class="tools">
@@ -73,6 +89,10 @@
   .note {
     margin: 0 0 var(--ax-space-2);
     color: var(--ax-text-muted);
+  }
+
+  .reconnect {
+    margin: 0 0 var(--ax-space-2);
   }
 
   .later {

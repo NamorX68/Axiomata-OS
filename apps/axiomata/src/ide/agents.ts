@@ -11,11 +11,13 @@
 import {
   invokeBackend as invoke,
   type AgentSpec,
+  type AgentState,
   type AgentStatus,
   type Harness,
   type IdeAgent,
   type ProvisionedAgent,
 } from "../core/backend";
+import type { ReachAnswer } from "./reach";
 
 /** The harnesses, in the order a picker should offer them. */
 export const HARNESSES: { id: Harness; label: string; hint: string }[] = [
@@ -80,6 +82,15 @@ export function prepareAgent(id: number): Promise<ProvisionedAgent> {
  */
 export function newAgentSession(id: number): Promise<boolean> {
   return invoke<boolean>("ide_agent_new_session", { id });
+}
+
+/**
+ * Whether the session's team tools (its MCP server) can be reached. With `healWhile` set to the status the pane
+ * shows, a running session whose server the service dropped while the pane sat idle gets it registered again
+ * (card #72); `null` only looks.
+ */
+export function sessionReach(id: number, healWhile: AgentState | null): Promise<ReachAnswer> {
+  return invoke<ReachAnswer>("ide_session_reach", { id, healWhile });
 }
 
 /**

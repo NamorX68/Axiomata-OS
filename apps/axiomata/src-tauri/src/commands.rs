@@ -2537,6 +2537,21 @@ pub async fn prepare_ide_agent(
         .map_err(|err| err.to_string())
 }
 
+/// Whether session `id`'s team tools (its MCP server) can be reached. With `heal_while` set to the status the pane
+/// shows, a running session whose server the service dropped while the pane sat idle gets it registered again
+/// (card #72); any other status only looks.
+#[tauri::command]
+pub async fn ide_session_reach(
+    state: State<'_, CoreState>,
+    id: i64,
+    heal_while: Option<String>,
+) -> Result<axiomata_core::ide_start::Reach, String> {
+    let heal_while = heal_while.and_then(|status| ide::lifecycle::AgentState::parse(&status));
+    axiomata_core::ide_start::reach(&state, id, heal_while)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// Forgets an Opencode agent's session so its next start opens a fresh one
 /// ("New session", opencode2.md Q9). The old session stays in Opencode.
 #[tauri::command]

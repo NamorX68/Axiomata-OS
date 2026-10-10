@@ -320,6 +320,7 @@ pub fn run() {
             commands::delete_ide_agent,
             commands::prepare_ide_agent,
             commands::ide_agent_new_session,
+            commands::ide_session_reach,
             commands::ide_mailbox_nudge,
             commands::ide_mailbox_nudged,
             commands::ide_mailbox_messages,

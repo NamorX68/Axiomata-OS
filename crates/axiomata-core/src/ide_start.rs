@@ -17,7 +17,9 @@ use crate::AxiomataError;
 use crate::agent_entry::{self, AgentEntry};
 use crate::agents::opencode;
 use crate::ide::agent_store;
+use crate::ide::lifecycle::AgentState;
 use crate::ide::model::Harness;
+use crate::ide::presence;
 use crate::ide::provision::{self, Provisioned};
 use crate::paths;
 use crate::roster;
@@ -342,6 +344,129 @@ pub fn new_session(
     Ok(agent_store::set_opencode_session(&conn, id, None)?)
 }
 
+/// Whether an Opencode session's team tools can be reached right now, as far as the mailbox is concerned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Reach {
+    /// The session's MCP server is running: mail to it is delivered.
+    Reachable,
+    /// The server was gone and has been registered with the service again.
+    Reconnected,
+    /// The server is gone and was not (or could not be) brought back.
+    Unreachable { reason: Option<String> },
+    /// Not a session that has a registered server: another harness, a command of its own, a shared folder, or one
+    /// that was never started.
+    NotApplicable,
+}
+
+/// The directory an Opencode session's MCP server is registered at, or `None` when this session has no such
+/// registration to keep (see [`Reach::NotApplicable`]).
+fn registration_directory(
+    harness: Harness,
+    command: &str,
+    worktree: Option<&std::path::Path>,
+    project_is_repo: bool,
+) -> Option<std::path::PathBuf> {
+    let generated_command = command.trim().is_empty();
+    (harness == Harness::Opencode && generated_command && project_is_repo)
+        .then_some(worktree)
+        .flatten()
+        .map(std::path::Path::to_path_buf)
+}
+
+/// Whether a harness in this state runs, so that a server registered for its session is right. An ended one must stay
+/// unreachable: a server registered for it would make a finished session look alive.
+fn harness_runs(state: AgentState) -> bool {
+    matches!(
+        state,
+        AgentState::Idle | AgentState::Working | AgentState::Waiting
+    )
+}
+
+/// Says whether session `id`'s MCP server is running and, when `heal_while` names a running state, registers it again
+/// if it is not.
+///
+/// The service runs a location's MCP servers per directory and drops a location that sat idle (its log: "location
+/// services evicted"); the server goes with it, while the pane still shows an idle session. Mail to such a session
+/// comes back undeliverable although nothing ended it. Registering again is what a start does anyway, so this is the
+/// same step without a restart of the terminal. `heal_while` is the status the pane shows (as for the mail nudge):
+/// the app owns the panes, so the pane is the one that knows the harness runs; `None` or a state that does not run
+/// only looks.
+///
+/// A start in progress is waited for, so a probe never sees the moment between its registration and the server's lock.
+/// Registering issues the session's secret anew, so a caller should look twice before it heals: a server that is just
+/// starting has not taken its lock yet and would lose its secret under a heal.
+///
+/// # Errors
+///
+/// A database error.
+pub async fn reach(
+    core: &AxiomataCore,
+    id: i64,
+    heal_while: Option<AgentState>,
+) -> Result<Reach, AxiomataError> {
+    let roots = paths::ide_locations().channels;
+    let reachable = |roots: &_| presence::live_sessions(roots, &[id]).contains(&id);
+    if reachable(&roots) {
+        return Ok(Reach::Reachable);
+    }
+    let heal = heal_while.is_some_and(harness_runs);
+    let _start = if heal {
+        Some(start_lock().lock().await)
+    } else {
+        None
+    };
+    if heal && reachable(&roots) {
+        return Ok(Reach::Reachable);
+    }
+    let (agent, role, launch, directory) = {
+        let conn = core.db_lock();
+        let Some(agent) = agent_store::get_agent(&conn, id)? else {
+            return Ok(Reach::NotApplicable);
+        };
+        let is_repo = crate::ide::store::get_project(&conn, agent.project_id)?
+            .is_some_and(|project| crate::ide::worktree::is_repo(&project.repo_root));
+        let Some(directory) = registration_directory(
+            agent.harness,
+            &agent.command,
+            agent.worktree_path.as_deref(),
+            is_repo,
+        ) else {
+            return Ok(Reach::NotApplicable);
+        };
+        // A session the service never saw has nothing to keep registered; its start makes the first registration.
+        if agent.opencode_session.is_none() {
+            return Ok(Reach::NotApplicable);
+        }
+        let config = core.config_read().clone();
+        let role = roster::roles_for_project(&conn, &config, agent.project_id)
+            .into_iter()
+            .find(|role| role.name == agent.agent_role);
+        let launch = launch_of(&conn, &agent).map(|launch| launch.for_role(role.as_ref()));
+        (agent, role, launch, directory)
+    };
+    if !heal {
+        return Ok(Reach::Unreachable { reason: None });
+    }
+    if !directory.is_dir() {
+        return Ok(Reach::Unreachable {
+            reason: Some("its worktree is gone; restart the session".to_owned()),
+        });
+    }
+    let entry =
+        agent_entry::wire_opencode(&roots, &agent, &directory, role.as_ref(), launch.as_ref())
+            .await;
+    if entry.status == agent_entry::EntryStatus::Registered {
+        tracing::info!(
+            agent = id,
+            "the MCP server of an Opencode session was gone; registered it again"
+        );
+        Ok(Reach::Reconnected)
+    } else {
+        Ok(Reach::Unreachable { reason: entry.note })
+    }
+}
+
 /// The launch command with `--session <id>` added.
 fn with_session(command: &str, session: &str) -> String {
     format!("{command} --session {session}")
@@ -411,5 +536,34 @@ mod tests {
             with_session("opencode", "ses_abc"),
             "opencode --session ses_abc"
         );
+    }
+
+    #[test]
+    fn only_an_opencode_session_on_the_generated_command_in_a_repository_has_a_registration_to_keep()
+     {
+        let tree = std::path::Path::new("/w/tree");
+        let dir = |harness, command: &str, worktree, repo| {
+            registration_directory(harness, command, worktree, repo)
+        };
+        assert_eq!(
+            dir(Harness::Opencode, "  ", Some(tree), true),
+            Some(tree.to_path_buf())
+        );
+        assert_eq!(dir(Harness::ClaudeCode, "", Some(tree), true), None);
+        assert_eq!(
+            dir(Harness::Opencode, "opencode -m x", Some(tree), true),
+            None
+        );
+        assert_eq!(dir(Harness::Opencode, "", Some(tree), false), None);
+        assert_eq!(dir(Harness::Opencode, "", None, true), None);
+    }
+
+    #[test]
+    fn only_a_running_harness_is_healed() {
+        for state in [AgentState::Idle, AgentState::Working, AgentState::Waiting] {
+            assert!(harness_runs(state), "{state:?}");
+        }
+        assert!(!harness_runs(AgentState::Starting));
+        assert!(!harness_runs(AgentState::Ended));
     }
 }
