@@ -69,6 +69,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (27, include_str!("migrations/0009_session_spend_source.sql")),
     // The default board columns renamed to English (the German default names only; a column the owner named stays).
     (28, include_str!("migrations/0010_column_names_english.sql")),
+    // The marker colour of a project: a slot into the theme's twelve hues (card #70).
+    (29, axiomata_ide::SCHEMA_SQL_V10),
 ];
 
 /// Opens (creating if necessary) the SQLite database at
@@ -353,7 +355,12 @@ mod tests {
         )
         .unwrap();
 
-        let sql = MIGRATIONS.last().expect("migrations must not be empty").1;
+        // By number, not "the last one": later migrations must not change which one this test runs.
+        let sql = MIGRATIONS
+            .iter()
+            .find(|(version, _)| *version == 28)
+            .expect("migration 28 exists")
+            .1;
         conn.execute_batch(sql).unwrap();
 
         let names: Vec<String> = conn

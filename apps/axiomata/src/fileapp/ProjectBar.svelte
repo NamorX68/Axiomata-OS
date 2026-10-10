@@ -11,6 +11,7 @@
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import { folderNameProblem, otherProjects } from "./projectModel";
+  import { ACCENT_SLOTS, accentColor, themeAreaSwatches } from "../ide/projectAccent";
 
   interface Props {
     projects: IdeProject[];
@@ -24,9 +25,13 @@
     onChangeFolder: (id: number) => void;
     /** "Remove from list": the registry row goes, the folder stays. */
     onRemove: (id: number) => void;
+    /** Gives a project its marker colour (a slot), or none; without it the bar shows markers but cannot change them. */
+    onSetAccent?: (id: number, slot: number | null) => void;
   }
 
-  let { projects, current, busy = false, onPick, onOpenFolder, onNew, onClose, onChangeFolder, onRemove }: Props = $props();
+  let { projects, current, busy = false, onPick, onOpenFolder, onNew, onClose, onChangeFolder, onRemove, onSetAccent }: Props = $props();
+
+  const swatches = themeAreaSwatches;
 
   let open = $state(false);
   let adding = $state(false);
@@ -77,6 +82,7 @@
   <button class="current" type="button" aria-expanded={open} disabled={busy} onclick={() => (open = !open)}>
     <Icon name="folder" size="sm" />
     {#if current}
+      {#if accentColor(current.accent_slot, $swatches)}<span class="dot" style:background={accentColor(current.accent_slot, $swatches)}></span>{/if}
       <span class="name" title={current.repo_root}>{current.name}</span>
       {#if !current.root_exists}<span class="missing">folder missing</span>{/if}
     {:else}
@@ -99,7 +105,10 @@
                   onPick(project.id);
                 }}
               >
-                <span>{project.name}</span>
+                <span class="entry-name">
+                  {#if accentColor(project.accent_slot, $swatches)}<span class="dot" style:background={accentColor(project.accent_slot, $swatches)}></span>{/if}
+                  {project.name}
+                </span>
                 <small class:missing={!project.root_exists}>{project.repo_root}</small>
               </button>
               <!-- Quiet until the row is hovered or focused, as in the IDE's project list. -->
@@ -134,6 +143,31 @@
         <button type="button" role="menuitem" class="action" onclick={() => (adding = true)}
           ><Icon name="plus" size="sm" /> New project…</button
         >
+        {#if current && onSetAccent}
+          <div class="accent-row" role="group" aria-label="Marker colour of {current.name}">
+            <span class="label">Marker</span>
+            <button
+              type="button"
+              class="slot none"
+              class:chosen={current.accent_slot === null}
+              aria-label="No marker colour"
+              aria-pressed={current.accent_slot === null}
+              title="No marker"
+              onclick={() => onSetAccent(current.id, null)}
+            ></button>
+            {#each { length: ACCENT_SLOTS } as _, slot (slot)}
+              <button
+                type="button"
+                class="slot"
+                class:chosen={current.accent_slot === slot}
+                style:background={accentColor(slot, $swatches)}
+                aria-label="Marker colour {slot + 1}"
+                aria-pressed={current.accent_slot === slot}
+                onclick={() => onSetAccent(current.id, slot)}
+              ></button>
+            {/each}
+          </div>
+        {/if}
         {#if current}
           <button
             type="button"
@@ -221,6 +255,46 @@
 
   .name.none {
     color: var(--ax-text-muted);
+  }
+
+  /* A mark for orientation, small on purpose: it must never compete with the accent. */
+  .dot {
+    flex: none;
+    width: calc(7px * var(--ax-ui-scale));
+    height: calc(7px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+  }
+
+  .entry-name {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+  }
+
+  .accent-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-1) var(--ax-space-2);
+  }
+
+  /* The menu's own `button` rule makes buttons full-width columns; a swatch is a dot. */
+  .menu .accent-row .slot {
+    width: calc(14px * var(--ax-ui-scale));
+    height: calc(14px * var(--ax-ui-scale));
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-pill);
+  }
+
+  .menu .accent-row .slot.none {
+    background: none;
+    border-color: var(--ax-border-strong);
+  }
+
+  .menu .accent-row .slot.chosen {
+    border-color: var(--ax-text);
   }
 
   .missing {

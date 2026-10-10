@@ -52,6 +52,7 @@ import {
   listProjects,
   openProject,
   saveLayoutSoon,
+  setProjectAccent,
   setProjectRoot,
 } from "./projects";
 
@@ -251,6 +252,24 @@ export async function changeRoot(id: number, layout: Layout): Promise<Layout | n
   } catch (err) {
     report(err);
     return null;
+  }
+}
+
+/**
+ * Gives a project its marker colour, or takes it away with `null` (card #70). Replaced in place, in the list and as the
+ * open project: a marker is not worth emptying the list for, which `refresh` does.
+ */
+export async function setAccent(id: number, slot: number | null): Promise<void> {
+  try {
+    const updated = await setProjectAccent(id, slot);
+    if (!updated) return;
+    state.update((s) => ({
+      ...s,
+      projects: s.projects.map((project) => (project.id === id ? updated : project)),
+      current: s.current?.id === id ? { ...s.current, accent_slot: updated.accent_slot } : s.current,
+    }));
+  } catch (err) {
+    report(err);
   }
 }
 

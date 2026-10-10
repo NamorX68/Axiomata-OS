@@ -48,6 +48,7 @@
     onCloseProject: () => void;
     onChangeFolder: (id: number) => void;
     onRemoveProject: (id: number) => void;
+    onSetAccent?: (id: number, slot: number | null) => void;
 
     // The tree and the search.
     roots: FileRootInfo[];
@@ -90,6 +91,7 @@
     onCloseProject,
     onChangeFolder,
     onRemoveProject,
+    onSetAccent,
     roots,
     active,
     onOpenFile,
@@ -180,6 +182,7 @@
     onClose={onCloseProject}
     {onChangeFolder}
     onRemove={onRemoveProject}
+    {onSetAccent}
   />
   {#if tab === "files"}
     <div class="side-bar">

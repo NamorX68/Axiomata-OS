@@ -10,6 +10,7 @@ const project = (id: number, opened: string | null, exists = true): IdeProject =
   created_at: "2026-01-01T00:00:00Z",
   last_opened_at: opened,
   root_exists: exists,
+  accent_slot: null,
 });
 
 describe("canStart", () => {

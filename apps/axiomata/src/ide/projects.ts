@@ -29,6 +29,11 @@ export function renameProject(id: number, name: string): Promise<IdeProject | nu
   return invoke<IdeProject | null>("rename_ide_project", { id, name });
 }
 
+/** Gives a project its marker colour (a slot of the theme's area hues), or takes it away with `null`. */
+export function setProjectAccent(id: number, slot: number | null): Promise<IdeProject | null> {
+  return invoke<IdeProject | null>("set_ide_project_accent", { id, slot });
+}
+
 /** Changes where a project points without touching its id, name or layout. */
 export function setProjectRoot(id: number): Promise<IdeProject | null> {
   return invoke<IdeProject | null>("project_set_root", { id });

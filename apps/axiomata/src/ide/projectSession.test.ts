@@ -12,6 +12,7 @@ vi.mock("./projects", () => ({
   listProjects: vi.fn(),
   openProject: vi.fn(),
   setProjectRoot: vi.fn(),
+  setProjectAccent: vi.fn(),
   deleteProject: vi.fn(),
   flushLayout: vi.fn(async () => {}),
   saveLayoutSoon: vi.fn(),
@@ -38,6 +39,7 @@ function project(id: number, over: Partial<IdeProject> = {}): IdeProject {
     created_at: "2026-09-01T00:00:00Z",
     last_opened_at: null,
     root_exists: true,
+    accent_slot: null,
     ...over,
   };
 }
@@ -163,6 +165,38 @@ describe("changeRoot", () => {
   it("leaves the layout alone when the project moved is not the open one", async () => {
     api.setProjectRoot.mockResolvedValue(project(7, { repo_root: "/somewhere" }));
     expect(await session.changeRoot(7, layout)).toBeNull();
+  });
+});
+
+describe("setAccent", () => {
+  it("replaces the project in the list and as the open one, without emptying the list", async () => {
+    api.listProjects.mockResolvedValue([project(1), project(2)]);
+    api.openProject.mockResolvedValue(project(1));
+    await session.open(1);
+    api.setProjectAccent.mockResolvedValue(project(1, { accent_slot: 5 }));
+
+    await session.setAccent(1, 5);
+
+    expect(api.setProjectAccent).toHaveBeenCalledWith(1, 5);
+    expect(get(session.session).current?.accent_slot).toBe(5);
+    expect(get(session.session).projects.map((p) => p.accent_slot)).toEqual([5, null]);
+  });
+
+  it("leaves the open project alone when another one is marked", async () => {
+    api.listProjects.mockResolvedValue([project(1), project(2)]);
+    api.openProject.mockResolvedValue(project(1));
+    await session.open(1);
+    api.setProjectAccent.mockResolvedValue(project(2, { accent_slot: 3 }));
+
+    await session.setAccent(2, 3);
+
+    expect(get(session.session).current?.accent_slot).toBeNull();
+  });
+
+  it("reports a refusal instead of throwing", async () => {
+    api.setProjectAccent.mockRejectedValue(new Error("must be below 12"));
+    await session.setAccent(1, 99);
+    expect(toasted).toHaveBeenCalled();
   });
 });
 

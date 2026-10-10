@@ -11,6 +11,7 @@ const project = (id: number): IdeProject => ({
   created_at: "2026-09-01T00:00:00Z",
   last_opened_at: null,
   root_exists: true,
+  accent_slot: null,
 });
 
 describe("the editor's project", () => {

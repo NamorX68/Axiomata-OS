@@ -45,7 +45,9 @@
   import { getModule } from "../core/registry";
   import { openFilePanel } from "../core/staging";
   import { bringToFront, instances } from "../core/stores";
-  import { startActivityPoll, studioActivity } from "../core/studioActivity";
+  import { startActivityPoll, studioActivity, studioProject } from "../core/studioActivity";
+  import { accentColor, themeAreaSwatches } from "../ide/projectAccent";
+  import { listProjects } from "../ide/projects";
   import { toast } from "../core/toast";
   import type { ModuleContext } from "../core/types";
   import { APP_RING, layoutAppRing, layoutExpandedGroup, layoutOrbit } from "../graph/layout";
@@ -358,6 +360,31 @@
     if (renderer) renderer.activity = $studioActivity;
   });
 
+  // The pulse takes the marker colour of the project the sessions at work belong to (card #70); the theme's accent
+  // when there is none, or when they span several projects.
+  let pulseSlot = $state<number | null>(null);
+  $effect(() => {
+    const project = $studioProject;
+    if (project === null) {
+      pulseSlot = null;
+      return;
+    }
+    let stale = false;
+    void listProjects()
+      .then((all) => {
+        if (!stale) pulseSlot = all.find((p) => p.id === project)?.accent_slot ?? null;
+      })
+      .catch(() => {
+        if (!stale) pulseSlot = null;
+      });
+    return () => {
+      stale = true;
+    };
+  });
+  $effect(() => {
+    if (renderer) renderer.activityColor = accentColor(pulseSlot, $themeAreaSwatches);
+  });
+
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
@@ -398,7 +425,10 @@
     // The live pulse: the Studio's open card sessions, asked for in the background (no Studio window needed).
     const stopActivityPoll = startActivityPoll(
       () => invokeBackend("open_card_sessions"),
-      (count) => studioActivity.set(count),
+      (count, project) => {
+        studioActivity.set(count);
+        studioProject.set(project);
+      },
     );
     return () => {
       stopActivityPoll();

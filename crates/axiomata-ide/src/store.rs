@@ -37,7 +37,11 @@ const MAX_NAME_LEN: usize = 200;
 /// anything that would hurt; the point is that there *is* a ceiling.
 const MAX_LAYOUT_LEN: usize = 1024 * 1024;
 
-const PROJECT_COLS: &str = "id, name, repo_root, layout_json, created_at, last_opened_at";
+const PROJECT_COLS: &str =
+    "id, name, repo_root, layout_json, created_at, last_opened_at, accent_slot";
+
+/// How many marker colours a project can have: the twelve hues of the theme's area palette (`themeSwatches`).
+pub const ACCENT_SLOTS: u8 = 12;
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -69,6 +73,7 @@ struct RawProject {
     layout_json: Option<String>,
     created_at: String,
     last_opened_at: Option<String>,
+    accent_slot: Option<u8>,
 }
 
 impl RawProject {
@@ -84,6 +89,7 @@ impl RawProject {
             layout_json: self.layout_json,
             created_at,
             last_opened_at,
+            accent_slot: self.accent_slot,
         })
     }
 }
@@ -96,6 +102,7 @@ fn row_to_raw(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawProject> {
         layout_json: row.get(3)?,
         created_at: row.get(4)?,
         last_opened_at: row.get(5)?,
+        accent_slot: row.get(6)?,
     })
 }
 
@@ -308,6 +315,24 @@ pub fn set_repo_root(db: &Connection, id: i64, root: &Path) -> Result<Option<Pro
     get_project(db, id)
 }
 
+/// Gives a project its marker colour: a slot below [`ACCENT_SLOTS`], or `None` for no marker.
+pub fn set_accent_slot(db: &Connection, id: i64, slot: Option<u8>) -> Result<Option<Project>> {
+    if slot.is_some_and(|slot| slot >= ACCENT_SLOTS) {
+        return Err(IdeError::Invalid {
+            field: "accent_slot",
+            reason: format!("must be below {ACCENT_SLOTS}"),
+        });
+    }
+    let changed = db.execute(
+        "UPDATE projects SET accent_slot = ?2 WHERE id = ?1",
+        params![id, slot],
+    )?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    get_project(db, id)
+}
+
 /// Stores the frontend's dock tree verbatim. `None` clears it, which puts the
 /// project back to "opens with the starting layout".
 pub fn set_layout(db: &Connection, id: i64, layout: Option<&str>) -> Result<bool> {
@@ -402,6 +427,8 @@ mod tests {
     fn temp_db() -> Connection {
         let db = Connection::open_in_memory().expect("in-memory database");
         db.execute_batch(crate::SCHEMA_SQL_V1).expect("schema");
+        db.execute_batch(crate::SCHEMA_SQL_V10)
+            .expect("accent column");
         db
     }
 
@@ -792,6 +819,51 @@ mod tests {
 
         let err = rename_project(&db, project.id, "   ").expect_err("refused");
         assert!(matches!(err, IdeError::Invalid { field: "name", .. }));
+    }
+
+    #[test]
+    fn a_project_has_no_marker_until_it_gets_one_and_can_lose_it_again() {
+        let db = temp_db();
+        let dir = TempDir::new("accent");
+        let project = create_project(&db, new_project("Marked", &dir)).expect("created");
+        assert_eq!(project.accent_slot, None);
+
+        let marked = set_accent_slot(&db, project.id, Some(7))
+            .expect("set")
+            .expect("still there");
+        assert_eq!(marked.accent_slot, Some(7));
+        assert_eq!(list_projects(&db).expect("listed")[0].accent_slot, Some(7));
+
+        let cleared = set_accent_slot(&db, project.id, None)
+            .expect("cleared")
+            .expect("still there");
+        assert_eq!(cleared.accent_slot, None);
+    }
+
+    #[test]
+    fn a_marker_outside_the_palette_is_refused_and_a_missing_project_is_none() {
+        let db = temp_db();
+        let dir = TempDir::new("accent-range");
+        let project = create_project(&db, new_project("Marked", &dir)).expect("created");
+
+        assert!(set_accent_slot(&db, project.id, Some(ACCENT_SLOTS - 1)).is_ok());
+        let err = set_accent_slot(&db, project.id, Some(ACCENT_SLOTS)).expect_err("refused");
+        assert!(matches!(
+            err,
+            IdeError::Invalid {
+                field: "accent_slot",
+                ..
+            }
+        ));
+        assert_eq!(
+            get_project(&db, project.id).unwrap().unwrap().accent_slot,
+            Some(ACCENT_SLOTS - 1)
+        );
+        assert!(
+            set_accent_slot(&db, 9999, Some(1))
+                .expect("no error")
+                .is_none()
+        );
     }
 
     /// `set_repo_root` runs the same `normalize_root` as `create_project` —

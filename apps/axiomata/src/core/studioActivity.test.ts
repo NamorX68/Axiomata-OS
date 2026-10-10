@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionCount, startActivityPoll } from "./studioActivity";
+import { sessionCount, sessionProject, startActivityPoll } from "./studioActivity";
 
 describe("sessionCount", () => {
   it("counts the sessions of a list and nothing else", () => {
@@ -8,6 +8,19 @@ describe("sessionCount", () => {
     expect(sessionCount([])).toBe(0);
     expect(sessionCount(null)).toBe(0);
     expect(sessionCount([{ nope: 1 }, "x", null])).toBe(0);
+  });
+});
+
+describe("sessionProject", () => {
+  it("names the project when all sessions at work belong to one", () => {
+    expect(sessionProject([{ card_id: 1, project_id: 4 }, { card_id: 2, project_id: 4 }])).toBe(4);
+  });
+
+  it("names none for no sessions, for several projects, or for an answer without projects", () => {
+    expect(sessionProject([])).toBeNull();
+    expect(sessionProject([{ card_id: 1, project_id: 4 }, { card_id: 2, project_id: 5 }])).toBeNull();
+    expect(sessionProject([{ card_id: 1 }])).toBeNull();
+    expect(sessionProject(null)).toBeNull();
   });
 });
 
@@ -20,10 +33,10 @@ describe("startActivityPoll", () => {
     const report = vi.fn();
     const stop = startActivityPoll(fetchOpen, report, 1000, () => false);
     await vi.advanceTimersByTimeAsync(0);
-    expect(report).toHaveBeenLastCalledWith(1);
+    expect(report).toHaveBeenLastCalledWith(1, null);
     fetchOpen.mockResolvedValue([]);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(report).toHaveBeenLastCalledWith(0);
+    expect(report).toHaveBeenLastCalledWith(0, null);
     stop();
     const calls = fetchOpen.mock.calls.length;
     await vi.advanceTimersByTimeAsync(5000);

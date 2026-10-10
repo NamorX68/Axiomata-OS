@@ -2292,6 +2292,18 @@ pub fn rename_ide_project(
     ide::store::rename_project(&db, id, &name).map_err(|err| err.to_string())
 }
 
+/// Gives a project its marker colour (a slot of the theme's twelve hues) or, with `None`, takes it away (card #70).
+/// Returns `None` if there is no such project.
+#[tauri::command]
+pub fn set_ide_project_accent(
+    state: State<'_, CoreState>,
+    id: i64,
+    slot: Option<u8>,
+) -> Result<Option<ide::Project>, String> {
+    let db = state.db_lock();
+    ide::store::set_accent_slot(&db, id, slot).map_err(|err| err.to_string())
+}
+
 /// Stores the frontend's serialised dock tree. `None` clears it, which is what
 /// makes the IDE build its starting layout next time.
 #[tauri::command]

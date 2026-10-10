@@ -365,6 +365,7 @@ let ideProjects: IdeProject[] = [
     created_at: new Date(Date.now() - 12 * 86_400_000).toISOString(),
     last_opened_at: new Date().toISOString(),
     root_exists: true,
+    accent_slot: 4,
   },
   {
     id: 2,
@@ -374,6 +375,7 @@ let ideProjects: IdeProject[] = [
     created_at: new Date(Date.now() - 30 * 86_400_000).toISOString(),
     last_opened_at: null,
     root_exists: false,
+    accent_slot: null,
   },
 ];
 
@@ -1393,6 +1395,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
           created_at: new Date().toISOString(),
           last_opened_at: null,
           root_exists: true,
+          accent_slot: null,
         };
         ideProjects = [...ideProjects, project];
       }
@@ -1402,6 +1405,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "rename_ide_project": {
       const project = ideProjects.find((p) => p.id === args.id);
       if (project) project.name = String(args.name);
+      return (project ?? null) as T;
+    }
+    case "set_ide_project_accent": {
+      const project = ideProjects.find((p) => p.id === args.id);
+      if (project) project.accent_slot = (args.slot as number | null) ?? null;
       return (project ?? null) as T;
     }
     case "project_set_root": {

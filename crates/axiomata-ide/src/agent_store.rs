@@ -1069,6 +1069,7 @@ mod tests {
         db.execute_batch(crate::SCHEMA_SQL_V6).unwrap();
         db.execute_batch(crate::SCHEMA_SQL_V8).unwrap();
         db.execute_batch(crate::SCHEMA_SQL_V9).unwrap();
+        db.execute_batch(crate::SCHEMA_SQL_V10).unwrap();
 
         let agent = get_agent(&db, 1).unwrap().unwrap();
         assert_eq!(agent.agent_role, "allrounder");

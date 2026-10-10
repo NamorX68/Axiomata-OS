@@ -12,6 +12,9 @@ export const ACTIVITY_POLL_MS = 5000;
 /** Sessions at work right now; 0 = quiet. */
 export const studioActivity: Writable<number> = writable(0);
 
+/** The one project all the sessions at work belong to, or `null` when there are none or they span several (card #70). */
+export const studioProject: Writable<number | null> = writable(null);
+
 /** Counts the entries of an `open_card_sessions` answer; anything that is not a list of sessions counts as none. */
 export function sessionCount(open: unknown): number {
   if (!Array.isArray(open)) return 0;
@@ -20,14 +23,25 @@ export function sessionCount(open: unknown): number {
   return open.filter(isSession).length;
 }
 
+/** The project every session of an `open_card_sessions` answer belongs to; `null` for none, or for more than one. */
+export function sessionProject(open: unknown): number | null {
+  if (!Array.isArray(open)) return null;
+  const ids = new Set<number>();
+  for (const s of open) {
+    const id = typeof s === "object" && s !== null ? (s as { project_id?: unknown }).project_id : undefined;
+    if (typeof id === "number") ids.add(id);
+  }
+  return ids.size === 1 ? ([...ids][0] ?? null) : null;
+}
+
 /**
- * Polls `fetchOpen` every `intervalMs` (and once right away) and reports the number of sessions to `report`. Skips a
+ * Polls `fetchOpen` every `intervalMs` (and once right away) and reports the number of sessions, and the one project they belong to, to `report`. Skips a
  * round while the window is hidden or the previous answer is still pending, and keeps the last count when a call fails
  * (a short backend hiccup must not read as "all quiet"). Returns the function that stops it.
  */
 export function startActivityPoll(
   fetchOpen: () => Promise<unknown>,
-  report: (count: number) => void,
+  report: (count: number, project: number | null) => void,
   intervalMs: number = ACTIVITY_POLL_MS,
   isHidden: () => boolean = () => document.hidden,
 ): () => void {
@@ -37,8 +51,8 @@ export function startActivityPoll(
     if (pending || isHidden()) return;
     pending = true;
     try {
-      const count = sessionCount(await fetchOpen());
-      if (!stopped) report(count);
+      const open = await fetchOpen();
+      if (!stopped) report(sessionCount(open), sessionProject(open));
     } catch {
       // Keep the last count.
     } finally {

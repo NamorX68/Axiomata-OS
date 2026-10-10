@@ -108,6 +108,7 @@
   import PaneHost from "./panes/PaneHost.svelte";
   import { focusedIn, PANE_ATTR, parkPanes, placePanes, restoreFocus } from "./paneStore";
     import * as projectSession from "./projectSession";
+  import { accentColor, themeAreaSwatches } from "./projectAccent";
   import { flushLayout } from "./projects";
   import ProjectSidebar from "../fileapp/ProjectSidebar.svelte";
   import GitDiffView from "../fileapp/GitDiffView.svelte";
@@ -130,6 +131,8 @@
   const sessionState = projectSession.session;
   const projects = $derived($sessionState.projects);
   const current = $derived($sessionState.current);
+  /** The open project's marker colour as `--ax-project-hue`, for the marks below it (card #70); none = unset. */
+  const projectHue = $derived(accentColor(current?.accent_slot, $themeAreaSwatches));
   const agents = $derived($sessionState.agents);
   const mode = $derived($sessionState.mode);
   /** The other modes' layouts: their panes stay mounted (hidden), so an agent keeps running while the files are shown. */
@@ -853,7 +856,14 @@
   onMount(() => () => agentStatus.watch(null));
 </script>
 
-<section class="ide" class:hidden={!open} inert={!open} aria-label="Studio" onkeydowncapture={onViewKeydown}>
+<section
+  class="ide"
+  class:hidden={!open}
+  inert={!open}
+  aria-label="Studio"
+  style:--ax-project-hue={projectHue}
+  onkeydowncapture={onViewKeydown}
+>
   <header>
     <div class="titles">
       <div class="brand" style:--tree-w="{tree.visible ? tree.width * $uiScale : 0}px">
@@ -936,6 +946,7 @@
       onCloseProject={() => void closeProject()}
       onChangeFolder={(id) => void changeRoot(id)}
       onRemoveProject={(id) => void removeProject(id)}
+      onSetAccent={(id, slot) => void projectSession.setAccent(id, slot)}
       roots={treeRoots}
       active={front}
       onOpenFile={openFromSidebar}
@@ -1098,6 +1109,8 @@
     gap: var(--ax-space-4);
     padding: var(--ax-space-3) var(--ax-space-5);
     border-bottom: 1px solid var(--ax-border);
+    /* The project's marker colour as a thin top edge; nothing when the project has none (card #70). */
+    box-shadow: inset 0 calc(2px * var(--ax-ui-scale)) 0 var(--ax-project-hue, transparent);
     flex: 0 0 auto;
   }
 

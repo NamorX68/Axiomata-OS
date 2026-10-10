@@ -189,6 +189,8 @@ export interface IdeProject {
    *  project whose folder has gone stays in the list, marked — an unmounted
    *  disk looks exactly like a deleted folder from the inside. */
   root_exists: boolean;
+  /** The marker colour: a slot (0–11) into the theme's area hues, or `null` for none (`ide/projectAccent.ts`). */
+  accent_slot: number | null;
 }
 
 /** Which harness runs an agent. Mirrors `axiomata_ide::model::Harness`. */

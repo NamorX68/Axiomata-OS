@@ -21,6 +21,9 @@ pub struct Project {
     pub layout_json: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_opened_at: Option<DateTime<Utc>>,
+    /// The marker colour the owner gave the project: a slot (`0..ACCENT_SLOTS`) into the twelve hues the theme draws
+    /// areas in, so the colour itself follows the theme. `None` = no marker, neutral like before.
+    pub accent_slot: Option<u8>,
     /// **Computed on read, never stored**: does `repo_root` still point at a
     /// directory?
     ///

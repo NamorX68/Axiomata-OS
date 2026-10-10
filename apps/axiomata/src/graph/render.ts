@@ -186,6 +186,9 @@ export class GraphRenderer {
   highlight: Set<string> | null = null;
   /** Orbit only: how many card sessions are at work right now (0 = quiet, nothing is drawn). */
   activity = 0;
+  /** Orbit only: the colour of the pulse when the sessions at work belong to one marked project (card #70); `null` =
+   *  the theme's accent. */
+  activityColor: string | null = null;
   private angle = 0;
   private last = 0;
   private textColor = "#fff";
@@ -839,7 +842,7 @@ export class GraphRenderer {
     const phase = this.pulsePhase(t);
     ctx.beginPath();
     ctx.arc(cx, cy, 6 + (R * 0.62 - 6) * phase, 0, TWO_PI);
-    ctx.strokeStyle = this.accentColor;
+    ctx.strokeStyle = this.activityColor ?? this.accentColor;
     ctx.globalAlpha = 0.32 * (1 - phase) ** 2;
     ctx.lineWidth = 1.5;
     ctx.stroke();
@@ -851,7 +854,7 @@ export class GraphRenderer {
     const { ctx } = this;
     const breath = this.options.pulse === false ? 0.6 : 0.5 + 0.5 * Math.sin(this.pulsePhase(t) * TWO_PI);
     const g = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 2.4);
-    g.addColorStop(0, this.accentColor);
+    g.addColorStop(0, this.activityColor ?? this.accentColor);
     g.addColorStop(1, "transparent");
     ctx.globalAlpha = 0.25 + 0.3 * breath;
     ctx.fillStyle = g;
@@ -867,7 +870,7 @@ export class GraphRenderer {
     const br = Math.max(6, r * 0.4);
     const bx = x + r * 0.78;
     const by = y - r * 0.78;
-    ctx.fillStyle = this.accentColor;
+    ctx.fillStyle = this.activityColor ?? this.accentColor;
     ctx.beginPath();
     ctx.arc(bx, by, br, 0, TWO_PI);
     ctx.fill();
