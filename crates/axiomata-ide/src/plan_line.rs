@@ -643,7 +643,7 @@ mod tests {
         integrate(&line, &second, "#2 second").unwrap();
 
         let done = take_over(&repo, &line, &tip(&line.path).unwrap(), "Plan 1").unwrap();
-        let crate::git::TakeOver::Done { commit } = done else {
+        let crate::git::TakeOver::Done { commit, .. } = done else {
             panic!("{done:?}")
         };
         // Both cards' commits, one each, on main — no merge commit.

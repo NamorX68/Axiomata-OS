@@ -24,13 +24,18 @@
 //!   not something this module can verify.
 //! * **[`take_over`] is the only function that touches the user's own working
 //!   copy**, and it refuses rather than guesses: wrong branch checked out,
-//!   something staged, the agent's work not committed, no message given, or
-//!   nothing on the agent's branch beyond what the base already has. A
-//!   conflict is undone before it returns, so the working copy is never left
-//!   half-merged. Whether the agent is mid-turn is a separate refusal, one
-//!   level up in `provision::TakeOverTarget::run` (G12) — `AgentRepo::take_over`
-//!   itself is crate-private, so nothing can reach it without going through
-//!   that check first.
+//!   something staged, the agent's work not committed, no message given. Two
+//!   ways of finding that there is nothing to take — the agent's branch is part
+//!   of the base already, or squashing it brings nothing the base does not have
+//!   — are *not* refusals but [`TakeOver::Done`] with `committed: false`: the
+//!   work is on the base, and what that means belongs to the caller (a card
+//!   still closes; there is simply no commit to make). Refusing here would
+//!   strand that caller forever over a success. A conflict is undone before it
+//!   returns, so the working copy is never left half-merged. Whether the agent
+//!   is mid-turn is a separate refusal, one level up in
+//!   `provision::TakeOverTarget::run` (G12) — `AgentRepo::take_over` itself is
+//!   crate-private, so nothing can reach it without going through that check
+//!   first.
 //!
 //! Nothing here ever pushes.
 
@@ -113,8 +118,11 @@ pub enum TakeOverMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum TakeOver {
-    /// Taken over; `commit` is the new commit on the base branch.
-    Done { commit: String },
+    /// Taken over: `commit` is where the work sits on the base branch — the commit this take-over just made, or one
+    /// that already held it when `committed` is false. In that case nothing was committed: the agent's branch brings
+    /// nothing the base does not have, so there was nothing to commit. The caller decides what that means; this
+    /// layer only says which of the two happened.
+    Done { commit: String, committed: bool },
     /// Conflicted and was undone; the working copy is as it was (G9).
     Conflict { files: Vec<String> },
 }
@@ -836,6 +844,12 @@ pub struct TakeOverRequest<'a> {
 /// committed work is taken over). A conflict is undone before this returns
 /// (G9). Afterwards the agent's branch is moved to the new base, so its diff
 /// is empty and it carries on from what was just taken over (G11).
+///
+/// Two findings that the agent has *nothing* to contribute — its branch is part
+/// of the base already, or squashing it stages nothing — answer with
+/// [`TakeOver::Done`] and `committed: false` instead of a refusal: no commit was
+/// made, `commit` names the base's tip, which holds the work. G11 does not run
+/// in that case, because nothing moved.
 pub fn take_over(request: TakeOverRequest<'_>) -> Result<TakeOver> {
     let TakeOverRequest {
         repo_root,
@@ -884,9 +898,13 @@ pub fn take_over(request: TakeOverRequest<'_>) -> Result<TakeOver> {
     .parse()
     .unwrap_or(0);
     if ahead == 0 {
-        return refuse(
-            "there is nothing on the agent's branch that is not already on the base".into(),
-        );
+        // The agent's branch is part of the base's history already — the owner merged it by hand, or an earlier
+        // take-over put it there. There is nothing to take over, so say that instead of refusing: the work *is* on
+        // the base, which is what a take-over is for, and it is the caller that decides what follows from it.
+        return Ok(TakeOver::Done {
+            commit: git(repo_root, &["rev-parse", "HEAD"])?.trim().to_string(),
+            committed: false,
+        });
     }
     if git_with(repo_root, &["diff", "--cached", "--quiet"], &[0, 1])?.0 == 1 {
         return refuse(
@@ -902,7 +920,16 @@ pub fn take_over(request: TakeOverRequest<'_>) -> Result<TakeOver> {
                 return undo_or_fail(repo_root, &["reset", "--merge"], err);
             }
             if git_with(repo_root, &["diff", "--cached", "--quiet"], &[0, 1])?.0 == 0 {
-                return refuse("the agent's branch changes nothing compared to the base".into());
+                // Nothing staged: the agent's changes are on the base already — its own commits cancel each other
+                // out, or the owner put the same work there under an id of their own. Undo what `merge --squash`
+                // wrote (`--merge` keeps the owner's own local edits, and clears `SQUASH_MSG`, which would otherwise
+                // pre-fill their next commit) and answer "nothing to take" instead of refusing: a caller that
+                // refuses here never gets to the end of its own job.
+                git(repo_root, &["reset", "--merge"])?;
+                return Ok(TakeOver::Done {
+                    commit: git(repo_root, &["rev-parse", "HEAD"])?.trim().to_string(),
+                    committed: false,
+                });
             }
             if let Err(err) = git(repo_root, &["commit", "--quiet", "-m", message]) {
                 // A hook said no. Put the working copy back the way it was.
@@ -949,6 +976,7 @@ pub fn take_over(request: TakeOverRequest<'_>) -> Result<TakeOver> {
     }
     Ok(TakeOver::Done {
         commit: git(repo_root, &["rev-parse", "HEAD"])?.trim().to_string(),
+        committed: true,
     })
 }
 
@@ -1601,9 +1629,10 @@ mod tests {
         fs::write(f.repo.join("keep.txt"), "user's own edit\n").unwrap();
 
         let outcome = take_over(f.request(TakeOverMode::Squash)).unwrap();
-        let TakeOver::Done { commit } = outcome else {
+        let TakeOver::Done { commit, committed } = outcome else {
             panic!("{outcome:?}")
         };
+        assert!(committed, "this take-over made the commit");
 
         assert_eq!(
             git(&f.repo, &["log", "-1", "--format=%s", &commit])
@@ -1704,10 +1733,104 @@ mod tests {
         // And the happy path still works afterwards, so nothing was broken.
         assert!(matches!(
             take_over(f.request(TakeOverMode::Squash)).unwrap(),
-            TakeOver::Done { .. }
+            TakeOver::Done {
+                committed: true,
+                ..
+            }
         ));
-        // Nothing left to take over.
-        assert!(take_over(f.request(TakeOverMode::Squash)).is_err());
+        // Nothing left to take over — the agent's changes are on the base now, so the squash stages nothing. That is
+        // *said*, not refused: refusing here is what used to strand a caller that only wanted to finish.
+        let head = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            take_over(f.request(TakeOverMode::Squash)).unwrap(),
+            TakeOver::Done {
+                commit: head.clone(),
+                committed: false
+            }
+        );
+        assert_eq!(
+            git(&f.repo, &["rev-parse", "HEAD"])
+                .unwrap()
+                .trim()
+                .to_string(),
+            head,
+            "nothing was committed"
+        );
+        assert_eq!(
+            fs::read_to_string(f.repo.join("keep.txt")).unwrap(),
+            "staged by the user\n",
+            "the owner's own edit survives the undo of the empty squash"
+        );
+    }
+
+    /// The two ways an agent can have nothing to take over — the owner merged its branch by hand, or put the same
+    /// work on the base under an id of their own — used to be refusals. They are answers now: nothing is committed,
+    /// and the caller learns that it is done for it is the caller (a card that closes) or not.
+    #[test]
+    fn work_the_base_already_holds_is_answered_not_refused() {
+        // (a) The agent's branch is part of the base's history: merged by hand.
+        let f = fixture();
+        f.agent_commits("feature.txt", "feature\n");
+        run(
+            &f.repo,
+            &["merge", "--quiet", "--no-ff", "-m", "by hand", AGENT_BRANCH],
+        );
+        let head = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            take_over(f.request(TakeOverMode::Squash)).unwrap(),
+            TakeOver::Done {
+                commit: head.clone(),
+                committed: false
+            },
+            "(a)"
+        );
+        assert_eq!(
+            git(&f.repo, &["rev-parse", "HEAD"])
+                .unwrap()
+                .trim()
+                .to_string(),
+            head,
+            "(a)"
+        );
+
+        // (b) The same change, copied over under the owner's own commit: ahead by one, but squashing stages nothing.
+        let f = fixture();
+        f.agent_commits("feature.txt", "feature\n");
+        let tip = git(&f.worktree, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        run(&f.repo, &["cherry-pick", "--quiet", "-x", &tip]);
+        let head = git(&f.repo, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            take_over(f.request(TakeOverMode::Squash)).unwrap(),
+            TakeOver::Done {
+                commit: head.clone(),
+                committed: false
+            },
+            "(b)"
+        );
+        assert_eq!(
+            git(&f.repo, &["rev-parse", "HEAD"])
+                .unwrap()
+                .trim()
+                .to_string(),
+            head,
+            "(b): no new commit"
+        );
+        assert!(
+            !f.repo.join(".git").join("SQUASH_MSG").exists(),
+            "the empty squash left no state in the owner's project folder"
+        );
     }
 
     #[test]

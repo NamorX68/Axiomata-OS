@@ -312,6 +312,40 @@ describe("modes", () => {
     expect(get(session.session).parked.agents).toBe(agents);
   });
 
+  it("parks a Flow session's pane beside the team's tiles, repairing the Flow first", async () => {
+    api.openProject.mockResolvedValue(project(1));
+    const canvas = (await session.open(1))!;
+    // A card session arrives while the owner is in another mode: its pane waits in the Flow, which this project has
+    // never shown — it must be repaired before anything lands in it, or the pane sits in the planning group.
+    session.switchMode(canvas, "editor");
+    session.addTabParked("flow", { id: "a", kind: "agent", title: "worker-1", config: { agentId: 9 } });
+    const parked = get(session.session).parked.flow!;
+    expect(allTabs(parked).map((t) => t.kind).sort()).toEqual(["agent", "graph", "plan", "team"]);
+    const groups = allGroups(parked);
+    const team = groups.find((group) => group.tabs.some((tab) => tab.kind === "team"))!;
+    const pane = groups.find((group) => group.tabs.some((tab) => tab.kind === "agent"))!;
+    expect(pane).not.toBe(team);
+    expect(pane.tabs.map((tab) => tab.kind)).toEqual(["agent"]);
+    // And the columns share their room the way they do when the Flow is shown — 45 % for the first column
+    // (`balanceFlow`, the rule `openAgent` runs); the dock alone would have left it at half.
+    const row = (function find(node: typeof parked.root): Extract<typeof parked.root, { type: "split" }> | null {
+      if (node.type !== "split") return null;
+      for (const child of node.children) {
+        const found = find(child);
+        if (found) return found;
+      }
+      const holdsAgent = node.children.some(
+        (child) => child.type === "tabs" && child.tabs.some((tab) => tab.kind === "agent"),
+      );
+      return node.dir === "row" && holdsAgent ? node : null;
+    })(parked.root)!;
+    const column = row.children.findIndex(
+      (child) => child.type === "tabs" && child.tabs.some((tab) => tab.kind === "agent"),
+    );
+    expect(column).toBeGreaterThanOrEqual(0);
+    expect(row.sizes[column]).toBeCloseTo(0.45);
+  });
+
   it("gives the Flow its planning, graph and team panels back when the stored layout has none", async () => {
     const stored = JSON.stringify({
       mode: "flow",

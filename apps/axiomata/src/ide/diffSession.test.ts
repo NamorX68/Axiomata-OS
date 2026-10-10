@@ -59,7 +59,7 @@ function backend(files: AgentFileChange[], manual = true) {
     discard: vi.fn(async () => {}),
     discardHunk: vi.fn(async () => {}),
     commit: vi.fn(async () => "c0ffee"),
-    takeOver: vi.fn(async () => ({ outcome: "done" as const, commit: "beef" })),
+    takeOver: vi.fn(async () => ({ outcome: "done" as const, commit: "beef", committed: true })),
     lastSubject: vi.fn(async () => "Add words"),
   };
   return { api, loads };
@@ -252,7 +252,7 @@ describe("AgentDiffSession", () => {
       discard: vi.fn(async () => {}),
       discardHunk: vi.fn(async () => {}),
       commit: vi.fn(async () => "c0ffee"),
-      takeOver: vi.fn(async () => ({ outcome: "done" as const, commit: "beef" })),
+      takeOver: vi.fn(async () => ({ outcome: "done" as const, commit: "beef", committed: true })),
       lastSubject: vi.fn(async () => "Add words"),
     };
     const s = new AgentDiffSession(1, api);

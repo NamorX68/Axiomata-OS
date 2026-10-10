@@ -2257,7 +2257,18 @@ fn agent_take_over(core: &AxiomataCore, id: i64, message: &str, no_ff: bool) -> 
     };
     let roots = axiomata_core::paths::ide_locations().channels;
     match target.run(&roots, mode, message)? {
-        ide::git::TakeOver::Done { commit } => {
+        ide::git::TakeOver::Done {
+            commit,
+            committed: false,
+        } => {
+            // Nothing was committed, so the agent's branch was not moved either (G11 does not run): say what is
+            // actually the case rather than the sentence that follows a real take-over.
+            println!("nothing to take over: {commit} already holds the agent's work");
+        }
+        ide::git::TakeOver::Done {
+            commit,
+            committed: true,
+        } => {
             println!("taken over as {commit}; the agent's branch now starts from there")
         }
         ide::git::TakeOver::Conflict { files } => {
@@ -2872,9 +2883,17 @@ async fn board_take_over(core: &AxiomataCore, id: i64, message: Option<String>) 
         CardTakeOver::Done {
             commit,
             project_id,
+            already_on_base,
             cleanup,
         } => {
-            println!("card #{id} taken over as {commit}; its sessions are cleaned up");
+            if already_on_base {
+                println!(
+                    "card #{id} closed: its work was already on the main line ({commit}), so nothing was committed — \
+                     its sessions are cleaned up"
+                );
+            } else {
+                println!("card #{id} taken over as {commit}; its sessions are cleaned up");
+            }
             for note in cleanup {
                 println!("  not removed: {note}");
             }

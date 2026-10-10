@@ -143,6 +143,10 @@
                   {card.status.label}
                 </span>
               </span>
+              {#if agent.branch}
+                <!-- Where the work sits: the branch checked out in this agent's worktree. -->
+                <span class="branchline" title="Checked out in its worktree">{agent.branch}</span>
+              {/if}
               {#if card.plan || card.step}
                 <span class="doing">{card.step ?? card.plan}</span>
               {/if}
@@ -363,6 +367,17 @@
     flex: 0 0 auto;
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+  }
+
+  /* Where the work sits: the branch checked out in this agent's worktree. */
+  .branchline {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+    color: var(--ax-text-muted);
   }
 
   .doing {

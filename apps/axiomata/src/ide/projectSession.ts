@@ -32,7 +32,7 @@ import { toast } from "../core/toast";
 import { createAgent, deleteAgent, listAgents, updateAgent } from "./agents";
 
 import { addTab, allGroups, allTabs, closeTab, emptyLayout, singleGroupLayout, type Layout, type PaneTab } from "./layout";
-import { agentTabsOf, withFlowPanes } from "./planning";
+import { agentTabsOf, balanceFlow, flowAgentTarget, withFlowPanes } from "./planning";
 import { FILES_PANE, TASK_PANE, planTab } from "./paneKinds";
 import {
   emptyEditorLayout,
@@ -308,14 +308,25 @@ export function switchMode(layout: Layout, next: Mode): Layout {
  * Adds a pane to the layout of a mode that is *not* on screen, beside what is in it — a session the studio started by
  * itself gets its pane without the owner being taken out of the mode they are in. The pane is mounted at once (a
  * hidden layout's panes are), so its harness starts.
+ *
+ * The Flow is repaired before anything lands in it (`withFlowPanes`, what showing the mode does): without its panels a
+ * card session parked from the Kanban would sit in a layout that has only itself, and open beside the Planung tab
+ * instead of beside the team's tiles. Its session columns are then shared out evenly, exactly as when the Flow is on
+ * screen — so the owner does not come back to one column holding everything.
  */
 export function addTabParked(mode: Mode, tab: PaneTab): void {
   state.update((s) => {
     if (mode === s.mode) return s;
-    const layout = s.parked[mode] ?? emptyLayout();
+    const parked = s.parked[mode] ?? emptyLayout();
+    const layout = mode === "flow" ? withFlowPanes(parked) : parked;
     const groups = allGroups(layout);
-    const target = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
-    return { ...s, parked: { ...s.parked, [mode]: addTab(layout, tab, { nodeId: target, side: "right" }) } };
+    const last = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
+    const flow = mode === "flow" ? flowAgentTarget(layout) : null;
+    const target = flow ?? { nodeId: last, side: "right" as const };
+    const added = addTab(layout, tab, target);
+    // The shown path's rule (`openAgent`): a pane that became a tab in the newest column added no column to balance.
+    const settled = flow && flow.side !== "center" ? balanceFlow(added) : added;
+    return { ...s, parked: { ...s.parked, [mode]: settled } };
   });
 }
 

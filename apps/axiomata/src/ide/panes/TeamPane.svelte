@@ -1,8 +1,8 @@
 <!--
   The Flow's team pane (A2A CP-A9): what the studio's sessions are doing right now. A tile per session — a worker, a
-  reviewer, a planner — grouped by the plan its card belongs to: who it is, the card it works on, and a live line with
-  its newest step ("Edit …/src/a.rs"). A click on a tile opens the trail of its last steps and what it has used against
-  its limits; "Terminal" puts its pane in front, as the Canvas shows it.
+  reviewer, a planner — grouped by the plan its card belongs to: who it is, which branch its worktree is on, the card
+  it works on, and a live line with its newest step ("Edit …/src/a.rs"). A click on a tile opens the trail of its last
+  steps and what it has used against its limits; "Terminal" puts its pane in front, as the Canvas shows it.
 
   The steps come from the harness's own record (`session_activity`: the Claude Code transcript, the Opencode messages),
   read every few seconds while the pane is shown. Nothing here starts, stops or changes a session.
@@ -136,6 +136,12 @@
               <span class="name">{tile.agent.name}</span>
               <span class="chip">{tile.agent.agent_role}</span>
               {#if tile.agent.engine_id}<span class="chip muted">{tile.agent.engine_id}</span>{/if}
+              {#if tile.agent.branch}
+                <!-- Where the work sits: the branch its worktree has checked out (a reviewer has none, it is detached). -->
+                <span class="chip branch" title="Checked out in its worktree: {tile.agent.branch}"
+                  >{tile.agent.branch}</span
+                >
+              {/if}
               {#if (unread[tile.agent.id] ?? 0) > 0}
                 <span class="chip mail" title="Unread messages in the session's inbox">✉ {unread[tile.agent.id]}</span>
               {/if}
@@ -283,6 +289,14 @@
   .chip.mail {
     border-color: var(--ax-accent);
     color: var(--ax-accent);
+  }
+  /* Where the work sits. Long branch names give way rather than push the header apart; the tooltip has the full one. */
+  .chip.branch {
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--ax-font-mono);
+    color: var(--ax-text-muted);
   }
   .card-line,
   .question {

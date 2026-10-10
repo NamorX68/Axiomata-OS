@@ -275,7 +275,7 @@ export interface PlanSession {
 
 /** What taking a card over came to. Mirrors `axiomata_core::card_session::CardTakeOver`. */
 export type CardTakeOver =
-  | { outcome: "done"; commit: string; project_id: number; cleanup: string[] }
+  | { outcome: "done"; commit: string; project_id: number; already_on_base: boolean; cleanup: string[] }
   | { outcome: "conflict"; files: string[] };
 
 /** What taking a plan over came to. Mirrors `axiomata_core::card_session::PlanTakeOver`. */
@@ -493,7 +493,9 @@ export type BaseFile =
 export type TakeOverMode = "squash" | "no_ff";
 
 /** `ide_agent_take_over`: done, or a conflict that was undone (G9). */
-export type TakeOverResult = { outcome: "done"; commit: string } | { outcome: "conflict"; files: string[] };
+export type TakeOverResult =
+  | { outcome: "done"; commit: string; committed: boolean }
+  | { outcome: "conflict"; files: string[] };
 
 /* ---------------------------------------------------------------- board ---
  * Mirrors `axiomata_board`'s serde output: snake_case fields, `null` (not

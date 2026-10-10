@@ -599,28 +599,10 @@
     if (created) openAgent(created);
   }
 
-  /** The plan a card belongs to, or `null` (no card, no plan, or a board that cannot be read): found on the boards. */
-  async function planOfCard(cardId: number | null): Promise<number | null> {
-    if (cardId === null) return null;
-    try {
-      const boards = await invokeBackend<{ id: number }[]>("list_boards");
-      for (const board of boards) {
-        const cards = await invokeBackend<{ id: number; plan_id: number | null }[]>("list_board_cards", {
-          boardId: board.id,
-          includeArchived: false,
-        });
-        const found = cards.find((card) => card.id === cardId);
-        if (found) return found.plan_id;
-      }
-    } catch {
-      // Without the lookup the pane opens on the Canvas, as it did before.
-    }
-    return null;
-  }
-
   /**
-   * A card was started and the session made for it should be on screen: its project open, the Agents mode shown, its
-   * pane docked. The agent list is read again first — the session did not exist when it was last read.
+   * A card was started and the session made for it should be on screen: its project open, its pane docked where its
+   * tile is — in the Flow for anything the studio made for the board, on the Canvas for a session of the owner's own.
+   * The agent list is read again first — the session did not exist when it was last read.
    */
   async function showRequestedAgents(): Promise<void> {
     for (const { projectId, agentId, background } of takeAgentRequests()) {
@@ -641,8 +623,8 @@
         await projectSession.refreshAgents();
         const agent = projectSession.agentById(agentId);
         if (!agent) continue;
-        // A planner belongs to the plan it plans: its pane opens in the Flow, beside the planning panel.
-        openAgent(agent, modeForAgent(agent, await planOfCard(agent.card_id ?? null)), background === true);
+        // Anything made for the board goes beside its tiles in the Flow; only a session of the owner's own stays.
+        openAgent(agent, modeForAgent(agent), background === true);
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err);
         toast(`The session could not be opened: ${why}`, "danger");

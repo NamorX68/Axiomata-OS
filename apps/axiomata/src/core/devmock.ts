@@ -1667,7 +1667,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return plan as T;
     }
     case "take_over_card":
-      return { outcome: "done", commit: "0123456789abcdef0123456789abcdef01234567", project_id: 1, cleanup: [] } as T;
+      return {
+        outcome: "done",
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        project_id: 1,
+        already_on_base: false,
+        cleanup: [],
+      } as T;
     // No mail in the browser mock: there is never a line to type.
     case "ide_mailbox_nudge":
       return null as T;
@@ -1792,7 +1798,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         if (key.startsWith("worktree:1\0")) otherRootFiles.set(key.replace("worktree:1", "project:1"), content);
       }
       mockImageSettled = true;
-      return { outcome: "done", commit: "facade1234567" } as T;
+      return { outcome: "done", commit: "facade1234567", committed: true } as T;
     }
     case "ide_agent_has_changes":
       return false as T;

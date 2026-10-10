@@ -667,3 +667,44 @@ Branch-Technik: Ultra vergleicht den ausgecheckten Branch mit einer **Basis** (L
   Agenten (Kachel „starting“, nie „wartet“), das war der offene Punkt „Opencode-Reviewer zeigt starting“. Laufende Sitzungen heilt
   das nicht; erst neu gestartete zeigen den Zustand.
 - **Agents-Kacheln:** höchstens zwei nebeneinander (`TeamPane.svelte`, Owner: drei sind zu schmal).
+
+## Fund der Mac-Runde 4 (2026-10-10): die Take-over-Lücke, Kanban-Karten im Flow, der Zweig auf der Kachel
+
+**Anlass** (Owner am Mac): „die Karte ist fertig, aber im Flow unter Agents stehen noch vier Reiter“, „bei einem Plan
+öffnen sich die Agents im Flow, bei einer Karte aus dem Kanban im Canvas“, „ich sehe nicht, auf welchem Zweig die
+Agenten sind“.
+
+- **Die Take-over-Lücke** (`git::take_over`): es gibt **zwei** Funde, bei denen ein Take-over „nichts zu übernehmen"
+  findet — der Zweig des Arbeiters ist Teil des Basiszweigs (der Owner hat ihn von Hand gemergt, `ahead == 0`), oder
+  sein Squash staget nichts (eigene Commits, die sich aufheben, oder dieselbe Arbeit unter einer anderen Id). Beide
+  verweigerte die Git-Schicht früher — die Karte blieb abgezeichnet, **nie übernommen**, und ihre Sitzungen, Worktrees
+  und Zweige lebten für immer. Genau so stand Karte #74 da: der Owner hatte den Fix von Hand nach `main` geholt
+  (`07d363a`), der Zweig des gehaltenen Arbeiters hatte nichts Eigenes mehr. Beide sind jetzt
+  `TakeOver::Done { committed: false }` statt einer Verweigerung — der leere Squash räumt vorher seinen Zustand auf
+  (`reset --merge`, die lokalen Änderungen des Owners bleiben liegen), G11 läuft in diesem Zweig nicht, denn nichts
+  hat sich bewegt. Dann wird **nichts committet**, die Karte schließt trotzdem und ihre Sitzungen gehen: das ist der
+  Zweck des Take-overs, und die Verweigerung hätte das für immer verhindert. Ergebnisfeld
+  `CardTakeOver::Done.already_on_base` (CLI: „closed: its work was already on the main line (…)"; die Karte sagt
+  denselben Satz als Toast; `ide agents take-over` nennt den Fall eigens: „nothing to take over"). Tests:
+  `work_the_base_already_holds_is_answered_not_refused` (Git-Schicht, beide Wege),
+  `a_card_whose_work_is_already_on_main_still_closes_without_a_new_commit` und
+  `work_copied_onto_main_by_hand_also_closes_the_card_without_a_new_commit` (Karte, beide Wege); die Verweigerungen
+  selbst bleiben getestet (`take_over_refuses_instead_of_guessing`). Wer die Verweigerung als „prüft vorher, ob der
+  Basiszweig den Stand enthält" nachgebaut hat (`base_contains`, `merge-base --is-ancestor`), ist wieder raus: die
+  Antwort gehört in die Schicht, die auch den leeren Squash sieht — die Karte ruft sie nur ab.
+- **Karten-Sitzungen ohne Plan öffneten sich auf dem Canvas** (`planning.modeForAgent`): die Regel hing am **Plan** der
+  Karte, ihre Kachel steht aber immer im Flow (die Gruppe „No plan“ gehört dazu) — Kachel und Pane gaben verschiedene
+  Antworten. Jetzt entscheidet `card_id` mit: alles, was das Studio fürs Brett gemacht hat, gehört in den Flow, nur
+  Sitzungen, die der Owner selbst angelegt hat, bleiben auf dem Canvas. Der Aufruf braucht den Plan der Karte nicht
+  mehr (`planOfCard` in `IdeView.svelte` ist damit weg — eine Durchsicht aller Bretter je geöffneter Sitzung weniger).
+- **Beim Öffnen eines Projekts vergaß `openCardPanesOf` den Plan der Karte** (`IdeView.svelte`): es rief
+  `modeForAgent(agent)` ohne die Plan-Id auf, die Wiederherstellung landete also sogar **Plankarten** im Canvas. Fällt
+  mit der neuen Regel weg.
+- **`addTabParked` stellte die Panes des Flow nicht her** (`projectSession.ts`): eine Sitzung, die im Hintergrund kam,
+  während der Owner in einem anderen Modus war, landete in einem Flow, den dieses Projekt nie gezeigt hatte — der Pane
+  hätte neben „Planung“ statt neben den Kacheln gestanden. Der Parkweg repariert jetzt denselben Weg wie das Anzeigen
+  (`withFlowPanes`, danach `flowAgentTarget`) und teilt die Spalten wie das Anzeigen (`balanceFlow`): der Owner kommt
+  nicht zu einer Spalte zurück, die alles hält. Test in `projectSession.test.ts`.
+- **Der Zweig steht auf Kachel und Liste** (`TeamPane.svelte`, `AgentsPanel.svelte`): die Kachel im Flow und die Zeile
+  in der Agents-Liste tragen den ausgecheckten Zweig der Sitzung (Monospace, gekürzt, voll im Tooltip) — bisher stand
+  er nur in der Fußzeile des eigenen Panes. Ein Reviewer hat keinen (detached), dann steht nichts da.

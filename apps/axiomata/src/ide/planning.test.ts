@@ -143,8 +143,13 @@ describe("roles a card may be given", () => {
 const agentTab = (id: string, agentId: number): PaneTab => ({ id, kind: "agent", title: id, config: { agentId } });
 
 describe("where a session's pane belongs", () => {
-  it("opens a planner in the Flow and every other session on the Canvas", () => {
+  it("opens everything made for the board in the Flow and every other session on the Canvas", () => {
+    // A planner, and the worker and reviewer of a card — with a plan and without one: the tile is in the Flow either
+    // way (a card of no plan shows under "No plan"), so its pane has to be there too.
     expect(modeForAgent({ plan_id: 4 })).toBe("flow");
+    expect(modeForAgent({ plan_id: null, card_id: 7 })).toBe("flow");
+    expect(modeForAgent({ card_id: 7 })).toBe("flow");
+    // A session the owner made by hand: no card, no plan, no tile in the Flow.
     expect(modeForAgent({ plan_id: null })).toBe("agents");
     expect(modeForAgent({})).toBe("agents");
   });
@@ -283,15 +288,6 @@ describe("the Flow's starting proportions", () => {
     expect(row.dir).toBe("row");
     expect(row.sizes[0]).toBeCloseTo(0.3);
     expect(row.sizes[1]).toBeCloseTo(0.7);
-  });
-});
-
-describe("the mode of a session's pane", () => {
-  it("is the Flow for a plan's planner and for the workers and reviewers of a plan's cards, else the Canvas", () => {
-    expect(modeForAgent({ plan_id: 4 })).toBe("flow");
-    expect(modeForAgent({ plan_id: null }, 4)).toBe("flow");
-    expect(modeForAgent({ plan_id: null }, null)).toBe("agents");
-    expect(modeForAgent({ plan_id: null })).toBe("agents");
   });
 });
 

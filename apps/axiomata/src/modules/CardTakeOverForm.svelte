@@ -50,7 +50,12 @@
       }
       if (sessions.length > 0) emit("studio:close-agent-panes", { agentIds: sessions });
       void refreshAgents().catch(() => {});
-      toast(`Card #${card.id} was taken over (${result.commit.slice(0, 8)}).`, "info");
+      toast(
+        result.already_on_base
+          ? `Card #${card.id} closed: its work was already on the main line (${result.commit.slice(0, 8)}), so nothing was committed.`
+          : `Card #${card.id} was taken over (${result.commit.slice(0, 8)}).`,
+        "info",
+      );
       for (const note of result.cleanup) toast(`Not cleaned up: ${note}`, "warning");
       await sayWhatIsNotPushed(result.project_id);
       onDone();

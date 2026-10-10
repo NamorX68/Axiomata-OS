@@ -830,12 +830,18 @@ fn finish_review(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum CardTakeOver {
-    /// The work is in the project's main line as one commit, the card is closed and archived, and the sessions made for
-    /// it are gone. `cleanup` lists what could not be done — the work is taken over all the same.
+    /// The work is in the project's main line, the card is closed and archived, and the sessions made for it are gone.
+    /// `cleanup` lists what could not be done — the work is taken over all the same. `already_on_base` says that
+    /// nothing was committed: the base branch held the work already, so `commit` names that branch's tip instead of a
+    /// commit made here. The card ends all the same, which is the point.
     Done {
+        /// Where the work sits on the base branch: the commit this take-over made, or — when `already_on_base` — the
+        /// tip that already held it.
         commit: String,
         /// The project the work went into — where the commit is waiting to be pushed.
         project_id: i64,
+        /// Whether nothing was committed: the base branch held the work already.
+        already_on_base: bool,
         cleanup: Vec<String>,
     },
     /// The squash conflicted and was undone: the project folder is as it was (G9). Nothing else changed.
@@ -869,10 +875,16 @@ struct TakeOverPlan {
 /// card the owner signed off without a reviewer has nothing to compare with; its uncommitted work is committed as it
 /// stands.
 ///
-/// On success the squash commit is on the base branch, the card is marked taken over (and archived), and the sessions
-/// made for the card — the worker and its reviewers — are cleaned up: worktrees removed, the worker's branch deleted,
-/// the sessions forgotten with their secrets and Opencode registrations. A conflict is undone and reported. The
-/// database is locked only to read and to write, never while git runs.
+/// On success `commit` names where the work sits on the base branch — the squash commit this take-over made, or the
+/// tip that already held it when `already_on_base` is set — the card is marked taken over (and archived), and the
+/// sessions made for the card — the worker and its reviewers — are cleaned up: worktrees removed, the worker's branch
+/// deleted, the sessions forgotten with their secrets and Opencode registrations. A conflict is undone and reported.
+/// The database is locked only to read and to write, never while git runs.
+///
+/// When the base branch holds the reviewed state already there is nothing to squash — the owner put it there by hand,
+/// or the worker's own commits amount to no change — and the take-over says so instead of refusing (`already_on_base`
+/// is set): the card still closes and its sessions still go, which is what taking it over is for. Refusing would
+/// leave the card signed off, never taken over, its sessions alive as long as the app runs.
 ///
 /// The take-over commit runs the project's own hooks, as a take-over always has (the owner's repository, the owner's
 /// click). What the worker changed in a tracked hook script reaches them with the work — which is what the review is for.
@@ -907,34 +919,35 @@ fn take_over_blocking(
     message: Option<&str>,
 ) -> Result<Taken> {
     let plan = plan_take_over(&lock(db), card_id, message)?;
-    match squash(&plan, roots)? {
-        axiomata_ide::git::TakeOver::Conflict { files } => Ok(Taken {
-            outcome: CardTakeOver::Conflict { files },
-            opencode_locations: Vec::new(),
-        }),
-        axiomata_ide::git::TakeOver::Done { commit } => {
-            // The work is in the main line from here on: nothing below can undo it, so a step that fails is a note.
-            let mut cleanup = Vec::new();
-            match flow::mark_taken_over(&lock(db), plan.card.id, OWNER) {
-                Ok(true) => {}
-                Ok(false) => cleanup.push("the card could not be marked as taken over".to_owned()),
-                Err(err) => {
-                    cleanup.push(format!("the card could not be marked as taken over: {err}"))
-                }
-            }
-            let mut removals = begin_removal(&lock(db), &plan.sessions);
-            remove_trees(&mut removals, &mut cleanup);
-            let opencode_locations = finish_removal(&lock(db), roots, &removals, &mut cleanup);
-            Ok(Taken {
-                outcome: CardTakeOver::Done {
-                    commit,
-                    project_id: plan.card_project,
-                    cleanup,
-                },
-                opencode_locations,
-            })
+    let (commit, already_on_base) = match squash(&plan, roots)? {
+        Squashed::Conflict { files } => {
+            return Ok(Taken {
+                outcome: CardTakeOver::Conflict { files },
+                opencode_locations: Vec::new(),
+            });
         }
+        Squashed::Committed { commit } => (commit, false),
+        Squashed::AlreadyThere { commit } => (commit, true),
+    };
+    // The work is in the main line from here on: nothing below can undo it, so a step that fails is a note.
+    let mut cleanup = Vec::new();
+    match flow::mark_taken_over(&lock(db), plan.card.id, OWNER) {
+        Ok(true) => {}
+        Ok(false) => cleanup.push("the card could not be marked as taken over".to_owned()),
+        Err(err) => cleanup.push(format!("the card could not be marked as taken over: {err}")),
     }
+    let mut removals = begin_removal(&lock(db), &plan.sessions);
+    remove_trees(&mut removals, &mut cleanup);
+    let opencode_locations = finish_removal(&lock(db), roots, &removals, &mut cleanup);
+    Ok(Taken {
+        outcome: CardTakeOver::Done {
+            commit,
+            project_id: plan.card_project,
+            already_on_base,
+            cleanup,
+        },
+        opencode_locations,
+    })
 }
 
 /// Phase one of a take-over, under the lock: the card, the worker and what was reviewed.
@@ -1067,17 +1080,43 @@ fn gate_reviewed(
     }
 }
 
+/// What the squash of a take-over came to (phase two of [`take_over_blocking`]).
+enum Squashed {
+    /// A new commit on the base branch.
+    Committed { commit: String },
+    /// The agent's branch contributes nothing the base does not already have — the owner merged it by hand, or the
+    /// branch's own commits amount to no change. Nothing was committed; `commit` is the base's tip, which holds the
+    /// work. The card still ends here.
+    AlreadyThere { commit: String },
+    /// A conflict, undone: the base branch is as it was.
+    Conflict { files: Vec<String> },
+}
+
 /// Phase two of a take-over, no lock: the gate, and the squash.
-fn squash(
-    plan: &TakeOverPlan,
-    roots: &axiomata_ide::lifecycle::ChannelRoots,
-) -> Result<axiomata_ide::git::TakeOver> {
+fn squash(plan: &TakeOverPlan, roots: &axiomata_ide::lifecycle::ChannelRoots) -> Result<Squashed> {
+    // The gate is the whole point of this phase: it refuses unless the worker's branch is at exactly the commit the
+    // reviewer signed. Which commit that is in the end is the git layer's answer to give — it reports where the work
+    // sits, and whether it had to commit it there (`committed`).
     gate_reviewed(&plan.card, &plan.sessions, &plan.repo, &plan.message)?;
-    Ok(plan.target.run(
+    let done = plan.target.run(
         roots,
         axiomata_ide::git::TakeOverMode::Squash,
         &plan.message,
-    )?)
+    )?;
+    Ok(match done {
+        axiomata_ide::git::TakeOver::Done {
+            commit,
+            committed: true,
+        } => Squashed::Committed { commit },
+        // Nothing to commit: the work is on the base already. Refusing here — which is what this layer used to do —
+        // would strand the card forever: signed off, never taken over, its sessions alive. The card closing is what
+        // taking it over is for, so it closes either way (`already_on_base`).
+        axiomata_ide::git::TakeOver::Done {
+            commit,
+            committed: false,
+        } => Squashed::AlreadyThere { commit },
+        axiomata_ide::git::TakeOver::Conflict { files } => Squashed::Conflict { files },
+    })
 }
 
 /// A session that is going away, with the worktree it still has: read under the lock, removed without it, forgotten
@@ -1897,7 +1936,7 @@ fn take_over_plan_blocking(
     let message = format!("Plan #{}: {first_line}", plan.id);
     match axiomata_ide::plan_line::take_over(&project.repo_root, &line, &checked_tip, &message)? {
         axiomata_ide::git::TakeOver::Conflict { files } => Ok(PlanTakeOver::Conflict { files }),
-        axiomata_ide::git::TakeOver::Done { commit } => {
+        axiomata_ide::git::TakeOver::Done { commit, .. } => {
             // The work is in the project's branch from here on: nothing below can undo it, so a step that fails is a note.
             let mut cleanup = Vec::new();
             for card in &integrated {
@@ -2942,11 +2981,15 @@ mod tests {
 
         let taken = w.take_over(card, None).unwrap();
         let CardTakeOver::Done {
-            commit, cleanup, ..
+            commit,
+            already_on_base,
+            cleanup,
+            ..
         } = taken.outcome
         else {
             panic!("expected the work to be taken over: {:?}", taken.outcome);
         };
+        assert!(!already_on_base, "the take-over made its own commit");
         assert!(cleanup.is_empty(), "{cleanup:?}");
 
         // One new commit on main, with the card's number and title, holding the work.
@@ -2971,6 +3014,112 @@ mod tests {
                 .to_string()
                 .contains("already")
         );
+    }
+
+    #[test]
+    fn a_card_whose_work_is_already_on_main_still_closes_without_a_new_commit() {
+        let mut w = world();
+        let (card, worker, review) = w.approved();
+        let worker_row = agent_store::get_agent(&w.db, worker.agent.id)
+            .unwrap()
+            .unwrap();
+        let worker_tree = worker_row.worktree_path.clone().unwrap();
+        let review_tree = crate::ide::provision::prepare(&w.db, &w.locations(), review.agent.id)
+            .unwrap()
+            .cwd;
+        let branch = worker_row.branch.clone().unwrap();
+        // The owner put the reviewed work onto main by hand — the way a card ends up signed off with nothing left to
+        // squash. Without this branch of the take-over the card would be refused forever: closed by nobody, its
+        // sessions alive for as long as the app runs.
+        git(
+            &w.repo,
+            &["merge", "--quiet", "--no-ff", "-m", "by hand", &branch],
+        );
+        let main_after = git(&w.repo, &["rev-parse", "main"]);
+
+        let taken = w.take_over(card, None).unwrap();
+        let CardTakeOver::Done {
+            commit,
+            already_on_base,
+            cleanup,
+            ..
+        } = taken.outcome
+        else {
+            panic!("expected the card to be taken over: {:?}", taken.outcome);
+        };
+        assert!(already_on_base, "nothing was committed");
+        assert!(cleanup.is_empty(), "{cleanup:?}");
+        // The base branch's tip — the commit that holds the work — is reported, and nothing was added to it.
+        assert_eq!(commit, main_after);
+        assert_eq!(
+            git(&w.repo, &["rev-parse", "main"]),
+            main_after,
+            "nothing was committed"
+        );
+
+        // And it still ends the card and its sessions, which is what taking it over is for.
+        let closed = store::get_card(&w.db, card).unwrap().unwrap();
+        assert!(closed.taken_over_at.is_some() && closed.archived_at.is_some());
+        assert!(!worker_tree.exists() && !review_tree.exists());
+        assert!(!worktree::branch_exists(&w.repo, &branch));
+        assert_eq!(w.sessions(), 0);
+    }
+
+    /// The same incident, a different git verb: the owner copied the reviewed work onto main under an id of their
+    /// own. The worker's branch is then **ahead** of main, but squashing it brings nothing main does not have — the
+    /// case the empty-squash refusal used to strand, and which nothing but the squash itself can see.
+    #[test]
+    fn work_copied_onto_main_by_hand_also_closes_the_card_without_a_new_commit() {
+        let mut w = world();
+        let (card, worker, review) = w.approved();
+        let worker_row = agent_store::get_agent(&w.db, worker.agent.id)
+            .unwrap()
+            .unwrap();
+        let worker_tree = worker_row.worktree_path.clone().unwrap();
+        let review_tree = crate::ide::provision::prepare(&w.db, &w.locations(), review.agent.id)
+            .unwrap()
+            .cwd;
+        let branch = worker_row.branch.clone().unwrap();
+        let tip = git(&worker_tree, &["rev-parse", "HEAD"]);
+        // `-x` so the copy is a commit of its own: without it, cherry-picking a commit whose parent is already main's
+        // tip can produce the very same id (same parent, same tree, same second) and the branch would count as part
+        // of main instead of ahead of it.
+        git(&w.repo, &["cherry-pick", "--quiet", "-x", &tip]);
+        let main_after = git(&w.repo, &["rev-parse", "main"]);
+        assert_ne!(main_after, tip, "main got a commit of its own");
+        assert_eq!(
+            git(
+                &w.repo,
+                &["rev-list", "--count", &format!("main..{branch}")]
+            ),
+            "1",
+            "the branch is ahead: this is the squash path, not the branch-already-on-main one"
+        );
+
+        let taken = w.take_over(card, None).unwrap();
+        let CardTakeOver::Done {
+            commit,
+            already_on_base,
+            cleanup,
+            ..
+        } = taken.outcome
+        else {
+            panic!("expected the card to be taken over: {:?}", taken.outcome);
+        };
+        assert!(already_on_base, "nothing was committed");
+        assert!(cleanup.is_empty(), "{cleanup:?}");
+        assert_eq!(commit, main_after);
+        assert_eq!(
+            git(&w.repo, &["rev-parse", "main"]),
+            main_after,
+            "the squash staged nothing, so no commit was made"
+        );
+
+        let closed = store::get_card(&w.db, card).unwrap().unwrap();
+        assert!(closed.taken_over_at.is_some() && closed.archived_at.is_some());
+        assert!(!worker_tree.exists() && !review_tree.exists());
+        assert!(!worktree::branch_exists(&w.repo, &branch));
+        assert_eq!(w.sessions(), 0);
     }
 
     #[test]

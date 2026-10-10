@@ -273,11 +273,13 @@ export function proposalTitle(card: Pick<BoardCard, "id" | "title">): string {
 }
 
 /**
- * The mode a session's pane belongs in: everything that works for a plan — its planner and grill, and the workers and
- * reviewers of its cards (`cardPlanId`, the plan the session's card belongs to) — in the Flow, the rest on the Canvas.
+ * The mode a session's pane belongs in: everything the studio made for the board — a planner or grill (`plan_id`), the
+ * worker or reviewer of a card (`card_id`, with or without a plan) — in the Flow, beside the tile it already shows
+ * there; only a session the owner made by hand stays on the Canvas. Tile and pane must answer the same way, or a card
+ * sits in the Flow while its agent sits on the Canvas.
  */
-export function modeForAgent(agent: Pick<IdeAgent, "plan_id">, cardPlanId: number | null = null): Mode {
-  return agent.plan_id != null || cardPlanId !== null ? "flow" : "agents";
+export function modeForAgent(agent: Pick<IdeAgent, "plan_id" | "card_id">): Mode {
+  return agent.plan_id != null || agent.card_id != null ? "flow" : "agents";
 }
 
 /** How many session panes sit side by side in the Flow before a further one joins the newest as a tab: more columns
