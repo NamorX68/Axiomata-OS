@@ -27,6 +27,14 @@ const LOCK_FILE: &str = "mcp.lock";
 /// lock for a moment, and a server that starts exactly then must not conclude that another server is already there.
 const HOLD_ATTEMPTS: u32 = 100;
 const HOLD_PAUSE: Duration = Duration::from_millis(20);
+/// How often [`is_live`] re-probes after a refused shared lock before it believes the session is alive (3 × 5 ms).
+///
+/// A single refused probe is not proof: macOS `flock` can transiently refuse a shared lock that nobody holds, right
+/// after the exclusive holder released it — the window widens under load. Concluding "alive" from one such refusal
+/// would leave mail addressed to a session whose server is gone (A29). Only a refusal that survives every re-probe
+/// counts, because a real holder releases nothing while it holds.
+const LIVE_CONFIRM_ATTEMPTS: u32 = 3;
+const LIVE_CONFIRM_PAUSE: Duration = Duration::from_millis(5);
 
 /// Proof that this process vouches for a session: dropping it (or exiting) releases the lock.
 #[derive(Debug)]
@@ -140,15 +148,25 @@ pub fn hold_blocking(roots: &ChannelRoots, agent_id: i64) -> Result<Presence> {
 /// [`IdeError::Io`] for an unreadable or irregular lock file; a missing one is simply "not alive".
 pub fn is_live(roots: &ChannelRoots, agent_id: i64) -> Result<bool> {
     let path = lock_path(roots, agent_id);
-    let Some(file) = open_lock(&path, false)? else {
-        return Ok(false);
-    };
-    match file.try_lock_shared() {
-        // We got it, so nobody holds the exclusive lock; it is released again when `file` drops.
-        Ok(()) => Ok(false),
-        Err(TryLockError::WouldBlock) => Ok(true),
-        Err(TryLockError::Error(err)) => Err(io(&path, err)),
+    for attempt in 0..LIVE_CONFIRM_ATTEMPTS {
+        let Some(file) = open_lock(&path, false)? else {
+            return Ok(false);
+        };
+        match file.try_lock_shared() {
+            // We got it, so nobody holds the exclusive lock; it is released again when `file` drops.
+            Ok(()) => return Ok(false),
+            Err(TryLockError::WouldBlock) => {
+                // A real holder keeps its lock for every attempt below, so a session that is still
+                // refused at the end is alive. A transient refusal clears instead (see the constant).
+                if attempt + 1 == LIVE_CONFIRM_ATTEMPTS {
+                    return Ok(true);
+                }
+                thread::sleep(LIVE_CONFIRM_PAUSE);
+            }
+            Err(TryLockError::Error(err)) => return Err(io(&path, err)),
+        }
     }
+    unreachable!("the loop either returns a probe's result or the final refusal");
 }
 
 /// The ids among `candidates` that are alive, in the order given.
@@ -238,23 +256,44 @@ mod tests {
 
     #[test]
     fn a_blocking_hold_takes_over_when_the_first_holder_lets_go() {
+        use std::sync::mpsc;
+
         let roots = roots();
         let first = hold(&roots, 5).unwrap().unwrap();
+        // The waiter says when it starts, and reports the lock only once it actually holds it. Whether it is
+        // *blocked* is then a fact of the lock, not of the scheduler: while `first` exists, the handover cannot
+        // have happened, so a non-blocking probe is conclusive — no sleep whose window load could stretch.
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
         let waiter = {
             let roots = roots.clone();
-            thread::spawn(move || hold_blocking(&roots, 5).unwrap())
+            thread::spawn(move || {
+                ready_tx
+                    .send(())
+                    .expect("the main thread reads the arrival");
+                let successor =
+                    hold_blocking(&roots, 5).expect("the waiter ends up holding the lock");
+                acquired_tx
+                    .send(successor)
+                    .expect("the main thread waits for the handover");
+            })
         };
-        thread::sleep(Duration::from_millis(100));
+
+        ready_rx.recv().expect("the waiter reached the lock");
         assert!(
-            !waiter.is_finished(),
+            matches!(acquired_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
             "still waiting while the first one holds it"
         );
+
         drop(first);
-        let second = waiter.join().unwrap();
+        let second = acquired_rx
+            .recv()
+            .expect("the waiter takes over once the first holder lets go");
         assert!(
             is_live(&roots, 5).unwrap(),
             "the successor vouches for the session"
         );
+        waiter.join().unwrap();
         drop(second);
         assert!(!is_live(&roots, 5).unwrap());
     }
