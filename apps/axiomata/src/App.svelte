@@ -28,6 +28,7 @@ import { emit, on } from "./core/bus";
   import Toasts from "./shell/Toasts.svelte";
   import Ambient from "./shell/Ambient.svelte";
   import Dock from "./shell/Dock.svelte";
+  import Ignition from "./shell/Ignition.svelte";
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
@@ -209,6 +210,7 @@ import { emit, on } from "./core/bus";
 
 <Ambient />
 <Dock />
+<Ignition />
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />
 <Settings bind:open={settingsOpen} />

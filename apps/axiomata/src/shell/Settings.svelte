@@ -362,6 +362,10 @@
             <input type="checkbox" bind:checked={$effects.dayLight} /> Time-of-day light
             <span class="hint">(a faint light that moves with the sun)</span>
           </label>
+          <label class="opt">
+            <input type="checkbox" bind:checked={$effects.ignition} /> Start ignition
+            <span class="hint">(the logo lights up when the app starts; motion Full only)</span>
+          </label>
         </section>
 
         <section>

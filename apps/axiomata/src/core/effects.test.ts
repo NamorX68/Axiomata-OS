@@ -8,6 +8,8 @@ describe("readEffects", () => {
     expect(readEffects({ pointerLight: false, dayLight: "no", other: 1 })).toEqual({
       pointerLight: false,
       dayLight: true,
+      ignition: true,
     });
+    expect(readEffects({ ignition: false }).ignition).toBe(false);
   });
 });
