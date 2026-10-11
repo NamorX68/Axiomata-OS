@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="de" data-theme="graphite" data-font="geist">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Axiomata Signatur-Momente</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+@property --spin { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+:root{ --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace; --ease:cubic-bezier(.22,1,.36,1); }
+[data-font="geist"]{--sans:"Geist",system-ui,sans-serif}
+[data-font="inter"]{--sans:"Inter",system-ui,sans-serif}
+[data-font="plex"]{--sans:"IBM Plex Sans",system-ui,sans-serif}
+[data-theme="graphite"]{
+  --bg:#060607; --e1:#0f0f12; --e2:#16161a; --e3:#1d1d22;
+  --edge:rgba(255,255,255,.07); --hair:rgba(255,255,255,.06); --hair-strong:rgba(255,255,255,.12);
+  --text:#f2f2f4; --muted:#8d8d96; --faint:#5c5c66;
+  --accent:#ff7a1a; --accent-ink:#1a0c02; --glow:rgba(255,122,26,.55); --glow-soft:rgba(255,122,26,.16);
+  --ash:#3a3a42; --ok:#4fd67f; --warn:#e6b45f; --bad:#f26d6d;
+  --shadow:0 1px 0 var(--edge) inset, 0 18px 40px rgba(0,0,0,.45); --display:var(--sans);
+}
+[data-theme="paper"]{
+  --bg:#efe9df; --e1:#f6f1e8; --e2:#fbf8f2; --e3:#ffffff;
+  --edge:rgba(255,255,255,.9); --hair:rgba(60,40,20,.10); --hair-strong:rgba(60,40,20,.18);
+  --text:#2a2420; --muted:#7b7068; --faint:#a89d93;
+  --accent:#c9562a; --accent-ink:#fff; --glow:rgba(201,86,42,.45); --glow-soft:rgba(201,86,42,.12);
+  --ash:#cfc6bb; --ok:#3f8f5a; --warn:#b07d22; --bad:#c24a3e;
+  --shadow:0 1px 0 var(--edge) inset, 0 1px 2px rgba(60,40,20,.08), 0 10px 30px rgba(60,40,20,.10);
+  --display:"Newsreader",Georgia,serif;
+}
+*{box-sizing:border-box} html,body{margin:0}
+body{font-family:var(--sans);color:var(--text);background:var(--bg);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='64' viewBox='0 0 56 64'%3E%3Cpath fill='none' stroke='%23888' stroke-opacity='0.12' d='M28 0l24 14v28L28 56 4 42V14z M28 56v8'/%3E%3C/svg%3E")}
+.page{max-width:1500px;margin:0 auto;padding:16px 24px 100px}
+.controls{position:sticky;top:0;z-index:20;display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:12px 0;background:linear-gradient(var(--bg) 70%,transparent)}
+.seg{display:inline-flex;background:var(--e1);border:1px solid var(--hair);border-radius:999px;padding:3px;box-shadow:var(--shadow)}
+.seg button{all:unset;cursor:pointer;padding:5px 12px;border-radius:999px;color:var(--muted);font-weight:500}
+.seg button[aria-pressed="true"]{background:var(--e3);color:var(--text);box-shadow:0 1px 0 var(--edge) inset}
+.intro{max-width:900px;color:var(--muted);margin:4px 0 8px} .intro b{color:var(--text)}
+h2.sec{font:600 11px/1 var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:44px 0 14px;display:flex;align-items:center;gap:10px}
+h2.sec::after{content:"";flex:1;height:1px;background:var(--hair)}
+.panel{background:var(--e2);border-radius:16px;box-shadow:var(--shadow);border:1px solid var(--hair);overflow:hidden;position:relative}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.note{font-size:12.5px;color:var(--muted);margin-top:10px} .note b{color:var(--text);font-weight:600}
+.t-title{font:600 15px/1.3 var(--display)} .t-label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.t-caption{font-size:11.5px;color:var(--muted)} .sub{font-size:12px;color:var(--muted)} .mono{font-family:var(--mono);font-size:12px}
+.btn{all:unset;cursor:pointer;font-weight:500;padding:6px 12px;border-radius:9px;background:var(--e3);border:1px solid var(--hair-strong);color:var(--text)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;box-shadow:0 6px 18px var(--glow-soft)}
+.hex{clip-path:polygon(50% 0,93% 25%,93% 75%,50% 100%,7% 75%,7% 25%)}
+canvas{display:block;width:100%}
+.stage{position:relative}
+.toolbar{position:absolute;left:12px;right:12px;bottom:12px;display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;
+  background:color-mix(in srgb,var(--e2) 80%,transparent);backdrop-filter:blur(12px);border:1px solid var(--hair)}
+.toolbar input[type=range]{flex:1;accent-color:var(--accent)}
+.tip{position:absolute;pointer-events:none;padding:6px 9px;border-radius:9px;background:var(--e3);border:1px solid var(--hair-strong);box-shadow:var(--shadow);font-size:12px;display:none;white-space:nowrap}
+.legend{position:absolute;top:12px;right:12px;display:grid;gap:3px;font-size:11.5px;color:var(--muted)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:9px;height:10px;display:inline-block}
+/* fuse */
+.routine{display:flex;align-items:center;gap:12px;padding:14px 16px}
+.routine + .routine{border-top:1px solid var(--hair)}
+/* thinking bar */
+.abar{position:relative;border-radius:16px;padding:1.5px;background:var(--hair-strong)}
+.abar.thinking{background:conic-gradient(from var(--spin),transparent 0deg,var(--accent) 60deg,transparent 140deg,transparent 360deg);animation:spin 2.2s linear infinite}
+.abar.thinking::after{content:"";position:absolute;inset:-6px;border-radius:20px;z-index:-1;background:inherit;filter:blur(14px);opacity:.55}
+@keyframes spin{to{--spin:360deg}}
+.abar .in{display:flex;gap:10px;align-items:center;background:var(--e2);border-radius:14.5px;padding:10px 12px}
+.abar .in .ph{flex:1;color:var(--faint)}
+.reply{padding:14px 16px;min-height:120px;font-size:13px}
+.chipt{display:inline-flex;gap:6px;align-items:center;font:500 11.5px var(--sans);padding:3px 9px;border-radius:999px;background:var(--e1);border:1px solid var(--hair);color:var(--muted);margin:2px 4px 2px 0}
+.chipt .hm{width:8px;height:9px;background:var(--accent)}
+/* flow */
+svg.flow{width:100%;height:260px;display:block}
+.flow .node rect{fill:var(--e3);stroke:var(--hair-strong)}
+.flow .node text{fill:var(--text);font:500 12px var(--sans)}
+.flow .node .meta{fill:var(--muted);font-size:11px}
+.flow .edge{fill:none;stroke:var(--hair-strong);stroke-width:1.5}
+.flow .pulse{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:16 127;animation:flowp 2.4s linear infinite;filter:drop-shadow(0 0 4px var(--accent))}
+.flow .node.live rect{stroke:var(--accent);filter:drop-shadow(0 0 10px var(--glow-soft))}
+.flow .node.done rect{opacity:.6}
+@keyframes flowp{from{stroke-dashoffset:143}to{stroke-dashoffset:0}}
+/* ghost cursor */
+pre.code{margin:0;padding:14px 16px;font:12.5px/1.7 var(--mono);color:var(--text);background:var(--e2);min-height:190px}
+.kw{color:#ff9f5a}.fn{color:#7cb8ff}.ty{color:#5fd4c4}.cm{color:var(--faint)}
+[data-theme="paper"] .kw{color:#b4532a}[data-theme="paper"] .fn{color:#2f6db3}[data-theme="paper"] .ty{color:#24796c}
+.ghost{display:inline-block;position:relative;width:2px;height:1.25em;vertical-align:text-bottom;background:var(--accent);box-shadow:0 0 8px var(--glow)}
+.ghost .flag{position:absolute;left:0;top:-19px;display:flex;align-items:center;gap:4px;padding:1px 6px 1px 3px;border-radius:5px 5px 5px 0;background:var(--accent);color:var(--accent-ink);font:600 10px var(--sans);white-space:nowrap}
+.ghost .flag i{width:10px;height:11px;background:var(--accent-ink);opacity:.8}
+.typed{background:var(--glow-soft);border-radius:3px}
+/* ignition */
+.ign{height:300px;display:grid;place-items:center;position:relative}
+.ign svg{width:260px;height:260px;overflow:visible}
+.ign .logo-stroke{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-dasharray:300;stroke-dashoffset:300}
+.ign .logo-fill{fill:var(--accent);opacity:0;transform-origin:130px 118px}
+.ign .dot{fill:var(--muted);opacity:0;transform-box:fill-box;transform-origin:center}
+.ign.go .logo-stroke{animation:draw .9s var(--ease) forwards}
+.ign.go .logo-fill{animation:fillin .6s .8s var(--ease) forwards}
+.ign.go .dot{animation:pop .5s var(--ease) forwards}
+.ign .word{position:absolute;bottom:10px;font:600 20px var(--display);letter-spacing:.02em;opacity:0}
+.ign.go .word{animation:fade .8s 1.5s var(--ease) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes fillin{0%{opacity:0;transform:scale(.6)}60%{opacity:1;filter:drop-shadow(0 0 22px var(--accent))}100%{opacity:1;transform:scale(1);filter:drop-shadow(0 0 8px var(--glow))}}
+@keyframes pop{0%{opacity:0;transform:scale(.2)}100%{opacity:1;transform:scale(1)}}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* kanban done */
+.kcols{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:16px;min-height:200px}
+.kcol h4{margin:0 0 10px;font:600 12.5px var(--sans);display:flex;gap:8px;align-items:center}
+.kcol h4 .n{margin-left:auto;color:var(--faint);font-variant-numeric:tabular-nums;transition:transform .3s var(--ease)}
+.kcol h4 .n.bump{transform:scale(1.5);color:var(--accent)}
+.kcard{background:var(--e3);border:1px solid var(--hair);border-radius:12px;padding:11px 12px;margin-bottom:8px;box-shadow:0 1px 0 var(--edge) inset;display:flex;align-items:center;gap:8px}
+.kcard .grow{flex:1}
+.spark{position:fixed;width:8px;height:9px;background:var(--accent);pointer-events:none;z-index:50;box-shadow:0 0 8px var(--glow)}
+/* ideas */
+.ideas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.idea{padding:14px 16px;border-radius:14px;background:var(--e2);border:1px solid var(--hair);box-shadow:var(--shadow)}
+.idea .t-title{display:flex;gap:8px;align-items:center;margin-bottom:4px}
+.idea .t-title i{width:10px;height:11px;background:var(--accent);flex:none}
+.idea .tag{font:500 10.5px var(--sans);color:var(--faint);margin-left:auto;font-family:var(--sans)}
+@media (max-width:1100px){.grid2,.grid3,.ideas{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="controls">
+    <div class="seg" data-set="theme"><button aria-pressed="true" data-v="graphite">Graphite</button><button data-v="paper">Paper</button></div>
+    <div class="seg" data-set="font"><button aria-pressed="true" data-v="geist">Geist</button><button data-v="inter">Inter</button><button data-v="plex">IBM Plex Sans</button></div>
+  </div>
+  <p class="intro"><b>Signatur-Momente — Prototypen.</b> Alles hier läuft mit Zufallsdaten in der Größe deines Vaults
+    (252 Notizen, 9 Bereiche) und ist anfassbar: ziehen, scrollen, Knöpfe drücken. Ziel ist nicht Feinschliff, sondern
+    die Frage „will ich das?“. Am Ende steht ein Katalog weiterer Ideen.</p>
+
+  <h2 class="sec">1 · Wolke → Waben-Kugel mit Glut-Alterung und Agenten-Funken (W1 + W2 + W3)</h2>
+  <div class="grid2">
+    <div class="panel stage" id="hiveStage">
+      <canvas id="hive" height="560"></canvas>
+      <div class="legend" id="hiveLegend"></div>
+      <div class="toolbar">
+        <button class="btn" id="hivePlay">▶ Zeitreise</button>
+        <input type="range" id="hiveTime" min="0" max="1000" value="1000" aria-label="Zeit">
+        <span class="t-caption" id="hiveDate">heute</span>
+        <div class="seg" id="hshine" style="box-shadow:none"><button data-v="off">Ruhig</button><button data-v="twinkle">Funkeln</button><button aria-pressed="true" data-v="metal">Metall</button></div>
+      </div>
+      <div class="tip" id="hiveTip"></div>
+    </div>
+    <div>
+      <p class="note" style="margin-top:0"><b>Die Kugel ist dein Vault.</b> Jede Wabe eine Notiz, jeder Bereich eine
+        zusammenhängende „Landmasse“. <b>Glut-Alterung:</b> was heute angefasst wurde, glüht; was ruht, kühlt über die
+        Bereichsfarbe zu Asche ab — die Kugel ist eine Wärmekarte deines Kopfes.</p>
+      <p class="note"><b>Agenten-Funken:</b> Alle paar Sekunden schreibt ein Skill (links im Ring: interne Apps,
+        rechts: externe — U4 bleibt) in eine Notiz; ein Funke fliegt vom Icon zur Wabe, die danach nachglüht.</p>
+      <p class="note"><b>Schimmer</b> (Leiste unten): „Funkeln“ wie im heutigen 2Brain; „Metall“ beleuchtet jede Wabe nach ihrer echten Neigung auf der Kugel von links oben, mit Glanzlicht — die Kugel wirkt wie aus Metallplättchen.</p>
+      <p class="note"><b>Zeitreise:</b> Der Regler unten spult die Entstehung des Vaults ab. Ziehen dreht die Kugel,
+        Hover zeigt die Notiz. Ein Klick würde — wie heute — ins 2Brain wechseln (rechts daneben gedacht).</p>
+    </div>
+  </div>
+
+  <h2 class="sec">2 · 2Brain → Territorienkarte im Linsenkreis (B1 + B2)</h2>
+  <div class="grid2">
+    <div class="panel stage" id="mapStage">
+      <canvas id="map" height="560"></canvas>
+      <div class="toolbar">
+        <button class="btn" id="mapPlay">▶ Zeitreise</button>
+        <input type="range" id="mapTime" min="0" max="1000" value="1000" aria-label="Zeit">
+        <div class="seg" id="shine" style="box-shadow:none"><button data-v="off">Ruhig</button><button data-v="twinkle">Funkeln (heute)</button><button aria-pressed="true" data-v="metal">Metall</button></div>
+        <button class="btn" id="mapReset">Reset</button>
+      </div>
+      <div class="tip" id="mapTip"></div>
+    </div>
+    <div>
+      <p class="note" style="margin-top:0"><b>Schimmer</b> (Leiste unten): „Funkeln“ ist exakt das heutige 2Brain — jede Zelle atmet mit eigener Phase, das wirkt wie gekippte Metallplättchen. „Metall“ legt zusätzlich ein langsam wanderndes Licht und eine Lichtkante je Plättchen darüber.</p>
+      <p class="note"><b>Jeder Bereich ein Land aus Hexfeldern</b> mit Grenze und Namen, Notizen
+        sind Felder, Links sind Straßen. <b>Semantischer Zoom</b> (Mausrad): weit draußen nur Länder, näher Straßen,
+        ganz nah Dateinamen. Ziehen schwenkt — alles im Linsenkreis des Orbits wie heute (B3 aus orbit-brain.md).</p>
+      <p class="note">Die Glut-Alterung zeigt „besiedelte“ und „verlassene“ Gegenden; die Zeitreise lässt die Länder
+        wachsen. Klick auf ein Feld → das Detailfenster von heute.</p>
+    </div>
+  </div>
+
+  <h2 class="sec">3 · Glut im Alltag</h2>
+  <div class="grid3">
+    <div>
+      <div class="panel">
+        <div class="routine"><div style="flex:1"><div style="font-weight:600">Morning digest</div><div class="sub">/newsletter · <span id="fuseEta">in 2 h</span></div>
+          <canvas id="fuse" height="34" style="margin-top:6px"></canvas></div></div>
+        <div class="routine"><div style="flex:1"><div style="font-weight:600;color:var(--muted)">Evening ritual</div><div class="sub">prompt · off</div>
+          <canvas id="fuse2" height="34" style="margin-top:6px"></canvas></div></div>
+      </div>
+      <p class="note"><b>Zündschnur:</b> Die nächste Routine brennt als Lunte herunter (hier im Zeitraffer); beim Erreichen
+        des Endes zündet sie, der Skill-Eintrag glüht auf. Ausgeschaltete Routinen: kalte Schnur.</p>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="reply" id="reply"><span class="sub">Frag etwas …</span></div>
+        <div style="padding:12px"><div class="abar" id="abar"><div class="in"><span style="color:var(--accent)">›</span><span class="ph" id="abarText">Ask the agent, or /help</span><button class="btn primary" id="ask">Fragen</button></div></div></div>
+      </div>
+      <p class="note"><b>Denkende Leiste:</b> Solange der Agent arbeitet, läuft eine Glut um die Assistent-Leiste;
+        Werkzeug-Aufrufe erscheinen als kleine Hex-Chips statt als Textwand, die Antwort strömt ein.</p>
+    </div>
+    <div>
+      <div class="panel"><svg class="flow" viewBox="0 0 460 260" id="flow"></svg></div>
+      <p class="note"><b>Fließende Arbeit:</b> Im Flow-Graph laufen Glutpulse entlang der Kanten, auf denen gerade
+        gearbeitet wird; fertige Karten kühlen ab, die laufende glimmt.</p>
+    </div>
+  </div>
+
+  <h2 class="sec">4 · Momente</h2>
+  <div class="grid3">
+    <div>
+      <div class="panel ign" id="ign">
+        <svg viewBox="0 0 260 260" id="ignSvg">
+          <path class="logo-stroke" d="M130 80 L163 99 L163 137 L130 156 L97 137 L97 99 Z"/>
+          <path class="logo-fill" d="M130 92 L153 105 L153 131 L130 144 L107 131 L107 105 Z"/>
+        </svg>
+        <div class="word">Axiomata</div>
+      </div>
+      <div style="margin-top:8px"><button class="btn" id="ignBtn">▶ Zündung abspielen</button></div>
+      <p class="note"><b>Start-Zündung</b> (nur beim Kaltstart, ~1,5 s, überspringbar): das Hex-Logo zeichnet sich,
+        entzündet sich, der Ring baut sich Punkt für Punkt auf, dann blenden die Kacheln gestaffelt ein.</p>
+    </div>
+    <div>
+      <div class="panel"><div class="kcols">
+        <div class="kcol"><h4>In progress <span class="n" id="nProg">3</span></h4><div id="progList"></div></div>
+        <div class="kcol"><h4>Done <span class="n" id="nDone">5</span></h4><div id="doneList"></div></div>
+      </div></div>
+      <p class="note"><b>Erledigt-Moment:</b> Eine Karte nach „Done“ zerfällt in Hex-Funken, die in den Zähler fliegen
+        (Klick auf ✓). Klein, befriedigend, nur bei echter Erledigung — nie beim bloßen Verschieben.</p>
+    </div>
+    <div>
+      <div class="panel"><pre class="code" id="code"></pre></div>
+      <p class="note"><b>Agent im Editor (Mehrspieler-Cursor):</b> Bearbeitet ein Agent eine Datei, die du offen hast,
+        siehst du seinen Cursor mit Hex-Fahne und die frisch geschriebenen Zeichen glimmen kurz nach — wie in Figma.</p>
+    </div>
+  </div>
+
+  <h2 class="sec">5 · Weitere Ideen (nicht prototypisiert)</h2>
+  <div class="ideas">
+    <div class="idea"><div class="t-title"><i class="hex"></i>Herzschlag-Leiste<span class="tag">Dock</span></div><div class="sub">Eine haarfeine Zeitleiste im Dock zeigt die Agenten-Aktivität des Tages als Funken (Skill-Läufe, Routinen, Karten). Hover = was lief, Klick = Lauf öffnen, Länge der Glut = Kosten.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Licht unter dem Zeiger<span class="tag">Hintergrund</span></div><div class="sub">Das Hex-Muster ist fast unsichtbar und leuchtet nur in einem weichen Kreis um den Mauszeiger auf — als würde man mit einer Lampe über die Waben streichen.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Tageszeit-Licht<span class="tag">Themes</span></div><div class="sub">Dunkle Themes werden abends minimal wärmer, morgens kühler (wenige Prozent Farbton). Spürt man mehr, als man es sieht; abschaltbar.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Panels aus dem Ursprung<span class="tag">Bewegung</span></div><div class="sub">Kanban, Datei, Chat öffnen mit einer Feder-Animation aus dem Icon, das sie geöffnet hat (Ring, Dock, Spotlight), und schließen dorthin zurück.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Kommando-Kern ⌘K<span class="tag">Spotlight</span></div><div class="sub">Ergebnisse mit Hex-Typ-Icons, Vorschau rechts, Aktionen per ⇥, und als letzte Zeile immer „Ask Axiomata: …“ — Suche und Agent in einem Feld.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Fokus-Modus<span class="tag">⌘.</span></div><div class="sub">Alles außer dem aktiven Panel tritt zurück (Unschärfe, Waben verblassen), Glut-Ereignisse werden zu leisen Marken im Dock gesammelt.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Tankanzeige für Kosten<span class="tag">Spend</span></div><div class="sub">Das Tageslimit als Hex-Segment-Anzeige (wie eine Akku-Waben-Leiste); nähert es sich dem Limit, wird die Glut rot statt orange.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Projektfarbe als Waben-Ton<span class="tag">Studio</span></div><div class="sub">Die vorgemerkte Akzentfarbe pro Projekt färbt nur dessen Hex-Marke (Studio-Tab, Karten, Agent-Avatar) — Orientierung ohne zweiten Akzent.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Töne (aus per Vorgabe)<span class="tag">Sound</span></div><div class="sub">Drei leise Klänge: Agent fertig, Agent braucht dich, Routine gezündet. Für den Fall, dass die App im Hintergrund liegt.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Generative leere Leinwand<span class="tag">Dashboard</span></div><div class="sub">Ein leeres Dashboard zeigt eine langsam wachsende Wabenfläche mit „Add your first module“ statt Leere.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Kalender als Tagesbogen<span class="tag">Kachel</span></div><div class="sub">Heute als Bogen um eine Uhr: Termine als Segmente, „jetzt“ als Glutpunkt, der wandert; die Liste bleibt darunter.</div></div>
+    <div class="idea"><div class="t-title"><i class="hex"></i>Theme-Wahl als Live-Vorschau<span class="tag">Settings</span></div><div class="sub">Statt Farbstreifen eine Mini-Kopie der echten App je Theme; Hover blendet die ganze App testweise um.</div></div>
+  </div>
+</div>
+
+<script>
+/* ---------- shared ---------- */
+const $ = (s) => document.querySelector(s);
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const AREAS = [
+  {name:"Arbeit", n:46, hue:20}, {name:"Entwicklung", n:52, hue:220}, {name:"Persönlich", n:24, hue:50},
+  {name:"Fotografie", n:18, hue:290}, {name:"KI", n:30, hue:330}, {name:"Inbox", n:22, hue:130},
+  {name:"Gesellschaft", n:14, hue:355}, {name:"Mail", n:28, hue:180}, {name:"System & Werkzeuge", n:18, hue:255},
+];
+function areaColor(a, alpha=1){ const dark = document.documentElement.dataset.theme !== "paper"; return `hsla(${AREAS[a].hue},${dark?62:48}%,${dark?62:46}%,${alpha})`; }
+function hexPath(ctx, r){ ctx.beginPath(); for (let i=0;i<6;i++){ const a=Math.PI/3*i - Math.PI/2; ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);} ctx.closePath(); }
+function lerpColor(c1, c2, t){ return c1.map((v,i)=>Math.round(v+(c2[i]-v)*t)); }
+function parseHex(h){ h=h.replace("#",""); return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16)); }
+function hslToRgb(h,s,l){ s/=100;l/=100; const k=n=>(n+h/30)%12, a=s*Math.min(l,1-l), f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1))); return [f(0),f(8),f(4)].map(v=>Math.round(v*255)); }
+function fitCanvas(c){ const r=c.getBoundingClientRect(), d=devicePixelRatio||1; const h=+c.getAttribute("height"); c.width=r.width*d; c.height=h*d; c.style.height=h+"px"; const ctx=c.getContext("2d"); ctx.setTransform(d,0,0,d,0,0); return {ctx,w:r.width,h}; }
+const DAY = 86400000;
+// notes: shared between sphere and map
+const R0 = rng(7);
+const NOTES = [];
+AREAS.forEach((a,ai)=>{ for(let k=0;k<a.n;k++) NOTES.push({area:ai, name:`${a.name} · Notiz ${k+1}`, age: -Math.log(1-R0()*0.999)*24, born: 0, heat:0}); });
+// birth: areas start at different times, then grow
+NOTES.forEach(n=>{ n.born = Math.min(1, (n.area%5)/8 + R0()*0.7); });
+const order = [...NOTES].sort((a,b)=>a.born-b.born); order.forEach((n,i)=>n.rank=i/NOTES.length);
+NOTES.slice(0,4).forEach(n=>n.age=0.2);
+
+/* ---------- 1 hive sphere ---------- */
+(function(){
+  const c = $("#hive"); let {ctx,w,h} = fitCanvas(c);
+  addEventListener("resize",()=>({ctx,w,h}=fitCanvas(c)));
+  const N = NOTES.length, GA = Math.PI*(3-Math.sqrt(5));
+  // fibonacci lattice, then assign areas by nearest seed so areas form continents
+  const pts = []; for (let i=0;i<N;i++){ const y=1-2*(i+.5)/N, r=Math.sqrt(1-y*y), t=i*GA; pts.push([Math.cos(t)*r,y,Math.sin(t)*r]); }
+  const rr = rng(11); const seeds = AREAS.map(()=>{ const u=rr()*2-1, t=rr()*Math.PI*2, s=Math.sqrt(1-u*u); return [Math.cos(t)*s,u,Math.sin(t)*s]; });
+  // greedy: each area claims its n nearest free points to its seed (organic continents)
+  const free = new Set(pts.keys()); const cells = [];
+  const byArea = AREAS.map((a,ai)=>NOTES.filter(n=>n.area===ai));
+  const queue = AREAS.map((_,ai)=>ai).sort((a,b)=>AREAS[b].n-AREAS[a].n);
+  for (const ai of queue){ const s=seeds[ai]; const cand=[...free].sort((p,q)=>dist(pts[p],s)-dist(pts[q],s)).slice(0,AREAS[ai].n); cand.forEach((p,k)=>{ free.delete(p); cells.push({p:pts[p], note:byArea[ai][k]}); }); }
+  function dist(a,b){ return (a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2; }
+  cells.forEach(c=>c.phase=Math.random());
+  let hshine="metal"; document.querySelectorAll("#hshine button").forEach(b=>b.onclick=()=>{ hshine=b.dataset.v; document.querySelectorAll("#hshine button").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); });
+  const ring = []; const inner=["Calendar","ToDo","Mail","Reminders","Routines","Skills","Terminal","Studio","Kanban","Notes"], outer=["Safari","Obsidian","Xcode","Figma","Music"];
+  inner.forEach((n,i)=>ring.push({name:n, ang: Math.PI*0.62 + i*(Math.PI*0.76/(inner.length-1)), inner:true}));
+  outer.forEach((n,i)=>ring.push({name:n, ang: -Math.PI*0.3 + i*(Math.PI*0.6/(outer.length-1)), inner:false}));
+  let rotY=0, tilt=0.38, drag=null, time=1, playing=false, sparks=[], lastSpark=0, hover=null;
+  c.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,ry:rotY,t:tilt}; c.setPointerCapture(e.pointerId);});
+  c.addEventListener("pointermove",e=>{ if(drag){ rotY=drag.ry+(e.clientX-drag.x)*0.008; tilt=Math.max(-1,Math.min(1,drag.t+(e.clientY-drag.y)*0.006)); } else { const r=c.getBoundingClientRect(); hover={x:e.clientX-r.left,y:e.clientY-r.top}; } });
+  c.addEventListener("pointerup",()=>drag=null); c.addEventListener("pointerleave",()=>{hover=null;$("#hiveTip").style.display="none";});
+  const slider=$("#hiveTime"); slider.oninput=()=>{time=slider.value/1000; playing=false; label();};
+  $("#hivePlay").onclick=()=>{ playing=true; time=0; };
+  function label(){ $("#hiveDate").textContent = time>=0.999 ? "heute" : new Date(Date.now()-(1-time)*400*DAY).toLocaleDateString("de-DE",{month:"short",year:"numeric"}); }
+  $("#hiveLegend").innerHTML = AREAS.map((a,i)=>`<span><i class="hex" style="background:${areaColor(i)}"></i>${a.name}</span>`).join("");
+  let last=performance.now();
+  function frame(now){
+    const dt=Math.min(.05,(now-last)/1000); last=now;
+    if(!drag) rotY+=dt*0.12;
+    if(playing){ time=Math.min(1,time+dt/7); slider.value=time*1000; label(); if(time>=1) playing=false; }
+    const dark = document.documentElement.dataset.theme!=="paper";
+    const ash = parseHex(dark?"#34343c":"#d6cdc2"), ember = parseHex(dark?"#ff7a1a":"#c9562a");
+    ctx.clearRect(0,0,w,h);
+    const cx=w/2, cy=h/2-18, R=Math.min(w,h)*0.3;
+    // halo
+    const g=ctx.createRadialGradient(cx,cy,R*0.2,cx,cy,R*1.25); g.addColorStop(0,dark?"rgba(255,122,26,.06)":"rgba(201,86,42,.05)"); g.addColorStop(1,"transparent"); ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    // ring
+    const RR=R*1.32; ctx.strokeStyle=css("--hair-strong"); ctx.lineWidth=1; ctx.beginPath(); ctx.arc(cx,cy,RR,0,Math.PI*2); ctx.stroke();
+    ring.forEach(a=>{ const x=cx+Math.cos(a.ang)*RR, y=cy+Math.sin(a.ang)*RR; a.x=x;a.y=y; ctx.save(); ctx.translate(x,y);
+      hexPath(ctx,13); ctx.fillStyle=css("--e2"); ctx.fill(); ctx.strokeStyle=a.inner?css("--accent"):css("--muted"); ctx.globalAlpha=a.inner?.85:.6; ctx.lineWidth=1.3; ctx.stroke(); ctx.globalAlpha=1;
+      ctx.fillStyle=a.inner?css("--accent"):css("--muted"); ctx.font=`600 9px ${css("--sans")}`; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(a.name.slice(0,2),0,.5); ctx.restore(); });
+    ctx.font=`600 10px ${css("--sans")}`; ctx.fillStyle=css("--faint"); ctx.textAlign="center";
+    ctx.fillText("INTERN",cx-RR-34,cy); ctx.fillText("EXTERN",cx+RR+36,cy);
+    // cells
+    const cy_=Math.cos(rotY), sy_=Math.sin(rotY), ct=Math.cos(tilt), st=Math.sin(tilt);
+    const proj = cells.map(cell=>{ const [x,y,z]=cell.p; const x1=x*cy_-z*sy_, z1=x*sy_+z*cy_; const y2=y*ct-z1*st, z2=y*st+z1*ct; return {cell,x:cx+x1*R,y:cy+y2*R,nx:x1,ny:y2,z:z2}; }).sort((a,b)=>a.z-b.z);
+    const size = R*Math.sqrt(4*Math.PI/N)*0.55;
+    let hit=null;
+    for(const q of proj){ const n=q.cell.note; if(n.rank>time) continue;
+      n.heat=Math.max(0,n.heat-dt*0.12);
+      const front=q.z>0, f=Math.abs(q.z);
+      const ageT = Math.min(1, n.age/40);
+      let base = hslToRgb(AREAS[n.area].hue, dark?62:48, dark?60:48);
+      let col = lerpColor(base, ash, ageT*0.85);
+      const hot = Math.max(n.heat, n.age<1?0.75:0);
+      col = lerpColor(col, ember, hot);
+      if(front && hshine!=="off"){
+        // today's 2Brain twinkle: every cell breathes with its own phase
+        const tw = 0.82+0.18*Math.sin(now/1000*1.7+q.cell.phase*Math.PI*2);
+        if(hshine==="twinkle") col = col.map(v=>v*tw);
+        else {
+          // metal: real light from top-left on the cell's normal, a specular sheen, plus the twinkle as tiny tilt
+          const L=[-0.45,-0.55,0.7], Ln=Math.hypot(...L); const nx=q.nx, ny=q.ny, nz=q.z;
+          const diff=Math.max(0,(nx*L[0]+ny*L[1]+nz*L[2])/Ln);
+          const H=[L[0]/Ln,L[1]/Ln,L[2]/Ln+1], Hn=Math.hypot(...H);
+          const spec=Math.pow(Math.max(0,(nx*H[0]+ny*H[1]+nz*H[2])/Hn),40)*(0.6+0.4*Math.sin(now/1000*1.7+q.cell.phase*Math.PI*2));
+          const shade=0.45+0.75*diff;
+          col = col.map(v=>Math.min(255, v*shade*tw + (255-v)*spec*0.45));
+        }
+      }
+      ctx.save(); ctx.translate(q.x,q.y); ctx.rotate(Math.atan2(q.ny,q.nx)); ctx.scale(Math.max(f,.12),1);
+      hexPath(ctx,size*(front?0.92:0.7));
+      ctx.globalAlpha = front ? 1 : 0.13;
+      if(front && hot>0.2){ ctx.shadowBlur=14*hot; ctx.shadowColor=`rgba(${ember},${0.9})`; }
+      ctx.fillStyle=`rgb(${col})`; ctx.fill(); ctx.restore();
+      if(front && hover && (hover.x-q.x)**2+(hover.y-q.y)**2 < size*size) hit=q;
+    }
+    if(hit){ ctx.save(); ctx.translate(hit.x,hit.y); hexPath(ctx,size*1.25); ctx.strokeStyle=css("--text"); ctx.lineWidth=1.5; ctx.stroke(); ctx.restore();
+      const t=$("#hiveTip"); t.style.display="block"; t.style.left=(hit.x+14)+"px"; t.style.top=(hit.y-10)+"px"; const n=hit.cell.note;
+      t.innerHTML=`<b>${n.name}</b><br><span class="sub">${n.heat>0.1||n.age<1?"gerade bearbeitet":"vor "+Math.round(n.age)+" Tagen"}</span>`; } else if(hover) $("#hiveTip").style.display="none";
+    // sparks
+    if(now-lastSpark>2600 && time>=1){ lastSpark=now; const src=ring.filter(a=>a.inner)[Math.floor(Math.random()*7)]; const fronts=proj.filter(q=>q.z>0.35); const tgt=fronts[Math.floor(Math.random()*fronts.length)]; if(tgt) sparks.push({src,tgt:tgt.cell,t:0}); }
+    sparks = sparks.filter(s=>s.t<1);
+    for(const s of sparks){ s.t+=dt/1.1; const tq=proj.find(q=>q.cell===s.tgt); if(!tq) continue;
+      const mx=(s.src.x+tq.x)/2+(cx-(s.src.x+tq.x)/2)*0.5, my=(s.src.y+tq.y)/2-40;
+      const pt=u=>[(1-u)**2*s.src.x+2*(1-u)*u*mx+u*u*tq.x,(1-u)**2*s.src.y+2*(1-u)*u*my+u*u*tq.y];
+      const e=1-Math.pow(1-s.t,3);
+      for(let k=0;k<14;k++){ const u=Math.max(0,e-k*0.025); const [x,y]=pt(u); ctx.beginPath(); ctx.arc(x,y,2.6*(1-k/14),0,7); ctx.fillStyle=`rgba(${ember},${(1-k/14)*0.9})`; ctx.fill(); }
+      if(s.t>=1){ s.tgt.note.heat=1; s.tgt.note.age=0.1; }
+    }
+    requestAnimationFrame(frame);
+  }
+  label(); requestAnimationFrame(frame);
+})();
+
+/* ---------- 2 territory map ---------- */
+(function(){
+  const c=$("#map"); let {ctx,w,h}=fitCanvas(c); addEventListener("resize",()=>({ctx,w,h}=fitCanvas(c)));
+  const rr=rng(23); const key=(q,r)=>q+","+r; const DIRS=[[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+  const grid=new Map(); const RAD=11;
+  // seeds on a rough ring, grow round-robin with quotas
+  const seeds=AREAS.map((a,i)=>{ const ang=i/AREAS.length*Math.PI*2+rr()*0.3; const d=i===1?0:6+rr()*2; return [Math.round(Math.cos(ang)*d), Math.round(Math.sin(ang)*d*0.9)]; });
+  const fronts=AREAS.map((a,i)=>[seeds[i]]); const left=AREAS.map(a=>a.n); const byArea=AREAS.map((a,ai)=>NOTES.filter(n=>n.area===ai)); const used=AREAS.map(()=>0);
+  let progress=true;
+  while(progress){ progress=false;
+    for(let ai=0;ai<AREAS.length;ai++){ if(!left[ai]) continue; const f=fronts[ai];
+      for(let tries=0;tries<40 && f.length;tries++){ const idx=Math.floor(rr()*f.length); const [q,r]=f[idx];
+        if(!grid.has(key(q,r)) && Math.max(Math.abs(q),Math.abs(r),Math.abs(-q-r))<=RAD){ grid.set(key(q,r),{q,r,area:ai,note:byArea[ai][used[ai]++]}); left[ai]--; progress=true;
+          DIRS.forEach(([dq,dr])=>f.push([q+dq,r+dr])); break; }
+        f.splice(idx,1); } } }
+  const cellsArr=[...grid.values()];
+  cellsArr.forEach(c=>c.phase=rr());
+  let shine="metal"; document.querySelectorAll("#shine button").forEach(b=>b.onclick=()=>{ shine=b.dataset.v; document.querySelectorAll("#shine button").forEach(x=>x.setAttribute("aria-pressed",String(x===b))); });
+  { let mx=0,my=0; cellsArr.forEach(c=>{mx+=Math.sqrt(3)*(c.q+c.r/2); my+=1.5*c.r;}); var home={x:-mx/cellsArr.length*16, y:-my/cellsArr.length*16}; }
+  const links=[]; for(let i=0;i<110;i++){ const a=cellsArr[Math.floor(rr()*cellsArr.length)]; const same=rr()<0.7; const pool=same?cellsArr.filter(x=>x.area===a.area):cellsArr; const b=pool[Math.floor(rr()*pool.length)]; if(a!==b) links.push([a,b]); }
+  let zoom=1, pan={...home}, drag=null, hover=null, time=1, playing=false;
+  const S=Math.min(16, Math.min(w,h)*0.44/ (RAD*1.5+1));
+  const pix=(q,r)=>[S*zoom*Math.sqrt(3)*(q+r/2)+pan.x, S*zoom*1.5*r+pan.y];
+  c.addEventListener("wheel",e=>{ e.preventDefault(); const r=c.getBoundingClientRect(); const mx=e.clientX-r.left-w/2, my=e.clientY-r.top-h/2; const nz=Math.max(.6,Math.min(4,zoom*Math.exp(-e.deltaY*0.0015))); pan.x=mx-(mx-pan.x)*nz/zoom; pan.y=my-(my-pan.y)*nz/zoom; zoom=nz; },{passive:false});
+  c.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,px:pan.x,py:pan.y}; c.setPointerCapture(e.pointerId);});
+  c.addEventListener("pointermove",e=>{ const r=c.getBoundingClientRect(); hover={x:e.clientX-r.left,y:e.clientY-r.top}; if(drag){pan.x=drag.px+e.clientX-drag.x; pan.y=drag.py+e.clientY-drag.y;} });
+  c.addEventListener("pointerup",()=>drag=null); c.addEventListener("pointerleave",()=>{hover=null;$("#mapTip").style.display="none";});
+  $("#mapReset").onclick=()=>{zoom=1;pan={...home};};
+  const sl=$("#mapTime"); sl.oninput=()=>{time=sl.value/1000;playing=false;}; $("#mapPlay").onclick=()=>{playing=true;time=0;};
+  let last=performance.now();
+  function frame(now){ const dt=Math.min(.05,(now-last)/1000); last=now;
+    if(playing){ time=Math.min(1,time+dt/7); sl.value=time*1000; if(time>=1) playing=false; }
+    const dark=document.documentElement.dataset.theme!=="paper";
+    ctx.clearRect(0,0,w,h); const cx=w/2, cy=h/2-20, L=Math.min(w,h)*0.44;
+    ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,L,0,Math.PI*2); ctx.clip();
+    ctx.fillStyle=dark?"rgba(255,255,255,.015)":"rgba(60,40,20,.025)"; ctx.fillRect(0,0,w,h);
+    ctx.translate(cx,cy);
+    const s=S*zoom; const vis=c=>c.note.rank<=time;
+    // fills
+    let hit=null;
+    for(const cell of cellsArr){ if(!vis(cell)) continue; const [x,y]=pix(cell.q,cell.r); const n=cell.note;
+      ctx.save(); ctx.translate(x,y); hexPath(ctx,s*0.98);
+      const ageT=Math.min(1,n.age/40); const tsec=now/1000;
+      // "twinkle" = today's 2Brain: every cell breathes with its own phase, which reads as tilting in the light
+      const tw = shine==="off" ? 1 : 0.75+0.25*Math.sin(tsec*1.7+cell.phase*Math.PI*2);
+      ctx.fillStyle=areaColor(cell.area, ((dark?0.5:0.42)*(1-ageT*0.6)+0.08)*tw); ctx.fill();
+      if(shine==="metal"){
+        // a slow light sweeping across the map + a bevel per plate: the cell's own "tilt" decides how much it catches
+        const lx=Math.cos(tsec*0.35)*w*0.5, ly=Math.sin(tsec*0.35)*h*0.35;
+        const catchL=Math.exp(-((x-lx)**2+(y-ly)**2)/(2*(140*zoom)**2)) * (0.5+0.5*Math.sin(tsec*1.7+cell.phase*Math.PI*2));
+        const g=ctx.createLinearGradient(-s,-s,s,s);
+        g.addColorStop(0,`rgba(255,255,255,${(dark?0.10:0.35)+catchL*(dark?0.35:0.45)})`);
+        g.addColorStop(0.5,"rgba(255,255,255,0)");
+        g.addColorStop(1,`rgba(0,0,0,${dark?0.28:0.10})`);
+        ctx.fillStyle=g; ctx.fill();
+      }
+      ctx.strokeStyle=dark?"rgba(0,0,0,.35)":"rgba(255,255,255,.6)"; ctx.lineWidth=1; ctx.stroke();
+      if(n.age<1.5){ ctx.beginPath(); ctx.arc(0,0,s*0.22,0,7); ctx.fillStyle=css("--accent"); ctx.shadowBlur=12; ctx.shadowColor=css("--accent"); ctx.globalAlpha=0.75+0.25*Math.sin(now/400); ctx.fill(); }
+      ctx.restore();
+      if(hover){ const hx=hover.x-cx, hy=hover.y-cy; if((hx-x)**2+(hy-y)**2<(s*0.86)**2) hit={cell,x,y}; } }
+    // borders between areas
+    ctx.lineWidth=Math.max(1.4,1.6*zoom); ctx.lineCap="round";
+    for(const cell of cellsArr){ if(!vis(cell)) continue; const [x,y]=pix(cell.q,cell.r);
+      DIRS.forEach(([dq,dr],i)=>{ const nb=grid.get(key(cell.q+dq,cell.r+dr)); if(nb && vis(nb) && nb.area===cell.area) return;
+        // edge i of pointy hex facing direction i: corners at angles (−30+60i)±30 → map dir to corners
+        const dirAng=[0,-60,-120,180,120,60][i]*Math.PI/180; const a1=dirAng-Math.PI/6, a2=dirAng+Math.PI/6; const rad=s;
+        ctx.beginPath(); ctx.moveTo(x+Math.cos(a1)*rad,y+Math.sin(a1)*rad); ctx.lineTo(x+Math.cos(a2)*rad,y+Math.sin(a2)*rad);
+        ctx.strokeStyle=areaColor(cell.area, dark?0.95:0.85); ctx.stroke(); }); }
+    // roads
+    if(zoom>1.15){ ctx.globalAlpha=Math.min(1,(zoom-1.15)*2); ctx.setLineDash([3,4]); ctx.lineWidth=1.1; ctx.strokeStyle=dark?"rgba(255,255,255,.35)":"rgba(60,40,20,.35)";
+      for(const [a,b] of links){ if(!vis(a)||!vis(b)) continue; const [x1,y1]=pix(a.q,a.r),[x2,y2]=pix(b.q,b.r); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo((x1+x2)/2+(y2-y1)*0.15,(y1+y2)/2-(x2-x1)*0.15,x2,y2); ctx.stroke(); }
+      ctx.setLineDash([]); ctx.globalAlpha=1; }
+    // file names when close
+    if(zoom>2.3){ ctx.font=`500 ${Math.min(11,4*zoom)}px ${css("--sans")}`; ctx.fillStyle=css("--text"); ctx.textAlign="center"; ctx.textBaseline="middle";
+      for(const cell of cellsArr){ if(!vis(cell)) continue; const [x,y]=pix(cell.q,cell.r); if(Math.hypot(x,y)>L) continue; const nm=cell.note.name.split("· ")[1]; ctx.fillText(nm.length>9?nm.slice(0,8)+"…":nm,x,y+s*0.45); } }
+    // area labels
+    if(zoom<2.6){ ctx.globalAlpha=Math.min(1,(2.6-zoom)*1.5);
+      AREAS.forEach((a,ai)=>{ const cs=cellsArr.filter(c=>c.area===ai&&vis(c)); if(!cs.length) return; let sx=0,sy=0; cs.forEach(c=>{const [x,y]=pix(c.q,c.r); sx+=x; sy+=y;}); sx/=cs.length; sy/=cs.length;
+        ctx.font=`600 ${11+2*zoom}px ${css("--display")}`; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.lineWidth=4; ctx.strokeStyle=dark?"rgba(6,6,7,.7)":"rgba(251,248,242,.85)"; ctx.strokeText(a.name,sx,sy); ctx.fillStyle=css("--text"); ctx.fillText(a.name,sx,sy);
+        ctx.font=`500 10.5px ${css("--sans")}`; ctx.fillStyle=css("--muted"); ctx.strokeText(cs.length+" notes",sx,sy+14+zoom*2); ctx.fillText(cs.length+" notes",sx,sy+14+zoom*2); });
+      ctx.globalAlpha=1; }
+    if(hit){ ctx.save(); ctx.translate(hit.x,hit.y); hexPath(ctx,s*1.05); ctx.strokeStyle=css("--text"); ctx.lineWidth=2; ctx.stroke(); ctx.restore();
+      const t=$("#mapTip"); t.style.display="block"; t.style.left=(cx+hit.x+14)+"px"; t.style.top=(cy+hit.y-10)+"px"; const n=hit.cell.note; t.innerHTML=`<b>${n.name}</b><br><span class="sub">${n.age<1.5?"gerade bearbeitet":"vor "+Math.round(n.age)+" Tagen"}</span>`; }
+    else $("#mapTip").style.display="none";
+    ctx.restore();
+    ctx.strokeStyle=css("--hair-strong"); ctx.lineWidth=1; ctx.beginPath(); ctx.arc(cx,cy,L,0,Math.PI*2); ctx.stroke();
+    requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+})();
+
+/* ---------- 3a fuse ---------- */
+(function(){
+  const c=$("#fuse"), c2=$("#fuse2"); let A=fitCanvas(c), B=fitCanvas(c2); addEventListener("resize",()=>{A=fitCanvas(c);B=fitCanvas(c2);});
+  let parts=[], flash=0, last=performance.now(); const LOOP=14;
+  function frame(now){ const dt=Math.min(.05,(now-last)/1000); last=now; const t=(now/1000)%LOOP/LOOP;
+    const {ctx,w,h}=A; ctx.clearRect(0,0,w,h); const y=h/2, x0=4, x1=w-28; const bx=x0+(x1-x0)*t;
+    // burnt part
+    ctx.setLineDash([2,4]); ctx.strokeStyle=css("--ash"); ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(bx,y); ctx.stroke(); ctx.setLineDash([]);
+    // remaining fuse with slight wave
+    ctx.strokeStyle=css("--muted"); ctx.lineWidth=2; ctx.beginPath(); for(let x=bx;x<=x1;x+=3) ctx.lineTo(x,y+Math.sin(x*0.15)*1.2); ctx.stroke();
+    // charge hex at end
+    ctx.save(); ctx.translate(x1+14,y); hexPath(ctx,9); ctx.fillStyle=flash>0?css("--accent"):css("--e3"); ctx.strokeStyle=css("--hair-strong"); ctx.fill(); ctx.stroke(); if(flash>0){ctx.shadowBlur=20*flash; ctx.shadowColor=css("--accent"); ctx.fill();} ctx.restore();
+    // spark
+    const g=ctx.createRadialGradient(bx,y,0,bx,y,12); g.addColorStop(0,"rgba(255,220,160,1)"); g.addColorStop(.3,css("--accent")); g.addColorStop(1,"transparent"); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(bx,y,12,0,7); ctx.fill();
+    for(let i=0;i<3;i++) parts.push({x:bx,y,vx:(Math.random()-.6)*60,vy:-Math.random()*70,l:1});
+    parts=parts.filter(p=>p.l>0); parts.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=160*dt;p.l-=dt*2.2; ctx.fillStyle=`rgba(255,160,60,${p.l})`; ctx.fillRect(p.x,p.y,1.6,1.6);});
+    if(t>0.985) flash=1; flash=Math.max(0,flash-dt*1.2);
+    const mins=Math.round((1-t)*120); $("#fuseEta").textContent= mins>=60?`in ${Math.floor(mins/60)} h ${mins%60} min`:`in ${mins} min`;
+    // cold fuse
+    { const {ctx,w,h}=B; ctx.clearRect(0,0,w,h); ctx.strokeStyle=css("--hair-strong"); ctx.lineWidth=2; ctx.beginPath(); for(let x=4;x<=w-28;x+=3) ctx.lineTo(x,h/2+Math.sin(x*0.15)*1.2); ctx.stroke(); ctx.save(); ctx.translate(w-14,h/2); hexPath(ctx,9); ctx.fillStyle=css("--e3"); ctx.strokeStyle=css("--hair-strong"); ctx.fill(); ctx.stroke(); ctx.restore(); }
+    requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+})();
+
+/* ---------- 3b thinking bar ---------- */
+$("#ask").onclick=async()=>{
+  const bar=$("#abar"), out=$("#reply"); bar.classList.add("thinking"); $("#abarText").textContent="Was steht heute an?"; out.innerHTML="";
+  const chip=(t)=>{ const s=document.createElement("span"); s.className="chipt"; s.innerHTML=`<span class="hm hex"></span>${t}`; out.appendChild(s); };
+  const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
+  await wait(700); chip("calendar · today"); await wait(600); chip("reminders · open"); await wait(600); chip("kanban · board #1");
+  await wait(500); const p=document.createElement("p"); p.style.margin="10px 0 0"; out.appendChild(p);
+  const text="Heute: Team-Sync um 9, 1:1 mit Sam um 14 Uhr. Zwei offene Erinnerungen (Steuerunterlagen, Werkstatt). Auf dem Board wartet #10 auf deine Antwort.";
+  for(const ch of text){ p.textContent+=ch; await wait(14); }
+  bar.classList.remove("thinking"); $("#abarText").textContent="Ask the agent, or /help";
+};
+
+/* ---------- 3c flow ---------- */
+(function(){
+  const svg=$("#flow"); const nodes=[{id:"s",x:20,y:110,w:60,t:"Start",m:"",cls:"done"},{id:"a",x:120,y:40,w:130,t:"#7 Rolle vorschlagen",m:"done · doc",cls:"done"},{id:"b",x:120,y:170,w:130,t:"#9 Zustand testen",m:"working · OC",cls:"live"},
+    {id:"c",x:300,y:105,w:140,t:"#8 Review-Spalte",m:"waiting",cls:""}];
+  const edges=[["s","a",false],["s","b",true],["a","c",false],["b","c",true]];
+  const N=Object.fromEntries(nodes.map(n=>[n.id,n]));
+  const path=(a,b)=>{ const x1=a.x+a.w,y1=a.y+22,x2=b.x,y2=b.y+22,m=(x1+x2)/2; return `M${x1},${y1} C${m},${y1} ${m},${y2} ${x2},${y2}`; };
+  let html=""; edges.forEach(([a,b,live])=>{ const d=path(N[a],N[b]); html+=`<path class="edge" d="${d}"/>`; if(live) html+=`<path class="pulse" pathLength="143" d="${d}"/>`; });
+  nodes.forEach(n=>{ html+=`<g class="node ${n.cls}" transform="translate(${n.x},${n.y})"><rect width="${n.w}" height="44" rx="10"/><text x="10" y="19">${n.t}</text><text class="meta" x="10" y="34">${n.m}</text>${n.cls==="live"?`<polygon points="${n.w-14},8 ${n.w-8},11.5 ${n.w-8},18.5 ${n.w-14},22 ${n.w-20},18.5 ${n.w-20},11.5" fill="var(--accent)"><animate attributeName="opacity" values="1;.4;1" dur="2.6s" repeatCount="indefinite"/></polygon>`:""}</g>`; });
+  svg.innerHTML=html;
+})();
+
+/* ---------- 4a ignition ---------- */
+(function(){
+  const svg=$("#ignSvg"); let dots=""; for(let i=0;i<18;i++){ const a=i/18*Math.PI*2-Math.PI/2, x=130+Math.cos(a)*88, y=118+Math.sin(a)*88; const inner=Math.cos(a)<0;
+    dots+=`<polygon class="dot" style="animation-delay:${1.0+i*0.04}s;${inner?"fill:var(--accent)":""}" points="${x},${y-6} ${x+5.2},${y-3} ${x+5.2},${y+3} ${x},${y+6} ${x-5.2},${y+3} ${x-5.2},${y-3}"/>`; }
+  svg.insertAdjacentHTML("beforeend",dots);
+  const run=()=>{ const el=$("#ign"); el.classList.remove("go"); void el.offsetWidth; el.classList.add("go"); };
+  $("#ignBtn").onclick=run; setTimeout(run,400);
+})();
+
+/* ---------- 4b kanban done ---------- */
+(function(){
+  const prog=["#4 Drag-and-Drop ohne HTML5-API","#9 Zustandsableitung testen","#10 Postfach-Kern bauen"];
+  const pl=$("#progList"), dl=$("#doneList");
+  function render(){ pl.innerHTML=""; prog.forEach((t,i)=>{ const d=document.createElement("div"); d.className="kcard"; d.innerHTML=`<span class="grow">${t}</span><button class="btn" title="Done" style="padding:3px 8px">✓</button>`; d.querySelector("button").onclick=()=>finish(d,i); pl.appendChild(d); }); $("#nProg").textContent=prog.length;
+    if(!prog.length) pl.innerHTML=`<div class="sub">Alles erledigt. <a href="#" style="color:var(--accent)" onclick="location.reload();return false">neu</a></div>`; }
+  function finish(card,i){ const r=card.getBoundingClientRect(), tgt=$("#nDone").getBoundingClientRect();
+    for(let k=0;k<22;k++){ const s=document.createElement("div"); s.className="spark hex"; document.body.appendChild(s);
+      const sx=r.left+Math.random()*r.width, sy=r.top+Math.random()*r.height, mx=sx+(Math.random()-.5)*120, my=sy-40-Math.random()*80;
+      s.animate([{transform:`translate(${sx}px,${sy}px) scale(1)`,opacity:1},{transform:`translate(${mx}px,${my}px) scale(1.2)`,opacity:1,offset:.45},{transform:`translate(${tgt.left+4}px,${tgt.top+4}px) scale(.3)`,opacity:.2}],{duration:900+Math.random()*300,easing:"cubic-bezier(.22,1,.36,1)"}).onfinish=()=>s.remove(); s.style.left=0;s.style.top=0; }
+    card.animate([{opacity:1,transform:"scale(1)",filter:"blur(0)"},{opacity:0,transform:"scale(.92)",filter:"blur(4px)"}],{duration:380,fill:"forwards"});
+    setTimeout(()=>{ prog.splice(i,1); render(); const n=$("#nDone"); n.textContent=+n.textContent+1; n.classList.add("bump"); setTimeout(()=>n.classList.remove("bump"),300); },950); }
+  render();
+})();
+
+/* ---------- 4c ghost cursor ---------- */
+(function(){
+  const pre=$("#code");
+  const head=`<span class="cm">/// Derives the card's state from its events.</span>\n<span class="kw">pub fn</span> <span class="fn">derive_state</span>(events: &[<span class="ty">CardEvent</span>]) -> <span class="ty">CardState</span> {\n    <span class="kw">let mut</span> state = <span class="ty">CardState</span>::Open;\n    <span class="kw">for</span> e <span class="kw">in</span> events {\n        `;
+  const tail=`\n    }\n    state\n}`;
+  const line="state = state.apply(e)?;";
+  let i=0, pause=0;
+  setInterval(()=>{ if(pause>0){pause--; return;} i++; if(i>line.length){ pause=14; i=0; }
+    const done=line.slice(0,i); pre.innerHTML=head+`<span class="typed">${done}</span><span class="ghost"><span class="flag"><i class="hex"></i>OC · Builder</span></span>`+tail; },90);
+})();
+
+/* ---------- controls ---------- */
+document.querySelectorAll(".seg").forEach((seg)=>seg.addEventListener("click",(e)=>{ const b=e.target.closest("button"); if(!b) return;
+  seg.querySelectorAll("button").forEach((x)=>x.setAttribute("aria-pressed",String(x===b))); document.documentElement.dataset[seg.dataset.set]=b.dataset.v;
+  if(seg.dataset.set==="theme") $("#hiveLegend").innerHTML=AREAS.map((a,i)=>`<span><i class="hex" style="background:${areaColor(i)}"></i>${a.name}</span>`).join(""); }));
+</script>
+</body>
+</html>

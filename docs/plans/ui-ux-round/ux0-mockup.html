@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="de" data-theme="graphite" data-font="geist">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Axiomata UX0 — Glut + Hex</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ui-scale:1;
+  --r-sm:6px; --r-md:10px; --r-lg:16px;
+  --ease:cubic-bezier(.22,1,.36,1);
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+[data-font="geist"]{--sans:"Geist",system-ui,sans-serif}
+[data-font="inter"]{--sans:"Inter",system-ui,sans-serif}
+[data-font="plex"]{--sans:"IBM Plex Sans",system-ui,sans-serif}
+[data-font="grotesk"]{--sans:"Space Grotesk",system-ui,sans-serif}
+[data-font="system"]{--sans:-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+
+/* ---------- Graphite ---------- */
+[data-theme="graphite"]{
+  --bg:#060607; --e1:#0f0f12; --e2:#16161a; --e3:#1d1d22;
+  --edge:rgba(255,255,255,.07); --hair:rgba(255,255,255,.06); --hair-strong:rgba(255,255,255,.11);
+  --text:#f2f2f4; --muted:#8d8d96; --faint:#5c5c66;
+  --accent:#ff7a1a; --accent-ink:#1a0c02;
+  --glow:rgba(255,122,26,.55); --glow-soft:rgba(255,122,26,.16);
+  --sel:rgba(255,255,255,.07);
+  --ok:#4fd67f; --warn:#e6b45f; --bad:#f26d6d;
+  --shadow:0 1px 0 var(--edge) inset, 0 18px 40px rgba(0,0,0,.45);
+  --hex:rgba(255,255,255,.028);
+  --display:var(--sans);
+}
+/* ---------- Paper ---------- */
+[data-theme="paper"]{
+  --bg:#efe9df; --e1:#f6f1e8; --e2:#fbf8f2; --e3:#ffffff;
+  --edge:rgba(255,255,255,.9); --hair:rgba(60,40,20,.10); --hair-strong:rgba(60,40,20,.18);
+  --text:#2a2420; --muted:#7b7068; --faint:#a89d93;
+  --accent:#c9562a; --accent-ink:#fff;
+  --glow:rgba(201,86,42,.45); --glow-soft:rgba(201,86,42,.12);
+  --sel:rgba(60,40,20,.06);
+  --ok:#3f8f5a; --warn:#b07d22; --bad:#c24a3e;
+  --shadow:0 1px 0 var(--edge) inset, 0 1px 2px rgba(60,40,20,.08), 0 10px 30px rgba(60,40,20,.10);
+  --hex:rgba(60,40,20,.045);
+  --display:"Newsreader",Georgia,serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:var(--sans); color:var(--text); background:var(--bg); font-size:13px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='64' viewBox='0 0 56 64'%3E%3Cpath fill='none' stroke='%23888' stroke-opacity='0.12' d='M28 0l24 14v28L28 56 4 42V14z M28 56v8'/%3E%3C/svg%3E");
+  transition:background-color .3s;
+}
+.page{max-width:1500px;margin:0 auto;padding:24px 24px 80px}
+.controls{position:sticky;top:0;z-index:5;display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px 0;background:linear-gradient(var(--bg) 70%,transparent)}
+.seg{display:inline-flex;background:var(--e1);border:1px solid var(--hair);border-radius:999px;padding:3px;box-shadow:var(--shadow)}
+.seg button{all:unset;cursor:pointer;padding:5px 12px;border-radius:999px;color:var(--muted);font-weight:500}
+.seg button[aria-pressed="true"]{background:var(--e3);color:var(--text);box-shadow:0 1px 0 var(--edge) inset}
+.intro{max-width:880px;color:var(--muted);margin:4px 0 24px}
+.intro b{color:var(--text)}
+h2.sec{font:600 11px/1 var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:40px 0 14px;display:flex;align-items:center;gap:10px}
+h2.sec::after{content:"";flex:1;height:1px;background:var(--hair)}
+.ba{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:20px;align-items:start}
+.before{border-radius:var(--r-md);overflow:hidden;border:1px solid var(--hair)}
+.before img{display:block;width:100%}
+.cap{font-size:11.5px;color:var(--faint);margin-top:6px}
+.after{min-width:0}
+.note{font-size:12.5px;color:var(--muted);margin-top:10px;max-width:640px}
+.note b{color:var(--text);font-weight:600}
+
+/* ---------- type roles ---------- */
+.t-caption{font-size:11.5px;color:var(--muted)}
+.t-label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.t-title{font:600 15px/1.3 var(--display);letter-spacing:-.005em}
+.t-display{font:600 34px/1 var(--display);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12px}
+
+/* ---------- hex primitives ---------- */
+.hex{clip-path:polygon(50% 0,93% 25%,93% 75%,50% 100%,7% 75%,7% 25%)}
+.hexav{position:relative;width:30px;height:34px;display:grid;place-items:center;flex:none}
+.hexav .face{position:absolute;inset:2px;background:var(--e3);display:grid;place-items:center;font:600 10.5px var(--sans);color:var(--muted)}
+.hexav .ring{position:absolute;inset:0;background:var(--hair-strong)}
+.hexav.live .ring{background:var(--accent);animation:breathe 2.6s var(--ease) infinite}
+.hexav.live{filter:drop-shadow(0 0 8px var(--glow))}
+.hexav.live .face{color:var(--accent)}
+.hexmark{width:9px;height:10px;display:inline-block;background:var(--faint);flex:none}
+.hexmark.live{background:var(--accent);box-shadow:0 0 10px var(--glow);animation:breathe 2.6s var(--ease) infinite}
+.hexmark.ok{background:var(--ok)} .hexmark.warn{background:var(--warn)} .hexmark.bad{background:var(--bad)}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
+
+/* ---------- elevation ---------- */
+.panel{background:var(--e2);border-radius:var(--r-lg);box-shadow:var(--shadow);border:1px solid var(--hair);overflow:hidden}
+.phead{display:flex;align-items:center;gap:10px;height:44px;padding:0 10px 0 16px;border-bottom:1px solid var(--hair)}
+.phead .t-title{flex:1}
+.ib{all:unset;cursor:pointer;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.ib:hover{background:var(--sel);color:var(--text)}
+.kbd{font:500 11px var(--sans);color:var(--faint);border:1px solid var(--hair-strong);border-radius:5px;padding:0 5px;line-height:17px}
+svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- dock ---------- */
+.dock{display:flex;align-items:center;gap:6px;padding:6px;background:color-mix(in srgb,var(--e2) 82%,transparent);backdrop-filter:blur(14px);border:1px solid var(--hair);border-radius:16px;box-shadow:var(--shadow);width:max-content;margin:0 auto}
+.brand{display:flex;align-items:center;gap:8px;padding:0 10px 0 6px;font:600 14px var(--display);letter-spacing:-.01em}
+.brand .logo{width:20px;height:22px;background:var(--accent)}
+.brand .logo i{display:block;width:100%;height:100%;background:var(--e2);transform:scale(.55)}
+.brand small{font:500 11px var(--sans);color:var(--faint);letter-spacing:0}
+.dsep{width:1px;height:22px;background:var(--hair-strong);margin:0 4px}
+.di{all:unset;cursor:pointer;display:flex;align-items:center;gap:7px;padding:7px 11px;border-radius:10px;color:var(--muted);font-weight:500;position:relative}
+.di:hover{background:var(--sel);color:var(--text)}
+.di .badge{position:absolute;top:4px;right:5px;width:7px;height:8px;background:var(--accent);box-shadow:0 0 8px var(--glow)}
+.search{display:flex;align-items:center;gap:8px;padding:7px 10px 7px 12px;min-width:220px;border-radius:10px;background:var(--e1);border:1px solid var(--hair);color:var(--faint)}
+.search .kbd{margin-left:auto}
+
+/* ---------- tiles ---------- */
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.tile{padding:4px 2px}
+.tile .th{display:flex;align-items:center;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--hair);margin-bottom:12px}
+.tile .th svg{color:var(--muted)}
+.tile .th .meta{margin-left:auto}
+.row{display:flex;align-items:center;gap:10px;padding:7px 0}
+.row + .row{border-top:1px solid var(--hair)}
+.grow{flex:1;min-width:0}
+.sub{font-size:12px;color:var(--muted)}
+.chip{font:500 11px var(--sans);padding:2px 8px;border-radius:999px;background:var(--sel);color:var(--muted)}
+.btn{all:unset;cursor:pointer;font-weight:500;padding:6px 12px;border-radius:9px;background:var(--e3);border:1px solid var(--hair-strong);color:var(--text)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;box-shadow:0 0 0 1px rgba(0,0,0,.1) inset,0 6px 18px var(--glow-soft)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.run{all:unset;cursor:pointer;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:var(--muted);border:1px solid var(--hair-strong)}
+.run.live{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 50%,transparent);box-shadow:0 0 14px var(--glow-soft)}
+.bar{height:4px;border-radius:4px;background:var(--sel);overflow:hidden}
+.bar i{display:block;height:100%;width:38%;background:var(--accent);box-shadow:0 0 10px var(--glow)}
+
+/* ---------- kanban ---------- */
+.kb{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:14px}
+.col h4{margin:0 0 10px;display:flex;align-items:center;gap:8px;font:600 12.5px var(--sans)}
+.col h4 .n{margin-left:auto;color:var(--faint);font-weight:500}
+.card{background:var(--e3);border:1px solid var(--hair);border-radius:12px;padding:11px 12px;margin-bottom:8px;box-shadow:0 1px 0 var(--edge) inset;position:relative}
+.card .id{color:var(--faint);font-variant-numeric:tabular-nums;margin-right:4px}
+.card .ct{font-weight:500}
+.card .cm{display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.card.live{border-color:color-mix(in srgb,var(--accent) 45%,transparent);box-shadow:0 1px 0 var(--edge) inset,0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent),0 8px 28px var(--glow-soft)}
+.card.live::before{content:"";position:absolute;left:12px;right:12px;top:-1px;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);animation:sweep 2.8s var(--ease) infinite}
+@keyframes sweep{0%{opacity:.2;transform:scaleX(.3)}50%{opacity:1;transform:scaleX(1)}100%{opacity:.2;transform:scaleX(.3)}}
+.due{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.due.bad{color:var(--bad)}
+
+/* ---------- agent (flow) ---------- */
+.agent{display:flex;gap:12px;padding:14px 16px;align-items:flex-start}
+.agent + .agent{border-top:1px solid var(--hair)}
+.agent .act{margin-top:8px;display:flex;gap:8px;align-items:center;padding:7px 10px;border-radius:9px;background:var(--e1);border:1px solid var(--hair)}
+.agent .act .mono{color:var(--text)}
+
+/* ---------- notice + empty ---------- */
+.notice{display:flex;align-items:center;gap:10px;padding:9px 10px 9px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 9%,var(--e2));border:1px solid color-mix(in srgb,var(--warn) 28%,transparent)}
+.notice .grow{font-size:12.5px}
+.empty{display:grid;place-items:center;text-align:center;gap:12px;padding:48px 16px}
+.empty .art{position:relative;width:84px;height:92px}
+.empty .art .h1{position:absolute;inset:0;background:var(--hair-strong)}
+.empty .art .h1 i{position:absolute;inset:1.5px;background:var(--e2)}
+.empty .art .h2{position:absolute;width:30px;height:34px;left:27px;top:29px;background:var(--accent);opacity:.9;box-shadow:0 0 20px var(--glow)}
+.rail{display:flex;gap:16px}
+.side{width:280px;padding:12px;display:grid;gap:10px;align-content:start}
+@media (max-width:1000px){.ba{grid-template-columns:1fr}.tiles{grid-template-columns:1fr}.kb{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="cal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+  <symbol id="bolt" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol>
+  <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
+  <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></symbol>
+  <symbol id="kanban" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v7M12 7v4M16 7v9"/></symbol>
+  <symbol id="brain" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="note" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6M9 15h6"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20c1 0 1.5-.8 1.5-1.5 0-.4-.2-.7-.4-1-.3-.3-.4-.6-.4-1 0-.8.7-1.5 1.5-1.5H16a6 6 0 0 0 6-6c0-5-4.5-9-10-9z"/></symbol>
+  <symbol id="term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="controls">
+    <div class="seg" data-set="theme">
+      <button aria-pressed="true" data-v="graphite">Graphite</button>
+      <button data-v="paper">Paper</button>
+    </div>
+    <div class="seg" data-set="font">
+      <button aria-pressed="true" data-v="geist">Geist</button>
+      <button data-v="inter">Inter</button>
+      <button data-v="plex">IBM Plex Sans</button>
+      <button data-v="grotesk">Space Grotesk</button>
+      <button data-v="system">System (heute)</button>
+    </div>
+  </div>
+
+  <p class="intro"><b>UX0 — Richtung „Glut + Hex“.</b> Links der heutige Stand, rechts der Vorschlag. Die Oberfläche
+    wird ruhig und neutral; <b>Orange glimmt nur dort, wo etwas lebt oder dich braucht</b> (laufender Agent, laufender
+    Skill, die eine Hauptaktion). Das <b>Hexagon</b> des Logos wird die Systemform: Avatare, Status-Marken, leere
+    Zustände. Oben lassen sich Theme und Schrift-Kandidat (F1) umschalten. Nichts davon ist schon gebaut.</p>
+
+  <!-- 1 Dock -->
+  <h2 class="sec">1 · Kopfleiste → Dock</h2>
+  <div class="ba">
+    <div><div class="before"><img src="01-home.png" alt="Heute: Kopfleiste" style="object-fit:cover;object-position:top;height:120px"></div>
+      <div class="cap">Heute: Titel + Untertitel, sechs unbeschriftete Mini-Icons, Theme schaltet blind.</div></div>
+    <div class="after">
+      <div class="dock">
+        <div class="brand"><span class="logo hex"><i class="hex"></i></span>Axiomata <small>vault</small></div>
+        <span class="dsep"></span>
+        <button class="di"><svg class="i"><use href="#code"/></svg>Studio<span class="badge hex"></span></button>
+        <button class="di"><svg class="i"><use href="#kanban"/></svg>Kanban</button>
+        <button class="di"><svg class="i"><use href="#brain"/></svg>Brain</button>
+        <button class="di"><svg class="i"><use href="#note"/></svg>Note</button>
+        <span class="dsep"></span>
+        <div class="search"><svg class="i"><use href="#search"/></svg>Search or run…<span class="kbd">⌘K</span></div>
+        <button class="ib" title="Theme"><svg class="i"><use href="#palette"/></svg></button>
+        <button class="ib" title="Settings ⌘,"><svg class="i"><use href="#cog"/></svg></button>
+      </div>
+      <p class="note">Beschriftete Ziele, ⌘K sichtbar als Suchfeld, die Glut-Marke am Studio heißt „dort arbeitet
+        gerade ein Agent“ (ersetzt nichts, ergänzt den Live-Puls im Orbit). Theme öffnet eine Auswahl.</p>
+    </div>
+  </div>
+
+  <!-- 2 Tiles -->
+  <h2 class="sec">2 · Kacheln (Vorderseite bleibt rahmenlos)</h2>
+  <div class="ba">
+    <div><div class="before"><img src="03-dash.png" alt="Heute: Dashboard" ></div>
+      <div class="cap">Heute: riesige gesperrte Versal-Titel, Orange an jedem Knopf, „NEXT“, „TOMORROW“, „STALE“.</div></div>
+    <div class="after tiles">
+      <section class="tile">
+        <div class="th"><svg class="i"><use href="#bolt"/></svg><span class="t-title">Skills</span><span class="meta t-caption">6</span></div>
+        <div class="row"><div class="grow"><div style="font-weight:500">calendar-digest</div><div class="sub">opencode · 4 min ago</div></div><button class="run"><svg class="i" style="width:13px"><use href="#play"/></svg></button></div>
+        <div class="row"><div class="grow"><div style="font-weight:500">mail-digest</div><div class="sub" style="color:var(--accent)">running · 12 s</div><div class="bar" style="margin-top:6px"><i></i></div></div><button class="run live"><span class="hexmark live hex"></span></button></div>
+        <div class="row"><div class="grow"><div style="font-weight:500">newsletter</div><div class="sub">ollama · <span style="color:var(--bad)">offline</span></div></div><button class="run"><svg class="i" style="width:13px"><use href="#play"/></svg></button></div>
+      </section>
+      <section class="tile">
+        <div class="th"><svg class="i"><use href="#cal"/></svg><span class="t-title">Today</span><span class="meta t-caption">Sat, 11 Oct</span></div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin:4px 0 12px"><span class="t-display">2</span><span class="sub">events left</span></div>
+        <div class="row"><span class="t-caption" style="width:44px;font-variant-numeric:tabular-nums">09:00</span><div class="grow">Team-Sync</div></div>
+        <div class="row"><span class="t-caption" style="width:44px;font-variant-numeric:tabular-nums">14:00</span><div class="grow">1:1 mit Sam</div></div>
+        <div class="row"><span class="t-label" style="width:44px">Sun</span><div class="grow sub">Nothing planned</div></div>
+      </section>
+      <section class="tile">
+        <div class="th"><svg class="i"><use href="#clock"/></svg><span class="t-title">Routines</span><span class="meta t-caption">1 on</span></div>
+        <div class="row"><span class="hexmark ok hex"></span><div class="grow"><div style="font-weight:500">Morning digest</div><div class="sub">/newsletter · next in 2 h</div></div><span class="chip">on</span></div>
+        <div class="row"><span class="hexmark hex"></span><div class="grow"><div style="font-weight:500;color:var(--muted)">Evening ritual</div><div class="sub">prompt · off</div></div><span class="chip">off</span></div>
+      </section>
+      <p class="note" style="grid-column:1/-1">Titel in <b>einem</b> Stil (Satzschreibung, halbfett; F6: Versal-Sperrung als Dashboard-Signatur behalten?),
+        große Zahlen als Blickfang, Uhrzeiten als Ziffern statt Mono. Orange nur am laufenden <b>mail-digest</b>.</p>
+    </div>
+  </div>
+
+  <!-- 3 Kanban -->
+  <h2 class="sec">3 · Panel-Chrome + Kanban</h2>
+  <div class="ba">
+    <div><div class="before"><img src="06-kanban.png" alt="Heute: Kanban"></div>
+      <div class="cap">Heute: winziger Versal-Titel, Karten flach, Live-Zustand kaum erkennbar.</div></div>
+    <div class="after">
+      <div class="panel">
+        <div class="phead"><svg class="i" style="color:var(--muted)"><use href="#kanban"/></svg><span class="t-title">Kanban · Axiomata</span>
+          <span class="kbd">⌘W</span><button class="ib"><svg class="i"><use href="#cog"/></svg></button><button class="ib"><svg class="i"><use href="#x"/></svg></button></div>
+        <div class="kb">
+          <div class="col"><h4><span class="hexmark hex"></span>Open<span class="n">4</span></h4>
+            <div class="card"><span class="id">#1</span><span class="ct">Spaltenbreite auf 21:9 prüfen</span><div class="cm"><span class="chip">design</span><span class="due">in 3 d</span></div></div>
+            <div class="card"><span class="id">#3</span><span class="ct">Migration 0008 gegen bestehende DB testen</span><div class="cm"><span class="chip">rust</span><span class="due bad">2 d overdue</span></div></div>
+          </div>
+          <div class="col"><h4><span class="hexmark live hex"></span>In progress<span class="n">2</span></h4>
+            <div class="card live"><span class="id">#4</span><span class="ct">Drag-and-Drop ohne HTML5-API</span>
+              <div class="cm"><span class="hexav live" style="width:20px;height:22px"><span class="ring hex"></span><span class="face hex" style="font-size:8px">CC</span></span><span class="sub" style="color:var(--accent)">claude-1 working</span><span class="due">2/5</span></div></div>
+            <div class="card"><span class="id">#10</span><span class="ct">Postfach-Kern bauen</span><div class="cm"><span class="chip" style="color:var(--warn)">question</span></div></div>
+          </div>
+          <div class="col"><h4><span class="hexmark ok hex"></span>Done<span class="n">1</span></h4>
+            <div class="card" style="opacity:.75"><span class="id">#5</span><span class="ct">WAL und busy_timeout entschieden</span><div class="cm"><span class="chip">rust</span></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Eine Kopfzeile für <b>alle</b> schwebenden Panels (Kanban, Datei, Chat, Einstellungen, Picker):
+        44 px, Titel im Titelstil, Kürzel sichtbar, gleiche Knöpfe. Ebenen über Tonwert + Lichtkante oben. Die Karte, an
+        der ein Agent arbeitet, glimmt (Rand + wandernde Glutkante); alles andere bleibt ruhig.</p>
+    </div>
+  </div>
+
+  <!-- 4 Flow agents -->
+  <h2 class="sec">4 · Studio-Flow: Agenten, Hinweis, leerer Zustand</h2>
+  <div class="ba">
+    <div><div class="before"><img src="12-studio-flow.png" alt="Heute: Flow"></div>
+      <div class="cap">Heute: voller oranger „New plan“-Balken, Bereichsköpfe als Pillen, Hinweise als Prosa-Blöcke.</div></div>
+    <div class="after">
+      <div class="rail">
+        <div class="panel side">
+          <div class="notice"><span class="hexmark warn hex"></span><div class="grow">Project roles need your review</div><button class="btn ghost" style="padding:4px 8px">Review</button></div>
+          <div class="t-label" style="margin-top:6px">Agents</div>
+          <div class="agent" style="padding:8px 4px"><span class="hexav live"><span class="ring hex"></span><span class="face hex">OC</span></span>
+            <div class="grow"><div style="font-weight:600">Builder <span class="chip">allrounder</span></div><div class="sub">#9 Zustandsableitung testen</div></div></div>
+          <div class="agent" style="padding:8px 4px"><span class="hexav"><span class="ring hex"></span><span class="face hex">CC</span></span>
+            <div class="grow"><div style="font-weight:600">Reviewer <span class="chip">reviewer</span></div><div class="sub">waiting · just now</div></div></div>
+          <button class="btn" style="justify-self:start">New plan…</button>
+        </div>
+        <div class="panel" style="flex:1;min-width:0">
+          <div class="phead"><span class="t-title">Plan #1 · Studio-Ablauf</span><span class="t-caption">1 working · 1 waiting</span><button class="ib"><svg class="i"><use href="#term"/></svg></button></div>
+          <div class="agent"><span class="hexav live"><span class="ring hex"></span><span class="face hex">OC</span></span>
+            <div class="grow"><div><b>Builder</b> <span class="sub">works on</span> <b>#9</b> Zustandsableitung testen</div>
+              <div class="act"><span class="hexmark live hex"></span><span class="mono">cargo test -p core</span><span class="t-caption" style="margin-left:auto">just now</span></div></div></div>
+          <div class="empty"><div class="art"><span class="h1 hex"><i class="hex"></i></span><span class="h2 hex"></span></div>
+            <div class="t-title">No other agents on this plan</div><div class="sub">Accept a proposal to start the next card.</div><button class="btn primary">Accept #7</button></div>
+        </div>
+      </div>
+      <p class="note">Hinweise werden eine Zeile mit Aktion; Hex-Avatare atmen, solange der Agent arbeitet; „New plan“
+        wird ein normaler Knopf, die <b>eine</b> Hauptaktion des Moments (hier „Accept #7“) trägt den Akzent. Leere
+        Zustände bekommen das Hex-Motiv mit Glutkern.</p>
+    </div>
+  </div>
+
+  <!-- 5 Tabs -->
+  <h2 class="sec">5 · Reiter (K7/K14 neu gedacht)</h2>
+  <div class="ba">
+    <div><div class="before"><img src="10-studio-terminal.png" alt="Heute: Reiter" style="object-fit:cover;object-position:0 0;height:180px"></div>
+      <div class="cap">Heute: schwebende Pillen, aktive gefüllt und kursiv, Sprachfarbe tönt die ganze Pille; Bereichsköpfe („Planning“, „Agents“) sehen genauso aus.</div></div>
+    <div class="after">
+      <div class="panel">
+        <div class="tabs">
+          <button class="tab active"><span class="dot" style="background:#dea584"></span>demo.rs<svg class="i x"><use href="#x"/></svg></button>
+          <button class="tab"><span class="dot" style="background:#4c8fd8"></span>apps.ts</button>
+          <button class="tab dirty"><span class="dot" style="background:#9aa0aa"></span>AGENTS.md<span class="mod"></span></button>
+          <button class="tab agent"><span class="hexav live" style="width:16px;height:18px"><span class="ring hex"></span><span class="face hex" style="font-size:7px">OC</span></span>Builder</button>
+          <button class="tab"><svg class="i" style="width:14px"><use href="#term"/></svg>zsh</button>
+        </div>
+        <div class="code mono"><span style="color:var(--faint)">5</span>&nbsp;&nbsp;<span style="color:#ff9f5a">pub fn</span> <span style="color:#7cb8ff">step_1</span>(x: <span style="color:#5fd4c4">u32</span>) → <span style="color:#5fd4c4">u32</span> {</div>
+        <div class="areahead"><span class="t-label">Planning</span><span class="t-label on">Agents</span><span class="t-label">Flow view</span><span class="t-caption" style="margin-left:auto">2 agents</span></div>
+      </div>
+      <p class="note"><b>Dokument-Reiter</b> werden eine ruhige Leiste: der aktive Reiter ist dieselbe Fläche wie der
+        Editor (er „gehört“ zum Text), die anderen sind nur Text. Die <b>Sprachfarbe</b> sitzt nur noch als kleiner
+        Punkt bzw. im Datei-Icon statt die ganze Pille zu tönen — weniger Farbrauschen, gleiche Orientierung. Ein
+        <b>Agent-Reiter</b> trägt seinen Hex-Avatar und glimmt, solange er arbeitet. <b>Bereichsköpfe</b> (Planning,
+        Agents, Flow view) werden Kapitälchen-Überschriften, keine Knöpfe mehr.</p>
+    </div>
+  </div>
+</div>
+
+<style>
+.tabs{display:flex;align-items:flex-end;gap:2px;padding:8px 8px 0;background:var(--e1);border-bottom:1px solid var(--hair)}
+.tab{all:unset;cursor:pointer;display:flex;align-items:center;gap:7px;padding:7px 12px 8px;border-radius:9px 9px 0 0;color:var(--muted);font-weight:500;position:relative}
+.tab:hover{color:var(--text)}
+.tab .dot{width:7px;height:7px;border-radius:50%}
+.tab.active{background:var(--e2);color:var(--text);box-shadow:0 1px 0 var(--edge) inset;margin-bottom:-1px;padding-bottom:9px}
+.tab.active::before{content:"";position:absolute;left:10px;right:10px;top:0;height:2px;border-radius:2px;background:var(--text);opacity:.5}
+.tab .x{width:12px;height:12px;color:var(--faint)}
+.tab .mod{width:6px;height:6px;border-radius:50%;background:var(--muted)}
+.tab.agent{color:var(--accent)}
+.code{padding:14px 16px;background:var(--e2);min-height:60px}
+.areahead{display:flex;gap:18px;align-items:center;padding:12px 16px;border-top:1px solid var(--hair)}
+.areahead .on{color:var(--text);position:relative}
+.areahead .on::after{content:"";position:absolute;left:0;right:0;bottom:-12px;height:2px;background:var(--text);opacity:.6}
+</style>
+
+<script>
+document.querySelectorAll(".seg").forEach((seg) => {
+  seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    document.documentElement.dataset[seg.dataset.set] = b.dataset.v;
+  });
+});
+</script>
+</body>
+</html>
