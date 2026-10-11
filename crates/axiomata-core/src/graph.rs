@@ -28,6 +28,8 @@ use crate::skills;
 pub const MAX_FILES: usize = 5000;
 /// Bytes of a Markdown file scanned for links.
 pub const MAX_LINK_SCAN_BYTES: u64 = 256 * 1024;
+/// Bytes read from the top of a Markdown file to find its frontmatter `created:`.
+const FRONTMATTER_SCAN_BYTES: u64 = 4096;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphFile {
@@ -38,6 +40,11 @@ pub struct GraphFile {
     pub title: String,
     pub bytes: u64,
     pub modified: Option<DateTime<Utc>>,
+    /// When the note came into being, for the Orbit's time travel: the earliest of the frontmatter `created:`, the
+    /// file's birth time and its modification time (`docs/plans/ui-ux-round.md` G17). A vault imported in one go shows
+    /// that day honestly as its founding day, unless the notes say otherwise in their frontmatter.
+    #[serde(default)]
+    pub created: Option<DateTime<Utc>>,
     pub is_markdown: bool,
 }
 
@@ -101,6 +108,19 @@ pub fn build(config: &Config, db: &Connection) -> Result<WorkspaceGraph, Axiomat
         let full = root.join(&entry.rel_path);
         let meta = fs::metadata(&full).ok();
         let is_markdown = entry.rel_path.to_lowercase().ends_with(".md");
+        let modified = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .map(DateTime::<Utc>::from);
+        let born = meta
+            .as_ref()
+            .and_then(|m| m.created().ok())
+            .map(DateTime::<Utc>::from);
+        let stated = is_markdown
+            .then(|| read_head(&full, FRONTMATTER_SCAN_BYTES))
+            .flatten()
+            .and_then(|head| frontmatter_created(&head));
+        let created = [stated, born, modified].into_iter().flatten().min();
         files.push(GraphFile {
             path: entry.rel_path.clone(),
             area: area.clone(),
@@ -109,9 +129,8 @@ pub fn build(config: &Config, db: &Connection) -> Result<WorkspaceGraph, Axiomat
                 .clone()
                 .unwrap_or_else(|| file_stem(&entry.rel_path)),
             bytes: meta.as_ref().map(|m| m.len()).unwrap_or(0),
-            modified: meta
-                .and_then(|m| m.modified().ok())
-                .map(DateTime::<Utc>::from),
+            modified,
+            created,
             is_markdown,
         });
         if let Some(a) = area {
@@ -330,6 +349,37 @@ pub fn link_targets(text: &str) -> Vec<String> {
     out
 }
 
+/// The `created:` of a Markdown file's frontmatter (the `---` block at its very top), in the forms Obsidian and hand
+/// edits write: RFC 3339, `YYYY-MM-DD HH:MM[:SS]` or a bare `YYYY-MM-DD` (taken as midnight UTC). `None` without a
+/// frontmatter, without the key, or for a value that is none of those.
+fn frontmatter_created(head: &str) -> Option<DateTime<Utc>> {
+    let body = head
+        .strip_prefix("---\n")
+        .or_else(|| head.strip_prefix("---\r\n"))?;
+    let end = body.find("\n---")?;
+    let value = body[..end].lines().find_map(|line| {
+        let rest = line.trim_start().strip_prefix("created:")?;
+        Some(rest.trim().trim_matches(|c| c == '"' || c == '\''))
+    })?;
+    if let Ok(at) = DateTime::parse_from_rfc3339(value) {
+        return Some(at.with_timezone(&Utc));
+    }
+    for format in [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ] {
+        if let Ok(at) = chrono::NaiveDateTime::parse_from_str(value, format) {
+            return Some(at.and_utc());
+        }
+    }
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .map(|at| at.and_utc())
+}
+
 fn read_head(path: &Path, limit: u64) -> Option<String> {
     let mut buf = Vec::new();
     fs::File::open(path)
@@ -352,6 +402,7 @@ mod tests {
                 title: file_stem(p),
                 bytes: 0,
                 modified: None,
+                created: None,
                 is_markdown: p.ends_with(".md"),
             })
             .collect()
@@ -485,6 +536,37 @@ mod tests {
     }
 
     #[test]
+    fn reads_frontmatter_created_in_the_forms_notes_write_it() {
+        let at = |text: &str| frontmatter_created(text).map(|d| d.to_rfc3339());
+        assert_eq!(
+            at("---\ntitle: X\ncreated: 2024-03-05T10:20:30+01:00\n---\n# X\n"),
+            Some("2024-03-05T09:20:30+00:00".into())
+        );
+        assert_eq!(
+            at("---\ncreated: \"2024-03-05 10:20\"\n---\n"),
+            Some("2024-03-05T10:20:00+00:00".into())
+        );
+        assert_eq!(
+            at("---\r\ncreated: 2024-03-05\r\n---\r\n"),
+            Some("2024-03-05T00:00:00+00:00".into())
+        );
+    }
+
+    #[test]
+    fn has_no_created_without_frontmatter_key_or_a_readable_value() {
+        assert_eq!(
+            frontmatter_created("# Just a heading\ncreated: 2024-01-01\n"),
+            None
+        );
+        assert_eq!(frontmatter_created("---\ntitle: X\n---\n"), None);
+        assert_eq!(
+            frontmatter_created("---\ncreated: last spring\n---\n"),
+            None
+        );
+        assert_eq!(frontmatter_created("---\ncreated: 2024-01-01\n"), None);
+    }
+
+    #[test]
     fn build_groups_files_by_area_and_finds_the_hub() {
         let _guard = crate::test_support::ENV_MUTEX.lock().unwrap();
         let home = unique_temp_dir("axiomata-test-graph-home");
@@ -519,6 +601,8 @@ mod tests {
         let one = graph.files.iter().find(|f| f.path == "Dev/One.md").unwrap();
         assert_eq!(one.title, "One");
         assert!(one.is_markdown && one.bytes > 0 && one.modified.is_some());
+        // Never later than the file's own times (G17): the earliest of what is known.
+        assert!(one.created.is_some() && one.created <= one.modified);
         let txt = graph
             .files
             .iter()

@@ -107,6 +107,19 @@ export function emberOf(modified: number | null, now: number): Ember {
   return { heat: days < 1 ? 0.85 * (1 - days) : 0, ash: Math.min(1, days / ASH_DAYS) * 0.85 };
 }
 
+/**
+ * The span the time travel covers (G17): from the earliest note's birth to `now`. A vault without dates spans a day,
+ * so the slider still has somewhere to go.
+ */
+export function travelSpan(created: readonly (string | null | undefined)[], now: number): { from: number; to: number } {
+  let from = Infinity;
+  for (const text of created) {
+    const at = text ? Date.parse(text) : NaN;
+    if (!Number.isNaN(at) && at < from) from = at;
+  }
+  return { from: Number.isFinite(from) && from < now ? from : now - DAY, to: now };
+}
+
 /** `a` moved toward `b` by `t` (0…1). */
 export function mixRgb(a: Rgb, b: Rgb, t: number): Rgb {
   const k = Math.min(1, Math.max(0, t));

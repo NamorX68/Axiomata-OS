@@ -755,6 +755,8 @@ export interface GraphFile {
   title: string;
   bytes: number;
   modified: string | null;
+  /** The earliest of frontmatter `created:`, birth and modification time (G17); the Orbit's time travel. */
+  created?: string | null;
   is_markdown: boolean;
 }
 

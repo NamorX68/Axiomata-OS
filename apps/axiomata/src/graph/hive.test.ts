@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHive, emberOf, fibonacciSphere, metalLight, MIN_CELLS, mixRgb, type HiveFile } from "./hive";
+import { buildHive, emberOf, fibonacciSphere, metalLight, MIN_CELLS, mixRgb, travelSpan, type HiveFile } from "./hive";
 
 const files = (area: string, n: number): HiveFile[] =>
   Array.from({ length: n }, (_, i) => ({ id: `${area}/note-${i}.md`, area }));
@@ -54,6 +54,21 @@ describe("emberOf (W2)", () => {
   it("cools to ash over weeks, and half for a note without a time", () => {
     expect(emberOf(now - 40 * 86_400_000, now).ash).toBeCloseTo(0.85);
     expect(emberOf(null, now)).toEqual({ heat: 0, ash: 0.5 });
+  });
+});
+
+describe("travelSpan (G17)", () => {
+  const now = Date.UTC(2026, 9, 12);
+  it("runs from the earliest note to now, ignoring missing dates", () => {
+    const first = "2025-01-02T00:00:00Z";
+    expect(travelSpan([null, "2026-01-01T00:00:00Z", first, undefined], now)).toEqual({
+      from: Date.parse(first),
+      to: now,
+    });
+  });
+
+  it("spans a day for a vault without dates", () => {
+    expect(travelSpan([null], now)).toEqual({ from: now - 86_400_000, to: now });
   });
 });
 

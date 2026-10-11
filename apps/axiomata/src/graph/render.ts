@@ -190,6 +190,8 @@ export class GraphRenderer {
   highlight: Set<string> | null = null;
   /** Orbit only: how many card sessions are at work right now (0 = quiet, nothing is drawn). */
   activity = 0;
+  /** Orbit only: the moment the time travel shows (ms), or `null` for now (G17, UX4). */
+  timeCutoff: number | null = null;
   /** Orbit only: the colour of the pulse when the sessions at work belong to one marked project (card #70); `null` =
    *  the theme's accent. */
   activityColor: string | null = null;
@@ -729,8 +731,13 @@ export class GraphRenderer {
       const front = nz > 0;
       let heat = 0;
       let col: Rgb = unsettled;
-      if (node) {
-        const ember_ = emberOf(node.modified ? Date.parse(node.modified) : null, now);
+      // In the time travel a note not yet born is an unsettled cell, and one born just then glows: the vault grows.
+      const cutoff = this.timeCutoff;
+      const born = node?.created ? Date.parse(node.created) : null;
+      const settled = node !== null && (cutoff === null || born === null || born <= cutoff);
+      if (node && settled) {
+        const touched = cutoff === null ? (node.modified ? Date.parse(node.modified) : null) : born;
+        const ember_ = emberOf(touched, cutoff ?? now);
         heat = ember_.heat;
         col = mixRgb(mixRgb(this.rgb(node.color), ash, ember_.ash), ember, heat);
       }
@@ -751,7 +758,7 @@ export class GraphRenderer {
       ctx.rotate(Math.atan2(ny, nx));
       ctx.scale(Math.max(Math.abs(nz), 0.12), 1);
       this.hexagonPath(size * (front ? 0.92 : 0.7));
-      ctx.globalAlpha = front ? (node ? 1 : 0.55) : 0.13;
+      ctx.globalAlpha = front ? (settled ? 1 : 0.55) : 0.13;
       if (front && heat > 0.2) {
         // On a light ground a shine only looks dirty: a tighter, tinted shadow there.
         ctx.shadowBlur = (this.lightScheme ? 6 : 14) * heat;
@@ -761,9 +768,9 @@ export class GraphRenderer {
       ctx.fill();
       ctx.restore();
       if (node) {
-        // Only a front cell can be pointed at; a hidden one is parked far off for the hit test.
-        node.sx = front ? p.x : -1e6;
-        node.sy = front ? p.y : -1e6;
+        // Only a front cell of a note that exists can be pointed at; others are parked far off for the hit test.
+        node.sx = front && settled ? p.x : -1e6;
+        node.sy = front && settled ? p.y : -1e6;
       }
     }
     ctx.globalAlpha = 1;

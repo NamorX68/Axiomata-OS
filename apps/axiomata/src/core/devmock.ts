@@ -707,6 +707,8 @@ function mockGraph(): WorkspaceGraph {
         title,
         bytes: Math.floor(200 + rnd() * 9000),
         modified: new Date(Date.now() - rnd() * 90 * 86_400_000).toISOString(),
+        // A vault grown over a year, area by area, for the time travel.
+        created: new Date(Date.now() - (90 + rnd() * 270) * 86_400_000).toISOString(),
         is_markdown: true,
       });
     }

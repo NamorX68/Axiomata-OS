@@ -29,6 +29,8 @@ export interface GraphNode {
   /** Number of links touching the node. */
   degree: number;
   modified?: string | null;
+  /** When the note came into being (G17), for the Orbit's time travel. */
+  created?: string | null;
   isMarkdown?: boolean;
   /** Area nodes: which icon to draw (see `glyphForArea`). Builtin `"app"`
    *  nodes: which icon to draw (see `glyphForModuleType`) — a hand-drawn
@@ -469,6 +471,7 @@ export function buildModel(g: WorkspaceGraph, palette: Palette): GraphModel {
       phase: phase(f.path),
       degree: 0,
       modified: f.modified,
+      created: f.created ?? f.modified,
       isMarkdown: f.is_markdown,
     });
   }

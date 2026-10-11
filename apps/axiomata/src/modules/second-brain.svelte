@@ -53,9 +53,11 @@
   import type { ModuleContext } from "../core/types";
   import { APP_RING, layoutAppRing, layoutExpandedGroup, layoutOrbit } from "../graph/layout";
   import { buildAppNodes, buildModel, readPalette, type GraphNode } from "../graph/model";
+  import { travelSpan } from "../graph/hive";
   import { appNodeRadiusPx, GraphRenderer } from "../graph/render";
   import AppAddDialog from "./AppAddDialog.svelte";
   import AppContextMenu from "./AppContextMenu.svelte";
+  import TimeTravel from "./TimeTravel.svelte";
 
   const REFRESH_MS = 30_000;
   /** Fraction of the shorter canvas side used as the orbit ring's radius —
@@ -85,6 +87,10 @@
   let discR = $state(200);
   let renderer = $state.raw<GraphRenderer | null>(null);
   let graph: WorkspaceGraph | null = null;
+  /** The vault's life for the time travel (G17), from its first note to the last load. */
+  let span = $state<{ from: number; to: number } | null>(null);
+  /** The moment the time travel shows, or `null` for today. */
+  let travelAt = $state<number | null>(null);
   // `$state.raw`, not `$state`: this must stay the exact same object
   // reference that lives in `renderer.model.nodes`, since the renderer
   // decides its hover glow with `n === this.hover` — a plain `$state` would
@@ -153,6 +159,7 @@
       palette.glow,
     );
     renderer.model = model;
+    span = travelSpan(graph.files.map((f) => f.created ?? f.modified), Date.now());
     summary = `${graph.files.length} files · ${graph.areas.length} areas · ${graph.links.length} links${graph.truncated ? " · truncated" : ""}`;
   }
 
@@ -371,6 +378,11 @@
     if (renderer) renderer.activity = $studioActivity;
   });
 
+  $effect(() => {
+    const at = travelAt;
+    if (renderer) renderer.timeCutoff = at;
+  });
+
   // The pulse takes the marker colour of the project the sessions at work belong to (card #70); the theme's accent
   // when there is none, or when they span several projects.
   let pulseSlot = $state<number | null>(null);
@@ -489,6 +501,9 @@
   >
     +
   </button>
+  {#if span && !$brainActive}
+    <TimeTravel {span} onTravel={(at) => (travelAt = at)} />
+  {/if}
 </div>
 
 {#if menu}
