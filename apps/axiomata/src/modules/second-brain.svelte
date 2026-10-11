@@ -141,7 +141,17 @@
       model.nodes.push(n);
       model.byId.set(n.id, n);
     }
-    renderer.setColors(palette.text, palette.muted, palette.border, palette.invert, palette.invert, palette.surface, palette.accent, palette.light);
+    renderer.setColors(
+      palette.text,
+      palette.muted,
+      palette.border,
+      palette.invert,
+      palette.invert,
+      palette.surface,
+      palette.accent,
+      palette.light,
+      palette.glow,
+    );
     renderer.model = model;
     summary = `${graph.files.length} files · ${graph.areas.length} areas · ${graph.links.length} links${graph.truncated ? " · truncated" : ""}`;
   }
@@ -353,7 +363,7 @@
   $effect(() => {
     // Read the reactive inputs first — an early return on a missing renderer
     // would otherwise leave the effect without dependencies.
-    const next = { mode: "orbit" as const, spin, labels, pulse: animates($motion) };
+    const next = { mode: "orbit" as const, spin, labels, pulse: animates($motion), shine: $brainView.shine };
     if (renderer) renderer.options = { ...renderer.options, ...next };
   });
 
@@ -389,7 +399,7 @@
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { mode: "orbit", spin, labels, fileLabels: false, fit: ORBIT_FIT };
+    renderer.options = { mode: "orbit", spin, labels, fileLabels: false, fit: ORBIT_FIT, shine: $brainView.shine };
     renderer.resize();
     const ro = new ResizeObserver(() => {
       renderer?.resize();

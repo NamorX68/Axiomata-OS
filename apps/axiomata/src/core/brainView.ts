@@ -16,9 +16,20 @@ export interface BrainView {
   labels: boolean;
   /** File names beside the notes of the Second Brain view. */
   fileNames: boolean;
+  /** How the hex cells catch the light (`docs/plans/ui-ux-round.md` G7): still, twinkling, or lit like metal plates. */
+  shine: Shine;
 }
 
-export const DEFAULT_BRAIN_VIEW: BrainView = { speed: 0.02, labels: true, fileNames: false };
+/** The hex cells' shimmer: `calm` holds still, `twinkle` breathes each cell, `metal` lights each by its tilt. */
+export type Shine = "calm" | "twinkle" | "metal";
+
+export const SHINES: readonly { id: Shine; label: string }[] = [
+  { id: "calm", label: "Calm" },
+  { id: "twinkle", label: "Twinkle" },
+  { id: "metal", label: "Metal" },
+];
+
+export const DEFAULT_BRAIN_VIEW: BrainView = { speed: 0.02, labels: true, fileNames: false, shine: "metal" };
 
 /**
  * The radius of the disc the Second Brain graph is drawn in, as a share of the shorter side of the Orbit's own box (the one the cloud is sized from). The cloud it replaces has
@@ -55,6 +66,7 @@ export function readBrainView(stored: unknown, legacySecondBrain?: unknown): Bra
     labels: typeof own.labels === "boolean" ? own.labels : DEFAULT_BRAIN_VIEW.labels,
     fileNames:
       typeof own.fileNames === "boolean" ? own.fileNames : legacy.fileNames === true || DEFAULT_BRAIN_VIEW.fileNames,
+    shine: SHINES.some((x) => x.id === own.shine) ? (own.shine as Shine) : DEFAULT_BRAIN_VIEW.shine,
   };
 }
 

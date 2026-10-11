@@ -5,6 +5,8 @@
  * the device pixel ratio; call `resize()` when the canvas box changes.
  */
 
+import type { Shine } from "../core/brainView";
+import { buildHive, emberOf, metalLight, mixRgb, type HiveCell, type Rgb } from "./hive";
 import { APP_RING, EXPANDED_GROUP_RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 
@@ -24,6 +26,8 @@ export interface RenderOptions {
   fit: number;
   /** Orbit only: let the live-status pulse breathe. Off, it stays a still halo (the motion switch). */
   pulse?: boolean;
+  /** Orbit only: how the hive's cells catch the light (G7); `metal` when unset. */
+  shine?: Shine;
 }
 
 export interface View {
@@ -198,7 +202,12 @@ export class GraphRenderer {
   private hubGlyphColor = "#000";
   private surfaceColor = "#121216";
   private accentColor = "#ff7a1a";
+  /** The glow (G2): the orange family even where the accent is another hue — the hive's ember. */
+  private glowColor = "#ff7a1a";
   private lightScheme = false;
+  /** The honeycomb sphere of the current model, rebuilt when the model changes (`graph/hive.ts`). */
+  private hive: { model: GraphModel; cells: HiveCell[]; nodes: (GraphNode | null)[] } | null = null;
+  private rgbCache = new Map<string, Rgb>();
   /** Ring captions (rings mode). */
   captions = { skills: "SKILLS", memory: "MEMORY" };
   /** In-flight `flyTo` pan/zoom tween, consumed by `frame`. */
@@ -214,7 +223,19 @@ export class GraphRenderer {
     this.ctx = ctx;
   }
 
-  setColors(text: string, muted: string, line: string, glyph = "#000", hubGlyph = "#000", surface = "#121216", accent = "#ff7a1a", light = false): void {
+  setColors(
+    text: string,
+    muted: string,
+    line: string,
+    glyph = "#000",
+    hubGlyph = "#000",
+    surface = "#121216",
+    accent = "#ff7a1a",
+    light = false,
+    glow = accent,
+  ): void {
+    this.glowColor = glow;
+    this.rgbCache.clear();
     this.textColor = text;
     this.mutedColor = muted;
     this.lineColor = line;
@@ -609,37 +630,7 @@ export class GraphRenderer {
       return { x: cx + x1 * R, y: cy + y1 * R, z: z2 };
     };
 
-    // Wireframe geodesic (icosahedron, one subdivision).
-    ctx.strokeStyle = this.lineColor;
-    ctx.lineWidth = 0.6;
-    const wireBase = this.lightScheme ? 0.16 : 0.08;
-    const wireSpan = this.lightScheme ? 0.14 : 0.1;
-    for (const [a, b] of GEODESIC_EDGES) {
-      const pa = project(scale(GEODESIC_VERTS[a], 0.66));
-      const pb = project(scale(GEODESIC_VERTS[b], 0.66));
-      ctx.globalAlpha = wireBase + wireSpan * ((pa.z + pb.z) / 2 + 1);
-      ctx.beginPath();
-      ctx.moveTo(pa.x, pa.y);
-      ctx.lineTo(pb.x, pb.y);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
-    // Particle cloud, back to front.
-    const cloud = model.nodes.filter((n) => n.kind === "file" && n.p3).map((n) => ({ n, p: project(n.p3!) }));
-    cloud.sort((a, b) => a.p.z - b.p.z);
-    for (const { n, p } of cloud) {
-      const depth = (p.z + 1) / 2; // 0 back … 1 front
-      const r = 0.9 + depth * 1.7 + (n === this.hover ? 2 : 0);
-      ctx.globalAlpha = 0.25 + depth * 0.65;
-      ctx.fillStyle = n.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, TWO_PI);
-      ctx.fill();
-      n.sx = p.x;
-      n.sy = p.y;
-    }
-    ctx.globalAlpha = 1;
+    this.drawHive(cx, cy, R, t, project);
 
     // Hub.
     const hub = model.byId.get("hub");
@@ -692,6 +683,135 @@ export class GraphRenderer {
 
     this.drawAppRing(cx, cy, R, t);
     this.drawExpandedGroupRing(cx, cy, R);
+  }
+
+  /** The sphere's radius as a share of the orbit ring's. */
+  private static readonly HIVE_SPHERE = 0.62;
+
+  /**
+   * The honeycomb sphere (`graph/hive.ts`, UX4 W1/W2, G7) in place of the particle cloud: every note a cell in its
+   * area's colour, glowing where it was touched today and cooled toward ash where nothing moved for weeks; the spare
+   * cells dark and unsettled. Under "metal" each front cell is lit by its tilt, with a highlight; "twinkle" lets each
+   * breathe; "calm" holds still — and so does every light while the motion is not Full (`options.pulse`).
+   */
+  private drawHive(
+    cx: number,
+    cy: number,
+    R: number,
+    t: number,
+    project: (p: [number, number, number]) => { x: number; y: number; z: number },
+  ): void {
+    const { ctx } = this;
+    const model = this.model!;
+    if (this.hive?.model !== model) {
+      const files = model.nodes.filter((n) => n.kind === "file");
+      const cells = buildHive(files.map((n) => ({ id: n.id, area: n.area })));
+      this.hive = { model, cells, nodes: cells.map((c) => (c.fileId ? (model.byId.get(c.fileId) ?? null) : null)) };
+    }
+    const { cells, nodes } = this.hive;
+    const sphere = GraphRenderer.HIVE_SPHERE;
+    const now = Date.now();
+    const still = this.options.pulse === false;
+    const shine = this.options.shine ?? "metal";
+    const surface = this.rgb(this.surfaceColor);
+    const ash = mixRgb(this.rgb(this.mutedColor), surface, 0.55);
+    const ember = this.rgb(this.glowColor);
+    const unsettled = mixRgb(surface, this.rgb(this.mutedColor), 0.12);
+    const size = R * sphere * Math.sqrt((4 * Math.PI) / cells.length) * 0.55;
+
+    const placed = cells.map((cell, i) => ({ cell, node: nodes[i] ?? null, p: project(scale(cell.p, sphere)) }));
+    placed.sort((a, b) => a.p.z - b.p.z);
+    for (const { cell, node, p } of placed) {
+      // The cell's normal in screen space: its own direction from the sphere's centre.
+      const nx = (p.x - cx) / (R * sphere);
+      const ny = (p.y - cy) / (R * sphere);
+      const nz = p.z / sphere;
+      const front = nz > 0;
+      let heat = 0;
+      let col: Rgb = unsettled;
+      if (node) {
+        const ember_ = emberOf(node.modified ? Date.parse(node.modified) : null, now);
+        heat = ember_.heat;
+        col = mixRgb(mixRgb(this.rgb(node.color), ash, ember_.ash), ember, heat);
+      }
+      if (front && shine !== "calm") {
+        const wave = Math.sin(t * 1.7 + cell.phase * TWO_PI);
+        const twinkle = still ? 1 : 0.82 + 0.18 * wave;
+        if (shine === "twinkle") {
+          col = [col[0] * twinkle, col[1] * twinkle, col[2] * twinkle];
+        } else {
+          const { shade, spec } = metalLight([nx, ny, nz], still ? 1 : 0.6 + 0.4 * wave);
+          const lit = (v: number): number => Math.min(255, v * shade * twinkle + (255 - v) * spec * 0.45);
+          col = [lit(col[0]), lit(col[1]), lit(col[2])];
+        }
+      }
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      // Foreshortened towards the rim, as a flat plate on a ball would be.
+      ctx.rotate(Math.atan2(ny, nx));
+      ctx.scale(Math.max(Math.abs(nz), 0.12), 1);
+      this.hexagonPath(size * (front ? 0.92 : 0.7));
+      ctx.globalAlpha = front ? (node ? 1 : 0.55) : 0.13;
+      if (front && heat > 0.2) {
+        // On a light ground a shine only looks dirty: a tighter, tinted shadow there.
+        ctx.shadowBlur = (this.lightScheme ? 6 : 14) * heat;
+        ctx.shadowColor = this.glowColor;
+      }
+      ctx.fillStyle = `rgb(${Math.round(col[0])},${Math.round(col[1])},${Math.round(col[2])})`;
+      ctx.fill();
+      ctx.restore();
+      if (node) {
+        // Only a front cell can be pointed at; a hidden one is parked far off for the hit test.
+        node.sx = front ? p.x : -1e6;
+        node.sy = front ? p.y : -1e6;
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    const hover = this.hover;
+    if (hover?.kind === "file" && hover.sx !== undefined && hover.sy !== undefined && hover.sx > -1e5) {
+      ctx.save();
+      ctx.translate(hover.sx, hover.sy);
+      this.hexagonPath(size * 1.3);
+      ctx.strokeStyle = this.textColor;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  /** A pointy-top hexagon of circumradius `r` around the current origin, as the current path. */
+  private hexagonPath(r: number): void {
+    const { ctx } = this;
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = (Math.PI / 3) * k - Math.PI / 2;
+      ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
+  }
+
+  /** A CSS colour as RGB, read through the canvas (which normalises any notation), cached per colour string. */
+  private rgb(color: string): Rgb {
+    const cached = this.rgbCache.get(color);
+    if (cached) return cached;
+    const { ctx } = this;
+    ctx.save();
+    ctx.fillStyle = "#000";
+    ctx.fillStyle = color;
+    const norm = String(ctx.fillStyle);
+    ctx.restore();
+    let rgb: Rgb = [128, 128, 128];
+    const hex = /^#([0-9a-f]{6})$/i.exec(norm);
+    const fn = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(norm);
+    if (hex?.[1]) {
+      const v = parseInt(hex[1], 16);
+      rgb = [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+    } else if (fn) {
+      rgb = [Number(fn[1]), Number(fn[2]), Number(fn[3])];
+    }
+    this.rgbCache.set(color, rgb);
+    return rgb;
   }
 
   /** One ring node's disc, shared by the inner orbit ring's rim loop and the
@@ -1001,51 +1121,5 @@ function monogram(label: string): string {
 
 function scale(v: [number, number, number], k: number): [number, number, number] {
   return [v[0] * k, v[1] * k, v[2] * k];
-}
-
-/** Icosahedron subdivided once and normalised — the geodesic wireframe. */
-const [GEODESIC_VERTS, GEODESIC_EDGES] = (() => {
-  const phi = (1 + Math.sqrt(5)) / 2;
-  const base: [number, number, number][] = [
-    [-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0],
-    [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi],
-    [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1],
-  ];
-  const faces: [number, number, number][] = [
-    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
-    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
-    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
-    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
-  ];
-  const verts = base.map((v) => norm(v));
-  const midCache = new Map<string, number>();
-  const mid = (a: number, b: number) => {
-    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
-    let i = midCache.get(key);
-    if (i === undefined) {
-      i = verts.length;
-      verts.push(norm([(verts[a][0] + verts[b][0]) / 2, (verts[a][1] + verts[b][1]) / 2, (verts[a][2] + verts[b][2]) / 2]));
-      midCache.set(key, i);
-    }
-    return i;
-  };
-  const edges = new Set<string>();
-  const add = (a: number, b: number) => edges.add(a < b ? `${a}-${b}` : `${b}-${a}`);
-  for (const [a, b, c] of faces) {
-    const ab = mid(a, b);
-    const bc = mid(b, c);
-    const ca = mid(c, a);
-    for (const [x, y, z] of [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]] as [number, number, number][]) {
-      add(x, y);
-      add(y, z);
-      add(z, x);
-    }
-  }
-  return [verts, [...edges].map((e) => e.split("-").map(Number) as [number, number])] as const;
-})();
-
-function norm(v: [number, number, number]): [number, number, number] {
-  const l = Math.hypot(v[0], v[1], v[2]) || 1;
-  return [v[0] / l, v[1] / l, v[2] / l];
 }
 

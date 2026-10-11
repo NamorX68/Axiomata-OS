@@ -8,8 +8,8 @@ describe("readBrainView", () => {
   });
 
   it("takes the stored setting as it is, dropping the old motion switch", () => {
-    const stored = { motion: false, speed: 0.06, labels: false, fileNames: true };
-    expect(readBrainView(stored)).toEqual({ speed: 0.06, labels: false, fileNames: true });
+    const stored = { motion: false, speed: 0.06, labels: false, fileNames: true, shine: "twinkle" };
+    expect(readBrainView(stored)).toEqual({ speed: 0.06, labels: false, fileNames: true, shine: "twinkle" });
   });
 
   it("takes over the old Second Brain preferences: their slider and file names", () => {
@@ -17,7 +17,14 @@ describe("readBrainView", () => {
       speed: 0.08,
       labels: true,
       fileNames: true,
+      shine: "metal",
     });
+  });
+
+  it("lights the cells like metal unless another shimmer was chosen (G7)", () => {
+    expect(readBrainView(undefined).shine).toBe("metal");
+    expect(readBrainView({ shine: "glitter" }).shine).toBe("metal");
+    expect(readBrainView({ shine: "calm" }).shine).toBe("calm");
   });
 
   it("keeps the default speed when the old preferences had the rotation at 0", () => {

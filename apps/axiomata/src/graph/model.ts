@@ -112,6 +112,8 @@ export interface Palette {
   /** The colours areas, folders and user apps pick from (`themeSwatches`). */
   areaSwatches: string[];
   light: boolean;
+  /** The glow (`--ax-glow`): always the orange family, also where the accent is not (G2). */
+  glow: string;
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
@@ -184,6 +186,7 @@ export function readPalette(): Palette {
     surface: v("--ax-surface-1", "#121216"),
     areaSwatches: themeSwatches(accent, light),
     light,
+    glow: v("--ax-glow", accent),
   };
 }
 

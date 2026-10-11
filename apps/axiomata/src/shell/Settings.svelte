@@ -17,7 +17,7 @@
     type SpendSummary,
     invokeBackend,
   } from "../core/backend";
-  import { brainView, SPEED_MAX } from "../core/brainView";
+  import { brainView, SHINES, SPEED_MAX } from "../core/brainView";
   import { MOTION_LEVELS, isMotionLevel, motion, motionSetting, systemReducesMotion, turns } from "../core/motion";
   import { effects } from "../core/effects";
   import { UI_FONTS, uiFont } from "../core/uiFont";
@@ -378,6 +378,15 @@
           </label>
           <label class="opt"><input type="checkbox" bind:checked={$brainView.labels} /> Labels <span class="hint">(skills, areas and the hub)</span></label>
           <label class="opt"><input type="checkbox" bind:checked={$brainView.fileNames} /> File names <span class="hint">(next to every note in the Second Brain)</span></label>
+          <label class="row">
+            <span class="label">Shimmer</span>
+            <select bind:value={$brainView.shine}>
+              {#each SHINES as s (s.id)}
+                <option value={s.id}>{s.label}</option>
+              {/each}
+            </select>
+            <span class="hint">(how the hex cells catch the light; still unless motion is Full)</span>
+          </label>
         </section>
 
         <section>
