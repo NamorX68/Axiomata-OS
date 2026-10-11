@@ -2,7 +2,7 @@
   The dock (`docs/plans/ui-ux-round.md` UX3, G5): one floating bar at the top centre in place of the old title block
   and its six unlabelled icons. The brand on the left (hexagon, name, the workspace), then the places to go — Studio,
   Kanban, Second Brain, a new note — with their names, today's heartbeat and spend (`Heartbeat.svelte`), the spotlight
-  as a search field with its key, and the quiet tools at the end (add a module, the theme choice, the settings).
+  as a magnifier (its key on hover), and the quiet tools at the end (add a module, the theme choice, the settings).
 
   The Studio's hex mark glows while card sessions are at work (`core/studioActivity.ts`, the same signal as the Orbit's
   live pulse). Below ~1500 px of window width the names go and the icons stay, with the name and key as tooltip.
@@ -87,7 +87,6 @@
       onclick={() => emit("shell:spotlight")}
     >
       <Icon name="search" />
-      <span class="label">Search or run…</span>
       <kbd>{spotlightKey}</kbd>
     </button>
 
@@ -202,21 +201,33 @@
     display: inline-flex;
   }
 
+  /* Only the magnifier (owner, 2026-10-11): a field would promise typing in place, but it opens the spotlight. Its
+     key shows under it while pointed at or focused, without moving the dock. */
   .search {
-    min-width: calc(220px * var(--ax-ui-scale));
-    margin-right: var(--ax-space-1);
-    border: 1px solid var(--ax-border);
-    background: var(--ax-elev-1);
+    padding: var(--ax-space-1) var(--ax-space-2);
   }
 
   .search kbd {
-    margin-left: auto;
+    position: absolute;
+    top: calc(100% + var(--ax-space-2));
+    left: 50%;
+    transform: translateX(-50%);
     padding: 0 var(--ax-space-1);
     border: 1px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-sm);
+    background: var(--ax-elev-3);
     font: var(--ax-type-caption);
     line-height: 1.5;
     color: var(--ax-text-muted);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  .search:hover kbd,
+  .search:focus-visible kbd {
+    opacity: 1;
   }
 
   .theme-slot {
@@ -233,10 +244,6 @@
 
     .target {
       padding: var(--ax-space-1) var(--ax-space-2);
-    }
-
-    .search {
-      min-width: 0;
     }
   }
 </style>

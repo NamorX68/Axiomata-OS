@@ -3,8 +3,9 @@
   midnight with a spark for every skill or routine run and every agent session on a card (`core/heartbeat.ts`), and
   beside it today's metered spend as hex segments against the daily limit — red from 80 % on.
 
-  Read every half minute and whenever the window comes back into focus; nothing here is pushed. A click on a card's
-  spark opens the card in the Kanban, one on a run's spark shows the run (there is no run view of its own yet).
+  Read every half minute and whenever the window comes back into focus; nothing here is pushed. The strip alone is
+  too small to read, so pointing at it opens a list of today's entries (time, name, length, outcome). A click on a
+  card opens it in the Kanban, one on a run shows the run (there is no run view of its own yet).
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -21,13 +22,16 @@
     beatsFromCards,
     beatsFromRuns,
     dayShare,
+    durationText,
     fuel,
     FUEL_SEGMENTS,
+    openCardIds,
     placeOnDay,
     type Beat,
     type Fuel,
   } from "../core/heartbeat";
   import { openKanban } from "../modules/kanbanApp";
+  import StatusMark from "../ui/StatusMark.svelte";
 
   /** How often the strip is read again; a run or a session is minutes long, the strip need not be exact. */
   const REFRESH_MS = 30_000;
@@ -40,6 +44,10 @@
   let tank = $state<Fuel | null>(null);
   let now = $state(Date.now());
   let shown = $state<RunRecord | null>(null);
+  /** The list of today's entries, open while the pointer is on the strip or the list. */
+  let listOpen = $state(false);
+  /** The cards with an open session, kept from the last answer when a read fails. */
+  let openCards = new Set<number>();
   let root = $state<HTMLElement | null>(null);
 
   async function cardsOfAllBoards(): Promise<BoardCard[]> {
@@ -66,16 +74,18 @@
   async function read(): Promise<void> {
     const at = Date.now();
     // Each source on its own: a failing one leaves the others standing (and its last answer, not an empty strip).
-    const [runs, cards, spend] = await Promise.allSettled([
+    const [runs, cards, spend, open] = await Promise.allSettled([
       invoke<RunSummary[]>("list_runs", { limit: RUN_LIMIT }),
       cardsOfAllBoards(),
       invoke<SpendSummary[]>("get_spend_summary"),
+      invoke<unknown>("open_card_sessions"),
     ]);
     now = at;
+    if (open.status === "fulfilled") openCards = openCardIds(open.value);
     const next: Beat[] = [];
     if (runs.status === "fulfilled") next.push(...beatsFromRuns(runs.value, at));
     else next.push(...beats.filter((b) => b.kind === "run"));
-    if (cards.status === "fulfilled") next.push(...beatsFromCards(cards.value, at));
+    if (cards.status === "fulfilled") next.push(...beatsFromCards(cards.value, at, openCards));
     else next.push(...beats.filter((b) => b.kind === "card"));
     beats = next.sort((a, b) => a.start - b.start);
     if (spend.status === "fulfilled") tank = fuel(spend.value);
@@ -100,6 +110,7 @@
   }
 
   async function open(beat: Beat): Promise<void> {
+    listOpen = false;
     if (beat.kind === "card") {
       await openKanban({ ...(beat.boardId === undefined ? {} : { boardId: beat.boardId }), cardId: beat.id });
       return;
@@ -112,9 +123,10 @@
   }
 
   function onKeydown(e: KeyboardEvent): void {
-    if (shown && e.key === "Escape" && !e.defaultPrevented) {
+    if ((shown || listOpen) && e.key === "Escape" && !e.defaultPrevented) {
       e.preventDefault();
       shown = null;
+      listOpen = false;
     }
   }
 
@@ -132,8 +144,16 @@
 
 <svelte:window onkeydown={onKeydown} onpointerdown={onPointerDown} />
 
-<div class="heartbeat" bind:this={root}>
-  <div class="strip" role="group" aria-label="Today's work: {beats.length} runs and sessions">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="heartbeat" bind:this={root} onmouseleave={() => (listOpen = false)}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="strip"
+    role="group"
+    aria-label="Today's work: {beats.length} runs and sessions"
+    onmouseenter={() => (listOpen = !shown)}
+    onfocusin={() => (listOpen = !shown)}
+  >
     <span class="tick" style:left="25%" aria-hidden="true"></span>
     <span class="tick" style:left="50%" aria-hidden="true"></span>
     <span class="tick" style:left="75%" aria-hidden="true"></span>
@@ -166,6 +186,28 @@
         </span>
       {/if}
       <span class="amount">{money(tank.todayUsd)}</span>
+    </div>
+  {/if}
+
+  {#if listOpen && !shown}
+    <div class="list" role="dialog" aria-label="Today's work">
+      <p class="list-head">Today · {beats.length === 1 ? "1 entry" : `${beats.length} entries`}</p>
+      {#if beats.length === 0}
+        <p class="meta">Nothing ran today yet.</p>
+      {:else}
+        <ul>
+          {#each [...beats].reverse() as beat (beat.key)}
+            <li>
+              <button type="button" class="entry" onclick={() => void open(beat)}>
+                <StatusMark tone={beat.tone} />
+                <span class="when">{clock(beat.start)}</span>
+                <span class="what">{beat.label}</span>
+                <span class="long">{beat.end === null ? "running" : durationText(beat, now)}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   {/if}
 
@@ -275,6 +317,78 @@
     background: var(--ax-danger);
     filter: drop-shadow(0 0 calc(4px * var(--ax-ui-scale)) color-mix(in srgb, var(--ax-danger) 60%, transparent));
     animation: var(--ax-anim-breathe);
+  }
+
+  .list {
+    position: absolute;
+    top: calc(100% + var(--ax-space-3));
+    left: 0;
+    width: calc(420px * var(--ax-ui-scale));
+    max-height: calc(360px * var(--ax-ui-scale));
+    overflow: auto;
+    padding: var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-lg);
+    background: var(--ax-elev-3);
+    box-shadow: var(--ax-shadow-panel);
+  }
+
+  /* A bridge over the gap below the strip, so the pointer reaches the list without it closing on the way. */
+  .list::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(-1 * var(--ax-space-3));
+    height: var(--ax-space-3);
+  }
+
+  .list-head {
+    margin: 0 0 var(--ax-space-1);
+    padding: 0 var(--ax-space-2);
+    font: var(--ax-type-label);
+    letter-spacing: var(--ax-tracking-label);
+    text-transform: uppercase;
+    color: var(--ax-text-muted);
+  }
+
+  .list ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .entry {
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 0;
+    border-radius: var(--ax-radius-md);
+    background: transparent;
+    color: var(--ax-text);
+    font: var(--ax-type-body);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .entry:hover {
+    background: var(--ax-selected-bg);
+  }
+
+  .when,
+  .long {
+    font: var(--ax-type-caption);
+    font-variant-numeric: tabular-nums;
+    color: var(--ax-text-muted);
+  }
+
+  .what {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .run {

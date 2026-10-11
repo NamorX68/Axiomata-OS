@@ -62,10 +62,11 @@ export function beatsFromRuns(runs: readonly RunSummary[], now: number): Beat[] 
 }
 
 /**
- * Today's agent sessions on cards: from the claim to the sign-off, the failure or the cancel — or still going on
- * while the card is claimed. A session that ended today but began earlier starts at midnight on the strip.
+ * Today's agent sessions on cards: from the claim to the sign-off, the failure, the cancel or the archiving — or
+ * still going on while a session for the card is open (`openCards`, from `open_card_sessions`). A session that ended
+ * today but began earlier starts at midnight on the strip.
  */
-export function beatsFromCards(cards: readonly BoardCard[], now: number): Beat[] {
+export function beatsFromCards(cards: readonly BoardCard[], now: number, openCards: ReadonlySet<number>): Beat[] {
   const day = dayOf(now);
   const beats: Beat[] = [];
   for (const card of cards) {
@@ -73,11 +74,18 @@ export function beatsFromCards(cards: readonly BoardCard[], now: number): Beat[]
     if (claimed === null) continue;
     const verified = at(card.verified_at);
     const failed = at(card.failed_at);
-    const ended = failed ?? verified ?? at(card.canceled_at);
+    // Archived or taken over ends it too: a claim left on an archived card is no session at work (card #56, a week
+    // "claimed", glowed across the whole day).
+    const ended =
+      failed ?? verified ?? at(card.canceled_at) ?? at(card.taken_over_at) ?? at(card.archived_at);
     if (ended !== null && ended < day.start) continue;
     if (claimed >= day.end) continue;
-    const live = ended === null && card.claimed_by !== null;
+    // Only a session the backend reports open is at work; a claim without one is stale and shows nothing.
+    const live = ended === null && openCards.has(card.id);
     if (ended === null && !live) continue;
+    // Archived, cancelled or taken over without an outcome says nothing about when the work stopped: such a claim
+    // counts only when it was made today, never stretched back to midnight.
+    if (!live && failed === null && verified === null && claimed < day.start) continue;
     beats.push({
       key: `card:${card.id}`,
       kind: "card",
@@ -90,6 +98,27 @@ export function beatsFromCards(cards: readonly BoardCard[], now: number): Beat[]
     });
   }
   return beats;
+}
+
+/** A spark's length in words for the list: "40 s", "12 min", "2 h 5 min"; still going on counts up to `now`. */
+export function durationText(beat: Beat, now: number): string {
+  const seconds = Math.max(0, Math.round(((beat.end ?? now) - beat.start) / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const rest = minutes % 60;
+  return rest === 0 ? `${Math.floor(minutes / 60)} h` : `${Math.floor(minutes / 60)} h ${rest} min`;
+}
+
+/** The card ids of an `open_card_sessions` answer; anything that is not one counts as none. */
+export function openCardIds(open: unknown): Set<number> {
+  const ids = new Set<number>();
+  if (!Array.isArray(open)) return ids;
+  for (const s of open) {
+    const id = typeof s === "object" && s !== null ? (s as { card_id?: unknown }).card_id : undefined;
+    if (typeof id === "number") ids.add(id);
+  }
+  return ids;
 }
 
 /** How far into the day of `now` a moment lies, in percent (the strip's "now" line). */

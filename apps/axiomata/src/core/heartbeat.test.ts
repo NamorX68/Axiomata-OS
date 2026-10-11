@@ -1,12 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import type { BoardCard, RunSummary, SpendSummary } from "./backend";
-import { beatsFromCards, beatsFromRuns, dayOf, dayShare, fuel, placeOnDay } from "./heartbeat";
+import {
+  beatsFromCards,
+  beatsFromRuns,
+  dayOf,
+  dayShare,
+  durationText,
+  fuel,
+  openCardIds,
+  placeOnDay,
+} from "./heartbeat";
 
 /** Local time on 11 Oct 2026 at `h:m`, in ms. */
 const today = (h: number, m = 0): number => new Date(2026, 9, 11, h, m).getTime();
 const iso = (ms: number): string => new Date(ms).toISOString();
 const NOW = today(15);
+/** Card 4 has an open session (`open_card_sessions`). */
+const OPEN = new Set([4]);
 
 function run(over: Partial<RunSummary>): RunSummary {
   return {
@@ -76,13 +87,15 @@ describe("beatsFromRuns (G14)", () => {
 
 describe("beatsFromCards (G14)", () => {
   it("glows while the card is claimed and not done", () => {
-    expect(beatsFromCards([card({})], NOW)[0]).toMatchObject({ kind: "card", tone: "live", end: null, boardId: 1 });
+    const [beat] = beatsFromCards([card({})], NOW, OPEN);
+    expect(beat).toMatchObject({ kind: "card", tone: "live", end: null, boardId: 1 });
   });
 
   it("ends at the sign-off or the failure", () => {
     const [done, failed] = beatsFromCards(
       [card({ id: 1, verified_at: iso(today(11)) }), card({ id: 2, failed_at: iso(today(12)) })],
       NOW,
+      OPEN,
     );
     expect(done).toMatchObject({ tone: "ok", end: today(11) });
     expect(failed).toMatchObject({ tone: "bad", end: today(12) });
@@ -95,13 +108,24 @@ describe("beatsFromCards (G14)", () => {
         card({ id: 2, claimed_at: iso(today(0) - 7_200_000), verified_at: iso(today(0) - 3_600_000) }),
       ],
       NOW,
+      new Set([1]),
     );
     expect(beats).toHaveLength(1);
     expect(beats[0]?.start).toBe(today(0));
   });
 
-  it("skips an unclaimed card and one released without an end", () => {
-    expect(beatsFromCards([card({ claimed_at: null }), card({ claimed_by: null })], NOW)).toEqual([]);
+  it("skips an unclaimed card and a claim with no open session", () => {
+    expect(beatsFromCards([card({ claimed_at: null }), card({ id: 9 })], NOW, OPEN)).toEqual([]);
+  });
+
+  it("does not stretch a stale claim archived today back to midnight (card #56)", () => {
+    const stale = card({ id: 56, claimed_at: iso(today(0) - 7 * 86_400_000), archived_at: iso(today(13)) });
+    expect(beatsFromCards([stale], NOW, OPEN)).toEqual([]);
+  });
+
+  it("shows a claim made and archived today as a quiet spark", () => {
+    const brief = card({ id: 5, claimed_at: iso(today(10)), archived_at: iso(today(11)) });
+    expect(beatsFromCards([brief], NOW, OPEN)[0]).toMatchObject({ tone: "neutral", end: today(11) });
   });
 });
 
@@ -117,8 +141,22 @@ describe("placeOnDay", () => {
   });
 
   it("draws a running session up to now", () => {
-    const place = placeOnDay(only(beatsFromCards([card({ claimed_at: iso(today(12)) })], NOW)), NOW);
+    const place = placeOnDay(only(beatsFromCards([card({ claimed_at: iso(today(12)) })], NOW, OPEN)), NOW);
     expect(place.width).toBeCloseTo(12.5);
+  });
+});
+
+describe("durationText and openCardIds", () => {
+  it("says a spark's length in seconds, minutes or hours, up to now while it goes on", () => {
+    const beat = only(beatsFromRuns([run({ duration_ms: 40_000 })], NOW));
+    expect(durationText(beat, NOW)).toBe("40 s");
+    expect(durationText({ ...beat, end: beat.start + 12 * 60_000 }, NOW)).toBe("12 min");
+    expect(durationText({ ...beat, end: null, start: NOW - 125 * 60_000 }, NOW)).toBe("2 h 5 min");
+  });
+
+  it("reads the card ids of the open sessions and ignores anything else", () => {
+    expect(openCardIds([{ card_id: 4 }, { nope: 1 }])).toEqual(new Set([4]));
+    expect(openCardIds("broken")).toEqual(new Set());
   });
 });
 

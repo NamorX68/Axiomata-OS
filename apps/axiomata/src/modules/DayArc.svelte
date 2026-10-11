@@ -25,6 +25,7 @@
   const at = $derived(now.getTime());
   const nowAt = $derived(arcFraction(at));
   const here = $derived(arcPoint(nowAt));
+  const outside = $derived(now.getHours() < ARC_FROM_HOUR || now.getHours() >= ARC_TO_HOUR);
   const segments = $derived(arcSegments(events, at));
   const time = $derived(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   /** Read out: the time and today's events by name, since their titles are otherwise only tooltips. */
@@ -43,7 +44,14 @@
   }
 </script>
 
-<div class="clock arc" style:height="{size}px" style:width="{Math.round(size * 1.6)}px">
+<!-- Takes the room beside the mini-month, from a little narrower than it is tall up to its full width: the analogue face
+     it replaced was square, and a wider arc wrapped under the month in a tile of the usual width (owner, 2026-10-11). -->
+<div
+  class="clock arc"
+  style:height="{size}px"
+  style:min-width="{Math.round(size * 0.6)}px"
+  style:max-width="{Math.round(size * 1.6)}px"
+>
   <svg viewBox="0 0 100 62" role="img" aria-label={label}>
     <!-- An SVG filter, not a CSS one: WebKit does not reliably draw CSS filters on SVG children. -->
     <defs>
@@ -61,18 +69,27 @@
         filter={s.live ? `url(#${glowId})` : undefined}><title>{s.title}</title></path
       >
     {/each}
-    <polygon class="now" points={hex(here.x, here.y, 3.2)} filter="url(#{glowId})" />
+    <!-- The arc's hours at its ends: without them the hexagon resting at an end after ten at night reads as a
+         riddle (owner, 2026-10-11). -->
+    <text class="hour" x="6" y="61" text-anchor="middle">{ARC_FROM_HOUR}</text>
+    <text class="hour" x="94" y="61" text-anchor="middle">{ARC_TO_HOUR}</text>
+    <!-- Outside the arc's hours "now" waits at the nearer end, quiet: the day on the arc is over or not begun. -->
+    <polygon
+      class="now"
+      class:outside
+      points={hex(here.x, here.y, 3.2)}
+      filter={outside ? undefined : `url(#${glowId})`}
+    />
     <text class="time" x="50" y="46" text-anchor="middle">{time}</text>
   </svg>
 </div>
 
 <style>
   .clock.arc {
-    flex: 0 0 auto;
+    flex: 1 1 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    max-width: 100%;
     user-select: none;
   }
 
@@ -110,6 +127,18 @@
 
   .now {
     fill: var(--ax-glow);
+  }
+
+  .now.outside {
+    fill: var(--ax-text-muted);
+  }
+
+  .hour {
+    fill: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    /* In the arc's own box, like the time. */
+    font-size: 6px;
+    font-variant-numeric: tabular-nums;
   }
 
   .shine {
