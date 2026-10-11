@@ -32,8 +32,12 @@ export interface UiDisplay {
 /** "Auto", or a fixed size in percent. */
 export type UiSize = "auto" | number;
 
-/** The sizes the setting offers besides "Auto". */
-export const UI_SIZES = [90, 95, 100, 105, 110, 120, 125, 130, 140, 150] as const;
+/**
+ * The slider's range besides "Auto", in whole percent (owner, 2026-10-11: a slider instead of fixed steps, to set the
+ * size more finely). A little wider than what "Auto" itself picks (100–160 %, K9) at both ends.
+ */
+export const UI_SIZE_MIN = 75;
+export const UI_SIZE_MAX = 175;
 
 /** The "UI size" setting (K13), persisted in `dashboard.json` by `persist.ts`. */
 export const uiSize: Writable<UiSize> = writable("auto");
@@ -52,7 +56,10 @@ const FOLLOW_MS = 1000;
 
 /** Whether a stored value is a valid setting. */
 export function isUiSize(value: unknown): value is UiSize {
-  return value === "auto" || (typeof value === "number" && (UI_SIZES as readonly number[]).includes(value));
+  return (
+    value === "auto" ||
+    (typeof value === "number" && Number.isInteger(value) && value >= UI_SIZE_MIN && value <= UI_SIZE_MAX)
+  );
 }
 
 /**

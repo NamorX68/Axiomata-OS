@@ -35,10 +35,15 @@ describe("the UI scale (LK0, K9, K13)", () => {
     expect(scaleFor(110, wide)).toBe(1.1);
   });
 
-  it("accepts only the offered sizes as a stored setting", () => {
+  it("accepts Auto or a whole percentage within the slider's range as a stored setting", () => {
     expect(isUiSize("auto")).toBe(true);
     expect(isUiSize(125)).toBe(true);
-    expect(isUiSize(123)).toBe(false);
+    expect(isUiSize(123)).toBe(true);
+    expect(isUiSize(75)).toBe(true);
+    expect(isUiSize(175)).toBe(true);
+    expect(isUiSize(74)).toBe(false);
+    expect(isUiSize(176)).toBe(false);
+    expect(isUiSize(112.5)).toBe(false);
     expect(isUiSize("125")).toBe(false);
     expect(isUiSize(null)).toBe(false);
   });

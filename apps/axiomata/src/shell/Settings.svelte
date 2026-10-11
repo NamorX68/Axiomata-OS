@@ -23,7 +23,7 @@
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
   import { KEYBOARD_SETTINGS, isKeyboardSetting, keyboardSetting, platform, platformLabel } from "../core/keys";
-  import { UI_SIZES, uiScaleAuto, uiSize, type UiSize } from "../core/uiScale";
+  import { UI_SIZE_MAX, UI_SIZE_MIN, uiScaleAuto, uiSize } from "../core/uiScale";
   import { THEMES, applyTheme } from "../core/themes";
   import { toast } from "../core/toast";
   import { TEMPLATE } from "../theme/validator";
@@ -39,6 +39,13 @@
     { id: "about", label: "About" },
   ];
   let tab = $state<TabId>("appearance");
+
+  // What "Auto" comes to here, and the slider's value while it is dragged (it follows the setting otherwise).
+  const autoPercent = $derived(Math.round($uiScaleAuto * 100));
+  let sizeDraft = $state(100);
+  $effect(() => {
+    sizeDraft = $uiSize === "auto" ? autoPercent : $uiSize;
+  });
 
   let info = $state<AppInfo | null>(null);
   let reloading = $state(false);
@@ -362,20 +369,28 @@
 
         <section>
           <h3>UI size</h3>
+          <label class="opt">
+            <input
+              type="checkbox"
+              checked={$uiSize === "auto"}
+              onchange={(e) => uiSize.set(e.currentTarget.checked ? "auto" : autoPercent)}
+            />
+            Auto <span class="hint">({autoPercent}% on this display)</span>
+          </label>
           <label class="row">
             <span class="label">Text and controls</span>
-            <select
-              value={String($uiSize)}
-              onchange={(e) => {
-                const v = e.currentTarget.value;
-                uiSize.set((v === "auto" ? "auto" : Number(v)) as UiSize);
-              }}
-            >
-              <option value="auto">Auto ({Math.round($uiScaleAuto * 100)}%)</option>
-              {#each UI_SIZES as size (size)}
-                <option value={String(size)}>{size}%</option>
-              {/each}
-            </select>
+            <!-- Taken over on release, not while dragging: the dialog itself grows with the size, and a slider that
+                 moves under the pointer cannot be dragged. -->
+            <input
+              type="range"
+              min={UI_SIZE_MIN}
+              max={UI_SIZE_MAX}
+              step="1"
+              value={sizeDraft}
+              oninput={(e) => (sizeDraft = Number(e.currentTarget.value))}
+              onchange={(e) => uiSize.set(Number(e.currentTarget.value))}
+            />
+            <span class="readout">{sizeDraft}%</span>
           </label>
           <p class="hint">
             “Auto” follows the real pixel density of the display the window is on: on a dense monitor the interface
