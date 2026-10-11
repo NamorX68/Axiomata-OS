@@ -151,7 +151,8 @@
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(calc(150px * var(--ax-ui-scale)), 1fr));
+    /* Wide enough for a skill's name: at 150 px a wider tile fitted three and cut every name (owner, 2026-10-11). */
+    grid-template-columns: repeat(auto-fill, minmax(calc(240px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
   }
 
@@ -199,8 +200,10 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
+    min-width: 0;
     font: var(--ax-type-caption);
     color: var(--ax-text-muted);
+    white-space: nowrap;
   }
 
   .run {
