@@ -13,11 +13,14 @@
     agent never started has no worktree yet, a fresh worktree has no changes.
 -->
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
   import { onDestroy, tick, untrack } from "svelte";
   import IconButton from "../ui/IconButton.svelte";
 
   import type { AgentFileChange, AgentState, IdeAgent } from "../core/backend";
+  import { platform } from "../core/keys";
   import { formatBytes } from "../core/format";
+  import { diffViewAction } from "../fileapp/diffKeys";
   import { toast } from "../core/toast";
   import type { DiffLayout } from "../editor/diff/view";
   import DiffPanes from "../fileapp/DiffPanes.svelte";
@@ -139,22 +142,13 @@
     }
   }
 
-  /** ⌥⌘↓/⌥⌘↑ file, ⌘R reload, ⌘⇧D layout (H9) — wherever the focus is in the view. */
+  /** ⌥⌘↓/⌥⌘↑ file, ⌘R reload, ⌘⇧D layout (H9) — wherever the focus is in the view (other platforms: `diffKeys.ts`). */
   function onKey(e: KeyboardEvent): boolean {
-    const key = e.key.toLowerCase();
-    if (e.metaKey && e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-      session.stepFile(e.key === "ArrowDown" ? 1 : -1);
-      return true;
-    }
-    if (e.metaKey && !e.altKey && !e.shiftKey && key === "r") {
-      void session.refresh(true);
-      return true;
-    }
-    if (e.metaKey && e.shiftKey && key === "d") {
-      toggleLayout();
-      return true;
-    }
-    return false;
+    const action = diffViewAction(e, $platform);
+    if (action === "next-file" || action === "previous-file") session.stepFile(action === "next-file" ? 1 : -1);
+    else if (action === "refresh") void session.refresh(true);
+    else if (action === "layout") toggleLayout();
+    return action !== null;
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -206,7 +200,7 @@
       <IconButton
         icon={layout === "unified" ? "columns-2" : "rows-2"}
         size="sm"
-        label={layout === "unified" ? "Two columns (⌘⇧D)" : "One column (⌘⇧D)"}
+        label={keyHints(layout === "unified" ? "Two columns (⌘⇧D)" : "One column (⌘⇧D)", $platform)}
         onclick={toggleLayout}
       />
       {#if onOpenFile && loaded?.change.kind !== "deleted"}
@@ -242,7 +236,7 @@
       <IconButton icon="panel-right" size="sm" label="Open these diffs in a dock pane of their own" onclick={onDock} />
     {/if}
     <span class="reload" class:spinning={session.refreshing}>
-      <IconButton icon="refresh-cw" size="sm" label="Reload (⌘R)" onclick={() => session.refresh(true)} />
+      <IconButton icon="refresh-cw" size="sm" label={keyHints("Reload (⌘R)", $platform)} onclick={() => session.refresh(true)} />
     </span>
   </header>
 

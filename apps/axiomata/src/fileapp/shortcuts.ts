@@ -14,13 +14,28 @@
  * separated by ` / `. Vi keys are written in Vim's own notation.
  */
 
+import { keyHints } from "../core/keyHints";
+import type { Platform } from "../core/keys";
 import type { KeyInput } from "../editor/keymap";
+import { VI_CTRL_KEYS } from "./editorKeys";
 
 export interface Shortcut {
   keys: string;
   what: string;
   /** A move that ⇧ turns into extending the selection: the test checks both. */
   extends?: boolean;
+  /**
+   * The keys on Windows and Linux when they are not the glyphs turned into words (`core/keyHints.ts` does that):
+   * `null` leaves the entry out there. `editorKeys.ts` is where the editor's keys are translated;
+   * `shortcuts.test.ts` presses these through it.
+   */
+  other?: string | null;
+  /** The keys there while Vi is on, where they differ from `other` (`null`: none, Vi has its own). */
+  otherVi?: string | null;
+  /** The description there, where it differs. */
+  otherWhat?: string;
+  /** An entry that exists only on Windows and Linux; `keys` is then already in their words. */
+  onlyOther?: boolean;
 }
 
 export interface ShortcutGroup {
@@ -38,12 +53,12 @@ export const SHORTCUTS: ShortcutGroup[] = [
     checked: true,
     items: [
       { keys: "← / →", what: "One character left / right", extends: true },
-      { keys: "⌥← / ⌥→", what: "One word left / right", extends: true },
-      { keys: "⌘← / ⌘→", what: "Start / end of the line", extends: true },
+      { keys: "⌥← / ⌥→", what: "One word left / right", extends: true, other: "Ctrl+← / Ctrl+→" },
+      { keys: "⌘← / ⌘→", what: "Start / end of the line", extends: true, other: null },
       { keys: "↑ / ↓", what: "One line up / down", extends: true },
-      { keys: "⌘↑ / ⌘↓", what: "Start / end of the file", extends: true },
+      { keys: "⌘↑ / ⌘↓", what: "Start / end of the file", extends: true, other: "Ctrl+Home / Ctrl+End" },
       { keys: "Home / End", what: "Start / end of the line", extends: true },
-      { keys: "⌘Home / ⌘End", what: "Start / end of the file", extends: true },
+      { keys: "⌘Home / ⌘End", what: "Start / end of the file", extends: true, other: null },
       { keys: "PgUp / PgDn", what: "One page up / down", extends: true },
       { keys: "⇧ + any move", what: "Extend the selection" },
     ],
@@ -52,8 +67,13 @@ export const SHORTCUTS: ShortcutGroup[] = [
     title: "Editing",
     checked: true,
     items: [
-      { keys: "⌫ / ⌥⌫ / ⌘⌫", what: "Delete a character / word / to the line start backwards" },
-      { keys: "⌦ / ⌥⌦", what: "Delete a character / word forwards" },
+      {
+        keys: "⌫ / ⌥⌫ / ⌘⌫",
+        what: "Delete a character / word / to the line start backwards",
+        other: "Backspace / Ctrl+Backspace",
+        otherWhat: "Delete a character / word backwards",
+      },
+      { keys: "⌦ / ⌥⌦", what: "Delete a character / word forwards", other: "Delete / Ctrl+Delete" },
       { keys: "⏎", what: "New line" },
       { keys: "⇥ / ⇧⇥", what: "Indent / outdent" },
       { keys: "⌥↑ / ⌥↓", what: "Move the lines up / down" },
@@ -84,7 +104,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
     title: "Find",
     checked: true,
     items: [
-      { keys: "⌘F", what: "Find in the file" },
+      { keys: "⌘F", what: "Find in the file", otherVi: null },
       { keys: "⌥⌘F", what: "Find and replace" },
       { keys: "⌘G / ⇧⌘G", what: "Next / previous match" },
       { keys: "⌘E", what: "Search for the selection" },
@@ -94,7 +114,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
     title: "Folding",
     checked: true,
     items: [
-      { keys: "⌥⌘[ / ⌥⌘]", what: "Fold / unfold here" },
+      { keys: "⌥⌘[ / ⌥⌘]", what: "Fold / unfold here", other: "Ctrl+Shift+[ / Ctrl+Shift+]" },
       { keys: "⌥⌘0 / ⌥⌘J", what: "Fold / unfold everything" },
     ],
   },
@@ -131,6 +151,12 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: "⌘W", what: "Close the topmost window (the spotlight, else the top panel); not in a terminal" },
       { keys: "Esc", what: "Close the topmost window — in a file window only on a rendered page or a picture" },
       { keys: "F1 / F5, F2 / F10, F3, F4", what: "While the debugger is stopped: continue, step over, out, into" },
+      {
+        keys: "Ctrl+Shift+…",
+        what: "In a terminal pane every app shortcut takes Ctrl+Shift — plain Ctrl belongs to the shell",
+        onlyOther: true,
+      },
+      { keys: "Ctrl+Shift+C / Ctrl+Shift+V", what: "Copy / paste in a terminal pane", onlyOther: true },
     ],
   },
   {
@@ -235,17 +261,30 @@ export const SHORTCUTS: ShortcutGroup[] = [
   },
 ];
 
-/** The groups to show: the Vi ones only with Vi on — and then first, since they are the keys in use; narrowed by `query` (keys or description). */
-export function visibleShortcuts(vi: boolean, query: string): ShortcutGroup[] {
+/** What `item` shows on `on`, or `null` when it is not there (a Mac-only key, or one Vi takes over). */
+function shown(item: Shortcut, on: Platform, vi: boolean): Shortcut | null {
+  if (on === "mac") return item.onlyOther ? null : item;
+  const keys = vi && item.otherVi !== undefined ? item.otherVi : item.other;
+  if (keys === null) return null;
+  const text = keys ?? (item.onlyOther ? item.keys : keyHints(item.keys, on, { vi, viLetters: VI_CTRL_KEYS }));
+  return { ...item, keys: text, what: item.otherWhat ?? item.what };
+}
+
+/**
+ * The groups to show on `on`: the Vi ones only with Vi on — and then first, since they are the keys in use; narrowed by
+ * `query` (keys or description, as shown).
+ */
+export function visibleShortcuts(vi: boolean, query: string, on: Platform = "mac"): ShortcutGroup[] {
   const q = query.trim().toLowerCase();
   const out: ShortcutGroup[] = [];
   for (const group of SHORTCUTS) {
     if (group.vi && !vi) continue;
+    const present = group.items.flatMap((item) => shown(item, on, vi) ?? []);
     const items = q
-      ? group.items.filter(
+      ? present.filter(
           (s) => s.keys.toLowerCase().includes(q) || s.what.toLowerCase().includes(q) || group.title.toLowerCase().includes(q),
         )
-      : group.items;
+      : present;
     if (items.length > 0) out.push({ ...group, items });
   }
   // Stable: the Vi groups move up, everything keeps its order within its kind.

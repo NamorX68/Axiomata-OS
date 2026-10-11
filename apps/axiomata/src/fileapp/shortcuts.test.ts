@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { foldKeyAction, keyAction, type KeyInput } from "../editor/keymap";
 import { EX_COMMAND_NAMES } from "../editor/vi/ex";
 import { VI_GRAMMAR } from "../editor/vi/parse";
+import { editorKeyInput } from "./editorKeys";
 import { keyPresses, SHORTCUTS, visibleShortcuts } from "./shortcuts";
 
 /** What the key map does with a press, as one comparable value; `null` for nothing. */
@@ -109,3 +110,68 @@ describe("the shortcut list (LK1, K2)", () => {
     expect(keyPresses("⌘-click")).toBeNull();
   });
 });
+
+describe("the list on Windows and Linux", () => {
+  /** A written `Ctrl+Alt+F` as the key press it stands for; `null` for a form that is no single key. */
+  function pressOf(text: string): KeyInput | null {
+    const parts = text.split("+");
+    const name = parts.pop() ?? "";
+    const names: Record<string, string> = {
+      "←": "ArrowLeft", "→": "ArrowRight", "↑": "ArrowUp", "↓": "ArrowDown", Backspace: "Backspace", Delete: "Delete",
+      Home: "Home", End: "End", Enter: "Enter", Tab: "Tab",
+    };
+    const key = names[name] ?? (name.length === 1 ? name : null);
+    if (key === null) return null;
+    const shift = parts.includes("Shift");
+    const code = key === "[" ? "BracketLeft" : key === "]" ? "BracketRight" : undefined;
+    return {
+      key: shift && key.length === 1 ? key.toUpperCase() : key,
+      meta: false,
+      alt: parts.includes("Alt"),
+      shift,
+      ctrl: parts.includes("Ctrl"),
+      code,
+    };
+  }
+
+  it("answers every key it lists in the checked groups with what the Mac key does", () => {
+    const checked = new Set(SHORTCUTS.filter((g) => g.checked).map((g) => g.title));
+    for (const group of visibleShortcuts(false, "", "other").filter((g) => checked.has(g.title))) {
+      for (const item of group.items) {
+        for (const alternative of item.keys.split(" / ")) {
+          const press = pressOf(alternative);
+          if (!press) continue;
+          const event = { ...press, metaKey: false, ctrlKey: press.ctrl, altKey: press.alt, shiftKey: press.shift };
+          const input = editorKeyInput(event, "other", false);
+          expect(actionOf(input), `${group.title}: ${alternative}`).not.toBeNull();
+        }
+      }
+    }
+  });
+
+  it("leaves out what only the Mac has, and shows what only the others have", () => {
+    const keys = (on: "mac" | "other") => visibleShortcuts(false, "", on).flatMap((g) => g.items).map((s) => s.keys);
+    expect(keys("mac")).toContain("⌘← / ⌘→");
+    expect(keys("other")).not.toContain("⌘← / ⌘→");
+    expect(keys("other")).toContain("Ctrl+← / Ctrl+→");
+    expect(keys("other")).toContain("Ctrl+Shift+C / Ctrl+Shift+V");
+    expect(keys("mac")).not.toContain("Ctrl+Shift+C / Ctrl+Shift+V");
+  });
+
+  it("puts the Ctrl+Shift form on a letter Vi binds, and drops the find key Vi shares with the Studio", () => {
+    const items = (vi: boolean) => visibleShortcuts(vi, "", "other").flatMap((g) => g.items);
+    const keysOf = (vi: boolean) => items(vi).map((s) => s.keys);
+    expect(keysOf(false)).toContain("Ctrl+D");
+    expect(keysOf(true)).toContain("Ctrl+Shift+D");
+    expect(items(false).map((s) => s.what)).toContain("Find in the file");
+    expect(items(true).map((s) => s.what)).not.toContain("Find in the file");
+    // Ctrl+Shift+F stays the Studio's project search.
+    expect(items(true).find((s) => s.keys === "Ctrl+Shift+F")?.what).toMatch(/Search the project/);
+  });
+
+  it("searches what is shown", () => {
+    const byKeys = visibleShortcuts(false, "ctrl+u", "other").flatMap((g) => g.items).map((s) => s.what);
+    expect(byKeys).toEqual(["Remove the last cursor"]);
+  });
+});
+

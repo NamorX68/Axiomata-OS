@@ -42,6 +42,7 @@
     surface's back arrives through the `revision` prop instead.
 -->
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
   import { onMount, tick as nextTick, untrack } from "svelte";
   import type { Tree } from "web-tree-sitter";
 
@@ -63,6 +64,7 @@
     type KeyInput,
   } from "../editor/keymap";
   import { SEVERITY_NAME, type Diagnostic, type DiagnosticSet } from "../editor/lsp/diagnostics";
+  import { chord, primaryHeld, platform } from "../core/keys";
   import { renderMarkdown } from "../core/markdown";
   import { FindModel } from "../editor/search/findModel";
   import { cursor, pos, range, selectionRange, type Pos, type Range } from "../editor/position";
@@ -75,6 +77,7 @@
   import { CodeActionMenu, type CodeActionPort } from "./codeActionMenu";
   import CodeActionPopup from "./CodeActionPopup.svelte";
   import { CompletionMenu, type CompletionPort } from "./completionMenu";
+  import { editorKeyInput } from "./editorKeys";
   import { docTouched } from "./workspaceEdit";
   import { SignatureHint, type SignaturePort } from "./signatureHint";
   import CompletionPopup from "./CompletionPopup.svelte";
@@ -907,16 +910,9 @@
 
   // ---------------------------------------------------------------- keyboard
 
+  /** The press in the engine's (Mac) vocabulary: other platforms' keys are translated at this edge (K-10). */
   function keyInputFrom(e: KeyboardEvent): KeyInput {
-    return {
-      key: e.key,
-      meta: e.metaKey,
-      alt: e.altKey,
-      shift: e.shiftKey,
-      ctrl: e.ctrlKey,
-      keyCode: e.keyCode,
-      code: e.code,
-    };
+    return editorKeyInput(e, $platform, vi !== null);
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -1185,7 +1181,8 @@
    */
   function completionKey(e: KeyboardEvent): boolean {
     // ⇧⌘Space: the signature of the call the cursor is in (ED6.6), as in VS Code.
-    if (hint && e.code === "Space" && e.metaKey && e.shiftKey && !e.ctrlKey && !e.altKey) {
+    const c = chord(e, $platform);
+    if (hint && e.code === "Space" && c.primary && c.shift && !c.alt) {
       if (canComplete()) hint.invoke(doc);
       return canComplete();
     }
@@ -1456,7 +1453,7 @@
     input.focus();
     const unit = e.detail >= 3 ? lineRange : e.detail === 2 ? wordRange : null;
     const start = posAt(e);
-    if (e.metaKey && !e.altKey && !e.shiftKey && onDefinitionAt && !unit) return onDefinitionAt(start);
+    if (primaryHeld(e, $platform) && !e.altKey && !e.shiftKey && onDefinitionAt && !unit) return onDefinitionAt(start);
     if (vi) return viMousedown(start);
     if (e.altKey && !unit) return altMousedown(start);
     const origin = unit ? unit(start) : { start, end: start };
@@ -1712,7 +1709,7 @@
               class="fold-chevron"
               class:closed={r.fold.chevron === "closed"}
               style:top="{r.row * rowH}px"
-              title={r.fold.chevron === "closed" ? "Unfold (⌥⌘])" : "Fold (⌥⌘[)"}
+              title={keyHints(r.fold.chevron === "closed" ? "Unfold (⌥⌘])" : "Fold (⌥⌘[)", $platform)}
               aria-label={r.fold.chevron === "closed" ? "Unfold" : "Fold"}
               onmousedown={(e) => {
                 e.preventDefault();
@@ -1784,7 +1781,7 @@
               class="fold-pill {r.slide ?? ''}"
               style:top="{r.row * rowH}px"
               style:left="{r.fold.pill.cell * charW}px"
-              title="Unfold (⌥⌘])"
+              title={keyHints("Unfold (⌥⌘])", $platform)}
               onmousedown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1810,7 +1807,7 @@
                 <button
                   type="button"
                   class="line-action"
-                  title={action.title}
+                  title={action.title ? keyHints(action.title, $platform) : undefined}
                   onmousedown={(e) => e.stopPropagation()}
                   onclick={() => onLineAction?.(r.line, action.id)}>{action.label}</button
                 >

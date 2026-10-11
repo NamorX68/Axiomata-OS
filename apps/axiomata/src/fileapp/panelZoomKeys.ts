@@ -3,6 +3,7 @@
  * step is tested without a DOM. The steps themselves are `editorSettings.ts`'s `panelFontSize*` functions.
  */
 
+import { chord, type KeyLike, type Platform } from "../core/keys";
 import { panelFontSizeDown, panelFontSizeReset, panelFontSizeUp } from "./editorSettings";
 
 export type PanelZoomStep = "up" | "down" | "reset";
@@ -11,14 +12,16 @@ export type PanelZoomStep = "up" | "down" | "reset";
 export const PREVIEW_BASE_FONT_SIZE = 16;
 
 /** The key's data a zoom step is read from — a `KeyboardEvent` has all of it. */
-export type ZoomKeyEvent = Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">;
+export type ZoomKeyEvent = KeyLike;
 
 /**
- * Which zoom step a key press asks for, or `null` for any other key. ⌘ alone (Shift is free: `+` needs it on most
- * layouts): `+` and `=` (the same key without Shift) grow, `-` and `_` shrink, `0` resets.
+ * Which zoom step a key press asks for, or `null` for any other key. The primary key alone (⌘, or Ctrl off the Mac;
+ * Shift is free: `+` needs it on most layouts): `+` and `=` (the same key without Shift) grow, `-` and `_` shrink,
+ * `0` resets. Never in a terminal pane, which this window has none of.
  */
-export function panelZoomStep(e: ZoomKeyEvent): PanelZoomStep | null {
-  if (!e.metaKey || e.ctrlKey || e.altKey) return null;
+export function panelZoomStep(e: ZoomKeyEvent, on: Platform): PanelZoomStep | null {
+  const c = chord(e, on);
+  if (!c.primary || c.alt || c.typing) return null;
   if (e.key === "+" || e.key === "=") return "up";
   if (e.key === "-" || e.key === "_") return "down";
   if (e.key === "0") return "reset";

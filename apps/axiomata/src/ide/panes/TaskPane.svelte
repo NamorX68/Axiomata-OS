@@ -7,6 +7,8 @@
   pane without a run (a stored layout is cleaned of them on load) says so rather than guessing.
 -->
 <script lang="ts">
+  import { keyHints } from "../../core/keyHints";
+  import { platform } from "../../core/keys";
   import type { OutputRef } from "../../core/outputLinks";
   import { createContext } from "../../core/registry";
   import Terminal from "../../modules/terminal.svelte";
@@ -39,7 +41,7 @@
 <div class="task-pane">
   <div class="bar">
     <span class="label" title={label}>{label}</span>
-    <span class="hint">⌘-click a file:line to open it</span>
+    <span class="hint">{keyHints("⌘-click a file:line to open it", $platform)}</span>
     <IconButton icon="square" label="Stop (Ctrl-C)" size="sm" onclick={() => terminal?.interrupt()} />
     <IconButton icon="rotate-ccw" label="Run again" size="sm" onclick={onRestart} />
   </div>

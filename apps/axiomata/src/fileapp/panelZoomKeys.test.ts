@@ -4,36 +4,53 @@ import { DEFAULT_EDITOR_SETTINGS, PANEL_FONT_SIZE_MAX, PANEL_FONT_SIZE_MIN } fro
 import { applyPanelZoomStep, panelZoomStep, previewZoom, type ZoomKeyEvent } from "./panelZoomKeys";
 
 function press(key: string, mods: Partial<ZoomKeyEvent> = {}): ZoomKeyEvent {
-  return { key, metaKey: true, ctrlKey: false, altKey: false, ...mods };
+  return { key, metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, ...mods };
 }
 
 describe("panelZoomStep", () => {
   it("grows on ⌘+ and on ⌘= (the same key without Shift)", () => {
-    expect(panelZoomStep(press("+"))).toBe("up");
-    expect(panelZoomStep(press("="))).toBe("up");
+    expect(panelZoomStep(press("+"), "mac")).toBe("up");
+    expect(panelZoomStep(press("="), "mac")).toBe("up");
   });
 
   it("shrinks on ⌘- and on its shifted form", () => {
-    expect(panelZoomStep(press("-"))).toBe("down");
-    expect(panelZoomStep(press("_"))).toBe("down");
+    expect(panelZoomStep(press("-"), "mac")).toBe("down");
+    expect(panelZoomStep(press("_"), "mac")).toBe("down");
   });
 
   it("resets on ⌘0", () => {
-    expect(panelZoomStep(press("0"))).toBe("reset");
+    expect(panelZoomStep(press("0"), "mac")).toBe("reset");
   });
 
   it("leaves the keys without ⌘ alone, so Vi's `+`, `-` and `0` keep working", () => {
-    for (const key of ["+", "-", "0"]) expect(panelZoomStep(press(key, { metaKey: false }))).toBeNull();
+    for (const key of ["+", "-", "0"]) expect(panelZoomStep(press(key, { metaKey: false }), "mac")).toBeNull();
   });
 
   it("leaves ⌘ together with Ctrl or Alt alone", () => {
-    expect(panelZoomStep(press("+", { ctrlKey: true }))).toBeNull();
-    expect(panelZoomStep(press("-", { altKey: true }))).toBeNull();
+    expect(panelZoomStep(press("+", { ctrlKey: true }), "mac")).toBeNull();
+    expect(panelZoomStep(press("-", { altKey: true }), "mac")).toBeNull();
   });
 
   it("ignores other keys", () => {
-    expect(panelZoomStep(press("s"))).toBeNull();
-    expect(panelZoomStep(press("1"))).toBeNull();
+    expect(panelZoomStep(press("s"), "mac")).toBeNull();
+    expect(panelZoomStep(press("1"), "mac")).toBeNull();
+  });
+});
+
+describe("panelZoomStep off the Mac", () => {
+  const ctrl = { metaKey: false, ctrlKey: true };
+
+  it("zooms on Ctrl+ + - 0", () => {
+    expect(panelZoomStep(press("+", ctrl), "other")).toBe("up");
+    expect(panelZoomStep(press("=", ctrl), "other")).toBe("up");
+    expect(panelZoomStep(press("-", ctrl), "other")).toBe("down");
+    expect(panelZoomStep(press("0", ctrl), "other")).toBe("reset");
+  });
+
+  it("leaves ⌘/Super, Alt and AltGr alone", () => {
+    expect(panelZoomStep(press("+"), "other")).toBeNull();
+    expect(panelZoomStep(press("-", { ...ctrl, altKey: true }), "other")).toBeNull();
+    expect(panelZoomStep(press("0", { ...ctrl, altKey: true, getModifierState: () => true }), "other")).toBeNull();
   });
 });
 

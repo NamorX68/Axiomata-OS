@@ -4,6 +4,8 @@
   in the session's inbox about its card; the studio announces it in the terminal once the session waits for input.
 -->
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
+  import { platform } from "../core/keys";
   import { invokeBackend as invoke, type MailLine, type OwnerSend } from "../core/backend";
   import { messageOf } from "../core/errors";
   import { relativeTime } from "../core/format";
@@ -95,7 +97,7 @@
   <div class="write">
     <textarea
       rows="2"
-      placeholder="Write to the session … (⌘↩ sends)"
+      placeholder={keyHints("Write to the session … (⌘↩ sends)", $platform)}
       bind:value={draft}
       onkeydown={onKey}
       disabled={busy}

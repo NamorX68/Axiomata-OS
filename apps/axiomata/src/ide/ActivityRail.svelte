@@ -6,6 +6,8 @@
   never stay pressed. Settings and shortcuts stay on the right of the header.
 -->
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
+  import { platform } from "../core/keys";
   import IconButton from "../ui/IconButton.svelte";
   import type { SidebarView } from "../fileapp/treeModel";
 
@@ -45,7 +47,7 @@
     <IconButton
       icon="search"
       size="xl"
-      label="Search the project (⇧⌘F)"
+      label={keyHints("Search the project (⇧⌘F)", $platform)}
       tab
       pressed={shown("search")}
       onclick={() => onSelect("search")}
@@ -82,7 +84,7 @@
   <!-- Actions, not views: they never stay pressed. -->
   <div class="foot">
     <IconButton icon="terminal" size="xl" label="New terminal" {disabled} onclick={onTerminal} />
-    <IconButton icon="folder-open" size="xl" label="Open a file… (⌘O)" onclick={onOpenFile} />
+    <IconButton icon="folder-open" size="xl" label={keyHints("Open a file… (⌘O)", $platform)} onclick={onOpenFile} />
   </div>
 </nav>
 

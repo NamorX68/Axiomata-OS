@@ -21,6 +21,8 @@
 <script lang="ts">
   import { EditorDocument } from "../editor/document";
   import { FoldState } from "../editor/fold/state";
+  import { platform } from "../core/keys";
+  import { diffHunkAction } from "./diffKeys";
   import type { ViEffect } from "../editor/vi/machine";
   import { pos } from "../editor/position";
   import { DiffHighlight } from "../editor/diff/highlight";
@@ -224,16 +226,17 @@
   }
 
   function onKey(e: KeyboardEvent): boolean {
-    if (e.altKey && !e.metaKey && !e.ctrlKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-      goToHunk(e.key === "ArrowDown" ? 1 : -1);
+    const action = diffHunkAction(e, $platform);
+    if (action === "next-hunk" || action === "previous-hunk") {
+      goToHunk(action === "next-hunk" ? 1 : -1);
       return true;
     }
-    if (e.key === "Backspace" && e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+    if (action === "discard-hunk") {
       const hunk = panes[active]?.hunkOf[cursorLine()];
       if (hunk !== null && hunk !== undefined && hunkHeaders?.discard) onDiscardHunk?.(hunk);
       return true;
     }
-    if (e.key === "Enter" && !e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+    if (action === "open") {
       const line = openLine();
       if (line !== null) onOpen?.(line);
       return true;

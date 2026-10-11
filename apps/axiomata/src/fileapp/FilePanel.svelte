@@ -16,6 +16,7 @@
     and it asks first when there is unsaved text (W11) or an unfiled note (W4).
 -->
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
   import { onMount, tick, untrack } from "svelte";
 
   import { closeStaged, requestClose, setCloseGuard } from "../core/staging";
@@ -29,6 +30,7 @@
     updateEditorSettings,
   } from "./editorSettings";
   import FileEditor, { type OpenFileState } from "./FileEditor.svelte";
+  import { isClosePress, platform } from "../core/keys";
   import { applyPanelZoomStep, panelZoomStep, type PanelZoomStep } from "./panelZoomKeys";
   import type { OpenIntent } from "./fileKinds";
   import { handToFileApp } from "./handoff";
@@ -131,13 +133,13 @@
       return;
     }
     // In the editor the zoom keys are taken (and stopped) there; this is for focus in the header's controls.
-    const step = panelZoomStep(e);
+    const step = panelZoomStep(e, $platform);
     if (step) {
       e.preventDefault();
       zoom(step);
       return;
     }
-    if (e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "w") {
+    if (isClosePress(e, $platform)) {
       e.preventDefault();
       void requestClose(ctx.instanceId);
     }
@@ -176,7 +178,7 @@
         type="button"
         class="zoom-step"
         aria-label="Smaller text"
-        title="Smaller text (⌘-)"
+        title={keyHints("Smaller text (⌘-)", $platform)}
         disabled={$editorSettings.panelFontSize <= PANEL_FONT_SIZE_MIN}
         onclick={() => zoom("down")}>A−</button
       >
@@ -194,7 +196,7 @@
         type="button"
         class="zoom-step"
         aria-label="Larger text"
-        title="Larger text (⌘+)"
+        title={keyHints("Larger text (⌘+)", $platform)}
         disabled={$editorSettings.panelFontSize >= PANEL_FONT_SIZE_MAX}
         onclick={() => zoom("up")}>A+</button
       >
@@ -203,7 +205,7 @@
         type="button"
         class="zoom-step"
         aria-label="Reset text size"
-        title="Reset text size (⌘0)"
+        title={keyHints("Reset text size (⌘0)", $platform)}
         disabled={$editorSettings.panelFontSize === DEFAULT_EDITOR_SETTINGS.panelFontSize}
         onclick={() => zoom("reset")}>Reset</button
       >

@@ -18,6 +18,7 @@ import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } fro
 import { RETIRED_TILE_TYPES } from "./ringTypes";
 import { activeTheme, instances, loadInstances, onDirty, showGrid, snapEdges, windowTransparency } from "./stores";
 import { DEFAULT_THEME, applyTheme } from "./themes";
+import { isKeyboardSetting, keyboardSetting } from "./keys";
 import { isUiSize, uiSize } from "./uiScale";
 import { toast } from "./toast";
 import type { CanvasInstance, TileAnchor } from "./types";
@@ -253,6 +254,8 @@ export async function initPersistence(): Promise<void> {
   windowTransparency.set(getSetting<number>("windowTransparency") ?? 50);
   const savedUiSize = getSetting<unknown>("uiSize");
   uiSize.set(isUiSize(savedUiSize) ? savedUiSize : "auto");
+  const savedKeyboard = getSetting<unknown>("keyboard");
+  keyboardSetting.set(isKeyboardSetting(savedKeyboard) ? savedKeyboard : "auto");
   // Written back at once: the Second Brain view rewrites its own preferences, and the old rotation/file-names values that
   // this is taken over from would be gone before the first change.
   const savedBrainView = readBrainView(getSetting<unknown>("brainView"), getSetting<unknown>("secondBrain"));
@@ -287,6 +290,10 @@ export async function initPersistence(): Promise<void> {
   // `uiScale.ts` applies it; only its persistence is here.
   uiSize.subscribe((v) => {
     if (!first) setSetting("uiSize", v);
+  });
+  // `keys.ts` reads it; only its persistence is here.
+  keyboardSetting.subscribe((v) => {
+    if (!first) setSetting("keyboard", v);
   });
   // Unlike showGrid/snapEdges (read reactively wherever they're rendered),
   // this setting needs an actual DOM side effect on every change, not just

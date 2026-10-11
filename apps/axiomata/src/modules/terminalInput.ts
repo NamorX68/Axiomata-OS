@@ -8,6 +8,27 @@
  * with no way to unit-test it directly.
  */
 
+import { chord, type KeyLike, type Platform } from "../core/keys";
+
+/** What a key press in the terminal is for: the shell, typing, a clipboard step, or the app. */
+export type TerminalKeyRoute = "shell" | "typing" | "copy" | "paste" | "app";
+
+/**
+ * Who a key press in a terminal pane belongs to (`docs/plans/keys-platforms.md`, K-3, K-12). On the Mac nothing
+ * changes: ⌘ never reaches a shell. Elsewhere every Ctrl combination is the shell's (Ctrl+C is SIGINT), except
+ * Ctrl+Shift+C / Ctrl+Shift+V, which copy and paste as in other terminals, and every other Ctrl+Shift key, which is
+ * the app's (`studioKeys.ts`, `globalKeys.ts`) and must not reach the shell as a control byte. AltGr is typing.
+ */
+export function terminalKeyRoute(e: KeyLike, on: Platform): TerminalKeyRoute {
+  if (on === "mac") return "shell";
+  const c = chord(e, on);
+  if (c.typing) return "typing";
+  if (!e.ctrlKey || e.metaKey || e.altKey || !e.shiftKey) return "shell";
+  if (c.key === "c") return "copy";
+  if (c.key === "v") return "paste";
+  return "app";
+}
+
 /**
  * Maps one key press to the raw byte(s) to forward to the shell — the keys
  * that either produce no native `input` event or need a specific C0

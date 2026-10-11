@@ -20,6 +20,7 @@
   import { brainView, SPEED_MAX } from "../core/brainView";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
+  import { KEYBOARD_SETTINGS, isKeyboardSetting, keyboardSetting, platform, platformLabel } from "../core/keys";
   import { UI_SIZES, uiScaleAuto, uiSize, type UiSize } from "../core/uiScale";
   import { THEMES, applyTheme } from "../core/themes";
   import { toast } from "../core/toast";
@@ -335,6 +336,31 @@
             „Auto“ richtet sich nach der tatsächlichen Pixeldichte des Bildschirms, auf dem das Fenster liegt: auf
             einem dichten Monitor wird die Oberfläche größer, damit sie so gut lesbar ist wie auf einem MacBook. Die
             Schrift im Editor und im Terminal bleibt davon unberührt.
+          </p>
+        </section>
+
+        <section>
+          <h3>Keyboard</h3>
+          <label class="row">
+            <span class="label">Shortcuts follow</span>
+            <select
+              value={$keyboardSetting}
+              onchange={(e) => {
+                const v = e.currentTarget.value;
+                if (isKeyboardSetting(v)) keyboardSetting.set(v);
+              }}
+            >
+              {#each KEYBOARD_SETTINGS as option (option.value)}
+                <option value={option.value}>
+                  {option.label}{option.value === "auto" ? ` (${platformLabel($platform)})` : ""}
+                </option>
+              {/each}
+            </select>
+          </label>
+          <p class="hint">
+            Mac: ⌘ is the main key. Windows &amp; Linux: Ctrl is, and in a terminal an app shortcut takes Ctrl+Shift,
+            because Ctrl belongs to the shell there. "Auto" follows this machine; the other two let you try the other
+            keys here.
           </p>
         </section>
 

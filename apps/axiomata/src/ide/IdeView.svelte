@@ -32,8 +32,10 @@
   import { fade } from "svelte/transition";
 
   import { on } from "../core/bus";
+  import { inTerminalPane, platform } from "../core/keys";
   import { toast } from "../core/toast";
 
+  import { studioKeyAction } from "./studioKeys";
   import { DockDrag } from "./dockDrag.svelte";
   import { setDock } from "./dockContext";
   import DockNode from "./DockNode.svelte";
@@ -291,69 +293,52 @@
    * Everything else belongs to the panes.
    */
   function onViewKeydown(e: KeyboardEvent): void {
-    // The editor's tab keys, on the group the user last worked in.
-    if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
-      e.preventDefault();
-      e.stopPropagation();
-      noteFocusedPane();
-      layout = cycleTab(layout, lastWorkTab, e.shiftKey ? -1 : 1);
-      return;
-    }
-    if (e.metaKey && !e.ctrlKey && !e.altKey && (e.code === "Backslash" || e.key === "\\")) {
-      e.preventDefault();
-      e.stopPropagation();
-      noteFocusedPane();
-      layout = splitActive(layout, lastWorkTab, e.code === "Backslash" && e.shiftKey ? "bottom" : "right");
-      return;
-    }
-    if (!e.metaKey || e.altKey || e.ctrlKey) return;
-    const key = e.key.toLowerCase();
-    if (!e.shiftKey && /^[1-9]$/.test(key)) {
-      e.preventDefault();
-      e.stopPropagation();
-      noteFocusedPane();
-      layout = nthTab(layout, lastWorkTab, Number(key));
-      return;
-    }
-    if (!e.shiftKey && key === "w") {
-      // ⌘W closes a *file* tab only: a terminal or agent holds a live shell.
+    const inTerminal = inTerminalPane(e);
+    const action = studioKeyAction(e, get(platform), inTerminal);
+    if (!action) return;
+    // Quick open and the search need a project; every other action is taken (and stopped) even without one.
+    if (!current && (action.kind === "quick-open" || action.kind === "search")) return;
+    if (action.kind === "close-file") {
+      // Closing a *file* tab only: a terminal or agent holds a live shell.
       noteFocusedPane();
       const tab = allTabs(layout).find((t) => t.id === lastWorkTab);
-      if (tab && filePaneConfig(tab)) {
-        e.preventDefault();
-        e.stopPropagation();
-        void requestClose(tab.id);
-      }
+      if (!tab || !filePaneConfig(tab)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void requestClose(tab.id);
       return;
     }
-    if (!e.shiftKey && key === "n") {
-      e.preventDefault();
-      e.stopPropagation();
-      newNote();
-      return;
-    }
-    if (!e.shiftKey && key === "o") {
-      e.preventDefault();
-      e.stopPropagation();
-      void openPicked();
-      return;
-    }
-    if (!e.shiftKey && key === "b") {
-      e.preventDefault();
-      e.stopPropagation();
-      tree.visible = !tree.visible;
-      return;
-    }
-    if (!current) return;
-    if (!e.shiftKey && key === "p") {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!quickOpen) noteFocusedPane();
-      quickOpen = !quickOpen;
-    } else if (e.shiftKey && (key === "f" || e.code === "KeyF")) {
-      e.preventDefault();
-      e.stopPropagation();
-      showSearch();
+    e.preventDefault();
+    e.stopPropagation();
+    switch (action.kind) {
+      case "cycle-tab":
+        noteFocusedPane();
+        layout = cycleTab(layout, lastWorkTab, action.step);
+        break;
+      case "split":
+        noteFocusedPane();
+        layout = splitActive(layout, lastWorkTab, action.where);
+        break;
+      case "tab":
+        noteFocusedPane();
+        layout = nthTab(layout, lastWorkTab, action.number);
+        break;
+      case "new-note":
+        newNote();
+        break;
+      case "open-file":
+        void openPicked();
+        break;
+      case "toggle-tree":
+        tree.visible = !tree.visible;
+        break;
+      case "quick-open":
+        if (!quickOpen) noteFocusedPane();
+        quickOpen = !quickOpen;
+        break;
+      case "search":
+        showSearch();
+        break;
     }
   }
 

@@ -14,6 +14,7 @@
     files and says nothing was changed.
 -->
 <script lang="ts" module>
+  import { chord, platform } from "../core/keys";
   import type { TakeOverMode } from "../core/backend";
 
   /** What is being asked. */
@@ -72,7 +73,7 @@
       e.preventDefault();
       e.stopPropagation();
       onCancel();
-    } else if (e.key === "Enter" && (e.metaKey || !needsMessage)) {
+    } else if (e.key === "Enter" && (chord(e, $platform).primary || !needsMessage)) {
       e.preventDefault();
       e.stopPropagation();
       confirm();

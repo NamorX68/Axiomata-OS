@@ -9,6 +9,7 @@
 import { emit, on } from "./core/bus";
   import { openFilePanel, openNewNote, openStaged, requestClose, staged } from "./core/staging";
   import { globalKeyAction } from "./core/globalKeys";
+  import { inTerminalPane, platform } from "./core/keys";
   import { loadInstances } from "./core/stores";
   import { toast } from "./core/toast";
   import { openKanban } from "./modules/kanbanApp";
@@ -47,10 +48,11 @@ import { emit, on } from "./core/bus";
    * window, has marked the key as handled). Not while a terminal pane has the focus: ⌘W there is nobody's business.
    */
   function onWindowKeydown(event: KeyboardEvent): void {
-    const action = globalKeyAction(event, navigator.platform.toLowerCase().includes("mac"));
+    const inTerminal = inTerminalPane(event);
+    const action = globalKeyAction(event, get(platform), inTerminal);
     if (!action || event.defaultPrevented) return;
     if (action === "close") {
-      if ((event.target as Element | null)?.closest?.(".terminal")) return;
+      if (inTerminal) return;
       const open = get(staged);
       const top = open[open.length - 1];
       if (!spotlightOpen && !top) return;

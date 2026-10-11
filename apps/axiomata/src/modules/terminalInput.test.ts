@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { keyToBytes } from "./terminalInput";
+import type { KeyLike } from "../core/keys";
+import { keyToBytes, terminalKeyRoute } from "./terminalInput";
 
 describe("keyToBytes", () => {
   it("maps Ctrl+letter to its C0 control byte (Ctrl+A..Z -> 0x01..0x1a)", () => {
@@ -79,5 +80,45 @@ describe("keyToBytes", () => {
       expect(keyToBytes(key, true), key).not.toBeNull();
     }
     expect(keyToBytes("ArrowRight", true)).toEqual(bytes);
+  });
+});
+
+describe("terminalKeyRoute", () => {
+  const press = (key: string, held: Partial<KeyLike> = {}): KeyLike => ({
+    key,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...held,
+  });
+  const ctrl = { ctrlKey: true };
+  const ctrlShift = { ctrlKey: true, shiftKey: true };
+
+  it("leaves everything to the shell on the Mac, as before", () => {
+    expect(terminalKeyRoute(press("c", ctrl), "mac")).toBe("shell");
+    expect(terminalKeyRoute(press("C", ctrlShift), "mac")).toBe("shell");
+    expect(terminalKeyRoute(press("k", { metaKey: true }), "mac")).toBe("shell");
+  });
+
+  it("gives every plain Ctrl key to the shell elsewhere, Ctrl+C included", () => {
+    expect(terminalKeyRoute(press("c", ctrl), "other")).toBe("shell");
+    expect(terminalKeyRoute(press("w", ctrl), "other")).toBe("shell");
+    expect(terminalKeyRoute(press("k", ctrl), "other")).toBe("shell");
+    expect(terminalKeyRoute(press("a"), "other")).toBe("shell");
+  });
+
+  it("copies and pastes on Ctrl+Shift+C / Ctrl+Shift+V", () => {
+    expect(terminalKeyRoute(press("C", ctrlShift), "other")).toBe("copy");
+    expect(terminalKeyRoute(press("V", ctrlShift), "other")).toBe("paste");
+  });
+
+  it("keeps the other Ctrl+Shift keys from the shell: they are the app's", () => {
+    for (const key of ["K", "P", "W", "F", "N"]) expect(terminalKeyRoute(press(key, ctrlShift), "other"), key).toBe("app");
+  });
+
+  it("reads AltGr as typing, so the character is not turned into a control byte", () => {
+    expect(terminalKeyRoute(press("@", { ...ctrl, altKey: true }), "other")).toBe("typing");
+    expect(terminalKeyRoute(press("q", { ...ctrl, altKey: true, getModifierState: () => true }), "other")).toBe("typing");
   });
 });

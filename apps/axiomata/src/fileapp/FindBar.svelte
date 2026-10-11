@@ -15,6 +15,8 @@
   * `version` is the surface's redraw counter — the model is a plain class.
 -->
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
+  import { chord, platform } from "../core/keys";
   import type { FindModel } from "../editor/search/findModel";
 
   interface Props {
@@ -72,15 +74,16 @@
       onClose();
       return true;
     }
-    if (e.metaKey && !e.altKey && e.key.toLowerCase() === "g") {
-      model.next(e.shiftKey);
+    const c = chord(e, $platform);
+    if (c.primary && !c.alt && c.key === "g") {
+      model.next(c.shift);
       return true;
     }
-    if (e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+    if (c.primary && !c.alt && !c.shift && c.key === "f") {
       focusQuery();
       return true;
     }
-    if (!e.metaKey || !e.altKey) return false;
+    if (!c.primary || !c.alt) return false;
     switch (e.code) {
       case "KeyC":
         model.setOptions({ caseSensitive: !model.options.caseSensitive });
@@ -124,7 +127,7 @@
     if (e.isComposing) return;
     let handled = commonKey(e);
     if (!handled && e.key === "Enter") {
-      if (e.metaKey && e.altKey) model.replaceAll();
+      if (chord(e, $platform).primary && e.altKey) model.replaceAll();
       else model.replaceOne();
       handled = true;
     }
@@ -142,7 +145,7 @@
         type="button"
         class="twist"
         class:open={showReplace}
-        title="Toggle replace (⌥⌘F)"
+        title={keyHints("Toggle replace (⌥⌘F)", $platform)}
         aria-label="Toggle replace"
         aria-expanded={showReplace}
         onclick={onToggleReplace}>›</button
@@ -164,7 +167,7 @@
         type="button"
         class="toggle"
         class:on={view.options.caseSensitive}
-        title="Match case (⌥⌘C)"
+        title={keyHints("Match case (⌥⌘C)", $platform)}
         aria-pressed={view.options.caseSensitive}
         onclick={() => model.setOptions({ caseSensitive: !model.options.caseSensitive })}>Aa</button
       >
@@ -172,7 +175,7 @@
         type="button"
         class="toggle word"
         class:on={view.options.wholeWord}
-        title="Whole word (⌥⌘W)"
+        title={keyHints("Whole word (⌥⌘W)", $platform)}
         aria-pressed={view.options.wholeWord}
         onclick={() => model.setOptions({ wholeWord: !model.options.wholeWord })}>ab</button
       >
@@ -180,23 +183,23 @@
         type="button"
         class="toggle"
         class:on={view.options.regex}
-        title="Regular expression (⌥⌘R)"
+        title={keyHints("Regular expression (⌥⌘R)", $platform)}
         aria-pressed={view.options.regex}
         onclick={() => model.setOptions({ regex: !model.options.regex })}>.*</button
       >
     </div>
     <span class="count" class:error={count.error} title={count.title}>{count.text}</span>
-    <button type="button" class="icon" title="Previous match (⇧⏎, ⇧⌘G)" aria-label="Previous match" onclick={() => model.next(true)}
+    <button type="button" class="icon" title={keyHints("Previous match (⇧⏎, ⇧⌘G)", $platform)} aria-label="Previous match" onclick={() => model.next(true)}
       >↑</button
     >
-    <button type="button" class="icon" title="Next match (⏎, ⌘G)" aria-label="Next match" onclick={() => model.next()}
+    <button type="button" class="icon" title={keyHints("Next match (⏎, ⌘G)", $platform)} aria-label="Next match" onclick={() => model.next()}
       >↓</button
     >
     <button
       type="button"
       class="icon"
       class:on={view.scope}
-      title="Find in selection (⌥⌘L)"
+      title={keyHints("Find in selection (⌥⌘L)", $platform)}
       aria-label="Find in selection"
       aria-pressed={view.scope}
       onclick={() => model.toggleScope()}>⌶</button
@@ -221,7 +224,7 @@
           type="button"
           class="toggle"
           class:on={view.options.preserveCase}
-          title="Preserve case (⌥⌘P)"
+          title={keyHints("Preserve case (⌥⌘P)", $platform)}
           aria-pressed={view.options.preserveCase}
           onclick={() => model.setOptions({ preserveCase: !model.options.preserveCase })}>AB</button
         >
@@ -229,7 +232,7 @@
       <button type="button" class="text" disabled={!view.valid} title="Replace (⏎)" onclick={() => model.replaceOne()}
         >Replace</button
       >
-      <button type="button" class="text" disabled={!view.valid} title="Replace all (⌥⌘⏎)" onclick={() => model.replaceAll()}
+      <button type="button" class="text" disabled={!view.valid} title={keyHints("Replace all (⌥⌘⏎)", $platform)} onclick={() => model.replaceAll()}
         >All</button
       >
     </div>

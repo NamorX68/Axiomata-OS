@@ -6,6 +6,8 @@
   will do.
 -->
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
+  import { platform } from "../core/keys";
   import { onDestroy } from "svelte";
 
   import { EditorDocument } from "../editor/document";
@@ -132,7 +134,7 @@
           value={s.viClipboard}
           onchange={(e) => updateEditorSettings({ viClipboard: e.currentTarget.value as "shared" | "separate" })}
         >
-          <option value="shared">Shared with the Mac (y and p use ⌘C/⌘V's clipboard)</option>
+          <option value="shared">{keyHints("Shared with the system (y and p use ⌘C/⌘V's clipboard)", $platform)}</option>
           <option value="separate">Separate ("+y and "+p reach the Mac)</option>
         </select>
       </label>
@@ -235,7 +237,7 @@
     </fieldset>
 
     <fieldset>
-      <legend>Soft wrap (⌥Z toggles per file)</legend>
+      <legend>{keyHints("Soft wrap (⌥Z toggles per file)", $platform)}</legend>
       <label class="check">
         <input
           type="checkbox"
@@ -351,7 +353,7 @@
         checked={s.formatOnSave}
         onchange={(e) => updateEditorSettings({ formatOnSave: e.currentTarget.checked })}
       />
-      <span>Format on save (⌘S, <code>:w</code>)</span>
+      <span>{keyHints("Format on save (⌘S,", $platform)} <code>:w</code>)</span>
     </label>
     {#if s.formatOnSave}
       <label>

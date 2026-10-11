@@ -35,6 +35,7 @@
 </script>
 
 <script lang="ts">
+  import { keyHints } from "../core/keyHints";
   import { get } from "svelte/store";
   import BreakpointEditor from "../ide/BreakpointEditor.svelte";
   import { breakpointInfo, breakpoints, infoOf, linesOf } from "../ide/breakpoints";
@@ -57,6 +58,7 @@
   import DiffPanes from "./DiffPanes.svelte";
   import { editorFace } from "./editorFace.svelte";
   import { editorSettings, ensureEditorSettingsLoaded, formatsOnSave, updateEditorSettings } from "./editorSettings";
+  import { chord, foreignModifier, platform } from "../core/keys";
   import { applyPanelZoomStep, panelZoomStep, previewZoom } from "./panelZoomKeys";
   import { applyTextEdits, storeBody, textChanges } from "../editor/textEdits";
   import { applyWorkspaceEdit, type EditPorts } from "./workspaceEdit";
@@ -506,7 +508,8 @@
 
   function interceptKey(e: KeyboardEvent): boolean {
     // ⌘. always, ⌘L where a server offers code actions — else ⌘L selects the line (L21).
-    const cmdOnly = e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+    const c = chord(e, $platform);
+    const cmdOnly = c.primary && !c.alt && !c.shift;
     const actionsHere = !!lspDoc?.connection.client.codeActions;
     if (cmdOnly && (e.key === "." || (e.key === "l" && actionsHere))) {
       e.preventDefault();
@@ -525,10 +528,10 @@
       void formatNow();
       return true;
     }
-    if (e.key === "F12" && !e.ctrlKey && !e.altKey && lspDoc) {
+    if (e.key === "F12" && !foreignModifier(e, $platform) && !e.altKey && lspDoc) {
       // F12 definition, ⌘F12 implementation, ⇧F12 uses (L7, ED6.3).
-      const kind: LocationKind = e.metaKey ? "implementation" : e.shiftKey ? "references" : "definition";
-      if (e.metaKey && e.shiftKey) return false;
+      const kind: LocationKind = c.primary ? "implementation" : e.shiftKey ? "references" : "definition";
+      if (c.primary && e.shiftKey) return false;
       e.preventDefault();
       void goToLocations(kind, session?.doc.selection.head ?? null);
       return true;
@@ -1064,8 +1067,9 @@
    * ⌘+ ⌘- ⌘0 resize the text of the floating window, and only there.
    */
   function onKeydownCapture(e: KeyboardEvent): void {
-    if (!e.metaKey || e.altKey || e.ctrlKey) return;
-    const zoomStep = compact ? panelZoomStep(e) : null;
+    const c = chord(e, $platform);
+    if (!c.primary || c.alt || c.typing) return;
+    const zoomStep = compact ? panelZoomStep(e, $platform) : null;
     if (zoomStep) {
       // `preventDefault` keeps the webview from zooming the whole app by itself.
       e.preventDefault();
@@ -1073,8 +1077,8 @@
       updateEditorSettings({ panelFontSize: applyPanelZoomStep($editorSettings.panelFontSize, zoomStep) });
       return;
     }
-    const key = e.key.toLowerCase();
-    const previewKey = key === "v" && e.shiftKey && previewKind !== null;
+    const key = c.key;
+    const previewKey = key === "v" && c.shift && previewKind !== null;
     if (key !== "s" && !previewKey) return;
     e.preventDefault();
     e.stopPropagation();
@@ -1299,15 +1303,15 @@
       <span>{status.position}</span>
       <span>{status.eol}</span>
       <span>{status.indent}</span>
-      <span>{wrap ? "Wrap on" : "Wrap off"} <kbd>⌥Z</kbd></span>
+      <span>{wrap ? "Wrap on" : "Wrap off"} <kbd>{keyHints("⌥Z", $platform)}</kbd></span>
       {#if previewKind}
         <span>
           {viewModeLabel(viewMode)}
-          <kbd>⌘⇧V</kbd>
+          <kbd>{keyHints("⌘⇧V", $platform)}</kbd>
         </span>
       {/if}
       {#if session.untitled}
-        <span class="note">{filing ? "Filing the note…" : "New note — ⌘S files it"}</span>
+        <span class="note">{filing ? "Filing the note…" : keyHints("New note — ⌘S files it", $platform)}</span>
       {/if}
       {#if session.light}<span class="warn" title="Over 2 MB: no syntax colours">Large file — light mode</span>{/if}
       {#if session.readOnly}
@@ -1315,7 +1319,7 @@
       {/if}
       {#if diagnostics && diagnostics.size > 0}
         {@const counts = diagnostics.counts()}
-        <span class="problems" title="Problems from the language server — F8 / ⇧F8 to step through">
+        <span class="problems" title={keyHints("Problems from the language server — F8 / ⇧F8 to step through", $platform)}>
           {#if counts.error}<span class="diag-error">✖ {counts.error}</span>{/if}
           {#if counts.warning}<span class="diag-warning">⚠ {counts.warning}</span>{/if}
           {#if counts.info + counts.hint}<span class="diag-info">ℹ {counts.info + counts.hint}</span>{/if}

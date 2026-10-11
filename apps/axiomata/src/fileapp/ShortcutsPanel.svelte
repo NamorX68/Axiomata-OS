@@ -5,11 +5,12 @@
 -->
 <script lang="ts">
   import Icon from "../ui/Icon.svelte";
+  import { platform } from "../core/keys";
   import { editorSettings } from "./editorSettings";
   import { visibleShortcuts } from "./shortcuts";
 
   let query = $state("");
-  const groups = $derived(visibleShortcuts($editorSettings.mode === "vi", query));
+  const groups = $derived(visibleShortcuts($editorSettings.mode === "vi", query, $platform));
 </script>
 
 <div class="shortcuts">
@@ -22,7 +23,7 @@
       <section>
         <h3>{group.title}</h3>
         <dl>
-          {#each group.items as item (item.keys)}
+          {#each group.items as item (item.keys + item.what)}
             <dt>
               {#each item.keys.split(" / ") as alternative, i (i)}
                 {#if i > 0}<span class="or">/</span>{/if}<kbd>{alternative}</kbd>

@@ -125,7 +125,8 @@
     type TermCell,
   } from "./TerminalScreen";
   import { outputRefAt, rowText, type OutputRef } from "../core/outputLinks";
-  import { keyToBytes } from "./terminalInput";
+  import { platform } from "../core/keys";
+  import { keyToBytes, terminalKeyRoute } from "./terminalInput";
   import { createSequenceGuard } from "./terminalScrollback";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
   import { DEFAULT_THEME, THEME_DEFAULT_COLORS, THEMES } from "./terminalThemes";
@@ -950,7 +951,16 @@
    *  coverage instead of being reachable only through a live
    *  `KeyboardEvent`. */
   function handleKeydown(e: KeyboardEvent): void {
-    const bytes = keyToBytes(e.key, e.ctrlKey, e.shiftKey);
+    const route = terminalKeyRoute(e, $platform);
+    // Ctrl+Shift+C copies through the `copy` event (`handleCopy`); Ctrl+Shift+V is left to the native `paste` event
+    // (`handlePaste`); any other Ctrl+Shift key is the app's and goes on to its handlers unprevented.
+    if (route === "copy") {
+      e.preventDefault();
+      document.execCommand("copy");
+      return;
+    }
+    if (route === "paste" || route === "app") return;
+    const bytes = keyToBytes(e.key, e.ctrlKey && route !== "typing", e.shiftKey);
     if (!bytes) return;
     e.preventDefault();
     sendBytes(bytes);
