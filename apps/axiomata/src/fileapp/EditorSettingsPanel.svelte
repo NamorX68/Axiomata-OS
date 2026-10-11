@@ -93,7 +93,6 @@
     { key: "minimap", label: "Minimap" },
     { key: "stickyScroll", label: "Sticky scroll" },
     { key: "diagnosticsInline", label: "Problem message at line end" },
-    { key: "tabColors", label: "Tabs coloured by language" },
   ];
 
   const AUTOSAVE: { value: Autosave; label: string }[] = [

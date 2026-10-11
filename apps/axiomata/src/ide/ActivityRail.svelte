@@ -9,6 +9,7 @@
   import { keyHints } from "../core/keyHints";
   import { platform } from "../core/keys";
   import IconButton from "../ui/IconButton.svelte";
+  import { glow } from "../ui/glow";
   import type { SidebarView } from "../fileapp/treeModel";
 
   let {
@@ -78,7 +79,7 @@
         pressed={shown("agents")}
         onclick={() => onSelect("agents")}
       />
-      {#if agentsRunning > 0}<span class="badge live" aria-hidden="true">{agentsRunning}</span>{/if}
+      {#if agentsRunning > 0}<span class="badge live" aria-hidden="true" use:glow={true}>{agentsRunning}</span>{/if}
     </span>
   </div>
   <!-- Actions, not views: they never stay pressed. -->
@@ -137,11 +138,16 @@
     min-width: calc(14px * var(--ax-ui-scale));
     padding: 0 var(--ax-space-1);
     border-radius: var(--ax-radius-pill);
-    background: var(--ax-accent);
+    background: var(--ax-text-muted);
     color: var(--ax-bg);
     font-size: calc(9px * var(--ax-ui-scale));
     line-height: calc(14px * var(--ax-ui-scale));
     text-align: center;
     pointer-events: none;
+  }
+
+  /* Only the agents at work glow (the accent rule); changed files are a count, not something alive. */
+  .badge.live {
+    background: var(--ax-glow);
   }
 </style>

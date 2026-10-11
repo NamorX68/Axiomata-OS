@@ -12,6 +12,7 @@
   import { messageOf } from "../core/errors";
   import { confirmProjectRoles, projectRoles, type Limits, type ProjectRoles, type Role } from "../core/roster";
   import { toast } from "../core/toast";
+  import Notice from "../ui/Notice.svelte";
 
   let { projectId }: { projectId: number | null } = $props();
 
@@ -83,12 +84,41 @@
       Roles from this project apply (confirmed): {found.overrides.roles.map((r) => r.name).join(", ") || "none that could be read"}.
     </p>
   {:else}
-    <div class="trust" role="alert">
-      <p>
-        This project has its own agent roles in <code>.axiomata/agents/</code>. Their instructions are what an agent
-        will obey — and the rights they list are granted without asking in a session started for a card, where nobody
-        watches each step — so they stay off until you have read them.
-      </p>
+    {#snippet review()}
+      <ul class="review">
+        {#each found?.overrides.roles ?? [] as role (role.name)}
+          <li>
+            <strong>{role.name}</strong>
+            {#each facts(role) as line (line)}<br /><span class="muted">{line}</span>{/each}
+            <pre>{role.instructions}</pre>
+          </li>
+        {/each}
+      </ul>
+      <div class="actions">
+        <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these roles</button>
+        <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
+      </div>
+    {/snippet}
+    <div class="slot">
+      <Notice
+        title="Project roles need your review"
+        alert
+        children={reviewing && !found.overrides.blocked ? review : undefined}
+      >
+        {#snippet details()}
+          <p>
+            This project has its own agent roles in <code>.axiomata/agents/</code>. Their instructions are what an
+            agent will obey — and the rights they list are granted without asking in a session started for a card,
+            where nobody watches each step — so they stay off until you have read them.
+          </p>
+        {/snippet}
+        {#snippet action()}
+          {#if !found?.overrides.blocked && !reviewing}
+            <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
+          {/if}
+        {/snippet}
+      </Notice>
+      <!-- What is wrong with them stays in sight, not folded away: it changes what "Allow" would mean. -->
       {#if found.overrides.blocked}
         <p class="problem">They cannot be confirmed: {found.overrides.blocked}.</p>
       {/if}
@@ -101,40 +131,13 @@
       {#if found.unknown_engines.length > 0}
         <p class="problem">Names engines you do not have: {found.unknown_engines.join(", ")}.</p>
       {/if}
-      {#if !found.overrides.blocked}
-        {#if reviewing}
-          <ul class="review">
-            {#each found.overrides.roles as role (role.name)}
-              <li>
-                <strong>{role.name}</strong>
-                {#each facts(role) as line (line)}<br /><span class="muted">{line}</span>{/each}
-                <pre>{role.instructions}</pre>
-              </li>
-            {/each}
-          </ul>
-          <div class="actions">
-            <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these roles</button>
-            <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
-          </div>
-        {:else}
-          <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
-        {/if}
-      {/if}
     </div>
   {/if}
 {/if}
 
 <style>
-  .trust {
-    padding: var(--ax-space-3);
+  .slot {
     margin-bottom: var(--ax-space-3);
-    border: 1px solid var(--ax-warning);
-    border-radius: var(--ax-radius-md);
-    background: var(--ax-surface-2);
-    font-size: var(--ax-font-size-sm);
-  }
-  .trust p {
-    margin: 0 0 var(--ax-space-2);
   }
   .applied {
     margin: 0 0 var(--ax-space-2);
@@ -142,7 +145,10 @@
     color: var(--ax-text-muted);
   }
   .problem {
+    margin: var(--ax-space-1) 0 0;
+    padding-left: var(--ax-space-3);
     color: var(--ax-warning);
+    font: var(--ax-type-caption);
   }
   .muted {
     color: var(--ax-text-muted);

@@ -657,16 +657,16 @@
     border-bottom: 2px solid transparent;
     border-radius: 0;
     color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
+    font: var(--ax-type-body);
+    font-weight: 500;
   }
   .tab:hover:not(.active) {
     color: var(--ax-text);
   }
+  /* Selected, not alive (UX2): the text colour, never the accent. */
   .tab.active {
-    color: var(--ax-accent);
-    border-bottom-color: var(--ax-accent);
+    color: var(--ax-text);
+    border-bottom-color: var(--ax-text);
   }
 
   .body {
@@ -678,11 +678,12 @@
     flex-direction: column;
     gap: var(--ax-space-6);
   }
+  /* Section heads in the label role (UX2, as `ui/SectionHead.svelte`): quiet, so the choices below them speak. */
   h3 {
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
+    font: var(--ax-type-label);
+    letter-spacing: var(--ax-tracking-label);
     text-transform: uppercase;
-    color: var(--ax-accent);
+    color: var(--ax-text-muted);
     margin-bottom: var(--ax-space-2);
   }
 

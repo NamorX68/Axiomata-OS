@@ -10,11 +10,10 @@
   than one can be staged — this split is what avoids that, not just a
   refactor for its own sake.
 
-  Slides in from the bottom and comes to rest centred (both axes), unless
-  its opener passed an `anchor` — then it settles centred on whatever opened
-  it, which is what a Kanban card does so the detail appears over the tile
-  the eye is already on. Without an anchor the original behaviour stands
-  (owner request: "neue Fenster verhalten sich beim öffnen wie bisher").
+  Grows out of whatever opened it (`ui/fromOrigin.ts`, UX2) and comes to rest
+  centred (both axes), unless its opener passed an `anchor` — then it settles
+  centred on whatever opened it, which is what a Kanban card does so the
+  detail appears over the tile the eye is already on.
 
   Resizable from all four edges and remembered across restarts. The size used
   to be one shared value for every panel, which the owner asked to keep while
@@ -33,9 +32,9 @@
   resets to "centred" every time a panel is freshly opened, exactly the
   "new windows behave as before" requirement. Once dragged at least once,
   `.positioned` overrides the default centring CSS with the explicit
-  `left`/`top` from `pos`; the `slide` transition itself checks `pos` so a
-  panel dragged away from centre flies out from wherever it actually is on
-  close, instead of snapping back to the centred transform first.
+  `left`/`top` from `pos`; the transition itself checks `pos` so a panel
+  dragged away from centre closes from wherever it actually is, instead of
+  snapping back to the centred transform first.
 
   Any pointer interaction with the panel (`pointerdowncapture`, same
   convention as `Tile.svelte`'s `bringToFront`) raises it to the front of
@@ -43,9 +42,7 @@
   just array order, since every panel shares one fixed `z-index`.
 -->
 <script lang="ts">
-  import { cubicOut } from "svelte/easing";
   import { get } from "svelte/store";
-  import type { TransitionConfig } from "svelte/transition";
 
   import { draggable, type DragDelta } from "../canvas/drag";
   import { resizable, type ResizeDelta } from "../canvas/resize";
@@ -61,6 +58,8 @@
   } from "../core/staging";
   import type { ModuleContext } from "../core/types";
   import { uiScale } from "../core/uiScale";
+  import PanelHead from "../ui/PanelHead.svelte";
+  import { fromOrigin } from "../ui/fromOrigin";
 
   let { panel, ctx, onClose }: { panel: StagedPanel; ctx: ModuleContext; onClose: () => void } = $props();
 
@@ -71,7 +70,6 @@
   // is the correct idiom regardless.
   const def = $derived(getModule(panel.type));
 
-  const SLIDE_MS = 560;
   const MIN_W = 480;
   const MIN_H = 240;
   /** Legacy single-size setting, still read so an existing one survives. */
@@ -219,23 +217,9 @@
   const liveX = $derived(pos ? pos.x + (moving?.dx ?? 0) : null);
   const liveY = $derived(pos ? pos.y + (moving?.dy ?? 0) : null);
 
-  /** Slide-in from the bottom, settling centred — same shape regardless of
-   *  how many other panels are open (see the component doc comment). A
-   *  plain `fly` can't be used for the centred case because the panel is
-   *  horizontally centred with `transform: translateX(-50%)`, and Svelte's
-   *  `fly` *replaces* the element transform for the duration, which would
-   *  knock it off-centre mid-animation — this keeps the `-50%` and adds the
-   *  vertical offset instead. Once the panel has been dragged at least once
-   *  (`pos` set), its position is real `left`/`top` pixels with no `-50%`
-   *  transform at rest (`.positioned` below), so closing it plays the exit
-   *  from wherever it actually is instead of snapping back to the centred
-   *  transform first. */
-  function slide(_node: Element): TransitionConfig {
-    if (pos) {
-      return { duration: SLIDE_MS, easing: cubicOut, css: (t, u) => `opacity: ${t}; transform: translateY(${u * 600}px)` };
-    }
-    return { duration: SLIDE_MS, easing: cubicOut, css: (t, u) => `opacity: ${t}; transform: translate(-50%, ${u * 600}px)` };
-  }
+  // The entrance grows out of whatever opened the panel (`ui/fromOrigin.ts`). Centred, the panel's resting transform
+  // is `translateX(-50%)`, which the flight must keep rather than replace; once dragged (`pos` set) it sits at real
+  // `left`/`top` pixels with no transform, so closing plays from wherever it actually is.
 </script>
 
 <aside
@@ -244,7 +228,7 @@
   class:moving={moving !== null}
   class:positioned={pos !== null}
   data-staged={panel.id}
-  transition:slide
+  transition:fromOrigin={{ base: pos ? "" : "translateX(-50%)" }}
   aria-label={def?.title ?? panel.type}
   bind:this={panelEl}
   onpointerdowncapture={() => bringToFront(panel.id)}
@@ -258,11 +242,7 @@
   <div class="resize-handle resize-e" use:resizable={{ dir: "e", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
   <div class="resize-handle resize-n" use:resizable={{ dir: "n", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
   <div class="resize-handle resize-s" use:resizable={{ dir: "s", onStart: startResize, onMove: (d) => (resizing = unscaled(d)), onEnd: endResize }}></div>
-  <header class="panel-head">
-    <span class="icon" aria-hidden="true">{@html def?.icon ?? ""}</span>
-    <h2>{def?.title ?? panel.type}</h2>
-    <button type="button" class="close" aria-label="Close panel" onclick={onClose}>×</button>
-  </header>
+  <PanelHead title={def?.title ?? panel.type} iconSvg={def?.icon} {onClose} movable />
   <div class="body">
     {#if def}
       <def.component {ctx} />
@@ -296,17 +276,13 @@
     height: min(80vh, calc(100vh - calc(64px * var(--ax-ui-scale)) - var(--ax-space-4)));
     width: min(calc(1000px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-5)));
     border-radius: var(--ax-radius-lg);
-    /* Tile-front "elevated" look (see canvas/Tile.svelte's
-       .tile.dragging/.resizing .face.front), permanently on rather than
-       only while interacting — this panel is never at rest against its own
-       canvas background the way a tile is, so the fully transparent resting
-       state that look is built on would be unreadable here. */
-    background: var(--ax-tile-glass-bg);
+    /* The panel step of the elevation scale, the same surface as `Window.svelte`'s: a tone, the light edge and a
+       shadow that carries in the dark, with only a hint of the canvas behind. */
+    border: 1px solid var(--ax-border);
+    background: color-mix(in srgb, var(--ax-elev-2) 94%, transparent);
     -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
     backdrop-filter: blur(var(--ax-tile-glass-blur));
-    border: none;
-    border-bottom: 2px solid var(--ax-border-strong);
-    box-shadow: var(--ax-shadow-drag);
+    box-shadow: var(--ax-shadow-panel);
   }
   .panel.resizing,
   .panel.moving {
@@ -332,7 +308,7 @@
   }
   .resize-handle:hover,
   .panel.resizing .resize-handle {
-    background: var(--ax-accent);
+    background: var(--ax-text-muted);
     opacity: 0.5;
   }
   .resize-w {
@@ -362,69 +338,6 @@
     width: 100%;
     height: 6px;
     cursor: ns-resize;
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-2) var(--ax-space-3);
-    flex: 0 0 auto;
-    cursor: grab;
-    /* Permanent, not just while `.moving` (unlike `.panel.resizing`/
-       `.panel.moving`'s own `user-select: none` below): a native
-       press-and-drag text selection starts on `mousedown` itself, before
-       `use:draggable`'s own threshold-crossing `preventDefault()` ever
-       gets a chance to run — a title bar's text should never be
-       selectable in the first place anyway, the same convention any
-       desktop window titlebar follows. */
-    user-select: none;
-  }
-  .panel.moving header {
-    cursor: grabbing;
-  }
-  .icon {
-    display: inline-flex;
-    width: calc(16px * var(--ax-ui-scale));
-    height: calc(16px * var(--ax-ui-scale));
-    color: var(--ax-accent);
-  }
-  .icon :global(svg) {
-    width: 100%;
-    height: 100%;
-  }
-  h2 {
-    flex: 1 1 auto;
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
-  }
-  /* Matches canvas/Tile.svelte's .tile-btn exactly, for the same close/
-     settings-button look everywhere in the app — including its front-head
-     behaviour of staying hidden until the pointer is over the tile (or it
-     has focus), not a permanently-visible button. */
-  .close {
-    width: calc(22px * var(--ax-ui-scale));
-    height: calc(22px * var(--ax-ui-scale));
-    padding: 0;
-    display: grid;
-    place-items: center;
-    line-height: 1;
-    font-size: var(--ax-font-size-lg);
-    background: transparent;
-    border-color: transparent;
-    color: var(--ax-text-muted);
-    opacity: 0;
-    transition: opacity var(--ax-dur-fast) var(--ax-ease);
-    cursor: pointer;
-  }
-  .panel:hover .close,
-  .panel:focus-within .close {
-    opacity: 1;
-  }
-  .close:hover:not(:disabled) {
-    color: var(--ax-text);
-    background: var(--ax-surface-3);
   }
 
   .body {

@@ -23,6 +23,8 @@
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import SectionHead from "../ui/SectionHead.svelte";
+  import HexAvatar from "../ui/HexAvatar.svelte";
 
   const statuses = agentStatus.statuses;
 
@@ -162,7 +164,7 @@
 </script>
 
 <div class="panel">
-  <p class="title">AGENTS</p>
+  <SectionHead label="Agents" rule level={2} />
   <div class="body">
     <ProjectRolesNotice {projectId} />
     {#if roleList.length > 0 && !disabled && editing === undefined}
@@ -194,9 +196,13 @@
           <li class="card {card.status.tone}" style:--harness="var(--ax-harness-{agent.harness})">
             <button class="open" type="button" {disabled} title={card.status.title} onclick={() => onOpen(agent)}>
               <span class="top">
-                <span class="avatar" role="img" aria-label={harnessLabel(agent.harness)} title={engineName(agent, engines)}>
-                  {harnessBadge(agent.harness)}
-                </span>
+                <HexAvatar
+                  text={harnessBadge(agent.harness)}
+                  live={card.status.tone === "working"}
+                  ring="var(--harness)"
+                  label={harnessLabel(agent.harness)}
+                  title={engineName(agent, engines)}
+                />
                 <span class="who">
                   <span class="name">{agent.name}</span>
                   <span class="meta">
@@ -293,15 +299,6 @@
     flex-direction: column;
   }
 
-  .title {
-    margin: 0;
-    padding: var(--ax-space-2) var(--ax-space-4);
-    border-bottom: 1px solid var(--ax-border);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
-  }
-
   .body {
     flex: 1;
     min-height: 0;
@@ -390,19 +387,6 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-3);
-  }
-
-  .avatar {
-    display: grid;
-    place-items: center;
-    flex: 0 0 auto;
-    width: calc(28px * var(--ax-ui-scale));
-    height: calc(28px * var(--ax-ui-scale));
-    border-radius: var(--ax-radius-pill);
-    background: color-mix(in srgb, var(--harness, var(--ax-text-muted)) 22%, transparent);
-    color: var(--harness, var(--ax-text-muted));
-    font-size: var(--ax-font-size-xs);
-    font-weight: 600;
   }
 
   .who {

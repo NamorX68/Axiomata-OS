@@ -11,6 +11,8 @@
 
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import SectionHead from "../ui/SectionHead.svelte";
+  import Notice from "../ui/Notice.svelte";
   import {
     describeTask,
     groupTasks,
@@ -139,31 +141,39 @@
 </script>
 
 <div class="panel">
-  <div class="head">
-    <span class="title">RUN</span>
-    <IconButton icon="refresh-cw" label="Read the tasks again" size="sm" onclick={() => void refresh()} />
-  </div>
+  <SectionHead label="Run" rule level={2}>
+    {#snippet actions()}
+      <IconButton icon="refresh-cw" label="Read the tasks again" size="sm" onclick={() => void refresh()} />
+    {/snippet}
+  </SectionHead>
   <div class="body">
     {#if !root}
       <p class="note">Open a project to see what it can run.</p>
     {:else if listed}
       {#if listed.project_file && !listed.project_file.trusted}
-        <div class="trust" role="alert">
-          <p>
-            This project has its own <code>.axiomata/tasks.json</code>. It runs commands from the repository, so it
-            stays off until you have looked at them.
-          </p>
-          {#if reviewing}
-            <ul class="review">
-              {#each projectTasks as task (task.id)}<li><code>{describeTask(task)}</code></li>{/each}
-            </ul>
-            <div class="actions">
-              <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these tasks</button>
-              <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
-            </div>
-          {:else}
-            <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
-          {/if}
+        {#snippet review()}
+          <ul class="review">
+            {#each projectTasks as task (task.id)}<li><code>{describeTask(task)}</code></li>{/each}
+          </ul>
+          <div class="actions">
+            <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these tasks</button>
+            <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
+          </div>
+        {/snippet}
+        <div class="notice-slot">
+          <Notice title="Project tasks need your review" alert children={reviewing ? review : undefined}>
+            {#snippet details()}
+              <p>
+                This project has its own <code>.axiomata/tasks.json</code>. It runs commands from the repository, so it
+                stays off until you have looked at them.
+              </p>
+            {/snippet}
+            {#snippet action()}
+              {#if !reviewing}
+                <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
+              {/if}
+            {/snippet}
+          </Notice>
         </div>
       {/if}
       {#each groups as g (g.group)}
@@ -249,20 +259,6 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-  }
-
-  .head {
-    display: flex;
-    align-items: center;
-    padding: var(--ax-space-1) var(--ax-space-3) var(--ax-space-1) var(--ax-space-4);
-    border-bottom: 1px solid var(--ax-border);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .title {
-    flex: 1;
-    letter-spacing: var(--ax-tracking-wide);
   }
 
   .body {
@@ -505,17 +501,8 @@
     color: var(--ax-warning);
   }
 
-  .trust {
-    padding: var(--ax-space-3);
+  .notice-slot {
     margin-bottom: var(--ax-space-3);
-    border: 1px solid var(--ax-warning);
-    border-radius: var(--ax-radius-md);
-    background: var(--ax-surface-2);
-    font-size: var(--ax-font-size-sm);
-  }
-
-  .trust p {
-    margin: 0 0 var(--ax-space-2);
   }
 
   .review {

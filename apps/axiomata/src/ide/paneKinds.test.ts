@@ -12,7 +12,11 @@ import {
   filesTab,
   fileTab,
   frontFile,
+  graphTab,
+  isAreaTab,
   isWorkPane,
+  planTab,
+  teamTab,
   openOrFocus,
   projectRoot,
   showsFile,
@@ -303,5 +307,15 @@ describe("untitled notes", () => {
     const filed = allTabs(layout)[0];
     expect(filePaneConfig(filed)).toMatchObject({ root: "workspace", rel: "Notes/x.md", untitled: false });
     expect(filed.title).toBe("x.md");
+  });
+});
+
+describe("isAreaTab (G4)", () => {
+  it("counts Planning, Agents and the Flow view as areas", () => {
+    expect([planTab(), teamTab(), graphTab()].every(isAreaTab)).toBe(true);
+  });
+
+  it("counts a file as a document, not an area", () => {
+    expect(isAreaTab(fileTab("project:1", "a.rs", null))).toBe(false);
   });
 });

@@ -54,6 +54,14 @@ export const GRAPH_PANE = "graph";
 /** The Studio's engines and roles (`docs/plans/studio-roster-ui.md`, R-1): a list with its form beside it. One per layout. */
 export const ROSTER_PANE = "roster";
 
+/**
+ * Whether a tab is an *area* of the Flow layout (Planning, Agents, Flow view) rather than a document: its tab reads as
+ * a section heading in the label role, not as a tab to be swapped (`docs/plans/ui-ux-round.md` G4).
+ */
+export function isAreaTab(tab: Pick<PaneTab, "kind">): boolean {
+  return tab.kind === PLAN_PANE || tab.kind === TEAM_PANE || tab.kind === GRAPH_PANE;
+}
+
 export function rosterTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: ROSTER_PANE, title: "Engines & roles", config: {} };
 }

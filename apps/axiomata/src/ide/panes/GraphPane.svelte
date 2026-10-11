@@ -23,6 +23,7 @@
   import { NODE_H, NODE_W, endOf, layoutGraph, reviewLabel, reviewToneOf, toneOf, wrapTitle } from "../flowGraph";
   import { allCardsOfPlan } from "../planning";
   import { flowSelection, resolvePlan } from "../flowSelection";
+  import EmptyState from "../../ui/EmptyState.svelte";
   import { agentStatus } from "../agentStatus";
   import { refreshAgents, session } from "../projectSession";
 
@@ -196,9 +197,9 @@
   </header>
 
   {#if !plan}
-    <p class="empty">There is no plan yet. Create one in the “Planning” tab; its cards appear here as a graph.</p>
+    <EmptyState title="No plan yet" text="Create one under Planning; its cards appear here as a graph." />
   {:else if cards.length === 0}
-    <p class="empty">The plan has no cards yet. The planner creates them as proposals.</p>
+    <EmptyState title="The plan has no cards yet" text="The planner creates them as proposals." />
   {:else}
     <div class="canvas">
       <svg width={graph.width} height={graph.height} role="img" aria-label="Graph des Plans {plan.name}">
@@ -368,10 +369,6 @@
     margin-right: var(--ax-space-1);
     border-radius: var(--ax-radius-pill);
     background: var(--tone);
-  }
-  .empty {
-    margin: var(--ax-space-4);
-    color: var(--ax-text-muted);
   }
   /* The graph sits in the middle of the pane, both ways; `margin: auto` (not `align-items: center`) so that one larger than
      the pane scrolls from its top left instead of being cut off at the top. */

@@ -117,6 +117,7 @@ import { initPersistence } from "./core/persist";
 import { DEFAULT_THEME, applyTheme } from "./core/themes";
 import { startUiScale } from "./core/uiScale";
 import { startMotion } from "./core/motion";
+import { startOriginTracking } from "./core/origin";
 import { startUiFont } from "./core/uiFont";
 import { registerBuiltins } from "./modules";
 
@@ -128,6 +129,7 @@ applyTheme(DEFAULT_THEME);
 startUiScale();
 startUiFont();
 startMotion();
+startOriginTracking();
 // The editor's own colour theme follows its setting from the first paint; the file is read once at start.
 editorSettings.subscribe((settings) => applyEditorTheme(settings.editorTheme));
 void ensureEditorSettingsLoaded();

@@ -65,6 +65,8 @@ export const ALLOWED_TOKENS: readonly string[] = [
   "--ax-font-title",
   "--ax-glow",
   "--ax-glow-shadow",
+  "--ax-glow-drop",
+  "--ax-selected-bg",
   "--ax-edge-light",
   "--ax-shadow-panel",
   "--ax-ash",

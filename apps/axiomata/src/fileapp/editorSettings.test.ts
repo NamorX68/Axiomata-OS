@@ -179,15 +179,6 @@ describe("cursor animation and file icons (editor-look K8, K5)", () => {
   });
 });
 
-describe("tab colours (editor-look K14)", () => {
-  it("defaults to on, keeps off, and ignores a value that is no boolean", () => {
-    expect(DEFAULT_EDITOR_SETTINGS.tabColors).toBe(true);
-    expect(parseEditorSettings({}).tabColors).toBe(true);
-    expect(parseEditorSettings({ tabColors: false }).tabColors).toBe(false);
-    expect(parseEditorSettings({ tabColors: "no" }).tabColors).toBe(true);
-  });
-});
-
 describe("minimap and sticky scroll settings (ED5, T8/T9)", () => {
   it("defaults both to on", () => {
     expect(DEFAULT_EDITOR_SETTINGS).toMatchObject({

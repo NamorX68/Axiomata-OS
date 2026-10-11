@@ -42,10 +42,15 @@
 
 {#if $panelOpen}
   <div class="chat-wrap" transition:slide>
-    <Window title="Agent" modal={false} onClose={() => panelOpen.set(false)} style="width: 100%; height: 100%;">
+    <Window
+      title="Agent"
+      subtitle={$sessionId ? `session ${$sessionId.slice(0, 8)}…` : "new session"}
+      modal={false}
+      onClose={() => panelOpen.set(false)}
+      style="width: 100%; height: 100%;"
+    >
       {#snippet headerExtra()}
-        <span class="session">{$sessionId ? `session ${$sessionId.slice(0, 8)}…` : "new session"}</span>
-        <button type="button" class="new-session" onclick={newSession} disabled={$busy || $turns.length === 0}>
+        <button type="button" class="ax-btn new-session" onclick={newSession} disabled={$busy || $turns.length === 0}>
           New session
         </button>
       {/snippet}
@@ -81,12 +86,6 @@
     z-index: var(--ax-z-assistant);
   }
 
-  .session {
-    flex: 1 1 auto;
-    font-family: var(--ax-font-mono);
-    font-size: var(--ax-font-size-sm);
-    color: var(--ax-text-muted);
-  }
   .new-session {
     font-size: var(--ax-font-size-sm);
     padding: 1px var(--ax-space-2);

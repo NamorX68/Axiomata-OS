@@ -71,8 +71,6 @@ export interface EditorSettings {
   formatOnSave: boolean;
   /** ED6.5 (L14): languages (editor ids, `python`, `markdown`) saved as they are. */
   formatOnSaveExcept: string[];
-  /** editor-look K14: tabs tinted with their language's colour. */
-  tabColors: boolean;
   /** editor-look K5: the file tree's icons — Catppuccin, Git (Octicons), JetBrains, monochrome or none. */
   fileIcons: FileIconStyle;
   /** `"follow"` (the app theme's editor colours) or the id of an editor theme (`core/editorThemes.ts`). */
@@ -107,7 +105,6 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   stickyScroll: true,
   diagnosticsInline: false,
   formatOnSave: true,
-  tabColors: true,
   fileIcons: "catppuccin",
   editorTheme: FOLLOW_APP_THEME,
   formatOnSaveExcept: [],
@@ -202,7 +199,6 @@ export function parseEditorSettings(raw: unknown): EditorSettings {
     stickyScroll: bool(r.stickyScroll, d.stickyScroll),
     diagnosticsInline: bool(r.diagnosticsInline, d.diagnosticsInline),
     formatOnSave: bool(r.formatOnSave, d.formatOnSave),
-    tabColors: bool(r.tabColors, d.tabColors),
     fileIcons: pick(r.fileIcons, FILE_ICON_STYLES, d.fileIcons),
     editorTheme: editorThemeOr(r.editorTheme),
     formatOnSaveExcept: languageList(r.formatOnSaveExcept),

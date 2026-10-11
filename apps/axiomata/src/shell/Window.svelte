@@ -1,33 +1,28 @@
 <!--
-  Shared "window" chrome for every floating dialog/panel in the app: the
-  glass background + bottom-hairline + `--ax-shadow-drag` look
-  `StagingLayer.svelte` (the file-viewer panel) and `canvas/Tile.svelte`'s
-  frameless front face established, extracted here so every dialog
-  (`ModulePicker`, `Settings`, `AppAddDialog`, `ChatPanel`, …) shares one
-  definition instead of retyping the same CSS in each file.
+  Shared chrome for every floating dialog in the app (`ModulePicker`, `Settings`, `AppAddDialog`, `ChatPanel`, …):
+  the panel surface of the elevation scale (`--ax-elev-2` with its light edge and `--ax-shadow-panel`) and the one
+  panel head (`ui/PanelHead.svelte`) — the same look the staged panels (`StagingPanel.svelte`) wear.
 
-  This component owns *how a window looks* (background, border, shadow,
-  header, close-button behaviour) — never *where it sits or how big it is*.
-  `modal={true}` (default) centres it inside a full-screen scrim, the
-  classic dialog shape, closing on Escape or a click on the scrim.
-  `modal={false}` renders just the card with no scrim, for an
-  always-visible docked panel like `ChatPanel`; the caller positions and
-  sizes it via the `style` prop (a raw inline-style string, not a `class` —
-  a class passed in as a prop would carry *this* component's own Svelte
-  scoping attribute, not the caller's, so the caller's own `<style>` block
-  could never actually target it; a plain inline style has no such
-  scoping problem).
-
-  The close button is hidden until the window is hovered/focused, matching
-  `canvas/Tile.svelte`'s front-head `.tile-btn` behaviour — not a
-  permanently-visible button.
+  This component owns *how a window looks and closes* — never *where it sits or how big it is*. `modal={true}`
+  (default) centres it inside a full-screen scrim, the classic dialog shape, closing on Escape, ⌘W or a click on the
+  scrim, and grows out of whatever opened it (`ui/fromOrigin.ts`). `modal={false}` renders just the card with no
+  scrim, for an always-visible docked panel like `ChatPanel`, which moves itself; the caller positions and sizes it via
+  the `style` prop (a raw inline-style string, not a `class` — a class passed in as a prop would carry *this*
+  component's own Svelte scoping attribute, not the caller's, so the caller's own `<style>` block could never actually
+  target it; a plain inline style has no such scoping problem).
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { fade } from "svelte/transition";
+
+  import { pushClose } from "../core/closeStack";
+  import PanelHead from "../ui/PanelHead.svelte";
+  import { fromOrigin } from "../ui/fromOrigin";
 
   let {
     title,
     icon,
+    subtitle,
     onClose,
     modal = true,
     style = "",
@@ -37,20 +32,23 @@
     title: string;
     /** Raw SVG markup, same convention as `ModuleDefinition.icon`. */
     icon?: string;
+    /** A caption after the title (a session, a count). */
+    subtitle?: string;
     onClose: () => void;
     modal?: boolean;
     /** Positioning/sizing, applied as a literal inline style on the window
      *  card — see the component doc comment for why this is a `style`
      *  string and not a `class`. */
     style?: string;
-    /** Extra header content between the title and the close button (e.g.
-     *  `ChatPanel`'s session id + "New session" button) — the title/icon/
-     *  close-button trio stays the one fixed part of the header every
-     *  window shares, this is the escape hatch for the rare one that needs
-     *  more than that. */
+    /** The window's own controls in the head, between the title and the close button (e.g. `ChatPanel`'s "New
+     *  session"). */
     headerExtra?: Snippet;
     children: Snippet;
   } = $props();
+
+  // ⌘W closes the newest dialog (`App.svelte`); the latest `onClose` is the one called. Only a modal one: the docked
+  // chat is no dialog, and ⌘W must not close it from under the file window the owner is working in.
+  $effect(() => (modal ? pushClose(() => onClose()) : undefined));
 
   // `!e.defaultPrevented` + calling `preventDefault()` on the way out is
   // the coordination convention `StagingLayer`/`ChatPanel`/`SecondBrainView`
@@ -67,9 +65,16 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+{#snippet card()}
+  <PanelHead {title} iconSvg={icon} {subtitle} actions={headerExtra} {onClose} />
+  <div class="body">
+    {@render children()}
+  </div>
+{/snippet}
+
 {#if modal}
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="overlay" onclick={onClose}>
+  <div class="overlay" onclick={onClose} transition:fade|global={{ duration: 160 }}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div
       class="window"
@@ -79,29 +84,14 @@
       aria-label={title}
       tabindex="-1"
       onclick={(e) => e.stopPropagation()}
+      transition:fromOrigin|global
     >
-      <header>
-        {#if icon}<span class="icon" aria-hidden="true">{@html icon}</span>{/if}
-        <h2>{title}</h2>
-      {#if headerExtra}{@render headerExtra()}{/if}
-        <button type="button" class="close" aria-label="Close" onclick={onClose}>×</button>
-      </header>
-      <div class="body">
-        {@render children()}
-      </div>
+      {@render card()}
     </div>
   </div>
 {:else}
   <div class="window" {style} role="dialog" aria-label={title}>
-    <header>
-      {#if icon}<span class="icon" aria-hidden="true">{@html icon}</span>{/if}
-      <h2>{title}</h2>
-      {#if headerExtra}{@render headerExtra()}{/if}
-      <button type="button" class="close" aria-label="Close" onclick={onClose}>×</button>
-    </header>
-    <div class="body">
-      {@render children()}
-    </div>
+    {@render card()}
   </div>
 {/if}
 
@@ -115,68 +105,18 @@
     background: var(--ax-overlay);
   }
 
+  /* The panel step of the elevation scale: a tone, the light edge along the top and a shadow that carries in the
+     dark — a hint of glass behind it, but never so much that the canvas shows through the text. */
   .window {
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-lg);
-    /* Permanently-on glass, unlike Tile's own frameless front face (which
-       is fully transparent at rest, glass only while dragging/resizing) —
-       a window floats above arbitrary other content the whole time it's
-       open, so the fully transparent resting state that look is built on
-       would be unreadable here. */
-    background: var(--ax-tile-glass-bg);
+    background: color-mix(in srgb, var(--ax-elev-2) 94%, transparent);
     -webkit-backdrop-filter: blur(var(--ax-tile-glass-blur));
     backdrop-filter: blur(var(--ax-tile-glass-blur));
-    border: none;
-    border-bottom: 2px solid var(--ax-border-strong);
-    box-shadow: var(--ax-shadow-drag);
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-2) var(--ax-space-3);
-    flex: 0 0 auto;
-  }
-  .icon {
-    display: inline-flex;
-    width: calc(16px * var(--ax-ui-scale));
-    height: calc(16px * var(--ax-ui-scale));
-    color: var(--ax-accent);
-  }
-  .icon :global(svg) {
-    width: 100%;
-    height: 100%;
-  }
-  h2 {
-    flex: 1 1 auto;
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
-  }
-  /* Matches canvas/Tile.svelte's .tile-btn exactly. */
-  .close {
-    width: calc(22px * var(--ax-ui-scale));
-    height: calc(22px * var(--ax-ui-scale));
-    padding: 0;
-    display: grid;
-    place-items: center;
-    line-height: 1;
-    font-size: var(--ax-font-size-lg);
-    background: transparent;
-    border-color: transparent;
-    color: var(--ax-text-muted);
-    opacity: 0;
-    transition: opacity var(--ax-dur-fast) var(--ax-ease);
-  }
-  .window:hover .close,
-  .window:focus-within .close {
-    opacity: 1;
-  }
-  .close:hover:not(:disabled) {
-    color: var(--ax-text);
-    background: var(--ax-surface-3);
+    box-shadow: var(--ax-shadow-panel);
   }
 
   .body {

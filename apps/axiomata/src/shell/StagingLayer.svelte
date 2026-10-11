@@ -11,6 +11,7 @@
   cascading through all of them in the same keystroke).
 -->
 <script lang="ts">
+  import { dialogOpen } from "../core/closeStack";
   import { createContext } from "../core/registry";
   import { requestClose, staged, type StagedPanel } from "../core/staging";
   import type { ModuleContext } from "../core/types";
@@ -41,7 +42,8 @@
   });
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && !e.defaultPrevented && $staged.length > 0) {
+    // A dialog above the panels takes its own Escape first (`core/closeStack.ts`).
+    if (e.key === "Escape" && !e.defaultPrevented && $staged.length > 0 && !dialogOpen()) {
       // Consumed: later Escape handlers (chat, Second Brain) leave it alone.
       e.preventDefault();
       void requestClose($staged[$staged.length - 1].id);

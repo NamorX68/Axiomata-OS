@@ -88,6 +88,17 @@ Wiedererkennungswert bescheren.“ Vorgänger: `docs/plans/editor-look.md` (K1�
 
 Je Checkpoint: Screenshots hell + dunkel, Abnahme am Mac, Commit, installierte App neu bauen.
 
+**Stand UX2 (2026-10-11, gebaut, Abnahme offen):** Familie in `ui/`: `PanelHead` (44 px, Titelrolle, ⌘W-Taste
+sichtbar), `SectionHead`, `Notice` (eine Zeile + Aktion, Gründe aufklappbar), `EmptyState` (Hex + Glutkern, glimmt nur
+mit Aktion), `HexAvatar`, `StatusMark` (+ `status.ts`: eine Ton-Sprache), `glow`-Action, `fromOrigin`-Transition
+(`core/origin.ts`: der Klick der letzten 1,5 s, sonst Bildschirmmitte; Full Feder, Calm kurz, Off nur Blende). Alle
+schwebenden Panels (`Window`, `StagingPanel`) auf `--ax-elev-2` + Lichtkante + `PanelHead`; ⌘W schließt jetzt auch
+Dialoge (`core/closeStack.ts`). Studio: Reiter nach G4 (Einstellung „Reiter tönen“ entfernt), Flow-Bereiche als
+Kapitälchen (`isAreaTab`), Seitenleisten-Köpfe als `SectionHead`, die drei Vertrauens-Hinweise (Rollen, tasks.json,
+debug.json) einzeilig, leere Zustände mit Hex. „Ausgewählt“ ist neutral (`--ax-selected-bg`): Modus-Umschalter,
+`IconButton pressed`, Einstellungs-Reiter und -Abschnitte; der Git-Zähler ist grau, nur der Agenten-Zähler glimmt.
+Bewusst später: Agent-Karten-Rahmen, „New plan“-Balken, Kanban-Karten (UX6), Kachel-Titel (UX3).
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

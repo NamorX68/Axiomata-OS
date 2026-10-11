@@ -6,6 +6,7 @@
   import Canvas from "./canvas/Canvas.svelte";
   import { invokeBackend, listenBackend, type PlanRunEvent } from "./core/backend";
   import { brainActive } from "./core/brainView";
+  import { closeTop } from "./core/closeStack";
 import { emit, on } from "./core/bus";
   import { openFilePanel, openNewNote, openStaged, requestClose, staged } from "./core/staging";
   import { globalKeyAction } from "./core/globalKeys";
@@ -44,8 +45,9 @@ import { emit, on } from "./core/bus";
 
   /**
    * The window-wide keys (`core/globalKeys.ts`): ⌘K toggles the spotlight from every view, ⌘, opens the settings and ⌘W
-   * closes the topmost thing — the spotlight, else the top staged panel (a panel that answers ⌘W itself, like the file
-   * window, has marked the key as handled). Not while a terminal pane has the focus: ⌘W there is nobody's business.
+   * closes the topmost thing — the spotlight, else the newest dialog (`core/closeStack.ts`), else the top staged panel
+   * (a panel that answers ⌘W itself, like the file window, has marked the key as handled). Not while a terminal pane
+   * has the focus: ⌘W there is nobody's business.
    */
   function onWindowKeydown(event: KeyboardEvent): void {
     const inTerminal = inTerminalPane(event);
@@ -53,12 +55,21 @@ import { emit, on } from "./core/bus";
     if (!action || event.defaultPrevented) return;
     if (action === "close") {
       if (inTerminal) return;
+      if (spotlightOpen) {
+        event.preventDefault();
+        spotlightOpen = false;
+        return;
+      }
+      // A dialog (settings, a picker, the chat) sits above the staged panels.
+      if (closeTop()) {
+        event.preventDefault();
+        return;
+      }
       const open = get(staged);
       const top = open[open.length - 1];
-      if (!spotlightOpen && !top) return;
+      if (!top) return;
       event.preventDefault();
-      if (spotlightOpen) spotlightOpen = false;
-      else if (top) void requestClose(top.id);
+      void requestClose(top.id);
       return;
     }
     event.preventDefault();

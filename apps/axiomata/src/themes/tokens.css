@@ -234,6 +234,16 @@
   --ax-glow-soft: color-mix(in srgb, var(--ax-glow) 16%, transparent);
   --ax-glow-strong: color-mix(in srgb, var(--ax-glow) 55%, transparent);
   --ax-glow-shadow: 0 0 calc(12px * var(--ax-ui-scale)) var(--ax-glow-strong);
+  /* The same glow for a `filter: drop-shadow(…)`, which follows a clipped shape (a hexagon) where a box-shadow cannot. */
+  --ax-glow-drop: drop-shadow(0 0 calc(7px * var(--ax-ui-scale)) var(--ax-glow-strong));
+  /* The glow's breath on a box-shadow (`ui/glow.ts`): dims to the soft glow and returns. */
+  --ax-anim-glow: ax-glow-breathe var(--ax-dur-breath) var(--ax-ease) infinite;
+  /* "Selected, but not alive" (U1 §3): a calm tone, never the accent — the mode switch, the activity rail, a tab. */
+  --ax-selected-bg: color-mix(in srgb, var(--ax-text) 9%, transparent);
+  /* The hexagon (U1/U5), for `clip-path`: avatars, status marks, empty states. */
+  --ax-hex-clip: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+  /* One head for every floating panel (UX2, `ui/PanelHead.svelte`). */
+  --ax-panel-head-h: calc(44px * var(--ax-ui-scale));
   /* The colour a cell ages into when nobody touched it for long (the Orbit's ember ageing, W2). */
   --ax-ash: color-mix(in srgb, var(--ax-text-muted) 45%, var(--ax-bg));
 
@@ -307,4 +317,5 @@
 [data-motion="calm"],
 [data-motion="off"] {
   --ax-anim-breathe: none;
+  --ax-anim-glow: none;
 }

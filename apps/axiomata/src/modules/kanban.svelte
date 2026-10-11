@@ -67,6 +67,9 @@
   import KanbanBoards from "./KanbanBoards.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import EmptyState from "../ui/EmptyState.svelte";
+  import StatusMark from "../ui/StatusMark.svelte";
+  import type { StatusTone } from "../ui/status";
 
   let { ctx }: { ctx: ModuleContext } = $props();
   // svelte-ignore state_referenced_locally
@@ -428,6 +431,13 @@
   type Role = BoardColumn["maps_to_status"];
   const ROLES: Role[] = ["open", "doing", "done"];
   const ROLE_NAMES: Record<Role, string> = { open: "open", doing: "in progress", done: "done" };
+
+  /** A column's status mark (UX2): open quiet, done green; in progress glows only while it holds work. */
+  function roleTone(role: Role, cardCount: number): StatusTone {
+    if (role === "done") return "ok";
+    if (role === "doing" && cardCount > 0) return "live";
+    return "neutral";
+  }
 
   /** The menu's "Umbenennen": the column's own name field, selected. */
   function renameColumn(id: number): void {
@@ -1026,7 +1036,7 @@
 {:else if boardId === null}
   <!-- The app opens even with no board at all: it has to offer to create the first one. -->
   <div class="first-board">
-    <p class="notice">No board yet.</p>
+    <EmptyState title="No board yet" text="Create the first one below." />
     <KanbanBoards current={null} onChoose={switchBoard} onDeleted={boardGone} />
   </div>
 {:else if $data === null || ($data.loading && $data.board === null)}
@@ -1119,7 +1129,7 @@
                  and form controls never start a drag — without it there is
                  nothing to take hold of. Same idea as the panel's own grip. -->
             <span class="col-grip" aria-hidden="true"><Icon name="grip-vertical" size="sm" /></span>
-            <span class="role" data-role={column.maps_to_status} title={ROLE_NAMES[column.maps_to_status]}></span>
+            <StatusMark tone={roleTone(column.maps_to_status, cards.length)} title={ROLE_NAMES[column.maps_to_status]} />
             <input
               class="name"
               value={column.name}
@@ -1153,7 +1163,7 @@
                       void saveColumn(column, { maps_to_status: role });
                     }}
                   >
-                    <span class="role" data-role={role}></span>{ROLE_NAMES[role]}
+                    <StatusMark tone={roleTone(role, role === "doing" ? 1 : 0)} />{ROLE_NAMES[role]}
                     {#if column.maps_to_status === role}<Icon name="check" size="sm" />{/if}
                   </button>
                 {/each}
@@ -1462,21 +1472,6 @@
     align-items: center;
     gap: var(--ax-space-2);
     padding: 0 var(--ax-space-1) var(--ax-space-2);
-  }
-  /* The column's role (B2): a dot — open grey, in progress the accent, done green. */
-  .role {
-    flex: 0 0 auto;
-    width: calc(8px * var(--ax-ui-scale));
-    height: calc(8px * var(--ax-ui-scale));
-    border-radius: var(--ax-radius-pill);
-    background: var(--ax-text-muted);
-  }
-  /* An attribute, not a class: `open` is already the card button's class here. */
-  .role[data-role="doing"] {
-    background: var(--ax-accent);
-  }
-  .role[data-role="done"] {
-    background: var(--ax-success);
   }
   /* Quiet until touched: the header should read as a heading, not as a form.
      Selectors are deliberately more specific than a bare class — styles.css's

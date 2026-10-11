@@ -14,6 +14,8 @@
 
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import SectionHead from "../ui/SectionHead.svelte";
+  import Notice from "../ui/Notice.svelte";
   import BreakpointEditor from "./BreakpointEditor.svelte";
   import { breakpointInfo, breakpoints, clearBreakpoints, infoOf } from "./breakpoints";
   import { debug, debugProblem, editDebugBreakpoint, loadWatches, saveWatches, startDebugging, toggleDebugBreakpoint } from "./debug";
@@ -259,33 +261,41 @@
 {/snippet}
 
 <div class="panel">
-  <div class="head">
-    <span class="title">DEBUG</span>
-    {#if $ds.phase === "idle" || $ds.phase === "ended"}
-      <IconButton icon="refresh-cw" label="Read the configurations again" size="sm" onclick={() => void refresh()} />
-    {/if}
-  </div>
+  <SectionHead label="Debug" rule level={2}>
+    {#snippet actions()}
+      {#if $ds.phase === "idle" || $ds.phase === "ended"}
+        <IconButton icon="refresh-cw" label="Read the configurations again" size="sm" onclick={() => void refresh()} />
+      {/if}
+    {/snippet}
+  </SectionHead>
   <div class="body">
     {#if !root}
       <p class="note">Open a project to debug it.</p>
     {:else}
       {#if listed?.project_file && !listed.project_file.trusted && $ds.phase !== "running" && $ds.phase !== "stopped"}
-        <div class="trust" role="alert">
-          <p>
-            This project has its own <code>.axiomata/debug.json</code>. It starts programs from the repository, so it
-            stays off until you have looked at them.
-          </p>
-          {#if reviewing}
-            <ul class="review">
-              {#each projectConfigs as c (c.name)}<li><code>{c.name}: {describe(c)}</code></li>{/each}
-            </ul>
-            <div class="actions">
-              <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these</button>
-              <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
-            </div>
-          {:else}
-            <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
-          {/if}
+        {#snippet review()}
+          <ul class="review">
+            {#each projectConfigs as c (c.name)}<li><code>{c.name}: {describe(c)}</code></li>{/each}
+          </ul>
+          <div class="actions">
+            <button type="button" class="ax-btn primary" onclick={() => void allow()}>Allow these</button>
+            <button type="button" class="ax-btn" onclick={() => (reviewing = false)}>Cancel</button>
+          </div>
+        {/snippet}
+        <div class="notice-slot">
+          <Notice title="Project debug setups need your review" alert children={reviewing ? review : undefined}>
+            {#snippet details()}
+              <p>
+                This project has its own <code>.axiomata/debug.json</code>. It starts programs from the repository, so it
+                stays off until you have looked at them.
+              </p>
+            {/snippet}
+            {#snippet action()}
+              {#if !reviewing}
+                <button type="button" class="ax-btn" onclick={() => (reviewing = true)}>Review…</button>
+              {/if}
+            {/snippet}
+          </Notice>
         </div>
       {/if}
 
@@ -511,20 +521,6 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-  }
-
-  .head {
-    display: flex;
-    align-items: center;
-    padding: var(--ax-space-1) var(--ax-space-3) var(--ax-space-1) var(--ax-space-4);
-    border-bottom: 1px solid var(--ax-border);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .title {
-    flex: 1;
-    letter-spacing: var(--ax-tracking-wide);
   }
 
   .body {
@@ -796,17 +792,8 @@
     overflow-wrap: anywhere;
   }
 
-  .trust {
-    padding: var(--ax-space-3);
+  .notice-slot {
     margin-bottom: var(--ax-space-3);
-    border: 1px solid var(--ax-warning);
-    border-radius: var(--ax-radius-md);
-    background: var(--ax-surface-2);
-    font-size: var(--ax-font-size-sm);
-  }
-
-  .trust p {
-    margin: 0 0 var(--ax-space-2);
   }
 
   .actions {

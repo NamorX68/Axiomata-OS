@@ -185,6 +185,9 @@ from the code itself:
   orange/`--ax-glow` only where something lives, works or needs the owner (a running agent/skill, a waiting
   question, the one primary action, the selection) — never titles, icons or every button; the hexagon is the system's
   shape. Movement goes through `core/motion.ts` (Full/Calm/Off, macOS "Reduce motion" = Off), never its own switch.
+  Chrome comes from the `ui/` family (UX2): a floating panel is `shell/Window.svelte` or a staged panel, both with
+  `ui/PanelHead.svelte` (⌘W via `core/closeStack.ts`); statuses are `ui/StatusMark.svelte` (`ui/status.ts` tones),
+  glowing is `use:glow` — no hand-rolled heads, dots or orange borders. Selected ≠ alive: `--ax-selected-bg`.
 - **UI scale** (`docs/plans/editor-look.md`, K9–K11): every UI size is `N px × var(--ax-ui-scale)`
   (tokens already are; a size that is no token is written `calc(Npx * var(--ax-ui-scale))`), set by
   `core/uiScale.ts` from the display's real density (`axiomata-macos::display`) or the "UI size"

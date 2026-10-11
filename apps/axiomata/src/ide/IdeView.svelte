@@ -41,6 +41,7 @@
   import DockNode from "./DockNode.svelte";
   import PaneGroup from "./PaneGroup.svelte";
   import { uiScale } from "../core/uiScale";
+  import EmptyState from "../ui/EmptyState.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import Inspector, { type InspectorTab } from "../fileapp/Inspector.svelte";
@@ -1031,8 +1032,11 @@
       {#if mode === "agents" && current && allTabs(layout).length === 0}
         <!-- A new project's Canvas is empty on purpose (no terminal nobody asked for): say so, and offer the terminal. -->
         <div class="canvas-empty">
-          <p>The canvas is empty. Agents appear here as soon as a card or a session starts.</p>
-          <button class="ax-btn primary" type="button" onclick={openTerminal}>Open terminal</button>
+          <EmptyState title="The canvas is empty" text="Agents appear here as soon as a card or a session starts.">
+            {#snippet action()}
+              <button class="ax-btn primary" type="button" onclick={openTerminal}>Open terminal</button>
+            {/snippet}
+          </EmptyState>
         </div>
       {/if}
       {#if drag.rootHint && drag.rootHint !== "center"}
@@ -1042,7 +1046,7 @@
       <!-- No project, no panes: a terminal with nowhere to start is worse than
            no terminal. The menu above is the only thing to do here. -->
       <div class="empty">
-        <p>Open a project — from the project bar in the sidebar.</p>
+        <EmptyState title="No project open" text="Open one from the project bar in the sidebar." />
       </div>
     {/if}
   </div>
@@ -1137,7 +1141,7 @@
   }
 
   .crumb:last-of-type {
-    color: var(--ax-accent);
+    color: var(--ax-text);
   }
 
   .crumb:hover {
@@ -1164,8 +1168,8 @@
     letter-spacing: var(--ax-tracking-wide);
   }
 
-  /* The mode switch is the Studio's main choice: the same filled-accent selection as the Second Brain bar's toggles,
-     larger than the quiet icon buttons around it (owner, 2026-10-08: the buttons were easy to overlook). */
+  /* The mode switch is the Studio's main choice, larger than the quiet icon buttons around it (owner, 2026-10-08: the
+     buttons were easy to overlook). The mode shown is a raised segment, not the accent: selected is not alive (UX2). */
   .modes {
     display: flex;
     gap: var(--ax-space-1);
@@ -1199,8 +1203,11 @@
   }
 
   .modes button.on {
-    background: var(--ax-accent);
-    color: var(--ax-text-invert);
+    background: var(--ax-elev-3);
+    color: var(--ax-text);
+    box-shadow:
+      var(--ax-shadow-raised),
+      0 0 0 1px var(--ax-border-strong);
   }
 
   .modes button:disabled {
@@ -1274,15 +1281,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: var(--ax-space-3);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-sm);
     pointer-events: none;
   }
-  .canvas-empty p {
-    margin: 0;
-  }
-  .canvas-empty button {
+  .canvas-empty :global(button) {
     pointer-events: auto;
   }
 
@@ -1291,8 +1292,6 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-sm);
   }
 
   /* While a tab is in flight the panes must not react to the pointer passing

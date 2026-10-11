@@ -36,8 +36,3 @@ export function languageColorId(fileName: string, firstLine = ""): LanguageColor
   const id = language === "tsx" ? "typescript" : language;
   return (LANGUAGE_COLOR_IDS as readonly string[]).includes(id ?? "") ? (id as LanguageColorId) : "other";
 }
-
-/** The CSS colour for a file: the token of its language. */
-export function languageColor(fileName: string): string {
-  return `var(--ax-lang-${languageColorId(fileName)})`;
-}

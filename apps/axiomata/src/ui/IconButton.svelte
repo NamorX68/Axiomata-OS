@@ -1,7 +1,7 @@
 <!--
   A button that is an icon (`docs/plans/editor-look.md`, K6, K11): at least
   `--ax-hit-min` square, whatever the icon size, so it is easy to hit on any
-  display; quiet at rest, a soft fill on hover, the accent when `pressed`.
+  display; quiet at rest, a soft fill on hover, a calm tone when `pressed`.
   `label` is required — it is the tooltip and what assistive technology reads.
   As a tab (`tab`, inside a `role="tablist"`) it reports `aria-selected` instead
   of `aria-pressed`.
@@ -65,9 +65,10 @@
     outline: 2px solid var(--ax-focus-ring);
     outline-offset: 1px;
   }
+  /* Selected, not alive (UX2): an open panel or a chosen view is a calm tone — the accent is for what works. */
   .icon-button.pressed {
-    background: var(--ax-accent-muted);
-    color: var(--ax-accent);
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
   }
   .icon-button:disabled {
     opacity: 0.4;

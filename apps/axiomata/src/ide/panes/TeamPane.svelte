@@ -18,6 +18,7 @@
   import { relativeTime } from "../../core/format";
   import { STATE_LABEL } from "../../core/kanban";
   import CardUsage from "../../modules/CardUsage.svelte";
+  import EmptyState from "../../ui/EmptyState.svelte";
   import Icon from "../../ui/Icon.svelte";
   import { agentStatus, describeStatus } from "../agentStatus";
   import { session } from "../projectSession";
@@ -118,10 +119,10 @@
 
 <div class="team">
   {#if groups.length === 0}
-    <p class="empty">
-      Noch läuft hier nichts. Sobald ein Plan freigegeben ist und seine Karten starten (oder ein Planer arbeitet), erscheint
-      jede Sitzung hier als Kachel — mit dem, was sie gerade tut.
-    </p>
+    <EmptyState
+      title="Nothing is running yet"
+      text="Once a plan is approved and its cards start (or a planner works), every session appears here as a tile — with what it is doing right now."
+    />
   {/if}
   {#each groups as group (group.planId ?? "none")}
     <section class="group" aria-label={group.title}>
@@ -214,10 +215,6 @@
     background: var(--ax-surface-1);
     color: var(--ax-text);
     font-size: var(--ax-font-size-sm);
-  }
-  .empty {
-    margin: 0;
-    color: var(--ax-text-muted);
   }
   h3 {
     margin: 0 0 var(--ax-space-2);

@@ -20,6 +20,7 @@
   import type { FileRootInfo, IdeProject } from "../core/backend";
   import { uiScale } from "../core/uiScale";
   import IconButton from "../ui/IconButton.svelte";
+  import SectionHead from "../ui/SectionHead.svelte";
   import FileTree from "./FileTree.svelte";
   import GitPanel from "./GitPanel.svelte";
   import type { RepoStatus, Side } from "./gitBackend";
@@ -185,17 +186,18 @@
     {onSetAccent}
   />
   {#if tab === "files"}
-    <div class="side-bar">
-      <span class="side-title">FILES</span>
-      <IconButton
-        icon={prefs.showHidden ? "eye" : "eye-off"}
-        label={prefs.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
-        pressed={prefs.showHidden}
-        size="sm"
-        onclick={() => (prefs = { ...prefs, showHidden: !prefs.showHidden })}
-      />
-      <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => treeView?.refresh()} />
-    </div>
+    <SectionHead label="Files" rule level={2}>
+      {#snippet actions()}
+        <IconButton
+          icon={prefs.showHidden ? "eye" : "eye-off"}
+          label={prefs.showHidden ? "Hide dotfiles, .git, node_modules, target" : "Show dotfiles, .git, node_modules, target"}
+          pressed={prefs.showHidden}
+          size="sm"
+          onclick={() => (prefs = { ...prefs, showHidden: !prefs.showHidden })}
+        />
+        <IconButton icon="refresh-cw" label="Read the folders again" size="sm" onclick={() => treeView?.refresh()} />
+      {/snippet}
+    </SectionHead>
   {/if}
   <!-- All the views stay mounted: the tree keeps what is open, the search its results. -->
   <div class="side-pane" class:gone={tab !== "search"}>
@@ -277,21 +279,6 @@
     flex-shrink: 0;
     min-height: 0;
     background: var(--ax-surface-1);
-  }
-
-  .side-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-3);
-    border-bottom: 1px solid var(--ax-border);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .side-title {
-    flex: 1;
-    letter-spacing: var(--ax-tracking-wide);
   }
 
   .side-pane {

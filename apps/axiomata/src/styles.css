@@ -192,7 +192,25 @@ input[type="radio"] {
   }
 }
 
+/* The glow on a box (`ui/glow.ts`, `--ax-anim-glow`): the shine sinks to the soft glow and returns. */
+@keyframes ax-glow-breathe {
+  0%,
+  100% {
+    box-shadow: var(--ax-glow-shadow);
+  }
+  50% {
+    box-shadow: 0 0 calc(4px * var(--ax-ui-scale)) var(--ax-glow-soft);
+  }
+}
+
+/* `use:glow` (`ui/glow.ts`): something here lives, works or needs the owner. The one global rule of the glow, so
+   every component that glows does so the same way; Calm and Off still it (`--ax-anim-glow: none`). */
+[data-ax-glow] {
+  box-shadow: var(--ax-glow-shadow);
+  animation: var(--ax-anim-glow);
+}
+
 /* The hexagon (U1): the system's shape, for avatars, status marks and empty states. */
 .ax-hex {
-  clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+  clip-path: var(--ax-hex-clip);
 }
