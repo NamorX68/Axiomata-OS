@@ -29,6 +29,12 @@ const DEBOUNCE: Duration = Duration::from_millis(400);
 /// The most notes one batch names; the rest of a large burst is counted, not listed.
 const MAX_BATCH: usize = 50;
 
+/// The longest a change waits to be reported while the vault keeps being written to (a sync, a build).
+const MAX_WAIT: Duration = Duration::from_secs(2);
+
+/// The most distinct notes held for one batch; changes beyond are counted only.
+const MAX_PENDING: usize = 5000;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VaultChanged {
@@ -58,6 +64,10 @@ pub fn start(app: &AppHandle) {
 }
 
 fn run(app: &AppHandle, root: &Path) {
+    // FSEvents reports resolved paths: a root reached through a symlink (`/var` → `/private/var`) must be resolved
+    // too, or no event would ever lie under it.
+    let resolved = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let root = resolved.as_path();
     let (tx, rx) = mpsc::channel();
     let mut watcher = match RecommendedWatcher::new(tx, notify::Config::default()) {
         Ok(w) => w,
@@ -71,22 +81,42 @@ fn run(app: &AppHandle, root: &Path) {
         return;
     }
     let mut pending: BTreeSet<String> = BTreeSet::new();
+    // Changes past the set's cap: counted, not kept.
+    let mut overflow = 0usize;
     let mut last_event = Instant::now();
+    // When the oldest change of the burst came in: a vault written to without pause still reports every MAX_WAIT.
+    let mut first_event: Option<Instant> = None;
     loop {
         match rx.recv_timeout(DEBOUNCE) {
             Ok(Ok(event)) => {
                 if !event.kind.is_access() {
-                    pending.extend(event.paths.iter().filter_map(|p| note_of(root, p)));
+                    // A folder's own events (its mtime moves with every file in it) are no note.
+                    let notes = event
+                        .paths
+                        .iter()
+                        .filter(|p| !p.is_dir())
+                        .filter_map(|p| note_of(root, p));
+                    for note in notes {
+                        if pending.len() < MAX_PENDING {
+                            pending.insert(note);
+                        } else if !pending.contains(&note) {
+                            overflow += 1;
+                        }
+                    }
                     last_event = Instant::now();
+                    first_event.get_or_insert(last_event);
                 }
             }
             Ok(Err(err)) => tracing::debug!(%err, "vault watch event error"),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
-        if !pending.is_empty() && last_event.elapsed() >= DEBOUNCE {
+        let settled = last_event.elapsed() >= DEBOUNCE;
+        let overdue = first_event.is_some_and(|t| t.elapsed() >= MAX_WAIT);
+        if !pending.is_empty() && (settled || overdue) {
             let all: Vec<String> = std::mem::take(&mut pending).into_iter().collect();
-            let more = all.len().saturating_sub(MAX_BATCH);
+            let more = all.len().saturating_sub(MAX_BATCH) + std::mem::take(&mut overflow);
+            first_event = None;
             let payload = VaultChanged {
                 files: all.into_iter().take(MAX_BATCH).collect(),
                 more,

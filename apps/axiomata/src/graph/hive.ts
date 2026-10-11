@@ -126,20 +126,27 @@ export function mixRgb(a: Rgb, b: Rgb, t: number): Rgb {
   return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 }
 
-/** The light falls from the upper left, towards the viewer (screen space: y down, z towards the eye). */
-const LIGHT: Vec3 = [-0.45, -0.55, 0.7];
+/** The light falls from the upper left, towards the viewer (screen space: y down, z towards the eye) — normalised. */
+const LIGHT: Vec3 = ((): Vec3 => {
+  const l: Vec3 = [-0.45, -0.55, 0.7];
+  const n = Math.hypot(...l);
+  return [l[0] / n, l[1] / n, l[2] / n];
+})();
+
+/** The half-way vector between the light and the eye (Blinn–Phong), normalised: where the highlight sits. */
+const HALF: Vec3 = ((): Vec3 => {
+  const h: Vec3 = [LIGHT[0], LIGHT[1], LIGHT[2] + 1];
+  const n = Math.hypot(...h);
+  return [h[0] / n, h[1] / n, h[2] / n];
+})();
 
 /**
- * The "metal" shimmer for a cell whose surface normal is `n` (screen space): how lit it is (diffuse, 0.45…1.2) and how
- * much highlight it catches (0…1). `sparkle` (0…1) lets the highlight flicker per cell like a tilting plate; a still
- * light passes 1.
+ * The "metal" shimmer for a cell whose surface normal is (`nx`, `ny`, `nz`) in screen space: how lit it is (diffuse,
+ * 0.45…1.2) and how much highlight it catches (0…1). `sparkle` (0…1) lets the highlight flicker per cell like a
+ * tilting plate; a still light passes 1. Called per cell and frame, so it allocates nothing but its answer.
  */
-export function metalLight(n: Vec3, sparkle: number): { shade: number; spec: number } {
-  const ln = Math.hypot(...LIGHT);
-  const l: Vec3 = [LIGHT[0] / ln, LIGHT[1] / ln, LIGHT[2] / ln];
-  const diffuse = Math.max(0, n[0] * l[0] + n[1] * l[1] + n[2] * l[2]);
-  const h: Vec3 = [l[0], l[1], l[2] + 1];
-  const hn = Math.hypot(...h);
-  const spec = Math.max(0, (n[0] * h[0] + n[1] * h[1] + n[2] * h[2]) / hn) ** 40 * sparkle;
+export function metalLight(nx: number, ny: number, nz: number, sparkle: number): { shade: number; spec: number } {
+  const diffuse = Math.max(0, nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]);
+  const spec = Math.max(0, nx * HALF[0] + ny * HALF[1] + nz * HALF[2]) ** 40 * sparkle;
   return { shade: 0.45 + 0.75 * diffuse, spec };
 }

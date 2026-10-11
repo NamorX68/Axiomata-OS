@@ -460,10 +460,12 @@
     let unmounted = false;
     void listenBackend<{ files: string[]; at: number }>("vault:changed", ({ files, at }) => {
       files.forEach((file, i) => (i < SPARKS_PER_BURST ? renderer?.spark(file, at) : renderer?.touch(file, at)));
-    }).then((stop) => {
-      if (unmounted) stop();
-      else stopVaultWatch = stop;
-    });
+    })
+      .then((stop) => {
+        if (unmounted) stop();
+        else stopVaultWatch = stop;
+      })
+      .catch((err: unknown) => console.warn("vault:changed listen failed:", err));
     return () => {
       unmounted = true;
       stopVaultWatch?.();

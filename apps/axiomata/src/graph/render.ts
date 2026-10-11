@@ -30,6 +30,16 @@ export interface RenderOptions {
   shine?: Shine;
 }
 
+/** A hive cell's tone before the shimmer (`GraphRenderer.hiveTones`). */
+interface HiveTone {
+  col: Rgb;
+  heat: number;
+  /** A note that exists at the moment shown (the time travel). */
+  settled: boolean;
+  /** One of the hottest cells, drawn with the glow's blur. */
+  blur: boolean;
+}
+
 export interface View {
   /** Pan offset in CSS px from the canvas centre. */
   x: number;
@@ -211,8 +221,16 @@ export class GraphRenderer {
   /** The glow (G2): the orange family even where the accent is another hue — the hive's ember. */
   private glowColor = "#ff7a1a";
   private lightScheme = false;
-  /** The honeycomb sphere of the current model, rebuilt when the model changes (`graph/hive.ts`). */
-  private hive: { model: GraphModel; cells: HiveCell[]; nodes: (GraphNode | null)[] } | null = null;
+  /** The honeycomb sphere of the current model (`graph/hive.ts`); its cells are kept while the notes stay the same. */
+  private hive: { model: GraphModel; signature: string; cells: HiveCell[]; nodes: (GraphNode | null)[] } | null = null;
+  /** Each cell's tone, worked out at most once a second (`hiveTones`). */
+  private tones: HiveTone[] = [];
+  private toneKey = "";
+  private toneAt = 0;
+  /** The cells' projected positions of the current frame, reused from frame to frame. */
+  private hiveXs = new Float32Array(0);
+  private hiveYs = new Float32Array(0);
+  private hiveZs = new Float32Array(0);
   private rgbCache = new Map<string, Rgb>();
   /** Ring captions (rings mode). */
   captions = { skills: "SKILLS", memory: "MEMORY" };
@@ -713,7 +731,10 @@ export class GraphRenderer {
   /** Marks a note as changed at `at` without a spark: its cell takes the glow at once (the rest of a large burst). */
   touch(fileId: string, at: number): void {
     const node = this.model?.byId.get(fileId);
-    if (node) node.modified = new Date(at).toISOString();
+    if (!node) return;
+    node.modified = new Date(at).toISOString();
+    // Its cell glows from the next frame on, not after the tones' next second.
+    this.toneAt = 0;
   }
 
   private drawSparks(cx: number, cy: number, t: number): void {
@@ -727,7 +748,8 @@ export class GraphRenderer {
       const node = this.model?.byId.get(s.fileId);
       const target = this.cellPos.get(s.fileId);
       if (!node || !target) continue;
-      if (u >= 1) {
+      // A cell turned away cannot be seen to be hit: it glows without a spark.
+      if (u >= 1 || !target.front) {
         this.touch(s.fileId, s.at);
         continue;
       }
@@ -788,73 +810,80 @@ export class GraphRenderer {
   ): void {
     const { ctx } = this;
     const model = this.model!;
-    if (this.hive?.model !== model) {
-      const files = model.nodes.filter((n) => n.kind === "file");
-      const cells = buildHive(files.map((n) => ({ id: n.id, area: n.area })));
-      this.hive = { model, cells, nodes: cells.map((c) => (c.fileId ? (model.byId.get(c.fileId) ?? null) : null)) };
-    }
-    const { cells, nodes } = this.hive;
+    if (this.hive?.model !== model) this.rebuildHive(model);
+    const hive = this.hive!;
+    const tones = this.hiveTones(hive);
     const sphere = GraphRenderer.HIVE_SPHERE;
-    const now = Date.now();
     const still = this.options.pulse === false;
     const shine = this.options.shine ?? "metal";
-    const surface = this.rgb(this.surfaceColor);
-    const ash = mixRgb(this.rgb(this.mutedColor), surface, 0.55);
-    const ember = this.rgb(this.glowColor);
-    const unsettled = mixRgb(surface, this.rgb(this.mutedColor), 0.12);
-    const size = R * sphere * Math.sqrt((4 * Math.PI) / cells.length) * 0.55;
+    const size = R * sphere * Math.sqrt((4 * Math.PI) / hive.cells.length) * 0.55;
+    const n = hive.cells.length;
+    if (this.hiveXs.length !== n) {
+      this.hiveXs = new Float32Array(n);
+      this.hiveYs = new Float32Array(n);
+      this.hiveZs = new Float32Array(n);
+    }
+    const xs = this.hiveXs;
+    const ys = this.hiveYs;
+    const zs = this.hiveZs;
+    for (let i = 0; i < n; i++) {
+      const p = project(scale(hive.cells[i]!.p, sphere));
+      xs[i] = p.x;
+      ys[i] = p.y;
+      zs[i] = p.z / sphere;
+    }
 
-    const placed = cells.map((cell, i) => ({ cell, node: nodes[i] ?? null, p: project(scale(cell.p, sphere)) }));
-    placed.sort((a, b) => a.p.z - b.p.z);
-    for (const { cell, node, p } of placed) {
-      // The cell's normal in screen space: its own direction from the sphere's centre.
-      const nx = (p.x - cx) / (R * sphere);
-      const ny = (p.y - cy) / (R * sphere);
-      const nz = p.z / sphere;
-      const front = nz > 0;
-      let heat = 0;
-      let col: Rgb = unsettled;
-      // In the time travel a note not yet born is an unsettled cell, and one born just then glows: the vault grows.
-      const cutoff = this.timeCutoff;
-      const born = node?.created ? Date.parse(node.created) : null;
-      const settled = node !== null && (cutoff === null || born === null || born <= cutoff);
-      if (node && settled) {
-        const touched = cutoff === null ? (node.modified ? Date.parse(node.modified) : null) : born;
-        const ember_ = emberOf(touched, cutoff ?? now);
-        heat = ember_.heat;
-        col = mixRgb(mixRgb(this.rgb(node.color), ash, ember_.ash), ember, heat);
-      }
-      if (front && shine !== "calm") {
-        const wave = Math.sin(t * 1.7 + cell.phase * TWO_PI);
-        const twinkle = still ? 1 : 0.82 + 0.18 * wave;
-        if (shine === "twinkle") {
-          col = [col[0] * twinkle, col[1] * twinkle, col[2] * twinkle];
-        } else {
-          const { shade, spec } = metalLight([nx, ny, nz], still ? 1 : 0.6 + 0.4 * wave);
-          const lit = (v: number): number => Math.min(255, v * shade * twinkle + (255 - v) * spec * 0.45);
-          col = [lit(col[0]), lit(col[1]), lit(col[2])];
+    // The far side first, then the near one: on a ball that is all the ordering the cells need.
+    for (const nearSide of [false, true]) {
+      for (let i = 0; i < n; i++) {
+        const nz = zs[i]!;
+        const front = nz > 0;
+        if (front !== nearSide) continue;
+        const cell = hive.cells[i]!;
+        const node = hive.nodes[i] ?? null;
+        const tone = tones[i]!;
+        const x = xs[i]!;
+        const y = ys[i]!;
+        // The cell's normal in screen space: its own direction from the sphere's centre.
+        const nx = (x - cx) / (R * sphere);
+        const ny = (y - cy) / (R * sphere);
+        let [r, g, b] = tone.col;
+        if (front && shine !== "calm") {
+          const wave = Math.sin(t * 1.7 + cell.phase * TWO_PI);
+          const twinkle = still ? 1 : 0.82 + 0.18 * wave;
+          if (shine === "twinkle") {
+            r *= twinkle;
+            g *= twinkle;
+            b *= twinkle;
+          } else {
+            const { shade, spec } = metalLight(nx, ny, nz, still ? 1 : 0.6 + 0.4 * wave);
+            const k = shade * twinkle;
+            r = Math.min(255, r * k + (255 - r) * spec * 0.45);
+            g = Math.min(255, g * k + (255 - g) * spec * 0.45);
+            b = Math.min(255, b * k + (255 - b) * spec * 0.45);
+          }
         }
-      }
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      // Foreshortened towards the rim, as a flat plate on a ball would be.
-      ctx.rotate(Math.atan2(ny, nx));
-      ctx.scale(Math.max(Math.abs(nz), 0.12), 1);
-      this.hexagonPath(size * (front ? 0.92 : 0.7));
-      ctx.globalAlpha = front ? (settled ? 1 : 0.55) : 0.13;
-      if (front && heat > 0.2) {
-        // On a light ground a shine only looks dirty: a tighter, tinted shadow there.
-        ctx.shadowBlur = (this.lightScheme ? 6 : 14) * heat;
-        ctx.shadowColor = this.glowColor;
-      }
-      ctx.fillStyle = `rgb(${Math.round(col[0])},${Math.round(col[1])},${Math.round(col[2])})`;
-      ctx.fill();
-      ctx.restore();
-      if (node) {
-        this.cellPos.set(node.id, { x: p.x, y: p.y, front });
-        // Only a front cell of a note that exists can be pointed at; others are parked far off for the hit test.
-        node.sx = front && settled ? p.x : -1e6;
-        node.sy = front && settled ? p.y : -1e6;
+        ctx.save();
+        ctx.translate(x, y);
+        // Foreshortened towards the rim, as a flat plate on a ball would be.
+        ctx.rotate(Math.atan2(ny, nx));
+        ctx.scale(Math.max(Math.abs(nz), 0.12), 1);
+        this.hexagonPath(size * (front ? 0.92 : 0.7));
+        ctx.globalAlpha = front ? (tone.settled ? 1 : 0.55) : 0.13;
+        if (front && tone.blur) {
+          // On a light ground a shine only looks dirty: a tighter, tinted shadow there.
+          ctx.shadowBlur = (this.lightScheme ? 6 : 14) * tone.heat;
+          ctx.shadowColor = this.glowColor;
+        }
+        ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+        ctx.fill();
+        ctx.restore();
+        if (node) {
+          this.cellPos.set(node.id, { x, y, front });
+          // Only a front cell of a note that exists can be pointed at; others are parked far off for the hit test.
+          node.sx = front && tone.settled ? x : -1e6;
+          node.sy = front && tone.settled ? y : -1e6;
+        }
       }
     }
     ctx.globalAlpha = 1;
@@ -869,6 +898,62 @@ export class GraphRenderer {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  /** How long a cell's tone (colour, heat) is kept before it is worked out again: heat fades by the hour. */
+  private static readonly TONE_TTL_MS = 1000;
+  /** The most cells drawn with the glow's blur at once — a blur per cell is the costly part after a large sync. */
+  private static readonly MAX_BLURRED = 150;
+
+  /**
+   * The hive for a new model. The 30-second refresh makes a new model with the same notes most of the time: then the
+   * sphere is kept and only its cells are tied to the new nodes, instead of growing the ball again.
+   */
+  private rebuildHive(model: GraphModel): void {
+    const files = model.nodes.filter((n) => n.kind === "file");
+    const signature = files.map((n) => `${n.id}\u0001${n.area ?? ""}`).join("\u0002");
+    const kept = this.hive?.signature === signature ? this.hive.cells : null;
+    const cells = kept ?? buildHive(files.map((n) => ({ id: n.id, area: n.area })));
+    const nodes = cells.map((c) => (c.fileId ? (model.byId.get(c.fileId) ?? null) : null));
+    this.hive = { model, signature, cells, nodes };
+    this.cellPos.clear();
+    this.toneAt = 0;
+  }
+
+  /**
+   * Each cell's colour before the shimmer, its heat, whether it is settled and whether it gets the glow's blur —
+   * worked out at most once a second (and at once after a change of colours, the time travel or a landed spark),
+   * not in every frame.
+   */
+  private hiveTones(hive: NonNullable<GraphRenderer["hive"]>): HiveTone[] {
+    const now = Date.now();
+    const key = `${this.surfaceColor}|${this.mutedColor}|${this.glowColor}|${this.timeCutoff}`;
+    const fresh = now - this.toneAt < GraphRenderer.TONE_TTL_MS;
+    if (this.tones.length === hive.cells.length && key === this.toneKey && fresh) return this.tones;
+    const surface = this.rgb(this.surfaceColor);
+    const ash = mixRgb(this.rgb(this.mutedColor), surface, 0.55);
+    const ember = this.rgb(this.glowColor);
+    const unsettled = mixRgb(surface, this.rgb(this.mutedColor), 0.12);
+    const cutoff = this.timeCutoff;
+    const tones: HiveTone[] = hive.nodes.map((node) => {
+      // In the time travel a note not yet born is an unsettled cell, and one born just then glows: the vault grows.
+      const born = node?.created ? Date.parse(node.created) : null;
+      const settled = node !== null && (cutoff === null || born === null || born <= cutoff);
+      if (!node || !settled) return { col: unsettled, heat: 0, settled: false, blur: false };
+      const touched = cutoff === null ? (node.modified ? Date.parse(node.modified) : null) : born;
+      const glow = emberOf(touched, cutoff ?? now);
+      const col = mixRgb(mixRgb(this.rgb(node.color), ash, glow.ash), ember, glow.heat);
+      return { col, heat: glow.heat, settled: true, blur: false };
+    });
+    tones
+      .filter((tone) => tone.heat > 0.2)
+      .sort((a, b) => b.heat - a.heat)
+      .slice(0, GraphRenderer.MAX_BLURRED)
+      .forEach((tone) => (tone.blur = true));
+    this.tones = tones;
+    this.toneKey = key;
+    this.toneAt = now;
+    return tones;
   }
 
   /** A pointy-top hexagon of circumradius `r` around the current origin, as the current path. */

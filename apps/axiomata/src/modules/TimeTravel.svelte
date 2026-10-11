@@ -65,7 +65,12 @@
     open = false;
   }
 
-  onDestroy(stop);
+  // Hidden (the Second Brain opened over the Orbit): back to today, or the hive would stay in the past while the
+  // slider, mounted afresh, says "today".
+  onDestroy(() => {
+    stop();
+    onTravel(null);
+  });
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

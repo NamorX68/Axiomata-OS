@@ -79,8 +79,8 @@ describe("mixRgb and metalLight", () => {
   });
 
   it("lights a plate facing the upper left brighter than one facing away", () => {
-    const lit = metalLight([-0.45, -0.55, 0.7], 1);
-    const away = metalLight([0.45, 0.55, -0.7], 1);
+    const lit = metalLight(-0.45, -0.55, 0.7, 1);
+    const away = metalLight(0.45, 0.55, -0.7, 1);
     expect(lit.shade).toBeGreaterThan(away.shade);
     expect(away.spec).toBe(0);
   });

@@ -351,15 +351,31 @@ pub fn link_targets(text: &str) -> Vec<String> {
 
 /// The `created:` of a Markdown file's frontmatter (the `---` block at its very top), in the forms Obsidian and hand
 /// edits write: RFC 3339, `YYYY-MM-DD HH:MM[:SS]` or a bare `YYYY-MM-DD` (taken as midnight UTC). `None` without a
-/// frontmatter, without the key, or for a value that is none of those.
+/// frontmatter, without the key, for a value that is none of those, and for a date no note can have (before
+/// [`EARLIEST_CREATED_YEAR`] or still to come). The key is matched without regard to case; a BOM is skipped.
 fn frontmatter_created(head: &str) -> Option<DateTime<Utc>> {
+    let stated = parse_created(head)?;
+    // A typo ("0001-01-01") or a date not yet come would stretch the Orbit's time travel over centuries.
+    let earliest = chrono::NaiveDate::from_ymd_opt(EARLIEST_CREATED_YEAR, 1, 1)?
+        .and_hms_opt(0, 0, 0)?
+        .and_utc();
+    (stated >= earliest && stated <= Utc::now()).then_some(stated)
+}
+
+/// The first year a stated `created:` is believed: older is a typo, not a note.
+const EARLIEST_CREATED_YEAR: i32 = 1990;
+
+fn parse_created(head: &str) -> Option<DateTime<Utc>> {
+    let head = head.strip_prefix('\u{feff}').unwrap_or(head);
     let body = head
         .strip_prefix("---\n")
         .or_else(|| head.strip_prefix("---\r\n"))?;
     let end = body.find("\n---")?;
     let value = body[..end].lines().find_map(|line| {
-        let rest = line.trim_start().strip_prefix("created:")?;
-        Some(rest.trim().trim_matches(|c| c == '"' || c == '\''))
+        let line = line.trim_start();
+        let (key, rest) = line.split_once(':')?;
+        key.eq_ignore_ascii_case("created")
+            .then(|| rest.trim().trim_matches(|c| c == '"' || c == '\''))
     })?;
     if let Ok(at) = DateTime::parse_from_rfc3339(value) {
         return Some(at.with_timezone(&Utc));
@@ -564,6 +580,13 @@ mod tests {
             None
         );
         assert_eq!(frontmatter_created("---\ncreated: 2024-01-01\n"), None);
+    }
+
+    #[test]
+    fn ignores_impossible_dates_and_tolerates_a_bom_and_a_capital_key() {
+        assert_eq!(frontmatter_created("---\ncreated: 0001-01-01\n---\n"), None);
+        assert_eq!(frontmatter_created("---\ncreated: 2999-01-01\n---\n"), None);
+        assert!(frontmatter_created("\u{feff}---\nCreated: 2024-01-01\n---\n").is_some());
     }
 
     #[test]

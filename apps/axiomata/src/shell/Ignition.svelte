@@ -52,7 +52,7 @@
     class:ignite={phase === "ignite"}
     aria-hidden="true"
     onpointerdown={skip}
-    out:fade={{ duration: phase === "wait" ? 120 : OPEN_MS }}
+    out:fade={{ duration: OPEN_MS }}
   >
     {#if phase === "ignite"}
       <svg viewBox="0 0 100 100" class="logo">
@@ -74,6 +74,11 @@
     justify-items: center;
     gap: var(--ax-space-3);
     background: var(--ax-bg);
+  }
+
+  /* While it fades out (Svelte makes an outroing element inert) the app beneath is already there to be used. */
+  .cover:global([inert]) {
+    pointer-events: none;
   }
 
   .logo {
