@@ -46,17 +46,22 @@ export interface ArcSegment {
   live: boolean;
 }
 
-/** Today's timed events as arc segments (all-day events have no place on a clock); outside the arc's hours, none. */
+/**
+ * Today's timed events as arc segments (all-day events have no place on a clock); outside the arc's hours, none. An
+ * event reaching into today from yesterday starts at the arc's beginning, one running on past midnight ends at its end.
+ */
 export function arcSegments(events: readonly CalendarEvent[], now: number): ArcSegment[] {
-  const today = new Date(now).toDateString();
+  const d = new Date(now);
+  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
   const segments: ArcSegment[] = [];
   for (const e of events) {
     if (e.allDay) continue;
     const start = Date.parse(e.start);
     const end = Date.parse(e.end);
-    if (Number.isNaN(start) || Number.isNaN(end) || new Date(start).toDateString() !== today) continue;
-    const from = arcFraction(start);
-    const to = arcFraction(end);
+    if (Number.isNaN(start) || Number.isNaN(end) || end <= dayStart || start >= dayEnd) continue;
+    const from = start < dayStart ? 0 : arcFraction(start);
+    const to = end >= dayEnd ? 1 : arcFraction(end);
     if (to <= from) continue;
     segments.push({ id: e.id, title: e.title, from, to, live: start <= now && now < end });
   }

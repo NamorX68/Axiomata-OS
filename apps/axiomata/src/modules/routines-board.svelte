@@ -64,7 +64,8 @@
     return r.id === nextId ? "next" : "queued";
   }
 
-  const TONES: Record<ReturnType<typeof statusOf>, StatusTone> = { next: "live", queued: "ok", off: "off" };
+  // "Next" is waiting, not working: its fuse glows, its mark does not (the accent rule).
+  const TONES: Record<ReturnType<typeof statusOf>, StatusTone> = { next: "ok", queued: "neutral", off: "off" };
 
   /** A backend timestamp in ms, or `null`. */
   const ms = (text: string | null | undefined): number | null => {

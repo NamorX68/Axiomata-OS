@@ -5,7 +5,7 @@
   `filterBackend` ("" = all) and `order` ("name" | "recent").
 
   Calm at rest ("Glut + Hex", UX3): the skill that runs is the one card that glows — its icon lights up and its run
-  button turns into a breathing status mark; the last outcome is a hex mark.
+  button turns into a quiet "busy" mark; the last outcome is a hex mark.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -124,11 +124,13 @@
             class="run"
             disabled={busy}
             aria-label="Run {s.name}"
+            aria-busy={busy}
             title={busy ? "Running…" : "Run"}
             onclick={() => run(s.name)}
           >
             {#if busy}
-              <StatusMark tone="live" size="md" />
+              <!-- The card already glows: one glowing cue is enough, the mark only says "busy". -->
+              <StatusMark tone="neutral" size="md" />
             {:else}
               <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.5v9l7-4.5z" /></svg>
             {/if}

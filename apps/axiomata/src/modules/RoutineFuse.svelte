@@ -3,15 +3,16 @@
   like a fuse — ash behind the spark, the rest of the fuse ahead, a hex charge at the end. How far it has burnt is
   `core/fuse.ts`.
 
-  At motion Full the spark throws a few embers (one animation frame loop, paused by the browser while the window is
-  hidden); at Calm and Off the spark holds still and the fuse is drawn again every few seconds.
+  At motion Full the spark throws a few embers (one animation frame loop, only while the fuse is on screen — the
+  browser pauses it in a hidden window); at Calm and Off, or scrolled away, the spark holds still and the fuse is
+  drawn again every few seconds.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
   import { get } from "svelte/store";
 
   import { fuseProgress } from "../core/fuse";
-  import { animates, motion } from "../core/motion";
+  import { animates, motion, type MotionLevel } from "../core/motion";
   import { uiScale } from "../core/uiScale";
 
   interface Props {
@@ -98,15 +99,17 @@
       ctx.fill();
       ctx.stroke();
 
-      // The spark: the one glowing thing here.
+      // The spark: the one glowing thing here. A blurred shadow rather than a gradient to "transparent", which would
+      // fade through transparent black and leave a dark fringe.
       const glowColor = color("--ax-glow");
-      const spark = ctx.createRadialGradient(bx, y, 0, bx, y, 7 * scale);
-      spark.addColorStop(0, glowColor);
-      spark.addColorStop(1, "transparent");
-      ctx.fillStyle = spark;
+      ctx.save();
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = 8 * scale;
+      ctx.fillStyle = glowColor;
       ctx.beginPath();
-      ctx.arc(bx, y, 7 * scale, 0, Math.PI * 2);
+      ctx.arc(bx, y, 2.2 * scale, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
 
       if (!withEmbers) return;
       const dt = Math.min(0.05, (now - last) / 1000);
@@ -133,9 +136,13 @@
       timer = null;
     };
 
-    const start = (level: string): void => {
+    let level: MotionLevel = "full";
+    let onScreen = true;
+
+    // The ember loop runs only at Full and while the fuse is on screen; otherwise it is drawn again now and then.
+    const start = (): void => {
       stop();
-      if (animates(level as Parameters<typeof animates>[0])) {
+      if (animates(level) && onScreen) {
         const frame = (now: number): void => {
           draw(now, true);
           raf = requestAnimationFrame(frame);
@@ -148,17 +155,31 @@
       }
     };
 
-    size();
-    const observer = new ResizeObserver(() => {
+    const resize = (): void => {
       size();
       draw(performance.now(), false);
-    });
+    };
+    size();
+    const observer = new ResizeObserver(resize);
     observer.observe(el);
-    const unsubscribe = motion.subscribe(start);
+    const visibility = new IntersectionObserver((entries) => {
+      onScreen = entries.some((e) => e.isIntersecting);
+      start();
+    });
+    visibility.observe(el);
+    // A move to a display of another density changes no size, only the pixel ratio: the canvas must follow it.
+    const density = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    density.addEventListener("change", resize);
+    const unsubscribe = motion.subscribe((next) => {
+      level = next;
+      start();
+    });
     return () => {
       stop();
       unsubscribe();
       observer.disconnect();
+      visibility.disconnect();
+      density.removeEventListener("change", resize);
     };
   });
 </script>

@@ -50,6 +50,18 @@ describe("arcSegments", () => {
     expect(oneOnOne?.live).toBe(true);
   });
 
+  it("keeps an event that crosses midnight, cut at the arc's ends", () => {
+    const [late, early] = arcSegments(
+      [
+        event({ id: "late", start: iso(at(21)), end: iso(at(25)) }),
+        event({ id: "early", start: iso(at(-2)), end: iso(at(8)) }),
+      ],
+      at(12),
+    );
+    expect(late).toMatchObject({ from: expect.closeTo(0.9375), to: 1 });
+    expect(early).toMatchObject({ from: 0, to: expect.closeTo(0.125) });
+  });
+
   it("leaves out all-day events, other days and events wholly outside the arc", () => {
     const segments = arcSegments(
       [
