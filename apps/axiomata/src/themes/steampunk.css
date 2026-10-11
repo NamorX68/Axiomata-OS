@@ -8,6 +8,8 @@
  */
 
 [data-theme="steampunk"] {
+  /* G1: the serif is this theme's title face (the Studio sets it back to the UI face). */
+  --ax-font-title: var(--ax-font-display);
   --ax-color-scheme: dark;
 
   --ax-bg: #110d0a;

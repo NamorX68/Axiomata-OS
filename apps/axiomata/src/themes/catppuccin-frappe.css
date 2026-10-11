@@ -7,6 +7,8 @@
  */
 
 [data-theme="catppuccin-frappe"] {
+  /* The glow stays in the orange family (G2): the palette's own Peach. */
+  --ax-glow: #ef9f76;
   --ax-bg: #232634;
   --ax-surface-1: #292c3c;
   --ax-surface-2: #303446;

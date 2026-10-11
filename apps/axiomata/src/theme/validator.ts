@@ -61,6 +61,13 @@ export const ALLOWED_TOKENS: readonly string[] = [
   "--ax-shadow-drag",
   "--ax-texture-url",
   "--ax-tracking-wide",
+  // Glut + Hex (docs/plans/ui-ux-round.md): the glow, the elevation edge and the title face are the palette's too.
+  "--ax-font-title",
+  "--ax-glow",
+  "--ax-glow-shadow",
+  "--ax-edge-light",
+  "--ax-shadow-panel",
+  "--ax-ash",
   ...["keyword", "string", "number", "comment", "function", "type", "variable", "constant", "property"].map(
     (t) => `--ax-syntax-${t}`,
   ),

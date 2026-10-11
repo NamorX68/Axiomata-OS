@@ -22,7 +22,7 @@
   (full-bleed behind every tile), so a click has to be checked against the
   cloud's actual footprint explicitly — otherwise any click on empty
   dashboard background would open Second Brain too (owner feedback: "egal
-  wo ich auf den Hintergrund klicke ich im Brain lande"). The motion and the labels come from `core/brainView.ts`.
+  wo ich auf den Hintergrund klicke ich im Brain lande"). The speed and the labels come from `core/brainView.ts`, whether it moves from `core/motion.ts`.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -41,6 +41,7 @@
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import { invokeBackend, type WorkspaceGraph } from "../core/backend";
   import { brainActive, brainView, spinOf } from "../core/brainView";
+  import { animates, motion } from "../core/motion";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
   import { openFilePanel } from "../core/staging";
@@ -107,8 +108,8 @@
    *  it rather than tracking a set. */
   let expandedGroupId = $state<string | null>(null);
 
-  // The motion and the captions are app settings now (`core/brainView.ts`), not this instance's config.
-  const spin = $derived(spinOf($brainView));
+  // The speed and the captions are app settings now (`core/brainView.ts`), the motion the app-wide level (`core/motion.ts`).
+  const spin = $derived(spinOf($brainView, $motion));
   const labels = $derived($brainView.labels);
   /** The "+" button's diameter, in lockstep with the App Ring's own icon
    *  nodes (`appNodeRadiusPx`) — so it reads as one of the ring's slots
@@ -352,7 +353,7 @@
   $effect(() => {
     // Read the reactive inputs first — an early return on a missing renderer
     // would otherwise leave the effect without dependencies.
-    const next = { mode: "orbit" as const, spin, labels, pulse: $brainView.motion };
+    const next = { mode: "orbit" as const, spin, labels, pulse: animates($motion) };
     if (renderer) renderer.options = { ...renderer.options, ...next };
   });
 

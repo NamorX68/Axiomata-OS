@@ -19,6 +19,14 @@
  * `~/.axiomata/theme.css` may override the palette tokens too, but ONLY these
  * exact `--ax-*` names and ONLY under `:root` / `[data-theme="custom"]` — the
  * validator (src/theme/validator.ts) rejects anything else.
+ *
+ * THE ACCENT RULE ("Glut + Hex", docs/plans/ui-ux-round.md U1): the accent —
+ * and its glow, `--ax-glow*` — means "something lives, works or needs you
+ * here": a running agent, skill or routine, a question waiting, the one
+ * primary action of the moment, the selection. Nothing else is orange: not
+ * titles, not icons, not every button. A calm surface is what makes the
+ * glow readable. The hexagon is the system's shape (avatars, status marks,
+ * empty states).
  */
 
 :root {
@@ -62,6 +70,11 @@
   --ax-z-toast: 10500;
 
   --ax-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* A spring with a little overshoot: panels flying in from their origin, the hex sparks. */
+  --ax-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* The glow's breath (G3): one slow cycle; `data-motion="calm"|"off"` turns the animation off, the glow stays. */
+  --ax-dur-breath: 2600ms;
+  --ax-anim-breathe: ax-breathe var(--ax-dur-breath) var(--ax-ease) infinite;
   --ax-dur-fast: 120ms;
   --ax-dur-med: 260ms;
   /* Slide-ins (chat, staged panels) — deliberately unhurried. */
@@ -84,13 +97,19 @@
      unchanged from before this token existed. */
   --ax-tile-glass-opacity: 1;
 
-  --ax-font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
+  /* The three bundled UI faces (U3/G1, `core/uiFont.ts`); `data-ui-font` on <html> picks one as `--ax-font-sans`. */
+  --ax-font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --ax-font-geist: "Geist Variable", var(--ax-font-system);
+  --ax-font-inter: "Inter Variable", var(--ax-font-system);
+  --ax-font-plex: "IBM Plex Sans Variable", var(--ax-font-system);
+  --ax-font-sans: var(--ax-font-geist);
   --ax-font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   /* Display face for the logo line and panel headings; themes may swap it. */
   --ax-font-display: var(--ax-font-sans);
+  /* The face of the title role (G1): the UI face, unless a theme gives its titles a character of its own (Paper's
+     serif). The Studio sets it back to the UI face — a workbench is not a page. */
+  --ax-font-title: var(--ax-font-sans);
   /* Letter-spacing for the uppercase panel headings ("SKILLS DECK"). */
   --ax-tracking-wide: 0.14em;
   /* The type scale (K11): reading text never below `sm`; `xs` only for tags and counts. */
@@ -99,6 +118,19 @@
   --ax-font-size-base: calc(14px * var(--ax-ui-scale));
   --ax-font-size-lg: calc(16px * var(--ax-ui-scale));
   --ax-font-size-xl: calc(20px * var(--ax-ui-scale));
+  --ax-font-size-display: calc(32px * var(--ax-ui-scale));
+
+  /* Type roles (U1 §3): what a piece of text *is*, not just how big. One title style everywhere (panel and tile
+     titles), labels as small caps-like uppercase with one tracking, display numbers as the heroes of a tile. Mono is
+     for code, paths, ids and commands only. */
+  --ax-type-caption: 400 var(--ax-font-size-xs) / 1.4 var(--ax-font-sans);
+  --ax-type-body: 400 var(--ax-font-size-sm) / var(--ax-line-height) var(--ax-font-sans);
+  --ax-type-label: 600 calc(11px * var(--ax-ui-scale)) / 1.2 var(--ax-font-sans);
+  --ax-tracking-label: 0.08em;
+  --ax-type-title: 600 calc(15px * var(--ax-ui-scale)) / 1.3 var(--ax-font-title);
+  --ax-type-heading: 600 calc(18px * var(--ax-ui-scale)) / 1.25 var(--ax-font-title);
+  --ax-type-display: 600 var(--ax-font-size-display) / 1 var(--ax-font-title);
+  --ax-tracking-tight: -0.015em;
   /* The terminal's default text size — a content font like the editor's, so not scaled. */
   --ax-terminal-font-size: 12px;
   --ax-line-height: 1.5;
@@ -185,6 +217,26 @@
   --ax-label-5: #c0a13f;
   --ax-label-6: #5aa8a8;
 
+  /* Elevation (U1 §3): the ground, a tile, a panel, a popover. Each step is a tone *and* a 1-px light edge along the
+     top — the glass edge carries depth where a shadow cannot (dark themes); light themes redefine the edge. */
+  --ax-elev-0: var(--ax-bg);
+  --ax-elev-1: var(--ax-surface-1);
+  --ax-elev-2: var(--ax-surface-2);
+  --ax-elev-3: var(--ax-surface-3);
+  --ax-edge-light: rgba(255, 255, 255, 0.07);
+  --ax-shadow-panel: inset 0 1px 0 var(--ax-edge-light), 0 18px 40px rgba(0, 0, 0, 0.45);
+  --ax-shadow-raised: inset 0 1px 0 var(--ax-edge-light);
+
+  /* The glow ("Glut", U1/G2): always the orange family, also in themes whose accent is not orange (their palette's own
+     orange then). In dark themes it shines (an additive blur); light themes set `--ax-glow-shadow` to a tinted shadow
+     instead, because a shine on a light ground only looks dirty. */
+  --ax-glow: var(--ax-accent);
+  --ax-glow-soft: color-mix(in srgb, var(--ax-glow) 16%, transparent);
+  --ax-glow-strong: color-mix(in srgb, var(--ax-glow) 55%, transparent);
+  --ax-glow-shadow: 0 0 calc(12px * var(--ax-ui-scale)) var(--ax-glow-strong);
+  /* The colour a cell ages into when nobody touched it for long (the Orbit's ember ageing, W2). */
+  --ax-ash: color-mix(in srgb, var(--ax-text-muted) 45%, var(--ax-bg));
+
   --ax-shadow-tile: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.32);
   --ax-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.5);
   --ax-shadow-drag: 0 16px 48px rgba(0, 0, 0, 0.55);
@@ -241,4 +293,18 @@
   --ax-diag-hint: var(--ax-text-muted);
   --ax-diag-dot: 6px;
   --ax-diag-wave: 8px 3px;
+}
+
+/* The UI face (`core/uiFont.ts`). Geist is the default above. */
+[data-ui-font="inter"] {
+  --ax-font-sans: var(--ax-font-inter);
+}
+[data-ui-font="plex"] {
+  --ax-font-sans: var(--ax-font-plex);
+}
+
+/* Calm and Off (`core/motion.ts`, G3): the glow holds still. */
+[data-motion="calm"],
+[data-motion="off"] {
+  --ax-anim-breathe: none;
 }

@@ -5,6 +5,10 @@ import { mount } from "svelte";
 // specificity (0,1,0) on purpose (see `themes/tokens.css`), so a tie between
 // them resolves by CSS source order, not selector strength. Reordering these
 // imports would make the fallback palette win over every theme.
+// The three bundled UI faces (U3, `core/uiFont.ts`), variable weight; `tokens.css` names them.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/ibm-plex-sans";
 import "./themes/tokens.css";
 import "./themes/graphite.css";
 import "./themes/paper.css";
@@ -112,6 +116,8 @@ import { loadCustomTheme } from "./core/custom-theme";
 import { initPersistence } from "./core/persist";
 import { DEFAULT_THEME, applyTheme } from "./core/themes";
 import { startUiScale } from "./core/uiScale";
+import { startMotion } from "./core/motion";
+import { startUiFont } from "./core/uiFont";
 import { registerBuiltins } from "./modules";
 
 // Paint the default theme immediately; `initPersistence` swaps in the saved
@@ -120,6 +126,8 @@ applyTheme(DEFAULT_THEME);
 // The UI scale for the window's display (LK0, K9), before the first paint settles;
 // the saved "UI size" (`initPersistence`) may override it a moment later.
 startUiScale();
+startUiFont();
+startMotion();
 // The editor's own colour theme follows its setting from the first paint; the file is read once at start.
 editorSettings.subscribe((settings) => applyEditorTheme(settings.editorTheme));
 void ensureEditorSettingsLoaded();

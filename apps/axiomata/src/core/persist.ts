@@ -9,7 +9,9 @@
  * through untouched.
  */
 
-import { brainView, readBrainView } from "./brainView";
+import { brainView, legacyMotionLevel, readBrainView } from "./brainView";
+import { isMotionLevel, motionSetting } from "./motion";
+import { isUiFont, uiFont } from "./uiFont";
 import { get } from "svelte/store";
 
 import { appGroups, loadAppGroups, type AppGroup } from "./appGroups";
@@ -258,9 +260,21 @@ export async function initPersistence(): Promise<void> {
   keyboardSetting.set(isKeyboardSetting(savedKeyboard) ? savedKeyboard : "auto");
   // Written back at once: the Second Brain view rewrites its own preferences, and the old rotation/file-names values that
   // this is taken over from would be gone before the first change.
-  const savedBrainView = readBrainView(getSetting<unknown>("brainView"), getSetting<unknown>("secondBrain"));
+  const storedBrainView = getSetting<unknown>("brainView");
+  const savedBrainView = readBrainView(storedBrainView, getSetting<unknown>("secondBrain"));
   brainView.set(savedBrainView);
   setSetting("brainView", savedBrainView);
+  // The app-wide motion level replaced the graph's own switch (`core/motion.ts`); a graph that was switched off keeps
+  // standing still, once, until the level has been stored.
+  const savedMotion = getSetting<unknown>("motion");
+  motionSetting.set(
+    isMotionLevel(savedMotion)
+      ? savedMotion
+      : (legacyMotionLevel(storedBrainView, getSetting<unknown>("secondBrain")) ?? "full"),
+  );
+  setSetting("motion", get(motionSetting));
+  const savedUiFont = getSetting<unknown>("uiFont");
+  if (isUiFont(savedUiFont)) uiFont.set(savedUiFont);
   loading = false;
   onDirty(scheduleSave);
   // Svelte stores call the subscriber once immediately, so this also
@@ -286,6 +300,13 @@ export async function initPersistence(): Promise<void> {
   });
   brainView.subscribe((v) => {
     if (!first) setSetting("brainView", v);
+  });
+  // `motion.ts` and `uiFont.ts` put these on `<html>`; only their persistence is here.
+  motionSetting.subscribe((v) => {
+    if (!first) setSetting("motion", v);
+  });
+  uiFont.subscribe((v) => {
+    if (!first) setSetting("uiFont", v);
   });
   // `uiScale.ts` applies it; only its persistence is here.
   uiSize.subscribe((v) => {

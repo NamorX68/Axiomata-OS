@@ -4,7 +4,7 @@
   pops the module's settings face, and × to remove it.
 -->
 <script lang="ts">
-  import { brainView } from "../core/brainView";
+  import { motion, motionSetting, systemReducesMotion, turns, type MotionLevel } from "../core/motion";
   import { getModule, makeContext } from "../core/registry";
   import { removeInstance } from "../core/stores";
   import type { CanvasInstance } from "../core/types";
@@ -17,6 +17,17 @@
   const ctx = makeContext(inst);
 
   let settingsOpen = $state(false);
+
+  // Pausing remembers the level it came from, so pause and resume give Calm back as Calm, not as Full.
+  let resumeTo: MotionLevel = "full";
+  function toggleMotion(): void {
+    if (turns($motion)) {
+      resumeTo = $motionSetting;
+      motionSetting.set("off");
+    } else {
+      motionSetting.set(resumeTo === "off" ? "full" : resumeTo);
+    }
+  }
 </script>
 
 <div class="host" data-background={inst.id}>
@@ -27,9 +38,10 @@
     <button
       type="button"
       aria-label="Motion"
-      aria-pressed={$brainView.motion}
-      title={$brainView.motion ? "Pause motion" : "Start motion"}
-      onclick={() => brainView.update((v) => ({ ...v, motion: !v.motion }))}>{$brainView.motion ? "⏸" : "▶"}</button
+      aria-pressed={turns($motion)}
+      disabled={$systemReducesMotion}
+      title={$systemReducesMotion ? "macOS “Reduce motion” is on" : turns($motion) ? "Pause motion" : "Start motion"}
+      onclick={toggleMotion}>{turns($motion) ? "⏸" : "▶"}</button
     >
     {#if def?.settings}
       <button type="button" aria-label="Background settings" title={def.title} onclick={() => (settingsOpen = !settingsOpen)}>⚙</button>

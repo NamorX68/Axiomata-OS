@@ -7,6 +7,8 @@
  */
 
 [data-theme="catppuccin-espresso"] {
+  /* The glow stays in the orange family (G2): the palette's own Peach (Macchiato's). */
+  --ax-glow: #f5a97f;
   --ax-bg: #000000;
   --ax-surface-1: #0a0a0a;
   --ax-surface-2: #181926;

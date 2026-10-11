@@ -7,6 +7,8 @@
  */
 
 [data-theme="catppuccin-macchiato"] {
+  /* The glow stays in the orange family (G2): the palette's own Peach. */
+  --ax-glow: #f5a97f;
   --ax-bg: #181926;
   --ax-surface-1: #1e2030;
   --ax-surface-2: #24273a;

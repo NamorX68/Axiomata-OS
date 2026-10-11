@@ -1079,6 +1079,13 @@
 
 <style>
   .ide {
+    /* A workbench is not a page (G1 of docs/plans/ui-ux-round.md): no theme serif in the Studio. The title-role
+       tokens are composed on <html>, so they are composed again here with the UI face. */
+    --ax-font-display: var(--ax-font-sans);
+    --ax-font-title: var(--ax-font-sans);
+    --ax-type-title: 600 calc(15px * var(--ax-ui-scale)) / 1.3 var(--ax-font-sans);
+    --ax-type-heading: 600 calc(18px * var(--ax-ui-scale)) / 1.25 var(--ax-font-sans);
+    --ax-type-display: 600 var(--ax-font-size-display) / 1 var(--ax-font-sans);
     /* The rail's width, shared with the header block that is centred over the rail and the tree. */
     --ide-rail-w: calc(57px * var(--ax-ui-scale));
     position: fixed;

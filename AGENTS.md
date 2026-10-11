@@ -181,7 +181,10 @@ from the code itself:
   `TextStore` instead (`syntax/highlighter.ts`). The CSP's `'wasm-unsafe-eval'` exists for tree-sitter.
 - **Themes**: every colour/size in a Svelte component goes through a `--ax-*` token
   (`themes/tokens.css`) — no literals. A user's `~/.axiomata/theme.css` is validated
-  (`:root { --ax-*: … }` only) before injection.
+  (`:root { --ax-*: … }` only) before injection. **The accent rule** (`docs/plans/ui-ux-round.md`, "Glut + Hex"):
+  orange/`--ax-glow` only where something lives, works or needs the owner (a running agent/skill, a waiting
+  question, the one primary action, the selection) — never titles, icons or every button; the hexagon is the system's
+  shape. Movement goes through `core/motion.ts` (Full/Calm/Off, macOS "Reduce motion" = Off), never its own switch.
 - **UI scale** (`docs/plans/editor-look.md`, K9–K11): every UI size is `N px × var(--ax-ui-scale)`
   (tokens already are; a size that is no token is written `calc(Npx * var(--ax-ui-scale))`), set by
   `core/uiScale.ts` from the display's real density (`axiomata-macos::display`) or the "UI size"

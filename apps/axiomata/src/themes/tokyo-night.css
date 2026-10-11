@@ -7,6 +7,8 @@
  */
 
 [data-theme="tokyo-night"] {
+  /* The glow stays in the orange family (G2): the palette's own orange. */
+  --ax-glow: #ff9e64;
   --ax-bg: #16161e;
   --ax-surface-1: #1a1b26;
   --ax-surface-2: #24283b;

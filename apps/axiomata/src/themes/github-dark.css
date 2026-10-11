@@ -7,6 +7,8 @@
  */
 
 [data-theme="github-dark"] {
+  /* The glow stays in the orange family (G2): the palette's own orange (Primer severe). */
+  --ax-glow: #db6d28;
   --ax-bg: #010409;
   --ax-surface-1: #0d1117;
   --ax-surface-2: #151b23;

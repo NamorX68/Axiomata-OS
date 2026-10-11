@@ -7,6 +7,8 @@
  */
 
 [data-theme="catppuccin-mocha"] {
+  /* The glow stays in the orange family (G2): the palette's own Peach. */
+  --ax-glow: #fab387;
   --ax-bg: #11111b;
   --ax-surface-1: #181825;
   --ax-surface-2: #1e1e2e;

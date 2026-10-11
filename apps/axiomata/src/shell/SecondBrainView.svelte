@@ -16,6 +16,7 @@
   import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime } from "../core/format";
   import { BRAIN_DISC, brainView, spinOf } from "../core/brainView";
+  import { motion } from "../core/motion";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel, staged } from "../core/staging";
   import { toast } from "../core/toast";
@@ -343,7 +344,7 @@
     if (renderer) {
       renderer.options = {
         ...renderer.options,
-        spin: spinOf($brainView),
+        spin: spinOf($brainView, $motion),
         labels: $brainView.labels,
         fileLabels: $brainView.fileNames,
         mode: renderMode,
@@ -389,7 +390,7 @@
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
     renderer.options = {
-      spin: spinOf($brainView),
+      spin: spinOf($brainView, $motion),
       labels: $brainView.labels,
       fileLabels: $brainView.fileNames,
       fit: DISC_FIT,

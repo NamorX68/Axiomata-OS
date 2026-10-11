@@ -7,6 +7,12 @@
  */
 
 [data-theme="github-light"] {
+  /* Glut + Hex (docs/plans/ui-ux-round.md): a light ground takes a bright edge and a tinted shadow, no shine. */
+  --ax-edge-light: rgba(255, 255, 255, 0.85);
+  --ax-shadow-panel: inset 0 1px 0 var(--ax-edge-light), 0 1px 2px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.1);
+  --ax-glow-shadow: 0 1px calc(4px * var(--ax-ui-scale)) color-mix(in srgb, var(--ax-glow) 40%, transparent);
+  /* The glow stays in the orange family (G2): the palette's own orange (Primer severe). */
+  --ax-glow: #bc4c00;
   --ax-color-scheme: light;
 
   --ax-bg: #f6f8fa;

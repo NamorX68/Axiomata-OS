@@ -18,6 +18,8 @@
     invokeBackend,
   } from "../core/backend";
   import { brainView, SPEED_MAX } from "../core/brainView";
+  import { MOTION_LEVELS, isMotionLevel, motion, motionSetting, systemReducesMotion, turns } from "../core/motion";
+  import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
   import { KEYBOARD_SETTINGS, isKeyboardSetting, keyboardSetting, platform, platformLabel } from "../core/keys";
@@ -299,6 +301,50 @@
         </section>
 
         <section>
+          <h3>Typeface</h3>
+          <div class="fonts" role="radiogroup" aria-label="Typeface">
+            {#each UI_FONTS as f (f.id)}
+              <button
+                type="button"
+                role="radio"
+                class="font"
+                class:active={$uiFont === f.id}
+                aria-checked={$uiFont === f.id}
+                style:font-family="var(--ax-font-{f.id})"
+                onclick={() => uiFont.set(f.id)}
+              >
+                <span class="sample">Aa</span>
+                <span class="name">{f.label}</span>
+              </button>
+            {/each}
+          </div>
+          <p class="hint">For the whole interface. Code in the editor and the terminal keep their own fonts.</p>
+        </section>
+
+        <section>
+          <h3>Motion</h3>
+          <label class="row">
+            <span class="label">Movement</span>
+            <select
+              value={$motionSetting}
+              onchange={(e) => {
+                const v = e.currentTarget.value;
+                if (isMotionLevel(v)) motionSetting.set(v);
+              }}
+            >
+              {#each MOTION_LEVELS as level (level.id)}
+                <option value={level.id}>{level.label}</option>
+              {/each}
+            </select>
+          </label>
+          <p class="hint">
+            Full: the glow breathes, sparks fly, the Orbit turns. Calm: the glow holds still, nothing flies, the Orbit
+            still turns. Off: nothing moves by itself.
+            {#if $systemReducesMotion}<strong>macOS “Reduce motion” is on, so motion is off.</strong>{/if}
+          </p>
+        </section>
+
+        <section>
           <h3>Canvas</h3>
           <label class="opt"><input type="checkbox" bind:checked={$showGrid} /> Show dot grid <span class="hint">(tiles snap to it either way)</span></label>
           <label class="opt"><input type="checkbox" bind:checked={$snapEdges} /> Magnetic edges <span class="hint">(tiles stick to their neighbours within 8 px)</span></label>
@@ -306,10 +352,9 @@
 
         <section>
           <h3>Orbit &amp; Second Brain</h3>
-          <label class="opt"><input type="checkbox" bind:checked={$brainView.motion} /> Motion <span class="hint">(the switch at the bottom left of the Orbit does the same)</span></label>
           <label class="opt">
             Speed
-            <input class="speed" type="range" min="0.005" max={SPEED_MAX} step="0.005" bind:value={$brainView.speed} disabled={!$brainView.motion} />
+            <input class="speed" type="range" min="0.005" max={SPEED_MAX} step="0.005" bind:value={$brainView.speed} disabled={!turns($motion)} />
           </label>
           <label class="opt"><input type="checkbox" bind:checked={$brainView.labels} /> Labels <span class="hint">(skills, areas and the hub)</span></label>
           <label class="opt"><input type="checkbox" bind:checked={$brainView.fileNames} /> File names <span class="hint">(next to every note in the Second Brain)</span></label>
@@ -333,9 +378,8 @@
             </select>
           </label>
           <p class="hint">
-            „Auto“ richtet sich nach der tatsächlichen Pixeldichte des Bildschirms, auf dem das Fenster liegt: auf
-            einem dichten Monitor wird die Oberfläche größer, damit sie so gut lesbar ist wie auf einem MacBook. Die
-            Schrift im Editor und im Terminal bleibt davon unberührt.
+            “Auto” follows the real pixel density of the display the window is on: on a dense monitor the interface
+            grows so it reads as well as on a MacBook. The fonts of the editor and the terminal are not affected.
           </p>
         </section>
 
@@ -365,7 +409,7 @@
         </section>
 
         <section>
-          <h3>Transparenz</h3>
+          <h3>Transparency</h3>
           <label class="row">
             <span class="label">Window transparency</span>
             <input type="range" min="0" max="100" step="5" bind:value={$windowTransparency} />
@@ -684,6 +728,36 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .fonts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ax-space-2);
+    margin-bottom: var(--ax-space-2);
+  }
+  .font {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-3);
+    text-align: left;
+    background: var(--ax-surface-2);
+  }
+  .font.active {
+    border-color: var(--ax-accent);
+    background: var(--ax-accent-muted);
+  }
+  .font .sample {
+    font-size: var(--ax-font-size-display);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .font .name {
+    font-size: var(--ax-font-size-sm);
+    color: var(--ax-text-muted);
   }
 
   .opt {

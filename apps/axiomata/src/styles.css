@@ -68,7 +68,8 @@ h1,
 h2,
 h3 {
   margin: 0;
-  font-family: var(--ax-font-display);
+  /* The title role (G1 of docs/plans/ui-ux-round.md): a theme's serif shows here, and nowhere in the Studio. */
+  font-family: var(--ax-font-title);
   font-weight: 600;
   line-height: 1.25;
 }
@@ -179,3 +180,19 @@ input[type="radio"] {
   outline-offset: 1px;
 }
 
+
+/* The glow's breath (`--ax-anim-breathe`, tokens.css): dims and returns, never vanishes. */
+@keyframes ax-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* The hexagon (U1): the system's shape, for avatars, status marks and empty states. */
+.ax-hex {
+  clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+}

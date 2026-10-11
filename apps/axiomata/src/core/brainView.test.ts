@@ -1,28 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_BRAIN_VIEW, readBrainView, spinOf } from "./brainView";
+import { DEFAULT_BRAIN_VIEW, legacyMotionLevel, readBrainView, spinOf } from "./brainView";
 
 describe("readBrainView", () => {
   it("starts with the defaults when nothing was stored", () => {
     expect(readBrainView(undefined)).toEqual(DEFAULT_BRAIN_VIEW);
   });
 
-  it("takes the stored setting as it is", () => {
+  it("takes the stored setting as it is, dropping the old motion switch", () => {
     const stored = { motion: false, speed: 0.06, labels: false, fileNames: true };
-    expect(readBrainView(stored)).toEqual(stored);
+    expect(readBrainView(stored)).toEqual({ speed: 0.06, labels: false, fileNames: true });
   });
 
   it("takes over the old Second Brain preferences: their slider and file names", () => {
     expect(readBrainView(undefined, { spin: 0.08, fileNames: true })).toEqual({
-      motion: true,
       speed: 0.08,
       labels: true,
       fileNames: true,
     });
   });
 
-  it("reads a rotation of 0 in the old preferences as the motion being off, keeping the default speed", () => {
-    expect(readBrainView(undefined, { spin: 0 })).toMatchObject({ motion: false, speed: DEFAULT_BRAIN_VIEW.speed });
+  it("keeps the default speed when the old preferences had the rotation at 0", () => {
+    expect(readBrainView(undefined, { spin: 0 })).toMatchObject({ speed: DEFAULT_BRAIN_VIEW.speed });
   });
 
   it("ignores values of the wrong type or out of range", () => {
@@ -30,9 +29,23 @@ describe("readBrainView", () => {
   });
 });
 
+describe("legacyMotionLevel", () => {
+  it("reads a switched-off graph as the app-wide motion being off", () => {
+    expect(legacyMotionLevel({ motion: false })).toBe("off");
+    expect(legacyMotionLevel(undefined, { spin: 0 })).toBe("off");
+  });
+
+  it("says nothing when the old switch was on or never stored", () => {
+    expect(legacyMotionLevel({ motion: true })).toBeNull();
+    expect(legacyMotionLevel(undefined)).toBeNull();
+    expect(legacyMotionLevel({ motion: true }, { spin: 0 })).toBeNull();
+  });
+});
+
 describe("spinOf", () => {
-  it("is the speed while the motion is on and 0 when it is off", () => {
-    expect(spinOf({ ...DEFAULT_BRAIN_VIEW, speed: 0.05 })).toBe(0.05);
-    expect(spinOf({ ...DEFAULT_BRAIN_VIEW, speed: 0.05, motion: false })).toBe(0);
+  it("is the speed while the graph may turn and 0 when motion is off", () => {
+    expect(spinOf({ ...DEFAULT_BRAIN_VIEW, speed: 0.05 }, "full")).toBe(0.05);
+    expect(spinOf({ ...DEFAULT_BRAIN_VIEW, speed: 0.05 }, "calm")).toBe(0.05);
+    expect(spinOf({ ...DEFAULT_BRAIN_VIEW, speed: 0.05 }, "off")).toBe(0);
   });
 });
