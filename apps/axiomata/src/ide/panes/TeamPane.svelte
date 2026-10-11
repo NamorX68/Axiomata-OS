@@ -243,7 +243,7 @@
     background: var(--ax-surface-2);
     border: 1px solid var(--ax-border);
     /* The project's marker colour (card #70); the plain border when it has none. */
-    border-left: calc(2px * var(--ax-ui-scale)) solid var(--ax-project-hue, var(--ax-border));
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--ax-project-hue, var(--ax-border));
     border-radius: var(--ax-radius-md);
     min-width: 0;
   }

@@ -480,7 +480,7 @@
     position: absolute;
     inset: 0;
     /* The project's marker colour (card #70); transparent, and the same width, when it has none. */
-    border-left: calc(2px * var(--ax-ui-scale)) solid var(--ax-project-hue, transparent);
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--ax-project-hue, transparent);
     display: grid;
     /* Content beside the side bar, status line under both. */
     grid-template-columns: 1fr auto;
