@@ -1,7 +1,7 @@
 # Plan: Engines, roles and agents made clear (Studio, package A) and a better Flow graph (package B)
 
 Status: **decisions settled 2026-10-11 (grilled with the owner: "so wie du vorschlägst", plus Q6: the graph's nodes get a nicer tile
-look). Package A (R-1…R-5) built the same day, checked in the browser mock, not yet on the Mac; package B not started.** Package A is built first, B after it, each as its own commit. Reviews run once before each commit (lean cadence, `CLAUDE.md`).
+look). Package A (R-1…R-5) built the same day and accepted by the owner after a look at it; package B (R-7, the graph's tiles) built the same day, checked in the browser mock, not yet on the Mac.** Package A is built first, B after it, each as its own commit. Reviews run once before each commit (lean cadence, `CLAUDE.md`).
 
 ## Why
 
@@ -21,7 +21,7 @@ and a role's name has to be typed as a slug. The Flow's graph is "very plain".
 | R-4 | Kind of agent on the card | A **role chip** (tinted by the role's kind: plan, review, implement, other), the **engine's name** instead of the model id (an agent without an engine falls back to harness + short model), and the avatar shows the **harness** ("CC" / "OC"). |
 | R-5 | Ids | **Derived.** A role's file name is a slug; the form takes a free name ("Reviewer light"), shows the id it becomes (`reviewer-light`) and appends `-2`, `-3` on a clash; an empty name becomes `<kind>-<tier>`. An engine's id comes from its label (empty: harness + model). Id and the rarely used fields sit under "Advanced"; an existing entry's id stays fixed. |
 | R-6 | Order | Package **A** (R-1…R-5), then package **B** (the graph). |
-| R-7 | The graph (package B) | The nodes become **tiles**: a state-coloured head with the card number and kind, a title that may take two lines, and a foot with role/engine and the state; the three Flow panes get room (the planning column never narrower than readable). Details are settled when B starts. |
+| R-7 | The graph (package B) | The nodes become **tiles** (300×104): a band and a breath of the state's colour, a head with the card number and kind (a dot for a live session), a title that may take two lines (`wrapTitle`), and a foot with the state, the role and how often it was sent back; a review stays a finer-dashed tile of its own. **Not done:** the planning column of the Flow is still narrow at ordinary widths (its detail text wraps letter by letter) — the owner asked only for the tree, so that waits for his word. |
 
 ## Checkpoints (package A)
 

@@ -6,7 +6,8 @@
 import type { BoardCard, TaskState } from "../core/backend";
 
 export const NODE_W = 300;
-export const NODE_H = 78;
+/** A tile: a head (number, kind, live dot), up to two lines of title, a foot (role, state). */
+export const NODE_H = 104;
 const COL_GAP = 80;
 const ROW_GAP = 16;
 const PAD = 16;
@@ -270,3 +271,42 @@ export function clip(text: string, max = 32): string {
   const line = text.split("\n")[0].trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
+
+/**
+ * A title broken into at most `lines` lines of at most `width` characters, at word boundaries; what does not fit ends
+ * in an ellipsis. SVG text does not wrap, so the tile asks for its lines. A word longer than a line is cut.
+ */
+export function wrapTitle(text: string, width = 32, lines = 2): string[] {
+  const words = text.split("\n")[0].trim().split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  let line = "";
+  for (let word of words) {
+    while (word.length > width) {
+      // A word that cannot fit a line at all: its first part fills what is left of this one.
+      const room = Math.max(width - line.length - (line ? 1 : 0), 1);
+      out.push(`${line ? `${line} ` : ""}${word.slice(0, room)}`);
+      line = "";
+      word = word.slice(room);
+      if (out.length >= lines) return ellipsize(out.slice(0, lines), width, true);
+    }
+    const next = line ? `${line} ${word}` : word;
+    if (next.length <= width) {
+      line = next;
+      continue;
+    }
+    out.push(line);
+    line = word;
+    if (out.length >= lines) return ellipsize(out.slice(0, lines), width, true);
+  }
+  if (line) out.push(line);
+  return ellipsize(out.slice(0, lines), width, out.length > lines);
+}
+
+/** The last of `lines` ends in "…" when `cut` says that text was left out, within `width`. */
+function ellipsize(lines: string[], width: number, cut: boolean): string[] {
+  if (!cut || lines.length === 0) return lines;
+  const last = lines[lines.length - 1];
+  const kept = last.length >= width ? last.slice(0, width - 1) : last;
+  return [...lines.slice(0, -1), `${kept.replace(/[\s.,;:-]+$/, "")}…`];
+}
+

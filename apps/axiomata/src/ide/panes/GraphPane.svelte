@@ -1,6 +1,7 @@
 <!--
-  The Flow's graph of a plan (A2A CP-A10, A6): every card of the plan as a node, a line for each "needs first", the
-  state as colour, columns by how many cards come before. Laid out by `ide/flowGraph.ts`, drawn here as SVG; no
+  The Flow's graph of a plan (A2A CP-A10, A6): every card of the plan as a tile (`docs/plans/studio-roster-ui.md`, R-7:
+  a head with number and kind, two lines of title, a foot with role and state), a line for each "needs first", the state
+  as colour, columns by how many cards come before. Laid out by `ide/flowGraph.ts`, drawn here as SVG; no
   library. A click on a node opens what is known of the card — its history, its sessions — and, for a card the studio
   gave up integrating, the two ways out. Nothing here edits the graph: dependencies are made by the planner and the
   board, not drawn with a mouse.
@@ -19,7 +20,7 @@
   import { relativeTime } from "../../core/format";
   import { STATE_LABEL } from "../../core/kanban";
   import { toast } from "../../core/toast";
-  import { NODE_H, NODE_W, clip, endOf, layoutGraph, reviewLabel, reviewToneOf, toneOf } from "../flowGraph";
+  import { NODE_H, NODE_W, endOf, layoutGraph, reviewLabel, reviewToneOf, toneOf, wrapTitle } from "../flowGraph";
   import { allCardsOfPlan } from "../planning";
   import { flowSelection, resolvePlan } from "../flowSelection";
   import { agentStatus } from "../agentStatus";
@@ -205,6 +206,8 @@
           <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
             <path d="M 0 0 L 8 4 L 0 8 z" class="arrow-head" />
           </marker>
+          <!-- A tile's outline, once: the colour band on its left edge is cut to it. -->
+          <clipPath id="tile-clip"><rect width={NODE_W} height={NODE_H} rx="12" /></clipPath>
         </defs>
         {#each graph.edges as edge (`${edge.from}-${edge.to}`)}
           <path
@@ -252,19 +255,30 @@
             onclick={() => (selectedId = selectedId === node.card.id ? null : node.card.id)}
             onkeydown={(e) => onKey(e, node.card.id)}
           >
-            <rect width={NODE_W} height={NODE_H} rx="10" />
+            <rect class="tile" width={NODE_W} height={NODE_H} rx="12" />
+            <rect class="band" width="6" height={NODE_H} clip-path="url(#tile-clip)" />
             {#if review}
-              <text x="14" y="30" class="title">Review #{node.card.id}</text>
-              <text x="14" y="56" class="sub">{reviewLabel(node.card)} · {clip(node.card.title, 26)}</text>
-              {#if reviewedNow.has(node.card.id)}<circle cx={NODE_W - 16} cy="16" r="5" class="live" />{/if}
+              <text x="20" y="25" class="head"><tspan class="tag">REVIEW</tspan><tspan dx="8">#{node.card.id}</tspan></text>
+              {#each wrapTitle(node.card.title) as line, i (i)}
+                <text x="20" y={52 + i * 19} class="title">{line}</text>
+              {/each}
+              <circle cx="22" cy="88" r="4" class="dot" />
+              <text x="32" y="92" class="foot">{reviewLabel(node.card) || STATE_LABEL[node.card.state]}</text>
+              {#if reviewedNow.has(node.card.id)}<circle cx={NODE_W - 18} cy="19" r="5" class="live" />{/if}
             {:else}
-              <text x="14" y="30" class="title">#{node.card.id} {clip(node.card.title)}</text>
-              <text x="14" y="56" class="sub">
-                {node.card.agent ?? "—"} · {STATE_LABEL[node.card.state]}{node.card.returned_count > 0
-                  ? ` · ${node.card.returned_count}× returned`
+              <text x="20" y="25" class="head">
+                <tspan class="id">#{node.card.id}</tspan><tspan dx="8">{node.card.kind ?? "card"}</tspan>
+              </text>
+              {#each wrapTitle(node.card.title) as line, i (i)}
+                <text x="20" y={52 + i * 19} class="title">{line}</text>
+              {/each}
+              <circle cx="22" cy="88" r="4" class="dot" />
+              <text x="32" y="92" class="foot">
+                {STATE_LABEL[node.card.state]}{node.card.agent ? ` · ${node.card.agent}` : ""}{node.card.returned_count > 0
+                  ? ` · ↺ ${node.card.returned_count}`
                   : ""}
               </text>
-              {#if livingCards.has(node.card.id)}<circle cx={NODE_W - 16} cy="16" r="5" class="live" />{/if}
+              {#if livingCards.has(node.card.id)}<circle cx={NODE_W - 18} cy="19" r="5" class="live" />{/if}
             {/if}
           </g>
         {/each}
@@ -435,33 +449,63 @@
     cursor: pointer;
     outline: none;
   }
-  .node rect {
-    fill: var(--ax-surface-2);
-    stroke: var(--tone);
-    stroke-width: 1.5;
+  /* A tile: the surface with a breath of the state's colour, a thin outline, and a band of the colour on the left. */
+  .node .tile {
+    fill: color-mix(in srgb, var(--tone) 7%, var(--ax-surface-2));
+    stroke: color-mix(in srgb, var(--tone) 55%, var(--ax-border));
+    stroke-width: 1;
   }
-  .node.proposed rect {
+  .node .band {
+    fill: var(--tone);
+  }
+  .node:hover .tile {
+    fill: color-mix(in srgb, var(--tone) 13%, var(--ax-surface-2));
+  }
+  .node.proposed .tile {
     stroke-dasharray: 5 4;
   }
-  /* A review is a stage of its card, not a card: a little lighter, its lines dashed like a proposal's but finer. */
-  .node.review-node rect {
-    fill: var(--ax-surface-1);
+  /* A review is a stage of its card, not a card: a little lighter, its outline finely dashed. */
+  .node.review-node .tile {
+    fill: color-mix(in srgb, var(--tone) 4%, var(--ax-surface-1));
     stroke-dasharray: 2 3;
   }
-  .node.selected rect,
-  .node:focus-visible rect {
+  .node.review-node .band {
+    opacity: 0.55;
+  }
+  .node.selected .tile,
+  .node:focus-visible .tile {
     fill: var(--ax-accent-muted);
-    stroke-width: 2.5;
+    stroke: var(--ax-accent);
+    stroke-width: 2;
   }
   .node text {
     fill: var(--ax-text);
-    font-size: 15px;
+  }
+  .node .head {
+    fill: var(--ax-text-muted);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+  .node .head .id {
+    fill: var(--tone);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+  .node .head .tag {
+    fill: var(--tone);
+    font-weight: 700;
+  }
+  .node .title {
+    font-size: 14px;
     font-weight: 600;
   }
-  .node .sub {
+  .node .foot {
     fill: var(--ax-text-muted);
-    font-size: 13px;
-    font-weight: 400;
+    font-size: 12px;
+  }
+  .node .dot {
+    fill: var(--tone);
   }
   .node .live {
     fill: var(--ax-success);

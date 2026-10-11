@@ -15,6 +15,7 @@ import {
   reviewLabel,
   reviewToneOf,
   toneOf,
+  wrapTitle,
 } from "./flowGraph";
 
 function card(id: number, depends_on: number[] = [], state: TaskState = "ready"): BoardCard {
@@ -180,3 +181,37 @@ describe("the end of a plan", () => {
     expect(endOf([{ state: "taken_over" }], "closed")).toEqual({ tone: "done", label: "closed" });
   });
 });
+
+describe("wrapTitle", () => {
+  it("keeps a short title on one line", () => {
+    expect(wrapTitle("Add the status dot")).toEqual(["Add the status dot"]);
+  });
+
+  it("breaks a longer one at a word boundary into two lines", () => {
+    expect(wrapTitle("Reviewer role for the board, with its own limits", 24)).toEqual([
+      "Reviewer role for the",
+      "board, with its own…",
+    ]);
+  });
+
+  it("ends the second line in an ellipsis when text is left over, within the width", () => {
+    const lines = wrapTitle("one two three four five six seven eight nine ten eleven twelve", 20);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]?.endsWith("…")).toBe(true);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(20);
+  });
+
+  it("cuts a word that is longer than a line", () => {
+    const lines = wrapTitle("x".repeat(70), 30);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe("x".repeat(30));
+    expect(lines[1]?.endsWith("…")).toBe(true);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(30);
+  });
+
+  it("uses the first line of a multi-line title and gives nothing for an empty one", () => {
+    expect(wrapTitle("First\nsecond")).toEqual(["First"]);
+    expect(wrapTitle("   ")).toEqual([]);
+  });
+});
+
