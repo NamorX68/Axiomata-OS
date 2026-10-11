@@ -127,3 +127,47 @@ export function startableAgent(
   const stamp = (a: IdeAgent) => Date.parse(a.updated_at) || 0;
   return fitting.reduce((newest, a) => (stamp(a) > stamp(newest) ? a : newest));
 }
+
+/** The kinds of work the Start chips are grouped under, in the order a person reads a project: plan first. */
+const KIND_GROUPS: readonly { kind: string; title: string }[] = [
+  { kind: "plan", title: "Planning" },
+  { kind: "implement", title: "Implementation" },
+  { kind: "review", title: "Review" },
+  { kind: "test", title: "Testing" },
+  { kind: "doc", title: "Documentation" },
+];
+
+/** Light before medium before heavy: the cheap role first, the expensive one last. */
+const TIER_ORDER = ["light", "medium", "heavy"];
+
+/** One heading of the Start chips and the roles under it. */
+export interface RoleGroup {
+  kind: string;
+  title: string;
+  roles: Role[];
+}
+
+/**
+ * The roles of a project grouped by their kind of work, each group in the order of {@link KIND_GROUPS} (kinds it does
+ * not know follow, alphabetically) and each role in a group by tier, then name. Empty groups are left out.
+ */
+export function groupRoles(roles: readonly Role[]): RoleGroup[] {
+  const known = new Map(KIND_GROUPS.map((group, i) => [group.kind, i]));
+  const byKind = new Map<string, Role[]>();
+  for (const role of roles) byKind.set(role.kind, [...(byKind.get(role.kind) ?? []), role]);
+  const rank = (role: Role) => {
+    const at = TIER_ORDER.indexOf(role.tier);
+    return at === -1 ? TIER_ORDER.length : at;
+  };
+  return [...byKind.entries()]
+    .map(([kind, list]) => ({
+      kind,
+      title: KIND_GROUPS.find((group) => group.kind === kind)?.title ?? roleTitle(kind),
+      roles: [...list].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => {
+      const [x, y] = [known.get(a.kind) ?? known.size, known.get(b.kind) ?? known.size];
+      return x - y || a.kind.localeCompare(b.kind);
+    });
+}
+

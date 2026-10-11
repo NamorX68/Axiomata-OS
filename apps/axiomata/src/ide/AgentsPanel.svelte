@@ -18,7 +18,7 @@
   import { cardOf } from "./agentCard";
   import ProjectRolesNotice from "./ProjectRolesNotice.svelte";
   import RoleChip from "./RoleChip.svelte";
-  import { agentNameFor, engineName, harnessBadge, harnessLabel, startableAgent } from "./rosterLook";
+  import { agentNameFor, engineName, groupRoles, harnessBadge, harnessLabel, startableAgent } from "./rosterLook";
   import { engineCatalog, engineLine, refreshEngines, rosterVersion } from "./rosterStore";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
@@ -60,6 +60,7 @@
   let roleEngines = $state<Record<string, string | null>>({});
   let roleList = $state<Role[]>([]);
   const roleKinds = $derived(new Map(roleList.map((role) => [role.name, role.kind])));
+  const roleGroups = $derived(groupRoles(roleList));
 
   let form = $state<AgentSpec>(blankSpec([]));
 
@@ -166,16 +167,23 @@
     <ProjectRolesNotice {projectId} />
     {#if roleList.length > 0 && !disabled && editing === undefined}
       <div class="starts" role="group" aria-label="Start an agent in a role">
-        <span class="starts-label">Start</span>
-        {#each roleList as role (role.name)}
-          <button
-            type="button"
-            class="start"
-            title={role.description || `Start ${role.name}`}
-            onclick={() => startRole(role)}
-          >
-            <RoleChip label={role.name} kind={role.kind} />
-          </button>
+        <span class="starts-label">Start an agent</span>
+        {#each roleGroups as group (group.kind)}
+          <div class="start-group">
+            <span class="group-title">{group.title}</span>
+            <div class="chips">
+              {#each group.roles as role (role.name)}
+                <button
+                  type="button"
+                  class="start"
+                  title={role.description || `Start ${role.name}`}
+                  onclick={() => startRole(role)}
+                >
+                  <RoleChip label={role.name} kind={role.kind} />
+                </button>
+              {/each}
+            </div>
+          </div>
         {/each}
       </div>
     {/if}
@@ -430,10 +438,26 @@
   /* The roles of the project as chips: one click starts an agent in that role. */
   .starts {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    flex-direction: column;
     gap: var(--ax-space-2);
     margin-bottom: var(--ax-space-3);
+  }
+
+  .start-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+  }
+
+  .group-title {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-1) var(--ax-space-2);
   }
 
   .starts-label {

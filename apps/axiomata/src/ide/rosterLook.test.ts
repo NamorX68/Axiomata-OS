@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { IdeAgent } from "../core/backend";
+import type { Role } from "../core/roster";
 import { isSlug } from "../core/roster";
 import {
   agentNameFor,
   engineIdFor,
   engineName,
+  groupRoles,
   harnessBadge,
   harnessLabel,
   modelShort,
@@ -196,6 +198,37 @@ describe("edges", () => {
     const odd = [agent({ id: 1, updated_at: "not a date" }), agent({ id: 2, updated_at: "2026-10-01T10:00:00Z" })];
     expect(startableAgent(odd, role, new Set())?.id).toBe(2);
     expect(startableAgent([...odd].reverse(), role, new Set())?.id).toBe(2);
+  });
+});
+
+describe("groupRoles", () => {
+  const role = (name: string, kind: string, tier: Role["tier"] = "medium") => ({ name, kind, tier }) as Role;
+
+  it("groups by kind in reading order and sorts a group by tier, then name", () => {
+    const groups = groupRoles([
+      role("reviewer-heavy", "review", "heavy"),
+      role("tester", "test"),
+      role("implementer-light", "implement", "light"),
+      role("planner", "plan", "heavy"),
+      role("reviewer-light", "review", "light"),
+      role("allrounder", "implement"),
+      role("implementer-heavy", "implement", "heavy"),
+    ]);
+    expect(groups.map((g) => g.title)).toEqual(["Planning", "Implementation", "Review", "Testing"]);
+    expect(groups[1]?.roles.map((r) => r.name)).toEqual(["implementer-light", "allrounder", "implementer-heavy"]);
+    expect(groups[2]?.roles.map((r) => r.name)).toEqual(["reviewer-light", "reviewer-heavy"]);
+  });
+
+  it("puts kinds it does not know after the known ones, alphabetically, under their own name", () => {
+    const groups = groupRoles([role("grill", "grill"), role("zed", "zeta"), role("doc", "doc"), role("p", "plan")]);
+    expect(groups.map((g) => g.kind)).toEqual(["plan", "doc", "grill", "zeta"]);
+    expect(groups[2]?.title).toBe("Grill");
+  });
+
+  it("gives no group for no roles, and sorts an unknown tier last", () => {
+    expect(groupRoles([])).toEqual([]);
+    const odd = groupRoles([role("b", "review", "heavy"), role("a", "review", "weird" as Role["tier"])]);
+    expect(odd[0]?.roles.map((r) => r.name)).toEqual(["b", "a"]);
   });
 });
 
