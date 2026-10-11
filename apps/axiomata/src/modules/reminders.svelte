@@ -414,7 +414,7 @@
   }
   .due {
     flex: 0 0 auto;
-    font-family: var(--ax-font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: var(--ax-font-size-sm);
     white-space: nowrap;
   }

@@ -256,10 +256,11 @@
     align-items: baseline;
     gap: var(--ax-space-2);
   }
+  /* The tile's hero figure: large, in the title face — a number, not something alive (the accent rule). */
   .stat-num {
-    font-size: var(--ax-font-size-xl);
-    font-weight: 700;
-    color: var(--ax-accent);
+    font: var(--ax-type-heading);
+    font-variant-numeric: tabular-nums;
+    color: var(--ax-text);
     line-height: 1;
   }
   .stat-label {
@@ -376,8 +377,8 @@
     white-space: nowrap;
   }
   .chip-topic {
-    background: var(--ax-accent-muted);
-    color: var(--ax-accent);
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
   }
   .subject {
     flex: 1 1 auto;

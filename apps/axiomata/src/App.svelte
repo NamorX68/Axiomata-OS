@@ -1,4 +1,4 @@
-<!-- Shell composition: TopBar → IconBar → Canvas → AssistantBar, plus overlays. -->
+<!-- Shell composition: Dock → Canvas → AssistantBar, plus overlays. -->
 <script lang="ts">
   import { onMount } from "svelte";
   import { get } from "svelte/store";
@@ -20,14 +20,13 @@ import { emit, on } from "./core/bus";
   import { endedSessions, runEventNote } from "./ide/planning";
   import { requestMode } from "./ide/modeRequest";
   import IdeView from "./ide/IdeView.svelte";
-  import IconBar from "./shell/IconBar.svelte";
   import ModulePicker from "./shell/ModulePicker.svelte";
   import SecondBrainView from "./shell/SecondBrainView.svelte";
   import Settings from "./shell/Settings.svelte";
   import Spotlight from "./shell/Spotlight.svelte";
   import StagingLayer from "./shell/StagingLayer.svelte";
   import Toasts from "./shell/Toasts.svelte";
-  import TopBar from "./shell/TopBar.svelte";
+  import Dock from "./shell/Dock.svelte";
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
@@ -206,8 +205,7 @@ import { emit, on } from "./core/bus";
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<TopBar />
-<IconBar />
+<Dock />
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />
 <Settings bind:open={settingsOpen} />

@@ -3,6 +3,9 @@
   screenshots): icon, `/name`, backend, a ▶ run button and the last run's
   outcome. Polls skills + recent runs every POLL_MS. Config (flip side):
   `filterBackend` ("" = all) and `order` ("name" | "recent").
+
+  Calm at rest ("Glut + Hex", UX3): the skill that runs is the one card that glows — its icon lights up and its run
+  button turns into a breathing status mark; the last outcome is a hex mark.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -10,6 +13,8 @@
   import type { RunSummary, Skill, SkippedSkill } from "../core/backend";
   import { relativeTime } from "../core/format";
   import type { ModuleContext } from "../core/types";
+  import { glow } from "../ui/glow";
+  import StatusMark from "../ui/StatusMark.svelte";
 
   const POLL_MS = 5000;
   const RUN_LIMIT = 50;
@@ -95,7 +100,7 @@
       {#each visible as s (s.name)}
         {@const last = lastRun.get(s.name)}
         {@const busy = running.includes(s.name)}
-        <li class="card" title={s.description}>
+        <li class="card" class:live={busy} title={s.description} use:glow={busy}>
           <span class="icon" aria-hidden="true">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
               <path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" />
@@ -104,8 +109,14 @@
           <span class="name">/{s.name}</span>
           <span class="meta">
             <span class="backend">{s.backend}</span>
-            {#if last}
-              <span class="dot {last.status}" title="{last.status} · {relativeTime(last.started_at)}"></span>
+            {#if busy}
+              <span class="running">running</span>
+            {:else if last}
+              <StatusMark
+                tone={last.status === "failed" ? "bad" : "ok"}
+                label={last.status}
+                title="{last.status} · {relativeTime(last.started_at)}"
+              />
             {/if}
           </span>
           <button
@@ -117,7 +128,7 @@
             onclick={() => run(s.name)}
           >
             {#if busy}
-              <span class="spinner" aria-hidden="true"></span>
+              <StatusMark tone="live" size="md" />
             {:else}
               <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.5v9l7-4.5z" /></svg>
             {/if}
@@ -164,7 +175,11 @@
     display: inline-flex;
     width: calc(18px * var(--ax-ui-scale));
     height: calc(18px * var(--ax-ui-scale));
-    color: var(--ax-accent);
+    color: var(--ax-text-muted);
+  }
+  .card.live .icon,
+  .running {
+    color: var(--ax-glow);
   }
   .icon svg {
     width: 100%;
@@ -182,27 +197,8 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font: var(--ax-type-caption);
     color: var(--ax-text-muted);
-  }
-  .backend {
-    color: var(--ax-accent);
-    opacity: 0.85;
-  }
-
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--ax-text-muted);
-  }
-  .dot.success {
-    background: var(--ax-success);
-  }
-  .dot.failed {
-    background: var(--ax-danger);
   }
 
   .run {
@@ -214,31 +210,21 @@
     display: grid;
     place-items: center;
     border-radius: var(--ax-radius-sm);
-    border-color: var(--ax-accent);
-    color: var(--ax-accent);
-    background: var(--ax-accent-muted);
+    border-color: var(--ax-border-strong);
+    color: var(--ax-text-muted);
+    background: transparent;
   }
   .run:hover:not(:disabled) {
-    background: var(--ax-accent);
-    color: var(--ax-text-invert);
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
+  }
+  .run:disabled {
+    opacity: 1;
+    border-color: color-mix(in srgb, var(--ax-glow) 50%, transparent);
   }
   .run svg {
     width: calc(14px * var(--ax-ui-scale));
     height: calc(14px * var(--ax-ui-scale));
-  }
-
-  .spinner {
-    width: calc(12px * var(--ax-ui-scale));
-    height: calc(12px * var(--ax-ui-scale));
-    border: 2px solid var(--ax-accent-muted);
-    border-top-color: var(--ax-accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   p {

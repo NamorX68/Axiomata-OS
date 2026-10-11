@@ -13,6 +13,9 @@
   no-confirmation-dialog convention as Calendar's/Reminders' hover ✕
   (`modules/calendar.svelte`, `modules/reminders.svelte`) — nothing else in
   this app uses a native confirm() dialog either.
+
+  "Glut + Hex" (UX3): the next routine burns down as a fuse under its row (`RoutineFuse.svelte`); its status is a hex
+  mark, not an orange pill, and the times are plain figures — the fuse is the one thing here that glows.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -20,7 +23,10 @@
   import type { NewRoutine, Routine } from "../core/backend";
   import { relativeTime, untilTime } from "../core/format";
   import type { ModuleContext } from "../core/types";
+  import StatusMark from "../ui/StatusMark.svelte";
+  import type { StatusTone } from "../ui/status";
   import RoutineForm, { type RoutineFormFields } from "./RoutineForm.svelte";
+  import RoutineFuse from "./RoutineFuse.svelte";
 
   const POLL_MS = 5000;
 
@@ -57,6 +63,14 @@
     if (!r.enabled) return "off";
     return r.id === nextId ? "next" : "queued";
   }
+
+  const TONES: Record<ReturnType<typeof statusOf>, StatusTone> = { next: "live", queued: "ok", off: "off" };
+
+  /** A backend timestamp in ms, or `null`. */
+  const ms = (text: string | null | undefined): number | null => {
+    const value = text ? Date.parse(text) : NaN;
+    return Number.isNaN(value) ? null : value;
+  };
 
   async function refresh() {
     try {
@@ -142,7 +156,7 @@
               {r.name}
               <span class="target">{r.target.type === "skill" ? `/${r.target.value}` : "prompt"}</span>
             </td>
-            <td class="status"><span class="pill {st}">{st}</span></td>
+            <td class="status"><span class="state {st}"><StatusMark tone={TONES[st]} />{st}</span></td>
             <td class="act">
               <button
                 type="button"
@@ -174,6 +188,12 @@
               </button>
             </td>
           </tr>
+          {@const next = st === "next" ? ms(r.next_fire_at) : null}
+          {#if next !== null && editingId !== r.id}
+            <tr class="fuse-row">
+              <td colspan="4"><RoutineFuse lastFired={ms(r.last_fired_at)} nextFire={next} /></td>
+            </tr>
+          {/if}
           {#if editingId === r.id}
             <tr class="edit-row">
               <td colspan="4">
@@ -211,9 +231,8 @@
   th {
     text-align: left;
     padding: var(--ax-space-1) var(--ax-space-2);
-    font-size: var(--ax-font-size-sm);
-    font-weight: 600;
-    letter-spacing: var(--ax-tracking-wide);
+    font: var(--ax-type-label);
+    letter-spacing: var(--ax-tracking-label);
     text-transform: uppercase;
     color: var(--ax-text-muted);
     border-bottom: 1px solid var(--ax-border);
@@ -238,10 +257,18 @@
     border-bottom: none;
   }
 
+  /* Figures, not code: the UI face with even digits. */
   .time {
-    font-family: var(--ax-font-mono);
-    font-size: var(--ax-font-size-sm);
-    color: var(--ax-accent);
+    font: var(--ax-type-body);
+    font-variant-numeric: tabular-nums;
+    color: var(--ax-text);
+  }
+  /* The fuse belongs to the row above it: no line between them. */
+  tr:has(+ tr.fuse-row) td {
+    border-bottom: none;
+  }
+  tr.fuse-row td {
+    padding-top: 0;
   }
   tr.off .time {
     color: var(--ax-text-muted);
@@ -258,21 +285,14 @@
     color: var(--ax-text-muted);
   }
 
-  .pill {
-    display: inline-block;
-    padding: 1px var(--ax-space-2);
-    border-radius: var(--ax-radius-pill);
-    font-size: var(--ax-font-size-sm);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    font: var(--ax-type-caption);
     color: var(--ax-text-muted);
-    background: var(--ax-surface-3);
   }
-  .pill.next {
-    color: var(--ax-text-invert);
-    background: var(--ax-accent);
-  }
-  .pill.queued {
+  .state.next {
     color: var(--ax-text);
   }
 

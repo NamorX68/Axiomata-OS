@@ -64,6 +64,8 @@
   --ax-z-particle: 1;
   --ax-z-tile-base: 10;
   --ax-z-tile-drag: 9000;
+  /* The dock and its popovers: above every tile, below the staged panels and dialogs that may open over it. */
+  --ax-z-dock: 9200;
   --ax-z-staging: 9500;
   --ax-z-assistant: 9600;
   --ax-z-dialog: 10000;

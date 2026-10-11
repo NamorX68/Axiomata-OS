@@ -11,7 +11,9 @@
   const skillName = $derived(resolveSkillName($config, CALENDAR_SKILL_NAME));
 
   const showClock = $derived($config.showClock === true);
-  const clockStyle = $derived($config.clockStyle === "analog" ? "analog" : "digital");
+  const clockStyle = $derived(
+    $config.clockStyle === "arc" || $config.clockStyle === "analog" ? "arc" : "digital",
+  );
   const agendaDays = $derived(
     Math.min(14, Math.max(1, typeof $config.agendaDays === "number" ? Math.floor($config.agendaDays) : 5)),
   );
@@ -56,9 +58,9 @@
         <input
           type="radio"
           name="clockStyle-{ctx.instanceId}"
-          checked={clockStyle === "analog"}
-          onchange={() => set("clockStyle", "analog")}
-        /> Analog
+          checked={clockStyle === "arc"}
+          onchange={() => set("clockStyle", "arc")}
+        /> Day arc
       </label>
     </div>
   {/if}

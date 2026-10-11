@@ -262,10 +262,11 @@
     gap: var(--ax-space-2);
     flex: 0 0 auto;
   }
+  /* The count is the tile's hero figure: large, in the title face — but a number, not something alive. */
   .count strong {
-    font-size: var(--ax-font-size-xl);
-    color: var(--ax-accent);
-    font-weight: 700;
+    font: var(--ax-type-heading);
+    font-variant-numeric: tabular-nums;
+    color: var(--ax-text);
   }
   .spacer {
     flex: 1 1 auto;
@@ -315,7 +316,7 @@
     color: var(--ax-text-muted);
   }
   .date {
-    font-family: var(--ax-font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: var(--ax-font-size-sm);
     flex: 0 0 auto;
   }

@@ -142,7 +142,10 @@
   // `miniH` is the mini-month's rendered height so the clock lines up with it.
   let miniH = $state(0);
   const showClock = $derived($config.showClock === true);
-  const clockStyle = $derived($config.clockStyle === "analog" ? "analog" : "digital");
+  // "analog" is the setting saved before the day arc replaced the analogue face (G11): it reads as the arc.
+  const clockStyle = $derived(
+    $config.clockStyle === "arc" || $config.clockStyle === "analog" ? "arc" : "digital",
+  );
   // Track the mini-month height, but cap it so the clock still fits beside the
   // 15rem grid in a default-width tile (the row wraps below that).
   const clockSize = $derived(Math.min(miniH, 160));
@@ -318,7 +321,7 @@
       />
     </div>
     {#if showClock && clockSize > 0}
-      <Clock style={clockStyle} size={clockSize} />
+      <Clock style={clockStyle} size={clockSize} events={filteredEvents} />
     {/if}
   </div>
 
@@ -479,12 +482,12 @@
     flex-direction: column;
     gap: var(--ax-space-2);
   }
+  /* A day is a label, not something alive (the accent rule). */
   .day-head {
-    font-size: var(--ax-font-size-sm);
-    font-weight: 600;
-    color: var(--ax-accent);
+    font: var(--ax-type-label);
+    color: var(--ax-text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.02em;
+    letter-spacing: var(--ax-tracking-label);
     padding-bottom: var(--ax-space-1);
   }
   .events {
@@ -510,7 +513,7 @@
   }
   .time {
     flex: 0 0 auto;
-    font-family: var(--ax-font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: var(--ax-font-size-sm);
     white-space: nowrap;
   }

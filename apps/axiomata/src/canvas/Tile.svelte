@@ -379,13 +379,9 @@
     padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-1);
     border-bottom: none;
   }
+  /* One title style for every tile (G6, `.tile-title` below): the title role in sentence case, no spaced capitals. */
   .front-head .tile-title {
-    font-size: var(--ax-font-size-xl);
-    color: var(--ax-text-muted);
-  }
-  .front-head .tile-icon {
-    width: calc(20px * var(--ax-ui-scale));
-    height: calc(20px * var(--ax-ui-scale));
+    color: var(--ax-text);
   }
   .front-head .tile-btn {
     opacity: 0;
@@ -412,7 +408,8 @@
     display: inline-flex;
     width: calc(16px * var(--ax-ui-scale));
     height: calc(16px * var(--ax-ui-scale));
-    color: var(--ax-accent);
+    /* Icons are no accent (the accent rule): quiet, so a tile that works can glow. */
+    color: var(--ax-text-muted);
   }
   .tile-icon :global(svg) {
     width: 100%;
@@ -421,10 +418,9 @@
 
   .tile-title {
     flex: 1 1 auto;
-    font-size: var(--ax-font-size-sm);
-    font-weight: 600;
-    letter-spacing: var(--ax-tracking-wide);
-    text-transform: uppercase;
+    margin: 0;
+    font: var(--ax-type-title);
+    letter-spacing: var(--ax-tracking-tight);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

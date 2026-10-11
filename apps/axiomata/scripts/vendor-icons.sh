@@ -18,12 +18,14 @@ WORK="${TMPDIR:-/tmp}/axiomata-icons"
 
 # Sorted; each is a file `icons/<name>.svg` in the package.
 ICONS=(
+  activity
   archive
   archive-restore
   arrow-down-to-line
   arrow-up-from-line
   book-open
   bot
+  brain
   bug
   calendar
   check
@@ -51,6 +53,7 @@ ICONS=(
   file-plus
   file-text
   files
+  flame
   folder
   folder-open
   folder-plus
@@ -73,6 +76,7 @@ ICONS=(
   maximize-2
   message-square-plus
   minimize-2
+  palette
   panel-left
   panel-right
   panels-top-left
@@ -87,7 +91,10 @@ ICONS=(
   search
   settings
   sliders-horizontal
+  sparkles
   square
+  square-kanban
+  square-pen
   step-forward
   terminal
   text-search

@@ -180,7 +180,7 @@
     width: 3px;
     height: 3px;
     border-radius: var(--ax-radius-pill);
-    background: var(--ax-accent);
+    background: var(--ax-text-muted);
   }
   .day.today .dot {
     background: var(--ax-text-invert);
