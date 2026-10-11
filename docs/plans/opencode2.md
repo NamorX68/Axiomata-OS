@@ -8,7 +8,7 @@ Maßgebliche Doku: **https://opencode.ai/v2/docs** (nicht `opencode.ai/docs` —
 
 ## Kontext
 
-Opencode 2 (installiert: 2.0.18) ist keine Sammlung eigenständiger Prozesse mehr, sondern ein
+Opencode 2 (gemessen an 2.0.18; 2026-10-11 an 2.0.26 im Betrieb geprüft) ist keine Sammlung eigenständiger Prozesse mehr, sondern ein
 **gemeinsamer Hintergrunddienst** pro Benutzer, an den sich jede Oberfläche (TUI, `opencode run`,
 `opencode api`) als Client hängt. Axiomata ist heute noch wie gegen v1 gebaut; gemessen am
 2026-09-27 bricht das an fünf Stellen:

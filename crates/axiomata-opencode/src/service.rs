@@ -25,8 +25,9 @@ const LOGIN_USER: &str = "opencode";
 const DISCOVERY_FILE: &str = "service.json";
 /// The major version this client speaks.
 const SUPPORTED_MAJOR: u64 = 2;
-/// The newest version this client was checked against; a newer 2.x is logged.
-pub const TESTED_VERSION: &str = "2.0.18";
+/// The newest version this client was checked against; a newer 2.x is logged. The event shapes were measured on 2.0.18;
+/// 2.0.26 was checked on 2026-10-11 by real use (skill runs, an agent session with its team tools, the inbox).
+pub const TESTED_VERSION: &str = "2.0.26";
 /// How long one ordinary request may take.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long `opencode debug paths` / `opencode service start` may take.
