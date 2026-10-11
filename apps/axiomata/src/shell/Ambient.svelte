@@ -118,7 +118,8 @@
     transform: translate(var(--ox), var(--oy));
     background: radial-gradient(
       circle closest-side,
-      color-mix(in srgb, var(--ax-glow) calc(60% * var(--ax-ambient)), transparent),
+      /* 35 %: at 60 the lit lines drew the eye away from the tiles (owner, 2026-10-12). */
+      color-mix(in srgb, var(--ax-glow) calc(35% * var(--ax-ambient)), transparent),
       transparent
     );
     -webkit-mask-image: var(--ax-hex-mask-url);
