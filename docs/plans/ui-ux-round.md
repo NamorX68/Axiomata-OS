@@ -99,6 +99,15 @@ debug.json) einzeilig, leere Zustände mit Hex. „Ausgewählt“ ist neutral (`
 `IconButton pressed`, Einstellungs-Reiter und -Abschnitte; der Git-Zähler ist grau, nur der Agenten-Zähler glimmt.
 Bewusst später: Agent-Karten-Rahmen, „New plan“-Balken, Kanban-Karten (UX6), Kachel-Titel (UX3).
 
+**Stand UX3 (2026-10-11/12, gebaut, Abnahme läuft):** Dock (`shell/Dock.svelte`, Suche nur als Lupe — Owner) mit
+Theme-Auswahl, Herzschlag-Leiste + Kosten-Tank (`core/heartbeat.ts`; eine Karte glüht nur mit offener Sitzung laut
+`open_card_sessions`, beim Überfahren eine Liste aller Einträge), Kacheltitel (G6), Skills-Glut, Routinen-Zündschnur
+(`core/fuse.ts`), Kalender-Tagesbogen (`core/dayArc.ts`, ersetzt „analog“, sitzt neben dem Monat, Stunden 6/22), Licht
+unter dem Zeiger + Tageslicht (`shell/Ambient.svelte`, `core/effects.ts`, Appearance → Light), denkende Assistent-Leiste
+(umlaufende Glut, Modul-Aktionen des Agenten als Hex-Chips — nur die über die Bridge sichtbaren), generative leere
+Leinwand (`canvas/EmptyCanvas.svelte`). Offen: Herzschlag fragt alle Boards inkl. Archiv ab (später eine Backend-Abfrage
+„Sitzungen heute“); Terminal-Titel-Versatz in der echten App prüfen.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

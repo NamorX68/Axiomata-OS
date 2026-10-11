@@ -13,6 +13,7 @@
   --ax-glow-shadow: 0 1px calc(4px * var(--ax-ui-scale)) color-mix(in srgb, var(--ax-glow) 40%, transparent);
   --ax-glow-drop: drop-shadow(0 1px calc(3px * var(--ax-ui-scale)) color-mix(in srgb, var(--ax-glow) 45%, transparent));
   --ax-selected-bg: color-mix(in srgb, var(--ax-text) 7%, transparent);
+  --ax-ambient: 0.5;
   /* The glow stays in the orange family (G2): the palette's own orange (Primer severe). */
   --ax-glow: #bc4c00;
   --ax-color-scheme: light;

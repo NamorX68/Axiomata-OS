@@ -7,6 +7,7 @@
   import { busy, panelOpen, pushInstruction, send, turns } from "../core/chat";
   import { route, runCommand } from "../core/commands";
   import { toast } from "../core/toast";
+  import StatusMark from "../ui/StatusMark.svelte";
 
   let input = $state("");
   let history = $state<string[]>([]);
@@ -49,7 +50,7 @@
 </script>
 
 <div class="dock">
-<form class="bar" onsubmit={submit}>
+<form class="bar" class:thinking={$busy} onsubmit={submit}>
   <span class="prompt" aria-hidden="true">›</span>
   <input
     bind:value={input}
@@ -61,7 +62,7 @@
     onkeydown={onKeydown}
   />
   {#if $busy}
-    <span class="chip"><span class="spinner"></span>working…</span>
+    <span class="chip"><StatusMark tone="live" />working…</span>
   {:else if $turns.length > 0}
     <button
       type="button"
@@ -84,6 +85,8 @@
     justify-content: center;
     padding: var(--ax-space-2) var(--ax-space-4) var(--ax-space-3);
   }
+  /* While the agent works an ember runs round the bar ("Glut + Hex", UX3): a conic gradient in the border box under
+     the bar's own fill, turned by `--ax-anim-orbit` (still at Calm and Off — the ember then simply stands). */
   .bar {
     width: min(var(--ax-assistant-width), 100%);
     display: flex;
@@ -97,11 +100,31 @@
     z-index: var(--ax-z-assistant);
   }
   .bar:focus-within {
-    border-color: var(--ax-accent);
+    border-color: var(--ax-text-muted);
+  }
+  .bar.thinking {
+    border-color: transparent;
+    background:
+      linear-gradient(var(--ax-surface-1), var(--ax-surface-1)) padding-box,
+      conic-gradient(
+          from var(--ax-orbit-angle),
+          transparent 0deg,
+          var(--ax-glow) 60deg,
+          transparent 140deg,
+          transparent 360deg
+        )
+        border-box;
+    box-shadow:
+      var(--ax-shadow-tile),
+      var(--ax-glow-shadow);
+    animation: var(--ax-anim-orbit);
   }
   .prompt {
-    color: var(--ax-accent);
+    color: var(--ax-text-muted);
     font-weight: 700;
+  }
+  .thinking .prompt {
+    color: var(--ax-glow);
   }
   input {
     flex: 1 1 auto;
@@ -120,19 +143,6 @@
     gap: var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
     color: var(--ax-text-muted);
-  }
-  .spinner {
-    width: calc(10px * var(--ax-ui-scale));
-    height: calc(10px * var(--ax-ui-scale));
-    border: 2px solid var(--ax-accent-muted);
-    border-top-color: var(--ax-accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
   .toggle {
     display: inline-flex;
@@ -155,8 +165,8 @@
     height: 1.2em;
     padding: 0 0.3em;
     border-radius: var(--ax-radius-pill);
-    background: var(--ax-accent-muted);
-    color: var(--ax-accent);
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
     font-size: 0.85em;
     font-weight: 600;
   }

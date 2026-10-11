@@ -19,6 +19,7 @@
   } from "../core/backend";
   import { brainView, SPEED_MAX } from "../core/brainView";
   import { MOTION_LEVELS, isMotionLevel, motion, motionSetting, systemReducesMotion, turns } from "../core/motion";
+  import { effects } from "../core/effects";
   import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
@@ -349,6 +350,18 @@
             still turns. Off: nothing moves by itself.
             {#if $systemReducesMotion}<strong>macOS “Reduce motion” is on, so motion is off.</strong>{/if}
           </p>
+        </section>
+
+        <section>
+          <h3>Light</h3>
+          <label class="opt">
+            <input type="checkbox" bind:checked={$effects.pointerLight} /> Light under the pointer
+            <span class="hint">(the hex lines glow where the mouse is)</span>
+          </label>
+          <label class="opt">
+            <input type="checkbox" bind:checked={$effects.dayLight} /> Time-of-day light
+            <span class="hint">(a faint light that moves with the sun)</span>
+          </label>
         </section>
 
         <section>

@@ -8,10 +8,12 @@
 
   import { get } from "svelte/store";
 
+  import { dashboardLoaded } from "../core/persist";
   import { getModule } from "../core/registry";
   import { canvasSize, guides, instances, showGrid, updateInstance } from "../core/stores";
   import { uiScale } from "../core/uiScale";
   import BackgroundHost from "./BackgroundHost.svelte";
+  import EmptyCanvas from "./EmptyCanvas.svelte";
   import { anchorFor } from "./snap";
   import Tile from "./Tile.svelte";
 
@@ -79,6 +81,9 @@
   {#each tiles as inst (inst.id)}
     <Tile {inst} />
   {/each}
+  {#if $dashboardLoaded && tiles.length === 0 && backgrounds.length === 0}
+    <EmptyCanvas />
+  {/if}
 </section>
 
 <style>

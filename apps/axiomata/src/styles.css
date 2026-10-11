@@ -203,6 +203,20 @@ input[type="radio"] {
   }
 }
 
+/* The ember running round the assistant bar while the agent thinks (UX3): a registered angle, so a conic gradient can
+   turn smoothly; `--ax-anim-orbit` is `none` at Calm and Off. */
+@property --ax-orbit-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes ax-orbit {
+  to {
+    --ax-orbit-angle: 360deg;
+  }
+}
+
 /* `use:glow` (`ui/glow.ts`): something here lives, works or needs the owner. The one global rule of the glow, so
    every component that glows does so the same way; Calm and Off still it (`--ax-anim-glow: none`). */
 [data-ax-glow] {

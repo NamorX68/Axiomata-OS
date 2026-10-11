@@ -17,19 +17,43 @@ export interface ChatTurn {
   text: string;
   at: number;
   costUsd?: number | null;
+  /** The app actions the agent used for this reply (`ToolCall` labels), shown as hex chips above it. */
+  tools?: ToolCall[];
+}
+
+/**
+ * One action the agent called in the app while answering (`core/agent-bridge.ts`), shown as a hex chip instead of a
+ * wall of text ("Glut + Hex", the thinking bar). Only these are visible to the app: the agent's own tools (MCP,
+ * shell) run inside its harness and report nothing here.
+ */
+export interface ToolCall {
+  label: string;
+  ok: boolean;
 }
 
 export const turns = writable<ChatTurn[]>([]);
 export const sessionId = writable<string | null>(null);
 export const busy = writable(false);
 export const panelOpen = writable(false);
+/** The actions of the turn in progress. */
+export const toolCalls = writable<ToolCall[]>([]);
 
 let nextId = 1;
 
-function push(role: TurnRole, text: string, costUsd?: number | null): ChatTurn {
-  const turn: ChatTurn = { id: nextId++, role, text, at: Date.now(), costUsd };
+function push(role: TurnRole, text: string, costUsd?: number | null, tools?: ToolCall[]): ChatTurn {
+  const turn: ChatTurn = { id: nextId++, role, text, at: Date.now(), costUsd, ...(tools?.length ? { tools } : {}) };
   turns.update((list) => [...list, turn]);
   return turn;
+}
+
+/**
+ * Notes an app action an agent called; only while a chat turn is in progress — then it counts as that turn's. A bridge
+ * request carries no session of its own, so an action another agent happens to call meanwhile lands on the chat's
+ * reply too; skill runs no longer get the module manifest, which makes that rare.
+ */
+export function noteToolCall(label: string, ok: boolean): void {
+  if (!get(busy)) return;
+  toolCalls.update((list) => [...list, { label, ok }]);
 }
 
 /** A local command's Markdown output, shown as an instruction-style turn. */
@@ -48,6 +72,7 @@ export function newSession(): void {
 export async function send(message: string, mode: ChatMode): Promise<ChatReply | null> {
   if (get(busy)) return null;
   busy.set(true);
+  toolCalls.set([]);
   panelOpen.set(true);
   push("user", mode === "instruct" ? `/${message}` : message);
   try {
@@ -61,6 +86,7 @@ export async function send(message: string, mode: ChatMode): Promise<ChatReply |
       reply.is_error ? "error" : mode === "instruct" ? "instruction" : "assistant",
       reply.reply_markdown || "(empty reply)",
       reply.cost_usd,
+      get(toolCalls),
     );
     return reply;
   } catch (err) {

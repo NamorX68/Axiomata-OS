@@ -9,7 +9,10 @@
  *   `complete_module_action`.
  */
 
+import { get } from "svelte/store";
+
 import { invokeBackend } from "./backend";
+import { noteToolCall } from "./chat";
 import { invokeAction, manifest, type ManifestEntry } from "./registry";
 import { instances } from "./stores";
 
@@ -69,6 +72,12 @@ export async function writeManifest(): Promise<void> {
   }
 }
 
+/** An action as its chip in the chat says it: "calendar · create event". */
+export function actionLabel(req: Pick<ActionRequest, "instance_id" | "action">): string {
+  const type = get(instances).find((i) => i.id === req.instance_id)?.type ?? req.instance_id;
+  return `${type} · ${req.action.replace(/_/g, " ")}`;
+}
+
 async function pollOnce(): Promise<void> {
   let requests: ActionRequest[];
   try {
@@ -85,6 +94,8 @@ async function pollOnce(): Promise<void> {
       error: null,
       completed_at: "",
     };
+    // Named before the action runs: an action that closes its own instance would leave only the raw id after it.
+    const label = actionLabel(req);
     try {
       response.result = (await invokeAction(req.instance_id, req.action, req.params ?? {})) ?? null;
       response.ok = true;
@@ -92,6 +103,7 @@ async function pollOnce(): Promise<void> {
       response.error = String(err);
     }
     response.completed_at = new Date().toISOString();
+    noteToolCall(label, response.ok);
     try {
       await invokeBackend("complete_module_action", { response });
     } catch (err) {

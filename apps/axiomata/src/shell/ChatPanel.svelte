@@ -27,7 +27,8 @@
     };
   }
 
-  import { busy, newSession, panelOpen, sessionId, turns } from "../core/chat";
+  import { busy, newSession, panelOpen, sessionId, toolCalls, turns, type ToolCall } from "../core/chat";
+  import StatusMark from "../ui/StatusMark.svelte";
   import { renderMarkdown } from "../core/markdown";
   import Window from "./Window.svelte";
 
@@ -39,6 +40,15 @@
     if (list) list.scrollTop = list.scrollHeight;
   });
 </script>
+
+<!-- The app actions the agent called for a reply (UX3): small hex chips instead of a wall of text. -->
+{#snippet chips(list: ToolCall[])}
+  <ul class="tools" aria-label="Actions the agent used">
+    {#each list as call, i (i)}
+      <li class="tool"><StatusMark tone={call.ok ? "ok" : "bad"} />{call.label}</li>
+    {/each}
+  </ul>
+{/snippet}
 
 {#if $panelOpen}
   <div class="chat-wrap" transition:slide>
@@ -60,13 +70,17 @@
             {#if t.role === "user"}
               <p>{t.text}</p>
             {:else}
+              {#if t.tools}{@render chips(t.tools)}{/if}
               <div class="md">{@html renderMarkdown(t.text)}</div>
               {#if t.costUsd != null}<span class="cost">${t.costUsd.toFixed(4)}</span>{/if}
             {/if}
           </article>
         {/each}
         {#if $busy}
-          <article class="turn assistant thinking"><span class="dots"><i></i><i></i><i></i></span></article>
+          <article class="turn assistant thinking">
+            {#if $toolCalls.length > 0}{@render chips($toolCalls)}{/if}
+            <span class="dots"><i></i><i></i><i></i></span>
+          </article>
         {/if}
       </div>
     </Window>
@@ -129,6 +143,25 @@
   .turn p {
     margin: 0;
     white-space: pre-wrap;
+  }
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-1);
+    margin: 0 0 var(--ax-space-2);
+    padding: 0;
+    list-style: none;
+  }
+  .tool {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    padding: 0 var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-elev-1);
+    font: var(--ax-type-caption);
+    color: var(--ax-text-muted);
   }
   .cost {
     display: block;

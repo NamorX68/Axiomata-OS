@@ -26,6 +26,7 @@ import { emit, on } from "./core/bus";
   import Spotlight from "./shell/Spotlight.svelte";
   import StagingLayer from "./shell/StagingLayer.svelte";
   import Toasts from "./shell/Toasts.svelte";
+  import Ambient from "./shell/Ambient.svelte";
   import Dock from "./shell/Dock.svelte";
 
   let pickerOpen = $state(false);
@@ -205,6 +206,7 @@ import { emit, on } from "./core/bus";
 
 <svelte:window onkeydown={onWindowKeydown} />
 
+<Ambient />
 <Dock />
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />

@@ -12,9 +12,10 @@
 import { brainView, legacyMotionLevel, readBrainView } from "./brainView";
 import { isMotionLevel, motionSetting } from "./motion";
 import { isUiFont, uiFont } from "./uiFont";
-import { get } from "svelte/store";
+import { get, writable, type Readable } from "svelte/store";
 
 import { appGroups, loadAppGroups, type AppGroup } from "./appGroups";
+import { effects, readEffects } from "./effects";
 import { hiddenBuiltins, loadHiddenBuiltins, loadUserApps, userApps, type UserApp } from "./apps";
 import { invokeBackend as invoke, type LoadedDashboardState as LoadedState } from "./backend";
 import { RETIRED_TILE_TYPES } from "./ringTypes";
@@ -24,6 +25,14 @@ import { isKeyboardSetting, keyboardSetting } from "./keys";
 import { isUiSize, uiSize } from "./uiScale";
 import { toast } from "./toast";
 import type { CanvasInstance, TileAnchor } from "./types";
+
+const dashboardRead = writable(false);
+
+/**
+ * Whether the saved dashboard has been read (or could not be). The app mounts before it is, so anything that judges
+ * the layout — the empty canvas — must wait for it, or every start would flash "empty".
+ */
+export const dashboardLoaded: Readable<boolean> = { subscribe: dashboardRead.subscribe };
 
 export const STATE_VERSION = 1;
 export const SAVE_DEBOUNCE_MS = 400;
@@ -225,6 +234,7 @@ export async function initPersistence(): Promise<void> {
     loaded = await invoke<LoadedState>("get_dashboard_state");
   } catch (err) {
     toast(`Could not read dashboard.json: ${String(err)}`, "danger");
+    dashboardRead.set(true);
     return;
   }
 
@@ -275,7 +285,9 @@ export async function initPersistence(): Promise<void> {
   setSetting("motion", get(motionSetting));
   const savedUiFont = getSetting<unknown>("uiFont");
   if (isUiFont(savedUiFont)) uiFont.set(savedUiFont);
+  effects.set(readEffects(getSetting<unknown>("effects")));
   loading = false;
+  dashboardRead.set(true);
   onDirty(scheduleSave);
   // Svelte stores call the subscriber once immediately, so this also
   // materialises dashboard.json on the very first boot — handy for hand-edits.
@@ -307,6 +319,10 @@ export async function initPersistence(): Promise<void> {
   });
   uiFont.subscribe((v) => {
     if (!first) setSetting("uiFont", v);
+  });
+  // `shell/Ambient.svelte` reads it; only its persistence is here.
+  effects.subscribe((v) => {
+    if (!first) setSetting("effects", v);
   });
   // `uiScale.ts` applies it; only its persistence is here.
   uiSize.subscribe((v) => {
