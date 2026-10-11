@@ -695,6 +695,7 @@
 </script>
 
 <div class="plan-pane">
+  <div class="plan-grid">
   <aside class="plans" aria-label="Plans">
     {#if boards.length > 1}
       <select
@@ -1077,18 +1078,40 @@
       {/if}
     {/if}
   </section>
+  </div>
 </div>
 
 <style>
   .plan-pane {
     position: absolute;
     inset: 0;
-    display: grid;
-    grid-template-columns: calc(340px * var(--ax-ui-scale)) 1fr;
     overflow: hidden;
     background: var(--ax-surface-1);
     color: var(--ax-text);
     font-size: var(--ax-font-size-sm);
+    /* The layout below asks how wide this pane is, not the window: the Flow gives it a narrow column. */
+    container-type: inline-size;
+  }
+  .plan-grid {
+    height: 100%;
+    display: grid;
+    grid-template-columns: calc(340px * var(--ax-ui-scale)) minmax(0, 1fr);
+  }
+  /* In a narrow pane the plans sit above the plan instead of beside it: the plan keeps the whole width rather than a
+     sliver. Container queries cannot use the UI scale, so the breakpoint is a plain width. */
+  @container (max-width: 720px) {
+    .plan-grid {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .plans {
+      max-height: calc(210px * var(--ax-ui-scale));
+      border-right: 0;
+      border-bottom: 1px solid var(--ax-border);
+    }
+    .grow {
+      display: none;
+    }
   }
   .plans {
     display: flex;
