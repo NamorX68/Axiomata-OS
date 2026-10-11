@@ -39,7 +39,7 @@
     setGroupGlyph,
   } from "../core/appGroups";
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
-  import { invokeBackend, type WorkspaceGraph } from "../core/backend";
+  import { invokeBackend, listenBackend, type WorkspaceGraph } from "../core/backend";
   import { brainActive, brainView, spinOf } from "../core/brainView";
   import { animates, motion } from "../core/motion";
   import { createInstance } from "../core/lifecycle";
@@ -60,6 +60,8 @@
   import TimeTravel from "./TimeTravel.svelte";
 
   const REFRESH_MS = 30_000;
+  /** The most sparks one burst of changed notes sends flying; the rest take their glow without one. */
+  const SPARKS_PER_BURST = 12;
   /** Fraction of the shorter canvas side used as the orbit ring's radius —
    *  shared by both rings, since the App Ring's own radius is a multiple of
    *  this one (`APP_RING`, `graph/layout.ts`): shrinking it scales both
@@ -453,7 +455,18 @@
         studioProject.set(project);
       },
     );
+    // Notes changed (the vault watch, G9): a few sparks fly to their cells, the rest of a large burst just glows.
+    let stopVaultWatch: (() => void) | null = null;
+    let unmounted = false;
+    void listenBackend<{ files: string[]; at: number }>("vault:changed", ({ files, at }) => {
+      files.forEach((file, i) => (i < SPARKS_PER_BURST ? renderer?.spark(file, at) : renderer?.touch(file, at)));
+    }).then((stop) => {
+      if (unmounted) stop();
+      else stopVaultWatch = stop;
+    });
     return () => {
+      unmounted = true;
+      stopVaultWatch?.();
       stopActivityPoll();
       cancelAnimationFrame(raf);
       clearInterval(refresh);

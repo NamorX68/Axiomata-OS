@@ -141,6 +141,7 @@ import { emit, on } from "./core/bus";
           mockExternalWrite: m.mockExternalWrite,
           mockPickNext: m.mockPickNext,
           mockAgentState: m.mockAgentState,
+          mockEmit: m.mockEmit,
         };
       });
     }

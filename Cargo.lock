@@ -15,6 +15,7 @@ dependencies = [
  "axiomata-tasks",
  "axiomata-terminal",
  "home",
+ "notify",
  "rusqlite",
  "serde",
  "serde_json",

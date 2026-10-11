@@ -25,6 +25,7 @@ mod menu;
 mod plan_watch;
 mod tasks;
 mod terminal;
+mod vault_watch;
 
 /// File-name prefix of the app log; `tracing-appender` appends the date (`app.log.YYYY-MM-DD`).
 /// Distinct from `runs.log`, so the rotation's clean-up (it matches the prefix plus a dot) never
@@ -362,6 +363,7 @@ pub fn run() {
             app.manage(debug::DebugState::default());
             card_watch::start(app.handle());
             limit_watch::start(app.handle());
+            vault_watch::start(app.handle());
             plan_watch::start(app.handle());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;

@@ -192,6 +192,10 @@ export class GraphRenderer {
   activity = 0;
   /** Orbit only: the moment the time travel shows (ms), or `null` for now (G17, UX4). */
   timeCutoff: number | null = null;
+  /** Sparks in flight to cells whose note just changed (W3): from the Studio's ring icon or the hub. */
+  private sparks: { fileId: string; fromStudio: boolean; start: number; at: number }[] = [];
+  /** Where each note's cell was last drawn, front or back, for sparks to aim at. */
+  private cellPos = new Map<string, { x: number; y: number; front: boolean }>();
   /** Orbit only: the colour of the pulse when the sessions at work belong to one marked project (card #70); `null` =
    *  the theme's accent. */
   activityColor: string | null = null;
@@ -685,6 +689,85 @@ export class GraphRenderer {
 
     this.drawAppRing(cx, cy, R, t);
     this.drawExpandedGroupRing(cx, cy, R);
+    this.drawSparks(cx, cy, t);
+  }
+
+  /** How long a spark takes from its source to the cell, in seconds. */
+  private static readonly SPARK_FLIGHT = 1.1;
+
+  /**
+   * A note changed (`vault:changed`, G9): a spark flies to its cell — from the Studio's ring icon while card sessions
+   * work, else from the hub — and the cell takes the glow when it lands. At Calm and Off nothing flies: the note is
+   * marked touched at once (G3).
+   */
+  spark(fileId: string, at: number): void {
+    const node = this.model?.byId.get(fileId);
+    if (!node) return;
+    if (this.options.pulse === false) {
+      this.touch(fileId, at);
+      return;
+    }
+    this.sparks.push({ fileId, fromStudio: this.activity > 0, start: performance.now() / 1000, at });
+  }
+
+  /** Marks a note as changed at `at` without a spark: its cell takes the glow at once (the rest of a large burst). */
+  touch(fileId: string, at: number): void {
+    const node = this.model?.byId.get(fileId);
+    if (node) node.modified = new Date(at).toISOString();
+  }
+
+  private drawSparks(cx: number, cy: number, t: number): void {
+    if (this.sparks.length === 0) return;
+    const { ctx } = this;
+    const studio = this.model?.nodes.find((n) => n.appType === "view:ide");
+    const now = performance.now() / 1000;
+    const flying: typeof this.sparks = [];
+    for (const s of this.sparks) {
+      const u = (now - s.start) / GraphRenderer.SPARK_FLIGHT;
+      const node = this.model?.byId.get(s.fileId);
+      const target = this.cellPos.get(s.fileId);
+      if (!node || !target) continue;
+      if (u >= 1) {
+        this.touch(s.fileId, s.at);
+        continue;
+      }
+      flying.push(s);
+      const fromStudio = s.fromStudio && studio?.sx !== undefined && studio.sy !== undefined;
+      const from = fromStudio ? { x: studio.sx ?? cx, y: studio.sy ?? cy } : { x: cx, y: cy };
+      // A curve bowed towards the centre and up, so a spark from the ring arcs over the ball rather than cutting it.
+      const mx = (from.x + target.x) / 2 + (cx - (from.x + target.x) / 2) * 0.5;
+      const my = (from.y + target.y) / 2 - 40;
+      const point = (k: number) => ({
+        x: (1 - k) ** 2 * from.x + 2 * (1 - k) * k * mx + k * k * target.x,
+        y: (1 - k) ** 2 * from.y + 2 * (1 - k) * k * my + k * k * target.y,
+      });
+      const ease = 1 - (1 - u) ** 2;
+      // The trail: short segments fading towards its tail.
+      ctx.strokeStyle = this.glowColor;
+      ctx.lineWidth = 1.5;
+      const tail = Math.max(0, ease - 0.25);
+      let prev = point(tail);
+      for (let k = tail + 0.02; k <= ease; k += 0.02) {
+        const p = point(k);
+        ctx.globalAlpha = 0.15 + 0.85 * ((k - tail) / 0.25);
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        prev = p;
+      }
+      const head = point(ease);
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = this.lightScheme ? 4 : 12;
+      ctx.shadowColor = this.glowColor;
+      ctx.fillStyle = this.glowColor;
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, 2.5 + Math.sin(t * 20) * 0.4, 0, TWO_PI);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
+    this.sparks = flying;
   }
 
   /** The sphere's radius as a share of the orbit ring's. */
@@ -768,6 +851,7 @@ export class GraphRenderer {
       ctx.fill();
       ctx.restore();
       if (node) {
+        this.cellPos.set(node.id, { x: p.x, y: p.y, front });
         // Only a front cell of a note that exists can be pointed at; others are parked far off for the hit test.
         node.sx = front && settled ? p.x : -1e6;
         node.sy = front && settled ? p.y : -1e6;
