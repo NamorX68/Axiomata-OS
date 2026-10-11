@@ -22,7 +22,10 @@ app="$root/target/release/bundle/macos/Axiomata-OS.app"
 echo "built: $app"
 
 if [[ "${1:-}" == "--install" ]]; then
-  if pgrep -f "/Applications/Axiomata-OS.app/" >/dev/null; then
+  # Only the app itself blocks the copy. The shared Opencode service outlives it and keeps the `axiomata-cli mcp-serve`
+  # of an open session running from this very path; those are no window to quit, and the next start of the app registers
+  # them again (card #72). Matching the whole bundle path would refuse the install for a leftover nobody can see.
+  if pgrep -f "/Applications/Axiomata-OS.app/Contents/MacOS/Axiomata-OS( |$)" >/dev/null; then
     echo "Axiomata-OS is running from /Applications; quit it first." >&2
     exit 1
   fi
