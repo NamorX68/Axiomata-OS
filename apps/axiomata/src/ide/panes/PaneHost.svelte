@@ -36,6 +36,7 @@
     fileTab,
     GIT_PANE,
     PLAN_PANE,
+    ROSTER_PANE,
     TEAM_PANE,
     GRAPH_PANE,
     projectRoot,
@@ -54,6 +55,7 @@
   import PlanPane from "./PlanPane.svelte";
   import TeamPane from "./TeamPane.svelte";
   import GraphPane from "./GraphPane.svelte";
+  import RosterPane from "./RosterPane.svelte";
   import { getDock } from "../dockContext";
   import { openFileBeside } from "./openFile";
 
@@ -190,6 +192,8 @@
     {:else}
       <p class="unknown">No project is open to show a graph for.</p>
     {/if}
+  {:else if tab.kind === ROSTER_PANE}
+    <RosterPane />
   {:else if tab.kind === TEAM_PANE}
     {#if $session.current}
       <TeamPane project={$session.current} tabId={tab.id} {visible} />

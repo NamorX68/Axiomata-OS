@@ -2,6 +2,8 @@
   Roles (a2a.md CP-A1): what an agent is for. One `AGENT.md` per role under `~/.axiomata/agents/`; this is the
   form for it. A role names engines by id and never carries a command line. The form keeps lists and numbers as
   text (`RoleForm`); `checkRoleForm` builds the role or points at the first bad field, and Rust has the last word.
+  Laid out as a list with its form beside it (`docs/plans/studio-roster-ui.md`, R-1). The name typed becomes the id
+  (R-5): the form shows the id a new role gets, and the rarely used fields sit under "Advanced".
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -22,6 +24,9 @@
     type SkippedRole,
   } from "../core/roster";
   import { toast } from "../core/toast";
+  import RoleChip from "./RoleChip.svelte";
+  import { roleIdFor } from "./rosterLook";
+  import { bumpRoster } from "./rosterStore";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
 
@@ -62,10 +67,22 @@
     problem = null;
   }
 
+  /** The id a new role gets: the name typed as a slug, clear of the taken ones (an empty name: kind and tier). */
+  const derivedId = $derived(
+    form && isNew
+      ? roleIdFor(form.name, form.kind, form.tier, roles.map((r) => r.name))
+      : (form?.name ?? ""),
+  );
+
+  /** The fields under "Advanced": a problem in one of them opens the section, so it is never hidden from the owner. */
+  const advancedProblem = $derived(
+    problem !== null && ["fallback", "creates", "maxCost", "maxTokens", "maxSteps"].includes(problem.field),
+  );
+
   async function save() {
     if (!form) return;
     const checked = checkRoleForm(
-      form,
+      { ...form, name: derivedId },
       engines.map((e) => e.id),
     );
     if (!checked.ok) {
@@ -81,6 +98,7 @@
       await saveRole(checked.value);
       form = null;
       await reload();
+      bumpRoster();
     } catch (err) {
       problem = { field: "", message: messageOf(err) };
     } finally {
@@ -94,6 +112,7 @@
       await deleteRole(role.name);
       if (form?.name === role.name && !isNew) form = null;
       await reload();
+      bumpRoster();
     } catch (err) {
       toast(messageOf(err), "warning");
     }
@@ -115,60 +134,64 @@
   });
 </script>
 
-<section>
-  <h3>Roles</h3>
-  <p class="lead">
-    A role says what an agent is for: kind of work, tier, engine, limits and the working instructions. It lives as a
-    file at <code>~/.axiomata/agents/&lt;name&gt;/AGENT.md</code>. A role names engines only by id — it can never start
-    a program itself.
-  </p>
-
-  {#if loading}
-    <p class="hint">Loading…</p>
-  {:else}
-    {#if roles.length === 0}
-      <p class="hint">No roles yet.</p>
+<section class="split" class:has-form={form !== null}>
+  <div class="list">
+    <div class="list-head">
+      <h3>Roles</h3>
+      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add role…</button>
+    </div>
+    {#if loading}
+      <p class="hint">Loading…</p>
     {:else}
-      <ul class="cards">
-        {#each roles as r (r.name)}
-          {@const engine = engines.find((e) => e.id === r.engine)}
-          <li
-            class="card"
-            class:editing={form?.name === r.name && !isNew}
-            style:--harness={engine ? `var(--ax-harness-${engine.harness})` : undefined}
-          >
-            <button type="button" class="open" onclick={() => startEdit(r)}>
-              <span class="top">
-                <span class="avatar" aria-hidden="true">{r.name.trim().charAt(0).toUpperCase() || "?"}</span>
-                <span class="who">
-                  <span class="name">{r.name} <span class="tier">{tierLabel(r.tier)}</span></span>
-                  <span class="meta">
-                    {r.kind} · {r.engine ? (engine?.label ?? r.engine) : "engine chosen at start"}
+      {#if roles.length === 0}
+        <p class="hint">No roles yet.</p>
+      {:else}
+        <ul class="cards">
+          {#each roles as r (r.name)}
+            {@const engine = engines.find((e) => e.id === r.engine)}
+            <li
+              class="card"
+              class:editing={form?.name === r.name && !isNew}
+              style:--harness={engine ? `var(--ax-harness-${engine.harness})` : undefined}
+            >
+              <button type="button" class="open" onclick={() => startEdit(r)}>
+                <span class="top">
+                  <span class="avatar" aria-hidden="true">{r.name.trim().charAt(0).toUpperCase() || "?"}</span>
+                  <span class="who">
+                    <span class="name">{r.name} <span class="tier">{tierLabel(r.tier)}</span></span>
+                    <span class="meta">
+                      <RoleChip label={r.kind} kind={r.kind} />
+                      {r.engine ? (engine?.label ?? r.engine) : "engine chosen at start"}
+                    </span>
                   </span>
                 </span>
-              </span>
-              {#if r.description}<span class="since">{r.description}</span>{/if}
-            </button>
-            <div class="row-actions">
-              <IconButton icon="pencil" label="Edit {r.name}" size="sm" onclick={() => startEdit(r)} />
-              <IconButton icon="trash-2" label="Delete {r.name}" size="sm" onclick={() => remove(r)} />
-            </div>
-          </li>
-        {/each}
-      </ul>
+                {#if r.description}<span class="since">{r.description}</span>{/if}
+              </button>
+              <div class="row-actions">
+                <IconButton icon="trash-2" label="Delete {r.name}" size="sm" onclick={() => remove(r)} />
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#each skipped as s (s.name)}
+        <p class="problem">Skipped: <code>{s.name}</code> — {s.reason}</p>
+      {/each}
     {/if}
-    {#each skipped as s (s.name)}
-      <p class="problem">Skipped: <code>{s.name}</code> — {s.reason}</p>
-    {/each}
-  {/if}
+  </div>
 
-  {#if form}
-    <div class="form">
-      <label class="field">
-        <span>Name {isNew ? "" : "(fixed)"}</span>
-        <input type="text" spellcheck="false" bind:value={form.name} disabled={!isNew} placeholder="e.g. implementer-light" />
-        {#if problem?.field === "name"}<em class="problem">{problem.message}</em>{/if}
-      </label>
+  <div class="detail">
+    {#if form}
+      <button type="button" class="back" onclick={() => (form = null)}>← All roles</button>
+      <h3>{isNew ? "New role" : form.name}</h3>
+      {#if isNew}
+        <label class="field">
+          <span>Name</span>
+          <input type="text" spellcheck="false" bind:value={form.name} placeholder="e.g. Reviewer light" />
+          {#if problem?.field === "name"}<em class="problem">{problem.message}</em>{/if}
+        </label>
+        <p class="idline">ID and file name: <code>{derivedId || "—"}</code></p>
+      {/if}
       <label class="field">
         <span>Description</span>
         <input type="text" bind:value={form.description} />
@@ -177,7 +200,10 @@
       <div class="pair">
         <label class="field">
           <span>Kind of work</span>
-          <input type="text" spellcheck="false" bind:value={form.kind} placeholder="implement, review, plan, test, doc" />
+          <input type="text" spellcheck="false" list="role-kinds" bind:value={form.kind} placeholder="implement, review, plan, test, doc" />
+          <datalist id="role-kinds">
+            {#each ["implement", "review", "plan", "test", "doc"] as k (k)}<option value={k}></option>{/each}
+          </datalist>
           {#if problem?.field === "kind"}<em class="problem">{problem.message}</em>{/if}
         </label>
         <label class="field">
@@ -200,66 +226,130 @@
         {#if problem?.field === "engine"}<em class="problem">{problem.message}</em>{/if}
       </label>
       <label class="field">
-        <span>Fallback engines (ids, comma-separated, in this order)</span>
-        <input type="text" spellcheck="false" bind:value={form.fallback} placeholder={engines.map((e) => e.id).join(", ")} />
-        {#if problem?.field === "fallback"}<em class="problem">{problem.message}</em>{/if}
-      </label>
-      <label class="field">
-        <span>Creates cards without asking (kinds, comma-separated)</span>
-        <input type="text" spellcheck="false" bind:value={form.creates} placeholder="e.g. test, doc" />
-        {#if problem?.field === "creates"}<em class="problem">{problem.message}</em>{/if}
-      </label>
-      <label class="field">
-        <span>Rights (harness rules, one per line)</span>
-        <textarea rows="2" spellcheck="false" bind:value={form.permissions}></textarea>
-      </label>
-      <div class="triple">
-        <label class="field">
-          <span>Cost limit (USD)</span>
-          <input type="text" inputmode="decimal" bind:value={form.maxCost} placeholder="empty = default" />
-          {#if problem?.field === "maxCost"}<em class="problem">{problem.message}</em>{/if}
-        </label>
-        <label class="field">
-          <span>Token limit</span>
-          <input type="text" inputmode="numeric" bind:value={form.maxTokens} placeholder="empty = default" />
-          {#if problem?.field === "maxTokens"}<em class="problem">{problem.message}</em>{/if}
-        </label>
-        <label class="field">
-          <span>Step limit</span>
-          <input type="text" inputmode="numeric" bind:value={form.maxSteps} placeholder="empty = default" />
-          {#if problem?.field === "maxSteps"}<em class="problem">{problem.message}</em>{/if}
-        </label>
-      </div>
-      <label class="field">
         <span>Working instructions (Markdown)</span>
-        <textarea rows="8" spellcheck="false" bind:value={form.instructions}></textarea>
+        <textarea rows="12" spellcheck="false" bind:value={form.instructions}></textarea>
       </label>
+      <details class="advanced" open={advancedProblem}>
+        <summary>Advanced: fallback engines, rights, limits</summary>
+        <label class="field">
+          <span>Fallback engines (ids, comma-separated, in this order)</span>
+          <input type="text" spellcheck="false" bind:value={form.fallback} placeholder={engines.map((e) => e.id).join(", ")} />
+          {#if problem?.field === "fallback"}<em class="problem">{problem.message}</em>{/if}
+        </label>
+        <label class="field">
+          <span>Creates cards without asking (kinds, comma-separated)</span>
+          <input type="text" spellcheck="false" bind:value={form.creates} placeholder="e.g. test, doc" />
+          {#if problem?.field === "creates"}<em class="problem">{problem.message}</em>{/if}
+        </label>
+        <label class="field">
+          <span>Rights (harness rules, one per line)</span>
+          <textarea rows="2" spellcheck="false" bind:value={form.permissions}></textarea>
+        </label>
+        <div class="triple">
+          <label class="field">
+            <span>Cost limit (USD)</span>
+            <input type="text" inputmode="decimal" bind:value={form.maxCost} placeholder="empty = default" />
+            {#if problem?.field === "maxCost"}<em class="problem">{problem.message}</em>{/if}
+          </label>
+          <label class="field">
+            <span>Token limit</span>
+            <input type="text" inputmode="numeric" bind:value={form.maxTokens} placeholder="empty = default" />
+            {#if problem?.field === "maxTokens"}<em class="problem">{problem.message}</em>{/if}
+          </label>
+          <label class="field">
+            <span>Step limit</span>
+            <input type="text" inputmode="numeric" bind:value={form.maxSteps} placeholder="empty = default" />
+            {#if problem?.field === "maxSteps"}<em class="problem">{problem.message}</em>{/if}
+          </label>
+        </div>
+      </details>
       {#if problem && !problem.field}<p class="problem">{problem.message}</p>{/if}
       <div class="actions">
-        <button type="button" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save role"}</button>
-        <button type="button" class="plain" onclick={() => (form = null)}>Cancel</button>
+        <button type="button" class="ax-btn primary" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save role"}</button>
+        <button type="button" class="ax-btn" onclick={() => (form = null)}>Cancel</button>
       </div>
-    </div>
-  {:else if !loading}
-    <div class="actions">
-      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add role…</button>
-    </div>
-  {/if}
+    {:else if !loading}
+      <p class="hint">
+        A role says what an agent is for: kind of work, tier, engine, limits and the working instructions. It lives
+        as a file at <code>~/.axiomata/agents/&lt;id&gt;/AGENT.md</code>. A role names engines only by id — it can
+        never start a program itself. Pick one on the left to change it, or add a new one.
+      </p>
+    {/if}
+  </div>
 </section>
 
 <style>
-  .lead,
+  /* The list and its form side by side, each scrolling on its own. */
+  .split {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(calc(220px * var(--ax-ui-scale)), 34%) minmax(0, 1fr);
+  }
+  /* In a narrow pane the list and the form take turns: the form never sits at the end of a long list. */
+  .back {
+    display: none;
+    margin-bottom: var(--ax-space-2);
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--ax-accent);
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+  /* Container queries cannot use the UI scale, so the breakpoint is a plain width. */
+  @container (max-width: 640px) {
+    .split {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .split.has-form .list,
+    .split:not(.has-form) .detail {
+      display: none;
+    }
+    .back {
+      display: inline-block;
+    }
+    .list {
+      border-right: 0;
+    }
+  }
+  .list,
+  .detail {
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--ax-space-3) var(--ax-space-4);
+  }
+  .list {
+    border-right: 1px solid var(--ax-border);
+  }
+  .list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ax-space-2);
+    margin-bottom: var(--ax-space-3);
+  }
+  h3 {
+    margin: 0 0 var(--ax-space-3);
+    font-size: var(--ax-font-size-lg);
+  }
+  .list-head h3 {
+    margin: 0;
+  }
   .hint {
     margin: 0 0 var(--ax-space-3);
     font-size: var(--ax-font-size-sm);
+    line-height: var(--ax-line-height);
     color: var(--ax-text-muted);
   }
-  .lead code,
+  .hint code,
   .problem code {
     font-family: var(--ax-font-mono);
     color: var(--ax-text);
   }
-  /* A card per role, the same look as an engine's (and an agent's in the Agents panel): the engine's colour on its edge. */
+  /* A card per role, like an engine's and an agent's in the Agents panel: the engine's colour on its edge. */
   .cards {
     list-style: none;
     margin: 0 0 var(--ax-space-3);
@@ -362,8 +452,7 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    width: 100%;
-    padding: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
     background: none;
     border: 0;
     border-radius: var(--ax-radius-md);
@@ -377,17 +466,32 @@
     background: var(--ax-surface-2);
     color: var(--ax-text);
   }
-  .form {
-    padding: var(--ax-space-3);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
+  .advanced {
     margin-bottom: var(--ax-space-3);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+  .advanced summary {
+    cursor: pointer;
+    margin-bottom: var(--ax-space-2);
+  }
+  .idline {
+    margin: 0 0 var(--ax-space-3);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+  .idline code {
+    font-family: var(--ax-font-mono);
+  }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
   }
   .pair {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--ax-space-2);
+    gap: var(--ax-space-3);
   }
   .triple {
     display: grid;
@@ -442,8 +546,5 @@
   .actions {
     display: flex;
     gap: var(--ax-space-2);
-  }
-  .plain {
-    background: transparent;
   }
 </style>

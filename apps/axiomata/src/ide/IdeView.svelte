@@ -60,7 +60,6 @@
   } from "./layout";
   import type { AgentSpec, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
-  import AgentsSettings from "./AgentsSettings.svelte";
   import TasksPanel from "./TasksPanel.svelte";
   import DebugPanel from "./DebugPanel.svelte";
   import { onDebugReveal, onDebugTerminal } from "./debug";
@@ -81,6 +80,8 @@
     frontFileTab,
     FILE_PANE,
     isWorkPane,
+    ROSTER_PANE,
+    rosterTab,
     TASK_PANE,
     taskIdOf,
     taskTab,
@@ -582,6 +583,18 @@
     layout = applyProjectCwd(added, project.repo_root);
   }
 
+  /** Brings the engines-and-roles pane forward, making it in the last group of this layout when there is none. */
+  function openRoster() {
+    const here = allTabs(layout).find((t) => t.kind === ROSTER_PANE);
+    if (here) {
+      layout = activateTab(layout, here.id);
+      return;
+    }
+    const groups = allGroups(layout);
+    const last = groups.length > 0 ? groups[groups.length - 1].id : layout.root.id;
+    layout = addTab(layout, rosterTab(), { nodeId: last, side: "center" });
+  }
+
   async function addAgent(spec: AgentSpec) {
     const created = await projectSession.addAgent(spec);
     if (created) openAgent(created);
@@ -958,9 +971,9 @@
           {openAgentIds}
           disabled={!current}
           projectId={current?.id ?? null}
-          onManage={() => (inspector = "agents")}
+          onManage={openRoster}
           onOpen={openAgent}
-          onCreate={(spec) => void addAgent(spec)}
+          onCreate={(spec) => addAgent(spec)}
           onEdit={(id, spec) => void projectSession.editAgent(id, spec)}
           onRemove={(id) => void projectSession.removeAgent(id)}
         />
@@ -1051,9 +1064,7 @@
   {/if}
   </div>
   {#if inspector}
-    <Inspector tab={inspector} surface={preview.current} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)}>
-      {#snippet agents()}<AgentsSettings />{/snippet}
-    </Inspector>
+    <Inspector tab={inspector} surface={preview.current} onTab={(t) => (inspector = t)} onClose={() => (inspector = null)} />
   {/if}
   </div>
   {#if quickOpen && open}

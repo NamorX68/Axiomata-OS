@@ -1,7 +1,8 @@
 <!--
   Engines (a2a.md CP-A1): the owner's catalog of harness + model + environment. Sessions and roles refer to an
   engine by id, so switching an engine happens here, once. Rust is authoritative for validation; `checkEngine`
-  only points at a field before the round trip.
+  only points at a field before the round trip. Laid out as a list with its form beside it
+  (`docs/plans/studio-roster-ui.md`, R-1); the id is derived from the label unless it is set under "Advanced" (R-5).
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -19,6 +20,7 @@
   } from "../core/roster";
   import { toast } from "../core/toast";
   import { HARNESSES } from "./agents";
+  import { engineIdFor, harnessBadge } from "./rosterLook";
   import { engineLine, refreshEngines } from "./rosterStore";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -59,9 +61,21 @@
     problem = null;
   }
 
+  const agentCount = (n: number) => `${n} agent${n === 1 ? "" : "s"}`;
+
+  /** The id a new engine gets: the one typed under "Advanced", else derived from the label, clear of taken ones. */
+  const derivedId = $derived(
+    form && isNew
+      ? form.id.trim() || engineIdFor(form.label, form.harness, form.model, engines.map((e) => e.id))
+      : (form?.id ?? ""),
+  );
+
+  /** The fields under "Advanced": a problem in one of them opens the section, so it is never hidden from the owner. */
+  const advancedProblem = $derived(problem !== null && ["id", "env"].includes(problem.field));
+
   async function save() {
     if (!form) return;
-    const checked = checkEngine(form);
+    const checked = checkEngine({ ...form, id: derivedId });
     if (!checked.ok) {
       problem = { field: checked.field, message: checked.message };
       return;
@@ -99,65 +113,68 @@
   onMount(reload);
 </script>
 
-<section>
-  <h3>Engines</h3>
-  <p class="lead">
-    An engine is harness + model + environment — the part that costs money and can be unreachable. Engines are made
-    only here; an agent in the Agents panel is built by choosing one, and roles refer to them by id.
-  </p>
-
-  {#if loading}
-    <p class="hint">Loading…</p>
-  {:else if engines.length === 0}
-    <p class="hint">No engines yet.</p>
-  {:else}
-    <ul class="cards">
-      {#each engines as e (e.id)}
-        <li class="card" class:editing={form?.id === e.id && !isNew} style:--harness="var(--ax-harness-{e.harness})">
-          <button type="button" class="open" onclick={() => startEdit(e)}>
-            <span class="top">
-              <span class="avatar" aria-hidden="true">{e.label.trim().charAt(0).toUpperCase() || "?"}</span>
-              <span class="who">
-                <span class="name">{e.label}</span>
-                <span class="meta">{engineLine(e)}</span>
+<section class="split" class:has-form={form !== null}>
+  <div class="list">
+    <div class="list-head">
+      <h3>Engines</h3>
+      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add engine…</button>
+    </div>
+    {#if loading}
+      <p class="hint">Loading…</p>
+    {:else if engines.length === 0}
+      <p class="hint">No engines yet. An agent runs on an engine, so add one first.</p>
+    {:else}
+      <ul class="cards">
+        {#each engines as e (e.id)}
+          <li class="card" class:editing={form?.id === e.id && !isNew} style:--harness="var(--ax-harness-{e.harness})">
+            <button type="button" class="open" onclick={() => startEdit(e)}>
+              <span class="top">
+                <span class="avatar" aria-hidden="true">{harnessBadge(e.harness)}</span>
+                <span class="who">
+                  <span class="name">{e.label}</span>
+                  <span class="meta">{engineLine(e)}</span>
+                </span>
               </span>
-            </span>
-            <span class="since">
-              <code>{e.id}</code> · {e.billing === "subscription" ? "subscription" : "metered"} · {e.sessions} agent{e.sessions ===
-              1
-                ? ""
-                : "s"}
-            </span>
-          </button>
-          <div class="row-actions">
-            <IconButton icon="pencil" label="Edit {e.label}" size="sm" onclick={() => startEdit(e)} />
-            <IconButton icon="trash-2" label="Remove {e.label}" size="sm" onclick={() => remove(e)} />
-          </div>
-        </li>
-      {/each}
-    </ul>
-  {/if}
+              <span class="since">
+                <code>{e.id}</code> · {e.billing === "subscription" ? "subscription" : "metered"} · {agentCount(e.sessions)}
+              </span>
+            </button>
+            <div class="row-actions">
+              <IconButton icon="trash-2" label="Remove {e.label}" size="sm" onclick={() => remove(e)} />
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
 
-  {#if form}
-    <div class="form">
-      <label class="field">
-        <span>ID {isNew ? "" : "(fixed)"}</span>
-        <input type="text" spellcheck="false" bind:value={form.id} disabled={!isNew} placeholder="e.g. claude-opus" />
-        {#if problem?.field === "id"}<em class="problem">{problem.message}</em>{/if}
-      </label>
+  <div class="detail">
+    {#if form}
+      <button type="button" class="back" onclick={() => (form = null)}>← All engines</button>
+      <h3>{isNew ? "New engine" : form.label || "Engine"}</h3>
       <label class="field">
         <span>Label</span>
         <input type="text" bind:value={form.label} placeholder="e.g. Claude Code · Opus" />
         {#if problem?.field === "label"}<em class="problem">{problem.message}</em>{/if}
       </label>
-      <label class="field">
-        <span>Harness</span>
-        <select bind:value={form.harness}>
-          {#each HARNESSES as h (h.id)}
-            <option value={h.id}>{h.label} — {h.hint}</option>
-          {/each}
-        </select>
-      </label>
+      <div class="pair">
+        <label class="field">
+          <span>Harness</span>
+          <select bind:value={form.harness}>
+            {#each HARNESSES as h (h.id)}
+              <option value={h.id}>{h.label} — {h.hint}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="field">
+          <span>Billing</span>
+          <select bind:value={form.billing}>
+            {#each BILLINGS as b (b.id)}
+              <option value={b.id}>{b.label} — {b.hint}</option>
+            {/each}
+          </select>
+        </label>
+      </div>
       <label class="field">
         <span>Model</span>
         <input
@@ -168,42 +185,131 @@
           placeholder="empty = the harness picks; Opencode: provider/model"
         />
       </label>
-      <label class="field">
-        <span>Command (empty = the harness default)</span>
-        <input type="text" spellcheck="false" bind:value={form.command} />
-      </label>
-      <label class="field">
-        <span>Environment (<code>KEY=value</code> per line)</span>
-        <textarea rows="2" spellcheck="false" bind:value={form.env}></textarea>
-        {#if problem?.field === "env"}<em class="problem">{problem.message}</em>{/if}
-      </label>
-      <label class="field">
-        <span>Billing</span>
-        <select bind:value={form.billing}>
-          {#each BILLINGS as b (b.id)}
-            <option value={b.id}>{b.label} — {b.hint}</option>
-          {/each}
-        </select>
-      </label>
+      <details class="advanced" open={advancedProblem}>
+        <summary>Advanced</summary>
+        <label class="field">
+          <span>ID {isNew ? "" : "(fixed)"}</span>
+          <input
+            type="text"
+            spellcheck="false"
+            bind:value={form.id}
+            disabled={!isNew}
+            placeholder={isNew ? derivedId : ""}
+          />
+          {#if problem?.field === "id"}<em class="problem">{problem.message}</em>{/if}
+        </label>
+        <label class="field">
+          <span>Command (empty = the harness default)</span>
+          <input type="text" spellcheck="false" bind:value={form.command} />
+        </label>
+        <label class="field">
+          <span>Environment (<code>KEY=value</code> per line)</span>
+          <textarea rows="3" spellcheck="false" bind:value={form.env}></textarea>
+          {#if problem?.field === "env"}<em class="problem">{problem.message}</em>{/if}
+        </label>
+      </details>
+      {#if isNew}<p class="idline">ID: <code>{derivedId || "—"}</code></p>{/if}
       {#if problem && !problem.field}<p class="problem">{problem.message}</p>{/if}
       <div class="actions">
-        <button type="button" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save engine"}</button>
-        <button type="button" class="plain" onclick={() => (form = null)}>Cancel</button>
+        <button type="button" class="ax-btn primary" disabled={saving} onclick={save}>{saving ? "Saving…" : "Save engine"}</button>
+        <button type="button" class="ax-btn" onclick={() => (form = null)}>Cancel</button>
       </div>
-    </div>
-  {:else}
-    <div class="actions">
-      <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> Add engine…</button>
-    </div>
-  {/if}
+    {:else}
+      <p class="hint">
+        An engine is harness + model + environment — the part that costs money and can be unreachable. Pick one on
+        the left to change it, or add a new one.
+      </p>
+    {/if}
+  </div>
 </section>
 
 <style>
-  .lead,
+  /* The list and its form side by side, each scrolling on its own. */
+  .split {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(calc(220px * var(--ax-ui-scale)), 34%) minmax(0, 1fr);
+  }
+  /* In a narrow pane the list and the form take turns: the form never sits at the end of a long list. */
+  .back {
+    display: none;
+    margin-bottom: var(--ax-space-2);
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--ax-accent);
+    font: inherit;
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+  /* Container queries cannot use the UI scale, so the breakpoint is a plain width. */
+  @container (max-width: 640px) {
+    .split {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .split.has-form .list,
+    .split:not(.has-form) .detail {
+      display: none;
+    }
+    .back {
+      display: inline-block;
+    }
+    .list {
+      border-right: 0;
+    }
+  }
+  .list,
+  .detail {
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--ax-space-3) var(--ax-space-4);
+  }
+  .list {
+    border-right: 1px solid var(--ax-border);
+  }
+  .list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ax-space-2);
+    margin-bottom: var(--ax-space-3);
+  }
+  h3 {
+    margin: 0 0 var(--ax-space-3);
+    font-size: var(--ax-font-size-lg);
+  }
+  .list-head h3 {
+    margin: 0;
+  }
   .hint {
     margin: 0 0 var(--ax-space-3);
     font-size: var(--ax-font-size-sm);
+    line-height: var(--ax-line-height);
     color: var(--ax-text-muted);
+  }
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--ax-space-3);
+  }
+  .advanced {
+    margin-bottom: var(--ax-space-3);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+  .advanced summary {
+    cursor: pointer;
+    margin-bottom: var(--ax-space-2);
+  }
+  .idline {
+    margin: 0 0 var(--ax-space-3);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+  .idline code {
+    font-family: var(--ax-font-mono);
   }
   /* A card per engine, the same look as an agent in the Agents panel: the harness's colour on its edge. */
   .cards {
@@ -302,8 +408,7 @@
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    width: 100%;
-    padding: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
     background: none;
     border: 0;
     border-radius: var(--ax-radius-md);
@@ -316,13 +421,6 @@
   .add:hover {
     background: var(--ax-surface-2);
     color: var(--ax-text);
-  }
-  .form {
-    padding: var(--ax-space-3);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
-    margin-bottom: var(--ax-space-3);
   }
   .field {
     display: flex;
@@ -369,8 +467,5 @@
   .actions {
     display: flex;
     gap: var(--ax-space-2);
-  }
-  .plain {
-    background: transparent;
   }
 </style>

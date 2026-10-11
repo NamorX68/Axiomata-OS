@@ -1,8 +1,10 @@
 <!--
   The Agents panel of the activity rail: which agents this project has (with their live status), the form to
   add or edit one, and the click that puts one into a pane. It is a view of the sidebar column, like Files.
-  An agent is *made on an engine*: the form picks one from the catalog (and a role) and never describes a harness,
-  a command or a model — engines are created only in the settings (`EnginesSection`), so there is one place for it.
+  An agent is *a role on an engine*: the role's "Start" chip opens the agent of that role that has no pane, or makes
+  one on the role's engine (`docs/plans/studio-roster-ui.md`, R-3); the form is for something quite different. The
+  form never describes a harness, a command or a model — engines are made only in the Engines & roles pane
+  (`EnginesSection`).
   Deleting a profile does not close the panes showing it — those may have something running, and the pane
   says the profile is gone instead of taking a live shell with it. The wording here says as much.
 -->
@@ -10,12 +12,14 @@
   import { onMount } from "svelte";
 
   import type { AgentSpec, IdeAgent } from "../core/backend";
-  import { projectRoles } from "../core/roster";
+  import { projectRoles, type Role } from "../core/roster";
   import { blankSpec, specOf, specReady } from "./agents";
   import { agentStatus } from "./agentStatus";
   import { cardOf } from "./agentCard";
   import ProjectRolesNotice from "./ProjectRolesNotice.svelte";
-  import { engineCatalog, engineLine, refreshEngines } from "./rosterStore";
+  import RoleChip from "./RoleChip.svelte";
+  import { agentNameFor, engineName, harnessBadge, harnessLabel, startableAgent } from "./rosterLook";
+  import { engineCatalog, engineLine, refreshEngines, rosterVersion } from "./rosterStore";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
@@ -40,10 +44,11 @@
     disabled?: boolean;
     /** The open project, for the roles it brings (`ProjectRolesNotice`). */
     projectId?: number | null;
-    /** Opens the inspector's Agents tab: where engines and roles are made. */
+    /** Opens the Engines & roles pane: where engines and roles are made. */
     onManage: () => void;
     onOpen: (agent: IdeAgent) => void;
-    onCreate: (spec: AgentSpec) => void;
+    /** May answer when the agent exists, so a second click on a chip waits for the first. */
+    onCreate: (spec: AgentSpec) => void | Promise<unknown>;
     onEdit: (id: number, spec: AgentSpec) => void;
     onRemove: (id: number) => void;
   } = $props();
@@ -53,6 +58,8 @@
   /** The roles in force for this project — what the role picker offers — and the engine each carries. */
   let roleNames = $state<string[]>([]);
   let roleEngines = $state<Record<string, string | null>>({});
+  let roleList = $state<Role[]>([]);
+  const roleKinds = $derived(new Map(roleList.map((role) => [role.name, role.kind])));
 
   let form = $state<AgentSpec>(blankSpec([]));
 
@@ -62,6 +69,7 @@
     if (id === null) {
       roleNames = [];
       roleEngines = {};
+      roleList = [];
       return;
     }
     try {
@@ -69,10 +77,12 @@
       if (id === projectId) {
         roleNames = roles.effective.map((role) => role.name);
         roleEngines = Object.fromEntries(roles.effective.map((role) => [role.name, role.engine]));
+        roleList = roles.effective;
       }
     } catch {
       roleNames = [];
       roleEngines = {};
+      roleList = [];
     }
   }
 
@@ -80,7 +90,9 @@
     void refreshEngines();
   });
 
+  // The roles are made in another pane: read them again when one was saved or deleted there.
   $effect(() => {
+    void $rosterVersion;
     void loadRoles(projectId);
   });
 
@@ -114,11 +126,37 @@
     editing = undefined;
   }
 
-  /** What an agent card says about what it runs on: its engine's label, else the harness and model of its profile. */
-  function runsOn(agent: IdeAgent): string {
-    const engine = engines.find((e) => e.id === agent.engine_id);
-    if (engine) return engine.label;
-    return `${agent.harness === "claude_code" ? "Claude Code" : agent.harness}${agent.model ? ` · ${agent.model}` : ""}`;
+  /**
+   * A role's "Start" chip: the agent of that role with no pane opens again (its session continues in its worktree);
+   * with none, one is made on the role's engine. A role that names no engine (the planner) opens the form with the role
+   * chosen, because the engine is the owner's pick at every start.
+   */
+  /** A "Start" click is being served: the agent it makes is not in `agents` yet, so a second click would repeat it. */
+  let starting = false;
+
+  async function startRole(role: Role) {
+    if (starting) return;
+    const again = startableAgent(agents, role, openAgentIds);
+    if (again) {
+      onOpen(again);
+      return;
+    }
+    if (role.engine && engines.some((engine) => engine.id === role.engine)) {
+      starting = true;
+      try {
+        await onCreate({
+          name: agentNameFor(role.name, agents.map((a) => a.name)),
+          engine_id: role.engine,
+          role: role.name,
+        });
+      } finally {
+        starting = false;
+      }
+      return;
+    }
+    startNew();
+    form.role = role.name;
+    form.name = agentNameFor(role.name, agents.map((a) => a.name));
   }
 </script>
 
@@ -126,6 +164,21 @@
   <p class="title">AGENTS</p>
   <div class="body">
     <ProjectRolesNotice {projectId} />
+    {#if roleList.length > 0 && !disabled && editing === undefined}
+      <div class="starts" role="group" aria-label="Start an agent in a role">
+        <span class="starts-label">Start</span>
+        {#each roleList as role (role.name)}
+          <button
+            type="button"
+            class="start"
+            title={role.description || `Start ${role.name}`}
+            onclick={() => startRole(role)}
+          >
+            <RoleChip label={role.name} kind={role.kind} />
+          </button>
+        {/each}
+      </div>
+    {/if}
     {#if agents.length > 0}
       <ul class="cards">
         {#each agents as agent (agent.id)}
@@ -133,10 +186,15 @@
           <li class="card {card.status.tone}" style:--harness="var(--ax-harness-{agent.harness})">
             <button class="open" type="button" {disabled} title={card.status.title} onclick={() => onOpen(agent)}>
               <span class="top">
-                <span class="avatar" aria-hidden="true">{agent.name.trim().charAt(0).toUpperCase() || "?"}</span>
+                <span class="avatar" role="img" aria-label={harnessLabel(agent.harness)} title={engineName(agent, engines)}>
+                  {harnessBadge(agent.harness)}
+                </span>
                 <span class="who">
                   <span class="name">{agent.name}</span>
-                  <span class="meta">{runsOn(agent)}{agent.agent_role !== "allrounder" ? ` · ${agent.agent_role}` : ""}</span>
+                  <span class="meta">
+                    <RoleChip label={agent.agent_role} kind={roleKinds.get(agent.agent_role)} />
+                    <span class="engine">{engineName(agent, engines)}</span>
+                  </span>
                 </span>
                 <span class="state">
                   <StatusDot view={card.status} />
@@ -335,6 +393,7 @@
     border-radius: var(--ax-radius-pill);
     background: color-mix(in srgb, var(--harness, var(--ax-text-muted)) 22%, transparent);
     color: var(--harness, var(--ax-text-muted));
+    font-size: var(--ax-font-size-xs);
     font-weight: 600;
   }
 
@@ -353,11 +412,48 @@
   }
 
   .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--ax-space-2);
+    min-width: 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .engine {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* The roles of the project as chips: one click starts an agent in that role. */
+  .starts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ax-space-2);
+    margin-bottom: var(--ax-space-3);
+  }
+
+  .starts-label {
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
+  }
+
+  .start {
+    padding: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-pill);
+    cursor: pointer;
+  }
+
+  .start:hover,
+  .start:focus-visible {
+    border-color: var(--ax-border-strong);
   }
 
   .state {

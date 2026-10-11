@@ -12,6 +12,18 @@ import { toast } from "../core/toast";
 
 const store = writable<EngineEntry[]>([]);
 
+const rosterVersionStore = writable(0);
+
+/**
+ * Counts changes of the roles. The Agents panel reads the roles a project has once per project; the roles are made in
+ * another pane, so whoever saves or deletes one calls [`bumpRoster`] and the panel's "Start" chips follow.
+ */
+export const rosterVersion = { subscribe: rosterVersionStore.subscribe };
+
+export function bumpRoster(): void {
+  rosterVersionStore.update((n) => n + 1);
+}
+
 /** The catalog, with how many sessions run on each engine. */
 export const engineCatalog = { subscribe: store.subscribe };
 

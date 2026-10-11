@@ -51,6 +51,13 @@ export const TEAM_PANE = "team";
 /** The Flow mode's graph of a plan (A2A CP-A10, A6): the cards as nodes, "needs first" as lines. One per Flow layout. */
 export const GRAPH_PANE = "graph";
 
+/** The Studio's engines and roles (`docs/plans/studio-roster-ui.md`, R-1): a list with its form beside it. One per layout. */
+export const ROSTER_PANE = "roster";
+
+export function rosterTab(): PaneTab {
+  return { id: crypto.randomUUID(), kind: ROSTER_PANE, title: "Engines & roles", config: {} };
+}
+
 export function graphTab(): PaneTab {
   return { id: crypto.randomUUID(), kind: GRAPH_PANE, title: "Flow view", config: {} };
 }
