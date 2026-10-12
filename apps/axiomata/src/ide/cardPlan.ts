@@ -5,6 +5,7 @@
  * columns.
  */
 
+import type { WaitingAgent } from "../core/agentWaiting";
 import type { BoardCard, BoardPlan } from "../core/backend";
 import { readyToTakeOver } from "./planning";
 
@@ -57,6 +58,23 @@ export function phaseOf(plan: BoardPlan, cards: BoardCard[]): CardPlanPhase {
 /** Whether a session works on one of the plan's steps right now: then the card glows (the accent rule). */
 export function stepAtWork(cards: BoardCard[], planId: number, atWork: ReadonlySet<number>): boolean {
   return cards.some((card) => card.plan_id === planId && atWork.has(card.id));
+}
+
+/**
+ * The agents waiting for the owner that a card stands for: its own session, and — for a card started as a plan — the
+ * sessions of the plan's steps, which the board does not show (plans/agent-waiting.md W2).
+ */
+export function waitingFor(
+  card: Pick<BoardCard, "id" | "origin_of">,
+  cards: Pick<BoardCard, "id" | "plan_id">[],
+  waiting: WaitingAgent[],
+): WaitingAgent[] {
+  // Called for every card on every redraw: nothing to look up while nobody waits, the usual case.
+  if (waiting.length === 0) return [];
+  const planId = card.origin_of;
+  const steps =
+    planId == null ? new Set<number>() : new Set(cards.filter((c) => c.plan_id === planId).map((c) => c.id));
+  return waiting.filter((agent) => agent.card_id === card.id || (agent.card_id !== null && steps.has(agent.card_id)));
 }
 
 /** A card the owner may start as a plan: ready, and no step of a plan (that one starts in the Flow). */

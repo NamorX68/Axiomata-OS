@@ -42,6 +42,7 @@
     planOfCard,
     progressOf,
     stepAtWork,
+    waitingFor,
     visibleOnBoard,
   } from "../ide/cardPlan";
   import { showPlanInFlow } from "../ide/planRequest";
@@ -87,6 +88,8 @@
   import IconButton from "../ui/IconButton.svelte";
   import EmptyState from "../ui/EmptyState.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
+  import WaitingBadge from "../ui/WaitingBadge.svelte";
+  import { waitingAgents } from "../core/agentWaiting";
   import type { StatusTone } from "../ui/status";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -1442,6 +1445,7 @@
                 <div class="marker" aria-hidden="true"></div>
               {/if}
               {@const project = projectColor(card)}
+              {@const waits = waitingFor(card, $data?.cards ?? [], $waitingAgents)}
               <article
                 class="card"
                 data-tone={card.labels.length > 0 ? labelColorIndex(card.labels[0], LABEL_TOKENS) : undefined}
@@ -1451,6 +1455,7 @@
                   glowing.has(card.id) ||
                   (card.origin_of != null && stepAtWork($data?.cards ?? [], card.origin_of, $studioCards))}
                 class:archived={card.archived_at !== null}
+                class:waited={waits.length > 0}
                 class:lifted={dragging?.id === card.id || carrying?.id === card.id}
                 class:settling={settling.has(card.id)}
                 data-card={card.id}
@@ -1469,6 +1474,9 @@
                   <span class="title"><span class="num">#{card.id}</span> {card.title}</span>
                 </button>
                 {@render cardFace(card)}
+                {#if waits.length > 0}
+                  <span class="waits" data-no-drag><WaitingBadge agents={waits} size="sm" /></span>
+                {/if}
               </article>
             {:else}
               <p class="empty">No cards</p>
@@ -1844,6 +1852,7 @@
   /* One card look (editor-look B1, B7): the theme's card surface with a hairline, lifting a little
      under the pointer. A light theme may add its own resting shadow (`--ax-card-shadow`). */
   .card {
+    position: relative;
     background: var(--ax-card-bg);
     border: 1px solid var(--ax-border);
     box-shadow: var(--ax-card-shadow);
@@ -1854,6 +1863,18 @@
       border-color var(--ax-dur-fast) var(--ax-ease),
       translate var(--ax-dur-fast) var(--ax-ease);
   }
+  /* The title keeps clear of the waiting badge in the corner. */
+  .card.waited .open {
+    padding-right: calc(18px * var(--ax-ui-scale));
+  }
+  /* An agent waits for the owner on this card or a step of its plan (plans/agent-waiting.md W2). */
+  .waits {
+    position: absolute;
+    /* Inside the card: the column scrolls, and anything past the card's edge would be cut off by it. */
+    top: var(--ax-space-1);
+    right: var(--ax-space-1);
+  }
+
   .card:hover {
     border-color: var(--ax-border-strong);
     box-shadow: var(--ax-card-shadow-raised);
@@ -1874,9 +1895,6 @@
     animation: var(--ax-anim-glow);
   }
   /* G19: the project a card's plan runs in, as a short line along its top in the project's colour. */
-  .card[data-project] {
-    position: relative;
-  }
   .card[data-project]::before {
     content: "";
     position: absolute;

@@ -56,6 +56,8 @@
   import AppAddDialog from "./AppAddDialog.svelte";
   import AppContextMenu from "./AppContextMenu.svelte";
   import TimeTravel from "./TimeTravel.svelte";
+  import { waitingAgents } from "../core/agentWaiting";
+  import WaitingBadge from "../ui/WaitingBadge.svelte";
 
   const REFRESH_MS = 30_000;
   /** The most sparks one burst of changed notes sends flying; the rest take their glow without one. */
@@ -573,6 +575,12 @@
   >
     +
   </button>
+  <!-- An agent waits for the owner (plans/agent-waiting.md W2): below the core whose pulse says "at work". -->
+  {#if $waitingAgents.length > 0}
+    <div class="waiting" style:top="calc(50% + {discR * 0.42}px)">
+      <WaitingBadge agents={$waitingAgents} />
+    </div>
+  {/if}
   <!-- Also over the Second Brain: its map travels with the hive (`travelAt`). -->
   {#if span}
     <TimeTravel {span} onTravel={(at) => travelAt.set(at)} />
@@ -646,6 +654,11 @@
   }
   .brain.turning {
     cursor: grabbing;
+  }
+  .waiting {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
   }
   canvas {
     width: 100%;

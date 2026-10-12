@@ -24,11 +24,14 @@ use std::time::Duration;
 use axiomata_opencode::{EventStream, OpencodeError, Service, SessionState, Tracker};
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
+use serde::Serialize;
 
+use crate::AxiomataError;
 use crate::agents::opencode;
-use crate::ide::agent_store;
-use crate::ide::lifecycle::{AgentState, AgentStatus, PlanDocument};
+use crate::board::store as board_store;
+use crate::ide::lifecycle::{AgentState, AgentStatus, ChannelRoots, PlanDocument};
 use crate::ide::model::{Agent, Harness};
+use crate::ide::{agent_store, provision, store as project_store};
 
 /// First pause before looking for the service again.
 const RETRY_MIN: Duration = Duration::from_secs(2);
@@ -228,6 +231,75 @@ async fn seed(
     Ok(())
 }
 
+/// An agent that waits for the owner — a permission prompt or a question — in whichever project it is
+/// (`docs/plans/agent-waiting.md`, board card #87).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WaitingAgent {
+    pub agent_id: i64,
+    pub project_id: i64,
+    pub name: String,
+    /// The card the session works on or reviews, if any.
+    pub card_id: Option<i64>,
+    pub card_title: Option<String>,
+    /// When it began to wait.
+    pub since: Option<DateTime<Utc>>,
+}
+
+/// Every agent of every project that waits for the owner, oldest wait first. The same reading as the Studio's status
+/// poll (the file channel, with the Opencode service's view laid over it), but across all projects, for the app's
+/// badge and notification.
+///
+/// The database is locked only to list the agents and, afterwards, to name the cards — never while the channel files
+/// are read: this runs every few seconds and the connection is shared by every command.
+///
+/// # Errors
+///
+/// A database error.
+pub fn waiting_agents(
+    db: &Mutex<Connection>,
+    roots: &ChannelRoots,
+) -> std::result::Result<Vec<WaitingAgent>, AxiomataError> {
+    let agents = {
+        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut agents = Vec::new();
+        for project in project_store::list_projects(&conn)? {
+            agents.extend(agent_store::list_agents(&conn, project.id)?);
+        }
+        agents
+    };
+    let mut statuses = provision::agent_statuses(&agents, roots);
+    overlay(&mut statuses, &agents);
+    let mut waiting = waiting_of(&agents, &statuses);
+    let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+    for entry in &mut waiting {
+        if let Some(card_id) = entry.card_id {
+            entry.card_title = board_store::get_card(&conn, card_id)?.map(|card| card.title);
+        }
+    }
+    Ok(waiting)
+}
+
+/// The agents whose status is `waiting`, oldest wait first; `statuses` are matched to `agents` by id.
+fn waiting_of(agents: &[Agent], statuses: &[AgentStatus]) -> Vec<WaitingAgent> {
+    let mut waiting: Vec<WaitingAgent> = statuses
+        .iter()
+        .filter(|status| status.state == AgentState::Waiting)
+        .filter_map(|status| {
+            let agent = agents.iter().find(|agent| agent.id == status.agent_id)?;
+            Some(WaitingAgent {
+                agent_id: agent.id,
+                project_id: agent.project_id,
+                name: agent.name.clone(),
+                card_id: agent.card_id,
+                card_title: None,
+                since: status.since,
+            })
+        })
+        .collect();
+    waiting.sort_by_key(|entry| (entry.since, entry.agent_id));
+    waiting
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,5 +415,37 @@ mod tests {
         let mut statuses = vec![starting(1, 2_000)];
         overlay_with(&mut statuses, &agents, &Tracker::default(), false);
         assert_eq!(statuses[0].state, AgentState::Starting);
+    }
+
+    #[test]
+    fn only_waiting_agents_are_listed_with_their_card_and_the_oldest_wait_first() {
+        let mut on_card = agent(2, Harness::ClaudeCode, "", None);
+        on_card.project_id = 7;
+        on_card.card_id = Some(12);
+        let agents = vec![
+            agent(1, Harness::ClaudeCode, "", None),
+            on_card,
+            agent(3, Harness::Opencode, "", None),
+            agent(4, Harness::ClaudeCode, "", None),
+        ];
+        let state = |agent_id, state, since_ms| AgentStatus {
+            state,
+            ..starting(agent_id, since_ms)
+        };
+        let statuses = vec![
+            state(1, AgentState::Working, 1_000),
+            state(2, AgentState::Waiting, 5_000),
+            state(3, AgentState::Waiting, 2_000),
+            // A status without its agent (removed in between) is left out.
+            state(9, AgentState::Waiting, 1_000),
+        ];
+        let waiting = waiting_of(&agents, &statuses);
+        assert_eq!(
+            waiting.iter().map(|w| w.agent_id).collect::<Vec<_>>(),
+            vec![3, 2]
+        );
+        assert_eq!(waiting[1].project_id, 7);
+        assert_eq!(waiting[1].card_id, Some(12));
+        assert_eq!(waiting[1].since, from_ms(5_000));
     }
 }

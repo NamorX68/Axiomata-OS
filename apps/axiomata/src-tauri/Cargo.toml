@@ -25,6 +25,9 @@ tauri-plugin-window-state = "2"
 # The native open dialog for the file app (editor plan E6). Driven from Rust
 # only — `capabilities/default.json` deliberately grants none of its JS API.
 tauri-plugin-dialog = "2"
+# The macOS notification when an agent starts waiting for the owner (`waiting_watch.rs`, plans/agent-waiting.md W6).
+# Called from Rust only — `capabilities/default.json` grants none of its JS API.
+tauri-plugin-notification = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

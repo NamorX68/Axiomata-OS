@@ -5,6 +5,7 @@
 
   import Canvas from "./canvas/Canvas.svelte";
   import { invokeBackend, listenBackend, type PlanRunEvent } from "./core/backend";
+  import { AGENTS_WAITING, watchWaiting } from "./core/agentWaiting";
   import { brainActive } from "./core/brainView";
   import { closeTop } from "./core/closeStack";
 import { emit, on } from "./core/bus";
@@ -208,9 +209,15 @@ import { emit, on } from "./core/bus";
         // Without the list the watcher's events still arrive; a session's pane can be opened from the Agents list.
       }
     });
+    // Which agents wait for the owner, in any project: the badge in the Dock, over the Orbit and on the Kanban's cards.
+    const waiting = watchWaiting(
+      () => invokeBackend("waiting_agents"),
+      (handler) => listenBackend(AGENTS_WAITING, handler),
+    ).catch(() => () => {});
     return () => {
       offs.forEach((off) => off());
       review.forEach((pending) => void pending.then((off) => off()));
+      void waiting.then((off) => off());
     };
   });
 </script>

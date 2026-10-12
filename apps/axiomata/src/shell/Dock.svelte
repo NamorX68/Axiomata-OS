@@ -15,11 +15,13 @@
   import { keyHints } from "../core/keyHints";
   import { platform } from "../core/keys";
   import { studioActivity, watchActivity } from "../core/studioActivity";
+  import { waitingAgents } from "../core/agentWaiting";
   import { focusMode, toggleFocus } from "../core/focusMode";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import type { IconName } from "../ui/icons/lucide";
   import StatusMark from "../ui/StatusMark.svelte";
+  import WaitingBadge from "../ui/WaitingBadge.svelte";
   import Heartbeat from "./Heartbeat.svelte";
   import ThemePicker from "./ThemePicker.svelte";
 
@@ -79,6 +81,7 @@
           <span class="live"><StatusMark tone="live" label="{$studioActivity} at work" /></span>
         {/if}
       </button>
+      {#if t.id === "studio"}<WaitingBadge agents={$waitingAgents} size="sm" />{/if}
     {/each}
 
     <span class="sep" aria-hidden="true"></span>

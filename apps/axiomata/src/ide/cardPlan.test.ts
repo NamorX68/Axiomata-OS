@@ -8,6 +8,7 @@ import {
   planOfCard,
   progressOf,
   stepAtWork,
+  waitingFor,
   visibleOnBoard,
 } from "./cardPlan";
 
@@ -74,6 +75,22 @@ describe("the steps of a card's plan", () => {
   it("make a session at work on one of them glow the card", () => {
     expect(stepAtWork(cards, 1, new Set([20]))).toBe(true);
     expect(stepAtWork(cards, 1, new Set([21]))).toBe(false);
+  });
+
+  it("make a session waiting on one of them, or on the card itself, show the card's waiting badge", () => {
+    const waits = (id: number, cardId: number | null) => ({
+      agent_id: id,
+      project_id: 1,
+      name: `a${id}`,
+      card_id: cardId,
+      card_title: null,
+      since: null,
+    });
+    const waiting = [waits(1, 20), waits(2, 30), waits(3, null), waits(4, 99)];
+    const steps = [card(20, 1), card(30, null)];
+    expect(waitingFor({ id: 99, origin_of: 1 }, steps, waiting).map((a) => a.agent_id)).toEqual([1, 4]);
+    expect(waitingFor({ id: 30, origin_of: null }, steps, waiting).map((a) => a.agent_id)).toEqual([2]);
+    expect(waitingFor({ id: 50, origin_of: null }, steps, waiting)).toEqual([]);
   });
 });
 

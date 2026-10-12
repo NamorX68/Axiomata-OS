@@ -1998,6 +1998,22 @@ pub fn open_card_sessions(
     axiomata_core::card_session::open_card_sessions(&state).map_err(|err| err.to_string())
 }
 
+/// Every agent of every project that waits for the owner, for a page that has just loaded; afterwards the
+/// `agents:waiting` event brings each change (`waiting_watch.rs`, plans/agent-waiting.md).
+#[tauri::command]
+pub async fn waiting_agents(
+    state: State<'_, CoreState>,
+) -> Result<Vec<axiomata_core::ide_status::WaitingAgent>, String> {
+    let db = std::sync::Arc::clone(&state.db);
+    let roots = axiomata_core::paths::ide_locations().channels;
+    tauri::async_runtime::spawn_blocking(move || {
+        axiomata_core::ide_status::waiting_agents(&db, &roots)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+    .map_err(|err| err.to_string())
+}
+
 /// The owner takes a reviewed card over (A3, A22): the work lands in the project's main line as one commit, the card is
 /// closed and the sessions made for it are cleaned up. A conflict is undone and comes back as the outcome.
 #[tauri::command]

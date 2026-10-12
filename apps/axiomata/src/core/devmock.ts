@@ -1656,6 +1656,19 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (!ideAgents.some((a) => a.id === agent.id)) ideAgents.push(agent);
       return { agent, card_id: args.cardId, role: "reviewer", engine_id: (args.engineId as string | null) ?? "mock-engine" } as T;
     }
+    case "waiting_agents":
+      // Two agents wait for the owner (plans/agent-waiting.md): one on card #4, one of the owner's own sessions.
+      return [
+        {
+          agent_id: 1,
+          project_id: 1,
+          name: "claude-1",
+          card_id: 4,
+          card_title: "Mock card",
+          since: new Date(Date.now() - 4 * 60_000).toISOString(),
+        },
+        { agent_id: 2, project_id: 1, name: "opencode-1", card_id: null, card_title: null, since: null },
+      ] as T;
     case "open_card_sessions":
       // Card #4 (in progress, claimed by claude-1) has a session at work, so its card glows (UX6a).
       // Card #13, a step of the plan made from card #11, too: that card glows on the board.
