@@ -467,11 +467,14 @@ to stderr).
 
 Svelte 5 + Vite + TS: `core/` (stores, registry, lifecycle, persist, commands, chat, staging,
 agent-bridge, backend types + `devmock` for browser-only development), `canvas/` (Canvas,
-Tile, drag/resize actions, snap physics), `shell/` (TopBar, IconBar, ModulePicker, Settings,
-AssistantBar, ChatPanel, StagingLayer, Toasts, SecondBrainView, Spotlight), `modules/` (one `.svelte` +
+Tile, drag/resize actions, snap physics), `shell/` (Dock with Heartbeat and ThemePicker, ModulePicker, Settings,
+AssistantBar, ChatPanel, StagingLayer/StagingPanel/Window, Toasts, SecondBrainView, Spotlight, and the effects
+Ambient, Ignition and Sounds), `ui/` (the chrome family of the UI/UX round: PanelHead, SectionHead, Notice,
+EmptyState, HexAvatar, StatusMark, Icon/IconButton, ThemePreview, the `glow` action), `modules/` (one `.svelte` +
 optional settings face per module type, registered in `modules/index.ts`), `themes/`
-(`tokens.css` + one file per theme), `graph/` (the particle-graph model/layout/render, shared
-between the dashboard-centre background and the full-screen Second Brain view). Details in §5.
+(`tokens.css` + one file per theme), `graph/` (the graph model/layout/render — the Orbit's hive sphere `hive.ts`, the
+Second Brain's territory map `territory.ts` — shared between the dashboard-centre background and the full-screen
+Second Brain view). Details in §5; the round's look and its rules in §7 "UI/UX round Glut + Hex".
 
 **Spotlight (⌘K, built 2026-10-07, `docs/plans/spotlight-search.md`).** One search for the whole app: a pill in the middle of the screen
 (`shell/Spotlight.svelte`), opened by ⌘K from every view (only ⌘ on a Mac — Ctrl+K is "kill line" in a shell) and by the top-bar 🔍.
@@ -806,9 +809,12 @@ carrying its own config.
   action and it was ~1.6K tokens resent on every step of the agent loop (Stufe 1, 2026-09).
   A future skill that needs module access should reintroduce it behind a `SKILL.md`
   frontmatter flag.
-- **Themes**: `<html data-theme="…">`, every colour/size through a `--ax-*` token (graphite,
-  paper, steampunk, forest, ocean); a user `~/.axiomata/theme.css` is validated
-  (`:root { --ax-*: … }` only) before injection.
+- **Themes**: `<html data-theme="…">`, every colour/size through a `--ax-*` token (13 themes: graphite,
+  paper, steampunk, forest, ocean, five Catppuccin flavours, Tokyo Night, GitHub Dark/Light); a user
+  `~/.axiomata/theme.css` is validated (`:root { --ax-*: … }` only) before injection. Since the UI/UX round the
+  accent is budgeted: the glow (`--ax-glow`, always the palette's orange family) only where something lives, works or
+  needs the owner; "selected" is neutral (`--ax-selected-bg`); the UI font is embedded (Geist by default, Inter or
+  IBM Plex Sans); movement goes through `core/motion.ts` (Full/Calm/Off, macOS "Reduce motion" = Off).
 - **UI scale** (`docs/plans/editor-look.md`, LK0): `--ax-ui-scale` on `<html>` multiplies every UI
   size — type (12/13/14/16/20 px), spacing, radii, icons (`--ax-icon-*`), hit targets
   (`--ax-hit-min`), panel and dialog widths. "Auto" (`core/uiScale.ts`) asks Rust (`ui_displays`,
@@ -875,11 +881,11 @@ carrying its own config.
 `axiomata_core::graph::build` (command `get_workspace_graph`) walks every tracked file
 (reusing the memory walker) plus skills and routines as graph nodes, and every `[[wiki]]` /
 relative Markdown link / relative HTML `href` as an edge, capped at 5000 files. The frontend
-(`apps/axiomata/src/graph/`) renders this with Canvas 2D (no graph library) in three
-full-view layouts (Rings, Circle, Hex — a hex-grid mosaic of file cells sized to match Rings'
-band) plus a separate `layoutOrbit` used only by the dashboard-centre background widget (a
-spinning 3-D fibonacci-sphere point cloud inside a wireframe geodesic, with skills/routines/
-newest notes as an icon rim) — Orbit is the fixed name for that background widget
+(`apps/axiomata/src/graph/`) renders this with Canvas 2D (no graph library) in two
+full-view layouts (Rings, and Map — since UX5 the default: every area a country of hex fields on an axial grid,
+grown in birth order, links as roads, a semantic zoom; `graph/territory.ts`) plus a separate `layoutOrbit` used only
+by the dashboard-centre background widget (since UX4 a Goldberg hive sphere, `graph/hive.ts`: notes as cells among dark
+unsettled ones, glowing by age, with skills/routines/newest notes as an icon rim) — Orbit is the fixed name for that background widget
 specifically, distinct from "Second Brain" (the full-screen view it opens into on click).
 The full view (`shell/SecondBrainView.svelte`) adds pan/zoom, search (title/path/area
 locally, note contents via `search_workspace`, debounced), and a detail panel (view / copy
@@ -1725,16 +1731,51 @@ own link) in one running file, `News/KI-Modelle.md`, newest section on top — t
 skills. It writes inside `News/`, so it shares their turquoise area colour without any new pin. Bundled like the others
 (`DEFAULT_SKILLS`, seed-if-absent, `skills reseed --force`).
 
-### Ausblick (2026-10-09)
+### UI/UX round "Glut + Hex" (UX1–UX7, 2026-10-11/12)
 
-The agent-to-agent build plan CP-A1…CP-A10 is through (`docs/plans/a2a.md`); what is open next:
+An app-wide round for one coherent look with its own signature (`docs/plans/ui-ux-round.md`, decisions U1–U7 and
+G1–G23, a "Stand" paragraph per checkpoint). Layouts stayed; chrome, type, accent and the highlights are new.
+
+- **UX1 foundation:** type roles, elevation tokens with a light edge, glow tokens and the accent rule written into
+  `themes/tokens.css` for all 13 themes; the embedded UI font (Geist/Inter/IBM Plex Sans, `core/uiFont.ts`); Motion
+  Full/Calm/Off (`core/motion.ts`); UI size slider 75–175 %.
+- **UX2 chrome:** the `ui/` family (PanelHead with ⌘W via `core/closeStack.ts`, SectionHead, Notice, EmptyState,
+  HexAvatar, StatusMark + `ui/status.ts`, `use:glow`, `fromOrigin` — panels open from where the click was); calm
+  tabs with coloured file icons (K7/K14 replaced).
+- **UX3 dashboard:** the Dock (`shell/Dock.svelte`) instead of the top bar, with the heartbeat strip and the cost
+  tank (`core/heartbeat.ts`), theme picker; tile titles; skill glow; the routine fuse (`core/fuse.ts`); the
+  calendar's day arc (`core/dayArc.ts`); light under the pointer and time-of-day light (`shell/Ambient.svelte`); the
+  thinking assistant bar; a generative empty canvas.
+- **UX4 Orbit:** the hive sphere with glow ageing and shimmer (Calm/Twinkle/Metal), time travel (`created` from
+  frontmatter/birthtime/mtime in `graph.rs`), a vault watcher in Rust (`src-tauri/vault_watch.rs`, event
+  `vault:changed`) feeding sparks, the start ignition (`shell/Ignition.svelte`).
+- **UX5 Second Brain:** the territory map (above).
+- **UX6 Studio, Flow, Kanban:** one app-wide poll of open card sessions (`core/studioActivity.ts`, held by the
+  Dock) — glowing cards, the Orbit pulse in glow orange, the project colour as a 2-px card edge and on hex marks;
+  done sparks (`core/doneMoments.ts`); agent cards and Flow nodes that glow while a session works, glow pulses on the
+  Flow edges; the agent's trail in an open file (`editor/trail.ts`, `fileapp/trailAuthor.ts`: changed lines glow
+  after an external write, with the harness's hex flag — honest, never simulated typing).
+- **UX7:** ⌘K "Ask Axiomata" and the focus mode ⌘⇧. (`core/focusMode.ts`); theme cards with a real miniature
+  (`ui/ThemePreview.svelte`); the chat with the AX hex mark, the terminal cursor in glow; sounds (`core/sounds.ts`,
+  `core/soundWatch.ts`, `shell/Sounds.svelte`, `shell/soundPlayer.ts`): three WebAudio cues — an agent waits, an agent
+  finished its turn, a routine fired — off by default, played only while the window has no focus; their watcher
+  polls all projects' agent states every 4 s and, unlike the other polls, keeps going while the window is hidden.
+  A last pass over the light themes (Paper, Catppuccin Latte, GitHub Light).
+
+Every effect is switchable under Appearance (`core/effects.ts`). Open from the round: card #76 (terminal fonts in the
+installed app, the CSP blocks `data:` font subsets) and the Mac check of whether WebKit throttles the sounds of a
+hidden window.
+
+### Ausblick (2026-10-12)
+
+The agent-to-agent build plan CP-A1…CP-A10 is through (`docs/plans/a2a.md`), the ⌘K spotlight, Orbit + 2Brain and
+the UI/UX round "Glut + Hex" are built; what is open next:
 
 - the Mac tests and the UI/UX polish rounds of the A2A work (`docs/plans/a2a.md`);
 - **ED7** — extracting the editor and the Studio into a standalone app, the engine in `src/editor/` already
   importing nothing from the app (D1);
-- the ⌘K spotlight (`docs/plans/spotlight-search.md`), then Orbit and 2Brain merged into one view
-  (`docs/plans/orbit-brain.md`), then an app-wide UI/UX round;
-- a Mac-only-code split for Linux/Windows;
+- #Tags and [[Wikilinks]] with a jump into the linked note, as in Obsidian (board #1, card #75);
+- a real test of the Windows/Linux keys (`core/keys.ts`, card #71) and the Mac-only-code split for Linux/Windows;
 - in `docs/plans/agentic-ide.md`, **M7.4 (mini-harness)** and **M7.6 (extraction)** are still open.
 
 Deferred by owner decision: further model-provider work.
