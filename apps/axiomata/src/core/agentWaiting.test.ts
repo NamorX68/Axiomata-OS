@@ -29,6 +29,15 @@ describe("the waiting agents", () => {
     ]);
   });
 
+  it("drops an entry whose since is not a string, and keeps one whose since is null", () => {
+    expect(
+      parseWaiting([
+        { agent_id: 8, project_id: 1, name: "e", since: 1_700_000_000_000 },
+        { agent_id: 9, project_id: 1, name: "f", since: null },
+      ]),
+    ).toEqual([{ agent_id: 9, project_id: 1, name: "f", card_id: null, card_title: null, since: null }]);
+  });
+
   it("finds the agents of one card", () => {
     expect(waitingOnCard([agent(1, 12), agent(2, 13), agent(3, 12)], 12).map((a) => a.agent_id)).toEqual([1, 3]);
   });
@@ -46,6 +55,14 @@ describe("the waiting agents", () => {
     expect(waitedFor("2026-10-12T10:00:00Z", start + 30_000)).toBe("now");
     expect(waitedFor("2026-10-12T10:00:00Z", start + 4 * 60_000)).toBe("4 min");
     expect(waitedFor("2026-10-12T10:00:00Z", start + 125 * 60_000)).toBe("2 h");
+  });
+
+  it("switches the unit exactly at the minute and the hour", () => {
+    const start = Date.parse("2026-10-12T10:00:00Z");
+    expect(waitedFor("2026-10-12T10:00:00Z", start + 59_000)).toBe("now");
+    expect(waitedFor("2026-10-12T10:00:00Z", start + 60_000)).toBe("1 min");
+    expect(waitedFor("2026-10-12T10:00:00Z", start + 59 * 60_000)).toBe("59 min");
+    expect(waitedFor("2026-10-12T10:00:00Z", start + 60 * 60_000)).toBe("1 h");
   });
 
   it("takes the first read, unless a push overtook it", async () => {
@@ -81,6 +98,25 @@ describe("the waiting agents", () => {
       async () => () => {},
       store,
     );
+    expect(get(store).map((a) => a.agent_id)).toEqual([7]);
+  });
+
+  it("rejects when listening fails, and does not read the list", async () => {
+    const store = writable<WaitingAgent[]>([agent(7)]);
+    let read = false;
+    await expect(
+      watchWaiting(
+        async () => {
+          read = true;
+          return [agent(1)];
+        },
+        async () => {
+          throw new Error("no channel");
+        },
+        store,
+      ),
+    ).rejects.toThrow("no channel");
+    expect(read).toBe(false);
     expect(get(store).map((a) => a.agent_id)).toEqual([7]);
   });
 
