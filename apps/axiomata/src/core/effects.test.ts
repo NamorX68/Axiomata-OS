@@ -9,7 +9,9 @@ describe("readEffects", () => {
       pointerLight: false,
       dayLight: true,
       ignition: true,
+      sounds: false,
     });
     expect(readEffects({ ignition: false }).ignition).toBe(false);
+    expect(readEffects({ sounds: true }).sounds).toBe(true);
   });
 });

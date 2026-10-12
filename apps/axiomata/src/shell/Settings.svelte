@@ -20,6 +20,9 @@
   import { brainView, SHINES, SPEED_MAX } from "../core/brainView";
   import { MOTION_LEVELS, isMotionLevel, motion, motionSetting, systemReducesMotion, turns } from "../core/motion";
   import { effects } from "../core/effects";
+  import { CUE_LABELS, CUE_ORDER } from "../core/sounds";
+  import Icon from "../ui/Icon.svelte";
+  import { playCue, unlockAudio } from "./soundPlayer";
   import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
   import { activeTheme, showGrid, snapEdges, windowTransparency } from "../core/stores";
@@ -367,6 +370,28 @@
             <input type="checkbox" bind:checked={$effects.ignition} /> Start ignition
             <span class="hint">(the logo lights up when the app starts; motion Full only)</span>
           </label>
+        </section>
+
+        <section>
+          <h3>Sound</h3>
+          <label class="opt">
+            <input
+              type="checkbox"
+              bind:checked={$effects.sounds}
+              onchange={() => {
+                if ($effects.sounds) void unlockAudio();
+              }}
+            />
+            Sounds
+            <span class="hint">(only while Axiomata is in the background)</span>
+          </label>
+          <div class="cues">
+            {#each CUE_ORDER as cue (cue)}
+              <button type="button" class="cue" onclick={() => void unlockAudio().then(() => playCue(cue))}>
+                <Icon name="play" size="sm" />{CUE_LABELS[cue]}
+              </button>
+            {/each}
+          </div>
         </section>
 
         <section>
@@ -769,9 +794,10 @@
     text-align: left;
     background: var(--ax-surface-2);
   }
+  /* Chosen, not alive: neutral like the theme cards (the accent rule). */
   .font.active {
-    border-color: var(--ax-accent);
-    background: var(--ax-accent-muted);
+    border-color: var(--ax-text-muted);
+    background: var(--ax-selected-bg);
   }
   .font .sample {
     font-size: var(--ax-font-size-display);
@@ -793,6 +819,18 @@
   }
   .hint {
     color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+  .cues {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-2);
+    margin-top: var(--ax-space-1);
+  }
+  .cue {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
     font-size: var(--ax-font-size-sm);
   }
 
@@ -895,9 +933,10 @@
     text-align: left;
     background: var(--ax-surface-2);
   }
+  /* Chosen, not alive: neutral like the theme cards (the accent rule). */
   .provider.active {
-    border-color: var(--ax-accent);
-    background: var(--ax-accent-muted);
+    border-color: var(--ax-text-muted);
+    background: var(--ax-selected-bg);
   }
   .provider-form {
     padding: var(--ax-space-3);

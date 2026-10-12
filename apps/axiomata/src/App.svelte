@@ -29,6 +29,7 @@ import { emit, on } from "./core/bus";
   import Ambient from "./shell/Ambient.svelte";
   import Dock from "./shell/Dock.svelte";
   import Ignition from "./shell/Ignition.svelte";
+  import Sounds from "./shell/Sounds.svelte";
   import { focusMode, toggleFocus } from "./core/focusMode";
 
   let pickerOpen = $state(false);
@@ -219,6 +220,7 @@ import { emit, on } from "./core/bus";
 <Ambient />
 <Dock />
 <Ignition />
+<Sounds />
 <Toasts />
 <ModulePicker bind:open={pickerOpen} />
 <Settings bind:open={settingsOpen} />

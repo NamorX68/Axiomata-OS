@@ -194,6 +194,21 @@ sichtbare Glocke in Glut statt Akzent (dort lebt etwas; G2 auch in fremden Palet
 Karte #76 (Terminal-Schriften in der installierten App, CSP blockiert `data:`-Teilsätze, Victor Mono ohne Fett) —
 eine CSP-Änderung, eigens zu prüfen.
 
+**Stand UX7d (2026-10-12, gebaut, Abnahme offen):** Töne (G10: aus per Vorgabe), drei leise Klänge aus dem
+Ideenkatalog, per WebAudio erzeugt (`shell/soundPlayer.ts`, keine Audiodateien): „Agent wartet auf dich“ (zwei gleiche
+Töne wie ein Klopfen), „Agent hat seine Runde beendet“ (aufsteigende Quinte), „Routine gezündet“ (Funke + tiefer warmer
+Ton). Welche Änderung welchen Klang ruft, ist reine Logik (`core/sounds.ts` `cuesBetween`): ein Agent geht auf
+`waiting` (auch ein neuer), `working` → `idle`/`ended`, das `last_fired_at` einer bekannten Routine ändert sich; der
+erste Blick stellt nur die Szene; mehrere zugleich → nur der wichtigste. Der Wächter (`core/soundWatch.ts`, mit
+`shell/Sounds.svelte`) läuft nur, solange die Töne an sind, schaut alle 4 s auf alle Agenten aller Projekte
+(`ide_agent_states` je Projekt) und alle Routinen und spielt **nur, wenn Axiomata nicht im Vordergrund ist** (das Fenster
+hat keinen Fokus) — vorn sagt es die Glut. Anders als die übrigen Abfragen setzt er bei verstecktem Fenster nicht aus,
+genau dafür ist er da. Das Audio wird beim ersten Klick/Tastendruck geweckt (Webview-Regel). Appearance → Sound: Schalter
++ drei Hörproben. Am Mac zu prüfen: ob WebKit Timer und Audio eines verdeckten Fensters drosselt (dann kämen die Klänge
+verspätet). Gegenprobe helle Themes (Paper, Catppuccin Latte, GitHub Light; Dashboard, Kanban, Studio Canvas/Flow, ⌘K,
+Chat, Einstellungen, 2Brain): stimmig; nachgezogen nur Akzentregel-Reste — gewählte Schrift- und Provider-Karte neutral
+wie die Theme-Karten, die Dateizahl der Memory-Kachel ohne Akzent.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

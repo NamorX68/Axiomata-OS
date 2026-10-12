@@ -119,9 +119,10 @@
     color: var(--ax-warning);
   }
 
+  /* A count, not something at work: plain text like the other tiles' numbers (the accent rule). */
   .files strong {
     font-size: var(--ax-font-size-xl);
-    color: var(--ax-accent);
+    color: var(--ax-text);
     font-weight: 700;
   }
 
