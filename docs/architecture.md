@@ -1766,6 +1766,34 @@ Every effect is switchable under Appearance (`core/effects.ts`). Open from the r
 installed app, the CSP blocks `data:` font subsets) and the Mac check of whether WebKit throttles the sounds of a
 hidden window.
 
+### A card started as a plan (2026-10-12)
+
+The board's cards are worked off the way the owner plans with an assistant (`docs/plans/card-as-plan.md`, K1–K6):
+"Start …" on a ready card with no plan makes it the **goal of a new plan** in a chosen project. The card moves to In
+Progress, the Studio opens in the Flow on the plan, and the owner decides about "grill afterwards" and starts the
+planner, who splits the card into steps (a small card may stay one step). Once released, the plan always runs by itself,
+within a cost limit of its own that starts at $5 (`flow::CARD_PLAN_MAX_COST_USD`; a "Cost limit (USD)" field in the
+Flow for every plan).
+
+- **Model:** the side table `plan_origin` (migration 30) links plan and card; the card gets **no** `plan_id` (a plan
+  that runs by itself would start it like a step). `Plan.origin_card_id`, `Card.origin_of` (an open plan, computed on
+  read), `TaskState::Planned`, derived before the column — so neither the reviewer watcher, a claim (`claim_card`,
+  `start_card`) nor the MCP tools ever take the card, whatever column it is in.
+- **The card follows its plan:** `flow::sync_origin_card(s)` runs at the end of every `PlanRun::tick` and puts it in
+  In Progress while planned or under way and in Review once every step is through (`flow::plan_settled`, the rule the
+  plan run uses for "ready to take over"). `close_plan` puts it in Done when a step was taken over, otherwise back on top
+  of Open; deleting an open plan does the same. A called-off card stays where the owner left it.
+- **Board:** the steps of an open card-plan stay off the board (and out of the Markdown mirror, which writes "plan #N,
+  k/n steps done" on the card instead); the card shows phase and progress, glows while a step is worked on, and its side
+  panel opens the Flow — "Take over in the Flow …" once everything waits for the owner. `canTakeOver` no longer offers a
+  single card of a plan that runs by itself.
+- **Entry points:** Tauri `start_card_plan`, CLI `board plan from-card <card> --project <p>`, `card_session::
+  start_card_plan` (project must exist and be a repository). `ide/planRequest.ts` opens the Flow on a plan; a project
+  request for the project already open no longer reopens it (which reset the Studio's mode).
+
+First run on the Mac (2026-10-12): card #83 → plan #7, one step (#85) worked, reviewed, integrated; the card moved to
+Review by itself, and the owner's take-over brought it into `main` and the card to Done.
+
 ### Ausblick (2026-10-12)
 
 The agent-to-agent build plan CP-A1…CP-A10 is through (`docs/plans/a2a.md`), the ⌘K spotlight, Orbit + 2Brain and

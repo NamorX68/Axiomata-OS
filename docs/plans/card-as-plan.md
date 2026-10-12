@@ -1,7 +1,8 @@
 # Karte als Plan — eine Board-Karte wird zum Ziel eines Plans
 
-Stand: 2026-10-12, entworfen, K1–K4 vom Owner entschieden; Checkpoint 0 (Bestätigung) offen. Gearbeitet wird im
-Worktree `card-as-plan`. Baut auf A2A auf (`docs/plans/a2a.md`, A3/A4, A14, CP-A6a, CP-A7, CP-A8a).
+Stand: 2026-10-12, **abgeschlossen** (CP0–CP3): gebaut, Review + Security-Audit eingearbeitet, am Mac vom Owner
+abgenommen (Karte #83 → Plan #7 → Review → Take over → Done), K1–K6 vom Owner entschieden. Baut auf A2A auf
+(`docs/plans/a2a.md`, A3/A4, A14, CP-A6a, CP-A7, CP-A8a). Zusammenfassung in `docs/architecture.md` §7.
 
 ## Context
 
