@@ -304,7 +304,22 @@
     border-radius: var(--ax-radius-lg);
     transition:
       box-shadow var(--ax-dur-fast) var(--ax-ease),
-      background var(--ax-dur-fast) var(--ax-ease);
+      background var(--ax-dur-fast) var(--ax-ease),
+      visibility 0s linear 0s;
+  }
+  /* The face turned away is hidden for real once the flip has run (card #20, #80). Both faces lie on top of each other
+     in one 3-D context, the back one later in the DOM; `backface-visibility` only stops it from being *drawn*. Clicks
+     still found the front, but macOS WebKit's wheel/scroll hit testing did not honour it: every wheel turn over a
+     tile's front landed on the invisible back face, so no tile body and no terminal tile ever scrolled — while the back
+     (settings) side, on top in both senses, did. `visibility: hidden` takes the face out of every hit test. The delay
+     keeps it visible while the card turns; a face coming into view shows at once (the rule above). */
+  .tile-inner:not(.flipped) .face.back,
+  .tile-inner.flipped .face.front {
+    visibility: hidden;
+    transition:
+      box-shadow var(--ax-dur-fast) var(--ax-ease),
+      background var(--ax-dur-fast) var(--ax-ease),
+      visibility 0s linear var(--ax-dur-med);
   }
   /* Front: almost no chrome at rest — the module's content sits straight on
      the canvas, like the reference dashboard's edge panels. The only mark is
@@ -318,21 +333,6 @@
     box-shadow: none;
     border-radius: 0;
     border-bottom: 2px solid var(--ax-border-strong);
-    /* Owner found the mouse-wheel-scroll bug (see .tile-body below) does
-       *not* reproduce on .face.back — the one structural difference is
-       that .face.back carries its own `transform: rotateY(180deg)` (the
-       flip-card trick: combined with .tile-inner's own rotation when
-       flipped, it cancels out to upright), while .face.front has no
-       transform of its own at all, only the inherited one from
-       .tile-inner's `preserve-3d` context. An element with its own
-       `transform` gets its own compositing context "for free" — .face.back
-       already had that; .face.front never did. This identity transform
-       (no visible rotation) exists solely to give .face.front the same
-       property. Two earlier fix attempts on .tile-body itself
-       (touch-action, then its own translateZ(0)) did not resolve this —
-       if this doesn't either, the next step is live WKWebView Web
-       Inspector debugging, not another blind guess. */
-    transform: translateZ(0);
   }
   .tile:hover .face.front {
     background: color-mix(in srgb, var(--ax-tile-glass-bg) 45%, transparent);
@@ -460,20 +460,9 @@
        enough in the real Tauri app (WKWebView): macOS trackpad scrolling is
        delivered as native `wheel` events, not touch/pointer gestures, so
        `touch-action` has no effect on it there — which is also why this
-       never reproduced against the dev-mock in Chromium. */
+       never reproduced against the dev-mock in Chromium. The wheel itself was lost elsewhere: see the hidden
+       face below `.face` (card #20, #80). */
     touch-action: pan-y;
-    /* `.tile-inner`'s permanent `transform-style: preserve-3d` (needed for
-       the flip card) puts every tile body inside a 3-D rendering context at
-       all times, not just while flipping. WebKit has a known class of bugs
-       where a scrollable descendant of a `preserve-3d` ancestor stops
-       receiving wheel-driven scroll (arrow-key scroll, which doesn't go
-       through wheel/hit-testing at all, keeps working) — Chromium's
-       compositor doesn't have this problem, which is why agent-browser
-       testing against the dev-mock never caught it. Promoting this element
-       onto its own compositing layer isolates it from the parent's 3-D
-       flattening and is the standard fix. */
-    transform: translateZ(0);
-    -webkit-overflow-scrolling: touch;
   }
 
   .tile-unknown {
