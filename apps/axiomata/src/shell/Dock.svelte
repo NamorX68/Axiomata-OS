@@ -14,7 +14,7 @@
   import { emit } from "../core/bus";
   import { keyHints } from "../core/keyHints";
   import { platform } from "../core/keys";
-  import { studioActivity } from "../core/studioActivity";
+  import { studioActivity, watchActivity } from "../core/studioActivity";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import type { IconName } from "../ui/icons/lucide";
@@ -50,6 +50,10 @@
       console.error("get_app_info failed:", err);
     }
   });
+
+  // The Dock is always there, so it keeps the one poll of the card sessions running for the whole app (the Studio mark
+  // here, the Orbit's pulse, the Kanban's glowing cards).
+  onMount(() => watchActivity(() => invoke("open_card_sessions")));
 </script>
 
 <header class="dock-row">

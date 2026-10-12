@@ -132,6 +132,17 @@ endet. Semantischer Zoom: weit draußen Ländernamen mit Notizzahl (bis Zoom 2,8
 Uhr-Knopf des Orbits bleibt auch über dem 2Brain sichtbar, ohne Orbit bringt die Karte ihren eigenen mit. Detailfenster
 unverändert. `docs/architecture.md` wird am Ende der Runde nachgezogen.
 
+**Stand UX6a (2026-10-12, gebaut, Abnahme offen):** Eine Abfrage der offenen Kartensitzungen für die ganze App
+(`core/studioActivity.ts` `watchActivity`, gehalten vom immer sichtbaren Dock): `studioActivity` (Zahl) und neu
+`studioCards` (welche Karten). Orbit-Puls jetzt Glut-Orange (G22; `activityColor`/`studioProject` entfallen).
+Kanban: Karten mit offener Sitzung glimmen (`use:glow`, Kartenregel `:global([data-ax-glow])`, weil die eigene
+Schattenregel die globale überstimmt); Projektkante G19 als kurze 2-px-Linie oben in der Farbe des Projekts, in dem
+der Plan der Karte läuft (Karte → Plan → Projekt → `accent_slot`); Erledigt-Moment G18 (`core/doneMoments.ts`): eine
+Karte, die in eine Done-Spalte kommt (egal durch wen), zerfällt bei Motion Full in neun Hex-Funken, die in den Zähler
+der Spalte fliegen (Zähler pulst), sonst glimmt sie kurz; wer das Brett neu öffnet, sieht die seit dem letzten Blick
+erledigten Karten einmal nachglimmen (`kanbanSeen` in den Einstellungen). Mock: Karte #4 hat eine offene Sitzung, der
+Plan ein Projekt mit Farbe. Karten-Look selbst unverändert gelassen.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):
@@ -182,6 +193,14 @@ Runde 2:
 - **G20 „Ask Axiomata“ in ⌘K:** Enter schickt sofort ab und öffnet den Chat (Kosten über den Tagesdeckel begrenzt).
 - **G21 Theme-Wahl:** jedes Kärtchen zeigt einen kleinen echten App-Ausschnitt (Kachel, Karte, Glut); kein
   Umfärben der ganzen App beim Darüberfahren; Klick wechselt.
+
+Runde 3 (2026-10-12, vor UX6):
+
+- **G22 Orbit-Puls:** Glut-Orange wie G19 — die Projektfarbe aus Karte #70 weicht dort; sie zeigt sich nur an
+  Hex-Marken, Avatar-Rändern und Kartenkanten.
+- **G23 Schnitt UX6:** UX6a Kanban (Glut an Karten mit offener Sitzung, Erledigt-Funken G18, Projektkante G19,
+  Karten-Look) → UX6b Studio/Flow (Hex-Avatare mit Glut, Glutpulse im Flow-Graph, Projektton der Hex-Marken, Hinweise
+  einzeilig, „New plan“-Balken, Agent-Karten-Rahmen) → UX6c Agent im Editor (G8); je Commit + Mac-Abnahme.
 
 Von mir ohne eigene Frage festgelegt (Einspruch jederzeit): Das Dock blendet unter ~1500 px Fensterbreite die
 Beschriftungen aus (Icons + Tooltip mit Kürzel); Glut in hellen Themes ohne additives Leuchten (Ton + Schatten statt

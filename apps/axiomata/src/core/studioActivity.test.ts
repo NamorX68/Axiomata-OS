@@ -1,6 +1,14 @@
+import { get } from "svelte/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sessionCount, sessionProject, startActivityPoll } from "./studioActivity";
+import {
+  sessionCards,
+  sessionCount,
+  startActivityPoll,
+  studioActivity,
+  studioCards,
+  watchActivity,
+} from "./studioActivity";
 
 describe("sessionCount", () => {
   it("counts the sessions of a list and nothing else", () => {
@@ -11,16 +19,11 @@ describe("sessionCount", () => {
   });
 });
 
-describe("sessionProject", () => {
-  it("names the project when all sessions at work belong to one", () => {
-    expect(sessionProject([{ card_id: 1, project_id: 4 }, { card_id: 2, project_id: 4 }])).toBe(4);
-  });
-
-  it("names none for no sessions, for several projects, or for an answer without projects", () => {
-    expect(sessionProject([])).toBeNull();
-    expect(sessionProject([{ card_id: 1, project_id: 4 }, { card_id: 2, project_id: 5 }])).toBeNull();
-    expect(sessionProject([{ card_id: 1 }])).toBeNull();
-    expect(sessionProject(null)).toBeNull();
+describe("sessionCards", () => {
+  it("names the cards at work, each once, and nothing for an answer that is no list", () => {
+    expect([...sessionCards([{ card_id: 3 }, { card_id: 7 }, { card_id: 3 }])].sort()).toEqual([3, 7]);
+    expect(sessionCards(null).size).toBe(0);
+    expect(sessionCards([{ nope: 1 }]).size).toBe(0);
   });
 });
 
@@ -33,17 +36,17 @@ describe("startActivityPoll", () => {
     const report = vi.fn();
     const stop = startActivityPoll(fetchOpen, report, 1000, () => false);
     await vi.advanceTimersByTimeAsync(0);
-    expect(report).toHaveBeenLastCalledWith(1, null);
+    expect(report).toHaveBeenLastCalledWith(1, new Set([1]));
     fetchOpen.mockResolvedValue([]);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(report).toHaveBeenLastCalledWith(0, null);
+    expect(report).toHaveBeenLastCalledWith(0, new Set());
     stop();
     const calls = fetchOpen.mock.calls.length;
     await vi.advanceTimersByTimeAsync(5000);
     expect(fetchOpen.mock.calls.length).toBe(calls);
   });
 
-  it("keeps the last count when a call fails, and skips rounds while the window is hidden", async () => {
+  it("keeps the last answer when a call fails, and skips rounds while the window is hidden", async () => {
     const fetchOpen = vi.fn().mockResolvedValueOnce([{ card_id: 1 }]).mockRejectedValue(new Error("down"));
     const report = vi.fn();
     let hidden = false;
@@ -56,5 +59,27 @@ describe("startActivityPoll", () => {
     await vi.advanceTimersByTimeAsync(3000);
     expect(fetchOpen.mock.calls.length).toBe(calls);
     stop();
+  });
+});
+
+describe("watchActivity", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("runs one poll for all watchers, feeds the stores, and stops with the last watcher", async () => {
+    const fetchOpen = vi.fn().mockResolvedValue([{ card_id: 4 }, { card_id: 9 }]);
+    const stopA = watchActivity(fetchOpen);
+    const stopB = watchActivity(fetchOpen);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchOpen).toHaveBeenCalledTimes(1);
+    expect(get(studioActivity)).toBe(2);
+    expect([...get(studioCards)].sort()).toEqual([4, 9]);
+    stopA();
+    stopA();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchOpen).toHaveBeenCalledTimes(2);
+    stopB();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(fetchOpen).toHaveBeenCalledTimes(2);
   });
 });

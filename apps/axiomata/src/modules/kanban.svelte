@@ -25,7 +25,7 @@
   import { SvelteSet } from "svelte/reactivity";
 
   import { draggable, type DragDelta, type DragPoint } from "../canvas/drag";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   import type { BoardCard, BoardColumn, CardEvent, CardFields, CardTier } from "../core/backend";
   import { invokeBackend as invoke } from "../core/backend";
@@ -36,6 +36,13 @@
   import { canReview, canStart, canTakeOver } from "../ide/cardStart";
   import { refreshAgents } from "../ide/projectSession";
   import { boardStore, refreshBoard } from "../core/boardStore";
+  import { arrivedDone, doneSince, rolesOf, type RoleMap } from "../core/doneMoments";
+  import { animates, motion } from "../core/motion";
+  import { getSetting, setSetting } from "../core/persist";
+  import { studioCards } from "../core/studioActivity";
+  import { accentColor, themeAreaSwatches } from "../ide/projectAccent";
+  import { listProjects } from "../ide/projects";
+  import { glow } from "../ui/glow";
   import {
     actorLabel,
     applyFilter,
@@ -690,6 +697,150 @@
     events = await invoke<CardEvent[]>("list_card_events", { cardId: card.id, limit: 30 });
   }
 
+  // --- UX6a (`docs/plans/ui-ux-round.md`): the glow of cards at work, the project's edge, the done moment ---
+
+  /** Each project's marker slot, for the edge in its colour on the cards of its plans (G19). */
+  let projectSlots = $state<Map<number, number | null>>(new Map());
+  async function loadProjects(): Promise<void> {
+    try {
+      projectSlots = new Map((await listProjects()).map((p) => [p.id, p.accent_slot]));
+    } catch {
+      // Without the projects the cards simply carry no edge.
+    }
+  }
+  const planProject = $derived(new Map(plans.map((p) => [p.id, p.project_id ?? null])));
+  /** The colour of the project a card's plan runs in, or `null`: no plan, no project, or a project without one. */
+  function projectColor(card: BoardCard): string | null {
+    const project = card.plan_id === null ? null : (planProject.get(card.plan_id) ?? null);
+    return project === null ? null : accentColor(projectSlots.get(project), $themeAreaSwatches);
+  }
+
+  /** Where it is remembered when each board was last looked at (board id → ISO time), for the afterglow. */
+  const SEEN_KEY = "kanbanSeen";
+  /** How long a card glows that got done while nobody looked, or at Calm and Off in place of the sparks. */
+  const AFTERGLOW_MS = 2600;
+  /** How many hex sparks a done card bursts into. */
+  const SPARKS = 9;
+  /** The cards glowing for a moment (the afterglow), on top of those a session works on. */
+  const glowing = new SvelteSet<number>();
+  let sparkLayer = $state<HTMLElement | null>(null);
+  /** Each card's column role as last seen, on which board, and the columns' roles then — plain bookkeeping. */
+  let rolesBefore: RoleMap | null = null;
+  let rolesBoard: number | null = null;
+  let columnsBefore = "";
+  /** The afterglow's pending ends, one per card, so a card done again restarts its glow and unmount clears them. */
+  const glowTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+  function markSeen(id: number): void {
+    setSetting(SEEN_KEY, { ...(getSetting<Record<string, string>>(SEEN_KEY) ?? {}), [id]: new Date().toISOString() });
+  }
+
+  function afterglow(ids: readonly number[]): void {
+    if (ids.length === 0) return;
+    for (const id of ids) {
+      glowing.add(id);
+      clearTimeout(glowTimers.get(id));
+      glowTimers.set(
+        id,
+        setTimeout(() => {
+          glowing.delete(id);
+          glowTimers.delete(id);
+        }, AFTERGLOW_MS),
+      );
+    }
+  }
+
+  /** A card that just got done bursts into hex sparks that fly into its column's count; at Calm and Off it glows. */
+  function burst(id: number): void {
+    const cardEl = rootEl?.querySelector<HTMLElement>(`[data-card="${id}"]`);
+    const countEl = cardEl?.closest(".col")?.querySelector<HTMLElement>(".count");
+    if (!animates(get(motion)) || !cardEl || !countEl || !sparkLayer) {
+      afterglow([id]);
+      return;
+    }
+    const layer = sparkLayer.getBoundingClientRect();
+    const from = cardEl.getBoundingClientRect();
+    const to = countEl.getBoundingClientRect();
+    if (from.width === 0 || to.width === 0) {
+      // Not laid out (yet): no sparks from nowhere — the card just glows.
+      afterglow([id]);
+      return;
+    }
+    const x0 = from.left + from.width / 2 - layer.left;
+    const y0 = from.top + from.height / 2 - layer.top;
+    const dx = to.left + to.width / 2 - layer.left - x0;
+    const dy = to.top + to.height / 2 - layer.top - y0;
+    for (let i = 0; i < SPARKS; i++) {
+      const spark = document.createElement("span");
+      spark.className = "spark";
+      spark.style.left = `${x0}px`;
+      spark.style.top = `${y0}px`;
+      sparkLayer.appendChild(spark);
+      // Out from the card first, each its own way, then all into the count.
+      const a = (i / SPARKS) * Math.PI * 2;
+      const out = Math.min(from.width, 160) * 0.45;
+      spark
+        .animate(
+          [
+            { transform: "translate(0, 0) scale(0.4)", opacity: 0 },
+            { transform: `translate(${Math.cos(a) * out}px, ${Math.sin(a) * out * 0.5}px) scale(1)`, opacity: 1, offset: 0.35 },
+            { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.2 },
+          ],
+          { duration: 900 + i * 35, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        )
+        // A cancelled animation rejects `finished`; the spark goes either way.
+        .finished.catch(() => undefined)
+        .finally(() => spark.remove());
+    }
+    countEl.animate([{ transform: "scale(1)" }, { transform: "scale(1.4)" }, { transform: "scale(1)" }], {
+      duration: 420,
+      delay: 820,
+      easing: "ease-out",
+    });
+    afterglow([id]);
+  }
+
+  // A card arriving in a done column, whoever moved it (G18): sparks while the board is on screen. A board looked at
+  // anew instead glows the cards that got done while nobody looked.
+  $effect(() => {
+    const board = $data;
+    const id = boardId;
+    // A board still loading has no cards yet: its first look is the first loaded snapshot.
+    if (!board || board.board === null || id === null) return;
+    const now = rolesOf(board.cards, board.columns);
+    const columns = board.columns.map((c) => `${c.id}:${c.maps_to_status}`).join(",");
+    if (rolesBoard !== id) {
+      rolesBoard = id;
+      rolesBefore = now;
+      columnsBefore = columns;
+      afterglow(doneSince(board.cards, board.columns, getSetting<Record<string, string>>(SEEN_KEY)?.[id]));
+      markSeen(id);
+      return;
+    }
+    if (columns !== columnsBefore) {
+      // A column given another role (or added, removed) moves no card: a column turned "done" is not a burst of
+      // finished work.
+      columnsBefore = columns;
+      rolesBefore = now;
+      return;
+    }
+    const arrived = arrivedDone(rolesBefore, now);
+    rolesBefore = now;
+    if (arrived.length === 0) return;
+    markSeen(id);
+    // A card that changed column is a new element there: after the DOM update it still needs a frame to be laid out.
+    void tick().then(() => requestAnimationFrame(() => arrived.forEach(burst)));
+  });
+
+  onMount(() => {
+    void loadProjects();
+    return () => {
+      glowTimers.forEach((timer) => clearTimeout(timer));
+      glowTimers.clear();
+      if (boardId !== null) markSeen(boardId);
+    };
+  });
+
   function titleOf(id: number): string {
     return $data?.cards.find((c) => c.id === id)?.title ?? "deleted";
   }
@@ -1217,9 +1368,13 @@
               {#if target?.columnId === column.id && target.index === index && (dragging || carrying)}
                 <div class="marker" aria-hidden="true"></div>
               {/if}
+              {@const project = projectColor(card)}
               <article
                 class="card"
                 data-tone={card.labels.length > 0 ? labelColorIndex(card.labels[0], LABEL_TOKENS) : undefined}
+                data-project={project ? "" : undefined}
+                style:--card-project={project}
+                use:glow={$studioCards.has(card.id) || glowing.has(card.id)}
                 class:archived={card.archived_at !== null}
                 class:lifted={dragging?.id === card.id || carrying?.id === card.id}
                 class:settling={settling.has(card.id)}
@@ -1315,6 +1470,8 @@
 
     <!-- What a keyboard move is doing, for anyone not watching the screen. -->
     <p class="sr-only" aria-live="polite">{announcement}</p>
+    <!-- The done moment's sparks fly over everything, from the card to its column's count. -->
+    <div class="sparks" bind:this={sparkLayer} aria-hidden="true"></div>
 
     {#if boardEmpty}
       <p class="notice">Nothing here yet — create the first card in a column below.</p>
@@ -1633,6 +1790,40 @@
   }
   .card.archived {
     opacity: 0.55;
+  }
+  /* The glow of a card at work or just done (`ui/glow.ts`): the card's own shadow rule above would outrank the global
+     one, so the card says it again. */
+  .card:global([data-ax-glow]) {
+    border-color: var(--ax-glow);
+    box-shadow: var(--ax-glow-shadow);
+    animation: var(--ax-anim-glow);
+  }
+  /* G19: the project a card's plan runs in, as a short line along its top in the project's colour. */
+  .card[data-project] {
+    position: relative;
+  }
+  .card[data-project]::before {
+    content: "";
+    position: absolute;
+    inset: 0 var(--ax-radius-md) auto;
+    height: calc(2px * var(--ax-ui-scale));
+    border-radius: 0 0 var(--ax-radius-pill) var(--ax-radius-pill);
+    background: var(--card-project);
+  }
+  /* The done moment (G18): small glowing hexes, placed and flown by script. */
+  .sparks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 6;
+  }
+  .sparks :global(.spark) {
+    position: absolute;
+    width: calc(7px * var(--ax-ui-scale));
+    height: calc(8px * var(--ax-ui-scale));
+    margin: calc(-4px * var(--ax-ui-scale)) 0 0 calc(-3.5px * var(--ax-ui-scale));
+    background: var(--ax-glow);
+    clip-path: var(--ax-hex-clip);
   }
   /* The card being moved, by pointer or by key. It keeps its place in the flow
      so the column does not reshuffle under the drop indicator — it is only

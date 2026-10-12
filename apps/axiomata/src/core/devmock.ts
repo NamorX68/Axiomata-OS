@@ -513,6 +513,8 @@ let boardPlans: BoardPlan[] = [
     name: "Studio-Ablauf",
     goal: "",
     status: "approved",
+    // Runs in the mock project with a marker colour, so its cards show the project's edge (UX6a, G19).
+    project_id: 1,
     auto_start_max: null,
     max_cost_usd: null,
     max_tokens: null,
@@ -1611,7 +1613,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return { agent, card_id: args.cardId, role: "reviewer", engine_id: (args.engineId as string | null) ?? "mock-engine" } as T;
     }
     case "open_card_sessions":
-      return [] as T;
+      // Card #4 (in progress, claimed by claude-1) has a session at work, so its card glows (UX6a).
+      return [{ card_id: 4, project_id: 1, agent_id: 1 }] as T;
     case "take_over_plan": {
       const plan = boardPlans.find((p) => p.id === args.id);
       if (!plan) throw new Error(`no plan ${String(args.id)}`);
