@@ -610,6 +610,75 @@ function drawBoxDrawingLine(
  *  the template for future additions (double/heavy/dashed box-drawing
  *  lines, see `BOX_DRAWING_LINES`'s own doc comment); a third handler can
  *  be appended here without touching `draw()`'s per-cell branch at all. */
+/** One Powerline separator: a polygon or a half ellipse over the cell, filled (the solid forms) or stroked (the thin
+ *  ones). Points are cell-relative, 0-1 across the cell's width and height. */
+export type PowerlineShape =
+  | { kind: "polygon"; points: readonly (readonly [number, number])[]; fill: boolean }
+  | { kind: "half-ellipse"; bulge: "right" | "left"; fill: boolean };
+
+/** The Powerline separators of a Starship/Powerlevel10k prompt (U+E0B0-E0BF, private use area), drawn to the cell
+ *  rather than from a font. Only a font patched to the same metrics (a Nerd Font Mono) draws them edge to edge; any
+ *  other primary font takes them from the bundled icon fallback (`PureNerdFont`), whose glyphs follow its own em
+ *  square — they came out too small, shifted, or with a cap missing beside the segment colour (owner, 2026-10-12).
+ *  Ghostty, Kitty and WezTerm draw this range themselves for the same reason. */
+export const POWERLINE_SHAPES: Readonly<Record<string, PowerlineShape>> = {
+  "\ue0b0": { kind: "polygon", points: [[0, 0], [1, 0.5], [0, 1]], fill: true },
+  "\ue0b1": { kind: "polygon", points: [[0, 0], [1, 0.5], [0, 1]], fill: false },
+  "\ue0b2": { kind: "polygon", points: [[1, 0], [0, 0.5], [1, 1]], fill: true },
+  "\ue0b3": { kind: "polygon", points: [[1, 0], [0, 0.5], [1, 1]], fill: false },
+  "\ue0b4": { kind: "half-ellipse", bulge: "right", fill: true },
+  "\ue0b5": { kind: "half-ellipse", bulge: "right", fill: false },
+  "\ue0b6": { kind: "half-ellipse", bulge: "left", fill: true },
+  "\ue0b7": { kind: "half-ellipse", bulge: "left", fill: false },
+  // The slanted separators: lower-left, lower-right, upper-left and upper-right triangles and their diagonals.
+  "\ue0b8": { kind: "polygon", points: [[0, 0], [1, 1], [0, 1]], fill: true },
+  "\ue0b9": { kind: "polygon", points: [[0, 0], [1, 1]], fill: false },
+  "\ue0ba": { kind: "polygon", points: [[1, 0], [1, 1], [0, 1]], fill: true },
+  "\ue0bb": { kind: "polygon", points: [[1, 0], [0, 1]], fill: false },
+  "\ue0bc": { kind: "polygon", points: [[0, 0], [1, 0], [0, 1]], fill: true },
+  "\ue0bd": { kind: "polygon", points: [[1, 0], [0, 1]], fill: false },
+  "\ue0be": { kind: "polygon", points: [[0, 0], [1, 0], [1, 1]], fill: true },
+  "\ue0bf": { kind: "polygon", points: [[0, 0], [1, 1]], fill: false },
+};
+
+/** Draws a Powerline separator (see `POWERLINE_SHAPES`) to the cell `(x, y, cellW, cellH)`; `false` for any other
+ *  character. A filled shape covers its cell exactly, so it meets the neighbouring segment's background without a seam. */
+function drawPowerline(
+  ctx: CanvasRenderingContext2D,
+  glyph: string,
+  x: number,
+  y: number,
+  cellW: number,
+  cellH: number,
+  color: string,
+): boolean {
+  const shape = POWERLINE_SHAPES[glyph];
+  if (!shape) return false;
+  ctx.beginPath();
+  if (shape.kind === "polygon") {
+    shape.points.forEach(([px, py], i) => {
+      if (i === 0) ctx.moveTo(x + px * cellW, y + py * cellH);
+      else ctx.lineTo(x + px * cellW, y + py * cellH);
+    });
+    if (shape.fill) ctx.closePath();
+  } else {
+    // A half ellipse over the full cell height whose flat side lies on the cell edge facing its segment.
+    const right = shape.bulge === "right";
+    const centerX = right ? x : x + cellW;
+    ctx.ellipse(centerX, y + cellH / 2, cellW, cellH / 2, 0, right ? -Math.PI / 2 : Math.PI / 2, right ? Math.PI / 2 : (3 * Math.PI) / 2);
+    if (shape.fill) ctx.closePath();
+  }
+  if (shape.fill) {
+    ctx.fillStyle = color;
+    ctx.fill();
+  } else {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = BOX_LINE_WIDTH;
+    ctx.stroke();
+  }
+  return true;
+}
+
 const PROCEDURAL_GLYPH_HANDLERS: readonly ((
   ctx: CanvasRenderingContext2D,
   glyph: string,
@@ -618,7 +687,7 @@ const PROCEDURAL_GLYPH_HANDLERS: readonly ((
   cellW: number,
   cellH: number,
   color: string,
-) => boolean)[] = [drawBlockElement, drawBoxDrawingLine];
+) => boolean)[] = [drawBlockElement, drawBoxDrawingLine, drawPowerline];
 
 /** A cell's actual background colour, theme-aware — pulled out of `draw()`
  *  specifically so this one call has a unit test (Checkpoint 5n, real bug,

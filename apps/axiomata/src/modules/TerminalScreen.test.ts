@@ -5,6 +5,7 @@ import {
   BOX_DRAWING_LINES,
   cellFont,
   isCellSelected,
+  POWERLINE_SHAPES,
   resolveBgColor,
   resolveColor,
   SHADE_ALPHA,
@@ -313,5 +314,30 @@ describe("selectionText", () => {
     // A selection dragged to a row that no longer exists (e.g. the screen
     // shrank since) shouldn't crash - it should just stop at what's there.
     expect(selectionText(rows, { row: 0, col: 0 }, { row: 5, col: 0 })).toBe("only one row");
+  });
+});
+
+describe("POWERLINE_SHAPES (owner, 2026-10-12)", () => {
+  it("covers the whole separator range U+E0B0-E0BF", () => {
+    for (let code = 0xe0b0; code <= 0xe0bf; code++) {
+      expect(POWERLINE_SHAPES[String.fromCodePoint(code)], code.toString(16)).toBeDefined();
+    }
+  });
+
+  it("keeps every point inside the cell, and fills the solid forms only", () => {
+    for (const [glyph, shape] of Object.entries(POWERLINE_SHAPES)) {
+      if (shape.kind === "polygon") {
+        for (const [px, py] of shape.points) {
+          expect(px >= 0 && px <= 1 && py >= 0 && py <= 1, glyph).toBe(true);
+        }
+      }
+      const odd = (glyph.codePointAt(0) ?? 0) % 2 === 1;
+      expect(shape.fill, glyph.codePointAt(0)?.toString(16)).toBe(!odd);
+    }
+  });
+
+  it("points the arrows and caps towards the side they close", () => {
+    expect(POWERLINE_SHAPES["\ue0b0"]).toMatchObject({ points: [[0, 0], [1, 0.5], [0, 1]] });
+    expect(POWERLINE_SHAPES["\ue0b6"]).toMatchObject({ kind: "half-ellipse", bulge: "left" });
   });
 });
