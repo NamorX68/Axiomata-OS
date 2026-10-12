@@ -150,3 +150,54 @@ export function metalLight(nx: number, ny: number, nz: number, sparkle: number):
   const spec = Math.max(0, nx * HALF[0] + ny * HALF[1] + nz * HALF[2]) ** 40 * sparkle;
   return { shade: 0.45 + 0.75 * diffuse, spec };
 }
+
+/**
+ * The cell under a point: the index of the nearest pickable cell (`pickable[i]` 1) whose centre (`xs[i]`, `ys[i]`) lies
+ * within `reach` px of (`px`, `py`), or -1. The cells tile the ball, so the nearest centre is the cell the point is on.
+ */
+export function nearestCell(
+  xs: ArrayLike<number>,
+  ys: ArrayLike<number>,
+  pickable: ArrayLike<number>,
+  px: number,
+  py: number,
+  reach: number,
+): number {
+  let best = -1;
+  let bestD = reach * reach;
+  for (let i = 0; i < pickable.length; i++) {
+    if (!pickable[i]) continue;
+    const d = ((xs[i] ?? 0) - px) ** 2 + ((ys[i] ?? 0) - py) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** How far the owner may tip the hive towards a pole (radians), so it never turns over. */
+export const MAX_TILT = 1.1;
+
+/**
+ * A drag of (`dx`, `dy`) px over a ball of radius `r` px as a turn: the yaw it adds (sideways, about the axis) and the
+ * new tilt (up and down, bounded by `MAX_TILT`), so the surface under the pointer follows it.
+ */
+export function dragTurn(tilt: number, dx: number, dy: number, r: number): { yaw: number; tilt: number } {
+  const radius = Math.max(1, r);
+  return { yaw: -dx / radius, tilt: Math.min(MAX_TILT, Math.max(-MAX_TILT, tilt - dy / radius)) };
+}
+
+/** The fastest a let-go hive coasts on (radians per second): a flick turns it briskly, never a blur. */
+export const MAX_COAST = 6;
+/** A drag held still this long (ms) before it is let go ends without coasting. */
+export const STILL_MS = 80;
+
+/**
+ * The speed a let-go hive coasts on: the drag's last speed (`spin`, radians per second), bounded by `MAX_COAST` — or
+ * none, when the pointer stood still for `STILL_MS` before the release or the motion is not Full.
+ */
+export function coastSpin(spin: number, stillMs: number, full: boolean): number {
+  if (!full || stillMs > STILL_MS) return 0;
+  return Math.min(MAX_COAST, Math.max(-MAX_COAST, spin));
+}

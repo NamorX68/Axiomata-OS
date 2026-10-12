@@ -6,7 +6,17 @@
  */
 
 import type { Shine } from "../core/brainView";
-import { buildHive, emberOf, metalLight, mixRgb, type HiveCell, type Rgb } from "./hive";
+import {
+  buildHive,
+  coastSpin,
+  dragTurn,
+  emberOf,
+  metalLight,
+  mixRgb,
+  nearestCell,
+  type HiveCell,
+  type Rgb,
+} from "./hive";
 import { APP_RING, EXPANDED_GROUP_RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 
@@ -231,6 +241,18 @@ export class GraphRenderer {
   private hiveXs = new Float32Array(0);
   private hiveYs = new Float32Array(0);
   private hiveZs = new Float32Array(0);
+  /** Per cell of the current frame: 1 where it can be pointed at (front, a note that exists at the time shown). */
+  private hivePickable = new Uint8Array(0);
+  /** A cell's circumradius in CSS px in the current frame, the reach of `hitCell`. */
+  private hiveCellPx = 0;
+  /** The owner's own turn of the hive (radians), on top of the ambient spin: about its axis, and its tilt. */
+  private hiveYaw = 0;
+  private hiveTilt = 0;
+  /** The yaw speed a drag let go with (radians per second), dying away in `frame` at motion Full. */
+  private hiveSpin = 0;
+  private turning = false;
+  /** When the drag last moved the hive (`performance.now()` ms): a release after holding still does not coast. */
+  private turnedAt = 0;
   private rgbCache = new Map<string, Rgb>();
   /** Ring captions (rings mode). */
   captions = { skills: "SKILLS", memory: "MEMORY" };
@@ -362,6 +384,8 @@ export class GraphRenderer {
     const hexPx = this.hexCellRadius();
     for (const n of this.model.nodes) {
       if (orbit && n.kind === "area") continue;
+      // A note of the hive is found by its cell (`hitCell`); only the recent ones also sit on the ring.
+      if (orbit && n.kind === "file" && !n.onOrbit) continue;
       const s = orbit && n.sx !== undefined && n.sy !== undefined ? { x: n.sx, y: n.sy } : this.toScreen(n);
       const d = Math.hypot(s.x - px, s.y - py);
       const reach = hex && n.kind === "file" ? Math.max(hexPx, 3) + slop : Math.max(n.r * this.view.zoom, 3) + slop;
@@ -373,9 +397,45 @@ export class GraphRenderer {
     return best;
   }
 
+  /**
+   * Orbit only: the note whose hive cell lies under a CSS-px point — the nearest front cell of a note that exists at
+   * the time shown, within a cell's reach — or null. The cells tile the ball, so the nearest centre is the cell the
+   * pointer is on; a note on the ring is found here too, by its cell.
+   */
+  hitCell(px: number, py: number): GraphNode | null {
+    const hive = this.hive;
+    if (this.options.mode !== "orbit" || !hive) return null;
+    const at = nearestCell(this.hiveXs, this.hiveYs, this.hivePickable, px, py, this.hiveCellPx);
+    return at < 0 ? null : (hive.nodes[at] ?? null);
+  }
+
+  /**
+   * Orbit only: turns the hive by a pointer drag of (`dx`, `dy`) CSS px over `ms` — sideways about its axis, up and
+   * down by tipping it — so the surface under the pointer follows it. The ring around it stays where it is.
+   */
+  turnHive(dx: number, dy: number, ms: number): void {
+    const { yaw, tilt } = dragTurn(this.hiveTilt, dx, dy, this.radius() * GraphRenderer.HIVE_SPHERE);
+    this.hiveYaw += yaw;
+    this.hiveTilt = tilt;
+    this.hiveSpin = ms > 0 ? yaw / (ms / 1000) : 0;
+    this.turnedAt = performance.now();
+    this.turning = true;
+  }
+
+  /** The drag let go: the hive coasts on at its last speed, bounded, and slows down (motion Full only). */
+  releaseHive(): void {
+    this.turning = false;
+    this.hiveSpin = coastSpin(this.hiveSpin, performance.now() - this.turnedAt, this.options.pulse !== false);
+  }
+
   frame(now: number): void {
     const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 0;
     this.last = now;
+    if (!this.turning && this.hiveSpin !== 0) {
+      this.hiveYaw += this.hiveSpin * dt;
+      this.hiveSpin *= Math.exp(-dt * 2.5);
+      if (Math.abs(this.hiveSpin) < 0.01) this.hiveSpin = 0;
+    }
     // Ambient rotation pauses for as long as a node stays selected (its
     // detail panel open), not just during the "fly to" tween/pulse.
     // `centerOn`/`flyTo`'s destination is computed once, from the angle at
@@ -639,9 +699,9 @@ export class GraphRenderer {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // 3-D rotation shared by wireframe and cloud.
-    const ay = this.angle * 3;
-    const ax = 0.35 + Math.sin(t * 0.15) * 0.08;
+    // The hive's 3-D rotation: the ambient spin plus the owner's own turn (`turnHive`).
+    const ay = this.angle * 3 + this.hiveYaw;
+    const ax = 0.35 + this.hiveTilt + Math.sin(t * 0.15) * 0.08;
     const cosY = Math.cos(ay);
     const sinY = Math.sin(ay);
     const cosX = Math.cos(ax);
@@ -793,7 +853,7 @@ export class GraphRenderer {
   }
 
   /** The sphere's radius as a share of the orbit ring's. */
-  private static readonly HIVE_SPHERE = 0.62;
+  static readonly HIVE_SPHERE = 0.62;
 
   /**
    * The honeycomb sphere (`graph/hive.ts`, UX4 W1/W2, G7) in place of the particle cloud: every note a cell in its
@@ -822,7 +882,9 @@ export class GraphRenderer {
       this.hiveXs = new Float32Array(n);
       this.hiveYs = new Float32Array(n);
       this.hiveZs = new Float32Array(n);
+      this.hivePickable = new Uint8Array(n);
     }
+    this.hiveCellPx = size;
     const xs = this.hiveXs;
     const ys = this.hiveYs;
     const zs = this.hiveZs;
@@ -878,20 +940,18 @@ export class GraphRenderer {
         ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
         ctx.fill();
         ctx.restore();
-        if (node) {
-          this.cellPos.set(node.id, { x, y, front });
-          // Only a front cell of a note that exists can be pointed at; others are parked far off for the hit test.
-          node.sx = front && tone.settled ? x : -1e6;
-          node.sy = front && tone.settled ? y : -1e6;
-        }
+        // Only a front cell of a note that exists can be pointed at (`hitCell`).
+        this.hivePickable[i] = node && front && tone.settled ? 1 : 0;
+        if (node) this.cellPos.set(node.id, { x, y, front: front && tone.settled });
       }
     }
     ctx.globalAlpha = 1;
 
-    const hover = this.hover;
-    if (hover?.kind === "file" && hover.sx !== undefined && hover.sy !== undefined && hover.sx > -1e5) {
+    // The hovered note's cell — also when it was hovered on the ring, which shows where on the ball it lives.
+    const hovered = this.hover?.kind === "file" ? this.cellPos.get(this.hover.id) : undefined;
+    if (hovered?.front) {
       ctx.save();
-      ctx.translate(hover.sx, hover.sy);
+      ctx.translate(hovered.x, hovered.y);
       this.hexagonPath(size * 1.3);
       ctx.strokeStyle = this.textColor;
       ctx.lineWidth = 1.5;

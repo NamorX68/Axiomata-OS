@@ -108,6 +108,13 @@ unter dem Zeiger + Tageslicht (`shell/Ambient.svelte`, `core/effects.ts`, Appear
 Leinwand (`canvas/EmptyCanvas.svelte`). Offen: Herzschlag fragt alle Boards inkl. Archiv ab (später eine Backend-Abfrage
 „Sitzungen heute“); Terminal-Titel-Versatz in der echten App prüfen.
 
+**Stand UX4 (2026-10-12, abgenommen):** Waben-Kugel (`graph/hive.ts`), Glut-Alterung, Schimmer, Zeitreise, Vault-Watcher
++ Funken, Start-Zündung. Mac-Feedback eingearbeitet: Waben waren kaum wählbar (Trefferradius kam vom alten Punkt, und
+die Ring-Schleife überschrieb die Position frischer Notizen — Mails nie wählbar) → eigener Waben-Treffertest
+(`nearestCell`, `GraphRenderer.hitCell`); Kugel mit gehaltener Maustaste drehen und neigen (`dragTurn`, Nachlauf nur
+bei Motion Full, der Ring bleibt stehen); Zündung länger (~2,5 s) und kräftiger: Funken fliegen auf die Ecken, Kern
+zündet mit Druckwelle und Aufleuchten, der Name zieht sich zusammen, die Marke öffnet sich zur App.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

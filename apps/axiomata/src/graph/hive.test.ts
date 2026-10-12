@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHive, emberOf, fibonacciSphere, metalLight, MIN_CELLS, mixRgb, travelSpan, type HiveFile } from "./hive";
+import {
+  buildHive,
+  coastSpin,
+  dragTurn,
+  emberOf,
+  fibonacciSphere,
+  MAX_COAST,
+  MAX_TILT,
+  metalLight,
+  MIN_CELLS,
+  mixRgb,
+  nearestCell,
+  STILL_MS,
+  travelSpan,
+  type HiveFile,
+} from "./hive";
 
 const files = (area: string, n: number): HiveFile[] =>
   Array.from({ length: n }, (_, i) => ({ id: `${area}/note-${i}.md`, area }));
@@ -83,5 +98,51 @@ describe("mixRgb and metalLight", () => {
     const away = metalLight(0.45, 0.55, -0.7, 1);
     expect(lit.shade).toBeGreaterThan(away.shade);
     expect(away.spec).toBe(0);
+  });
+});
+
+describe("nearestCell", () => {
+  const xs = [0, 20, 40];
+  const ys = [0, 0, 0];
+  it("finds the cell whose centre is nearest to the point", () => {
+    expect(nearestCell(xs, ys, [1, 1, 1], 14, 3, 12)).toBe(1);
+  });
+
+  it("skips a cell that cannot be picked, even when it is nearest", () => {
+    expect(nearestCell(xs, ys, [1, 0, 1], 24, 0, 25)).toBe(2);
+  });
+
+  it("finds nothing beyond a cell's reach", () => {
+    expect(nearestCell(xs, ys, [1, 1, 1], 20, 30, 12)).toBe(-1);
+  });
+});
+
+describe("dragTurn", () => {
+  it("turns the ball so its front follows a sideways drag, by the arc dragged", () => {
+    const { yaw, tilt } = dragTurn(0, 50, 0, 100);
+    expect(yaw).toBeCloseTo(-0.5);
+    expect(tilt).toBe(0);
+  });
+
+  it("tips the ball with an upward drag and never past the limit", () => {
+    expect(dragTurn(0, 0, -30, 100).tilt).toBeCloseTo(0.3);
+    expect(dragTurn(1, 0, -500, 100).tilt).toBe(MAX_TILT);
+    expect(dragTurn(-1, 0, 500, 100).tilt).toBe(-MAX_TILT);
+  });
+});
+
+describe("coastSpin", () => {
+  it("keeps a moderate flick's speed", () => {
+    expect(coastSpin(2, 10, true)).toBe(2);
+  });
+
+  it("bounds a flick from events that came in a millisecond apart", () => {
+    expect(coastSpin(40, 10, true)).toBe(MAX_COAST);
+    expect(coastSpin(-40, 10, true)).toBe(-MAX_COAST);
+  });
+
+  it("does not coast after the pointer held still, nor when the motion is not Full", () => {
+    expect(coastSpin(2, STILL_MS + 1, true)).toBe(0);
+    expect(coastSpin(2, 10, false)).toBe(0);
   });
 });

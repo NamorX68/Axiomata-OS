@@ -183,19 +183,90 @@
    *  behind every tile. Gates both the click-to-open behaviour and the
    *  pointer cursor, so the affordance matches what's actually clickable. */
   let withinCloud = $state(false);
+  /** Whether `hover` was found by its hive cell rather than on the ring: a recent note is both, and only its ring
+   *  icon opens the file at once — a cell selects it in the Second Brain like every other cell. */
+  let hoverInCell = false;
+  /** Over the hive itself: a press there turns the ball (`onDown`). */
+  let overHive = $state(false);
+  let brainEl = $state<HTMLDivElement | null>(null);
+  /** The drag turning the hive, while the button is held; `moved` once it went further than a click would. */
+  let drag: { x: number; y: number; at: number; moved: boolean } | null = null;
+  /** Whether a drag is turning the ball right now (the grabbing cursor). */
+  let turning = $state(false);
+  /** Ends a drag under way: drops its window listeners (also on unmount and when the window loses focus). */
+  let endDrag: (() => void) | null = null;
+  /** Until when (`performance.now()` ms) a click is the tail of a drag and must not select or open anything. The
+   *  browser fires that click only where the press and the release share an element, so a flag waiting for it could
+   *  outlive the drag and eat the next real click; a moment in time cannot. */
+  let swallowUntil = 0;
+  /** How far the pointer may wander during a press and still count as a click, in px. */
+  const CLICK_SLOP = 4;
+  /** How long after a drag's release its click still counts as part of it, in ms. */
+  const DRAG_CLICK_MS = 60;
 
   function onMove(e: MouseEvent) {
-    if (!renderer) return;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    hover = renderer.hitTest(x, y);
+    if (!drag) pointAt(e.clientX, e.clientY);
+  }
+
+  /** Hover state for the pointer at a client point: what lies under it, and whether the bare ball is there. */
+  function pointAt(clientX: number, clientY: number): void {
+    if (!renderer || !brainEl) return;
+    const rect = brainEl.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    // The ring and the apps first; the hub only where no cell lies over it — the ball covers the centre.
+    const ring = renderer.hitTest(x, y);
+    const cell = ring && ring.id !== "hub" ? null : renderer.hitCell(x, y);
+    hover = cell ?? ring;
+    hoverInCell = cell !== null;
     renderer.hover = hover;
-    withinCloud = hover !== null || Math.hypot(x - rect.width / 2, y - rect.height / 2) <= discR;
+    const fromCentre = Math.hypot(x - rect.width / 2, y - rect.height / 2);
+    overHive = (ring === null || ring.id === "hub") && fromCentre <= discR * GraphRenderer.HIVE_SPHERE;
+    withinCloud = hover !== null || fromCentre <= discR;
+  }
+
+  /** A press on the hive starts turning it; the window follows the drag, so it goes on over tiles and beyond. */
+  function onDown(e: MouseEvent): void {
+    if (e.button !== 0 || !overHive || !renderer) return;
+    endDrag?.();
+    drag = { x: e.clientX, y: e.clientY, at: performance.now(), moved: false };
+    const move = (ev: MouseEvent) => {
+      if (!drag || !renderer) return;
+      const dx = ev.clientX - drag.x;
+      const dy = ev.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < CLICK_SLOP) return;
+      const now = performance.now();
+      renderer.turnHive(dx, dy, now - drag.at);
+      drag = { x: ev.clientX, y: ev.clientY, at: now, moved: true };
+      turning = true;
+    };
+    const up = (ev: MouseEvent) => {
+      const moved = drag?.moved ?? false;
+      stop();
+      if (moved) swallowUntil = performance.now() + DRAG_CLICK_MS;
+      // The ball turned under a still pointer: what it points at now — unless it was let go over a tile or elsewhere.
+      if (brainEl && ev.composedPath().includes(brainEl)) pointAt(ev.clientX, ev.clientY);
+      else onLeave();
+    };
+    const stop = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("blur", stop);
+      drag = null;
+      turning = false;
+      endDrag = null;
+      renderer?.releaseHive();
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("blur", stop);
+    endDrag = stop;
   }
 
   function onLeave() {
     hover = null;
+    hoverInCell = false;
+    overHive = false;
     withinCloud = false;
     if (renderer) renderer.hover = null;
   }
@@ -277,6 +348,7 @@
    *  it must not also open Second Brain, same reasoning as the `menu`
    *  dismiss above. */
   function onClick(): void {
+    if (performance.now() < swallowUntil) return;
     if (menu) {
       menu = null;
       return;
@@ -295,7 +367,7 @@
       handleAppClick(hover);
       return;
     }
-    if (hover?.kind === "file" && hover.path && hover.onOrbit) {
+    if (hover?.kind === "file" && hover.path && hover.onOrbit && !hoverInCell) {
       openFilePanel(hover.path, "read");
       return;
     }
@@ -468,6 +540,7 @@
       .catch((err: unknown) => console.warn("vault:changed listen failed:", err));
     return () => {
       unmounted = true;
+      endDrag?.();
       stopVaultWatch?.();
       stopActivityPoll();
       cancelAnimationFrame(raf);
@@ -488,6 +561,10 @@
   class="brain"
   class:hovering={hover !== null}
   class:clickable={withinCloud}
+  class:grab={overHive && hover === null}
+  class:turning
+  bind:this={brainEl}
+  onmousedown={onDown}
   onmousemove={onMove}
   onmouseleave={onLeave}
   onclick={onClick}
@@ -581,6 +658,13 @@
   }
   .brain.clickable {
     cursor: pointer;
+  }
+  /* The bare ball between its notes: it can be turned. */
+  .brain.grab {
+    cursor: grab;
+  }
+  .brain.turning {
+    cursor: grabbing;
   }
   canvas {
     width: 100%;
