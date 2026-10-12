@@ -46,6 +46,7 @@
     canDeletePlan,
     rolesOfKind,
     sessionEngine,
+    suggestedRole,
     cardEditable,
     newCardColumn,
     cardsOfPlan,
@@ -283,6 +284,12 @@
   let grillEngine = $state("");
   const plannerNames = $derived(rolesOfKind(roles, "plan", "planner"));
   const grillNames = $derived(rolesOfKind(roles, "grill", "grill"));
+  // A plan made from a card suggests a planner and a grill of the card's tier; the owner may pick another.
+  const originTier = $derived(
+    plan?.origin_card_id != null ? (data?.cards.find((card) => card.id === plan.origin_card_id)?.tier ?? null) : null,
+  );
+  const plannerSuggested = $derived(suggestedRole(plannerNames, roles, $session.agents, originTier));
+  const grillSuggested = $derived(suggestedRole(grillNames, roles, $session.agents, originTier));
 
   function showPlanner(agentId: number): void {
     emit("shell:agent", { projectId: project.id, agentId });
@@ -364,12 +371,12 @@
   }
 
   async function startPlanner(): Promise<void> {
-    const made = await startSession(plannerRole || plannerNames[0] || "", plannerEngine, false);
+    const made = await startSession(plannerRole || plannerSuggested, plannerEngine, false);
     if (made) toast(`The planner ${made.agent.name} is reading the project.`, "info");
   }
 
   async function startGrill(): Promise<boolean> {
-    const made = await startSession(grillRole || grillNames[0] || "", grillEngine, true);
+    const made = await startSession(grillRole || grillSuggested, grillEngine, true);
     if (made) toast(`${made.agent.name} is now questioning you about the cards in the terminal.`, "info");
     return made !== null;
   }
@@ -390,7 +397,7 @@
   const grillWanted = $derived(plan ? ($grillAfter[plan.id] ?? false) : false);
   const grillEngineChosen = $derived(
     sessionEngine(
-      roles.find((r) => r.name === (grillRole || grillNames[0])) ?? null,
+      roles.find((r) => r.name === (grillRole || grillSuggested)) ?? null,
       $engineCatalog,
       grillEngine,
     ).engineId !== "",
@@ -908,6 +915,7 @@
                   names={plannerNames}
                   {roles}
                   catalog={$engineCatalog}
+                  suggested={plannerSuggested}
                   bind:role={plannerRole}
                   bind:engine={plannerEngine}
                 />
@@ -927,6 +935,7 @@
                     names={grillNames}
                     {roles}
                     catalog={$engineCatalog}
+                    suggested={grillSuggested}
                     bind:role={grillRole}
                     bind:engine={grillEngine}
                   />

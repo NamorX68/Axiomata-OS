@@ -162,6 +162,28 @@ export function rolesOfKind(roles: Pick<Role, "name" | "kind">[], kind: string, 
   return names.includes(preferred) ? [preferred, ...names.filter((name) => name !== preferred)] : names;
 }
 
+/**
+ * The role a planner's or grilling start offers first, out of `names` (as {@link rolesOfKind} orders them); the owner can
+ * still pick another. A plan made from a card gets a role of the card's tier — a small card wants a small planner —
+ * and the last one used among several of that tier; otherwise the role of the project's latest session among `names`;
+ * otherwise the first of `names`. Empty when `names` is.
+ */
+export function suggestedRole(
+  names: string[],
+  roles: Pick<Role, "name" | "tier">[],
+  agents: Pick<IdeAgent, "id" | "agent_role">[],
+  cardTier: CardTier | null,
+): string {
+  const lastUsed = (among: string[]): string | undefined =>
+    [...agents].sort((a, b) => b.id - a.id).find((agent) => among.includes(agent.agent_role))?.agent_role;
+  if (cardTier !== null) {
+    const ofTier = names.filter((name) => roles.find((role) => role.name === name)?.tier === cardTier);
+    const pick = lastUsed(ofTier) ?? ofTier[0];
+    if (pick !== undefined) return pick;
+  }
+  return lastUsed(names) ?? names[0] ?? "";
+}
+
 /** The ids of the cards a proposal waits for, as the proposal row shows them: `#12, #14`, or nothing. */
 export function needsLabel(card: Pick<BoardCard, "depends_on">): string {
   return card.depends_on.map((id) => `#${id}`).join(", ");

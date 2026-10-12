@@ -1,8 +1,8 @@
 <!--
-  The choice at the start of a planner or a grilling session (the plan's panel): a **role**, not an engine. The role carries
-  its engine, shown beside its name; only a role that names none (a freshly seeded one) asks for an engine — once: the
-  start saves the pick into the role, and the next start is one click. Engines and roles are changed under "Engines &
-  roles".
+  The choice at the start of a planner or a grilling session (the plan's panel): a **role**, not an engine. One role is
+  suggested (`suggestedRole`), the owner may pick another. The role carries its engine, shown beside its name; only a
+  role that names none (a freshly seeded one) asks for an engine — once: the start saves the pick into the role, and the
+  next start is one click. Engines and roles are changed under "Engines & roles".
 -->
 <script lang="ts">
   import type { EngineEntry, Role } from "../../core/roster";
@@ -14,6 +14,7 @@
     names,
     roles,
     catalog,
+    suggested = "",
     role = $bindable(""),
     engine = $bindable(""),
   }: {
@@ -22,13 +23,15 @@
     names: string[];
     roles: Role[];
     catalog: EngineEntry[];
-    /** The role picked; empty = the first. */
+    /** The role shown while the owner has picked none (`suggestedRole`); empty = the first of `names`. */
+    suggested?: string;
+    /** The role picked; empty = the suggested one. */
     role: string;
     /** The engine picked for a role that has none. */
     engine: string;
   } = $props();
 
-  const picked = $derived(names.includes(role) ? role : (names[0] ?? ""));
+  const picked = $derived(names.includes(role) ? role : names.includes(suggested) ? suggested : (names[0] ?? ""));
   const current = $derived(roles.find((r) => r.name === picked) ?? null);
   const choice = $derived(sessionEngine(current, catalog, engine));
   const engineLabel = $derived(catalog.find((e) => e.id === choice.engineId));

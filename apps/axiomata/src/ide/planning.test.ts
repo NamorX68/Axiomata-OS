@@ -9,6 +9,7 @@ import {
   canDeletePlan,
   rolesOfKind,
   sessionEngine,
+  suggestedRole,
   cardEditable,
   newCardColumn,
   canStartGrill,
@@ -566,5 +567,35 @@ describe("what a session started from a role runs on", () => {
     expect(rolesOfKind(roles, "plan", "planner")).toEqual(["planner", "planner-heavy"]);
     expect(rolesOfKind(roles, "grill", "grill")).toEqual(["grill"]);
     expect(rolesOfKind(roles, "review", "reviewer")).toEqual([]);
+  });
+
+  describe("the role a start suggests", () => {
+    const names = ["planner", "planner-sonnet", "planner-haiku", "planner-mimo"];
+    const roles = [
+      { name: "planner", tier: "heavy" as const },
+      { name: "planner-sonnet", tier: "medium" as const },
+      { name: "planner-haiku", tier: "light" as const },
+      { name: "planner-mimo", tier: "light" as const },
+    ];
+    const used = (id: number, role: string) => ({ id, agent_role: role });
+
+    it("gives a plan made from a card a role of the card's tier, the last one used among several", () => {
+      expect(suggestedRole(names, roles, [], "medium")).toBe("planner-sonnet");
+      expect(suggestedRole(names, roles, [], "light")).toBe("planner-haiku");
+      expect(suggestedRole(names, roles, [used(3, "planner-mimo"), used(2, "planner-haiku")], "light")).toBe(
+        "planner-mimo",
+      );
+      // A later session of another tier does not count for this one.
+      expect(suggestedRole(names, roles, [used(9, "planner"), used(4, "planner-mimo")], "light")).toBe("planner-mimo");
+    });
+
+    it("falls back to the project's latest role, then to the first, when the tier has no role or there is no card", () => {
+      expect(suggestedRole(names, roles, [used(5, "allrounder"), used(4, "planner-sonnet")], null)).toBe(
+        "planner-sonnet",
+      );
+      expect(suggestedRole(names, roles, [], null)).toBe("planner");
+      expect(suggestedRole(["planner"], roles, [used(1, "planner")], "light")).toBe("planner");
+      expect(suggestedRole([], roles, [], "light")).toBe("");
+    });
   });
 });
