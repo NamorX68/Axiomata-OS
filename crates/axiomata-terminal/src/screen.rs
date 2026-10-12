@@ -62,6 +62,19 @@ pub enum Color {
     Rgb { r: u8, g: u8, b: u8 },
 }
 
+/// How the running program wants mouse wheel turns delivered (card #80): not at all (the terminal scrolls its own
+/// history, or turns the wheel into arrow keys on the alternate screen), or as mouse reports in the classic X10 byte
+/// encoding (`CSI M` + three bytes) or the SGR encoding (`CSI < b;x;y M`, `?1006`) — what Claude Code, Opencode and
+/// `nvim` ask for so they can scroll themselves.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseReporting {
+    #[default]
+    Off,
+    X10,
+    Sgr,
+}
+
 /// One character cell: what to draw, and how. `Serialize` for the same
 /// reason as [`Color`] — sent to the frontend renderer as-is.
 #[derive(Clone, Copy, PartialEq, Debug, Serialize)]
@@ -220,6 +233,11 @@ pub struct Screen {
     scroll_bottom: usize,
     /// Set by `ESC 7`, read by `ESC 8` — see [`SavedCursor`].
     saved_cursor: Option<SavedCursor>,
+    /// Whether a mouse tracking mode is on (`?1000`, `?1002` or `?1003`): the program wants button and wheel events
+    /// itself. Only the wheel is reported so far (card #80); clicks stay the terminal's, for selecting text.
+    mouse_tracking: bool,
+    /// Whether the program asked for the SGR mouse encoding (`?1006`).
+    mouse_sgr: bool,
 }
 
 impl Screen {
@@ -246,6 +264,8 @@ impl Screen {
             scroll_top: 0,
             scroll_bottom: rows - 1,
             saved_cursor: None,
+            mouse_tracking: false,
+            mouse_sgr: false,
         }
     }
 
@@ -368,6 +388,15 @@ impl Screen {
         self.bracketed_paste
     }
 
+    /// How the program wants mouse wheel turns delivered — see [`MouseReporting`].
+    pub fn mouse_reporting(&self) -> MouseReporting {
+        match (self.mouse_tracking, self.mouse_sgr) {
+            (false, _) => MouseReporting::Off,
+            (true, false) => MouseReporting::X10,
+            (true, true) => MouseReporting::Sgr,
+        }
+    }
+
     /// Reads and clears whether a BEL (`0x07`) has arrived since the last
     /// call — Checkpoint 5b's "Visueller Bell" setting. A plain flag, not a
     /// counter or queue: the Tauri glue layer calls this once per `feed()`
@@ -484,10 +513,10 @@ impl Screen {
         self.in_alt_screen = false;
     }
 
-    /// Applies a DEC private mode (`CSI ?<code>h`/`l`) — the two this
-    /// checkpoint actually acts on are 1049 (alternate screen) and 2004
-    /// (bracketed paste); anything else (cursor visibility `?25`, etc.) is
-    /// a silent no-op, same convention as an unrecognized plain CSI action.
+    /// Applies a DEC private mode (`CSI ?<code>h`/`l`): 1049 (alternate
+    /// screen), 2004 (bracketed paste) and the mouse modes 1000/1002/1003/1006;
+    /// anything else (cursor visibility `?25`, etc.) is a silent no-op, same
+    /// convention as an unrecognized plain CSI action.
     fn set_private_mode(&mut self, code: u16, enabled: bool) {
         match code {
             1049 => {
@@ -498,6 +527,10 @@ impl Screen {
                 }
             }
             2004 => self.bracketed_paste = enabled,
+            // X10-compatible, button-event and any-event tracking all mean "send me the wheel"; which of them is on
+            // only matters for motion reports, which are not sent.
+            1000 | 1002 | 1003 => self.mouse_tracking = enabled,
+            1006 => self.mouse_sgr = enabled,
             _ => {}
         }
     }
@@ -942,8 +975,14 @@ impl Perform for Screen {
         if let Some(&marker) = intermediates.first() {
             if marker == b'?' {
                 match action {
-                    'h' => self.set_private_mode(Self::first_param_or(params, 0), true),
-                    'l' => self.set_private_mode(Self::first_param_or(params, 0), false),
+                    // One sequence may set several modes at once (`CSI ?1000;1006h`).
+                    'h' | 'l' => {
+                        for group in params.iter() {
+                            if let Some(&code) = group.first() {
+                                self.set_private_mode(code, action == 'h');
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -2224,5 +2263,34 @@ mod tests {
         let mut parser = vte::Parser::new();
         parser.advance(&mut screen, b"\x1b[?1049l\x1b[3;1H\n\n\x1b[5S\x1bM\x1b[9L");
         assert_eq!(screen.size(), (3, 2));
+    }
+
+    #[test]
+    fn mouse_reporting_follows_the_tracking_and_encoding_modes() {
+        let mut screen = Screen::new(1, 1);
+        let mut parser = vte::Parser::new();
+        assert_eq!(screen.mouse_reporting(), MouseReporting::Off);
+        parser.advance(&mut screen, b"\x1b[?1002h");
+        assert_eq!(screen.mouse_reporting(), MouseReporting::X10);
+        parser.advance(&mut screen, b"\x1b[?1006h");
+        assert_eq!(screen.mouse_reporting(), MouseReporting::Sgr);
+        parser.advance(&mut screen, b"\x1b[?1002l");
+        assert_eq!(
+            screen.mouse_reporting(),
+            MouseReporting::Off,
+            "the encoding alone reports nothing"
+        );
+    }
+
+    #[test]
+    fn one_private_mode_sequence_may_set_several_modes() {
+        let mut screen = Screen::new(1, 1);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[?1000;1006;2004h");
+        assert_eq!(screen.mouse_reporting(), MouseReporting::Sgr);
+        assert!(screen.bracketed_paste());
+        parser.advance(&mut screen, b"\x1b[?1000;2004l");
+        assert_eq!(screen.mouse_reporting(), MouseReporting::Off);
+        assert!(!screen.bracketed_paste());
     }
 }

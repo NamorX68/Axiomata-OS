@@ -1083,8 +1083,12 @@ mod tests {
         assert!(review.ends_with(",Edit'"), "{review}");
         let launch = Launch::Card(CardLaunch::review(4, "worker-3", "main").with_auto_rights(true));
         assert!(launch.auto_rights() && launch.read_only());
-        let plain_review = claude_card_options(Some(&axiomata_roster::reviewer_role()), true, false);
-        assert!(!plain_review.contains("--permission-mode"), "{plain_review}");
+        let plain_review =
+            claude_card_options(Some(&axiomata_roster::reviewer_role()), true, false);
+        assert!(
+            !plain_review.contains("--permission-mode"),
+            "{plain_review}"
+        );
         assert!(Launch::Card(CardLaunch::work(4).with_auto_rights(true)).auto_rights());
         assert!(!Launch::Card(CardLaunch::work(4)).auto_rights());
     }

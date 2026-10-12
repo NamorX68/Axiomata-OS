@@ -40,7 +40,7 @@ use std::sync::{Mutex, Once};
 use std::thread;
 use std::time::Duration;
 
-use axiomata_terminal::{Cell, PtySession, Terminal};
+use axiomata_terminal::{Cell, MouseReporting, PtySession, Terminal};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -77,6 +77,12 @@ pub enum TerminalEvent {
         /// across two consecutive events for the same bell. The frontend
         /// briefly flashes the tile when this is `true`; no audio.
         bell: bool,
+        /// How the program wants the mouse wheel (card #80): reported to it, or kept by the terminal.
+        mouse: MouseReporting,
+        /// Whether the alternate screen is up: it has no history of its own, so the wheel becomes arrow keys there.
+        alt_screen: bool,
+        /// How many lines of history lie above the screen — the scrollbar's length.
+        scrollback: usize,
     },
     /// The shell process ended (on its own, or the PTY tore down) — not an
     /// error, and not something `terminal_write`/`_resize` should still be
@@ -154,6 +160,9 @@ fn screen_event(terminal: &mut Terminal) -> TerminalEvent {
         cursor_col,
         bracketed_paste: screen.bracketed_paste(),
         bell,
+        mouse: screen.mouse_reporting(),
+        alt_screen: screen.in_alt_screen(),
+        scrollback: screen.scrollback_len(),
     }
 }
 
@@ -675,6 +684,34 @@ mod tests {
     /// and consume `Terminal::take_bell()` — a stale/stuck `true` would
     /// flash the frontend's overlay on every subsequent snapshot instead of
     /// just once for the one BEL that actually arrived.
+    #[test]
+    fn screen_event_carries_the_mouse_mode_the_alternate_screen_and_the_history_length() {
+        let mut terminal = Terminal::new(1, 5);
+        terminal.feed(b"a\r\nb\r\nc");
+        let TerminalEvent::Screen {
+            mouse,
+            alt_screen,
+            scrollback,
+            ..
+        } = screen_event(&mut terminal)
+        else {
+            panic!("expected a Screen event");
+        };
+        assert_eq!(
+            (mouse, alt_screen, scrollback),
+            (MouseReporting::Off, false, 2)
+        );
+
+        terminal.feed(b"\x1b[?1049h\x1b[?1000;1006h");
+        let TerminalEvent::Screen {
+            mouse, alt_screen, ..
+        } = screen_event(&mut terminal)
+        else {
+            panic!("expected a Screen event");
+        };
+        assert_eq!((mouse, alt_screen), (MouseReporting::Sgr, true));
+    }
+
     #[test]
     fn screen_event_bell_is_true_once_then_false_again() {
         let mut terminal = Terminal::new(1, 5);

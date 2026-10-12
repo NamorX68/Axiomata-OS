@@ -20,7 +20,7 @@ mod pty;
 mod screen;
 
 pub use pty::PtySession;
-pub use screen::{Cell, Color, Screen};
+pub use screen::{Cell, Color, MouseReporting, Screen};
 
 /// Turns a shell's raw output bytes into screen state — a thin pairing of a
 /// [`vte::Parser`] (which tokenizes escape sequences) and a [`Screen`]

@@ -128,6 +128,15 @@
   import { platform } from "../core/keys";
   import { keyToBytes, terminalKeyRoute } from "./terminalInput";
   import { createSequenceGuard } from "./terminalScrollback";
+  import {
+    WheelAccumulator,
+    historyKeyAction,
+    offsetForThumb,
+    scrollKeyLines,
+    scrollThumb,
+    wheelAction,
+    type MouseReporting,
+  } from "./terminalWheel";
   import { ensureTerminalSettingsLoaded, terminalSettings } from "./terminalSettings";
   import { DEFAULT_THEME, THEME_DEFAULT_COLORS, THEMES } from "./terminalThemes";
   import { mergeEnv, parseEnvLines } from "./terminalEnv";
@@ -174,8 +183,6 @@
   const MIN_COLS = 20;
   /** Classic terminal cursor blink period — on/off every half-period. */
   const CURSOR_BLINK_MS = 530;
-  /** Lines per mouse-wheel "tick" scrolled into history. */
-  const WHEEL_LINES = 3;
 
   /** Mirrors the backend's `TerminalEvent` (`src-tauri/src/terminal.rs`).
    *  Field names are snake_case, not camelCase: this rides over a raw
@@ -189,6 +196,9 @@
         cursor_col: number;
         bracketed_paste: boolean;
         bell: boolean;
+        mouse: MouseReporting;
+        alt_screen: boolean;
+        scrollback: number;
       }
     | { type: "exited" };
 
@@ -213,6 +223,13 @@
   let scrollOffset = $state(0);
   let historyRows: TermCell[][] | null = null;
   const scrollFetchGuard = createSequenceGuard();
+  // What the running program asked for, from the last screen event: where a wheel turn goes (`terminalWheel.ts`),
+  // and how long the history is — the scrollbar's length (card #80).
+  let mouseReporting: MouseReporting = "off";
+  let altScreen = $state(false);
+  let scrollbackLen = $state(0);
+  const wheel = new WheelAccumulator();
+  let draggingThumb = $state(false);
 
   // Mouse selection state (row/col in `displayRows()`'s coordinate space).
   let selecting = false;
@@ -231,8 +248,10 @@
   let context2d: CanvasRenderingContext2D | null = null;
   let metrics: CharMetrics | null = null;
   let dpr = 1;
-  let lastRows = 0;
+  let lastRows = $state(0);
   let lastCols = 0;
+  /** The scrollbar's thumb, `null` while there is nothing to scroll (no history, or the alternate screen). */
+  const thumb = $derived(altScreen ? null : scrollThumb(lastRows, scrollbackLen, scrollOffset));
   let raf = 0;
   /** CP6: `tick()` used to call `draw()` on every single
    *  `requestAnimationFrame` unconditionally, forever — including a tile
@@ -651,6 +670,12 @@
     if (!sessionId) return;
     lastInputAt = performance.now();
     snapToLive();
+    writeRaw(bytes);
+  }
+
+  /** Writes bytes to the program as they are — no snap to the live view, not counted as typing. */
+  function writeRaw(bytes: Uint8Array): void {
+    if (!sessionId) return;
     void ctx.invoke("terminal_write", { id: sessionId, data: Array.from(bytes) }).catch(() => {
       sessionId = null;
       ended = true;
@@ -703,6 +728,14 @@
       liveRows = event.rows;
       liveCursor = { row: event.cursor_row, col: event.cursor_col };
       bracketedPaste = event.bracketed_paste;
+      mouseReporting = event.mouse;
+      scrollbackLen = event.scrollback;
+      if (event.alt_screen !== altScreen) {
+        altScreen = event.alt_screen;
+        wheel.reset();
+        // The alternate screen has no history: a view left scrolled back would hide the program that just took over.
+        if (altScreen) snapToLive();
+      }
       needsRedraw = true;
       // `terminalSettings.bellEnabled` (Checkpoint 5b) defaults to on; only an
       // explicit `false` suppresses the flash.
@@ -821,11 +854,9 @@
     }
   }
 
-  function handleWheel(e: WheelEvent): void {
-    if (!sessionId) return;
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -WHEEL_LINES : WHEEL_LINES;
-    const next = Math.max(0, scrollOffset + delta);
+  /** Moves the view to `offset` lines back into history (clamped), fetching that viewport unless it is the live one. */
+  function scrollHistoryTo(offset: number): void {
+    const next = Math.min(Math.max(0, Math.round(offset)), scrollbackLen);
     if (next === scrollOffset) return;
     scrollOffset = next;
     needsRedraw = true;
@@ -838,11 +869,51 @@
     void fetchHistory(scrollOffset);
   }
 
+  /** `lines` of wheel (positive = up) at a cell: to the program, as arrow keys, or through the history (`terminalWheel.ts`). */
+  function applyWheel(lines: number, row: number, col: number): void {
+    const action = wheelAction(lines, { mouse: mouseReporting, altScreen }, row, col);
+    if (!action) return;
+    if (action.kind === "history") scrollHistoryTo(scrollOffset + action.lines);
+    // A report to the program is no typing: it must not snap a scrolled view back, nor count as the owner's input.
+    else writeRaw(action.bytes);
+  }
+
+  function handleWheel(e: WheelEvent): void {
+    if (!sessionId) return;
+    e.preventDefault();
+    const lines = wheel.lines(e.deltaY, e.deltaMode, metrics?.height ?? 16, lastRows);
+    const pos = cellFromEvent(e) ?? { row: 0, col: 0 };
+    applyWheel(lines, pos.row, pos.col);
+  }
+
+  /** Dragging the scrollbar's thumb: the pointer's place on the track is the thumb's top. */
+  let thumbGrab = 0;
+  function handleThumbDown(e: PointerEvent): void {
+    const track = (e.currentTarget as HTMLElement).parentElement;
+    if (!track || !thumb) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = track.getBoundingClientRect();
+    thumbGrab = (e.clientY - rect.top) / rect.height - thumb.top;
+    draggingThumb = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function handleThumbMove(e: PointerEvent): void {
+    if (!draggingThumb) return;
+    const track = (e.currentTarget as HTMLElement).parentElement;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    scrollHistoryTo(offsetForThumb((e.clientY - rect.top) / rect.height - thumbGrab, lastRows, scrollbackLen));
+  }
+  function handleThumbUp(): void {
+    draggingThumb = false;
+  }
+
   /** Pixel coordinates -> a cell position, for mouse selection. `null` if
    *  the canvas hasn't been measured yet (shouldn't happen in practice —
    *  the canvas is only interactive once a session is up, by which point
    *  `measureAndSize` has already run). */
-  function cellFromEvent(e: PointerEvent): CellPos | null {
+  function cellFromEvent(e: MouseEvent): CellPos | null {
     if (!canvasEl || !metrics) return null;
     const rect = canvasEl.getBoundingClientRect();
     return {
@@ -952,6 +1023,21 @@
    *  coverage instead of being reachable only through a live
    *  `KeyboardEvent`. */
   function handleKeydown(e: KeyboardEvent): void {
+    // Scrolling by keyboard (card #80) comes first: ⌘⇧↑/↓ is the wheel, Shift+PageUp/… pages through the history.
+    const scrollLines = scrollKeyLines(e, $platform);
+    if (scrollLines !== null) {
+      e.preventDefault();
+      applyWheel(scrollLines, Math.floor(lastRows / 2), Math.floor(lastCols / 2));
+      return;
+    }
+    const historyKey = historyKeyAction(e.key, e, altScreen, lastRows);
+    if (historyKey) {
+      e.preventDefault();
+      if (historyKey.kind === "top") scrollHistoryTo(scrollbackLen);
+      else if (historyKey.kind === "bottom") scrollHistoryTo(0);
+      else scrollHistoryTo(scrollOffset + historyKey.lines);
+      return;
+    }
     const route = terminalKeyRoute(e, $platform);
     // Ctrl+Shift+C copies through the `copy` event (`handleCopy`); Ctrl+Shift+V is left to the native `paste` event
     // (`handlePaste`); any other Ctrl+Shift key is the app's and goes on to its handlers unprevented.
@@ -1243,6 +1329,20 @@
     {:else if scrollOffset > 0}
       <div class="banner">history — scroll down to return</div>
     {/if}
+    {#if thumb}
+      <!-- The history's scrollbar (card #80): where the view is, and a thumb to drag. -->
+      <div class="scrollbar" class:active={scrollOffset > 0 || draggingThumb}>
+        <div
+          class="thumb"
+          style:top="{thumb.top * 100}%"
+          style:height="{thumb.size * 100}%"
+          onpointerdown={handleThumbDown}
+          onpointermove={handleThumbMove}
+          onpointerup={handleThumbUp}
+          onpointercancel={handleThumbUp}
+        ></div>
+      </div>
+    {/if}
     <!-- Checkpoint 5b's visual bell — a brief border flash, no audio. -->
     <div class="bell-flash" class:active={bellFlash}></div>
     <input
@@ -1307,6 +1407,31 @@
     font-size: var(--ax-font-size-xs);
     color: var(--ax-text-muted);
     pointer-events: none;
+  }
+  /* The history's scrollbar (card #80): a thin track on the right edge, quiet until the view is scrolled back or the
+   *  pointer is on it — it marks a place, nothing lives there, so no glow. */
+  .scrollbar {
+    position: absolute;
+    top: var(--ax-space-1);
+    right: calc(2px * var(--ax-ui-scale));
+    bottom: var(--ax-space-1);
+    width: calc(6px * var(--ax-ui-scale));
+    opacity: 0.35;
+    transition: opacity var(--ax-dur-fast) var(--ax-ease);
+  }
+  .scrollbar:hover,
+  .scrollbar.active {
+    opacity: 1;
+  }
+  .thumb {
+    position: absolute;
+    left: 0;
+    right: 0;
+    min-height: calc(12px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-sm);
+    background: color-mix(in srgb, var(--ax-text-muted) 55%, transparent);
+    cursor: default;
+    touch-action: none;
   }
   /* Captures keyboard focus/input without showing its own (always-empty)
    *  text — the canvas is the only visible typing feedback, same as a real
