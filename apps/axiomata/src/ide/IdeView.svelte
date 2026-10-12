@@ -77,8 +77,6 @@
     fileTab,
     filePaneConfig,
     fileOrigin,
-    frontFile,
-    frontFileTab,
     FILE_PANE,
     isWorkPane,
     ROSTER_PANE,
@@ -96,6 +94,7 @@
     showsFile,
   } from "./paneKinds";
   import { applyProjectCwd } from "./paneCwd";
+  import { shownFileTab } from "./shownFile";
   import { MODES, MODE_ICON, MODE_LABEL, parkedLayouts, type Mode } from "./modes";
   import { balanceCanvas, canvasAgentTarget } from "./canvasLayout";
   import { agentTabsOf, balanceFlow, flowAgentTarget, modeForAgent, resetFlowPanes } from "./planning";
@@ -167,10 +166,6 @@
   const treeRoots = $derived(treeRootsOf(roots, current?.id ?? null));
   /** The symbols of each open file, by `root\0rel`; the front file's go to the sidebar's outline. */
   let outlines = $state<Record<string, OutlineInfo>>({});
-  const front = $derived(frontFile(layout));
-  const activeOutline = $derived(front ? (outlines[`${front.root}\0${front.rel}`] ?? null) : null);
-  /** The symbols holding the front file's cursor — the breadcrumbs (#49), from the same data as the outline. */
-  const crumbs = $derived(activeOutline?.symbols ? pathAt(activeOutline.symbols, activeOutline.line) : []);
   let gitCount = $state(0);
   const statuses = agentStatus.statuses;
   /** The agents with a pane open in either layout (a hidden mode's pane still runs). */
@@ -266,6 +261,26 @@
    * to the tree or to ⌘P.
    */
   let lastWorkTab = $state<string | null>(null);
+  /** The file pane the user last focused (no untitled note): shown while the work pane is no file. */
+  let lastFocusedFile = $state<string | null>(null);
+  /** The file tab the IDE shows; outline, breadcrumbs, highlight, jump and debugger follow it (`shownFile.ts`). */
+  const shownTab = $derived(shownFileTab(layout, lastWorkTab, lastFocusedFile));
+  const front = $derived.by(() => {
+    const config = shownTab ? filePaneConfig(shownTab) : null;
+    return config ? { root: config.root, rel: config.rel } : null;
+  });
+  const activeOutline = $derived(front ? (outlines[`${front.root}\0${front.rel}`] ?? null) : null);
+  /** The symbols holding the front file's cursor — the breadcrumbs (#49), from the same data as the outline. */
+  const crumbs = $derived(activeOutline?.symbols ? pathAt(activeOutline.symbols, activeOutline.line) : []);
+
+  /** Records the work pane the user is in, if there is one; a file pane is also the last focused file. */
+  function rememberWorkPane(tabId: string | null): void {
+    if (tabId === null) return;
+    lastWorkTab = tabId;
+    const tab = allTabs(layout).find((t) => t.id === tabId);
+    const config = tab ? filePaneConfig(tab) : null;
+    if (config && !config.untitled) lastFocusedFile = tabId;
+  }
 
   /** The work pane `el` sits in (or whose tab it is), if any. */
   function workPaneOf(el: Element | null): string | null {
@@ -279,14 +294,14 @@
 
   /** Remembers the work pane that still has the focus, before it moves. */
   function noteFocusedPane(): void {
-    lastWorkTab = workPaneOf(document.activeElement) ?? lastWorkTab;
+    rememberWorkPane(workPaneOf(document.activeElement));
   }
 
   function noteWorkPane(event: Event): void {
     // A pointer press comes before the focus moves: whatever held it is
     // where the user comes from, even when that pane was never clicked.
     if (event.type === "pointerdown") noteFocusedPane();
-    lastWorkTab = workPaneOf(event.target as Element | null) ?? lastWorkTab;
+    rememberWorkPane(workPaneOf(event.target as Element | null));
   }
 
   /**
@@ -499,10 +514,9 @@
 
   /** The outline's click: the front file pane moves its cursor (its `jump` changes, as for a diff). */
   function jumpToSymbol(line: number): void {
-    const tab = frontFileTab(layout);
-    const config = tab ? filePaneConfig(tab) : null;
-    if (!tab || !config) return;
-    layout = setTabConfig(layout, tab.id, { ...config, line, jump: Date.now() });
+    const config = shownTab ? filePaneConfig(shownTab) : null;
+    if (!shownTab || !config) return;
+    layout = setTabConfig(layout, shownTab.id, { ...config, line, jump: Date.now() });
   }
 
   /** Switches the shown mode; the layout on screen is parked, not closed. */
@@ -794,7 +808,7 @@
     setConfig: (tabId, config) => {
       layout = setTabConfig(layout, tabId, config);
     },
-    activeFile: () => frontFile(layout),
+    activeFile: () => front,
     draggingTab: () => drag.draggingTab,
     hint: () => drag.hint,
   });
@@ -1004,7 +1018,7 @@
           root={current ? projectRoot(current.id) : null}
           folder={current?.repo_root ?? null}
           active={tree.visible && tree.view === "debug"}
-          currentFile={frontFile(layout)}
+          currentFile={front}
           onOpen={(rel, line) => current && openFromQuickOpen({ root: projectRoot(current.id), rel }, line - 1)}
           onError={(message) => toast(message, "danger")}
         />

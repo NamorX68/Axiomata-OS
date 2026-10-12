@@ -117,17 +117,11 @@ export function withFilesPane(layout: Layout, projectId: number): Layout {
 }
 
 /**
- * The file in the front tab of the file group — the group `openOrFocus` sends
- * files to — or `null` when that tab is not a file (or there is no such group).
- * With files dragged into a second group, the first one in reading order counts.
+ * The front tab of the file group — the group `openOrFocus` sends files to — or
+ * `null` when there is no such group. With files dragged into a second group, the
+ * first one in reading order counts. The fallback of `shownFileTab`, which decides
+ * which file the IDE shows; nothing else should ask this on its own.
  */
-export function frontFile(layout: Layout): FileRef | null {
-  const tab = frontFileTab(layout);
-  const config = tab ? filePaneConfig(tab) : null;
-  return config && !config.untitled ? { root: config.root, rel: config.rel } : null;
-}
-
-/** The tab `frontFile` is about, or `null`. */
 export function frontFileTab(layout: Layout): PaneTab | null {
   const group = allGroups(layout).find((g) => g.tabs.some((t) => t.kind === FILE_PANE));
   return group?.tabs.find((t) => t.id === group.active) ?? null;

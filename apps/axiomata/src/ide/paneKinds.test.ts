@@ -11,7 +11,6 @@ import {
   filesPaneConfig,
   filesTab,
   fileTab,
-  frontFile,
   graphTab,
   isAreaTab,
   isWorkPane,
@@ -233,21 +232,6 @@ describe("the Files pane (W9, W16)", () => {
     expect(findTab(layout, b.id)?.group.id).toBe(findTab(layout, a.id)?.group.id);
   });
 
-  it("names the file in the file group's front tab, and nothing when that tab is not a file", () => {
-    let layout = withFilesPane(singleGroupLayout([terminal]), 3);
-    expect(frontFile(layout)).toBeNull();
-    const a = fileTab("project:3", "a.rs", null);
-    layout = openOrFocus(layout, a, (t) => showsFile(t, "project:3", "a.rs"), allTabs(layout)[0].id);
-    expect(frontFile(layout)).toEqual({ root: "project:3", rel: "a.rs" });
-    const b = fileTab("project:3", "b.rs", null);
-    layout = openOrFocus(layout, b, (t) => showsFile(t, "project:3", "b.rs"), null);
-    expect(frontFile(layout)).toEqual({ root: "project:3", rel: "b.rs" });
-    const terminal2: PaneTab = { id: "t2", kind: "terminal", title: "Terminal" };
-    const group = findTab(layout, a.id)?.group.id ?? "";
-    layout = addTab(layout, terminal2, { nodeId: group, side: "center" });
-    // The file group's front tab is now a terminal: no file to highlight.
-    expect(frontFile(layout)).toBeNull();
-  });
 });
 
 describe("layoutAfterRename", () => {
