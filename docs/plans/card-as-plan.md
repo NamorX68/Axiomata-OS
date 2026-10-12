@@ -123,6 +123,13 @@ Karte #11 mit Plan #2 (Schritte #12 integriert, #13 in Arbeit mit Sitzung), Hand
 Entwurf: „Take over plan“ sitzt nicht auf der Karte, der Knopf öffnet den Flow, wo die Übernahme (Konflikte, Push-Hinweis)
 schon lebt.
 
+**Owner-Nachträge (2026-10-12, nach CP2):**
+- **K5 Kostengrenze 5 $:** Ein Karten-Plan startet mit `max_cost_usd = 5` (`flow::CARD_PLAN_MAX_COST_USD`), weil er
+  nach der Freigabe unbeaufsichtigt läuft und der Kartentext auch von einem Skill stammen kann (Security-Review,
+  MEDIUM). Änderbar im Flow: neues Feld „Cost limit (USD)“ über dem Ziel, für jeden Plan (leer = keine eigene Grenze).
+- **K6 Kein Auto-Start:** Der Planer startet nicht von selbst. Der Flow öffnet sich auf dem Plan, „Danach grillen“ ist
+  vorbelegt; der Owner hakt es an oder ab und klickt „Planer starten“. `PlanRequest.startPlanner` entfällt.
+
 ## Verifikation
 
 - `cargo fmt --check && cargo clippy --workspace -- -D warnings && cargo test --workspace`;

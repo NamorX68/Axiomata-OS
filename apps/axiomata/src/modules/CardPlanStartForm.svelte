@@ -1,8 +1,8 @@
 <!--
   "Start …" on a card that is no step of a plan (`docs/plans/card-as-plan.md`, K1/K4): the card becomes the goal of a
-  new plan in the chosen project and moves to In Progress; the Studio opens in the Flow on that plan and starts its
-  planner, which proposes the steps and then grills the owner about them. After the owner releases the plan its steps
-  run by themselves, and the card follows them across the board.
+  new plan in the chosen project and moves to In Progress; the Studio opens in the Flow on that plan, where the owner
+  ticks or unticks "grill afterwards" and starts the planner. After the owner releases the plan its steps run by
+  themselves (within a cost limit of its own), and the card follows them across the board.
 -->
 <script lang="ts">
   import { invokeBackend as invoke, type BoardCard, type BoardPlan, type IdeProject } from "../core/backend";
@@ -42,10 +42,10 @@
     error = "";
     try {
       const plan = await invoke<BoardPlan>("start_card_plan", { cardId: card.id, projectId });
-      // K4: first the planner splits the card, then it is grilled — the wish the Flow's "grill afterwards" holds.
+      // K4: grilling is the default; the owner unticks "grill afterwards" in the Flow before starting the planner.
       setGrillWish(plan.id, true);
-      showPlanInFlow(projectId, { boardId: plan.board_id, planId: plan.id, startPlanner: true });
-      toast(`Card #${card.id} is now plan #${plan.id}: the planner proposes its steps in the Studio.`, "info");
+      showPlanInFlow(projectId, { boardId: plan.board_id, planId: plan.id });
+      toast(`Card #${card.id} is now plan #${plan.id}: start its planner in the Flow.`, "info");
       onDone();
       onStarted?.();
     } catch (err) {
@@ -73,9 +73,9 @@
       </select>
     </label>
     <p class="hint">
-      The card becomes a plan: a planner proposes its steps and then questions you about them in the Studio. Once you
-      release the plan, the steps run by themselves and the card moves along — to Review when everything is ready for
-      your take-over.
+      The card becomes a plan. In the Studio you choose whether to be grilled and start the planner, which proposes
+      the steps. Once you release the plan, the steps run by themselves (up to $5 unless you change it) and the card
+      moves along — to Review when everything is ready for your take-over.
     </p>
   {/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}

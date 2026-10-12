@@ -322,10 +322,8 @@
 
   /**
    * The plan a card was started as (`docs/plans/card-as-plan.md`), or another view asked for: it is opened on its
-   * board, and when asked its planner is started — once the roles and engines are in. A planner role that names no
-   * engine is left to the owner's pick here instead of guessing one.
+   * board. Nothing is started — the owner decides about grilling and starts the planner here.
    */
-  let pendingPlanner = $state<number | null>(null);
   $effect(() => {
     const request = $planRequest;
     if (!request || !visible) return;
@@ -334,27 +332,36 @@
     planId = request.planId;
     // The plan was just made from a card: the shared board store does not know it yet.
     void refreshBoard(request.boardId);
-    if (request.startPlanner) pendingPlanner = request.planId;
   });
-  $effect(() => {
-    // The sessions must be in, or a planner that already runs would not be seen and a second one started.
-    if (
-      pendingPlanner === null ||
-      !rolesLoaded ||
-      $engineCatalog.length === 0 ||
-      plan?.id !== pendingPlanner ||
-      $session.current === null
-    )
-      return;
-    pendingPlanner = null;
-    if (planner !== null) return;
-    const role = roles.find((r) => r.name === (plannerRole || plannerNames[0]));
-    if (!role || sessionEngine(role, $engineCatalog, "").ask) {
-      toast("Pick the planner's engine and start it: it proposes the card's steps.", "info");
+
+  /* ------------------------------------------------------------ cost --- */
+
+  /**
+   * Writes the cost limit the owner typed: empty = no limit of the plan's own (the day's cap still holds). The other
+   * settings go along unchanged — `update_board_plan` replaces them all; the goal left out keeps the plan's own.
+   */
+  async function saveCostLimit(raw: string): Promise<void> {
+    if (!plan) return;
+    const current = plan;
+    const value = raw.trim() === "" ? null : Number(raw);
+    if (value !== null && (!Number.isFinite(value) || value <= 0)) {
+      error = "The cost limit is a positive amount in USD, or empty for none.";
       return;
     }
-    void startPlanner();
-  });
+    if (value === current.max_cost_usd) return;
+    await run(async () => {
+      await invoke("update_board_plan", {
+        id: current.id,
+        fields: {
+          name: current.name,
+          auto_start_max: current.auto_start_max,
+          max_cost_usd: value,
+          max_tokens: current.max_tokens,
+        },
+      });
+      await reload();
+    });
+  }
 
   async function startPlanner(): Promise<void> {
     const made = await startSession(plannerRole || plannerNames[0] || "", plannerEngine, false);
@@ -842,6 +849,20 @@
           follows them — to Review when everything waits for your take-over.
         </p>
       {/if}
+
+      <label class="cost">
+        Cost limit (USD)
+        <input
+          type="number"
+          min="0.5"
+          step="0.5"
+          value={plan.max_cost_usd ?? ""}
+          placeholder="none"
+          aria-label="Cost limit (USD)"
+          disabled={busy || plan.status === "closed"}
+          onchange={(event) => void saveCostLimit(event.currentTarget.value)}
+        />
+      </label>
 
       <label class="goal">
         Goal
@@ -1334,6 +1355,12 @@
   }
   textarea {
     resize: vertical;
+  }
+  .cost {
+    margin-bottom: var(--ax-space-2);
+  }
+  .cost input {
+    width: calc(120px * var(--ax-ui-scale));
   }
   .row {
     display: flex;

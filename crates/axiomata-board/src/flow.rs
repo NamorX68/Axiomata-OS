@@ -685,6 +685,10 @@ pub fn close_plan(db: &Connection, plan_id: i64) -> Result<bool> {
 /// sets.
 pub const AUTO_UNBOUNDED: u32 = 64;
 
+/// The cost limit a plan made from a card starts with, in USD (owner, 2026-10-12): it runs unattended once approved, and
+/// the card's text may come from a skill rather than from the owner. The owner changes it in the Flow.
+pub const CARD_PLAN_MAX_COST_USD: f64 = 5.0;
+
 /// Whether a plan's steps are through, the same rule the studio's run uses to call a plan ready to take over: every
 /// card is on the line, taken over or called off, and at least one is on the line — a plan whose cards were all called
 /// off has nothing to take over. Archived cards are left out by the caller.
@@ -949,7 +953,7 @@ pub fn start_card_as_plan(
         goal: goal_of(&card),
         project_id: Some(project_id),
         auto_start_max: Some(AUTO_UNBOUNDED),
-        max_cost_usd: None,
+        max_cost_usd: Some(CARD_PLAN_MAX_COST_USD),
         max_tokens: None,
     };
     let plan = create_plan(&tx, card.board_id, &fields)?;
@@ -4076,6 +4080,7 @@ mod tests {
         assert_eq!(plan.origin_card_id, Some(card.id));
         assert_eq!(plan.project_id, Some(7));
         assert_eq!(plan.auto_start_max, Some(AUTO_UNBOUNDED));
+        assert_eq!(plan.max_cost_usd, Some(CARD_PLAN_MAX_COST_USD));
         assert_eq!(plan.name, format!("#{} Tags und Wikilinks", card.id));
         assert!(
             plan.goal

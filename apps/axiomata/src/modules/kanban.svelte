@@ -1184,11 +1184,7 @@
               : "The plan's steps, planner and graph"}
             onclick={() => {
               if (actionPlan.project_id == null) return;
-              showPlanInFlow(actionPlan.project_id, {
-                boardId: actionPlan.board_id,
-                planId: actionPlan.id,
-                startPlanner: false,
-              });
+              showPlanInFlow(actionPlan.project_id, { boardId: actionPlan.board_id, planId: actionPlan.id });
               leaveForStudio();
             }}
           >{waiting ? "Take over in the Flow …" : "Open in the Flow"}</button>

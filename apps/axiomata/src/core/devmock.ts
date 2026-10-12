@@ -2074,7 +2074,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         base_branch: null,
         status: "draft",
         auto_start_max: 64,
-        max_cost_usd: null,
+        // `flow::CARD_PLAN_MAX_COST_USD`
+        max_cost_usd: 5,
         max_tokens: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
