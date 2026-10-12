@@ -203,6 +203,7 @@ pub fn ide_locations() -> axiomata_ide::provision::Locations {
             claude_tasks: claude_tasks_dir(),
             claude_plans: claude_plans_dir(),
         },
+        permission_cli: crate::agent_entry::cli_path(),
     }
 }
 

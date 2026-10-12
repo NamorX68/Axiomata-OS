@@ -6,11 +6,15 @@
 
   The list is moved under `body` (`ui/portal.ts`) and fixed to the window (`placeList`), not to the badge: a badge in a
   scrolling Kanban column, a transformed panel or at the Dock's left end would otherwise open a list that is cut off. Escape and ⌘W close the list alone (`core/closeStack.ts`).
+
+  A permission request the app can answer is shown under its agent with its answers (`AskAnswer.svelte`, card #88); then
+  even one waiting agent opens the list rather than its pane. A session idle on a draft plan says so.
 -->
 <script lang="ts">
   import { badgeClick, placeList, waitedFor, type WaitingAgent } from "../core/agentWaiting";
   import { emit } from "../core/bus";
   import { pushClose } from "../core/closeStack";
+  import AskAnswer from "./AskAnswer.svelte";
   import { portal } from "./portal";
 
   interface Props {
@@ -69,7 +73,7 @@
 
   // The list closes by itself when the agents it listed stopped waiting.
   $effect(() => {
-    if (agents.length < 2) listOpen = false;
+    if (badgeClick(agents).kind !== "list") listOpen = false;
   });
 
   // While the list is open: ⌘W closes it first, and "since" keeps counting.
@@ -150,6 +154,11 @@
                 </span>
                 <span class="since">{waitedFor(agent.since, now)}</span>
               </button>
+              {#if agent.ask}
+                <div class="request"><AskAnswer agentId={agent.agent_id} ask={agent.ask} /></div>
+              {:else if agent.reason === "plan_draft"}
+                <p class="note">waits for your answer on its plan</p>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -276,6 +285,17 @@
   }
 
   .since {
+    color: var(--ax-text-muted);
+    font: var(--ax-type-caption);
+  }
+
+  .request,
+  .note {
+    margin: 0 0 var(--ax-space-1);
+    padding: 0 var(--ax-space-1) var(--ax-space-1);
+  }
+
+  .note {
     color: var(--ax-text-muted);
     font: var(--ax-type-caption);
   }

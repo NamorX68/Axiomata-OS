@@ -75,6 +75,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (30, axiomata_board::SCHEMA_SQL_V10),
     // Plans whose working sessions may do everything but push: the owner's auto mode (plan-auto-rights.md).
     (31, axiomata_board::SCHEMA_SQL_V11),
+    // The agents' permission requests the owner answers in the app (permission-asks.md, card #88).
+    (32, include_str!("migrations/0011_permission_asks.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

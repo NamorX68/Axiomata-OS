@@ -46,6 +46,8 @@
   } from "../reach";
   import type { AgentState } from "../../core/backend";
   import { agentStatus, describeStatus } from "../agentStatus";
+  import { waitingAgents } from "../../core/agentWaiting";
+  import AskAnswer from "../../ui/AskAnswer.svelte";
   import DiffView from "../DiffView.svelte";
   import Icon from "../../ui/Icon.svelte";
   import IconButton from "../../ui/IconButton.svelte";
@@ -159,6 +161,8 @@
 
   const statuses = agentStatus.statuses;
   const status = $derived($statuses.byAgent.get(agent.id));
+  /** The permission request this agent waits on, answerable here (card #88). */
+  const ask = $derived($waitingAgents.find((waiting) => waiting.agent_id === agent.id)?.ask ?? null);
 
   // Keeps the running Opencode session's team tools registered (card #72): the service drops a location that sat
   // idle, and its MCP server with it, while this pane still shows an idle session. `reach.ts` holds the rules.
@@ -309,6 +313,12 @@
 
 <div class="agent-pane">
   <div class="body">
+    {#if ask}
+      <!-- The agent asks for a right: answered here, over its terminal (card #88). -->
+      <div class="ask-strip" role="alert" aria-label="{agent.name} asks for a permission">
+        <AskAnswer agentId={agent.id} {ask} compact />
+      </div>
+    {/if}
     <!-- The terminal is always mounted, and hidden when another side tab is
          showing — never behind an `{#if}`. Unmounting it closes the PTY and
          restarts the agent, which is exactly what looking at the Plan tab for
@@ -502,6 +512,21 @@
   .terminal-slot {
     position: absolute;
     inset: 0;
+  }
+
+  /* Over the terminal's top edge, not above it: the terminal keeps its size, so the harness is not resized and does
+   *  not redraw for a strip that comes and goes. The warn tone is the waiting badge's: the agent waits for the owner. */
+  .ask-strip {
+    position: absolute;
+    top: var(--ax-space-1);
+    left: var(--ax-space-2);
+    right: var(--ax-space-2);
+    z-index: 2;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-warning);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-3);
+    box-shadow: var(--ax-shadow-panel);
   }
 
   /* Not `display: none`: a hidden terminal keeps its measured size, so it does

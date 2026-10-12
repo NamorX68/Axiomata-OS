@@ -95,6 +95,9 @@ can follow your progress in the IDE's Plan tab.
 const MAX_READ_BYTES: u64 = 256 * 1024;
 /// The most Claude Code task files looked at for one plan.
 const MAX_TASK_FILES: usize = 200;
+/// Claude Code's timeout for the permission hook, in seconds: above the hook's own wait for the owner
+/// (`axiomata_core::permission_ask::HOOK_WAIT`, 25 minutes), so the hook ends by itself and is never killed.
+const PERMISSION_HOOK_TIMEOUT_SECS: u64 = 30 * 60;
 
 /// The two roots a status channel lives under. The crate has no paths of its
 /// own; the embedder hands these in, bundled with the rest in
@@ -248,6 +251,8 @@ pub struct Channel {
     claude_list_id: String,
     claude_list_dir: PathBuf,
     claude_plans: PathBuf,
+    /// The program Claude Code's `PermissionRequest` hook runs, if the app answers permission prompts (card #88).
+    permission_cli: Option<PathBuf>,
 }
 
 impl Channel {
@@ -260,6 +265,16 @@ impl Channel {
             claude_list_dir: roots.claude_tasks.join(&claude_list_id),
             claude_plans: roots.claude_plans.clone(),
             claude_list_id,
+            permission_cli: None,
+        }
+    }
+
+    /// The same channel with Claude Code's permission prompts sent to the app through `cli` (`docs/plans/
+    /// permission-asks.md`); `None` keeps them in the pane.
+    pub fn with_permission_hook(self, cli: Option<&Path>) -> Self {
+        Channel {
+            permission_cli: cli.map(Path::to_path_buf),
+            ..self
         }
     }
 
@@ -514,7 +529,7 @@ impl Channel {
         let waiting = json!([{ "type": "command", "command": self.waiting_line() }]);
         let plan_pointer = json!([{ "type": "command", "command": self.plan_pointer_line() }]);
         let limit = json!([{ "type": "command", "command": self.limit_line() }]);
-        let settings = json!({
+        let mut settings = json!({
             "_axiomata": format!(
                 "Written by Axiomata-OS for agent {} on every start; edits are overwritten.",
                 self.agent_id
@@ -539,10 +554,36 @@ impl Channel {
                 "SessionEnd": [{ "hooks": hook(AgentState::Ended) }],
             },
         });
+        // Before Claude Code shows a permission prompt: the app asks the owner, and the channel says `waiting` while it
+        // does — the prompt is not on screen yet, so the `Notification` hook has not fired (card #88).
+        if let Some(line) = self.permission_line() {
+            settings["hooks"]["PermissionRequest"] = json!([{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": line,
+                    "timeout": PERMISSION_HOOK_TIMEOUT_SECS,
+                }],
+            }]);
+        }
         // A `Value` built from literals always serialises.
         let mut text = serde_json::to_string_pretty(&settings).unwrap_or_default();
         text.push('\n');
         text
+    }
+
+    /// The `PermissionRequest` hook: marks the channel `waiting`, then hands the payload on stdin to the CLI, which
+    /// waits for the owner's answer in the app and prints it (`axiomata_core::permission_ask`). Afterwards `working`
+    /// again: after a Deny no tool runs, so no `PostToolUse` would end the wait; a prompt handed back to the pane is
+    /// marked `waiting` once more by the `Notification` hook. The CLI's exit code is the hook's.
+    fn permission_line(&self) -> Option<String> {
+        let cli = shell_quote(&self.permission_cli.as_ref()?.display().to_string());
+        Some(format!(
+            "{}; {cli} permission-hook --agent {}; s=$?; {}; exit $s",
+            self.state_line(AgentState::Waiting),
+            self.agent_id,
+            self.state_line(AgentState::Working),
+        ))
     }
 
     /// The `PreToolUse` hook: refuses the call (exit code 2, the reason on stderr goes to the model) while the limit
@@ -868,6 +909,57 @@ mod tests {
         let status = channel.read_status(Harness::ClaudeCode);
         assert_eq!(status.state, AgentState::Starting);
         assert!(status.since.is_none() && status.started_at.is_none() && status.plan.is_none());
+    }
+
+    #[test]
+    fn the_permission_hook_marks_waiting_and_hands_the_payload_to_the_cli() {
+        let root = locations();
+        // A stand-in for `axiomata-cli`: it records its arguments and the payload it was given.
+        let cli = root.events.join("fake-cli");
+        let record = root.events.join("fake-cli.out");
+        fs::create_dir_all(&root.events).unwrap();
+        fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\n{{ echo \"$@\"; cat; }} > {}\n",
+                shell_quote(&record.display().to_string())
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&cli, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+        let channel = Channel::for_agent(&root, 12).with_permission_hook(Some(&cli));
+        channel.reset().unwrap();
+        channel.install(Harness::ClaudeCode).unwrap();
+        let settings: Value = serde_json::from_str(
+            &fs::read_to_string(channel.dir().join(CLAUDE_SETTINGS_FILE)).unwrap(),
+        )
+        .unwrap();
+        let hook = &settings["hooks"]["PermissionRequest"][0]["hooks"][0];
+        assert_eq!(hook["timeout"], PERMISSION_HOOK_TIMEOUT_SECS);
+
+        run_hook(hook["command"].as_str().unwrap(), r#"{"tool_name":"Bash"}"#);
+        // Waiting while the CLI ran, working once it answered.
+        assert_eq!(
+            channel.read_status(Harness::ClaudeCode).state,
+            AgentState::Working
+        );
+        assert_eq!(
+            fs::read_to_string(&record).unwrap(),
+            "permission-hook --agent 12\n{\"tool_name\":\"Bash\"}"
+        );
+    }
+
+    #[test]
+    fn without_a_permission_program_the_prompt_stays_in_the_pane() {
+        let channel = Channel::for_agent(&locations(), 13);
+        channel.reset().unwrap();
+        channel.install(Harness::ClaudeCode).unwrap();
+        let settings: Value = serde_json::from_str(
+            &fs::read_to_string(channel.dir().join(CLAUDE_SETTINGS_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert!(settings["hooks"].get("PermissionRequest").is_none());
     }
 
     #[test]

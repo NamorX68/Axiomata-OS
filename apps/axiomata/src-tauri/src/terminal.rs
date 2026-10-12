@@ -680,10 +680,6 @@ mod tests {
         assert!(bracketed_paste);
     }
 
-    /// `screen_event`'s `bell` field (Checkpoint 5b) has to actually read
-    /// and consume `Terminal::take_bell()` — a stale/stuck `true` would
-    /// flash the frontend's overlay on every subsequent snapshot instead of
-    /// just once for the one BEL that actually arrived.
     #[test]
     fn screen_event_carries_the_mouse_mode_the_alternate_screen_and_the_history_length() {
         let mut terminal = Terminal::new(1, 5);
@@ -712,6 +708,10 @@ mod tests {
         assert_eq!((mouse, alt_screen), (MouseReporting::Sgr, true));
     }
 
+    /// `screen_event`'s `bell` field (Checkpoint 5b) has to actually read
+    /// and consume `Terminal::take_bell()` — a stale/stuck `true` would
+    /// flash the frontend's overlay on every subsequent snapshot instead of
+    /// just once for the one BEL that actually arrived.
     #[test]
     fn screen_event_bell_is_true_once_then_false_again() {
         let mut terminal = Terminal::new(1, 5);

@@ -40,6 +40,9 @@ pub struct Locations {
     pub worktrees: PathBuf,
     /// Where the status channels live (M7.2 CP6).
     pub channels: ChannelRoots,
+    /// The program that answers Claude Code's permission prompts through the app (`<it> permission-hook --agent <id>`,
+    /// `docs/plans/permission-asks.md`); `None` leaves every prompt in the pane, as before.
+    pub permission_cli: Option<PathBuf>,
 }
 
 /// Everything an agent needs before it can be started.
@@ -152,7 +155,8 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
 
     // Every start, like the worktree: a channel deleted by hand, or one from
     // before CP6, is simply rebuilt.
-    let channel = Channel::for_agent(&locations.channels, agent.id);
+    let channel = Channel::for_agent(&locations.channels, agent.id)
+        .with_permission_hook(locations.permission_cli.as_deref());
     channel.reset()?;
     let hookup = channel.install(agent.harness)?;
 
@@ -442,6 +446,7 @@ mod tests {
                 claude_tasks: root.join("claude-tasks"),
                 claude_plans: root.join("claude-plans"),
             },
+            permission_cli: None,
         }
     }
 

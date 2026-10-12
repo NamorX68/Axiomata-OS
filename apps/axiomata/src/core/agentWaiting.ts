@@ -10,6 +10,21 @@ import { writable, type Writable } from "svelte/store";
 /** The event the backend sends with the whole new list. */
 export const AGENTS_WAITING = "agents:waiting";
 
+/** Why an agent waits: a prompt of its harness, or idle on a plan that is still a draft (`permission-asks.md`, R6). */
+export type WaitReason = "prompt" | "plan_draft";
+
+/** A permission request the owner can answer in the app (`axiomata_core::ide_status::WaitingAsk`, card #88). Written by
+ *  the agent: shown as plain text only. */
+export interface WaitingAsk {
+  id: string;
+  source: "claude" | "opencode";
+  tool: string;
+  detail: string;
+}
+
+/** What the owner answers: `terminal` hands a Claude Code request back to the pane's own prompt. */
+export type AskDecision = "allow" | "deny" | "terminal";
+
 /** An agent that waits for the owner (`axiomata_core::ide_status::WaitingAgent`). */
 export interface WaitingAgent {
   agent_id: number;
@@ -19,6 +34,9 @@ export interface WaitingAgent {
   card_title: string | null;
   /** When it began to wait (RFC 3339), if known. */
   since: string | null;
+  reason: WaitReason;
+  /** The permission request it waits on, when the app can answer it. */
+  ask: WaitingAsk | null;
 }
 
 /** The agents waiting right now, oldest wait first. */
@@ -28,6 +46,20 @@ const isNumber = (value: unknown): value is number => typeof value === "number";
 const isOptional = <T>(value: unknown, guard: (v: unknown) => v is T): boolean =>
   value === null || value === undefined || guard(value);
 const isString = (value: unknown): value is string => typeof value === "string";
+
+/** An answerable request, or `null` for anything that is not one — a malformed ask never hides its agent. */
+export function parseAsk(value: unknown): WaitingAsk | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (!isString(v.id) || !isString(v.tool) || !isString(v.detail)) return null;
+  if (v.source !== "claude" && v.source !== "opencode") return null;
+  return { id: v.id, source: v.source, tool: v.tool, detail: v.detail };
+}
+
+/** The answers the app offers for a request: "in terminal" only where the pane's prompt is not already open. */
+export function askDecisions(ask: WaitingAsk): AskDecision[] {
+  return ask.source === "claude" ? ["allow", "deny", "terminal"] : ["allow", "deny"];
+}
 
 /** The entries of an answer that are waiting agents; anything else is dropped. */
 export function parseWaiting(value: unknown): WaitingAgent[] {
@@ -51,7 +83,14 @@ export function parseWaiting(value: unknown): WaitingAgent[] {
       card_id: (entry.card_id as number | null | undefined) ?? null,
       card_title: (entry.card_title as string | null | undefined) ?? null,
       since: (entry.since as string | null | undefined) ?? null,
+      reason: entry.reason === "plan_draft" ? "plan_draft" : "prompt",
+      ask: parseAsk(entry.ask),
     }));
+}
+
+/** The list with `agentId`'s request taken out, once the owner answered it — until the next push confirms it. */
+export function withoutAsk(waiting: WaitingAgent[], agentId: number): WaitingAgent[] {
+  return waiting.map((agent) => (agent.agent_id === agentId ? { ...agent, ask: null } : agent));
 }
 
 /** The waiting agents that work on (or review) `cardId`. */
@@ -65,7 +104,8 @@ export type BadgeClick = { kind: "open"; agent: WaitingAgent } | { kind: "list" 
 export function badgeClick(waiting: WaitingAgent[]): BadgeClick {
   const [first, ...rest] = waiting;
   if (first === undefined) return { kind: "none" };
-  return rest.length === 0 ? { kind: "open", agent: first } : { kind: "list" };
+  // A request the app can answer is answered in the list, so even one agent opens it (card #88).
+  return rest.length === 0 && first.ask === null ? { kind: "open", agent: first } : { kind: "list" };
 }
 
 /** How long an agent has waited, short: "now", "4 min", "2 h". */

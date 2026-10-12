@@ -24,7 +24,8 @@ questions nobody is there to answer.
 - **A4 — who.** Workers, and since card #95 (owner, 2026-10-12) reviewers too: a reviewer gets the free shell under the
   same denies — it hung on `npm ci` / `git check-ignore` otherwise — and still no edit (Claude Code: `Edit` denied on
   top; Opencode: no `edit *` allow, the read-only `edit * deny` wins). Planners and grilling sessions are done before
-  the release.
+  the release. "No edit" means no edit tools: a free shell can still write a file (`sed -i`, `>`), the same "patterns,
+  not a sandbox" limit as below.
 - **A5 — when.** Read at a session's start (`ide_start::card_launch`), and only while the plan is released (approved,
   not closed). The switch stays on the running plan; a change
   applies to sessions started afterwards, a running one keeps what it started with (Claude Code cannot change its mode

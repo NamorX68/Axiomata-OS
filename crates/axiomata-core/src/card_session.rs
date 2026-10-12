@@ -2304,6 +2304,7 @@ mod tests {
                     claude_tasks: self.dir.join("tasks"),
                     claude_plans: self.dir.join("plans"),
                 },
+                permission_cli: None,
             }
         }
 

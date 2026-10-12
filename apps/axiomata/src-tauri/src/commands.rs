@@ -2036,6 +2036,23 @@ pub async fn waiting_agents(
     .map_err(|err| err.to_string())
 }
 
+/// The owner answers an agent's permission request from the app (`docs/plans/permission-asks.md`, card #88): `allow`,
+/// `deny`, or `terminal` (Claude Code only: hand it back to the pane's own prompt). Always as the owner — this command is
+/// the only door that answers; no CLI command does. The `agents:waiting` event brings the changed list on its next tick.
+#[tauri::command]
+pub async fn answer_permission(
+    state: State<'_, CoreState>,
+    agent_id: i64,
+    request_id: String,
+    decision: String,
+) -> Result<(), String> {
+    let decision =
+        axiomata_core::permission_ask::Decision::parse(&decision).map_err(|err| err.to_string())?;
+    axiomata_core::ide_status::answer_permission(&state.db, agent_id, &request_id, decision)
+        .await
+        .map_err(|err| err.to_string())
+}
+
 /// The owner takes a reviewed card over (A3, A22): the work lands in the project's main line as one commit, the card is
 /// closed and the sessions made for it are cleaned up. A conflict is undone and comes back as the outcome.
 #[tauri::command]

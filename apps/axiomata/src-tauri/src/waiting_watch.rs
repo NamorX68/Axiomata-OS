@@ -188,6 +188,8 @@ mod tests {
             card_id: card.map(|(id, _)| id),
             card_title: card.map(|(_, title)| title.to_owned()),
             since: None,
+            reason: axiomata_core::ide_status::WaitReason::Prompt,
+            ask: None,
         }
     }
 

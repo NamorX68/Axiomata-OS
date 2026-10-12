@@ -1672,9 +1672,22 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
           card_id: 4,
           card_title: "Mock card",
           since: new Date(Date.now() - 4 * 60_000).toISOString(),
+          reason: "prompt",
+          ask: { id: "1", source: "claude", tool: "Bash", detail: "npm ci && npm test" },
         },
-        { agent_id: 2, project_id: 1, name: "opencode-1", card_id: null, card_title: null, since: null },
+        {
+          agent_id: 2,
+          project_id: 1,
+          name: "opencode-1",
+          card_id: null,
+          card_title: null,
+          since: null,
+          reason: "prompt",
+          ask: { id: "per_1", source: "opencode", tool: "external_directory", detail: "/Users/me/other-project/*" },
+        },
       ] as T;
+    case "answer_permission":
+      return undefined as T;
     case "open_card_sessions":
       // Card #4 (in progress, claimed by claude-1) has a session at work, so its card glows (UX6a).
       // Card #13, a step of the plan made from card #11, too: that card glows on the board.

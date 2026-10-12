@@ -1,7 +1,18 @@
 import { get, writable } from "svelte/store";
 import { describe, expect, it } from "vitest";
 
-import { badgeClick, parseWaiting, placeList, waitedFor, waitingOnCard, watchWaiting, type WaitingAgent } from "./agentWaiting";
+import {
+  askDecisions,
+  badgeClick,
+  parseAsk,
+  parseWaiting,
+  placeList,
+  withoutAsk,
+  waitedFor,
+  waitingOnCard,
+  watchWaiting,
+  type WaitingAgent,
+} from "./agentWaiting";
 
 const agent = (id: number, cardId: number | null = null): WaitingAgent => ({
   agent_id: id,
@@ -10,6 +21,8 @@ const agent = (id: number, cardId: number | null = null): WaitingAgent => ({
   card_id: cardId,
   card_title: cardId === null ? null : `Card ${cardId}`,
   since: null,
+  reason: "prompt",
+  ask: null,
 });
 
 describe("the waiting agents", () => {
@@ -24,8 +37,17 @@ describe("the waiting agents", () => {
         "nonsense",
       ]),
     ).toEqual([
-      { agent_id: 3, project_id: 1, name: "a", card_id: 12, card_title: "Fix", since: "2026-10-12T10:00:00Z" },
-      { agent_id: 4, project_id: 1, name: "b", card_id: null, card_title: null, since: null },
+      {
+        agent_id: 3,
+        project_id: 1,
+        name: "a",
+        card_id: 12,
+        card_title: "Fix",
+        since: "2026-10-12T10:00:00Z",
+        reason: "prompt",
+        ask: null,
+      },
+      { agent_id: 4, project_id: 1, name: "b", card_id: null, card_title: null, since: null, reason: "prompt", ask: null },
     ]);
   });
 
@@ -35,7 +57,9 @@ describe("the waiting agents", () => {
         { agent_id: 8, project_id: 1, name: "e", since: 1_700_000_000_000 },
         { agent_id: 9, project_id: 1, name: "f", since: null },
       ]),
-    ).toEqual([{ agent_id: 9, project_id: 1, name: "f", card_id: null, card_title: null, since: null }]);
+    ).toEqual([
+      { agent_id: 9, project_id: 1, name: "f", card_id: null, card_title: null, since: null, reason: "prompt", ask: null },
+    ]);
   });
 
   it("finds the agents of one card", () => {
@@ -138,5 +162,52 @@ describe("the waiting agents", () => {
       expect(placeList(at(500, 700), size, viewport, 6, 8).top).toBe(494);
       expect(placeList(at(500, 100), size, { width: 1000, height: 250 }, 6, 8).top).toBe(42);
     });
+  });
+});
+
+describe("permission requests in the waiting list", () => {
+  it("reads a well-formed request and the plan-draft reason", () => {
+    const [entry] = parseWaiting([
+      {
+        agent_id: 1,
+        project_id: 1,
+        name: "a",
+        reason: "plan_draft",
+        ask: { id: "7", source: "claude", tool: "Bash", detail: "npm ci" },
+      },
+    ]);
+    expect(entry?.reason).toBe("plan_draft");
+    expect(entry?.ask).toEqual({ id: "7", source: "claude", tool: "Bash", detail: "npm ci" });
+  });
+
+  it("drops a malformed request but keeps its agent", () => {
+    const [entry] = parseWaiting([{ agent_id: 1, project_id: 1, name: "a", ask: { id: 7, source: "claude" } }]);
+    expect(entry?.agent_id).toBe(1);
+    expect(entry?.ask).toBeNull();
+    expect(parseAsk({ id: "1", source: "other", tool: "x", detail: "" })).toBeNull();
+    expect(parseAsk("nonsense")).toBeNull();
+  });
+
+  it("offers 'in terminal' only for Claude Code, whose pane prompt waits behind the hook", () => {
+    expect(askDecisions({ id: "1", source: "claude", tool: "Bash", detail: "" })).toEqual(["allow", "deny", "terminal"]);
+    expect(askDecisions({ id: "p", source: "opencode", tool: "shell", detail: "" })).toEqual(["allow", "deny"]);
+  });
+});
+
+describe("answering from the list", () => {
+  const asking = (id: number): WaitingAgent => ({
+    ...agent(id),
+    ask: { id: "1", source: "claude", tool: "Bash", detail: "ls" },
+  });
+
+  it("opens the list even for one agent whose request can be answered there", () => {
+    expect(badgeClick([asking(1)])).toEqual({ kind: "list" });
+    expect(badgeClick([agent(1)]).kind).toBe("open");
+  });
+
+  it("takes an answered request out of the list and keeps its agent", () => {
+    const after = withoutAsk([asking(1), asking(2)], 1);
+    expect(after.map((a) => a.ask === null)).toEqual([true, false]);
+    expect(after).toHaveLength(2);
   });
 });

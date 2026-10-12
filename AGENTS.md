@@ -27,7 +27,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (card #75). Built since: the ⌘K spotlight, Orbit + 2Brain in one view, and the app-wide UI/UX round "Glut + Hex"
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
-  the board). Deferred: further model-provider work.
+  the board), and permission asks answered in the app (#88, `docs/plans/permission-asks.md`). Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
   new work and **update them** (not just this file) when a milestone or major feature lands.

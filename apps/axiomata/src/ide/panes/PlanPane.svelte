@@ -1123,7 +1123,7 @@
           </label>
           <span class="muted">
             {autoRights
-              ? "The plan's workers may run any command and edit without asking. A push, the CLI, the database and config files stay blocked in their plain forms — patterns, not a sandbox: switch it on for cards you have read. Reviewers may run any command too but edit nothing; taking the plan over stays yours."
+              ? "The plan's workers may run any command and edit without asking. A push, the CLI, the database and config files stay blocked in their plain forms — patterns, not a sandbox: switch it on for cards you have read. Reviewers may run any command too but get no edit tools; taking the plan over stays yours."
               : "The plan's workers ask before commands their role does not allow."}
           </span>
           {#if !grilled}

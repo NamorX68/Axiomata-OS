@@ -17,11 +17,14 @@
 //! last state until the next seed corrects it (after 2–30 s) — accepted
 //! rather than letting every dot flicker to "unknown" on a brief drop.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use axiomata_opencode::{EventStream, OpencodeError, Service, SessionState, Tracker};
+use axiomata_opencode::{
+    EventStream, OpencodeError, PermissionRequest, Service, SessionState, Tracker,
+};
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -32,6 +35,7 @@ use crate::board::store as board_store;
 use crate::ide::lifecycle::{AgentState, AgentStatus, ChannelRoots, PlanDocument};
 use crate::ide::model::{Agent, Harness};
 use crate::ide::{agent_store, provision, store as project_store};
+use crate::permission_ask::{self, Decision};
 
 /// First pause before looking for the service again.
 const RETRY_MIN: Duration = Duration::from_secs(2);
@@ -98,6 +102,9 @@ pub async fn overlay_once(statuses: &mut [AgentStatus], agents: &[Agent]) {
             tracker.set(session, snapshot.state, now_ms());
             if let Some(plan) = snapshot.plan {
                 tracker.set_plan(session, plan, now_ms());
+            }
+            if let Some(request) = snapshot.permission {
+                tracker.set_permission(session, request, now_ms());
             }
         }
     }
@@ -227,8 +234,59 @@ async fn seed(
         if let Some(plan) = snapshot.plan {
             tracker.set_plan(&session, plan, now);
         }
+        if let Some(request) = snapshot.permission {
+            tracker.set_permission(&session, request, now);
+        }
     }
     Ok(())
+}
+
+/// The permission request an Opencode session waits on, as the watcher last saw it.
+fn tracked_permission(session: &str) -> Option<PermissionRequest> {
+    let watch = WATCH.get()?;
+    let tracker = watch
+        .tracker
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    tracker.get(session)?.permission.clone()
+}
+
+/// The Opencode session of an agent the service runs (the generated command), if it has one.
+fn service_session(agent: &Agent) -> Option<&str> {
+    (agent.harness == Harness::Opencode && agent.command.trim().is_empty())
+        .then_some(agent.opencode_session.as_deref())
+        .flatten()
+}
+
+/// Why an agent counts as waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WaitReason {
+    /// Its harness waits on a prompt: a permission request or a question.
+    Prompt,
+    /// A session made for a plan sits idle while the plan is a draft: it has asked or proposed, and the next step is
+    /// the owner's (`docs/plans/permission-asks.md`, R6).
+    PlanDraft,
+}
+
+/// Which harness a permission request came from: how it is answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AskSource {
+    /// Claude Code's `PermissionRequest` hook, waiting in `permission_asks`.
+    Claude,
+    /// The Opencode service's own request.
+    Opencode,
+}
+
+/// A permission request the owner can answer in the app (`docs/plans/permission-asks.md`). Written by the agent:
+/// shown as plain text only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WaitingAsk {
+    pub id: String,
+    pub source: AskSource,
+    pub tool: String,
+    pub detail: String,
 }
 
 /// An agent that waits for the owner — a permission prompt or a question — in whichever project it is
@@ -243,6 +301,9 @@ pub struct WaitingAgent {
     pub card_title: Option<String>,
     /// When it began to wait.
     pub since: Option<DateTime<Utc>>,
+    pub reason: WaitReason,
+    /// The permission request it waits on, when the app can answer it (card #88).
+    pub ask: Option<WaitingAsk>,
 }
 
 /// Every agent of every project that waits for the owner, oldest wait first. The same reading as the Studio's status
@@ -259,33 +320,96 @@ pub fn waiting_agents(
     db: &Mutex<Connection>,
     roots: &ChannelRoots,
 ) -> std::result::Result<Vec<WaitingAgent>, AxiomataError> {
-    let agents = {
+    let (agents, draft_plans) = {
         let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
         let mut agents = Vec::new();
         for project in project_store::list_projects(&conn)? {
             agents.extend(agent_store::list_agents(&conn, project.id)?);
         }
-        agents
+        let draft_plans = draft_plans_of(&conn, &agents)?;
+        (agents, draft_plans)
     };
     let mut statuses = provision::agent_statuses(&agents, roots);
     overlay(&mut statuses, &agents);
-    let mut waiting = waiting_of(&agents, &statuses);
+    let mut waiting = waiting_of(&agents, &statuses, &draft_plans);
     let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
     for entry in &mut waiting {
         if let Some(card_id) = entry.card_id {
             entry.card_title = board_store::get_card(&conn, card_id)?.map(|card| card.title);
         }
+        if entry.reason != WaitReason::Prompt {
+            continue;
+        }
+        let Some(agent) = agents.iter().find(|agent| agent.id == entry.agent_id) else {
+            continue;
+        };
+        entry.ask = match agent.harness {
+            Harness::ClaudeCode => {
+                permission_ask::open_ask(&conn, agent.id)?.map(|ask| WaitingAsk {
+                    id: ask.id.to_string(),
+                    source: AskSource::Claude,
+                    tool: ask.tool,
+                    detail: ask.detail,
+                })
+            }
+            Harness::Opencode => service_session(agent)
+                .and_then(tracked_permission)
+                .map(|request| opencode_ask(&request)),
+            Harness::Mini => None,
+        };
     }
     Ok(waiting)
 }
 
-/// The agents whose status is `waiting`, oldest wait first; `statuses` are matched to `agents` by id.
-fn waiting_of(agents: &[Agent], statuses: &[AgentStatus]) -> Vec<WaitingAgent> {
+/// The plans of `agents` that are still drafts — for R6.
+fn draft_plans_of(
+    conn: &Connection,
+    agents: &[Agent],
+) -> std::result::Result<HashSet<i64>, AxiomataError> {
+    let mut drafts = HashSet::new();
+    for plan_id in agents.iter().filter_map(|agent| agent.plan_id) {
+        if !drafts.contains(&plan_id)
+            && crate::board::flow::get_plan(conn, plan_id)?
+                .is_some_and(|plan| plan.status == crate::board::PlanStatus::Draft)
+        {
+            drafts.insert(plan_id);
+        }
+    }
+    Ok(drafts)
+}
+
+/// An Opencode request as the app shows it: the action as the tool, its resources as the detail.
+fn opencode_ask(request: &PermissionRequest) -> WaitingAsk {
+    WaitingAsk {
+        id: request.id.clone(),
+        source: AskSource::Opencode,
+        tool: permission_ask::one_line(&request.action),
+        detail: permission_ask::one_line(&request.resources.join(", ")),
+    }
+}
+
+/// The agents that wait for the owner, oldest wait first; `statuses` are matched to `agents` by id. An agent waits when
+/// its harness waits on a prompt, or when it was made for a plan in `draft_plans` and sits idle (R6).
+fn waiting_of(
+    agents: &[Agent],
+    statuses: &[AgentStatus],
+    draft_plans: &HashSet<i64>,
+) -> Vec<WaitingAgent> {
     let mut waiting: Vec<WaitingAgent> = statuses
         .iter()
-        .filter(|status| status.state == AgentState::Waiting)
         .filter_map(|status| {
             let agent = agents.iter().find(|agent| agent.id == status.agent_id)?;
+            let reason = match status.state {
+                AgentState::Waiting => WaitReason::Prompt,
+                AgentState::Idle
+                    if agent
+                        .plan_id
+                        .is_some_and(|plan| draft_plans.contains(&plan)) =>
+                {
+                    WaitReason::PlanDraft
+                }
+                _ => return None,
+            };
             Some(WaitingAgent {
                 agent_id: agent.id,
                 project_id: agent.project_id,
@@ -293,11 +417,73 @@ fn waiting_of(agents: &[Agent], statuses: &[AgentStatus]) -> Vec<WaitingAgent> {
                 card_id: agent.card_id,
                 card_title: None,
                 since: status.since,
+                reason,
+                ask: None,
             })
         })
         .collect();
     waiting.sort_by_key(|entry| (entry.since, entry.agent_id));
     waiting
+}
+
+/// The owner answers an agent's permission request in the app (`docs/plans/permission-asks.md`): Claude Code's through
+/// the database its hook waits on, Opencode's through the service. The request must be the one the agent waits on now,
+/// so an answer can never land on another agent's or an old question.
+///
+/// # Errors
+///
+/// [`AxiomataError::PermissionAsk`] for an unknown agent, a request that is not (or no longer) open, or "in terminal"
+/// for Opencode (its pane prompt is open anyway); a database or service error.
+pub async fn answer_permission(
+    db: &Mutex<Connection>,
+    agent_id: i64,
+    request_id: &str,
+    decision: Decision,
+) -> std::result::Result<(), AxiomataError> {
+    let refused = |reason: String| AxiomataError::PermissionAsk { reason };
+    let agent = {
+        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        agent_store::get_agent(&conn, agent_id)?
+    }
+    .ok_or_else(|| refused(format!("no agent {agent_id}")))?;
+    match agent.harness {
+        Harness::ClaudeCode => {
+            let id = request_id
+                .parse::<i64>()
+                .map_err(|_| refused(format!("malformed request id {request_id:?}")))?;
+            let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+            permission_ask::decide(&conn, agent_id, id, decision, "human:owner")
+        }
+        Harness::Opencode => {
+            let reply = match decision {
+                Decision::Allow => "once",
+                Decision::Deny => "reject",
+                Decision::Terminal => {
+                    return Err(refused(
+                        "an Opencode request is answered here or in its pane".into(),
+                    ));
+                }
+            };
+            let session = service_session(&agent).ok_or_else(|| {
+                refused(format!("agent {agent_id} has no session on the service"))
+            })?;
+            if tracked_permission(session).is_none_or(|request| request.id != request_id) {
+                return Err(refused(format!(
+                    "request {request_id} is not the one agent {agent_id} waits on"
+                )));
+            }
+            let service = opencode::find()
+                .await
+                .map_err(|err| refused(format!("the Opencode service is not reachable: {err}")))?;
+            service
+                .reply_permission(session, request_id, reply)
+                .await
+                .map_err(|err| refused(format!("the Opencode service refused the answer: {err}")))
+        }
+        Harness::Mini => Err(refused(
+            "this harness asks nothing the app can answer".into(),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -439,7 +625,7 @@ mod tests {
             // A status without its agent (removed in between) is left out.
             state(9, AgentState::Waiting, 1_000),
         ];
-        let waiting = waiting_of(&agents, &statuses);
+        let waiting = waiting_of(&agents, &statuses, &HashSet::new());
         assert_eq!(
             waiting.iter().map(|w| w.agent_id).collect::<Vec<_>>(),
             vec![3, 2]
@@ -447,5 +633,148 @@ mod tests {
         assert_eq!(waiting[1].project_id, 7);
         assert_eq!(waiting[1].card_id, Some(12));
         assert_eq!(waiting[1].since, from_ms(5_000));
+    }
+
+    #[test]
+    fn an_idle_session_of_a_draft_plan_waits_for_the_owner_and_others_do_not() {
+        let mut planner = agent(1, Harness::ClaudeCode, "", None);
+        planner.plan_id = Some(4);
+        let mut done_planner = agent(2, Harness::ClaudeCode, "", None);
+        done_planner.plan_id = Some(5);
+        let plain = agent(3, Harness::ClaudeCode, "", None);
+        let mut busy_planner = agent(4, Harness::ClaudeCode, "", None);
+        busy_planner.plan_id = Some(4);
+        let agents = vec![planner, done_planner, plain, busy_planner];
+        let state = |agent_id, state| AgentStatus {
+            state,
+            ..starting(agent_id, 1_000)
+        };
+        let statuses = vec![
+            state(1, AgentState::Idle),
+            state(2, AgentState::Idle),
+            state(3, AgentState::Idle),
+            state(4, AgentState::Working),
+        ];
+        let drafts = HashSet::from([4]);
+        let waiting = waiting_of(&agents, &statuses, &drafts);
+        assert_eq!(waiting.len(), 1, "{waiting:?}");
+        assert_eq!(waiting[0].agent_id, 1);
+        assert_eq!(waiting[0].reason, WaitReason::PlanDraft);
+        assert_eq!(waiting[0].ask, None);
+    }
+
+    #[test]
+    fn an_opencode_request_shows_its_action_and_resources() {
+        let ask = opencode_ask(&PermissionRequest {
+            id: "per_1".into(),
+            action: "shell".into(),
+            resources: vec!["npm ci".into(), "git status\nx".into()],
+        });
+        assert_eq!(
+            ask,
+            WaitingAsk {
+                id: "per_1".into(),
+                source: AskSource::Opencode,
+                tool: "shell".into(),
+                detail: "npm ci, git status x".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn the_watchers_view_names_the_opencode_request_its_session_waits_on() {
+        let mut tracker = Tracker::default();
+        tracker.set_permission(
+            "ses_w",
+            PermissionRequest {
+                id: "per_2".into(),
+                action: "edit".into(),
+                resources: vec!["src/a.rs".into()],
+            },
+            1,
+        );
+        assert_eq!(tracker.get("ses_w").unwrap().state, SessionState::Waiting);
+        let own = agent(1, Harness::Opencode, "opencode", Some("ses_w"));
+        assert_eq!(
+            service_session(&own),
+            None,
+            "an own command runs outside the service"
+        );
+        let generated = agent(2, Harness::Opencode, "", Some("ses_w"));
+        assert_eq!(service_session(&generated), Some("ses_w"));
+    }
+
+    /// A database with one project and an agent on `harness`.
+    fn db_with_agent(harness: Harness) -> (Mutex<Connection>, i64) {
+        let dir = std::env::temp_dir().join(format!(
+            "axiomata-answer-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let db = crate::db::open_and_migrate_at(&dir.join("axiomata.db")).unwrap();
+        let project = project_store::create_project(
+            &db,
+            axiomata_ide::NewProject {
+                name: "P".into(),
+                repo_root: dir.clone(),
+            },
+        )
+        .unwrap();
+        let agent = agent_store::create_agent(
+            &db,
+            axiomata_ide::NewAgent {
+                project_id: project.id,
+                fields: axiomata_ide::AgentFields {
+                    name: "worker".into(),
+                    harness,
+                    command: String::new(),
+                    model: None,
+                    env: String::new(),
+                },
+            },
+        )
+        .unwrap();
+        (Mutex::new(db), agent.id)
+    }
+
+    #[tokio::test]
+    async fn the_owner_answers_a_claude_request_of_that_agent_only() {
+        let (db, agent) = db_with_agent(Harness::ClaudeCode);
+        let id = {
+            let conn = db.lock().unwrap();
+            permission_ask::ask(&conn, agent, "Bash", "npm ci").unwrap()
+        };
+        let refused = |result: std::result::Result<(), AxiomataError>| {
+            matches!(result, Err(AxiomataError::PermissionAsk { .. }))
+        };
+        assert!(refused(
+            answer_permission(&db, agent + 1, &id.to_string(), Decision::Allow).await
+        ));
+        assert!(refused(
+            answer_permission(&db, agent, "x", Decision::Allow).await
+        ));
+        answer_permission(&db, agent, &id.to_string(), Decision::Allow)
+            .await
+            .unwrap();
+        let conn = db.lock().unwrap();
+        assert_eq!(
+            permission_ask::decision_of(&conn, id).unwrap(),
+            Some(Decision::Allow)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_opencode_request_is_answered_only_while_it_is_the_tracked_one() {
+        let (db, agent) = db_with_agent(Harness::Opencode);
+        // "In terminal" is no answer for Opencode, and without a tracked request nothing is sent to the service.
+        let refused = |result: std::result::Result<(), AxiomataError>| {
+            matches!(result, Err(AxiomataError::PermissionAsk { .. }))
+        };
+        assert!(refused(
+            answer_permission(&db, agent, "per_1", Decision::Terminal).await
+        ));
+        assert!(refused(
+            answer_permission(&db, agent, "per_1", Decision::Allow).await
+        ));
     }
 }

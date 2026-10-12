@@ -66,6 +66,8 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
     let (mut ready, role, launch) = {
         let conn = core.db_lock();
         let ready = provision::prepare(&conn, &paths::ide_locations(), id)?;
+        // A request a hook of the previous run left open is nobody's any more: the app must not offer it.
+        crate::permission_ask::close_open(&conn, id, "system:restart")?;
         let config = core.config_read().clone();
         let role = roster::roles_for_project(&conn, &config, ready.agent.project_id)
             .into_iter()

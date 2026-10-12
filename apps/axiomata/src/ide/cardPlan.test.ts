@@ -85,6 +85,8 @@ describe("the steps of a card's plan", () => {
       card_id: cardId,
       card_title: null,
       since: null,
+      reason: "prompt" as const,
+      ask: null,
     });
     const waiting = [waits(1, 20), waits(2, 30), waits(3, null), waits(4, 99)];
     const steps = [card(20, 1), card(30, null)];

@@ -1794,6 +1794,26 @@ Flow for every plan).
 First run on the Mac (2026-10-12): card #83 → plan #7, one step (#85) worked, reviewed, integrated; the card moved to
 Review by itself, and the owner's take-over brought it into `main` and the card to Done.
 
+### Terminal, auto mode for reviewers, permission asks (2026-10-12)
+
+- **#93 — partial-redraw TUIs.** A raw capture of Claude Code showed it scrolls its transcript with a scroll region
+  (`CSI 2;21r`, `CSI nS`, `CSI r`), which `screen.rs` dropped — the old lines stayed under the new ones. The screen
+  model now has scroll regions, SU/SD, IL/DL, ICH/DCH/ECH, CNL/CPL and `ESC 7/8/D/E/M` (xterm's semantics).
+- **#80 — scrolling.** The screen tracks the mouse modes (`?1000/1002/1003/1006`, also several in one sequence) and
+  sends them with each snapshot, with the alternate-screen flag and the history length. A wheel turn goes to a program
+  that tracks the mouse as a report (Claude Code and Opencode scroll themselves), becomes arrow keys on the alternate
+  screen without tracking, and scrolls the history otherwise (`modules/terminalWheel.ts`). A scrollbar shows and drags
+  the history; ⌘⇧↑/↓ (Ctrl+Shift elsewhere) scroll like the wheel, Shift+PageUp/PageDown/Home/End page the history.
+- **#76 — fonts.** Vite never inlines a font as a `data:` URL (the CSP blocked the small `@fontsource` subsets in the
+  installed app only); the terminal loads each font string once without trusting `document.fonts.check()`.
+- **#95 — reviewers in auto mode** run any command under the workers' denies and still edit nothing
+  (`docs/plans/plan-auto-rights.md`, A4).
+- **#88 — permission asks in the app** (`docs/plans/permission-asks.md`): Claude Code's `PermissionRequest` hook runs
+  `axiomata-cli permission-hook`, which waits on `permission_asks` (migration 32) for the owner's answer; Opencode's
+  requests come from the status tracker and are answered on the service. The waiting badge's list and a strip over the
+  agent's pane offer Allow / Deny (Claude Code also "In terminal"); `answer_permission` is the only door. A planner or
+  grill idle on a draft plan now counts as waiting.
+
 ### Ausblick (2026-10-12)
 
 The agent-to-agent build plan CP-A1…CP-A10 is through (`docs/plans/a2a.md`), the ⌘K spotlight, Orbit + 2Brain and

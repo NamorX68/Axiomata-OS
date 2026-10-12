@@ -45,6 +45,42 @@ pub struct PlanAnswer {
     pub at_ms: i64,
 }
 
+/// A permission request a session waits on: what the owner answers in the app (`docs/plans/permission-asks.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionRequest {
+    /// The request's id, for [`Service::reply_permission`].
+    pub id: String,
+    /// What is asked for: `shell`, `edit`, `external_directory`, …
+    pub action: String,
+    /// What it applies to: the command, the file, the folder.
+    pub resources: Vec<String>,
+}
+
+impl PermissionRequest {
+    /// Reads a request from a `permission.asked` event's data or an item of the session's `/permission` list.
+    pub fn from_value(value: &Value) -> Option<Self> {
+        Some(PermissionRequest {
+            id: value.get("id").and_then(Value::as_str)?.to_owned(),
+            action: value
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("?")
+                .to_owned(),
+            resources: value
+                .get("resources")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
+}
+
 /// One session's entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionStatus {
@@ -52,6 +88,8 @@ pub struct SessionStatus {
     /// When `state` began, in milliseconds since the Unix epoch.
     pub since_ms: i64,
     pub plan: Option<PlanAnswer>,
+    /// The permission request the session waits on, while it does.
+    pub permission: Option<PermissionRequest>,
 }
 
 /// Per-session state, fed from the event stream.
@@ -80,10 +118,23 @@ impl Tracker {
                 state,
                 since_ms: now_ms,
                 plan: None,
+                permission: None,
             });
         if entry.state != state {
             entry.state = state;
             entry.since_ms = now_ms;
+        }
+        // A request is only open while the session waits; any other state means it was answered or the turn ended.
+        if state != SessionState::Waiting {
+            entry.permission = None;
+        }
+    }
+
+    /// Records the permission request a session waits on (an event, or seeding after a reconnect).
+    pub fn set_permission(&mut self, session_id: &str, request: PermissionRequest, now_ms: i64) {
+        self.set(session_id, SessionState::Waiting, now_ms);
+        if let Some(entry) = self.sessions.get_mut(session_id) {
+            entry.permission = Some(request);
         }
     }
 
@@ -118,9 +169,11 @@ impl Tracker {
                 self.set(&session, SessionState::Idle, now_ms);
                 self.finish_plans(&session, now_ms);
             }
-            "permission.asked" | "form.created" => {
-                self.set(&session, SessionState::Waiting, now_ms)
-            }
+            "permission.asked" => match PermissionRequest::from_value(data) {
+                Some(request) => self.set_permission(&session, request, now_ms),
+                None => self.set(&session, SessionState::Waiting, now_ms),
+            },
+            "form.created" => self.set(&session, SessionState::Waiting, now_ms),
             // Answered, cancelled or otherwise closed: the turn goes on.
             _ if kind.starts_with("form.") => self.set(&session, SessionState::Working, now_ms),
             "session.step.started" if data.get("agent").and_then(Value::as_str) == Some("plan") => {
@@ -166,6 +219,8 @@ impl Tracker {
 pub struct SessionSnapshot {
     pub state: SessionState,
     pub plan: Option<PlanAnswer>,
+    /// The first open permission request, if any.
+    pub permission: Option<PermissionRequest>,
 }
 
 impl Service {
@@ -186,8 +241,9 @@ impl Service {
         session_id: &str,
         active: &[String],
     ) -> Result<SessionSnapshot, OpencodeError> {
-        let waiting = !self.list(session_id, "/permission").await?.is_empty()
-            || !self.list(session_id, "/form").await?.is_empty();
+        let permissions = self.list(session_id, "/permission").await?;
+        let permission = permissions.iter().find_map(PermissionRequest::from_value);
+        let waiting = !permissions.is_empty() || !self.list(session_id, "/form").await?.is_empty();
         let state = if waiting {
             SessionState::Waiting
         } else if active.iter().any(|s| s == session_id) {
@@ -199,6 +255,7 @@ impl Service {
         Ok(SessionSnapshot {
             state,
             plan: latest_plan(&recent),
+            permission,
         })
     }
 
@@ -266,6 +323,14 @@ mod tests {
         );
         assert_eq!(t.get("ses_a").unwrap().state, SessionState::Waiting);
         assert_eq!(t.get("ses_a").unwrap().since_ms, 20);
+        assert_eq!(
+            t.get("ses_a")
+                .unwrap()
+                .permission
+                .as_ref()
+                .map(|p| p.id.as_str()),
+            Some("per_1")
+        );
         t.apply(
             &event(
                 "permission.replied",
@@ -280,7 +345,8 @@ mod tests {
             &SessionStatus {
                 state: SessionState::Idle,
                 since_ms: 40,
-                plan: None
+                plan: None,
+                permission: None,
             }
         );
     }
@@ -407,5 +473,34 @@ mod tests {
             })
         );
         assert_eq!(latest_plan(&messages[..2]), None);
+    }
+
+    #[test]
+    fn a_permission_request_is_kept_with_what_it_asks_until_it_is_answered() {
+        let mut t = Tracker::default();
+        t.apply(
+            &event(
+                "permission.asked",
+                json!({"id": "per_9", "sessionID": "ses_p", "action": "shell", "resources": ["npm ci"]}),
+            ),
+            5,
+        );
+        assert_eq!(
+            t.get("ses_p").unwrap().permission,
+            Some(PermissionRequest {
+                id: "per_9".into(),
+                action: "shell".into(),
+                resources: vec!["npm ci".into()],
+            })
+        );
+        t.apply(
+            &event("permission.replied", json!({"sessionID": "ses_p"})),
+            6,
+        );
+        assert_eq!(t.get("ses_p").unwrap().permission, None);
+        // A request without an id cannot be answered, but the session still waits.
+        t.apply(&event("permission.asked", json!({"sessionID": "ses_p"})), 7);
+        assert_eq!(t.get("ses_p").unwrap().state, SessionState::Waiting);
+        assert_eq!(t.get("ses_p").unwrap().permission, None);
     }
 }

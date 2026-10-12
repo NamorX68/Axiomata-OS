@@ -193,4 +193,9 @@ pub enum AxiomataError {
     /// hand-edited row or a schema/format change should ever produce this.
     #[error("routine row {id} is corrupt: {reason}")]
     CorruptRoutineRow { id: i64, reason: String },
+
+    /// An answer to an agent's permission request was refused: not the owner's, not that agent's request, already
+    /// answered, or an unknown decision (`crate::permission_ask`, card #88).
+    #[error("permission request: {reason}")]
+    PermissionAsk { reason: String },
 }

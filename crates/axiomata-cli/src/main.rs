@@ -117,6 +117,15 @@ enum Command {
     /// Serve the MCP tools (mailbox, board steps) for one agent session on stdin/stdout. Started by the studio for a
     /// session, with `AXIOMATA_AGENT_ID` in the environment; not meant to be run by hand.
     McpServe,
+    /// The `PermissionRequest` hook of a studio session's Claude Code (`docs/plans/permission-asks.md`): stores the
+    /// request from stdin, waits for the owner's answer in the app and prints it for Claude Code — or nothing, and
+    /// Claude Code asks in its pane. Started by the hook; not meant to be run by hand.
+    #[command(hide = true)]
+    PermissionHook {
+        /// The studio session asking; must be the shell's own when it runs in one.
+        #[arg(long)]
+        agent: i64,
+    },
     /// Summarise the workspace graph (areas, files, links, skills, routines).
     Graph,
     /// Print the module manifest the dashboard wrote for the agent.
@@ -746,6 +755,7 @@ async fn main() -> Result<()> {
                 },
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
         Command::McpServe => return mcp_serve(&core),
+        Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
         Command::Modules => modules()?,
         Command::ModuleAction {
@@ -764,6 +774,44 @@ fn mcp_serve(core: &AxiomataCore) -> Result<()> {
     let roots = axiomata_core::paths::ide_locations().channels;
     let ctx = axiomata_core::agent_mcp::Context::from_env(core, roots)?;
     axiomata_core::agent_mcp::serve_stdio(&ctx).context("serving MCP on stdio")
+}
+
+/// `permission-hook`: one permission request of a Claude Code session, answered by the owner in the app or handed back
+/// to the pane. Every failure ends without output and with exit code 1, which Claude Code treats as "no decision" — the
+/// session never stands still because of this hook (exit code 2 would refuse the call, so it is never used).
+fn permission_hook(core: &AxiomataCore, agent: i64) -> Result<()> {
+    use axiomata_core::permission_ask;
+    use std::io::Read as _;
+
+    // A hook is started with its session's environment, which always names the session: a request without it, or in
+    // another session's name, is not this shell's to make. (A shell can set the variable itself — not a sandbox,
+    // `docs/plans/permission-asks.md` R4.)
+    let own = std::env::var("AXIOMATA_AGENT_ID").unwrap_or_default();
+    if own.trim() != agent.to_string() {
+        anyhow::bail!("only agent {agent}'s own session may ask in its name");
+    }
+    /// A payload larger than this is not a permission request; it is read no further.
+    const MAX_PAYLOAD: u64 = 1 << 20;
+    let mut payload = String::new();
+    std::io::stdin()
+        .take(MAX_PAYLOAD)
+        .read_to_string(&mut payload)
+        .context("reading the hook's payload")?;
+    let value: serde_json::Value = serde_json::from_str(&payload).unwrap_or_default();
+    let (tool, detail) = permission_ask::describe(&value);
+    // The CLI's own connection, held for the whole wait: nothing else in this process needs it.
+    let db = core.db.lock().unwrap_or_else(|poison| poison.into_inner());
+    let id = permission_ask::ask(&db, agent, &tool, &detail)?;
+    let decision = permission_ask::wait_for_decision(
+        &db,
+        id,
+        permission_ask::HOOK_WAIT,
+        permission_ask::HOOK_POLL,
+    )?;
+    if let Some(output) = permission_ask::hook_output(decision) {
+        println!("{output}");
+    }
+    Ok(())
 }
 
 /// Scans an Obsidian folder, lets the agent sort the notes into areas, writes
