@@ -286,7 +286,8 @@
     const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
     defaultFg = v("--ax-text", defaultFg);
     defaultBg = v("--ax-surface-1", defaultBg);
-    cursorColor = v("--ax-accent", cursorColor);
+    // The cursor is where the terminal lives: the glow, the orange family even in a theme with another accent (G2).
+    cursorColor = v("--ax-glow", cursorColor);
     selectionColor = v("--ax-accent-muted", selectionColor);
     // CP6 architecture-review finding (HIGH): these four feed `draw()`
     // directly, but nothing else re-triggers a paint when only the theme
@@ -1344,7 +1345,8 @@
     box-shadow: inset 0 0 0 2px transparent;
     transition: box-shadow 60ms ease-out;
   }
+  /* The bell wants the owner: the glow's rule. */
   .bell-flash.active {
-    box-shadow: inset 0 0 0 2px var(--ax-accent);
+    box-shadow: inset 0 0 0 2px var(--ax-glow);
   }
 </style>

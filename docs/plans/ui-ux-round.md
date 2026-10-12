@@ -186,6 +186,14 @@ Themes sind auf `[data-theme]` gescoped). Nur Grund-Tokens, die jedes Theme selb
 sodass ein Theme mit eigener Glut gewinnt (G2). In den Einstellungen und im Dock-Popup (jetzt drei Spalten, scrollt ab
 70 vh); das aktive Theme neutral markiert; Darüberfahren färbt nichts um, ein Klick wechselt.
 
+**Stand UX7c (2026-10-12, gebaut, Abnahme offen):** Chat (`shell/ChatPanel.svelte`): Agenten-Antworten tragen die
+Hex-Marke „AX“ wie ein Absender (bei einem Fehler mit rotem Ring), während der Agent denkt glimmt sie, und drei
+Glut-Waben atmen nacheinander statt grauer Punkte (bei Calm/Off still); die eigenen Nachrichten sind neutrale Platten
+(Akzentregel), Anweisungen mit neutralem Rand; Listenpunkte gedämpft, Kosten leise rechts. Terminal: Cursor und
+sichtbare Glocke in Glut statt Akzent (dort lebt etwas; G2 auch in fremden Paletten). Offen und nicht Teil der Runde:
+Karte #76 (Terminal-Schriften in der installierten App, CSP blockiert `data:`-Teilsätze, Victor Mono ohne Fett) —
+eine CSP-Änderung, eigens zu prüfen.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

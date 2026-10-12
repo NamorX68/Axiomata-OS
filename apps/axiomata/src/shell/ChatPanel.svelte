@@ -6,6 +6,9 @@
   interaction with the rest of the app); `.chat-wrap` below owns the fixed
   bottom-centre positioning and the slide-in transition, exactly the split
   `Window.svelte`'s own doc comment describes.
+
+  Glut + Hex (UX7c): the agent's turns carry its hexagon ("AX") like a sender, lit while it thinks — three breathing
+  hexes in place of grey dots; the owner's own turns are neutral, since the accent means "alive", not "mine".
 -->
 <script lang="ts">
   import { cubicOut } from "svelte/easing";
@@ -28,6 +31,7 @@
   }
 
   import { busy, newSession, panelOpen, sessionId, toolCalls, turns, type ToolCall } from "../core/chat";
+  import HexAvatar from "../ui/HexAvatar.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
   import { renderMarkdown } from "../core/markdown";
   import Window from "./Window.svelte";
@@ -66,21 +70,27 @@
       {/snippet}
       <div class="turns" bind:this={list}>
         {#each $turns as t (t.id)}
-          <article class="turn {t.role}">
-            {#if t.role === "user"}
-              <p>{t.text}</p>
-            {:else}
-              {#if t.tools}{@render chips(t.tools)}{/if}
-              <div class="md">{@html renderMarkdown(t.text)}</div>
-              {#if t.costUsd != null}<span class="cost">${t.costUsd.toFixed(4)}</span>{/if}
-            {/if}
-          </article>
+          {#if t.role === "user"}
+            <article class="turn user"><p>{t.text}</p></article>
+          {:else}
+            <div class="from-agent">
+              <HexAvatar text="AX" ring={t.role === "error" ? "var(--ax-danger)" : undefined} size="sm" />
+              <article class="turn {t.role}">
+                {#if t.tools}{@render chips(t.tools)}{/if}
+                <div class="md">{@html renderMarkdown(t.text)}</div>
+                {#if t.costUsd != null}<span class="cost">${t.costUsd.toFixed(4)}</span>{/if}
+              </article>
+            </div>
+          {/if}
         {/each}
         {#if $busy}
-          <article class="turn assistant thinking">
-            {#if $toolCalls.length > 0}{@render chips($toolCalls)}{/if}
-            <span class="dots"><i></i><i></i><i></i></span>
-          </article>
+          <div class="from-agent">
+            <HexAvatar text="AX" live size="sm" label="Axiomata is thinking" />
+            <article class="turn assistant thinking">
+              {#if $toolCalls.length > 0}{@render chips($toolCalls)}{/if}
+              <span class="hexes" aria-hidden="true"><i class="ax-hex"></i><i class="ax-hex"></i><i class="ax-hex"></i></span>
+            </article>
+          </div>
         {/if}
       </div>
     </Window>
@@ -122,23 +132,39 @@
     border-radius: var(--ax-radius-md);
     user-select: text;
   }
+  /* The owner's own words: a raised neutral plate on the right. */
   .turn.user {
     align-self: flex-end;
-    background: var(--ax-accent-muted);
-    border: 1px solid color-mix(in srgb, var(--ax-accent) 40%, transparent);
+    background: var(--ax-elev-3);
+    border: 1px solid var(--ax-border-strong);
+    box-shadow: var(--ax-shadow-raised);
+  }
+  /* The agent's turns: its hexagon beside them, like a sender. */
+  .from-agent {
+    align-self: flex-start;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ax-space-2);
+    max-width: 92%;
+  }
+  .from-agent :global(.avatar) {
+    margin-top: var(--ax-space-1);
+  }
+  .from-agent .turn {
+    max-width: none;
+    min-width: 0;
   }
   .turn.assistant,
   .turn.instruction,
   .turn.error {
-    align-self: flex-start;
     background: var(--ax-surface-2);
     border: 1px solid var(--ax-border);
   }
   .turn.instruction {
-    border-left: 3px solid var(--ax-accent);
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--ax-border-strong);
   }
   .turn.error {
-    border-left: 3px solid var(--ax-danger);
+    border-left: calc(3px * var(--ax-ui-scale)) solid var(--ax-danger);
   }
   .turn p {
     margin: 0;
@@ -166,8 +192,9 @@
   .cost {
     display: block;
     margin-top: var(--ax-space-1);
-    font-family: var(--ax-font-mono);
-    font-size: var(--ax-font-size-sm);
+    text-align: right;
+    font: var(--ax-type-caption);
+    font-variant-numeric: tabular-nums;
     color: var(--ax-text-muted);
   }
 
@@ -212,37 +239,27 @@
     border-top: 1px solid var(--ax-border);
   }
   .md :global(li::marker) {
-    color: var(--ax-accent);
+    color: var(--ax-text-muted);
   }
 
   .thinking {
     padding: var(--ax-space-3);
   }
-  .dots {
+  /* Thinking: three small hexes breathing one after another in the glow (still at Calm and Off). */
+  .hexes {
     display: inline-flex;
     gap: calc(4px * var(--ax-ui-scale));
   }
-  .dots i {
-    width: calc(6px * var(--ax-ui-scale));
-    height: calc(6px * var(--ax-ui-scale));
-    border-radius: 50%;
-    background: var(--ax-text-muted);
-    animation: blink 1.2s infinite;
+  .hexes i {
+    width: calc(8px * var(--ax-ui-scale));
+    height: calc(9px * var(--ax-ui-scale));
+    background: var(--ax-glow);
+    animation: var(--ax-anim-breathe);
   }
-  .dots i:nth-child(2) {
-    animation-delay: 0.2s;
+  .hexes i:nth-child(2) {
+    animation-delay: 0.3s;
   }
-  .dots i:nth-child(3) {
-    animation-delay: 0.4s;
-  }
-  @keyframes blink {
-    0%,
-    80%,
-    100% {
-      opacity: 0.25;
-    }
-    40% {
-      opacity: 1;
-    }
+  .hexes i:nth-child(3) {
+    animation-delay: 0.6s;
   }
 </style>
