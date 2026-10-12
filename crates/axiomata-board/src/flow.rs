@@ -211,7 +211,8 @@ pub fn latest_event(db: &Connection, card_id: i64, kind: EventKind) -> Result<Op
 
 const PLAN_COLS: &str = "id, board_id, name, status, auto_start_max, max_cost_usd, max_tokens, \
      created_at, updated_at, approved_at, goal, project_id, base_branch, line_tip, \
-     (SELECT card_id FROM plan_origin WHERE plan_origin.plan_id = plans.id)";
+     (SELECT card_id FROM plan_origin WHERE plan_origin.plan_id = plans.id), \
+     EXISTS (SELECT 1 FROM plan_auto_rights WHERE plan_auto_rights.plan_id = plans.id)";
 
 fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Result<Vec<Plan>> {
     let sql = format!("SELECT {PLAN_COLS} FROM plans {sql_tail}");
@@ -233,6 +234,7 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             row.get::<_, Option<String>>(12)?,
             row.get::<_, Option<String>>(13)?,
             row.get::<_, Option<i64>>(14)?,
+            row.get::<_, bool>(15)?,
         ))
     })?;
     let mut out = Vec::new();
@@ -253,6 +255,7 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             base_branch,
             line_tip,
             origin_card_id,
+            auto_rights,
         ) = row?;
         let status = PlanStatus::parse(&status).ok_or_else(|| BoardError::CorruptRow {
             table: "plans",
@@ -275,6 +278,7 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             updated_at: parse_ts(&updated, "plans", id, "updated_at")?,
             approved_at: parse_opt_ts(approved, "plans", id, "approved_at")?,
             origin_card_id,
+            auto_rights,
         });
     }
     Ok(out)
@@ -407,6 +411,32 @@ pub fn apply_goal_suggestion(db: &mut Connection, plan_id: i64, at: &str) -> Res
     )?;
     tx.commit()?;
     Ok(updated)
+}
+
+/// Switches the owner's auto mode of a plan on or off (`docs/plans/plan-auto-rights.md`): with it, the plan's working
+/// sessions may run any command and edit without asking; a push stays refused (patterns, not a sandbox). Only the owner may (`human:` actor): an agent
+/// that could switch it on would widen its own rights. Returns `false` when there is no such plan or it is closed.
+pub fn set_plan_auto_rights(db: &Connection, plan_id: i64, on: bool, actor: &str) -> Result<bool> {
+    let actor = normalize_actor(actor)?;
+    require_human(&actor, "switching a plan's auto mode")?;
+    let Some(plan) = get_plan(db, plan_id)? else {
+        return Ok(false);
+    };
+    if plan.status == PlanStatus::Closed {
+        return Ok(false);
+    }
+    if on {
+        db.execute(
+            "INSERT OR IGNORE INTO plan_auto_rights (plan_id, at) VALUES (?1, ?2)",
+            params![plan_id, now()],
+        )?;
+    } else {
+        db.execute(
+            "DELETE FROM plan_auto_rights WHERE plan_id = ?1",
+            params![plan_id],
+        )?;
+    }
+    Ok(true)
 }
 
 /// Notes that a grilling session was started for the plan: the approval then no longer says "not grilled". Asked
@@ -2024,7 +2054,7 @@ mod tests {
     };
     use crate::{
         SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5, SCHEMA_SQL_V6,
-        SCHEMA_SQL_V7, SCHEMA_SQL_V8, SCHEMA_SQL_V9, SCHEMA_SQL_V10,
+        SCHEMA_SQL_V7, SCHEMA_SQL_V8, SCHEMA_SQL_V9, SCHEMA_SQL_V10, SCHEMA_SQL_V11,
     };
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2073,6 +2103,7 @@ mod tests {
         db.execute_batch(SCHEMA_SQL_V8).unwrap();
         db.execute_batch(SCHEMA_SQL_V9).unwrap();
         db.execute_batch(SCHEMA_SQL_V10).unwrap();
+        db.execute_batch(SCHEMA_SQL_V11).unwrap();
         let board = create_board(&mut db, "Flow").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
@@ -3030,6 +3061,24 @@ mod tests {
         assert_eq!(create_plan(&f.db, f.board, &fields("")).unwrap().goal, "");
         let too_long = "x".repeat(MAX_PLAN_GOAL_LEN + 1);
         assert!(create_plan(&f.db, f.board, &fields(&too_long)).is_err());
+    }
+
+    #[test]
+    fn only_the_owner_switches_a_plans_auto_mode_and_never_on_a_closed_plan() {
+        let f = fixture();
+        let p = plan(&f);
+        assert!(!get_plan(&f.db, p.id).unwrap().unwrap().auto_rights);
+        // An agent that could switch it on would widen its own rights.
+        assert!(set_plan_auto_rights(&f.db, p.id, true, "agent:7").is_err());
+        assert!(!get_plan(&f.db, p.id).unwrap().unwrap().auto_rights);
+        assert!(set_plan_auto_rights(&f.db, p.id, true, "human:owner").unwrap());
+        assert!(set_plan_auto_rights(&f.db, p.id, true, "human:owner").unwrap());
+        assert!(get_plan(&f.db, p.id).unwrap().unwrap().auto_rights);
+        assert!(set_plan_auto_rights(&f.db, p.id, false, "human:owner").unwrap());
+        assert!(!get_plan(&f.db, p.id).unwrap().unwrap().auto_rights);
+        assert!(!set_plan_auto_rights(&f.db, 9999, true, "human:owner").unwrap());
+        assert!(close_plan(&f.db, p.id).unwrap());
+        assert!(!set_plan_auto_rights(&f.db, p.id, true, "human:owner").unwrap());
     }
 
     #[test]

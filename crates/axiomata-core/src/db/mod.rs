@@ -73,6 +73,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (29, axiomata_ide::SCHEMA_SQL_V10),
     // The board card a plan was made for: the card follows its plan across the board (card-as-plan.md).
     (30, axiomata_board::SCHEMA_SQL_V10),
+    // Plans whose working sessions may do everything but push: the owner's auto mode (plan-auto-rights.md).
+    (31, axiomata_board::SCHEMA_SQL_V11),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

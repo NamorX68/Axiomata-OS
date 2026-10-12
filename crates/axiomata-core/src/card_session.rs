@@ -2574,6 +2574,51 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_of_a_plan_in_auto_mode_is_started_with_the_free_rights_read_at_its_start() {
+        use crate::ide_start::card_launch;
+        let mut w = world();
+        let card = w.card(w.open, Some("builder"));
+        let plan = flow::create_plan(
+            &w.db,
+            w.board,
+            &axiomata_board::PlanFields {
+                project_id: None,
+                goal: String::new(),
+                name: "p".into(),
+                auto_start_max: None,
+                max_cost_usd: None,
+                max_tokens: None,
+            },
+        )
+        .unwrap();
+        let mut stored = store::get_card(&w.db, card).unwrap().unwrap();
+        stored.plan_id = Some(plan.id);
+        store::update_card(&w.db, card, &fields_of(&stored)).unwrap();
+        let started = w.start(card, None).unwrap();
+        assert_eq!(
+            card_launch(&w.db, &started.agent),
+            Some(crate::agent_entry::CardLaunch::work(card))
+        );
+        flow::set_plan_auto_rights(&w.db, plan.id, true, "human:owner").unwrap();
+        // Switched on, but the plan is still a draft: not yet.
+        assert_eq!(
+            card_launch(&w.db, &started.agent),
+            Some(crate::agent_entry::CardLaunch::work(card))
+        );
+        flow::approve_plan(&mut w.db, plan.id, "human:owner").unwrap();
+        assert_eq!(
+            card_launch(&w.db, &started.agent),
+            Some(crate::agent_entry::CardLaunch::work_freely(card))
+        );
+        // A closed plan's switch is history.
+        flow::close_plan(&w.db, plan.id).unwrap();
+        assert_ne!(
+            card_launch(&w.db, &started.agent),
+            Some(crate::agent_entry::CardLaunch::work_freely(card))
+        );
+    }
+
+    #[test]
     fn only_a_card_in_work_counts_as_a_sessions_card() {
         use crate::ide_start::card_launch;
         let mut w = world();

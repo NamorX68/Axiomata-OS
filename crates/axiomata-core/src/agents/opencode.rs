@@ -445,6 +445,21 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
             .iter()
             .map(|pattern| PermissionRule::new("shell", pattern, "allow")),
     );
+    // The owner's auto mode (`docs/plans/plan-auto-rights.md`, a worker only): any command and any edit without asking.
+    // What would stop the session with a question it cannot get answered while nobody watches — a folder outside the
+    // worktree, an `.env` file — is refused instead, and so are the plain ways past the studio's own lines (the CLI as
+    // the owner, the database, the next session's configuration, the shared git hooks). Patterns, not a sandbox: they
+    // stop the plain forms only. The push and git-outside denies below still come last and win.
+    if rights.auto_rights && !rights.read_only {
+        rules.push(PermissionRule::new("shell", "*", "allow"));
+        rules.push(PermissionRule::new("edit", "*", "allow"));
+        rules.extend(
+            AUTO_DENIED
+                .iter()
+                .map(|(action, resource)| PermissionRule::new(action, resource, "deny")),
+        );
+        rules.push(PermissionRule::new("read", "*.env.example", "allow"));
+    }
     // A reviewer judges what it is shown and changes nothing — and so does a planner; both read with git, which it is
     // allowed to
     // do one command at a time without asking. Anything else, and a chain of several commands, is still a question.
@@ -481,6 +496,33 @@ const REVIEWER_GIT: [&str; 5] = [
     "git rev-parse *",
 ];
 
+/// What a session in the owner's auto mode is refused rather than asked about (action, resource): anything outside its
+/// worktree, secrets in `.env` files, and the configuration files a later session in the same worktree would obey.
+const AUTO_DENIED: [(&str, &str); 19] = [
+    ("external_directory", "*"),
+    ("read", "*.env"),
+    ("read", "*.env.*"),
+    ("edit", "*opencode.json*"),
+    ("edit", "*.opencode/*"),
+    ("edit", "*.claude/*"),
+    ("edit", "*.mcp.json"),
+    // The same files by shell, and what else would cross the studio's lines: the CLI run without the agent's
+    // environment acts as the owner, the database holds every owner's decision, the git hooks are shared with the
+    // main checkout and run when the owner commits.
+    ("shell", "*opencode.json*"),
+    ("shell", "*.opencode/*"),
+    ("shell", "*.claude/*"),
+    ("shell", "*.mcp.json*"),
+    ("shell", "*.git/hooks*"),
+    ("shell", "*core.hooksPath*"),
+    ("shell", "axiomata-cli*"),
+    ("shell", "*/axiomata-cli *"),
+    ("shell", "*/axiomata-cli"),
+    ("shell", "*sqlite3*"),
+    ("shell", "*.axiomata/*"),
+    ("shell", "*git push*"),
+];
+
 /// Options of the read-only git commands that reach beyond the checkout.
 const GIT_OUTSIDE_DENIED: [&str; 2] = ["git * --no-index*", "git * --output*"];
 
@@ -493,6 +535,8 @@ pub struct CardRights<'a> {
     pub read_only: bool,
     /// Shell patterns the owner's role file lets the session run without asking (`agent_entry::opencode_shell_patterns`).
     pub shell: &'a [String],
+    /// The owner's auto mode of the card's plan: a worker may run anything and edit without asking, never push.
+    pub auto_rights: bool,
 }
 
 /// A session of an IDE agent on the service, and whether this start made it.
@@ -800,6 +844,7 @@ mod tests {
                 tools: &[],
                 read_only,
                 shell: &shell,
+                auto_rights: false,
             });
             let last_allow = rules.iter().rposition(|r| r.effect == "allow").unwrap();
             let last_push_deny = rules
@@ -816,6 +861,7 @@ mod tests {
             tools: &["read_inbox", "claim_task"],
             read_only: false,
             shell: &[],
+            auto_rights: false,
         });
         let has = |action: &str, effect: &str| {
             rules
@@ -849,6 +895,7 @@ mod tests {
                 tools: &[],
                 read_only,
                 shell: &shell,
+                auto_rights: false,
             });
             for pattern in &shell {
                 assert!(
@@ -868,6 +915,7 @@ mod tests {
                 tools: &["get_plan"],
                 read_only,
                 shell: &[],
+                auto_rights: false,
             })
         };
         let position = |rules: &[PermissionRule], resource: &str, effect: &str| {
@@ -895,12 +943,100 @@ mod tests {
         }
     }
 
+    /// What Opencode decides for one request under `rules`: the last rule whose action and resource match (`*` is any
+    /// run of characters), as its documentation says; `allow` when none does (its base policy).
+    fn decide<'r>(rules: &'r [PermissionRule], action: &str, resource: &str) -> &'r str {
+        fn glob(pattern: &str, text: &str) -> bool {
+            match pattern.split_once('*') {
+                None => pattern == text,
+                Some((head, rest)) => {
+                    text.starts_with(head)
+                        && (head.len()..=text.len()).any(|at| glob(rest, &text[at..]))
+                }
+            }
+        }
+        rules
+            .iter()
+            .rev()
+            .find(|r| glob(&r.action, action) && glob(&r.resource, resource))
+            .map_or("allow", |r| r.effect.as_str())
+    }
+
+    #[test]
+    fn in_the_owners_auto_mode_a_worker_runs_and_edits_anything_but_never_pushes_or_reaches_outside()
+     {
+        let rights = |read_only, auto_rights| CardRights {
+            tools: &["report_done"],
+            read_only,
+            shell: &[],
+            auto_rights,
+        };
+        let auto = card_permissions(&rights(false, true));
+        assert_eq!(decide(&auto, "shell", "rm -rf target"), "allow");
+        assert_eq!(decide(&auto, "shell", "cargo add serde"), "allow");
+        assert_eq!(decide(&auto, "edit", "src/main.rs"), "allow");
+        for push in [
+            "git push",
+            "git push origin main",
+            "git -C . push",
+            "git -c a=b push origin",
+        ] {
+            assert_eq!(decide(&auto, "shell", push), "deny", "{push}");
+        }
+        assert_eq!(decide(&auto, "shell", "git diff --no-index a b"), "deny");
+        assert_eq!(
+            decide(&auto, "external_directory", "/Users/someone/*"),
+            "deny"
+        );
+        assert_eq!(decide(&auto, "read", "config/.env"), "deny");
+        assert_eq!(decide(&auto, "read", ".env.example"), "allow");
+        for config in [
+            ".claude/settings.json",
+            "opencode.json",
+            ".opencode/agent.md",
+            ".mcp.json",
+        ] {
+            assert_eq!(decide(&auto, "edit", config), "deny", "{config}");
+        }
+        for crossing in [
+            "echo {} > .claude/settings.json",
+            "axiomata-cli board plan approve 3",
+            "/Applications/Axiomata-OS.app/Contents/MacOS/axiomata-cli board approve 4",
+            "sqlite3 /Users/x/.axiomata/axiomata.db",
+            "cp hook .git/hooks/pre-commit",
+            "git config core.hooksPath h",
+            "sh -c \"git push\"",
+        ] {
+            assert_eq!(decide(&auto, "shell", crossing), "deny", "{crossing}");
+        }
+        // Working on the CLI's own crate is still work.
+        assert_eq!(
+            decide(&auto, "shell", "cargo test -p axiomata-cli"),
+            "allow"
+        );
+        // Without the mode nothing of this is opened up, and a reviewer never gets it.
+        let plain = card_permissions(&rights(false, false));
+        assert!(
+            !plain
+                .iter()
+                .any(|r| r.action == "shell" && r.resource == "*")
+        );
+        let reviewer = card_permissions(&rights(true, true));
+        assert_eq!(decide(&reviewer, "edit", "src/main.rs"), "deny");
+        assert!(
+            !reviewer
+                .iter()
+                .any(|r| r.action == "shell" && r.resource == "*")
+        );
+    }
+
     #[test]
     fn a_reviewer_may_not_edit_anything() {
         let rights = |review| CardRights {
             tools: &["review_verdict"],
             read_only: review,
             shell: &[],
+            auto_rights: false,
         };
         let denies_edits = |rules: Vec<PermissionRule>| {
             rules

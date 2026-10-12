@@ -279,6 +279,10 @@ pub struct Plan {
     /// the plan's cards; this card itself is not one of them.
     #[serde(default)]
     pub origin_card_id: Option<i64>,
+    /// The owner's auto mode (`docs/plans/plan-auto-rights.md`): the plan's working sessions may run any command and
+    /// edit without asking; a push stays refused (patterns, not a sandbox). Read when a session starts; one that runs keeps what it was started with.
+    #[serde(default)]
+    pub auto_rights: bool,
 }
 
 /// What a caller sets on a plan (everything but the status, which only [`crate::flow::approve_plan`] and

@@ -635,6 +635,8 @@ export interface BoardPlan {
   approved_at: string | null;
   /** The board card the plan was made for (card-as-plan.md); its steps are the plan's cards, not this one. */
   origin_card_id?: number | null;
+  /** The owner's auto mode (plan-auto-rights.md): the plan's workers may do anything without asking but push. */
+  auto_rights?: boolean;
 }
 
 export type CardEventKind =

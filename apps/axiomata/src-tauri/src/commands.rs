@@ -1765,6 +1765,7 @@ pub async fn approve_board_plan(
     id: i64,
     run_by_itself: Option<bool>,
     project_id: Option<i64>,
+    auto_rights: Option<bool>,
 ) -> Result<Option<usize>, String> {
     let config = read_config(&state.config);
     let moved = {
@@ -1802,6 +1803,14 @@ pub async fn approve_board_plan(
         }
         let moved =
             board::flow::approve_plan(&mut db, id, OWNER_ACTOR).map_err(|err| err.to_string())?;
+        // The owner's auto mode goes with the yes (plan-auto-rights.md) — after it, so a release that fails leaves no
+        // draft in auto mode; still under this lock, so no card of the plan starts before it is set.
+        if moved.is_some()
+            && let Some(on) = auto_rights
+        {
+            board::flow::set_plan_auto_rights(&db, id, on, OWNER_ACTOR)
+                .map_err(|err| err.to_string())?;
+        }
         if moved.is_some()
             && let Some(plan) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())?
         {
@@ -1813,6 +1822,19 @@ pub async fn approve_board_plan(
         axiomata_core::plan_session::forget_plan_sessions(&state, id).await;
     }
     Ok(moved)
+}
+
+/// Switches the owner's auto mode of a plan (`docs/plans/plan-auto-rights.md`): its working sessions may then run
+/// any command and edit without asking; a push stays refused (patterns, not a sandbox). A session started afterwards gets the new rights; one that runs
+/// keeps what it was started with. `false` when there is no such plan or it is closed.
+#[tauri::command]
+pub fn set_plan_auto_rights(
+    state: State<'_, CoreState>,
+    id: i64,
+    on: bool,
+) -> Result<bool, String> {
+    let db = state.db_lock();
+    board::flow::set_plan_auto_rights(&db, id, on, OWNER_ACTOR).map_err(|err| err.to_string())
 }
 
 #[tauri::command]

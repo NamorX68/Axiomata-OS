@@ -1374,6 +1374,7 @@ mod tests {
     use crate::model::CardFields;
     use crate::{
         SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5, SCHEMA_SQL_V10,
+        SCHEMA_SQL_V11,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1408,6 +1409,9 @@ mod tests {
         // Every card read asks which open plan a card is the goal of.
         conn.execute_batch(SCHEMA_SQL_V10)
             .expect("plan origin schema");
+        // And every plan read whether its auto mode is on.
+        conn.execute_batch(SCHEMA_SQL_V11)
+            .expect("plan auto rights schema");
         conn
     }
 

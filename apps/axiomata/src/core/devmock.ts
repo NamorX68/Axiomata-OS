@@ -1656,6 +1656,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       if (!ideAgents.some((a) => a.id === agent.id)) ideAgents.push(agent);
       return { agent, card_id: args.cardId, role: "reviewer", engine_id: (args.engineId as string | null) ?? "mock-engine" } as T;
     }
+    case "set_plan_auto_rights": {
+      const plan = boardPlans.find((p) => p.id === Number(args.id));
+      if (!plan || plan.status === "closed") return false as T;
+      boardPlans = boardPlans.map((p) => (p.id === plan.id ? { ...p, auto_rights: Boolean(args.on) } : p));
+      return true as T;
+    }
     case "waiting_agents":
       // Two agents wait for the owner (plans/agent-waiting.md): one on card #4, one of the owner's own sessions.
       return [
@@ -2160,7 +2166,15 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
           ? {}
           : { auto_start_max: runByItself ? 64 : null, project_id: runByItself ? (plan.project_id ?? (args.projectId as number)) : plan.project_id };
       boardPlans = boardPlans.map((p) =>
-        p.id === plan.id ? { ...p, ...settings, status: "approved", approved_at: new Date().toISOString() } : p,
+        p.id === plan.id
+          ? {
+              ...p,
+              ...settings,
+              ...(typeof args.autoRights === "boolean" ? { auto_rights: args.autoRights } : {}),
+              status: "approved",
+              approved_at: new Date().toISOString(),
+            }
+          : p,
       );
       // The planner has had its say: its session goes, like the backend's `forget_plan_sessions`.
       for (let i = ideAgents.length - 1; i >= 0; i--) if (ideAgents[i].plan_id === plan.id) ideAgents.splice(i, 1);

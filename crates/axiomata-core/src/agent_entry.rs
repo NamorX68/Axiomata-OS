@@ -249,6 +249,9 @@ pub struct CardLaunch {
     pub card_id: i64,
     /// `Some` for a reviewer: who it judges and what the work is measured against.
     pub review: Option<ReviewTarget>,
+    /// The owner's auto mode of the card's plan was on when the session started (`docs/plans/plan-auto-rights.md`):
+    /// a worker may then run any command and edit without asking — never push. Never set for a reviewer.
+    pub auto_rights: bool,
 }
 
 /// What a reviewer needs to know beyond the card.
@@ -266,6 +269,15 @@ impl CardLaunch {
         CardLaunch {
             card_id,
             review: None,
+            auto_rights: false,
+        }
+    }
+
+    /// A session that works on a card of a plan in the owner's auto mode.
+    pub fn work_freely(card_id: i64) -> Self {
+        CardLaunch {
+            auto_rights: true,
+            ..CardLaunch::work(card_id)
         }
     }
 
@@ -277,6 +289,7 @@ impl CardLaunch {
                 worker: worker.to_owned(),
                 base: base.to_owned(),
             }),
+            auto_rights: false,
         }
     }
 }
@@ -338,6 +351,15 @@ impl Launch {
         match self {
             Launch::Card(card) => card.review.is_some(),
             Launch::Plan(_) => true,
+        }
+    }
+
+    /// A worker of a plan in the owner's auto mode: any command and any edit in its worktree without asking, never a
+    /// push (`docs/plans/plan-auto-rights.md`). A reviewer or a planner never is, whatever the plan says.
+    pub fn auto_rights(&self) -> bool {
+        match self {
+            Launch::Card(card) => card.auto_rights && card.review.is_none(),
+            Launch::Plan(_) => false,
         }
     }
 }
@@ -478,11 +500,25 @@ const CLAUDE_CARD_DENIED: &str = concat!(
     "Bash(git * --output*),Bash(git * --no-index*),Edit(.claude/**),Edit(.mcp.json)"
 );
 
+/// What a worker in the owner's auto mode is refused on top of [`CLAUDE_CARD_DENIED`]: the plain shell forms of
+/// writing the next session's configuration, of acting as the owner (the CLI without the agent's environment, the
+/// database), of the git hooks the main checkout shares, and of a push hidden in another command.
+const CLAUDE_AUTO_DENIED: &str = concat!(
+    "Bash(*.claude/*),Bash(*.mcp.json*),Bash(*opencode.json*),Bash(*.opencode/*),",
+    "Bash(*.git/hooks*),Bash(*core.hooksPath*),",
+    "Bash(axiomata-cli*),Bash(*/axiomata-cli *),Bash(*/axiomata-cli),Bash(*sqlite3*),Bash(*.axiomata/*),",
+    "Bash(*git push*)"
+);
+
 /// What an unattended Claude Code session may do without asking (A34): edits in its worktree, the server's own tools
 /// for its role — each one listed, so no wildcard grants a tool the role does not have — and what the role file adds
 /// that is narrow enough ([`grantable`]). Everything else stays a question in the pane. `bypassPermissions` is never
 /// used, not even by a role, and a push is refused outright.
-fn claude_card_options(role: Option<&Role>, review: bool) -> String {
+///
+/// In the owner's auto mode (`auto_rights`, a worker only) the mode is Claude Code's own `auto` instead of
+/// `acceptEdits`: its classifier lets what is safe through without asking and refuses what is risky — and the denied
+/// list still holds, so a push stays refused by two locks, not one (`docs/plans/plan-auto-rights.md`).
+fn claude_card_options(role: Option<&Role>, review: bool, auto_rights: bool) -> String {
     let mut allowed: Vec<String> = role_tools(role)
         .into_iter()
         .map(|tool| format!("mcp__{SERVER_NAME}__{tool}"))
@@ -500,6 +536,15 @@ fn claude_card_options(role: Option<&Role>, review: bool) -> String {
         (
             "--setting-sources user --strict-mcp-config ".to_owned(),
             format!("{CLAUDE_CARD_DENIED},Edit"),
+        )
+    } else if auto_rights {
+        // Claude Code's own classifier is the first lock; the denied list, widened by the plain forms of crossing the
+        // studio's lines, the second. Project settings and project MCP servers are not read either: a shell can write
+        // `.claude/settings.json` (hooks, its own rules) whatever the `Edit` denies say, and the next session would obey
+        // it. Patterns, not a sandbox (`docs/plans/plan-auto-rights.md`).
+        (
+            "--permission-mode auto --setting-sources user --strict-mcp-config ".to_owned(),
+            format!("{CLAUDE_CARD_DENIED},{CLAUDE_AUTO_DENIED}"),
         )
     } else {
         (
@@ -563,7 +608,10 @@ fn wire_claude_with(
             let path = channel.dir().join(CLAUDE_CONFIG_FILE);
             let mut arg = format!("--mcp-config {}", shell_quote(&path.display().to_string()));
             if let Some(launch) = card {
-                arg = format!("{arg} {}", claude_card_options(role, launch.read_only()));
+                arg = format!(
+                    "{arg} {}",
+                    claude_card_options(role, launch.read_only(), launch.auto_rights())
+                );
             }
             (
                 Some(arg),
@@ -995,11 +1043,47 @@ mod tests {
     }
 
     #[test]
+    fn in_the_owners_auto_mode_a_claude_worker_runs_in_auto_mode_and_still_may_not_push() {
+        let options = claude_card_options(Some(&axiomata_roster::default_role()), false, true);
+        assert!(options.contains("--permission-mode auto "), "{options}");
+        assert!(!options.contains("acceptEdits"), "{options}");
+        assert!(!options.contains("bypassPermissions"), "{options}");
+        assert!(options.contains("Bash(git push *)"), "{options}");
+        assert!(options.contains("Edit(.claude/**)"), "{options}");
+        assert!(
+            options.contains("--setting-sources user --strict-mcp-config"),
+            "{options}"
+        );
+        assert!(
+            options.contains("Bash(*sqlite3*)") && options.contains("Bash(*git push*)"),
+            "{options}"
+        );
+        // Without the mode, nothing of this changes.
+        let plain = claude_card_options(Some(&axiomata_roster::default_role()), false, false);
+        assert!(
+            !plain.contains("--setting-sources") && !plain.contains("sqlite3"),
+            "{plain}"
+        );
+        // A reviewer is read-only whatever the plan says.
+        let review = claude_card_options(Some(&axiomata_roster::reviewer_role()), true, true);
+        assert!(!review.contains("--permission-mode auto"), "{review}");
+        assert!(
+            !Launch::Card(CardLaunch {
+                auto_rights: true,
+                ..CardLaunch::review(4, "worker-3", "main")
+            })
+            .auto_rights()
+        );
+        assert!(Launch::Card(CardLaunch::work_freely(4)).auto_rights());
+        assert!(!Launch::Card(CardLaunch::work(4)).auto_rights());
+    }
+
+    #[test]
     fn a_claude_card_session_may_not_make_git_write_or_read_outside_its_checkout() {
-        let options = claude_card_options(Some(&axiomata_roster::default_role()), false);
+        let options = claude_card_options(Some(&axiomata_roster::default_role()), false, false);
         assert!(options.contains("Bash(git * --output*)"), "{options}");
         assert!(options.contains("Bash(git * --no-index*)"), "{options}");
-        let review = claude_card_options(Some(&axiomata_roster::reviewer_role()), true);
+        let review = claude_card_options(Some(&axiomata_roster::reviewer_role()), true, false);
         assert!(review.contains("Bash(git * --output*)"), "{review}");
     }
 

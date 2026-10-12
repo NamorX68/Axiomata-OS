@@ -503,6 +503,41 @@
    */
   let runByItself = $state(true);
 
+  /**
+   * The owner's auto mode (plan-auto-rights.md): offered with the release, once the owner has read the cards. Off by
+   * default — it is a yes to more than the cards. It can be switched later; a session started afterwards gets it.
+   */
+  let autoRights = $state(false);
+  // A yes to more than the cards never carries over to another plan shown in this pane.
+  let autoRightsFor: number | null = null;
+  $effect(() => {
+    const id = plan?.id ?? null;
+    if (id !== autoRightsFor) {
+      autoRightsFor = id;
+      autoRights = false;
+    }
+  });
+
+  async function switchAutoRights(box: HTMLInputElement): Promise<void> {
+    if (!plan) return;
+    const id = plan.id;
+    const on = box.checked;
+    const switched = await run(async () => {
+      if (!(await invoke<boolean>("set_plan_auto_rights", { id, on }))) {
+        throw new Error("The plan is closed or gone; its auto mode was not changed.");
+      }
+      await reload();
+      toast(
+        on
+          ? "Auto mode on: sessions started from now on may do anything but push."
+          : "Auto mode off: sessions started from now on ask again.",
+        "info",
+      );
+    });
+    // Refused (or busy): the box shows what the plan says, not the click.
+    if (!switched) box.checked = !on;
+  }
+
   async function approvePlan(): Promise<void> {
     if (!plan) return;
     const current = plan;
@@ -516,7 +551,9 @@
         id: current.id,
         runByItself: auto,
         projectId: project.id,
+        autoRights,
       });
+      autoRights = false;
       endPlanner(current.id);
       await Promise.all([reload(), refreshAgents()]);
       toast(
@@ -1080,6 +1117,15 @@
               : "The proposals move to the first open column; you start every card yourself."}
             Der Planer ist danach fertig.
           </span>
+          <label class="check">
+            <input type="checkbox" bind:checked={autoRights} />
+            Auto mode
+          </label>
+          <span class="muted">
+            {autoRights
+              ? "The plan's workers may run any command and edit without asking. A push, the CLI, the database and config files stay blocked in their plain forms — patterns, not a sandbox: switch it on for cards you have read. Reviewers stay read-only; taking the plan over stays yours."
+              : "The plan's workers ask before commands their role does not allow."}
+          </span>
           {#if !grilled}
             <span class="muted hint-line">
               This plan was not grilled: its goal has not been questioned yet. You can still release it.
@@ -1104,6 +1150,24 @@
           {:else if spend.day_cap_usd !== null}
             <span class="muted">Heute: ${spend.today.cost_usd.toFixed(2)} von ${spend.day_cap_usd.toFixed(2)}</span>
           {/if}
+        </div>
+      {/if}
+
+      {#if plan.status === "approved"}
+        <div class="approve">
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={plan.auto_rights === true}
+              disabled={busy}
+              onchange={(event) => void switchAutoRights(event.currentTarget)}
+            />
+            Auto mode
+          </label>
+          <span class="muted">
+            Anything but a push (blocked by patterns, not a sandbox), without asking. Applies to sessions started from now
+            on; running ones keep their rights — to stop one, stop its card.
+          </span>
         </div>
       {/if}
 

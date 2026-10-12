@@ -131,6 +131,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                     shell: shell.as_slice(),
                     tools: tools.as_slice(),
                     read_only: launch.read_only(),
+                    auto_rights: launch.auto_rights(),
                 }),
             )
             .await?;
@@ -282,7 +283,21 @@ pub(crate) fn card_launch(
             && !in_review
             && mine.is_some()
             && card.claimed_by == mine)
-            .then(|| agent_entry::CardLaunch::work(card_id));
+            .then(|| {
+                // The owner's auto mode is read now, at the start: a session that runs keeps what it started with.
+                let auto = card
+                    .plan_id
+                    .and_then(|plan_id| crate::board::flow::get_plan(db, plan_id).ok().flatten())
+                    // Only a released plan that still runs: a closed one's switch is history.
+                    .is_some_and(|plan| {
+                        plan.auto_rights && plan.status == crate::board::PlanStatus::Approved
+                    });
+                if auto {
+                    agent_entry::CardLaunch::work_freely(card_id)
+                } else {
+                    agent_entry::CardLaunch::work(card_id)
+                }
+            });
     }
     if !in_review || card.verified_by.is_some() {
         return None;

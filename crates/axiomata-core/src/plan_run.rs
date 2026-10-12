@@ -556,6 +556,7 @@ mod tests {
             updated_at: chrono::Utc::now(),
             approved_at: None,
             origin_card_id: None,
+            auto_rights: false,
         }
     }
 

@@ -76,6 +76,10 @@ pub const SCHEMA_SQL_V9: &str = include_str!("plan_grilled.sql");
 /// own constant and migration number (30), frozen once released.
 pub const SCHEMA_SQL_V10: &str = include_str!("plan_origin.sql");
 
+/// The board's **version 11** schema (`plan_auto_rights`: plans whose workers may do everything but push),
+/// `docs/plans/plan-auto-rights.md`. Its own constant and migration number (31), frozen once released.
+pub const SCHEMA_SQL_V11: &str = include_str!("plan_auto_rights.sql");
+
 /// Everything that can go wrong in the board core.
 ///
 /// Deliberately without a `NotFound` or `Conflict` variant: "no such row"

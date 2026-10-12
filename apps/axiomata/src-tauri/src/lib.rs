@@ -295,6 +295,7 @@ pub fn run() {
             commands::resume_plan,
             commands::open_card_sessions,
             commands::waiting_agents,
+            commands::set_plan_auto_rights,
             commands::list_card_events,
             commands::card_usage,
             commands::start_plan_session,
