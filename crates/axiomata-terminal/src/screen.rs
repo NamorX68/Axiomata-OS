@@ -10,11 +10,16 @@
 //! never feeds it, matching real terminals), the alternate screen itself
 //! (`CSI ?1049h`/`l` — what `vim`/`less`/`htop` use so they can "give the
 //! screen back" on exit), and bracketed-paste tracking (`CSI ?2004h`/`l`).
-//! Still no saved-cursor (`DECSC`/`DECRC`), scroll regions, or wide-char
-//! spacer cells (a width-2 character occupies one cell and simply advances
-//! the cursor by 2 — real terminals also blank the following cell, not
-//! implemented here). None of that is silently broken so much as not yet
-//! asked for by this checkpoint.
+//! Card #93 added the line- and cell-editing family a partial-redraw TUI
+//! relies on: scroll regions (`DECSTBM`, `CSI t;b r`) with scroll up/down
+//! (`SU`/`SD`), insert/delete line (`IL`/`DL`), insert/delete/erase
+//! character (`ICH`/`DCH`/`ECH`), next/previous line (`CNL`/`CPL`), and the
+//! `ESC 7`/`ESC 8` saved cursor plus `ESC D`/`E`/`M`. A raw capture of
+//! Claude Code's TUI showed it scrolls its transcript with `CSI 2;21r`
+//! `CSI nS` `CSI r` — dropping those left the old lines in place and drew
+//! the new ones over them. Still no wide-char spacer cells (a width-2
+//! character occupies one cell and simply advances the cursor by 2 — real
+//! terminals also blank the following cell, not implemented here).
 
 use std::collections::VecDeque;
 
@@ -120,6 +125,17 @@ struct SavedPrimary {
     active_hyperlink: bool,
 }
 
+/// What `ESC 7` (DECSC) keeps for a later `ESC 8` (DECRC): the cursor
+/// position, its pending-wrap state and the SGR pen — the parts of DECSC's
+/// state this model has at all (no charsets, no origin mode).
+#[derive(Clone, Copy)]
+struct SavedCursor {
+    row: usize,
+    col: usize,
+    wrap_pending: bool,
+    pen: Cell,
+}
+
 /// The screen: a fixed `rows`x`cols` grid of [`Cell`]s, a cursor position,
 /// and the "pen" (the SGR attributes any newly printed character gets).
 /// Implements [`vte::Perform`] directly — this struct *is* the terminal
@@ -193,6 +209,17 @@ pub struct Screen {
     /// mid-hyperlink `CSI 0 m` would have silently (and wrongly) turned the
     /// rest of that same link's text back into a non-hyperlink cell.
     active_hyperlink: bool,
+    /// First row of the scroll region (`DECSTBM`), 0-indexed, inclusive.
+    /// A line feed on [`Self::scroll_bottom`] and every scroll command move
+    /// only the rows between the two margins; the rows outside stay put —
+    /// that is how a TUI keeps a header and an input box fixed while its
+    /// transcript scrolls between them.
+    scroll_top: usize,
+    /// Last row of the scroll region, 0-indexed, inclusive. `rows - 1`
+    /// whenever no region is set.
+    scroll_bottom: usize,
+    /// Set by `ESC 7`, read by `ESC 8` — see [`SavedCursor`].
+    saved_cursor: Option<SavedCursor>,
 }
 
 impl Screen {
@@ -216,6 +243,9 @@ impl Screen {
             scrollback_limit: SCROLLBACK_LIMIT,
             bell_pending: false,
             active_hyperlink: false,
+            scroll_top: 0,
+            scroll_bottom: rows - 1,
+            saved_cursor: None,
         }
     }
 
@@ -265,6 +295,10 @@ impl Screen {
         self.cursor_row = self.cursor_row.min(rows - 1);
         self.cursor_col = self.cursor_col.min(cols - 1);
         self.wrap_pending = false;
+        // Margins set for the old height may not fit the new one; like
+        // xterm, a resize resets them and the program sets them again.
+        self.scroll_top = 0;
+        self.scroll_bottom = rows - 1;
     }
 
     /// `(rows, cols)`.
@@ -444,6 +478,9 @@ impl Screen {
         self.pen = saved.pen;
         self.active_hyperlink = saved.active_hyperlink;
         self.wrap_pending = saved.wrap_pending;
+        // The scroll region is left as it is, like xterm: a well-behaved
+        // program resets it (`CSI r`) on its way out, and `resize` resets it
+        // anyway.
         self.in_alt_screen = false;
     }
 
@@ -465,37 +502,171 @@ impl Screen {
         }
     }
 
-    /// Shifts every row up by one, dropping the top line and appending a
-    /// blank one at the bottom — the bare minimum "content keeps flowing"
-    /// behaviour a shell needs once output exceeds one screen. Not a real
-    /// scrollback (the dropped line is gone, not just off-screen) — that's
-    /// Checkpoint 4.
-    fn scroll_up(&mut self) {
-        let dropped = self.grid.remove(0);
-        // The alternate screen never feeds scrollback (see `scrollback`'s
-        // own doc comment) — its dropped line is just discarded.
-        if !self.in_alt_screen {
-            self.scrollback.push_back(dropped);
-            // A `while` (not `if`) so this stays correct even if a future
-            // caller shrinks `scrollback_limit` on a `Screen` that already
-            // holds more lines than the new cap allows — not reachable
-            // today (the limit is only ever set once, at construction via
-            // `with_scrollback_limit`), but cheap to keep robust.
-            while self.scrollback.len() > self.scrollback_limit {
-                self.scrollback.pop_front();
+    /// Scrolls the scroll region up by `n` lines: its top lines drop out,
+    /// blank ones enter at its bottom, rows outside the region stay put.
+    /// Dropped lines go to scrollback only from the primary screen and only
+    /// when the region starts at the top row (xterm's rule) — a line leaving
+    /// a region in the middle of the screen was never "above" anything.
+    fn scroll_up(&mut self, n: usize) {
+        let (top, bottom) = (self.scroll_top, self.scroll_bottom);
+        let feeds_scrollback = top == 0 && !self.in_alt_screen;
+        for _ in 0..n.min(bottom - top + 1) {
+            let dropped = self.grid.remove(top);
+            if feeds_scrollback {
+                self.scrollback.push_back(dropped);
+                // A `while` (not `if`) so this stays correct even if a
+                // future caller shrinks `scrollback_limit` on a `Screen`
+                // that already holds more lines than the new cap allows.
+                while self.scrollback.len() > self.scrollback_limit {
+                    self.scrollback.pop_front();
+                }
             }
+            self.grid.insert(bottom, vec![self.blank_cell(); self.cols]);
         }
-        self.grid.push(vec![self.blank_cell(); self.cols]);
     }
 
-    /// Moves the cursor down one row, scrolling the screen if it was
-    /// already on the last row.
+    /// Scrolls the scroll region down by `n` lines: its bottom lines are
+    /// discarded, blank ones enter at its top. Never touches scrollback.
+    fn scroll_down(&mut self, n: usize) {
+        let (top, bottom) = (self.scroll_top, self.scroll_bottom);
+        for _ in 0..n.min(bottom - top + 1) {
+            self.grid.remove(bottom);
+            self.grid.insert(top, vec![self.blank_cell(); self.cols]);
+        }
+    }
+
+    /// Moves the cursor down one row, scrolling the region if it was on
+    /// the region's bottom margin. Below the region it just moves down and
+    /// stops at the last row — only the region scrolls, never the rows
+    /// outside it.
     fn line_feed(&mut self) {
-        if self.cursor_row + 1 >= self.rows {
-            self.scroll_up();
-        } else {
+        if self.cursor_row == self.scroll_bottom {
+            self.scroll_up(1);
+        } else if self.cursor_row + 1 < self.rows {
             self.cursor_row += 1;
         }
+    }
+
+    /// `ESC M` (RI): the mirror of [`Self::line_feed`] — up one row, or
+    /// scroll the region down when already on its top margin.
+    fn reverse_index(&mut self) {
+        if self.cursor_row == self.scroll_top {
+            self.scroll_down(1);
+        } else {
+            self.cursor_row = self.cursor_row.saturating_sub(1);
+        }
+    }
+
+    /// CUU/CPL: up `n` rows, stopping at the top margin when the cursor
+    /// starts inside the region (at row 0 otherwise), like xterm.
+    fn cursor_up(&mut self, n: usize) {
+        let limit = if self.cursor_row >= self.scroll_top {
+            self.scroll_top
+        } else {
+            0
+        };
+        self.cursor_row = self.cursor_row.saturating_sub(n).max(limit);
+    }
+
+    /// CUD/CNL: down `n` rows, stopping at the bottom margin when the
+    /// cursor starts inside the region (at the last row otherwise).
+    fn cursor_down(&mut self, n: usize) {
+        let limit = if self.cursor_row <= self.scroll_bottom {
+            self.scroll_bottom
+        } else {
+            self.rows - 1
+        };
+        self.cursor_row = (self.cursor_row + n).min(limit);
+    }
+
+    /// DECSTBM (`CSI top;bottom r`, 1-indexed, both optional): sets the
+    /// scroll region and homes the cursor. A region of fewer than two rows
+    /// is ignored, as in xterm; a bottom past the screen is clamped.
+    fn set_scroll_region(&mut self, params: &Params) {
+        let (top, bottom) = Self::param_pair_or(params, 0);
+        let top = if top == 0 { 1 } else { top as usize };
+        let bottom = if bottom == 0 {
+            self.rows
+        } else {
+            (bottom as usize).min(self.rows)
+        };
+        if top >= bottom {
+            return;
+        }
+        self.scroll_top = top - 1;
+        self.scroll_bottom = bottom - 1;
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+    }
+
+    /// IL (`CSI n L`): inserts `n` blank lines at the cursor row, pushing
+    /// the rows below it down within the region (the bottom ones drop out).
+    /// Outside the region it does nothing, as in xterm.
+    fn insert_lines(&mut self, n: usize) {
+        if !(self.scroll_top..=self.scroll_bottom).contains(&self.cursor_row) {
+            return;
+        }
+        for _ in 0..n.min(self.scroll_bottom - self.cursor_row + 1) {
+            self.grid.remove(self.scroll_bottom);
+            self.grid
+                .insert(self.cursor_row, vec![self.blank_cell(); self.cols]);
+        }
+        self.cursor_col = 0;
+    }
+
+    /// DL (`CSI n M`): deletes `n` lines at the cursor row, pulling the
+    /// rows below it up within the region (blank lines enter at its bottom).
+    fn delete_lines(&mut self, n: usize) {
+        if !(self.scroll_top..=self.scroll_bottom).contains(&self.cursor_row) {
+            return;
+        }
+        for _ in 0..n.min(self.scroll_bottom - self.cursor_row + 1) {
+            self.grid.remove(self.cursor_row);
+            self.grid
+                .insert(self.scroll_bottom, vec![self.blank_cell(); self.cols]);
+        }
+        self.cursor_col = 0;
+    }
+
+    /// ICH (`CSI n @`): shifts the cells from the cursor on right by `n`,
+    /// blanking the gap; cells pushed past the right edge are lost.
+    fn insert_chars(&mut self, n: usize) {
+        let (row, col) = (self.cursor_row, self.cursor_col);
+        let n = n.min(self.cols - col);
+        self.grid[row][col..].rotate_right(n);
+        self.clear_range(row, col, col + n);
+    }
+
+    /// DCH (`CSI n P`): deletes `n` cells at the cursor, shifting the rest
+    /// of the line left; blank cells enter at the right edge.
+    fn delete_chars(&mut self, n: usize) {
+        let (row, col) = (self.cursor_row, self.cursor_col);
+        let n = n.min(self.cols - col);
+        self.grid[row][col..].rotate_left(n);
+        self.clear_range(row, self.cols - n, self.cols);
+    }
+
+    /// ECH (`CSI n X`): blanks `n` cells from the cursor on, without
+    /// shifting anything.
+    fn erase_chars(&mut self, n: usize) {
+        let (row, col) = (self.cursor_row, self.cursor_col);
+        self.clear_range(row, col, (col + n).min(self.cols));
+    }
+
+    /// `ESC 8` (DECRC): back to what the last `ESC 7` saved — or, with
+    /// nothing saved, to the home position with a default pen (xterm).
+    fn restore_cursor(&mut self) {
+        let saved = self.saved_cursor.unwrap_or(SavedCursor {
+            row: 0,
+            col: 0,
+            wrap_pending: false,
+            pen: Cell::default(),
+        });
+        // The screen may have shrunk since the save.
+        self.cursor_row = saved.row.min(self.rows - 1);
+        self.cursor_col = saved.col.min(self.cols - 1);
+        self.wrap_pending = saved.wrap_pending;
+        self.pen = saved.pen;
     }
 
     /// An erased cell takes the *current* background colour, like a real
@@ -780,14 +951,16 @@ impl Perform for Screen {
         }
         self.wrap_pending = false;
         match action {
-            'A' => {
-                self.cursor_row = self
-                    .cursor_row
-                    .saturating_sub(Self::first_param_or(params, 1) as usize)
+            'A' => self.cursor_up(Self::first_param_or(params, 1) as usize),
+            'B' => self.cursor_down(Self::first_param_or(params, 1) as usize),
+            // CNL/CPL — down/up `n` lines and to column 1.
+            'E' => {
+                self.cursor_down(Self::first_param_or(params, 1) as usize);
+                self.cursor_col = 0;
             }
-            'B' => {
-                self.cursor_row =
-                    (self.cursor_row + Self::first_param_or(params, 1) as usize).min(self.rows - 1)
+            'F' => {
+                self.cursor_up(Self::first_param_or(params, 1) as usize);
+                self.cursor_col = 0;
             }
             'C' => {
                 self.cursor_col =
@@ -834,11 +1007,53 @@ impl Perform for Screen {
             'J' => self.erase_in_display(Self::first_param_or(params, 0)),
             'K' => self.erase_in_line(Self::first_param_or(params, 0)),
             'm' => self.apply_sgr(params),
-            // Scroll regions and insert/delete line/char are still out of
-            // scope (private-mode `h`/`l` — cursor visibility, bracketed
-            // paste, alternate screen — is handled above, before this
-            // match) — silently no-op rather than corrupting the grid on
-            // an unrecognized sequence.
+            'r' => self.set_scroll_region(params),
+            'S' => self.scroll_up(Self::first_param_or(params, 1) as usize),
+            // `CSI T` with more than one parameter is xterm's mouse
+            // highlight tracking, not SD — not modeled, so left alone.
+            'T' if params.len() <= 1 => self.scroll_down(Self::first_param_or(params, 1) as usize),
+            'L' => self.insert_lines(Self::first_param_or(params, 1) as usize),
+            'M' => self.delete_lines(Self::first_param_or(params, 1) as usize),
+            '@' => self.insert_chars(Self::first_param_or(params, 1) as usize),
+            'P' => self.delete_chars(Self::first_param_or(params, 1) as usize),
+            'X' => self.erase_chars(Self::first_param_or(params, 1) as usize),
+            // Anything else (device queries, tab stops, ANSI modes, …) is a
+            // silent no-op rather than a guess that could corrupt the grid.
+            _ => {}
+        }
+    }
+
+    /// The plain `ESC <byte>` sequences a partial-redraw TUI uses: save and
+    /// restore the cursor (`7`/`8`), index (`D`), next line (`E`) and
+    /// reverse index (`M`). One with an intermediate byte (`ESC ( B`, a
+    /// charset designation) or any other final byte is ignored.
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        if !intermediates.is_empty() {
+            return;
+        }
+        match byte {
+            b'7' => {
+                self.saved_cursor = Some(SavedCursor {
+                    row: self.cursor_row,
+                    col: self.cursor_col,
+                    wrap_pending: self.wrap_pending,
+                    pen: self.pen,
+                });
+            }
+            b'8' => self.restore_cursor(),
+            b'D' => {
+                self.wrap_pending = false;
+                self.line_feed();
+            }
+            b'E' => {
+                self.wrap_pending = false;
+                self.cursor_col = 0;
+                self.line_feed();
+            }
+            b'M' => {
+                self.wrap_pending = false;
+                self.reverse_index();
+            }
             _ => {}
         }
     }
@@ -1728,5 +1943,286 @@ mod tests {
             !screen.cell(0, 0).underline,
             "CSI > 4 m must not be misread as SGR 4 (underline)"
         );
+    }
+
+    /// Feeds `bytes` into a fresh `rows`x`cols` screen whose rows are first
+    /// filled with the letters of `fill` (one letter per row, repeated
+    /// across the row), so a test can see where each original row ended up.
+    fn screen_with_rows(rows: u16, cols: u16, fill: &str, bytes: &[u8]) -> Screen {
+        let mut screen = Screen::new(rows, cols);
+        let mut parser = vte::Parser::new();
+        for (row, letter) in fill.chars().enumerate() {
+            let line: String = std::iter::repeat_n(letter, cols as usize).collect();
+            parser.advance(&mut screen, format!("\x1b[{};1H{line}", row + 1).as_bytes());
+        }
+        parser.advance(&mut screen, bytes);
+        screen
+    }
+
+    fn first_letters(screen: &Screen) -> String {
+        (0..screen.size().0)
+            .map(|row| screen.cell(row, 0).ch)
+            .collect()
+    }
+
+    #[test]
+    fn scroll_up_inside_a_region_moves_only_the_rows_between_the_margins() {
+        // Claude Code's own transcript scroll, captured raw (card #93):
+        // `CSI 2;21r CSI nS CSI r` — scroll the middle, keep the header and
+        // the input box below it where they are.
+        let screen = screen_with_rows(5, 2, "abcde", b"\x1b[2;4r\x1b[1S\x1b[r");
+        assert_eq!(first_letters(&screen), "acd e");
+    }
+
+    #[test]
+    fn a_line_feed_on_the_bottom_margin_scrolls_the_region_and_nothing_else() {
+        let screen = screen_with_rows(5, 2, "abcde", b"\x1b[2;4r\x1b[4;1H\n");
+        assert_eq!(first_letters(&screen), "acd e");
+        assert_eq!(screen.cursor(), (3, 0), "the cursor stays on the margin");
+    }
+
+    #[test]
+    fn a_line_feed_below_the_region_moves_down_but_never_scrolls() {
+        let screen = screen_with_rows(4, 2, "abcd", b"\x1b[1;2r\x1b[4;1H\n");
+        assert_eq!(first_letters(&screen), "abcd");
+        assert_eq!(screen.cursor(), (3, 0));
+    }
+
+    #[test]
+    fn only_a_region_starting_at_the_top_row_feeds_scrollback() {
+        let middle = screen_with_rows(4, 2, "abcd", b"\x1b[2;4r\x1b[2S");
+        assert_eq!(middle.scrollback_len(), 0);
+
+        let top = screen_with_rows(4, 2, "abcd", b"\x1b[1;3r\x1b[2S");
+        assert_eq!(first_letters(&top), "c  d");
+        assert_eq!(top.scrollback_len(), 2);
+    }
+
+    #[test]
+    fn decstbm_homes_the_cursor_and_ignores_a_region_under_two_rows() {
+        let screen = screen_with_rows(4, 2, "abcd", b"\x1b[3;2H\x1b[2;3r");
+        assert_eq!(screen.cursor(), (0, 0));
+
+        // `CSI 3;3r` is no region at all, so the next scroll still moves
+        // the whole screen.
+        let ignored = screen_with_rows(3, 2, "abc", b"\x1b[3;3r\x1b[1S");
+        assert_eq!(first_letters(&ignored), "bc ");
+    }
+
+    #[test]
+    fn a_bottom_margin_past_the_screen_is_clamped() {
+        let screen = screen_with_rows(3, 2, "abc", b"\x1b[2;99r\x1b[1S");
+        assert_eq!(first_letters(&screen), "ac ");
+    }
+
+    #[test]
+    fn scroll_down_inside_a_region_inserts_blank_lines_at_its_top() {
+        let screen = screen_with_rows(5, 2, "abcde", b"\x1b[2;4r\x1b[1T");
+        assert_eq!(first_letters(&screen), "a bce");
+    }
+
+    #[test]
+    fn csi_t_with_several_parameters_is_not_scroll_down() {
+        let screen = screen_with_rows(3, 2, "abc", b"\x1b[1;1;1;1;1T");
+        assert_eq!(first_letters(&screen), "abc");
+    }
+
+    #[test]
+    fn a_scroll_larger_than_the_region_only_blanks_the_region() {
+        let screen = screen_with_rows(4, 2, "abcd", b"\x1b[2;3r\x1b[9S");
+        assert_eq!(first_letters(&screen), "a  d");
+    }
+
+    #[test]
+    fn insert_and_delete_lines_stay_inside_the_region() {
+        let inserted = screen_with_rows(5, 2, "abcde", b"\x1b[1;4r\x1b[2;2H\x1b[1L");
+        assert_eq!(first_letters(&inserted), "a bce");
+        assert_eq!(inserted.cursor(), (1, 0), "IL moves the cursor to column 1");
+
+        let deleted = screen_with_rows(5, 2, "abcde", b"\x1b[1;4r\x1b[2;1H\x1b[2M");
+        assert_eq!(first_letters(&deleted), "ad  e");
+    }
+
+    #[test]
+    fn insert_lines_outside_the_region_does_nothing() {
+        let screen = screen_with_rows(4, 2, "abcd", b"\x1b[1;2r\x1b[4;1H\x1b[1L");
+        assert_eq!(first_letters(&screen), "abcd");
+    }
+
+    #[test]
+    fn insert_delete_and_erase_characters_edit_the_current_line() {
+        let mut screen = Screen::new(1, 6);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"abcdef\x1b[3G\x1b[2@");
+        assert_eq!(screen.line_text(0), "ab  cd");
+
+        parser.advance(&mut screen, b"\x1b[1;1Habcdef\x1b[2G\x1b[2P");
+        assert_eq!(screen.line_text(0), "adef  ");
+
+        parser.advance(&mut screen, b"\x1b[1;1Habcdef\x1b[2G\x1b[3X");
+        assert_eq!(screen.line_text(0), "a   ef");
+        assert_eq!(screen.cursor(), (0, 1), "ECH does not move the cursor");
+    }
+
+    #[test]
+    fn character_edits_never_run_past_the_right_edge() {
+        let mut screen = Screen::new(1, 4);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"abcd\x1b[3G\x1b[99@");
+        assert_eq!(screen.line_text(0), "ab  ");
+        parser.advance(&mut screen, b"\x1b[1;1Habcd\x1b[3G\x1b[99P");
+        assert_eq!(screen.line_text(0), "ab  ");
+        parser.advance(&mut screen, b"\x1b[1;1Habcd\x1b[3G\x1b[99X");
+        assert_eq!(screen.line_text(0), "ab  ");
+    }
+
+    #[test]
+    fn next_and_previous_line_move_to_column_one() {
+        let mut screen = Screen::new(5, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[2;4H\x1b[2E");
+        assert_eq!(screen.cursor(), (3, 0));
+        parser.advance(&mut screen, b"\x1b[3G\x1b[F");
+        assert_eq!(screen.cursor(), (2, 0));
+    }
+
+    #[test]
+    fn cursor_up_and_down_stop_at_the_margins_from_inside_the_region() {
+        let mut screen = Screen::new(6, 2);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[2;4r\x1b[3;1H\x1b[9A");
+        assert_eq!(screen.cursor(), (1, 0));
+        parser.advance(&mut screen, b"\x1b[9B");
+        assert_eq!(screen.cursor(), (3, 0));
+        // From below the region, the screen's own edges apply.
+        parser.advance(&mut screen, b"\x1b[5;1H\x1b[9B");
+        assert_eq!(screen.cursor(), (5, 0));
+    }
+
+    #[test]
+    fn esc_7_and_esc_8_save_and_restore_cursor_and_pen() {
+        let mut screen = Screen::new(3, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(
+            &mut screen,
+            b"\x1b[2;3H\x1b[31m\x1b7\x1b[0m\x1b[1;1Hx\x1b8y",
+        );
+        assert_eq!(screen.cursor(), (1, 3));
+        let restored = screen.cell(1, 2);
+        assert_eq!(restored.ch, 'y');
+        assert_eq!(restored.fg, Color::Indexed { index: 1 });
+        assert_eq!(
+            screen.cell(0, 0).fg,
+            Color::Default,
+            "x was printed after the reset"
+        );
+    }
+
+    #[test]
+    fn esc_8_without_a_save_goes_home_with_a_default_pen() {
+        let mut screen = Screen::new(3, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[3;3H\x1b[1m\x1b8z");
+        assert_eq!(screen.cell(0, 0).ch, 'z');
+        assert!(!screen.cell(0, 0).bold);
+    }
+
+    #[test]
+    fn esc_8_clamps_a_cursor_saved_on_a_larger_screen() {
+        let mut screen = Screen::new(5, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[5;5H\x1b7");
+        screen.resize(2, 2);
+        parser.advance(&mut screen, b"\x1b8");
+        assert_eq!(screen.cursor(), (1, 1));
+    }
+
+    #[test]
+    fn reverse_index_on_the_top_margin_scrolls_the_region_down() {
+        let screen = screen_with_rows(4, 2, "abcd", b"\x1b[2;3r\x1b[2;1H\x1bM");
+        assert_eq!(first_letters(&screen), "a bd");
+        let moved = screen_with_rows(4, 2, "abcd", b"\x1b[3;1H\x1bM");
+        assert_eq!(moved.cursor(), (1, 0));
+        assert_eq!(first_letters(&moved), "abcd");
+    }
+
+    #[test]
+    fn esc_d_and_esc_e_are_line_feeds() {
+        let mut screen = Screen::new(3, 5);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[1;3H\x1bD");
+        assert_eq!(screen.cursor(), (1, 2), "IND keeps the column");
+        parser.advance(&mut screen, b"\x1bE");
+        assert_eq!(screen.cursor(), (2, 0), "NEL goes to column 1");
+    }
+
+    #[test]
+    fn a_charset_designation_prints_nothing() {
+        // `ESC ( B` (select ASCII) arrives in every Claude Code session.
+        let mut screen = Screen::new(1, 3);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b(Ba");
+        assert_eq!(screen.line_text(0), "a  ");
+    }
+
+    #[test]
+    fn resize_resets_the_scroll_region() {
+        let mut screen = screen_with_rows(4, 2, "abcd", b"\x1b[2;3r");
+        screen.resize(4, 2);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[1S");
+        assert_eq!(first_letters(&screen), "bcd ");
+    }
+
+    #[test]
+    fn a_pending_wrap_on_the_bottom_margin_scrolls_the_region_once() {
+        let mut screen = Screen::new(4, 2);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[1;3r\x1b[1;1Ha\r\nb\r\ncdX");
+        assert_eq!(screen.line_text(1), "cd");
+        assert_eq!(screen.line_text(2), "X ");
+        assert_eq!(screen.cursor(), (2, 1));
+    }
+
+    #[test]
+    fn scrolling_on_the_alternate_screen_never_feeds_scrollback() {
+        let screen = screen_with_rows(3, 2, "", b"\x1b[?1049habc\x1b[1;2r\x1b[2S");
+        assert_eq!(screen.scrollback_len(), 0);
+    }
+
+    #[test]
+    fn a_zero_count_acts_as_one() {
+        let scrolled = screen_with_rows(3, 2, "abc", b"\x1b[0S");
+        assert_eq!(first_letters(&scrolled), "bc ");
+        let inserted = screen_with_rows(3, 2, "abc", b"\x1b[1;1H\x1b[0L");
+        assert_eq!(first_letters(&inserted), " ab");
+        let deleted = screen_with_rows(3, 2, "abc", b"\x1b[1;1H\x1b[0M");
+        assert_eq!(first_letters(&deleted), "bc ");
+    }
+
+    #[test]
+    fn an_ignored_scroll_region_does_not_move_the_cursor() {
+        let screen = screen_with_rows(3, 3, "", b"\x1b[2;3H\x1b[2;2r");
+        assert_eq!(screen.cursor(), (1, 2));
+    }
+
+    #[test]
+    fn character_edits_at_the_last_column_touch_one_cell() {
+        let mut screen = Screen::new(1, 3);
+        let mut parser = vte::Parser::new();
+        // `abc` leaves a pending wrap on the last column.
+        parser.advance(&mut screen, b"abc\x1b[@");
+        assert_eq!(screen.line_text(0), "ab ");
+        parser.advance(&mut screen, b"\x1b[1;1Habc\x1b[P");
+        assert_eq!(screen.line_text(0), "ab ");
+    }
+
+    #[test]
+    fn a_region_survives_an_alternate_screen_round_trip_with_a_resize() {
+        let mut screen = screen_with_rows(6, 2, "", b"\x1b[2;5r\x1b[?1049h");
+        screen.resize(3, 2);
+        let mut parser = vte::Parser::new();
+        parser.advance(&mut screen, b"\x1b[?1049l\x1b[3;1H\n\n\x1b[5S\x1bM\x1b[9L");
+        assert_eq!(screen.size(), (3, 2));
     }
 }
