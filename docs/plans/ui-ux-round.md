@@ -143,6 +143,18 @@ der Spalte fliegen (Zähler pulst), sonst glimmt sie kurz; wer das Brett neu öf
 erledigten Karten einmal nachglimmen (`kanbanSeen` in den Einstellungen). Mock: Karte #4 hat eine offene Sitzung, der
 Plan ein Projekt mit Farbe. Karten-Look selbst unverändert gelassen.
 
+**Stand UX6b (2026-10-12, gebaut, Abnahme offen):** Agenten-Karten (`ide/AgentsPanel.svelte`) als Platte mit
+Lichtkante; der dicke Harness-Rand links entfällt (die Harness-Farbe steht im Avatar-Ring), eine arbeitende Karte
+glimmt und atmet, eine wartende bekommt den Warnrahmen. Flow-Graph (`ide/panes/GraphPane.svelte`): Knoten mit
+laufender Sitzung (Arbeiter auf der Karte, Prüfer auf ihrer Review-Stufe) bekommen eine Glut-Kontur, die atmet (nur die
+Kontur, nicht die Fläche), ihr Lebenspunkt ist Glut statt Grün; auf jeder Kante in einen solchen Knoten läuft ein
+Glutpuls (`pathLength` + Strichversatz), bei Calm/Off steht er als stille Glutlinie; geprüfte/fertige Knoten kühlen ab
+(Band und Titel gedämpft). Projektmarke am Projekteintrag als Hex statt Punkt (Studio-Kopf, Agentenpane und Team trugen
+die Projektfarbe schon seit #70). Planungsspalte: „New plan …“ neutral mit Plus statt orangener Balken, der offene Plan
+neutral ausgewählt (Akzentregel). Hinweise im Studio waren schon einzeilig (UX2). Eigene Entscheidung: Avatar-Ring
+bleibt Harness-Farbe (G19 nennt den Avatar-Rand für die Projektfarbe — innerhalb eines Projekts sagt sie aber nichts,
+und die Harness-Unterscheidung CC/OC ginge verloren).
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

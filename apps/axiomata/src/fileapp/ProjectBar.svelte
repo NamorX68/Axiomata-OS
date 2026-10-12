@@ -258,11 +258,12 @@
   }
 
   /* A mark for orientation, small on purpose: it must never compete with the accent. */
+  /* The project's mark in its colour (G19): a hexagon, the system's shape. */
   .dot {
     flex: none;
-    width: calc(7px * var(--ax-ui-scale));
-    height: calc(7px * var(--ax-ui-scale));
-    border-radius: var(--ax-radius-pill);
+    width: calc(9px * var(--ax-ui-scale));
+    height: calc(10px * var(--ax-ui-scale));
+    clip-path: var(--ax-hex-clip);
   }
 
   .entry-name {

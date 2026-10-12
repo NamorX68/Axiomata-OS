@@ -57,6 +57,14 @@
   const reviewedNow = $derived(
     new Set($session.agents.filter(isReviewer).map((a) => a.card_id).filter((id) => id != null)),
   );
+  /** The nodes a session works on right now, by their key in an edge (a review's key is minus its card's id): the
+   *  lines into them carry the ember's pulse (UX6b). */
+  const workingKeys = $derived(
+    new Set<number>([
+      ...[...livingCards].filter((id): id is number => typeof id === "number"),
+      ...[...reviewedNow].filter((id): id is number => typeof id === "number").map((id) => -id),
+    ]),
+  );
 
   // A session that waits for the owner (a question, a permission) turns its node into a "Rückfrage": nobody else will
   // answer it.
@@ -217,6 +225,10 @@
             class:lit={selectedId !== null && (selectedId === Math.abs(edge.from) || selectedId === Math.abs(edge.to))}
             marker-end="url(#arrow)"
           />
+          {#if workingKeys.has(edge.to)}
+            <!-- Work flowing in: a short ember running along the line, again and again. -->
+            <path d={edge.path} class="pulse" pathLength="100" />
+          {/if}
         {/each}
         {#if graph.start}
           <g class="start" transform="translate({graph.start.x} {graph.start.y})" aria-label="Start des Plans">
@@ -244,6 +256,7 @@
                 ? reviewToneOf(node.card.state)
                 : toneOf(node.card.state)}"
             class:review-node={review}
+            class:working={workingKeys.has(node.key)}
             class:proposed={node.card.state === "proposed"}
             class:selected={selectedId === node.card.id}
             transform="translate({node.x} {node.y})"
@@ -504,8 +517,57 @@
   .node .dot {
     fill: var(--tone);
   }
+  /* A node a session works on (UX6b): its outline takes the glow and breathes, its live dot too — the accent rule's
+     "alive". The glow is a stroke, not a filter: WebKit does not reliably draw CSS filters on SVG children. */
   .node .live {
-    fill: var(--ax-success);
+    fill: var(--ax-glow);
+    animation: var(--ax-anim-breathe);
+  }
+  .node.working .tile {
+    stroke: var(--ax-glow);
+    stroke-width: 2;
+    /* Only the outline breathes — the shared breath fades a whole element, and the tile's face must stay. */
+    animation: outline-breathe var(--ax-dur-breath) var(--ax-ease) infinite;
+  }
+  :global(:root[data-motion="calm"]) .node.working .tile,
+  :global(:root[data-motion="off"]) .node.working .tile {
+    animation: none;
+  }
+  @keyframes outline-breathe {
+    50% {
+      stroke-opacity: 0.45;
+    }
+  }
+  /* A card checked and done cools down: its band and title step back, the work ahead stands out. */
+  .node.done .band {
+    opacity: 0.45;
+  }
+  .node.done .title {
+    fill: var(--ax-text-muted);
+  }
+  /* The ember running along a line into a node at work. At Calm and Off the run stops and the line just glows (G3). */
+  .pulse {
+    fill: none;
+    stroke: var(--ax-glow);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-dasharray: 9 91;
+    animation: flow-in 1.8s linear infinite;
+  }
+  :global(:root[data-motion="calm"]) .pulse,
+  :global(:root[data-motion="off"]) .pulse {
+    stroke-dasharray: none;
+    stroke-width: 1.5;
+    opacity: 0.7;
+    animation: none;
+  }
+  @keyframes flow-in {
+    from {
+      stroke-dashoffset: 100;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
   }
   .detail {
     flex: none;

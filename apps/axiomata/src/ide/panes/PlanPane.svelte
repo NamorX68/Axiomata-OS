@@ -63,6 +63,7 @@
   import ProposalEditor from "./ProposalEditor.svelte";
   import SessionPicker from "./SessionPicker.svelte";
   import { engineCatalog, refreshEngines } from "../rosterStore";
+  import Icon from "../../ui/Icon.svelte";
 
   let { project, visible }: { project: IdeProject; tabId: string; visible: boolean } = $props();
 
@@ -706,8 +707,9 @@
         {#each boards as board (board.id)}<option value={board.id}>{board.name}</option>{/each}
       </select>
     {/if}
-    <button class="ax-btn primary" type="button" disabled={boardId === null} onclick={() => (creating = !creating)}>
-      New plan …
+    <!-- A quiet way in (UX6b): the column's lasting orange belongs to what works, not to a button always there. -->
+    <button class="ax-btn new-plan-btn" type="button" disabled={boardId === null} onclick={() => (creating = !creating)}>
+      <Icon name="plus" size="sm" />New plan …
     </button>
     {#if creating}
       <form
@@ -1121,6 +1123,12 @@
     border-right: 1px solid var(--ax-border);
     overflow-y: auto;
   }
+  .new-plan-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ax-space-1);
+  }
   .plans ul {
     margin: 0;
     padding: 0;
@@ -1162,9 +1170,10 @@
     overflow: hidden;
     overflow-wrap: anywhere;
   }
+  /* The open plan is chosen, not alive: neutral, like every selection since UX2 (the accent rule). */
   .plans li button.on {
-    background: var(--ax-accent-muted);
-    border-color: var(--ax-accent);
+    background: var(--ax-selected-bg);
+    border-color: var(--ax-border-strong);
   }
   .grow {
     flex: 1;

@@ -333,29 +333,32 @@
     gap: var(--ax-space-3);
   }
 
-  /* A card per agent: the harness's colour on its edge, the step it is on, how far it is. */
+  /* A card per agent (UX6b): a raised plate with the light edge; the harness's colour lives in the avatar's ring, and
+     a card whose agent works glows and breathes — the accent rule's "alive". */
   .card {
     position: relative;
     display: block;
     padding: 0;
     border: 1px solid var(--ax-border);
-    border-left: calc(3px * var(--ax-ui-scale)) solid var(--harness, var(--ax-border-strong));
     border-radius: var(--ax-radius-md);
-    background: var(--ax-surface-2);
+    background: var(--ax-elev-2);
+    box-shadow: var(--ax-shadow-raised);
   }
 
   .card:hover,
   .card:focus-within {
     border-color: var(--ax-border-strong);
-    border-left-color: var(--harness, var(--ax-border-strong));
-    background: var(--ax-surface-3);
+    background: var(--ax-elev-3);
   }
 
   .card.working {
-    box-shadow: 0 0 0 1px var(--ax-accent) inset;
+    border-color: var(--ax-glow);
+    box-shadow: var(--ax-glow-shadow);
+    animation: var(--ax-anim-glow);
   }
 
   .card.waiting {
+    border-color: var(--ax-warning);
     box-shadow: 0 0 0 1px var(--ax-warning) inset;
   }
 
