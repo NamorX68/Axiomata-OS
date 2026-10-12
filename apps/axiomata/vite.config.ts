@@ -30,6 +30,13 @@ export default defineConfig(async () => ({
   // Svelte 5 client builds for component imports under vitest.
   resolve: isVitest ? { conditions: ["browser"] } : undefined,
 
+  // Fonts are never inlined as `data:` URLs (card #76): the CSP has no `font-src data:`, and the small `@fontsource`
+  // subsets Vite would inline (Vietnamese, Greek, Cyrillic, symbol ranges) were blocked in the installed app only —
+  // `vite dev` serves them as files. Everything else keeps Vite's default limit (`undefined`).
+  build: {
+    assetsInlineLimit: (file: string) => (/\.(woff2?|ttf|otf)$/i.test(file) ? false : undefined),
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

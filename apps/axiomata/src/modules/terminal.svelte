@@ -498,7 +498,10 @@
    *  can call it once per distinct descriptor `draw` might use (Checkpoint
    *  6d) instead of only the one plain string. */
   function ensureFontLoaded(fontString: string): void {
-    if (!document.fonts || document.fonts.check(fontString) || attemptedFontLoads.has(fontString)) return;
+    // Not short-cut by `document.fonts.check()` (card #76): WebKit can answer `true` for a weight whose face was never
+    // loaded, and a canvas does not load a face by itself — the bold cells then drew in the regular face. One explicit
+    // `load()` per string is cheap; for a face already loaded it resolves at once.
+    if (!document.fonts || attemptedFontLoads.has(fontString)) return;
     attemptedFontLoads.add(fontString);
     document.fonts
       .load(fontString)
