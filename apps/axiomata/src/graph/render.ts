@@ -17,7 +17,7 @@ import {
   type HiveCell,
   type Rgb,
 } from "./hive";
-import { APP_RING, EXPANDED_GROUP_RING } from "./layout";
+import { APP_RING, approachAngle, EXPANDED_GROUP_RING, orbitRestAngle } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
 import { cellKey, NEIGHBOURS, pixelToAxial } from "./territory";
 
@@ -37,6 +37,8 @@ export interface RenderOptions {
   fit: number;
   /** Orbit only: let the live-status pulse breathe. Off, it stays a still halo (the motion switch). */
   pulse?: boolean;
+  /** Orbit only: at rest (`spin` 0) the ring jumps to its rest angle instead of turning there ("Reduce motion"). */
+  snapRest?: boolean;
   /** Orbit only: how the hive's cells catch the light (G7); `metal` when unset. */
   shine?: Shine;
   /** Fade the drawing out towards the canvas's inscribed circle from this share of its radius on (0…1): the Second
@@ -221,7 +223,11 @@ export class GraphRenderer {
   /** Where each note's cell was last drawn, front or back, for sparks to aim at. */
   private cellPos = new Map<string, { x: number; y: number; front: boolean }>();
   private angle = 0;
+  /** Whether the ring has turned on its own yet: one that starts at rest is placed at once, not turned there. */
+  private hasSpun = false;
   private last = 0;
+  /** Rate of the ring's ease-out into its rest angle (`approachAngle`): about a second to settle. */
+  private static readonly REST_RATE = 5;
   private textColor = "#fff";
   private mutedColor = "#888";
   private lineColor = "#fff";
@@ -456,7 +462,15 @@ export class GraphRenderer {
       // A map is read north up: it never turns.
       this.angle = 0;
     } else if (!this.selected && !this.flyAnim && !this.pulse) {
-      this.angle = (this.angle + this.options.spin * dt) % TWO_PI;
+      if (this.options.spin !== 0) {
+        this.hasSpun = true;
+        this.angle = (this.angle + this.options.spin * dt) % TWO_PI;
+      } else if (this.options.mode === "orbit" && this.model) {
+        // Paused: the ring settles with the newest note at 12 o'clock (re-aimed every frame, so a new note moves it).
+        const rest = orbitRestAngle(this.model);
+        this.angle =
+          this.options.snapRest || !this.hasSpun ? rest : approachAngle(this.angle, rest, dt, GraphRenderer.REST_RATE);
+      }
     }
     if (this.flyAnim) {
       const a = this.flyAnim;

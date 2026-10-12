@@ -81,6 +81,46 @@ export function layoutOrbit(model: GraphModel): void {
   });
 }
 
+const TWO_PI = Math.PI * 2;
+
+/**
+ * The turn of the orbit ring (radians, added to every slot's angle) at which it rests when the motion is paused:
+ * the newest note on the ring sits at 12 o'clock, the older ones follow clockwise (the ring is laid out newest
+ * first after the skills). `0` when no note is on the ring. Skills keep their slots; only the whole ring turns.
+ */
+export function orbitRestAngle(model: GraphModel): number {
+  let newest: GraphNode | null = null;
+  let newestAt = -Infinity;
+  for (const n of model.nodes) {
+    if (!n.onOrbit || n.kind !== "file" || !n.modified) continue;
+    const at = Date.parse(n.modified);
+    if (Number.isNaN(at) || at <= newestAt) continue;
+    newest = n;
+    newestAt = at;
+  }
+  return newest ? -Math.PI / 2 - Math.atan2(newest.y, newest.x) : 0;
+}
+
+/** The signed way from angle `from` to `to` that is shortest, in (−π, π]. */
+export function shortestTurn(from: number, to: number): number {
+  const d = (((to - from) % TWO_PI) + TWO_PI) % TWO_PI;
+  return d > Math.PI ? d - TWO_PI : d;
+}
+
+/** Angle left at which a turn towards a target counts as arrived (radians, well below one pixel on the ring). */
+const ARRIVED = 1e-3;
+
+/**
+ * One frame of the ring settling into its rest angle: moves `from` towards `to` by the shortest way, covering the
+ * share `1 − e^(−rate·dt)` of what is left (ease-out; `rate` 5 ≈ one second to settle), and lands on `to` exactly
+ * once it is close enough to not be seen.
+ */
+export function approachAngle(from: number, to: number, dt: number, rate: number): number {
+  const left = shortestTurn(from, to);
+  if (Math.abs(left) < ARRIVED) return to;
+  return from + left * (1 - Math.exp(-rate * dt));
+}
+
 /** App-Ring radius, in the same graph-unit scale as the orbit ring's radius
  *  1 (`layoutOrbit` above) — drawn just outside it. */
 export const APP_RING = 1.18;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceGraph } from "../core/backend";
-import { applyLayout, layoutOrbit, MAP_EDGE, MAP_SKILLS, RING } from "./layout";
+import { applyLayout, approachAngle, layoutOrbit, MAP_EDGE, MAP_SKILLS, orbitRestAngle, RING, shortestTurn } from "./layout";
 import { buildModel, glyphForArea, neighbours, regroup, searchNodes, type Palette } from "./model";
 import { cellKey, NEIGHBOURS } from "./territory";
 
@@ -106,6 +106,31 @@ describe("layouts", () => {
     expect(m.byId.get("area:Dev")!.onOrbit).toBeFalsy();
   });
 
+  it("orbit rest angle turns the newest note on the ring to 12 o'clock, older ones follow clockwise", () => {
+    const graph = fixture();
+    graph.files = graph.files.slice(0, 5).map((f, i) => ({ ...f, modified: `2026-10-0${i + 1}T10:00:00Z` }));
+    const m = buildModel(graph, palette);
+    layoutOrbit(m);
+    const rest = orbitRestAngle(m);
+    const ring = m.nodes.filter((n) => n.onOrbit && n.kind === "file");
+    const shown = (n: { x: number; y: number }): number =>
+      (((Math.atan2(n.y, n.x) + rest + Math.PI / 2) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const newest = ring.reduce((a, b) => (Date.parse(a.modified!) > Date.parse(b.modified!) ? a : b));
+    const topAngle = shown(newest);
+    expect(Math.min(topAngle, 2 * Math.PI - topAngle)).toBeCloseTo(0, 6);
+    // Clockwise from the top, the modified times fall.
+    const clockwise = [...ring].sort((a, b) => shown(a) - shown(b)).map((n) => Date.parse(n.modified!));
+    expect(clockwise).toEqual([...clockwise].sort((a, b) => b - a));
+    // The skill keeps its slot (before the notes), only the ring as a whole is turned.
+    expect(m.byId.get("skill:a")!.onOrbit).toBe(true);
+  });
+
+  it("orbit rest angle is 0 when no note is on the ring", () => {
+    const m = buildModel(fixture(), palette);
+    layoutOrbit(m);
+    expect(orbitRestAngle(m)).toBe(0);
+  });
+
   it("map gives every file its own field inside the lens, skills ringing it, areas at their country's middle", () => {
     const m = buildModel(fixture(), palette);
     applyLayout(m, "map");
@@ -137,6 +162,29 @@ describe("layouts", () => {
         expect(d).toBeGreaterThanOrEqual(minGap);
       }
     }
+  });
+});
+
+describe("ring settling into its rest angle", () => {
+  const TAU = 2 * Math.PI;
+
+  it("takes the shortest way round, across zero", () => {
+    expect(shortestTurn(0.1, TAU - 0.1)).toBeCloseTo(-0.2, 9);
+    expect(shortestTurn(TAU - 0.1, 0.1)).toBeCloseTo(0.2, 9);
+    expect(shortestTurn(0, Math.PI)).toBeCloseTo(Math.PI, 9);
+  });
+
+  it("turns backwards over 0 from 0.1 to 2π−0.1 instead of almost a full round", () => {
+    const next = approachAngle(0.1, TAU - 0.1, 0.1, 5);
+    expect(next).toBeLessThan(0.1);
+    expect(next).toBeGreaterThan(-0.1);
+  });
+
+  it("settles on the target exactly and stays there", () => {
+    let angle = 3;
+    for (let i = 0; i < 300; i++) angle = approachAngle(angle, 0.5, 1 / 60, 5);
+    expect(angle).toBe(0.5);
+    expect(approachAngle(angle, 0.5, 1 / 60, 5)).toBe(0.5);
   });
 });
 

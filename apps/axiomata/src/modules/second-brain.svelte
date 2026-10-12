@@ -41,7 +41,7 @@
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import { invokeBackend, listenBackend, type WorkspaceGraph } from "../core/backend";
   import { brainActive, brainView, spinOf, travelAt } from "../core/brainView";
-  import { animates, motion } from "../core/motion";
+  import { animates, motion, systemReducesMotion } from "../core/motion";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
   import { openFilePanel } from "../core/staging";
@@ -440,7 +440,14 @@
   $effect(() => {
     // Read the reactive inputs first — an early return on a missing renderer
     // would otherwise leave the effect without dependencies.
-    const next = { mode: "orbit" as const, spin, labels, pulse: animates($motion), shine: $brainView.shine };
+    const next = {
+      mode: "orbit" as const,
+      spin,
+      labels,
+      pulse: animates($motion),
+      snapRest: $systemReducesMotion,
+      shine: $brainView.shine,
+    };
     if (renderer) renderer.options = { ...renderer.options, ...next };
   });
 
@@ -456,7 +463,15 @@
   onMount(() => {
     if (!canvas) return;
     renderer = new GraphRenderer(canvas);
-    renderer.options = { mode: "orbit", spin, labels, fileLabels: false, fit: ORBIT_FIT, shine: $brainView.shine };
+    renderer.options = {
+      mode: "orbit",
+      spin,
+      labels,
+      fileLabels: false,
+      fit: ORBIT_FIT,
+      snapRest: $systemReducesMotion,
+      shine: $brainView.shine,
+    };
     renderer.resize();
     const ro = new ResizeObserver(() => {
       renderer?.resize();
