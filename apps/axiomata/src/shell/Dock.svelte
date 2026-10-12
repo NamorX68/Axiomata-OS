@@ -15,6 +15,7 @@
   import { keyHints } from "../core/keyHints";
   import { platform } from "../core/keys";
   import { studioActivity, watchActivity } from "../core/studioActivity";
+  import { focusMode, toggleFocus } from "../core/focusMode";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import type { IconName } from "../ui/icons/lucide";
@@ -40,6 +41,7 @@
   let themeOpen = $state(false);
 
   const spotlightKey = $derived(keyHints("⌘K", $platform));
+  const focusKey = $derived(keyHints("⌘⇧.", $platform));
   const settingsKey = $derived(keyHints("⌘,", $platform));
   const working = $derived($studioActivity > 0);
 
@@ -83,6 +85,12 @@
     <Heartbeat />
     <span class="sep" aria-hidden="true"></span>
 
+    {#if $focusMode}
+      <!-- The focus mode is on (G13): said here, where it can be left with a click as well as with its key. -->
+      <button type="button" class="focus-chip" title="Leave the focus mode ({focusKey})" onclick={toggleFocus}>
+        <Icon name="eye-off" size="sm" />Focus
+      </button>
+    {/if}
     <button
       type="button"
       class="search"
@@ -209,6 +217,22 @@
      key shows under it while pointed at or focused, without moving the dock. */
   .search {
     padding: var(--ax-space-1) var(--ax-space-2);
+  }
+
+  /* The focus mode's mark: neutral, a state the owner chose, not something alive. */
+  .focus-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    min-height: calc(26px * var(--ax-ui-scale));
+    padding: 0 var(--ax-space-2);
+    border: 1px solid var(--ax-border-strong);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-selected-bg);
+    color: var(--ax-text);
+    font: var(--ax-type-caption);
+    font-weight: 600;
+    cursor: pointer;
   }
 
   .search kbd {

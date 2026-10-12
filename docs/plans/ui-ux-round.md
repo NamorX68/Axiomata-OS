@@ -166,6 +166,18 @@ aufglühen und in 2,6 s abkühlen (bei Motion Off stehen sie und gehen dann) und
 Fahne: Hex-Avatar des Harness + Name, 8 s, dann verblasst sie; auf einer eingeklappten Zeile keine Fahne. Mock:
 `__ax.mockExternalWrite("project:1", "notes.txt", …)` zeigt es mit „OC Builder“.
 
+**UX7 geschnitten (2026-10-12):** 7a ⌘K „Ask Axiomata“ + Fokus-Modus → 7b Theme-Wahl als Kärtchen mit echtem
+Mini-Ausschnitt (G21) + Einstellungs-Look → 7c Chat und Terminal → 7d Töne (aus per Vorgabe) + Gegenprobe helle Themes.
+
+**Stand UX7a (2026-10-12, gebaut, Abnahme offen):** ⌘K (`shell/Spotlight.svelte`): unter den Treffern immer die
+Zeile „Ask Axiomata“ mit glimmender Hex-Marke und der Frage; ohne Treffer ist sie die einzige und gewählt — Return
+schickt die Frage sofort an den Chat (`core/chat.ts` `send`, der Chat öffnet sich; läuft schon eine Antwort, ein
+Hinweis). Gewählte Zeile neutral (Akzentregel); Gruppennamen englisch. Fokus-Modus (G13, `core/focusMode.ts`):
+⌘⇧. bzw. Strg+⇧+. (`core/globalKeys.ts` „focus“) setzt `data-focus="on"` am Dokument; `styles.css`: Kacheln ohne
+Fokus und der Orbit-Hintergrund werden unscharf und blass (die 2Brain-Linse und alle Panels darüber bleiben), Glut,
+Atem und umlaufende Glut stehen still; das Umgebungslicht geht (`shell/Ambient.svelte`); im Dock ein neutraler Chip
+„Focus“, der ihn auch per Klick beendet.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

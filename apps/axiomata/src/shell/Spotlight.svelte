@@ -2,11 +2,18 @@
   The ⌘K search (`docs/plans/spotlight-search.md`): a pill in the middle of the screen, the hits listed below it. Typing
   searches the instant sources (shell actions, modules, skills, routines, cards, plans, projects); ↑/↓ only *select* a hit,
   and nothing is carried out until Return or a double click (S5). Esc or a click outside closes it and gives the focus back.
+  Under the hits there is always "Ask Axiomata" (UX7a, G20): Return on it sends the query to the chat at once and opens it
+  — the only row when nothing matches, so a question typed into ⌘K is one Return from an answer (the daily cap bounds
+  what it costs).
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
 
+  import { get } from "svelte/store";
+
   import type { SearchHit } from "../core/backend";
+  import { busy, send } from "../core/chat";
+  import { toast } from "../core/toast";
   import { GROUP_LABEL, rankItems, type SpotlightSources } from "../core/spotlight";
   import { withContentHits, type SpotlightAction } from "../core/spotlightItems";
   import { loadInstantSources, runSpotlightAction, searchFileContents } from "../core/spotlightRun";
@@ -31,6 +38,10 @@
   let requestId = 0;
 
   const rows = $derived(rankItems(query, { ...sources, file: withContentHits(sources.file ?? [], contentHits) }));
+  /** The question "Ask Axiomata" would send; with none there is no such row. */
+  const question = $derived(query.trim());
+  /** Every row the arrows walk: the hits, and "Ask Axiomata" after them (its index is `rows.length`). */
+  const total = $derived(rows.length + (question ? 1 : 0));
 
   /** A new list starts at its first hit. */
   $effect(() => {
@@ -94,7 +105,23 @@
     opener = null;
   }
 
+  /** Sends the query to the chat, which opens with the answer coming (G20). */
+  function ask(): void {
+    const message = question;
+    if (!message) return;
+    close(false);
+    if (get(busy)) {
+      toast("The agent is still answering — ask again in a moment.", "warning");
+      return;
+    }
+    void send(message, "chat");
+  }
+
   function choose(index: number, secondary = false): void {
+    if (index === rows.length) {
+      ask();
+      return;
+    }
     const row = rows[index];
     if (!row) return;
     close(false);
@@ -109,9 +136,9 @@
       close();
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      if (rows.length === 0) return;
+      if (total === 0) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
-      active = (active + step + rows.length) % rows.length;
+      active = (active + step + total) % total;
     } else if (event.key === "Enter") {
       event.preventDefault();
       choose(active, event.metaKey || event.ctrlKey);
@@ -130,15 +157,15 @@
         type="text"
         role="combobox"
         aria-label="Search"
-        aria-expanded={rows.length > 0}
+        aria-expanded={total > 0}
         aria-controls="spotlight-list"
-        aria-activedescendant={rows.length > 0 ? `spotlight-row-${active}` : undefined}
-        placeholder="Search …"
+        aria-activedescendant={total > 0 ? `spotlight-row-${active}` : undefined}
+        placeholder="Search, or ask Axiomata …"
         autocomplete="off"
         spellcheck="false"
         onkeydown={onKeydown}
       />
-      {#if rows.length > 0}
+      {#if total > 0}
         <ul id="spotlight-list" class="results" role="listbox" aria-label="Results" bind:this={list}>
           {#each rows as row, index (row.group + ":" + row.item.id)}
             {#if row.groupStart}
@@ -158,10 +185,25 @@
               {#if row.item.detail ?? row.item.subtitle}<span class="sub">{row.item.detail ?? row.item.subtitle}</span>{/if}
             </li>
           {/each}
+          {#if question}
+            {#if rows.length > 0}<li class="group" role="presentation">Ask</li>{/if}
+            <li
+              id="spotlight-row-{rows.length}"
+              class="row ask"
+              role="option"
+              tabindex="-1"
+              aria-selected={active === rows.length}
+              data-active={active === rows.length}
+              onmousemove={() => (active = rows.length)}
+              ondblclick={ask}
+            >
+              <span class="ask-mark ax-hex" aria-hidden="true"></span>
+              <span class="title">Ask Axiomata</span>
+              <span class="sub">“{question}”</span>
+            </li>
+          {/if}
         </ul>
         {#if searching}<p class="busy">Searching files …</p>{/if}
-      {:else if query.trim() !== ""}
-        <p class="none">{searching ? "Searching files …" : "No results"}</p>
       {/if}
     </div>
   </div>
@@ -200,8 +242,7 @@
     border-color: var(--ax-accent);
     box-shadow: var(--ax-shadow-pop), var(--ax-focus-ring);
   }
-  .results,
-  .none {
+  .results {
     margin: 0;
     padding: var(--ax-space-2);
     max-height: min(60vh, calc(440px * var(--ax-ui-scale)));
@@ -211,11 +252,6 @@
     border-radius: var(--ax-radius-lg);
     background: var(--ax-surface-1);
     box-shadow: var(--ax-shadow-pop);
-  }
-  .none {
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-sm);
-    padding: var(--ax-space-3) var(--ax-space-4);
   }
   .busy {
     margin: 0;
@@ -238,8 +274,17 @@
     border-radius: var(--ax-radius-md);
     cursor: default;
   }
+  /* The chosen row is chosen, not alive: neutral (the accent rule). */
   .row[data-active="true"] {
-    background: var(--ax-accent-muted);
+    background: var(--ax-selected-bg);
+  }
+  /* "Ask Axiomata": the agent's hexagon, glowing — asking it starts work. */
+  .ask-mark {
+    flex: none;
+    align-self: center;
+    width: calc(12px * var(--ax-ui-scale));
+    height: calc(14px * var(--ax-ui-scale));
+    background: var(--ax-glow);
   }
   .title {
     flex: 0 0 auto;

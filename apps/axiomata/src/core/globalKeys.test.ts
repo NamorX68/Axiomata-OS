@@ -6,6 +6,20 @@ function press(key: string, held: Partial<GlobalKeyEvent> = {}): GlobalKeyEvent 
   return { key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...held };
 }
 
+describe("the focus mode's key (G13)", () => {
+  it("is ⌘⇧. on the Mac, whatever Shift makes of the period, and not ⌘. (the editor's code actions)", () => {
+    expect(globalKeyAction(press(">", { metaKey: true, shiftKey: true, code: "Period" }), "mac")).toBe("focus");
+    expect(globalKeyAction(press(".", { metaKey: true, shiftKey: true }), "mac")).toBe("focus");
+    expect(globalKeyAction(press(".", { metaKey: true }), "mac")).toBeNull();
+  });
+
+  it("is Ctrl+Shift+. elsewhere, also inside a terminal pane", () => {
+    expect(globalKeyAction(press(">", { ctrlKey: true, shiftKey: true, code: "Period" }), "other")).toBe("focus");
+    expect(globalKeyAction(press(".", { ctrlKey: true, shiftKey: true }), "other", true)).toBe("focus");
+    expect(globalKeyAction(press(".", { ctrlKey: true }), "other")).toBeNull();
+  });
+});
+
 describe("globalKeyAction on the Mac", () => {
   it("maps ⌘K, ⌘, and ⌘W", () => {
     expect(globalKeyAction(press("k", { metaKey: true }), "mac")).toBe("spotlight");

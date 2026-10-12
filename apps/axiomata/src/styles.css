@@ -224,6 +224,26 @@ input[type="radio"] {
   animation: var(--ax-anim-glow);
 }
 
+/* The focus mode (G13, ⌘⇧., `core/focusMode.ts`): everything but the work in front recedes. The glow holds still, the
+   tiles without the focus and the Orbit blur and fade; a tile being worked in (focus inside it) stays sharp, and so do
+   the panels above the canvas (Studio, Kanban, files) and the Second Brain's lens. */
+:root[data-focus="on"] {
+  --ax-anim-glow: none;
+  --ax-anim-breathe: none;
+  --ax-anim-orbit: none;
+}
+.canvas .tile,
+#particle-slot [data-background] {
+  transition:
+    filter var(--ax-dur-slow) var(--ax-ease),
+    opacity var(--ax-dur-slow) var(--ax-ease);
+}
+:root[data-focus="on"] .canvas .tile:not(:focus-within),
+:root[data-focus="on"] #particle-slot [data-background]:not(:has(.stage)) {
+  filter: blur(calc(3px * var(--ax-ui-scale)));
+  opacity: 0.35;
+}
+
 /* The hexagon (U1): the system's shape, for avatars, status marks and empty states. */
 .ax-hex {
   clip-path: var(--ax-hex-clip);

@@ -29,6 +29,7 @@ import { emit, on } from "./core/bus";
   import Ambient from "./shell/Ambient.svelte";
   import Dock from "./shell/Dock.svelte";
   import Ignition from "./shell/Ignition.svelte";
+  import { focusMode, toggleFocus } from "./core/focusMode";
 
   let pickerOpen = $state(false);
   let settingsOpen = $state(false);
@@ -75,8 +76,15 @@ import { emit, on } from "./core/bus";
     }
     event.preventDefault();
     if (action === "spotlight") spotlightOpen = !spotlightOpen;
+    else if (action === "focus") toggleFocus();
     else settingsOpen = true;
   }
+
+  // The focus mode (G13) is a mark on the document: `styles.css` lets everything but the work in front recede.
+  $effect(() => {
+    if ($focusMode) document.documentElement.dataset.focus = "on";
+    else delete document.documentElement.dataset.focus;
+  });
 
   // The Orbit's own click handler needs to know whether the layer is up (`core/brainView.ts`).
   $effect(() => brainActive.set(brainOpen));

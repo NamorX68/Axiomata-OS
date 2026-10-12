@@ -13,6 +13,7 @@
 
   import { dayLightAt, type DayLight } from "../core/daylight";
   import { effects } from "../core/effects";
+  import { focusMode } from "../core/focusMode";
   import { uiScale } from "../core/uiScale";
 
   /** How often the day's light is placed again; it moves by the hour. */
@@ -76,7 +77,8 @@
   });
 </script>
 
-{#if $effects.dayLight}
+<!-- In the focus mode (G13) the ambient light goes: nothing moves or warms beside the work. -->
+{#if $effects.dayLight && !$focusMode}
   <div
     class="day"
     aria-hidden="true"
@@ -86,7 +88,7 @@
     style:--day-alpha="{(DAY_ALPHA * light.strength).toFixed(2)}%"
   ></div>
 {/if}
-{#if $effects.pointerLight}
+{#if $effects.pointerLight && !$focusMode}
   <div class="pointer" aria-hidden="true" bind:this={pointerEl}></div>
 {/if}
 
