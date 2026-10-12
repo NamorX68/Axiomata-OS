@@ -71,6 +71,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (28, include_str!("migrations/0010_column_names_english.sql")),
     // The marker colour of a project: a slot into the theme's twelve hues (card #70).
     (29, axiomata_ide::SCHEMA_SQL_V10),
+    // The board card a plan was made for: the card follows its plan across the board (card-as-plan.md).
+    (30, axiomata_board::SCHEMA_SQL_V10),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

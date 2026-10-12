@@ -1682,6 +1682,20 @@ pub fn list_board_plans(
     board::flow::list_plans(&db, board_id).map_err(|err| err.to_string())
 }
 
+/// Starts a board card as a plan (`docs/plans/card-as-plan.md`): a draft plan in `project_id` whose goal is the card,
+/// with the card in progress. The owner's step, from the Kanban; the frontend starts the planner on the plan next.
+#[tauri::command]
+pub fn start_card_plan(
+    state: State<'_, CoreState>,
+    card_id: i64,
+    project_id: i64,
+) -> Result<board::Plan, String> {
+    let plan = axiomata_core::card_session::start_card_plan(&state, card_id, project_id)
+        .map_err(|err| err.to_string())?;
+    board_mirror::after_change(&state.db_lock(), &read_config(&state.config), plan.board_id);
+    Ok(plan)
+}
+
 #[tauri::command]
 pub fn create_board_plan(
     state: State<'_, CoreState>,
@@ -1738,12 +1752,13 @@ pub fn update_board_plan(
     board::flow::update_plan(&db, id, &fields).map_err(|err| err.to_string())
 }
 
-/// The owner's yes to a plan: its proposals move to Offen, and the planner that proposed them is done — its session goes.
+/// The owner's yes to a plan: its proposals move to Offen, and the planner that proposed them is done — its session
+/// goes.
 ///
 /// `run_by_itself` decides, in the same step, whether the plan then runs by itself (A4, CP-A8): `true` sets it to start
-/// its cards on its own (in `project_id`, or the one it has), `false` makes it manual — written either way, so a plan the
-/// owner unchecked does not run because of an earlier setting. Left out, the plan's settings are not touched. `None` if
-/// there is no such draft plan; nothing is changed then.
+/// its cards on its own (in `project_id`, or the one it has), `false` makes it manual — written either way, so a plan
+/// the owner unchecked does not run because of an earlier setting. Left out, the plan's settings are not touched.
+/// `None` if there is no such draft plan; nothing is changed then.
 #[tauri::command]
 pub async fn approve_board_plan(
     state: State<'_, CoreState>,
@@ -1760,6 +1775,13 @@ pub async fn approve_board_plan(
         if current.status != board::PlanStatus::Draft {
             return Ok(None);
         }
+        // A plan made from a card always runs by itself (card-as-plan.md, K4): the owner approves once, the steps go
+        // on.
+        let run_by_itself = if current.origin_card_id.is_some() {
+            Some(true)
+        } else {
+            run_by_itself
+        };
         if let Some(run) = run_by_itself {
             let fields = board::PlanFields {
                 goal: current.goal.clone(),
@@ -1769,7 +1791,7 @@ pub async fn approve_board_plan(
                     current.project_id
                 },
                 name: current.name.clone(),
-                auto_start_max: run.then_some(AUTO_UNBOUNDED),
+                auto_start_max: run.then_some(board::flow::AUTO_UNBOUNDED),
                 max_cost_usd: current.max_cost_usd,
                 max_tokens: current.max_tokens,
             };
@@ -1793,14 +1815,19 @@ pub async fn approve_board_plan(
     Ok(moved)
 }
 
-/// `auto_start_max` of a plan that runs by itself: no limit of its own — the dependencies and the machine's cap decide.
-const AUTO_UNBOUNDED: u32 = 64;
-
 #[tauri::command]
 pub async fn close_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
     let closed = {
         let db = state.db_lock();
-        board::flow::close_plan(&db, id).map_err(|err| err.to_string())?
+        let closed = board::flow::close_plan(&db, id).map_err(|err| err.to_string())?;
+        // The card the plan was made for left it (back to Open): the mirror shows where.
+        if closed
+            && let Some(plan) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())?
+            && plan.origin_card_id.is_some()
+        {
+            board_mirror::after_change(&db, &read_config(&state.config), plan.board_id);
+        }
+        closed
     };
     if closed {
         axiomata_core::plan_session::forget_plan_sessions(&state, id).await;
@@ -2008,8 +2035,9 @@ pub async fn take_over_plan(
     Ok(outcome)
 }
 
-/// The owner merges a signed-off card into its plan's line by hand — the retry of a card the studio gave up on (CP-A8c).
-/// Returns what happened, as the studio's own looks would: the Flow closes the panes of the sessions that are gone.
+/// The owner merges a signed-off card into its plan's line by hand — the retry of a card the studio gave up on
+/// (CP-A8c). Returns what happened, as the studio's own looks would: the Flow closes the panes of the sessions that are
+/// gone.
 #[tauri::command]
 pub async fn integrate_card(
     state: State<'_, CoreState>,
@@ -2049,8 +2077,8 @@ pub fn plan_goal_suggestion(
     board::flow::goal_suggestion(&db, id).map_err(|err| err.to_string())
 }
 
-/// The owner takes the proposed goal over: it becomes the plan's goal and the proposal goes. `at` is the proposal the owner
-/// read; one that changed since is refused.
+/// The owner takes the proposed goal over: it becomes the plan's goal and the proposal goes. `at` is the proposal the
+/// owner read; one that changed since is refused.
 #[tauri::command]
 pub fn apply_goal_suggestion(
     state: State<'_, CoreState>,

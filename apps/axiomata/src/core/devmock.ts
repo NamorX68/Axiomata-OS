@@ -522,6 +522,21 @@ let boardPlans: BoardPlan[] = [
     updated_at: new Date(Date.now() - DAY).toISOString(),
     approved_at: new Date(Date.now() - DAY).toISOString(),
   },
+  {
+    id: 2,
+    board_id: 1,
+    name: "#11 Notizen: #Tags und [[Wikilinks]]",
+    goal: "Notizen: #Tags und [[Wikilinks]] wie in Obsidian",
+    status: "approved",
+    project_id: 1,
+    auto_start_max: 64,
+    max_cost_usd: null,
+    max_tokens: null,
+    created_at: new Date(Date.now() - DAY).toISOString(),
+    updated_at: new Date().toISOString(),
+    approved_at: new Date(Date.now() - 3_600_000).toISOString(),
+    origin_card_id: 11,
+  },
 ];
 /** `[card, needs]` pairs. */
 let boardDeps: [number, number][] = [[8, 4], [10, 9], [8, 9]];
@@ -532,8 +547,10 @@ let boardEvents: CardEvent[] = [
 /** The state Rust derives for a card (`axiomata_board::flow::derive_state`). */
 function mockState(card: BoardCard, column: BoardColumn | undefined, waiting: number[]): TaskState {
   if (card.taken_over_at) return "taken_over";
+  if (card.integrated_at) return "integrated";
   if (card.canceled_at) return "canceled";
   if (card.failed_at) return "failed";
+  if (card.origin_of != null) return "planned";
   if (!column) return "ready";
   if (column.stage === "proposal") return "proposed";
   if (column.stage === "review") return "in_review";
@@ -547,7 +564,9 @@ function decorate(card: BoardCard): BoardCard {
   const depends_on = boardDeps.filter(([id]) => id === card.id).map(([, needs]) => needs);
   const waiting_on = depends_on.filter((id) => !boardCards.find((c) => c.id === id)?.verified_by);
   const column = boardColumns.find((c) => c.id === card.column_id);
-  return { ...card, depends_on, waiting_on, state: mockState(card, column, waiting_on) };
+  const origin_of = boardPlans.find((p) => p.origin_card_id === card.id && p.status !== "closed")?.id ?? null;
+  const decorated = { ...card, depends_on, waiting_on, origin_of };
+  return { ...decorated, state: mockState(decorated, column, waiting_on) };
 }
 function mockCard(card: Partial<BoardCard> & Pick<BoardCard, "id" | "column_id" | "position" | "title">): BoardCard {
   return {
@@ -659,6 +678,31 @@ let boardCards: BoardCard[] = [
     claimed_by: "agent:allrounder-10",
     claimed_at: new Date(Date.now() - 1_800_000).toISOString(),
     input_required: "Soll das Postfach eine eigene Tabelle bekommen oder die Karten-Ereignisse nutzen?",
+  }),
+  mockCard({
+    id: 11,
+    column_id: 2,
+    position: 3,
+    title: "Notizen: #Tags und [[Wikilinks]] wie in Obsidian",
+    labels: ["feature", "notes"],
+  }),
+  mockCard({
+    id: 12,
+    column_id: 3,
+    position: 3,
+    title: "Tags und Links beim Einlesen erkennen",
+    plan_id: 2,
+    verified_by: "agent:reviewer-12",
+    integrated_at: new Date(Date.now() - 600_000).toISOString(),
+  }),
+  mockCard({
+    id: 13,
+    column_id: 2,
+    position: 4,
+    title: "Sprung in die verlinkte Notiz",
+    plan_id: 2,
+    claimed_by: "agent:allrounder-13",
+    claimed_at: new Date(Date.now() - 900_000).toISOString(),
   }),
 ];
 
@@ -1614,7 +1658,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "open_card_sessions":
       // Card #4 (in progress, claimed by claude-1) has a session at work, so its card glows (UX6a).
-      return [{ card_id: 4, project_id: 1, agent_id: 1 }] as T;
+      // Card #13, a step of the plan made from card #11, too: that card glows on the board.
+      return [
+        { card_id: 4, project_id: 1, agent_id: 1 },
+        { card_id: 13, project_id: 1, agent_id: 1 },
+      ] as T;
     case "take_over_plan": {
       const plan = boardPlans.find((p) => p.id === args.id);
       if (!plan) throw new Error(`no plan ${String(args.id)}`);
@@ -2013,6 +2061,33 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return true as T;
     }
     // ---- the agent flow (a2a.md CP-A2) ----
+    case "start_card_plan": {
+      const card = boardCards.find((c) => c.id === args.cardId);
+      if (!card) throw new Error(`invalid card_id: no card ${String(args.cardId)}`);
+      if (card.plan_id !== null) throw new Error(`invalid card_id: the card is a step of plan #${card.plan_id}`);
+      const created: BoardPlan = {
+        id: Math.max(0, ...boardPlans.map((p) => p.id)) + 1,
+        board_id: card.board_id,
+        name: `#${card.id} ${card.title}`,
+        goal: card.title,
+        project_id: Number(args.projectId),
+        base_branch: null,
+        status: "draft",
+        auto_start_max: 64,
+        max_cost_usd: null,
+        max_tokens: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        approved_at: null,
+        origin_card_id: card.id,
+      };
+      boardPlans = [...boardPlans, created];
+      const doing = boardColumns.find((c) => c.board_id === card.board_id && c.maps_to_status === "doing" && !c.stage);
+      if (doing) {
+        boardCards = boardCards.map((c) => (c.id === card.id ? { ...c, column_id: doing.id, position: 99 } : c));
+      }
+      return created as T;
+    }
     case "list_board_plans":
       return boardPlans.filter((p) => p.board_id === args.boardId) as T;
     case "create_board_plan": {

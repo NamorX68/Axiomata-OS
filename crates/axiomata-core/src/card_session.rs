@@ -162,6 +162,39 @@ pub fn start_card_session(core: &AxiomataCore, request: &StartRequest) -> Result
     )
 }
 
+/// Starts a board card as a plan (`docs/plans/card-as-plan.md`): a draft plan in the project whose goal is the card,
+/// with the card in progress. The project is checked the way a card session's is — the plan's steps will run unattended
+/// in worktrees of it. The caller starts the planner and rewrites the board's mirror.
+///
+/// # Errors
+///
+/// A refusal that says why: no such project, a project that is no repository, or the board's own refusal (see
+/// [`flow::start_card_as_plan`]).
+pub fn start_card_plan(
+    core: &AxiomataCore,
+    card_id: i64,
+    project_id: i64,
+) -> Result<crate::board::Plan> {
+    start_card_plan_in(&mut core.db_lock(), card_id, project_id)
+}
+
+fn start_card_plan_in(
+    db: &mut Connection,
+    card_id: i64,
+    project_id: i64,
+) -> Result<crate::board::Plan> {
+    let project = project_store::get_project(db, project_id)?
+        .ok_or_else(|| refusal("project", format!("no project {project_id}")))?;
+    if !worktree::is_repo(&project.repo_root) {
+        return Err(refusal(
+            "project",
+            "a plan's steps run unattended in worktrees of their own, and this project is not a git repository"
+                .to_string(),
+        ));
+    }
+    Ok(flow::start_card_as_plan(db, card_id, project_id, OWNER)?)
+}
+
 /// Whether a plan runs by itself: approved, set to start its cards on its own, and with a project to run them in.
 pub fn runs_by_itself(plan: &crate::board::Plan) -> bool {
     plan.status == crate::board::PlanStatus::Approved
@@ -2413,6 +2446,50 @@ mod tests {
                 .contains("no role")
         );
         assert_eq!(w.sessions(), 0);
+    }
+
+    #[test]
+    fn a_card_is_started_as_a_plan_only_in_a_project_that_is_a_repository() {
+        let mut w = world();
+        let card = w.card(w.open, None);
+        let err = start_card_plan_in(&mut w.db, card, 999).unwrap_err();
+        assert!(err.to_string().contains("no project 999"), "{err}");
+
+        let plain = w.dir.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let folder = project_store::create_project(
+            &w.db,
+            NewProject {
+                name: "Folder".into(),
+                repo_root: plain,
+            },
+        )
+        .unwrap()
+        .id;
+        let err = start_card_plan_in(&mut w.db, card, folder).unwrap_err();
+        assert!(err.to_string().contains("not a git repository"), "{err}");
+        assert!(
+            flow::list_plans(&w.db, w.board).unwrap().is_empty(),
+            "a refusal makes no plan"
+        );
+
+        let plan = start_card_plan_in(&mut w.db, card, w.project).unwrap();
+        assert_eq!(plan.origin_card_id, Some(card));
+        assert_eq!(plan.project_id, Some(w.project));
+        assert!(
+            !runs_by_itself(&plan),
+            "a draft does not run yet, though it is set to once approved"
+        );
+        assert_eq!(plan.auto_start_max, Some(flow::AUTO_UNBOUNDED));
+        // No reviewer is ever made for the card, whatever column it ends up in — in progress, and in Review.
+        assert!(awaiting_in(&w.db).unwrap().is_empty());
+        let review = store::list_columns(&w.db, w.board)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.stage == Some(axiomata_board::ColumnStage::Review))
+            .unwrap();
+        store::move_card(&mut w.db, card, review.id, 0).unwrap();
+        assert!(awaiting_in(&w.db).unwrap().is_empty());
     }
 
     #[test]

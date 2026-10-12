@@ -266,6 +266,7 @@ pub fn run() {
             commands::delete_card,
             commands::set_card_archived,
             commands::list_board_plans,
+            commands::start_card_plan,
             commands::create_board_plan,
             commands::update_board_plan,
             commands::approve_board_plan,

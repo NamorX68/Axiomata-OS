@@ -58,6 +58,7 @@
   import { unpushedNote } from "../cardStart";
   import { agentStatus } from "../agentStatus";
   import { grillAfter, setGrillWish } from "../grillAfter";
+  import { planRequest } from "../planRequest";
   import { refreshAgents, session } from "../projectSession";
   import { flowSelection } from "../flowSelection";
   import ProposalEditor from "./ProposalEditor.svelte";
@@ -78,7 +79,8 @@
   let boardId = $state<number | null>(null);
   let data = $state<BoardData | null>(null);
   let roles = $state<Role[]>([]);
-  // The planner and the grilling session are told apart by their roles' kinds: until the roles are in, neither can be started.
+  // The planner and the grilling session are told apart by their roles' kinds: until the roles are in, neither can be
+  // started.
   let rolesLoaded = $state(false);
   let planId = $state<number | null>(null);
   let error = $state("");
@@ -273,8 +275,8 @@
 
   /* ----------------------------------------------------------- planner --- */
 
-  // A session starts from a ROLE, which carries its engine; only a role that names none asks for one — once, and the pick is
-  // saved into the role (`SessionPicker.svelte`). Engines and roles are changed under "Engines & roles".
+  // A session starts from a ROLE, which carries its engine; only a role that names none asks for one — once, and the
+  // pick is saved into the role (`SessionPicker.svelte`). Engines and roles are changed under "Engines & roles".
   let plannerRole = $state("");
   let plannerEngine = $state("");
   let grillRole = $state("");
@@ -287,8 +289,8 @@
   }
 
   /**
-   * Starts a session of `roleName` for the plan. A role without an engine gets the picked one written into it first, so the
-   * next start is one click; a role with one is started as it is.
+   * Starts a session of `roleName` for the plan. A role without an engine gets the picked one written into it first, so
+   * the next start is one click; a role with one is started as it is.
    */
   async function startSession(roleName: string, pickedEngine: string, grill: boolean): Promise<PlanSession | null> {
     const role = roles.find((r) => r.name === roleName);
@@ -315,6 +317,44 @@
     });
     return made;
   }
+
+  /* ------------------------------------------------- a plan asked for from outside --- */
+
+  /**
+   * The plan a card was started as (`docs/plans/card-as-plan.md`), or another view asked for: it is opened on its
+   * board, and when asked its planner is started — once the roles and engines are in. A planner role that names no
+   * engine is left to the owner's pick here instead of guessing one.
+   */
+  let pendingPlanner = $state<number | null>(null);
+  $effect(() => {
+    const request = $planRequest;
+    if (!request || !visible) return;
+    planRequest.set(null);
+    if (boardId !== request.boardId) chooseBoard(request.boardId);
+    planId = request.planId;
+    // The plan was just made from a card: the shared board store does not know it yet.
+    void refreshBoard(request.boardId);
+    if (request.startPlanner) pendingPlanner = request.planId;
+  });
+  $effect(() => {
+    // The sessions must be in, or a planner that already runs would not be seen and a second one started.
+    if (
+      pendingPlanner === null ||
+      !rolesLoaded ||
+      $engineCatalog.length === 0 ||
+      plan?.id !== pendingPlanner ||
+      $session.current === null
+    )
+      return;
+    pendingPlanner = null;
+    if (planner !== null) return;
+    const role = roles.find((r) => r.name === (plannerRole || plannerNames[0]));
+    if (!role || sessionEngine(role, $engineCatalog, "").ask) {
+      toast("Pick the planner's engine and start it: it proposes the card's steps.", "info");
+      return;
+    }
+    void startPlanner();
+  });
 
   async function startPlanner(): Promise<void> {
     const made = await startSession(plannerRole || plannerNames[0] || "", plannerEngine, false);
@@ -361,8 +401,8 @@
     });
   });
 
-  // A sharper goal a grilling session proposed: it waits for the owner, who takes it over or discards it. Read again while
-  // a grilling session exists (it writes from another process) and whenever the plan changes.
+  // A sharper goal a grilling session proposed: it waits for the owner, who takes it over or discards it. Read again
+  // while a grilling session exists (it writes from another process) and whenever the plan changes.
   let suggestion = $state<GoalSuggestion | null>(null);
   $effect(() => {
     const current = plan;
@@ -443,8 +483,8 @@
   /* --------------------------------------------------------- the owner's --- */
 
   /**
-   * Whether the plan, once approved, runs by itself (A4, CP-A8): its cards start as soon as what they build on is done —
-   * as many at once as the dependencies allow —, are reviewed and are integrated into the plan's line. On by default:
+   * Whether the plan, once approved, runs by itself (A4, CP-A8): its cards start as soon as what they build on is done
+   * — as many at once as the dependencies allow —, are reviewed and are integrated into the plan's line. On by default:
    * a plan the owner has to feed card by card is what this panel exists to avoid.
    */
   let runByItself = $state(true);
@@ -454,11 +494,13 @@
     const current = plan;
     await saveGoal();
     await run(async () => {
-      // One step in the backend: the setting and the yes go together, so a yes that fails leaves no setting behind, and an
-      // unchecked box makes the plan manual even if it was set to run by itself before.
+      // One step in the backend: the setting and the yes go together, so a yes that fails leaves no setting behind, and
+      // an unchecked box makes the plan manual even if it was set to run by itself before. A plan made from a card
+      // always runs by itself (the backend holds to that too): its card follows the steps.
+      const auto = runByItself || current.origin_card_id != null;
       const moved = await invoke<number | null>("approve_board_plan", {
         id: current.id,
-        runByItself,
+        runByItself: auto,
         projectId: project.id,
       });
       endPlanner(current.id);
@@ -466,7 +508,7 @@
       toast(
         moved === null
           ? "The plan is no longer a draft."
-          : runByItself
+          : auto
             ? `Plan released: ${moved} card(s) are being worked on.`
             : `Plan released: ${moved} card(s) wait in the first open column.`,
         "info",
@@ -507,8 +549,8 @@
     });
   }
 
-  // What a plan that runs by itself has spent (CP-A8c): read again while the pane is shown, since the sessions that spend
-  // it live in other processes. A failed read leaves the last figures.
+  // What a plan that runs by itself has spent (CP-A8c): read again while the pane is shown, since the sessions that
+  // spend it live in other processes. A failed read leaves the last figures.
   let spend = $state<PlanSpend | null>(null);
   $effect(() => {
     const current = plan;
@@ -794,6 +836,12 @@
           >
         {/if}
       </header>
+      {#if plan.origin_card_id != null}
+        <p class="muted origin">
+          The goal of card #{plan.origin_card_id} on the board. Once released its steps run by themselves, and the card
+          follows them — to Review when everything waits for your take-over.
+        </p>
+      {/if}
 
       <label class="goal">
         Goal
@@ -990,12 +1038,14 @@
           <button class="ax-btn primary" type="button" disabled={busy || !canApprove(plan, cards)} onclick={() => void approvePlan()}>
             Release plan
           </button>
-          <label class="check">
-            <input type="checkbox" bind:checked={runByItself} />
-            Automatisch abarbeiten
-          </label>
+          {#if plan.origin_card_id == null}
+            <label class="check">
+              <input type="checkbox" bind:checked={runByItself} />
+              Automatisch abarbeiten
+            </label>
+          {/if}
           <span class="muted">
-            {runByItself
+            {runByItself || plan.origin_card_id != null
               ? "Cards start by themselves as soon as their predecessors are done, as many at once as possible; the review runs by itself."
               : "The proposals move to the first open column; you start every card yourself."}
             Der Planer ist danach fertig.
@@ -1336,6 +1386,10 @@
   }
   .hint {
     margin: 0;
+    font-size: var(--ax-font-size-sm);
+  }
+  .origin {
+    margin: 0 0 var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
   }
   .reason,

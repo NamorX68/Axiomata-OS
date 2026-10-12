@@ -46,6 +46,13 @@ describe("review and take-over", () => {
     }
   });
 
+  it("offers no take-over of a single card whose plan runs by itself: its line is taken over as a whole", () => {
+    const running = { status: "approved" as const, auto_start_max: 64, project_id: 3 };
+    expect(canTakeOver({ state: "verified" }, running)).toBe(false);
+    expect(canTakeOver({ state: "verified" }, { ...running, auto_start_max: null })).toBe(true);
+    expect(canTakeOver({ state: "verified" }, null)).toBe(true);
+  });
+
   it("proposes the card's number and first line as the commit message", () => {
     expect(defaultTakeOverMessage({ id: 56, title: "Editor: Textgröße erhöhen" })).toBe("#56 Editor: Textgröße erhöhen");
     expect(defaultTakeOverMessage({ id: 7, title: "  First\nsecond " })).toBe("#7 First");

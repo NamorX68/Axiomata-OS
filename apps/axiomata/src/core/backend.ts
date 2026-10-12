@@ -523,6 +523,8 @@ export type TaskState =
   | "blocked"
   | "ready"
   | "working"
+  /** The goal of an open plan (card-as-plan.md): the plan's steps do the work, the card follows them. */
+  | "planned"
   | "input_required"
   | "in_review"
   | "done"
@@ -588,6 +590,8 @@ export interface BoardCard {
   /** Computed by Rust: the cards this one needs first, and those of them not signed off yet. */
   depends_on: number[];
   waiting_on: number[];
+  /** Computed by Rust: the open plan this card is the goal of (card-as-plan.md), if any. */
+  origin_of?: number | null;
   /** Computed by Rust, see {@link TaskState}. */
   state: TaskState;
 }
@@ -629,6 +633,8 @@ export interface BoardPlan {
   created_at: string;
   updated_at: string;
   approved_at: string | null;
+  /** The board card the plan was made for (card-as-plan.md); its steps are the plan's cards, not this one. */
+  origin_card_id?: number | null;
 }
 
 export type CardEventKind =

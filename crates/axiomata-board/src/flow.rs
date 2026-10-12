@@ -85,6 +85,11 @@ pub fn derive_state(card: &Card, column: &Column) -> TaskState {
     if card.failed_at.is_some() {
         return TaskState::Failed;
     }
+    // Before the column: the goal of an open plan stands in In Progress or Review because its plan does, not because an
+    // agent works on it or a reviewer should look at it.
+    if card.origin_of.is_some() {
+        return TaskState::Planned;
+    }
     match column.stage {
         Some(ColumnStage::Proposal) => TaskState::Proposed,
         Some(ColumnStage::Review) => TaskState::InReview,
@@ -205,7 +210,8 @@ pub fn latest_event(db: &Connection, card_id: i64, kind: EventKind) -> Result<Op
 // ----------------------------------------------------------------- plans ---
 
 const PLAN_COLS: &str = "id, board_id, name, status, auto_start_max, max_cost_usd, max_tokens, \
-     created_at, updated_at, approved_at, goal, project_id, base_branch, line_tip";
+     created_at, updated_at, approved_at, goal, project_id, base_branch, line_tip, \
+     (SELECT card_id FROM plan_origin WHERE plan_origin.plan_id = plans.id)";
 
 fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Result<Vec<Plan>> {
     let sql = format!("SELECT {PLAN_COLS} FROM plans {sql_tail}");
@@ -226,6 +232,7 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             row.get::<_, Option<i64>>(11)?,
             row.get::<_, Option<String>>(12)?,
             row.get::<_, Option<String>>(13)?,
+            row.get::<_, Option<i64>>(14)?,
         ))
     })?;
     let mut out = Vec::new();
@@ -245,6 +252,7 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             project_id,
             base_branch,
             line_tip,
+            origin_card_id,
         ) = row?;
         let status = PlanStatus::parse(&status).ok_or_else(|| BoardError::CorruptRow {
             table: "plans",
@@ -266,6 +274,7 @@ fn read_plan(db: &Connection, sql_tail: &str, args: impl rusqlite::Params) -> Re
             created_at: parse_ts(&created, "plans", id, "created_at")?,
             updated_at: parse_ts(&updated, "plans", id, "updated_at")?,
             approved_at: parse_opt_ts(approved, "plans", id, "approved_at")?,
+            origin_card_id,
         });
     }
     Ok(out)
@@ -313,8 +322,8 @@ pub struct GoalSuggestion {
     pub at: String,
 }
 
-/// Files a proposal for a plan's goal, replacing an earlier one. Only for a plan that is still a draft: an approved plan's
-/// goal is history. The text is bounded like the goal itself.
+/// Files a proposal for a plan's goal, replacing an earlier one. Only for a plan that is still a draft: an approved
+/// plan's goal is history. The text is bounded like the goal itself.
 pub fn set_goal_suggestion(db: &Connection, plan_id: i64, goal: &str) -> Result<()> {
     check_len("goal", goal, MAX_PLAN_GOAL_LEN)?;
     if goal.trim().is_empty() {
@@ -357,10 +366,10 @@ pub fn clear_goal_suggestion(db: &Connection, plan_id: i64) -> Result<bool> {
     )? == 1)
 }
 
-/// The owner takes the proposal over: it becomes the plan's goal (the rest of the plan's settings stay) and the proposal
-/// goes, in one transaction. `at` is the time of the proposal **the owner read**: a session that proposed again in between
-/// has replaced the text, and the owner must not approve what they did not see. `None` if there is no proposal; only a
-/// draft's goal is changed.
+/// The owner takes the proposal over: it becomes the plan's goal (the rest of the plan's settings stay) and the
+/// proposal goes, in one transaction. `at` is the time of the proposal **the owner read**: a session that proposed
+/// again in between has replaced the text, and the owner must not approve what they did not see. `None` if there is no
+/// proposal; only a draft's goal is changed.
 pub fn apply_goal_suggestion(db: &mut Connection, plan_id: i64, at: &str) -> Result<Option<Plan>> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let Some(suggestion) = goal_suggestion(&tx, plan_id)? else {
@@ -471,8 +480,8 @@ pub fn create_plan(db: &Connection, board_id: i64, fields: &PlanFields) -> Resul
 /// Full replace of the plan's settings; the status only moves through [`approve_plan`] and [`close_plan`].
 pub fn update_plan(db: &Connection, id: i64, fields: &PlanFields) -> Result<Option<Plan>> {
     check_plan_fields(fields)?;
-    // The project is where the plan's sessions run and where its line is a branch: once the plan is approved, or its line
-    // exists, it does not move to another repository.
+    // The project is where the plan's sessions run and where its line is a branch: once the plan is approved, or its
+    // line exists, it does not move to another repository.
     if let Some(current) = get_plan(db, id)?
         && fields.project_id != current.project_id
         && (current.status != PlanStatus::Draft || current.base_branch.is_some())
@@ -480,6 +489,16 @@ pub fn update_plan(db: &Connection, id: i64, fields: &PlanFields) -> Result<Opti
         return invalid(
             "project_id",
             "an approved plan, or one with a line, stays in its project",
+        );
+    }
+    // A plan made from a card runs by itself (card-as-plan.md, K4): its card follows the steps, and steps started by
+    // hand would leave it waiting in In Progress for a take-over that only a plan that runs by itself has.
+    if fields.auto_start_max.is_none()
+        && get_plan(db, id)?.is_some_and(|current| current.origin_card_id.is_some())
+    {
+        return invalid(
+            "auto_start_max",
+            "a plan made from a card runs by itself; its steps are not started by hand",
         );
     }
     let changed = db.execute(
@@ -525,6 +544,13 @@ pub fn delete_plan(db: &mut Connection, id: i64) -> Result<bool> {
                 "the plan is under way (a card is held by a session, or its line exists); take it over or close it first",
             );
         }
+    }
+    // The card the plan was made for is open again; a closed plan's card already left it (to Done, or to Open).
+    if let Some(plan) = get_plan(&tx, id)?
+        && plan.status != PlanStatus::Closed
+        && let Some(card_id) = plan.origin_card_id
+    {
+        place_origin_card(&tx, card_id, id, OriginPlace::BackToOpen)?;
     }
     tx.execute(
         "DELETE FROM card_deps
@@ -625,13 +651,327 @@ pub fn approve_plan(db: &mut Connection, plan_id: i64, actor: &str) -> Result<Op
 }
 
 /// Closes a plan: nothing starts from it any more. `false` if there is no such plan or it is closed already.
+///
+/// The card the plan was made for (`docs/plans/card-as-plan.md`) leaves it: to Done when the plan's work was taken over
+/// (a card of it is marked taken over), otherwise back to the top of Open, ready to be started again.
 pub fn close_plan(db: &Connection, plan_id: i64) -> Result<bool> {
-    let closed = db.execute(
+    let tx = immediate(db)?;
+    let closed = tx.execute(
         "UPDATE plans SET status = 'closed', updated_at = ?2 WHERE id = ?1 AND status <> 'closed'",
         params![plan_id, now()],
     )? == 1;
-    clear_goal_suggestion(db, plan_id)?;
+    clear_goal_suggestion(&tx, plan_id)?;
+    if closed && let Some(card_id) = origin_card(&tx, plan_id)? {
+        let taken_over: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM cards WHERE plan_id = ?1 AND taken_over_at IS NOT NULL)",
+            params![plan_id],
+            |row| row.get(0),
+        )?;
+        let place = if taken_over {
+            OriginPlace::Done
+        } else {
+            OriginPlace::BackToOpen
+        };
+        place_origin_card(&tx, card_id, plan_id, place)?;
+    }
+    tx.commit()?;
     Ok(closed)
+}
+
+// --------------------------------------------------- a card started as a plan ---
+
+/// How many of its ready steps a plan made from a card starts at once: no limit of its own — the machine's cap on
+/// sessions (`agents.max_parallel_sessions`) and the spend limits still hold. The value the Flow's "run by itself"
+/// sets.
+pub const AUTO_UNBOUNDED: u32 = 64;
+
+/// Whether a plan's steps are through, the same rule the studio's run uses to call a plan ready to take over: every
+/// card is on the line, taken over or called off, and at least one is on the line — a plan whose cards were all called
+/// off has nothing to take over. Archived cards are left out by the caller.
+pub fn plan_settled<'a>(cards: impl IntoIterator<Item = &'a Card>) -> bool {
+    let mut any_on_line = false;
+    for card in cards {
+        let settled = card.integrated_at.is_some()
+            || card.taken_over_at.is_some()
+            || card.state == TaskState::Canceled;
+        if !settled {
+            return false;
+        }
+        any_on_line |= card.state != TaskState::Canceled;
+    }
+    any_on_line
+}
+
+/// The card a plan was made for, if it was started from one.
+pub fn origin_card(db: &Connection, plan_id: i64) -> Result<Option<i64>> {
+    Ok(db
+        .query_row(
+            "SELECT card_id FROM plan_origin WHERE plan_id = ?1",
+            params![plan_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Where the card of a plan belongs, from the plan's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OriginPlace {
+    /// Being planned, or the steps are under way.
+    Doing,
+    /// Every step is through: the plan waits for the owner's take-over.
+    Review,
+    /// Taken over.
+    Done,
+    /// The plan went without its work being taken over: the card is open again.
+    BackToOpen,
+}
+
+impl OriginPlace {
+    fn note(self, plan_id: i64) -> String {
+        match self {
+            OriginPlace::Doing => format!("plan #{plan_id} is under way"),
+            OriginPlace::Review => {
+                format!("plan #{plan_id} is through and waits for the take-over")
+            }
+            OriginPlace::Done => format!("plan #{plan_id} was taken over"),
+            OriginPlace::BackToOpen => format!("plan #{plan_id} ended without a take-over"),
+        }
+    }
+}
+
+/// Moves the card of a plan to where the plan's state puts it. A card that is archived, or was moved to another board,
+/// stays where it is. Only a real move writes a line into the card's history. Never claims the card: `move_card_in`
+/// without an actor, so entering the review column does not make anybody its reviewer.
+fn place_origin_card(
+    tx: &Transaction<'_>,
+    card_id: i64,
+    plan_id: i64,
+    place: OriginPlace,
+) -> Result<bool> {
+    let Some(card) = get_card(tx, card_id)? else {
+        return Ok(false);
+    };
+    let Some(plan) = get_plan(tx, plan_id)? else {
+        return Ok(false);
+    };
+    let settled =
+        card.canceled_at.is_some() || card.failed_at.is_some() || card.taken_over_at.is_some();
+    if card.archived_at.is_some() || settled || card.board_id != plan.board_id {
+        return Ok(false);
+    }
+    let columns = list_columns(tx, card.board_id)?;
+    let target = match place {
+        OriginPlace::Doing => column_with(&columns, CardStatus::Doing, None),
+        OriginPlace::Review => column_with(&columns, CardStatus::Doing, Some(ColumnStage::Review)),
+        OriginPlace::Done => column_with(&columns, CardStatus::Done, None),
+        OriginPlace::BackToOpen => column_with(&columns, CardStatus::Open, None),
+    };
+    let Some(target) = target else {
+        return Ok(false);
+    };
+    if target.id == card.column_id {
+        return Ok(false);
+    }
+    let index = if place == OriginPlace::BackToOpen {
+        0
+    } else {
+        usize::MAX
+    };
+    move_card_in(tx, card_id, target.id, index, None)?;
+    insert_event(
+        tx,
+        card_id,
+        OWNER_STEP,
+        EventKind::Note,
+        &place.note(plan_id),
+    )?;
+    Ok(true)
+}
+
+/// The actor of the moves the card of a plan makes by itself: a step of the owner's plan, never an agent's.
+const OWNER_STEP: &str = "human:plan";
+
+/// Puts the card of an open plan where the plan stands: In Progress while it is planned or its steps are under way,
+/// Review once every step is through. Idempotent — the studio's run calls it on every look, which also brings back a
+/// card the owner dragged elsewhere, and a step added to a finished plan takes its card out of Review again. `false`
+/// when nothing moved (no such plan, no card, closed, or the card is where it belongs).
+pub fn sync_origin_card(db: &Connection, plan_id: i64) -> Result<bool> {
+    let tx = immediate(db)?;
+    let Some(plan) = get_plan(&tx, plan_id)? else {
+        return Ok(false);
+    };
+    let Some(card_id) = plan.origin_card_id else {
+        return Ok(false);
+    };
+    let place = match plan.status {
+        PlanStatus::Closed => return Ok(false),
+        PlanStatus::Draft => OriginPlace::Doing,
+        PlanStatus::Approved => {
+            let steps: Vec<Card> = crate::store::list_cards(&tx, plan.board_id, false)?
+                .into_iter()
+                .filter(|card| card.plan_id == Some(plan_id))
+                .collect();
+            if steps.is_empty()
+                && plan.approved_at.is_some()
+                && origin_steps_archived(&tx, plan_id)?
+            {
+                // Every step left the board (a take-over whose plan could not be closed): leave the card be.
+                return Ok(false);
+            }
+            if plan_settled(&steps) {
+                OriginPlace::Review
+            } else {
+                OriginPlace::Doing
+            }
+        }
+    };
+    let moved = place_origin_card(&tx, card_id, plan_id, place)?;
+    tx.commit()?;
+    Ok(moved)
+}
+
+/// Whether the plan has steps and every one of them is archived.
+fn origin_steps_archived(db: &Connection, plan_id: i64) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT COUNT(*) > 0 AND COUNT(*) = COUNT(archived_at) FROM cards WHERE plan_id = ?1",
+        params![plan_id],
+        |row| row.get(0),
+    )?)
+}
+
+/// [`sync_origin_card`] for every open plan made from a card. Returns the cards that moved (the caller rewrites their
+/// boards' mirrors).
+pub fn sync_origin_cards(db: &Connection) -> Result<Vec<i64>> {
+    let plans: Vec<(i64, i64)> = {
+        let mut stmt = db.prepare(
+            "SELECT o.plan_id, o.card_id FROM plan_origin o JOIN plans p ON p.id = o.plan_id
+             WHERE p.status <> 'closed' ORDER BY o.plan_id",
+        )?;
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let mut moved = Vec::new();
+    for (plan_id, card_id) in plans {
+        if sync_origin_card(db, plan_id)? {
+            moved.push(card_id);
+        }
+    }
+    Ok(moved)
+}
+
+/// The longest prefix of `text` that fits in `max` bytes, cut at a character boundary.
+fn clip(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// What a plan made from `card` is for: the card in its own words, title, description and acceptance criteria.
+fn goal_of(card: &Card) -> String {
+    let mut goal = card.title.clone();
+    if !card.body.trim().is_empty() {
+        goal.push_str("\n\n");
+        goal.push_str(card.body.trim());
+    }
+    if !card.acceptance.trim().is_empty() {
+        goal.push_str("\n\nAcceptance:\n");
+        goal.push_str(card.acceptance.trim());
+    }
+    clip(&goal, MAX_PLAN_GOAL_LEN).to_string()
+}
+
+/// Starts a board card as a plan (`docs/plans/card-as-plan.md`, K1): a draft plan in `project_id` whose goal is the
+/// card, which runs by itself once the owner approves it, and the card moves to In Progress. The caller starts the
+/// planner on it. Owner only; all in one transaction.
+///
+/// # Errors
+///
+/// [`BoardError::Invalid`] with the reason when the actor is not the owner, the card does not exist, is archived,
+/// failed or called off, is a step of a plan, is held by somebody, is not waiting in a plain open column, is the goal
+/// of an open plan already, or the board lacks a column the card would move through.
+pub fn start_card_as_plan(
+    db: &mut Connection,
+    card_id: i64,
+    project_id: i64,
+    actor: &str,
+) -> Result<Plan> {
+    let actor = normalize_actor(actor)?;
+    require_human(&actor, "starting a card as a plan")?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let Some(card) = get_card(&tx, card_id)? else {
+        return invalid("card_id", format!("no card {card_id}"));
+    };
+    if card.archived_at.is_some() {
+        return invalid("card_id", "the card is archived");
+    }
+    check_not_called_off(&card)?;
+    if let Some(plan) = card.plan_id {
+        return invalid(
+            "card_id",
+            format!("the card is a step of plan #{plan}; start it in the Flow"),
+        );
+    }
+    if let Some(plan) = card.origin_of {
+        return invalid(
+            "card_id",
+            format!("the card is the goal of plan #{plan} already"),
+        );
+    }
+    if let Some(holder) = card.claimed_by.as_deref() {
+        return invalid("card_id", format!("the card is held by {holder}"));
+    }
+    let columns = list_columns(&tx, card.board_id)?;
+    let Some(here) = columns.iter().find(|c| c.id == card.column_id) else {
+        return invalid("card_id", "the card lies in no column of its board");
+    };
+    if here.maps_to_status != CardStatus::Open || here.stage.is_some() {
+        return invalid("card_id", "the card is not waiting in an open column");
+    }
+    let Some(doing) = column_with(&columns, CardStatus::Doing, None) else {
+        return invalid("column_id", "the board has no column for work in progress");
+    };
+    if column_with(&columns, CardStatus::Doing, Some(ColumnStage::Review)).is_none()
+        || column_with(&columns, CardStatus::Done, None).is_none()
+    {
+        return invalid(
+            "column_id",
+            "the board needs a review and a done column for the card to follow its plan",
+        );
+    }
+    let name = format!("#{} {}", card.id, card.title);
+    let fields = PlanFields {
+        name: clip(&name, MAX_PLAN_NAME_LEN).to_string(),
+        goal: goal_of(&card),
+        project_id: Some(project_id),
+        auto_start_max: Some(AUTO_UNBOUNDED),
+        max_cost_usd: None,
+        max_tokens: None,
+    };
+    let plan = create_plan(&tx, card.board_id, &fields)?;
+    tx.execute(
+        "INSERT INTO plan_origin (plan_id, card_id) VALUES (?1, ?2)",
+        params![plan.id, card_id],
+    )?;
+    move_card_in(&tx, card_id, doing.id, usize::MAX, None)?;
+    insert_event(
+        &tx,
+        card_id,
+        &actor,
+        EventKind::Note,
+        &format!("started as plan #{}", plan.id),
+    )?;
+    let plan = get_plan(&tx, plan.id)?.ok_or_else(|| BoardError::CorruptRow {
+        table: "plans",
+        id: plan.id,
+        reason: "vanished immediately after insert".to_string(),
+    })?;
+    tx.commit()?;
+    Ok(plan)
 }
 
 // ---------------------------------------------------------- dependencies ---
@@ -781,9 +1121,10 @@ pub fn propose_card(
     propose_card_from(db, new, needs, actor, None)
 }
 
-/// [`propose_card`], where `parent` is the card the proposing session is working on, if it is working one (a planner has
-/// none). The proposal lies one level below it ([`MAX_PROPOSAL_DEPTH`]), and a plan takes only so many such proposals
-/// ([`MAX_SELF_PROPOSED_PER_PLAN`]): a refusal says which bound was hit, and the session is a model that can read it.
+/// [`propose_card`], where `parent` is the card the proposing session is working on, if it is working one (a planner
+/// has none). The proposal lies one level below it ([`MAX_PROPOSAL_DEPTH`]), and a plan takes only so many such
+/// proposals ([`MAX_SELF_PROPOSED_PER_PLAN`]): a refusal says which bound was hit, and the session is a model that can
+/// read it.
 pub fn propose_card_from(
     db: &mut Connection,
     new: &NewCard,
@@ -881,8 +1222,8 @@ fn proposal_depth_in(db: &Connection, card_id: i64) -> Result<i64> {
 /// The history line [`edit_own_proposal`] writes: the owner reads who changed a proposal and that it was not the owner.
 const CHANGED_NOTE: &str = "changed by the session";
 
-/// The proposal `card_id`, if it is one — in the board's proposal column, not archived — **and `actor` is the one who proposed
-/// it**: a session mends its own proposals, never another's, and never a card the owner already said yes to.
+/// The proposal `card_id`, if it is one — in the board's proposal column, not archived — **and `actor` is the one who
+/// proposed it**: a session mends its own proposals, never another's, and never a card the owner already said yes to.
 fn own_proposal(tx: &Connection, card_id: i64, actor: &str) -> Result<Card> {
     let Some(card) = get_card(tx, card_id)? else {
         return invalid("card_id", format!("no card {card_id}"));
@@ -911,10 +1252,11 @@ fn own_proposal(tx: &Connection, card_id: i64, actor: &str) -> Result<Card> {
 /// How often a session may change one proposal: every change is a line of history, and a loop must not fill it.
 const MAX_CHANGES_PER_PROPOSAL: i64 = 30;
 
-/// A session changes a proposal **it made itself**, while it still waits for the owner's yes: `change` is applied to the
-/// card's fields **as they are inside the transaction** (an edit the owner made a moment ago to a field the session does
-/// not name is kept), and `needs` (when given) replaces the card's "needs first" edges. The card, its edges and a history
-/// line ("changed by the session", by the actor) are one transaction, so a refused edge leaves the proposal as it was.
+/// A session changes a proposal **it made itself**, while it still waits for the owner's yes: `change` is applied to
+/// the card's fields **as they are inside the transaction** (an edit the owner made a moment ago to a field the session
+/// does not name is kept), and `needs` (when given) replaces the card's "needs first" edges. The card, its edges and a
+/// history line ("changed by the session", by the actor) are one transaction, so a refused edge leaves the proposal as
+/// it was.
 pub fn edit_own_proposal(
     db: &mut Connection,
     card_id: i64,
@@ -940,7 +1282,8 @@ pub fn edit_own_proposal(
     }
     let mut fields = card.fields();
     change(&mut fields);
-    // The plan and the column stay: a proposal that moved itself to another plan would be a way round the owner's reading.
+    // The plan and the column stay: a proposal that moved itself to another plan would be a way round the owner's
+    // reading.
     fields.plan_id = card.plan_id;
     crate::store::update_card_in(&tx, card_id, &fields)?;
     if let Some(wanted) = needs {
@@ -975,8 +1318,8 @@ pub fn withdraw_own_proposal(db: &mut Connection, card_id: i64, actor: &str) -> 
     Ok(())
 }
 
-/// The ids of the cards of plan `plan_id` that a session changed after proposing them: for the planning panel to say "by the
-/// planner changed", so the owner re-reads them.
+/// The ids of the cards of plan `plan_id` that a session changed after proposing them: for the planning panel to say
+/// "by the planner changed", so the owner re-reads them.
 pub fn changed_proposals(db: &Connection, plan_id: i64) -> Result<Vec<i64>> {
     let mut stmt = db.prepare(
         "SELECT DISTINCT e.card_id FROM card_events e JOIN cards c ON c.id = e.card_id
@@ -1029,6 +1372,14 @@ pub fn start_card(db: &mut Connection, card_id: i64, actor: &str) -> Result<Star
         return invalid(
             "card_id",
             "the card is a proposal; the owner has not approved it",
+        );
+    }
+    if let Some(plan) = card.origin_of {
+        return invalid(
+            "card_id",
+            format!(
+                "the card is the goal of plan #{plan}; its steps are the work, not the card itself"
+            ),
         );
     }
     if let Some(holder) = card.claimed_by.as_deref()
@@ -1121,9 +1472,9 @@ pub fn release_started(db: &mut Connection, card_id: i64, actor: &str) -> Result
 }
 
 /// Puts a **signed-off** card back to the top of the plain open column to be done again (CP-A8): its claim and its
-/// signature are dropped and `reason` goes into its history as a `released` line. For the studio's own use when a reviewed
-/// card does not fit the plan's line any more — what it did was reviewed against a base that has moved, and doing it again
-/// on the line as it is now is the honest repair.
+/// signature are dropped and `reason` goes into its history as a `released` line. For the studio's own use when a
+/// reviewed card does not fit the plan's line any more — what it did was reviewed against a base that has moved, and
+/// doing it again on the line as it is now is the honest repair.
 ///
 /// `false` for a card that is not signed off, was integrated or taken over already, or is failed or called off.
 pub fn reset_for_rework(
@@ -1161,9 +1512,9 @@ pub fn reset_for_rework(
     Ok(true)
 }
 
-/// Counts a card's returns from zero again: the owner had it done anew, so what earlier reviewers sent back is no longer
-/// the count the next escalation and the "sent back again" notice are measured against. The history keeps the lines.
-/// `false` if there is no such card.
+/// Counts a card's returns from zero again: the owner had it done anew, so what earlier reviewers sent back is no
+/// longer the count the next escalation and the "sent back again" notice are measured against. The history keeps the
+/// lines. `false` if there is no such card.
 pub fn clear_returned_count(db: &Connection, card_id: i64) -> Result<bool> {
     let changed = db.execute(
         "UPDATE cards SET returned_count = 0, updated_at = ?2 WHERE id = ?1",
@@ -1500,9 +1851,9 @@ pub fn set_line_tip(db: &Connection, plan_id: i64, tip: &str) -> Result<bool> {
     Ok(changed == 1)
 }
 
-/// How many lines of a card's history are of `kind`, were written by `actor` and start with `text_prefix`. Counted in the
-/// database, not out of the latest few lines: a history that grows must not make an old line forgotten. The actor is
-/// part of the question because a note is anyone's to write — a session could write the studio's own words.
+/// How many lines of a card's history are of `kind`, were written by `actor` and start with `text_prefix`. Counted in
+/// the database, not out of the latest few lines: a history that grows must not make an old line forgotten. The actor
+/// is part of the question because a note is anyone's to write — a session could write the studio's own words.
 pub fn count_events(
     db: &Connection,
     card_id: i64,
@@ -1526,9 +1877,9 @@ pub fn count_events(
 // -------------------------------------------------------- standard columns ---
 
 /// Gives a board the two columns the agent flow needs (A13), without touching anything already there: a column named
-/// "Review" that maps to doing gets the review role (so does a "Proposal" — or the former German "Vorschlag" — that maps to open the proposal role),
-/// otherwise a new one is inserted — Review right after the last "doing" column, Proposal at the left edge. Returns
-/// whether anything changed.
+/// "Review" that maps to doing gets the review role (so does a "Proposal" — or the former German "Vorschlag" — that
+/// maps to open the proposal role), otherwise a new one is inserted — Review right after the last "doing" column,
+/// Proposal at the left edge. Returns whether anything changed.
 pub fn ensure_flow_columns(db: &mut Connection, board_id: i64) -> Result<bool> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut changed = false;
@@ -1669,7 +2020,7 @@ mod tests {
     };
     use crate::{
         SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5, SCHEMA_SQL_V6,
-        SCHEMA_SQL_V7, SCHEMA_SQL_V8, SCHEMA_SQL_V9,
+        SCHEMA_SQL_V7, SCHEMA_SQL_V8, SCHEMA_SQL_V9, SCHEMA_SQL_V10,
     };
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1717,6 +2068,7 @@ mod tests {
         db.execute_batch(SCHEMA_SQL_V7).unwrap();
         db.execute_batch(SCHEMA_SQL_V8).unwrap();
         db.execute_batch(SCHEMA_SQL_V9).unwrap();
+        db.execute_batch(SCHEMA_SQL_V10).unwrap();
         let board = create_board(&mut db, "Flow").unwrap();
         let columns = list_columns(&db, board.id).unwrap();
         let id = |name: &str| columns.iter().find(|c| c.name == name).unwrap().id;
@@ -2835,8 +3187,8 @@ mod tests {
         assert_eq!(edited.plan_id, Some(plan.id), "the plan cannot be changed");
         assert_eq!(changed_proposals(&f.db, plan.id).unwrap(), [mine.id]);
 
-        // A history line is anyone's to write: a session that forges "proposed by the session" on another's card still does
-        // not own it.
+        // A history line is anyone's to write: a session that forges "proposed by the session" on another's card still
+        // does not own it.
         insert_event(&f.db, other.id, "agent:p-1", EventKind::Note, PROPOSED_NOTE).unwrap();
         assert!(edit_own_proposal(&mut f.db, other.id, "agent:p-1", &apply, None).is_err());
         assert!(withdraw_own_proposal(&mut f.db, other.id, "agent:p-1").is_err());
@@ -3679,5 +4031,296 @@ mod tests {
         report_done(&mut f.db, card.id, "agent:a-1").unwrap();
         review_verdict(&mut f.db, card.id, "agent:r-2", Verdict::Approve, "").unwrap();
         assert!(release_started(&mut f.db, card.id, "human:owner").is_err());
+    }
+
+    // ------------------------------------------------- a card started as a plan ---
+
+    /// A card with a description and acceptance criteria, started as a plan in project 7.
+    fn started_as_plan(f: &mut Fixture) -> (Card, Plan) {
+        let card = create_card(
+            &f.db,
+            &NewCard {
+                column_id: f.open,
+                fields: CardFields {
+                    body: "Tags wie in Obsidian".into(),
+                    acceptance: "- #tag springt".into(),
+                    ..fields("Tags und Wikilinks")
+                },
+            },
+        )
+        .unwrap();
+        let plan = start_card_as_plan(&mut f.db, card.id, 7, "human:owner").unwrap();
+        (card, plan)
+    }
+
+    fn column_of(f: &Fixture, card: i64) -> i64 {
+        get_card(&f.db, card).unwrap().unwrap().column_id
+    }
+
+    /// One step of `plan` worked, reviewed and put on the line.
+    fn step_on_the_line(f: &mut Fixture, plan: i64, title: &str) -> Card {
+        let step = planned_card(f, f.open, plan, title);
+        start_card(&mut f.db, step.id, "agent:w-1").unwrap();
+        report_done(&mut f.db, step.id, "agent:w-1").unwrap();
+        review_verdict(&mut f.db, step.id, "agent:r-2", Verdict::Approve, "").unwrap();
+        assert!(mark_integrated(&f.db, step.id, "human:owner").unwrap());
+        step
+    }
+
+    #[test]
+    fn starting_a_card_as_a_plan_makes_it_the_goal_of_a_draft_that_runs_by_itself() {
+        let mut f = fixture();
+        let (card, plan) = started_as_plan(&mut f);
+
+        assert_eq!(plan.status, PlanStatus::Draft);
+        assert_eq!(plan.origin_card_id, Some(card.id));
+        assert_eq!(plan.project_id, Some(7));
+        assert_eq!(plan.auto_start_max, Some(AUTO_UNBOUNDED));
+        assert_eq!(plan.name, format!("#{} Tags und Wikilinks", card.id));
+        assert!(
+            plan.goal
+                .starts_with("Tags und Wikilinks\n\nTags wie in Obsidian")
+        );
+        assert!(plan.goal.contains("Acceptance:\n- #tag springt"));
+
+        let after = get_card(&f.db, card.id).unwrap().unwrap();
+        assert_eq!(after.column_id, f.doing, "the card is in progress at once");
+        assert_eq!(after.plan_id, None, "the goal is no step of its plan");
+        assert_eq!(after.claimed_by, None);
+        assert_eq!(after.origin_of, Some(plan.id));
+        assert_eq!(after.state, TaskState::Planned);
+        let events = list_events(&f.db, card.id, 10).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.text == format!("started as plan #{}", plan.id))
+        );
+    }
+
+    #[test]
+    fn only_the_owner_starts_a_free_open_card_as_a_plan_and_only_once() {
+        let mut f = fixture();
+        let free = card_in(&f, f.open, "free");
+        assert!(start_card_as_plan(&mut f.db, free.id, 7, "agent:a-1").is_err());
+
+        let other = plan(&f);
+        let step = planned_card(&f, f.open, other.id, "a step");
+        assert!(start_card_as_plan(&mut f.db, step.id, 7, "human:owner").is_err());
+
+        let held = card_in(&f, f.open, "held");
+        crate::store::claim_card(&f.db, held.id, "agent:a-1").unwrap();
+        assert!(start_card_as_plan(&mut f.db, held.id, 7, "human:owner").is_err());
+
+        let proposed = card_in(&f, f.proposal, "proposed");
+        assert!(start_card_as_plan(&mut f.db, proposed.id, 7, "human:owner").is_err());
+
+        start_card_as_plan(&mut f.db, free.id, 7, "human:owner").unwrap();
+        let err = start_card_as_plan(&mut f.db, free.id, 7, "human:owner").unwrap_err();
+        assert!(matches!(
+            err,
+            BoardError::Invalid {
+                field: "card_id",
+                ..
+            }
+        ));
+        assert_eq!(
+            list_plans(&f.db, f.board).unwrap().len(),
+            2,
+            "nothing was made by a refusal"
+        );
+    }
+
+    #[test]
+    fn the_card_follows_its_plan_to_review_back_to_work_and_to_done() {
+        let mut f = fixture();
+        let (card, plan) = started_as_plan(&mut f);
+        planned_card(&f, f.proposal, plan.id, "first step");
+        assert!(
+            !sync_origin_card(&f.db, plan.id).unwrap(),
+            "a draft keeps it in progress"
+        );
+
+        approve_plan(&mut f.db, plan.id, "human:owner").unwrap();
+        let first = crate::store::list_cards(&f.db, f.board, false)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.plan_id == Some(plan.id))
+            .unwrap();
+        assert!(
+            !sync_origin_card(&f.db, plan.id).unwrap(),
+            "under way: still in progress"
+        );
+        start_card(&mut f.db, first.id, "agent:w-1").unwrap();
+        report_done(&mut f.db, first.id, "agent:w-1").unwrap();
+        review_verdict(&mut f.db, first.id, "agent:r-2", Verdict::Approve, "").unwrap();
+        assert!(
+            !sync_origin_card(&f.db, plan.id).unwrap(),
+            "signed off is not on the line yet"
+        );
+        assert!(mark_integrated(&f.db, first.id, "human:owner").unwrap());
+
+        assert!(sync_origin_card(&f.db, plan.id).unwrap());
+        assert_eq!(column_of(&f, card.id), f.review);
+        let in_review = get_card(&f.db, card.id).unwrap().unwrap();
+        assert_eq!(
+            in_review.state,
+            TaskState::Planned,
+            "no reviewer is to pick it up"
+        );
+        assert_eq!(
+            in_review.claimed_by, None,
+            "entering review claims it for nobody"
+        );
+        assert!(!sync_origin_card(&f.db, plan.id).unwrap(), "idempotent");
+
+        // A step added to the finished plan takes the card back into work; calling it off settles the plan again.
+        let late = planned_card(&f, f.open, plan.id, "late step");
+        assert!(sync_origin_card(&f.db, plan.id).unwrap());
+        assert_eq!(column_of(&f, card.id), f.doing);
+        cancel_card(&f.db, late.id, "human:owner", "not needed").unwrap();
+        assert!(sync_origin_card(&f.db, plan.id).unwrap());
+        assert_eq!(column_of(&f, card.id), f.review);
+
+        // The take-over marks the steps, then closes the plan: the card is done and an ordinary card again.
+        assert!(mark_taken_over(&f.db, first.id, "human:owner").unwrap());
+        assert!(close_plan(&f.db, plan.id).unwrap());
+        let done = get_card(&f.db, card.id).unwrap().unwrap();
+        assert_eq!(done.column_id, f.done);
+        assert_eq!(done.origin_of, None);
+        assert_eq!(done.state, TaskState::Done);
+        assert!(
+            !sync_origin_card(&f.db, plan.id).unwrap(),
+            "a closed plan moves nothing"
+        );
+    }
+
+    #[test]
+    fn a_plan_that_ends_without_a_take_over_puts_its_card_back_on_top_of_open() {
+        let mut f = fixture();
+        card_in(&f, f.open, "already waiting");
+        let (closed_card, closed) = started_as_plan(&mut f);
+        assert!(close_plan(&f.db, closed.id).unwrap());
+        let reopened = get_card(&f.db, closed_card.id).unwrap().unwrap();
+        assert_eq!(reopened.column_id, f.open);
+        assert_eq!(reopened.state, TaskState::Ready);
+        let first_open = crate::store::list_cards(&f.db, f.board, false)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.column_id == f.open)
+            .unwrap();
+        assert_eq!(
+            first_open.id, closed_card.id,
+            "on top, where the owner sees it"
+        );
+        // Free again: it may be started as a plan once more.
+        start_card_as_plan(&mut f.db, closed_card.id, 7, "human:owner").unwrap();
+
+        let (deleted_card, deleted) = started_as_plan(&mut f);
+        assert!(delete_plan(&mut f.db, deleted.id).unwrap());
+        let after = get_card(&f.db, deleted_card.id).unwrap().unwrap();
+        assert_eq!(after.column_id, f.open);
+        assert_eq!(after.origin_of, None);
+        assert_eq!(
+            origin_card(&f.db, deleted.id).unwrap(),
+            None,
+            "the link went with the plan"
+        );
+    }
+
+    #[test]
+    fn a_card_dragged_away_from_its_plan_is_brought_back_and_never_joins_a_plan() {
+        let mut f = fixture();
+        let (card, plan) = started_as_plan(&mut f);
+        crate::store::move_card(&mut f.db, card.id, f.open, 0).unwrap();
+        assert_eq!(sync_origin_cards(&f.db).unwrap(), vec![card.id]);
+        assert_eq!(column_of(&f, card.id), f.doing);
+        assert!(sync_origin_cards(&f.db).unwrap().is_empty());
+
+        let mut joined = get_card(&f.db, card.id).unwrap().unwrap().fields();
+        joined.plan_id = Some(plan.id);
+        let err = update_card(&f.db, card.id, &joined).unwrap_err();
+        assert!(matches!(
+            err,
+            BoardError::Invalid {
+                field: "plan_id",
+                ..
+            }
+        ));
+
+        // Its plan keeps running by itself.
+        let manual = PlanFields {
+            name: plan.name.clone(),
+            goal: plan.goal.clone(),
+            project_id: plan.project_id,
+            auto_start_max: None,
+            max_cost_usd: None,
+            max_tokens: None,
+        };
+        let err = update_plan(&f.db, plan.id, &manual).unwrap_err();
+        assert!(matches!(
+            err,
+            BoardError::Invalid {
+                field: "auto_start_max",
+                ..
+            }
+        ));
+        let limited = PlanFields {
+            max_cost_usd: Some(2.0),
+            auto_start_max: Some(2),
+            ..manual
+        };
+        assert!(
+            update_plan(&f.db, plan.id, &limited).unwrap().is_some(),
+            "other settings change freely"
+        );
+    }
+
+    #[test]
+    fn nobody_claims_or_starts_the_goal_of_an_open_plan_even_when_it_lies_in_open() {
+        let mut f = fixture();
+        let (card, plan) = started_as_plan(&mut f);
+        crate::store::move_card(&mut f.db, card.id, f.open, 0).unwrap();
+        assert!(!crate::store::claim_card(&f.db, card.id, "agent:a-1").unwrap());
+        assert!(start_card(&mut f.db, card.id, "agent:a-1").is_err());
+        assert!(start_card(&mut f.db, card.id, "human:owner").is_err());
+        // Once the plan is closed it is an ordinary card again.
+        close_plan(&f.db, plan.id).unwrap();
+        assert!(crate::store::claim_card(&f.db, card.id, "agent:a-1").unwrap());
+    }
+
+    #[test]
+    fn a_called_off_card_or_one_whose_steps_all_left_stays_where_it_is() {
+        let mut f = fixture();
+        let (card, plan) = started_as_plan(&mut f);
+        cancel_card(&f.db, card.id, "human:owner", "not now").unwrap();
+        crate::store::move_card(&mut f.db, card.id, f.open, 0).unwrap();
+        assert!(!sync_origin_card(&f.db, plan.id).unwrap());
+        assert_eq!(column_of(&f, card.id), f.open);
+
+        let (other, lined) = started_as_plan(&mut f);
+        let step = planned_card(&f, f.proposal, lined.id, "step");
+        approve_plan(&mut f.db, lined.id, "human:owner").unwrap();
+        crate::store::move_card(&mut f.db, other.id, f.review, 0).unwrap();
+        crate::store::set_card_archived(&f.db, step.id, true).unwrap();
+        assert!(
+            !sync_origin_card(&f.db, lined.id).unwrap(),
+            "no steps on the board: no news"
+        );
+        assert_eq!(column_of(&f, other.id), f.review);
+    }
+
+    #[test]
+    fn a_plan_is_settled_when_every_step_is_through_and_one_is_on_the_line() {
+        let mut f = fixture();
+        let plan = plan(&f);
+        assert!(!plan_settled(&[]), "no steps, nothing to take over");
+        let on_line = step_on_the_line(&mut f, plan.id, "a");
+        let called_off = planned_card(&f, f.open, plan.id, "b");
+        cancel_card(&f.db, called_off.id, "human:owner", "no").unwrap();
+        let read = |id| get_card(&f.db, id).unwrap().unwrap();
+        assert!(plan_settled(&[read(on_line.id), read(called_off.id)]));
+        assert!(!plan_settled(&[read(called_off.id)]), "all called off");
+        let open = planned_card(&f, f.open, plan.id, "c");
+        assert!(!plan_settled(&[read(on_line.id), read(open.id)]));
     }
 }

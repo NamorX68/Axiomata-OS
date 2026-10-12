@@ -30,10 +30,21 @@
   import type { BoardCard, BoardColumn, CardEvent, CardFields, CardTier } from "../core/backend";
   import { invokeBackend as invoke } from "../core/backend";
   import CardReviewForm from "./CardReviewForm.svelte";
+  import CardPlanStartForm from "./CardPlanStartForm.svelte";
   import CardStartForm from "./CardStartForm.svelte";
   import CardTakeOverForm from "./CardTakeOverForm.svelte";
   import CardUsage from "./CardUsage.svelte";
   import { canReview, canStart, canTakeOver } from "../ide/cardStart";
+  import {
+    PHASE_LABEL,
+    canStartAsPlan,
+    phaseOf,
+    planOfCard,
+    progressOf,
+    stepAtWork,
+    visibleOnBoard,
+  } from "../ide/cardPlan";
+  import { showPlanInFlow } from "../ide/planRequest";
   import { refreshAgents } from "../ide/projectSession";
   import { boardStore, refreshBoard } from "../core/boardStore";
   import { arrivedDone, doneSince, rolesOf, type RoleMap } from "../core/doneMoments";
@@ -176,9 +187,11 @@
     includeArchived: showArchived,
   });
 
-  const visible = $derived($data ? applyFilter($data.cards, filter) : []);
-  const grouped = $derived($data ? hideEmptyProposal(groupByColumn($data.columns, visible), $data.cards) : []);
   const plans = $derived($data?.plans ?? []);
+  // The steps of a plan made from a card live in the Flow; the card stands for them here (card-as-plan.md, K2).
+  const boardCards = $derived($data ? visibleOnBoard($data.cards, plans) : []);
+  const visible = $derived(applyFilter(boardCards, filter));
+  const grouped = $derived($data ? hideEmptyProposal(groupByColumn($data.columns, visible), boardCards) : []);
   const allLabels = $derived($data ? collectLabels($data.cards) : []);
   const boardEmpty = $derived($data !== null && $data.cards.length === 0);
   /** The card in the large board's side panel (editor-look B4), if one is open. */
@@ -191,6 +204,15 @@
   const detail = $derived<BoardCard | null>(
     shownCardId === null ? null : ($data?.cards.find((card) => card.id === shownCardId) ?? null),
   );
+
+  /**
+   * The Studio opens on a card's plan: this board panel (or this card's own panel) closes, so the Studio is not hidden
+   * behind it.
+   */
+  function leaveForStudio(): void {
+    const own = $staged.find((panel) => panel.config.path === `board:${boardId}`)?.id ?? stagedId;
+    if (own) closeStaged(own);
+  }
 
   function showInSide(id: number | null): void {
     confirmingDelete = false;
@@ -662,7 +684,9 @@
   }
   let note = $state("");
   /** The form of a card step that is open — start, review or take-over (A2A CP-A6) — and the card it belongs to. */
-  let stepForm = $state<{ card: number; step: "start" | "review" | "take-over"; state: string } | null>(null);
+  let stepForm = $state<{ card: number; step: "plan" | "start" | "review" | "take-over"; state: string } | null>(
+    null,
+  );
   // The form belongs to the card it was opened on: looking at another card closes it.
   $effect(() => {
     void cardId;
@@ -711,7 +735,8 @@
   const planProject = $derived(new Map(plans.map((p) => [p.id, p.project_id ?? null])));
   /** The colour of the project a card's plan runs in, or `null`: no plan, no project, or a project without one. */
   function projectColor(card: BoardCard): string | null {
-    const project = card.plan_id === null ? null : (planProject.get(card.plan_id) ?? null);
+    const planId = card.plan_id ?? card.origin_of ?? null;
+    const project = planId === null ? null : (planProject.get(planId) ?? null);
     return project === null ? null : accentColor(projectSlots.get(project), $themeAreaSwatches);
   }
 
@@ -883,6 +908,16 @@
     </p>
   {/if}
   <!-- The agent flow (a2a.md CP-A2): what the column cannot say — waiting for another card, a question, a failure. -->
+  {@const cardPlan = planOfCard(card, plans)}
+  {#if cardPlan}
+    {@const steps = progressOf($data?.cards ?? [], cardPlan.id)}
+    {@const phase = phaseOf(cardPlan, $data?.cards ?? [])}
+    <p class="flow-line">
+      <span class="state-badge" data-state-tone={phase === "waiting" ? "warn" : "muted"} title={cardPlan.name}>
+        plan · {PHASE_LABEL[phase]}{#if steps.total > 0}&nbsp;· {steps.done}/{steps.total}{/if}
+      </span>
+    </p>
+  {/if}
   {#if isNotableState(card.state) || card.kind || card.agent}
     <p class="flow-line">
       {#if isNotableState(card.state)}
@@ -1019,6 +1054,10 @@
         <span>Plan</span>
         <select
           value={detail.plan_id ?? ""}
+          disabled={detail.origin_of != null}
+          title={detail.origin_of != null
+            ? `The goal of plan #${detail.origin_of}; it is no step of a plan`
+            : undefined}
           onchange={(event) => {
             const select = event.currentTarget;
             void saveDetail({ plan_id: select.value ? Number(select.value) : null });
@@ -1080,6 +1119,17 @@
       <dd>
         {STATE_LABEL[detail.state]}{#if detail.returned_count > 0} · {detail.returned_count}× returned{/if}
       </dd>
+      {#if detail.origin_of != null}
+        {@const detailPlan = planOfCard(detail, plans)}
+        {#if detailPlan}
+          {@const steps = progressOf($data?.cards ?? [], detailPlan.id)}
+          <dt>Plan</dt>
+          <dd>
+            #{detailPlan.id} · {PHASE_LABEL[phaseOf(detailPlan, $data?.cards ?? [])]}
+            · {steps.done}/{steps.total} steps done
+          </dd>
+        {/if}
+      {/if}
       {#if detail.input_required}
         <dt>Question</dt>
         <dd>{detail.input_required}</dd>
@@ -1111,7 +1161,9 @@
         stepForm = null;
         if (boardId !== null) void refreshBoard(boardId);
       }}
-      {#if stepForm.step === "start"}
+      {#if stepForm.step === "plan"}
+        <CardPlanStartForm card={detail} onDone={finish} onStarted={leaveForStudio} />
+      {:else if stepForm.step === "start"}
         <CardStartForm card={detail} onDone={finish} />
       {:else if stepForm.step === "review"}
         <CardReviewForm card={detail} onDone={finish} />
@@ -1121,11 +1173,36 @@
     {/if}
     <div class="detail-actions">
       {#if !(stepForm?.card === detail.id && stepForm.state === detail.state)}
-        {#if canStart(detail)}
+        {@const actionPlan = planOfCard(detail, plans)}
+        {#if actionPlan}
+          {@const waiting = phaseOf(actionPlan, $data?.cards ?? []) === "waiting"}
+          <button
+            class="ax-btn"
+            class:primary={waiting}
+            title={waiting
+              ? "Every step is ready: take the plan over in the Flow"
+              : "The plan's steps, planner and graph"}
+            onclick={() => {
+              if (actionPlan.project_id == null) return;
+              showPlanInFlow(actionPlan.project_id, {
+                boardId: actionPlan.board_id,
+                planId: actionPlan.id,
+                startPlanner: false,
+              });
+              leaveForStudio();
+            }}
+          >{waiting ? "Take over in the Flow …" : "Open in the Flow"}</button>
+        {:else if canStartAsPlan(detail)}
+          <button
+            class="ax-btn primary"
+            title="The card becomes a plan: a planner splits it, then it runs by itself"
+            onclick={() => (stepForm = { card: detail.id, step: "plan", state: detail.state })}>Start …</button
+          >
+        {:else if canStart(detail)}
           <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "start", state: detail.state })}>Start …</button>
         {:else if canReview(detail)}
           <button class="ax-btn" title="The reviewer starts by itself; here with an engine of your choice" onclick={() => (stepForm = { card: detail.id, step: "review", state: detail.state })}>Start review …</button>
-        {:else if canTakeOver(detail)}
+        {:else if canTakeOver(detail, plans.find((plan) => plan.id === detail.plan_id) ?? null)}
           <button class="ax-btn primary" onclick={() => (stepForm = { card: detail.id, step: "take-over", state: detail.state })}>Take over …</button>
         {/if}
       {/if}
@@ -1137,7 +1214,7 @@
       {/if}
       {#if detail.state === "failed" || detail.state === "canceled"}
         <button class="ax-btn" onclick={() => markCard(detail, "reopen")}>Reopen</button>
-      {:else if detail.state !== "taken_over" && detail.state !== "integrated" && detail.state !== "verified"}
+      {:else if !["taken_over", "integrated", "verified", "planned"].includes(detail.state)}
         <button class="ax-btn" onclick={() => markCard(detail, "cancel")}>Absagen</button>
       {/if}
       <button class="ax-btn" onclick={() => setArchived(detail, detail.archived_at === null)}>
@@ -1374,7 +1451,9 @@
                 data-tone={card.labels.length > 0 ? labelColorIndex(card.labels[0], LABEL_TOKENS) : undefined}
                 data-project={project ? "" : undefined}
                 style:--card-project={project}
-                use:glow={$studioCards.has(card.id) || glowing.has(card.id)}
+                use:glow={$studioCards.has(card.id) ||
+                  glowing.has(card.id) ||
+                  (card.origin_of != null && stepAtWork($data?.cards ?? [], card.origin_of, $studioCards))}
                 class:archived={card.archived_at !== null}
                 class:lifted={dragging?.id === card.id || carrying?.id === card.id}
                 class:settling={settling.has(card.id)}

@@ -119,6 +119,9 @@ pub enum TaskState {
     Ready,
     /// In a doing column.
     Working,
+    /// The goal of an open plan (`docs/plans/card-as-plan.md`): the plan's steps do the work, the card follows them
+    /// across the board. No agent works on it and no reviewer picks it up, whichever column it is in.
+    Planned,
     /// The working agent asked something and waits for the answer.
     InputRequired,
     /// In a review column: reported done, waiting for a reviewer.
@@ -257,8 +260,8 @@ pub struct Plan {
     pub name: String,
     /// What the plan is for, in the owner's words; the planner reads it (`get_plan`).
     pub goal: String,
-    /// The project (repository) the plan's sessions run in; `None` until the owner says (the Flow does when it makes the
-    /// plan). A plan that runs by itself needs one.
+    /// The project (repository) the plan's sessions run in; `None` until the owner says (the Flow does when it makes
+    /// the plan). A plan that runs by itself needs one.
     pub project_id: Option<i64>,
     /// The branch the plan's integration line was cut from, once there is one.
     pub base_branch: Option<String>,
@@ -272,6 +275,10 @@ pub struct Plan {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub approved_at: Option<DateTime<Utc>>,
+    /// The board card the plan was made for (`docs/plans/card-as-plan.md`), if it was started from one. Its steps are
+    /// the plan's cards; this card itself is not one of them.
+    #[serde(default)]
+    pub origin_card_id: Option<i64>,
 }
 
 /// What a caller sets on a plan (everything but the status, which only [`crate::flow::approve_plan`] and
@@ -367,6 +374,9 @@ pub struct Card {
     /// for. A failed or canceled one stays in here, so the block stays visible.
     #[serde(default)]
     pub waiting_on: Vec<i64>,
+    /// **Computed on read**: the open plan this card is the goal of (`docs/plans/card-as-plan.md`), if any.
+    #[serde(default, skip_deserializing)]
+    pub origin_of: Option<i64>,
     /// **Computed on read**: see [`TaskState`]. Ignored when a client sends a card back.
     #[serde(default, skip_deserializing)]
     pub state: TaskState,

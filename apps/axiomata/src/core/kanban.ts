@@ -246,6 +246,7 @@ export const STATE_LABEL: Record<TaskState, string> = {
   blocked: "waiting",
   ready: "ready",
   working: "in progress",
+  planned: "plan",
   input_required: "question",
   in_review: "in review",
   done: "done",

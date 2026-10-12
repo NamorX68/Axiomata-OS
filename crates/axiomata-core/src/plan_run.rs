@@ -218,15 +218,8 @@ fn plan_work(
                 ));
             }
         }
-        // Finished: there are cards, every one of them is on the line (or taken over) or was called off, and at least one
-        // is on the line: a plan whose cards were all called off has nothing to take over.
-        let settled = |card: &&Card| {
-            card.integrated_at.is_some()
-                || card.taken_over_at.is_some()
-                || card.state == TaskState::Canceled
-        };
-        let all_done =
-            mine.iter().all(settled) && mine.iter().any(|card| card.state != TaskState::Canceled);
+        // Finished: the same rule that moves the card a plan was made for into Review (`flow::plan_settled`).
+        let all_done = crate::board::flow::plan_settled(mine.iter().copied());
         if all_done && !already_finished.contains(&plan.id) {
             work.finished.push((plan.id, plan.name.clone()));
         }
@@ -450,7 +443,24 @@ impl PlanRun {
             self.finished.insert(plan_id);
             events.push(RunEvent::ReadyToTakeOver { plan_id, name });
         }
+        // Last, so a card that was integrated in this look already counts: the card a plan was made for follows it.
+        tokio::task::block_in_place(|| sync_origin_cards(core));
         events
+    }
+}
+
+/// Puts the card every open plan was made for where its plan stands (`docs/plans/card-as-plan.md`) and rewrites the
+/// mirror of a card that moved. A failure is logged and tried again on the next look.
+fn sync_origin_cards(core: &AxiomataCore) {
+    let config: Config = core.config_read().clone();
+    let db = core.db_lock();
+    match crate::board::flow::sync_origin_cards(&db) {
+        Ok(moved) => {
+            for card_id in moved {
+                crate::board_mirror::after_card_change(&db, &config, card_id);
+            }
+        }
+        Err(err) => tracing::warn!(%err, "could not move the cards of plans made from a card"),
     }
 }
 
@@ -545,6 +555,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             approved_at: None,
+            origin_card_id: None,
         }
     }
 

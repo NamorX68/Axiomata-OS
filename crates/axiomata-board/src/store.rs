@@ -588,6 +588,7 @@ impl RawCard {
             // Filled in by `decorate`, which knows the columns and the edges.
             depends_on: Vec::new(),
             waiting_on: Vec::new(),
+            origin_of: None,
             state: TaskState::default(),
         })
     }
@@ -637,6 +638,8 @@ fn decorate(db: &Connection, mut cards: Vec<Card>) -> Result<Vec<Card>> {
     let mut columns: HashMap<i64, Column> = HashMap::new();
     // card id → (depends-on id, signed off?)
     let mut edges: HashMap<i64, Vec<(i64, bool)>> = HashMap::new();
+    // card id → the open plan it is the goal of
+    let mut origins: HashMap<i64, i64> = HashMap::new();
     for board_id in boards {
         for column in list_columns(db, board_id)? {
             columns.insert(column.id, column);
@@ -663,8 +666,23 @@ fn decorate(db: &Connection, mut cards: Vec<Card>) -> Result<Vec<Card>> {
             let (card_id, dep_id, signed) = row?;
             edges.entry(card_id).or_default().push((dep_id, signed));
         }
+        // Only an open plan makes its card the plan's: once the plan is closed the card is an ordinary card again.
+        let mut stmt = db.prepare(
+            "SELECT o.card_id, o.plan_id FROM plan_origin o
+             JOIN plans p ON p.id = o.plan_id
+             JOIN cards c ON c.id = o.card_id
+             WHERE c.board_id = ?1 AND p.status <> 'closed'",
+        )?;
+        let rows = stmt.query_map(params![board_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (card_id, plan_id) = row?;
+            origins.insert(card_id, plan_id);
+        }
     }
     for card in &mut cards {
+        card.origin_of = origins.get(&card.id).copied();
         if let Some(list) = edges.get(&card.id) {
             card.depends_on = list.iter().map(|(dep, _)| *dep).collect();
             card.waiting_on = list
@@ -888,6 +906,17 @@ fn write_card_fields(tx: &Connection, id: i64, fields: &CardFields) -> Result<bo
     };
     check_plan_of_board(tx, fields.plan_id, existing.board_id)?;
     if fields.plan_id != existing.plan_id {
+        // The goal of a plan is not a step of one: a plan that runs by itself would start it like its own steps.
+        if fields.plan_id.is_some()
+            && let Some(plan) = existing.origin_of
+        {
+            return Err(BoardError::Invalid {
+                field: "plan_id",
+                reason: format!(
+                    "the card is the goal of plan #{plan}; it cannot be a step of a plan"
+                ),
+            });
+        }
         crate::flow::check_plan_change_keeps_edges(tx, id)?;
     }
     let changed = tx.execute(
@@ -1242,7 +1271,8 @@ pub fn move_to_status(db: &mut Connection, id: i64, status: CardStatus) -> Resul
 pub fn claim_card(db: &Connection, id: i64, actor: &str) -> Result<bool> {
     let actor = normalize_actor(actor)?;
     let stamp = now();
-    // A card in a proposal column has not been approved yet and cannot be taken. `archived_at IS NULL`: an
+    // A card in a proposal column has not been approved yet and cannot be taken, nor can the goal of an open plan (its
+    // steps are the work; card-as-plan.md). `archived_at IS NULL`: an
     // archived card is not live work. Without this an
     // agent enumerating cards with a query that forgot the archive filter could
     // claim something nobody meant to put back in play.
@@ -1250,7 +1280,9 @@ pub fn claim_card(db: &Connection, id: i64, actor: &str) -> Result<bool> {
         "UPDATE cards SET claimed_by = ?2, claimed_at = ?3, updated_at = ?3
          WHERE id = ?1 AND claimed_by IS NULL AND archived_at IS NULL
            AND NOT EXISTS (SELECT 1 FROM board_columns c
-                           WHERE c.id = cards.column_id AND c.stage = 'proposal')",
+                           WHERE c.id = cards.column_id AND c.stage = 'proposal')
+           AND NOT EXISTS (SELECT 1 FROM plan_origin o JOIN plans p ON p.id = o.plan_id
+                           WHERE o.card_id = cards.id AND p.status <> 'closed')",
         params![id, actor, stamp],
     )? == 1)
 }
@@ -1340,7 +1372,9 @@ pub fn explain_verify_refusal(
 mod tests {
     use super::*;
     use crate::model::CardFields;
-    use crate::{SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5};
+    use crate::{
+        SCHEMA_SQL_V1, SCHEMA_SQL_V2, SCHEMA_SQL_V3, SCHEMA_SQL_V4, SCHEMA_SQL_V5, SCHEMA_SQL_V10,
+    };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1371,6 +1405,9 @@ mod tests {
         conn.execute_batch(SCHEMA_SQL_V3).expect("plan goal schema");
         conn.execute_batch(SCHEMA_SQL_V4).expect("plan line schema");
         conn.execute_batch(SCHEMA_SQL_V5).expect("plan line schema");
+        // Every card read asks which open plan a card is the goal of.
+        conn.execute_batch(SCHEMA_SQL_V10)
+            .expect("plan origin schema");
         conn
     }
 

@@ -694,15 +694,27 @@
       unsubscribeHandoffs = handoffs.subscribe((list) => {
         if (list.length > 0) void takeWaiting();
       });
+      // A project being opened brings its stored mode: a mode asked for together with it is shown after that, not
+      // before (it would be undone).
+      let opening: { id: number; done: Promise<void> } | null = null;
       unsubscribeMode = modeRequest.subscribe((wanted) => {
         if (!wanted) return;
         modeRequest.set(null);
-        switchTo(wanted);
+        if (opening) void opening.done.then(() => switchTo(wanted));
+        else switchTo(wanted);
       });
       unsubscribeProject = projectRequest.subscribe((wanted) => {
         if (wanted === null) return;
         projectRequest.set(null);
-        void openProjectById(wanted);
+        // Already open, or on its way: opening it again would only put its stored mode back over the one asked for.
+        if (get(sessionState).current?.id === wanted || opening?.id === wanted) return;
+        // `open` reports its own failures; the mode asked for is shown either way.
+        const done = openProjectById(wanted).catch(() => {});
+        const mine = { id: wanted, done };
+        opening = mine;
+        void done.then(() => {
+          if (opening === mine) opening = null;
+        });
       });
       unsubscribeAgent = agentRequests.subscribe((waiting) => {
         if (waiting.length > 0) void showRequestedAgents();

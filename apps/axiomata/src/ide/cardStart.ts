@@ -2,7 +2,8 @@
  * What the Kanban's "Starten" needs to decide before it asks the backend (A2A CP-A6a): which cards can be started at
  * all, and which project the dialog offers first. Pure, so it is tested without a backend.
  */
-import type { BoardCard, IdeProject } from "../core/backend";
+import type { BoardCard, BoardPlan, IdeProject } from "../core/backend";
+import { runsByItself } from "./planning";
 
 /** A card is started from "ready": approved, waiting for nobody, held by nobody. The backend checks it again. */
 export function canStart(card: Pick<BoardCard, "state">): boolean {
@@ -24,9 +25,15 @@ export function canReview(card: Pick<BoardCard, "state">): boolean {
   return card.state === "in_review";
 }
 
-/** A card the reviewer signed off waits for the owner's take-over, the second gate. */
-export function canTakeOver(card: Pick<BoardCard, "state">): boolean {
-  return card.state === "verified";
+/**
+ * A card the reviewer signed off waits for the owner's take-over, the second gate — unless its plan runs by itself:
+ * that plan's line is taken over as a whole, and the backend refuses a single card of it.
+ */
+export function canTakeOver(
+  card: Pick<BoardCard, "state">,
+  plan: Pick<BoardPlan, "status" | "auto_start_max" | "project_id"> | null = null,
+): boolean {
+  return card.state === "verified" && !(plan !== null && runsByItself(plan));
 }
 
 /** What the take-over's commit says unless the owner writes something else: the card's number and its first line. */

@@ -168,12 +168,13 @@ pub enum PlanAction {
         /// An engine of the catalog (`ide engines list`).
         #[arg(long)]
         engine: Option<String>,
-        /// Start a session that grills the plan's goal (interviews you, then proposes a sharper goal) instead of a planner.
+        /// Start a session that grills the plan's goal (interviews you, then proposes a sharper goal) instead of a
+        /// planner.
         #[arg(long)]
         grill: bool,
     },
-    /// The sharper goal a grilling session proposed for a plan. Without a flag it is shown; `--accept` makes it the plan's
-    /// goal, `--discard` drops it. The owner's step: the goal is the owner's own words.
+    /// The sharper goal a grilling session proposed for a plan. Without a flag it is shown; `--accept` makes it the
+    /// plan's goal, `--discard` drops it. The owner's step: the goal is the owner's own words.
     Goal {
         id: i64,
         /// Take the proposal over as the plan's goal.
@@ -182,6 +183,15 @@ pub enum PlanAction {
         /// Drop the proposal.
         #[arg(long)]
         discard: bool,
+    },
+    /// Start a board card as a plan (docs/plans/card-as-plan.md): a draft plan in the project whose goal is the card,
+    /// which runs by itself once approved; the card moves to In Progress and then follows its plan across the board.
+    /// Start a planner for it next (`board plan start <plan> --project <p>`). The owner's step.
+    FromCard {
+        card: i64,
+        /// The project (repository) the plan's steps run in.
+        #[arg(long)]
+        project: i64,
     },
     /// Say yes to a plan: its proposals move to Offen and it becomes approved.
     Approve {
@@ -238,6 +248,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         PlanAction::New { goal, .. } if !goal.is_empty() => owner_only("writing a plan's goal")?,
         PlanAction::Edit { .. } => owner_only("changing a plan's settings")?,
         PlanAction::Start { .. } => owner_only("starting a planner")?,
+        PlanAction::FromCard { .. } => owner_only("starting a card as a plan")?,
         PlanAction::Approve { .. } => owner_only("approving a plan")?,
         PlanAction::Resume { .. } => owner_only("giving a plan a new allowance")?,
         PlanAction::Goal { .. } => owner_only("reading or taking over a proposed goal")?,
@@ -338,7 +349,8 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             discard,
         } => {
             if accept {
-                // Taking over from the command line is taking over what is there now: the proposal is read in the same breath.
+                // Taking over from the command line is taking over what is there now: the proposal is read in the same
+                // breath.
                 let Some(read) = flow::goal_suggestion(&db, id)? else {
                     println!("plan #{id} has no proposed goal");
                     return Ok(());
@@ -376,7 +388,7 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
                 plan.max_tokens.unwrap_or_default()
             );
         }
-        PlanAction::Start { .. } => {
+        PlanAction::Start { .. } | PlanAction::FromCard { .. } => {
             bail!("starting a planner is an asynchronous step and is handled before this point")
         }
         PlanAction::Approve { id, actor } => {
@@ -392,6 +404,12 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         PlanAction::Close { id } => {
             if !flow::close_plan(&db, id)? {
                 bail!("plan #{id} does not exist or is closed already");
+            }
+            // The card the plan was made for left it (to Open or Done).
+            if let Some(plan) = flow::get_plan(&db, id)?
+                && plan.origin_card_id.is_some()
+            {
+                board_mirror::after_change(&db, &read_config(core), plan.board_id);
             }
             println!("plan #{id} closed");
         }
@@ -561,6 +579,9 @@ pub fn flow_marks(card: &board::Card) -> String {
     ) {
         marks.push_str(&format!("  state:{}", state_name(card.state)));
     }
+    if let Some(plan) = card.origin_of {
+        marks.push_str(&format!("  goal-of:#{plan}"));
+    }
     if let Some(plan) = card.plan_id {
         marks.push_str(&format!("  plan:#{plan}"));
     }
@@ -580,6 +601,7 @@ fn state_name(state: board::TaskState) -> &'static str {
         board::TaskState::Blocked => "blocked",
         board::TaskState::Ready => "ready",
         board::TaskState::Working => "working",
+        board::TaskState::Planned => "planned",
         board::TaskState::InputRequired => "input-required",
         board::TaskState::InReview => "in-review",
         board::TaskState::Done => "done",

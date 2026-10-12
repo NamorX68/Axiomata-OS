@@ -2754,6 +2754,17 @@ async fn board_plan(core: &AxiomataCore, action: board_flow::PlanAction) -> Resu
         }
         return Ok(());
     }
+    if let PlanAction::FromCard { card, project } = action {
+        board_flow::owner_only("starting a card as a plan")?;
+        let plan = axiomata_core::card_session::start_card_plan(core, card, project)?;
+        board_mirror::after_change(&core.db_lock(), &read_config(core), plan.board_id);
+        println!(
+            "card #{card} is the goal of the new plan #{} {} — start its planner: \
+             board plan start {} --project {project}",
+            plan.id, plan.name, plan.id
+        );
+        return Ok(());
+    }
     let ended = match &action {
         PlanAction::Approve { id, .. } | PlanAction::Close { id } | PlanAction::Delete { id } => {
             Some(*id)
@@ -3108,6 +3119,7 @@ mod tests {
             canceled_at: None,
             depends_on: Vec::new(),
             waiting_on: Vec::new(),
+            origin_of: None,
             state: board::TaskState::Ready,
         }
     }

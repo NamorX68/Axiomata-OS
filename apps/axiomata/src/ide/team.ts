@@ -43,6 +43,8 @@ const ORDER: Record<TaskState, number> = {
   failed: 9,
   canceled: 10,
   proposed: 11,
+  // The goal of a plan has no session of its own; listed last should one ever show up.
+  planned: 12,
 };
 
 /**

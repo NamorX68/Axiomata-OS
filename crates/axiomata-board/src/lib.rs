@@ -48,8 +48,8 @@ pub const SCHEMA_SQL_V2: &str = include_str!("flow.sql");
 /// (19), frozen once released.
 pub const SCHEMA_SQL_V3: &str = include_str!("plan_goal.sql");
 
-/// The board's **version 4** schema (`project_id`, `base_branch` on a plan, `integrated_at` on a card), `docs/plans/a2a.md`
-/// CP-A8. Its own constant and migration number (20), frozen once released.
+/// The board's **version 4** schema (`project_id`, `base_branch` on a plan, `integrated_at` on a card),
+/// `docs/plans/a2a.md` CP-A8. Its own constant and migration number (20), frozen once released.
 pub const SCHEMA_SQL_V4: &str = include_str!("plan_line.sql");
 
 /// The board's **version 5** schema (`line_tip` on a plan), `docs/plans/a2a.md` CP-A8. A migration of its own (21): the
@@ -60,17 +60,21 @@ pub const SCHEMA_SQL_V5: &str = include_str!("plan_line_tip.sql");
 /// number (23), frozen once released.
 pub const SCHEMA_SQL_V6: &str = include_str!("proposal_depth.sql");
 
-/// The board's **version 7** schema (`plan_goal_suggestions`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own
-/// constant and migration number (24), frozen once released.
+/// The board's **version 7** schema (`plan_goal_suggestions`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its
+/// own constant and migration number (24), frozen once released.
 pub const SCHEMA_SQL_V7: &str = include_str!("plan_goal_suggestion.sql");
 
-/// The board's **version 8** schema (`card_proposers`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own constant
-/// and migration number (25), frozen once released.
+/// The board's **version 8** schema (`card_proposers`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own
+/// constant and migration number (25), frozen once released.
 pub const SCHEMA_SQL_V8: &str = include_str!("card_proposers.sql");
 
-/// The board's **version 9** schema (`plan_grilled`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own constant
-/// and migration number (26), frozen once released.
+/// The board's **version 9** schema (`plan_grilled`), `docs/plans/a2a.md` "Plan bearbeiten und grillen". Its own
+/// constant and migration number (26), frozen once released.
 pub const SCHEMA_SQL_V9: &str = include_str!("plan_grilled.sql");
+
+/// The board's **version 10** schema (`plan_origin`: the card a plan was made for), `docs/plans/card-as-plan.md`. Its
+/// own constant and migration number (30), frozen once released.
+pub const SCHEMA_SQL_V10: &str = include_str!("plan_origin.sql");
 
 /// Everything that can go wrong in the board core.
 ///
@@ -156,6 +160,22 @@ mod schema_is_frozen {
     }
 }
 
+/// How far a plan's steps are: how many are on its line (or taken over), out of all that are not called off. Archived
+/// steps count — a plan that was taken over archives its cards.
+pub fn plan_progress(cards: &[Card], plan_id: i64) -> (usize, usize) {
+    let steps = cards
+        .iter()
+        .filter(|card| card.plan_id == Some(plan_id) && card.canceled_at.is_none());
+    let (mut on_line, mut total) = (0, 0);
+    for card in steps {
+        total += 1;
+        if card.integrated_at.is_some() || card.taken_over_at.is_some() {
+            on_line += 1;
+        }
+    }
+    (on_line, total)
+}
+
 /// Renders a board as Markdown, for mirroring into the user's workspace.
 ///
 /// Pure on purpose: the board crate must not know where a workspace is or how
@@ -184,11 +204,15 @@ pub fn render_board_markdown(board: &Board, columns: &[Column], cards: &[Card]) 
 
     let mut ordered: Vec<&Column> = columns.iter().collect();
     ordered.sort_by(|a, b| a.position.total_cmp(&b.position).then(a.id.cmp(&b.id)));
+    // The steps of a plan made from a card are the plan's business (card-as-plan.md, K2): the card stands for them.
+    let planned: std::collections::HashSet<i64> =
+        cards.iter().filter_map(|card| card.origin_of).collect();
 
     for column in ordered {
         let mut held: Vec<&Card> = cards
             .iter()
             .filter(|card| card.column_id == column.id && card.archived_at.is_none())
+            .filter(|card| card.plan_id.is_none_or(|plan| !planned.contains(&plan)))
             .collect();
         held.sort_by(|a, b| a.position.total_cmp(&b.position).then(a.id.cmp(&b.id)));
 
@@ -221,6 +245,10 @@ pub fn render_board_markdown(board: &Board, columns: &[Column], cards: &[Card]) 
             }
             if let Some(signer) = &card.verified_by {
                 notes.push(format!("approved by {signer}"));
+            }
+            if let Some(plan) = card.origin_of {
+                let (on_line, total) = plan_progress(cards, plan);
+                notes.push(format!("plan #{plan}, {on_line}/{total} steps done"));
             }
             if let Some(kind) = &card.kind {
                 notes.push(format!("kind {kind}"));
@@ -313,6 +341,7 @@ mod render_tests {
             canceled_at: None,
             depends_on: Vec::new(),
             waiting_on: Vec::new(),
+            origin_of: None,
             state: TaskState::default(),
         }
     }
@@ -404,6 +433,36 @@ mod render_tests {
         assert!(out.contains("2× returned"));
         assert!(out.contains("waiting on #7, #9"));
         assert!(out.contains("failed"));
+    }
+
+    #[test]
+    fn a_card_started_as_a_plan_stands_for_its_steps_with_their_progress() {
+        let columns = vec![
+            column(1, "Open", 1.0, CardStatus::Open),
+            column(2, "In Progress", 2.0, CardStatus::Doing),
+        ];
+        let mut goal = card(10, 2, 1.0, "Tags und Wikilinks");
+        goal.origin_of = Some(4);
+        let mut on_line = card(11, 1, 1.0, "Parser");
+        on_line.plan_id = Some(4);
+        on_line.integrated_at = Some(Utc.with_ymd_and_hms(2026, 10, 12, 0, 0, 0).unwrap());
+        let mut open = card(12, 1, 2.0, "Sprung");
+        open.plan_id = Some(4);
+        let mut called_off = card(13, 1, 3.0, "Verworfen");
+        called_off.plan_id = Some(4);
+        called_off.canceled_at = Some(Utc.with_ymd_and_hms(2026, 10, 12, 0, 0, 0).unwrap());
+        let mut other_plan = card(14, 1, 4.0, "Anderer Plan");
+        other_plan.plan_id = Some(5);
+        let cards = [goal, on_line, open, called_off, other_plan];
+
+        assert_eq!(plan_progress(&cards, 4), (1, 2));
+        let out = render_board_markdown(&board(), &columns, &cards);
+        assert!(out.contains("Tags und Wikilinks  (plan #4, 1/2 steps done)"));
+        assert!(!out.contains("Parser") && !out.contains("Sprung") && !out.contains("Verworfen"));
+        assert!(
+            out.contains("Anderer Plan"),
+            "a plan of no card keeps its cards on the board"
+        );
     }
 
     #[test]
