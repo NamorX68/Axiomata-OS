@@ -39,6 +39,9 @@ export interface RenderOptions {
   pulse?: boolean;
   /** Orbit only: how the hive's cells catch the light (G7); `metal` when unset. */
   shine?: Shine;
+  /** Fade the drawing out towards the canvas's inscribed circle from this share of its radius on (0…1): the Second
+   *  Brain's lens has no hard rim, it thins out into the Orbit beneath. Unset, nothing fades. */
+  fadeFrom?: number;
 }
 
 /** A hive cell's or map field's tone before the shimmer (`GraphRenderer.noteTones`). */
@@ -468,6 +471,26 @@ export class GraphRenderer {
       if (raw >= 1) this.flyAnim = null;
     }
     this.draw(now / 1000);
+    if (this.options.fadeFrom !== undefined) this.fadeEdge(this.options.fadeFrom);
+  }
+
+  /**
+   * Thins the finished frame out towards the canvas's inscribed circle, from `from` of its radius on: what was drawn
+   * keeps only as much as a radial gradient lets through. Done on the canvas, not with a CSS mask, which WebKit and
+   * Chromium leave the canvas blank with inside the Orbit's container.
+   */
+  private fadeEdge(from: number): void {
+    const { ctx, width, height } = this;
+    const r = Math.min(width, height) / 2;
+    const g = ctx.createRadialGradient(width / 2, height / 2, r * from, width / 2, height / 2, r);
+    g.addColorStop(0, "#000");
+    g.addColorStop(1, "transparent");
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
   }
 
   private font(px: number, weight = 600): string {
@@ -1410,7 +1433,7 @@ export class GraphRenderer {
       if (tone.heat > GraphRenderer.MAP_EMBER_FROM) {
         // A fresh note's glow: an ember in the middle of its field, as bright as the note is fresh.
         ctx.beginPath();
-        ctx.arc(0, 0, s * 0.18, 0, TWO_PI);
+        ctx.arc(0, 0, s * 0.13, 0, TWO_PI);
         ctx.globalAlpha = alpha * Math.min(1, 0.35 + tone.heat);
         if (tone.blur) {
           ctx.shadowBlur = (this.lightScheme ? 4 : 12) * tone.heat;

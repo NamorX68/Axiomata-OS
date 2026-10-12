@@ -72,6 +72,9 @@
   /** The graph's outermost radius is the disc's edge: the renderer's `fit` is the share of the canvas (the disc's own
    *  square) that one graph unit takes. */
   const DISC_FIT = 0.5;
+  /** From this share of the lens's radius on the graph thins out into the Orbit (`RenderOptions.fadeFrom`); the map's
+   *  skills ring sits inside it (`layout.ts` `MAP_SKILLS`). */
+  const LENS_FADE = 0.9;
 
   /**
    * The disc lives inside the Orbit's own container (`[data-background]`), moved there on mount: it then has the cloud's box —
@@ -423,6 +426,7 @@
       labels: $brainView.labels,
       fileLabels: $brainView.fileNames,
       fit: DISC_FIT,
+      fadeFrom: LENS_FADE,
       mode: renderMode,
     };
     renderer.resize();
@@ -642,8 +646,9 @@
        path makes the circle the element's shape for hit testing too. */
     clip-path: circle(50%);
     overflow: hidden;
-    background: var(--ax-bg);
-    box-shadow: 0 0 0 1px var(--ax-border);
+    /* No hard edge (owner, UX5): the ground thins out into the Orbit's disc beneath over the outer rim — still solid
+       where the Orbit's hive lies under it — and the graph fades out with it instead of being cut off. */
+    background: radial-gradient(closest-side, var(--ax-bg) 86%, transparent 100%);
     cursor: grab;
   }
   /* In the Orbit's container (`container-type: size` there): its own box is the unit, the same one the cloud is sized from. */

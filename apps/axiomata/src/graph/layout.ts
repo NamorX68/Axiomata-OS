@@ -218,9 +218,9 @@ export function layoutRings(model: GraphModel): void {
 }
 
 /** How far out the map reaches, in graph units (1 = the lens circle's edge): room is left for the skills' ring. */
-export const MAP_EDGE = 0.84;
-/** The ring the skills sit on around the map. */
-export const MAP_SKILLS = 0.94;
+export const MAP_EDGE = 0.8;
+/** The ring the skills sit on around the map — inside the lens's faded rim (`SecondBrainView`'s `LENS_FADE`, 0.9). */
+export const MAP_SKILLS = 0.87;
 
 /** A note's birth for the map (G17): its `created`, else its last change, else unknown. */
 function bornOf(n: GraphNode): number | null {
