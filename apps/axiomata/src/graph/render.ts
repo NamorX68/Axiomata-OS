@@ -988,11 +988,13 @@ export class GraphRenderer {
    * Each note's colour before the shimmer, its heat, whether it is settled and whether it gets the glow's blur — for
    * the hive's cells (`null` = an unsettled one) and the map's fields alike — worked out at most once a second (and at
    * once after a change of colours, of the list, the time travel or a landed spark), not in every frame. `cooling` is
-   * how far an old note fades toward ash (1 = all the way): a map keeps more of its countries' colours.
+   * how far an old note fades toward ash (1 = all the way): a map keeps more of its countries' colours. `tint` mixes
+   * the heat into the colour itself — the hive's cells; a map's field keeps its country's colour and shows its heat
+   * as an ember core instead, or a fresh note would read as another country.
    */
-  private noteTones(nodes: readonly (GraphNode | null)[], cooling = 1): HiveTone[] {
+  private noteTones(nodes: readonly (GraphNode | null)[], cooling = 1, tint = true): HiveTone[] {
     const now = Date.now();
-    const key = `${this.surfaceColor}|${this.mutedColor}|${this.glowColor}|${this.timeCutoff}|${cooling}`;
+    const key = `${this.surfaceColor}|${this.mutedColor}|${this.glowColor}|${this.timeCutoff}|${cooling}|${tint}`;
     const fresh = now - this.toneAt < GraphRenderer.TONE_TTL_MS;
     if (this.toneList === nodes && key === this.toneKey && fresh) return this.tones;
     const surface = this.rgb(this.surfaceColor);
@@ -1007,7 +1009,7 @@ export class GraphRenderer {
       if (!node || !settled) return { col: unsettled, heat: 0, settled: false, blur: false };
       const touched = cutoff === null ? (node.modified ? Date.parse(node.modified) : null) : born;
       const glow = emberOf(touched, cutoff ?? now);
-      const col = mixRgb(mixRgb(this.rgb(node.color), ash, glow.ash * cooling), ember, glow.heat);
+      const col = mixRgb(mixRgb(this.rgb(node.color), ash, glow.ash * cooling), ember, tint ? glow.heat : 0);
       return { col, heat: glow.heat, settled: true, blur: false };
     });
     tones
@@ -1287,6 +1289,8 @@ export class GraphRenderer {
   private static readonly COUNTRIES_UNTIL = 2.8;
   /** How far an old note fades toward ash on the map: half way, so every country keeps its colour. */
   private static readonly MAP_COOLING = 0.5;
+  /** The least heat (0…1) a field shows as an ember core. */
+  private static readonly MAP_EMBER_FROM = 0.05;
   /** How fast a field breathes on the map (radians per second) — slower than the hive's 1.7, a map is read. */
   private static readonly MAP_BREATH = 0.8;
   /** How fast the metal's light wanders across the map (radians per second). */
@@ -1351,7 +1355,7 @@ export class GraphRenderer {
     const { ctx, width, height } = this;
     const model = this.model!;
     const notes = this.mapNotes(model);
-    const tones = this.noteTones(notes, GraphRenderer.MAP_COOLING);
+    const tones = this.noteTones(notes, GraphRenderer.MAP_COOLING, false);
     const s = this.hexCellRadius();
     const zoom = this.view.zoom;
     const hl = this.highlight;
@@ -1399,13 +1403,23 @@ export class GraphRenderer {
       ctx.save();
       ctx.translate(p.x, p.y);
       this.hexagonPath(s * 0.94);
-      ctx.globalAlpha = hl !== null && !hl.has(n.id) && n !== this.selected ? 0.15 : 1;
-      if (tone.blur) {
-        ctx.shadowBlur = (this.lightScheme ? 6 : 14) * tone.heat;
-        ctx.shadowColor = this.glowColor;
-      }
+      const alpha = hl !== null && !hl.has(n.id) && n !== this.selected ? 0.15 : 1;
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
       ctx.fill();
+      if (tone.heat > GraphRenderer.MAP_EMBER_FROM) {
+        // A fresh note's glow: an ember in the middle of its field, as bright as the note is fresh.
+        ctx.beginPath();
+        ctx.arc(0, 0, s * 0.24, 0, TWO_PI);
+        ctx.globalAlpha = alpha * Math.min(1, 0.35 + tone.heat);
+        if (tone.blur) {
+          ctx.shadowBlur = (this.lightScheme ? 4 : 12) * tone.heat;
+          ctx.shadowColor = this.glowColor;
+        }
+        ctx.fillStyle = this.glowColor;
+        ctx.fill();
+        ctx.globalAlpha = alpha;
+      }
       if (shine === "metal") {
         // A plate's lit upper rim — upper-left corner, top, upper-right corner (y points down): what makes the
         // fields read as tilted metal.
@@ -1514,9 +1528,10 @@ export class GraphRenderer {
         if (!m) continue;
         const x = m.x / m.n;
         const y = m.y / m.n;
-        const size = 12 + 2 * zoom;
+        const size = 13 + 2 * zoom;
         const w = this.haloText(area.label, x, y, this.font(size, 650), this.textColor);
-        this.haloText(`${m.n} ${m.n === 1 ? "note" : "notes"}`, x, y + size * 0.6 + 8, this.font(10.5, 500), this.mutedColor);
+        const count = `${m.n} ${m.n === 1 ? "note" : "notes"}`;
+        this.haloText(count, x, y + size * 0.6 + 8, this.font(11.5, 500), this.mutedColor);
         if (countries > 0.5) this.mapLabels.push({ node: area, x, y: y + 6, w: w + 12, h: size + 26 });
       }
       ctx.globalAlpha = 1;
