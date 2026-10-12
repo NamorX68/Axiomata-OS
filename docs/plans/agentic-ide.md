@@ -372,6 +372,9 @@ und ein Projektwechsel, der das Layout wiederherstellt.
 
 ### M7.4 — Mini-Harness
 
+**Neu geplant 2026-10-13 als eigener Harness `axiomata-harness` / `axh`: [`harness.md`](harness.md) (H1–H7, HS1–HS8) gilt, wo es von hier abweicht.**
+
+
 - **CP10** — `ProviderRole::Agent` als dritte Rolle neben `Chat` und `Skill`,
   samt Einstellungsseite. Eigenes, günstiges, präzises Modell zuweisbar, ohne
   Chat oder Skills anzufassen.

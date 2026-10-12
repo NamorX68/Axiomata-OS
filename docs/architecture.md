@@ -1814,6 +1814,14 @@ Review by itself, and the owner's take-over brought it into `main` and the card 
   agent's pane offer Allow / Deny (Claude Code also "In terminal"); `answer_permission` is the only door. A planner or
   grill idle on a draft plan now counts as waiting.
 
+### Own harness, step HS1 (2026-10-13)
+
+`crates/axiomata-harness` (binary `axh`, `docs/plans/harness.md`): a lean agent loop over an OpenAI-compatible chat
+API (OpenRouter, Ollama) with guarded file tools (`axiomata_files::Root`), a short system prompt and an event stream
+(JSON lines) that later front ends — a TUI, an app of its own, the Studio — build on. No dependency on
+`axiomata-core`; the CLI's `harness run` hands it the provider's URL, key and skill model from `config.toml`. Next:
+HS2 (bash) … HS8 (subagents), each planned on its own.
+
 ### Ausblick (2026-10-12)
 
 The agent-to-agent build plan CP-A1…CP-A10 is through (`docs/plans/a2a.md`), the ⌘K spotlight, Orbit + 2Brain and

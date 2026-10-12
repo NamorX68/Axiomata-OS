@@ -157,8 +157,9 @@ pub enum ProviderRole {
 /// Per-provider settings: which model to use for interactive chat vs.
 /// unattended skill/routine runs, plus the endpoint/credential fields kept
 /// for the Settings UI. Opencode resolves providers and auth from its own
-/// config, so the `base_url`/`api_key` fields are stored-but-unused by the
-/// harness (they still drive `validate_for_save`). Kept independently per
+/// config; the `base_url`/`api_key` fields are what Axiomata's own harness
+/// (`axiomata-harness`, `docs/plans/harness.md` H5) talks to the provider with,
+/// and they still drive `validate_for_save`. Kept independently per
 /// provider (`AgentDefaults::providers`) so switching the active provider in
 /// the Settings UI never discards what was typed for the others.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

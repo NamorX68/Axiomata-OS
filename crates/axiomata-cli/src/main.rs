@@ -4,6 +4,7 @@
 //! action through the file queue.
 
 mod files_cmd;
+mod harness_cmd;
 
 use std::path::{Path, PathBuf};
 
@@ -128,6 +129,11 @@ enum Command {
     },
     /// Summarise the workspace graph (areas, files, links, skills, routines).
     Graph,
+    /// Axiomata's own agent harness (`docs/plans/harness.md`): run a prompt with a provider from config.toml.
+    Harness {
+        #[command(subcommand)]
+        action: harness_cmd::HarnessAction,
+    },
     /// Print the module manifest the dashboard wrote for the agent.
     Modules,
     /// Call an action on a mounted dashboard module (the running dashboard
@@ -757,6 +763,7 @@ async fn main() -> Result<()> {
         Command::McpServe => return mcp_serve(&core),
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
+        Command::Harness { action } => return harness_cmd::run(&core, action).await,
         Command::Modules => modules()?,
         Command::ModuleAction {
             instance,

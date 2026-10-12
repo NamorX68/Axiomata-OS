@@ -27,7 +27,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (card #75). Built since: the ⌘K spotlight, Orbit + 2Brain in one view, and the app-wide UI/UX round "Glut + Hex"
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
-  the board), and permission asks answered in the app (#88, `docs/plans/permission-asks.md`). Deferred: further model-provider work.
+  the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness `axiomata-harness` / `axh`
+  (#37, `docs/plans/harness.md`; HS1 built, HS2–HS8 open). Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
   new work and **update them** (not just this file) when a milestone or major feature lands.
@@ -59,6 +60,7 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   ide roles list|show|save|delete|project|confirm   (AGENT.md roles; `project`/`confirm`: a project's own roles, by hash)
 #   files roots|read|write|grants|search     (through the editor's guard; roots: workspace, project:<id>, worktree:<agent>, grant:<id>)
 #   assistant "hi" [--resume <id>] [--instruct] | modules | module-action <instance> <action> --json '{}' | graph | import obsidian <folder>
+#   harness run "prompt" [--provider open-router|ollama] [--model m] [--cwd dir] [--json]   (own harness, docs/plans/harness.md)
 
 cd apps/axiomata && cargo tauri dev       # run the desktop app (hot-reloading dev mode)
 cd apps/axiomata && scripts/build-app.sh [--install]   # the installable Axiomata-OS.app (ad-hoc signed); --install copies it to /Applications
