@@ -216,6 +216,9 @@ export class GraphRenderer {
   highlight: Set<string> | null = null;
   /** Orbit only: how many card sessions are at work right now (0 = quiet, nothing is drawn). */
   activity = 0;
+  /** Agents waiting for the owner (plans/agent-waiting.md): the Studio's icon then carries their number in the warn
+   *  tone's hexagon instead of the count of sessions at work. */
+  waiting = 0;
   /** Orbit only: the moment the time travel shows (ms), or `null` for now (G17, UX4). */
   timeCutoff: number | null = null;
   /** Sparks in flight to cells whose note just changed (W3): from the Studio's ring icon or the hub. */
@@ -237,6 +240,8 @@ export class GraphRenderer {
   private accentColor = "#ff7a1a";
   /** The glow (G2): the orange family even where the accent is another hue — the hive's ember. */
   private glowColor = "#ff7a1a";
+  /** The warn tone (`--ax-warning`): "waits for the owner". */
+  private warningColor = "#e6b45f";
   private lightScheme = false;
   /** The honeycomb sphere of the current model (`graph/hive.ts`); its cells are kept while the notes stay the same. */
   private hive: { model: GraphModel; signature: string; cells: HiveCell[]; nodes: (GraphNode | null)[] } | null = null;
@@ -291,8 +296,10 @@ export class GraphRenderer {
     accent = "#ff7a1a",
     light = false,
     glow = accent,
+    warning = "#e6b45f",
   ): void {
     this.glowColor = glow;
+    this.warningColor = warning;
     this.rgbCache.clear();
     this.textColor = text;
     this.mutedColor = muted;
@@ -1218,7 +1225,8 @@ export class GraphRenderer {
       } else {
         drawGlyph(ctx, n.glyph ?? "folder", x, y, r * 0.62, hot ? this.accentColor : n.color);
       }
-      if (working) this.drawActivityBadge(x, y, r);
+      if (n.appType === "view:ide" && this.waiting > 0) this.drawWaitingBadge(x, y, r);
+      else if (working) this.drawActivityBadge(x, y, r);
 
       if (hot) this.drawHotLabel(x, y, r, n.label, 0.75, 0.5);
     }
@@ -1260,6 +1268,32 @@ export class GraphRenderer {
     ctx.arc(x, y, r * 2.4, 0, TWO_PI);
     ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  /** The number of agents waiting for the owner, in a hexagon of the warn tone at the icon's upper right — the same
+   *  sign as the Dock's and the Kanban's badge; it stands in for the count of sessions at work while anyone waits. */
+  private drawWaitingBadge(x: number, y: number, r: number): void {
+    const { ctx } = this;
+    const br = Math.max(7, r * 0.48);
+    const bx = x + r * 0.78;
+    const by = y - r * 0.78;
+    ctx.fillStyle = this.warningColor;
+    ctx.beginPath();
+    // Pointy-top, like `--ax-hex-clip`.
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 3;
+      const px = bx + br * Math.cos(a);
+      const py = by + br * Math.sin(a);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = this.glyphColor;
+    ctx.font = this.font(Math.max(8, br * 1.05), 700);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(this.waiting > 9 ? "9+" : String(this.waiting), bx, by + 0.5);
   }
 
   /** The number of sessions at work, in a small accent dot at the icon's upper right. */

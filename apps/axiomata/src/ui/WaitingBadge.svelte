@@ -15,7 +15,7 @@
 
   interface Props {
     agents: WaitingAgent[];
-    size?: "sm" | "md";
+    size?: "sm" | "md" | "lg";
   }
 
   let { agents, size = "md" }: Props = $props();
@@ -203,6 +203,15 @@
   .md {
     width: calc(22px * var(--ax-ui-scale));
     height: calc(25px * var(--ax-ui-scale));
+  }
+
+  .lg {
+    width: calc(44px * var(--ax-ui-scale));
+    height: calc(50px * var(--ax-ui-scale));
+  }
+
+  .lg .hex {
+    font-size: calc(20px * var(--ax-ui-scale));
   }
 
   .list {

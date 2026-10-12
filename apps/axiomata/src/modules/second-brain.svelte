@@ -157,6 +157,7 @@
       palette.accent,
       palette.light,
       palette.glow,
+      palette.warning,
     );
     renderer.model = model;
     span = travelSpan(graph.files.map((f) => f.created ?? f.modified), Date.now());
@@ -458,6 +459,10 @@
   });
 
   $effect(() => {
+    if (renderer) renderer.waiting = $waitingAgents.length;
+  });
+
+  $effect(() => {
     const at = $travelAt;
     if (renderer) renderer.timeCutoff = at;
   });
@@ -575,10 +580,13 @@
   >
     +
   </button>
-  <!-- An agent waits for the owner (plans/agent-waiting.md W2): below the core whose pulse says "at work". -->
+  <!-- An agent waits for the owner (plans/agent-waiting.md W2): large, in the middle of the sphere — and the Studio's
+       icon on the ring carries the same hexagon. -->
   {#if $waitingAgents.length > 0}
-    <div class="waiting" style:top="calc(50% + {discR * 0.42}px)">
-      <WaitingBadge agents={$waitingAgents} />
+    <!-- A press on the badge is the badge's: it must not start turning the sphere underneath (`onDown`). -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="waiting" onmousedown={(event) => event.stopPropagation()}>
+      <WaitingBadge agents={$waitingAgents} size="lg" />
     </div>
   {/if}
   <!-- Also over the Second Brain: its map travels with the hive (`travelAt`). -->
@@ -657,8 +665,9 @@
   }
   .waiting {
     position: absolute;
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
   }
   canvas {
     width: 100%;

@@ -2,8 +2,9 @@
 //!
 //! The work is [`axiomata_core::ide_status::waiting_agents`]: every agent of every project whose harness waits on a
 //! permission prompt or a question. This task asks for it every few seconds, sends the whole list to the frontend when
-//! it changed (the badge in the Dock, the Orbit and the Kanban), and posts one macOS notification for an agent that has
-//! just begun to wait while no window of the app is focused. It pushes from Rust rather than letting the page poll
+//! it changed (the badge in the Dock, the Orbit and the Kanban), and posts one macOS notification per wait for an agent
+//! that waits while no window of the app is focused — also one that began to wait while the owner was still looking:
+//! leaving the app with a question open is exactly when it is forgotten. It pushes from Rust rather than letting the page poll
 //! because WebKit throttles the timers of a window in the background — exactly when the notification matters.
 
 use std::collections::{HashMap, HashSet};
@@ -38,31 +39,23 @@ pub fn start(app: &AppHandle) {
         // The Opencode agents' statuses come from the service's event stream; without its watcher they would read as
         // their file channel says, which never says `waiting`.
         ide_status::ensure_running(Arc::clone(&app.state::<AxiomataCore>().db));
-        let mut last: Vec<WaitingAgent> = Vec::new();
-        // The first reading only sets the scene: an agent that was already waiting when the app started is shown by
-        // the badge, not announced as news.
-        let mut seeded = false;
-        let mut cooldown = Cooldown::default();
+        let mut last: Option<Vec<WaitingAgent>> = None;
+        let mut announcer = Announcer::default();
         loop {
             tokio::time::sleep(TICK).await;
             let Some(now) = read(&app).await else {
                 continue;
             };
-            if seeded && now == last {
-                continue;
-            }
-            if let Err(err) = app.emit(AGENTS_WAITING, &now) {
+            if last.as_ref() != Some(&now)
+                && let Err(err) = app.emit(AGENTS_WAITING, &now)
+            {
                 tracing::warn!(%err, "could not tell the frontend which agents wait");
             }
-            if seeded && !app_is_focused(&app) {
-                for agent in newly_waiting(&last, &now) {
-                    if cooldown.due(agent.agent_id, Instant::now()) {
-                        notify(&app, agent);
-                    }
-                }
+            // Every tick, not only on a change: the owner leaving the app is a change the list does not show.
+            for agent in announcer.due_now(&now, app_is_focused(&app), Instant::now()) {
+                notify(&app, agent);
             }
-            seeded = true;
-            last = now;
+            last = Some(now);
         }
     });
 }
@@ -87,13 +80,38 @@ async fn read(app: &AppHandle) -> Option<Vec<WaitingAgent>> {
     }
 }
 
-/// The agents in `now` that were not waiting in `before` — a wait that went on is not new; one that ended and began
-/// again is (its agent left the list in between).
-fn newly_waiting<'a>(before: &[WaitingAgent], now: &'a [WaitingAgent]) -> Vec<&'a WaitingAgent> {
-    let known: HashSet<i64> = before.iter().map(|agent| agent.agent_id).collect();
-    now.iter()
-        .filter(|agent| !known.contains(&agent.agent_id))
-        .collect()
+/// Which waits have been announced: one notification per wait, only while no window of the app is focused, and at
+/// most one per agent within [`COOLDOWN`].
+#[derive(Default)]
+struct Announcer {
+    /// Agents whose current wait was announced; an agent leaves when its wait ends, so its next wait is news again.
+    announced: HashSet<i64>,
+    cooldown: Cooldown,
+}
+
+impl Announcer {
+    /// The agents of `waiting` to announce now. While the app is focused the badge says it, and nothing is announced —
+    /// but nothing is marked either: leaving the app with the wait still open announces it then.
+    fn due_now<'a>(
+        &mut self,
+        waiting: &'a [WaitingAgent],
+        focused: bool,
+        now: Instant,
+    ) -> Vec<&'a WaitingAgent> {
+        self.announced
+            .retain(|id| waiting.iter().any(|agent| agent.agent_id == *id));
+        if focused {
+            return Vec::new();
+        }
+        let mut due = Vec::new();
+        for agent in waiting {
+            if !self.announced.contains(&agent.agent_id) && self.cooldown.due(agent.agent_id, now) {
+                self.announced.insert(agent.agent_id);
+                due.push(agent);
+            }
+        }
+        due
+    }
 }
 
 /// When each agent was last announced, for [`COOLDOWN`].
@@ -125,6 +143,7 @@ fn app_is_focused(app: &AppHandle) -> bool {
 /// The notification for one agent. Its text comes from the database, never from the page; no sound (W5).
 fn notify(app: &AppHandle, agent: &WaitingAgent) {
     let (title, body) = notification_text(agent);
+    tracing::info!(agent = agent.agent_id, "announcing a waiting agent");
     if let Err(err) = app.notification().builder().title(title).body(body).show() {
         tracing::warn!(%err, agent = agent.agent_id, "could not post the waiting notification");
     }
@@ -173,15 +192,39 @@ mod tests {
     }
 
     #[test]
-    fn only_an_agent_that_was_not_waiting_before_is_new() {
-        let before = vec![waiting(1, None), waiting(2, None)];
-        let now = vec![waiting(2, None), waiting(3, None)];
-        let new: Vec<i64> = newly_waiting(&before, &now)
-            .iter()
-            .map(|a| a.agent_id)
-            .collect();
-        assert_eq!(new, vec![3]);
-        assert!(newly_waiting(&now, &now).is_empty());
+    fn a_wait_is_announced_once_and_only_while_the_owner_is_away_from_the_app() {
+        let mut announcer = Announcer::default();
+        let start = Instant::now();
+        let ids =
+            |agents: Vec<&WaitingAgent>| agents.iter().map(|a| a.agent_id).collect::<Vec<_>>();
+        let one = vec![waiting(1, None)];
+        // It began while the owner looked: nothing, and nothing used up.
+        assert!(announcer.due_now(&one, true, start).is_empty());
+        // The owner leaves the app with the wait still open: now.
+        assert_eq!(ids(announcer.due_now(&one, false, start)), vec![1]);
+        // Once per wait.
+        assert!(
+            announcer
+                .due_now(&one, false, start + COOLDOWN * 2)
+                .is_empty()
+        );
+        // A second agent waits meanwhile: it is news.
+        let two = vec![waiting(1, None), waiting(2, None)];
+        assert_eq!(
+            ids(announcer.due_now(&two, false, start + COOLDOWN * 2)),
+            vec![2]
+        );
+        // Agent 1's wait ends and a new one begins soon after: within the cooldown, held back; after it, news.
+        let _ = announcer.due_now(&[waiting(2, None)], false, start + COOLDOWN * 2);
+        assert!(
+            announcer
+                .due_now(&two, false, start + Duration::from_secs(10))
+                .is_empty()
+        );
+        assert_eq!(
+            ids(announcer.due_now(&two, false, start + COOLDOWN * 3)),
+            vec![1]
+        );
     }
 
     #[test]
