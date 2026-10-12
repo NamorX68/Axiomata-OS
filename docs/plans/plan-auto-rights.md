@@ -21,7 +21,10 @@ questions nobody is there to answer.
   edits and shell commands touching the configuration a later session would obey (`opencode.json`, `.opencode/`,
   `.claude/`, `.mcp.json`, `.git/hooks`), the CLI, `sqlite3` and `.axiomata/` (`AUTO_DENIED`).
   The git-outside and push denies come last and win.
-- **A4 — who.** Workers only. Reviewers stay read-only, planners and grilling sessions are done before the release.
+- **A4 — who.** Workers, and since card #95 (owner, 2026-10-12) reviewers too: a reviewer gets the free shell under the
+  same denies — it hung on `npm ci` / `git check-ignore` otherwise — and still no edit (Claude Code: `Edit` denied on
+  top; Opencode: no `edit *` allow, the read-only `edit * deny` wins). Planners and grilling sessions are done before
+  the release.
 - **A5 — when.** Read at a session's start (`ide_start::card_launch`), and only while the plan is released (approved,
   not closed). The switch stays on the running plan; a change
   applies to sessions started afterwards, a running one keeps what it started with (Claude Code cannot change its mode

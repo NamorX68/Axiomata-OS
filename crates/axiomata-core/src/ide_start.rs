@@ -284,19 +284,7 @@ pub(crate) fn card_launch(
             && mine.is_some()
             && card.claimed_by == mine)
             .then(|| {
-                // The owner's auto mode is read now, at the start: a session that runs keeps what it started with.
-                let auto = card
-                    .plan_id
-                    .and_then(|plan_id| crate::board::flow::get_plan(db, plan_id).ok().flatten())
-                    // Only a released plan that still runs: a closed one's switch is history.
-                    .is_some_and(|plan| {
-                        plan.auto_rights && plan.status == crate::board::PlanStatus::Approved
-                    });
-                if auto {
-                    agent_entry::CardLaunch::work_freely(card_id)
-                } else {
-                    agent_entry::CardLaunch::work(card_id)
-                }
+                agent_entry::CardLaunch::work(card_id).with_auto_rights(plan_auto_rights(db, &card))
             });
     }
     if !in_review || card.verified_by.is_some() {
@@ -322,11 +310,18 @@ pub(crate) fn card_launch(
         let project = crate::ide::store::get_project(db, worker.project_id).ok()??;
         crate::ide::worktree::current_branch(&project.repo_root)
     })?;
-    Some(agent_entry::CardLaunch::review(
-        card_id,
-        &worker.name,
-        &base,
-    ))
+    Some(
+        agent_entry::CardLaunch::review(card_id, &worker.name, &base)
+            .with_auto_rights(plan_auto_rights(db, &card)),
+    )
+}
+
+/// Whether the card's plan is in the owner's auto mode, read now, at the start: a session that runs keeps what it
+/// started with. Only a released plan that still runs counts — a closed one's switch is history.
+fn plan_auto_rights(db: &rusqlite::Connection, card: &crate::board::Card) -> bool {
+    card.plan_id
+        .and_then(|plan_id| crate::board::flow::get_plan(db, plan_id).ok().flatten())
+        .is_some_and(|plan| plan.auto_rights && plan.status == crate::board::PlanStatus::Approved)
 }
 
 /// A session working on a card without the team tools could not report it, nor be reviewed: it is not started.

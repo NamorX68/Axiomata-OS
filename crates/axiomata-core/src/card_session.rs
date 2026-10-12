@@ -2608,13 +2608,13 @@ mod tests {
         flow::approve_plan(&mut w.db, plan.id, "human:owner").unwrap();
         assert_eq!(
             card_launch(&w.db, &started.agent),
-            Some(crate::agent_entry::CardLaunch::work_freely(card))
+            Some(crate::agent_entry::CardLaunch::work(card).with_auto_rights(true))
         );
         // A closed plan's switch is history.
         flow::close_plan(&w.db, plan.id).unwrap();
         assert_ne!(
             card_launch(&w.db, &started.agent),
-            Some(crate::agent_entry::CardLaunch::work_freely(card))
+            Some(crate::agent_entry::CardLaunch::work(card).with_auto_rights(true))
         );
     }
 
@@ -3030,6 +3030,41 @@ mod tests {
                 .filter(|a| a.card_review)
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn a_reviewer_of_a_plan_in_auto_mode_is_started_with_its_rights() {
+        use crate::ide_start::card_launch;
+        let mut w = world();
+        let (card, worker) = w.reported("sonnet");
+        let plan = flow::create_plan(
+            &w.db,
+            w.board,
+            &axiomata_board::PlanFields {
+                project_id: None,
+                goal: String::new(),
+                name: "p".into(),
+                auto_start_max: None,
+                max_cost_usd: None,
+                max_tokens: None,
+            },
+        )
+        .unwrap();
+        let mut stored = store::get_card(&w.db, card).unwrap().unwrap();
+        stored.plan_id = Some(plan.id);
+        store::update_card(&w.db, card, &fields_of(&stored)).unwrap();
+        flow::set_plan_auto_rights(&w.db, plan.id, true, "human:owner").unwrap();
+        flow::approve_plan(&mut w.db, plan.id, "human:owner").unwrap();
+
+        let review = w.review(card, Some("opus")).unwrap();
+        let ready = crate::ide::provision::prepare(&w.db, &w.locations(), review.agent.id).unwrap();
+        assert_eq!(
+            card_launch(&w.db, &ready.agent),
+            Some(
+                crate::agent_entry::CardLaunch::review(card, &worker.agent.name, "main")
+                    .with_auto_rights(true)
+            )
         );
     }
 

@@ -250,7 +250,8 @@ pub struct CardLaunch {
     /// `Some` for a reviewer: who it judges and what the work is measured against.
     pub review: Option<ReviewTarget>,
     /// The owner's auto mode of the card's plan was on when the session started (`docs/plans/plan-auto-rights.md`):
-    /// a worker may then run any command and edit without asking — never push. Never set for a reviewer.
+    /// a worker may then run any command and edit without asking, a reviewer run any command but still edit nothing —
+    /// neither ever pushes.
     pub auto_rights: bool,
 }
 
@@ -273,11 +274,11 @@ impl CardLaunch {
         }
     }
 
-    /// A session that works on a card of a plan in the owner's auto mode.
-    pub fn work_freely(card_id: i64) -> Self {
+    /// The same launch with the owner's auto mode of the card's plan on or off.
+    pub fn with_auto_rights(self, auto_rights: bool) -> Self {
         CardLaunch {
-            auto_rights: true,
-            ..CardLaunch::work(card_id)
+            auto_rights,
+            ..self
         }
     }
 
@@ -354,11 +355,12 @@ impl Launch {
         }
     }
 
-    /// A worker of a plan in the owner's auto mode: any command and any edit in its worktree without asking, never a
-    /// push (`docs/plans/plan-auto-rights.md`). A reviewer or a planner never is, whatever the plan says.
+    /// A session of a plan in the owner's auto mode (`docs/plans/plan-auto-rights.md`): any command without asking,
+    /// never a push — and a worker any edit in its worktree too, while a reviewer stays without edits ([`Self::read_only`]
+    /// still holds). A planner never is: it is done before the plan is released (A4, card #95).
     pub fn auto_rights(&self) -> bool {
         match self {
-            Launch::Card(card) => card.auto_rights && card.review.is_none(),
+            Launch::Card(card) => card.auto_rights,
             Launch::Plan(_) => false,
         }
     }
@@ -532,7 +534,14 @@ fn claude_card_options(role: Option<&Role>, review: bool, auto_rights: bool) -> 
     // It also reads no project settings and no project MCP servers: its checkout is the worker's work, and whatever
     // `.claude/settings.json` or `.mcp.json` the worker put there would otherwise be the reviewer's own configuration.
     // The studio's `--settings` and `--mcp-config` still apply.
-    let (mode, denied) = if review {
+    let (mode, denied) = if review && auto_rights {
+        // The owner's auto mode for a reviewer (card #95): any command, so it can install and run the tests it judges
+        // by, under the same two locks as a worker — and still no edit at all.
+        (
+            "--permission-mode auto --setting-sources user --strict-mcp-config ".to_owned(),
+            format!("{CLAUDE_CARD_DENIED},{CLAUDE_AUTO_DENIED},Edit"),
+        )
+    } else if review {
         (
             "--setting-sources user --strict-mcp-config ".to_owned(),
             format!("{CLAUDE_CARD_DENIED},Edit"),
@@ -1064,17 +1073,19 @@ mod tests {
             !plain.contains("--setting-sources") && !plain.contains("sqlite3"),
             "{plain}"
         );
-        // A reviewer is read-only whatever the plan says.
+        // A reviewer in the mode runs any command (card #95) under the same denies, and still edits nothing.
         let review = claude_card_options(Some(&axiomata_roster::reviewer_role()), true, true);
-        assert!(!review.contains("--permission-mode auto"), "{review}");
+        assert!(review.contains("--permission-mode auto "), "{review}");
         assert!(
-            !Launch::Card(CardLaunch {
-                auto_rights: true,
-                ..CardLaunch::review(4, "worker-3", "main")
-            })
-            .auto_rights()
+            review.contains("Bash(*sqlite3*)") && review.contains("Bash(git push *)"),
+            "{review}"
         );
-        assert!(Launch::Card(CardLaunch::work_freely(4)).auto_rights());
+        assert!(review.ends_with(",Edit'"), "{review}");
+        let launch = Launch::Card(CardLaunch::review(4, "worker-3", "main").with_auto_rights(true));
+        assert!(launch.auto_rights() && launch.read_only());
+        let plain_review = claude_card_options(Some(&axiomata_roster::reviewer_role()), true, false);
+        assert!(!plain_review.contains("--permission-mode"), "{plain_review}");
+        assert!(Launch::Card(CardLaunch::work(4).with_auto_rights(true)).auto_rights());
         assert!(!Launch::Card(CardLaunch::work(4)).auto_rights());
     }
 

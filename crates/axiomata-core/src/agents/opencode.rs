@@ -445,14 +445,17 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
             .iter()
             .map(|pattern| PermissionRule::new("shell", pattern, "allow")),
     );
-    // The owner's auto mode (`docs/plans/plan-auto-rights.md`, a worker only): any command and any edit without asking.
+    // The owner's auto mode (`docs/plans/plan-auto-rights.md`): any command without asking, and for a worker any edit.
+    // A reviewer in it gets the commands only (card #95) — the read-only edit deny below comes later and wins anyway.
     // What would stop the session with a question it cannot get answered while nobody watches — a folder outside the
     // worktree, an `.env` file — is refused instead, and so are the plain ways past the studio's own lines (the CLI as
     // the owner, the database, the next session's configuration, the shared git hooks). Patterns, not a sandbox: they
     // stop the plain forms only. The push and git-outside denies below still come last and win.
-    if rights.auto_rights && !rights.read_only {
+    if rights.auto_rights {
         rules.push(PermissionRule::new("shell", "*", "allow"));
-        rules.push(PermissionRule::new("edit", "*", "allow"));
+        if !rights.read_only {
+            rules.push(PermissionRule::new("edit", "*", "allow"));
+        }
         rules.extend(
             AUTO_DENIED
                 .iter()
@@ -535,7 +538,7 @@ pub struct CardRights<'a> {
     pub read_only: bool,
     /// Shell patterns the owner's role file lets the session run without asking (`agent_entry::opencode_shell_patterns`).
     pub shell: &'a [String],
-    /// The owner's auto mode of the card's plan: a worker may run anything and edit without asking, never push.
+    /// The owner's auto mode of the card's plan: run anything without asking, never push; edit too unless `read_only`.
     pub auto_rights: bool,
 }
 
@@ -1014,17 +1017,26 @@ mod tests {
             decide(&auto, "shell", "cargo test -p axiomata-cli"),
             "allow"
         );
-        // Without the mode nothing of this is opened up, and a reviewer never gets it.
+        // Without the mode nothing of this is opened up.
         let plain = card_permissions(&rights(false, false));
         assert!(
             !plain
                 .iter()
                 .any(|r| r.action == "shell" && r.resource == "*")
         );
+        // A reviewer in the mode runs any command (card #95) under the same denies, and still edits nothing.
         let reviewer = card_permissions(&rights(true, true));
+        assert_eq!(decide(&reviewer, "shell", "npm ci"), "allow");
+        assert_eq!(decide(&reviewer, "shell", "git check-ignore -v x"), "allow");
+        assert_eq!(decide(&reviewer, "shell", "git push origin main"), "deny");
+        assert_eq!(decide(&reviewer, "shell", "sqlite3 db"), "deny");
+        assert_eq!(decide(&reviewer, "external_directory", "/tmp/*"), "deny");
         assert_eq!(decide(&reviewer, "edit", "src/main.rs"), "deny");
+        assert_eq!(decide(&reviewer, "edit", "notes.md"), "deny");
+        // Without the mode a reviewer keeps its read-only git and nothing more.
+        let plain_reviewer = card_permissions(&rights(true, false));
         assert!(
-            !reviewer
+            !plain_reviewer
                 .iter()
                 .any(|r| r.action == "shell" && r.resource == "*")
         );
