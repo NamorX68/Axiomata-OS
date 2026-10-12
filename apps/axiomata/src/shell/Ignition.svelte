@@ -1,8 +1,8 @@
 <!--
   The start ignition (`docs/plans/ui-ux-round.md` UX4, G10): at a cold start six embers fly in to the corners of the hex
   logo, its outline draws itself between them, its core catches with a flare and a shock wave, the name pulls
-  together — then the mark opens towards the viewer onto the app, about two and a half seconds in all (the owner
-  wanted it a little longer and bolder than the first cut). A click or a key skips it. Only at motion Full and while
+  together — then the mark opens towards the viewer onto the app, about four seconds in all (the owner
+  wanted it longer and bolder than the first cut). A click or a key skips it. Only at motion Full and while
   switched on under Appearance (`core/effects.ts`); otherwise the cover simply goes as soon as the saved settings are
   read.
 
@@ -18,7 +18,7 @@
   import { dashboardLoaded } from "../core/persist";
 
   /** When the mark starts to open onto the app, from the start of the ignition (ms). */
-  const OPEN_AT = 2000;
+  const OPEN_AT = 3500;
   /** How long the opening takes; the CSS reads it as `--open-ms`. */
   const OPEN_MS = 520;
   /** The hex's corners in the logo's 100-unit box: where the embers land. */
@@ -93,7 +93,7 @@
               r="2.6"
               style:--dx="{(x - 50) * (EMBER_FROM - 1)}px"
               style:--dy="{(y - 50) * (EMBER_FROM - 1)}px"
-              style:--delay="{i * 45}ms"
+              style:--delay="{i * 80}ms"
             />
           {/each}
           <path class="shell" d="M50 10 L84.6 30 L84.6 70 L50 90 L15.4 70 L15.4 30 Z" pathLength="1" />
@@ -161,7 +161,7 @@
     background: radial-gradient(circle, var(--ax-glow-strong) 0%, var(--ax-glow-soft) 35%, transparent 70%);
     opacity: 0;
     transform: scale(0.3);
-    animation: flare 900ms var(--ax-ease) 1080ms forwards;
+    animation: flare 1500ms var(--ax-ease) 1880ms forwards;
   }
 
   /* Six embers fly in to the corners… */
@@ -169,7 +169,7 @@
     fill: var(--ax-glow);
     opacity: 0;
     transform: translate(var(--dx), var(--dy));
-    animation: fly-in 560ms var(--ax-ease) var(--delay) forwards;
+    animation: fly-in 900ms var(--ax-ease) var(--delay) forwards;
   }
 
   /* …the outline draws itself between them… */
@@ -180,7 +180,7 @@
     stroke-linejoin: round;
     stroke-dasharray: 1;
     stroke-dashoffset: 1;
-    animation: draw 720ms var(--ax-ease) 420ms forwards;
+    animation: draw 1200ms var(--ax-ease) 700ms forwards;
   }
 
   /* …its core catches the glow… */
@@ -189,7 +189,7 @@
     opacity: 0;
     transform-box: fill-box;
     transform-origin: center;
-    animation: catch 460ms var(--ax-spring) 1060ms forwards;
+    animation: catch 700ms var(--ax-spring) 1850ms forwards;
   }
 
   /* …and the catch sends a wave out. */
@@ -201,7 +201,7 @@
     opacity: 0;
     transform-box: fill-box;
     transform-origin: center;
-    animation: wave 760ms var(--ax-ease) 1100ms forwards;
+    animation: wave 1200ms var(--ax-ease) 1920ms forwards;
   }
 
   .word {
@@ -210,7 +210,7 @@
     letter-spacing: 0.4em;
     color: var(--ax-text);
     opacity: 0;
-    animation: pull-together 560ms var(--ax-ease) 1260ms forwards;
+    animation: pull-together 900ms var(--ax-ease) 2200ms forwards;
   }
 
   @keyframes fly-in {
