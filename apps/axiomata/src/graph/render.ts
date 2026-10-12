@@ -1287,6 +1287,10 @@ export class GraphRenderer {
   private static readonly COUNTRIES_UNTIL = 2.8;
   /** How far an old note fades toward ash on the map: half way, so every country keeps its colour. */
   private static readonly MAP_COOLING = 0.5;
+  /** How fast a field breathes on the map (radians per second) — slower than the hive's 1.7, a map is read. */
+  private static readonly MAP_BREATH = 0.8;
+  /** How fast the metal's light wanders across the map (radians per second). */
+  private static readonly MAP_SWEEP = 0.16;
 
   /** Whether a note exists at the moment the time travel shows (always, when it shows today). */
   private bornBy(n: GraphNode): boolean {
@@ -1355,8 +1359,9 @@ export class GraphRenderer {
     const shine = this.options.shine ?? "metal";
     const lens = Math.min(width, height) * this.options.fit;
     // The metal's light wanders slowly across the lens; at Calm and Off it stands at the upper left (G3).
-    const lightX = width / 2 + (still ? -0.45 : Math.cos(t * 0.35) * 0.6) * lens;
-    const lightY = height / 2 + (still ? -0.4 : Math.sin(t * 0.35) * 0.45) * lens;
+    const sweep = t * GraphRenderer.MAP_SWEEP;
+    const lightX = width / 2 + (still ? -0.45 : Math.cos(sweep) * 0.6) * lens;
+    const lightY = height / 2 + (still ? -0.4 : Math.sin(sweep) * 0.45) * lens;
     const spread = 2 * (lens * 0.4) ** 2;
     const onScreen = (x: number, y: number) => x > -s && x < width + s && y > -s && y < height + s;
 
@@ -1381,7 +1386,7 @@ export class GraphRenderer {
       if (!onScreen(p.x, p.y)) return;
       let [r, g, b] = tone.col;
       if (shine !== "calm") {
-        const wave = still ? 1 : 0.82 + 0.18 * Math.sin(t * 1.7 + n.phase * TWO_PI);
+        const wave = still ? 1 : 0.82 + 0.18 * Math.sin(t * GraphRenderer.MAP_BREATH + n.phase * TWO_PI);
         let lift = 0;
         if (shine === "metal") {
           const catchL = Math.exp(-((p.x - lightX) ** 2 + (p.y - lightY) ** 2) / spread);
