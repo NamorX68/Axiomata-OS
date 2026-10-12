@@ -1410,7 +1410,7 @@ export class GraphRenderer {
       if (tone.heat > GraphRenderer.MAP_EMBER_FROM) {
         // A fresh note's glow: an ember in the middle of its field, as bright as the note is fresh.
         ctx.beginPath();
-        ctx.arc(0, 0, s * 0.24, 0, TWO_PI);
+        ctx.arc(0, 0, s * 0.18, 0, TWO_PI);
         ctx.globalAlpha = alpha * Math.min(1, 0.35 + tone.heat);
         if (tone.blur) {
           ctx.shadowBlur = (this.lightScheme ? 4 : 12) * tone.heat;
