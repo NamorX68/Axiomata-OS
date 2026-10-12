@@ -155,6 +155,17 @@ neutral ausgewählt (Akzentregel). Hinweise im Studio waren schon einzeilig (UX2
 bleibt Harness-Farbe (G19 nennt den Avatar-Rand für die Projektfarbe — innerhalb eines Projekts sagt sie aber nichts,
 und die Harness-Unterscheidung CC/OC ginge verloren).
 
+**Stand UX6c (2026-10-12, gebaut, Abnahme offen):** Agent im Editor (G8), ehrlich statt gespielt. Lädt eine saubere
+offene Datei still neu, weil sie sich auf der Platte geändert hat (`fileapp/session.ts` `onExternalChange`), hält die
+Sitzung die Spur fest: die Zeilen des neuen Texts, die neu oder anders sind (`editor/trail.ts` `trailOf`, Zeilen-Diff
+über den vorhandenen Myers; eine reine Löschung markiert die Zeile, die jetzt an der Lücke steht) — nicht für Dateien
+im leichten Modus (über 2 MiB). Wessen Spur (`fileapp/trailAuthor.ts`): im Worktree `worktree:<id>` dessen Agent; im
+Projektordner `project:<id>` nur der eine Agent dieses Projekts ohne eigenen Worktree, der gerade arbeitet — sonst
+niemand (eine eigene Änderung des Owners anderswo bekommt nie eine Agenten-Fahne). Die Editorfläche lässt die Zeilen
+aufglühen und in 2,6 s abkühlen (bei Motion Off stehen sie und gehen dann) und setzt an das Ende der letzten Zeile die
+Fahne: Hex-Avatar des Harness + Name, 8 s, dann verblasst sie; auf einer eingeklappten Zeile keine Fahne. Mock:
+`__ax.mockExternalWrite("project:1", "notes.txt", …)` zeigt es mit „OC Builder“.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

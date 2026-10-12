@@ -50,6 +50,8 @@
   import { indentGuides, type LineDecoration, type LineDecorations } from "../editor/decorations";
   import type { EditorDocument } from "../editor/document";
   import { cursorCell, posAtCell, rowSlice, selectionRuns, uniqueByKey } from "../editor/geometry";
+  import HexAvatar from "../ui/HexAvatar.svelte";
+  import type { EditorTrail } from "./trailAuthor";
   import { allSelections, columnSelection, toggleCursor } from "../editor/multicursor";
   import { gutterDigits, lineLabel } from "../editor/gutter";
   import { FoldRanges, type FoldRange } from "../editor/fold/ranges";
@@ -123,6 +125,8 @@
     onScrollPos?: (top: number, left: number) => void;
     /** Per-line colours, gutter labels, marks and buttons (H3); replaces the line numbers. */
     decorations?: LineDecorations | null;
+    /** What an agent just changed in the file (UX6c, G8): the lines glow out, its flag stands at the last one. */
+    trail?: EditorTrail | null;
     /** A button of a line's decoration was clicked. */
     onLineAction?: (line: number, action: string) => void;
     /** Sees every key first; returning `true` means it was handled and the surface ignores it. */
@@ -181,6 +185,7 @@
     onTopLine,
     onScrollPos,
     decorations = null,
+    trail = null,
     onLineAction,
     interceptKey,
     onViEffect,
@@ -1727,6 +1732,34 @@
             <div class="line-bg ln-{r.deco.kind} {r.slide ?? ''}" style:top="{r.row * rowH}px"></div>
           {/if}
         {/each}
+        {#if trail}
+          <!-- An agent's trail (UX6c): keyed by when it came, so a new change starts the glow again. -->
+          {#key trail.at}
+            {#each view.rows as r (r.row)}
+              {#if trail.lines.has(r.line)}
+                <div class="line-bg trail-line" style:top="{r.row * rowH}px"></div>
+              {/if}
+            {/each}
+            <!-- A folded line has no row of its own: then the glow of the lines around says enough. -->
+            {#if trail.flag && trail.flag.line < doc.store.lineCount() && layout.rowCount(trail.flag.line) > 0}
+              {@const at = cursorCell(
+                layout,
+                doc.store,
+                pos(trail.flag.line, doc.store.line(trail.flag.line).length),
+                settings.tabSize,
+              )}
+              <div
+                class="trail-flag"
+                style:top="{at.row * rowH}px"
+                style:left="{(at.cell + 2) * charW}px"
+                style:--trail-ms="{trail.ms}ms"
+              >
+                <HexAvatar text={trail.flag.text} ring={trail.flag.ring} size="sm" live label={trail.flag.label} />
+                <span>{trail.flag.name}</span>
+              </div>
+            {/if}
+          {/key}
+        {/if}
         {#each view.marks as m (m.key)}
           <div
             class="mark mk-{m.kind}"
@@ -2119,6 +2152,60 @@
 
   .ln-add {
     background: var(--ax-diff-add);
+  }
+
+  /* An agent's trail (UX6c, G8): its new lines glow up and cool off; at Off they simply stand, then go. */
+  .trail-line {
+    background: var(--ax-glow-soft);
+    animation: trail-cool 2600ms var(--ax-ease) forwards;
+  }
+
+  .trail-flag {
+    position: absolute;
+    height: var(--row);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    padding: 0 var(--ax-space-2) 0 var(--ax-space-1);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-elev-3);
+    box-shadow: var(--ax-glow-shadow);
+    color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-xs);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: trail-flag var(--trail-ms) var(--ax-ease) forwards;
+  }
+
+  :global(:root[data-motion="off"]) .trail-line {
+    animation: trail-hold 2600ms step-end forwards;
+  }
+
+  @keyframes trail-cool {
+    from {
+      background: var(--ax-glow-strong);
+    }
+    to {
+      background: transparent;
+    }
+  }
+
+  @keyframes trail-hold {
+    to {
+      background: transparent;
+    }
+  }
+
+  /* The flag stays while the work is fresh, then fades. */
+  @keyframes trail-flag {
+    0%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
   }
 
   .ln-remove {

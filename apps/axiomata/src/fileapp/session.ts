@@ -29,6 +29,7 @@ import type { EditorRecovery, FileChange, FileVersion, TextFile } from "../core/
 import { EditorDocument } from "../editor/document";
 import type { Indent } from "../editor/detect";
 import { FoldState } from "../editor/fold/state";
+import { trailOf, type Trail } from "../editor/trail";
 
 /** The backend calls a session needs; the real one is `invokeBackend`. */
 export interface FileBackend {
@@ -93,6 +94,8 @@ export class FileSession {
   /** A new note not filed yet: no file behind it (W4). */
   readonly untitled: boolean;
   banner: Banner | null = null;
+  /** The lines the last silent reload brought in from outside, and when (UX6c): the view lets them glow. */
+  trail: (Trail & { at: number }) | null = null;
   /** Set by "keep mine": the next save must be confirmed, then overwrites. */
   private overwriteArmed = false;
   private closed = false;
@@ -236,7 +239,11 @@ export class FileSession {
       return true;
     }
     if (!this.doc.dirty && !this.overwriteArmed) {
+      // What came in from outside, line by line, for the trail the view draws (UX6c, G8) — not for a file in the
+      // light mode (over 2 MiB), where two whole texts and a diff on every change would cost what that mode saves.
+      const before = this.light ? null : this.doc.store.text();
       await this.reload();
+      this.trail = before === null ? null : { ...trailOf(before, this.doc.store.text()), at: Date.now() };
       this.banner = { kind: "reloaded" };
       return true;
     }

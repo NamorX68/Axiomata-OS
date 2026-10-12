@@ -156,6 +156,18 @@ describe("external changes (F10)", () => {
     expect(session.banner).toEqual({ kind: "reloaded" });
   });
 
+  it("leaves the trail of what came in from outside, but none over unsaved edits", async () => {
+    const { backend, session } = await opened();
+    await session.onExternalChange(backend.external("a.md", "hello\nadded\n"));
+    expect(session.trail).toMatchObject({ lines: [1], last: 1 });
+    expect(session.trail?.at).toBeGreaterThan(0);
+
+    const other = await opened();
+    typeInto(other.session, " mine");
+    await other.session.onExternalChange(other.backend.external("a.md", "theirs\n"));
+    expect(other.session.trail).toBeNull();
+  });
+
   it("never touches unsaved edits; reload takes a second click", async () => {
     const { backend, session } = await opened();
     typeInto(session, " mine");

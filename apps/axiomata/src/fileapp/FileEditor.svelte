@@ -80,6 +80,10 @@
   import MarkdownPreview from "./MarkdownPreview.svelte";
   import { ScrollLink } from "./scrollLink";
   import { DRAFT_REL, DRAFT_ROOT, FileSession, FOREIGN_ROOT } from "./session";
+  import { trailAuthor, type EditorTrail } from "./trailAuthor";
+  import { agentStatus } from "../ide/agentStatus";
+  import { session as projectSession } from "../ide/projectSession";
+  import { harnessBadge, harnessLabel } from "../ide/rosterLook";
   import { statusParts } from "./status";
   import { DiagnosticSet } from "../editor/lsp/diagnostics";
   import { detectLanguage } from "../editor/syntax/languages";
@@ -302,6 +306,45 @@
     if (s) onState?.({ root: s.root, rel: s.rel, dirty: s.doc.dirty, untitled: s.untitled });
     else onState?.(image ? { ...image, dirty: false, untitled: false } : null);
     markDirty(editorId, s && !s.untitled && s.doc.dirty ? { root: s.root, rel: s.rel } : null);
+  });
+
+  /** How long an agent's trail stays: the lines cool off sooner (the surface's CSS), the flag lingers. */
+  const TRAIL_MS = 8000;
+  let trail = $state<EditorTrail | null>(null);
+  let trailTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** What the last silent reload brought in, as the surface's trail — with the agent's flag when it is known whose. */
+  function showTrail(s: FileSession): void {
+    const t = s.trail;
+    if (s !== session || !t || t.lines.length === 0) return;
+    const statuses = get(agentStatus.statuses);
+    const author = trailAuthor(s.root, get(projectSession).agents, (id) => statuses.byAgent.get(id)?.state === "working");
+    trail = {
+      lines: new Set(t.lines),
+      at: t.at,
+      ms: TRAIL_MS,
+      flag:
+        author && t.last !== null
+          ? {
+              line: t.last,
+              text: harnessBadge(author.harness),
+              ring: `var(--ax-harness-${author.harness})`,
+              name: author.name,
+              label: harnessLabel(author.harness),
+            }
+          : null,
+    };
+    if (trailTimer) clearTimeout(trailTimer);
+    trailTimer = setTimeout(() => (trail = null), TRAIL_MS);
+  }
+
+  // Another file shows: the last one's trail goes with it.
+  $effect(() => {
+    void session;
+    trail = null;
+  });
+  $effect(() => () => {
+    if (trailTimer) clearTimeout(trailTimer);
   });
 
   /** After a session action or an external change — both may replace the text. */
@@ -1093,7 +1136,12 @@
   onMount(() => {
     void ensureEditorSettingsLoaded();
     const unlisten = listenBackend<FileChange>("files:changed", (change) => {
-      void session?.onExternalChange(change).then((shown) => shown && refresh());
+      const s = session;
+      void s?.onExternalChange(change).then((shown) => {
+        if (!shown) return;
+        showTrail(s);
+        refresh();
+      });
     });
     // A rename or delete made in the file app reaches every copy of the file this way (W13) —
     // before the watcher, which only sees the old path go, could call a rename a deletion.
@@ -1199,6 +1247,7 @@
             {onFolds}
             {interceptKey}
             {diagnostics}
+            {trail}
             diagnosticsInline={$editorSettings.diagnosticsInline}
             readOnly={session.readOnly}
             hoverAt={lspDoc ? hoverAt : undefined}
