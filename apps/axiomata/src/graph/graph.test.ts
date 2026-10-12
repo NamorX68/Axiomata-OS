@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceGraph } from "../core/backend";
-import { applyLayout, layoutOrbit, RING } from "./layout";
+import { applyLayout, layoutOrbit, MAP_EDGE, MAP_SKILLS, RING } from "./layout";
 import { buildModel, glyphForArea, neighbours, regroup, searchNodes, type Palette } from "./model";
+import { cellKey, NEIGHBOURS } from "./territory";
 
 const palette: Palette = {
   text: "#fff",
@@ -105,14 +106,23 @@ describe("layouts", () => {
     expect(m.byId.get("area:Dev")!.onOrbit).toBeFalsy();
   });
 
-  it("hex gives every file its own cell, tiled in its area's wedge, hub/skills as in rings", () => {
+  it("map gives every file its own field inside the lens, skills ringing it, areas at their country's middle", () => {
     const m = buildModel(fixture(), palette);
-    applyLayout(m, "hex");
-    const hub = m.byId.get("hub")!;
-    expect([hub.x, hub.y]).toEqual([0, 0]);
+    applyLayout(m, "map");
     const skill = m.byId.get("skill:a")!;
-    expect(Math.hypot(skill.x, skill.y)).toBeCloseTo(RING.skills, 5);
+    expect(Math.hypot(skill.x, skill.y)).toBeCloseTo(MAP_SKILLS, 5);
     expect(m.hexUnit).toBeGreaterThan(0);
+    expect(m.territory?.size).toBe(41);
+    const work = m.nodes.filter((n) => n.area === "Work" && n.kind === "file");
+    const workArea = m.byId.get("area:Work")!;
+    expect(workArea.x).toBeCloseTo(work.reduce((s, n) => s + n.x, 0) / work.length, 6);
+    // Every field, corner included, stays inside the map's edge; its neighbours are the notes of the fields around it.
+    for (const n of m.nodes.filter((n) => n.kind === "file")) {
+      expect(Math.hypot(n.x, n.y) + m.hexUnit!).toBeLessThanOrEqual(MAP_EDGE + 1e-6);
+      NEIGHBOURS.forEach(({ dq, dr }, i) => {
+        expect(n.around?.[i]).toBe(m.territory!.get(cellKey(n.cell!.q + dq, n.cell!.r + dr)) ?? null);
+      });
+    }
     const files = m.nodes.filter((n) => n.kind === "file");
     // Every file lands on a distinct cell — no two share a position.
     const seen = new Set(files.map((n) => `${n.x.toFixed(6)},${n.y.toFixed(6)}`));

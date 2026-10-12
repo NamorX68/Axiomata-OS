@@ -113,7 +113,24 @@ Leinwand (`canvas/EmptyCanvas.svelte`). Offen: Herzschlag fragt alle Boards inkl
 die Ring-Schleife überschrieb die Position frischer Notizen — Mails nie wählbar) → eigener Waben-Treffertest
 (`nearestCell`, `GraphRenderer.hitCell`); Kugel mit gehaltener Maustaste drehen und neigen (`dragTurn`, Nachlauf nur
 bei Motion Full, der Ring bleibt stehen); Zündung länger (~2,5 s) und kräftiger: Funken fliegen auf die Ecken, Kern
-zündet mit Druckwelle und Aufleuchten, der Name zieht sich zusammen, die Marke öffnet sich zur App.
+zündet mit Druckwelle und Aufleuchten, der Name zieht sich zusammen, die Marke öffnet sich zur App. Auf Wunsch danach
+noch 1,5 s länger (~4 s, jede Stufe gestreckt).
+
+**Stand UX5 (2026-10-12, gebaut, Abnahme offen):** Layout „Map“ ersetzt „Hex“ (G16) und ist die Vorgabe; ein altes
+„hex“ in den Einstellungen wird zur Karte. `graph/territory.ts`: jede Area (bzw. jeder Ordner) ein zusammenhängendes
+Land auf einem axialen Hexgitter — das größte in der Mitte, die übrigen auf einem Ring darum, je über einen Bogen so
+breit wie ihr Anteil; sie wachsen Feld für Feld (immer das Land, das seiner Größe am weitesten hinterher ist, ins freie
+Nachbarfeld nächst seinem Kern) und **in Geburtsreihenfolge**: die ältesten Notizen im Herzen, die jüngsten an der
+Küste — in der Zeitreise wachsen die Länder als Inseln und dann zu einem Kontinent zusammen. `layoutMap` skaliert die
+Karte bis `MAP_EDGE` in die Linse; Skills als Symbolring außen (`MAP_SKILLS`), der Hub fällt weg, ein Area-Knoten sitzt
+in der Mitte seines Landes (dort steht sein Name; Klick darauf = Area-Detail wie bisher). Zeichnen (`drawMap`): Felder
+mit Glut-Alterung (nur halbe Abkühlung, damit jedes Land seine Farbe behält) und Schimmer (Metall: wanderndes Licht +
+Lichtkante oben je Plättchen; Calm/Off: stehendes Licht), Grenzen in Landesfarbe, wo Länder sich treffen oder das Land
+endet. Semantischer Zoom: weit draußen Ländernamen mit Notizzahl (bis Zoom 2,8), ab 1,3 Links als gestrichelte Straßen
+(die der überfahrenen/gewählten Notiz immer, als Glut), ab 2,4 trägt jedes Feld seinen Namen. Zoom per Mausrad jetzt
+**zum Zeiger hin** (auch in Rings). Zeitreise: ein Store `travelAt` (`core/brainView.ts`) für Orbit und Karte; der
+Uhr-Knopf des Orbits bleibt auch über dem 2Brain sichtbar, ohne Orbit bringt die Karte ihren eigenen mit. Detailfenster
+unverändert. `docs/architecture.md` wird am Ende der Runde nachgezogen.
 
 ## 5. Gegrillt (2026-10-11)
 

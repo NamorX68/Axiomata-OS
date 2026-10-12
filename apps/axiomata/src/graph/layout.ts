@@ -5,7 +5,8 @@
  * outer radius; the renderer scales to the canvas.
  */
 
-import type { AreaSegment, GraphModel, GraphNode } from "./model";
+import type { GraphModel, GraphNode } from "./model";
+import { axialToPixel, buildTerritory, cellKey, NEIGHBOURS } from "./territory";
 
 export const RING = {
   skills: 0.17,
@@ -13,15 +14,6 @@ export const RING = {
   filesInner: 0.39,
   filesOuter: 0.84,
 } as const;
-
-/** Hex's own file-band inner radius, deliberately independent of
- *  `RING.filesInner` (Rings only) rather than derived from it —
- *  owner feedback was that Rings' gap to the hub cluster was too
- *  large (fixed by shrinking `RING.filesInner` above) while Hex's existing
- *  gap already looked right, so the two must not move together. This is
- *  the same absolute radius Hex used before that change (was
- *  `RING.filesInner + 0.32` back when `RING.filesInner` was `0.4`). */
-const HEX_FILES_INNER = 0.72;
 
 /** Arc spacing between file dots in graph units (at radius r the dot
  *  spacing along the arc is this). */
@@ -37,7 +29,7 @@ function placeRing(nodes: GraphNode[], radius: number, startAngle = -Math.PI / 2
   });
 }
 
-export type LayoutKind = "rings" | "hex";
+export type LayoutKind = "rings" | "map";
 
 /** Most icon nodes on the dashboard orbit ring (the inner of the two rings
  *  now that the App Ring sits outside it) — skills always get
@@ -158,7 +150,7 @@ export function layoutExpandedGroup(members: GraphNode[], anchorAngle: number): 
 }
 
 export function applyLayout(model: GraphModel, kind: LayoutKind): void {
-  if (kind === "hex") layoutHex(model);
+  if (kind === "map") layoutMap(model);
   else layoutRings(model);
 }
 
@@ -225,186 +217,64 @@ export function layoutRings(model: GraphModel): void {
   placeRing(loose, (RING.skills + RING.filesInner) / 2, Math.PI / 2);
 }
 
-/** The 6 axial unit directions, in ring-walking order — convention-
- *  independent of flat- vs pointy-top; only `hexToPixel` cares about that. */
-const AXIAL_DIRS: [number, number][] = [
-  [1, 0],
-  [1, -1],
-  [0, -1],
-  [-1, 0],
-  [-1, 1],
-  [0, 1],
-];
+/** How far out the map reaches, in graph units (1 = the lens circle's edge): room is left for the skills' ring. */
+export const MAP_EDGE = 0.84;
+/** The ring the skills sit on around the map. */
+export const MAP_SKILLS = 0.94;
 
-/** Flat-top axial → pixel, hex circumradius `u` (graph units). */
-function hexToPixel(q: number, r: number, u: number): [number, number] {
-  return [u * 1.5 * q, u * Math.sqrt(3) * (r + q / 2)];
+/** A note's birth for the map (G17): its `created`, else its last change, else unknown. */
+function bornOf(n: GraphNode): number | null {
+  const at = Date.parse(n.created ?? n.modified ?? "");
+  return Number.isNaN(at) ? null : at;
 }
 
-/** Every axial cell on hex ring `k` (k ≥ 1) around the origin, walked side
- *  by side — the standard "spiral ring" traversal. */
-function hexRing(k: number): [number, number][] {
-  const cells: [number, number][] = [];
-  let q = AXIAL_DIRS[4][0] * k;
-  let r = AXIAL_DIRS[4][1] * k;
-  for (const [dq, dr] of AXIAL_DIRS) {
-    for (let step = 0; step < k; step++) {
-      cells.push([q, r]);
-      q += dq;
-      r += dr;
-    }
+/**
+ * The territory map (UX5, G16): every note a field, every area a country (`graph/territory.ts`), centred and scaled
+ * so the map fills the lens up to `MAP_EDGE`; `model.hexUnit` is a field's circumradius in graph units and
+ * `model.territory` finds a field's neighbours. An area's node sits at its country's middle, where its name is drawn;
+ * the skills ring the map; the hub has no place on it and stays at the centre, not drawn.
+ */
+export function layoutMap(model: GraphModel): void {
+  const hub = model.byId.get("hub");
+  if (hub) {
+    hub.x = 0;
+    hub.y = 0;
   }
-  return cells;
-}
-
-/** Is `angle` inside `[start, end)`, both possibly outside ±π (area
- *  segments are laid out as a running sum, not wrapped)? */
-function angleInSegment(angle: number, start: number, end: number): boolean {
-  const twoPi = Math.PI * 2;
-  let a = angle;
-  while (a < start) a += twoPi;
-  while (a >= start + twoPi) a -= twoPi;
-  return a >= start && a < end;
-}
-
-/** One candidate hex cell in the ring-spiral, in pixel (graph-unit) space —
- *  `ring`/`angle` are kept alongside `x`/`y` because `assignFilesToCells`
- *  picks cells innermost-first, angle-sorted within a ring. */
-interface HexCell {
-  x: number;
-  y: number;
-  ring: number;
-  angle: number;
-}
-
-/** Solves one hex circumradius `u` (graph units) so `fileCount` hexes, each
- *  of area (3√3/2)u², cover roughly the annulus Rings uses for files (with
- *  a little slack so the outermost ring isn't razor-tight against
- *  neighbours) — plus the ring-spiral index `kStart` to start generating
- *  cells from. The mosaic starts further out than Rings' dots do
- *  (`HEX_FILES_INNER`, not `RING.filesInner`) — otherwise the innermost
- *  cells crowd right up against the skill/routine/area icons and make them
- *  hard to pick out. */
-function solveHexUnit(fileCount: number): { u: number; kStart: number } {
-  const innerR = HEX_FILES_INNER;
-  const outerR = RING.filesOuter;
-  const slack = 1.15;
-  const fieldArea = Math.PI * (outerR * outerR - innerR * innerR);
-  const hexArea = (3 * Math.sqrt(3)) / 2;
-  const u = Math.sqrt((fieldArea * slack) / (fileCount * hexArea));
-  const ringHeight = Math.sqrt(3) * u;
-  const kStart = Math.max(1, Math.ceil(innerR / ringHeight));
-  return { u, kStart };
-}
-
-/** Every hex cell from ring `kStart` outward, spiralling ring by ring
- *  (`hexRing`), until there are comfortably more candidates than
- *  `targetCount` files (30% slack) or the spiral has clearly run away —
- *  the slack absorbs `assignFilesToCells`'s per-wedge discretisation (an
- *  area's own cells can run out a little short even when the whole field
- *  has room to spare). */
-function generateHexCells(unit: number, kStart: number, targetCount: number): HexCell[] {
-  const cells: HexCell[] = [];
-  let k = kStart;
-  while (cells.length < targetCount * 1.3 && k < kStart + 200) {
-    for (const [q, r] of hexRing(k)) {
-      const [x, y] = hexToPixel(q, r, unit);
-      cells.push({ x, y, ring: k, angle: Math.atan2(y, x) });
-    }
-    k++;
-  }
-  return cells;
-}
-
-/** Hands each area's files the nearest free cells inside its own angular
- *  wedge (innermost ring first, alphabetically within a ring so the
- *  layout is stable), then spills any leftovers — a wedge that ran short
- *  because of the discretisation above, not a real area imbalance — onto
- *  whatever cells are still free, nearest first. Mutates each file node's
- *  `x`/`y` in place. */
-function assignFilesToCells(files: GraphNode[], areas: AreaSegment[], cells: HexCell[]): void {
-  // Loose (no-area) files don't get a proper wedge in Rings either — give
-  // them a narrow slice pointing at the same spot Rings parks their ring.
-  const wedges = [
-    ...areas.map((s) => ({ area: s.name, start: s.start, end: s.end })),
-    { area: null, start: Math.PI / 2 - 0.15, end: Math.PI / 2 + 0.15 },
-  ];
-  const byArea = new Map<string | null, GraphNode[]>();
-  for (const n of files) {
-    const key = n.area;
-    if (!byArea.has(key)) byArea.set(key, []);
-    byArea.get(key)!.push(n);
-  }
-
-  const used = new Set<number>();
-  const assigned = new Set<GraphNode>();
-  for (const w of wedges) {
-    const mine = (byArea.get(w.area) ?? []).slice().sort((a, b) => a.label.localeCompare(b.label));
-    if (mine.length === 0) continue;
-    const candidates = cells
-      .map((c, i) => ({ c, i }))
-      .filter(({ i, c }) => !used.has(i) && angleInSegment(c.angle, w.start, w.end))
-      .sort((a, b) => a.c.ring - b.c.ring || a.c.angle - b.c.angle);
-    mine.forEach((node, j) => {
-      const pick = candidates[j];
-      if (!pick) return;
-      used.add(pick.i);
-      node.x = pick.c.x;
-      node.y = pick.c.y;
-      assigned.add(node);
-    });
-  }
-  // Spillover: a wedge that ran short (discretisation, not a real area
-  // imbalance) — hand its leftover files the nearest still-free cells.
-  const leftover = files.filter((n) => !assigned.has(n));
-  if (leftover.length > 0) {
-    const free = cells
-      .map((c, i) => ({ c, i }))
-      .filter(({ i }) => !used.has(i))
-      .sort((a, b) => a.c.ring - b.c.ring || a.c.angle - b.c.angle);
-    leftover.forEach((node, j) => {
-      const pick = free[j];
-      if (!pick) return;
-      node.x = pick.c.x;
-      node.y = pick.c.y;
-      assigned.add(node);
-    });
-  }
-}
-
-/** Honeycomb layout: hub / skills / routines / area markers exactly as in
- *  Rings (so the centre still reads the same way); every file gets its own
- *  hex cell instead of a dot, tiled as a true flat-top hex grid (a spiral
- *  of rings out from the origin, per `hexRing`) so neighbouring notes touch
- *  edge-to-edge like a honeycomb. Cells are handed out per area, in the
- *  same angular wedge each area already owns in Rings/Circle, so the
- *  overall shape still reads as "areas around a hub" — just made of hex
- *  tiles instead of arcs of dots. One shared cell size (`model.hexUnit`,
- *  graph units) is solved from the file count so the mosaic fills roughly
- *  the same band Rings uses for files, then everything is rescaled to
- *  land exactly on that band's outer edge; the renderer reads `hexUnit`
- *  back to draw each cell at the matching pixel size. */
-export function layoutHex(model: GraphModel): void {
-  layoutRings(model);
+  placeRing(
+    model.nodes.filter((n) => n.kind === "skill"),
+    MAP_SKILLS,
+  );
   const files = model.nodes.filter((n) => n.kind === "file");
-  if (files.length === 0) {
-    model.hexUnit = undefined;
-    return;
+  const cells = buildTerritory(files.map((n) => ({ id: n.id, area: n.area, born: bornOf(n) })));
+  const points = cells.map((c) => axialToPixel(c.q, c.r));
+  const mx = points.reduce((s, [x]) => s + x, 0) / Math.max(1, points.length);
+  const my = points.reduce((s, [, y]) => s + y, 0) / Math.max(1, points.length);
+  // The farthest field's outer corner lands on the edge.
+  let reach = 1;
+  for (const [x, y] of points) reach = Math.max(reach, Math.hypot(x - mx, y - my) + 1);
+  const unit = MAP_EDGE / reach;
+  const territory = new Map<string, GraphNode>();
+  cells.forEach((c, i) => {
+    const node = model.byId.get(c.id);
+    const [x, y] = points[i] ?? [0, 0];
+    if (!node) return;
+    node.x = (x - mx) * unit;
+    node.y = (y - my) * unit;
+    node.cell = { q: c.q, r: c.r };
+    territory.set(cellKey(c.q, c.r), node);
+  });
+  model.hexUnit = cells.length > 0 ? unit : undefined;
+  model.territory = territory;
+  model.mapCentre = { x: mx, y: my };
+  // Each field's six neighbours, found once here rather than by key in every frame (the borders).
+  for (const node of territory.values()) {
+    const at = node.cell;
+    if (at) node.around = NEIGHBOURS.map(({ dq, dr }) => territory.get(cellKey(at.q + dq, at.r + dr)) ?? null);
   }
-  let { u, kStart } = solveHexUnit(files.length);
-  const cells = generateHexCells(u, kStart, files.length);
-  assignFilesToCells(files, model.areas, cells);
 
-  // Rescale so the outermost placed cell lands on `RING.filesOuter` — fills
-  // the same band regardless of how the ring-spiral vs. annulus area
-  // estimates happened to compare, and keeps `hexUnit` in step with the
-  // final layout.
-  const maxR = Math.max(...files.map((n) => Math.hypot(n.x, n.y)), 1e-6);
-  const scale = RING.filesOuter / maxR;
-  u *= scale;
-  for (const n of files) {
-    n.x *= scale;
-    n.y *= scale;
+  for (const area of model.nodes.filter((n) => n.kind === "area")) {
+    const mine = files.filter((n) => n.area === area.area);
+    area.x = mine.reduce((s, n) => s + n.x, 0) / Math.max(1, mine.length);
+    area.y = mine.reduce((s, n) => s + n.y, 0) / Math.max(1, mine.length);
   }
-  model.hexUnit = u;
 }

@@ -44,6 +44,10 @@ export const SPEED_MAX = 0.12;
 /** Whether the Second Brain layer is up over the Orbit (set by the shell). */
 export const brainActive: Writable<boolean> = writable(false);
 
+/** The moment the time travel shows (ms), or `null` for today (G17) — one for the Orbit's hive and the Second
+ *  Brain's map, so going from one to the other stays at the same moment. */
+export const travelAt: Writable<number | null> = writable(null);
+
 export const brainView: Writable<BrainView> = writable({ ...DEFAULT_BRAIN_VIEW });
 
 const isSpeed = (value: unknown): value is number =>

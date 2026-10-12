@@ -1,11 +1,11 @@
 <!--
   Full-screen Second Brain: the graph with pan (drag) / zoom (wheel), hover
-  labels, layout Rings / Hex, grouping
+  labels, layout Rings / Map, grouping
   by areas or folders, spin + file-name toggles, and a detail panel for the
   selected node (file → open in the file panel / copy path / fly to / connections;
   skill → run; hub → open). "Back to the OS" closes.
-  Hex tiles every note into its own honeycomb cell, same area wedges as
-  Rings. Orbit (the dashboard-centre widget's 3-D cloud) lives only
+  Map (UX5, G16) draws the vault as a territory map: every note a field, every
+  area a country, links as roads, with a semantic zoom and the Orbit's time travel. Orbit (the dashboard-centre widget's 3-D cloud) lives only
   there now, not as a full-view option here.
 -->
 <script lang="ts">
@@ -15,8 +15,8 @@
 
   import { invokeBackend, type RunSummary, type WorkspaceGraph } from "../core/backend";
   import { absoluteTime, formatBytes, relativeTime } from "../core/format";
-  import { BRAIN_DISC, brainView, spinOf } from "../core/brainView";
-  import { motion } from "../core/motion";
+  import { BRAIN_DISC, brainView, spinOf, travelAt } from "../core/brainView";
+  import { animates, motion } from "../core/motion";
   import { getSetting, setSetting } from "../core/persist";
   import { openFilePanel, staged } from "../core/staging";
   import { toast } from "../core/toast";
@@ -36,6 +36,8 @@
   import FilePeek from "../fileapp/FilePeek.svelte";
   import { clampRect, moved, readRect, resizedEdge, type Edge, type Rect } from "./floatingRect";
   import Legend from "../graph/Legend.svelte";
+  import { travelSpan } from "../graph/hive";
+  import TimeTravel from "../modules/TimeTravel.svelte";
   import { GraphRenderer, type RenderMode } from "../graph/render";
 
   let {
@@ -99,10 +101,11 @@
   // work fine through a proxy, which is why this went unnoticed).
   let selected = $state.raw<GraphNode | null>(null);
   let hover = $state.raw<GraphNode | null>(null);
-  let layout = $state<LayoutKind>(prefs.layout === "hex" ? "hex" : "rings");
+  // The map is the default (it replaced "hex", which an older setting may still name).
+  let layout = $state<LayoutKind>(prefs.layout === "rings" ? "rings" : "map");
   // The one place the layout is mapped to a renderer mode, so the mount-time renderer options and the reactive
   // `$effect` below can't drift apart.
-  const renderMode = $derived<RenderMode>(layout === "hex" ? "hex" : "rings");
+  const renderMode = $derived<RenderMode>(layout === "map" ? "map" : "rings");
   let grouping = $state<Grouping>(prefs.grouping === "folders" ? "folders" : "areas");
   let helpOpen = $state(prefs.help === true);
   let areaFilter = $state("");
@@ -110,8 +113,8 @@
   const HELP = [
     ["Rings", "Notes sit on arcs inside their area's segment; skills inside, areas on the next ring. Shows the size of each area."],
     [
-      "Hex",
-      "Honeycomb instead of arcs: every note its own hex cell, packed tight, in the same area segment as in Rings. Skills and areas stay as in Rings.",
+      "Map",
+      "A map of the vault: every note a field, every area a country, the oldest notes at its heart. Links are roads (zoom in); close up every field shows its name. Skills ring the map.",
     ],
     ["Areas", "One segment per top-level vault folder."],
     ["Folders", "One segment per deepest folder, e.g. Learning/Rust/lessons. A finer split of large areas."],
@@ -290,8 +293,16 @@
   function onWheel(e: WheelEvent) {
     if (!renderer) return;
     e.preventDefault();
-    const factor = Math.exp(-e.deltaY * 0.0015);
-    renderer.view.zoom = Math.min(8, Math.max(0.4, renderer.view.zoom * factor));
+    const view = renderer.view;
+    const zoom = Math.min(8, Math.max(0.4, view.zoom * Math.exp(-e.deltaY * 0.0015)));
+    // The point under the pointer stays put: zooming walks towards what is being looked at, as a map does.
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const px = e.clientX - rect.left - rect.width / 2;
+    const py = e.clientY - rect.top - rect.height / 2;
+    const k = zoom / view.zoom;
+    view.x = px - (px - view.x) * k;
+    view.y = py - (py - view.y) * k;
+    view.zoom = zoom;
   }
 
   async function runSkill(name: string) {
@@ -358,9 +369,17 @@
         labels: $brainView.labels,
         fileLabels: $brainView.fileNames,
         mode: renderMode,
+        pulse: animates($motion),
+        shine: $brainView.shine,
       };
     }
   });
+  $effect(() => {
+    const at = $travelAt;
+    if (renderer) renderer.timeCutoff = at;
+  });
+  /** The vault's life for the time travel when no Orbit is there to offer it. */
+  const span = $derived(graph ? travelSpan(graph.files.map((f) => f.created ?? f.modified), Date.now()) : null);
   // Remember the view preferences in dashboard.json (settings.secondBrain).
   let prefsReady = false;
   $effect(() => {
@@ -446,13 +465,17 @@
     <canvas bind:this={canvas}></canvas>
     {#if error}<p class="error">{error}</p>{/if}
   </div>
+  <!-- Over the Orbit its own time travel serves the map too; without one, the map brings its own. -->
+  {#if !inOrbit && span && layout === "map"}
+    <div class="travel"><TimeTravel {span} onTravel={(at) => travelAt.set(at)} /></div>
+  {/if}
 
   <aside class="controls" class:away={$staged.length > 0}>
     <div class="group">
       <span class="label">Layout</span>
       <div class="seg">
         <button type="button" class:on={layout === "rings"} title={helpText("Rings")} aria-describedby="help-rings" onclick={() => (layout = "rings")}>Rings</button>
-        <button type="button" class:on={layout === "hex"} title={helpText("Hex")} aria-describedby="help-hex" onclick={() => (layout = "hex")}>Hex</button>
+        <button type="button" class:on={layout === "map"} title={helpText("Map")} aria-describedby="help-map" onclick={() => (layout = "map")}>Map</button>
       </div>
     </div>
     <div class="group">
@@ -472,7 +495,7 @@
     {/if}
     {#if helpOpen}
       <div class="help">
-        <Legend hex={layout === "hex"} />
+        <Legend map={layout === "map"} />
         <dl class="help-terms">
           {#each HELP as [term, text] (term)}
             <dt id="help-{term.toLowerCase().replace(' ', '-')}">{term}</dt>
@@ -624,6 +647,17 @@
     cursor: grab;
   }
   /* In the Orbit's container (`container-type: size` there): its own box is the unit, the same one the cloud is sized from. */
+  .travel {
+    position: fixed;
+    inset: auto 0 0 auto;
+    z-index: 3;
+    width: calc(320px * var(--ax-ui-scale));
+    height: calc(120px * var(--ax-ui-scale));
+    pointer-events: none;
+  }
+  .travel > :global(*) {
+    pointer-events: auto;
+  }
   .stage.in-orbit {
     position: absolute;
     width: var(--disc-cqmin);

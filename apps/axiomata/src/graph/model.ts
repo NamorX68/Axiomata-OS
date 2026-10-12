@@ -41,6 +41,11 @@ export interface GraphNode {
   p3?: [number, number, number];
   /** Orbit mode: node sits on the icon ring. */
   onOrbit?: boolean;
+  /** Map layout, files: the note's field on the territory map's axial grid (`graph/territory.ts`). */
+  cell?: { q: number; r: number };
+  /** Map layout, files: the notes in the six neighbouring fields, in `territory.ts` `NEIGHBOURS` order (`null` = no
+   *  land there). */
+  around?: (GraphNode | null)[];
   /** Orbit mode: last projected screen position (for hit-testing). */
   sx?: number;
   sy?: number;
@@ -95,9 +100,14 @@ export interface GraphModel {
   byId: Map<string, GraphNode>;
   totalFiles: number;
   truncated: boolean;
-  /** Hex layout only: circumradius of one file's cell, in graph units — the
-   *  renderer multiplies by its own px radius to draw matching-size cells. */
+  /** Map layout only: circumradius of one file's field, in graph units — the
+   *  renderer multiplies by its own px radius to draw matching-size fields. */
   hexUnit?: number;
+  /** Map layout only: each field's note by its axial key (`territory.ts` `cellKey`), for borders between countries. */
+  territory?: Map<string, GraphNode>;
+  /** Map layout only: the map's middle on the axial grid's own scale (circumradius 1), which graph (0, 0) stands for —
+   *  with `hexUnit` it turns a point back into a field (the hit test). */
+  mapCentre?: { x: number; y: number };
 }
 
 export interface Palette {

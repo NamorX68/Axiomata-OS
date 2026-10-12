@@ -19,12 +19,13 @@ import {
 } from "./hive";
 import { APP_RING, EXPANDED_GROUP_RING } from "./layout";
 import { glyphForArea, type GraphModel, type GraphNode } from "./model";
+import { cellKey, NEIGHBOURS, pixelToAxial } from "./territory";
 
-export type RenderMode = "rings" | "orbit" | "hex";
+export type RenderMode = "rings" | "orbit" | "map";
 
 export interface RenderOptions {
-  /** `rings`/`hex` = the Second Brain view (dots vs. honeycomb cells for
-   *  files); `orbit` = the dashboard centre. */
+  /** `rings`/`map` = the Second Brain view (dots on arcs vs. the territory
+   *  map's fields); `orbit` = the dashboard centre. */
   mode?: RenderMode;
   /** Radians per second of ring rotation. */
   spin: number;
@@ -40,7 +41,7 @@ export interface RenderOptions {
   shine?: Shine;
 }
 
-/** A hive cell's tone before the shimmer (`GraphRenderer.hiveTones`). */
+/** A hive cell's or map field's tone before the shimmer (`GraphRenderer.noteTones`). */
 interface HiveTone {
   col: Rgb;
   heat: number;
@@ -233,8 +234,9 @@ export class GraphRenderer {
   private lightScheme = false;
   /** The honeycomb sphere of the current model (`graph/hive.ts`); its cells are kept while the notes stay the same. */
   private hive: { model: GraphModel; signature: string; cells: HiveCell[]; nodes: (GraphNode | null)[] } | null = null;
-  /** Each cell's tone, worked out at most once a second (`hiveTones`). */
+  /** Each cell's tone, worked out at most once a second (`noteTones`), and the list of notes it was worked out for. */
   private tones: HiveTone[] = [];
+  private toneList: readonly (GraphNode | null)[] | null = null;
   private toneKey = "";
   private toneAt = 0;
   /** The cells' projected positions of the current frame, reused from frame to frame. */
@@ -253,6 +255,10 @@ export class GraphRenderer {
   private turning = false;
   /** When the drag last moved the hive (`performance.now()` ms): a release after holding still does not coast. */
   private turnedAt = 0;
+  /** The map's notes for the current model (`mapNotes`). */
+  private mapFiles: { model: GraphModel; files: GraphNode[] } | null = null;
+  /** Where the countries' names were drawn in the last frame, for the hit test (they lie on top of the fields). */
+  private mapLabels: { node: GraphNode; x: number; y: number; w: number; h: number }[] = [];
   private rgbCache = new Map<string, Rgb>();
   /** Ring captions (rings mode). */
   captions = { skills: "SKILLS", memory: "MEMORY" };
@@ -306,12 +312,12 @@ export class GraphRenderer {
     return Math.min(this.width, this.height) * this.options.fit * this.view.zoom;
   }
 
-  /** A file cell's px radius in Hex mode — 0 outside Hex mode, or before
+  /** A file field's px radius on the map — 0 outside the map, or before
    *  `model.hexUnit` is known. The one place `model.hexUnit` (graph units)
    *  becomes a screen size, so hit-testing, drawing and the pulse effect
    *  can't drift out of sync with each other. */
   private hexCellRadius(): number {
-    if (this.options.mode !== "hex" || !this.model?.hexUnit) return 0;
+    if (this.options.mode !== "map" || !this.model?.hexUnit) return 0;
     return this.model.hexUnit * this.radius();
   }
 
@@ -377,18 +383,17 @@ export class GraphRenderer {
   /** Nearest node within `slop` px of a CSS-px point, or null. */
   hitTest(px: number, py: number, slop = 6): GraphNode | null {
     if (!this.model) return null;
+    if (this.options.mode === "map") return this.hitMap(px, py, slop);
     let best: GraphNode | null = null;
     let bestD = Infinity;
     const orbit = this.options.mode === "orbit";
-    const hex = this.options.mode === "hex";
-    const hexPx = this.hexCellRadius();
     for (const n of this.model.nodes) {
       if (orbit && n.kind === "area") continue;
       // A note of the hive is found by its cell (`hitCell`); only the recent ones also sit on the ring.
       if (orbit && n.kind === "file" && !n.onOrbit) continue;
       const s = orbit && n.sx !== undefined && n.sy !== undefined ? { x: n.sx, y: n.sy } : this.toScreen(n);
       const d = Math.hypot(s.x - px, s.y - py);
-      const reach = hex && n.kind === "file" ? Math.max(hexPx, 3) + slop : Math.max(n.r * this.view.zoom, 3) + slop;
+      const reach = Math.max(n.r * this.view.zoom, 3) + slop;
       if (d < reach && d < bestD) {
         best = n;
         bestD = d;
@@ -447,7 +452,10 @@ export class GraphRenderer {
     // highlight ring was never actually missing, just off-centre after a
     // moment) — pausing here fixes the camera side of that mismatch rather
     // than chasing the node's math every frame.
-    if (!this.selected && !this.flyAnim && !this.pulse) {
+    if (this.options.mode === "map") {
+      // A map is read north up: it never turns.
+      this.angle = 0;
+    } else if (!this.selected && !this.flyAnim && !this.pulse) {
       this.angle = (this.angle + this.options.spin * dt) % TWO_PI;
     }
     if (this.flyAnim) {
@@ -474,6 +482,10 @@ export class GraphRenderer {
     if (!model) return;
     if (this.options.mode === "orbit") {
       this.drawOrbit(t);
+      return;
+    }
+    if (this.options.mode === "map") {
+      this.drawMap(t);
       return;
     }
     const R = this.radius();
@@ -523,17 +535,10 @@ export class GraphRenderer {
 
     // Nodes.
     const hl = this.highlight;
-    const hex = this.options.mode === "hex";
-    const hexR = this.hexCellRadius();
     for (const n of model.nodes) {
       const p = this.toScreen(n);
       const dimmed = hl !== null && !hl.has(n.id) && n !== this.selected;
       const twinkle = n.kind === "file" ? 0.75 + 0.25 * Math.sin(t * 1.7 + n.phase * TWO_PI) : 1;
-      if (hex && n.kind === "file") {
-        const alpha = dimmed ? 0.12 : twinkle;
-        this.drawHexCell(p.x, p.y, hexR, n.color, alpha, n === this.hover || n === this.selected);
-        continue;
-      }
       const r = Math.max(1.2, n.r * Math.sqrt(this.view.zoom)) * (n === this.hover || n === this.selected ? 1.8 : 1);
       if (n.kind !== "file") {
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
@@ -577,8 +582,7 @@ export class GraphRenderer {
         const p = this.toScreen(n);
         ctx.fillStyle = n.kind === "file" || n.kind === "hub" ? this.textColor : n.kind === "area" ? n.color : this.mutedColor;
         ctx.globalAlpha = n === this.hover || n === this.selected ? 1 : 0.8;
-        const below = hex && n.kind === "file" ? hexR : n.r * this.view.zoom;
-        ctx.fillText(n.label, p.x, p.y + below + 6);
+        ctx.fillText(n.label, p.x, p.y + n.r * this.view.zoom + 6);
       }
       ctx.globalAlpha = 1;
     }
@@ -872,7 +876,7 @@ export class GraphRenderer {
     const model = this.model!;
     if (this.hive?.model !== model) this.rebuildHive(model);
     const hive = this.hive!;
-    const tones = this.hiveTones(hive);
+    const tones = this.noteTones(hive.nodes);
     const sphere = GraphRenderer.HIVE_SPHERE;
     const still = this.options.pulse === false;
     const shine = this.options.shine ?? "metal";
@@ -981,28 +985,29 @@ export class GraphRenderer {
   }
 
   /**
-   * Each cell's colour before the shimmer, its heat, whether it is settled and whether it gets the glow's blur —
-   * worked out at most once a second (and at once after a change of colours, the time travel or a landed spark),
-   * not in every frame.
+   * Each note's colour before the shimmer, its heat, whether it is settled and whether it gets the glow's blur — for
+   * the hive's cells (`null` = an unsettled one) and the map's fields alike — worked out at most once a second (and at
+   * once after a change of colours, of the list, the time travel or a landed spark), not in every frame. `cooling` is
+   * how far an old note fades toward ash (1 = all the way): a map keeps more of its countries' colours.
    */
-  private hiveTones(hive: NonNullable<GraphRenderer["hive"]>): HiveTone[] {
+  private noteTones(nodes: readonly (GraphNode | null)[], cooling = 1): HiveTone[] {
     const now = Date.now();
-    const key = `${this.surfaceColor}|${this.mutedColor}|${this.glowColor}|${this.timeCutoff}`;
+    const key = `${this.surfaceColor}|${this.mutedColor}|${this.glowColor}|${this.timeCutoff}|${cooling}`;
     const fresh = now - this.toneAt < GraphRenderer.TONE_TTL_MS;
-    if (this.tones.length === hive.cells.length && key === this.toneKey && fresh) return this.tones;
+    if (this.toneList === nodes && key === this.toneKey && fresh) return this.tones;
     const surface = this.rgb(this.surfaceColor);
     const ash = mixRgb(this.rgb(this.mutedColor), surface, 0.55);
     const ember = this.rgb(this.glowColor);
     const unsettled = mixRgb(surface, this.rgb(this.mutedColor), 0.12);
     const cutoff = this.timeCutoff;
-    const tones: HiveTone[] = hive.nodes.map((node) => {
+    const tones: HiveTone[] = nodes.map((node) => {
       // In the time travel a note not yet born is an unsettled cell, and one born just then glows: the vault grows.
       const born = node?.created ? Date.parse(node.created) : null;
       const settled = node !== null && (cutoff === null || born === null || born <= cutoff);
       if (!node || !settled) return { col: unsettled, heat: 0, settled: false, blur: false };
       const touched = cutoff === null ? (node.modified ? Date.parse(node.modified) : null) : born;
       const glow = emberOf(touched, cutoff ?? now);
-      const col = mixRgb(mixRgb(this.rgb(node.color), ash, glow.ash), ember, glow.heat);
+      const col = mixRgb(mixRgb(this.rgb(node.color), ash, glow.ash * cooling), ember, glow.heat);
       return { col, heat: glow.heat, settled: true, blur: false };
     });
     tones
@@ -1011,6 +1016,7 @@ export class GraphRenderer {
       .slice(0, GraphRenderer.MAX_BLURRED)
       .forEach((tone) => (tone.blur = true));
     this.tones = tones;
+    this.toneList = nodes;
     this.toneKey = key;
     this.toneAt = now;
     return tones;
@@ -1273,28 +1279,295 @@ export class GraphRenderer {
     }
   }
 
-  /** One honeycomb cell: a filled flat-top hexagon (matches `layoutHex`'s
-   *  axial→pixel orientation) with a thin separating stroke, brightened to
-   *  the accent colour when hovered/selected. */
-  private drawHexCell(x: number, y: number, r: number, color: string, alpha: number, hot: boolean): void {
-    const { ctx } = this;
-    ctx.beginPath();
-    for (let k = 0; k < 6; k++) {
-      const a = (Math.PI / 3) * k;
-      const px = x + Math.cos(a) * r;
-      const py = y + Math.sin(a) * r;
-      if (k === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
+  /** From this zoom on the links show as roads between the fields; they are fully there half a step later. */
+  private static readonly ROADS_FROM = 1.3;
+  /** From this zoom on every field carries its note's name. */
+  private static readonly NAMES_FROM = 2.4;
+  /** Up to this zoom the countries carry their names; they fade out on the way there. */
+  private static readonly COUNTRIES_UNTIL = 2.8;
+  /** How far an old note fades toward ash on the map: half way, so every country keeps its colour. */
+  private static readonly MAP_COOLING = 0.5;
+
+  /** Whether a note exists at the moment the time travel shows (always, when it shows today). */
+  private bornBy(n: GraphNode): boolean {
+    const cutoff = this.timeCutoff;
+    if (cutoff === null || !n.created) return true;
+    const born = Date.parse(n.created);
+    return Number.isNaN(born) || born <= cutoff;
+  }
+
+  /** The map's notes, in a list kept for as long as the model, so their tones are worked out once a second. */
+  private mapNotes(model: GraphModel): GraphNode[] {
+    if (this.mapFiles?.model !== model) {
+      this.mapFiles = { model, files: model.nodes.filter((n) => n.kind === "file" && n.cell !== undefined) };
     }
-    ctx.closePath();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.globalAlpha = hot ? 1 : Math.min(1, alpha + 0.3);
-    ctx.strokeStyle = hot ? this.accentColor : this.surfaceColor;
-    ctx.lineWidth = hot ? 1.8 : 1;
-    ctx.stroke();
+    return this.mapFiles.files;
+  }
+
+  /** A skill's px radius on the ring around the map: steady while zooming, so the ring reads as a frame. */
+  private mapSkillPx(): number {
+    const lens = Math.min(this.width, this.height) * this.options.fit;
+    return Math.max(9, Math.min(16, lens * 0.03));
+  }
+
+  /** The map: what is under a CSS-px point — a country's name first (drawn on top), then a skill, then a field. */
+  private hitMap(px: number, py: number, slop: number): GraphNode | null {
+    const model = this.model;
+    if (!model) return null;
+    for (const box of this.mapLabels) {
+      if (Math.abs(px - box.x) <= box.w / 2 && Math.abs(py - box.y) <= box.h / 2) return box.node;
+    }
+    const skill = this.mapSkillPx() + slop;
+    for (const n of model.nodes) {
+      if (n.kind !== "skill") continue;
+      const p = this.toScreen(n);
+      if (Math.hypot(p.x - px, p.y - py) < skill) return n;
+    }
+    // The field is found the way it is drawn: the point taken back to the axial grid and rounded to its hex — exact at
+    // every edge, and one lookup instead of a scan.
+    const unit = model.hexUnit;
+    const centre = model.mapCentre;
+    if (!unit || !centre) return null;
+    const R = this.radius();
+    const gx = (px - this.width / 2 - this.view.x) / R;
+    const gy = (py - this.height / 2 - this.view.y) / R;
+    const [q, r] = pixelToAxial(gx / unit + centre.x, gy / unit + centre.y);
+    const field = model.territory?.get(cellKey(q, r)) ?? null;
+    return field && this.bornBy(field) ? field : null;
+  }
+
+  /**
+   * The territory map (UX5, G16): every note a field in its country's colour — glowing where it was touched today,
+   * cooled toward ash where nothing moved for weeks, lit by the shimmer (G7) — with a border where countries meet or
+   * the land ends. The zoom decides what else there is (semantic zoom): from afar the countries' names, closer the
+   * links as roads, close up every field's name. Skills ring the map. In the time travel a note not yet born has no
+   * field: the countries grow.
+   */
+  private drawMap(t: number): void {
+    const { ctx, width, height } = this;
+    const model = this.model!;
+    const notes = this.mapNotes(model);
+    const tones = this.noteTones(notes, GraphRenderer.MAP_COOLING);
+    const s = this.hexCellRadius();
+    const zoom = this.view.zoom;
+    const hl = this.highlight;
+    const still = this.options.pulse === false;
+    const shine = this.options.shine ?? "metal";
+    const lens = Math.min(width, height) * this.options.fit;
+    // The metal's light wanders slowly across the lens; at Calm and Off it stands at the upper left (G3).
+    const lightX = width / 2 + (still ? -0.45 : Math.cos(t * 0.35) * 0.6) * lens;
+    const lightY = height / 2 + (still ? -0.4 : Math.sin(t * 0.35) * 0.45) * lens;
+    const spread = 2 * (lens * 0.4) ** 2;
+    const onScreen = (x: number, y: number) => x > -s && x < width + s && y > -s && y < height + s;
+
+    // Fields.
+    const middles = new Map<string, { x: number; y: number; n: number }>();
+    const shown = new Set<GraphNode>();
+    notes.forEach((n, i) => {
+      const tone = tones[i];
+      if (!tone?.settled) return;
+      shown.add(n);
+      // The field's screen position, worked out once per frame and kept on the node for the passes below.
+      const p = this.toScreen(n);
+      n.sx = p.x;
+      n.sy = p.y;
+      if (n.area) {
+        const m = middles.get(n.area) ?? { x: 0, y: 0, n: 0 };
+        m.x += p.x;
+        m.y += p.y;
+        m.n++;
+        middles.set(n.area, m);
+      }
+      if (!onScreen(p.x, p.y)) return;
+      let [r, g, b] = tone.col;
+      if (shine !== "calm") {
+        const wave = still ? 1 : 0.82 + 0.18 * Math.sin(t * 1.7 + n.phase * TWO_PI);
+        let lift = 0;
+        if (shine === "metal") {
+          const catchL = Math.exp(-((p.x - lightX) ** 2 + (p.y - lightY) ** 2) / spread);
+          lift = catchL * (still ? 0.8 : 0.5 + 0.5 * wave) * 0.4;
+        }
+        r = Math.min(255, r * wave + (255 - r) * lift);
+        g = Math.min(255, g * wave + (255 - g) * lift);
+        b = Math.min(255, b * wave + (255 - b) * lift);
+      }
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      this.hexagonPath(s * 0.94);
+      ctx.globalAlpha = hl !== null && !hl.has(n.id) && n !== this.selected ? 0.15 : 1;
+      if (tone.blur) {
+        ctx.shadowBlur = (this.lightScheme ? 6 : 14) * tone.heat;
+        ctx.shadowColor = this.glowColor;
+      }
+      ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+      ctx.fill();
+      if (shine === "metal") {
+        // A plate's lit upper rim — upper-left corner, top, upper-right corner (y points down): what makes the
+        // fields read as tilted metal.
+        const rim = s * 0.94;
+        const side = Math.cos(Math.PI / 6) * rim;
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.moveTo(-side, -rim / 2);
+        ctx.lineTo(0, -rim);
+        ctx.lineTo(side, -rim / 2);
+        ctx.strokeStyle = this.lightScheme ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.14)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.restore();
+    });
     ctx.globalAlpha = 1;
+
+    // Borders: an edge whose neighbour is another country, or no land at all, is drawn in the field's own colour —
+    // where two countries meet, both colours run side by side. One path per field; the corners are worked out once.
+    const k = s * 0.9;
+    const edgeEnds = NEIGHBOURS.map(({ angle }) => {
+      const a = (angle * Math.PI) / 180;
+      return [
+        Math.cos(a - Math.PI / 6) * k,
+        Math.sin(a - Math.PI / 6) * k,
+        Math.cos(a + Math.PI / 6) * k,
+        Math.sin(a + Math.PI / 6) * k,
+      ] as const;
+    });
+    ctx.lineWidth = Math.max(1.2, 1.4 * Math.sqrt(zoom));
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.9;
+    for (const n of shown) {
+      const x = n.sx ?? 0;
+      const y = n.sy ?? 0;
+      if (!onScreen(x, y)) continue;
+      let any = false;
+      ctx.beginPath();
+      edgeEnds.forEach(([x1, y1, x2, y2], i) => {
+        const nb = n.around?.[i] ?? null;
+        if (nb && nb.area === n.area && shown.has(nb)) return;
+        ctx.moveTo(x + x1, y + y1);
+        ctx.lineTo(x + x2, y + y2);
+        any = true;
+      });
+      if (!any) continue;
+      ctx.strokeStyle = n.color;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Roads: the links between notes, from mid zoom on — a hovered or selected note's always. Below that zoom only the
+    // links of those two are looked at.
+    const roads = Math.min(1, Math.max(0, (zoom - GraphRenderer.ROADS_FROM) * 2));
+    const hotIds = [this.hover?.id, this.selected?.id];
+    ctx.lineWidth = 1;
+    for (const e of model.edges) {
+      const hot = hotIds.includes(e.from) || hotIds.includes(e.to);
+      if (!hot && roads === 0) continue;
+      const a = model.byId.get(e.from);
+      const b = model.byId.get(e.to);
+      if (a?.kind !== "file" || b?.kind !== "file" || !shown.has(a) || !shown.has(b)) continue;
+      const ax = a.sx ?? 0;
+      const ay = a.sy ?? 0;
+      const bx = b.sx ?? 0;
+      const by = b.sy ?? 0;
+      if (!hot && !onScreen(ax, ay) && !onScreen(bx, by)) continue;
+      ctx.setLineDash(hot ? [] : [3, 4]);
+      ctx.strokeStyle = hot ? this.glowColor : this.textColor;
+      ctx.globalAlpha = hot ? 0.9 : 0.2 * roads;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      // Bowed a little, so roads that share a field do not run on top of each other.
+      ctx.quadraticCurveTo((ax + bx) / 2 + (by - ay) * 0.15, (ay + by) / 2 - (bx - ax) * 0.15, bx, by);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
+    // Names on the fields, close up (or always, with the file names switched on).
+    const names = zoom >= GraphRenderer.NAMES_FROM || this.options.fileLabels;
+    if (names && s >= 14) {
+      ctx.font = this.font(Math.min(12, s * 0.3), 500);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = this.textColor;
+      for (const n of shown) {
+        const x = n.sx ?? 0;
+        const y = n.sy ?? 0;
+        if (!onScreen(x, y)) continue;
+        ctx.globalAlpha = hl !== null && !hl.has(n.id) ? 0.25 : 0.92;
+        ctx.fillText(this.fitText(n.label, s * 1.5), x, y);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // The countries' names, from afar.
+    this.mapLabels = [];
+    const countries = Math.min(1, Math.max(0, (GraphRenderer.COUNTRIES_UNTIL - zoom) * 1.5));
+    if (this.options.labels && countries > 0) {
+      ctx.globalAlpha = countries;
+      for (const area of model.nodes) {
+        if (area.kind !== "area" || !area.area) continue;
+        const m = middles.get(area.area);
+        if (!m) continue;
+        const x = m.x / m.n;
+        const y = m.y / m.n;
+        const size = 12 + 2 * zoom;
+        const w = this.haloText(area.label, x, y, this.font(size, 650), this.textColor);
+        this.haloText(`${m.n} ${m.n === 1 ? "note" : "notes"}`, x, y + size * 0.6 + 8, this.font(10.5, 500), this.mutedColor);
+        if (countries > 0.5) this.mapLabels.push({ node: area, x, y: y + 6, w: w + 12, h: size + 26 });
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // The hovered and the selected field: outlined, and named above it — over the countries' names, and only while the
+    // fields do not carry their names themselves.
+    for (const n of [this.selected, this.hover]) {
+      if (!n || n.kind !== "file" || !shown.has(n)) continue;
+      const p = { x: n.sx ?? 0, y: n.sy ?? 0 };
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      this.hexagonPath(s * 1.04);
+      ctx.strokeStyle = n === this.selected ? this.glowColor : this.textColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+      if (!names) this.haloText(n.label, p.x, p.y - s - 8, this.font(12, 600), this.textColor);
+    }
+
+    // Skills ring the map.
+    const skillR = this.mapSkillPx();
+    for (const n of model.nodes) {
+      if (n.kind !== "skill") continue;
+      const p = this.toScreen(n);
+      const hot = n === this.hover || n === this.selected;
+      this.drawNodeDisc(p.x, p.y, skillR, n.color, hot);
+      drawGlyph(ctx, glyphOf(n), p.x, p.y, skillR * 0.62, hot ? this.accentColor : n.color);
+      if (hot) this.drawHotLabel(p.x, p.y, skillR, n.label, 0.75, 0.6);
+    }
+
+    this.drawPulse();
+  }
+
+  /** `text` cut to `max` px with an ellipsis, in the current font. */
+  private fitText(text: string, max: number): string {
+    const { ctx } = this;
+    if (ctx.measureText(text).width <= max) return text;
+    let cut = text;
+    while (cut.length > 1 && ctx.measureText(`${cut}…`).width > max) cut = cut.slice(0, -1);
+    return `${cut}…`;
+  }
+
+  /** Text on a halo of the ground colour, so it reads over the fields; returns its width. */
+  private haloText(text: string, x: number, y: number, font: string, color: string): number {
+    const { ctx } = this;
+    ctx.font = font;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = this.surfaceColor;
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+    return ctx.measureText(text).width;
   }
 
   private badgeFor(n: GraphNode, _t: number): string | null {

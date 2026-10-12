@@ -40,7 +40,7 @@
   } from "../core/appGroups";
   import { hiddenBuiltins, listBuiltinApps, removeUserApp, ringViewFor, setUserAppGlyph, userApps } from "../core/apps";
   import { invokeBackend, listenBackend, type WorkspaceGraph } from "../core/backend";
-  import { brainActive, brainView, spinOf } from "../core/brainView";
+  import { brainActive, brainView, spinOf, travelAt } from "../core/brainView";
   import { animates, motion } from "../core/motion";
   import { createInstance } from "../core/lifecycle";
   import { getModule } from "../core/registry";
@@ -91,8 +91,6 @@
   let graph: WorkspaceGraph | null = null;
   /** The vault's life for the time travel (G17), from its first note to the last load. */
   let span = $state<{ from: number; to: number } | null>(null);
-  /** The moment the time travel shows, or `null` for today. */
-  let travelAt = $state<number | null>(null);
   // `$state.raw`, not `$state`: this must stay the exact same object
   // reference that lives in `renderer.model.nodes`, since the renderer
   // decides its hover glow with `n === this.hover` — a plain `$state` would
@@ -453,7 +451,7 @@
   });
 
   $effect(() => {
-    const at = travelAt;
+    const at = $travelAt;
     if (renderer) renderer.timeCutoff = at;
   });
 
@@ -593,8 +591,9 @@
   >
     +
   </button>
-  {#if span && !$brainActive}
-    <TimeTravel {span} onTravel={(at) => (travelAt = at)} />
+  <!-- Also over the Second Brain: its map travels with the hive (`travelAt`). -->
+  {#if span}
+    <TimeTravel {span} onTravel={(at) => travelAt.set(at)} />
   {/if}
 </div>
 

@@ -8,16 +8,16 @@
   import { drawGlyph } from "./render";
 
   /** `app` nodes only exist in orbit mode (the dashboard background's App
-   *  Ring) — this legend covers the Second Brain's own rings/hex
+   *  Ring) — this legend covers the Second Brain's own rings/map
    *  views, which never show one. Excluding it from the type (rather than
    *  giving `NodeKind`'s full `Record` a phantom, never-read `app` entry)
    *  keeps the exhaustiveness check meaningful: a kind this legend actually
    *  needs but forgets still fails to compile. */
   type LegendKind = Exclude<NodeKind, "app">;
 
-  /** In Hex mode the "file" swatch matches the honeycomb cell it stands
-   *  for instead of the dot every other layout uses. */
-  let { hex = false }: { hex?: boolean } = $props();
+  /** On the map the "file" swatch is the pointy-top field it stands for
+   *  instead of the dot the rings use. */
+  let { map = false }: { map?: boolean } = $props();
 
   const KINDS: { kind: LegendKind; label: string }[] = [
     { kind: "hub", label: "AGENTS.md (hub)" },
@@ -50,10 +50,10 @@
       const r = kind === "file" ? 3 : 7;
       ctx.fillStyle = colors[kind];
       ctx.beginPath();
-      if (kind === "file" && hex) {
+      if (kind === "file" && map) {
         const hr = 6;
         for (let k = 0; k < 6; k++) {
-          const a = (Math.PI / 3) * k;
+          const a = (Math.PI / 3) * k - Math.PI / 2;
           const px = 11 + Math.cos(a) * hr;
           const py = 11 + Math.sin(a) * hr;
           if (k === 0) ctx.moveTo(px, py);
@@ -83,9 +83,9 @@
     return () => mo.disconnect();
   });
 
-  // Repaint whenever the canvases mount, `hex` flips (layout switch) or the UI scale changes.
+  // Repaint whenever the canvases mount, `map` flips (layout switch) or the UI scale changes.
   $effect(() => {
-    hex;
+    map;
     void $uiScale;
     paint();
   });
