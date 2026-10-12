@@ -178,6 +178,14 @@ Fokus und der Orbit-Hintergrund werden unscharf und blass (die 2Brain-Linse und 
 Atem und umlaufende Glut stehen still; das Umgebungslicht geht (`shell/Ambient.svelte`); im Dock ein neutraler Chip
 „Focus“, der ihn auch per Klick beendet.
 
+**Stand UX7b (2026-10-12, gebaut, Abnahme offen):** Theme-Wahl als Kärtchen mit echtem Mini-Ausschnitt (G21):
+`ui/ThemePreview.svelte` zeichnet eine kleine Szene — Dock-Pille mit glimmender Hex-Marke, eine Kachel, eine
+arbeitende Karte mit Glut und Hex-Avatar — im jeweiligen Theme, indem sie `data-theme` auf sich selbst setzt (die
+Themes sind auf `[data-theme]` gescoped). Nur Grund-Tokens, die jedes Theme selbst setzt (die abgeleiteten aus
+`tokens.css` werden auf `:root` im aktiven Theme berechnet); die Glut wird mit Spezifität 0 aus dem Akzent abgeleitet,
+sodass ein Theme mit eigener Glut gewinnt (G2). In den Einstellungen und im Dock-Popup (jetzt drei Spalten, scrollt ab
+70 vh); das aktive Theme neutral markiert; Darüberfahren färbt nichts um, ein Klick wechselt.
+
 ## 5. Gegrillt (2026-10-11)
 
 Runde 1 (F1–F6, F9 + Stillschweigendes):

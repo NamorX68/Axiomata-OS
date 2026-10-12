@@ -26,6 +26,7 @@
   import { KEYBOARD_SETTINGS, isKeyboardSetting, keyboardSetting, platform, platformLabel } from "../core/keys";
   import { UI_SIZE_MAX, UI_SIZE_MIN, uiScaleAuto, uiSize } from "../core/uiScale";
   import { THEMES, applyTheme } from "../core/themes";
+  import ThemePreview from "../ui/ThemePreview.svelte";
   import { toast } from "../core/toast";
   import { TEMPLATE } from "../theme/validator";
   import Window from "./Window.svelte";
@@ -297,7 +298,7 @@
                   data-theme-id={t.id}
                   onclick={() => applyTheme(t.id)}
                 >
-                  <span class="swatch" data-theme={t.id}><i></i><i></i><i></i></span>
+                  <ThemePreview theme={t.id} />
                   <span class="text">
                     <span class="title">{t.label}</span>
                     <span class="meta">{t.blurb}</span>
@@ -721,40 +722,21 @@
     grid-template-columns: repeat(auto-fill, minmax(calc(170px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
   }
+  /* A theme as a real piece of the app (UX7b, G21), its name below; a click switches, hovering recolours nothing. */
   .theme {
     width: 100%;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: var(--ax-space-2);
     padding: var(--ax-space-2);
     text-align: left;
     background: var(--ax-surface-2);
   }
+  /* The theme in use is chosen, not alive: neutral (the accent rule). */
   .theme.active {
-    border-color: var(--ax-accent);
-    background: var(--ax-accent-muted);
-  }
-  .swatch {
-    display: inline-flex;
-    gap: 2px;
-    flex: 0 0 auto;
-  }
-  .swatch i {
-    width: calc(10px * var(--ax-ui-scale));
-    height: calc(22px * var(--ax-ui-scale));
-    border-radius: 2px;
-  }
-  /* Swatches use the theme files' own tokens by scoping the data-theme. */
-  .swatch i:nth-child(1) {
-    background: var(--ax-bg);
-    border: 1px solid var(--ax-border-strong);
-  }
-  .swatch i:nth-child(2) {
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border-strong);
-  }
-  .swatch i:nth-child(3) {
-    background: var(--ax-accent);
+    border-color: var(--ax-text-muted);
+    background: var(--ax-selected-bg);
   }
   .text {
     display: flex;

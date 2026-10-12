@@ -1,12 +1,13 @@
 <!--
   The dock's theme choice (`docs/plans/ui-ux-round.md` UX3): a popover with every theme as a chip — its own ground,
   surface and accent as a swatch, drawn from the theme's tokens by scoping `data-theme` on the swatch — instead of a
-  button that cycles blindly through thirteen. A click switches and closes; Escape or a click elsewhere closes. The
-  richer preview with a real piece of the app is UX7 (G21).
+  button that cycles blindly through thirteen. A click switches and closes; Escape or a click elsewhere closes. Each
+  chip shows a real piece of the app in its theme (UX7b, G21: `ui/ThemePreview.svelte`); hovering recolours nothing.
 -->
 <script lang="ts">
   import { activeTheme } from "../core/stores";
   import { THEMES, applyTheme } from "../core/themes";
+  import ThemePreview from "../ui/ThemePreview.svelte";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -49,7 +50,7 @@
           title={t.blurb}
           onclick={() => choose(t.id)}
         >
-          <span class="swatch" data-theme={t.id} aria-hidden="true"><i></i><i></i><i></i></span>
+          <ThemePreview theme={t.id} />
           <span class="name">{t.label}</span>
         </button>
       </li>
@@ -62,7 +63,9 @@
     position: absolute;
     top: calc(100% + var(--ax-space-2));
     right: 0;
-    width: calc(420px * var(--ax-ui-scale));
+    width: min(calc(540px * var(--ax-ui-scale)), calc(100vw - 2 * var(--ax-space-4)));
+    max-height: 70vh;
+    overflow-y: auto;
     padding: var(--ax-space-2);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-lg);
@@ -75,16 +78,17 @@
     padding: 0;
     list-style: none;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--ax-space-1);
   }
 
   .theme {
     width: 100%;
     display: flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-1);
     border: 1px solid transparent;
     border-radius: var(--ax-radius-md);
     background: transparent;
@@ -98,38 +102,15 @@
     background: var(--ax-selected-bg);
   }
 
-  /* The theme in use is the selection: the accent's one allowed place here. */
+  /* The theme in use is chosen, not alive: neutral, like every selection (the accent rule). */
   .theme.active {
-    border-color: var(--ax-accent);
-  }
-
-  .swatch {
-    display: inline-flex;
-    gap: calc(2px * var(--ax-ui-scale));
-    flex: none;
-  }
-
-  .swatch i {
-    width: calc(8px * var(--ax-ui-scale));
-    height: calc(18px * var(--ax-ui-scale));
-    border-radius: calc(2px * var(--ax-ui-scale));
-  }
-
-  .swatch i:nth-child(1) {
-    background: var(--ax-bg);
-    border: 1px solid var(--ax-border-strong);
-  }
-
-  .swatch i:nth-child(2) {
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border-strong);
-  }
-
-  .swatch i:nth-child(3) {
-    background: var(--ax-accent);
+    border-color: var(--ax-text-muted);
+    background: var(--ax-selected-bg);
   }
 
   .name {
+    padding: 0 var(--ax-space-1);
+    font: var(--ax-type-caption);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
