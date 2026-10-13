@@ -28,7 +28,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
   the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness `axiomata-harness` / `axh`
-  (#37, `docs/plans/harness.md`; HS1–HS5 built, HS6–HS8 open). Deferred: further model-provider work.
+  (#37, `docs/plans/harness.md`; HS1–HS6 built, HS6b–HS8 open). Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
   new work and **update them** (not just this file) when a milestone or major feature lands.

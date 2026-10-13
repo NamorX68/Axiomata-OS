@@ -15,11 +15,13 @@ use axiomata_harness::permissions::settings::{self, SandboxSettings, Trust};
 use axiomata_harness::permissions::{
     Asker, Gate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
 };
-use axiomata_harness::tools::files::file_tools;
+use axiomata_harness::skills::{self, SkillTool};
+use axiomata_harness::tools::Tool;
+use axiomata_harness::tools::files::{SkillRoots, file_tools};
 use axiomata_harness::tools::shell::{ShellOptions, shell_tools};
 use axiomata_harness::{
     Cancel, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat, RunConfig,
-    Toolbox,
+    SharedSink, SkillHow, Toolbox,
 };
 use clap::{Subcommand, ValueEnum};
 
@@ -61,9 +63,17 @@ pub enum HarnessAction {
         /// Take a role's `permissions` (`~/.axiomata/agents/<role>/AGENT.md`) as allow rules.
         #[arg(long)]
         role: Option<String>,
-        /// The prompt — or a slash command (`/review src/`) of `~/.axh/commands/` and, in a trusted folder, the
-        /// project's `.axh/commands/` (HS4).
-        prompt: String,
+        /// Run a skill as the run's task (HS6, K1.1): its SKILL.md body becomes the run's instructions, and its
+        /// frontmatter may narrow the tools, pick the model and set the time limit (K5).
+        #[arg(long)]
+        skill: Option<String>,
+        /// A folder of skills beside the app's `~/.axiomata/skills` (HS6, K2); repeatable.
+        #[arg(long)]
+        skill_dir: Vec<PathBuf>,
+        /// The prompt — extra text beside `--skill`, or a slash command (`/review src/`) of `~/.axh/commands/`
+        /// and, in a trusted folder, the project's `.axh/commands/` (HS4). Without `--skill` a prompt is required;
+        /// with one it defaults to "Run the skill.".
+        prompt: Option<String>,
     },
 }
 
@@ -96,28 +106,52 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         ask,
         deny,
         role,
+        skill,
+        skill_dir,
         prompt,
     } = action;
     // It spends the owner's money with the owner's key: not something an agent session starts by itself.
     owner_only("running the own harness")?;
+    if prompt.is_none() && skill.is_none() {
+        bail!("name a prompt, or run a skill with --skill <name>");
+    }
     let config = crate::read_config(core);
     let mut endpoint = endpoint(&config, provider, model)?;
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("cannot use {}", cwd.display()))?;
-    let mut tools = Toolbox::new();
-    tools.extend(file_tools(&cwd)?);
     let mut built = gate(&cwd, permission_mode, allow, ask, deny, role)?;
-    // Slash commands (HS4), after the gate and with the same home, folder and trust it was built with (C1).
-    let mut registry = Registry::load(&built.home, &cwd, built.trusted)?;
-    registry.set_permissions(PermissionsView::of(&built.gate, &built.sandbox));
-    let mut sink: Box<dyn EventSink> = if json {
+    // Every event through one shared sink: the loop writes to it, and the `skill` tool reports from inside a call
+    // (HS6, K1.2).
+    let inner: Box<dyn EventSink> = if json {
         Box::new(JsonLines)
     } else {
         Box::new(Readable)
     };
-    let mut prompt = prompt;
-    let gate = match registry.expand(&prompt) {
+    let mut sink = SharedSink::new(inner);
+    // Skills (HS6, K2): the app's own `~/.axiomata/skills` (this CLI knows where that is, the harness does not),
+    // the folders of `--skill-dir` and — in a folder the owner trusted once, the same trust the project's allow
+    // rules need — the project's `.axh/skills`. A skill that cannot be used is a note, never an error (K3).
+    let mut skill_dirs = vec![axiomata_core::paths::global_skills_dir()];
+    skill_dirs.extend(skill_dir);
+    let (catalog, notes) = skills::Catalog::load(&built.home, &cwd, built.trusted, &skill_dirs);
+    for note in notes {
+        eprintln!("note: skill left out: {note}");
+    }
+    let catalog = Arc::new(catalog);
+    let mut tools = Toolbox::new();
+    tools.extend(file_tools(&cwd, SkillRoots::new(&catalog.folders()))?);
+    // The `skill` tool only while there is at least one skill to load (K1.2).
+    if !catalog.is_empty() {
+        tools.extend([
+            Box::new(SkillTool::new(Arc::clone(&catalog), sink.clone())) as Box<dyn Tool>
+        ]);
+    }
+    // Slash commands (HS4), after the gate and with the same home, folder and trust it was built with (C1).
+    let mut registry = Registry::load(&built.home, &cwd, built.trusted)?;
+    registry.set_permissions(PermissionsView::of(&built.gate, &built.sandbox));
+    let mut prompt = prompt.unwrap_or_default();
+    built.gate = match registry.expand(&prompt) {
         // An ordinary prompt: no command was named (C6).
         None => built.gate,
         Some(Err(message)) => bail!(message),
@@ -156,15 +190,35 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
             built.gate
         }
     };
-    // The model is built after the commands: one of them may name its own.
+    let mut run_config = RunConfig::new(&cwd);
+    if let Some(turns) = max_turns {
+        run_config.max_turns = turns;
+    }
+    // A skill as the run (HS6, K1.1): its body is the run's instructions, its frontmatter may narrow the tools,
+    // pick the model and set the time limit (K5). After the commands, so a command's own word wins where both
+    // name one.
+    if let Some(name) = skill {
+        let Some(chosen) = catalog.get(&name) else {
+            bail!("no skill named {name:?}; known: {}", catalog.known());
+        };
+        chosen.start_run(&cwd, &mut run_config, &mut endpoint, &mut built.gate)?;
+        sink.send(Event::Skill {
+            name,
+            how: SkillHow::Run,
+        });
+        if prompt.trim().is_empty() {
+            prompt = skills::DEFAULT_PROMPT.to_owned();
+        }
+    }
+    // The model is built after the commands and the skill: one of them may name its own.
     let model = OpenAiCompat::new(endpoint)?;
-    tools.set_gate(Arc::new(gate));
+    tools.set_gate(Arc::new(built.gate));
     // MCP servers (HS5), after the gate and before the shell (M1–M3): a project's server the owner has not
     // approved yet is asked about in the terminal, or left out with a note when there is none (M2).
     let entries = mcp::config::load(&built.home, &cwd)?;
     let entries =
         mcp::approval::permitted(entries, &built.home, &cwd, mcp::approval::interactive())?;
-    tools.extend(mcp::start(entries, sink.as_mut()).await);
+    tools.extend(mcp::start(entries, &mut sink).await);
     // The shell after the gate: the settings that built it also say how the sandbox runs (HS3b).
     tools.extend(shell_tools(
         &cwd,
@@ -173,15 +227,11 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
             ..ShellOptions::from_environment()
         },
     )?);
-    let mut run_config = RunConfig::new(&cwd);
-    if let Some(turns) = max_turns {
-        run_config.max_turns = turns;
-    }
     // Ctrl-C, SIGTERM and SIGHUP end the run with its last line and every background job stopped.
     let cancel = Cancel::new();
     axiomata_harness::run::cancel_on_signals(&cancel);
     let outcome =
-        axiomata_harness::run(&run_config, &model, &tools, &prompt, sink.as_mut(), &cancel).await;
+        axiomata_harness::run(&run_config, &model, &tools, &prompt, &mut sink, &cancel).await;
     match outcome.reason {
         FinishReason::Answered => Ok(()),
         other => bail!("the run ended: {other:?}"),
@@ -385,6 +435,14 @@ impl EventSink for Readable {
                     plain(reason.as_deref().unwrap_or("it did not start"))
                 ),
             },
+            // A skill of this run: as the run itself (K1.1) or loaded by the model (K1.2).
+            Event::Skill { name, how } => {
+                let how = match how {
+                    SkillHow::Run => "as the run",
+                    SkillHow::Loaded => "loaded",
+                };
+                format!("✳ skill {} · {how}", plain(&name))
+            }
             Event::Error { message } => {
                 eprintln!("error: {}", plain(&message));
                 return;

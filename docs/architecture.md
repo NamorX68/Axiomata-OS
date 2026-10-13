@@ -1837,7 +1837,13 @@ HS5 (2026-10-13): the MCP client — servers from `~/.axh/mcp.json` and the proj
 a project's server only once the owner approved that very config (SHA-256 in `~/.axh/mcp-approved.json`), transports
 stdio (JSON-RPC lines, child process in its own group) and Streamable HTTP (JSON or SSE, `Mcp-Session-Id` kept, headers
 with `${VAR}`, https or loopback only), the tools offered as `mcp__<server>__<tool>` and judged by rules of that name;
-servers run outside the sandbox, a failed one is left out and the run goes on. Next: HS6 (skills) … HS8 (subagents),
+servers run outside the sandbox, a failed one is left out and the run goes on.
+HS6 (2026-10-13): skills in the harness — a `SKILL.md` catalog (`~/.axh/skills`, a trusted project's `.axh/skills`,
+folders the caller passes; YAML frontmatter by `gray_matter`, everything unknown ignored), two ways to use one: a
+skill **as the run** (`--skill <name>`, its body the instructions, `allowed_tools` narrowing, `model` overriding,
+`timeout_secs` capping, `prepend_files` inlined from the working folder) and the `skill` **tool** the model calls
+itself, whose files are read-only roots `skill:<name>/<rel>` beside the working folder. The core is untouched
+(`backend: axh` is HS6b). Next: HS6b (skills through the own harness in the core), HS7 (hooks) … HS8 (subagents),
 each planned on its own.
 
 ### Ausblick (2026-10-12)

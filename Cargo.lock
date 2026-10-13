@@ -435,6 +435,7 @@ dependencies = [
  "chrono",
  "clap",
  "globset",
+ "gray_matter",
  "reqwest 0.12.28",
  "rustix",
  "serde",

@@ -1,6 +1,6 @@
 # Axiomata's own harness (board card #37, M7.4)
 
-Status: HS1–HS5 built 2026-10-13. Each further step is planned on its own and confirmed by the owner before it is built.
+Status: HS1–HS6 built 2026-10-13. Each further step is planned on its own and confirmed by the owner before it is built.
 
 ## Why
 
@@ -39,13 +39,55 @@ Backend, one checkpoint and commit each:
 | **HS3b** ✅ | Sandbox for `bash`: macOS Seatbelt plus a network proxy with a domain list (B1–B6 below) |
 | **HS4** ✅ | Slash commands: registry, Markdown command files, built-ins (`/help`, `/model`, `/clear`) |
 | **HS5** ✅ | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
-| HS6 | Skills: SKILL.md parser in the harness, a skill as a run; then `backend: axh` in the core |
+| **HS6** ✅ | Skills in the harness: SKILL.md parser, a skill as a run, the `skill` tool — K1–K6 below |
+| HS6b | `backend: axh` in the core: skill runs through the own harness, `runs` table, spend metering — planned on its own |
 | HS7 | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) |
 | HS8 | Subagents: a `task` tool starting a nested loop with its own prompt, tools and limits |
 
 After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
 `spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
 own, both on the event stream of H3.
+
+## HS6 — skills (decided 2026-10-13)
+
+- **K1 — two ways to use a skill.**
+  1. *A skill as a run:* `axh run --skill <name> [-- "extra prompt"]` and `axiomata-cli harness run --skill <name>`.
+     The `SKILL.md` body becomes the run's instructions (appended to the small system prompt of H6); the prompt is
+     the extra text, or `"Run the skill."` when there is none.
+  2. *Like Claude Code:* in every run the model sees every available skill's `name` and `description` in the
+     description of one tool, `skill`; calling `skill {"name": "…"}` returns that `SKILL.md`'s body and the list of
+     files next to it (K4) as the tool result, and the model follows it. Loading text is no action
+     (`Access::Own`): what the model then does is judged as usual.
+- **K2 — the caller says where skills are.** The harness itself knows `~/.axh/skills/` (the owner's) and
+  `<project>/.axh/skills/` (only in a trusted folder, as the project's allow rules). A caller adds more folders:
+  `RunConfig.skill_dirs`, `axh` a repeatable `--skill-dir <path>`; `axiomata-cli harness run` passes
+  `~/.axiomata/skills` (it knows where that is; the harness does not). Each skill is a folder
+  `<dir>/<name>/SKILL.md`. On equal names: project beats caller folders beats the owner's — the more specific place
+  wins, as with commands.
+- **K3 — frontmatter.** YAML (`gray_matter`, as the roster reads `AGENT.md`). Read: `name`, `description` (both
+  required — a skill without them is skipped with a note on stderr, never fails the run), `model`, `allowed_tools` /
+  `allowed-tools` (a list or one space- or comma-separated string of rules, e.g. Axiomata's `allowed_tools:
+  mcp__apple-mail__…`), `timeout_secs`, `prepend_files`. Every other key (`backend`, `output`, `license`,
+  `metadata`, …) is ignored: skill files come from other tools too. `name` must equal the folder name and match
+  `[a-z0-9-]{1,64}`; otherwise skipped with a note. Limits (named consts): 200 skills, 256 KiB per `SKILL.md`, 8 KiB
+  of frontmatter, 200 files listed per skill, 3 folders deep.
+- **K4 — files next to a skill.** A skill folder may hold more files (scripts, references). The `skill` tool's
+  result ends with a list of them as `skill:<name>/<rel>` paths, and the file tools understand those as a second
+  read-only root per skill **outside** the working folder (`read_file`, `list_dir`, `grep`, `glob`), each through
+  `axiomata_files::Root` with `LinkPolicy::Contained`. Never writable, whatever the run's rules allow. The `Read`
+  rules judge them as `skill:<name>/<rel>`.
+- **K5 — what a skill's frontmatter does in a run** (a skill *run*, K1.1, only):
+  - `allowed_tools` narrows the run like a command's (`Gate::restrict` of HS4), never widens; a skill loaded
+    through the `skill` tool does not change the rules (Claude Code's model-invoked skills behave the same: the
+    existing permissions decide).
+  - `model` overrides the run's model; ignored when loaded through the tool.
+  - `timeout_secs` becomes the run's overall timeout, capped by the existing maximum.
+  - `prepend_files: ["rel/path.md"]` (Axiomata's bridge, `AGENTS.md` "Backend ids"): each file relative to the
+    **working folder** is inlined before the body as `## Context file: <path>` + content; a missing file — with a
+    missing folder in front of it — is skipped; an absolute path or one with `..` fails the run with a clear error;
+    read through a contained root, capped at 256 KiB per file.
+- **K6 — Axiomata's core is not touched in HS6.** `backend: axh`, runs in the `runs` table and spend metering are
+  step HS6b, planned on its own. HS6 only adds `--skill`/`--skill-dir` to the CLI's existing `harness run`.
 
 ## HS5 — MCP (decided 2026-10-13)
 
@@ -226,6 +268,34 @@ own, both on the event stream of H3.
 - **S6 — background jobs.** `bash` with `run_in_background` starts a job and returns its id at once; `bash_output`
   reads what it wrote since the last look and whether it still runs; `kill_shell` ends it. At most 8 jobs per run,
   the last 1 MiB of each job's output kept; every job ends with the run.
+
+## HS6 — what exists
+
+- `skills` (`Skill`, `Catalog`, `SkillTool`): the frontmatter parsed by `gray_matter` (a `RuleList` deserializer
+  accepts Axiomata's space-separated `allowed_tools` string and Claude Code's list, the YAML checked for blow-up
+  before the parser sees it); `Catalog::load(home, project, trusted, extra_dirs)` merges the folders of K2 with
+  project > caller > owner, and every unusable skill is a note on stderr, never an error. `Skill::start_run` applies
+  K5; `Skill::instructions` inlines the prepended files; `Skill::files` lists what sits beside the `SKILL.md`.
+- The `skill` tool (K1.2), offered only while the catalog is not empty: its description lists every skill
+  (`name: description`, 300 characters each, the whole list 8 000, then "…and N more, call skill with list=true"),
+  `list=true` answers all names, a load emits `Event::Skill { name, how: loaded }` and returns the body plus the
+  `skill:<name>/<rel>` file list (K4).
+- `tools/files.rs`'s `SkillRoots`: `read_file`, `list_dir`, `grep` and `glob` take `skill:<name>/<rel>` paths as
+  read-only roots beside the working folder, the `Read` rules judging exactly those paths; `write_file`/`edit_file`
+  refuse them whatever the rules allow.
+- `axh run --skill <name> [--skill-dir <path> …] [-- "extra prompt"]` and `axiomata-cli harness run` the same, the
+  CLI adding `~/.axiomata/skills`; both emit `Event::Skill { name, how: run }` before the first model call and
+  default the prompt to "Run the skill." (K1.1). An unknown `--skill` errors listing the known names.
+- Live on this Mac (2026-10-13), against a base URL that refuses connections (no model call): `--skill mail-digest`
+  through `--skill-dir ~/.axiomata/skills` — the skill event, the `skill` tool among the run's tools, its
+  `prepend_files: ["Mail/.topics.md"]` skipped where there is no `Mail/` folder; the CLI lists all nine app skills
+  for an unknown name.
+- Tests (inline): the catalog (merge order, an untrusted project left out, a missing description, a `name` ≠ folder,
+  an oversized file), the frontmatter (Axiomata's `mail-digest` style, Claude Code's list with a quoted
+  `Bash(git status:*)`, an unknown key ignored), a skill run (body in the prompt, prepends in order and missing ones
+  skipped, `..` refused, `allowed_tools` narrowing a `bash` call, `model` overriding), the `skill` tool (lists,
+  loads, unknown name, the cut list, `list=true`, its event), the file roots (read, list, grep, glob, a write
+  refused, an escape and a link out refused, a denied `Read` rule left out of a skill search) and the event's JSON.
 
 ## HS5 — what exists
 
