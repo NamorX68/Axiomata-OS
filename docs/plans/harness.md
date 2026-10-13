@@ -1,6 +1,6 @@
 # Axiomata's own harness (board card #37, M7.4)
 
-Status: HS1 built 2026-10-13. Each further step is planned on its own and confirmed by the owner before it is built.
+Status: HS1 and HS2 built 2026-10-13. Each further step is planned on its own and confirmed by the owner before it is built.
 
 ## Why
 
@@ -34,7 +34,7 @@ Backend, one checkpoint and commit each:
 | Step | What |
 |---|---|
 | **HS1** ✅ | Crate, OpenAI-compatible client, loop, events, file tools, `axh`, `axiomata-cli harness run` |
-| HS2 | Bash tool: process with timeout, output cap, cleaned environment, `kill_on_drop` |
+| **HS2** ✅ | Shell: `bash` (foreground and background), `bash_output`, `kill_shell` — S1–S6 below |
 | HS3 | Permissions (H7): rules, the ask trait, `permission_asks` |
 | HS4 | Slash commands: registry, Markdown command files, built-ins (`/help`, `/model`, `/clear`) |
 | HS5 | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
@@ -45,6 +45,46 @@ Backend, one checkpoint and commit each:
 After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
 `spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
 own, both on the event stream of H3.
+
+## HS2 — the shell (decided 2026-10-13)
+
+- **S1 — off unless asked for.** Until the permissions of HS3 exist, the shell tools are offered only when the caller
+  says so (`axh --allow-bash`, `axiomata-cli harness run --allow-bash`); the shell reaches whatever the owner's user
+  reaches. With HS3, rules take the switch's place.
+- **S2 — the owner's shell, with a profile snapshot, like Claude Code.** `$SHELL` (zsh on the Mac; `/bin/sh` when unset
+  or unknown). Once per run, an interactive login shell writes a snapshot of the profile — functions, aliases, `PATH` —
+  and every command sources it, so a command finds what the owner's terminal finds without `~/.zshrc` running each
+  time. The profile is the owner's own code; it runs once per run. If the snapshot fails, commands run without it.
+- **S3 — a fresh process per command, the folder carried over.** Each call is a new shell; after it the harness reads
+  where it ended (`pwd -P`) and the next call starts there — but only inside the run's folder: a `cd` outside is set
+  back, and the model is told so. Variables do not carry over.
+- **S4 — limits.** 2 minutes per command by default, at most 10; stdin is empty (nothing waits for input); stdout and
+  stderr together, cut like every tool result; the exit code always comes back, and a non-zero one marks the call as
+  failed. On a timeout, a stop or the end of the run the whole process group is killed, children included.
+- **S5 — environment.** The cleaned tool environment of `axiomata-files` (`toolenv`, the one the language servers get)
+  plus the snapshot's `PATH` — no stray variables, so not the harness's own key either.
+- **S6 — background jobs.** `bash` with `run_in_background` starts a job and returns its id at once; `bash_output`
+  reads what it wrote since the last look and whether it still runs; `kill_shell` ends it. At most 8 jobs per run,
+  the last 1 MiB of each job's output kept; every job ends with the run.
+
+## HS2 — what exists
+
+- `tools::shell` (`shell_tools(cwd, ShellOptions)`): `bash`, `bash_output`, `kill_shell` over one `Session` per run
+  (snapshot, folder, environment, jobs); the jobs are killed when the run's toolbox is dropped.
+- `axh run … --allow-bash` and `axiomata-cli harness run … --allow-bash` offer them (S1).
+- Reviews (2026-10-13), built in: a process group is forgotten once its leader is reaped (no stale id ever hits
+  another group), and a dropped call (timeout or stop of the run) kills its group; the snapshot runs as a login shell
+  that reads `~/.zshrc` itself (an interactive `-i` shell in its own group would fight the terminal and stop); a
+  `$SHELL` other than zsh or bash runs as `/bin/sh`; `builtin cd/eval/pwd` so a profile function cannot take over the
+  wrapper; a deleted folder sends the next command to the run's folder; job output never breaks a UTF-8 character;
+  at most 32 jobs are kept; Ctrl-C, SIGTERM and SIGHUP all end the run cleanly, its jobs included.
+- **Known limits, until HS3's sandbox:** a child that leaves its process group on purpose (`setsid`, a daemon,
+  `launchctl`) survives the kill; a command can read what the owner's user can read, including the harness's own
+  start environment through `ps` (so the key) and the credential files — the clean environment (S5) keeps stray
+  variables out of commands, it does not hide them.
+- Tests: output and exit code, the folder carried over and set back, the cleaned environment (no key), a timeout
+  killing a backgrounded grandchild, jobs read, stopped and ended with the run, and the zsh profile snapshot
+  (alias, function, `PATH`) against a scratch `HOME`.
 
 ## HS1 — what exists
 

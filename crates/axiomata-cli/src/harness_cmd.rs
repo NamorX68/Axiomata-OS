@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
 use axiomata_harness::tools::files::file_tools;
+use axiomata_harness::tools::shell::{ShellOptions, shell_tools};
 use axiomata_harness::{
     Cancel, Event, EventSink, FinishReason, ModelEndpoint, OpenAiCompat, RunConfig, Toolbox,
 };
@@ -37,6 +38,9 @@ pub enum HarnessAction {
         /// Print the events as JSON lines, as `axh` does.
         #[arg(long)]
         json: bool,
+        /// Offer the shell tools. Until the permissions of HS3 exist the shell reaches whatever your user reaches.
+        #[arg(long)]
+        allow_bash: bool,
         prompt: String,
     },
 }
@@ -65,6 +69,7 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         cwd,
         max_turns,
         json,
+        allow_bash,
         prompt,
     } = action;
     // It spends the owner's money with the owner's key: not something an agent session starts by itself.
@@ -77,6 +82,9 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     let model = OpenAiCompat::new(endpoint)?;
     let mut tools = Toolbox::new();
     tools.extend(file_tools(&cwd)?);
+    if allow_bash {
+        tools.extend(shell_tools(&cwd, ShellOptions::from_environment())?);
+    }
     let mut run_config = RunConfig::new(&cwd);
     if let Some(turns) = max_turns {
         run_config.max_turns = turns;
@@ -86,14 +94,9 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     } else {
         Box::new(Readable)
     };
-    // Ctrl-C ends the run with its last line instead of killing it mid-step.
+    // Ctrl-C, SIGTERM and SIGHUP end the run with its last line and every background job stopped.
     let cancel = Cancel::new();
-    let on_signal = cancel.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            on_signal.cancel();
-        }
-    });
+    axiomata_harness::run::cancel_on_signals(&cancel);
     let outcome =
         axiomata_harness::run(&run_config, &model, &tools, &prompt, sink.as_mut(), &cancel).await;
     match outcome.reason {

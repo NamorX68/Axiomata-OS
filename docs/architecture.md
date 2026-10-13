@@ -1820,7 +1820,9 @@ Review by itself, and the owner's take-over brought it into `main` and the card 
 API (OpenRouter, Ollama) with guarded file tools (`axiomata_files::Root`), a short system prompt and an event stream
 (JSON lines) that later front ends — a TUI, an app of its own, the Studio — build on. No dependency on
 `axiomata-core`; the CLI's `harness run` hands it the provider's URL, key and skill model from `config.toml`. Next:
-HS2 (bash) … HS8 (subagents), each planned on its own.
+HS2 (2026-10-13): the shell — `bash` in the owner's shell with a profile snapshot, the folder carried
+over, process groups killed on timeout/stop, background jobs (`bash_output`, `kill_shell`), off unless `--allow-bash`.
+Next: HS3 (permissions) … HS8 (subagents), each planned on its own.
 
 ### Ausblick (2026-10-12)
 
