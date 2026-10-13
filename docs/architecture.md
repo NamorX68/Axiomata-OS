@@ -1824,7 +1824,11 @@ HS2 (2026-10-13): the shell — `bash` in the owner's shell with a profile snaps
 over, process groups killed on timeout/stop, background jobs (`bash_output`, `kill_shell`), off unless `--allow-bash`.
 HS3a (2026-10-13): permissions in Claude Code's format — allow/ask/deny rules (also a role's), modes
 (default, accept_edits, plan, dont_ask, auto), `~/.axh/` and trusted project `.axh/` settings, asks in the terminal
-(the app's asker follows with the Studio). Next: HS3b (sandbox) … HS8 (subagents), each planned on its own.
+(the app's asker follows with the Studio).
+HS3b (2026-10-13): `bash` runs under macOS Seatbelt — writes only in the working folder, temp folders, package caches
+and git (never its `config`/`hooks`), the owner's secrets and `.env` unreadable, signals only its own processes, the
+network only through the run's proxy, which asks the gate per host (`Network(crates.io)`); the escape
+`dangerously_disable_sandbox` is always asked. Next: HS4 (slash commands) … HS8 (subagents), each planned on its own.
 
 ### Ausblick (2026-10-12)
 

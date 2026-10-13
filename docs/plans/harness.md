@@ -36,7 +36,7 @@ Backend, one checkpoint and commit each:
 | **HS1** ✅ | Crate, OpenAI-compatible client, loop, events, file tools, `axh`, `axiomata-cli harness run` |
 | **HS2** ✅ | Shell: `bash` (foreground and background), `bash_output`, `kill_shell` — S1–S6 below |
 | **HS3a** ✅ | Permissions: rules, modes, settings files, asking (P1–P8 below) |
-| HS3b | Sandbox for `bash` (macOS Seatbelt first) — planned on its own |
+| **HS3b** ✅ | Sandbox for `bash`: macOS Seatbelt plus a network proxy with a domain list (B1–B6 below) |
 | HS4 | Slash commands: registry, Markdown command files, built-ins (`/help`, `/model`, `/clear`) |
 | HS5 | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
 | HS6 | Skills: SKILL.md parser in the harness, a skill as a run; then `backend: axh` in the core |
@@ -46,6 +46,49 @@ Backend, one checkpoint and commit each:
 After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
 `spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
 own, both on the event stream of H3.
+
+## HS3b — the sandbox (decided 2026-10-13)
+
+- **B1 — Seatbelt, like Claude Code and Codex.** Every `bash` command runs under `sandbox-exec -p <profile>`, the
+  profile built per run from resolved paths (`/tmp` is `/private/tmp`) and passed as an argument, so nothing on disk
+  can change it between two calls. Where there is no `sandbox-exec` (not macOS) the rules of HS3a alone judge, and the
+  CLI says so. Linux (bubblewrap/Landlock) comes when the harness runs there.
+- **B2 — writing.** Only the working folder, the temporary folders (`$TMPDIR` and its parent, `/private/tmp`), the
+  package caches (`~/.cargo/registry|git`, `~/.npm`, `~/.cache`, `~/Library/Caches`, …) and the repository's git
+  folders. Never the protected folders and files of the working folder (`.git` aside, P5's list), never git's
+  `config`, `config.worktree`, `hooks`, `info` — code or settings the owner's own git would run — neither of the
+  repository nor of a submodule, another worktree or any git folder below the working folder. No `.git` — folder or
+  file, at any depth — and no git folder below one (`modules/…`, `worktrees/…`) is created, moved or removed: a
+  prepared folder moved into place would bring its own config, since Seatbelt judges a rename by its target only
+  (so `git init`, `git submodule add` and `git worktree add` fail in the sandbox, by design). No `.envrc` at any
+  depth. Commits work.
+  Accepted on purpose: the package caches are writable, so a command could plant something a later build of the
+  owner's picks up (cargo does not re-check an unpacked crate) — the price of builds that work in the sandbox.
+- **B3 — reading.** Everything, except the owner's secrets: keys and credentials (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.netrc`, `~/.git-credentials`, `~/.npmrc`, `~/.pypirc`, cargo's credentials, gcloud/Azure/Terraform, keychains,
+  1Password, other agents' credentials, …), Axiomata's and the harness's own configuration (`~/.axiomata/config.toml`
+  holds API keys, `~/.axh`), shell histories, browser, mail, Slack and Discord data, and every `.env`, `.env.*`,
+  `*.env` and `.envrc*` in the working folder.
+- **B4 — the network, through a proxy with a domain list, like Claude Code.** A sandboxed command reaches nothing
+  but the run's own proxy on `127.0.0.1` — not the other services on this machine (the Opencode service, a database,
+  a dev server) — and `HTTP(S)_PROXY`/`ALL_PROXY` (both spellings) point it there; proxy and profile start with the
+  first sandboxed command. The owner can open localhost (`"allowLocalBinding": true`, like Claude Code: a test's own
+  socket, a dev server), which opens every local service with it. For each connection the proxy asks the gate about the host — rules `Network(crates.io)`
+  (one host) or `Network(*.github.com)` (everything below, not the domain itself), then the mode: `auto` lets a host
+  through, `default`/`accept_edits` ask, `plan`/`dont_ask` refuse — and answers 403 with the reason when refused.
+  HTTPS is a `CONNECT` tunnel (the proxy sees the host, never the content); plain HTTP is forwarded one request per
+  connection, with the judged host as `Host` (no fronting another site on the same server). Names are resolved by the
+  proxy, outside the sandbox, and an address on this machine, the local network or link-local (a cloud's metadata
+  service) is never connected to, whatever name led there. Every judgement is a `permission` event like any other; an
+  ask whose command has ended is dropped. At most 64 connections at once, 30 s for a request head and a connection.
+- **B5 — signals and other applications.** A command signals only processes of its own sandbox, never the owner's
+  others; it cannot start `osascript`, `osacompile`, `open`, `automator` or `shortcuts` (`tell app "Terminal" to do
+  script` would run anything outside).
+- **B6 — the escape: `dangerously_disable_sandbox`, always asked.** The `bash` tool takes the flag; such a call is
+  asked in every mode, whatever a rule allows, and refused where nothing can be asked. The owner may switch the
+  sandbox off, add writable places or open localhost in `~/.axh/settings.json` (`"sandbox": {"enabled", "allowWrite",
+  "denyRead", "allowLocalBinding"}`); a project's settings may only add `denyRead`. A sandbox switched on but
+  impossible to set up (no absolute `HOME`) stops the run; where the system has none, `axh` and the CLI say so.
 
 ## HS3a — permissions (decided 2026-10-13)
 
@@ -68,7 +111,7 @@ own, both on the event stream of H3.
   (`RM` is `rm`). What a command writes (`>`, `>>`, `&>`) — or reads (`<`) — is held against the protected names, also
   through a glob (`.ax?`), refused; a write outside the folder is asked; a write inside it lands where the shell is
   (after an earlier `cd`) and is held against the `Edit` rules; a `cd` together with a write is asked. A part with
-  `NAME=value` in front is never allowed by a rule. Best effort until HS3b: `find -delete`, a script, a program's own
+  `NAME=value` in front is never allowed by a rule. Best effort, the sandbox of HS3b holds the rest: `find -delete`, a script, a program's own
   config still do more than their words say; `Read` rules bind the file tools, not what a command reads (as in Claude
   Code).
 - **P3 — modes, like Claude Code.** `default`: reads free, edits and commands asked; `accept_edits`: edits free too,
@@ -117,6 +160,29 @@ own, both on the event stream of H3.
 - **S6 — background jobs.** `bash` with `run_in_background` starts a job and returns its id at once; `bash_output`
   reads what it wrote since the last look and whether it still runs; `kill_shell` ends it. At most 8 jobs per run,
   the last 1 MiB of each job's output kept; every job ends with the run.
+
+## HS3b — what exists
+
+- `sandbox` (`available`, `Policy::new(root, home, extra_writable, extra_secrets)`, `profile`) and `sandbox::proxy`
+  (`Proxy::start(gate)`, `environment`); `Access::Network { host }` and the `Network(host)` rule; the `sandbox`
+  section of the settings (`SandboxSettings`, returned by `build_gate`) and `ShellOptions::sandbox`.
+- Tried on this Mac and kept honest: `(deny signal)` with `(allow signal (target same-sandbox))` holds, `(target
+  others)` alone does not; `process-info` rules do not hide processes from `ps` (and the setuid `ps` does not run in a
+  sandbox at all) — so other processes stay visible, but their environment is not readable by a non-root user
+  anyway. Apple Events: Seatbelt's `appleevent-send`, `lsopen` and even a blanket `mach-lookup` deny did not stop
+  `osascript … tell application "Finder"` on this Mac; refusing to start the programs does (also through a link; a
+  copy of a system program is killed by macOS). Live (2026-10-13): `auto` let a Python write to `~` through and
+  Seatbelt stopped it; with `--allow 'Network(example.com)'` curl reached example.com and got 403 for example.org.
+- Reviews (code + security, 2026-10-13) found localhost open on every port, Apple Events, git folders beyond the
+  top-level one, the `Host` header and pipelined requests, SSRF through a resolved private address, the proxy without
+  limits, the sandbox silently off without `HOME`, and gaps in the secret list — all closed as above, with tests. A
+  second security pass found the git denies passable by moving a prepared folder into place and by a new `.git` file,
+  plus two `Content-Length`s and NAT64/6to4 addresses — closed too. Left by choice: a client that half-closes before
+  its ask is answered counts as gone; any local process may use the proxy (judged by the same rules).
+- Limits: a program that ignores the proxy variables reaches no network at all (not around the list); a host
+  allowed is allowed with every path and port on it; the sandbox reads the rest of the disk (B3 is a deny list, not
+  an allow list); a program that sends Apple Events through the system's interfaces itself (Python's `ctypes`, a
+  compiled helper) is held only by macOS's own Automation consent; the package caches (B2).
 
 ## HS3a — what exists
 

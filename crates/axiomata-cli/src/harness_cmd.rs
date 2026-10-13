@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
-use axiomata_harness::permissions::settings::{self, Trust};
+use axiomata_harness::permissions::settings::{self, SandboxSettings, Trust};
 use axiomata_harness::permissions::{
     Asker, Gate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
 };
@@ -103,15 +103,16 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     let model = OpenAiCompat::new(endpoint)?;
     let mut tools = Toolbox::new();
     tools.extend(file_tools(&cwd)?);
-    tools.extend(shell_tools(&cwd, ShellOptions::from_environment())?);
-    tools.set_gate(Arc::new(gate(
+    let (gate, sandbox) = gate(&cwd, permission_mode, allow, ask, deny, role)?;
+    tools.set_gate(Arc::new(gate));
+    // The shell after the gate: the settings that built it also say how the sandbox runs (HS3b).
+    tools.extend(shell_tools(
         &cwd,
-        permission_mode,
-        allow,
-        ask,
-        deny,
-        role,
-    )?));
+        ShellOptions {
+            sandbox: Some(sandbox),
+            ..ShellOptions::from_environment()
+        },
+    )?);
     let mut run_config = RunConfig::new(&cwd);
     if let Some(turns) = max_turns {
         run_config.max_turns = turns;
@@ -133,6 +134,7 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
 }
 
 /// The run's gate (HS3a): the settings files, the flags and a role's rules; asks in the terminal when there is one.
+/// Also what the settings say about the sandbox (HS3b).
 /// A project with `.axh/` settings in a folder not yet trusted is asked about first (P5).
 fn gate(
     cwd: &std::path::Path,
@@ -141,7 +143,7 @@ fn gate(
     ask: Vec<String>,
     deny: Vec<String>,
     role: Option<String>,
-) -> Result<Gate> {
+) -> Result<(Gate, SandboxSettings)> {
     use std::io::IsTerminal;
     let mode = match mode {
         None => None,
@@ -203,13 +205,16 @@ fn gate(
         deny,
         trusted,
     };
-    let (gate, untrusted) = build_gate(&home, cwd, options, asker)?;
+    let (gate, untrusted, sandbox) = build_gate(&home, cwd, options, asker)?;
     if untrusted {
         eprintln!(
             "note: the project's .axh/ allow rules and mode are left out: this folder is not trusted"
         );
     }
-    Ok(gate)
+    if !sandbox.enabled || !axiomata_harness::sandbox::available() {
+        eprintln!("note: commands run without a sandbox here; only the rules judge them");
+    }
+    Ok((gate, sandbox))
 }
 
 /// The endpoint for `provider` (or the configured default) from the config: base URL, key and model.
