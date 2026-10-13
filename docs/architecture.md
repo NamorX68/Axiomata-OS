@@ -1832,7 +1832,13 @@ network only through the run's proxy, which asks the gate per host (`Network(cra
 HS4 (2026-10-13): slash commands — `~/.axh/commands/` plus a trusted project's `.axh/commands/`, folders naming the
 command (`a/b/c/x.md` is `/a/b/c`, depth ≤ 3), YAML frontmatter by hand (`model`, `allowed-tools`, `disable-model-invocation`),
 `$ARGUMENTS`/`$1…` substitution, a `command` event, the built-ins `/help` and `/permissions`, and `allowed-tools`
-narrowing the run's gate only (never widening it). Next: HS5 … HS8 (subagents), each planned on its own.
+narrowing the run's gate only (never widening it).
+HS5 (2026-10-13): the MCP client — servers from `~/.axh/mcp.json` and the project's `.mcp.json` (the owner's win),
+a project's server only once the owner approved that very config (SHA-256 in `~/.axh/mcp-approved.json`), transports
+stdio (JSON-RPC lines, child process in its own group) and Streamable HTTP (JSON or SSE, `Mcp-Session-Id` kept, headers
+with `${VAR}`, https or loopback only), the tools offered as `mcp__<server>__<tool>` and judged by rules of that name;
+servers run outside the sandbox, a failed one is left out and the run goes on. Next: HS6 (skills) … HS8 (subagents),
+each planned on its own.
 
 ### Ausblick (2026-10-12)
 

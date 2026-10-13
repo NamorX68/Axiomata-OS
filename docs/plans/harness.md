@@ -1,6 +1,6 @@
 # Axiomata's own harness (board card #37, M7.4)
 
-Status: HS1, HS2 and HS3a built 2026-10-13. Each further step is planned on its own and confirmed by the owner before it is built.
+Status: HS1–HS5 built 2026-10-13. Each further step is planned on its own and confirmed by the owner before it is built.
 
 ## Why
 
@@ -38,7 +38,7 @@ Backend, one checkpoint and commit each:
 | **HS3a** ✅ | Permissions: rules, modes, settings files, asking (P1–P8 below) |
 | **HS3b** ✅ | Sandbox for `bash`: macOS Seatbelt plus a network proxy with a domain list (B1–B6 below) |
 | **HS4** ✅ | Slash commands: registry, Markdown command files, built-ins (`/help`, `/model`, `/clear`) |
-| HS5 | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
+| **HS5** ✅ | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
 | HS6 | Skills: SKILL.md parser in the harness, a skill as a run; then `backend: axh` in the core |
 | HS7 | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) |
 | HS8 | Subagents: a `task` tool starting a nested loop with its own prompt, tools and limits |
@@ -46,6 +46,39 @@ Backend, one checkpoint and commit each:
 After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
 `spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
 own, both on the event stream of H3.
+
+## HS5 — MCP (decided 2026-10-13)
+
+- **M1 — servers from the owner and the project, like Claude Code.** `~/.axh/mcp.json` (the owner's) and
+  `<project>/.mcp.json` (Claude Code's file, so a repo's servers work as they are). Format of both:
+  `{"mcpServers": {"<name>": {"command": "…", "args": […], "env": {…}}}}` for stdio and
+  `{"mcpServers": {"<name>": {"type": "http", "url": "https://…", "headers": {…}}}}` for HTTP. Unknown fields →
+  error (`deny_unknown_fields`), except `type: "stdio"` which is the default. Server names `[a-zA-Z0-9_-]{1,32}`.
+  On a name in both files the owner's wins.
+- **M2 — a project's server runs only after the owner approved *that* server.** A project's server starts
+  processes or sends data out, so trusting the folder is not enough: each server is approved on its own, keyed by
+  project path + server name + SHA-256 of its JSON config; a changed command, argument, env or URL asks again.
+  Approvals live in `~/.axh/mcp-approved.json` (written atomically, mode 0600, like `Trust` in `settings.rs`). The CLI
+  shows the server's command line / URL (through `permissions::printable`) and asks y/n; headless (`axh`, no
+  terminal) skips unapproved project servers and says so on stderr. The owner's own servers need no approval.
+- **M3 — transports stdio and HTTP.**
+  - stdio: the server is a child process; JSON-RPC 2.0, one message per line on stdin/stdout; stderr discarded.
+    Environment: the cleaned tool environment (`axiomata_files::toolenv`) plus the server's `env`. Its own process
+    group, killed with the run (`kill_on_drop`, as in `tools/shell.rs`).
+  - HTTP ("Streamable HTTP"): every message is a `POST` to `url` with `Content-Type: application/json` and
+    `Accept: application/json, text/event-stream`. The answer is either JSON or an SSE stream (`text/event-stream`):
+    read `data:` lines until the response with the request's `id` arrives. Keep the `Mcp-Session-Id` header from the
+    `initialize` answer and send it on every later request. No OAuth in HS5: `headers` values may
+    contain `${VAR}`, replaced from the harness's own environment (missing variable → that server fails to start
+    with a clear message); the URL must be `https://` or loopback `http://` (same rule as `model.rs` uses for keys).
+    Same 16 MiB answer cap and no redirects as `model.rs`.
+- **M4 — servers run outside the sandbox, like Claude Code.** They are configured by the owner (or approved,
+  M2) and often need the network or apps (`apple-mail`). What protects the owner is the permission on their tools
+  (M5).
+- **M5 — permissions like Claude Code.** A tool appears to the model as `mcp__<server>__<tool>`. Rules:
+  `mcp__server__tool` (one tool) or `mcp__server` (every tool of that server), in allow / ask / deny like any rule,
+  and taking no pattern (`mcp__mail(send)` would silently match nothing). Without a rule: `auto` allows,
+  `default` and `accept_edits` ask, `plan` and `dont_ask` refuse.
 
 ## HS4 — slash commands (decided 2026-10-13)
 
@@ -193,6 +226,26 @@ own, both on the event stream of H3.
 - **S6 — background jobs.** `bash` with `run_in_background` starts a job and returns its id at once; `bash_output`
   reads what it wrote since the last look and whether it still runs; `kill_shell` ends it. At most 8 jobs per run,
   the last 1 MiB of each job's output kept; every job ends with the run.
+
+## HS5 — what exists
+
+- `mcp` (`config`, `approval`, `client`, `tools`): the two files merged with the owner winning (M1), approvals
+  keyed by project + name + SHA-256 of the config in `~/.axh/mcp-approved.json` (M2), a `Client` whose transport is
+  stdio (JSON-RPC lines, the removed client of `54173bf` as template) or Streamable HTTP (JSON or SSE answers,
+  `Mcp-Session-Id` kept), the handshake `initialize` → `notifications/initialized` → `tools/list` (at most 10 pages,
+  200 tools per server), and one `Tool` per MCP tool named `mcp__<server>__<tool>` (other characters → `_`, a name
+  past 64 characters skipped with a note on stderr).
+- `Access::Mcp`, the `mcp__server` / `mcp__server__tool` rule kind and the mode fallback (M5); the `bash`-style
+  `Event::McpServer { name, status, tools, reason }`. Wired into `axh` and `axiomata-cli harness run` after the gate
+  and before the shell; a server that fails to start is named in its event and left out, the run goes on. Servers
+  are not sandboxed (M4); their tools are judged like any other call.
+- Live (2026-10-13): against the real `@modelcontextprotocol/server-everything` over stdio — handshake, 13 tools
+  listed, a call answered. The HTTP transport is tested against a fake server on the loopback (plain JSON, SSE with
+  a notification before the response, the session id coming back, a 500 as an error).
+- Tests (inline): config (both files merged, an unknown field, a bad name, a non-loopback `http://` URL, `${VAR}`
+  in a header), approval (unapproved left out, approved runs, changed `args` ask again, mode 0600), the stdio
+  client against a fake server script (handshake, pagination, result text, `isError`, a timeout, the process gone
+  after the drop), the HTTP client, the two name cases, the MCP rules and the mode fallback.
 
 ## HS4 — what exists
 

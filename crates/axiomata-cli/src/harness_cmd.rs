@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
 use axiomata_harness::commands::{Expanded, PermissionsView, Registry, Source};
+use axiomata_harness::mcp;
 use axiomata_harness::permissions::settings::{self, SandboxSettings, Trust};
 use axiomata_harness::permissions::{
     Asker, Gate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
@@ -17,7 +18,8 @@ use axiomata_harness::permissions::{
 use axiomata_harness::tools::files::file_tools;
 use axiomata_harness::tools::shell::{ShellOptions, shell_tools};
 use axiomata_harness::{
-    Cancel, Event, EventSink, FinishReason, ModelEndpoint, OpenAiCompat, RunConfig, Toolbox,
+    Cancel, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat, RunConfig,
+    Toolbox,
 };
 use clap::{Subcommand, ValueEnum};
 
@@ -157,6 +159,12 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // The model is built after the commands: one of them may name its own.
     let model = OpenAiCompat::new(endpoint)?;
     tools.set_gate(Arc::new(gate));
+    // MCP servers (HS5), after the gate and before the shell (M1–M3): a project's server the owner has not
+    // approved yet is asked about in the terminal, or left out with a note when there is none (M2).
+    let entries = mcp::config::load(&built.home, &cwd)?;
+    let entries =
+        mcp::approval::permitted(entries, &built.home, &cwd, mcp::approval::interactive())?;
+    tools.extend(mcp::start(entries, sink.as_mut()).await);
     // The shell after the gate: the settings that built it also say how the sandbox runs (HS3b).
     tools.extend(shell_tools(
         &cwd,
@@ -363,6 +371,20 @@ impl EventSink for Readable {
             } => {
                 format!("  {} {}", if allowed { "·" } else { "⊘" }, plain(&reason))
             }
+            // An MCP server of this run, connected or failed (HS5).
+            Event::McpServer {
+                name,
+                status,
+                tools,
+                reason,
+            } => match status {
+                McpStatus::Connected => format!("◇ mcp {} · {tools} tools", plain(&name)),
+                McpStatus::Failed => format!(
+                    "◇ mcp {} ✗ {}",
+                    plain(&name),
+                    plain(reason.as_deref().unwrap_or("it did not start"))
+                ),
+            },
             Event::Error { message } => {
                 eprintln!("error: {}", plain(&message));
                 return;
