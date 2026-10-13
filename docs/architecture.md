@@ -1822,7 +1822,9 @@ API (OpenRouter, Ollama) with guarded file tools (`axiomata_files::Root`), a sho
 `axiomata-core`; the CLI's `harness run` hands it the provider's URL, key and skill model from `config.toml`. Next:
 HS2 (2026-10-13): the shell — `bash` in the owner's shell with a profile snapshot, the folder carried
 over, process groups killed on timeout/stop, background jobs (`bash_output`, `kill_shell`), off unless `--allow-bash`.
-Next: HS3 (permissions) … HS8 (subagents), each planned on its own.
+HS3a (2026-10-13): permissions in Claude Code's format — allow/ask/deny rules (also a role's), modes
+(default, accept_edits, plan, dont_ask, auto), `~/.axh/` and trusted project `.axh/` settings, asks in the terminal
+(the app's asker follows with the Studio). Next: HS3b (sandbox) … HS8 (subagents), each planned on its own.
 
 ### Ausblick (2026-10-12)
 

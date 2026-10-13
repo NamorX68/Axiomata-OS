@@ -4,10 +4,15 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
+use axiomata_harness::permissions::settings::{self, Trust};
+use axiomata_harness::permissions::{
+    Asker, Gate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
+};
 use axiomata_harness::tools::files::file_tools;
 use axiomata_harness::tools::shell::{ShellOptions, shell_tools};
 use axiomata_harness::{
@@ -38,9 +43,21 @@ pub enum HarnessAction {
         /// Print the events as JSON lines, as `axh` does.
         #[arg(long)]
         json: bool,
-        /// Offer the shell tools. Until the permissions of HS3 exist the shell reaches whatever your user reaches.
+        /// default, accept_edits, plan, dont_ask or auto; otherwise the settings files', else default.
         #[arg(long)]
-        allow_bash: bool,
+        permission_mode: Option<String>,
+        /// A rule the run allows (`Bash(cargo test:*)`, `Edit(src/**)`); repeatable.
+        #[arg(long)]
+        allow: Vec<String>,
+        /// A rule the run asks about; repeatable.
+        #[arg(long)]
+        ask: Vec<String>,
+        /// A rule the run refuses; repeatable.
+        #[arg(long)]
+        deny: Vec<String>,
+        /// Take a role's `permissions` (`~/.axiomata/agents/<role>/AGENT.md`) as allow rules.
+        #[arg(long)]
+        role: Option<String>,
         prompt: String,
     },
 }
@@ -69,7 +86,11 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         cwd,
         max_turns,
         json,
-        allow_bash,
+        permission_mode,
+        allow,
+        ask,
+        deny,
+        role,
         prompt,
     } = action;
     // It spends the owner's money with the owner's key: not something an agent session starts by itself.
@@ -82,9 +103,15 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     let model = OpenAiCompat::new(endpoint)?;
     let mut tools = Toolbox::new();
     tools.extend(file_tools(&cwd)?);
-    if allow_bash {
-        tools.extend(shell_tools(&cwd, ShellOptions::from_environment())?);
-    }
+    tools.extend(shell_tools(&cwd, ShellOptions::from_environment())?);
+    tools.set_gate(Arc::new(gate(
+        &cwd,
+        permission_mode,
+        allow,
+        ask,
+        deny,
+        role,
+    )?));
     let mut run_config = RunConfig::new(&cwd);
     if let Some(turns) = max_turns {
         run_config.max_turns = turns;
@@ -103,6 +130,86 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         FinishReason::Answered => Ok(()),
         other => bail!("the run ended: {other:?}"),
     }
+}
+
+/// The run's gate (HS3a): the settings files, the flags and a role's rules; asks in the terminal when there is one.
+/// A project with `.axh/` settings in a folder not yet trusted is asked about first (P5).
+fn gate(
+    cwd: &std::path::Path,
+    mode: Option<String>,
+    mut allow: Vec<String>,
+    ask: Vec<String>,
+    deny: Vec<String>,
+    role: Option<String>,
+) -> Result<Gate> {
+    use std::io::IsTerminal;
+    let mode = match mode {
+        None => None,
+        Some(text) => {
+            Some(Mode::parse(&text).with_context(|| format!("unknown permission mode {text:?}"))?)
+        }
+    };
+    if let Some(name) = role {
+        let roles = axiomata_core::roster::list_roles()?;
+        let role = roles
+            .roles
+            .into_iter()
+            .find(|role| role.name == name)
+            .with_context(|| format!("no role {name:?} in ~/.axiomata/agents"))?;
+        allow.extend(role.permissions);
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .context("HOME is not set to an absolute folder")?;
+    let interactive = std::io::stdin().is_terminal();
+    let mut trust = Trust::load(&home)?;
+    let mut trusted = trust.contains(cwd);
+    if !trusted && interactive && settings::project_has_settings(cwd) {
+        let (allow, mode) = settings::project_summary(cwd)?;
+        if !allow.is_empty() || mode.is_some() {
+            // What trusting would let in, shown before the question; the folder's name may hold anything, so it is
+            // shown as plain text.
+            let folder = printable(&cwd.display().to_string());
+            eprintln!("{folder} has its own harness settings (.axh/). Trusting it adds:");
+            for rule in &allow {
+                eprintln!("  allow {}", printable(rule));
+            }
+            if let Some(mode) = mode {
+                eprintln!("  mode  {mode:?} (only where it is no looser than your own)");
+            }
+            eprint!("Trust this folder? [y/N]: ");
+            let _ = std::io::stderr().flush();
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+            if matches!(
+                line.trim().to_lowercase().as_str(),
+                "y" | "j" | "yes" | "ja"
+            ) {
+                trust.add(&home, cwd)?;
+                trusted = true;
+            }
+        }
+    }
+    let asker: Arc<dyn Asker> = if interactive {
+        Arc::new(Terminal)
+    } else {
+        Arc::new(Nobody)
+    };
+    let options = GateOptions {
+        mode,
+        allow,
+        ask,
+        deny,
+        trusted,
+    };
+    let (gate, untrusted) = build_gate(&home, cwd, options, asker)?;
+    if untrusted {
+        eprintln!(
+            "note: the project's .axh/ allow rules and mode are left out: this folder is not trusted"
+        );
+    }
+    Ok(gate)
 }
 
 /// The endpoint for `provider` (or the configured default) from the config: base URL, key and model.
@@ -181,6 +288,11 @@ impl EventSink for Readable {
                 format!("  {} {}", if ok { "✓" } else { "✗" }, preview(&output))
             }
             Event::Usage { .. } => return,
+            Event::Permission {
+                allowed, reason, ..
+            } => {
+                format!("  {} {}", if allowed { "·" } else { "⊘" }, plain(&reason))
+            }
             Event::Error { message } => {
                 eprintln!("error: {}", plain(&message));
                 return;
