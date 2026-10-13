@@ -37,7 +37,7 @@ Backend, one checkpoint and commit each:
 | **HS2** ✅ | Shell: `bash` (foreground and background), `bash_output`, `kill_shell` — S1–S6 below |
 | **HS3a** ✅ | Permissions: rules, modes, settings files, asking (P1–P8 below) |
 | **HS3b** ✅ | Sandbox for `bash`: macOS Seatbelt plus a network proxy with a domain list (B1–B6 below) |
-| HS4 | Slash commands: registry, Markdown command files, built-ins (`/help`, `/model`, `/clear`) |
+| **HS4** ✅ | Slash commands: registry, Markdown command files, built-ins (`/help`, `/model`, `/clear`) |
 | HS5 | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
 | HS6 | Skills: SKILL.md parser in the harness, a skill as a run; then `backend: axh` in the core |
 | HS7 | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) |
@@ -46,6 +46,39 @@ Backend, one checkpoint and commit each:
 After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
 `spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
 own, both on the event stream of H3.
+
+## HS4 — slash commands (decided 2026-10-13)
+
+- **C1 — where the files are, and who may put them there.** `~/.axh/commands/**/*.md` (the owner) and, in a folder
+  the owner trusted once (P5), `<project>/.axh/commands/**/*.md`. Read through `axiomata_files::Root` with
+  `LinkPolicy::Contained`, rooted at the `commands` folder itself, so a link cannot lead out of it. At most 200
+  files, 64 KiB each, 3 folders deep; beyond that — as with a name that is no command name — the run does not start,
+  rather than running with a half-known command list. A project's command of a name the owner already has wins; a
+  built-in always wins, and the file shadowed by one is skipped, no error. A name is `[a-z0-9_-]` per segment (lower
+  case), segments joined by `:` — `git/commit.md` is `git:commit`.
+- **C2 — the format.** An optional `---` block of `key: value` lines, then the body. Known keys: `description`,
+  `argument-hint`, `allowed-tools` (comma-separated rules, e.g. `Bash(git status:*), Read`), `model`; an unknown key
+  is refused, in the spirit of the settings files' `deny_unknown_fields`. Values may be wrapped in one pair of
+  `"…"`, which is stripped. In the body only `$ARGUMENTS` (the whole rest, trimmed) and `$1`, `$2`, … (its
+  whitespace-separated words, a missing one empty) are replaced; nothing else is.
+- **C3 — `allowed-tools` only narrows.** The gate takes the command's rules as its `restrict`: a call those rules do
+  not name is refused (`the command /name allows only: …`), and a call they do name is judged as usual against the
+  run's own rules and its mode — such a rule never allows anything by itself. `bash_output` and `kill_shell` stay
+  always allowed. So `allowed-tools: Read` refuses `bash` and `write_file`, and `allowed-tools: Bash(git status:*)`
+  in `plan` mode still has `git status` refused by `plan`.
+- **C4 — what is deliberately not there yet.** `!command` lines in a body are refused by name (`/name uses !command
+  lines, which the harness does not run yet`): they would need the gate and the sandbox. An `@path` in the body is
+  left in the text, not read — the model can call `read_file`.
+- **C5 — the built-ins are code, not files.** `/help` lists every command (name, source, argument hint,
+  description); `/permissions` shows the run's mode, its allow / ask / deny rules and the sandbox's four settings,
+  each line through `permissions::printable`. Both are answered without a model. The names `clear`, `model` and
+  `compact` are reserved — they answer that they are not available in a single run yet, so no file can take them
+  before the TUI brings them.
+- **C6 — headless expansion, and the `command` event.** `/name …` is expanded after the gate is built (same home,
+  folder and trust): no slash is an ordinary prompt, an unknown name or a `!` body is an error without a model call,
+  a built-in is text for the front end, a file command is the run's prompt — with its `model` where it names one and
+  its `allowed-tools` narrowing the gate. `Event::Command { name, source, prompt_chars }` is emitted before the first
+  model call, tagged `event` like every other event.
 
 ## HS3b — the sandbox (decided 2026-10-13)
 
@@ -160,6 +193,26 @@ own, both on the event stream of H3.
 - **S6 — background jobs.** `bash` with `run_in_background` starts a job and returns its id at once; `bash_output`
   reads what it wrote since the last look and whether it still runs; `kill_shell` ends it. At most 8 jobs per run,
   the last 1 MiB of each job's output kept; every job ends with the run.
+
+## HS4 — what exists
+
+- `commands` (`Registry`, `Command`, `Source`, `Expanded`, `PermissionsView`, `commands::builtin`): the files read
+  through `axiomata_files::Root` (`LinkPolicy::Contained`; limits as named consts), the frontmatter parsed by hand
+  (no `gray_matter`, no `serde_yaml`), the expansion with `$ARGUMENTS` / `$1`, and the five built-ins.
+- `Gate::restrict` / `Gate::restrict_name` (C3) beside `Gate::rules` and `Gate::mode_name`, which the
+  `/permissions` view is built from; `Event::Command`.
+- `axh run … -- "/review src/"` and `axiomata-cli harness run "/review src/"`: the registry is built after the gate,
+  a built-in is printed without a model (events in `axh`, text in the CLI), a file command runs as the prompt with
+  its model and its narrowed gate; the readable output prints `/name (source)`, `--json` the `command` event.
+- Two points the build plan left open were settled by the owner while building (2026-10-13): the `command` event
+  carries the tag `event` like every other event (the `{"type": …}` in the plan was a slip of the pen, the same one
+  HS6 and HS7's plans repeat), and "depth 3" counts the folders below `commands/` — `a/b/c/x.md` counts,
+  `a/b/c/d/x.md` does not.
+- Tests (inline): frontmatter (none, all four keys, quotes, an unknown key, a rule that does not parse, a block that
+  never closes), names (folders as prefixes, a name that is no name, depth 4), precedence (built-in over project
+  over user, an untrusted project not loaded at all), expansion (`$ARGUMENTS`, `$1`/`$2`, a missing `$3`, `$HOME`
+  untouched, an unknown name, a `!` line, plain text, `@file` left in the text), limits (201 files, 65 KiB, a link
+  out of the folder), the two restrict cases of C3, the three built-ins, and the `command` event's JSON.
 
 ## HS3b — what exists
 

@@ -1828,7 +1828,11 @@ HS3a (2026-10-13): permissions in Claude Code's format — allow/ask/deny rules 
 HS3b (2026-10-13): `bash` runs under macOS Seatbelt — writes only in the working folder, temp folders, package caches
 and git (never its `config`/`hooks`), the owner's secrets and `.env` unreadable, signals only its own processes, the
 network only through the run's proxy, which asks the gate per host (`Network(crates.io)`); the escape
-`dangerously_disable_sandbox` is always asked. Next: HS4 (slash commands) … HS8 (subagents), each planned on its own.
+`dangerously_disable_sandbox` is always asked.
+HS4 (2026-10-13): slash commands — `~/.axh/commands/` plus a trusted project's `.axh/commands/`, folders naming the
+command (`a/b/c/x.md` is `/a/b/c`, depth ≤ 3), YAML frontmatter by hand (`model`, `allowed-tools`, `disable-model-invocation`),
+`$ARGUMENTS`/`$1…` substitution, a `command` event, the built-ins `/help` and `/permissions`, and `allowed-tools`
+narrowing the run's gate only (never widening it). Next: HS5 … HS8 (subagents), each planned on its own.
 
 ### Ausblick (2026-10-12)
 

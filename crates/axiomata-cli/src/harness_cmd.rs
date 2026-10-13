@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
+use axiomata_harness::commands::{Expanded, PermissionsView, Registry, Source};
 use axiomata_harness::permissions::settings::{self, SandboxSettings, Trust};
 use axiomata_harness::permissions::{
     Asker, Gate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
@@ -58,6 +59,8 @@ pub enum HarnessAction {
         /// Take a role's `permissions` (`~/.axiomata/agents/<role>/AGENT.md`) as allow rules.
         #[arg(long)]
         role: Option<String>,
+        /// The prompt — or a slash command (`/review src/`) of `~/.axh/commands/` and, in a trusted folder, the
+        /// project's `.axh/commands/` (HS4).
         prompt: String,
     },
 }
@@ -96,20 +99,69 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // It spends the owner's money with the owner's key: not something an agent session starts by itself.
     owner_only("running the own harness")?;
     let config = crate::read_config(core);
-    let endpoint = endpoint(&config, provider, model)?;
+    let mut endpoint = endpoint(&config, provider, model)?;
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("cannot use {}", cwd.display()))?;
-    let model = OpenAiCompat::new(endpoint)?;
     let mut tools = Toolbox::new();
     tools.extend(file_tools(&cwd)?);
-    let (gate, sandbox) = gate(&cwd, permission_mode, allow, ask, deny, role)?;
+    let mut built = gate(&cwd, permission_mode, allow, ask, deny, role)?;
+    // Slash commands (HS4), after the gate and with the same home, folder and trust it was built with (C1).
+    let mut registry = Registry::load(&built.home, &cwd, built.trusted)?;
+    registry.set_permissions(PermissionsView::of(&built.gate, &built.sandbox));
+    let mut sink: Box<dyn EventSink> = if json {
+        Box::new(JsonLines)
+    } else {
+        Box::new(Readable)
+    };
+    let mut prompt = prompt;
+    let gate = match registry.expand(&prompt) {
+        // An ordinary prompt: no command was named (C6).
+        None => built.gate,
+        Some(Err(message)) => bail!(message),
+        // A built-in is answered without a model: its text is the answer (C5).
+        Some(Ok(Expanded::Builtin { name, text })) => {
+            sink.emit(Event::Command {
+                name,
+                source: Source::Builtin.as_str().to_owned(),
+                prompt_chars: 0,
+            });
+            sink.emit(Event::AssistantText { turn: 0, text });
+            return Ok(());
+        }
+        Some(Ok(Expanded::Prompt {
+            name,
+            prompt: expanded,
+            allowed_tools,
+            model,
+        })) => {
+            let source = registry.source(&name).unwrap_or(Source::User);
+            sink.emit(Event::Command {
+                source: source.as_str().to_owned(),
+                name: name.clone(),
+                prompt_chars: expanded.chars().count(),
+            });
+            // C3: the command's tools narrow the gate on top of its rules, never in their place.
+            if !allowed_tools.is_empty() {
+                built.gate.restrict_name = Some(name);
+                built.gate.restrict = Some(allowed_tools);
+            }
+            prompt = expanded;
+            // The command's own model, where it names one (C2).
+            if let Some(model) = model {
+                endpoint.model = model;
+            }
+            built.gate
+        }
+    };
+    // The model is built after the commands: one of them may name its own.
+    let model = OpenAiCompat::new(endpoint)?;
     tools.set_gate(Arc::new(gate));
     // The shell after the gate: the settings that built it also say how the sandbox runs (HS3b).
     tools.extend(shell_tools(
         &cwd,
         ShellOptions {
-            sandbox: Some(sandbox),
+            sandbox: Some(built.sandbox),
             ..ShellOptions::from_environment()
         },
     )?);
@@ -117,11 +169,6 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     if let Some(turns) = max_turns {
         run_config.max_turns = turns;
     }
-    let mut sink: Box<dyn EventSink> = if json {
-        Box::new(JsonLines)
-    } else {
-        Box::new(Readable)
-    };
     // Ctrl-C, SIGTERM and SIGHUP end the run with its last line and every background job stopped.
     let cancel = Cancel::new();
     axiomata_harness::run::cancel_on_signals(&cancel);
@@ -133,8 +180,19 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     }
 }
 
+/// What the run's gate was built with (HS3a), for the caller that still needs it: the settings' word on the sandbox
+/// (HS3b), the home folder and whether the project counts as trusted — the command registry needs the same trust
+/// the gate was built on (HS4, C1).
+struct Built {
+    gate: Gate,
+    sandbox: SandboxSettings,
+    home: PathBuf,
+    trusted: bool,
+}
+
 /// The run's gate (HS3a): the settings files, the flags and a role's rules; asks in the terminal when there is one.
-/// Also what the settings say about the sandbox (HS3b).
+/// Also what the settings say about the sandbox (HS3b), and the home folder and trust the command registry of HS4
+/// is read with — a project's commands count where its allow rules count (C1).
 /// A project with `.axh/` settings in a folder not yet trusted is asked about first (P5).
 fn gate(
     cwd: &std::path::Path,
@@ -143,7 +201,7 @@ fn gate(
     ask: Vec<String>,
     deny: Vec<String>,
     role: Option<String>,
-) -> Result<(Gate, SandboxSettings)> {
+) -> Result<Built> {
     use std::io::IsTerminal;
     let mode = match mode {
         None => None,
@@ -214,7 +272,12 @@ fn gate(
     if !sandbox.enabled || !axiomata_harness::sandbox::available() {
         eprintln!("note: commands run without a sandbox here; only the rules judge them");
     }
-    Ok((gate, sandbox))
+    Ok(Built {
+        gate,
+        sandbox,
+        home,
+        trusted,
+    })
 }
 
 /// The endpoint for `provider` (or the configured default) from the config: base URL, key and model.
@@ -285,6 +348,8 @@ impl EventSink for Readable {
             Event::Started { model, cwd, tools } => {
                 format!("▸ {} in {cwd} · {} tools", plain(&model), tools.len())
             }
+            // The command a prompt came from, before the run's own lines (HS4).
+            Event::Command { name, source, .. } => format!("/{name} ({source})"),
             Event::AssistantText { text, .. } => format!("\n{}\n", plain(&text)),
             Event::ToolCall {
                 name, arguments, ..
