@@ -28,7 +28,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
   the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness `axiomata-harness` / `axh`
-  (#37, `docs/plans/harness.md`; HS1–HS7 built, HS8 open). Deferred: further model-provider work.
+  (#37, `docs/plans/harness.md`; HS1–HS8 built). Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
   new work and **update them** (not just this file) when a milestone or major feature lands.
@@ -232,3 +232,10 @@ from the code itself:
   are no-ops (the gate stays the only decider), a crash/timeout/odd exit is a fail-open `Event::Hook` note,
   and only the owner's file counts: a project's `.axh/` hooks are parsed (`project_hooks_skipped`) and
   printed/folded into `stderr` as a note, never executed.
+- **Subagents: offering `task` and judging `task` are two layers** (HS8, `docs/plans/harness-hs8.md`): the
+  tool is *offered* when the run configures it (`RunConfig.subagents`, default on; in the core set only
+  when the skill's `allowed_tools` names `task` — one reading of the frontmatter feeds both the gate and
+  the tool list), but whether a call *runs* is the gate's word like any change (`Access::Other` under
+  `task`, rules then mode; headless an unanswered ask refuses it). A declaration alone never allows, the
+  subagent gets the parent's toolbox minus `task` (one level only), and its events arrive wrapped as
+  `Event::Sub { depth, event }` — sinks must recurse (`Notes`, `Readable`) or they drop them.

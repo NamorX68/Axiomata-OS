@@ -620,8 +620,12 @@ the run's permissions for axh; see below).
   MCP servers come from `~/.axh/mcp.json` +
   `.mcp.json` (a project's server never asked about headless), catalog notes go to
   `tracing::warn`, and one `Notes` collector joins event errors, failed servers, refused
-  calls and hook notes into the run's `stderr`. `RunConfig.instructions` stays `None` — the core-built prompt
-  is the user message (no double inlining of the skill body).
+  calls and hook notes into the run's `stderr` — events of a subagent (HS8) as
+  `subagent: <line>`. `RunConfig.instructions` stays `None` — the core-built prompt
+  is the user message (no double inlining of the skill body). The frontmatter also decides
+  whether the run offers the **`task` subagent tool** (HS8, B3): `allowed_tools` naming
+  `task` sets `RunConfig.subagents`, so offering and allowing come from one reading of it —
+  a skill that does not declare the tool never sees it.
 
 ### Model providers (`config.agents.providers`)
 
@@ -1832,7 +1836,7 @@ Review by itself, and the owner's take-over brought it into `main` and the card 
   agent's pane offer Allow / Deny (Claude Code also "In terminal"); `answer_permission` is the only door. A planner or
   grill idle on a draft plan now counts as waiting.
 
-### Own harness, HS1–HS7 (2026-10-13/14)
+### Own harness, HS1–HS8 (2026-10-13/14)
 
 `crates/axiomata-harness` (binary `axh`, `docs/plans/harness.md`): a lean agent loop over an OpenAI-compatible chat
 API (OpenRouter, Ollama) with guarded file tools (`axiomata_files::Root`), a short system prompt and an event stream
@@ -1880,7 +1884,21 @@ Only the owner's hooks run: a project's are parsed but left out and said so (CLI
 unattended core runs (`backend: axh`) execute the owner's hooks too — stricter or unchanged, never looser. Hooks run
 through one lazy per-run shell `Session` (snapshot, cleaned env, sandbox, proxy) with `min(hook timeout, deadline)`
 and cancel; `SessionStart`'s context sits behind the harness's own system prompt, a blocked `Stop` feeds its reason
-back as a user message and takes another turn (`stop_hook_active`). Next: HS8 (subagents), planned on its own.
+back as a user message and takes another turn (`stop_hook_active`).
+HS8 (2026-10-14): subagents — a `task` tool in the loop starts a nested run of the same loop
+(`run_inner(..., depth)` behind the unchanged `run()`): its own `subagent_prompt` with the parent's `instructions`
+dropped, the parent's toolbox minus `task` (so one level only — a hallucinated `task` at depth ≥ 1 gets the
+ordinary *no tool named* error), the owner's `PreToolUse`/`PostToolUse`/`Stop` hooks but never `SessionStart`
+(its own `session_id`), its own turn limit (15) and time limit (5 min, capped by the parent's remaining time). The
+call is judged like any change — `Access::Other` under the name `task`, rules first then mode, headless an
+unanswered ask refuses it; the parent drains the shared gate log right after judging and before the nested run, and
+wraps whatever the subagent judged but did not get to report — nothing is lost in the nesting, and the subagent's
+tokens are summed into the run's usage. Every nested event arrives wrapped as `Event::Sub { depth, event }`
+(JSON: `…, "inner": {…}`): the CLI indents it by depth and prints the subagent's own finished line as
+`↳ subagent · …`, the core's `Notes` prefixes `subagent: `. In the core the tool is offered only to a skill that
+names `task` in its `allowed_tools` — the same declaration is that run's whole permission set (B3), and `~/.axh`
+rules feed neither. Next: sessions over several turns, streaming and the Anthropic client, each planned on its own
+(`docs/plans/harness.md`).
 
 ### Ausblick (2026-10-12)
 

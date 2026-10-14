@@ -10,7 +10,9 @@
 //! `allowed_tools` become the run's whole permission set (B3): what the skill
 //! declares is allowed, what it does not name is refused before anything is
 //! asked, nobody answers a question, and the settings files of `~/.axh` never
-//! widen the gate. HS7 (B4): the owner's hooks from `~/.axh/settings.json` run
+//! widen the gate. HS8 (B3): the `task` tool is offered only for a skill that
+//! names it in its `allowed_tools` — the same declaration feeds the gate and
+//! the tool list. HS7 (B4): the owner's hooks from `~/.axh/settings.json` run
 //! here too — they may only block, never permit (B2), fail open (B3), and a
 //! project's hooks are parsed and left out (B1), said so in the run's
 //! `stderr`.
@@ -27,7 +29,7 @@ use std::time::Instant;
 
 use axiomata_harness::mcp;
 use axiomata_harness::permissions::settings;
-use axiomata_harness::permissions::{Gate, Mode, Nobody, RuleSet};
+use axiomata_harness::permissions::{Gate, Mode, Nobody, Rule, RuleSet};
 use axiomata_harness::skills::{self, SkillTool};
 use axiomata_harness::tools::files::{SkillRoots, file_tools};
 use axiomata_harness::tools::shell::{ShellOptions, shell_tools};
@@ -60,7 +62,8 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         .await
         .expect("agent_slots semaphore is never closed");
     let cwd = request.cwd.clone();
-    let gate = gate_for(request.name.as_deref(), request.allowed_tools.as_deref())?;
+    let declared = declared_rules(request.name.as_deref(), request.allowed_tools.as_deref())?;
+    let gate = gate_for(request.name.as_deref(), &declared);
     // B3: a project's settings are never trusted in an unattended run; from
     // them only the sandbox's read secrets count. HS7 B4: the owner's hooks
     // run here as they do in the CLI; a project's hooks are parsed and left
@@ -82,6 +85,11 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     let mut run_config = RunConfig::new(&cwd);
     run_config.timeout = request.timeout;
     run_config.skill_dirs = skill_dirs.to_vec();
+    // HS8 (B3): the `task` tool exists only for a skill that names it in its
+    // `allowed_tools` — the same declaration that is the gate's whole
+    // permission set above, so what is offered and what is allowed come from
+    // one place; a skill that declares nothing never even sees the tool.
+    run_config.subagents = declared.iter().any(|rule| rule.names_tool("task"));
     // HS7 (B4): the owner's hooks, and the sandbox their commands run in (D5).
     run_config.hooks = loaded.hooks;
     run_config.sandbox = Some(sandbox.clone());
@@ -223,29 +231,37 @@ fn endpoint(config: &Config, model: Option<String>) -> Result<ModelEndpoint, Axi
     })
 }
 
-/// The run's gate (B3): mode `default` with nobody to answer a question, and
-/// the skill's declared `allowed_tools` as both its allow rules and its
-/// narrowing — what the skill names is allowed, everything else is refused
-/// before any rule or mode is asked. A skill that declares nothing keeps the
-/// mode's own word: reads are free, everything that changes something asks
-/// and `Nobody` refuses it.
+/// The skill's declared `allowed_tools` as rules — parsed once, for the gate (B3) and, in HS8, for whether
+/// the run offers `task` at all (HS8, B3): offering and allowing come from one reading of the frontmatter.
 ///
 /// # Errors
 ///
 /// [`AxiomataError::InvalidSkill`] for an `allowed_tools` entry that is no
 /// rule — the skill exists but is misconfigured; named by the run, since only
 /// the request travels here.
-fn gate_for(name: Option<&str>, allowed_tools: Option<&str>) -> Result<Gate, AxiomataError> {
-    let declared = match allowed_tools.map(str::trim).filter(|text| !text.is_empty()) {
+fn declared_rules(
+    name: Option<&str>,
+    allowed_tools: Option<&str>,
+) -> Result<Vec<Rule>, AxiomataError> {
+    match allowed_tools.map(str::trim).filter(|text| !text.is_empty()) {
         Some(text) => skills::rules_of(text).map_err(|reason| AxiomataError::InvalidSkill {
             path: PathBuf::from(name.unwrap_or("the run")),
             reason: format!("unparsable `allowed_tools`: {reason}"),
-        })?,
-        None => Vec::new(),
-    };
+        }),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The run's gate (B3): mode `default` with nobody to answer a question, and
+/// the skill's declared `allowed_tools` as both its allow rules and its
+/// narrowing — what the skill names is allowed, everything else is refused
+/// before any rule or mode is asked. A skill that declares nothing keeps the
+/// mode's own word: reads are free, everything that changes something asks
+/// and `Nobody` refuses it. [`declared_rules`] parses the list.
+fn gate_for(name: Option<&str>, declared: &[Rule]) -> Gate {
     let mut gate = Gate::new(
         RuleSet {
-            allow: declared.clone(),
+            allow: declared.to_vec(),
             ask: Vec::new(),
             deny: Vec::new(),
         },
@@ -254,9 +270,9 @@ fn gate_for(name: Option<&str>, allowed_tools: Option<&str>) -> Result<Gate, Axi
     );
     if !declared.is_empty() {
         gate.restrict_name = name.map(str::to_owned);
-        gate.restrict = Some(declared);
+        gate.restrict = Some(declared.to_vec());
     }
-    Ok(gate)
+    gate
 }
 
 /// What the run's events leave behind for the record (D7): the errors the
@@ -269,38 +285,44 @@ struct Notes(Arc<Mutex<Vec<String>>>);
 
 impl EventSink for Notes {
     fn emit(&mut self, event: Event) {
-        let line = match event {
-            Event::Error { message } => Some(message),
-            Event::McpServer {
-                name,
-                status: McpStatus::Failed,
-                reason,
-                ..
-            } => Some(format!(
-                "mcp server {name} left out: {}",
-                reason.unwrap_or_else(|| "it did not start".to_owned())
-            )),
-            Event::Permission {
-                allowed: false,
-                tool,
-                reason,
-                ..
-            } => Some(format!("{tool}: {reason}")),
-            // HS7: what a hook did or why it did not (a block's reason, a
-            // failure) — the record shows why a call never ran.
-            Event::Hook {
-                hook_event,
-                note: Some(note),
-                ..
-            } => Some(format!("hook {hook_event}: {note}")),
-            _ => None,
-        };
-        if let Some(line) = line {
+        if let Some(line) = note_of(event) {
             self.0
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner())
                 .push(line);
         }
+    }
+}
+
+/// One event's line for the record, `None` for what the record has nothing to say about (D7). An event of
+/// a subagent (HS8, D8) arrives wrapped in `Sub`: its line is kept with the prefix, never lost.
+fn note_of(event: Event) -> Option<String> {
+    match event {
+        Event::Error { message } => Some(message),
+        Event::McpServer {
+            name,
+            status: McpStatus::Failed,
+            reason,
+            ..
+        } => Some(format!(
+            "mcp server {name} left out: {}",
+            reason.unwrap_or_else(|| "it did not start".to_owned())
+        )),
+        Event::Permission {
+            allowed: false,
+            tool,
+            reason,
+            ..
+        } => Some(format!("{tool}: {reason}")),
+        // HS7: what a hook did or why it did not (a block's reason, a
+        // failure) — the record shows why a call never ran.
+        Event::Hook {
+            hook_event,
+            note: Some(note),
+            ..
+        } => Some(format!("hook {hook_event}: {note}")),
+        Event::Sub { event, .. } => note_of(*event).map(|line| format!("subagent: {line}")),
+        _ => None,
     }
 }
 
@@ -409,11 +431,12 @@ mod tests {
     #[tokio::test]
     async fn the_gate_allows_what_the_skill_declares_and_refuses_the_rest() {
         // B3: the declaration is the whole permission set, narrowed on top of itself.
-        let gate = gate_for(
+        let declared = declared_rules(
             Some("mail-digest"),
             Some("Read mcp__apple-mail__search_emails"),
         )
         .unwrap();
+        let gate = gate_for(Some("mail-digest"), &declared);
         assert_eq!(gate.restrict_name.as_deref(), Some("mail-digest"));
         assert!(gate.mode_name() == "default");
         // A declared tool is allowed by its own rule …
@@ -459,7 +482,10 @@ mod tests {
         // A skill that declares only a command gets no free reads: its
         // declaration is the whole permission set — unlike declaring nothing,
         // where mode default keeps reads free.
-        let git_only = gate_for(Some("release-notes"), Some("Bash(git log:*)")).unwrap();
+        let git_only = gate_for(
+            Some("release-notes"),
+            &declared_rules(Some("release-notes"), Some("Bash(git log:*)")).unwrap(),
+        );
         let refused = git_only
             .judge(
                 "read_file",
@@ -477,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_skill_that_declares_nothing_reads_freely_but_changes_nothing() {
-        let gate = gate_for(Some("summarize"), None).unwrap();
+        let gate = gate_for(Some("summarize"), &[]);
         assert!(gate.restrict.is_none());
         // Mode default: reads are free …
         assert!(
@@ -497,7 +523,7 @@ mod tests {
 
     #[test]
     fn an_unparsable_declaration_is_a_clear_error_naming_the_run() {
-        let err = match gate_for(Some("weird"), Some("Bash(")) {
+        let err = match declared_rules(Some("weird"), Some("Bash(")) {
             Err(err) => err,
             Ok(_) => panic!("unparsable `allowed_tools` must be refused"),
         };
@@ -775,6 +801,66 @@ mod tests {
         assert_eq!(seen[0].1["model"], "test-model");
         let messages = seen[0].1["messages"].to_string();
         assert!(messages.contains("Say the word ok."), "{messages}");
+    }
+
+    /// HS8, B3 end to end: the model's tool list carries `task` only for a
+    /// skill that names it in its `allowed_tools` — the same declaration that
+    /// is the gate's whole permission set, so offering and allowing come from
+    /// one reading of the frontmatter. A skill that does not declare it never
+    /// even sees the tool.
+    #[tokio::test]
+    async fn only_a_skill_declaring_task_is_offered_the_task_tool() {
+        let mut fx = Fixture::new("task-tool");
+        fx.write_skill(
+            "axh-plain",
+            "---\nname: axh-plain\ndescription: d\nbackend: axh\nallowed_tools: Read\n---\n\
+             Say ok.\n",
+        );
+        fx.write_skill(
+            "axh-subbed",
+            "---\nname: axh-subbed\ndescription: d\nbackend: axh\nallowed_tools: Read task\n---\n\
+             Say ok.\n",
+        );
+        let api = FakeApi::spawn(json!({
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2}
+        }))
+        .await;
+        fx.config.agents.skill_provider = ProviderId::OpenRouter;
+        fx.config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some(api.base_url.clone()),
+                api_key: Some("sk-test".into()),
+                chat_model: "c".into(),
+                skill_model: "test-model".into(),
+            },
+        );
+
+        for skill in ["axh-plain", "axh-subbed"] {
+            let record = runner::execute_and_record_skill(skill, &fx.config, &fx.db)
+                .await
+                .unwrap();
+            assert_eq!(record.status, RunStatus::Success, "err: {:?}", record.error);
+        }
+
+        let seen = api.seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "one model call per skill");
+        let offered = |body: &Value| -> Vec<String> {
+            body["tools"]
+                .as_array()
+                .map(|specs| {
+                    specs
+                        .iter()
+                        .filter_map(|spec| spec["function"]["name"].as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let plain = offered(&seen[0].1);
+        assert!(!plain.contains(&"task".to_owned()), "offered: {plain:?}");
+        let subbed = offered(&seen[1].1);
+        assert!(subbed.contains(&"task".to_owned()), "offered: {subbed:?}");
     }
 
     /// B1 end to end: the default skill provider (Anthropic, no base URL)

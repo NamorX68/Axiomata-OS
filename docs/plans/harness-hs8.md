@@ -1,102 +1,173 @@
-# HS8 — subagents: build instructions
+# HS8 — Subagents: a `task` tool starting a nested run
 
-Self-contained instructions for building step HS8 of the harness (`docs/plans/harness.md`, card #37). Written
-2026-10-13 for another model to build without the conversation. Build HS4–HS7 first (`harness-hs4.md` …
-`harness-hs7.md`); HS8 starts from their commits. Owner decisions (2026-10-13) are marked **[owner]**, points the
-planner fixed are **[default]** — build them as written, do not redesign.
+Self-contained instructions for step HS8 of the harness (`docs/plans/harness.md`, card #37). Written 2026-10-14
+for the owner. Owner decisions are marked **[owner]**, points the planner fixed are **[default]** — build them as
+written, do not redesign.
 
 ## Where and how
 
-As in HS4 ("Where and how"): worktree `.claude/worktrees/harness`, branch `worktree-harness`, no `axiomata-core`
-dependency, gate `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`,
-one commit `feat(harness): subagents, step HS8 (#37)`, no push. Frontmatter with the workspace's `gray_matter`, as in
-HS6. Read `src/run.rs` (the loop), `src/tools/mod.rs` (`Toolbox`, `CallContext`), `src/event.rs` and HS6's
-`src/skills/` (same file layout and trust rules) before starting.
+As in HS6/HS6b/HS7: worktree `.claude/worktrees/harness`, branch `worktree-harness`, gate
+`cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`, one commit
+`feat(harness): subagents, step HS8 (#37)`, no push. H2 unchanged (no harness → core dependency); the core wiring
+below is core → harness, as in HS6b/HS7.
 
-## Decisions
+A run gains one tool, `task`. Calling it starts a **nested run**: its own system prompt, its own conversation, its
+own limits — on the parent's model, with the parent's toolbox, gate, hooks and `Cancel`. The tool's result is the
+subagent's final answer, so the parent's context stays clean while the work happens.
 
-- **A1 [owner] — definitions like Claude Code, plus one built in.** Markdown files `~/.axh/agents/<name>.md` (the
-  owner's) and `<project>/.axh/agents/<name>.md` (only in a trusted folder; the project's beats the owner's on equal
-  names). Frontmatter: `name` (required, equals the file stem, `[a-z0-9-]{1,64}`), `description` (required — the
-  parent model reads it to choose), `tools` (optional: a list or comma-separated string of tool names; omitted = all
-  tools the parent has, minus `task`), `model` (optional; `inherit` or omitted = the parent's model). Other keys are
-  ignored. The body is the subagent's instructions. A broken file is skipped with a note, never fails the run;
-  at most 100 definitions, 64 KiB each (named consts). Built in, no file: **`general`** — every tool of the parent
-  except `task`, instructions: work on the task with the tools, then answer with a concise report of what was found
-  or done (the report is all the parent sees). A file named `general.md` is skipped with a note.
-- **A2 [owner] — a subagent never has more rights than its parent.** It shares the parent's `Arc<Gate>` (same rules,
-  mode, `restrict` of a command or skill, same asker — the owner is asked the same way; HS3a's `asking` mutex already
-  serialises asks from parallel subagents), the same sandbox settings and the same hooks (`PreToolUse` /
-  `PostToolUse` fire for its tool calls; `SessionStart`, `UserPromptSubmit`, `Stop` do not — they belong to the
-  parent's run). `tools` only narrows: a tool not listed is **not offered** to the subagent at all. Names in `tools`
-  may be the harness's (`bash`, `read_file`) or Claude Code's (`Bash`, `Read`, … — the mapping of HS7's E5), plus
-  `mcp__<server>` for all of a server's tools or `mcp__<server>__<tool>`; an unknown name is skipped with a note.
-- **A3 [owner] — parallel, depth 1.** A subagent has no `task` tool. When one answer of the parent model contains
-  several `task` calls, they run at the same time — at most 4 at once (named const), the rest wait; other tool calls
-  of that answer keep running one after the other, in order, and every result goes back to the model in the original
-  call order.
-- **A4 [default] — a subagent's own state.** Its own message history (it never sees the parent's conversation, only
-  its prompt), its own shell session (its own folder carry-over and background jobs, all ended when it finishes —
-  parallel subagents would otherwise move each other's working folder), shared MCP clients (`Arc`, one process per
-  server for the whole run), shared skill catalog. Limits: `max_turns` 30 (named const, never above the parent's), the
-  parent's remaining overall time, the parent's stop/cancel ends it at once.
-- **A5 [default] — the `task` tool.** Parameters `{"description": string (3–8 words, for display), "prompt":
-  string, "subagent_type": string (optional, default "general")}`. Its description lists every available agent as
-  `name: description` (each cut at 300 chars, the list at 8 000, like HS6's `skill` tool). `access()` is
-  `Access::Own` — starting a subagent is not an action; everything it does is judged as usual (A2). Result: the
-  subagent's final answer (cut like every tool result), then a line
-  `[subagent <type>: <turns> turns, <in>/<out> tokens, <reason>]`. A subagent that ends on its turn limit, timeout or
-  an error still returns what it has, with the reason; an unknown `subagent_type` is a tool error listing the names.
-- **A6 [default] — events and usage.** `Event::Subagent { id, kind, description, status: "started" | "finished",
-  turns, tokens_in, tokens_out, reason }` (`id` = `"sa-1"`, `"sa-2"`, … per run). Every event a subagent produces is
-  sent as `Event::FromSubagent { id, event: Box<Event> }` (serialized `{"type": "from_subagent", "id": …, "event":
-  {…}}`), so a front end can nest it. Its tokens are added to the parent's `usage` and to `finished`'s totals. The
-  CLI's readable output indents a subagent's lines by two spaces under `▸ subagent <id> <kind>: <description>`.
+## Decisions (owner, 2026-10-14)
+
+- **B1 [owner] — `task` is judged like a change.** The call is `Access::Other` under the tool name `task`: rules
+  (`allow task` / `ask task` / `deny task`) decide first, then the mode — `default`/`accept_edits` **ask**
+  (an interactive answer; headless with nobody there: `no one to ask`, refused), `auto` allows, `plan`/`dont_ask`
+  refuse. Spawning a subagent is therefore *opt-in*: a run switches it on through `allow task` (owner settings,
+  `--allow task`, a role's permissions), through `--permission-mode auto`, or through an interactive answer;
+  `deny task` blocks it everywhere. A narrowed run (a command's or skill's `restrict`) needs `task` declared *and*
+  still passes the normal judgement — a declaration alone never allows (HS6b-B3, C3). No new `Access` variant and
+  no new mode behaviour: every existing statement about rules and modes holds unchanged.
+- **B2 [owner] — the subagent gets exactly the parent's toolbox, minus `task`.** Same `Toolbox` (same gate
+  instance, same shell/MCP/skill sessions, same sandbox), same model, same working folder. No per-call tool
+  selection and no agent types in HS8 — `subagent_type`, roles and tool lists come with M7.5. One level only: a
+  subagent is never offered `task`, so nesting deeper than one cannot start; a hallucinated `task` call falls into
+  the ordinary `call_until` and gets `error: there is no tool named "task"`.
+- **B3 [owner] — the core offers `task` only to skills that declare it.** In an unattended run (`backend: axh`)
+  the frontmatter decides: `RunConfig.subagents` is `true` only when `task` appears in the skill's
+  `allowed_tools` — a skill that declares nothing (most of them) never even sees the tool. Because the core's gate
+  takes `allowed_tools` as its *allow rules* **and** its narrowing (HS6b-B3), the same declaration is at the same
+  time the permission: declared = offered and allowed, undeclared = neither. The `~/.axh` rules and mode never feed
+  the core gate, so they add nothing here. In the CLI/`axh` the layers stay independent: `subagents` defaults to
+  `true` (offering) and the gate alone (B1) decides whether a call passes — a human started that run.
+
+## Defaults (planner)
+
+- **D1 — the tool.** Name `task`, in a new **private** module `crates/axiomata-harness/src/task.rs` (the loop's
+  own tool, not a caller-facing API): the `ToolSpec` — description "Start a subagent for a self-contained piece of
+  work. It runs in its own context — yours stays clean — with the same tools, permissions and folder, and returns
+  only its final answer; give it everything it needs in `prompt`, it sees nothing else." — and two required
+  string arguments: `description` (a short label for the event stream) and `prompt` (the subagent's whole user
+  message). A missing or empty one answers
+  `error: the task needs a non-empty description and prompt`; the run goes on. The name `task` is reserved at
+  depth 0 — a caller's own tool of that name would be shadowed (documented here, not guarded).
+- **D2 — where it runs: in the loop, replacing only the `call_until` step.** The rest of a call's path stays
+  exactly as it is (`ToolCall` event, `MAX_CALLS_PER_TURN`, `PreToolUse`, gate-log drain, `ToolResult` event,
+  `PostToolUse`, the tool message). The arm itself:
+  1. parse the arguments (D1);
+  2. if the toolbox has a gate: `gate.judge("task", &Access::Other)` — a refusal ends the arm with
+     `error: <reason>` exactly as `call_until` would; **the parent drains the gate's judgement log right after the
+     judgement and before the nested run starts** (the nested run drains the same log in its own loop — left
+     waiting, the parent's `task` judgement would surface inside the subagent's events and vanish from the
+     parent's);
+  3. run the nested run (D3) through the wrapper of D8 with a copy of the config: `instructions: None`,
+     `max_turns`/`timeout` from D6, the effective timeout additionally capped by the parent's remaining time
+     (`deadline − now`), everything else — cwd, hooks, sandbox, skill dirs, `max_output_tokens` — identical, and
+     the same `Cancel`;
+  4. after it returns: `usage += nested.usage`, so the parent's `Finished` carries the subagent's tokens too (the
+     spend metering stays honest); gate judgements the nested run left behind (it cancelled between judging and
+     draining) are drained **wrapped as `Sub` events**, so nothing surfaces on the wrong level;
+  5. map the outcome to the tool result: `Answered` → `true` with the answer, cut to
+     `MAX_TOOL_OUTPUT_CHARS` (an empty answer → `true` with `the subagent finished without text`);
+     `MaxTurns`/`Timeout`/`Cancelled`/`Failed` → `false` with
+     `error: the subagent stopped without answering: <reason>` — the parent's own checks end it on the next turn
+     (they share the cancel token and the deadline). The nested call goes through `Box::pin` (async recursion).
+- **D3 — `run()` keeps its signature; the nesting lives in `run_inner(..., depth)`.** Depth 0 = today's run plus
+  the `task` spec appended to `specs` (and into `Event::Started.tools`) and D2's interception; `SessionStart`
+  hooks fire at depth 0 only. Depth ≥ 1 = no `task` spec, no interception, everything else identical. Public
+  `run()` calls `run_inner(..., depth: 0)`. `RunConfig.subagents == false` behaves like a run built without the
+  spec and without the interception (D7).
+- **D4 — the subagent runs the owner's hooks.** `PreToolUse`/`PostToolUse`/`Stop` fire inside the nested run as
+  in any run — HS7-B2's veto must hold for a subagent too, it works with the run's tools; `SessionStart` does
+  **not** repeat (it belongs to the run, not to a subagent). The nested run's hook payloads carry its own
+  `session_id`, generated exactly as today, so a hook sees a distinct session per subagent.
+- **D5 — the subagent's own prompt** (the roadmap's "its own prompt"): `prompt::subagent_prompt(cwd, date)` — a
+  fixed short system prompt: you are a subagent inside a larger run on the user's machine; do only the task in the
+  user message; use the tools and read a file before you change it; when the task is done answer with the result
+  alone, no preamble — the agent that sent you continues from your answer; then `Working folder:` and `Today:`.
+  The nested messages are `[system, user(prompt)]`: the parent's `RunConfig.instructions` are **dropped** for the
+  subagent (they are the caller's contract with the parent; isolation is the point — the parent's model passes
+  along whatever context the subagent needs).
+- **D6 — limits**, as named consts in `config.rs` and `RunConfig` fields with those defaults:
+  `DEFAULT_SUBAGENT_MAX_TURNS = 15` and `DEFAULT_SUBAGENT_TIMEOUT = 5 min`. The subagent's turns count only
+  against its own limit (D2.3 caps its time by the parent's remaining time); the parent's `Finished.turns` stays
+  its own model calls while its `Finished.usage` includes the subagent's tokens (D2.4).
+- **D7 — availability is `RunConfig.subagents: bool`, default `true`.** `false` = no spec, no interception. The
+  CLI/`axh` keep the default; the core sets it per B3.
+- **D8 — events: `Event::Sub { depth: u32, event: Box<Event> }`.** Everything the nested run emits arrives
+  wrapped — `Started`, `Usage`, `AssistantText`, `ToolCall`, `ToolResult`, `Permission`, `Hook`, `Skill`, `Error`
+  and its own `Finished`, nothing dropped; the inner field serialises as **`inner`** (the outer tag already owns
+  `event`): `{"event":"sub","depth":1,"inner":{…}}`. The wrapper is a small `SubSink` in `run.rs` borrowing the
+  parent's sink; accounting never counts events — D2.4 sums the `RunOutcome`. The parent's `ToolCall(task)` …
+  `ToolResult(task)` bracket the whole nested stream. Consumers:
+  - **CLI `Readable`**: the match moves into `fn render(&Event) -> Option<String>` (`Usage` → `None`, as today);
+    `Event::Error` stays a stderr line, also inside a `Sub` (with its indent); the `Sub` arm renders the inner
+    event indented by `"  " × depth`, nested wrappers cumulatively, except a sub's `Finished`, which reads
+    `↳ subagent · {turns} turns · {in}/{out} tokens` so a second finished line can never be mistaken for the
+    run's own.
+  - **`axh`'s JSON lines**: unchanged — serde handles the nesting.
+  - **core `Notes`**: the collector's match becomes a function it calls recursively for a `Sub`; a line from
+    inside a subagent is prefixed `subagent: `.
+- **D9 — hook alias**: `claude_alias("task") = Some("Task")`, so a `PreToolUse`/`PostToolUse` matcher written for
+  Claude's `Task` tool fires on ours (HS7-D2 extended).
+- **D10 — core wiring (B3)**: a small `pub` method `Rule::names_tool(&self, name: &str) -> bool` in
+  `permissions` (kind `Tool`, that tool name, no pattern — exactly what `restrict_allows` decides for such a call);
+  `core/agents/axh.rs` sets `RunConfig.subagents = request.allowed_tools`' parsed rules containing
+  `names_tool("task")` — the same `rules_of` list it already feeds the gate with — and leaves the gate
+  construction itself untouched. The `Notes` recursion of D8 is the only other core edit.
 
 ## What to build
 
-1. **`src/agents/mod.rs`** — `AgentDef { name, description, tools: Option<Vec<String>>, model: Option<String>,
-   instructions: String, source }`; `AgentCatalog::load(home, project, trusted) -> (AgentCatalog, Vec<String>)`
-   including `general` (A1).
-2. **A tool factory.** The `task` tool must build a fresh toolbox for each subagent (A4). Add to `src/tools/mod.rs`:
-   `pub trait ToolFactory: Send + Sync { fn build(&self) -> Result<Toolbox, HarnessError>; }` — the caller (`axh`,
-   the CLI) implements it with what it already builds (file tools, `shell_tools` with the same options, the shared
-   MCP tools, the skill tool), **without** `task`. Then filter by the definition's `tools` (A2) and set the parent's
-   gate and hooks on it.
-3. **`src/agents/task.rs`** — the `task` tool (A5): resolve the type, build the toolbox, run a nested `run::run`
-   with a `RunConfig` derived from the parent's (A4 limits, model from A1), a sink that wraps events (A6), and the
-   parent's stop flag; return the report.
-4. **`src/run.rs`** — run consecutive `task` calls of one answer concurrently (A3): a `JoinSet` + `Semaphore(4)`;
-   keep results in call order. Sum subagent usage into the run's totals (A6).
-5. **`event.rs`** — `Event::Subagent`, `Event::FromSubagent` (A6).
-6. **`bin/axh.rs` / `harness_cmd.rs`** — load the catalog with the other settings, implement `ToolFactory`, add the
-   `task` tool to the parent's toolbox — always, whatever the mode: its subagent is held by the same gate (A2) —
-   and the readable output (A6).
-7. **Docs** in the same commit — `docs/plans/harness.md`: row HS8 ✅, section "HS8 — subagents (decided
-   2026-10-13)" with A1–A6 and "HS8 — what exists"; status line in `docs/architecture.md`; `AGENTS.md` status
-   `HS1–HS8 built` (HS6b open).
+1. **`event.rs`** — `Event::Sub` (D8) + its JSON test; **`config.rs`** — `subagents`, `subagent_max_turns`,
+   `subagent_timeout` with the two consts (D6/D7).
+2. **`task.rs` (new, private)** — the spec and the argument check (D1).
+3. **`prompt.rs`** — `subagent_prompt` (D5); **`permissions/mod.rs`** — `Rule::names_tool` (D10);
+   **`hooks.rs`** — the `task → Task` alias (D9).
+4. **`run.rs`** — `run_inner(depth)` behind the unchanged `run()`, the `task` arm with its judgement ordering
+   (D2), the nested `RunConfig` (D2.3), usage aggregation, `SubSink` (D8), the depth rules (D3).
+5. **`crates/axiomata-cli/src/harness_cmd.rs`** — the `Readable` refactor and the `Sub` arm (D8).
+6. **`crates/axiomata-core/src/agents/axh.rs`** — the `subagents` flag from the frontmatter (B3/D10) and the
+   `Notes` recursion (D8).
+7. **Docs in the same commit** — this file; `docs/plans/harness.md` (roadmap HS8 ✅, an `HS8 — subagents`
+   decisions section, an `HS8 — what exists`); `docs/architecture.md` (§5 harness paragraph + status log);
+   worktree `AGENTS.md` (`HS1–HS8 built` + one trap line about the two layers: offering vs judging).
 
 ## Tests (inline, all must pass)
 
-Use the fake model server the existing `run.rs`/`model.rs` tests use; script it so the parent calls `task` and the
-subagent answers.
-
-- catalog: owner + trusted project merged, project wins; untrusted project skipped; `general.md` skipped; missing
-  `description` skipped; `tools` as list and as string; `model: inherit`.
-- task: the subagent gets only the prompt (not the parent's messages); its final text and the summary line come back;
-  unknown `subagent_type` → tool error with the names; turn limit → partial report with reason.
-- rights: a subagent with `tools: Read` is not offered `bash` (check the tool list it was sent); in `plan` mode a
-  subagent's `write_file` is refused; a deny rule of the parent holds for the subagent; the subagent has no `task`.
-- parallel: three `task` calls in one answer run concurrently (prove it with a fake model that waits until all three
-  requests arrived, with a timeout), at most 4 at once with six calls, results in call order.
-- state: two parallel subagents each `cd` into a different subfolder and `pwd` — each sees its own; a subagent's
-  background job is gone after it finishes.
-- cancel: stopping the parent ends running subagents.
-- events: `from_subagent` wraps a subagent's `tool_call`; `subagent` started/finished; tokens added to the parent's
-  totals.
+- **arguments**: a `task` call without `description`/`prompt` (or an empty one) → the tool error, no nested model
+  call (the scripted model's call count stays at one).
+- **the happy path**: script `[task call → subagent's text answer → parent's final answer]`; the parent answers
+  with the final text; the stream holds `Sub { depth: 1, … }` events (the subagent's `AssistantText` and its
+  `Finished`) beside exactly **one unwrapped** `Finished`; the parent's `Finished.usage` is the exact sum of all
+  three replies's tokens (7/1 + 10/2 + 10/2 = 27/5); `Event::Started.tools` contains `task` at depth 0 and the
+  subagent's request's tool list does not (the scripted model records the specs it was offered).
+- **B1**: `deny task` → refused, no nested call, a `Permission` event with `allowed: false` and `tool: "task"`;
+  mode `default` + `Nobody` + no rule → refused (`no one to ask`); `allow task` → the subagent runs. The other
+  modes' behaviour is `Access::Other`'s, already pinned by HS3a's tests.
+- **restrict**: a narrowed run whose rules do not name `task` refuses it, naming the command (HS6b-B3); with
+  `task` declared *and* an `allow task` rule it runs — the two layers of B1 in one test.
+- **hooks inside** (D4): a `PreToolUse` hook blocking `echo` blocks the subagent's own call —
+  `Sub { … Hook { blocked: true } }` in the stream and `error: …` in the subagent's next message; a
+  `SessionStart` hook fires **once** in a run that used `task`.
+- **limits** (D6): `subagent_max_turns = 1` → the subagent's single turn calls a tool, its second turn hits the
+  limit → the parent gets `error: the subagent stopped without answering: MaxTurns` and finishes normally with its
+  next reply; `subagent_timeout = 0` → the subagent never reaches the model (its replies stay queued), the
+  parent continues.
+- **cancel**: a test tool that fires the run's `Cancel` from inside the subagent → the subagent stops, and the
+  parent run ends `Cancelled`.
+- **D7**: `subagents: false` → no `task` in the offered specs; a `task` call gets
+  `error: there is no tool named "task"`.
+- **core (B3)**: the end-to-end skill run's request body has **no** `task` tool for a skill whose frontmatter
+  declares no `task`; with `allowed_tools: Read task` the body offers it (the gate's allow side of the same
+  declaration is pinned by HS6b's own test).
+- **event/CLI/permissions**: `Event::Sub` serialises as `{"event":"sub","depth":1,"inner":{…}}`; `render` indents
+  a nested event, writes a sub's finished line as `↳ …`, and returns `None` for `Usage`; `Rule::names_tool` on a
+  plain rule, a patterned rule and a non-tool rule; `claude_alias("task") == Some("Task")`; `subagent_prompt`
+  carries the working folder and the date.
 
 ## Out of scope (do not build)
 
-Subagents starting subagents, background subagents that outlive their `task` call, resuming a subagent, its own
-permission rules, `SubagentStop` hooks, Axiomata's `AGENT.md` roles as subagents, a subagent on another provider or
-key. Each is a later step.
+Parallel `task` calls in one turn (the loop runs a reply's calls one after the other — by design), subagent
+types/roles (`subagent_type`), a per-call tool list (B2 declined), per-subagent models, nesting deeper than one
+level (B2), `SubagentStop`-style hooks, presenting `Event::Sub` in the Studio/app, subagents on the
+opencode/ollama backends — and the roadmap's next backend items (sessions over several turns, streaming, the
+Anthropic client). Known limit, documented not fixed: events a tool sends through its own sink handle (the
+`skill` tool's load event) arrive at the top level rather than wrapped — they are neither turned off nor
+miscounted, only not indented.

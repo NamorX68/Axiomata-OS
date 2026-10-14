@@ -414,74 +414,109 @@ struct Readable;
 
 impl EventSink for Readable {
     fn emit(&mut self, event: Event) {
-        let line = match event {
-            Event::Started { model, cwd, tools } => {
-                format!("▸ {} in {cwd} · {} tools", plain(&model), tools.len())
-            }
-            // The command a prompt came from, before the run's own lines (HS4).
-            Event::Command { name, source, .. } => format!("/{name} ({source})"),
-            Event::AssistantText { text, .. } => format!("\n{}\n", plain(&text)),
-            Event::ToolCall {
-                name, arguments, ..
-            } => format!("→ {} {}", plain(&name), preview(&arguments)),
-            Event::ToolResult { ok, output, .. } => {
-                format!("  {} {}", if ok { "✓" } else { "✗" }, preview(&output))
-            }
-            Event::Usage { .. } => return,
-            Event::Permission {
-                allowed, reason, ..
-            } => {
-                format!("  {} {}", if allowed { "·" } else { "⊘" }, plain(&reason))
-            }
-            // An MCP server of this run, connected or failed (HS5).
-            Event::McpServer {
-                name,
-                status,
-                tools,
-                reason,
-            } => match status {
-                McpStatus::Connected => format!("◇ mcp {} · {tools} tools", plain(&name)),
-                McpStatus::Failed => format!(
-                    "◇ mcp {} ✗ {}",
-                    plain(&name),
-                    plain(reason.as_deref().unwrap_or("it did not start"))
+        // Errors go to stderr — stdout carries a command run's reply (HS4) — also from inside a
+        // subagent, where they keep their indent (HS8, D8).
+        if let Some((indent, message)) = error_of(&event) {
+            eprintln!("{indent}error: {message}");
+            return;
+        }
+        if let Some(line) = render(&event) {
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{line}");
+            let _ = out.flush();
+        }
+    }
+}
+
+/// One event's line for the terminal, `None` for what is not printed: a `Usage` (as before) and an
+/// `Error` (stderr's, [`emit`] takes those before this is asked).
+fn render(event: &Event) -> Option<String> {
+    let line = match event {
+        Event::Started { model, cwd, tools } => {
+            format!("▸ {} in {cwd} · {} tools", plain(model), tools.len())
+        }
+        // The command a prompt came from, before the run's own lines (HS4).
+        Event::Command { name, source, .. } => format!("/{name} ({source})"),
+        Event::AssistantText { text, .. } => format!("\n{}\n", plain(text)),
+        Event::ToolCall {
+            name, arguments, ..
+        } => format!("→ {} {}", plain(name), preview(arguments)),
+        Event::ToolResult { ok, output, .. } => {
+            format!("  {} {}", if *ok { "✓" } else { "✗" }, preview(output))
+        }
+        Event::Permission {
+            allowed, reason, ..
+        } => {
+            format!("  {} {}", if *allowed { "·" } else { "⊘" }, plain(reason))
+        }
+        // An MCP server of this run, connected or failed (HS5).
+        Event::McpServer {
+            name,
+            status,
+            tools,
+            reason,
+        } => match status {
+            McpStatus::Connected => format!("◇ mcp {} · {tools} tools", plain(name)),
+            McpStatus::Failed => format!(
+                "◇ mcp {} ✗ {}",
+                plain(name),
+                plain(reason.as_deref().unwrap_or("it did not start"))
+            ),
+        },
+        // A skill of this run: as the run itself (K1.1) or loaded by the model (K1.2).
+        Event::Skill { name, how } => {
+            let how = match how {
+                SkillHow::Run => "as the run",
+                SkillHow::Loaded => "loaded",
+            };
+            format!("✳ skill {} · {how}", plain(name))
+        }
+        // A hook of this run (HS7): its event, whether it blocked, and what it had to say.
+        Event::Hook {
+            hook_event,
+            blocked,
+            note,
+            ..
+        } => format!(
+            "△ hook {hook_event}{} · {}",
+            if *blocked { " ⊘" } else { "" },
+            plain(note.as_deref().unwrap_or("ran"))
+        ),
+        Event::Finished {
+            reason,
+            turns,
+            usage,
+        } => format!(
+            "■ {reason:?} · {turns} turns · {} in / {} out tokens",
+            usage.input_tokens, usage.output_tokens
+        ),
+        Event::Usage { .. } | Event::Error { .. } => return None,
+        // A subagent's events, indented by their depth (HS8, D8). Its own finished line reads `↳`, not
+        // `■`: two run-looking finished lines would have a reader count the run's end twice.
+        Event::Sub { depth, event } => {
+            let inner = match &**event {
+                Event::Finished { turns, usage, .. } => format!(
+                    "↳ subagent · {turns} turns · {} in / {} out tokens",
+                    usage.input_tokens, usage.output_tokens
                 ),
-            },
-            // A skill of this run: as the run itself (K1.1) or loaded by the model (K1.2).
-            Event::Skill { name, how } => {
-                let how = match how {
-                    SkillHow::Run => "as the run",
-                    SkillHow::Loaded => "loaded",
-                };
-                format!("✳ skill {} · {how}", plain(&name))
-            }
-            // A hook of this run (HS7): its event, whether it blocked, and what it had to say.
-            Event::Hook {
-                hook_event,
-                blocked,
-                note,
-                ..
-            } => format!(
-                "△ hook {hook_event}{} · {}",
-                if blocked { " ⊘" } else { "" },
-                plain(note.as_deref().unwrap_or("ran"))
-            ),
-            Event::Error { message } => {
-                eprintln!("error: {}", plain(&message));
-                return;
-            }
-            Event::Finished {
-                reason,
-                turns,
-                usage,
-            } => format!(
-                "■ {reason:?} · {turns} turns · {} in / {} out tokens",
-                usage.input_tokens, usage.output_tokens
-            ),
-        };
-        let mut out = std::io::stdout().lock();
-        let _ = writeln!(out, "{line}");
-        let _ = out.flush();
+                inner => render(inner)?,
+            };
+            return Some(format!("{}{inner}", "  ".repeat(*depth as usize)));
+        }
+    };
+    Some(line)
+}
+
+/// `(indent, message)` of an error event wherever it sits in the stream — a subagent's errors arrive
+/// wrapped in `Sub` and keep their depth's indent (HS8, D8); `None` for every other event.
+fn error_of(event: &Event) -> Option<(String, String)> {
+    match event {
+        Event::Error { message } => Some((String::new(), plain(message))),
+        Event::Sub { depth, event } => {
+            let (indent, message) = error_of(event)?;
+            Some((format!("{}{indent}", "  ".repeat(*depth as usize)), message))
+        }
+        _ => None,
     }
 }
 
@@ -577,5 +612,64 @@ mod tests {
             preview(&"x".repeat(PREVIEW_CHARS + 5)).chars().count(),
             PREVIEW_CHARS + 1
         );
+    }
+
+    #[test]
+    fn a_subagents_events_are_indented_and_their_finished_reads_its_own() {
+        use axiomata_harness::Usage;
+
+        // HS8, D8: the subagent's own finished line is a `↳`, never the run's `■`.
+        let finished = Event::Sub {
+            depth: 1,
+            event: Box::new(Event::Finished {
+                reason: FinishReason::Answered,
+                turns: 3,
+                usage: Usage {
+                    input_tokens: 30,
+                    output_tokens: 6,
+                },
+            }),
+        };
+        assert_eq!(
+            render(&finished).as_deref(),
+            Some("  ↳ subagent · 3 turns · 30 in / 6 out tokens")
+        );
+        let own = Event::Finished {
+            reason: FinishReason::Answered,
+            turns: 3,
+            usage: Usage {
+                input_tokens: 30,
+                output_tokens: 6,
+            },
+        };
+        assert_eq!(
+            render(&own).as_deref(),
+            Some("■ Answered · 3 turns · 30 in / 6 out tokens")
+        );
+
+        // A `Usage` is never printed, wrapped or not.
+        let usage = Event::Sub {
+            depth: 1,
+            event: Box::new(Event::Usage {
+                turn: 1,
+                input_tokens: 1,
+                output_tokens: 2,
+            }),
+        };
+        assert_eq!(render(&usage), None);
+
+        // Errors stay stderr's, wherever they sit, and a subagent's keeps its indent.
+        let error = Event::Error {
+            message: "boom".into(),
+        };
+        assert_eq!(error_of(&error), Some((String::new(), "boom".into())));
+        let wrapped = Event::Sub {
+            depth: 2,
+            event: Box::new(Event::Error {
+                message: "boom".into(),
+            }),
+        };
+        assert_eq!(error_of(&wrapped), Some(("    ".into(), "boom".into())));
+        assert_eq!(error_of(&own), None);
     }
 }
