@@ -65,15 +65,26 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
   explicit `cache_control`, ~10 % of input price on reads with a small surcharge on the write; others automatic).
   The spend metering would then have to know the cache's read/write prices, or `metered_cost_usd` over-estimates.
 - **Directions sketched with the owner (2026-10-14, none decided):** (a) *compaction by a small local model* —
-  the config's `ollama_model` (`gemma4:12b-mlx`) summarising old turns, but **not through the veto hooks** (HS7
-  stays "hooks veto, never permit"): a caller-supplied compactor trait, structured summaries (paths, errors and
-  numbers verbatim), a recency window of verbatim turns, full text kept on disk with the path in the summary;
-  (b) *tool-output diet* — purpose-built result contracts (a test tool returning exit code + failures only),
-  and generically: full output written to a log file, the tool result carrying exit code + tail + the path
-  ("more on disk, grep it") — relocation of information, never loss; (c) *subagent model routing* — an optional
-  `model` in the `task` args (allowlisted, metered, capped) letting the parent pick a cheaper model per task; a
-  separate decision model only when subagents start arising automatically (the planner), and heuristics over a
-  paid classifier.
+  **not through the veto hooks** (HS7 stays "hooks veto, never permit") but a caller-supplied compactor trait;
+  the owner's own reference implementation is **OChaT's hybrid memory**
+  (`~/Documents/Development/PyProjects/OChaT/docs/memory-system.md`): the last N messages verbatim, older ones
+  kept by score (code bonus ×2 + length bonus, max 5), a summary of the rest with caching, oldest trimmed first
+  against a token budget. For axh: the same shape, but one-shot **into** the history (a stable prefix keeps
+  caching possible, unlike a per-request projection), strict summary instructions (paths, errors, numbers
+  verbatim; success-only output compresses — the "tests are OK" case), and **a small local model, not a 12b
+  one** (owner: summarisation with instructions needs the ≤ ~3b class; Ollama's catalogue now hosts those —
+  the same class serves as a *local classifier*, so a paid decision model is never needed); the full text
+  stays on disk with its path in the summary. (b) *tool-output diet* — purpose-built result contracts (a test
+  tool returning exit code + failures only), and generically: full output written to a log file, the tool
+  result carrying exit code + tail + the path ("more on disk, grep it") — relocation of information, never
+  loss. (c) *subagent model routing* — the app's planner already picks a model per plan step (CP-A7), so the
+  harness side only needs to **accept** an optional `model` in the `task` args (allowlisted, metered, capped);
+  the decision stays with the caller, and the classifier that feeds it, when subagents arise automatically, is
+  local — no paid API.
+- **Standalone constraint (owner, 2026-10-14):** `axh` is meant to become a harness of its own someday (working
+  name "Glut"). Every context-diet mechanism above must live in the harness behind traits/config with defaults
+  **off**, reaching neither `~/.axiomata` nor the core (H2's spirit): the caller wires in the local model, the
+  classifier or the planner's choice.
 
 ## HS8 — subagents (decided 2026-10-14)
 
