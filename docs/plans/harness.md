@@ -137,7 +137,13 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
    phase before anything is shipped, never the production path. The trait boundary absorbs every backend
    difference, only the adapter changes. Licensing of the shipped
    models to be checked before distributing (Apache-2.0 ok, research-only no). Writing an inference engine
-  oneself: explicitly rejected — kernel-level competition, months for less than llama.cpp already does.
+  oneself: explicitly rejected — kernel-level competition, months for less than llama.cpp already does. An
+  AI-assisted port does not change that calculus: REA (`morluto/rea`, viral Oct 2026) reconstructs *binaries*
+  without source, but MLX and mlx-lm are open source — nothing to reverse-engineer, and porting from source is
+  still a port (upstream churn, no parity suite for Metal kernels à la uutils-vs-coreutils). The move that
+  survives is **convert the model, not the engine**: the strands head is a few hundred lines and its GGUF
+  exists, tev1 needs no conversion at all; llama.cpp tracks new architectures upstream, the harness stands on
+  a thin FFI.
 
 ## HS8 — subagents (decided 2026-10-14)
 
