@@ -97,7 +97,7 @@ pub struct RunRecord {
     pub id: Option<i64>,
     /// Skill name as resolved at run time.
     pub skill_name: String,
-    /// `"opencode"` or `"ollama"`.
+    /// `"opencode"`, `"ollama"` or `"axh"` (the own harness).
     pub backend: String,
     /// Overall outcome.
     pub status: RunStatus,
@@ -169,7 +169,7 @@ pub struct RunSummary {
     pub id: i64,
     /// Skill name as resolved at run time.
     pub skill_name: String,
-    /// `"opencode"` or `"ollama"`.
+    /// `"opencode"`, `"ollama"` or `"axh"` (the own harness).
     pub backend: String,
     /// Overall outcome.
     pub status: RunStatus,

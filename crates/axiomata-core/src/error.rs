@@ -54,6 +54,14 @@ pub enum AxiomataError {
     #[error("roster: {0}")]
     Roster(#[from] axiomata_roster::RosterError),
 
+    /// The own agent harness (`docs/plans/harness.md`, step HS6b) refused a
+    /// setup step of a `backend: axh` run — settings that do not parse, a
+    /// folder it cannot work in. Its own variant for the same reason as
+    /// `Board`/`Ide`/`Roster`: the harness is a crate of its own, built to be
+    /// lifted out, and carries its own error type.
+    #[error("harness: {0}")]
+    Harness(#[from] axiomata_harness::HarnessError),
+
     /// Applying a specific schema migration failed.
     #[error("migration {version} failed: {source}")]
     Migration {
@@ -63,8 +71,8 @@ pub enum AxiomataError {
     },
 
     /// A skill's frontmatter or a routine referenced an agent backend
-    /// identifier that is neither `"opencode"` nor `"ollama"`.
-    #[error("unknown agent backend {backend:?} (expected \"opencode\" or \"ollama\")")]
+    /// identifier that is neither `"opencode"`, `"ollama"` nor `"axh"`.
+    #[error("unknown agent backend {backend:?} (expected \"opencode\", \"ollama\" or \"axh\")")]
     UnknownAgentBackend { backend: String },
 
     /// The agent child process could not be spawned or waited on.

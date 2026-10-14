@@ -1,7 +1,9 @@
 //! Agent backends: `Opencode` (turns on Opencode 2's shared background
 //! service — the single agent harness for every model Axiomata runs, cloud or
-//! local) and `Ollama` (a
-//! single raw completion against a local model for simple, tool-free tasks).
+//! local), `Ollama` (a
+//! single raw completion against a local model for simple, tool-free tasks)
+//! and `Axh` (a run through Axiomata's own harness, `axiomata-harness` —
+//! step HS6b, `docs/plans/harness-hs6b.md`).
 //!
 //! Skill and routine execution dispatches through the [`AgentBackend`] enum
 //! rather than a plugin registry or trait-object abstraction — a deliberate
@@ -23,6 +25,7 @@ use std::time::Duration;
 use crate::config::{Config, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 
+pub mod axh;
 pub mod ollama;
 pub mod opencode;
 
@@ -32,6 +35,10 @@ pub mod opencode;
 pub const BACKEND_OPENCODE: &str = "opencode";
 /// See [`BACKEND_OPENCODE`].
 pub const BACKEND_OLLAMA: &str = "ollama";
+/// See [`BACKEND_OPENCODE`]. Runs the skill through Axiomata's own harness
+/// (`docs/plans/harness-hs6b.md`, B1): an OpenAI-compatible endpoint of the
+/// skill provider, no opencode involved.
+pub const BACKEND_AXH: &str = "axh";
 
 /// Upper bound on how much of a backend's output is kept, shared by the raw
 /// completion [`AgentBackend::Ollama`] and the headless
@@ -165,6 +172,16 @@ pub enum AgentBackend {
     /// loop. Intended for simple, deterministic tasks (e.g. appending a to-do
     /// item).
     Ollama { model: String },
+    /// A run through Axiomata's own harness (`axiomata-harness`,
+    /// `docs/plans/harness.md`, step HS6b): the same lean tool-calling loop
+    /// the `axh` binary runs, driven from the core — guarded file tools, the
+    /// skill's own `allowed_tools` as its permissions, the sandbox, the
+    /// harness's MCP servers, an OpenAI-compatible endpoint of the skill
+    /// provider (so the provider must carry a base URL and key — B1, no
+    /// silent fallback to opencode). The prompt arrives fully built
+    /// (`skills::runner::build_prompt_at`), as on opencode; the model id
+    /// travels bare through [`AgentRequest::model`].
+    Axh,
 }
 
 impl AgentBackend {
@@ -172,10 +189,11 @@ impl AgentBackend {
     /// onto a concrete backend.
     ///
     /// Args:
-    ///     backend: `"opencode"` or `"ollama"`.
+    ///     backend: `"opencode"`, `"ollama"` or `"axh"`.
     ///     model_override: For `"ollama"`, a model name that wins over the
-    ///         configured default; ignored for `"opencode"` (its model is
-    ///         resolved separately, see [`opencode::model_id`]).
+    ///         configured default; ignored for `"opencode"` and `"axh"` (their
+    ///         models are resolved separately, see [`opencode::model_id`] and
+    ///         `skills::runner::resolve_run_model`).
     ///     config: Provides the model fallback (`agents.ollama_model`).
     ///
     /// Returns:
@@ -191,6 +209,7 @@ impl AgentBackend {
     ) -> Result<Self, AxiomataError> {
         match backend {
             BACKEND_OPENCODE => Ok(Self::Opencode),
+            BACKEND_AXH => Ok(Self::Axh),
             BACKEND_OLLAMA => {
                 let model = model_override
                     .map(str::to_owned)
@@ -219,6 +238,7 @@ impl AgentBackend {
         match self {
             Self::Opencode => BACKEND_OPENCODE,
             Self::Ollama { .. } => BACKEND_OLLAMA,
+            Self::Axh => BACKEND_AXH,
         }
     }
 
@@ -227,10 +247,19 @@ impl AgentBackend {
     /// A non-zero `exit_code` in the returned [`AgentRunResult`] means the
     /// agent ran but reported failure; an `Err` means it could not be run at
     /// all (spawn failure, timeout, transport error).
-    pub async fn run(&self, request: AgentRequest) -> Result<AgentRunResult, AxiomataError> {
+    ///
+    /// `config` supplies the skill provider's endpoint to [`Self::Axh`]; the
+    /// other backends resolve their own model and talk to a service that
+    /// carries its auth, so they ignore it.
+    pub async fn run(
+        &self,
+        request: AgentRequest,
+        config: &Config,
+    ) -> Result<AgentRunResult, AxiomataError> {
         match self {
             Self::Opencode => opencode::run(request).await,
             Self::Ollama { model } => ollama::run(request, model).await,
+            Self::Axh => axh::run(request, config).await,
         }
     }
 }
@@ -383,6 +412,10 @@ pub struct AgentRequest {
     /// stdin and becomes the task message; for Ollama it is the raw completion
     /// prompt.
     pub prompt: String,
+    /// The run's name — the skill or routine that triggered it. For `axh` it
+    /// becomes the gate's `restrict_name`, so a refused call says which skill
+    /// narrowed the run (`docs/plans/harness-hs6b.md`, B3).
+    pub name: Option<String>,
     /// Working directory for the agent: the session's location, so workspace
     /// context and project opencode config load from here.
     pub cwd: PathBuf,
@@ -394,8 +427,10 @@ pub struct AgentRequest {
     /// backend does the prepending itself.
     pub system_prompt_file: Option<PathBuf>,
     /// For opencode: the full `provider/model` id built by
-    /// [`opencode::model_id`]. Ignored by Ollama (its model lives in the
-    /// backend enum).
+    /// [`opencode::model_id`]. For `axh`: the **bare** model as the API names
+    /// it (`deepseek/deepseek-chat`) — see
+    /// `skills::runner::resolve_run_model`. Ignored by Ollama (its model lives
+    /// in the backend enum).
     pub model: Option<String>,
     /// Whether tool use is pre-approved for the run; see
     /// [`crate::config::AgentDefaults::auto_approve_tools`]. `false` makes a
@@ -403,8 +438,10 @@ pub struct AgentRequest {
     /// the prompt-injection guard for prompts that embed untrusted content.
     pub auto_approve_tools: bool,
     /// Carried over from `SKILL.md` frontmatter for symmetry; the opencode
-    /// backend ignores it (MCP servers come from opencode's own config). Kept
-    /// so callers don't lose the declared tools.
+    /// backend ignores it (MCP servers come from opencode's own config). The
+    /// `axh` backend makes it the run's permissions — what it names is
+    /// allowed, the rest refused (HS6b, B3). Kept so callers don't lose the
+    /// declared tools.
     pub allowed_tools: Option<String>,
     /// The reply must contain one JSON object (`output: json` in the skill's
     /// frontmatter). The opencode backend asks once more, in the same
@@ -519,6 +556,19 @@ mod tests {
         let backend = AgentBackend::resolve(BACKEND_OPENCODE, None, &Config::default()).unwrap();
         assert_eq!(backend, AgentBackend::Opencode);
         assert_eq!(backend.id(), "opencode");
+    }
+
+    #[test]
+    fn resolve_maps_axh_identifier_onto_the_own_harness() {
+        // HS6b: `backend: axh` is a first-class id; the model override is not
+        // its business (the frontmatter/`skill_model` resolution happens in
+        // `resolve_run_model`), so it resolves the same whatever is passed.
+        for override_model in [None, Some("ignored")] {
+            let backend =
+                AgentBackend::resolve(BACKEND_AXH, override_model, &Config::default()).unwrap();
+            assert_eq!(backend, AgentBackend::Axh);
+            assert_eq!(backend.id(), "axh");
+        }
     }
 
     #[test]

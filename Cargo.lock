@@ -373,6 +373,7 @@ version = "0.1.0"
 dependencies = [
  "axiomata-board",
  "axiomata-files",
+ "axiomata-harness",
  "axiomata-ide",
  "axiomata-opencode",
  "axiomata-roster",

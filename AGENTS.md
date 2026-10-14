@@ -28,7 +28,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
   the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness `axiomata-harness` / `axh`
-  (#37, `docs/plans/harness.md`; HS1–HS6 built, HS6b–HS8 open). Deferred: further model-provider work.
+  (#37, `docs/plans/harness.md`; HS1–HS6b built, HS7–HS8 open). Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
   new work and **update them** (not just this file) when a milestone or major feature lands.
@@ -201,7 +201,11 @@ from the code itself:
   `calc(…)`, not a number. UI icons: `ui/Icon.svelte`/`ui/IconButton.svelte` over the Lucide subset
   vendored by `scripts/vendor-icons.sh`.
 - **Backend ids + the one frontmatter bridge**: `backend:` is `opencode` (default) |
-  `ollama`; the only other relevant field is `prepend_files: ["rel/path.md"]` (workspace files
+  `ollama` | `axh` (the own harness, HS6b — needs a skill provider **with a `base_url`**
+  (open_router/ollama), else the run records a clear `Failed`, never a silent hop to opencode;
+  MCP servers come from `~/.axh/mcp.json` + `.mcp.json`, **never** `opencode.json`; the skill's
+  `allowed_tools` become the run's whole permissions, `~/.axh` rules feed neither);
+  the only other relevant field is `prepend_files: ["rel/path.md"]` (workspace files
   inlined into the prompt as `## Context file:` blocks; missing = skipped, `..`/absolute =
   run fails as a recorded `Failed`, per §D of the Stufe 2 plan). The `local_backend` /
   `effective_backend` mechanism and the `ollama-agent` backend are gone.

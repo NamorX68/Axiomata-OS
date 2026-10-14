@@ -566,10 +566,12 @@ pending migrations.
 
 ### Agent backends (`agents/`)
 
-Execution dispatches through a small `enum`, `AgentBackend { Opencode, Ollama { model } }` —
-deliberately not a trait/registry (see §6). `AgentRequest` carries `prompt`, `cwd`, `timeout`,
+Execution dispatches through a small `enum`, `AgentBackend { Opencode, Ollama { model }, Axh }` —
+deliberately not a trait/registry (see §6). `AgentRequest` carries `prompt`, `name` (the run's
+skill/prompt target, read only by the `axh` gate), `cwd`, `timeout`,
 `system_prompt_file` (the module bridge manifest, appended to **chat turns only** —
-skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see below).
+skill/routine runs omit it), `model`, and `allowed_tools` (documentation for opencode,
+the run's permissions for axh; see below).
 
 - `opencode.rs` is the single agent harness. Since OC1 (`docs/plans/opencode2.md`,
   2026-09-27) it is a **client of Opencode 2's shared background service** through the
@@ -606,6 +608,17 @@ skill/routine runs omit it), `model`, and `allowed_tools` (declarative only; see
   calls headless and is gone with it).
 - `ollama.rs` makes one non-streaming `POST /api/generate` call to the local daemon — the
   simple, tool-free `backend: ollama` completion for deterministic tasks.
+- `axh.rs` (HS6b, `docs/plans/harness-hs6b.md`) runs a skill through **Axiomata's own harness**
+  (`axiomata_harness::run`): the endpoint is the skill provider's `base_url`/`api_key` and the
+  runner's **bare** model — a provider without a base URL (Anthropic today) records a clear
+  `Failed`, never a fallback to opencode. The gate is built fresh per run from the skill's
+  `allowed_tools` (split by the harness's own `rules_of`) over mode `default` with `Nobody` to
+  ask, `restrict_name` = the skill's name; `~/.axh` permission rules feed neither gate nor mode,
+  `settings::load` only word on the sandbox. MCP servers come from `~/.axh/mcp.json` +
+  `.mcp.json` (a project's server never asked about headless), catalog notes go to
+  `tracing::warn`, and one `Notes` collector joins event errors, failed servers and refused
+  calls into the run's `stderr`. `RunConfig.instructions` stays `None` — the core-built prompt
+  is the user message (no double inlining of the skill body).
 
 ### Model providers (`config.agents.providers`)
 
@@ -720,11 +733,13 @@ seed-if-absent: an edited `SKILL.md` reaches an install through `skills reseed -
 Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
 (`registry::list_skills`/`find_skill`, frontmatter via `gray_matter`, filesystem is the only
 source of truth). `runner::execute_skill` resolves the backend (`opencode` by default; `ollama`
-for a tool-free local completion), builds the prompt (any `prepend_files` blocks, then the
+for a tool-free local completion; `axh` for the own harness — `resolve_run_model` then hands the
+bare model, no `provider/` prefix), builds the prompt (any `prepend_files` blocks, then the
 `SKILL.md` body) and runs it without touching the database; `execute_and_record_skill` adds the
 DB/log write. `runlog.rs` persists to the SQLite `runs` table and appends JSONL to
 `logs/runs.log`. A connector skill's SOP reaches its MCP tools through opencode's own config —
-`allowed_tools:` frontmatter is documentation only (see "Agent backends" above).
+for those runs `allowed_tools:` frontmatter is documentation only; on `backend: axh` it is the
+run's whole permission set (see "Agent backends" above).
 
 ### Memory router (`memory/`)
 
@@ -1814,7 +1829,7 @@ Review by itself, and the owner's take-over brought it into `main` and the card 
   agent's pane offer Allow / Deny (Claude Code also "In terminal"); `answer_permission` is the only door. A planner or
   grill idle on a draft plan now counts as waiting.
 
-### Own harness, step HS1 (2026-10-13)
+### Own harness, HS1–HS6b (2026-10-13/14)
 
 `crates/axiomata-harness` (binary `axh`, `docs/plans/harness.md`): a lean agent loop over an OpenAI-compatible chat
 API (OpenRouter, Ollama) with guarded file tools (`axiomata_files::Root`), a short system prompt and an event stream
@@ -1842,9 +1857,17 @@ HS6 (2026-10-13): skills in the harness — a `SKILL.md` catalog (`~/.axh/skills
 folders the caller passes; YAML frontmatter by `gray_matter`, everything unknown ignored), two ways to use one: a
 skill **as the run** (`--skill <name>`, its body the instructions, `allowed_tools` narrowing, `model` overriding,
 `timeout_secs` capping, `prepend_files` inlined from the working folder) and the `skill` **tool** the model calls
-itself, whose files are read-only roots `skill:<name>/<rel>` beside the working folder. The core is untouched
-(`backend: axh` is HS6b). Next: HS6b (skills through the own harness in the core), HS7 (hooks) … HS8 (subagents),
-each planned on its own.
+itself, whose files are read-only roots `skill:<name>/<rel>` beside the working folder.
+HS6b (2026-10-14): skills through the own harness **in the core** — `backend: axh` in a `SKILL.md` runs
+`skills::runner` through `agents::axh::run`: the harness's loop (tools, gate, sandbox, MCP) with the prompt the
+core built as the user message, recorded like every other run (`runs.backend = "axh"`, no migration) and metered
+from the token counts × the price table. The endpoint is the skill provider as it is — without a `base_url`
+(Anthropic, today's skill default) the run records a clear `Failed` naming it, never a silent hop to opencode;
+MCP servers come only from `~/.axh/mcp.json` + the project's `.mcp.json`, never from `opencode.json`; the gate is
+built fresh per run from the skill's `allowed_tools` over mode default with nobody to ask, the `~/.axh`
+permission rules feeding neither; no bundled skill switched — opt-in per frontmatter. The allowed dependency
+direction: core → harness, the harness still knowing nothing of core. Next: HS7 (hooks) … HS8 (subagents), each
+planned on its own.
 
 ### Ausblick (2026-10-12)
 

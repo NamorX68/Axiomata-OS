@@ -1,6 +1,6 @@
 # Axiomata's own harness (board card #37, M7.4)
 
-Status: HS1–HS6 built 2026-10-13. Each further step is planned on its own and confirmed by the owner before it is built.
+Status: HS1–HS6b built 2026-10-13/14. Each further step is planned on its own and confirmed by the owner before it is built.
 
 ## Why
 
@@ -40,13 +40,49 @@ Backend, one checkpoint and commit each:
 | **HS4** ✅ | Slash commands: registry, Markdown command files, built-ins (`/help`, `/model`, `/clear`) |
 | **HS5** ✅ | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
 | **HS6** ✅ | Skills in the harness: SKILL.md parser, a skill as a run, the `skill` tool — K1–K6 below |
-| HS6b | `backend: axh` in the core: skill runs through the own harness, `runs` table, spend metering — planned on its own |
+| **HS6b** ✅ | `backend: axh` in the core: skill runs through the own harness, `runs` table, spend metering — B1–B4 below |
 | HS7 | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) |
 | HS8 | Subagents: a `task` tool starting a nested loop with its own prompt, tools and limits |
 
 After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
 `spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
 own, both on the event stream of H3.
+
+## HS6b — `backend: axh` in the core (decided 2026-10-14)
+
+Full plan with tests and build order: `docs/plans/harness-hs6b.md`. The step is the allowed dependency direction
+(core → harness; H2 stays: the harness knows nothing of core). A skill's `SKILL.md` with `backend: axh` runs its
+prompt through `axiomata_harness::run` instead of an opencode session; the runner records it like every other run
+(`runs.backend = "axh"`, no migration) and meters it from the token counts.
+
+- **B1 [owner] — no silent fallback.** The endpoint is `config.agents.providers[agents.skill_provider]` as it is.
+  A provider without a `base_url` (Anthropic, the current skill default — the harness has no client for it yet,
+  H4) or a keyless OpenRouter fails the run with a message naming it: a recorded `Failed` run, never a hop back to
+  opencode. A run says `axh` in `runs.backend` or it did not run.
+- **B2 [owner] — MCP only from the harness's own config.** `~/.axh/mcp.json` + the project's `.mcp.json`, read via
+  `mcp::config::load` — never `opencode.json`. Owner servers run without approval; a project server is never asked
+  about headless (`permitted(…, can_ask=false)`, left out with the M2 note). Connector skills need their `apple-*`
+  servers copied into `~/.axh/mcp.json` once, by the owner.
+- **B3 [owner] — unattended, deterministic permissions.** The gate is built fresh per run: `Mode::Default`, asker
+  `Nobody`, and the skill's declared `allowed_tools` (parsed with the harness's own `rules_of`) as both its allow
+  rules and its narrowing (`restrict` + `restrict_name` = the skill's name, so a refusal reads
+  `the command /mail-digest allows only: …`). What the skill names is allowed, the rest refused before anything
+  is asked; a skill that declares nothing keeps mode default (reads free, changes ask and are refused). The
+  `~/.axh` permission rules and mode do **not** feed the gate; `settings::load` still word on the sandbox only
+  (settings can only narrow).
+- **B4 [owner] — no bundled skill switches.** `backend: axh` is opt-in per `SKILL.md`, written by the owner.
+
+Defaults (planner, all built as written): **D1** the core keeps building the prompt (`build_prompt_at` → the run's
+user message; the harness's `Skill::start_run` is *not* used — no double inlining; `RunConfig.instructions` stays
+`None`). **D2** the model travels **bare** (frontmatter `model:` else `skill_model`, no `provider/` prefix —
+`resolve_run_model`'s `Axh` arm), so `metered_cost_usd` and `runs.model` key on it unchanged; a skill on axh names
+its model as the API does. **D3** no JSON-repair turn on axh (`output: json` skills stay on opencode). **D4**
+`system_prompt_file` ignored (as opencode's run path ignores it). **D5** the shared 4-slot `agent_slots()` taken
+before tools/MCP. **D6** `AgentRequest::timeout` into `RunConfig.timeout`; `FinishReason::Timeout` →
+`AgentTimeout { backend: "axh" }` → the usual `Failed` record. **D7** one collector sink keeps `Event::Error`,
+failed MCP servers and refused calls → joined into `stderr`; reply → `stdout`, usage → token columns, turns →
+`num_turns`. **D8** `provider_label(Axh)` = the skill provider (it bills through that key — the daily cap keeps
+working). **D9** `runs.backend` verbatim `"axh"`.
 
 ## HS6 — skills (decided 2026-10-13)
 
@@ -268,6 +304,30 @@ own, both on the event stream of H3.
 - **S6 — background jobs.** `bash` with `run_in_background` starts a job and returns its id at once; `bash_output`
   reads what it wrote since the last look and whether it still runs; `kill_shell` ends it. At most 8 jobs per run,
   the last 1 MiB of each job's output kept; every job ends with the run.
+
+## HS6b — what exists
+
+- `crates/axiomata-core/src/agents/axh.rs` — the backend: `run(request, config)` resolves the skill provider's
+  endpoint (**B1**, errors are `InvalidAgentModel` naming the provider), takes an `agent_slots()` permit, builds
+  the fresh gate (**B3**), reads `settings::load` for the sandbox only, loads the skill catalog from
+  `~/.axh` + `~/.axiomata/skills` (notes → `tracing::warn`), and wires the toolbox in the CLI's order — files +
+  `SkillRoots`, `skill` tool, gate, MCP (**B2**, `permitted(…, false)`), sandboxed shell — before
+  `axiomata_harness::run` with the core-built prompt as the user message (**D1**). The outcome maps: `Answered`
+  → exit 0 with the answer as `stdout`; `MaxTurns`/`Failed`/`Cancelled` → exit 1 with a `Notes` collector's lines
+  (event errors, failed MCP servers, refused calls) as `stderr`; `Timeout` → `AgentTimeout { backend: "axh" }`.
+  Tokens `0 → None`, turns → `num_turns`, `cost_usd: None` — the runner meters it (**D2/D8**).
+- `agents/mod.rs`: `BACKEND_AXH`, `AgentBackend::Axh`, `run(&self, request, config)` (config reaches only the
+  Axh arm) and `AgentRequest::name` (the run's name, → `restrict_name`). `skills/runner.rs`: `resolve_run_model`
+  returns the **bare** model for Axh, `provider_label` the skill provider; `error.rs` gains
+  `Harness(#[from] axiomata_harness::HarnessError)` shown as `harness: {0}`.
+- Two small public additions in the harness itself: `skills::rules_of` (one rules string → `Vec<Rule>`, the same
+  splitter the frontmatter parser uses) and `permissions::settings::home_dir()` — `$AXH_HOME` when set and
+  absolute, else `$HOME`, empty counts as unset — so a test or embedder runs against its own `~/.axh`.
+- Tests (`agents/axh.rs`, `runner.rs`): the end-to-end proof — a scratch `AXIOMATA_HOME` **and** `AXH_HOME`, a
+  `backend: axh` skill and a fake `POST /v1/chat/completions` on the loopback → a `Success` row with
+  `backend = "axh"`, `provider = "open_router"`, the bare `model`, 10/2 tokens, the metered cost and one single
+  model call (no repair turn); B1's failed record ("… has no base URL …") without any model call; the gate's
+  declare-is-the-whole-set semantics; the collector's keep/leave-alone; `resolve_run_model`/`provider_label`.
 
 ## HS6 — what exists
 

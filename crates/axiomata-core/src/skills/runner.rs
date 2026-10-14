@@ -246,7 +246,8 @@ fn misconfigured_skill_record(
 }
 
 /// Runs the raw string `prompt` on `backend_id` (`"opencode"` / `"ollama"`
-/// — the routine store validates those two),
+/// — the routine store validates those two; a caller may also hand it
+/// `"axh"`, the own harness, `docs/plans/harness-hs6b.md`),
 /// attributing the resulting [`RunRecord`] to `name`. The counterpart to
 /// [`execute_skill`] for callers that have a prompt but no `SKILL.md` — the
 /// routine scheduler's `prompt` target. An unresolvable `backend_id` yields a
@@ -295,7 +296,11 @@ pub async fn execute_prompt(
 /// Resolves the model id a run on `backend` needs, exactly as the request
 /// will hand it to the backend: for opencode the **full `provider/<model>`
 /// id** from [`opencode::model_id`] (the `--model` flag needs the provider
-/// prefix), for Ollama `None` (its model lives in the enum variant).
+/// prefix), for Ollama `None` (its model lives in the enum variant), for the
+/// own harness (`axh`) the **bare** model as the API names it — frontmatter
+/// `model:` else the skill provider's `skill_model`, no prefix of ours
+/// (`docs/plans/harness-hs6b.md`, D2; a prefixed id would 404 visibly on
+/// `{base_url}/v1/chat/completions`).
 ///
 /// The single resolution point for both [`execute_skill`] and
 /// [`execute_prompt`], so the two can never diverge again — they did once:
@@ -309,6 +314,28 @@ fn resolve_run_model(
     match backend {
         AgentBackend::Opencode => opencode::model_id(frontmatter_model, config).map(Some),
         AgentBackend::Ollama { .. } => Ok(None),
+        AgentBackend::Axh => match frontmatter_model.map(str::trim).filter(|m| !m.is_empty()) {
+            Some(model) => Ok(Some(model.to_owned())),
+            None => {
+                let skill_model = config
+                    .agents
+                    .providers
+                    .get(&config.agents.skill_provider)
+                    .map(|settings| settings.skill_model.trim())
+                    .filter(|model| !model.is_empty())
+                    .map(str::to_owned);
+                match skill_model {
+                    Some(model) => Ok(Some(model)),
+                    None => Err(AxiomataError::InvalidAgentModel {
+                        reason: format!(
+                            "backend axh has no model: set `model:` in the skill's \
+                             frontmatter or the skill model of {} in config.toml",
+                            config.agents.skill_provider.as_str()
+                        ),
+                    }),
+                }
+            }
+        },
     }
 }
 
@@ -397,8 +424,8 @@ async fn run_on_backend(
     let _guard = RunningGuard(name.to_string());
 
     let provider = provider_label(backend, config);
-    let request = request_for(prompt, config, model.clone(), options);
-    Ok(match backend.run(request).await {
+    let request = request_for(name, prompt, config, model.clone(), options);
+    Ok(match backend.run(request, config).await {
         Ok(result) => {
             let mut result = result;
             // The opencode backend's `model` is the `provider/<model>` id the
@@ -451,11 +478,14 @@ async fn run_on_backend(
 
 /// The `provider` string to stamp on a run's record: the **skill** provider
 /// for an opencode run (every runner path here is an unattended skill /
-/// routine run — the interactive chat path lives in [`crate::agents`]),
-/// `None` for the local Ollama backend (which has no provider and never bills).
+/// routine run — the interactive chat path lives in [`crate::agents`]), the
+/// skill provider again for `axh` — it posts to that provider's base URL and
+/// bills through that provider's key, so the daily cap must see the same
+/// label (HS6b, D8) — and `None` for the local Ollama backend (which has no
+/// provider and never bills).
 fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
     match backend {
-        AgentBackend::Opencode => Some(
+        AgentBackend::Opencode | AgentBackend::Axh => Some(
             config
                 .agents
                 .provider_for(ProviderRole::Skill)
@@ -467,14 +497,17 @@ fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
 }
 
 /// The [`AgentRequest`] for a run: [`agent_request`] plus what the skill's
-/// frontmatter asks of the reply.
+/// frontmatter asks of the reply. `name` is the run's name — it becomes the
+/// `axh` gate's `restrict_name` (HS6b, B3), so a refusal names the skill.
 fn request_for(
+    name: &str,
     prompt: String,
     config: &Config,
     model: Option<String>,
     options: RunOptions,
 ) -> AgentRequest {
     let mut request = agent_request(
+        Some(name),
         prompt,
         config,
         model,
@@ -488,7 +521,10 @@ fn request_for(
 /// Builds the [`AgentRequest`] for a prompt: the caller-supplied prompt, the
 /// workspace as the working directory, and the run timeout (the skill's own
 /// `timeout_secs` frontmatter if set, else `config.agents.skill_timeout_secs`).
+/// `name` is the triggering skill/prompt target where a caller has one; only
+/// the `axh` backend reads it, as its gate's `restrict_name` (HS6b, B3).
 fn agent_request(
+    name: Option<&str>,
     prompt: String,
     config: &Config,
     model: Option<String>,
@@ -497,6 +533,7 @@ fn agent_request(
 ) -> AgentRequest {
     AgentRequest {
         prompt,
+        name: name.map(str::to_owned),
         cwd: config.workspace_root.clone(),
         timeout: Duration::from_secs(
             timeout_override_secs.unwrap_or(config.agents.skill_timeout_secs),
@@ -753,7 +790,7 @@ mod tests {
         }
         let config = Config::default();
         std::fs::write(home.join("module-context.md"), "# modules").unwrap();
-        let req = agent_request("p".to_string(), &config, None, None, None);
+        let req = agent_request(None, "p".to_string(), &config, None, None, None);
         assert_eq!(req.system_prompt_file, None);
         unsafe {
             std::env::remove_var(crate::paths::AXIOMATA_HOME_ENV);
@@ -773,6 +810,7 @@ mod tests {
         let config = Config::default();
 
         let req = agent_request(
+            None,
             "p".to_string(),
             &config,
             None,
@@ -784,7 +822,7 @@ mod tests {
             Some("mcp__apple-reminders__calendar_events".to_string())
         );
 
-        let req = agent_request("p".to_string(), &config, None, None, None);
+        let req = agent_request(None, "p".to_string(), &config, None, None, None);
         assert_eq!(req.allowed_tools, None);
 
         unsafe {
@@ -805,10 +843,10 @@ mod tests {
         let mut config = Config::default();
         config.agents.skill_timeout_secs = 300;
 
-        let default_req = agent_request("p".into(), &config, None, None, None);
+        let default_req = agent_request(None, "p".into(), &config, None, None, None);
         assert_eq!(default_req.timeout, Duration::from_secs(300));
 
-        let overridden = agent_request("p".into(), &config, None, None, Some(600));
+        let overridden = agent_request(None, "p".into(), &config, None, None, Some(600));
         assert_eq!(overridden.timeout, Duration::from_secs(600));
 
         unsafe {
@@ -825,12 +863,16 @@ mod tests {
             timeout_secs: Some(600),
             expects_json: true,
         };
-        let req = request_for("p".to_string(), &config, None, options);
+        let req = request_for("s", "p".to_string(), &config, None, options);
         assert!(req.expects_json);
         assert_eq!(req.allowed_tools.as_deref(), Some("mcp__x__y"));
         assert_eq!(req.timeout, Duration::from_secs(600));
+        // The run's name travels along — the `axh` gate names it in a refusal (B3).
+        assert_eq!(req.name.as_deref(), Some("s"));
         // A raw prompt target has no contract.
-        assert!(!request_for("p".to_string(), &config, None, RunOptions::default()).expects_json);
+        assert!(
+            !request_for("s", "p".to_string(), &config, None, RunOptions::default()).expects_json
+        );
     }
 
     #[test]
@@ -859,6 +901,72 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ollama, None);
+    }
+
+    /// `axh` (HS6b, D2): the bare model as the API names it — the frontmatter
+    /// wins, else the skill provider's `skill_model`, neither prefixed; and a
+    /// run with no model at all is a clear error, not a guess.
+    #[test]
+    fn resolve_run_model_gives_axh_a_bare_model_from_the_frontmatter_or_the_skill_provider() {
+        let mut config = Config::default();
+        config.agents.skill_provider = crate::config::ProviderId::OpenRouter;
+        config
+            .agents
+            .providers
+            .get_mut(&crate::config::ProviderId::OpenRouter)
+            .unwrap()
+            .skill_model = "deepseek/deepseek-chat".to_string();
+
+        let from_config = resolve_run_model(&AgentBackend::Axh, None, &config).unwrap();
+        assert_eq!(from_config, Some("deepseek/deepseek-chat".to_string()));
+
+        let from_frontmatter = resolve_run_model(
+            &AgentBackend::Axh,
+            Some("meta-llama/llama-3.3-70b-instruct"),
+            &config,
+        )
+        .unwrap();
+        assert_eq!(
+            from_frontmatter,
+            Some("meta-llama/llama-3.3-70b-instruct".to_string())
+        );
+
+        // Nothing anywhere: an error that says which knob to turn.
+        config
+            .agents
+            .providers
+            .get_mut(&crate::config::ProviderId::OpenRouter)
+            .unwrap()
+            .skill_model = String::new();
+        let err = resolve_run_model(&AgentBackend::Axh, None, &config).unwrap_err();
+        assert!(matches!(err, AxiomataError::InvalidAgentModel { .. }));
+        assert!(err.to_string().contains("axh"), "{err}");
+    }
+
+    /// `axh` bills through the skill provider's key (D8), so its run carries
+    /// the same provider label as an opencode run — the daily cap and
+    /// `runs.provider` see the provider it actually spent on.
+    #[test]
+    fn provider_label_bills_axh_through_the_skill_provider_like_opencode() {
+        let mut config = Config::default();
+        config.agents.skill_provider = crate::config::ProviderId::OpenRouter;
+        assert_eq!(
+            provider_label(&AgentBackend::Axh, &config).as_deref(),
+            Some("open_router")
+        );
+        assert_eq!(
+            provider_label(&AgentBackend::Opencode, &config).as_deref(),
+            Some("open_router")
+        );
+        assert_eq!(
+            provider_label(
+                &AgentBackend::Ollama {
+                    model: "m".to_string()
+                },
+                &config
+            ),
+            None
+        );
     }
 
     /// A minimal `Skill` whose prompt-relevant fields are set.

@@ -67,8 +67,9 @@ pub struct Skill {
     pub effort: Option<String>,
     /// Optional trigger description from the frontmatter.
     pub trigger: Option<String>,
-    /// Agent backend identifier (`"opencode"` or `"ollama"`). Not validated
-    /// here — [`crate::agents::AgentBackend::resolve`] checks it at run time.
+    /// Agent backend identifier (`"opencode"`, `"ollama"` or `"axh"`). Not
+    /// validated here — [`crate::agents::AgentBackend::resolve`] checks it at
+    /// run time.
     pub backend: String,
     /// Workspace-relative files whose contents are prepended to the run's
     /// prompt as `## Context file: <rel>` blocks — the bridge for a skill that
