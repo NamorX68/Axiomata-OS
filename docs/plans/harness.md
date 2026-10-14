@@ -80,7 +80,8 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
   loss. (c) *subagent model routing* — the app's planner already picks a model per plan step (CP-A7), so the
   harness side only needs to **accept** an optional `model` in the `task` args (allowlisted, metered, capped);
   the decision stays with the caller, and the classifier that feeds it, when subagents arise automatically, is
-  local — no paid API. Candidate for that slot (owner, 2026-10-14): **`strands-decider`** (Ollama, 2B,
+  local — no paid API. Candidate for that slot (owner, 2026-10-14): **`strands-decider`** (2B, weights from
+  the Ollama library, runs in-process on MLX — no Ollama daemon, see (e),
   Qwen3.5-2B-Base with a trained decision head — probabilities over defined answers, not generated labels;
   choice/noul/score questions, several per request; Apache 2.0, MLX on Apple Silicon, median ~40 ms; 4K context
   → state must be trimmed to task + plan, not full history; wording-sensitive and ~79 % on JevBench per the
@@ -107,13 +108,18 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
    M-series numbers for the ≤ ~1.7b Q4 class: prefill ~1k tok/s, generation ~40–70 tok/s, a 300-token summary
    in ~3–5 s warm. Crash isolation (a bad GGUF can segfault a host process) needs no server either: a tiny
    **stdio** helper process, MCP-style — pipe, no port. Build order behind one trait (`LocalBrain`: summarise
-   / classify / embed) from day one: Ollama adapter first, llama.cpp in-process second, stdio sidecar only if
-   isolation is ever needed. **Backend per platform (owner, 2026-10-14): MLX is a must on Apple Silicon**
+   / classify / embed) from day one. **Owner decision (2026-10-14): the decider runs without Ollama** — straight
+   on MLX (Apple Silicon). The honest shape for that is a resident **stdio helper holding mlx-lm**: the
+   trained decision head is custom MLX/Python model code (Rust MLX bindings are too young for custom
+   architectures), weights live in a harness-owned dir (e.g. `~/.axh/models`, one-time download — not
+   Ollama's store, not `~/.axiomata`), no port, no HTTP, crash stays outside. llama.cpp/GBNF remains only
+   the x86 stand-in. Ollama keeps exactly one role: the zero-infra bench for the summariser's prompt-template
+   phase before anything is shipped, never the production path. **Backend per platform (owner, 2026-10-14): MLX is a must on Apple Silicon**
    (native path there, and where `strands-decider` lives), **llama.cpp for the Intel/x86 boxes** — one caveat:
    the decider's trained head and its `systemone` API are MLX/Ollama-specific and likely do not exist in
    llama.cpp, so the x86 route needs a small chat model behind a GBNF-forced JSON schema as the decision
    stand-in; the trait boundary absorbs the difference, only the adapter changes. Licensing of the shipped
-  models to be checked before distributing (Apache-2.0 ok, research-only no). Writing an inference engine
+   models to be checked before distributing (Apache-2.0 ok, research-only no). Writing an inference engine
   oneself: explicitly rejected — kernel-level competition, months for less than llama.cpp already does.
 
 ## HS8 — subagents (decided 2026-10-14)
