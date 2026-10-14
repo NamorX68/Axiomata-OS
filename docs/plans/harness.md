@@ -97,7 +97,14 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
   (e) *an in-process inference component* instead of writing an engine from scratch: llama.cpp (or MLX) as a
   library, **two pinned quantised models shipped with the harness** (the summariser + a small
   classifier/embedder — the embedder would also make the vault's search local), GBNF grammar forcing the
-  summary's output schema — no daemon, no HTTP, deterministic latency, offline. Licensing of the shipped
+  summary's output schema — no daemon, no HTTP, deterministic latency, offline. What makes it *fast* is not the missing HTTP (localhost serialisation is milliseconds) but
+   **model residency** (no keep-alive eviction and reload between turns) and **KV-cache reuse across turns** —
+   the pricing mechanism of prompt caching, in time instead of money, and only controllable in-process; rough
+   M-series numbers for the ≤ ~1.7b Q4 class: prefill ~1k tok/s, generation ~40–70 tok/s, a 300-token summary
+   in ~3–5 s warm. Crash isolation (a bad GGUF can segfault a host process) needs no server either: a tiny
+   **stdio** helper process, MCP-style — pipe, no port. Build order behind one trait (`LocalBrain`: summarise
+   / classify / embed) from day one: Ollama adapter first, llama.cpp in-process second, stdio sidecar only if
+   isolation is ever needed. Licensing of the shipped
   models to be checked before distributing (Apache-2.0 ok, research-only no). Writing an inference engine
   oneself: explicitly rejected — kernel-level competition, months for less than llama.cpp already does.
 
