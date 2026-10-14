@@ -87,7 +87,12 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
   classifier or the planner's choice.
 - **Longer bets (owner sketch, 2026-10-14):** (d) *a purpose-fine-tuned summariser* — the "paths, errors and
   numbers verbatim" contract is machine-checkable, so training pairs can be generated from real transcripts and
-  filtered automatically, and the same check evaluates the result; LoRA on the ≤ ~1.7b class (MLX on the Mac)
+  filtered automatically, and the same check evaluates the result; data can be **synthetic wholesale** —
+  procedurally generated tool outputs (test logs, listings, error cascades) whose ground truth the generator
+  knows, teacher-model summaries filtered by the checker (recall of paths/errors/numbers, precision against
+  hallucinated ones, enforced compression ratio so the student cannot pass by copying verbatim), optionally
+  preference pairs (DPO) from ranked candidates; hybrid volume (synthetic) + domain holdout (real transcripts)
+  closes the domain gap, and every later run becomes training data; LoRA on the ≤ ~1.7b class (MLX on the Mac)
   is the last rung of a ladder whose first rungs are the prompt template and an eval set — needed anyway;
   (e) *an in-process inference component* instead of writing an engine from scratch: llama.cpp (or MLX) as a
   library, **two pinned quantised models shipped with the harness** (the summariser + a small
