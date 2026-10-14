@@ -64,6 +64,16 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
   specs + the conversation so far, appended per turn). Providers cut the price of a re-read prefix (Anthropic
   explicit `cache_control`, ~10 % of input price on reads with a small surcharge on the write; others automatic).
   The spend metering would then have to know the cache's read/write prices, or `metered_cost_usd` over-estimates.
+- **Directions sketched with the owner (2026-10-14, none decided):** (a) *compaction by a small local model* —
+  the config's `ollama_model` (`gemma4:12b-mlx`) summarising old turns, but **not through the veto hooks** (HS7
+  stays "hooks veto, never permit"): a caller-supplied compactor trait, structured summaries (paths, errors and
+  numbers verbatim), a recency window of verbatim turns, full text kept on disk with the path in the summary;
+  (b) *tool-output diet* — purpose-built result contracts (a test tool returning exit code + failures only),
+  and generically: full output written to a log file, the tool result carrying exit code + tail + the path
+  ("more on disk, grep it") — relocation of information, never loss; (c) *subagent model routing* — an optional
+  `model` in the `task` args (allowlisted, metered, capped) letting the parent pick a cheaper model per task; a
+  separate decision model only when subagents start arising automatically (the planner), and heuristics over a
+  paid classifier.
 
 ## HS8 — subagents (decided 2026-10-14)
 
