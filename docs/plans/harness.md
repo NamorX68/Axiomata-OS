@@ -80,12 +80,24 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
   loss. (c) *subagent model routing* — the app's planner already picks a model per plan step (CP-A7), so the
   harness side only needs to **accept** an optional `model` in the `task` args (allowlisted, metered, capped);
   the decision stays with the caller, and the classifier that feeds it, when subagents arise automatically, is
-  local — no paid API. Candidate for that slot (owner, 2026-10-14): **`strands-decider`** (2B, weights from
-  the Ollama library, runs in-process on MLX — no Ollama daemon, see (e),
-  Qwen3.5-2B-Base with a trained decision head — probabilities over defined answers, not generated labels;
-  choice/noul/score questions, several per request; Apache 2.0, MLX on Apple Silicon, median ~40 ms; 4K context
+  local — no paid API. Candidate for that slot (owner, 2026-10-14): **`strands-decider`** (2B, Qwen3.5-2B-Base with a trained decision head — probabilities over defined answers, not generated labels;
+  choice/noul/score questions, several per request; Apache 2.0, median ~40 ms, a GGUF conversion exists
+  so llama.cpp runs it with no daemon at all (see (e); stock-compatibility warning there); 4K context
   → state must be trimmed to task + plan, not full history; wording-sensitive and ~79 % on JevBench per the
   publisher, so: test the real questions, fall back to the default model on low confidence, never route blind);
+  The field has grown into a category, all speaking the same Jev/System-One API shape (`/v1/systemone`:
+  typed choice/noul/score questions over a state) - so `LocalBrain::decide` should speak exactly that shape
+  and the model stays interchangeable (surveyed 2026-10-14): **clef-flash** 9B from Cloudflare (Qwen3.5-9B,
+  Apache 2.0, lowest measured latency in their Decision Index, median 38.8 ms on their hardware, BFCL 98.8,
+  multimodal - screenshots as state, which would let a run be gated on what is on screen; 11-12 GB resident,
+  the heavy option, `clef` 27B above it; like strands it scores non-autoregressively, so expect the same
+  custom-runtime caveat); **tev1** from Together AI (4B ~4.5 GB / 0.8B ~800 MB, Qwen3.5 fine-tuned on 37,840
+  examples, MIT training scripts, "how to train your own Jev for $17" - the (d) recipe published by someone
+  else). Tev1 looks like a **behavioural** fine-tune, not an architectural head (it replies in prose in plain
+  chat) - if so, option probabilities come from an ordinary generative model's first-token logits, which
+  stock llama.cpp reads today: the GGUF-first candidate of the family, to be verified at build time. Caveats:
+  ~2k effective context, 73.3 % (4B) / 63.5 % (0.8B) vs Jev 76 % on the same eval, calibration and injection
+  handling untested by the publisher.
 - **Standalone constraint (owner, 2026-10-14):** `axh` is meant to become a harness of its own someday (working
   name "Glut"). Every context-diet mechanism above must live in the harness behind traits/config with defaults
   **off**, reaching neither `~/.axiomata` nor the core (H2's spirit): the caller wires in the local model, the
@@ -108,17 +120,22 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
    M-series numbers for the ≤ ~1.7b Q4 class: prefill ~1k tok/s, generation ~40–70 tok/s, a 300-token summary
    in ~3–5 s warm. Crash isolation (a bad GGUF can segfault a host process) needs no server either: a tiny
    **stdio** helper process, MCP-style — pipe, no port. Build order behind one trait (`LocalBrain`: summarise
-   / classify / embed) from day one. **Owner decision (2026-10-14): the decider runs without Ollama** — straight
-   on MLX (Apple Silicon). The honest shape for that is a resident **stdio helper holding mlx-lm**: the
-   trained decision head is custom MLX/Python model code (Rust MLX bindings are too young for custom
-   architectures), weights live in a harness-owned dir (e.g. `~/.axh/models`, one-time download — not
-   Ollama's store, not `~/.axiomata`), no port, no HTTP, crash stays outside. llama.cpp/GBNF remains only
-   the x86 stand-in. Ollama keeps exactly one role: the zero-infra bench for the summariser's prompt-template
-   phase before anything is shipped, never the production path. **Backend per platform (owner, 2026-10-14): MLX is a must on Apple Silicon**
-   (native path there, and where `strands-decider` lives), **llama.cpp for the Intel/x86 boxes** — one caveat:
-   the decider's trained head and its `systemone` API are MLX/Ollama-specific and likely do not exist in
-   llama.cpp, so the x86 route needs a small chat model behind a GBNF-forced JSON schema as the decision
-   stand-in; the trait boundary absorbs the difference, only the adapter changes. Licensing of the shipped
+   / classify / embed) from day one. **Owner decisions (2026-10-14, refined): no Ollama in production, and GGUF first.** MLX is
+   deferred until Rust bindings can carry it; the production target is **llama.cpp + GGUF on every
+   platform**, one backend for Apple Silicon and x86 alike - at 2B the backend barely moves latency
+   anyway, tens of milliseconds either way. Weights live in a harness-owned dir (e.g. `~/.axh/models`,
+   one-time download, not Ollama's store and not `~/.axiomata`), resident process, no port, no HTTP. A
+   GGUF of the decider exists (`fabricant451/strands-decider-2B-hobson-v19-GGUF`, Q8_0 ~2 GB, arch
+   `qwen35`, Apache-2.0, checked 2026-10-14), but its own card warns it is experimental and "requires
+   the custom Strands-aware llama.cpp/wllama runtime; stock GGUF clients are not assumed compatible" -
+   so the build-time gate is: check whether llama.cpp upstream carries the `qwen35` arch plus the
+   decision head yet. If not, the interim is either a small chat model behind a GBNF-forced choice,
+   probabilities read from the first token's logits (less calibrated, workable), or the community ONNX
+   build via the mature `ort` crate - a classification head is exactly what ONNX Runtime does well,
+   Metal execution provider included; pruned 1B/1.4B decider variants exist for an even smaller
+   footprint. Ollama keeps exactly one role: the zero-infra bench for the summariser's prompt-template
+   phase before anything is shipped, never the production path. The trait boundary absorbs every backend
+   difference, only the adapter changes. Licensing of the shipped
    models to be checked before distributing (Apache-2.0 ok, research-only no). Writing an inference engine
   oneself: explicitly rejected — kernel-level competition, months for less than llama.cpp already does.
 
