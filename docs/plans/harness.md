@@ -85,6 +85,16 @@ subagent multiplies the requests — all summed into one number (D2.4). In money
   name "Glut"). Every context-diet mechanism above must live in the harness behind traits/config with defaults
   **off**, reaching neither `~/.axiomata` nor the core (H2's spirit): the caller wires in the local model, the
   classifier or the planner's choice.
+- **Longer bets (owner sketch, 2026-10-14):** (d) *a purpose-fine-tuned summariser* — the "paths, errors and
+  numbers verbatim" contract is machine-checkable, so training pairs can be generated from real transcripts and
+  filtered automatically, and the same check evaluates the result; LoRA on the ≤ ~1.7b class (MLX on the Mac)
+  is the last rung of a ladder whose first rungs are the prompt template and an eval set — needed anyway;
+  (e) *an in-process inference component* instead of writing an engine from scratch: llama.cpp (or MLX) as a
+  library, **two pinned quantised models shipped with the harness** (the summariser + a small
+  classifier/embedder — the embedder would also make the vault's search local), GBNF grammar forcing the
+  summary's output schema — no daemon, no HTTP, deterministic latency, offline. Licensing of the shipped
+  models to be checked before distributing (Apache-2.0 ok, research-only no). Writing an inference engine
+  oneself: explicitly rejected — kernel-level competition, months for less than llama.cpp already does.
 
 ## HS8 — subagents (decided 2026-10-14)
 
