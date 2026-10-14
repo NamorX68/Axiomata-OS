@@ -614,10 +614,13 @@ the run's permissions for axh; see below).
   `Failed`, never a fallback to opencode. The gate is built fresh per run from the skill's
   `allowed_tools` (split by the harness's own `rules_of`) over mode `default` with `Nobody` to
   ask, `restrict_name` = the skill's name; `~/.axh` permission rules feed neither gate nor mode,
-  `settings::load` only word on the sandbox. MCP servers come from `~/.axh/mcp.json` +
+  `settings::load` word on the sandbox **and** on the hooks (HS7, B4: the owner's
+  `~/.axh/settings.json` hooks run unattended too — they may only block and fail open; a
+  project's hooks are parsed and left out, the skip note going into the run's `stderr`).
+  MCP servers come from `~/.axh/mcp.json` +
   `.mcp.json` (a project's server never asked about headless), catalog notes go to
-  `tracing::warn`, and one `Notes` collector joins event errors, failed servers and refused
-  calls into the run's `stderr`. `RunConfig.instructions` stays `None` — the core-built prompt
+  `tracing::warn`, and one `Notes` collector joins event errors, failed servers, refused
+  calls and hook notes into the run's `stderr`. `RunConfig.instructions` stays `None` — the core-built prompt
   is the user message (no double inlining of the skill body).
 
 ### Model providers (`config.agents.providers`)
@@ -1829,7 +1832,7 @@ Review by itself, and the owner's take-over brought it into `main` and the card 
   agent's pane offer Allow / Deny (Claude Code also "In terminal"); `answer_permission` is the only door. A planner or
   grill idle on a draft plan now counts as waiting.
 
-### Own harness, HS1–HS6b (2026-10-13/14)
+### Own harness, HS1–HS7 (2026-10-13/14)
 
 `crates/axiomata-harness` (binary `axh`, `docs/plans/harness.md`): a lean agent loop over an OpenAI-compatible chat
 API (OpenRouter, Ollama) with guarded file tools (`axiomata_files::Root`), a short system prompt and an event stream
@@ -1866,8 +1869,18 @@ from the token counts × the price table. The endpoint is the skill provider as 
 MCP servers come only from `~/.axh/mcp.json` + the project's `.mcp.json`, never from `opencode.json`; the gate is
 built fresh per run from the skill's `allowed_tools` over mode default with nobody to ask, the `~/.axh`
 permission rules feeding neither; no bundled skill switched — opt-in per frontmatter. The allowed dependency
-direction: core → harness, the harness still knowing nothing of core. Next: HS7 (hooks) … HS8 (subagents), each
-planned on its own.
+direction: core → harness, the harness still knowing nothing of core.
+HS7 (2026-10-14): hooks, Claude Code's four events — `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` — in the
+owner's `~/.axh/settings.json` (Claude's shape, `type: "command"`, an unanchored matcher regex against the tool's
+name and its Claude alias), the payload as JSON on stdin (`session_id`, `cwd`, `hook_event_name` + the event's
+fields) and the answers read Claude's way: `permissionDecision`/legacy `decision`, exit 2's stderr, plain stdout as
+`SessionStart` context. Hooks **veto only** — a block gives the model `error: <reason>` and nothing runs, `allow`
+and `ask` are no-ops (the gate stays the only decider), everything unexpected fails open as an `Event::Hook` note.
+Only the owner's hooks run: a project's are parsed but left out and said so (CLI stderr / the run's `stderr`), and
+unattended core runs (`backend: axh`) execute the owner's hooks too — stricter or unchanged, never looser. Hooks run
+through one lazy per-run shell `Session` (snapshot, cleaned env, sandbox, proxy) with `min(hook timeout, deadline)`
+and cancel; `SessionStart`'s context sits behind the harness's own system prompt, a blocked `Stop` feeds its reason
+back as a user message and takes another turn (`stop_hook_active`). Next: HS8 (subagents), planned on its own.
 
 ### Ausblick (2026-10-12)
 

@@ -9,8 +9,11 @@
 //! sandbox and MCP. What arrives here is an [`AgentRequest`]; its
 //! `allowed_tools` become the run's whole permission set (B3): what the skill
 //! declares is allowed, what it does not name is refused before anything is
-//! asked, nobody answers a question, and the settings files of `~/.axh` only
-//! ever narrow the sandbox — never the gate.
+//! asked, nobody answers a question, and the settings files of `~/.axh` never
+//! widen the gate. HS7 (B4): the owner's hooks from `~/.axh/settings.json` run
+//! here too — they may only block, never permit (B2), fail open (B3), and a
+//! project's hooks are parsed and left out (B1), said so in the run's
+//! `stderr`.
 //!
 //! B1 — no silent fallback: the endpoint is the skill provider's as it is
 //! (`config.agents.providers`). A provider without a base URL — Anthropic,
@@ -58,9 +61,13 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         .expect("agent_slots semaphore is never closed");
     let cwd = request.cwd.clone();
     let gate = gate_for(request.name.as_deref(), request.allowed_tools.as_deref())?;
-    // B3: the settings files are read for the sandbox alone; a project's are
-    // never trusted in an unattended run.
-    let sandbox = settings::load(&home, &cwd, false)?.sandbox;
+    // B3: a project's settings are never trusted in an unattended run; from
+    // them only the sandbox's read secrets count. HS7 B4: the owner's hooks
+    // run here as they do in the CLI; a project's hooks are parsed and left
+    // out (B1), the run's `stderr` says so below.
+    let loaded = settings::load(&home, &cwd, false)?;
+    let sandbox = loaded.sandbox.clone();
+    let project_hooks_skipped = loaded.project_hooks_skipped;
     // K2/K3: the app's `~/.axiomata/skills` beside the harness's own folders;
     // a skill the catalog cannot use is a note, never an error.
     let skill_dirs = [global_skills_dir()];
@@ -75,8 +82,18 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     let mut run_config = RunConfig::new(&cwd);
     run_config.timeout = request.timeout;
     run_config.skill_dirs = skill_dirs.to_vec();
+    // HS7 (B4): the owner's hooks, and the sandbox their commands run in (D5).
+    run_config.hooks = loaded.hooks;
+    run_config.sandbox = Some(sandbox.clone());
     // D7: what the record needs, kept as the run reports it.
     let notes = Notes::default();
+    if project_hooks_skipped {
+        notes.push(
+            "the project's own .axh/ hooks are not run: only the owner's \
+             ~/.axh/settings.json hooks run"
+                .to_owned(),
+        );
+    }
     let mut sink = SharedSink::new(Box::new(notes.clone()));
     let mut tools = Toolbox::new();
     tools.extend(file_tools(&cwd, SkillRoots::new(&catalog.folders()))?);
@@ -269,6 +286,13 @@ impl EventSink for Notes {
                 reason,
                 ..
             } => Some(format!("{tool}: {reason}")),
+            // HS7: what a hook did or why it did not (a block's reason, a
+            // failure) — the record shows why a call never ran.
+            Event::Hook {
+                hook_event,
+                note: Some(note),
+                ..
+            } => Some(format!("hook {hook_event}: {note}")),
             _ => None,
         };
         if let Some(line) = line {
@@ -281,6 +305,15 @@ impl EventSink for Notes {
 }
 
 impl Notes {
+    /// A line for the record that no event brought (the project's hooks
+    /// left out, B1).
+    fn push(&self, line: String) {
+        self.0
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push(line);
+    }
+
     /// The kept lines, then `why` — the reason a run ended without an answer —
     /// one per line; nothing at all when neither has anything to say.
     fn join(&self, why: Option<&str>) -> String {
@@ -499,6 +532,16 @@ mod tests {
             allowed: false,
             reason: "the command /demo allows only: Read".into(),
         });
+        // HS7: a hook's note — a block's reason or a failure — reaches the
+        // record too.
+        notes.emit(Event::Hook {
+            turn: Some(1),
+            hook_event: "PreToolUse".into(),
+            command: "check".into(),
+            blocked: true,
+            context_chars: 12,
+            note: Some("not today".into()),
+        });
         notes.emit(Event::Usage {
             turn: 1,
             input_tokens: 5,
@@ -508,6 +551,7 @@ mod tests {
         assert!(joined.contains("500"), "{joined}");
         assert!(joined.contains("apple-mail"), "{joined}");
         assert!(joined.contains("allows only"), "{joined}");
+        assert!(joined.contains("hook PreToolUse: not today"), "{joined}");
         assert!(!joined.contains("token"), "{joined}");
         assert!(joined.ends_with("the model API failed"), "{joined}");
         assert_eq!(Notes::default().join(None), "");
@@ -519,6 +563,7 @@ mod tests {
     struct Fixture {
         _guard: std::sync::MutexGuard<'static, ()>,
         home: PathBuf,
+        axh_home: PathBuf,
         config: Config,
         db: Mutex<Connection>,
     }
@@ -545,6 +590,7 @@ mod tests {
             Self {
                 _guard: guard,
                 home,
+                axh_home,
                 config,
                 db: Mutex::new(db),
             }
@@ -573,6 +619,13 @@ mod tests {
 
     impl FakeApi {
         async fn spawn(answer: Value) -> Self {
+            Self::spawn_each(vec![answer]).await
+        }
+
+        /// One canned answer per request; the last one repeats when more
+        /// requests come than there are answers.
+        async fn spawn_each(answers: Vec<Value>) -> Self {
+            assert!(!answers.is_empty());
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base_url = format!("http://{}", listener.local_addr().unwrap());
             let seen: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
@@ -584,8 +637,13 @@ mod tests {
                     };
                     let (head, body) = Self::read_request(&mut socket).await;
                     let parsed: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-                    kept.lock().unwrap().push((head, parsed));
-                    let payload = serde_json::to_string(&answer).unwrap();
+                    let number = {
+                        let mut seen = kept.lock().unwrap();
+                        seen.push((head, parsed));
+                        seen.len() - 1
+                    };
+                    let answer = &answers[number.min(answers.len() - 1)];
+                    let payload = serde_json::to_string(answer).unwrap();
                     let response = format!(
                         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
                          content-length: {}\r\nconnection: close\r\n\r\n{payload}",
@@ -735,5 +793,67 @@ mod tests {
         let message = record.error.unwrap();
         assert!(message.contains("base URL"), "{message}");
         assert_eq!(runlog::list_runs(&fx.conn(), 10).unwrap().len(), 1);
+    }
+
+    /// HS7, B4 end to end: the owner's hooks run in an unattended core run —
+    /// a `PreToolUse` hook exits 2 with stderr, the call is blocked and the
+    /// reason lands in the run's `stderr` through the `Notes` collector. A
+    /// project's hooks are parsed and left out (B1), and the run says so.
+    #[tokio::test]
+    async fn hooks_run_in_unattended_core_runs_and_a_projects_are_left_out() {
+        let mut fx = Fixture::new("hooks");
+        fx.write_skill(
+            "axh-hooked",
+            "---\nname: axh-hooked\ndescription: d\nbackend: axh\n---\n\
+             Look at a.txt, then say ok.\n",
+        );
+        std::fs::create_dir_all(fx.axh_home.join(".axh")).unwrap();
+        std::fs::write(
+            fx.axh_home.join(".axh/settings.json"),
+            r#"{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "echo 'hook says no' >&2; exit 2"}]}]}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(fx.config.workspace_root.join(".axh")).unwrap();
+        std::fs::write(
+            fx.config.workspace_root.join(".axh/settings.json"),
+            r#"{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}]}}"#,
+        )
+        .unwrap();
+        let api = FakeApi::spawn_each(vec![
+            json!({"choices": [{"message": {"role": "assistant", "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "read_file", "arguments": "{\"path\":\"a.txt\"}"}}
+            ]}}]}),
+            json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                   "usage": {"prompt_tokens": 10, "completion_tokens": 2}}),
+        ])
+        .await;
+        fx.config.agents.skill_provider = ProviderId::OpenRouter;
+        fx.config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some(api.base_url.clone()),
+                api_key: Some("sk-test".into()),
+                chat_model: "c".into(),
+                skill_model: "test-model".into(),
+            },
+        );
+
+        let record = runner::execute_and_record_skill("axh-hooked", &fx.config, &fx.db)
+            .await
+            .unwrap();
+        assert_eq!(record.status, RunStatus::Success, "err: {:?}", record.error);
+        assert_eq!(record.stdout, "ok");
+        assert_eq!(record.num_turns, Some(2), "the blocked call was a turn");
+        assert!(
+            record.stderr.contains("hook says no"),
+            "the hook's block reached the record: {}",
+            record.stderr
+        );
+        assert!(
+            record.stderr.contains(".axh/ hooks are not run"),
+            "and so did the project's hooks being left out: {}",
+            record.stderr
+        );
     }
 }

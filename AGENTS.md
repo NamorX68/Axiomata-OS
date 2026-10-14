@@ -28,7 +28,7 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   UX1–UX7 (2026-10-12, `docs/plans/ui-ux-round.md`; §7 of `docs/architecture.md`), and "a card started as a plan"
   (2026-10-12, `docs/plans/card-as-plan.md`: Start on a card makes it a plan's goal, the card follows the plan across
   the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness `axiomata-harness` / `axh`
-  (#37, `docs/plans/harness.md`; HS1–HS6b built, HS7–HS8 open). Deferred: further model-provider work.
+  (#37, `docs/plans/harness.md`; HS1–HS7 built, HS8 open). Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
   new work and **update them** (not just this file) when a milestone or major feature lands.
@@ -227,3 +227,8 @@ from the code itself:
   into both role fields on load, then `save()` drops it). Details: `docs/architecture.md` §5
   "Model providers"; `docs/plans/per-role-provider.md`;
   `docs/plans/settings-provider-overhaul.md`.
+- **Hooks veto, they never permit** (HS7, `docs/plans/harness-hs7.md`): the `hooks` of
+  `~/.axh/settings.json` (Claude's shape) may only *block* a call or the answer — `allow`/`ask` parse and
+  are no-ops (the gate stays the only decider), a crash/timeout/odd exit is a fail-open `Event::Hook` note,
+  and only the owner's file counts: a project's `.axh/` hooks are parsed (`project_hooks_skipped`) and
+  printed/folded into `stderr` as a note, never executed.

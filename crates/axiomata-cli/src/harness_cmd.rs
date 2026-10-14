@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
 use axiomata_harness::commands::{Expanded, PermissionsView, Registry, Source};
+use axiomata_harness::hooks::Hooks;
 use axiomata_harness::mcp;
 use axiomata_harness::permissions::settings::{self, SandboxSettings, Trust};
 use axiomata_harness::permissions::{
@@ -194,6 +195,9 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     if let Some(turns) = max_turns {
         run_config.max_turns = turns;
     }
+    // HS7: the owner's hooks (B1, the only ones that ever run), and the sandbox their commands run in (D5).
+    run_config.hooks = built.hooks;
+    run_config.sandbox = Some(built.sandbox.clone());
     // A skill as the run (HS6, K1.1): its body is the run's instructions, its frontmatter may narrow the tools,
     // pick the model and set the time limit (K5). After the commands, so a command's own word wins where both
     // name one.
@@ -240,12 +244,13 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
 
 /// What the run's gate was built with (HS3a), for the caller that still needs it: the settings' word on the sandbox
 /// (HS3b), the home folder and whether the project counts as trusted — the command registry needs the same trust
-/// the gate was built on (HS4, C1).
+/// the gate was built on (HS4, C1) — and the owner's hooks (HS7).
 struct Built {
     gate: Gate,
     sandbox: SandboxSettings,
     home: PathBuf,
     trusted: bool,
+    hooks: Hooks,
 }
 
 /// The run's gate (HS3a): the settings files, the flags and a role's rules; asks in the terminal when there is one.
@@ -321,10 +326,16 @@ fn gate(
         deny,
         trusted,
     };
-    let (gate, untrusted, sandbox) = build_gate(&home, cwd, options, asker)?;
+    let (gate, untrusted, sandbox, hooks, project_hooks) = build_gate(&home, cwd, options, asker)?;
     if untrusted {
         eprintln!(
             "note: the project's .axh/ allow rules and mode are left out: this folder is not trusted"
+        );
+    }
+    // HS7, B1: the owner's hooks run; a project's are parsed and left out, and said so here.
+    if project_hooks {
+        eprintln!(
+            "note: the project's own .axh/ hooks are not run: only ~/.axh/settings.json hooks run"
         );
     }
     if !sandbox.enabled || !axiomata_harness::sandbox::available() {
@@ -335,6 +346,7 @@ fn gate(
         sandbox,
         home,
         trusted,
+        hooks,
     })
 }
 
@@ -443,6 +455,17 @@ impl EventSink for Readable {
                 };
                 format!("✳ skill {} · {how}", plain(&name))
             }
+            // A hook of this run (HS7): its event, whether it blocked, and what it had to say.
+            Event::Hook {
+                hook_event,
+                blocked,
+                note,
+                ..
+            } => format!(
+                "△ hook {hook_event}{} · {}",
+                if blocked { " ⊘" } else { "" },
+                plain(note.as_deref().unwrap_or("ran"))
+            ),
             Event::Error { message } => {
                 eprintln!("error: {}", plain(&message));
                 return;

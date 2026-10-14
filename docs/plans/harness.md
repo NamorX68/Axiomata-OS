@@ -1,6 +1,6 @@
 # Axiomata's own harness (board card #37, M7.4)
 
-Status: HS1–HS6b built 2026-10-13/14. Each further step is planned on its own and confirmed by the owner before it is built.
+Status: HS1–HS7 built 2026-10-13/14. Each further step is planned on its own and confirmed by the owner before it is built.
 
 ## Why
 
@@ -41,7 +41,7 @@ Backend, one checkpoint and commit each:
 | **HS5** ✅ | MCP client (stdio, JSON-RPC lines; template: the removed client of `54173bf`), tools as `mcp__server__tool` |
 | **HS6** ✅ | Skills in the harness: SKILL.md parser, a skill as a run, the `skill` tool — K1–K6 below |
 | **HS6b** ✅ | `backend: axh` in the core: skill runs through the own harness, `runs` table, spend metering — B1–B4 below |
-| HS7 | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) |
+| **HS7** ✅ | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) — B1–B4 below |
 | HS8 | Subagents: a `task` tool starting a nested loop with its own prompt, tools and limits |
 
 After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
@@ -83,6 +83,39 @@ before tools/MCP. **D6** `AgentRequest::timeout` into `RunConfig.timeout`; `Fini
 failed MCP servers and refused calls → joined into `stderr`; reply → `stdout`, usage → token columns, turns →
 `num_turns`. **D8** `provider_label(Axh)` = the skill provider (it bills through that key — the daily cap keeps
 working). **D9** `runs.backend` verbatim `"axh"`.
+
+## HS7 — hooks (decided 2026-10-14)
+
+Full plan with tests and build order: `docs/plans/harness-hs7.md`. Claude Code's four events — `SessionStart`,
+`PreToolUse`, `PostToolUse`, `Stop` — configured in the owner's `~/.axh/settings.json` in Claude's shape, their
+payload as JSON on stdin, their answers Claude's JSON (or the exit codes).
+
+- **B1 [owner, rev. 2026-10-14] — owner hooks only.** Hooks come from `~/.axh/settings.json` alone. A project's
+  hooks are parsed — a settings file holding them must not fail the load — but never run: the repo rule "nothing
+  a stored file says may start a process" holds for hooks. `Loaded.project_hooks_skipped` carries the fact; the
+  CLI prints a stderr note, the core folds the same note into the run's `stderr` through `Notes`.
+- **B2 [owner, rev. 2026-10-14] — hooks veto, the gate decides.** A `PreToolUse` hook may only block (`deny` or
+  exit 2 → `error: <reason>` as the tool result, nothing runs). `allow` and `ask` parse faithfully and are
+  no-ops: rules, mode and `allowed_tools` stay the sole decider, HS6b-B3's determinism untouched, no bypass path
+  in the `Toolbox`.
+- **B3 [owner] — fail-open.** A crash, an exit other than 0/2 or a timeout is an `Event::Hook` note and the run
+  goes on; only an explicit block blocks. The run loop itself never fails because of a hook.
+- **B4 [owner] — unattended core runs execute the owner's hooks** (`backend: axh`): with B2+B3 a hook can only
+  make a run stricter or leave it unchanged, never looser. The gate construction in `agents/axh.rs` is untouched.
+
+Defaults (planner, D1–D8 in the plan file): the config types are Claude's shape — only `type: "command"`, unknown
+event names ignored, unknown entry fields tolerated, an unparsable matcher or an unknown type a
+`HarnessError::Settings` at load, 60 s default timeout; a matcher is an unanchored regex against the tool's name
+**and** its Claude alias (`bash` → `Bash`, `read_file` → `Read`, `list_dir` → `Ls`, …; MCP tools keep their
+`mcp__server__tool` spelling; `Stop` has no matcher); the payload carries `session_id` (`axh-<pid>-<epoch-ms>`),
+`transcript_path: ""`, `cwd`, `hook_event_name` and the event's own fields (`source` / `tool_name` +
+`tool_input` (+ `tool_response`) / `stop_hook_active`); hooks run through one lazy per-run `Session` (shell,
+snapshot, cleaned env, sandbox, network proxy) — a session that cannot be built is an `Event::Error` and the run
+goes on without hooks; `SessionStart` context becomes a system message right behind the harness's own; a blocked
+call gets `error: <reason>` instead of running, a blocked `PostToolUse` replaces what the model gets (the
+`ToolResult` event already shows what the tool really answered), a blocked `Stop` feeds the reason back as a user
+message and takes another turn with `stop_hook_active: true`; the effective limit is `min(hook timeout, time
+left to the run's deadline)`, cancel honoured by dropping the wait (which kills the hook's process group).
 
 ## HS6 — skills (decided 2026-10-13)
 
@@ -304,6 +337,44 @@ working). **D9** `runs.backend` verbatim `"axh"`.
 - **S6 — background jobs.** `bash` with `run_in_background` starts a job and returns its id at once; `bash_output`
   reads what it wrote since the last look and whether it still runs; `kill_shell` ends it. At most 8 jobs per run,
   the last 1 MiB of each job's output kept; every job ends with the run.
+
+## HS7 — what exists
+
+- `hooks` (new module, `crates/axiomata-harness/src/hooks.rs`): the Claude-shaped config types (`HooksSection`,
+  `Entry`, `CommandEntry` — unknown event names kept but never run, unknown entry fields ignored, only
+  `type: "command"`), `Hooks::compile` (matcher regex and type checked at load, 60 s default timeout, the reason
+  plain for `settings.rs` to wrap in `HarnessError::Settings`), `claude_alias`, `payload`/`tool_input`, and
+  `run_event`: configured order, the first block short-circuits the event, every hook reported as `Event::Hook`.
+  `answer_of` reads Claude's channels — `hookSpecificOutput.permissionDecision` (deny blocks, allow/ask are
+  no-ops), the legacy top-level `decision`, exit 2's stderr as block reason (context for `SessionStart` instead),
+  plain stdout as `SessionStart` context; anything else a note (B3).
+- `tools/shell.rs`: `Session`/`Session::new` and a new `run_hook` are `pub(crate)` — the payload written to a
+  piped stdin from its own task, stdout and stderr kept apart (they mean different things to a hook), no folder
+  carry-over, `GroupGuard` + timeout + stop flag like any command, the run's proxy through
+  `Sandboxing::On(gate)`.
+- `permissions/settings.rs`: `File.hooks` (so the key parses under `deny_unknown_fields`), `Settings.hooks`
+  compiled at read, `Loaded.hooks` = the owner's only and `Loaded.project_hooks_skipped` (B1);
+  `permissions::build_gate` returns `(gate, untrusted_project, sandbox, hooks, project_hooks_skipped)`.
+- `event.rs`: `Event::Hook { turn: Option<u32>, hook_event, command, blocked, context_chars, note }` — `turn` is
+  `null` for `SessionStart`, `note` carries a fail-open failure *or* the block reason (D6, so a record shows why
+  a call never ran). `config.rs`: `RunConfig.hooks` + `RunConfig.sandbox`.
+- `run.rs`: the four integration points around the loop's own steps (D3) — `SessionStart` after `Started`,
+  `PreToolUse` before the gate (a blocked call gets `error: <reason>` and no gate judgement), `PostToolUse` after
+  the tool, `Stop` on an empty reply — plus the lazy `HookSession` (D8, one session per run, build failure =
+  `Event::Error` + run on) and `hooks_event` (the run's deadline and cancel honoured around every event).
+- Callers: `bin/axh.rs` and `axiomata-cli/src/harness_cmd.rs` destructure the five-element tuple, print the
+  *project hooks skipped* stderr note (B1) and put hooks + sandbox into `RunConfig` (D5/D7); the CLI's readable
+  output prints `△ hook <event> …`. `agents/axh.rs` passes `loaded.hooks` (B4), pushes the skip note into its
+  `Notes` collector and folds `Event::Hook` notes into the run's `stderr`.
+- Tests: `hooks.rs` (a Claude-shaped section compiles / a broken one stops the run, the alias matcher,
+  deny-vs-allow, exit 2, `SessionStart`'s three context channels, fail-open crash and timeout, the first block
+  short-circuiting, `Stop` without a matcher, the payload's fields), `settings.rs` (the owner's hooks loaded, a
+  project's parsed but left out — also in a trusted folder —, a broken project hooks file stops the load, the
+  `hooks` key parsing beside unknown event names), `run.rs` (context behind the harness's own prompt, `PreToolUse`
+  deny **and** B2's load-bearing *allow changes nothing against a deny rule*, `PostToolUse` replacing the model's
+  result while the stream keeps the tool's own, the two-turn `Stop` through `stop_hook_active`, a session that
+  cannot be built as an error note), and the core's end-to-end skill run whose `stderr` holds both the hook's
+  block reason and the project-hooks note.
 
 ## HS6b — what exists
 
