@@ -48,6 +48,23 @@ After the backend: sessions over several turns, streaming, the Anthropic client,
 `spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
 own, both on the event stream of H3.
 
+## Open — token cost ("cheap by default", owner note 2026-10-14)
+
+A short owner run on `ling-3.0-flash` already summed **57–70k input tokens** (`harness run`, HS8's test prompt): the
+per-request baseline is lean (~2.2k: system prompt, 11 tool specs, the skills list), but every turn re-sends the
+whole conversation, `glob`/`grep` results are unbounded (only the global 30k tool-result cap cuts them), and a
+subagent multiplies the requests — all summed into one number (D2.4). In money: ~$0.002 on `ling-3.0-flash`,
+~$0.25 on `claude-sonnet-5`. Not fatal today; the harness must stay cheap, so something should be done here.
+**No plan yet — owner note; decide before building.** Two concerns to weigh:
+
+- **Cutting `glob`/`grep` (or lowering `MAX_TOOL_OUTPUT_CHARS`) takes the model information it may need for the
+  prompt** (owner, 2026-10-14). Any line trades information for tokens; if a cap comes, it needs a clear
+  *more exists — narrow the call* note, a generous limit, or an explicit `limit` argument the model raises itself.
+- **Prompt caching**: our requests have a cacheable shape by construction (stable prefix = system prompt + tool
+  specs + the conversation so far, appended per turn). Providers cut the price of a re-read prefix (Anthropic
+  explicit `cache_control`, ~10 % of input price on reads with a small surcharge on the write; others automatic).
+  The spend metering would then have to know the cache's read/write prices, or `metered_cost_usd` over-estimates.
+
 ## HS8 — subagents (decided 2026-10-14)
 
 Full plan with tests and build order: `docs/plans/harness-hs8.md`. A `task` tool starts a nested run of the same
