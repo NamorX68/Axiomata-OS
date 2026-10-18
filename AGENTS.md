@@ -207,8 +207,10 @@ from the code itself:
   `allowed_tools` become the run's whole permissions — `~/.axh` `deny`/`ask` still beat them, `~/.axh` `allow`
   never widens them);
   the only other relevant field is `prepend_files: ["rel/path.md"]` (workspace files
-  inlined into the prompt as `## Context file:` blocks; missing = skipped, `..`/absolute =
-  run fails as a recorded `Failed`, per §D of the Stufe 2 plan). The `local_backend` /
+  inlined into the prompt as `## Context file:` blocks framed as untrusted data; missing = skipped,
+  `..`/absolute, a `.git`/`.hg`/`.jj` store, a linked or special file or one over 256 KiB = run fails as
+  a recorded `Failed`; one reader for core and harness, `axiomata_harness::skills::context`, through
+  `axiomata-files`' pinned walk, strict link policy for the workspace). The `local_backend` /
   `effective_backend` mechanism and the `ollama-agent` backend are gone.
 - **Model / provider**: the provider is chosen **per role** — `agents.chat_provider` for
   interactive chat, `agents.skill_provider` for skill/routine runs — resolved via

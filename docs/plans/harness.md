@@ -283,9 +283,12 @@ left to the run's deadline)`, cancel honoured by dropping the wait (which kills 
   - `model` overrides the run's model; ignored when loaded through the tool.
   - `timeout_secs` becomes the run's overall timeout, capped by the existing maximum.
   - `prepend_files: ["rel/path.md"]` (Axiomata's bridge, `AGENTS.md` "Backend ids"): each file relative to the
-    **working folder** is inlined before the body as `## Context file: <path>` + content; a missing file — with a
-    missing folder in front of it — is skipped; an absolute path or one with `..` fails the run with a clear error;
-    read through a contained root, capped at 256 KiB per file.
+    **working folder** is inlined before the body as `## Context file: <path>` + content in an `<untrusted-data>`
+    frame; a missing or blank file — or a missing folder in front of it — is skipped; an absolute path, one with
+    `..`, one into a `.git`/`.hg`/`.jj` store (as written or through a link), a special file or one over 256 KiB
+    fails the run with a clear error. One reader for the harness and the core (`skills::context`, review
+    2026-10-18 — the two had drifted apart): the pinned `openat` walk of `axiomata-files`, contained root here,
+    strict (no linked files) for the core's workspace.
 - **K6 — Axiomata's core is not touched in HS6.** `backend: axh`, runs in the `runs` table and spend metering are
   step HS6b, planned on its own. HS6 only adds `--skill`/`--skill-dir` to the CLI's existing `harness run`.
 
@@ -489,7 +492,9 @@ left to the run's deadline)`, cancel honoured by dropping the wait (which kills 
   (`instructions: None`, its own limits, timeout capped by the parent's remaining time), runs
   `Box::pin(run_inner(..., depth + 1))` through a `SubSink`, drains the subagent's leftovers wrapped, sums the
   usage into the run's and maps the outcome back to a tool result; `SubSink` wraps every event in `Event::Sub` at
-  its depth.
+  its depth. Since the review of 2026-10-18 the loop is a `Loop` struct (the run's inputs and the state it keeps
+  between turns) with one method per step — `session_start`, `drive`, `ask`, `stop_hooks`, `run_calls`,
+  `run_call`, `execute`, `run_task`; a step that ends the run returns `Err(FinishReason)` and `?` carries it out.
 - `event.rs`: `Event::Sub { depth: u32, event: Box<Event> }` — serde names the box `inner`.
 - `prompt.rs`: `subagent_prompt(cwd, date)`; `hooks.rs`: `claude_alias("task")` = `"Task"`;
   `permissions/mod.rs`: `Rule::names_tool` (`pub`); `tools/mod.rs`: `cap` `pub(crate)` (the subagent's answer is
@@ -531,7 +536,8 @@ left to the run's deadline)`, cancel honoured by dropping the wait (which kills 
 - `run.rs`: the four integration points around the loop's own steps (D3) — `SessionStart` after `Started`,
   `PreToolUse` before the gate (a blocked call gets `error: <reason>` and no gate judgement), `PostToolUse` after
   the tool, `Stop` on an empty reply — plus the lazy `HookSession` (D8, one session per run, build failure =
-  `Event::Error` + run on) and `hooks_event` (the run's deadline and cancel honoured around every event).
+  `Event::Error` + run on) and `RunHooks::fire` (was `hooks_event`; the run's deadline and cancel honoured around
+  every event, the payload built only when there are hooks).
 - Callers: `bin/axh.rs` and `axiomata-cli/src/harness_cmd.rs` destructure the five-element tuple, print the
   *project hooks skipped* stderr note (B1) and put hooks + sandbox into `RunConfig` (D5/D7); the CLI's readable
   output prints `△ hook <event> …`. `agents/axh.rs` passes `loaded.hooks` (B4), pushes the skip note into its

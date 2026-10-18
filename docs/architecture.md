@@ -712,8 +712,11 @@ One `SKILL.md` frontmatter mechanism surviving from Stufe 2's lean-local-agent p
 `AgentBackend::Opencode` regardless of provider.
 
 - **`prepend_files: ["Mail/.topics.md"]`** — workspace files read at run time and prefixed to
-  the prompt as `## Context file: <rel>` blocks (missing/blank files contribute nothing; a
-  `..`/absolute entry is rejected). The generic fix for a skill that references a workspace
+  the prompt as `## Context file: <rel>` blocks framed as untrusted data (missing/blank files
+  contribute nothing; a `..`/absolute entry, a version-control store, a linked or special file or
+  one over 256 KiB fails the run). Read by the harness's `skills::context` — the one reader for
+  core and harness — through `axiomata-files`' pinned walk with the workspace's strict link
+  policy. The generic fix for a skill that references a workspace
   file but runs on a backend with no file tool — the opencode harness doesn't get `mail-digest`'s
   topics file as context, so `mail-digest` needs its configured topics inline. Applies to
   **every** backend. Applies live to the routine scheduler's `skill` targets too (they go
