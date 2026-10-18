@@ -16,6 +16,8 @@
   import { onDestroy } from "svelte";
 
   import { messageOf } from "../core/errors";
+  import EmptyState from "../ui/EmptyState.svelte";
+  import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import { gitApi, type Branch, type OutgoingCommit, type RepoStatus, type Side } from "./gitBackend";
   import { canCommit, groupEntries, markOf, pushState, splitPath, type GitRow } from "./gitModel";
@@ -254,7 +256,7 @@
           disabled={busy}
           aria-label={row.untracked ? `Delete ${row.entry.path}` : `Discard changes in ${row.entry.path}`}
           title={row.untracked ? "Delete this untracked file" : "Discard the unstaged changes"}
-          onclick={() => void revert(row)}>↶</button
+          onclick={() => void revert(row)}><Icon name="undo-2" size="sm" /></button
         >
       {/if}
       <button
@@ -263,7 +265,8 @@
         disabled={busy}
         aria-label={side === "staged" ? `Unstage ${row.entry.path}` : `Stage ${row.entry.path}`}
         title={side === "staged" ? "Unstage" : "Stage"}
-        onclick={() => void (side === "staged" ? unstage(row) : stage(row))}>{side === "staged" ? "−" : "+"}</button
+        onclick={() => void (side === "staged" ? unstage(row) : stage(row))}
+        ><Icon name={side === "staged" ? "x" : "plus"} size="sm" /></button
       >
     </div>
   {/each}
@@ -271,12 +274,13 @@
 
 <section class="git" aria-label="Git">
   {#if !root}
-    <p class="note">No project open.</p>
+    <EmptyState compact title="No project open" text="Open one from the project bar above." />
   {:else if notARepo}
-    <p class="note">This project folder is not a git repository.</p>
-    <p class="note">
-      <button type="button" class="ax-btn primary" disabled={busy} onclick={() => void createRepo()}>Create repository</button>
-    </p>
+    <EmptyState compact title="Not a git repository" text="This project folder has no history yet.">
+      {#snippet action()}
+        <button type="button" class="ax-btn primary" disabled={busy} onclick={() => void createRepo()}>Create repository</button>
+      {/snippet}
+    </EmptyState>
     {#if error}<p class="problem" role="alert">{error}</p>{/if}
   {:else if !status}
     <p class="note">{error || "Reading the repository…"}</p>
@@ -290,10 +294,13 @@
           title={status.upstream ? `Follows ${status.upstream} — switch branch` : "No upstream — switch branch"}
           onclick={() => void openBranches()}
         >
+          <Icon name="git-branch" size="sm" />
           <span class="name">{status.branch ?? `detached at ${status.head ?? "?"}`}</span>
+          <span class="caret" class:turned={branchMenu}><Icon name="chevron-down" size="sm" /></span>
         </button>
-        {#if status.ahead > 0}<span class="count" title="Commits not on the upstream">↑{status.ahead}</span>{/if}
-        {#if status.behind > 0}<span class="count" title="Commits on the upstream you do not have">↓{status.behind}</span>{/if}
+        <!-- With a push button the ahead count is on it; without one (no remote) it stands here. -->
+        {#if status.ahead > 0 && !push}<span class="count" title="Commits not on the upstream">↑ {status.ahead}</span>{/if}
+        {#if status.behind > 0}<span class="count" title="Commits on the upstream you do not have">↓ {status.behind}</span>{/if}
         {#if branchMenu}
           <div class="branch-menu" role="menu">
             {#each branchList as branch (branch.name)}
@@ -304,12 +311,13 @@
                 disabled={branch.current}
                 onclick={() => void switchTo(branch.name)}
               >
-                <span class="check" aria-hidden="true">{branch.current ? "✓" : ""}</span>
+                <span class="check" aria-hidden="true">{#if branch.current}<Icon name="check" size="sm" />{/if}</span>
                 <span class="name">{branch.name}</span>
                 {#if branch.upstream}<small>{branch.upstream}</small>{/if}
               </button>
             {/each}
             <div class="new-branch">
+              <Icon name="plus" size="sm" />
               <input
                 type="text"
                 spellcheck="false"
@@ -346,15 +354,17 @@
 
     <div class="scroll">
       {#if outgoing.length > 0}
+        <div class="plate outgoing-plate">
         <div class="group-head">
           <button
             type="button"
-            class="link"
+            class="fold"
             aria-expanded={outgoingOpen}
             title="What a push would publish"
             onclick={() => (outgoingOpen = !outgoingOpen)}
           >
-            {outgoingOpen ? "▾" : "▸"} To push <small>{outgoing.length}</small>
+            <span class="caret" class:turned={outgoingOpen}><Icon name="chevron-right" size="sm" /></span>
+            To push <span class="n">{outgoing.length}</span>
           </button>
         </div>
         {#if outgoingOpen}
@@ -383,30 +393,37 @@
             {/each}
           </ul>
         {/if}
+        </div>
       {/if}
-      <div class="group-head">
-        <span>Staged <small>{groups.staged.length}</small></span>
-        {#if groups.staged.length > 0}
-          <button type="button" class="link" disabled={busy} onclick={() => void unstageAll()}>Unstage all</button>
-        {/if}
+      <div class="plate staged-plate">
+        <div class="group-head">
+          <span class="title">Staged <span class="n">{groups.staged.length}</span></span>
+          {#if groups.staged.length > 0}
+            <button type="button" class="link" disabled={busy} onclick={() => void unstageAll()}>Unstage all</button>
+          {/if}
+        </div>
+        {#if groups.staged.length === 0}<p class="empty">Nothing staged yet — the + on a change adds it.</p>{/if}
+        {@render rows(groups.staged, "staged")}
       </div>
-      {#if groups.staged.length === 0}<p class="empty">Nothing staged.</p>{/if}
-      {@render rows(groups.staged, "staged")}
 
-      <div class="group-head">
-        <span>Changes <small>{groups.changes.length}</small></span>
-        {#if groups.changes.length > 0}
-          <button type="button" class="link" disabled={busy} onclick={() => void stageAll()}>Stage all</button>
+      <div class="plate">
+        <div class="group-head">
+          <span class="title">Changes <span class="n">{groups.changes.length}</span></span>
+          {#if groups.changes.length > 0}
+            <button type="button" class="link" disabled={busy} onclick={() => void stageAll()}>Stage all</button>
+          {/if}
+        </div>
+        {#if groups.changes.length === 0}
+          <p class="empty clean"><Icon name="circle-check" size="sm" /> The working tree is clean.</p>
         {/if}
+        {@render rows(groups.changes, "unstaged")}
       </div>
-      {#if groups.changes.length === 0}<p class="empty">No changes — the working tree is clean.</p>{/if}
-      {@render rows(groups.changes, "unstaged")}
     </div>
 
     <div class="commit">
       <textarea
         rows="3"
-        placeholder="Commit message"
+        placeholder="Commit message  (⌘↩ commits)"
         spellcheck="true"
         bind:value={message}
         onkeydown={(e) => {
@@ -418,7 +435,7 @@
       ></textarea>
       <div class="commit-buttons">
         <button type="button" class="ax-btn primary" disabled={!commitReady || busy} onclick={() => void commit()}>
-          Commit {groups.staged.length > 0 ? `(${groups.staged.length})` : ""}
+          <Icon name="git-commit-horizontal" size="sm" /> Commit {groups.staged.length > 0 ? `(${groups.staged.length})` : ""}
         </button>
         <button
           type="button"
@@ -427,7 +444,7 @@
           title={status.branch === null ? "HEAD is detached; switch to a branch to push" : "Commit what is staged, then push the branch (never forced)"}
           onclick={() => void commitAndPush()}
         >
-          Commit &amp; Push
+          <Icon name="arrow-up-from-line" size="sm" /> Commit &amp; Push
         </button>
       </div>
     </div>
@@ -443,65 +460,87 @@
     min-height: 0;
   }
 
+  /* The branch as a pill that says it opens a menu, its distance to the upstream beside it, the remote on the right. */
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--ax-space-1) var(--ax-space-3);
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-3);
     border-bottom: 1px solid var(--ax-border);
     font-size: var(--ax-font-size-sm);
   }
 
   .branch {
+    position: relative;
+    flex: 1 1 auto;
     display: flex;
-    align-items: baseline;
-    gap: var(--ax-space-2);
+    align-items: center;
+    gap: var(--ax-space-1);
     min-width: 0;
   }
 
-  .branch .name {
+  .branch-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    min-width: 0;
+    padding: var(--ax-space-1) var(--ax-space-2);
+    background: var(--ax-elev-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
+    color: var(--ax-text);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .branch-button:hover,
+  .branch-button[aria-expanded="true"] {
+    border-color: var(--ax-border-strong);
+    background: var(--ax-elev-3);
+  }
+
+  .branch-button .name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--ax-text);
+  }
+
+  .caret {
+    display: inline-flex;
+    color: var(--ax-text-muted);
+    transition: transform var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  .branch-button .caret.turned {
+    transform: rotate(180deg);
+  }
+
+  .fold .caret.turned {
+    transform: rotate(90deg);
+  }
+
+  .count {
+    flex: none;
+    padding: 0 var(--ax-space-2);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
   }
 
   .remote {
     display: flex;
+    flex: none;
     align-items: center;
-    gap: var(--ax-space-2);
+    gap: var(--ax-space-1);
   }
 
   .push {
-    padding: 0 var(--ax-space-2);
-  }
-
-  .commit-buttons {
-    display: flex;
-    gap: var(--ax-space-2);
-  }
-
-  .commit-buttons .ax-btn {
-    flex: 1;
-  }
-
-  .branch {
-    position: relative;
-  }
-
-  .branch-button {
-    min-width: 0;
-    padding: 0 var(--ax-space-1);
-    background: none;
-    border: 0;
-    border-radius: var(--ax-radius-sm);
-    color: var(--ax-text);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .branch-button:hover {
-    background: var(--ax-accent-muted);
+    padding: var(--ax-space-1) var(--ax-space-3);
+    white-space: nowrap;
   }
 
   .branch-menu {
@@ -509,19 +548,19 @@
     left: 0;
     top: calc(100% + var(--ax-space-1));
     z-index: 10;
-    min-width: calc(220px * var(--ax-ui-scale));
+    min-width: calc(240px * var(--ax-ui-scale));
     max-height: calc(320px * var(--ax-ui-scale));
     overflow: auto;
     padding: var(--ax-space-1);
-    background: var(--ax-surface-2);
-    border: 1px solid var(--ax-border);
+    background: var(--ax-elev-3);
+    border: 1px solid var(--ax-border-strong);
     border-radius: var(--ax-radius-md);
     box-shadow: var(--ax-shadow-pop);
   }
 
   .branch-menu > button {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--ax-space-2);
     width: 100%;
     padding: var(--ax-space-1) var(--ax-space-2);
@@ -535,23 +574,35 @@
   }
 
   .branch-menu > button:hover:not(:disabled) {
-    background: var(--ax-accent-muted);
+    background: var(--ax-selected-bg);
   }
 
   .branch-menu > button.current {
+    color: var(--ax-text);
+    font-weight: 600;
+    cursor: default;
+  }
+
+  .branch-menu small {
+    margin-left: auto;
     color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
   }
 
   .check {
-    width: calc(12px * var(--ax-ui-scale));
-    color: var(--ax-accent);
+    display: inline-flex;
+    width: calc(14px * var(--ax-ui-scale));
+    color: var(--ax-success);
   }
 
   .new-branch {
     display: flex;
+    align-items: center;
     gap: var(--ax-space-2);
-    padding: var(--ax-space-2) var(--ax-space-1) var(--ax-space-1);
+    margin-top: var(--ax-space-1);
+    padding: var(--ax-space-2) var(--ax-space-2) var(--ax-space-1);
     border-top: 1px solid var(--ax-border);
+    color: var(--ax-text-muted);
   }
 
   .new-branch input {
@@ -565,30 +616,92 @@
     font: inherit;
   }
 
-  .revert:hover:not(:disabled) {
-    color: var(--ax-danger, var(--ax-warning));
-  }
-
-  .count {
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
   .scroll {
     flex: 1;
     min-height: 0;
     overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-3);
+    padding: var(--ax-space-3);
+  }
+
+  /* A group of files is a plate, like the Run view's groups; the files are rows on it. */
+  .plate {
+    flex: none;
+    overflow: hidden;
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-2);
+    box-shadow: var(--ax-shadow-raised);
+  }
+
+  .staged-plate {
+    border-left: calc(3px * var(--ax-ui-scale)) solid color-mix(in srgb, var(--ax-success) 70%, transparent);
+  }
+
+  .outgoing-plate {
+    border-left: calc(3px * var(--ax-ui-scale)) solid color-mix(in srgb, var(--ax-harness-opencode) 70%, transparent);
   }
 
   .group-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--ax-space-2) var(--ax-space-3) var(--ax-space-1);
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-3);
+    border-bottom: 1px solid var(--ax-border);
+    background: var(--ax-elev-3);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
+    font-weight: 600;
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
+  }
+
+  .title,
+  .fold {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+  }
+
+  .fold {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+  }
+
+  .n {
+    padding: 0 var(--ax-space-2);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  /* Quiet until pointed at: these are not the panel's one primary action (the accent rule). */
+  .link {
+    padding: 0 var(--ax-space-2);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-pill);
+    color: var(--ax-text-muted);
+    font: inherit;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+  }
+
+  .link:hover:not(:disabled) {
+    border-color: var(--ax-border-strong);
+    color: var(--ax-text);
   }
 
   .outgoing,
@@ -597,27 +710,37 @@
     padding: 0;
     list-style: none;
   }
+
+  .outgoing > li + li {
+    border-top: 1px solid color-mix(in srgb, var(--ax-border) 60%, transparent);
+  }
+
   .commit-line {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: var(--ax-space-2);
+    gap: 0 var(--ax-space-2);
     width: 100%;
-    padding: var(--ax-space-1) var(--ax-space-3);
+    padding: var(--ax-space-2) var(--ax-space-3);
     background: none;
     border: 0;
     color: var(--ax-text);
     font: inherit;
+    font-size: var(--ax-font-size-sm);
     text-align: left;
     cursor: pointer;
   }
+
   .commit-line:hover {
-    background: var(--ax-accent-muted);
+    background: var(--ax-elev-3);
   }
+
   .commit-line .sha {
     font-family: var(--ax-font-mono);
-    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    color: var(--ax-harness-opencode);
   }
+
   .commit-line .subject {
     flex: 1;
     min-width: 0;
@@ -625,50 +748,58 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .commit-line small {
+    flex-basis: 100%;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .files {
+    padding-bottom: var(--ax-space-2);
+  }
+
   .files li {
     padding: 0 var(--ax-space-3) 0 calc(28px * var(--ax-ui-scale));
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
     overflow-wrap: anywhere;
   }
+
   .files .mark {
     display: inline-block;
-    width: 1.2em;
-    color: var(--ax-accent);
+    width: 1.4em;
+    background: none;
   }
+
   .files .muted {
     color: var(--ax-text-muted);
-  }
-
-  .group-head small {
-    margin-left: var(--ax-space-1);
-  }
-
-  .link {
-    background: none;
-    border: 0;
-    color: var(--ax-accent);
-    font: inherit;
-    text-transform: none;
-    cursor: pointer;
   }
 
   .row {
     display: flex;
     align-items: center;
+    gap: var(--ax-space-1);
     padding-right: var(--ax-space-2);
     font-size: var(--ax-font-size-sm);
   }
 
-  .row:hover,
+  .row + .row {
+    border-top: 1px solid color-mix(in srgb, var(--ax-border) 40%, transparent);
+  }
+
+  .row:hover {
+    background: var(--ax-elev-3);
+  }
+
   .row.selected {
-    background: var(--ax-accent-muted);
+    background: var(--ax-selected-bg);
   }
 
   .open {
     display: flex;
     flex: 1;
-    align-items: baseline;
+    align-items: center;
     gap: var(--ax-space-2);
     min-width: 0;
     padding: var(--ax-space-1) var(--ax-space-3);
@@ -680,24 +811,39 @@
     cursor: pointer;
   }
 
+  /* The change's letter as a small badge in its colour: modified, new, deleted at a glance. */
   .mark {
+    --mark: var(--ax-text-muted);
     flex-shrink: 0;
-    width: calc(14px * var(--ax-ui-scale));
+    display: inline-grid;
+    place-items: center;
+    width: calc(18px * var(--ax-ui-scale));
+    height: calc(18px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-sm);
+    background: color-mix(in srgb, var(--mark) 16%, transparent);
+    color: var(--mark);
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
-    text-align: center;
-    color: var(--ax-text-muted);
+    font-weight: 600;
+  }
+
+  .mark-M,
+  .mark-R {
+    --mark: var(--ax-harness-opencode);
   }
 
   .mark-A,
   .mark-U {
-    color: var(--ax-success, var(--ax-accent));
+    --mark: var(--ax-success);
   }
 
   .mark-D,
-  .mark-\!,
+  .mark-\! {
+    --mark: var(--ax-danger);
+  }
+
   .conflict .name {
-    color: var(--ax-danger, var(--ax-warning));
+    color: var(--ax-danger);
   }
 
   .name {
@@ -716,25 +862,40 @@
 
   .toggle {
     flex-shrink: 0;
-    width: calc(22px * var(--ax-ui-scale));
+    display: inline-grid;
+    place-items: center;
+    width: calc(24px * var(--ax-ui-scale));
+    height: calc(24px * var(--ax-ui-scale));
+    padding: 0;
     background: none;
-    border: 0;
+    border: 1px solid transparent;
     border-radius: var(--ax-radius-sm);
     color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-md, 1em);
     cursor: pointer;
+    opacity: 0.55;
+  }
+
+  .row:hover .toggle,
+  .row:focus-within .toggle,
+  .row.selected .toggle {
+    opacity: 1;
   }
 
   .toggle:hover:not(:disabled) {
-    background: var(--ax-surface-2);
+    border-color: var(--ax-border-strong);
+    background: var(--ax-elev-2);
     color: var(--ax-text);
+  }
+
+  .revert:hover:not(:disabled) {
+    color: var(--ax-danger);
   }
 
   .note,
   .empty,
   .problem {
     margin: 0;
-    padding: var(--ax-space-2) var(--ax-space-4);
+    padding: var(--ax-space-2) var(--ax-space-3);
     font-size: var(--ax-font-size-sm);
   }
 
@@ -743,26 +904,57 @@
     color: var(--ax-text-muted);
   }
 
+  .clean {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+  }
+
+  .empty.clean {
+    color: var(--ax-success);
+  }
+
   .problem {
     color: var(--ax-warning);
   }
 
+  /* The commit box sits on the panel's floor: its message, the primary Commit, and Commit & Push beside it. */
   .commit {
     display: flex;
     flex-direction: column;
     gap: var(--ax-space-2);
-    padding: var(--ax-space-2) var(--ax-space-3);
+    padding: var(--ax-space-3);
     border-top: 1px solid var(--ax-border);
+    background: var(--ax-elev-2);
   }
 
   textarea {
     resize: vertical;
-    padding: var(--ax-space-1) var(--ax-space-2);
-    background: var(--ax-surface-2);
+    min-height: calc(64px * var(--ax-ui-scale));
+    padding: var(--ax-space-2);
+    background: var(--ax-bg);
     border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
+    border-radius: var(--ax-radius-md);
     color: var(--ax-text);
     font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-sm);
+  }
+
+  textarea:focus-visible {
+    outline: var(--ax-focus-ring);
+  }
+
+  .commit-buttons {
+    display: flex;
+    gap: var(--ax-space-2);
+  }
+
+  .commit-buttons .ax-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ax-space-1);
+    white-space: nowrap;
   }
 </style>

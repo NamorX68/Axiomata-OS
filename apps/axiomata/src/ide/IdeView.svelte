@@ -448,6 +448,15 @@
    * then typed into a terminal pane — a second click on the same task starts that pane again. A new pane
    * docks below the dock, or joins the group of the task pane already open.
    */
+  /** The tasks with a pane on the canvas: the Run view shows that a click starts that pane again. */
+  const openTaskIds = $derived(
+    new Set(
+      allTabs(layout)
+        .map(taskIdOf)
+        .filter((id): id is string => id !== null),
+    ),
+  );
+
   async function runTask(task: Pick<TaskInfo, "id" | "label">): Promise<void> {
     const project = current;
     if (!project) return;
@@ -1028,6 +1037,7 @@
         <TasksPanel
           root={current ? projectRoot(current.id) : null}
           active={tree.visible && tree.view === "tasks"}
+          {openTaskIds}
           onRun={(task) => void runTask(task)}
           onError={(message) => toast(message, "danger")}
         />

@@ -79,15 +79,17 @@
     --tone: var(--ax-glow);
   }
 
+  /* In a narrow sidebar the action moves under the title rather than squeezing it into a column of single words. */
   .line {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--ax-space-2);
     min-height: var(--ax-hit-min);
   }
 
   .title {
-    flex: 1;
+    flex: 1 1 calc(140px * var(--ax-ui-scale));
     min-width: 0;
   }
 
@@ -95,6 +97,7 @@
     display: inline-flex;
     gap: var(--ax-space-1);
     flex: none;
+    margin-left: auto;
   }
 
   .details {

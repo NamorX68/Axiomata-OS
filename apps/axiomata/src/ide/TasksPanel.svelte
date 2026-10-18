@@ -9,6 +9,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import EmptyState from "../ui/EmptyState.svelte";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
@@ -32,6 +33,7 @@
   let {
     root,
     active,
+    openTaskIds = new Set<string>(),
     onRun,
     onError,
   }: {
@@ -39,6 +41,8 @@
     root: string | null;
     /** The view is on screen (the list is read again each time it is shown). */
     active: boolean;
+    /** The tasks that have a pane open: a click there starts that pane again, so the row says so. */
+    openTaskIds?: ReadonlySet<string>;
     onRun: (task: TaskInfo) => void;
     onError: (message: string) => void;
   } = $props();
@@ -177,24 +181,34 @@
         </div>
       {/if}
       {#each groups as g (g.group)}
-        <section class="g-{g.group}">
+        <section class="group g-{g.group}">
           <h3><span class="swatch" aria-hidden="true"></span>{GROUP_LABEL[g.group]}<span class="n">{g.tasks.length}</span></h3>
           <ul>
             {#each g.tasks as task (task.id)}
-              <li class:locked={locked(task)}>
+              {@const inPane = openTaskIds.has(task.id)}
+              <li class:locked={locked(task)} class:in-pane={inPane}>
                 <button
                   type="button"
                   class="run"
                   disabled={locked(task)}
-                  title={locked(task) ? "Review the project's tasks.json first" : describeTask(task)}
+                  title={locked(task)
+                    ? "Review the project's tasks.json first"
+                    : inPane
+                      ? `Start again in its pane: ${describeTask(task)}`
+                      : describeTask(task)}
                   onclick={() => onRun(task)}
                 >
-                  <span class="play" aria-hidden="true"><Icon name="play" size="sm" /></span>
+                  <span class="play" aria-hidden="true"><Icon name={inPane ? "rotate-ccw" : "play"} size="sm" /></span>
                   <span class="text">
                     <span class="label">{task.label}</span>
                     {#if task.command !== task.label}<span class="cmd">{describeTask(task)}</span>{/if}
                   </span>
-                  {#if task.source !== "detected"}<span class="tag">{task.source}</span>{/if}
+                  {#if locked(task)}
+                    <span class="tag"><Icon name="lock" size="sm" /> project</span>
+                  {:else if task.source !== "detected"}
+                    <span class="tag">{task.source}</span>
+                  {/if}
+                  {#if inPane}<span class="pane-mark">in a pane</span>{/if}
                 </button>
                 {#if task.source !== "detected" && !locked(task)}
                   <span class="own">
@@ -207,10 +221,11 @@
           </ul>
         </section>
       {:else}
-        <p class="note">
-          Nothing to run found. Tasks are detected from <code>Cargo.toml</code>, <code>package.json</code>,
-          <code>pyproject.toml</code> and a <code>Makefile</code>, or written in <code>.axiomata/tasks.json</code>.
-        </p>
+        <EmptyState
+          compact
+          title="Nothing to run yet"
+          text="Tasks are found in Cargo.toml, package.json, pyproject.toml and a Makefile, or written in .axiomata/tasks.json."
+        />
       {/each}
       {#each listed.problems as problem (problem)}
         <p class="problem">{problem}</p>
@@ -218,7 +233,7 @@
     {/if}
     {#if root}
       {#if editing === null}
-        <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> New task…</button>
+        <button type="button" class="add" onclick={startNew}><Icon name="plus" size="sm" /> New task</button>
       {:else}
         <form
           onsubmit={(event) => {
@@ -227,22 +242,44 @@
           }}
         >
           <p class="form-title">{editing === "" ? "New task" : "Edit task"}</p>
-          <input type="text" bind:value={form.label} placeholder="Name, e.g. Start the server" spellcheck="false" />
-          <input
-            type="text"
-            bind:value={form.command}
-            placeholder="Command, e.g. uv run uvicorn app:app --reload"
-            spellcheck="false"
-          />
-          <input type="text" bind:value={form.cwd} placeholder="Folder inside the project (optional)" spellcheck="false" />
-          <select bind:value={form.group} aria-label="What it is for">
-            {#each GROUP_CHOICES as choice (choice.id)}<option value={choice.id}>{choice.label}</option>{/each}
-          </select>
-          <fieldset>
-            <legend>Keep it</legend>
-            <label><input type="radio" bind:group={scope} value="project" /> in this project <small>.axiomata/tasks.json</small></label>
-            <label><input type="radio" bind:group={scope} value="personal" /> for all my projects <small>~/.axiomata</small></label>
-          </fieldset>
+          <label class="field">
+            <span>Name</span>
+            <input type="text" bind:value={form.label} placeholder="Start the server" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>Command</span>
+            <input type="text" class="mono" bind:value={form.command} placeholder="uv run uvicorn app:app --reload" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>Folder <small>inside the project, optional</small></span>
+            <input type="text" class="mono" bind:value={form.cwd} placeholder="." spellcheck="false" />
+          </label>
+          <div class="field">
+            <span>What it is for</span>
+            <div class="kinds" role="radiogroup" aria-label="What it is for">
+              {#each GROUP_CHOICES as choice (choice.id)}
+                <label class="kind g-{choice.id}" class:on={form.group === choice.id}>
+                  <input type="radio" bind:group={form.group} value={choice.id} />
+                  <span class="swatch" aria-hidden="true"></span>{choice.label}
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div class="field">
+            <span>Keep it</span>
+            <div class="scopes" role="radiogroup" aria-label="Keep it">
+              <label class="scope" class:on={scope === "project"}>
+                <input type="radio" bind:group={scope} value="project" />
+                <span>In this project</span>
+                <small>.axiomata/tasks.json</small>
+              </label>
+              <label class="scope" class:on={scope === "personal"}>
+                <input type="radio" bind:group={scope} value="personal" />
+                <span>For all my projects</span>
+                <small>~/.axiomata/tasks.json</small>
+              </label>
+            </div>
+          </div>
           <div class="actions">
             <button type="submit" class="ax-btn primary" disabled={saving || !form.label.trim() || !form.command.trim()}>Save</button>
             <button type="button" class="ax-btn" onclick={() => (editing = null)}>Cancel</button>
@@ -268,32 +305,46 @@
     padding: var(--ax-space-3);
   }
 
-  section {
+  /* Each kind of task is a plate in its colour (the swatch and the edge); a task is a row on it. */
+  .group,
+  .kind {
     --tone: var(--ax-text-muted);
-    margin-bottom: var(--ax-space-3);
   }
 
-  section.g-run {
+  .g-run {
     --tone: var(--ax-accent);
   }
 
-  section.g-build {
+  .g-build {
     --tone: var(--ax-harness-opencode);
   }
 
-  section.g-test {
+  .g-test {
     --tone: var(--ax-success);
   }
 
-  section.g-lint {
+  .g-lint {
     --tone: var(--ax-warning);
+  }
+
+  .group {
+    margin-bottom: var(--ax-space-3);
+    overflow: hidden;
+    border: 1px solid var(--ax-border);
+    border-left: calc(3px * var(--ax-ui-scale)) solid color-mix(in srgb, var(--tone) 70%, transparent);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-2);
+    box-shadow: var(--ax-shadow-raised);
   }
 
   h3 {
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    margin: var(--ax-space-3) 0 var(--ax-space-1);
+    margin: 0;
+    padding: var(--ax-space-2) var(--ax-space-3);
+    border-bottom: 1px solid var(--ax-border);
+    background: color-mix(in srgb, var(--tone) 6%, var(--ax-elev-3));
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
     font-weight: 600;
@@ -302,15 +353,20 @@
   }
 
   .swatch {
+    flex: none;
     width: calc(8px * var(--ax-ui-scale));
     height: calc(8px * var(--ax-ui-scale));
-    border-radius: var(--ax-radius-pill);
+    clip-path: var(--ax-hex-clip);
     background: var(--tone);
   }
 
   .n {
     margin-left: auto;
+    padding: 0 var(--ax-space-2);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
     font-weight: 400;
+    letter-spacing: 0;
   }
 
   ul {
@@ -319,7 +375,10 @@
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-1);
+  }
+
+  li + li {
+    border-top: 1px solid color-mix(in srgb, var(--ax-border) 60%, transparent);
   }
 
   .run {
@@ -327,10 +386,9 @@
     align-items: center;
     gap: var(--ax-space-3);
     width: 100%;
-    padding: var(--ax-space-2) var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-3);
     background: none;
-    border: 1px solid transparent;
-    border-radius: var(--ax-radius-md);
+    border: none;
     color: var(--ax-text);
     font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-sm);
@@ -340,13 +398,16 @@
 
   .run:hover:not(:disabled),
   .run:focus-visible {
-    background: var(--ax-surface-2);
-    border-color: var(--ax-border);
+    background: var(--ax-elev-3);
   }
 
   .run:disabled {
-    opacity: 0.45;
     cursor: default;
+  }
+
+  .locked .text,
+  .locked .play {
+    opacity: 0.45;
   }
 
   /* The play mark is a round button in the group's colour; filled on hover. */
@@ -354,14 +415,19 @@
     display: grid;
     place-items: center;
     flex: 0 0 auto;
-    width: calc(26px * var(--ax-ui-scale));
-    height: calc(26px * var(--ax-ui-scale));
+    width: calc(28px * var(--ax-ui-scale));
+    height: calc(28px * var(--ax-ui-scale));
+    border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
     border-radius: var(--ax-radius-pill);
-    background: color-mix(in srgb, var(--tone) 18%, transparent);
+    background: color-mix(in srgb, var(--tone) 14%, transparent);
     color: var(--tone);
+    transition:
+      background var(--ax-dur-fast) var(--ax-ease),
+      color var(--ax-dur-fast) var(--ax-ease);
   }
 
-  .run:hover:not(:disabled) .play {
+  .run:hover:not(:disabled) .play,
+  .run:focus-visible .play {
     background: var(--tone);
     color: var(--ax-bg);
   }
@@ -371,6 +437,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
+    gap: calc(2px * var(--ax-ui-scale));
   }
 
   .label {
@@ -389,12 +456,26 @@
     font-size: var(--ax-font-size-xs);
   }
 
-  .tag {
+  .tag,
+  .pane-mark {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
     padding: 0 var(--ax-space-2);
     border-radius: var(--ax-radius-pill);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .tag {
     background: var(--ax-surface-3);
     color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
+  }
+
+  /* A pane is open for it: not "running" (the shell may have finished), so no glow — just where it is. */
+  .pane-mark {
+    border: 1px solid var(--ax-border-strong);
+    color: var(--ax-text);
   }
 
   li {
@@ -404,7 +485,7 @@
   .own {
     position: absolute;
     top: 50%;
-    right: var(--ax-space-1);
+    right: var(--ax-space-2);
     transform: translateY(-50%);
     display: flex;
     gap: var(--ax-space-1);
@@ -419,75 +500,154 @@
   }
 
   .add {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--ax-space-2);
-    margin-top: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
+    width: 100%;
+    margin-top: var(--ax-space-1);
+    padding: var(--ax-space-2);
     background: none;
-    border: none;
+    border: 1px dashed var(--ax-border-strong);
+    border-radius: var(--ax-radius-md);
     color: var(--ax-text-muted);
     font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-sm);
     cursor: pointer;
   }
 
-  .add:hover {
+  .add:hover,
+  .add:focus-visible {
+    border-style: solid;
+    background: var(--ax-elev-2);
     color: var(--ax-text);
   }
 
+  /* The form is a plate like the groups, its fields labelled above. */
   form {
     display: flex;
     flex-direction: column;
-    gap: var(--ax-space-2);
-    margin-top: var(--ax-space-3);
-    padding-top: var(--ax-space-3);
-    border-top: 1px solid var(--ax-border);
+    gap: var(--ax-space-3);
+    margin-top: var(--ax-space-1);
+    padding: var(--ax-space-3);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-2);
+    box-shadow: var(--ax-shadow-raised);
   }
 
   .form-title {
     margin: 0;
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-    letter-spacing: var(--ax-tracking-wide);
+    color: var(--ax-text);
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
   }
 
-  input[type="text"],
-  select {
-    padding: var(--ax-space-1) var(--ax-space-2);
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .field small {
+    opacity: 0.8;
+  }
+
+  input[type="text"] {
+    padding: var(--ax-space-2);
     background: var(--ax-bg);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-sm);
     color: var(--ax-text);
-    font-family: var(--ax-font-mono);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  input[type="text"]:focus-visible,
-  select:focus-visible {
-    outline: var(--ax-focus-ring);
-  }
-
-  fieldset {
-    margin: 0;
-    padding: 0;
-    border: none;
-    display: flex;
-    flex-direction: column;
-    gap: var(--ax-space-1);
+    font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-sm);
   }
 
-  legend {
-    padding: 0;
-    margin-bottom: var(--ax-space-1);
-    color: var(--ax-text-muted);
+  input.mono {
+    font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
   }
 
-  fieldset small {
+  input[type="text"]:focus-visible {
+    outline: var(--ax-focus-ring);
+  }
+
+  .kinds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-1);
+  }
+
+  .kind {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-pill);
     color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    cursor: pointer;
+  }
+
+  .kind input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .kind.on {
+    border-color: var(--tone);
+    background: color-mix(in srgb, var(--tone) 14%, transparent);
+    color: var(--ax-text);
+  }
+
+  .kind:focus-within {
+    outline: var(--ax-focus-ring);
+  }
+
+  .scopes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(calc(110px * var(--ax-ui-scale)), 1fr));
+    gap: var(--ax-space-1);
+  }
+
+  .scope {
+    display: flex;
+    flex-direction: column;
+    gap: calc(2px * var(--ax-ui-scale));
+    padding: var(--ax-space-2);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+
+  .scope input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .scope small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .scope.on {
+    border-color: var(--ax-border-strong);
+    background: var(--ax-elev-3);
+    color: var(--ax-text);
+  }
+
+  .scope:focus-within {
+    outline: var(--ax-focus-ring);
   }
 
   .note,
