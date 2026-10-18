@@ -167,7 +167,7 @@ async fn connect() -> Result<Service, AxiomataError> {
         backend: BACKEND_OPENCODE,
         message: format!("preparing the app's Opencode stopped: {err}"),
     })??;
-    let service = match Service::find(binary, &env).await {
+    let service = match Service::find_in(&opencode_instance::expected_state_dir(instance)).await {
         Ok(running) if stale => restart_when_idle(binary, &env, instance, running).await?,
         Ok(running) => running,
         Err(_) => {
@@ -261,11 +261,14 @@ async fn check_state_dir(
 
 /// Finds the app's Opencode service without starting it — for the IDE's status
 /// watcher, which has nothing to watch on a service that is not running.
-/// Under `cfg(test)` it never connects, like [`connect`].
+/// Under `cfg(test)` it never connects, like [`connect`]. The watchers call it every few seconds, so after the one
+/// check of the state folder it reads the discovery file there directly instead of asking `opencode` each time.
 pub(crate) async fn find() -> Result<Service, AxiomataError> {
     refuse_in_tests()?;
     let binary = resolve_opencode_binary()?;
-    Service::find(binary, &opencode_instance::service_env(Instance::Write))
+    let instance = Instance::Write;
+    check_state_dir(binary, &opencode_instance::service_env(instance), instance).await?;
+    Service::find_in(&opencode_instance::expected_state_dir(instance))
         .await
         .map(|service| service.with_session_environment(opencode_instance::session_env()))
         .map_err(into_axiomata)

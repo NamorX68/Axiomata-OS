@@ -614,6 +614,7 @@ mod tests {
             "openrouter": {
                 "settings": { "apiKey": "owner-key", "timeout": 30 },
                 "headers": { "Authorization": "Bearer owner" },
+                "body": { "provider": { "quantizations": ["fp8"], "ignore": ["morph"] } },
                 "models": { "deepseek/deepseek-v4.1-flash": { "body": { "provider": { "sort": "throughput" } } } }
             },
             "ollama": { "settings": { "baseURL": "http://elsewhere:1/v1" }, "models": { "q": { "name": "Q" } } }
@@ -640,6 +641,11 @@ mod tests {
         assert_eq!(
             openrouter["models"]["deepseek/deepseek-v4.1-flash"]["body"]["provider"]["sort"],
             "throughput"
+        );
+        assert_eq!(
+            openrouter["body"],
+            json!({ "provider": { "quantizations": ["fp8"], "ignore": ["morph"] } }),
+            "the routing for every model of the provider comes along"
         );
         let ollama = &generated["providers"]["ollama"];
         assert_eq!(ollama["settings"]["baseURL"], "http://localhost:11434/v1");

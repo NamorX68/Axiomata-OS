@@ -9,10 +9,10 @@
 //! else; a refused login surfaces as [`OpencodeError::Unauthorized`] rather
 //! than a vague failure (plan Q10, upstream issue #51724).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -28,8 +28,9 @@ const DISCOVERY_FILE: &str = "service.json";
 /// The major version this client speaks.
 const SUPPORTED_MAJOR: u64 = 2;
 /// The newest version this client was checked against; a newer 2.x is logged. The event shapes were measured on 2.0.18;
-/// 2.0.26 was checked on 2026-10-11 by real use (skill runs, an agent session with its team tools, the inbox).
-pub const TESTED_VERSION: &str = "2.0.26";
+/// 2.0.32 was checked on 2026-10-18 by real use (a mail digest with its MCP servers, a card session with shell and
+/// team tools, both on the app's own instance).
+pub const TESTED_VERSION: &str = "2.0.32";
 /// How long one ordinary request may take.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long `opencode debug paths` / `opencode service start` may take.
@@ -115,6 +116,15 @@ impl Service {
         child_env: &[(String, String)],
     ) -> Result<Self, OpencodeError> {
         let state = state_dir(opencode, child_env).await?;
+        Self::find_in(&state).await
+    }
+
+    /// [`Service::find`] for a caller that already knows the state folder — no `opencode debug paths` process,
+    /// which matters to a watcher that looks every few seconds.
+    ///
+    /// Errors:
+    ///     As [`Service::find`].
+    pub async fn find_in(state: &Path) -> Result<Self, OpencodeError> {
         let service = Self::from_discovery(&state.join(DISCOVERY_FILE)).await?;
         check_version(&service.version)?;
         Ok(service)
@@ -319,7 +329,8 @@ fn check_version(version: &str) -> Result<(), OpencodeError> {
             found: version.to_string(),
         });
     }
-    if parse_version(TESTED_VERSION).is_some_and(|tested| parts > tested) {
+    if parse_version(TESTED_VERSION).is_some_and(|tested| parts > tested) && first_note_of(version)
+    {
         tracing::info!(
             version,
             tested = TESTED_VERSION,
@@ -327,6 +338,16 @@ fn check_version(version: &str) -> Result<(), OpencodeError> {
         );
     }
     Ok(())
+}
+
+/// Whether `version` is noted for the first time in this process: the watchers look every few seconds, and the same
+/// note each time would bury the log.
+fn first_note_of(version: &str) -> bool {
+    static NOTED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+    NOTED
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(version.to_string())
 }
 
 /// `major.minor.patch` of a version like `2.0.18` (a suffix after `-` is ignored).
@@ -414,6 +435,16 @@ mod tests {
         assert_eq!(parse_version("2.0.18-beta.1"), Some((2, 0, 18)));
         assert_eq!(parse_version("v2"), None);
         assert_eq!(parse_version(""), None);
+    }
+
+    #[test]
+    fn a_newer_version_is_noted_once_per_version() {
+        assert!(first_note_of("2.99.1"));
+        assert!(
+            !first_note_of("2.99.1"),
+            "the watchers look every few seconds"
+        );
+        assert!(first_note_of("2.99.2"), "an update is noted again");
     }
 
     #[test]
