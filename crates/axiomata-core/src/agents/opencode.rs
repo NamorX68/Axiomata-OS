@@ -22,7 +22,8 @@ use axiomata_opencode::{
     TurnSession, unattended_permissions,
 };
 
-use super::opencode_instance::{self, Instance};
+use super::opencode_instance;
+pub use super::opencode_instance::Instance;
 use super::{
     AgentRequest, AgentRunResult, BACKEND_OPENCODE, ChatReply, ChatRequest, MAX_RESPONSE_BYTES,
     agent_slots, truncate_utf8, valid_model_name,
@@ -147,14 +148,13 @@ pub(crate) fn chat_model_id(config: &Config) -> Result<String, AxiomataError> {
 ///
 /// Unit tests never get here: a turn on a real service could be a billed model call, so under `cfg(test)` this
 /// always fails.
-async fn connect() -> Result<Service, AxiomataError> {
+async fn connect(instance: Instance) -> Result<Service, AxiomataError> {
     /// One preparation at a time: two turns starting together must not both find the configuration stale and
     /// restart the service under each other's feet.
     static PREPARING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     refuse_in_tests()?;
     let binary = resolve_opencode_binary()?;
-    let instance = Instance::Write;
     let env = opencode_instance::service_env(instance);
     let _preparing = PREPARING.lock().await;
     check_state_dir(binary, &env, instance).await?;
@@ -236,8 +236,10 @@ async fn check_state_dir(
     env: &[(String, String)],
     instance: Instance,
 ) -> Result<(), AxiomataError> {
-    static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if CHECKED.load(std::sync::atomic::Ordering::Acquire) {
+    static CHECKED: [std::sync::atomic::AtomicBool; Instance::ALL.len()] =
+        [const { std::sync::atomic::AtomicBool::new(false) }; Instance::ALL.len()];
+    let checked = &CHECKED[instance as usize];
+    if checked.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(());
     }
     let reported = Service::state_dir(binary, env)
@@ -255,7 +257,7 @@ async fn check_state_dir(
             ),
         });
     }
-    CHECKED.store(true, std::sync::atomic::Ordering::Release);
+    checked.store(true, std::sync::atomic::Ordering::Release);
     Ok(())
 }
 
@@ -263,10 +265,9 @@ async fn check_state_dir(
 /// watcher, which has nothing to watch on a service that is not running.
 /// Under `cfg(test)` it never connects, like [`connect`]. The watchers call it every few seconds, so after the one
 /// check of the state folder it reads the discovery file there directly instead of asking `opencode` each time.
-pub(crate) async fn find() -> Result<Service, AxiomataError> {
+pub(crate) async fn find(instance: Instance) -> Result<Service, AxiomataError> {
     refuse_in_tests()?;
     let binary = resolve_opencode_binary()?;
-    let instance = Instance::Write;
     check_state_dir(binary, &opencode_instance::service_env(instance), instance).await?;
     Service::find_in(&opencode_instance::expected_state_dir(instance))
         .await
@@ -274,10 +275,65 @@ pub(crate) async fn find() -> Result<Service, AxiomataError> {
         .map_err(into_axiomata)
 }
 
-/// What a pane types in front of its `opencode` command, so its terminal UI attaches to the app's service and not
-/// to the owner's (`docs/plans/agent-isolation.md`, CP1).
-pub(crate) fn tui_env_prefix() -> String {
-    opencode_instance::tui_env_prefix(Instance::Write)
+/// What a pane types in front of its `opencode` command, so its terminal UI attaches to the app's service its session
+/// runs on and not to the owner's (`docs/plans/agent-isolation.md`, CP1).
+pub(crate) fn tui_env_prefix(instance: Instance) -> String {
+    opencode_instance::tui_env_prefix(instance)
+}
+
+/// The services of the app's instances that are running, found once — what a look at card sessions asks and then uses
+/// for every session in it.
+#[derive(Debug)]
+pub struct RunningServices(Vec<(Instance, Service)>);
+
+impl RunningServices {
+    /// The service `session_id` runs on, asking each running one whether it knows the session (ids are unique across
+    /// instances). `None` when none of them does.
+    pub async fn holding(&self, session_id: &str) -> Option<&Service> {
+        self.find(session_id).await.map(|(_, service)| service)
+    }
+
+    /// The instance `session_id` runs on, `None` when no running one knows it.
+    pub async fn instance_of(&self, session_id: &str) -> Option<Instance> {
+        self.find(session_id).await.map(|(instance, _)| *instance)
+    }
+
+    async fn find(&self, session_id: &str) -> Option<&(Instance, Service)> {
+        /// How long one service may take to say whether it knows the session: it is local, and one that does not
+        /// answer must not hold back the look at the sessions behind it.
+        const ASK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+        for entry in &self.0 {
+            let asked = tokio::time::timeout(ASK_TIMEOUT, entry.1.session(session_id)).await;
+            if matches!(asked, Ok(Ok(_))) {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    /// Whether no instance's service is running.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// The rules of a skill run: [`unattended_permissions`], and for a skill declaring `access: read` the read instance's
+/// rights after them, so an auto-approved run still edits nothing and runs no more than a reader may (D8).
+fn skill_permissions(auto_approve: bool, read_only: bool) -> Vec<PermissionRule> {
+    let mut rules = unattended_permissions(auto_approve);
+    if read_only {
+        rules.extend(read_session_rules());
+    }
+    rules
+}
+
+/// The rules a read session gets on top of the instance's own (D3): measured, a session's rules beat a project's
+/// `opencode.json` and a saved "always" alike, so the read instance's rights are repeated in every session it runs.
+fn read_session_rules() -> Vec<PermissionRule> {
+    opencode_instance::read_rules()
+        .into_iter()
+        .map(|(action, resource, effect)| PermissionRule::new(action, resource, effect))
+        .collect()
 }
 
 /// A real service is never reached from a unit test.
@@ -352,14 +408,15 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         .acquire()
         .await
         .expect("agent_slots semaphore is never closed");
-    let service = connect().await?;
+    let service = connect(Instance::for_access(request.read_only)).await?;
+    let permissions = skill_permissions(request.auto_approve_tools, request.read_only);
     let mut outcome = service
         .run_turn(TurnRequest {
             session: TurnSession::New(NewSession {
                 directory: request.cwd.display().to_string(),
                 title: Some(SKILL_SESSION_TITLE.to_string()),
                 model: Some(model),
-                permissions: unattended_permissions(request.auto_approve_tools),
+                permissions,
                 ..NewSession::default()
             }),
             text: request.prompt,
@@ -507,7 +564,7 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         .acquire()
         .await
         .expect("agent_slots semaphore is never closed");
-    let service = connect().await?;
+    let service = connect(Instance::Write).await?;
     // A conversation the service does not know (one held on the owner's service before the app had its own,
     // `docs/plans/agent-isolation.md` CP1, or one deleted since) goes on in a new session rather than failing.
     let session_id = match request.session_id {
@@ -560,7 +617,15 @@ fn ide_permissions() -> Vec<PermissionRule> {
 /// opened up; whatever else the agent wants stays a question in the pane.
 fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
     let server = crate::agent_entry::SERVER_NAME;
-    let mut rules = ide_permissions();
+    // A reader starts from the read instance's rights, in front of everything else: what the role, the owner's auto
+    // mode and the read-only git list allow below lifts them one by one, and a project's own `opencode.json` — which
+    // a session's rules beat — lifts nothing.
+    let mut rules = if rights.read_only {
+        read_session_rules()
+    } else {
+        Vec::new()
+    };
+    rules.extend(ide_permissions());
     rules.extend(
         rights
             .tools
@@ -597,6 +662,10 @@ fn card_permissions(rights: &CardRights<'_>) -> Vec<PermissionRule> {
     // do one command at a time without asking. Anything else, and a chain of several commands, is still a question.
     if rights.read_only {
         rules.push(PermissionRule::new("edit", "*", "deny"));
+        rules.push(PermissionRule::new("external_directory", "*", "deny"));
+        // Measured (CP2): `git log > f` passes as the allowed `git log *`, the redirect writing the file. Last, so no
+        // role pattern or the auto mode lifts it; a reader's `2>&1` goes with it.
+        rules.push(PermissionRule::new("shell", "*>*", "deny"));
         rules.extend(
             REVIEWER_GIT
                 .iter()
@@ -659,7 +728,8 @@ const AUTO_DENIED: [(&str, &str); 20] = [
 ];
 
 /// Options of the read-only git commands that reach beyond the checkout.
-const GIT_OUTSIDE_DENIED: [&str; 2] = ["git * --no-index*", "git * --output*"];
+/// Git takes an unambiguous abbreviation of a long option (`--outp=f`), so the shortest ones are matched.
+const GIT_OUTSIDE_DENIED: [&str; 2] = ["git * --no-i*", "git * --ou*"];
 
 /// What an unattended card session of Opencode may do without asking.
 #[derive(Debug, Clone, Copy)]
@@ -678,6 +748,8 @@ pub struct CardRights<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdeSession {
     pub id: String,
+    /// The instance it runs on: the read instance for a reviewer or a planner (D3).
+    pub instance: Instance,
     /// New at this start. Only a new session gets the card's first message — a continued one still has it.
     pub created: bool,
 }
@@ -707,7 +779,8 @@ pub async fn ide_session(
         .filter(|m| !m.is_empty())
         .map(|m| model_ref(Some(m.to_string()), "agent"))
         .transpose()?;
-    let service = connect().await?;
+    let instance = Instance::for_access(card_rights.is_some_and(|rights| rights.read_only));
+    let service = connect(instance).await?;
     if let Some(id) = existing.filter(|id| super::valid_session_id(id)) {
         let found = match service.session(id).await {
             Ok(info) => Some(info),
@@ -720,6 +793,14 @@ pub async fn ide_session(
             .and_then(ModelRef::from_value);
         let found_dir = found.as_ref().and_then(session_directory);
         let decision = reuse(found_dir, directory, current_model.as_ref(), model.as_ref());
+        if found.is_none() {
+            // Gone, or on the other instance (the session's role changed since): this start makes a new one.
+            tracing::info!(
+                session = id,
+                ?instance,
+                "opencode: the stored session is not on this instance; making a new one"
+            );
+        }
         if decision != Reuse::Replace {
             service.apply_environment(id).await.map_err(into_axiomata)?;
         }
@@ -727,6 +808,7 @@ pub async fn ide_session(
             Reuse::Continue => {
                 return Ok(IdeSession {
                     id: id.to_string(),
+                    instance,
                     created: false,
                 });
             }
@@ -739,6 +821,7 @@ pub async fn ide_session(
                 }
                 return Ok(IdeSession {
                     id: id.to_string(),
+                    instance,
                     created: false,
                 });
             }
@@ -767,6 +850,7 @@ pub async fn ide_session(
     }
     Ok(IdeSession {
         id: created,
+        instance,
         created: true,
     })
 }
@@ -776,8 +860,12 @@ pub async fn ide_session(
 ///
 /// Errors:
 ///     A malformed `session_id` or anything the service refuses as [`AxiomataError::AgentApi`].
-pub async fn send_prompt(session_id: &str, text: &str) -> Result<(), AxiomataError> {
-    connect()
+pub async fn send_prompt(
+    instance: Instance,
+    session_id: &str,
+    text: &str,
+) -> Result<(), AxiomataError> {
+    connect(instance)
         .await?
         .prompt(session_id, text)
         .await
@@ -785,10 +873,16 @@ pub async fn send_prompt(session_id: &str, text: &str) -> Result<(), AxiomataErr
         .map_err(into_axiomata)
 }
 
-/// The running Opencode service, without starting it: what a look at card sessions asks once and then uses for every
-/// session in it (`None` when it is not running). Under `cfg(test)` it never connects.
-pub async fn running_service() -> Option<Service> {
-    find().await.ok()
+/// The app's instances' services that are running, without starting any: what a look at card sessions asks once and
+/// then uses for every session in it ([`RunningServices::holding`]). Under `cfg(test)` it never connects.
+pub async fn running_services() -> RunningServices {
+    let mut services = Vec::new();
+    for instance in Instance::ALL {
+        if let Ok(service) = find(instance).await {
+            services.push((instance, service));
+        }
+    }
+    RunningServices(services)
 }
 
 /// What an Opencode session has used so far (A33), read from its messages.
@@ -823,6 +917,7 @@ pub async fn interrupt_session(service: &Service, session_id: &str) -> Result<()
 ///     A missing `directory` as [`AxiomataError::AgentSpawn`], anything the service refuses — or a server that comes up
 ///     `failed` — as [`AxiomataError::AgentApi`].
 pub async fn register_mcp(
+    instance: Instance,
     directory: &std::path::Path,
     config: &serde_json::Value,
 ) -> Result<(), AxiomataError> {
@@ -831,7 +926,7 @@ pub async fn register_mcp(
     const CONNECT_PAUSE: std::time::Duration = std::time::Duration::from_millis(400);
 
     check_cwd(directory)?;
-    let service = connect().await?;
+    let service = connect(instance).await?;
     let location = directory.display().to_string();
     service
         .register_mcp(&location, crate::agent_entry::SERVER_NAME, config)
@@ -864,17 +959,24 @@ fn refused_registration(err: OpencodeError) -> AxiomataError {
 /// service** for it: a service that is not running has nothing registered. A failure is logged, not returned: the
 /// registration is gone with the service at the latest, and the worktree is already removed.
 pub async fn forget_mcp(directory: &std::path::Path) {
-    let Ok(service) = find().await else {
-        return;
-    };
-    if let Err(err) = service
-        .remove_mcp(
-            &directory.display().to_string(),
-            crate::agent_entry::SERVER_NAME,
-        )
-        .await
-    {
-        tracing::warn!(%err, directory = %directory.display(), "could not remove the agent MCP server");
+    // Either instance may hold it: a worktree's role decides where its session ran.
+    for instance in Instance::ALL {
+        let Ok(service) = find(instance).await else {
+            continue;
+        };
+        match service
+            .remove_mcp(
+                &directory.display().to_string(),
+                crate::agent_entry::SERVER_NAME,
+            )
+            .await
+        {
+            Ok(()) | Err(OpencodeError::Http { status: 404, .. }) => {}
+            Err(err) => {
+                let directory = directory.display();
+                tracing::warn!(%err, ?instance, %directory, "could not remove the agent MCP server")
+            }
+        }
     }
 }
 
@@ -1174,8 +1276,64 @@ mod tests {
         assert!(
             !plain_reviewer
                 .iter()
-                .any(|r| r.action == "shell" && r.resource == "*")
+                .any(|r| r.action == "shell" && r.resource == "*" && r.effect == "allow")
         );
+        assert_eq!(decide(&plain_reviewer, "shell", "npm ci"), "deny");
+        assert_eq!(decide(&plain_reviewer, "shell", "git log -3"), "allow");
+    }
+
+    #[test]
+    fn a_reader_starts_from_the_read_instances_rights_and_the_role_lifts_them_one_by_one() {
+        let shell = vec!["cargo test *".to_owned()];
+        let rights = |read_only| CardRights {
+            tools: &["review_verdict"],
+            read_only,
+            shell: &shell,
+            auto_rights: false,
+        };
+        let reviewer = card_permissions(&rights(true));
+        let base = read_session_rules();
+        assert_eq!(
+            &reviewer[..base.len()],
+            &base[..],
+            "the read rights come first"
+        );
+        assert_eq!(decide(&reviewer, "shell", "rm -rf src"), "deny");
+        assert_eq!(decide(&reviewer, "shell", "ls -la"), "allow");
+        assert_eq!(decide(&reviewer, "shell", "git diff HEAD~1"), "allow");
+        assert_eq!(
+            decide(&reviewer, "shell", "cargo test -p x"),
+            "allow",
+            "the role's own command"
+        );
+        assert_eq!(decide(&reviewer, "edit", "src/lib.rs"), "deny");
+        assert_eq!(decide(&reviewer, "external_directory", "/etc/*"), "deny");
+        assert_eq!(decide(&reviewer, "axiomata_review_verdict", "x"), "allow");
+        let worker = card_permissions(&rights(false));
+        assert!(
+            !worker
+                .iter()
+                .any(|r| r.action == "shell" && r.resource == "*" && r.effect == "deny"),
+            "a worker keeps the write instance's defaults"
+        );
+    }
+
+    #[test]
+    fn a_skill_declaring_read_access_looks_with_its_tools_and_changes_nothing() {
+        let reader = skill_permissions(true, true);
+        assert_eq!(decide(&reader, "apple-mail_search_emails", "*"), "allow");
+        assert_eq!(decide(&reader, "read", "Mail/.topics.md"), "allow");
+        assert_eq!(decide(&reader, "edit", "Mail/digest.md"), "deny");
+        assert_eq!(decide(&reader, "shell", "rm -rf Mail"), "deny");
+        assert_eq!(decide(&reader, "shell", "git log --oneline"), "allow");
+        assert_eq!(
+            decide(&reader, "question", "*"),
+            "deny",
+            "a run nobody watches asks nothing"
+        );
+        let writer = skill_permissions(true, false);
+        assert_eq!(decide(&writer, "edit", "Mail/digest.md"), "allow");
+        assert_eq!(writer, unattended_permissions(true));
     }
 
     #[test]
@@ -1329,9 +1487,10 @@ mod tests {
 
     #[tokio::test]
     async fn unit_tests_cannot_reach_the_real_service() {
-        assert!(
-            matches!(connect().await, Err(AxiomataError::AgentApi { message, .. }) if message.contains("never"))
-        );
+        assert!(matches!(
+            connect(Instance::Write).await,
+            Err(AxiomataError::AgentApi { message, .. }) if message.contains("never")
+        ));
     }
 
     #[test]

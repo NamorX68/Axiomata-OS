@@ -117,6 +117,7 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
             allowed_tools: skill.allowed_tools.clone(),
             timeout_secs: skill.timeout_secs,
             expects_json: skill.expects_json,
+            read_only: skill.read_only,
         },
     )
     .await
@@ -368,6 +369,8 @@ struct RunOptions {
     timeout_secs: Option<u64>,
     /// The skill's `output: json` contract.
     expects_json: bool,
+    /// The skill's `access: read`.
+    read_only: bool,
 }
 
 /// Shared tail of [`execute_skill`] / [`execute_prompt`]: claims `name` for
@@ -504,6 +507,7 @@ fn request_for(
         options.timeout_secs,
     );
     request.expects_json = options.expects_json;
+    request.read_only = options.read_only;
     request
 }
 
@@ -539,6 +543,7 @@ fn agent_request(
         auto_approve_tools: config.agents.auto_approve_tools,
         allowed_tools,
         expects_json: false,
+        read_only: false,
     }
 }
 
@@ -851,9 +856,11 @@ mod tests {
             allowed_tools: Some("mcp__x__y".to_string()),
             timeout_secs: Some(600),
             expects_json: true,
+            read_only: true,
         };
         let req = request_for("s", "p".to_string(), &config, None, options);
         assert!(req.expects_json);
+        assert!(req.read_only, "access: read reaches the backend");
         assert_eq!(req.allowed_tools.as_deref(), Some("mcp__x__y"));
         assert_eq!(req.timeout, Duration::from_secs(600));
         // The run's name travels along — the `axh` gate names it in a refusal (B3).
@@ -971,6 +978,7 @@ mod tests {
             allowed_tools: None,
             timeout_secs: None,
             expects_json: false,
+            read_only: false,
             path: PathBuf::from("/tmp/s/SKILL.md"),
             body: "BODY-BODY".to_string(),
         }

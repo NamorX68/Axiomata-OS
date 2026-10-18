@@ -634,13 +634,15 @@ fn wire_claude_with(
     }
 }
 
-/// Wires the server into an Opencode session at its worktree (`directory`) on the shared service.
+/// Wires the server into an Opencode session at its worktree (`directory`) on `instance`, the app's service the
+/// session runs on.
 pub async fn wire_opencode(
     roots: &ChannelRoots,
     agent: &Agent,
     directory: &Path,
     role: Option<&Role>,
     card: Option<&Launch>,
+    instance: crate::agents::opencode::Instance,
 ) -> AgentEntry {
     let Some(cli) = cli_path() else {
         return AgentEntry::unavailable(no_cli_note());
@@ -659,7 +661,9 @@ pub async fn wire_opencode(
         card.and_then(Launch::plan_id),
         forwarded_from_process,
     );
-    match crate::agents::opencode::register_mcp(directory, &server.opencode_config()).await {
+    match crate::agents::opencode::register_mcp(instance, directory, &server.opencode_config())
+        .await
+    {
         Ok(()) => AgentEntry::new(EntryStatus::Registered, Some(&cli), role, None),
         Err(err) => {
             AgentEntry::unavailable(format!("Opencode would not take the MCP server: {err}"))

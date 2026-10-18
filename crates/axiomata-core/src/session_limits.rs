@@ -205,9 +205,9 @@ pub struct Meter {
     /// The most an Opencode session was read to have used: the service is asked for a bounded window of its messages,
     /// so a long session would otherwise read as using *less* once old messages fall out of it.
     opencode_floor: HashMap<String, Usage>,
-    /// The Opencode service as found by this look (`Some(None)`: not running). Asked once per look: finding it runs a
-    /// process, and there is one call per session otherwise.
-    service: Option<Option<axiomata_opencode::Service>>,
+    /// The app's Opencode services as found by this look. Found once per look; which one holds a session is asked per
+    /// session ([`opencode::RunningServices::holding`]).
+    services: Option<opencode::RunningServices>,
 }
 
 /// The longest one Opencode request of a look may take. The service is local; one that does not answer must not hold
@@ -227,15 +227,16 @@ impl Meter {
             projects,
             transcripts: HashMap::new(),
             opencode_floor: HashMap::new(),
-            service: None,
+            services: None,
         }
     }
 
-    async fn service(&mut self) -> Option<&axiomata_opencode::Service> {
-        if self.service.is_none() {
-            self.service = Some(opencode::running_service().await);
+    /// The service `session` runs on, `None` when no running instance knows it.
+    async fn service_of(&mut self, session: &str) -> Option<axiomata_opencode::Service> {
+        if self.services.is_none() {
+            self.services = Some(opencode::running_services().await);
         }
-        self.service.as_ref()?.as_ref()
+        self.services.as_ref()?.holding(session).await.cloned()
     }
 
     /// What `watched` has used, `None` when the harness's record could not be read.
@@ -287,7 +288,10 @@ impl Meter {
                     .opencode_session
                     .as_deref()
                     .ok_or(Unmeasured::NoOpencodeSession)?;
-                let service = self.service().await.ok_or(Unmeasured::ServiceDown)?.clone();
+                let service = self
+                    .service_of(session)
+                    .await
+                    .ok_or(Unmeasured::ServiceDown)?;
                 match tokio::time::timeout(
                     OPENCODE_TIMEOUT,
                     opencode::session_usage(&service, session),
@@ -358,7 +362,7 @@ impl Meter {
         let Some(session) = entry.agent.opencode_session.as_deref() else {
             return;
         };
-        let Some(service) = self.service().await.cloned() else {
+        let Some(service) = self.service_of(session).await else {
             return;
         };
         match tokio::time::timeout(
@@ -388,7 +392,7 @@ impl Meter {
             }
         };
         let config = core.config_read().clone();
-        self.service = None;
+        self.services = None;
         let mut seen = Vec::new();
         let mut breaches = Vec::new();
         // Every reading goes into the ledger first, so the day's total below includes this look.

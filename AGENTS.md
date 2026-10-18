@@ -104,11 +104,14 @@ from the code itself:
   why).
 - **Opencode 2 is a service, and Axiomata is its API client** (`docs/plans/opencode2.md`,
   crate `axiomata-opencode`; docs: https://opencode.ai/v2/docs, *not* `/docs`, that is v1).
-  Skills, chat and card sessions run on the **app's own** service, never the owner's
-  (`docs/plans/agent-isolation.md`, `agents/opencode_instance.rs`): its own `XDG_*` folders under
-  `~/.axiomata/opencode/write/`, its own port, a config generated at every connect (keys from
+  Skills, chat and card sessions run on the **app's own** services, never the owner's
+  (`docs/plans/agent-isolation.md`, `agents/opencode_instance.rs`): two instances, each with its own `XDG_*`
+  folders under `~/.axiomata/opencode/<write|read>/`, its own port, a config generated at every connect (keys from
   `config.toml`, MCP from `~/.axh/mcp.json`, the owner's model catalog without credentials), left
-  running when the app quits. Sessions get the owner's environment back for their shell commands (`PUT
+  running when the app quits. Reviewers, planners and skills with `access: read` run on `read`: its rights are in
+  its config **and** in front of every session's rules — measured, a project's `opencode.json` and a saved
+  "always" beat the config, a session's rules beat both.
+  Sessions get the owner's environment back for their shell commands (`PUT
   …/environment`); a pane's TUI attaches with `XDG_STATE_HOME` alone. Each session is
   `POST /api/session`, prompt, wait on `/api/event`, read the messages back — never parse a CLI's output again,
   never `--standalone` (it deadlocks on the shared database and starts its own MCP servers,

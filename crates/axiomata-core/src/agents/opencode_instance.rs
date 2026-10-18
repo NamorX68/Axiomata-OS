@@ -77,24 +77,92 @@ const STARTED_WITH_FILE: &str = "started-with.json";
 /// The largest owner's `opencode.json` read for its catalog.
 const MAX_OWNER_CONFIG_BYTES: u64 = 1024 * 1024;
 
-/// One of the app's Opencode instances. CP2 adds the `read` instance and CP3 the master's.
+/// One of the app's Opencode instances. CP3 adds the master's. The discriminants index per-instance state
+/// (`Instance as usize`), in [`Instance::ALL`]'s order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Instance {
-    /// Everything that may write: card workers, chat, skills (the only instance until CP2).
-    Write,
+#[repr(usize)]
+pub enum Instance {
+    /// Everything that may write: card workers, chat, skills that do not declare `access: read`.
+    Write = 0,
+    /// Sessions that only look (D3, CP2): reviewers, planners, skills declaring `access: read`. Its configuration
+    /// refuses every edit and every command but the read-only ones ([`read_rules`]), and its database keeps its own
+    /// saved "always" answers — none of the writers' and none of the owner's reach it.
+    Read = 1,
 }
 
 impl Instance {
+    /// Every instance, in the order a session is looked for on them.
+    pub const ALL: [Instance; 2] = [Instance::Write, Instance::Read];
+
+    /// The instance a session runs on: the read instance when it may only look.
+    pub fn for_access(read_only: bool) -> Self {
+        if read_only {
+            Instance::Read
+        } else {
+            Instance::Write
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Instance::Write => "write",
+            Instance::Read => "read",
         }
     }
 }
 
+/// The rights of the read instance, as (action, resource, effect) in Opencode's order — the later rule counts. Its
+/// configuration holds them for a session without rules of its own (a pane the owner opens on it), and every session
+/// the app makes there gets them again in front of its own rules ([`read_session_rules`]): measured on 2.0.32
+/// (`docs/plans/agent-isolation.md`, CP2), a project's `opencode.json` or `.opencode/opencode.json` and a saved
+/// "always" both beat the configuration's rules, and a session's own rules beat them both.
+pub(crate) fn read_rules() -> Vec<(&'static str, &'static str, &'static str)> {
+    let mut rules = vec![
+        ("edit", "*", "deny"),
+        ("shell", "*", "deny"),
+        ("external_directory", "*", "deny"),
+    ];
+    rules.extend(
+        READ_COMMANDS
+            .iter()
+            .map(|command| ("shell", *command, "allow")),
+    );
+    // The read-only git commands that reach beyond the checkout: `--no-index` reads any file, `--output` writes one —
+    // matched in their shortest unambiguous forms, which git takes too (`--outp=f`).
+    rules.extend(
+        ["git * --no-i*", "git * --ou*"]
+            .iter()
+            .map(|pattern| ("shell", *pattern, "deny")),
+    );
+    // Measured (CP2): a redirect does not make a command another one — `git log > f` passes as `git log *` and writes
+    // the file. Last, so nothing above lifts it.
+    rules.push(("shell", "*>*", "deny"));
+    rules
+}
+
+/// The commands a reader runs without asking: git's read-only ones and a look at the folder it is in. Nothing that
+/// takes a program or a path to write to as an argument (`find -exec`, `rg --pre`, a pager), which a pattern cannot
+/// tell apart, and `ls` without a path, so it does not list folders outside the checkout.
+const READ_COMMANDS: [&str; 13] = [
+    "git status",
+    "git status *",
+    "git log",
+    "git log *",
+    "git diff",
+    "git diff *",
+    "git show",
+    "git show *",
+    "git rev-parse *",
+    "git branch --show-current",
+    "ls",
+    "ls -la",
+    "pwd",
+];
+
 /// The four folders of an instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Places {
+    instance: Instance,
     root: PathBuf,
     config: PathBuf,
     data: PathBuf,
@@ -105,14 +173,16 @@ struct Places {
 impl Places {
     fn of(instance: Instance) -> Self {
         Self::below(
+            instance,
             &paths::axiomata_home()
                 .join(INSTANCES_DIR)
                 .join(instance.name()),
         )
     }
 
-    fn below(root: &Path) -> Self {
+    fn below(instance: Instance, root: &Path) -> Self {
         Self {
+            instance,
             root: root.to_path_buf(),
             config: root.join("config"),
             data: root.join("data"),
@@ -207,7 +277,7 @@ fn prepare_at(places: &Places, home: &Path, config: &Config) -> Result<bool, Axi
             backend: super::BACKEND_OPENCODE,
             message: format!("the MCP servers for the app's Opencode: {err}"),
         })?;
-    let generated = generated_config(owner_catalog(home), config, &servers);
+    let generated = generated_config(owner_catalog(home), config, &servers, places.instance);
     let text = serde_json::to_string_pretty(&generated).map_err(|err| AxiomataError::AgentApi {
         backend: super::BACKEND_OPENCODE,
         message: format!("the generated Opencode configuration: {err}"),
@@ -233,12 +303,13 @@ pub(crate) fn mark_started(instance: Instance) -> Result<(), AxiomataError> {
     write_private_atomic(&places.root.join(STARTED_WITH_FILE), &text)
 }
 
-/// The configuration an instance runs with: the owner's model catalog under the app's credentials, and the MCP
-/// servers of `~/.axh/mcp.json`.
+/// The configuration an instance runs with: the owner's model catalog under the app's credentials, the MCP
+/// servers of `~/.axh/mcp.json`, and for the read instance its rights ([`read_rules`]).
 fn generated_config(
     catalog: Map<String, Value>,
     config: &Config,
     servers: &[axiomata_harness::mcp::config::ServerEntry],
+    instance: Instance,
 ) -> Value {
     let mut providers = catalog;
     let settings = |id: ProviderId| config.agents.providers.get(&id);
@@ -273,11 +344,18 @@ fn generated_config(
         .iter()
         .filter_map(|entry| opencode_server(entry).map(|server| (entry.name.clone(), server)))
         .collect();
-    json!({
+    let mut generated = json!({
         "$schema": CONFIG_SCHEMA,
         "providers": providers,
         "mcp": { "servers": servers },
-    })
+    });
+    if instance == Instance::Read {
+        generated["permissions"] = read_rules()
+            .into_iter()
+            .map(|(action, resource, effect)| json!({ "action": action, "resource": resource, "effect": effect }))
+            .collect();
+    }
+    generated
 }
 
 /// The `settings` object of `provider` in `providers`, made where missing.
@@ -555,7 +633,7 @@ mod tests {
 
     #[test]
     fn the_service_gets_the_instance_folders_in_place_of_the_owners() {
-        let places = Places::below(Path::new("/app/opencode/write"));
+        let places = Places::below(Instance::Write, Path::new("/app/opencode/write"));
         let ambient = vec![
             ("PATH".to_owned(), "/usr/bin".to_owned()),
             ("XDG_CONFIG_HOME".to_owned(), "/owner/config".to_owned()),
@@ -582,7 +660,7 @@ mod tests {
 
     #[test]
     fn a_pane_attaches_through_the_state_folder_alone() {
-        let places = Places::below(Path::new("/app/it's/write"));
+        let places = Places::below(Instance::Write, Path::new("/app/it's/write"));
         assert_eq!(
             tui_env_prefix_for(&places),
             r"env XDG_STATE_HOME='/app/it'\''s/write/state' "
@@ -627,6 +705,11 @@ mod tests {
             catalog,
             &config_with(Some("app-key"), Some("http://localhost:11434/")),
             &[],
+            Instance::Write,
+        );
+        assert!(
+            generated.get("permissions").is_none(),
+            "the write instance keeps Opencode's defaults"
         );
         let openrouter = &generated["providers"]["openrouter"];
         assert_eq!(openrouter["settings"]["apiKey"], "app-key");
@@ -662,7 +745,7 @@ mod tests {
         let Value::Object(catalog) = catalog else {
             unreachable!()
         };
-        let generated = generated_config(catalog, &config_with(None, None), &[]);
+        let generated = generated_config(catalog, &config_with(None, None), &[], Instance::Write);
         assert!(!generated.to_string().contains("owner-key"));
         assert!(generated["providers"].get("ollama").is_none());
     }
@@ -690,7 +773,12 @@ mod tests {
         let Value::Object(catalog) = catalog else {
             unreachable!()
         };
-        let generated = generated_config(catalog, &config_with(Some("app-key"), None), &[]);
+        let generated = generated_config(
+            catalog,
+            &config_with(Some("app-key"), None),
+            &[],
+            Instance::Write,
+        );
         let openrouter = &generated["providers"]["openrouter"];
         assert_eq!(
             openrouter["settings"],
@@ -713,7 +801,7 @@ mod tests {
             &home,
             r#"{"mcpServers": {"mail": {"command": "uvx", "args": ["mail"]}}}"#,
         );
-        let places = Places::below(&base.join("app/opencode/write"));
+        let places = Places::below(Instance::Write, &base.join("app/opencode/write"));
         let config = config_with(Some("app-key"), None);
 
         assert!(
@@ -767,7 +855,7 @@ mod tests {
     fn prepare_refuses_a_relative_or_linked_instance_folder() {
         let base = temp_dir("refuse");
         let config = Config::default();
-        let relative = Places::below(Path::new("relative/write"));
+        let relative = Places::below(Instance::Write, Path::new("relative/write"));
         assert!(matches!(
             prepare_at(&relative, &base, &config),
             Err(AxiomataError::Io { .. })
@@ -775,7 +863,11 @@ mod tests {
         std::fs::create_dir_all(base.join("elsewhere")).unwrap();
         std::os::unix::fs::symlink(base.join("elsewhere"), base.join("linked")).unwrap();
         assert!(matches!(
-            prepare_at(&Places::below(&base.join("linked")), &base, &config),
+            prepare_at(
+                &Places::below(Instance::Write, &base.join("linked")),
+                &base,
+                &config
+            ),
             Err(AxiomataError::Io { .. })
         ));
         assert!(
@@ -786,6 +878,59 @@ mod tests {
             "nothing written through the link"
         );
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn the_read_instance_refuses_edits_and_all_but_reading_commands() {
+        let generated = generated_config(Map::new(), &Config::default(), &[], Instance::Read);
+        let rules = generated["permissions"]
+            .as_array()
+            .expect("the read instance has rules");
+        let effect = |action: &str, resource: &str| {
+            rules
+                .iter()
+                .find(|rule| rule["action"] == action && rule["resource"] == resource)
+                .map(|rule| rule["effect"].as_str().unwrap().to_owned())
+        };
+        assert_eq!(effect("edit", "*").as_deref(), Some("deny"));
+        assert_eq!(effect("shell", "*").as_deref(), Some("deny"));
+        assert_eq!(effect("external_directory", "*").as_deref(), Some("deny"));
+        assert_eq!(effect("shell", "git diff *").as_deref(), Some("allow"));
+        let first_allow = rules
+            .iter()
+            .position(|rule| rule["effect"] == "allow")
+            .unwrap();
+        let last_deny_all = rules
+            .iter()
+            .rposition(|rule| rule["resource"] == "*" && rule["effect"] == "deny")
+            .unwrap();
+        assert!(
+            last_deny_all < first_allow,
+            "the read-only commands come after the refusal they lift"
+        );
+        assert_eq!(
+            rules.last().unwrap()["effect"],
+            "deny",
+            "the ways past the checkout come last"
+        );
+    }
+
+    #[test]
+    fn each_instance_indexes_its_own_state() {
+        for (index, instance) in Instance::ALL.into_iter().enumerate() {
+            assert_eq!(instance as usize, index);
+        }
+    }
+
+    #[test]
+    fn each_instance_has_folders_of_its_own() {
+        assert_ne!(
+            expected_state_dir(Instance::Read),
+            expected_state_dir(Instance::Write)
+        );
+        assert_eq!(Instance::for_access(true), Instance::Read);
+        assert_eq!(Instance::for_access(false), Instance::Write);
+        assert!(tui_env_prefix(Instance::Read).contains("/opencode/read/state"));
     }
 
     #[test]
@@ -844,7 +989,7 @@ mod tests {
                 },
             ),
         ];
-        let generated = generated_config(Map::new(), &Config::default(), &servers);
+        let generated = generated_config(Map::new(), &Config::default(), &servers, Instance::Write);
         let servers = &generated["mcp"]["servers"];
         assert_eq!(
             servers["mail"],

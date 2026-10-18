@@ -301,10 +301,14 @@ project by id, never by path (`project_roles`, `confirm_project_roles`).
 ### `axiomata-opencode`
 
 The client for Opencode 2's background service (`docs/plans/opencode2.md`, OC1). Since
-2026-10-18 the service it talks to is the **app's own instance**, not the owner's
-(`docs/plans/agent-isolation.md`, CP1): core's `agents/opencode_instance.rs` gives it its own
-`XDG_*` folders, port and generated config, and `Service::with_session_environment` hands each
-session the owner's environment back for its shell commands. Standalone like `axiomata-terminal`: no Tauri, no `axiomata-core` — the skill runner (in
+2026-10-18 the services it talks to are the **app's own instances**, not the owner's
+(`docs/plans/agent-isolation.md`, CP1/CP2): core's `agents/opencode_instance.rs` gives each its own
+`XDG_*` folders, port and generated config — `write` for workers, chat and skills, `read` for
+reviewers, planners and skills declaring `access: read`, whose config and every session refuse
+edits and all but read-only commands — and `Service::with_session_environment` hands each
+session the owner's environment back for its shell commands. Watchers find a session on
+either instance (`agents::opencode::RunningServices::holding`).
+Standalone like `axiomata-terminal`: no Tauri, no `axiomata-core` — the skill runner (in
 core) and the agentic IDE (`axiomata-ide`, OC2/OC3) both use it. `service` finds the
 service (`opencode debug paths state` → `service.json`), logs in (the one undocumented
 detail: HTTP Basic, user `opencode`), refuses a non-loopback URL and a major version other

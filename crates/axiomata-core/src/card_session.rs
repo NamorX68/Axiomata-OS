@@ -1707,12 +1707,13 @@ pub async fn escalate_card(core: &AxiomataCore, card_id: i64) -> Result<CardEsca
     // plan's tick, which has other plans' cards to start and integrate.
     if let Some(session) = old_opencode {
         tokio::spawn(async move {
-            let Some(service) = crate::agents::opencode::running_service().await else {
+            let services = crate::agents::opencode::running_services().await;
+            let Some(service) = services.holding(&session).await else {
                 return;
             };
             match tokio::time::timeout(
                 std::time::Duration::from_secs(10),
-                crate::agents::opencode::interrupt_session(&service, &session),
+                crate::agents::opencode::interrupt_session(service, &session),
             )
             .await
             {

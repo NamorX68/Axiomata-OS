@@ -1,6 +1,6 @@
 # The app's agents apart from the owner's own — and a master pane in the canvas
 
-Status: drafted 2026-10-18, owner decisions D1–D9 taken (Q1–Q4 grilled the same day); CP0 measured, CP1 built; next: CP2. Background:
+Status: drafted 2026-10-18, owner decisions D1–D9 taken (Q1–Q4 grilled the same day); CP0 measured, CP1 and CP2 built; next: CP3. Background:
 the owner's note `vault/Entwicklung/opencode-pi-harness-uebersicht.md` (put together with Grok) and the code as it
 stands at `2377be6`.
 
@@ -161,7 +161,36 @@ Still open: the exact action that made the owner's TUI lose its shell. Next time
     session is unknown goes on in a new one. `~/.axh/mcp.json` was created with the owner's two Apple servers.
   - **Locked:** card sessions may not write `~/.axh/` (Opencode auto mode shell, Claude `Edit`/`Bash` denies).
 - **CP2 — read and write apart.** The `read` instance with its config rights; routing of reviewers, planners and
-  read-only skills.
+  read-only skills. **Built 2026-10-18.** Measured first on a throwaway service (2.0.32, evaluating with
+  `POST /api/session/{id}/permission`, the answers steady only a few seconds after a session is made):
+  - **The configuration's rules alone do not hold.** A project's `opencode.json` or `.opencode/opencode.json` with
+    `shell *`/`edit *` allow beats them; so does a saved "always" (`touch *` answered in one session allows it in a
+    session without rules). `OPENCODE_DISABLE_PROJECT_CONFIG` stops the project file but also every project
+    `AGENTS.md` (an agent no longer knows the repository's guidance) — not used.
+  - **A session's own rules beat both**: a session whose list starts with `shell *`/`edit *` deny refuses what the
+    project file and the saved "always" allow. `policies` (`tool.use` deny) did not take a tool away.
+  - So the read instance's rights ([`read_rules`]: edit, shell and outside folders refused, read-only git and `ls`
+    allowed, `--no-index`/`--output` refused) are in its generated config — for a pane opened on it without rules —
+    **and** in front of every session the app makes there: a reviewer's or planner's role and the owner's auto mode
+    lift them one rule at a time behind it, never the project; a skill with `access: read` gets them after its
+    run rules, so its auto approval cannot lift them. Its database keeps its own "always" answers.
+  - **Routing:** a card session from its launch (`Launch::read_only`: a reviewer, a planner) — the session, its MCP
+    registration, its first prompt and the pane's `XDG_STATE_HOME` all on the same instance; a skill from
+    `access: read` (D8, `read`/`write`, anything else refuses the skill); chat and workers on `write`. The status
+    watcher follows both instances; the limit meter, the activity look, the permission answer and an escalation's
+    interrupt find a session on whichever instance knows it.
+  - **Checked end to end** with a scratch `AXIOMATA_HOME` and a local model: a skill with `access: read` started
+    only the read instance, its `touch` was refused by the service, its `ls` ran, nothing was written.
+  - **Review (2026-10-18):** a redirect writes through an allowed command — measured, `git log > f` and `ls > f`
+    made their files on the read rules, while a pipe (`| tee f`) and `$(…)` are split into commands of their own and
+    refused. So `*>*` is refused last, in the config and in every read session (a reader's `2>&1` goes with it);
+    git's long options are matched in their shortest forms (`--ou*`, `--no-i*`); `ls` takes no path.
+  - **What `read` does not mean:** a reviewer in the owner's auto mode keeps `shell *` (card #95, the owner's
+    choice) — only edits, other folders, redirects and the auto mode's denies stay refused; and a skill with
+    `access: read` still has every tool of the MCP servers (apple-mail can send). The boundary is the workspace and
+    the checkout, not the outside world.
+  - Not done: the bundled skills declare no `access` yet — the digests only read, but on `read` they would start a
+    second set of MCP servers (apple-mail opening Mail.app from both instances); left to the owner.
 - **CP3 — master panes.** Claude Code and Opencode in the Studio's pane menu, team tools wired, the `master`
   instance (D6).
 - **CP4 — Claude Code hygiene.** No card session in a real project folder (D9); docs, `AGENTS.md` traps (the

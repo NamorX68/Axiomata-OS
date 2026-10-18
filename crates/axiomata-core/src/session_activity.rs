@@ -60,7 +60,10 @@ pub async fn read(core: &AxiomataCore, agent_ids: &[i64]) -> Vec<SessionActivity
         .collect();
     let roots = paths::ide_locations().channels;
     let projects = paths::claude_projects_dir();
-    let mut service: Option<Option<axiomata_opencode::Service>> = None;
+    let mut services: Option<opencode::RunningServices> = None;
+    // A service that did not answer in time is not asked again in this look: each further session would wait as long,
+    // and the look would outlast the next one.
+    let mut gave_up = false;
     let mut out = Vec::new();
     for agent in agents {
         let steps = match agent.harness {
@@ -81,11 +84,16 @@ pub async fn read(core: &AxiomataCore, agent_ids: &[i64]) -> Vec<SessionActivity
             }
             Harness::Opencode => match agent.opencode_session.as_deref() {
                 None => None,
+                Some(_) if gave_up => None,
                 Some(session) => {
-                    if service.is_none() {
-                        service = Some(opencode::running_service().await);
+                    if services.is_none() {
+                        services = Some(opencode::running_services().await);
                     }
-                    match service.clone().flatten() {
+                    let holding = match &services {
+                        Some(found) => found.holding(session).await.cloned(),
+                        None => None,
+                    };
+                    match holding {
                         None => None,
                         Some(running) => {
                             let asked = tokio::time::timeout(
@@ -93,10 +101,8 @@ pub async fn read(core: &AxiomataCore, agent_ids: &[i64]) -> Vec<SessionActivity
                                 running.recent_messages(session, RECENT_MESSAGES),
                             )
                             .await;
-                            // A service that did not answer in time is not asked again in this look: each further session
-                            // would wait as long, and the look would outlast the next one.
                             if asked.is_err() {
-                                service = Some(None);
+                                gave_up = true;
                             }
                             asked
                                 .ok()

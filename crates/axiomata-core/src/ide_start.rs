@@ -149,11 +149,11 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                     ),
                 });
             }
-            // The terminal UI attaches to the app's own service (`docs/plans/agent-isolation.md`, CP1), where the
-            // session is — the owner's service does not know it.
+            // The terminal UI attaches to the app's own service the session runs on (`docs/plans/agent-isolation.md`,
+            // CP1, CP2) — the owner's service does not know it.
             ready.launch_command = format!(
                 "{}{}",
-                opencode::tui_env_prefix(),
+                opencode::tui_env_prefix(session.instance),
                 with_session(&ready.launch_command, &session.id)
             );
             // Taken before the line below overwrites it: the "remember only now" check at the end compares against what
@@ -175,6 +175,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                     &ready.cwd,
                     role.as_ref(),
                     launch.as_ref(),
+                    session.instance,
                 )
                 .await
             };
@@ -188,7 +189,7 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                         agent_entry::instructions(&ready.agent, role.as_ref()),
                         agent_entry::start_prompt(&ready.agent, launch)
                     );
-                    opencode::send_prompt(&session.id, &text).await?;
+                    opencode::send_prompt(session.instance, &session.id, &text).await?;
                 }
             }
             // Remembered only now: a start that failed on the way (the entry, the first message) must not leave a
@@ -471,9 +472,29 @@ pub async fn reach(
             reason: Some("its worktree is gone; restart the session".to_owned()),
         });
     }
-    let entry =
-        agent_entry::wire_opencode(&roots, &agent, &directory, role.as_ref(), launch.as_ref())
-            .await;
+    // Registered where the session is, which may not be where its launch would put a new one (its role changed since).
+    let session = agent.opencode_session.as_deref().unwrap_or_default();
+    let Some(instance) = opencode::running_services()
+        .await
+        .instance_of(session)
+        .await
+    else {
+        return Ok(Reach::Unreachable {
+            reason: Some(
+                "no running Opencode service of the app knows its session; restart the session"
+                    .to_owned(),
+            ),
+        });
+    };
+    let entry = agent_entry::wire_opencode(
+        &roots,
+        &agent,
+        &directory,
+        role.as_ref(),
+        launch.as_ref(),
+        instance,
+    )
+    .await;
     if entry.status == agent_entry::EntryStatus::Registered {
         tracing::info!(
             agent = id,

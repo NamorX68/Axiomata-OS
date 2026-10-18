@@ -448,6 +448,11 @@ pub struct AgentRequest {
     /// frontmatter). The opencode backend asks once more, in the same
     /// session, when the first reply has none; Ollama ignores it.
     pub expects_json: bool,
+    /// The run only looks (`access: read` in the skill's frontmatter,
+    /// `docs/plans/agent-isolation.md` D8): the opencode backend runs it on
+    /// the read instance, which refuses every edit and every command but the
+    /// read-only ones. The other backends ignore it.
+    pub read_only: bool,
 }
 
 /// The chat provider's `chat_model`, for interactive dashboard-assistant

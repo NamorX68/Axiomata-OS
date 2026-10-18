@@ -46,6 +46,11 @@ struct SkillFrontmatter {
     /// `text` (the default). Anything else is rejected.
     #[serde(default)]
     output: Option<String>,
+    /// What the skill does to the workspace: `read` (it only looks, and runs
+    /// on the app's read instance, `docs/plans/agent-isolation.md` D8) or
+    /// `write` (the default).
+    #[serde(default)]
+    access: Option<String>,
 }
 
 /// Default agent backend for a skill that doesn't name one.
@@ -92,6 +97,10 @@ pub struct Skill {
     /// it. A reply without one gets a single repair prompt in the same session
     /// (`agents::opencode::run`) before the run counts as done.
     pub expects_json: bool,
+    /// Whether the skill only looks (`access: read` in the frontmatter): its
+    /// runs go to the app's read Opencode instance, which refuses every edit
+    /// and every command but the read-only ones (D8).
+    pub read_only: bool,
     /// Absolute path to the skill's `SKILL.md`.
     pub path: PathBuf,
     /// The Markdown body after the frontmatter — the skill's actual
@@ -309,6 +318,17 @@ fn load_skill(manifest: &Path) -> Result<Skill, AxiomataError> {
         }
     };
 
+    let read_only = match frontmatter.access.as_deref().map(str::trim) {
+        None | Some("") | Some("write") => false,
+        Some("read") => true,
+        Some(other) => {
+            return Err(AxiomataError::InvalidSkill {
+                path: manifest.to_path_buf(),
+                reason: format!("frontmatter `access` must be `read` or `write`, not {other:?}"),
+            });
+        }
+    };
+
     Ok(Skill {
         name: frontmatter.name,
         description: frontmatter.description,
@@ -320,6 +340,7 @@ fn load_skill(manifest: &Path) -> Result<Skill, AxiomataError> {
         allowed_tools: frontmatter.allowed_tools,
         timeout_secs: frontmatter.timeout_secs,
         expects_json,
+        read_only,
         path: manifest.to_path_buf(),
         body: parsed.content,
     })
@@ -553,6 +574,33 @@ mod tests {
         assert!(matches!(
             find_skill("as-xml").unwrap_err(),
             AxiomataError::InvalidSkill { reason, .. } if reason.contains("`output`")
+        ));
+    }
+
+    #[test]
+    fn access_frontmatter_marks_a_reading_skill_and_rejects_anything_else() {
+        let h = TestHome::new("access-frontmatter");
+        let with_access = |name: &str, access: &str| {
+            write_skill(
+                &h.skills_dir(),
+                name,
+                &format!("---\nname: {name}\ndescription: d\naccess: {access}\n---\nbody\n"),
+            );
+        };
+        with_access("reads", "read");
+        with_access("writes", "write");
+        with_access("deletes", "delete");
+        write_skill(&h.skills_dir(), "plain", &skill_md("plain", "opencode"));
+
+        assert!(find_skill("reads").unwrap().read_only);
+        assert!(!find_skill("writes").unwrap().read_only);
+        assert!(
+            !find_skill("plain").unwrap().read_only,
+            "a skill writes unless it says otherwise"
+        );
+        assert!(matches!(
+            find_skill("deletes").unwrap_err(),
+            AxiomataError::InvalidSkill { reason, .. } if reason.contains("`access`")
         ));
     }
 

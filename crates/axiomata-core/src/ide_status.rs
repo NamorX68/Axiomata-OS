@@ -18,7 +18,7 @@
 //! rather than letting every dot flicker to "unknown" on a brief drop.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -48,9 +48,33 @@ const PLAN_NAME: &str = "plan agent";
 #[derive(Default)]
 struct Watch {
     tracker: Mutex<Tracker>,
-    /// Whether the stream is up and the tracker seeded — only then does "no
-    /// entry" mean "idle" rather than "unknown".
-    connected: AtomicBool,
+    /// Per instance (`Instance as usize`): [`UNKNOWN`], [`FOLLOWED`] (its
+    /// stream is up and the tracker seeded from it) or [`NOT_RUNNING`].
+    reach: [AtomicU8; opencode::Instance::ALL.len()],
+}
+
+/// The watcher has not looked at an instance yet, or lost its stream.
+const UNKNOWN: u8 = 0;
+/// The instance's stream is followed and the tracker seeded from it.
+const FOLLOWED: u8 = 1;
+/// No service of the instance runs: nothing works on it.
+const NOT_RUNNING: u8 = 2;
+
+impl Watch {
+    /// Whether "no entry" means "idle" rather than "unknown": every instance is followed or not running, and one is
+    /// followed. A session on an instance still unknown would otherwise read as idle while it works.
+    fn settled(&self) -> bool {
+        let reach: Vec<u8> = self
+            .reach
+            .iter()
+            .map(|r| r.load(Ordering::Relaxed))
+            .collect();
+        reach.iter().all(|&r| r != UNKNOWN) && reach.contains(&FOLLOWED)
+    }
+
+    fn set_reach(&self, instance: opencode::Instance, reach: u8) {
+        self.reach[instance as usize].store(reach, Ordering::Relaxed);
+    }
 }
 
 static WATCH: OnceLock<Arc<Watch>> = OnceLock::new();
@@ -63,7 +87,10 @@ pub fn ensure_running(db: Arc<Mutex<Connection>>) {
     }
     WATCH.get_or_init(|| {
         let watch = Arc::new(Watch::default());
-        tokio::spawn(run(Arc::clone(&watch), db));
+        // One follower per instance: a reviewer's session is on the read instance, a worker's on the write one.
+        for instance in opencode::Instance::ALL {
+            tokio::spawn(run(Arc::clone(&watch), Arc::clone(&db), instance));
+        }
         watch
     });
 }
@@ -74,7 +101,7 @@ pub fn overlay(statuses: &mut [AgentStatus], agents: &[Agent]) {
     let Some(watch) = WATCH.get() else {
         return;
     };
-    let connected = watch.connected.load(Ordering::Relaxed);
+    let connected = watch.settled();
     let tracker = watch
         .tracker
         .lock()
@@ -86,29 +113,36 @@ pub fn overlay(statuses: &mut [AgentStatus], agents: &[Agent]) {
 /// for a one-shot caller like the CLI. Leaves the statuses as they are when
 /// no service is running.
 pub async fn overlay_once(statuses: &mut [AgentStatus], agents: &[Agent]) {
-    let Ok(service) = opencode::find().await else {
-        return;
-    };
-    let Ok(active) = service.active_sessions().await else {
-        return;
-    };
     let mut tracker = Tracker::default();
-    let sessions = agents
-        .iter()
-        .filter(|a| a.harness == Harness::Opencode && a.command.trim().is_empty())
-        .filter_map(|a| a.opencode_session.as_deref());
-    for session in sessions {
-        if let Ok(snapshot) = service.session_snapshot(session, &active).await {
-            tracker.set(session, snapshot.state, now_ms());
-            if let Some(plan) = snapshot.plan {
-                tracker.set_plan(session, plan, now_ms());
-            }
-            if let Some(request) = snapshot.permission {
-                tracker.set_permission(session, request, now_ms());
+    let mut connected = false;
+    for instance in opencode::Instance::ALL {
+        let Ok(service) = opencode::find(instance).await else {
+            continue;
+        };
+        let Ok(active) = service.active_sessions().await else {
+            continue;
+        };
+        connected = true;
+        let sessions = agents
+            .iter()
+            .filter(|a| a.harness == Harness::Opencode && a.command.trim().is_empty())
+            .filter_map(|a| a.opencode_session.as_deref());
+        // A session of the other instance is unknown here (404) and skipped.
+        for session in sessions {
+            if let Ok(snapshot) = service.session_snapshot(session, &active).await {
+                tracker.set(session, snapshot.state, now_ms());
+                if let Some(plan) = snapshot.plan {
+                    tracker.set_plan(session, plan, now_ms());
+                }
+                if let Some(request) = snapshot.permission {
+                    tracker.set_permission(session, request, now_ms());
+                }
             }
         }
     }
-    overlay_with(statuses, agents, &tracker, true);
+    if connected {
+        overlay_with(statuses, agents, &tracker, true);
+    }
 }
 
 /// [`overlay`] against a given tracker, so it is testable without the watcher.
@@ -170,18 +204,21 @@ fn now_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
 
-/// Looks for the service, follows it while it is there, and looks again
-/// with a growing pause when it is not.
-async fn run(watch: Arc<Watch>, db: Arc<Mutex<Connection>>) {
+/// Looks for `instance`'s service, follows it while it is there, and looks
+/// again with a growing pause when it is not.
+async fn run(watch: Arc<Watch>, db: Arc<Mutex<Connection>>, instance: opencode::Instance) {
     let mut pause = RETRY_MIN;
     loop {
-        if let Ok(service) = opencode::find().await {
-            pause = RETRY_MIN;
-            if let Err(err) = follow(&watch, &service, &db).await {
-                tracing::debug!(%err, "ide status: lost the Opencode event stream");
+        match opencode::find(instance).await {
+            Ok(service) => {
+                pause = RETRY_MIN;
+                if let Err(err) = follow(&watch, &service, &db, instance).await {
+                    tracing::debug!(%err, ?instance, "ide status: lost the Opencode event stream");
+                }
+                watch.set_reach(instance, UNKNOWN);
             }
+            Err(_) => watch.set_reach(instance, NOT_RUNNING),
         }
-        watch.connected.store(false, Ordering::Relaxed);
         tokio::time::sleep(pause).await;
         pause = (pause * 2).min(RETRY_MAX);
     }
@@ -192,11 +229,12 @@ async fn follow(
     watch: &Watch,
     service: &Service,
     db: &Mutex<Connection>,
+    instance: opencode::Instance,
 ) -> Result<(), OpencodeError> {
     // The stream first, so nothing between the seed and the first event is lost.
     let mut events = EventStream::open(service).await?;
     seed(watch, service, db).await?;
-    watch.connected.store(true, Ordering::Relaxed);
+    watch.set_reach(instance, FOLLOWED);
     while let Some(event) = events.next().await? {
         watch
             .tracker
@@ -472,9 +510,10 @@ pub async fn answer_permission(
                     "request {request_id} is not the one agent {agent_id} waits on"
                 )));
             }
-            let service = opencode::find()
-                .await
-                .map_err(|err| refused(format!("the Opencode service is not reachable: {err}")))?;
+            let services = opencode::running_services().await;
+            let service = services.holding(session).await.ok_or_else(|| {
+                refused("no running Opencode service of the app knows the session".into())
+            })?;
             service
                 .reply_permission(session, request_id, reply)
                 .await
@@ -489,6 +528,24 @@ pub async fn answer_permission(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_entry_reads_as_idle_only_once_every_instance_is_followed_or_not_running() {
+        let watch = Watch::default();
+        assert!(!watch.settled(), "nothing looked at yet");
+        watch.set_reach(opencode::Instance::Write, FOLLOWED);
+        assert!(
+            !watch.settled(),
+            "a reviewer on the read instance could be working unseen"
+        );
+        watch.set_reach(opencode::Instance::Read, NOT_RUNNING);
+        assert!(watch.settled());
+        watch.set_reach(opencode::Instance::Read, UNKNOWN);
+        assert!(!watch.settled(), "its stream was lost");
+        watch.set_reach(opencode::Instance::Write, NOT_RUNNING);
+        watch.set_reach(opencode::Instance::Read, NOT_RUNNING);
+        assert!(!watch.settled(), "no service at all: unknown, as before");
+    }
     use axiomata_opencode::{Event, PlanAnswer};
 
     fn agent(id: i64, harness: Harness, command: &str, session: Option<&str>) -> Agent {
