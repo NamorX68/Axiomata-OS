@@ -147,6 +147,43 @@ export interface RoleGroup {
   roles: Role[];
 }
 
+/** Roles that are one job on several models — `planner`, `planner-haiku`, `planner-sonnet` — under one Start chip. */
+export interface RoleFamily {
+  /** The name the chip shows: the part of the roles' names before the first `-`. */
+  base: string;
+  roles: Role[];
+}
+
+/**
+ * The roles of one group as families: roles whose names share the part before the first `-` are one job on different
+ * engines. Families keep the order of their first role (the group's tier order), and the roles in a family keep theirs.
+ */
+export function roleFamilies(roles: readonly Role[]): RoleFamily[] {
+  const families = new Map<string, Role[]>();
+  for (const role of roles) {
+    const base = role.name.split("-")[0] || role.name;
+    families.set(base, [...(families.get(base) ?? []), role]);
+  }
+  return [...families.entries()].map(([base, list]) => ({ base, roles: list }));
+}
+
+/**
+ * What a role is called inside its family's menu: the rest of its name (`haiku` of `planner-haiku`), or — for the
+ * family's plain role — its engine's model (its label when it names none), or "pick engine" for a role that names no
+ * engine (the owner picks at the start).
+ */
+export function variantLabel(
+  role: Role,
+  base: string,
+  engines: readonly Pick<EngineEntry, "id" | "label" | "model">[],
+): string {
+  if (role.name !== base && role.name.startsWith(`${base}-`)) return role.name.slice(base.length + 1);
+  if (role.engine === null) return "pick engine";
+  const engine = engines.find((candidate) => candidate.id === role.engine);
+  if (!engine) return role.name;
+  return engine.model ? modelShort(engine.model) : engine.label;
+}
+
 /**
  * The roles of a project grouped by their kind of work, each group in the order of {@link KIND_GROUPS} (kinds it does
  * not know follow, alphabetically) and each role in a group by tier, then name. Empty groups are left out.

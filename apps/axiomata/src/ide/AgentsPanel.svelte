@@ -18,7 +18,16 @@
   import { cardOf } from "./agentCard";
   import ProjectRolesNotice from "./ProjectRolesNotice.svelte";
   import RoleChip from "./RoleChip.svelte";
-  import { agentNameFor, engineName, groupRoles, harnessBadge, harnessLabel, startableAgent } from "./rosterLook";
+  import {
+    agentNameFor,
+    engineName,
+    groupRoles,
+    harnessBadge,
+    harnessLabel,
+    roleFamilies,
+    startableAgent,
+    variantLabel,
+  } from "./rosterLook";
   import { engineCatalog, engineLine, refreshEngines, rosterVersion } from "./rosterStore";
   import StatusDot from "./StatusDot.svelte";
   import Icon from "../ui/Icon.svelte";
@@ -143,6 +152,13 @@
    * with none, one is made on the role's engine. A role that names no engine (the planner) opens the form with the role
    * chosen, because the engine is the owner's pick at every start.
    */
+  /** The family of roles whose models are shown under its group (`kind/base`), `null` = none. */
+  let openFamily = $state<string | null>(null);
+
+  function toggleFamily(key: string) {
+    openFamily = openFamily === key ? null : key;
+  }
+
   /** A "Start" click is being served: the agent it makes is not in `agents` yet, so a second click would repeat it. */
   let starting = false;
 
@@ -227,20 +243,50 @@
       <div class="starts" role="group" aria-label="Start an agent in a role">
         <span class="starts-label">Start an agent</span>
         {#each roleGroups as group (group.kind)}
-          <div class="start-group">
-            <span class="group-title">{group.title}</span>
-            <div class="chips">
-              {#each group.roles as role (role.name)}
+          {@const families = roleFamilies(group.roles)}
+          {@const open = families.find((family) => `${group.kind}/${family.base}` === openFamily)}
+          <span class="group-title">{group.title}</span>
+          <div class="chips">
+            {#each families as family (family.base)}
+              {#if family.roles.length === 1}
                 <button
                   type="button"
                   class="start"
-                  title={role.description || `Start ${role.name}`}
-                  onclick={() => startRole(role)}
+                  title={family.roles[0].description || `Start ${family.roles[0].name}`}
+                  onclick={() => startRole(family.roles[0])}
                 >
-                  <RoleChip label={role.name} kind={role.kind} />
+                  <RoleChip label={family.roles[0].name} kind={family.roles[0].kind} />
                 </button>
-              {/each}
-            </div>
+              {:else}
+                <!-- One job on several models: the chip opens the models under the group, the click there starts. -->
+                <button
+                  type="button"
+                  class="start family"
+                  class:expanded={open === family}
+                  aria-expanded={open === family}
+                  title="{family.base} on {family.roles.length} models"
+                  onclick={() => toggleFamily(`${group.kind}/${family.base}`)}
+                >
+                  <RoleChip label={family.base} kind={group.kind} />
+                  <span class="caret"><Icon name="chevron-down" size="sm" /></span>
+                </button>
+              {/if}
+            {/each}
+            {#if open}
+              <div class="variants" role="group" aria-label="{open.base} on a model">
+                {#each open.roles as role (role.name)}
+                  <button
+                    type="button"
+                    class="variant"
+                    title={role.description || `Start ${role.name}`}
+                    onclick={() => {
+                      openFamily = null;
+                      void startRole(role);
+                    }}>{variantLabel(role, open.base, engines)}</button
+                  >
+                {/each}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -549,17 +595,66 @@
   }
 
   /* The roles of the project as chips: one click starts an agent in that role. */
+  /* One line per kind of work: its title in a column of its own, its jobs beside it. */
   .starts {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ax-space-2);
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: baseline;
+    gap: var(--ax-space-2) var(--ax-space-3);
     margin-bottom: var(--ax-space-3);
   }
 
-  .start-group {
-    display: flex;
-    flex-direction: column;
+  .starts-label {
+    grid-column: 1 / -1;
+  }
+
+  .family {
+    display: inline-flex;
+    align-items: center;
     gap: var(--ax-space-1);
+    color: var(--ax-text-muted);
+  }
+
+  .family.expanded {
+    border-color: var(--ax-border-strong);
+  }
+
+  .caret {
+    display: inline-flex;
+    transition: transform var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  .family.expanded .caret {
+    transform: rotate(180deg);
+  }
+
+  /* The models of the open job, on a line of their own under its chips. */
+  .variants {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-1);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-2);
+  }
+
+  .variant {
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border: 1px solid transparent;
+    border-radius: var(--ax-radius-pill);
+    background: none;
+    color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-xs);
+    cursor: pointer;
+  }
+
+  .variant:hover,
+  .variant:focus-visible {
+    border-color: var(--ax-border-strong);
+    background: var(--ax-elev-3);
   }
 
   .group-title {

@@ -11,12 +11,14 @@ import {
   harnessBadge,
   harnessLabel,
   modelShort,
+  roleFamilies,
   roleIdFor,
   roleTitle,
   roleTone,
   slugify,
   startableAgent,
   uniqueSlug,
+  variantLabel,
 } from "./rosterLook";
 
 function agent(over: Partial<IdeAgent>): IdeAgent {
@@ -223,6 +225,33 @@ describe("groupRoles", () => {
     const groups = groupRoles([role("grill", "grill"), role("zed", "zeta"), role("doc", "doc"), role("p", "plan")]);
     expect(groups.map((g) => g.kind)).toEqual(["plan", "doc", "grill", "zeta"]);
     expect(groups[2]?.title).toBe("Grill");
+  });
+
+  it("folds one job on several models into a family under the chip's name", () => {
+    const families = roleFamilies([
+      role("implementer-light", "implement", "light"),
+      role("allrounder", "implement"),
+      role("implementer-haiku", "implement"),
+      role("allrounder-heavy", "implement", "heavy"),
+    ]);
+    expect(families.map((f) => [f.base, f.roles.map((r) => r.name)])).toEqual([
+      ["implementer", ["implementer-light", "implementer-haiku"]],
+      ["allrounder", ["allrounder", "allrounder-heavy"]],
+    ]);
+    expect(roleFamilies([])).toEqual([]);
+  });
+
+  it("calls a variant by the rest of its name, the plain role by its engine", () => {
+    const engines = [
+      { id: "opus", label: "Claude Opus 5.5", model: null },
+      { id: "mimo", label: "Opencode · MiMo", model: "openrouter/xiaomi/mimo-v2-flash" },
+    ];
+    const named = (name: string, engine: string | null) => ({ name, engine }) as Role;
+    expect(variantLabel(named("planner-haiku", "h"), "planner", engines)).toBe("haiku");
+    expect(variantLabel(named("planner", "opus"), "planner", engines)).toBe("Claude Opus 5.5");
+    expect(variantLabel(named("planner", "mimo"), "planner", engines)).toBe("mimo-v2-flash");
+    expect(variantLabel(named("planner", null), "planner", engines)).toBe("pick engine");
+    expect(variantLabel(named("planner", "gone"), "planner", engines)).toBe("planner");
   });
 
   it("gives no group for no roles, and sorts an unknown tier last", () => {

@@ -1153,6 +1153,20 @@ let mockRoles: Role[] = [
     instructions: "Check the diff against the acceptance criteria.",
     source: "user",
   },
+  // The same job on a cheaper model: the Agents panel folds it under the "reviewer" chip.
+  {
+    name: "reviewer-haiku",
+    description: "Reviews a small card cheaply",
+    kind: "review",
+    tier: "light",
+    engine: "claude-code-claude-sonnet-5",
+    fallback_engines: [],
+    permissions: [],
+    limits: {},
+    creates: [],
+    instructions: "Check the diff against the acceptance criteria.",
+    source: "user",
+  },
 ];
 let mockRolesConfirmed = false;
 
