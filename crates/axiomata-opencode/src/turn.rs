@@ -23,6 +23,10 @@ use crate::session::{ModelRef, NewSession, PermissionRule};
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Pause between two reads while waiting for the `idle` entry.
 const SETTLE_POLL: Duration = Duration::from_millis(200);
+/// How often, and how far apart, a new unattended session looks whether its MCP servers are up: 30 s at most,
+/// for a service that just started (a connector skill without its tools answers empty).
+const MCP_SETTLE_LOOKS: u32 = 60;
+const MCP_SETTLE_PAUSE: Duration = Duration::from_millis(500);
 /// Pause between two reads when the event stream broke mid-turn.
 const FALLBACK_POLL: Duration = Duration::from_secs(1);
 
@@ -113,6 +117,16 @@ impl Service {
                 match self.reconnect_failed_mcp(&new.directory).await {
                     Ok(names) if !names.is_empty() => {
                         tracing::info!(?names, directory = %new.directory, "reconnected failed MCP servers")
+                    }
+                    Ok(_) => {}
+                    Err(err) => tracing::warn!(%err, "could not check the MCP servers"),
+                }
+                match self
+                    .await_mcp_settled(&new.directory, MCP_SETTLE_LOOKS, MCP_SETTLE_PAUSE)
+                    .await
+                {
+                    Ok(pending) if !pending.is_empty() => {
+                        tracing::warn!(?pending, directory = %new.directory, "MCP servers still connecting")
                     }
                     Ok(_) => {}
                     Err(err) => tracing::warn!(%err, "could not check the MCP servers"),

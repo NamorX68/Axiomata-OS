@@ -82,11 +82,13 @@ async fn read_request(stream: &mut TcpStream) -> Option<(String, String, String,
     let mut first = lines.next()?.split(' ');
     let (method, path) = (first.next()?.to_string(), first.next()?.to_string());
     let mut auth = String::new();
+    let mut location = String::new();
     let mut length = 0usize;
     for line in lines {
         let (name, value) = line.split_once(':').unwrap_or((line, ""));
         match name.to_ascii_lowercase().as_str() {
             "authorization" => auth = value.trim().to_string(),
+            "x-opencode-directory" => location = value.trim().to_string(),
             "content-length" => length = value.trim().parse().unwrap_or(0),
             _ => {}
         }
@@ -97,6 +99,12 @@ async fn read_request(stream: &mut TcpStream) -> Option<(String, String, String,
         let n = stream.read(&mut chunk).await.ok()?;
         body.extend_from_slice(&chunk[..n]);
     }
+    // The location rides along in the path as `#<directory>`, where only the MCP list looks at it.
+    let path = if location.is_empty() {
+        path
+    } else {
+        format!("{path}#{location}")
+    };
     Some((
         method,
         path,
@@ -139,6 +147,10 @@ async fn serve(
 ) {
     let Some((method, path, auth, body)) = read_request(&mut stream).await else {
         return;
+    };
+    let (path, location) = match path.split_once('#') {
+        Some((path, location)) => (path.to_string(), location.to_string()),
+        None => (path, String::new()),
     };
     seen.lock()
         .unwrap()
@@ -242,6 +254,12 @@ async fn serve(
                 {"name": "broken", "status": {"status": "failed", "error": "no such file"}},
                 {"name": "slow", "status": {"status": "connecting"}},
             ]});
+            // Anywhere but `/d`, everything is up: a turn there must not wait for a server that never comes.
+            let servers = if location == "/d" {
+                servers
+            } else {
+                json!({"data": [{"name": "axiomata", "status": {"status": "connected"}}]})
+            };
             respond(&mut stream, "200 OK", &servers).await
         }
         ("PUT", "/api/session/ses_mock1/environment")
@@ -579,6 +597,38 @@ async fn sessions_get_the_given_environment_for_their_commands() {
     assert_eq!(puts[0].1, "/api/session/ses_mock1/environment");
     let body: Value = serde_json::from_str(&puts[0].2).unwrap();
     assert_eq!(body, json!({ "variables": { "HOME": "/Users/me" } }));
+}
+
+#[tokio::test]
+async fn a_new_session_waits_for_servers_still_connecting() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("settle-mcp");
+    let bin = fake_opencode(&dir);
+    write_discovery(&dir, &discovery(mock.port, "pw"));
+    let service = Service::connect(&bin, &env()).await.expect("connect");
+    let pause = Duration::from_millis(1);
+    assert_eq!(
+        service.await_mcp_settled("/d", 3, pause).await.unwrap(),
+        ["slow"],
+        "gives up and names the server still connecting"
+    );
+    assert!(
+        service
+            .await_mcp_settled("/elsewhere", 3, pause)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let looks = mock
+        .requests()
+        .iter()
+        .filter(|(method, path, _)| method == "GET" && path == "/api/mcp")
+        .count();
+    assert_eq!(looks, 4, "three looks at /d, one where all are up");
 }
 
 #[tokio::test]

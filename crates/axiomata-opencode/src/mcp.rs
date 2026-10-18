@@ -159,6 +159,38 @@ impl Service {
         self.send("DELETE", request, &path).await.map(drop)
     }
 
+    /// Waits until no MCP server at `directory` is still `connecting`, for at most `attempts` looks `pause`
+    /// apart. A service that just started brings its servers up a few seconds after it answers (6 s for
+    /// `apple-mail` from a fresh cache, measured 2026-10-18), and a session made before that finds none of their
+    /// tools. Returns the names still connecting when it gave up.
+    ///
+    /// Errors:
+    ///     Anything the service refuses when asked for the servers.
+    pub async fn await_mcp_settled(
+        &self,
+        directory: &str,
+        attempts: u32,
+        pause: std::time::Duration,
+    ) -> Result<Vec<String>, OpencodeError> {
+        let mut pending = Vec::new();
+        for attempt in 0..attempts {
+            if attempt > 0 {
+                tokio::time::sleep(pause).await;
+            }
+            pending = self
+                .mcp_servers(directory)
+                .await?
+                .into_iter()
+                .filter(|server| server.status == "connecting")
+                .map(|server| server.name)
+                .collect();
+            if pending.is_empty() {
+                break;
+            }
+        }
+        Ok(pending)
+    }
+
     /// Connects every `failed` MCP server of `directory` again; returns the
     /// names it reconnected. A server that will not connect is skipped (and
     /// stays failed) — the run goes on and says what it could not do.
