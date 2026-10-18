@@ -71,6 +71,12 @@
 
   const engines = $derived($engineCatalog);
 
+  /** The engines a project has a master pane for, in the order the tiles show them. */
+  const MASTER_HARNESSES = ["claude_code", "opencode"] as const;
+  /** The project's master agents by engine: they are the tiles at the top, not cards in the list. */
+  const masters = $derived(new Map(agents.filter((a) => a.agent_role === "master").map((a) => [a.harness, a])));
+  const listed = $derived(agents.filter((a) => a.agent_role !== "master"));
+
   async function loadRoles(id: number | null) {
     if (id === null) {
       roleNames = [];
@@ -169,6 +175,53 @@
 <div class="panel">
   <SectionHead label="Agents" rule level={2} />
   <div class="body">
+    {#if !disabled}
+      <!-- The engines as the owner uses them outside: own settings and rules, the real folder, the team tools added. -->
+      <div class="masters" role="group" aria-label="Master panes">
+        {#each MASTER_HARNESSES as harness (harness)}
+          {@const agent = masters.get(harness)}
+          {@const card = agent
+            ? cardOf(agent, $statuses.byAgent.get(agent.id), openAgentIds.has(agent.id), $statuses.checkedAt)
+            : null}
+          <div class="master-tile" style:--harness="var(--ax-harness-{harness})">
+          <button
+            class="master {card?.status.tone ?? ''}"
+            type="button"
+            title="{harnessLabel(harness)} as you use it outside — your settings and rules, in the project folder, with the team tools"
+            onclick={() => onMaster(harness)}
+          >
+            <HexAvatar
+              text={harnessBadge(harness)}
+              live={card?.status.tone === "working"}
+              ring="var(--harness)"
+              size="lg"
+              label={harnessLabel(harness)}
+            />
+            <span class="master-name">{harnessLabel(harness)}</span>
+            <span class="master-kind">Master</span>
+            {#if card}
+              <span class="state"><StatusDot view={card.status} /> {card.status.label}</span>
+            {/if}
+          </button>
+          {#if agent}
+            <!-- Removing a master forgets its session; the next click starts a fresh one. -->
+            <div class="row-actions">
+              <IconButton
+                icon="trash-2"
+                label="Remove the {harnessLabel(harness)} master"
+                size="sm"
+                onclick={() => {
+                  if (confirm(`Remove the ${harnessLabel(harness)} master? Panes already running it stay open.`)) {
+                    onRemove(agent.id);
+                  }
+                }}
+              />
+            </div>
+          {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
     <ProjectRolesNotice {projectId} />
     {#if roleList.length > 0 && !disabled && editing === undefined}
       <div class="starts" role="group" aria-label="Start an agent in a role">
@@ -192,9 +245,9 @@
         {/each}
       </div>
     {/if}
-    {#if agents.length > 0}
+    {#if listed.length > 0}
       <ul class="cards">
-        {#each agents as agent (agent.id)}
+        {#each listed as agent (agent.id)}
           {@const card = cardOf(agent, $statuses.byAgent.get(agent.id), openAgentIds.has(agent.id), $statuses.checkedAt)}
           <li class="card {card.status.tone}" style:--harness="var(--ax-harness-{agent.harness})">
             <button class="open" type="button" {disabled} title={card.status.title} onclick={() => onOpen(agent)}>
@@ -235,10 +288,7 @@
             </button>
             <!-- Quiet until the card is hovered or focused (editor-look I4). -->
             <div class="row-actions">
-              <!-- A master keeps its engine and role: there is nothing to edit (the backend refuses it too). -->
-              {#if agent.agent_role !== "master"}
-                <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
-              {/if}
+              <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
               <IconButton
                 icon="trash-2"
                 label="Remove {agent.name}"
@@ -263,25 +313,6 @@
       {#if engines.length === 0 && !disabled}
         <p class="hint">No engines yet — an agent runs on an engine. Add one under Engines &amp; roles.</p>
       {/if}
-      <!-- The engines as the owner uses them outside: own settings and rules, the real folder, the team tools added. -->
-      <button
-        class="add"
-        type="button"
-        {disabled}
-        title="Claude Code as you use it outside — in the project folder, with the team tools"
-        onclick={() => onMaster("claude_code")}
-      >
-        <Icon name="user" size="sm" /> Master · Claude Code
-      </button>
-      <button
-        class="add"
-        type="button"
-        {disabled}
-        title="Opencode as you use it outside — your agents and rules, in the project folder, with the team tools"
-        onclick={() => onMaster("opencode")}
-      >
-        <Icon name="user" size="sm" /> Master · Opencode
-      </button>
       <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Engines &amp; roles…</button>
     {:else}
       <form
@@ -445,6 +476,76 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* The master panes first and larger than the agents' cards: the engines as the owner works with them every day. The
+     harness's colour is the tile's edge; only a working master glows (the accent rule). */
+  .masters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ax-space-3);
+    margin-bottom: var(--ax-space-4);
+  }
+
+  .master-tile {
+    position: relative;
+    display: flex;
+    min-width: 0;
+  }
+
+  .master-tile:hover .row-actions,
+  .master-tile:focus-within .row-actions {
+    opacity: 1;
+  }
+
+  .master {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--ax-space-1);
+    min-width: 0;
+    padding: var(--ax-space-4) var(--ax-space-2) var(--ax-space-3);
+    border: 1px solid color-mix(in srgb, var(--harness) 45%, var(--ax-border));
+    border-top: calc(3px * var(--ax-ui-scale)) solid var(--harness);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-2);
+    box-shadow: var(--ax-shadow-raised);
+    color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    cursor: pointer;
+  }
+
+  .master:hover,
+  .master:focus-visible {
+    border-color: var(--harness);
+    background: var(--ax-elev-3);
+  }
+
+  .master.working {
+    border-color: var(--ax-glow);
+    box-shadow: var(--ax-glow-shadow);
+    animation: var(--ax-anim-glow);
+  }
+
+  .master.waiting {
+    border-color: var(--ax-warning);
+  }
+
+  .master-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--ax-font-size-base);
+    font-weight: 600;
+  }
+
+  .master-kind {
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+    letter-spacing: var(--ax-tracking-wide);
+    text-transform: uppercase;
   }
 
   /* The roles of the project as chips: one click starts an agent in that role. */

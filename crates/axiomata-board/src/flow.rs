@@ -560,20 +560,12 @@ pub fn delete_plan(db: &mut Connection, id: i64) -> Result<bool> {
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if let Some(plan) = get_plan(&tx, id)?
         && plan.status == PlanStatus::Approved
+        && (held_cards(&tx, id)? > 0 || plan.base_branch.is_some())
     {
-        let held: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM cards
-             WHERE plan_id = ?1 AND claimed_by IS NOT NULL AND archived_at IS NULL AND taken_over_at IS NULL
-               AND failed_at IS NULL AND canceled_at IS NULL",
-            params![id],
-            |row| row.get(0),
-        )?;
-        if held > 0 || plan.base_branch.is_some() {
-            return invalid(
-                "plan_id",
-                "the plan is under way (a card is held by a session, or its line exists); take it over or close it first",
-            );
-        }
+        return invalid(
+            "plan_id",
+            "the plan is under way (a card is held by a session, or its line exists); take it over or close it first",
+        );
     }
     // The card the plan was made for is open again; a closed plan's card already left it (to Done, or to Open).
     if let Some(plan) = get_plan(&tx, id)?
@@ -595,6 +587,17 @@ pub fn delete_plan(db: &mut Connection, id: i64) -> Result<bool> {
     let changed = tx.execute("DELETE FROM plans WHERE id = ?1", params![id])?;
     tx.commit()?;
     Ok(changed == 1)
+}
+
+/// How many cards of plan `plan_id` a session still holds: claimed, and neither signed off, failed nor called off.
+fn held_cards(db: &Connection, plan_id: i64) -> Result<i64> {
+    Ok(db.query_row(
+        "SELECT COUNT(*) FROM cards
+         WHERE plan_id = ?1 AND claimed_by IS NOT NULL AND verified_by IS NULL AND archived_at IS NULL
+           AND taken_over_at IS NULL AND failed_at IS NULL AND canceled_at IS NULL",
+        params![plan_id],
+        |row| row.get(0),
+    )?)
 }
 
 fn column_with(
@@ -684,8 +687,17 @@ pub fn approve_plan(db: &mut Connection, plan_id: i64, actor: &str) -> Result<Op
 ///
 /// The card the plan was made for (`docs/plans/card-as-plan.md`) leaves it: to Done when the plan's work was taken over
 /// (a card of it is marked taken over), otherwise back to the top of Open, ready to be started again.
+///
+/// Refused while a session still holds a card of the plan: it would go on working for a plan that is over. A line the
+/// plan has is the caller's to remove (`axiomata_core::card_session::close_plan`).
 pub fn close_plan(db: &Connection, plan_id: i64) -> Result<bool> {
     let tx = immediate(db)?;
+    if held_cards(&tx, plan_id)? > 0 {
+        return invalid(
+            "plan_id",
+            "a card of the plan is still held by a session; let it finish or release it first",
+        );
+    }
     let closed = tx.execute(
         "UPDATE plans SET status = 'closed', updated_at = ?2 WHERE id = ?1 AND status <> 'closed'",
         params![plan_id, now()],
@@ -3202,6 +3214,38 @@ mod tests {
         let idle = plan(&f);
         approve_plan(&mut f.db, idle.id, "human:owner").unwrap();
         assert!(delete_plan(&mut f.db, idle.id).unwrap());
+    }
+
+    #[test]
+    fn a_plan_is_closed_only_once_no_session_holds_a_card_of_it() {
+        let mut f = fixture();
+        let busy = plan(&f);
+        let held = planned_card(&f, f.open, busy.id, "held");
+        let signed = planned_card(&f, f.open, busy.id, "signed off");
+        approve_plan(&mut f.db, busy.id, "human:owner").unwrap();
+        claim_card(&f.db, held.id, "agent:w-1").unwrap();
+        claim_card(&f.db, signed.id, "agent:w-2").unwrap();
+        // A signed-off card's session is over: only the held one blocks.
+        f.db.execute(
+            "UPDATE cards SET verified_by = 'agent:r-3', verified_at = '2026-10-19T00:00:00Z' WHERE id = ?1",
+            params![signed.id],
+        )
+        .unwrap();
+
+        let refused = close_plan(&f.db, busy.id).unwrap_err();
+        assert!(
+            refused.to_string().contains("held by a session"),
+            "{refused}"
+        );
+        assert_eq!(
+            get_plan(&f.db, busy.id).unwrap().unwrap().status,
+            PlanStatus::Approved
+        );
+
+        cancel_card(&f.db, held.id, "human:owner", "given up").unwrap();
+        assert!(close_plan(&f.db, busy.id).unwrap());
+        assert!(!close_plan(&f.db, busy.id).unwrap(), "closed already");
+        assert!(delete_plan(&mut f.db, busy.id).unwrap());
     }
 
     #[test]

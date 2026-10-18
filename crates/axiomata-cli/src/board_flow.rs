@@ -256,6 +256,10 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
         PlanAction::Delete { .. } => owner_only("deleting a plan")?,
         _ => {}
     }
+    // Closing takes the database lock itself, between the git steps that remove the plan's line.
+    if let PlanAction::Close { id } = action {
+        return close_plan(core, id);
+    }
     let mut db = core.db_lock();
     match action {
         PlanAction::List { board } => {
@@ -401,17 +405,8 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             }
             println!("plan #{id} approved — {moved} card(s) moved to Offen");
         }
-        PlanAction::Close { id } => {
-            if !flow::close_plan(&db, id)? {
-                bail!("plan #{id} does not exist or is closed already");
-            }
-            // The card the plan was made for left it (to Open or Done).
-            if let Some(plan) = flow::get_plan(&db, id)?
-                && plan.origin_card_id.is_some()
-            {
-                board_mirror::after_change(&db, &read_config(core), plan.board_id);
-            }
-            println!("plan #{id} closed");
+        PlanAction::Close { .. } => {
+            unreachable!("closing a plan is handled before the lock is taken")
         }
         PlanAction::Delete { id } => {
             let board_id = flow::get_plan(&db, id)?.map(|plan| plan.board_id);
@@ -423,6 +418,27 @@ pub fn plan_cmd(core: &AxiomataCore, action: PlanAction) -> Result<()> {
             }
             println!("plan #{id} deleted (its cards stay on the board)");
         }
+    }
+    Ok(())
+}
+
+/// Closes plan `id` and removes its line (`card_session::close_plan`).
+fn close_plan(core: &AxiomataCore, id: i64) -> Result<()> {
+    let worktrees = axiomata_core::paths::ide_locations().worktrees;
+    let outcome = axiomata_core::card_session::close_plan_blocking(&core.db, &worktrees, id)?;
+    if !outcome.closed {
+        bail!("plan #{id} does not exist or is closed already");
+    }
+    let db = core.db_lock();
+    // The card the plan was made for left it (to Open or Done).
+    if let Some(plan) = flow::get_plan(&db, id)?
+        && plan.origin_card_id.is_some()
+    {
+        board_mirror::after_change(&db, &read_config(core), plan.board_id);
+    }
+    println!("plan #{id} closed");
+    for note in outcome.cleanup {
+        println!("  note: {note}");
     }
     Ok(())
 }

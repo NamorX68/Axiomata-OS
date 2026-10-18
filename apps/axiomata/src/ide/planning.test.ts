@@ -6,6 +6,7 @@ import { addTab, allGroups, allTabs, closeTab, forceCloseTab, emptyLayout, singl
 import {
   agentTabsOf,
   balanceFlow,
+  canClosePlan,
   canDeletePlan,
   rolesOfKind,
   sessionEngine,
@@ -457,6 +458,27 @@ describe("deleting a plan", () => {
     expect(canDeletePlan(approved, [card("ready", "agent:x-1")])).toBe(false);
     expect(canDeletePlan(approved, [card("working", "agent:x-1", "2026-10-06T10:00:00Z")])).toBe(true);
     expect(canDeletePlan({ ...approved, base_branch: "main" }, [card("ready")])).toBe(false);
+  });
+});
+
+describe("closing a plan", () => {
+  const card = (state: string, claimed: string | null = null) =>
+    ({ state, claimed_by: claimed, archived_at: null }) as Pick<BoardCard, "state" | "claimed_by" | "archived_at">;
+
+  it("is possible for a draft, and for an approved plan once no session holds a card of it", () => {
+    expect(canClosePlan({ status: "draft" }, [card("proposed")])).toBe(true);
+    const approved = { status: "approved" as const };
+    expect(canClosePlan(approved, [card("canceled", "agent:x-1")])).toBe(true);
+    expect(canClosePlan(approved, [card("integrated", "agent:x-1"), card("failed", "agent:y-2")])).toBe(true);
+    expect(canClosePlan(approved, [card("working", "agent:x-1")])).toBe(false);
+    expect(canClosePlan(approved, [card("done", "agent:x-1")])).toBe(false);
+    expect(canClosePlan(approved, [card("verified", "agent:x-1")])).toBe(true);
+    // Moved into work by hand, without a session: nothing holds it (the backend agrees).
+    expect(canClosePlan(approved, [card("working")])).toBe(true);
+  });
+
+  it("is not offered again for a closed plan", () => {
+    expect(canClosePlan({ status: "closed" }, [])).toBe(false);
   });
 });
 

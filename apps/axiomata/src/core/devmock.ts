@@ -2215,9 +2215,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     }
     case "close_board_plan": {
       const plan = boardPlans.find((p) => p.id === args.id);
-      if (!plan || plan.status === "closed") return false as T;
+      if (!plan || plan.status === "closed") return { closed: false, cleanup: [] } as T;
       boardPlans = boardPlans.map((p) => (p.id === plan.id ? { ...p, status: "closed" } : p));
-      return true as T;
+      return { closed: true, cleanup: [] } as T;
     }
     case "delete_board_plan": {
       const before = boardPlans.length;

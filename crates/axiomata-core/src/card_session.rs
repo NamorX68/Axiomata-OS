@@ -1881,6 +1881,80 @@ fn check_line_tip(
     Ok(tip)
 }
 
+/// What closing a plan came to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlanClosed {
+    /// `false`: there is no such plan, or it was closed already.
+    pub closed: bool,
+    /// What of its line could not be removed. The line's work is never lost: a line that holds something the project's
+    /// branch lacks stays, and says so here.
+    pub cleanup: Vec<String>,
+}
+
+/// The owner closes a plan, also one that was approved and never finished: nothing starts from it any more, and its
+/// integration line goes — its worktree, then its branch, the way a take-over removes it (never forced). Then the
+/// plan can be deleted.
+///
+/// # Errors
+///
+/// [`flow::close_plan`]'s refusal while a session still holds a card of the plan; a database error.
+pub async fn close_plan(core: &AxiomataCore, plan_id: i64) -> Result<PlanClosed> {
+    let db = Arc::clone(&core.db);
+    let worktrees = crate::paths::ide_locations().worktrees;
+    tokio::task::spawn_blocking(move || close_plan_blocking(&db, &worktrees, plan_id))
+        .await
+        .map_err(|err| refusal("plan", format!("closing the plan failed: {err}")))?
+}
+
+/// [`close_plan`] for a caller that may block (the CLI).
+///
+/// # Errors
+///
+/// As [`close_plan`].
+pub fn close_plan_blocking(
+    db: &Mutex<Connection>,
+    worktrees: &std::path::Path,
+    plan_id: i64,
+) -> Result<PlanClosed> {
+    let (closed, plan, project) = {
+        let conn = lock(db);
+        let closed = flow::close_plan(&conn, plan_id)?;
+        let plan = flow::get_plan(&conn, plan_id)?;
+        let project = plan
+            .as_ref()
+            .and_then(|plan| plan.project_id)
+            .map(|id| project_store::get_project(&conn, id))
+            .transpose()?
+            .flatten();
+        (closed, plan, project)
+    };
+    let mut cleanup = Vec::new();
+    // A plan without a recorded base branch never made a line: there is nothing on disk to remove.
+    if let Some(plan) = plan.filter(|_| closed)
+        && let Some(base_branch) = plan.base_branch
+    {
+        match project {
+            Some(project) => {
+                let line = axiomata_ide::plan_line::Line {
+                    path: axiomata_ide::plan_line::line_path(worktrees, &project.name, plan.id),
+                    branch: axiomata_ide::plan_line::line_branch(plan.id),
+                    base_branch,
+                    created: false,
+                };
+                if line.path.exists() || worktree::branch_exists(&project.repo_root, &line.branch) {
+                    cleanup.extend(axiomata_ide::plan_line::remove(&project.repo_root, &line));
+                }
+            }
+            None => cleanup.push(format!(
+                "the project of plan #{} is gone; its line {} was not looked for",
+                plan.id,
+                axiomata_ide::plan_line::line_branch(plan.id)
+            )),
+        }
+    }
+    Ok(PlanClosed { closed, cleanup })
+}
+
 /// What taking a plan's line over came to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]
@@ -2612,8 +2686,13 @@ mod tests {
             card_launch(&w.db, &started.agent),
             Some(crate::agent_entry::CardLaunch::work(card).with_auto_rights(true))
         );
-        // A closed plan's switch is history.
-        flow::close_plan(&w.db, plan.id).unwrap();
+        // A closed plan's switch is history. Closing is refused while the card is held, so the plan is closed the way a
+        // database from before that refusal can have it.
+        w.db.execute(
+            "UPDATE plans SET status = 'closed' WHERE id = ?1",
+            rusqlite::params![plan.id],
+        )
+        .unwrap();
         assert_ne!(
             card_launch(&w.db, &started.agent),
             Some(crate::agent_entry::CardLaunch::work(card).with_auto_rights(true))
@@ -4031,6 +4110,57 @@ mod tests {
             let worktrees = self.locations().worktrees;
             self.shared(|db| take_over_plan_blocking(db, &worktrees, plan))
         }
+
+        fn close_plan(&mut self, plan: i64) -> Result<PlanClosed> {
+            let worktrees = self.locations().worktrees;
+            self.shared(|db| close_plan_blocking(db, &worktrees, plan))
+        }
+    }
+
+    #[test]
+    fn a_plan_given_up_is_closed_with_its_line_and_can_then_be_deleted() {
+        let mut w = world();
+        let (plan, cards, line) = w.line_plan(&["a"]);
+        flow::set_plan_base_branch(&w.db, plan, &line.base_branch).unwrap();
+        w.start_on(cards[0], Some("sonnet"), Some(&line.branch))
+            .unwrap();
+
+        // A session still holds the card: the plan stays as it is.
+        assert!(w.close_plan(plan).is_err());
+        assert!(line.path.exists());
+
+        flow::cancel_card(&w.db, cards[0], "human:owner", "given up").unwrap();
+        let closed = w.close_plan(plan).unwrap();
+        assert!(closed.closed, "{closed:?}");
+        assert!(closed.cleanup.is_empty(), "{:?}", closed.cleanup);
+        assert!(!line.path.exists());
+        assert!(!worktree::branch_exists(&w.repo, &line.branch));
+        assert!(flow::delete_plan(&mut w.db, plan).unwrap());
+    }
+
+    #[test]
+    fn closing_a_plan_keeps_a_line_with_work_the_branch_lacks() {
+        let mut w = world();
+        let (plan, cards, line) = w.line_plan(&["a"]);
+        flow::set_plan_base_branch(&w.db, plan, &line.base_branch).unwrap();
+        w.worked_on_the_line(cards[0], &line, "a.txt", "a\n");
+        w.integrate(cards[0]).unwrap();
+
+        let closed = w.close_plan(plan).unwrap();
+        assert!(closed.closed);
+        assert!(
+            closed
+                .cleanup
+                .iter()
+                .any(|note| note.contains(&line.branch)),
+            "{:?}",
+            closed.cleanup
+        );
+        assert!(worktree::branch_exists(&w.repo, &line.branch));
+        assert_eq!(
+            git(&w.repo, &["show", &format!("{}:a.txt", line.branch)]),
+            "a"
+        );
     }
 
     #[test]

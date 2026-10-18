@@ -57,6 +57,14 @@ export function cardsOfPlan(cards: BoardCard[], planId: number): BoardCard[] {
   return cards.filter((card) => card.plan_id === planId && card.archived_at === null);
 }
 
+/** The states in which a card's session is over, whoever held it: signed off, or given up. */
+const SETTLED: ReadonlySet<BoardCard["state"]> = new Set(["verified", "integrated", "taken_over", "failed", "canceled"]);
+
+/** Whether a session still holds one of the cards — the same test as `board::flow`'s `held_cards`, which refuses a close. */
+function heldBySession(cards: Pick<BoardCard, "claimed_by" | "archived_at" | "state">[]): boolean {
+  return cards.some((card) => card.archived_at === null && card.claimed_by != null && !SETTLED.has(card.state));
+}
+
 /**
  * Whether a plan may be deleted: a draft or a closed plan always; an approved one only while nothing of it is under way —
  * no card held by a session and no integration line (`board::flow::delete_plan` refuses the same, so the button is not a
@@ -67,12 +75,24 @@ export function canDeletePlan(
   cards: Pick<BoardCard, "claimed_by" | "archived_at" | "state">[],
 ): boolean {
   if (plan.status !== "approved") return true;
-  const underWay = cards.some(
+  const busy = cards.some(
     (card) =>
       card.archived_at === null &&
-      (card.claimed_by != null || card.state === "working" || card.state === "in_review" || card.state === "input_required"),
+      (card.state === "working" || card.state === "in_review" || card.state === "input_required"),
   );
-  return !underWay && !plan.base_branch;
+  return !heldBySession(cards) && !busy && !plan.base_branch;
+}
+
+/**
+ * Whether a plan may be closed: a draft always; an approved one once no session holds a card of it any more — its line
+ * goes with it (`card_session::close_plan`). Then it can be deleted.
+ */
+export function canClosePlan(
+  plan: Pick<BoardPlan, "status">,
+  cards: Pick<BoardCard, "claimed_by" | "archived_at" | "state">[],
+): boolean {
+  if (plan.status === "draft") return true;
+  return plan.status === "approved" && !heldBySession(cards);
 }
 
 /** Every card of a plan, the archived ones (taken over) included: what a finished plan did is still its own. */

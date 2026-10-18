@@ -1838,23 +1838,26 @@ pub fn set_plan_auto_rights(
 }
 
 #[tauri::command]
-pub async fn close_board_plan(state: State<'_, CoreState>, id: i64) -> Result<bool, String> {
-    let closed = {
-        let db = state.db_lock();
-        let closed = board::flow::close_plan(&db, id).map_err(|err| err.to_string())?;
-        // The card the plan was made for left it (back to Open): the mirror shows where.
-        if closed
-            && let Some(plan) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())?
-            && plan.origin_card_id.is_some()
+pub async fn close_board_plan(
+    state: State<'_, CoreState>,
+    id: i64,
+) -> Result<axiomata_core::card_session::PlanClosed, String> {
+    let outcome = axiomata_core::card_session::close_plan(&state, id)
+        .await
+        .map_err(|err| err.to_string())?;
+    if outcome.closed {
         {
-            board_mirror::after_change(&db, &read_config(&state.config), plan.board_id);
+            let db = state.db_lock();
+            // The card the plan was made for left it (back to Open): the mirror shows where.
+            if let Some(plan) = board::flow::get_plan(&db, id).map_err(|err| err.to_string())?
+                && plan.origin_card_id.is_some()
+            {
+                board_mirror::after_change(&db, &read_config(&state.config), plan.board_id);
+            }
         }
-        closed
-    };
-    if closed {
         axiomata_core::plan_session::forget_plan_sessions(&state, id).await;
     }
-    Ok(closed)
+    Ok(outcome)
 }
 
 #[tauri::command]

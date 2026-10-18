@@ -43,6 +43,7 @@
     proposalsOf,
     proposalTitle,
     allCardsOfPlan,
+    canClosePlan,
     canDeletePlan,
     rolesOfKind,
     sessionEngine,
@@ -702,10 +703,22 @@
   async function closePlan(): Promise<void> {
     if (!plan) return;
     const current = plan;
+    // An approved plan may have work on its line that was never taken over: closing is the end of it as a plan.
+    if (
+      current.status === "approved" &&
+      !confirm(
+        `Close the plan “${current.name}”? Nothing starts from it any more and its line is removed; work on the line ` +
+          "that was not taken over stays on its branch.",
+      )
+    ) {
+      return;
+    }
     await run(async () => {
-      await invoke("close_board_plan", { id: current.id });
+      const outcome = await invoke<{ closed: boolean; cleanup: string[] }>("close_board_plan", { id: current.id });
       endPlanner(current.id);
       await Promise.all([reload(), refreshAgents()]);
+      // What of the line stayed (work the project's branch lacks is never thrown away) is the owner's to know.
+      if (outcome.cleanup.length > 0) toast(`Plan “${current.name}” was closed. ${outcome.cleanup.join("; ")}`, "info");
     });
   }
 
@@ -869,8 +882,17 @@
         <span class="status {plan.status}">{planStatusLabel(plan.status)}</span>
         {#if runsByItself(plan)}<span class="status auto">runs by itself</span>{/if}
         <span class="spacer"></span>
-        {#if plan.status === "draft"}
-          <button class="ax-btn" type="button" disabled={busy} onclick={() => void closePlan()}>Close</button>
+        {#if plan.status !== "closed"}
+          {@const closable = canClosePlan(plan, allCardsOfPlan(data?.cards ?? [], plan.id))}
+          <button
+            class="ax-btn"
+            type="button"
+            disabled={busy || !closable}
+            title={closable
+              ? "Close the plan: nothing starts from it any more, and its line is removed"
+              : "A session still works on a card of the plan: let it finish or release it first"}
+            onclick={() => void closePlan()}>Close</button
+          >
         {/if}
         {#if deleting}
           <button class="ax-btn danger" type="button" disabled={busy} onclick={() => void deletePlan()}>Really delete</button>
