@@ -613,7 +613,8 @@ the run's permissions for axh; see below).
   runner's **bare** model — a provider without a base URL (Anthropic today) records a clear
   `Failed`, never a fallback to opencode. The gate is built fresh per run from the skill's
   `allowed_tools` (split by the harness's own `rules_of`) over mode `default` with `Nobody` to
-  ask, `restrict_name` = the skill's name; `~/.axh` permission rules feed neither gate nor mode,
+  ask, narrowed by the skill's own list (`Gate::narrow`); of the `~/.axh` permission rules only `deny`/`ask` join
+  the gate (they only make it stricter), their `allow` and mode feed neither gate nor mode,
   `settings::load` word on the sandbox **and** on the hooks (HS7, B4: the owner's
   `~/.axh/settings.json` hooks run unattended too — they may only block and fail open; a
   project's hooks are parsed and left out, the skip note going into the run's `stderr`).

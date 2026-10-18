@@ -204,7 +204,8 @@ from the code itself:
   `ollama` | `axh` (the own harness, HS6b — needs a skill provider **with a `base_url`**
   (open_router/ollama), else the run records a clear `Failed`, never a silent hop to opencode;
   MCP servers come from `~/.axh/mcp.json` + `.mcp.json`, **never** `opencode.json`; the skill's
-  `allowed_tools` become the run's whole permissions, `~/.axh` rules feed neither);
+  `allowed_tools` become the run's whole permissions — `~/.axh` `deny`/`ask` still beat them, `~/.axh` `allow`
+  never widens them);
   the only other relevant field is `prepend_files: ["rel/path.md"]` (workspace files
   inlined into the prompt as `## Context file:` blocks; missing = skipped, `..`/absolute =
   run fails as a recorded `Failed`, per §D of the Stufe 2 plan). The `local_backend` /

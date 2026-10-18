@@ -173,10 +173,11 @@ to `error: the subagent stopped without answering: <reason>`, recursion through 
 signature behind `run_inner(..., depth)`; the subagent runs `PreToolUse`/`PostToolUse`/`Stop` but never
 `SessionStart`, with its own `session_id`; its own `subagent_prompt`, the parent's `instructions` dropped; limits
 `subagent_max_turns = 15` and `subagent_timeout = 5 min`, the nested timeout capped by the parent's remaining
-time; `RunConfig.subagents` default `true`; every event of a nested run arrives wrapped as
-`Event::Sub { depth, event }` (JSON `{"event":"sub","depth":1,"inner":{…}}`), the CLI indents `"  " × depth` and
-prints a subagent's `Finished` as `↳ subagent · {turns} turns · {in}/{out} tokens`, the core's `Notes` prefixes
-`subagent: `; `claude_alias("task") = Some("Task")`; `Rule::names_tool` is `pub`.
+time, and `max_subagents = 8` per run (review 2026-10-18: without a count a parent could start one per turn and
+multiply the spend; a `task` past it is a tool error); `RunConfig.subagents` default `true`; every event of a
+nested run arrives wrapped as `Event::Sub { depth, event }` (JSON `{"event":"sub","depth":1,"inner":{…}}`), the
+CLI indents `"  " × depth` and prints a subagent's `Finished` as `↳ subagent · {turns} turns · {in}/{out}
+tokens`, the core's `Notes` prefixes `subagent: `; `claude_alias("task") = Some("Task")`; `Rule::names_tool` is `pub`.
 
 ## HS6b — `backend: axh` in the core (decided 2026-10-14)
 
@@ -195,8 +196,8 @@ prompt through `axiomata_harness::run` instead of an opencode session; the runne
   servers copied into `~/.axh/mcp.json` once, by the owner.
 - **B3 [owner] — unattended, deterministic permissions.** The gate is built fresh per run: `Mode::Default`, asker
   `Nobody`, and the skill's declared `allowed_tools` (parsed with the harness's own `rules_of`) as both its allow
-  rules and its narrowing (`restrict` + `restrict_name` = the skill's name, so a refusal reads
-  `the command /mail-digest allows only: …`). What the skill names is allowed, the rest refused before anything
+  rules and its narrowing (`Gate::narrow("the skill <name>", …)`, so a refusal reads
+  `the skill mail-digest allows only: …`). What the skill names is allowed, the rest refused before anything
   is asked; a skill that declares nothing keeps mode default (reads free, changes ask and are refused). The
   `~/.axh` permission rules and mode do **not** feed the gate; `settings::load` still word on the sandbox only
   (settings can only narrow).
@@ -300,8 +301,14 @@ left to the run's deadline)`, cancel honoured by dropping the wait (which kills 
   processes or sends data out, so trusting the folder is not enough: each server is approved on its own, keyed by
   project path + server name + SHA-256 of its JSON config; a changed command, argument, env or URL asks again.
   Approvals live in `~/.axh/mcp-approved.json` (written atomically, mode 0600, like `Trust` in `settings.rs`). The CLI
-  shows the server's command line / URL (through `permissions::printable`) and asks y/n; headless (`axh`, no
-  terminal) skips unapproved project servers and says so on stderr. The owner's own servers need no approval.
+  shows everything the hash covers — command line / URL, then every `env` variable and header as written, `${NAME}`
+  unexpanded (through `permissions::printable`) — and asks y/n; headless (`axh`, no terminal) skips unapproved
+  project servers and says so on stderr. The owner's own servers need no approval. Security review 2026-10-18: a
+  project's server may not set a variable that decides which code a program loads (`PATH`, `NODE_OPTIONS`,
+  `DYLD_*`, `LD_*`, …, `mcp::config::CODE_VARS`) — the file is refused; a header's `${AXH_API_KEY}` never expands;
+  a server name may not hold `__`; a tool's description is cut at 2 000 characters and a schema over 32 KiB leaves
+  the tool out; two servers the model would see under one name (`my-mail`/`my_mail`) — the later one is left out;
+  an error shows a URL without query, fragment or user info and a header's reason without its value.
 - **M3 — transports stdio and HTTP.**
   - stdio: the server is a child process; JSON-RPC 2.0, one message per line on stdin/stdout; stderr discarded.
     Environment: the cleaned tool environment (`axiomata_files::toolenv`) plus the server's `env`. Its own process
@@ -335,11 +342,13 @@ left to the run's deadline)`, cancel honoured by dropping the wait (which kills 
   is refused, in the spirit of the settings files' `deny_unknown_fields`. Values may be wrapped in one pair of
   `"…"`, which is stripped. In the body only `$ARGUMENTS` (the whole rest, trimmed) and `$1`, `$2`, … (its
   whitespace-separated words, a missing one empty) are replaced; nothing else is.
-- **C3 — `allowed-tools` only narrows.** The gate takes the command's rules as its `restrict`: a call those rules do
-  not name is refused (`the command /name allows only: …`), and a call they do name is judged as usual against the
-  run's own rules and its mode — such a rule never allows anything by itself. `bash_output` and `kill_shell` stay
-  always allowed. So `allowed-tools: Read` refuses `bash` and `write_file`, and `allowed-tools: Bash(git status:*)`
-  in `plan` mode still has `git status` refused by `plan`.
+- **C3 — `allowed-tools` only narrows.** The gate takes the command's rules as a narrowing (`Gate::narrow`): a call
+  those rules do not name is refused (`the command /name allows only: …`). Narrowings stack — a skill run started
+  with a command (`--skill s "/cmd"`) is narrowed by both, and a call must be named by each (review 2026-10-18:
+  first built as one field the skill overwrote, which could widen the command). A call they do name is judged as
+  usual against the run's own rules and its mode — such a rule never allows anything by itself. `bash_output` and
+  `kill_shell` stay always allowed. So `allowed-tools: Read` refuses `bash` and `write_file`, and
+  `allowed-tools: Bash(git status:*)` in `plan` mode still has `git status` refused by `plan`.
 - **C4 — what is deliberately not there yet.** `!command` lines in a body are refused by name (`/name uses !command
   lines, which the harness does not run yet`): they would need the gate and the sandbox. An `@path` in the body is
   left in the text, not read — the model can call `read_file`.
@@ -541,15 +550,17 @@ left to the run's deadline)`, cancel honoured by dropping the wait (which kills 
 
 - `crates/axiomata-core/src/agents/axh.rs` — the backend: `run(request, config)` resolves the skill provider's
   endpoint (**B1**, errors are `InvalidAgentModel` naming the provider), takes an `agent_slots()` permit, builds
-  the fresh gate (**B3**), reads `settings::load` for the sandbox only, loads the skill catalog from
-  `~/.axh` + `~/.axiomata/skills` (notes → `tracing::warn`), and wires the toolbox in the CLI's order — files +
-  `SkillRoots`, `skill` tool, gate, MCP (**B2**, `permitted(…, false)`), sandboxed shell — before
+  the fresh gate (**B3**; the settings' `deny`/`ask` rules join it, their `allow` and mode do not — owner,
+  2026-10-18), reads `settings::load` for the sandbox and hooks, loads the skill catalog from
+  `~/.axh` + `~/.axiomata/skills` (notes → `tracing::warn`), and builds the toolbox with `setup::toolbox` — the
+  one the CLI and `axh` use too: files + `SkillRoots`, `skill` tool, gate, MCP (**B2**, `permitted(…, false)`),
+  sandboxed shell — before
   `axiomata_harness::run` with the core-built prompt as the user message (**D1**). The outcome maps: `Answered`
   → exit 0 with the answer as `stdout`; `MaxTurns`/`Failed`/`Cancelled` → exit 1 with a `Notes` collector's lines
   (event errors, failed MCP servers, refused calls) as `stderr`; `Timeout` → `AgentTimeout { backend: "axh" }`.
   Tokens `0 → None`, turns → `num_turns`, `cost_usd: None` — the runner meters it (**D2/D8**).
 - `agents/mod.rs`: `BACKEND_AXH`, `AgentBackend::Axh`, `run(&self, request, config)` (config reaches only the
-  Axh arm) and `AgentRequest::name` (the run's name, → `restrict_name`). `skills/runner.rs`: `resolve_run_model`
+  Axh arm) and `AgentRequest::name` (the run's name, → the gate's narrowing). `skills/runner.rs`: `resolve_run_model`
   returns the **bare** model for Axh, `provider_label` the skill provider; `error.rs` gains
   `Harness(#[from] axiomata_harness::HarnessError)` shown as `harness: {0}`.
 - Two small public additions in the harness itself: `skills::rules_of` (one rules string → `Vec<Rule>`, the same
@@ -614,7 +625,7 @@ left to the run's deadline)`, cancel honoured by dropping the wait (which kills 
 - `commands` (`Registry`, `Command`, `Source`, `Expanded`, `PermissionsView`, `commands::builtin`): the files read
   through `axiomata_files::Root` (`LinkPolicy::Contained`; limits as named consts), the frontmatter parsed by hand
   (no `gray_matter`, no `serde_yaml`), the expansion with `$ARGUMENTS` / `$1`, and the five built-ins.
-- `Gate::restrict` / `Gate::restrict_name` (C3) beside `Gate::rules` and `Gate::mode_name`, which the
+- `Gate::narrow` / `Gate::narrowed_by` (C3) beside `Gate::rules` and `Gate::mode_name`, which the
   `/permissions` view is built from; `Event::Command`.
 - `axh run … -- "/review src/"` and `axiomata-cli harness run "/review src/"`: the registry is built after the gate,
   a built-in is printed without a model (events in `axh`, text in the CLI), a file command runs as the prompt with

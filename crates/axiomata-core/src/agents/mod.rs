@@ -413,7 +413,7 @@ pub struct AgentRequest {
     /// prompt.
     pub prompt: String,
     /// The run's name — the skill or routine that triggered it. For `axh` it
-    /// becomes the gate's `restrict_name`, so a refused call says which skill
+    /// names the gate's narrowing, so a refused call says which skill
     /// narrowed the run (`docs/plans/harness-hs6b.md`, B3).
     pub name: Option<String>,
     /// Working directory for the agent: the session's location, so workspace

@@ -9,20 +9,17 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use axiomata_core::AxiomataCore;
 use axiomata_core::config::{Config, ProviderId};
-use axiomata_harness::commands::{Expanded, PermissionsView, Registry, Source};
-use axiomata_harness::hooks::Hooks;
+use axiomata_harness::commands::{PermissionsView, Registry};
 use axiomata_harness::mcp;
-use axiomata_harness::permissions::settings::{self, SandboxSettings, Trust};
+use axiomata_harness::permissions::settings::{self, Trust};
 use axiomata_harness::permissions::{
-    Asker, Gate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
+    Asker, BuiltGate, GateOptions, Mode, Nobody, Terminal, build_gate, printable,
 };
-use axiomata_harness::skills::{self, SkillTool};
-use axiomata_harness::tools::Tool;
-use axiomata_harness::tools::files::{SkillRoots, file_tools};
-use axiomata_harness::tools::shell::{ShellOptions, shell_tools};
+use axiomata_harness::setup::{self, Draft, Prepared};
+use axiomata_harness::skills;
 use axiomata_harness::{
     Cancel, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat, RunConfig,
-    SharedSink, SkillHow, Toolbox,
+    SharedSink, SkillHow,
 };
 use clap::{Subcommand, ValueEnum};
 
@@ -117,11 +114,11 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
         bail!("name a prompt, or run a skill with --skill <name>");
     }
     let config = crate::read_config(core);
-    let mut endpoint = endpoint(&config, provider, model)?;
+    let endpoint = endpoint(&config, provider, model)?;
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("cannot use {}", cwd.display()))?;
-    let mut built = gate(&cwd, permission_mode, allow, ask, deny, role)?;
+    let (built, home, trusted) = gate(&cwd, permission_mode, allow, ask, deny, role)?;
     // Every event through one shared sink: the loop writes to it, and the `skill` tool reports from inside a call
     // (HS6, K1.2).
     let inner: Box<dyn EventSink> = if json {
@@ -135,62 +132,14 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // rules need — the project's `.axh/skills`. A skill that cannot be used is a note, never an error (K3).
     let mut skill_dirs = vec![axiomata_core::paths::global_skills_dir()];
     skill_dirs.extend(skill_dir);
-    let (catalog, notes) = skills::Catalog::load(&built.home, &cwd, built.trusted, &skill_dirs);
+    let (catalog, notes) = skills::Catalog::load(&home, &cwd, trusted, &skill_dirs);
     for note in notes {
         eprintln!("note: skill left out: {note}");
     }
     let catalog = Arc::new(catalog);
-    let mut tools = Toolbox::new();
-    tools.extend(file_tools(&cwd, SkillRoots::new(&catalog.folders()))?);
-    // The `skill` tool only while there is at least one skill to load (K1.2).
-    if !catalog.is_empty() {
-        tools.extend([
-            Box::new(SkillTool::new(Arc::clone(&catalog), sink.clone())) as Box<dyn Tool>
-        ]);
-    }
-    // Slash commands (HS4), after the gate and with the same home, folder and trust it was built with (C1).
-    let mut registry = Registry::load(&built.home, &cwd, built.trusted)?;
+    // Slash commands (HS4), with the same home, folder and trust the gate was built with (C1).
+    let mut registry = Registry::load(&home, &cwd, trusted)?;
     registry.set_permissions(PermissionsView::of(&built.gate, &built.sandbox));
-    let mut prompt = prompt.unwrap_or_default();
-    built.gate = match registry.expand(&prompt) {
-        // An ordinary prompt: no command was named (C6).
-        None => built.gate,
-        Some(Err(message)) => bail!(message),
-        // A built-in is answered without a model: its text is the answer (C5).
-        Some(Ok(Expanded::Builtin { name, text })) => {
-            sink.emit(Event::Command {
-                name,
-                source: Source::Builtin.as_str().to_owned(),
-                prompt_chars: 0,
-            });
-            sink.emit(Event::AssistantText { turn: 0, text });
-            return Ok(());
-        }
-        Some(Ok(Expanded::Prompt {
-            name,
-            prompt: expanded,
-            allowed_tools,
-            model,
-        })) => {
-            let source = registry.source(&name).unwrap_or(Source::User);
-            sink.emit(Event::Command {
-                source: source.as_str().to_owned(),
-                name: name.clone(),
-                prompt_chars: expanded.chars().count(),
-            });
-            // C3: the command's tools narrow the gate on top of its rules, never in their place.
-            if !allowed_tools.is_empty() {
-                built.gate.restrict_name = Some(name);
-                built.gate.restrict = Some(allowed_tools);
-            }
-            prompt = expanded;
-            // The command's own model, where it names one (C2).
-            if let Some(model) = model {
-                endpoint.model = model;
-            }
-            built.gate
-        }
-    };
     let mut run_config = RunConfig::new(&cwd);
     if let Some(turns) = max_turns {
         run_config.max_turns = turns;
@@ -198,39 +147,35 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // HS7: the owner's hooks (B1, the only ones that ever run), and the sandbox their commands run in (D5).
     run_config.hooks = built.hooks;
     run_config.sandbox = Some(built.sandbox.clone());
-    // A skill as the run (HS6, K1.1): its body is the run's instructions, its frontmatter may narrow the tools,
-    // pick the model and set the time limit (K5). After the commands, so a command's own word wins where both
-    // name one.
-    if let Some(name) = skill {
-        let Some(chosen) = catalog.get(&name) else {
-            bail!("no skill named {name:?}; known: {}", catalog.known());
-        };
-        chosen.start_run(&cwd, &mut run_config, &mut endpoint, &mut built.gate)?;
-        sink.send(Event::Skill {
-            name,
-            how: SkillHow::Run,
-        });
-        if prompt.trim().is_empty() {
-            prompt = skills::DEFAULT_PROMPT.to_owned();
-        }
-    }
-    // The model is built after the commands and the skill: one of them may name its own.
+    let mut draft = Draft {
+        config: run_config,
+        endpoint,
+        gate: built.gate,
+    };
+    let prepared = setup::prepare(
+        &mut draft,
+        &registry,
+        &catalog,
+        prompt,
+        skill.as_deref(),
+        &mut sink,
+    )?;
+    // A built-in is answered without a model: its text is the answer (C5).
+    let Prepared::Prompt(prompt) = prepared else {
+        return Ok(());
+    };
+    let Draft {
+        config: run_config,
+        endpoint,
+        gate,
+    } = draft;
+    // The model is built after the command and the skill: either may name its own (C2, K5).
     let model = OpenAiCompat::new(endpoint)?;
-    tools.set_gate(Arc::new(built.gate));
-    // MCP servers (HS5), after the gate and before the shell (M1–M3): a project's server the owner has not
-    // approved yet is asked about in the terminal, or left out with a note when there is none (M2).
-    let entries = mcp::config::load(&built.home, &cwd)?;
-    let entries =
-        mcp::approval::permitted(entries, &built.home, &cwd, mcp::approval::interactive())?;
-    tools.extend(mcp::start(entries, &mut sink).await);
-    // The shell after the gate: the settings that built it also say how the sandbox runs (HS3b).
-    tools.extend(shell_tools(
-        &cwd,
-        ShellOptions {
-            sandbox: Some(built.sandbox),
-            ..ShellOptions::from_environment()
-        },
-    )?);
+    // MCP servers (HS5, M1–M3): a project's server the owner has not approved yet is asked about in the
+    // terminal, or left out with a note when there is none (M2).
+    let servers = mcp::config::load(&home, &cwd)?;
+    let servers = mcp::approval::permitted(servers, &home, &cwd, mcp::approval::interactive())?;
+    let tools = setup::toolbox(&cwd, &catalog, gate, servers, built.sandbox, &mut sink).await?;
     // Ctrl-C, SIGTERM and SIGHUP end the run with its last line and every background job stopped.
     let cancel = Cancel::new();
     axiomata_harness::run::cancel_on_signals(&cancel);
@@ -242,20 +187,9 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     }
 }
 
-/// What the run's gate was built with (HS3a), for the caller that still needs it: the settings' word on the sandbox
-/// (HS3b), the home folder and whether the project counts as trusted — the command registry needs the same trust
-/// the gate was built on (HS4, C1) — and the owner's hooks (HS7).
-struct Built {
-    gate: Gate,
-    sandbox: SandboxSettings,
-    home: PathBuf,
-    trusted: bool,
-    hooks: Hooks,
-}
-
 /// The run's gate (HS3a): the settings files, the flags and a role's rules; asks in the terminal when there is one.
-/// Also what the settings say about the sandbox (HS3b), and the home folder and trust the command registry of HS4
-/// is read with — a project's commands count where its allow rules count (C1).
+/// Beside it the home folder and whether the project counts as trusted — the skills and the command registry of HS4
+/// are read with the same trust (C1), a project's commands count where its allow rules count.
 /// A project with `.axh/` settings in a folder not yet trusted is asked about first (P5).
 fn gate(
     cwd: &std::path::Path,
@@ -264,7 +198,7 @@ fn gate(
     ask: Vec<String>,
     deny: Vec<String>,
     role: Option<String>,
-) -> Result<Built> {
+) -> Result<(BuiltGate, PathBuf, bool)> {
     use std::io::IsTerminal;
     let mode = match mode {
         None => None,
@@ -326,28 +260,11 @@ fn gate(
         deny,
         trusted,
     };
-    let (gate, untrusted, sandbox, hooks, project_hooks) = build_gate(&home, cwd, options, asker)?;
-    if untrusted {
-        eprintln!(
-            "note: the project's .axh/ allow rules and mode are left out: this folder is not trusted"
-        );
+    let built = build_gate(&home, cwd, options, asker)?;
+    for note in built.notes() {
+        eprintln!("note: {note}");
     }
-    // HS7, B1: the owner's hooks run; a project's are parsed and left out, and said so here.
-    if project_hooks {
-        eprintln!(
-            "note: the project's own .axh/ hooks are not run: only ~/.axh/settings.json hooks run"
-        );
-    }
-    if !sandbox.enabled || !axiomata_harness::sandbox::available() {
-        eprintln!("note: commands run without a sandbox here; only the rules judge them");
-    }
-    Ok(Built {
-        gate,
-        sandbox,
-        home,
-        trusted,
-        hooks,
-    })
+    Ok((built, home, trusted))
 }
 
 /// The endpoint for `provider` (or the configured default) from the config: base URL, key and model.

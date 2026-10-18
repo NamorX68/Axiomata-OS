@@ -10,12 +10,13 @@
 //! `allowed_tools` become the run's whole permission set (B3): what the skill
 //! declares is allowed, what it does not name is refused before anything is
 //! asked, nobody answers a question, and the settings files of `~/.axh` never
-//! widen the gate. HS8 (B3): the `task` tool is offered only for a skill that
-//! names it in its `allowed_tools` — the same declaration feeds the gate and
-//! the tool list. HS7 (B4): the owner's hooks from `~/.axh/settings.json` run
-//! here too — they may only block, never permit (B2), fail open (B3), and a
-//! project's hooks are parsed and left out (B1), said so in the run's
-//! `stderr`.
+//! widen the gate — their `deny` and `ask` rules still hold (an `ask` is a
+//! refusal here, since nobody answers), their `allow` rules do not count.
+//! HS8 (B3): the `task` tool is offered only for a skill that names it in its
+//! `allowed_tools` — the same declaration feeds the gate and the tool list.
+//! HS7 (B4): the owner's hooks from `~/.axh/settings.json` run here too —
+//! they may only block, never permit (B2), fail open (B3), and a project's
+//! hooks are parsed and left out (B1), said so in the run's `stderr`.
 //!
 //! B1 — no silent fallback: the endpoint is the skill provider's as it is
 //! (`config.agents.providers`). A provider without a base URL — Anthropic,
@@ -25,15 +26,13 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axiomata_harness::mcp;
 use axiomata_harness::permissions::settings;
 use axiomata_harness::permissions::{Gate, Mode, Nobody, Rule, RuleSet};
-use axiomata_harness::skills::{self, SkillTool};
-use axiomata_harness::tools::files::{SkillRoots, file_tools};
-use axiomata_harness::tools::shell::{ShellOptions, shell_tools};
-use axiomata_harness::tools::{Tool, Toolbox};
+use axiomata_harness::setup;
+use axiomata_harness::skills;
 use axiomata_harness::{
     Cancel, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat, RunConfig,
     SharedSink,
@@ -45,9 +44,9 @@ use crate::error::AxiomataError;
 use crate::paths::global_skills_dir;
 
 /// Runs `request` on this backend — see the module doc for its shape. A turn
-/// that ran but was refused its tools, hit the turn limit or was cancelled is
-/// an `Ok` with `exit_code == 1` and the reason in `stderr`; an `Err` means
-/// there was no answer at all (no endpoint, no usable home folder, a timeout).
+/// that ran but was refused its tools, hit the turn or time limit or was
+/// cancelled is an `Ok` with `exit_code == 1` and the reason in `stderr`; an
+/// `Err` means the run never started (no endpoint, no usable home folder).
 pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResult, AxiomataError> {
     // B1: the endpoint as the skill provider has it — before a single token
     // is spent, a provider without a base URL fails here.
@@ -63,12 +62,13 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         .expect("agent_slots semaphore is never closed");
     let cwd = request.cwd.clone();
     let declared = declared_rules(request.name.as_deref(), request.allowed_tools.as_deref())?;
-    let gate = gate_for(request.name.as_deref(), &declared);
     // B3: a project's settings are never trusted in an unattended run; from
-    // them only the sandbox's read secrets count. HS7 B4: the owner's hooks
-    // run here as they do in the CLI; a project's hooks are parsed and left
-    // out (B1), the run's `stderr` says so below.
+    // them only what makes the run stricter counts — the sandbox's read
+    // secrets and the deny/ask rules. HS7 B4: the owner's hooks run here as
+    // they do in the CLI; a project's hooks are parsed and left out (B1), the
+    // run's `stderr` says so below.
     let loaded = settings::load(&home, &cwd, false)?;
+    let gate = gate_for(request.name.as_deref(), &declared, &loaded.rules);
     let sandbox = loaded.sandbox.clone();
     let project_hooks_skipped = loaded.project_hooks_skipped;
     // K2/K3: the app's `~/.axiomata/skills` beside the harness's own folders;
@@ -103,29 +103,13 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         );
     }
     let mut sink = SharedSink::new(Box::new(notes.clone()));
-    let mut tools = Toolbox::new();
-    tools.extend(file_tools(&cwd, SkillRoots::new(&catalog.folders()))?);
-    // The `skill` tool while there is at least one skill to load (K1.2).
-    if !catalog.is_empty() {
-        tools.extend([
-            Box::new(SkillTool::new(Arc::clone(&catalog), sink.clone())) as Box<dyn Tool>
-        ]);
-    }
-    tools.set_gate(Arc::new(gate));
     // B2: the harness's own MCP config, never opencode's. A project's server
     // is never asked about here (headless, M2): left out with a note.
-    let entries = mcp::config::load(&home, &cwd)?;
-    let entries = mcp::approval::permitted(entries, &home, &cwd, false)?;
-    tools.extend(mcp::start(entries, &mut sink).await);
-    // The shell after the gate — the sandbox the settings word on rides along
-    // (HS3b), so commands run guarded even though nobody asks.
-    tools.extend(shell_tools(
-        &cwd,
-        ShellOptions {
-            sandbox: Some(sandbox),
-            ..ShellOptions::from_environment()
-        },
-    )?);
+    let servers = mcp::config::load(&home, &cwd)?;
+    let servers = mcp::approval::permitted(servers, &home, &cwd, false)?;
+    // The sandbox the settings word on rides along with the shell (HS3b), so
+    // commands run guarded even though nobody asks.
+    let tools = setup::toolbox(&cwd, &catalog, gate, servers, sandbox, &mut sink).await?;
     // No signal handlers: this process is the app, not `axh`, and nothing
     // cancels a recorded run from here — the timeout ends it.
     let cancel = Cancel::new();
@@ -142,26 +126,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     let duration_ms = started.elapsed().as_millis() as u64;
     let input_tokens = (outcome.usage.input_tokens > 0).then_some(outcome.usage.input_tokens);
     let output_tokens = (outcome.usage.output_tokens > 0).then_some(outcome.usage.output_tokens);
-    // D6: the harness's own deadline is the run's; an expiry is the same
-    // `AgentTimeout` an opencode run records, not a half-done answer.
-    let (exit_code, ended) = match outcome.reason {
-        FinishReason::Answered => (0, None),
-        FinishReason::MaxTurns => (
-            1,
-            Some(format!(
-                "the run ended at its turn limit ({} turns)",
-                outcome.turns
-            )),
-        ),
-        FinishReason::Cancelled => (1, Some("the run was cancelled".to_owned())),
-        FinishReason::Failed => (1, Some("the model API failed".to_owned())),
-        FinishReason::Timeout => {
-            return Err(AxiomataError::AgentTimeout {
-                backend: BACKEND_AXH,
-                timeout: request.timeout,
-            });
-        }
-    };
+    let (exit_code, ended) = ending(outcome.reason, outcome.turns, request.timeout);
     Ok(AgentRunResult {
         stdout: outcome.answer.unwrap_or_default(),
         stderr: notes.join(ended.as_deref()),
@@ -174,6 +139,35 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         output_tokens,
         num_turns: Some(outcome.turns),
     })
+}
+
+/// How a run that ran ended, for its record (D6/D7): the exit code and, for
+/// anything but an answer, the reason that closes its `stderr`.
+///
+/// A timeout says what an opencode run's `AgentTimeout` says, but stays a
+/// result rather than an `Err`: the tokens spent before the deadline must
+/// reach the record, or the daily cap never sees what a run that hit its
+/// limit cost.
+fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<String>) {
+    match reason {
+        FinishReason::Answered => (0, None),
+        FinishReason::MaxTurns => (
+            1,
+            Some(format!("the run ended at its turn limit ({turns} turns)")),
+        ),
+        FinishReason::Cancelled => (1, Some("the run was cancelled".to_owned())),
+        FinishReason::Failed => (1, Some("the model API failed".to_owned())),
+        FinishReason::Timeout => (
+            1,
+            Some(
+                AxiomataError::AgentTimeout {
+                    backend: BACKEND_AXH,
+                    timeout,
+                }
+                .to_string(),
+            ),
+        ),
+    }
 }
 
 /// The model endpoint of an `axh` run (B1): the skill provider's base URL and
@@ -258,20 +252,28 @@ fn declared_rules(
 /// before any rule or mode is asked. A skill that declares nothing keeps the
 /// mode's own word: reads are free, everything that changes something asks
 /// and `Nobody` refuses it. [`declared_rules`] parses the list.
-fn gate_for(name: Option<&str>, declared: &[Rule]) -> Gate {
+///
+/// The settings' `deny` and `ask` rules (the owner's and a project's) beat a
+/// declaration as they do everywhere else — a skill cannot declare its way
+/// past `deny: Bash(rm:*)`. Their `allow` rules are left out: they would
+/// widen a skill beyond what it declares.
+fn gate_for(name: Option<&str>, declared: &[Rule], settings: &RuleSet) -> Gate {
     let mut gate = Gate::new(
         RuleSet {
             allow: declared.to_vec(),
-            ask: Vec::new(),
-            deny: Vec::new(),
+            ask: settings.ask.clone(),
+            deny: settings.deny.clone(),
         },
         Mode::Default,
         Arc::new(Nobody),
     );
-    if !declared.is_empty() {
-        gate.restrict_name = name.map(str::to_owned);
-        gate.restrict = Some(declared.to_vec());
-    }
+    gate.narrow(
+        match name {
+            Some(name) => format!("the skill {name}"),
+            None => "this run's declaration".to_owned(),
+        },
+        declared.to_vec(),
+    );
     gate
 }
 
@@ -436,8 +438,8 @@ mod tests {
             Some("Read mcp__apple-mail__search_emails"),
         )
         .unwrap();
-        let gate = gate_for(Some("mail-digest"), &declared);
-        assert_eq!(gate.restrict_name.as_deref(), Some("mail-digest"));
+        let gate = gate_for(Some("mail-digest"), &declared, &RuleSet::default());
+        assert_eq!(gate.narrowed_by(), ["the skill mail-digest"]);
         assert!(gate.mode_name() == "default");
         // A declared tool is allowed by its own rule …
         assert!(
@@ -485,6 +487,7 @@ mod tests {
         let git_only = gate_for(
             Some("release-notes"),
             &declared_rules(Some("release-notes"), Some("Bash(git log:*)")).unwrap(),
+            &RuleSet::default(),
         );
         let refused = git_only
             .judge(
@@ -503,8 +506,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_skill_that_declares_nothing_reads_freely_but_changes_nothing() {
-        let gate = gate_for(Some("summarize"), &[]);
-        assert!(gate.restrict.is_none());
+        let gate = gate_for(Some("summarize"), &[], &RuleSet::default());
+        assert!(gate.narrowed_by().is_empty());
         // Mode default: reads are free …
         assert!(
             gate.judge(
@@ -519,6 +522,41 @@ mod tests {
         // … and a command asks, which nobody answers.
         let refused = gate.judge("bash", &bash("git status")).await.unwrap_err();
         assert!(refused.contains("no one to ask"), "{refused}");
+    }
+
+    #[tokio::test]
+    async fn settings_deny_and_ask_beat_a_declaration_and_settings_allow_does_not_count() {
+        let declared = declared_rules(Some("cleanup"), Some("Bash(rm:*) Bash(git:*)")).unwrap();
+        let settings = RuleSet {
+            allow: vec![Rule::parse("Bash(curl:*)").unwrap()],
+            ask: vec![Rule::parse("Bash(git push:*)").unwrap()],
+            deny: vec![Rule::parse("Bash(rm:*)").unwrap()],
+        };
+        let gate = gate_for(Some("cleanup"), &declared, &settings);
+        // Declared, but the owner denies it.
+        assert!(gate.judge("bash", &bash("rm -rf notes")).await.is_err());
+        // Declared, but the owner wants to be asked — and nobody answers.
+        assert!(gate.judge("bash", &bash("git push")).await.is_err());
+        // Declared and untouched by the settings.
+        assert!(gate.judge("bash", &bash("git status")).await.is_ok());
+        // The settings allow it, the skill does not declare it: still refused.
+        let refused = gate.judge("bash", &bash("curl x")).await.unwrap_err();
+        assert!(refused.contains("allows only"), "{refused}");
+    }
+
+    #[test]
+    fn a_run_that_hit_its_time_limit_is_a_failed_result_not_an_error() {
+        // D6: a result, so the tokens it spent reach the record and the
+        // daily cap; its reason reads as an opencode timeout's does.
+        let (code, why) = ending(FinishReason::Timeout, 3, Duration::from_secs(90));
+        assert_eq!(code, 1);
+        let expected = AxiomataError::AgentTimeout {
+            backend: BACKEND_AXH,
+            timeout: Duration::from_secs(90),
+        }
+        .to_string();
+        assert_eq!(why.as_deref(), Some(expected.as_str()));
+        assert_eq!(ending(FinishReason::Answered, 1, Duration::ZERO), (0, None));
     }
 
     #[test]

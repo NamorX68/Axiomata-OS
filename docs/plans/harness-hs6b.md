@@ -26,15 +26,16 @@ already has `backend`, `model`, token and cost columns.
   without approval; a project server is never asked about (headless: `mcp::approval::permitted(…, can_ask=false)`
   leaves it out with the M2 note). Connector skills (`mail-digest` & Co.) therefore need their `apple-*` servers
   copied into `~/.axh/mcp.json` once, by the owner.
-- **B3 [owner] — unattended, deterministic permissions.** The run's gate is built fresh, not from
-  `~/.axh/settings.json` permission rules: `Mode::Default`, asker `Nobody`, `RuleSet.allow` = the skill's declared
-  `allowed_tools` (parsed with the harness's own `rules_of`), and the same list as `Gate.restrict` with
-  `restrict_name` = the skill's name. So *what the skill declares is allowed, and what it does not name is refused
-  before anything is asked* — including file reads, once the skill declares anything at all. A skill that declares
-  nothing runs with the mode default: reads free, everything that changes something asks and is refused by
-  `Nobody`. The sandbox settings (`settings::load`, user + project `denyRead`) are still read and applied to the
-  shell — settings only ever narrow there (B3 keeps its promise: permission rules of `~/.axh` do **not** feed the
-  gate). The sandbox (Seatbelt) is on wherever the system has it.
+- **B3 [owner] — unattended, deterministic permissions.** The run's gate is built fresh: `Mode::Default`, asker
+  `Nobody`, `RuleSet.allow` = the skill's declared `allowed_tools` (parsed with the harness's own `rules_of`), and
+  the same list as the gate's narrowing (`Gate::narrow("the skill <name>", …)`). So *what the skill declares is
+  allowed, and what it does not name is refused before anything is asked* — including file reads, once the skill
+  declares anything at all. A skill that declares nothing runs with the mode default: reads free, everything that
+  changes something asks and is refused by `Nobody`. The settings (`settings::load`, owner + project) only ever
+  narrow: their sandbox `denyRead` applies to the shell, and — owner, 2026-10-18, after the security review — their
+  `deny` and `ask` rules join the gate (an `ask` is a refusal, nobody answers), so a skill cannot declare its way
+  past the owner's `deny: Bash(rm:*)`. Their `allow` rules and mode do **not** feed the gate: they would widen a
+  skill beyond its declaration. The sandbox (Seatbelt) is on wherever the system has it.
 - **B4 [owner] — no bundled skill switches.** Nothing changes for existing skills; `backend: axh` is opt-in per
   `SKILL.md` frontmatter, written by the owner for the skills they want on the own harness.
 
@@ -57,8 +58,10 @@ already has `backend`, `model`, token and cost columns.
   manifest; skill runs never set it).
 - **D5 — the same 4-slot `agent_slots` semaphore** as every other backend, taken before the tools/MCP are built.
 - **D6 — the timeout** is `AgentRequest::timeout` (`skill.timeout_secs` else `agents.skill_timeout_secs`, already
-  resolved by the runner) into `RunConfig.timeout`; `FinishReason::Timeout` maps to
-  `AxiomataError::AgentTimeout { backend: "axh", … }` → the usual `Failed` record, as opencode does.
+  resolved by the runner) into `RunConfig.timeout`; `FinishReason::Timeout` maps to `exit_code 1` with
+  `AxiomataError::AgentTimeout { backend: "axh", … }`'s text in stderr → the usual `Failed` record. Changed in
+  the review (2026-10-18): first built as an `Err`, which dropped the tokens spent before the deadline, so the
+  daily cap never saw what a timed-out run cost.
 - **D7 — one collector sink.** A small `EventSink` keeps what the record needs: `Event::Error` messages, failed
   MCP servers, refused calls (`Event::Permission { allowed: false }`) → joined into `AgentRunResult::stderr`.
   The reply (`RunOutcome.answer`) becomes `stdout`, usage becomes the token columns, `outcome.turns` the
@@ -110,7 +113,7 @@ already has `backend`, `model`, token and cost columns.
       `RunConfig { cwd, timeout: request.timeout, skill_dirs: [global_skills_dir], ..new }`, `instructions: None`,
       no signal handlers (`Cancel::new()`, never signalled — this process is the app, not `axh`).
    8. Map the outcome per **D6/D7**: `Answered` → `exit_code 0`, stdout = answer; `MaxTurns`/`Failed`/
-      `Cancelled` → `exit_code 1` with the reason in stderr; `Timeout` → `Err(AgentTimeout)`; tokens
+      `Cancelled`/`Timeout` → `exit_code 1` with the reason in stderr (D6); tokens
       (`0 → None`), `num_turns`, `duration_ms`; `cost_usd: None` — `run_on_backend` meters it (D2).
 6. **`crates/axiomata-core/src/skills/runner.rs`** — the four seams: `backend.run(request, config)`;
    `resolve_run_model` gains the `Axh` arm (D2); `provider_label` gains `Axh` (D8); `request_for`/`agent_request`

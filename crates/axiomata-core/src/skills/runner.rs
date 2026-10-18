@@ -132,7 +132,8 @@ pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, Axi
 ///
 /// Errors:
 ///     [`AxiomataError::InvalidSkill`] if a `prepend_files` entry is an
-///     absolute path or contains `..` (workspace-relative only, no escape).
+///     absolute path, contains `..`, reaches a version-control store or out
+///     of the workspace through a link, or is too large (`context_file`).
 /// [`build_prompt_at`] without the date line (the tests' form).
 #[cfg(test)]
 fn build_prompt(config: &Config, skill: &registry::Skill) -> Result<String, AxiomataError> {
@@ -160,17 +161,17 @@ fn build_prompt_at(
 ) -> Result<String, AxiomataError> {
     let mut prompt = String::new();
     for rel in &skill.prepend_files {
-        if rel.contains("..") || std::path::Path::new(rel).is_absolute() {
-            return Err(AxiomataError::InvalidSkill {
+        let content = context_file(&config.workspace_root, rel).map_err(|reason| {
+            AxiomataError::InvalidSkill {
                 path: skill.path.clone(),
-                reason: format!("prepend_files entry {rel:?} must be a workspace-relative path"),
-            });
-        }
-        match std::fs::read_to_string(config.workspace_root.join(rel)) {
+                reason: format!("prepend_files entry {rel:?} {reason}"),
+            }
+        })?;
+        match content {
             // Missing or blank file → contribute nothing. Traced at debug
             // level so a typo'd path is diagnosable instead of silently
             // yielding no context.
-            Ok(content) if !content.trim().is_empty() => {
+            Some(content) if !content.trim().is_empty() => {
                 // `prepend_files` content is workspace data, not a trusted
                 // system prompt: frame it as DATA and tell the model never to
                 // act on instructions inside it (a prompt-injection guard —
@@ -195,6 +196,68 @@ fn build_prompt_at(
     }
     prompt.push_str(&skill.body);
     Ok(prompt)
+}
+
+/// The largest context file a skill may inline: every byte of it is paid for
+/// on every turn of the run.
+const MAX_CONTEXT_FILE_BYTES: u64 = 256 * 1024;
+/// Folders a context file may never come from — a version control's store,
+/// where `.git/config` can hold credentials in a remote's URL. The harness's
+/// file tools refuse them too (`axiomata-harness`, `tools/files.rs`); the
+/// prompt must not be the way around that.
+const PRIVATE_DIRS: [&str; 3] = [".git", ".hg", ".jj"];
+
+/// The text of the context file `rel` below `workspace`, `None` when it is
+/// missing or unreadable (the caller skips it).
+///
+/// # Errors
+///
+/// The reason, completing "prepend_files entry … ", when `rel` is absolute,
+/// climbs out with `..`, names a version-control store, leads outside the
+/// workspace through a link, or is larger than [`MAX_CONTEXT_FILE_BYTES`] —
+/// a skill that asks for such a file is misconfigured, and the run fails
+/// as recorded rather than inlining it.
+fn context_file(workspace: &std::path::Path, rel: &str) -> Result<Option<String>, String> {
+    use std::io::Read as _;
+    let path = std::path::Path::new(rel);
+    if rel.contains("..") || path.is_absolute() {
+        return Err("must be a workspace-relative path".to_owned());
+    }
+    let private = |part: &std::path::Component<'_>| {
+        let part = part.as_os_str().to_string_lossy();
+        PRIVATE_DIRS
+            .iter()
+            .any(|dir| part.eq_ignore_ascii_case(dir))
+    };
+    if path.components().any(|part| private(&part)) {
+        return Err("names a version-control store".to_owned());
+    }
+    // Resolved, so a link inside the workspace (`notes -> ~/.ssh`) cannot
+    // carry the read anywhere else.
+    let (Ok(root), Ok(real)) = (workspace.canonicalize(), workspace.join(rel).canonicalize())
+    else {
+        return Ok(None);
+    };
+    match real.strip_prefix(&root) {
+        Ok(inside) if !inside.components().any(|part| private(&part)) => {}
+        Ok(_) => return Err("leads into a version-control store".to_owned()),
+        Err(_) => return Err("leads outside the workspace".to_owned()),
+    }
+    let Ok(file) = std::fs::File::open(&real) else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_CONTEXT_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return Ok(None);
+    }
+    if bytes.len() as u64 > MAX_CONTEXT_FILE_BYTES {
+        return Err(format!("is larger than {MAX_CONTEXT_FILE_BYTES} bytes"));
+    }
+    Ok(String::from_utf8(bytes).ok())
 }
 
 /// The error a digest skill reported *instead of* data, if its reply is that:
@@ -498,7 +561,7 @@ fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
 
 /// The [`AgentRequest`] for a run: [`agent_request`] plus what the skill's
 /// frontmatter asks of the reply. `name` is the run's name — it becomes the
-/// `axh` gate's `restrict_name` (HS6b, B3), so a refusal names the skill.
+/// `axh` gate's narrowing (HS6b, B3), so a refusal names the skill.
 fn request_for(
     name: &str,
     prompt: String,
@@ -522,7 +585,7 @@ fn request_for(
 /// workspace as the working directory, and the run timeout (the skill's own
 /// `timeout_secs` frontmatter if set, else `config.agents.skill_timeout_secs`).
 /// `name` is the triggering skill/prompt target where a caller has one; only
-/// the `axh` backend reads it, as its gate's `restrict_name` (HS6b, B3).
+/// the `axh` backend reads it, as its gate's narrowing (HS6b, B3).
 fn agent_request(
     name: Option<&str>,
     prompt: String,
@@ -1088,6 +1151,42 @@ mod tests {
                 "{bad}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn build_prompt_rejects_a_store_a_link_out_and_an_oversized_file() {
+        let root = unique_temp_dir("axiomata-test-runner-guards");
+        let outside = unique_temp_dir("axiomata-test-runner-outside");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(root.join(".git/config"), "url = https://token@host/x").unwrap();
+        fs::write(outside.join("secret.md"), "secret").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.md"), root.join("link.md")).unwrap();
+        std::os::unix::fs::symlink(root.join(".git"), root.join("vcs")).unwrap();
+        fs::write(
+            root.join("big.md"),
+            "x".repeat(MAX_CONTEXT_FILE_BYTES as usize + 1),
+        )
+        .unwrap();
+        let config = Config {
+            workspace_root: root.clone(),
+            ..Config::default()
+        };
+        for (bad, why) in [
+            (".git/config", "version-control store"),
+            (".GIT/config", "version-control store"),
+            ("vcs/config", "leads into a version-control store"),
+            ("link.md", "outside the workspace"),
+            ("big.md", "larger than"),
+        ] {
+            let err = build_prompt(&config, &skill("opencode", &[bad])).unwrap_err();
+            assert!(
+                matches!(&err, AxiomataError::InvalidSkill { reason, .. } if reason.contains(why)),
+                "{bad}: {err}"
+            );
+        }
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&outside).ok();
     }
 
     #[tokio::test]
