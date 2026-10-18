@@ -67,6 +67,29 @@ impl Capabilities {
         create: Creates::Nothing,
     };
 
+    /// A project's master session (`docs/plans/agent-isolation.md`, D5, D9): the owner's own Claude Code or Opencode
+    /// sends work as itself — mail, and proposals of any kind for the board — but takes no card, reviews none and
+    /// plans none.
+    pub const MASTER: Capabilities = Capabilities {
+        work: false,
+        review: false,
+        plan: false,
+        grill: false,
+        create: Creates::Any,
+    };
+
+    /// The tools of `agent`: [`Capabilities::MASTER`] for a master, otherwise its role's from `roles` — the owner's
+    /// catalog — and [`Capabilities::NONE`] for a role that is not in it.
+    pub fn for_agent(agent: &crate::ide::model::Agent, roles: &[Role]) -> Self {
+        if agent.is_master() {
+            return Capabilities::MASTER;
+        }
+        roles
+            .iter()
+            .find(|role| role.name == agent.agent_role)
+            .map_or(Capabilities::NONE, Capabilities::of)
+    }
+
     /// Derives the tools from a role.
     pub fn of(role: &Role) -> Self {
         let kind = role.kind.as_str();
@@ -208,10 +231,7 @@ impl Context {
         };
         let actor = actor_from(Some(&agent_id.to_string()), Some(&agent.name))
             .ok_or(ContextError::UnknownSession(agent_id))?;
-        let caps = roles
-            .iter()
-            .find(|role| role.name == agent.agent_role)
-            .map_or(Capabilities::NONE, Capabilities::of);
+        let caps = Capabilities::for_agent(&agent, roles);
         Ok(Context {
             db: Arc::clone(&core.db),
             config: Arc::clone(&core.config),
@@ -307,6 +327,44 @@ mod tests {
             creates: creates.iter().map(|s| (*s).to_owned()).collect(),
             instructions: String::new(),
             source: axiomata_roster::Source::User,
+        }
+    }
+
+    #[test]
+    fn a_session_with_the_master_role_gets_the_masters_tools_whatever_the_catalog_says() {
+        use crate::ide::model::{Agent, Harness, MASTER_ROLE};
+        let mut master_role = role("implement", &[]);
+        master_role.name = MASTER_ROLE.into();
+        let mut agent: Agent = serde_json::from_value(serde_json::json!({
+            "id": 1, "project_id": 1, "name": "m", "harness": Harness::Opencode, "command": "", "model": null,
+            "env": "", "created_at": "2026-10-18T00:00:00Z", "updated_at": "2026-10-18T00:00:00Z",
+            "worktree_path": null, "branch": null, "port": null, "base_branch": null, "opencode_session": null,
+            "engine_id": null, "agent_role": MASTER_ROLE, "effective_command": "opencode", "effective_env": ""
+        }))
+        .unwrap();
+        assert_eq!(
+            Capabilities::for_agent(&agent, &[master_role]),
+            Capabilities::MASTER
+        );
+        agent.agent_role = "r".into();
+        assert!(Capabilities::for_agent(&agent, &[role("review", &[])]).review);
+        assert_eq!(Capabilities::for_agent(&agent, &[]), Capabilities::NONE);
+    }
+
+    #[test]
+    fn a_master_sends_work_but_takes_none() {
+        let tools = Capabilities::MASTER.tool_names();
+        for offered in ["send_message", "read_inbox", "list_cards", "create_card"] {
+            assert!(tools.contains(&offered), "{offered}");
+        }
+        for withheld in [
+            "claim_task",
+            "report_done",
+            "review_verdict",
+            "get_plan",
+            "propose_goal",
+        ] {
+            assert!(!tools.contains(&withheld), "{withheld}");
         }
     }
 

@@ -381,6 +381,10 @@ enum AgentAction {
     Prepare { id: i64 },
     /// Forget an Opencode agent's session, so its next start opens a fresh one.
     NewSession { id: i64 },
+    /// The project's master session on a harness (`claude_code` or `opencode`), made the first time: the engine as
+    /// the owner uses it outside, in the real project folder, with only the team tools added. Prints its id; `prepare`
+    /// starts it.
+    Master { project: i64, harness: String },
     /// What a project's agents are doing and planning, as their harnesses
     /// last reported it.
     Status { project: i64 },
@@ -1715,6 +1719,17 @@ async fn ide_cmd(core: &AxiomataCore, action: IdeAction) -> Result<()> {
             } => agent_edit(core, id, name, harness, command, model, env),
             AgentAction::Delete { id } => agent_delete(core, id).await,
             AgentAction::Prepare { id } => agent_prepare(core, id).await,
+            AgentAction::Master { project, harness } => {
+                let harness = ide::Harness::parse(&harness).ok_or_else(|| {
+                    anyhow::anyhow!("no harness called {harness:?} (claude_code, opencode)")
+                })?;
+                let master = {
+                    let db = core.db_lock();
+                    axiomata_core::roster::master_session(&db, project, harness)?
+                };
+                println!("agent #{} {} (master)", master.id, master.name);
+                Ok(())
+            }
             AgentAction::NewSession { id } => {
                 if axiomata_core::ide_start::new_session(&core.db, id)? {
                     println!("agent #{id} starts a fresh Opencode session next time");
@@ -2362,20 +2377,19 @@ async fn agent_discard_worktree(core: &AxiomataCore, id: i64, force: bool) -> Re
 }
 
 async fn agent_delete(core: &AxiomataCore, id: i64) -> Result<()> {
-    let agent = {
+    let (agent, registration) = {
         let db = core.db_lock();
         let Some(agent) = ide::agent_store::get_agent(&db, id)? else {
             anyhow::bail!("no agent #{id}");
         };
+        let registration = axiomata_core::ide_start::Registration::of(&db, &agent)?;
         if !ide::agent_store::delete_agent(&db, id)? {
             anyhow::bail!("no agent #{id}");
         }
-        agent
+        (agent, registration)
     };
-    if agent.harness == ide::model::Harness::Opencode
-        && let Some(worktree) = &agent.worktree_path
-    {
-        axiomata_core::agents::opencode::forget_mcp(worktree).await;
+    if let Some(registration) = registration {
+        registration.forget().await;
     }
     ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
         .context("the agent was removed, but its status folder was not")?;
@@ -3098,6 +3112,10 @@ mod tests {
         // Starting a session issues its secret; deleting or re-opening one changes what runs.
         for gated in [
             AgentAction::Prepare { id: 2 },
+            AgentAction::Master {
+                project: 1,
+                harness: "opencode".into(),
+            },
             AgentAction::Delete { id: 2 },
             AgentAction::NewSession { id: 2 },
         ] {

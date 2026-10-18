@@ -77,8 +77,8 @@ const STARTED_WITH_FILE: &str = "started-with.json";
 /// The largest owner's `opencode.json` read for its catalog.
 const MAX_OWNER_CONFIG_BYTES: u64 = 1024 * 1024;
 
-/// One of the app's Opencode instances. CP3 adds the master's. The discriminants index per-instance state
-/// (`Instance as usize`), in [`Instance::ALL`]'s order.
+/// One of the app's Opencode instances. The discriminants index per-instance state (`Instance as usize`), in
+/// [`Instance::ALL`]'s order and then the master's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
 pub enum Instance {
@@ -88,11 +88,18 @@ pub enum Instance {
     /// refuses every edit and every command but the read-only ones ([`read_rules`]), and its database keeps its own
     /// saved "always" answers — none of the writers' and none of the owner's reach it.
     Read = 1,
+    /// The master pane's (D4, D6, CP3): the owner's own configuration — agents, commands, rules, MCP servers — with
+    /// the app's keys, its own sessions and database. The owner works on it by hand; nothing of the app's runs there
+    /// but the team tools' registration.
+    Master = 2,
 }
 
 impl Instance {
-    /// Every instance, in the order a session is looked for on them.
+    /// The instances the app's automation runs on, in the order a session is looked for on them. The master's is not
+    /// among them: nothing the app watches or limits runs there.
     pub const ALL: [Instance; 2] = [Instance::Write, Instance::Read];
+    /// How many instances there are, for state kept per instance.
+    pub const COUNT: usize = 3;
 
     /// The instance a session runs on: the read instance when it may only look.
     pub fn for_access(read_only: bool) -> Self {
@@ -107,6 +114,7 @@ impl Instance {
         match self {
             Instance::Write => "write",
             Instance::Read => "read",
+            Instance::Master => "master",
         }
     }
 }
@@ -239,16 +247,21 @@ pub(crate) fn session_env() -> BTreeMap<String, String> {
     agent_child_env().into_iter().collect()
 }
 
-/// What goes in front of a pane's `opencode` command so its terminal UI attaches to `instance`'s service: the state
-/// folder, where the discovery file is. The UI's own configuration (theme, keys) stays the owner's.
+/// What goes in front of a pane's `opencode` command so its terminal UI attaches to `instance`'s service: the
+/// instance's state, data and cache folders. The UI's own configuration (theme, keys) stays the owner's.
 pub(crate) fn tui_env_prefix(instance: Instance) -> String {
     tui_env_prefix_for(&Places::of(instance))
 }
 
 fn tui_env_prefix_for(places: &Places) -> String {
+    // The state folder is where the discovery file is. Data and cache go along: should the UI ever find no service
+    // and start one itself, that one keeps its sessions in the instance's database, never in the owner's (D1).
+    let quoted = |path: &Path| crate::agent_entry::shell_quote(&path.display().to_string());
     format!(
-        "env XDG_STATE_HOME={} ",
-        crate::agent_entry::shell_quote(&places.state.display().to_string())
+        "env XDG_STATE_HOME={} XDG_DATA_HOME={} XDG_CACHE_HOME={} ",
+        quoted(&places.state),
+        quoted(&places.data),
+        quoted(&places.cache)
     )
 }
 
@@ -272,12 +285,18 @@ pub(crate) fn prepare(instance: Instance, config: &Config) -> Result<bool, Axiom
 
 fn prepare_at(places: &Places, home: &Path, config: &Config) -> Result<bool, AxiomataError> {
     make_instance_dirs(places)?;
-    let servers =
-        axiomata_harness::mcp::config::owner(home).map_err(|err| AxiomataError::AgentApi {
-            backend: super::BACKEND_OPENCODE,
-            message: format!("the MCP servers for the app's Opencode: {err}"),
-        })?;
-    let generated = generated_config(owner_catalog(home), config, &servers, places.instance);
+    let generated = if places.instance == Instance::Master {
+        link_owner_files(places, &owner_config_dir(home))?;
+        link_owner_config_home(places, &owner_config_home(home))?;
+        master_config(owner_config(home), config)
+    } else {
+        let servers =
+            axiomata_harness::mcp::config::owner(home).map_err(|err| AxiomataError::AgentApi {
+                backend: super::BACKEND_OPENCODE,
+                message: format!("the MCP servers for the app's Opencode: {err}"),
+            })?;
+        generated_config(owner_catalog(home), config, &servers, places.instance)
+    };
     let text = serde_json::to_string_pretty(&generated).map_err(|err| AxiomataError::AgentApi {
         backend: super::BACKEND_OPENCODE,
         message: format!("the generated Opencode configuration: {err}"),
@@ -311,6 +330,50 @@ fn generated_config(
     servers: &[axiomata_harness::mcp::config::ServerEntry],
     instance: Instance,
 ) -> Value {
+    let providers = with_app_credentials(catalog, config);
+    let servers: Map<String, Value> = servers
+        .iter()
+        .filter_map(|entry| opencode_server(entry).map(|server| (entry.name.clone(), server)))
+        .collect();
+    let mut generated = json!({
+        "$schema": CONFIG_SCHEMA,
+        "providers": providers,
+        "mcp": { "servers": servers },
+    });
+    if instance == Instance::Read {
+        generated["permissions"] = read_rules()
+            .into_iter()
+            .map(|(action, resource, effect)| json!({ "action": action, "resource": resource, "effect": effect }))
+            .collect();
+    }
+    generated
+}
+
+/// The master instance's configuration (D6): the owner's own `opencode.json` as it is — agents, rules, MCP servers,
+/// default model — with its providers under the app's credentials, since the owner's logins (`auth.json`) live in
+/// their own data folder, which the master does not use.
+fn master_config(mut owner: Map<String, Value>, config: &Config) -> Value {
+    let catalog = match owner.remove("providers") {
+        Some(Value::Object(mut providers)) => {
+            for provider in providers.values_mut() {
+                strip_credentials(provider);
+            }
+            providers
+        }
+        _ => Map::new(),
+    };
+    owner.insert(
+        "providers".to_owned(),
+        Value::Object(with_app_credentials(catalog, config)),
+    );
+    owner
+        .entry("$schema")
+        .or_insert_with(|| json!(CONFIG_SCHEMA));
+    Value::Object(owner)
+}
+
+/// `catalog`, the owner's providers stripped of credentials, with the keys and endpoints of `config.toml` (D2).
+fn with_app_credentials(catalog: Map<String, Value>, config: &Config) -> Map<String, Value> {
     let mut providers = catalog;
     let settings = |id: ProviderId| config.agents.providers.get(&id);
     if let Some(key) = settings(ProviderId::OpenRouter)
@@ -340,22 +403,7 @@ fn generated_config(
             .or_insert_with(|| json!(OPENAI_COMPATIBLE));
         ollama.entry("name").or_insert_with(|| json!("Ollama"));
     }
-    let servers: Map<String, Value> = servers
-        .iter()
-        .filter_map(|entry| opencode_server(entry).map(|server| (entry.name.clone(), server)))
-        .collect();
-    let mut generated = json!({
-        "$schema": CONFIG_SCHEMA,
-        "providers": providers,
-        "mcp": { "servers": servers },
-    });
-    if instance == Instance::Read {
-        generated["permissions"] = read_rules()
-            .into_iter()
-            .map(|(action, resource, effect)| json!({ "action": action, "resource": resource, "effect": effect }))
-            .collect();
-    }
-    generated
+    providers
 }
 
 /// The `settings` object of `provider` in `providers`, made where missing.
@@ -425,36 +473,145 @@ fn opencode_server(entry: &axiomata_harness::mcp::config::ServerEntry) -> Option
 /// The `providers` of the owner's own `opencode.json`, every credential removed; empty when there is none or it
 /// cannot be read — the instance then has Opencode's built-in catalog and what Ollama lists.
 fn owner_catalog(home: &Path) -> Map<String, Value> {
-    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+    match owner_config(home).remove("providers") {
+        Some(Value::Object(mut providers)) => {
+            for provider in providers.values_mut() {
+                strip_credentials(provider);
+            }
+            providers
+        }
+        _ => Map::new(),
+    }
+}
+
+/// The owner's configuration folder (`$XDG_CONFIG_HOME`, else `~/.config`).
+fn owner_config_home(home: &Path) -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|dir| dir.is_absolute())
-        .unwrap_or_else(|| home.join(".config"));
-    let file = config_home.join(OPENCODE_DIR).join(CONFIG_FILE);
+        .unwrap_or_else(|| home.join(".config"))
+}
+
+/// The owner's own Opencode configuration folder (`$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`).
+fn owner_config_dir(home: &Path) -> PathBuf {
+    owner_config_home(home).join(OPENCODE_DIR)
+}
+
+/// Links every entry of the owner's configuration folder but Opencode's into the master's `XDG_CONFIG_HOME`. The
+/// master's service runs its shell commands with that folder — the owner's sessions there are the TUI's own, which
+/// get no environment from the app — so `gh`, `git` and the like find their configuration as they do outside.
+fn link_owner_config_home(places: &Places, owner_home: &Path) -> Result<(), AxiomataError> {
+    let wanted: Vec<std::ffi::OsString> = match std::fs::read_dir(owner_home) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .filter(|name| name.to_str() != Some(OPENCODE_DIR))
+            .collect(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(source) => return Err(io_error(owner_home, source)),
+    };
+    sync_links(&places.config, owner_home, &wanted)
+}
+
+/// The owner's `opencode.json` as a whole, read only; empty when it is missing, too large or does not parse.
+fn owner_config(home: &Path) -> Map<String, Value> {
+    let file = owner_config_dir(home).join(CONFIG_FILE);
     let text = match read_capped(&file, MAX_OWNER_CONFIG_BYTES) {
         Ok(text) => text,
         Err(err) => {
             if err.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(file = %file.display(), %err, "the owner's Opencode model catalog is not used");
+                tracing::warn!(file = %file.display(), %err, "the owner's Opencode configuration is not used");
             }
             return Map::new();
         }
     };
     match serde_json::from_str::<Value>(&text) {
-        Ok(Value::Object(mut root)) => match root.remove("providers") {
-            Some(Value::Object(mut providers)) => {
-                for provider in providers.values_mut() {
-                    strip_credentials(provider);
-                }
-                providers
-            }
-            _ => Map::new(),
-        },
+        Ok(Value::Object(root)) => root,
         Ok(_) => Map::new(),
         Err(err) => {
-            tracing::warn!(file = %file.display(), %err, "the owner's Opencode model catalog does not parse");
+            tracing::warn!(file = %file.display(), %err, "the owner's Opencode configuration does not parse");
             Map::new()
         }
     }
+}
+
+/// What of the owner's configuration folder the master links: what Opencode reads to know how to work — instructions,
+/// agents, commands, modes, skills, themes, tools, plugins. Not the files it keeps up itself there (`.gitignore`,
+/// `package.json`, `node_modules`): written through a link, they would be the owner's (D1).
+const LINKED_FROM_OWNER: [&str; 15] = [
+    "AGENTS.md",
+    "agents",
+    "agent",
+    "commands",
+    "command",
+    "modes",
+    "mode",
+    "skills",
+    "skill",
+    "themes",
+    "tools",
+    "tool",
+    "plugins",
+    "plugin",
+    "prompts",
+];
+
+fn linked_from_owner(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .is_some_and(|name| LINKED_FROM_OWNER.contains(&name))
+}
+
+/// Links the owner's agents, commands, `AGENTS.md` and the rest of their configuration folder into the master's, so
+/// Opencode reads them where it reads its configuration — read in place, never copied or written (D1, D6). A link the
+/// owner's folder no longer backs is removed; a real file in the master's folder is left alone.
+fn link_owner_files(places: &Places, owner_dir: &Path) -> Result<(), AxiomataError> {
+    let wanted: Vec<std::ffi::OsString> = match std::fs::read_dir(owner_dir) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .filter(|name| linked_from_owner(name))
+            .collect(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(source) => return Err(io_error(owner_dir, source)),
+    };
+    sync_links(&places.opencode_config(), owner_dir, &wanted)
+}
+
+/// Makes `target_dir` hold a link to `source_dir/<name>` for every name in `wanted`: a link nothing wants any more is
+/// removed, one pointing elsewhere replaced, a real file of `target_dir`'s own left alone.
+fn sync_links(
+    target_dir: &Path,
+    source_dir: &Path,
+    wanted: &[std::ffi::OsString],
+) -> Result<(), AxiomataError> {
+    let existing = std::fs::read_dir(target_dir).map_err(|source| io_error(target_dir, source))?;
+    for entry in existing.filter_map(Result::ok) {
+        let path = entry.path();
+        let is_link =
+            std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink());
+        if is_link && !wanted.contains(&entry.file_name()) {
+            std::fs::remove_file(&path).map_err(|source| io_error(&path, source))?;
+        }
+    }
+    for name in wanted {
+        let link = target_dir.join(name);
+        let target = source_dir.join(name);
+        match std::fs::symlink_metadata(&link) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                if std::fs::read_link(&link).ok().as_deref() == Some(target.as_path()) {
+                    continue;
+                }
+                std::fs::remove_file(&link).map_err(|source| io_error(&link, source))?;
+            }
+            Ok(_) => {
+                tracing::warn!(file = %link.display(), "the master's folder has a file of its own here; not linked");
+                continue;
+            }
+            Err(_) => {}
+        }
+        std::os::unix::fs::symlink(&target, &link).map_err(|source| io_error(&link, source))?;
+    }
+    Ok(())
 }
 
 /// Removes, at any depth, every field named like a credential ([`CREDENTIAL_NAMES`]), every `headers` object
@@ -659,11 +816,24 @@ mod tests {
     }
 
     #[test]
-    fn a_pane_attaches_through_the_state_folder_alone() {
+    fn a_pane_attaches_through_the_instances_folders_but_keeps_the_owners_look() {
         let places = Places::below(Instance::Write, Path::new("/app/it's/write"));
-        assert_eq!(
-            tui_env_prefix_for(&places),
-            r"env XDG_STATE_HOME='/app/it'\''s/write/state' "
+        let prefix = tui_env_prefix_for(&places);
+        assert!(
+            prefix.starts_with(r"env XDG_STATE_HOME='/app/it'\''s/write/state' "),
+            "{prefix}"
+        );
+        assert!(
+            prefix.contains(r"XDG_DATA_HOME='/app/it'\''s/write/data'"),
+            "{prefix}"
+        );
+        assert!(
+            prefix.contains(r"XDG_CACHE_HOME='/app/it'\''s/write/cache'"),
+            "{prefix}"
+        );
+        assert!(
+            !prefix.contains("XDG_CONFIG_HOME"),
+            "theme and keys stay the owner's"
         );
     }
 
@@ -920,6 +1090,35 @@ mod tests {
         for (index, instance) in Instance::ALL.into_iter().enumerate() {
             assert_eq!(instance as usize, index);
         }
+        assert_eq!(
+            Instance::Master as usize + 1,
+            Instance::COUNT,
+            "the master is the last one"
+        );
+    }
+
+    #[test]
+    fn the_masters_shell_finds_the_owners_other_configuration() {
+        let base = temp_dir("config-home");
+        let owner_home = base.join("owner");
+        for dir in ["gh", "git", OPENCODE_DIR] {
+            std::fs::create_dir_all(owner_home.join(dir)).unwrap();
+        }
+        let places = Places::below(Instance::Master, &base.join("app/opencode/master"));
+        make_instance_dirs(&places).unwrap();
+        link_owner_config_home(&places, &owner_home).unwrap();
+        assert_eq!(
+            std::fs::read_link(places.config.join("gh")).ok(),
+            Some(owner_home.join("gh"))
+        );
+        assert!(
+            !std::fs::symlink_metadata(places.config.join(OPENCODE_DIR))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "Opencode's own folder is the master's"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
@@ -931,6 +1130,94 @@ mod tests {
         assert_eq!(Instance::for_access(true), Instance::Read);
         assert_eq!(Instance::for_access(false), Instance::Write);
         assert!(tui_env_prefix(Instance::Read).contains("/opencode/read/state"));
+    }
+
+    #[test]
+    fn the_master_runs_the_owners_configuration_under_the_apps_keys() {
+        let owner = json!({
+            "model": "openrouter/x/y",
+            "agents": { "build": { "model": "ollama/q" } },
+            "permissions": [{ "action": "shell", "resource": "*", "effect": "ask" }],
+            "mcp": { "servers": { "own": { "type": "local", "command": ["own-server"] } } },
+            "providers": { "openrouter": {
+                "settings": { "apiKey": "owner-key" },
+                "body": { "provider": { "sort": "throughput" } }
+            } }
+        });
+        let Value::Object(owner) = owner else {
+            unreachable!()
+        };
+        let master = master_config(owner, &config_with(Some("app-key"), None));
+        assert_eq!(master["agents"]["build"]["model"], "ollama/q");
+        assert_eq!(
+            master["permissions"][0]["effect"], "ask",
+            "the owner's rules, as outside"
+        );
+        assert_eq!(
+            master["mcp"]["servers"]["own"]["command"],
+            json!(["own-server"])
+        );
+        assert_eq!(master["model"], "openrouter/x/y");
+        let openrouter = &master["providers"]["openrouter"];
+        assert_eq!(
+            openrouter["settings"]["apiKey"], "app-key",
+            "one source of keys"
+        );
+        assert_eq!(openrouter["body"]["provider"]["sort"], "throughput");
+        assert_eq!(master["$schema"], CONFIG_SCHEMA);
+    }
+
+    #[test]
+    fn the_master_links_the_owners_files_and_keeps_its_own_configuration_and_port() {
+        let base = temp_dir("links");
+        let owner = base.join("owner/opencode");
+        std::fs::create_dir_all(owner.join("agents")).unwrap();
+        std::fs::create_dir_all(owner.join("skills")).unwrap();
+        std::fs::create_dir_all(owner.join("commands")).unwrap();
+        for file in [
+            "AGENTS.md",
+            CONFIG_FILE,
+            SERVICE_FILE,
+            ".gitignore",
+            "package.json",
+        ] {
+            std::fs::write(owner.join(file), "x").unwrap();
+        }
+        let places = Places::below(Instance::Master, &base.join("app/opencode/master"));
+        make_instance_dirs(&places).unwrap();
+        let own = places.opencode_config();
+        std::fs::write(own.join("commands"), "the master's own").unwrap();
+
+        link_owner_files(&places, &owner).unwrap();
+        let link = |name: &str| std::fs::read_link(own.join(name)).ok();
+        assert_eq!(link("agents"), Some(owner.join("agents")));
+        assert_eq!(link("AGENTS.md"), Some(owner.join("AGENTS.md")));
+        assert_eq!(link(CONFIG_FILE), None, "generated, never the owner's");
+        assert_eq!(link(SERVICE_FILE), None, "a port of its own");
+        for kept_by_opencode in [".gitignore", "package.json"] {
+            assert_eq!(
+                link(kept_by_opencode),
+                None,
+                "Opencode writes it: never through a link"
+            );
+        }
+        assert_eq!(
+            link("commands"),
+            None,
+            "a file of the master's own is left alone"
+        );
+
+        std::fs::remove_dir(owner.join("skills")).unwrap();
+        link_owner_files(&places, &owner).unwrap();
+        assert!(
+            std::fs::symlink_metadata(own.join("skills")).is_err(),
+            "a link nothing backs goes"
+        );
+        assert!(
+            owner.join("AGENTS.md").exists(),
+            "the owner's files are only read"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

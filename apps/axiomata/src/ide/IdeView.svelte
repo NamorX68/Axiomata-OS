@@ -61,6 +61,7 @@
   } from "./layout";
   import type { AgentSpec, IdeAgent } from "../core/backend";
   import AgentsPanel from "./AgentsPanel.svelte";
+  import { masterSession } from "./agents";
   import TasksPanel from "./TasksPanel.svelte";
   import DebugPanel from "./DebugPanel.svelte";
   import { onDebugReveal, onDebugTerminal } from "./debug";
@@ -610,6 +611,23 @@
     layout = addTab(layout, rosterTab(), { nodeId: last, side: "center" });
   }
 
+  /**
+   * Opens the project's master pane on `harness` (`docs/plans/agent-isolation.md`, CP3): the engine as the owner uses
+   * it outside, in the real project folder. Made the first time; afterwards the same session, brought forward if open.
+   */
+  async function openMaster(harness: "claude_code" | "opencode"): Promise<void> {
+    const project = current;
+    if (!project) return;
+    try {
+      const master = await masterSession(project.id, harness);
+      await projectSession.refreshAgents();
+      openAgent(projectSession.agentById(master.id) ?? master);
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      toast(`The master session could not be opened: ${why}`, "danger");
+    }
+  }
+
   async function addAgent(spec: AgentSpec) {
     const created = await projectSession.addAgent(spec);
     if (created) openAgent(created);
@@ -1000,6 +1018,7 @@
           projectId={current?.id ?? null}
           onManage={openRoster}
           onOpen={openAgent}
+          onMaster={(harness) => void openMaster(harness)}
           onCreate={(spec) => addAgent(spec)}
           onEdit={(id, spec) => void projectSession.editAgent(id, spec)}
           onRemove={(id) => void projectSession.removeAgent(id)}

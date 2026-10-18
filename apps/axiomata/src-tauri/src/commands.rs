@@ -2462,6 +2462,20 @@ pub fn create_ide_agent_on_engine(
     .map_err(|err| err.to_string())
 }
 
+/// The project's master session on `harness` (`claude_code` or `opencode`), made the first time it is asked for
+/// (`docs/plans/agent-isolation.md`, CP3): the engine as the owner uses it outside, in the real project folder.
+#[tauri::command]
+pub fn ide_master_session(
+    state: State<'_, CoreState>,
+    project_id: i64,
+    harness: String,
+) -> Result<ide::Agent, String> {
+    let harness =
+        ide::Harness::parse(&harness).ok_or_else(|| format!("no harness called {harness:?}"))?;
+    let db = state.db_lock();
+    axiomata_core::roster::master_session(&db, project_id, harness).map_err(|err| err.to_string())
+}
+
 /// Renames an agent and moves it to another engine and role. `None` if there is no such agent.
 #[tauri::command]
 pub fn update_ide_agent_on_engine(
@@ -2595,16 +2609,18 @@ pub async fn delete_ide_agent(state: State<'_, CoreState>, id: i64) -> Result<bo
     // unsendable). The worktree is read first: the row is gone afterwards, and the MCP registration is keyed on it.
     let (deleted, opencode_worktree) = {
         let db = state.db_lock();
-        let opencode_worktree = ide::agent_store::get_agent(&db, id)
-            .map_err(|err| err.to_string())?
-            .filter(|agent| agent.harness == ide::model::Harness::Opencode)
-            .and_then(|agent| agent.worktree_path);
+        let registration =
+            match ide::agent_store::get_agent(&db, id).map_err(|err| err.to_string())? {
+                Some(agent) => axiomata_core::ide_start::Registration::of(&db, &agent)
+                    .map_err(|err| err.to_string())?,
+                None => None,
+            };
         let deleted = ide::agent_store::delete_agent(&db, id).map_err(|err| err.to_string())?;
-        (deleted, opencode_worktree)
+        (deleted, registration)
     };
     if deleted {
-        if let Some(worktree) = opencode_worktree {
-            axiomata_core::agents::opencode::forget_mcp(&worktree).await;
+        if let Some(registration) = opencode_worktree {
+            registration.forget().await;
         }
         ide::provision::forget_channel(&axiomata_core::paths::ide_locations().channels, id)
             .map_err(|err| {

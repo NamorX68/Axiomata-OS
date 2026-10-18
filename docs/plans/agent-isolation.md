@@ -1,6 +1,6 @@
 # The app's agents apart from the owner's own — and a master pane in the canvas
 
-Status: drafted 2026-10-18, owner decisions D1–D9 taken (Q1–Q4 grilled the same day); CP0 measured, CP1 and CP2 built; next: CP3. Background:
+Status: drafted 2026-10-18, owner decisions D1–D9 taken (Q1–Q4 grilled the same day); CP0 measured, CP1–CP4 built (2026-10-18); open: the owner's Mac test. Background:
 the owner's note `vault/Entwicklung/opencode-pi-harness-uebersicht.md` (put together with Grok) and the code as it
 stands at `2377be6`.
 
@@ -192,9 +192,44 @@ Still open: the exact action that made the owner's TUI lose its shell. Next time
   - Not done: the bundled skills declare no `access` yet — the digests only read, but on `read` they would start a
     second set of MCP servers (apple-mail opening Mail.app from both instances); left to the owner.
 - **CP3 — master panes.** Claude Code and Opencode in the Studio's pane menu, team tools wired, the `master`
-  instance (D6).
+  instance (D6). **Built 2026-10-18:**
+  - **A master is an agent row with the reserved role `master`** (`axiomata_ide::model::MASTER_ROLE`), one per project
+    and harness, made the first time it is asked for (`roster::master_session`; Agents panel "Master · Claude Code" /
+    "Master · Opencode", `ide_master_session`, `axiomata-cli ide agents master <project> <harness>`). No role file
+    may take the name. Its command is the harness's own default — not an engine of the catalog, whose flags are the
+    studio's.
+  - **The real folder, nothing added:** `provision::prepare` gives it the project folder (no worktree, no branch — so
+    git's actions on an agent, which need both, never reach that folder) and no status hooks on its command line.
+    Claude Code starts as `claude --mcp-config <channel>/mcp.json`; Opencode as `opencode` with the master instance's
+    `XDG_STATE_HOME` in front, no session made for it and no rules added.
+  - **The `master` instance** (`~/.axiomata/opencode/master/`): its config is the owner's `opencode.json` as it is —
+    agents, rules, default model, MCP servers — with the providers under `config.toml`'s keys (D2/D6); the owner's
+    `AGENTS.md`, `agents/`, `commands/` and the like are **linked** into its config folder (a fixed list: never
+    `.gitignore`, `package.json` and the other files Opencode keeps up there itself, which it would write through a
+    link). Its own port, database and sessions. Not watched or limited — nothing of the app's runs there. Started
+    before the pane attaches, so a terminal UI never starts a service of its own with the owner's folders.
+  - **Team tools (D5, D9):** the `axiomata` server registered at the project folder (Opencode: on the master
+    instance), with the master's own capabilities — mail, the board to read, proposals of any kind — and no
+    `claim_task`, `report_done`, `review_verdict`: it sends work, it takes none.
+  - Checked end to end with a scratch home: both masters start in the project folder, the Opencode one sees the
+    owner's agents (`architecture-reviewer` …), rules and model, the owner's folder is only read.
+  - **Review (2026-10-18), changed:** the pane's prefix carries the instance's data and cache folders too (a UI that
+    starts a service itself never does so on the owner's database); the master's `XDG_CONFIG_HOME` links the owner's
+    other `~/.config` entries (`gh`, `git` …), since the TUI's sessions get no environment from the app; a master gets
+    no channel variables (`CLAUDE_CODE_TASK_LIST_ID`), reads as not status-connected, cannot be edited into another
+    role, its registration is healed and taken off the master instance on delete; a role file named `master` is
+    refused where it is saved.
+  - **As outside, on purpose:** the Opencode master's shell has no agent identity, so `axiomata-cli` there acts as the
+    owner — exactly as in the owner's own Opencode; the Claude master has its identity from the pane. The owner's
+    `opencode.json` is copied with its MCP servers as they are (secrets included) into the master's 0600 config. A
+    changed config restarts the master's service only while no session executes — an idle UI attached to it
+    reconnects. Only `opencode.json` is read (not `.jsonc`). The Claude master gets the team tools but no mailbox
+    instructions (nothing is added to its prompt).
 - **CP4 — Claude Code hygiene.** No card session in a real project folder (D9); docs, `AGENTS.md` traps (the
-  Opencode one changes: "the app's own instances, never the owner's service").
+  Opencode one changes: "the app's own instances, never the owner's service"). **Done 2026-10-18:** D9 already held —
+  `card_session` refuses a card session, a reviewer, a plan's steps and a planner for a project that is no git
+  repository, whatever the engine (since CP-A6; tested). The only session in a real folder is the master, the
+  owner's own tool. The traps are in `AGENTS.md` (Opencode's instances, the master).
 
 ## Grilled (owner, 2026-10-18)
 

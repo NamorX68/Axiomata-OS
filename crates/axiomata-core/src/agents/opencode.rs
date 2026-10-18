@@ -236,8 +236,8 @@ async fn check_state_dir(
     env: &[(String, String)],
     instance: Instance,
 ) -> Result<(), AxiomataError> {
-    static CHECKED: [std::sync::atomic::AtomicBool; Instance::ALL.len()] =
-        [const { std::sync::atomic::AtomicBool::new(false) }; Instance::ALL.len()];
+    static CHECKED: [std::sync::atomic::AtomicBool; Instance::COUNT] =
+        [const { std::sync::atomic::AtomicBool::new(false) }; Instance::COUNT];
     let checked = &CHECKED[instance as usize];
     if checked.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(());
@@ -873,6 +873,15 @@ pub async fn send_prompt(
         .map_err(into_axiomata)
 }
 
+/// Starts `instance`'s service when it is not running, with a configuration generated now — before a terminal UI
+/// attaches to it: one that found no service would start its own with the owner's folders.
+///
+/// Errors:
+///     As starting a session does: [`AxiomataError::AgentApi`] when the service cannot be prepared or reached.
+pub async fn ensure_running(instance: Instance) -> Result<(), AxiomataError> {
+    connect(instance).await.map(drop)
+}
+
 /// The app's instances' services that are running, without starting any: what a look at card sessions asks once and
 /// then uses for every session in it ([`RunningServices::holding`]). Under `cfg(test)` it never connects.
 pub async fn running_services() -> RunningServices {
@@ -961,21 +970,26 @@ fn refused_registration(err: OpencodeError) -> AxiomataError {
 pub async fn forget_mcp(directory: &std::path::Path) {
     // Either instance may hold it: a worktree's role decides where its session ran.
     for instance in Instance::ALL {
-        let Ok(service) = find(instance).await else {
-            continue;
-        };
-        match service
-            .remove_mcp(
-                &directory.display().to_string(),
-                crate::agent_entry::SERVER_NAME,
-            )
-            .await
-        {
-            Ok(()) | Err(OpencodeError::Http { status: 404, .. }) => {}
-            Err(err) => {
-                let directory = directory.display();
-                tracing::warn!(%err, ?instance, %directory, "could not remove the agent MCP server")
-            }
+        forget_mcp_on(instance, directory).await;
+    }
+}
+
+/// [`forget_mcp`] on one instance — the master's, whose registration is at the project folder (CP3).
+pub async fn forget_mcp_on(instance: Instance, directory: &std::path::Path) {
+    let Ok(service) = find(instance).await else {
+        return;
+    };
+    match service
+        .remove_mcp(
+            &directory.display().to_string(),
+            crate::agent_entry::SERVER_NAME,
+        )
+        .await
+    {
+        Ok(()) | Err(OpencodeError::Http { status: 404, .. }) => {}
+        Err(err) => {
+            let directory = directory.display();
+            tracing::warn!(%err, ?instance, %directory, "could not remove the agent MCP server")
         }
     }
 }

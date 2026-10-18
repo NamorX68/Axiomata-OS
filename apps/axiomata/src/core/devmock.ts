@@ -1593,6 +1593,26 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       ideAgents = [...ideAgents, created];
       return created as T;
     }
+    case "ide_master_session": {
+      const projectId = Number(args.projectId);
+      const harness = args.harness as "claude_code" | "opencode";
+      const found = ideAgents.find(
+        (a) => a.project_id === projectId && a.agent_role === "master" && a.harness === harness,
+      );
+      if (found) return found as T;
+      const created = {
+        ...mockAgent((ideAgents[ideAgents.length - 1]?.id ?? 0) + 1, projectId, {
+          name: harness === "claude_code" ? "master-claude-code" : "master-opencode",
+          harness,
+          command: "",
+          model: null,
+          env: "",
+        }),
+        agent_role: "master",
+      };
+      ideAgents = [...ideAgents, created];
+      return created as T;
+    }
     case "update_ide_agent_on_engine": {
       const index = ideAgents.findIndex((a) => a.id === args.id);
       if (index === -1) return null as T;

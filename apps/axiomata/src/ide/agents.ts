@@ -56,6 +56,14 @@ export function createAgent(projectId: number, spec: AgentSpec): Promise<IdeAgen
   return invoke<IdeAgent>("create_ide_agent_on_engine", { projectId, spec });
 }
 
+/**
+ * The project's master session on `harness`: the engine as the owner uses it outside, in the real project folder, with
+ * only the team tools added (`docs/plans/agent-isolation.md`, CP3). Made the first time it is asked for.
+ */
+export function masterSession(projectId: number, harness: "claude_code" | "opencode"): Promise<IdeAgent> {
+  return invoke<IdeAgent>("ide_master_session", { projectId, harness });
+}
+
 /** Renames an agent and moves it to another engine and role. */
 export function updateAgent(id: number, spec: AgentSpec): Promise<IdeAgent | null> {
   return invoke<IdeAgent | null>("update_ide_agent_on_engine", { id, spec });

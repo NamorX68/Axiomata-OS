@@ -54,7 +54,7 @@ cargo run -p axiomata-cli -- --help        # every subcommand; each has its own 
 #   board start|release|review|take-over|usage   (card sessions, a2a.md CP-A6; usage = steps/tokens/money against the limits)
 #   mcp-serve                                (MCP server of one agent session on stdio; needs AXIOMATA_AGENT_ID; logs go to stderr)
 #   ide projects list|new|rename|set-root|delete
-#   ide agents list|new|edit|delete|prepare|new-session|discard-worktree|status|diff|base|commit|discard|discard-hunk|take-over
+#   ide agents list|new|edit|delete|prepare|new-session|master|discard-worktree|status|diff|base|commit|discard|discard-hunk|take-over
 #                                            (take-over: squash by default, never pushes)
 #   ide engines list|add|edit|delete         (the owner's engine catalog; delete refused while a session/role uses it)
 #   ide roles list|show|save|delete|project|confirm   (AGENT.md roles; `project`/`confirm`: a project's own roles, by hash)
@@ -110,7 +110,10 @@ from the code itself:
   `config.toml`, MCP from `~/.axh/mcp.json`, the owner's model catalog without credentials), left
   running when the app quits. Reviewers, planners and skills with `access: read` run on `read`: its rights are in
   its config **and** in front of every session's rules — measured, a project's `opencode.json` and a saved
-  "always" beat the config, a session's rules beat both.
+  "always" beat the config, a session's rules beat both. A project's **master** pane (role `master`, Agents panel)
+  is the engine as the owner uses it outside, in the real folder: Claude Code with only `--mcp-config`, Opencode on
+  a third instance `master` whose config is the owner's `opencode.json` (keys from `config.toml`) with their
+  `agents/`, `commands/`, `AGENTS.md` linked — never a card, no worktree, no hooks.
   Sessions get the owner's environment back for their shell commands (`PUT
   …/environment`); a pane's TUI attaches with `XDG_STATE_HOME` alone. Each session is
   `POST /api/session`, prompt, wait on `/api/event`, read the messages back — never parse a CLI's output again,

@@ -109,7 +109,12 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
     // A project that is not a repository is an ordinary case: its agents share
     // the folder, exactly as they did before worktrees existed. Saying so is
     // better than refusing to start.
-    let (cwd, shared_folder) = if worktree::is_repo(&project.repo_root) {
+    // The master works where the owner does, in the real folder (D4): it is the owner's own tool, not a session whose
+    // work waits to be taken over. Git's actions on an agent (diff, commit, discard) need a worktree and a branch, so
+    // none of them ever touches that folder.
+    let (cwd, shared_folder) = if agent.is_master() {
+        (project.repo_root, false)
+    } else if worktree::is_repo(&project.repo_root) {
         let path =
             worktree::worktree_path(&locations.worktrees, &project.name, &agent.name, agent.id);
         // A reviewer looks at one state, a planner at the state the project was in; neither writes to a branch.
@@ -163,23 +168,29 @@ pub fn prepare(db: &Connection, locations: &Locations, agent_id: i64) -> Result<
     // Re-read, so the caller sees the worktree and port that were just written.
     let agent = reread(db, agent_id)?;
     let launch_command = match &hookup.args {
+        // Nothing of the studio's on the master's command line: no status hooks, no settings (D4).
+        Some(_) if agent.is_master() => agent.effective_command.clone(),
         Some(args) if agent.command.trim().is_empty() => {
             format!("{} {args}", agent.effective_command)
         }
         _ => agent.effective_command.clone(),
     };
+    // A master gets its identity, nothing of the channel's: `CLAUDE_CODE_TASK_LIST_ID` would move its task list (D4).
+    let channel_env: &[String] = if agent.is_master() { &[] } else { &hookup.env };
     let launch_env = std::iter::once(agent.effective_env.as_str())
-        .chain(hookup.env.iter().map(String::as_str))
+        .chain(channel_env.iter().map(String::as_str))
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
+    // Without the hooks a master reports nothing into the channel.
+    let status_connected = hookup.connected && !agent.is_master();
     Ok(Provisioned {
         agent,
         cwd,
         shared_folder,
         launch_command,
         launch_env,
-        status_connected: hookup.connected,
+        status_connected,
     })
 }
 
@@ -573,6 +584,63 @@ mod tests {
         let second = prepare(&db, &base, agent).unwrap();
         assert_eq!(first.cwd, second.cwd);
         assert_eq!(first.agent.port, second.agent.port);
+    }
+
+    #[test]
+    fn a_master_works_in_the_real_folder_with_nothing_of_the_studios_on_its_command_line() {
+        let repo = git_repo();
+        let (db, project) = db_with_project(repo.clone());
+        let base = locations();
+        let master = agent_store::create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: AgentFields {
+                    name: "master-claude".into(),
+                    harness: Harness::ClaudeCode,
+                    command: String::new(),
+                    model: None,
+                    env: String::new(),
+                },
+            },
+        )
+        .unwrap()
+        .id;
+        agent_store::set_role(&db, master, crate::model::MASTER_ROLE).unwrap();
+        let worker = agent_store::create_agent(
+            &db,
+            NewAgent {
+                project_id: project,
+                fields: AgentFields {
+                    name: "worker-claude".into(),
+                    harness: Harness::ClaudeCode,
+                    command: String::new(),
+                    model: None,
+                    env: String::new(),
+                },
+            },
+        )
+        .unwrap()
+        .id;
+
+        let ready = prepare(&db, &base, master).unwrap();
+        assert_eq!(ready.cwd, repo.canonicalize().unwrap());
+        assert!(!ready.shared_folder);
+        assert!(ready.agent.worktree_path.is_none() && ready.agent.branch.is_none());
+        assert_eq!(
+            ready.launch_command, ready.agent.effective_command,
+            "no status hooks, no settings"
+        );
+        assert_eq!(
+            ready.launch_env, ready.agent.effective_env,
+            "its identity, nothing of the channel's"
+        );
+        assert!(!ready.status_connected);
+        let other = prepare(&db, &base, worker).unwrap();
+        assert_ne!(
+            other.launch_command, other.agent.effective_command,
+            "a session of the studio's gets them"
+        );
     }
 
     #[test]

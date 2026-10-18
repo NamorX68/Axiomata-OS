@@ -35,6 +35,7 @@
     projectId = null,
     onManage,
     onOpen,
+    onMaster,
     onCreate,
     onEdit,
     onRemove,
@@ -49,6 +50,8 @@
     /** Opens the Engines & roles pane: where engines and roles are made. */
     onManage: () => void;
     onOpen: (agent: IdeAgent) => void;
+    /** Opens the project's master pane on an engine: as the owner uses it outside, in the real folder (CP3). */
+    onMaster: (harness: "claude_code" | "opencode") => void;
     /** May answer when the agent exists, so a second click on a chip waits for the first. */
     onCreate: (spec: AgentSpec) => void | Promise<unknown>;
     onEdit: (id: number, spec: AgentSpec) => void;
@@ -232,7 +235,10 @@
             </button>
             <!-- Quiet until the card is hovered or focused (editor-look I4). -->
             <div class="row-actions">
-              <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
+              <!-- A master keeps its engine and role: there is nothing to edit (the backend refuses it too). -->
+              {#if agent.agent_role !== "master"}
+                <IconButton icon="pencil" label="Edit {agent.name}" size="sm" onclick={() => startEdit(agent)} />
+              {/if}
               <IconButton
                 icon="trash-2"
                 label="Remove {agent.name}"
@@ -257,6 +263,25 @@
       {#if engines.length === 0 && !disabled}
         <p class="hint">No engines yet — an agent runs on an engine. Add one under Engines &amp; roles.</p>
       {/if}
+      <!-- The engines as the owner uses them outside: own settings and rules, the real folder, the team tools added. -->
+      <button
+        class="add"
+        type="button"
+        {disabled}
+        title="Claude Code as you use it outside — in the project folder, with the team tools"
+        onclick={() => onMaster("claude_code")}
+      >
+        <Icon name="user" size="sm" /> Master · Claude Code
+      </button>
+      <button
+        class="add"
+        type="button"
+        {disabled}
+        title="Opencode as you use it outside — your agents and rules, in the project folder, with the team tools"
+        onclick={() => onMaster("opencode")}
+      >
+        <Icon name="user" size="sm" /> Master · Opencode
+      </button>
       <button class="add" type="button" onclick={onManage}><Icon name="settings" size="sm" /> Engines &amp; roles…</button>
     {:else}
       <form

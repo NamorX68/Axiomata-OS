@@ -307,7 +307,8 @@ The client for Opencode 2's background service (`docs/plans/opencode2.md`, OC1).
 reviewers, planners and skills declaring `access: read`, whose config and every session refuse
 edits and all but read-only commands — and `Service::with_session_environment` hands each
 session the owner's environment back for its shell commands. Watchers find a session on
-either instance (`agents::opencode::RunningServices::holding`).
+either instance (`agents::opencode::RunningServices::holding`). A third instance, `master`, runs the owner's own
+configuration for a project's master pane (CP3: the engine as used outside, in the real folder, team tools only).
 Standalone like `axiomata-terminal`: no Tauri, no `axiomata-core` — the skill runner (in
 core) and the agentic IDE (`axiomata-ide`, OC2/OC3) both use it. `service` finds the
 service (`opencode debug paths state` → `service.json`), logs in (the one undocumented

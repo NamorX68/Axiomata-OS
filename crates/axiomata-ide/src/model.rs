@@ -132,7 +132,17 @@ pub struct Agent {
     pub effective_env: String,
 }
 
+/// The role of a project's **master** session (`docs/plans/agent-isolation.md`, D4, CP3): Claude Code or Opencode as
+/// the owner uses them outside, in the real project folder, with nothing added but the team tools. Not a role file —
+/// the name is reserved, and no catalog role can stand in for it.
+pub const MASTER_ROLE: &str = "master";
+
 impl Agent {
+    /// Whether this is a project's master session ([`MASTER_ROLE`]): no worktree, no card, no limits, no status hooks.
+    pub fn is_master(&self) -> bool {
+        self.agent_role == MASTER_ROLE
+    }
+
     /// Builds what [`Agent::effective_env`] holds.
     ///
     /// The identity is what makes an agent addressable from inside its own

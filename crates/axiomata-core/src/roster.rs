@@ -16,7 +16,7 @@ use rusqlite::Connection;
 use crate::AxiomataError;
 use crate::config::Config;
 use crate::ide::agent_store;
-use crate::ide::model::{Agent, AgentFields};
+use crate::ide::model::{Agent, AgentFields, Harness as AgentHarness};
 use crate::paths;
 
 type Result<T> = std::result::Result<T, AxiomataError>;
@@ -317,6 +317,16 @@ fn known_engine<'a>(config: &'a Config, id: &str) -> Result<&'a Engine> {
 }
 
 fn known_role(roles: &[Role], name: &str) -> Result<()> {
+    // Reserved: a role file of that name would turn an ordinary session into a project's master, in its real folder.
+    if name == crate::ide::model::MASTER_ROLE {
+        return Err(RosterError::Invalid {
+            field: "role",
+            reason: format!(
+                "“{name}” is the project's master session, opened from the Agents panel, not a role"
+            ),
+        }
+        .into());
+    }
     if roles.iter().any(|role| role.name == name) {
         return Ok(());
     }
@@ -325,6 +335,58 @@ fn known_role(roles: &[Role], name: &str) -> Result<()> {
         reason: format!("there is no role “{name}” for this project"),
     }
     .into())
+}
+
+/// The master session of `project_id` on `harness` (`docs/plans/agent-isolation.md`, D4, CP3), made the first time it
+/// is asked for: Claude Code or Opencode with its own default command — not an engine of the catalog, whose flags
+/// would be the studio's — in the real project folder, playing [`MASTER_ROLE`](crate::ide::model::MASTER_ROLE).
+///
+/// # Errors
+///
+/// [`RosterError::Invalid`] for a harness that has no master (the mini harness); the agent store's refusals; a failing
+/// database write. Nothing is created then.
+pub fn master_session(db: &Connection, project_id: i64, harness: AgentHarness) -> Result<Agent> {
+    let name = match harness {
+        AgentHarness::ClaudeCode => "master-claude-code",
+        AgentHarness::Opencode => "master-opencode",
+        AgentHarness::Mini => {
+            return Err(RosterError::Invalid {
+                field: "harness",
+                reason: "only Claude Code and Opencode have a master session".into(),
+            }
+            .into());
+        }
+    };
+    if let Some(master) = agent_store::list_agents(db, project_id)?
+        .into_iter()
+        .find(|agent| agent.is_master() && agent.harness == harness)
+    {
+        return Ok(master);
+    }
+    let tx = db.unchecked_transaction()?;
+    let created = agent_store::create_agent(
+        &tx,
+        crate::ide::model::NewAgent {
+            project_id,
+            fields: AgentFields {
+                name: name.to_owned(),
+                harness,
+                command: String::new(),
+                model: None,
+                env: String::new(),
+            },
+        },
+    )?;
+    agent_store::set_role(&tx, created.id, crate::ide::model::MASTER_ROLE)?;
+    tx.commit()?;
+    agent_store::get_agent(db, created.id)?.ok_or_else(|| {
+        crate::ide::IdeError::CorruptRow {
+            table: "ide_agents",
+            id: created.id,
+            reason: "row vanished after its creation".into(),
+        }
+        .into()
+    })
 }
 
 /// Creates an agent session in `project_id` that runs on an engine of the owner's catalog and plays `role`.
@@ -382,6 +444,14 @@ pub fn update_agent_on_engine(
     engine_id: &str,
     role: &str,
 ) -> Result<Option<Agent>> {
+    // A master is the engine as the owner uses it, not a session on a catalog engine: it is not turned into one.
+    if agent_store::get_agent(db, id)?.is_some_and(|agent| agent.is_master()) {
+        return Err(RosterError::Invalid {
+            field: "role",
+            reason: "the project's master session keeps its engine and role".into(),
+        }
+        .into());
+    }
     let engine = known_engine(config, engine_id)?;
     known_role(roles, role)?;
     let tx = db.unchecked_transaction()?;
@@ -442,6 +512,17 @@ pub fn list_roles() -> Result<Loaded> {
 ///
 /// [`RosterError::Invalid`] for a bad role or an unknown engine.
 pub fn save_role(config: &Config, role: Role) -> Result<()> {
+    // Reserved (see `known_role`): a role file of that name is refused where it is made, not only where it is used.
+    if role.name == crate::ide::model::MASTER_ROLE {
+        return Err(RosterError::Invalid {
+            field: "name",
+            reason: format!(
+                "“{}” is reserved for the project's master session",
+                role.name
+            ),
+        }
+        .into());
+    }
     role.validate()?;
     role.check_engines(|id| config.agents.engines.contains_key(id))?;
     axiomata_roster::save_role(&paths::agent_roles_dir(), &role)?;
@@ -576,6 +657,42 @@ mod tests {
         )
         .unwrap();
         (conn, project.id, dir)
+    }
+
+    #[test]
+    fn a_project_has_one_master_per_engine_and_no_role_can_pretend_to_be_it() {
+        let (db, project, dir) = fixture();
+        let claude = master_session(&db, project, AgentHarness::ClaudeCode).unwrap();
+        let opencode = master_session(&db, project, AgentHarness::Opencode).unwrap();
+        assert!(claude.is_master() && opencode.is_master());
+        assert_ne!(claude.id, opencode.id);
+        assert!(
+            claude.command.is_empty(),
+            "the engine's own default command, no catalog flags"
+        );
+        assert_eq!(
+            master_session(&db, project, AgentHarness::ClaudeCode)
+                .unwrap()
+                .id,
+            claude.id,
+            "asked again: the same"
+        );
+        assert!(master_session(&db, project, AgentHarness::Mini).is_err());
+        assert!(known_role(&[], crate::ide::model::MASTER_ROLE).is_err());
+        let edited = update_agent_on_engine(
+            &db,
+            &Config::default(),
+            &[],
+            claude.id,
+            "x",
+            "e",
+            "allrounder",
+        );
+        assert!(
+            edited.unwrap_err().to_string().contains("master"),
+            "a master is not turned into a session"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn add(

@@ -316,6 +316,7 @@ pub fn run() {
             commands::delete_ide_project,
             commands::list_ide_agents,
             commands::create_ide_agent_on_engine,
+            commands::ide_master_session,
             commands::update_ide_agent_on_engine,
             commands::list_engines,
             commands::save_engine,

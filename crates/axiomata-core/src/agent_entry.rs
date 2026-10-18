@@ -74,10 +74,9 @@ impl AgentEntry {
     fn new(
         status: EntryStatus,
         command: Option<&Path>,
-        role: Option<&Role>,
+        caps: &Capabilities,
         note: Option<String>,
     ) -> Self {
-        let caps = role.map_or(Capabilities::NONE, Capabilities::of);
         AgentEntry {
             status,
             server: SERVER_NAME,
@@ -96,13 +95,18 @@ impl AgentEntry {
         Self::new(
             EntryStatus::NotApplicable,
             None,
-            None,
+            &Capabilities::NONE,
             Some(note.to_owned()),
         )
     }
 
     fn unavailable(note: String) -> Self {
-        Self::new(EntryStatus::Unavailable, None, None, Some(note))
+        Self::new(
+            EntryStatus::Unavailable,
+            None,
+            &Capabilities::NONE,
+            Some(note),
+        )
     }
 }
 
@@ -235,6 +239,15 @@ pub fn instructions(agent: &Agent, role: Option<&Role>) -> String {
         }
     }
     text
+}
+
+/// The team tools `agent` has, as the server will offer them: a master's own ([`Capabilities::MASTER`]) or its role's.
+fn caps_of(agent: &Agent, role: Option<&Role>) -> Capabilities {
+    if agent.is_master() {
+        Capabilities::MASTER
+    } else {
+        role.map_or(Capabilities::NONE, Capabilities::of)
+    }
 }
 
 /// The tools of the server a role gets, as the server names them (`list_agents`, `claim_task`, …).
@@ -624,7 +637,12 @@ fn wire_claude_with(
             }
             (
                 Some(arg),
-                AgentEntry::new(EntryStatus::Registered, Some(&cli), role, None),
+                AgentEntry::new(
+                    EntryStatus::Registered,
+                    Some(&cli),
+                    &caps_of(agent, role),
+                    None,
+                ),
             )
         }
         Err(err) => (
@@ -664,7 +682,12 @@ pub async fn wire_opencode(
     match crate::agents::opencode::register_mcp(instance, directory, &server.opencode_config())
         .await
     {
-        Ok(()) => AgentEntry::new(EntryStatus::Registered, Some(&cli), role, None),
+        Ok(()) => AgentEntry::new(
+            EntryStatus::Registered,
+            Some(&cli),
+            &caps_of(agent, role),
+            None,
+        ),
         Err(err) => {
             AgentEntry::unavailable(format!("Opencode would not take the MCP server: {err}"))
         }
@@ -792,7 +815,7 @@ mod tests {
         let entry = AgentEntry::new(
             EntryStatus::Registered,
             Some(Path::new("/opt/ax/axiomata-cli")),
-            None,
+            &Capabilities::NONE,
             None,
         );
         let shown = serde_json::to_string(&entry).unwrap();
