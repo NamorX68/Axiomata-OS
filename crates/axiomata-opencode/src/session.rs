@@ -4,11 +4,20 @@
 //! (<https://opencode.ai/v2/docs/api/>); responses wrap their payload in
 //! `{data: …}`.
 
+use std::time::Duration;
+
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::error::OpencodeError;
 use crate::service::Service;
+
+/// How long a new session waits for its model to be listed: a service that just started reads a provider's
+/// models (Ollama's) a moment later, and a session made before that fails with "model unavailable" (CP1 of
+/// `docs/plans/agent-isolation.md`, measured on 2.0.32).
+const MODEL_WAIT: Duration = Duration::from_secs(15);
+/// Pause between two looks at the model list.
+const MODEL_POLL: Duration = Duration::from_millis(250);
 
 /// Messages read per page when walking a session backwards.
 const PAGE_SIZE: u32 = 50;
@@ -115,6 +124,9 @@ pub(crate) fn session_path(session_id: &str, rest: &str) -> Result<String, Openc
 impl Service {
     /// Creates a session and returns its id.
     pub async fn create_session(&self, new: &NewSession) -> Result<String, OpencodeError> {
+        if let Some(model) = &new.model {
+            self.await_model(model).await;
+        }
         let mut body = json!({ "location": { "directory": new.directory } });
         if let Some(title) = &new.title {
             body["title"] = json!(title);
@@ -129,11 +141,48 @@ impl Service {
             body["permissions"] = json!(new.permissions);
         }
         let session = data(self.post("/api/session", &body).await?, "create session")?;
-        session
+        let id = session
             .get("id")
             .and_then(Value::as_str)
             .map(str::to_owned)
-            .ok_or_else(|| OpencodeError::Protocol("created session has no id".into()))
+            .ok_or_else(|| OpencodeError::Protocol("created session has no id".into()))?;
+        self.apply_environment(&id).await?;
+        Ok(id)
+    }
+
+    /// Waits until the service lists `model`, for at most [`MODEL_WAIT`]. Best effort: a model that never
+    /// appears, or a list that cannot be read, is left for the session itself to report.
+    async fn await_model(&self, model: &ModelRef) {
+        let deadline = tokio::time::Instant::now() + MODEL_WAIT;
+        loop {
+            match self.get("/api/model").await {
+                Ok(answer) if lists_model(&answer, model) => return,
+                Ok(_) if tokio::time::Instant::now() < deadline => {
+                    tokio::time::sleep(MODEL_POLL).await
+                }
+                Ok(_) => {
+                    tracing::warn!(provider = %model.provider_id, model = %model.id, "opencode: model not listed");
+                    return;
+                }
+                Err(err) => {
+                    tracing::debug!(%err, "opencode: the model list could not be read");
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Sets the session's shell environment to the one [`Service::with_session_environment`] gave this client;
+    /// nothing without one. Applied again whenever a session is continued: whether the service keeps it across
+    /// its own restart is not documented.
+    pub async fn apply_environment(&self, session_id: &str) -> Result<(), OpencodeError> {
+        let Some(env) = &self.session_env else {
+            return Ok(());
+        };
+        let path = session_path(session_id, "/environment")?;
+        self.put(&path, &json!({ "variables": env.as_ref() }))
+            .await
+            .map(drop)
     }
 
     /// The session's info (`Session.Info`).
@@ -300,6 +349,21 @@ fn page_path(base: &str, cursor: Option<&str>) -> String {
     }
 }
 
+/// Whether `GET /api/model`'s answer lists `model`.
+fn lists_model(answer: &Value, model: &ModelRef) -> bool {
+    answer
+        .get("data")
+        .and_then(Value::as_array)
+        .is_some_and(|models| {
+            models.iter().any(|entry| {
+                entry.get("providerID").and_then(Value::as_str) == Some(model.provider_id.as_str())
+                    && ["id", "modelID"].iter().any(|key| {
+                        entry.get(*key).and_then(Value::as_str) == Some(model.id.as_str())
+                    })
+            })
+        })
+}
+
 /// Percent-encodes a query value (the cursor is opaque and may hold anything).
 fn percent_encode(value: &str) -> String {
     value
@@ -316,6 +380,25 @@ fn percent_encode(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_is_found_in_the_list_by_provider_and_id() {
+        let answer = json!({"data": [
+            {"id": "lfm2.5:8b", "modelID": "lfm2.5:8b", "providerID": "ollama"},
+            {"id": "deepseek/x-1017", "modelID": "deepseek/x", "providerID": "openrouter"}
+        ]});
+        let model = |full: &str| ModelRef::parse(full).unwrap();
+        assert!(lists_model(&answer, &model("ollama/lfm2.5:8b")));
+        assert!(
+            lists_model(&answer, &model("openrouter/deepseek/x")),
+            "by its modelID"
+        );
+        assert!(
+            !lists_model(&answer, &model("openrouter/lfm2.5:8b")),
+            "another provider's model"
+        );
+        assert!(!lists_model(&json!({}), &model("ollama/lfm2.5:8b")));
+    }
 
     #[test]
     fn only_the_first_page_names_the_order_a_later_one_names_its_cursor() {

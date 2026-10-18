@@ -244,7 +244,8 @@ async fn serve(
             ]});
             respond(&mut stream, "200 OK", &servers).await
         }
-        ("PUT" | "DELETE", "/api/experimental/mcp/axiomata") => {
+        ("PUT", "/api/session/ses_mock1/environment")
+        | ("PUT" | "DELETE", "/api/experimental/mcp/axiomata") => {
             // The real service answers 204 with no body.
             let _ = stream
                 .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
@@ -539,6 +540,45 @@ async fn an_mcp_server_is_registered_and_removed_per_location() {
             .is_err(),
         "a name that is no config key never becomes a path"
     );
+}
+
+#[tokio::test]
+async fn sessions_get_the_given_environment_for_their_commands() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("session-env");
+    let bin = fake_opencode(&dir);
+    write_discovery(&dir, &discovery(mock.port, "pw"));
+    let plain = Service::connect(&bin, &env()).await.expect("connect");
+    let new = NewSession {
+        directory: "/work".into(),
+        ..NewSession::default()
+    };
+    plain.create_session(&new).await.expect("created");
+    assert!(
+        !mock.requests().iter().any(|(method, ..)| method == "PUT"),
+        "without an environment the service's own stays"
+    );
+
+    let service = plain.with_session_environment(
+        [("HOME".to_owned(), "/Users/me".to_owned())]
+            .into_iter()
+            .collect(),
+    );
+    let id = service.create_session(&new).await.expect("created");
+    service.apply_environment(&id).await.expect("applied again");
+    let puts: Vec<_> = mock
+        .requests()
+        .into_iter()
+        .filter(|(method, ..)| method == "PUT")
+        .collect();
+    assert_eq!(puts.len(), 2, "once at creation, once when continued");
+    assert_eq!(puts[0].1, "/api/session/ses_mock1/environment");
+    let body: Value = serde_json::from_str(&puts[0].2).unwrap();
+    assert_eq!(body, json!({ "variables": { "HOME": "/Users/me" } }));
 }
 
 #[tokio::test]

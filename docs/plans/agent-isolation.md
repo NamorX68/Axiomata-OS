@@ -1,6 +1,6 @@
 # The app's agents apart from the owner's own — and a master pane in the canvas
 
-Status: drafted 2026-10-18, owner decisions D1–D9 taken (Q1–Q4 grilled the same day); CP0 measured, next: CP1. Background:
+Status: drafted 2026-10-18, owner decisions D1–D9 taken (Q1–Q4 grilled the same day); CP0 measured, CP1 built; next: CP2. Background:
 the owner's note `vault/Entwicklung/opencode-pi-harness-uebersicht.md` (put together with Grok) and the code as it
 stands at `2377be6`.
 
@@ -69,8 +69,8 @@ the couplings that are real.
 | `master` | `~/.axiomata/opencode/master/` (data, state, cache; config the owner's, D6) | the master Opencode pane | the owner's own |
 
 - **Launcher** (`axiomata-opencode`): `Service::connect` gets the instance's `XDG_*` folders in its child
-  environment; discovery reads that instance's `service.json`. The app starts what it needs at first use and stops its
-  own instances on quit — never the owner's service.
+  environment; discovery reads that instance's `service.json`. The app starts what it needs at first use — never the
+  owner's service — and leaves it running when it quits (see CP1 below).
 - **Generated config** per instance (`<config>/opencode/opencode.json`, rewritten at every start, mode `0600`):
   providers and keys from `config.toml` (D2), the MCP servers (D7), the instance's rights (D3). The owner edits the
   app's settings, never these files.
@@ -131,6 +131,35 @@ Still open: the exact action that made the owner's TUI lose its shell. Next time
   moves a case to option C. Written into this plan.
 - **CP1 — the app's own instances.** Launcher with `XDG_*`, discovery, generated config, start/stop, routing
   everything to `write` first; migration of stored session ids. The owner's service is no longer started or touched.
+  **Built 2026-10-18** (`agents/opencode_instance.rs`), checked end to end with a scratch `AXIOMATA_HOME` and a local
+  model (cold start, a config change restarting the instance, the owner's database untouched). What building it
+  settled:
+  - **Port:** chosen free once, kept in the instance's `config/opencode/service.json` beside the password the service
+    writes there.
+  - **Model catalog:** the `providers` of the owner's `opencode.json` (models, variants, routing preferences) are
+    copied without any credential field, URL with a user part or `headers`; keys and the Ollama endpoint then come
+    from `config.toml`. OpenRouter with the app's key drops the catalog's `baseURL`/`package`, so the key only ever
+    goes to Opencode's own OpenRouter endpoint. A provider the owner reaches only through `opencode auth login`
+    (Anthropic's subscription) is not available to the app (D6, by choice).
+  - **Shell environment:** a service with the instance's `XDG_*` folders hands them to every command it runs, so `gh`
+    or `git` would look for their configuration there. Every session gets the app's allowlisted environment back
+    (`PUT /api/session/{id}/environment` — measured: it *replaces* the environment), at creation and whenever it is
+    continued.
+  - **Panes:** the TUI is typed with `env XDG_STATE_HOME=<instance state>` in front — the discovery file is all it
+    needs (measured), so its own look and keys stay the owner's.
+  - **Restart:** the configuration is regenerated at every connect; a running service started with another one (marker
+    `started-with.json`, written only after a start that worked) is restarted only while no session executes, else
+    later. A restart drops the per-location `axiomata` MCP registrations of idle card sessions — they come back when
+    the pane restarts.
+  - **Not stopped on quit:** stopping it would cut off every running card worker on each `cargo tauri dev` rebuild; it
+    is the app's own, so leaving it running costs the owner nothing.
+  - **Guard:** before starting or restarting, Opencode's own `debug paths state` must name the instance's folder; the
+    instance folder must be an absolute, real folder (mode `0700`).
+  - **Cold start:** a fresh service lists Ollama's models a moment after it answers; a new session waits (up to 15 s)
+    until its model is listed.
+  - **Migration:** a stored card session id is unknown to the new service and replaced at the next start; a chat whose
+    session is unknown goes on in a new one. `~/.axh/mcp.json` was created with the owner's two Apple servers.
+  - **Locked:** card sessions may not write `~/.axh/` (Opencode auto mode shell, Claude `Edit`/`Bash` denies).
 - **CP2 — read and write apart.** The `read` instance with its config rights; routing of reviewers, planners and
   read-only skills.
 - **CP3 — master panes.** Claude Code and Opencode in the Studio's pane menu, team tools wired, the `master`

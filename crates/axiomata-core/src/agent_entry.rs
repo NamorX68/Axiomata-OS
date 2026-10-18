@@ -496,10 +496,10 @@ pub fn opencode_shell_patterns(permissions: &[String]) -> Vec<String> {
 /// which the role's own `git diff:*`/`git show:*` would take in), and write its own rules — `acceptEdits` takes edits
 /// without asking, and a
 /// session that can write `.claude/settings*.json` or a `.mcp.json` of its worktree could widen its own rights next
-/// time.
+/// time, and one that writes `~/.axh/mcp.json` would start a server of its own in every app instance.
 const CLAUDE_CARD_DENIED: &str = concat!(
     "Bash(git push),Bash(git push *),Bash(git * push),Bash(git * push *),",
-    "Bash(git * --output*),Bash(git * --no-index*),Edit(.claude/**),Edit(.mcp.json)"
+    "Bash(git * --output*),Bash(git * --no-index*),Edit(.claude/**),Edit(.mcp.json),Edit(~/.axh/**)"
 );
 
 /// What a worker in the owner's auto mode is refused on top of [`CLAUDE_CARD_DENIED`]: the plain shell forms of
@@ -508,7 +508,7 @@ const CLAUDE_CARD_DENIED: &str = concat!(
 const CLAUDE_AUTO_DENIED: &str = concat!(
     "Bash(*.claude/*),Bash(*.mcp.json*),Bash(*opencode.json*),Bash(*.opencode/*),",
     "Bash(*.git/hooks*),Bash(*core.hooksPath*),",
-    "Bash(axiomata-cli*),Bash(*/axiomata-cli *),Bash(*/axiomata-cli),Bash(*sqlite3*),Bash(*.axiomata/*),",
+    "Bash(axiomata-cli*),Bash(*/axiomata-cli *),Bash(*/axiomata-cli),Bash(*sqlite3*),Bash(*.axiomata/*),Bash(*.axh/*),",
     "Bash(*git push*)"
 );
 

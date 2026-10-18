@@ -22,9 +22,10 @@ use axiomata_opencode::{
     TurnSession, unattended_permissions,
 };
 
+use super::opencode_instance::{self, Instance};
 use super::{
     AgentRequest, AgentRunResult, BACKEND_OPENCODE, ChatReply, ChatRequest, MAX_RESPONSE_BYTES,
-    agent_child_env, agent_slots, truncate_utf8, valid_model_name,
+    agent_slots, truncate_utf8, valid_model_name,
 };
 use crate::config::{Config, ProviderRole};
 use crate::error::AxiomataError;
@@ -137,39 +138,154 @@ pub(crate) fn chat_model_id(config: &Config) -> Result<String, AxiomataError> {
     ))
 }
 
-/// Connects to the Opencode service (starting it if needed). The `opencode`
-/// commands this may run get the sanitised agent environment — a service
-/// started from here keeps it.
+/// Connects to the app's own Opencode service (`docs/plans/agent-isolation.md`, CP1), starting it if needed —
+/// never the owner's. Its configuration is generated first ([`opencode_instance::prepare`]); a running service that
+/// was started with another one is restarted, but only while no session is executing — a restart under a running
+/// card worker would cut it off mid-step, so it waits for a later connect. The `opencode` commands this runs get the
+/// sanitised agent environment with the instance's folders — a service started from here keeps it — and the
+/// sessions it makes get the owner's environment back for their shell commands.
 ///
-/// Unit tests never get here: a turn on the owner's real service could be a
-/// billed model call, so under `cfg(test)` this always fails.
+/// Unit tests never get here: a turn on a real service could be a billed model call, so under `cfg(test)` this
+/// always fails.
 async fn connect() -> Result<Service, AxiomataError> {
-    if cfg!(test) {
-        return Err(AxiomataError::AgentApi {
-            backend: BACKEND_OPENCODE,
-            message: "unit tests never reach the real Opencode service".to_string(),
-        });
-    }
+    /// One preparation at a time: two turns starting together must not both find the configuration stale and
+    /// restart the service under each other's feet.
+    static PREPARING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    refuse_in_tests()?;
     let binary = resolve_opencode_binary()?;
-    Service::connect(binary, &agent_child_env())
-        .await
-        .map_err(into_axiomata)
+    let instance = Instance::Write;
+    let env = opencode_instance::service_env(instance);
+    let _preparing = PREPARING.lock().await;
+    check_state_dir(binary, &env, instance).await?;
+    let stale = tokio::task::spawn_blocking(move || {
+        let config = Config::load()?;
+        opencode_instance::prepare(instance, &config)
+    })
+    .await
+    .map_err(|err| AxiomataError::AgentApi {
+        backend: BACKEND_OPENCODE,
+        message: format!("preparing the app's Opencode stopped: {err}"),
+    })??;
+    let service = match Service::find(binary, &env).await {
+        Ok(running) if stale => restart_when_idle(binary, &env, instance, running).await?,
+        Ok(running) => running,
+        Err(_) => {
+            let started = Service::connect(binary, &env)
+                .await
+                .map_err(into_axiomata)?;
+            if stale {
+                mark_started(instance).await;
+            }
+            started
+        }
+    };
+    Ok(service.with_session_environment(opencode_instance::session_env()))
 }
 
-/// Finds the Opencode service without starting it — for the IDE's status
+/// Restarts `running` so it reads its new configuration, unless a session is executing on it — then the old one
+/// stays until a later connect finds the service idle.
+async fn restart_when_idle(
+    binary: &std::path::Path,
+    env: &[(String, String)],
+    instance: Instance,
+    running: Service,
+) -> Result<Service, AxiomataError> {
+    match running.active_sessions().await {
+        Ok(active) if active.is_empty() => {
+            tracing::info!(
+                ?instance,
+                "opencode: configuration changed, restarting the app's service"
+            );
+            Service::restart(binary, env).await.map_err(into_axiomata)?;
+            let restarted = Service::connect(binary, env).await.map_err(into_axiomata)?;
+            mark_started(instance).await;
+            Ok(restarted)
+        }
+        Ok(active) => {
+            tracing::info!(
+                ?instance,
+                busy = active.len(),
+                "opencode: configuration changed, restart deferred while sessions run"
+            );
+            Ok(running)
+        }
+        Err(err) => {
+            tracing::warn!(%err, "opencode: could not tell whether sessions run, restart deferred");
+            Ok(running)
+        }
+    }
+}
+
+/// Records the configuration the service now runs with; a failure only means the next connect restarts once more.
+async fn mark_started(instance: Instance) {
+    match tokio::task::spawn_blocking(move || opencode_instance::mark_started(instance)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            tracing::warn!(%err, "opencode: the started configuration was not recorded")
+        }
+        Err(err) => tracing::warn!(%err, "opencode: recording the started configuration stopped"),
+    }
+}
+
+/// Refuses to drive a service whose state folder is not the instance's: Opencode would otherwise start, restart or
+/// stop the owner's own (an `XDG_*` variable it ignored, a newer version reading another one). Asked once per
+/// process — the answer does not change while it runs.
+async fn check_state_dir(
+    binary: &std::path::Path,
+    env: &[(String, String)],
+    instance: Instance,
+) -> Result<(), AxiomataError> {
+    static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if CHECKED.load(std::sync::atomic::Ordering::Acquire) {
+        return Ok(());
+    }
+    let reported = Service::state_dir(binary, env)
+        .await
+        .map_err(into_axiomata)?;
+    let expected = opencode_instance::expected_state_dir(instance);
+    if reported != expected {
+        return Err(AxiomataError::AgentApi {
+            backend: BACKEND_OPENCODE,
+            message: format!(
+                "Opencode keeps its state in {} instead of the app's {} — refusing to touch a service that may be \
+                 the owner's",
+                reported.display(),
+                expected.display()
+            ),
+        });
+    }
+    CHECKED.store(true, std::sync::atomic::Ordering::Release);
+    Ok(())
+}
+
+/// Finds the app's Opencode service without starting it — for the IDE's status
 /// watcher, which has nothing to watch on a service that is not running.
 /// Under `cfg(test)` it never connects, like [`connect`].
 pub(crate) async fn find() -> Result<Service, AxiomataError> {
+    refuse_in_tests()?;
+    let binary = resolve_opencode_binary()?;
+    Service::find(binary, &opencode_instance::service_env(Instance::Write))
+        .await
+        .map(|service| service.with_session_environment(opencode_instance::session_env()))
+        .map_err(into_axiomata)
+}
+
+/// What a pane types in front of its `opencode` command, so its terminal UI attaches to the app's service and not
+/// to the owner's (`docs/plans/agent-isolation.md`, CP1).
+pub(crate) fn tui_env_prefix() -> String {
+    opencode_instance::tui_env_prefix(Instance::Write)
+}
+
+/// A real service is never reached from a unit test.
+fn refuse_in_tests() -> Result<(), AxiomataError> {
     if cfg!(test) {
         return Err(AxiomataError::AgentApi {
             backend: BACKEND_OPENCODE,
             message: "unit tests never reach the real Opencode service".to_string(),
         });
     }
-    let binary = resolve_opencode_binary()?;
-    Service::find(binary, &agent_child_env())
-        .await
-        .map_err(into_axiomata)
+    Ok(())
 }
 
 /// The session's location must be a directory that exists — checked before
@@ -384,7 +500,22 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
     }
     check_cwd(&request.cwd)?;
     let text = with_module_context(request.system_prompt_file.as_ref(), request.message);
-    let session = match request.session_id {
+    let _permit = agent_slots()
+        .acquire()
+        .await
+        .expect("agent_slots semaphore is never closed");
+    let service = connect().await?;
+    // A conversation the service does not know (one held on the owner's service before the app had its own,
+    // `docs/plans/agent-isolation.md` CP1, or one deleted since) goes on in a new session rather than failing.
+    let session_id = match request.session_id {
+        Some(id) => match service.session(&id).await {
+            Ok(_) => Some(id),
+            Err(OpencodeError::Http { status: 404, .. }) => None,
+            Err(err) => return Err(into_axiomata(err)),
+        },
+        None => None,
+    };
+    let session = match session_id {
         Some(id) => TurnSession::Existing {
             id,
             model: Some(model),
@@ -397,11 +528,6 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
             ..NewSession::default()
         }),
     };
-    let _permit = agent_slots()
-        .acquire()
-        .await
-        .expect("agent_slots semaphore is never closed");
-    let service = connect().await?;
     let outcome = service
         .run_turn(TurnRequest {
             session,
@@ -501,7 +627,7 @@ const REVIEWER_GIT: [&str; 5] = [
 
 /// What a session in the owner's auto mode is refused rather than asked about (action, resource): anything outside its
 /// worktree, secrets in `.env` files, and the configuration files a later session in the same worktree would obey.
-const AUTO_DENIED: [(&str, &str); 19] = [
+const AUTO_DENIED: [(&str, &str); 20] = [
     ("external_directory", "*"),
     ("read", "*.env"),
     ("read", "*.env.*"),
@@ -523,6 +649,9 @@ const AUTO_DENIED: [(&str, &str); 19] = [
     ("shell", "*/axiomata-cli"),
     ("shell", "*sqlite3*"),
     ("shell", "*.axiomata/*"),
+    // The MCP servers every app instance starts (`docs/plans/agent-isolation.md`, D7): a server written there runs
+    // outside any session's rules at the next start.
+    ("shell", "*.axh/*"),
     ("shell", "*git push*"),
 ];
 
@@ -587,7 +716,11 @@ pub async fn ide_session(
             .and_then(|info| info.get("model"))
             .and_then(ModelRef::from_value);
         let found_dir = found.as_ref().and_then(session_directory);
-        match reuse(found_dir, directory, current_model.as_ref(), model.as_ref()) {
+        let decision = reuse(found_dir, directory, current_model.as_ref(), model.as_ref());
+        if decision != Reuse::Replace {
+            service.apply_environment(id).await.map_err(into_axiomata)?;
+        }
+        match decision {
             Reuse::Continue => {
                 return Ok(IdeSession {
                     id: id.to_string(),

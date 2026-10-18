@@ -120,6 +120,7 @@ impl Service {
                 self.create_session(&new).await?
             }
             TurnSession::Existing { id, model } => {
+                self.apply_environment(&id).await?;
                 if let Some(model) = model {
                     let current = self.session(&id).await?;
                     if current.get("model").and_then(ModelRef::from_value).as_ref() != Some(&model)

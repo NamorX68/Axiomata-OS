@@ -149,7 +149,13 @@ pub async fn start_agent(core: &AxiomataCore, id: i64) -> Result<Started, Axioma
                     ),
                 });
             }
-            ready.launch_command = with_session(&ready.launch_command, &session.id);
+            // The terminal UI attaches to the app's own service (`docs/plans/agent-isolation.md`, CP1), where the
+            // session is — the owner's service does not know it.
+            ready.launch_command = format!(
+                "{}{}",
+                opencode::tui_env_prefix(),
+                with_session(&ready.launch_command, &session.id)
+            );
             // Taken before the line below overwrites it: the "remember only now" check at the end compares against what
             // the database holds, and would otherwise never store a session made in this start.
             let remembered = ready.agent.opencode_session.clone();

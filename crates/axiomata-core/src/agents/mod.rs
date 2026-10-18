@@ -28,6 +28,7 @@ use crate::error::AxiomataError;
 pub mod axh;
 pub mod ollama;
 pub mod opencode;
+mod opencode_instance;
 
 /// Backend identifier stored verbatim in a `SKILL.md` frontmatter `backend`
 /// field and in a routine's DB row. Kept as a plain string on disk so the file

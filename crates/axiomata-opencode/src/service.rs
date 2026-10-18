@@ -9,8 +9,10 @@
 //! else; a refused login surfaces as [`OpencodeError::Unauthorized`] rather
 //! than a vague failure (plan Q10, upstream issue #51724).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -53,6 +55,9 @@ pub struct Service {
     base: String,
     password: String,
     version: String,
+    /// The process environment the shell commands of this client's sessions get
+    /// ([`Service::with_session_environment`]); `None` leaves the service's own.
+    pub(crate) session_env: Option<Arc<BTreeMap<String, String>>>,
 }
 
 impl std::fmt::Debug for Service {
@@ -134,6 +139,7 @@ impl Service {
             base,
             password: discovery.password,
             version: String::new(),
+            session_env: None,
         };
         let info = match service.get("/api/info").await {
             Ok(info) => info,
@@ -148,6 +154,41 @@ impl Service {
             .ok_or_else(|| OpencodeError::Protocol("/api/info has no version".into()))?
             .to_string();
         Ok(service)
+    }
+
+    /// Gives every session this client creates or continues `env` as the environment of its shell commands
+    /// ([`Service::apply_environment`]). A service started with folders of its own (`XDG_*`) passes them on to
+    /// every command it runs; a session given the owner's environment back runs `git`, `gh` and the like the way
+    /// the owner's terminal does.
+    pub fn with_session_environment(mut self, env: BTreeMap<String, String>) -> Self {
+        self.session_env = Some(Arc::new(env));
+        self
+    }
+
+    /// The state folder the `opencode` commands with `child_env` use (`opencode debug paths state`) — where the
+    /// service they start, restart or stop registers itself.
+    ///
+    /// Errors:
+    ///     As [`Service::connect`] for running the command.
+    pub async fn state_dir(
+        opencode: &Path,
+        child_env: &[(String, String)],
+    ) -> Result<PathBuf, OpencodeError> {
+        state_dir(opencode, child_env).await
+    }
+
+    /// Restarts the service, so it reads its configuration again (Opencode reads it once, at start). One that
+    /// is not running is started.
+    ///
+    /// Errors:
+    ///     [`OpencodeError::Unavailable`] when `opencode service restart` fails.
+    pub async fn restart(
+        opencode: &Path,
+        child_env: &[(String, String)],
+    ) -> Result<(), OpencodeError> {
+        run_command(opencode, &["service", "restart"], child_env)
+            .await
+            .map(drop)
     }
 
     /// The version the service reported.
@@ -175,6 +216,15 @@ impl Service {
     pub(crate) async fn get(&self, path: &str) -> Result<Value, OpencodeError> {
         self.send("GET", self.authorized(reqwest::Method::GET, path), path)
             .await
+    }
+
+    /// `PUT path` with a JSON body, answered JSON (or `null` for no content).
+    pub(crate) async fn put(&self, path: &str, body: &Value) -> Result<Value, OpencodeError> {
+        let request = self
+            .authorized(reqwest::Method::PUT, path)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string());
+        self.send("PUT", request, path).await
     }
 
     /// `POST path` with a JSON body, answered JSON (or `null` for no content).
@@ -427,6 +477,7 @@ mod tests {
             base: "http://127.0.0.1:1".into(),
             password: "top-secret".into(),
             version: "2.0.18".into(),
+            session_env: None,
         };
         assert!(!format!("{service:?}").contains("top-secret"));
     }

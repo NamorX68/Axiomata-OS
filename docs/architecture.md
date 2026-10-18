@@ -300,8 +300,11 @@ project by id, never by path (`project_roles`, `confirm_project_roles`).
 
 ### `axiomata-opencode`
 
-The client for Opencode 2's shared background service (`docs/plans/opencode2.md`, OC1).
-Standalone like `axiomata-terminal`: no Tauri, no `axiomata-core` — the skill runner (in
+The client for Opencode 2's background service (`docs/plans/opencode2.md`, OC1). Since
+2026-10-18 the service it talks to is the **app's own instance**, not the owner's
+(`docs/plans/agent-isolation.md`, CP1): core's `agents/opencode_instance.rs` gives it its own
+`XDG_*` folders, port and generated config, and `Service::with_session_environment` hands each
+session the owner's environment back for its shell commands. Standalone like `axiomata-terminal`: no Tauri, no `axiomata-core` — the skill runner (in
 core) and the agentic IDE (`axiomata-ide`, OC2/OC3) both use it. `service` finds the
 service (`opencode debug paths state` → `service.json`), logs in (the one undocumented
 detail: HTTP Basic, user `opencode`), refuses a non-loopback URL and a major version other

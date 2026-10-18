@@ -104,17 +104,22 @@ from the code itself:
   why).
 - **Opencode 2 is a service, and Axiomata is its API client** (`docs/plans/opencode2.md`,
   crate `axiomata-opencode`; docs: https://opencode.ai/v2/docs, *not* `/docs`, that is v1).
-  Skills and chat are sessions on the one shared background service (`POST /api/session`,
-  prompt, wait on `/api/event`, read the messages back) — never parse a CLI's output again,
+  Skills, chat and card sessions run on the **app's own** service, never the owner's
+  (`docs/plans/agent-isolation.md`, `agents/opencode_instance.rs`): its own `XDG_*` folders under
+  `~/.axiomata/opencode/write/`, its own port, a config generated at every connect (keys from
+  `config.toml`, MCP from `~/.axh/mcp.json`, the owner's model catalog without credentials), left
+  running when the app quits. Sessions get the owner's environment back for their shell commands (`PUT
+  …/environment`); a pane's TUI attaches with `XDG_STATE_HOME` alone. Each session is
+  `POST /api/session`, prompt, wait on `/api/event`, read the messages back — never parse a CLI's output again,
   never `--standalone` (it deadlocks on the shared database and starts its own MCP servers,
   apple-mail opening Mail.app each time). Unit tests cannot reach the real service
   (`cfg(test)` guard in `agents/opencode.rs`); live checks are `#[ignore]`d in
   `crates/axiomata-opencode/tests/live.rs`. After every Opencode update, check one real skill run.
-- **Connector skills reach MCP through opencode's own config, not Axiomata's** — skill
-  sessions run on the service (`AgentBackend::Opencode`), which resolves the
-  MCP servers from `~/.config/opencode/opencode.json` (the same `apple-mail` /
-  `apple-reminders` servers); tool use is pre-approved by the session's permission rules
-  (`auto_approve_tools`, the former `--auto`). There is no
+- **Connector skills reach MCP through the app instance's generated config** — skill
+  sessions run on the app's service (`AgentBackend::Opencode`), which starts the
+  MCP servers listed in `~/.axh/mcp.json` (the `apple-mail` / `apple-reminders` servers; the
+  owner's `~/.config/opencode/opencode.json` is not read for them); tool use is pre-approved
+  by the session's permission rules (`auto_approve_tools`, the former `--auto`). There is no
   `allowed_tools` allow-listing at runtime anymore (that was a Claude Code `--allowedTools`
   trap, §5 of `docs/architecture.md`); the frontmatter field is kept as documentation only.
 - **Routines**: cron is the `cron` crate's **6–7 field, seconds-first** format
