@@ -72,6 +72,8 @@ export interface GitApi {
   blob(root: string, path: string, source: "head" | "index"): Promise<Blob>;
   applyHunk(root: string, path: string, oldPath: string | null, side: Side, index: number, header: string): Promise<void>;
   commit(root: string, message: string): Promise<string>;
+  /** A commit message for what is staged, written by the skill provider's model (board card #96). Costs a model call. */
+  suggestMessage(root: string): Promise<string>;
   fetch(root: string): Promise<void>;
   /** Pushes the checked-out branch to its upstream, or publishes it to `origin`. Never forced. */
   push(root: string): Promise<PushResult>;
@@ -101,6 +103,7 @@ export const gitApi: GitApi = {
   applyHunk: (root, path, oldPath, side, index, header) =>
     invoke<void>("git_apply_hunk", { root, path, oldPath, side, index, header }),
   commit: (root, message) => invoke<string>("git_commit", { root, message }),
+  suggestMessage: (root) => invoke<string>("git_suggest_commit_message", { root }),
   fetch: (root) => invoke<void>("git_fetch", { root }),
   push: (root) => invoke<PushResult>("git_push", { root }),
   init: (root) => invoke<void>("git_init", { root }),

@@ -436,6 +436,123 @@ pub fn apply_hunk(
     git_with_input(repo, &args, patch.as_bytes()).map(drop)
 }
 
+/// The most of the staged diff handed to a model for a commit message, in bytes: enough for any commit a message can
+/// sum up, small enough to stay cheap. The `--stat` beside it always covers every file.
+pub const MAX_MESSAGE_DIFF_BYTES: usize = 48 * 1024;
+
+/// The most of `--stat` handed along, in bytes; staging thousands of files must not make one call huge.
+const MAX_MESSAGE_STAT_BYTES: usize = 16 * 1024;
+
+/// How many recent commit messages go along as examples of the project's style, and how long each may be.
+const RECENT_MESSAGES: usize = 10;
+const MAX_RECENT_MESSAGE_CHARS: usize = 2000;
+
+/// What a model needs to suggest a commit message (board card #96): what is staged and how the project writes its
+/// messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StagedSummary {
+    /// `git diff --cached --stat`: every staged file, even when the diff below is cut.
+    pub stat: String,
+    /// The staged diff, at most [`MAX_MESSAGE_DIFF_BYTES`].
+    pub diff: String,
+    /// Whether `diff` was cut.
+    pub truncated: bool,
+    /// The last commit messages, newest first; empty in a repository without commits.
+    pub recent: Vec<String>,
+}
+
+/// Reads [`StagedSummary`]. External diff drivers and text conversions stay off, and the runner turns off the config
+/// that would start a program on a read ([`crate::run`]); the repository's hooks are not involved in a read.
+///
+/// The summary goes to a model, often a cloud one: a staged file that looks like it holds a secret (`.env`, a key, a
+/// keystore — [`looks_secret`]) is named in `stat` but its diff is left out.
+///
+/// # Errors
+///
+/// [`GitError::Invalid`] when nothing is staged; a failed git call.
+pub fn staged_summary(repo: &Path) -> Result<StagedSummary> {
+    let diff_args = [
+        "diff",
+        "--cached",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+    ];
+    let names = git(repo, &[&diff_args[..], &["--name-only", "-z"]].concat())?;
+    let names: Vec<&str> = names.split('\0').filter(|n| !n.is_empty()).collect();
+    if names.is_empty() {
+        return Err(GitError::Invalid {
+            field: "index",
+            reason: "nothing is staged".into(),
+        });
+    }
+    let shown: Vec<&str> = names.iter().copied().filter(|n| !looks_secret(n)).collect();
+    let mut diff = if shown.is_empty() {
+        String::new()
+    } else if shown.len() == names.len() {
+        git(repo, &diff_args)?
+    } else {
+        // Literal pathspecs (`GIT_LITERAL_PATHSPECS`, see `run`): every name means exactly that file.
+        git(repo, &[&diff_args[..], &["--"], &shown[..]].concat())?
+    };
+    let mut stat = git(repo, &[&diff_args[..], &["--stat"]].concat())?;
+    cut_at(&mut stat, MAX_MESSAGE_STAT_BYTES);
+    let truncated = cut_at(&mut diff, MAX_MESSAGE_DIFF_BYTES);
+    let recent = if has_head(repo) {
+        let count = format!("-{RECENT_MESSAGES}");
+        // A record separator between messages: a message itself may hold any other character.
+        git(
+            repo,
+            &["log", "--no-show-signature", &count, "--format=%B%x1e"],
+        )?
+        .split('\u{1e}')
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(|message| message.chars().take(MAX_RECENT_MESSAGE_CHARS).collect())
+        .collect()
+    } else {
+        Vec::new()
+    };
+    Ok(StagedSummary {
+        stat,
+        diff,
+        truncated,
+        recent,
+    })
+}
+
+/// Cuts `text` to at most `max` bytes on a character boundary; whether it cut.
+fn cut_at(text: &mut String, max: usize) -> bool {
+    if text.len() <= max {
+        return false;
+    }
+    let mut cut = max;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    text.truncate(cut);
+    true
+}
+
+/// Whether a path's file name looks like it holds a secret: environment files, private keys and certificates,
+/// keystores, credential files. A guess on the name only — it keeps the obvious ones from leaving the machine.
+pub fn looks_secret(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    const NAMES: [&str; 6] = [
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        "credentials",
+        "credentials.json",
+        ".git-credentials",
+    ];
+    const PREFIXES: [&str; 5] = [".env", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"];
+    const SUFFIXES: [&str; 7] = [".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".asc"];
+    NAMES.contains(&name.as_str())
+        || PREFIXES.iter().any(|p| name.starts_with(p))
+        || SUFFIXES.iter().any(|s| name.ends_with(s))
+}
+
 /// Commits what is staged, with `message`; returns the new commit's id. Runs the user's own hooks
 /// with the user's own identity. Refuses an empty message and an empty index. **Creates a commit.**
 pub fn commit(repo: &Path, message: &str) -> Result<String> {
@@ -1159,6 +1276,83 @@ mod tests {
             Some(ChangeKind::Modified)
         );
         assert!(r.entry("a.txt").is_none());
+    }
+
+    #[test]
+    fn the_staged_summary_has_the_diff_the_stat_and_the_recent_messages() {
+        let r = Repo::new("summary");
+        r.write("a.txt", "1\n");
+        stage_all(&r.0).unwrap();
+        let first = staged_summary(&r.0).unwrap();
+        assert!(first.recent.is_empty(), "no commits yet");
+        assert!(first.diff.contains("+1"));
+        r.run(&["commit", "--quiet", "-m", "feat: one\n\n- body line"]);
+        r.write("a.txt", "2\n");
+        r.write("big.txt", &"x".repeat(MAX_MESSAGE_DIFF_BYTES + 10));
+        assert!(matches!(
+            staged_summary(&r.0),
+            Err(GitError::Invalid { field: "index", .. })
+        ));
+        stage_all(&r.0).unwrap();
+        let summary = staged_summary(&r.0).unwrap();
+        assert!(summary.stat.contains("a.txt") && summary.stat.contains("big.txt"));
+        assert!(summary.truncated);
+        assert!(summary.diff.len() <= MAX_MESSAGE_DIFF_BYTES);
+        assert_eq!(summary.recent, ["feat: one\n\n- body line"]);
+    }
+
+    #[test]
+    fn a_secret_looking_file_is_named_but_its_diff_stays_home_and_cuts_respect_characters() {
+        let r = Repo::new("secret");
+        r.write(".env", "TOKEN=hunter2\n");
+        r.write("app.rs", &"é".repeat(MAX_MESSAGE_DIFF_BYTES));
+        stage_all(&r.0).unwrap();
+        let summary = staged_summary(&r.0).unwrap();
+        assert!(summary.stat.contains(".env"));
+        assert!(!summary.diff.contains("hunter2"));
+        assert!(summary.diff.contains("app.rs"));
+        assert!(summary.truncated && summary.diff.len() <= MAX_MESSAGE_DIFF_BYTES);
+
+        let only = Repo::new("secret-only");
+        only.write("deploy.pem", "-----BEGIN-----\n");
+        stage_all(&only.0).unwrap();
+        let summary = staged_summary(&only.0).unwrap();
+        assert!(summary.diff.is_empty() && summary.stat.contains("deploy.pem"));
+    }
+
+    #[test]
+    fn secret_looking_names() {
+        for name in [
+            ".env",
+            "config/.env.local",
+            "id_ed25519",
+            "certs/server.PEM",
+            "creds/credentials",
+        ] {
+            assert!(looks_secret(name), "{name}");
+        }
+        for name in ["src/env.rs", "README.md", "keys.rs", "id.txt"] {
+            assert!(!looks_secret(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_repositorys_fsmonitor_hook_does_not_run_on_a_read() {
+        let r = Repo::new("fsmonitor");
+        let marker = r.0.join("ran");
+        let hook = r.0.join("hook.sh");
+        fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        r.run(&["config", "core.fsmonitor", hook.to_str().unwrap()]);
+        r.write("a.txt", "1\n");
+        stage_all(&r.0).unwrap();
+        let _ = staged_summary(&r.0).unwrap();
+        let _ = status(&r.0).unwrap();
+        assert!(!marker.exists(), "the repository's fsmonitor hook ran");
     }
 
     #[test]

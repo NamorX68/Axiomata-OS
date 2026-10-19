@@ -216,6 +216,25 @@ pub async fn git_commit(
     on_repo(&state, root, move |dir| repo::commit(&dir, &message)).await
 }
 
+/// Suggests a commit message for what is staged (board card #96): the skill provider's model reads the staged diff
+/// and the project's recent messages, in one call without tools. Metered and capped like any skill-role call.
+#[tauri::command]
+pub async fn git_suggest_commit_message(
+    state: State<'_, CoreState>,
+    root: String,
+) -> Result<String, FileError> {
+    let staged = on_repo(&state, root, |dir| repo::staged_summary(&dir)).await?;
+    let change = axiomata_core::commit_message::StagedChange {
+        stat: staged.stat,
+        diff: staged.diff,
+        truncated: staged.truncated,
+        recent: staged.recent,
+    };
+    axiomata_core::commit_message::suggest(&state, &change)
+        .await
+        .map_err(|err| FileError::new("Agent", err.to_string()))
+}
+
 /// Pushes the checked-out branch to its upstream, or publishes it to `origin`; never forced.
 #[tauri::command]
 pub async fn git_push(state: State<'_, CoreState>, root: String) -> Result<PushResult, FileError> {

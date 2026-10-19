@@ -206,6 +206,7 @@ pub fn run() {
             git::git_blob,
             git::git_apply_hunk,
             git::git_commit,
+            git::git_suggest_commit_message,
             git::git_fetch,
             git::git_push,
             git::git_init,

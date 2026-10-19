@@ -104,6 +104,24 @@
   const stageAll = () => act(() => gitApi.stageAll(root!));
   const unstageAll = () => act(() => gitApi.unstageAll(root!));
 
+  /** Whether the model is writing a message right now. */
+  let suggesting = $state(false);
+
+  /** Fills the message box with a suggestion for what is staged (board card #96). Replaces what is there: the owner
+   *  asked for it, and it stays editable before the commit. */
+  async function suggestMessage(): Promise<void> {
+    if (!root || suggesting || groups.staged.length === 0) return;
+    suggesting = true;
+    error = "";
+    try {
+      message = await gitApi.suggestMessage(root);
+    } catch (err) {
+      error = messageOf(err);
+    } finally {
+      suggesting = false;
+    }
+  }
+
   async function commit(): Promise<void> {
     if (!commitReady || !root) return;
     const text = message;
@@ -423,9 +441,10 @@
     <div class="commit">
       <textarea
         rows="3"
-        placeholder="Commit message  (⌘↩ commits)"
+        placeholder={suggesting ? "Writing a message from the staged diff…" : "Commit message  (⌘↩ commits)"}
         spellcheck="true"
         bind:value={message}
+        disabled={suggesting}
         onkeydown={(e) => {
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -434,13 +453,22 @@
         }}
       ></textarea>
       <div class="commit-buttons">
-        <button type="button" class="ax-btn primary" disabled={!commitReady || busy} onclick={() => void commit()}>
+        <IconButton
+          icon="sparkles"
+          label={groups.staged.length === 0
+            ? "Stage changes to have a message written"
+            : "Write a message: sends the staged diff (not .env or key files) to the skill provider's model — one paid call"}
+          disabled={suggesting || busy || groups.staged.length === 0}
+          pressed={suggesting}
+          onclick={() => void suggestMessage()}
+        />
+        <button type="button" class="ax-btn primary" disabled={!commitReady || busy || suggesting} onclick={() => void commit()}>
           <Icon name="git-commit-horizontal" size="sm" /> Commit {groups.staged.length > 0 ? `(${groups.staged.length})` : ""}
         </button>
         <button
           type="button"
           class="ax-btn"
-          disabled={!commitReady || busy || pushing || status.branch === null}
+          disabled={!commitReady || busy || pushing || suggesting || status.branch === null}
           title={status.branch === null ? "HEAD is detached; switch to a branch to push" : "Commit what is staged, then push the branch (never forced)"}
           onclick={() => void commitAndPush()}
         >

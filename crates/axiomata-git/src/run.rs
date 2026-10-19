@@ -66,6 +66,15 @@ fn git_raw(repo: &Path, args: &[&str], ok: &[i32], input: Option<&[u8]>) -> Resu
     command
         .arg("-C")
         .arg(repo)
+        // A repository's own config must not start a program on a read: `core.fsmonitor` names a hook git runs on
+        // `status`/`diff`, and `log.showSignature` makes `log` call `gpg.program` for a signed commit — both can
+        // arrive with a cloned repository (security review, board card #96).
+        .args([
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "log.showSignature=false",
+        ])
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_LITERAL_PATHSPECS", "1")

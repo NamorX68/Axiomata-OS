@@ -721,6 +721,14 @@ selected per skill by `SKILL.md`'s `backend: ollama`.
   column on `runs` (migration 0007) records which model a run used, and
   `spend::reconcile_recorded_costs` re-meters already-recorded runs/chat turns against the
   price table on every startup (best-effort; a failure is warned about, never fatal).
+- **Commit-message suggestion (board card #96, 2026-10-19).** The Git panel's ✨ sends the staged diff
+  (`axiomata_git::repo::staged_summary`: `--stat` capped at 16 KiB, diff at 48 KiB, the last ten
+  messages as style examples, secret-looking files named but not diffed) to the **skill provider's**
+  model in one completion without tools (`commit_message.rs`, `axh::endpoint` + `OpenAiCompat`),
+  guarded by the skill role's cap and logged in `chat_turns` as mode `commit_message`. Needs an
+  OpenRouter/Ollama skill provider. Every git call now runs with `core.fsmonitor=false` and
+  `log.showSignature=false` (`axiomata-git` `run.rs`): a cloned repository's config must not start a
+  program on a read.
 - **Model catalog (board card #17, 2026-10-19).** `model_catalog.rs` fetches OpenRouter's public
   `/api/v1/models` (with list prices) and Ollama's `/api/tags`; Anthropic is a built-in list (no key to
   ask with). Stored in `~/.axiomata/model-catalog.json`, refreshed at app start and once a day

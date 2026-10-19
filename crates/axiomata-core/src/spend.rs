@@ -24,7 +24,7 @@ use crate::error::AxiomataError;
 pub struct ChatTurnRecord {
     /// `session_id` opencode returned for this turn.
     pub session_id: String,
-    /// `"chat"` or `"instruct"`.
+    /// `"chat"`, `"instruct"` or `"commit_message"` (a suggestion for the Git panel, `crate::commit_message`).
     pub mode: &'static str,
     /// Active model-routing provider when the turn ran (`ProviderId::as_str`),
     /// or `None` if it could not be determined.

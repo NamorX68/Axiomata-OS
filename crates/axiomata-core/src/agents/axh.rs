@@ -576,7 +576,7 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
 /// H4), has no key where one is needed (OpenRouter), or when the run carries
 /// no model — a config gap must fail loudly, never silently bill another
 /// endpoint.
-fn endpoint(
+pub(crate) fn endpoint(
     config: &Config,
     role: ProviderRole,
     model: Option<String>,

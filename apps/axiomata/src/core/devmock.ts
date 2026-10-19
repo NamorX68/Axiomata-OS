@@ -2517,6 +2517,9 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "git_apply_hunk":
       gitApplyHunk(String(args.path), String(args.side), Number(args.index));
       return undefined as T;
+    case "git_suggest_commit_message":
+      if (gitIndex.size === 0) throw { kind: "Invalid", message: "nothing is staged" };
+      return "feat(mock): a suggested message\n\n- written from the staged diff" as T;
     case "git_commit": {
       if (String(args.message ?? "").trim() === "") throw { kind: "Invalid", message: "a commit needs a message" };
       for (const [path, text] of gitIndex) gitHead.set(path, text);
