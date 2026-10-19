@@ -154,6 +154,44 @@ pub enum ProviderRole {
     Skill,
 }
 
+/// Which agent harness drives a role's turns, beside the provider that serves them
+/// (`docs/plans/harness-choice.md`). The stored token is the same id a skill's `backend:` frontmatter and a run's
+/// `runs.backend` use, so one word names a harness everywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessId {
+    /// Opencode 2, on the app's own instances — every provider.
+    #[default]
+    Opencode,
+    /// Claude Code as `claude -p` on the app's own login folder — Anthropic only (D2).
+    ClaudeCode,
+    /// The own harness, Glut (`axiomata-harness`) — providers with an OpenAI-compatible endpoint (D6).
+    Axh,
+}
+
+impl HarnessId {
+    /// Every harness offered in the Settings UI, in display order.
+    pub const ALL: [HarnessId; 3] = [HarnessId::Opencode, HarnessId::ClaudeCode, HarnessId::Axh];
+
+    /// The stored token, matching the serde name and the `crate::agents::BACKEND_*` ids.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HarnessId::Opencode => "opencode",
+            HarnessId::ClaudeCode => "claude_code",
+            HarnessId::Axh => "axh",
+        }
+    }
+
+    /// Whether this harness can drive turns of `provider` — the matrix of `docs/plans/harness-choice.md`.
+    pub fn serves(self, provider: ProviderId) -> bool {
+        match self {
+            HarnessId::Opencode => true,
+            HarnessId::ClaudeCode => provider == ProviderId::Anthropic,
+            HarnessId::Axh => provider != ProviderId::Anthropic,
+        }
+    }
+}
+
 /// Per-provider settings: which model to use for interactive chat vs.
 /// unattended skill/routine runs, plus the endpoint/credential fields kept
 /// for the Settings UI. Opencode resolves providers and auth from its own
@@ -303,6 +341,15 @@ pub struct AgentDefaults {
     #[serde(default)]
     pub skill_provider: ProviderId,
 
+    /// Which harness drives interactive chat turns. See [`Self::harness_for`].
+    #[serde(default)]
+    pub chat_harness: HarnessId,
+
+    /// Which harness drives skill and routine runs that do not name one — a skill's own `backend:` frontmatter wins
+    /// (`docs/plans/harness-choice.md` D3). See [`Self::harness_for`].
+    #[serde(default)]
+    pub skill_harness: HarnessId,
+
     /// Daily spend cap in USD, applied per paid (non-Anthropic) role provider.
     /// Checked before every redirected agent turn against the sum of today's
     /// recorded `cost_usd` (skill runs + chat turns) for *that role's*
@@ -419,6 +466,14 @@ impl AgentDefaults {
         }
     }
 
+    /// The harness driving `role` — the counterpart of [`Self::provider_for`].
+    pub fn harness_for(&self, role: ProviderRole) -> HarnessId {
+        match role {
+            ProviderRole::Chat => self.chat_harness,
+            ProviderRole::Skill => self.skill_harness,
+        }
+    }
+
     /// Restores a provider entry that exists but is *entirely* blank
     /// (`base_url`/`api_key` both unset, both model fields empty) from
     /// [`ProviderSettings::default_for`] — so the base-URL default reappears
@@ -451,6 +506,8 @@ impl Default for AgentDefaults {
             legacy_active_provider: None,
             chat_provider: ProviderId::default(),
             skill_provider: ProviderId::default(),
+            chat_harness: HarnessId::default(),
+            skill_harness: HarnessId::default(),
             daily_usd_cap: default_daily_usd_cap(),
             costs: BTreeMap::new(),
             auto_approve_tools: default_auto_approve_tools(),
@@ -539,6 +596,15 @@ impl Config {
             let settings = self.agents.providers.get(&id).ok_or_else(|| {
                 format!("{role:?} provider {id:?} has no entry in [agents.providers]")
             })?;
+            let harness = self.agents.harness_for(role);
+            if !harness.serves(id) {
+                return Err(format!(
+                    "{role:?} harness {} cannot serve provider {}: Claude Code runs Anthropic only, \
+                     Glut (axh) has no Anthropic client yet",
+                    harness.as_str(),
+                    id.as_str()
+                ));
+            }
             if id == ProviderId::Anthropic {
                 continue;
             }
@@ -1237,6 +1303,83 @@ mod tests {
             },
         );
         assert_eq!(config.validate_for_save(), Ok(()));
+    }
+
+    /// The harness/provider matrix of `docs/plans/harness-choice.md`: Claude Code serves Anthropic only, Glut every
+    /// provider but Anthropic, Opencode all of them.
+    #[test]
+    fn harness_serves_only_the_providers_of_the_matrix() {
+        for provider in ProviderId::ALL {
+            assert!(HarnessId::Opencode.serves(provider));
+            assert_eq!(
+                HarnessId::ClaudeCode.serves(provider),
+                provider == ProviderId::Anthropic
+            );
+            assert_eq!(
+                HarnessId::Axh.serves(provider),
+                provider != ProviderId::Anthropic
+            );
+        }
+    }
+
+    /// A role whose harness cannot serve its provider is refused at save time, per role.
+    #[test]
+    fn validate_for_save_refuses_a_harness_that_cannot_serve_the_role_provider() {
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::Axh;
+        let err = config.validate_for_save().unwrap_err();
+        assert!(
+            err.starts_with("Chat harness axh cannot serve provider anthropic"),
+            "{err}"
+        );
+
+        let mut config = Config::default();
+        config.agents.skill_provider = ProviderId::Ollama;
+        config.agents.skill_harness = HarnessId::ClaudeCode;
+        let err = config.validate_for_save().unwrap_err();
+        assert!(
+            err.starts_with("Skill harness claude_code cannot serve provider ollama"),
+            "{err}"
+        );
+
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::ClaudeCode;
+        assert_eq!(config.validate_for_save(), Ok(()));
+    }
+
+    /// The two harness fields round-trip under their snake_case tokens, and a config saved before them reads as
+    /// Opencode for both roles — today's behaviour.
+    #[test]
+    fn harness_fields_round_trip_and_an_old_config_runs_on_opencode() {
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::ClaudeCode;
+        config.agents.skill_harness = HarnessId::Axh;
+        let text = toml::to_string(&config).unwrap();
+        assert!(text.contains("chat_harness = \"claude_code\""), "{text}");
+        assert!(text.contains("skill_harness = \"axh\""), "{text}");
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(
+            back.agents.harness_for(ProviderRole::Chat),
+            HarnessId::ClaudeCode
+        );
+        assert_eq!(back.agents.harness_for(ProviderRole::Skill), HarnessId::Axh);
+
+        let old: Config =
+            toml::from_str("owner = \"x\"\n[agents]\nchat_provider = \"anthropic\"\n").unwrap();
+        assert_eq!(old.agents.chat_harness, HarnessId::Opencode);
+        assert_eq!(old.agents.skill_harness, HarnessId::Opencode);
+        for harness in HarnessId::ALL {
+            assert_eq!(
+                toml::to_string(&HarnessWrap { h: harness }).unwrap(),
+                format!("h = \"{}\"\n", harness.as_str())
+            );
+        }
+    }
+
+    /// Serialises one bare [`HarnessId`] so its token can be compared with [`HarnessId::as_str`].
+    #[derive(Serialize)]
+    struct HarnessWrap {
+        h: HarnessId,
     }
 
     /// With that same split, a blank `skill_model` on the skill-role provider

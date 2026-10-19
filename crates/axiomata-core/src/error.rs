@@ -71,9 +71,16 @@ pub enum AxiomataError {
     },
 
     /// A skill's frontmatter or a routine referenced an agent backend
-    /// identifier that is neither `"opencode"`, `"ollama"` nor `"axh"`.
-    #[error("unknown agent backend {backend:?} (expected \"opencode\", \"ollama\" or \"axh\")")]
+    /// identifier that is none of `"opencode"`, `"claude_code"`, `"axh"` or `"ollama"`.
+    #[error(
+        "unknown agent backend {backend:?} (expected \"opencode\", \"claude_code\", \"axh\" or \"ollama\")"
+    )]
     UnknownAgentBackend { backend: String },
+
+    /// A known harness cannot run this turn — it is not built for the role yet, or what it needs is missing. The turn
+    /// is not started and never hops to another harness (`docs/plans/harness-choice.md`).
+    #[error("the {harness} harness cannot run this: {reason}")]
+    HarnessUnavailable { harness: String, reason: String },
 
     /// The agent child process could not be spawned or waited on.
     #[error("failed to run the {backend} agent ({program}): {source}")]

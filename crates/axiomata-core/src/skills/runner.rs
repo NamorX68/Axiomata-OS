@@ -55,8 +55,12 @@ use crate::skills::runlog;
 pub async fn execute_skill(name: &str, config: &Config) -> Result<RunRecord, AxiomataError> {
     let skill = registry::find_skill(name)?;
 
-    // A skill declares its backend directly in frontmatter (`backend:`).
-    let backend_id = skill.backend.as_str();
+    // A skill's own `backend:` frontmatter wins; without it the run follows the configured skill harness
+    // (`docs/plans/harness-choice.md` D3).
+    let backend_id = skill
+        .backend
+        .as_deref()
+        .unwrap_or_else(|| config.agents.skill_harness.as_str());
 
     // An unknown backend string in the frontmatter is a recordable failure: the
     // skill exists and someone tried to run it.
@@ -235,10 +239,8 @@ fn misconfigured_skill_record(
     )
 }
 
-/// Runs the raw string `prompt` on `backend_id` (`"opencode"` / `"ollama"`
-/// — the routine store validates those two; a caller may also hand it
-/// `"axh"`, the own harness, `docs/plans/harness-hs6b.md`),
-/// attributing the resulting [`RunRecord`] to `name`. The counterpart to
+/// Runs the raw string `prompt` on `backend_id` (`"opencode"`, `"claude_code"`,
+/// `"axh"` or `"ollama"`, as the routine store validates them), attributing the resulting [`RunRecord`] to `name`. The counterpart to
 /// [`execute_skill`] for callers that have a prompt but no `SKILL.md` — the
 /// routine scheduler's `prompt` target. An unresolvable `backend_id` yields a
 /// `Failed` record, not an `Err`; [`AxiomataError::AlreadyRunning`] (`name`
@@ -973,7 +975,7 @@ mod tests {
             model: None,
             effort: None,
             trigger: None,
-            backend: backend.to_string(),
+            backend: Some(backend.to_string()),
             prepend_files: prepend.iter().map(|s| s.to_string()).collect(),
             allowed_tools: None,
             timeout_secs: None,
@@ -1129,6 +1131,25 @@ mod tests {
         let recent = runlog::list_runs(&fx.conn(), 10).unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].skill_name, "weird");
+    }
+
+    /// A skill without `backend:` runs on the configured skill harness (harness-choice D3) — shown on Claude Code,
+    /// whose runner is not built yet: the run is recorded as that harness's `Failed`, never run on Opencode instead.
+    #[tokio::test]
+    async fn a_skill_without_a_backend_runs_on_the_configured_skill_harness() {
+        let mut fx = Fixture::new("skill-harness");
+        fx.config.agents.skill_harness = crate::config::HarnessId::ClaudeCode;
+        fx.write_skill(
+            "plain",
+            "---\nname: plain\ndescription: no backend field\n---\nbody\n",
+        );
+
+        let record = execute_and_record_skill("plain", &fx.config, &fx.db)
+            .await
+            .unwrap();
+        assert_eq!(record.status, RunStatus::Failed);
+        assert_eq!(record.backend, "claude_code");
+        assert!(record.error.unwrap().contains("claude_code harness"));
     }
 
     #[tokio::test]

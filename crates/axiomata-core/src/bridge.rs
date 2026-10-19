@@ -98,7 +98,7 @@ frontmatter plus instructions:
 ---
 name: my-skill            # the folder's name
 description: One sentence on what it does and when to use it.
-backend: opencode         # or ollama, or axh (Axiomata's own harness; needs a provider with a base URL)
+backend: opencode         # optional; else the skill harness of the settings. Or claude_code, axh (own harness), ollama
 model: provider/model-id  # optional; else the configured skill model; on axh the bare id the API names
 prepend_files: [\"Area/notes.md\"]   # optional workspace files inlined into the prompt
 timeout_secs: 600         # optional

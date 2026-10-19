@@ -336,7 +336,7 @@ fn apply_config_update(config: &RwLock<Config>, mut new_config: Config) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiomata_core::config::ProviderId;
+    use axiomata_core::config::{HarnessId, ProviderId};
     use axiomata_core::paths;
     use std::env;
     use std::path::PathBuf;
@@ -523,6 +523,32 @@ mod tests {
         };
         let merged = merge_view_update(&current, update);
         assert!(merged.validate_for_save().unwrap_err().contains("API key"));
+    }
+
+    /// The dialog does not edit the harness fields yet (harness-choice CP5): a save keeps what is stored.
+    #[test]
+    fn merge_view_update_keeps_the_harness_fields() {
+        let mut current = Config {
+            workspace_root: PathBuf::from("/ws"),
+            ..Config::default()
+        };
+        current.agents.chat_harness = HarnessId::ClaudeCode;
+        current.agents.skill_harness = HarnessId::Axh;
+        let update = ConfigUpdate {
+            owner: String::new(),
+            workspace_root: "/ws".to_string(),
+            agents: AgentDefaultsUpdate {
+                ollama_model: "llama3.2".to_string(),
+                skill_timeout_secs: 300,
+                chat_provider: ProviderId::Anthropic,
+                skill_provider: ProviderId::Anthropic,
+                daily_usd_cap: Some(2.0),
+                providers: BTreeMap::new(),
+            },
+        };
+        let merged = merge_view_update(&current, update);
+        assert_eq!(merged.agents.chat_harness, HarnessId::ClaudeCode);
+        assert_eq!(merged.agents.skill_harness, HarnessId::Axh);
     }
 
     #[test]

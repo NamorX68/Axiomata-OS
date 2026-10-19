@@ -65,7 +65,8 @@ pub struct GraphLink {
 pub struct GraphSkill {
     pub name: String,
     pub description: String,
-    pub backend: String,
+    /// The frontmatter's `backend:`; `None` when the skill follows `agents.skill_harness`.
+    pub backend: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
 }

@@ -751,7 +751,7 @@ seed-if-absent: an edited `SKILL.md` reaches an install through `skills reseed -
 
 Skills live in **one** place: `~/.axiomata/skills/<name>/SKILL.md`
 (`registry::list_skills`/`find_skill`, frontmatter via `gray_matter`, filesystem is the only
-source of truth). `runner::execute_skill` resolves the backend (`opencode` by default; `ollama`
+source of truth). `runner::execute_skill` resolves the backend (the frontmatter's `backend:`, else `agents.skill_harness`, `docs/plans/harness-choice.md`; `ollama`
 for a tool-free local completion; `axh` for the own harness — `resolve_run_model` then hands the
 bare model, no `provider/` prefix), builds the prompt (any `prepend_files` blocks, then the
 `SKILL.md` body) and runs it without touching the database; `execute_and_record_skill` adds the

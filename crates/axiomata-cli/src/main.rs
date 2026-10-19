@@ -699,8 +699,8 @@ struct AddRoutine {
     /// Send this raw prompt to an agent when the routine runs.
     #[arg(long, group = "target")]
     prompt: Option<String>,
-    /// Backend override: "opencode" or "ollama". Defaults to the skill's
-    /// own backend, or "ollama" for a raw prompt.
+    /// Backend override: "opencode", "claude_code", "axh" or "ollama". Defaults to the skill's
+    /// own backend, else the configured skill harness (also for a raw prompt).
     #[arg(long)]
     backend: Option<String>,
     /// Create the routine disabled.
@@ -1058,7 +1058,7 @@ fn list_skills() -> Result<()> {
         println!(
             "{name}  {backend}  — {description}",
             name = skill.name,
-            backend = skill.backend,
+            backend = skill.backend.as_deref().unwrap_or("(skill harness)"),
             description = skill.description,
         );
     }

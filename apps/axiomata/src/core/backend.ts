@@ -101,7 +101,8 @@ export interface ConfigUpdate {
 export interface Skill {
   name: string;
   description: string;
-  backend: string;
+  /** The frontmatter's `backend:`; `null` when the skill follows the configured skill harness. */
+  backend: string | null;
 }
 
 /** A skill directory `list_skills` could not turn into a `Skill` — a broken
@@ -781,7 +782,8 @@ export interface GraphLink {
 export interface GraphSkill {
   name: string;
   description: string;
-  backend: string;
+  /** The frontmatter's `backend:`; `null` when the skill follows the configured skill harness. */
+  backend: string | null;
   model: string | null;
   effort: string | null;
 }

@@ -44,7 +44,10 @@ not "fixed" on load — the run records a clear `Failed` (as HS6b's B1: never a 
   beside `provider_for(role)`.
 - **Skills.** `registry` keeps `backend: Option<String>` (no `default_backend()` any more); the runner resolves
   `skill.backend.unwrap_or(config.agents.skill_harness)`. Routines' `prompt` target (`execute_prompt`) takes the same
-  default. `runs.backend` keeps recording the harness that really ran (`claude_code` new).
+  default — it used to be the local `ollama` completion, so a stored prompt routine without a backend moves to the
+  skill harness and its provider (the owner had none, 2026-10-19; the daily cap still holds). Between CP1 and CP5 the
+  dialog has no harness control: a hand-set harness that does not fit a provider picked in the dialog makes the save
+  refuse with the matrix message. `runs.backend` keeps recording the harness that really ran (`claude_code` new).
 - **Chat.** `agents::chat` dispatches on `chat_harness`; `ChatReply` and `chat_turns` stay as they are. A session id
   belongs to one harness: switching the harness starts a new conversation (the dashboard drops the old id), never a
   resume across harnesses.

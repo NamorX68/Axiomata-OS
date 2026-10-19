@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use crate::config::{Config, ProviderId, ProviderRole};
+use crate::config::{Config, HarnessId, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 
 pub mod axh;
@@ -32,7 +32,8 @@ mod opencode_instance;
 
 /// Backend identifier stored verbatim in a `SKILL.md` frontmatter `backend`
 /// field and in a routine's DB row. Kept as a plain string on disk so the file
-/// format stays self-explanatory. The fallback when a skill names no backend.
+/// format stays self-explanatory. A skill or routine that names none runs on the configured
+/// `agents.skill_harness` (`docs/plans/harness-choice.md` D3).
 pub const BACKEND_OPENCODE: &str = "opencode";
 /// See [`BACKEND_OPENCODE`].
 pub const BACKEND_OLLAMA: &str = "ollama";
@@ -40,6 +41,9 @@ pub const BACKEND_OLLAMA: &str = "ollama";
 /// (`docs/plans/harness-hs6b.md`, B1): an OpenAI-compatible endpoint of the
 /// skill provider, no opencode involved.
 pub const BACKEND_AXH: &str = "axh";
+/// See [`BACKEND_OPENCODE`]. Claude Code as `claude -p` on the app's own login folder
+/// (`docs/plans/harness-choice.md`, D2/D5).
+pub const BACKEND_CLAUDE_CODE: &str = "claude_code";
 
 /// Upper bound on how much of a backend's output is kept, shared by the raw
 /// completion [`AgentBackend::Ollama`] and the headless
@@ -190,7 +194,8 @@ impl AgentBackend {
     /// onto a concrete backend.
     ///
     /// Args:
-    ///     backend: `"opencode"`, `"ollama"` or `"axh"`.
+    ///     backend: `"opencode"`, `"claude_code"`, `"axh"` or `"ollama"` (or a retired id, which follows
+    ///         `agents.skill_harness`).
     ///     model_override: For `"ollama"`, a model name that wins over the
     ///         configured default; ignored for `"opencode"` and `"axh"` (their
     ///         models are resolved separately, see [`opencode::model_id`] and
@@ -211,6 +216,11 @@ impl AgentBackend {
         match backend {
             BACKEND_OPENCODE => Ok(Self::Opencode),
             BACKEND_AXH => Ok(Self::Axh),
+            // Chosen in the settings already (harness-choice CP1); the runner arrives in CP2.
+            BACKEND_CLAUDE_CODE => Err(AxiomataError::HarnessUnavailable {
+                harness: BACKEND_CLAUDE_CODE.to_owned(),
+                reason: "running skills on Claude Code is not built yet".to_owned(),
+            }),
             BACKEND_OLLAMA => {
                 let model = model_override
                     .map(str::to_owned)
@@ -220,12 +230,16 @@ impl AgentBackend {
             // Retired backend ids that still live in `SKILL.md` frontmatter /
             // routine rows seeded before the opencode consolidation. A seed
             // never overwrites an existing copy, so pre-upgrade installs keep
-            // the old ids on disk; mapping them onto the single harness (with
-            // a warning) keeps those skills runnable instead of failing every
-            // run with `UnknownAgentBackend`.
+            // the old ids on disk; they name no harness of today, so they run
+            // on the configured one, as a skill without the field does.
             "claude-code" | "ollama-agent" => {
-                tracing::warn!(backend, "deprecated backend id — running on opencode");
-                Ok(Self::Opencode)
+                let harness = config.agents.skill_harness.as_str();
+                tracing::warn!(
+                    backend,
+                    harness,
+                    "retired backend id — running on the skill harness"
+                );
+                Self::resolve(harness, model_override, config)
             }
             other => Err(AxiomataError::UnknownAgentBackend {
                 backend: other.to_owned(),
@@ -338,6 +352,15 @@ pub async fn chat(
     mode: ChatMode,
     allowed_tools: Option<String>,
 ) -> Result<ChatReply, AxiomataError> {
+    // Chat on Claude Code and Glut arrives in harness-choice CP3/CP4; until then a chosen one refuses the turn rather
+    // than hopping back to Opencode.
+    let harness = config.agents.chat_harness;
+    if harness != HarnessId::Opencode {
+        return Err(AxiomataError::HarnessUnavailable {
+            harness: harness.as_str().to_owned(),
+            reason: "chat on this harness is not built yet".to_owned(),
+        });
+    }
     opencode::chat(ChatRequest {
         message,
         session_id,
@@ -602,6 +625,22 @@ mod tests {
         );
     }
 
+    /// A chat harness other than Opencode refuses the turn before anything starts, never hopping to Opencode.
+    #[tokio::test]
+    async fn chat_refuses_a_harness_without_a_chat_runner() {
+        for harness in [HarnessId::ClaudeCode, HarnessId::Axh] {
+            let mut config = Config::default();
+            config.agents.chat_harness = harness;
+            let err = chat(&config, "hi".to_owned(), None, ChatMode::Chat, None)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&err, AxiomataError::HarnessUnavailable { harness: h, .. } if h == harness.as_str()),
+                "{err:?}"
+            );
+        }
+    }
+
     #[test]
     fn resolve_rejects_unknown_identifier() {
         let err = AgentBackend::resolve("gemini-2.5", None, &Config::default()).unwrap_err();
@@ -612,16 +651,36 @@ mod tests {
     }
 
     #[test]
-    fn resolve_maps_retired_backend_ids_onto_opencode() {
+    fn resolve_maps_retired_backend_ids_onto_the_skill_harness() {
         // Skills seeded before the opencode consolidation carry these ids in
         // their frontmatter, and a seed never overwrites an existing copy — so
-        // they must keep resolving (onto the single harness) rather than break
-        // every run with `UnknownAgentBackend`.
+        // they must keep resolving (onto the configured harness) rather than
+        // break every run with `UnknownAgentBackend`.
+        let mut config = Config::default();
         for retired in ["claude-code", "ollama-agent"] {
-            let backend = AgentBackend::resolve(retired, None, &Config::default()).unwrap();
+            let backend = AgentBackend::resolve(retired, None, &config).unwrap();
             assert_eq!(backend, AgentBackend::Opencode, "{retired} -> Opencode");
-            assert_eq!(backend.id(), "opencode");
         }
+        config.agents.skill_harness = crate::config::HarnessId::Axh;
+        assert_eq!(
+            AgentBackend::resolve("claude-code", None, &config).unwrap(),
+            AgentBackend::Axh
+        );
+    }
+
+    #[test]
+    fn resolve_refuses_claude_code_until_its_runner_exists() {
+        let mut config = Config::default();
+        config.agents.skill_harness = HarnessId::ClaudeCode;
+        // A retired id follows the skill harness, so it meets the same refusal.
+        let err = AgentBackend::resolve("claude-code", None, &config).unwrap_err();
+        assert!(
+            matches!(err, AxiomataError::HarnessUnavailable { harness, .. } if harness == "claude_code")
+        );
+        let err = AgentBackend::resolve(BACKEND_CLAUDE_CODE, None, &Config::default()).unwrap_err();
+        assert!(
+            matches!(err, AxiomataError::HarnessUnavailable { harness, .. } if harness == "claude_code")
+        );
     }
 
     #[test]

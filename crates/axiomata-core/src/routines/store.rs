@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use rusqlite::types::Type;
 
+use crate::agents::{BACKEND_AXH, BACKEND_CLAUDE_CODE, BACKEND_OLLAMA, BACKEND_OPENCODE};
 use crate::error::AxiomataError;
 use crate::routines::model::{NewRoutine, Routine, RoutineRun, RoutineRunStatus, RoutineTarget};
 use crate::routines::schedule;
@@ -227,9 +228,13 @@ fn validate_new(new: &NewRoutine) -> Result<(), AxiomataError> {
     }
 
     match new.backend.as_deref() {
-        None | Some("opencode") | Some("ollama") => Ok(()),
+        None
+        | Some(BACKEND_OPENCODE)
+        | Some(BACKEND_CLAUDE_CODE)
+        | Some(BACKEND_AXH)
+        | Some(BACKEND_OLLAMA) => Ok(()),
         Some(other) => bad(format!(
-            "backend must be \"opencode\" or \"ollama\", got {other:?}"
+            "backend must be \"opencode\", \"claude_code\", \"axh\" or \"ollama\", got {other:?}"
         )),
     }
 }
@@ -790,6 +795,24 @@ mod tests {
             );
         }
 
+        let _ = fs::remove_file(&path);
+    }
+
+    /// Every harness of the settings is a valid routine backend (`docs/plans/harness-choice.md`).
+    #[test]
+    fn add_accepts_every_harness_as_a_backend() {
+        let (path, db) = temp_db();
+        for backend in ["opencode", "claude_code", "axh", "ollama"] {
+            let routine = add(
+                &db,
+                NewRoutine {
+                    backend: Some(backend.to_owned()),
+                    ..new_routine(&format!("on-{backend}"))
+                },
+            )
+            .unwrap();
+            assert_eq!(routine.backend.as_deref(), Some(backend));
+        }
         let _ = fs::remove_file(&path);
     }
 

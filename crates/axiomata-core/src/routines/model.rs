@@ -69,9 +69,9 @@ pub struct NewRoutine {
     pub name: String,
     pub cron_expr: String,
     pub target: RoutineTarget,
-    /// Backend override: `Some("opencode")` / `Some("ollama")`, or `None`
-    /// to use the target skill's own declared backend (skill target) or the
-    /// configured default (prompt target).
+    /// Backend override: `Some("opencode")` / `Some("claude_code")` / `Some("axh")` / `Some("ollama")`, or `None`
+    /// to use the target skill's own declared backend (skill target) or the configured `agents.skill_harness`
+    /// (prompt target, and a skill that declares none).
     pub backend: Option<String>,
     /// Whether the routine starts enabled. The UI defaults this to `true`.
     pub enabled: bool,

@@ -17,7 +17,6 @@ use gray_matter::Matter;
 use gray_matter::engine::YAML;
 use serde::{Deserialize, Serialize};
 
-use crate::agents::BACKEND_OPENCODE;
 use crate::error::AxiomataError;
 
 /// The YAML frontmatter of a `SKILL.md`, as authored by the user.
@@ -31,8 +30,8 @@ struct SkillFrontmatter {
     effort: Option<String>,
     #[serde(default)]
     trigger: Option<String>,
-    #[serde(default = "default_backend")]
-    backend: String,
+    #[serde(default)]
+    backend: Option<String>,
     /// Workspace-relative files whose contents are prepended to the skill's
     /// prompt as a `## Context file: <rel>` block (e.g. `mail-digest`'s
     /// `Mail/.topics.md`, which opencode has no file tool to read).
@@ -53,11 +52,6 @@ struct SkillFrontmatter {
     access: Option<String>,
 }
 
-/// Default agent backend for a skill that doesn't name one.
-fn default_backend() -> String {
-    BACKEND_OPENCODE.to_owned()
-}
-
 /// A discovered skill: its frontmatter metadata, its instruction body, and
 /// where it lives on disk.
 #[derive(Debug, Clone, Serialize)]
@@ -72,10 +66,10 @@ pub struct Skill {
     pub effort: Option<String>,
     /// Optional trigger description from the frontmatter.
     pub trigger: Option<String>,
-    /// Agent backend identifier (`"opencode"`, `"ollama"` or `"axh"`). Not
-    /// validated here — [`crate::agents::AgentBackend::resolve`] checks it at
-    /// run time.
-    pub backend: String,
+    /// Agent backend identifier (`"opencode"`, `"claude_code"`, `"axh"` or `"ollama"`); `None` when the frontmatter
+    /// names none and the run follows `agents.skill_harness` (`docs/plans/harness-choice.md` D3). Not validated
+    /// here — [`crate::agents::AgentBackend::resolve`] checks it at run time.
+    pub backend: Option<String>,
     /// Workspace-relative files whose contents are prepended to the run's
     /// prompt as `## Context file: <rel>` blocks — the bridge for a skill that
     /// references a workspace file (e.g. `mail-digest`'s `Mail/.topics.md`) but
@@ -423,19 +417,19 @@ mod tests {
         assert_eq!(names, ["cleanup", "triage"]);
 
         let triage = skills.iter().find(|s| s.name == "triage").unwrap();
-        assert_eq!(triage.backend, "ollama");
+        assert_eq!(triage.backend.as_deref(), Some("ollama"));
         assert_eq!(triage.body.trim(), "Do the triage.");
     }
 
     #[test]
-    fn backend_defaults_to_opencode_when_absent() {
+    fn backend_is_unset_when_absent() {
         let h = TestHome::new("default-backend");
         write_skill(
             &h.skills_dir(),
             "plain",
             "---\nname: plain\ndescription: no backend field\n---\nbody\n",
         );
-        assert_eq!(find_skill("plain").unwrap().backend, "opencode");
+        assert_eq!(find_skill("plain").unwrap().backend, None);
     }
 
     #[test]
@@ -611,17 +605,5 @@ mod tests {
             find_skill("ghost").unwrap_err(),
             AxiomataError::SkillNotFound { name } if name == "ghost"
         ));
-    }
-
-    #[test]
-    fn a_skill_without_a_backend_frontmatter_defaults_to_opencode() {
-        let home = TestHome::new("default-backend");
-        write_skill(
-            &home.skills_dir(),
-            "implicit",
-            "---\nname: implicit\ndescription: d\n---\n\nDo the thing.\n",
-        );
-        let skill = find_skill("implicit").unwrap();
-        assert_eq!(skill.backend, "opencode");
     }
 }

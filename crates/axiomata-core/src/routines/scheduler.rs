@@ -50,11 +50,6 @@ use crate::skills::{runlog, runner};
 /// this long of its scheduled instant.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Backend used for a `prompt` routine that does not name one itself. Local
-/// and dependency-free, matching the "daily digest against a local model"
-/// use case.
-const DEFAULT_PROMPT_BACKEND: &str = "ollama";
-
 /// What one [`tick`] did.
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct TickReport {
@@ -242,7 +237,12 @@ async fn execute_target(routine: &Routine, config: &Config) -> Result<RunRecord,
             runner::execute_prompt(
                 &routine.name,
                 text.clone(),
-                routine.backend.as_deref().unwrap_or(DEFAULT_PROMPT_BACKEND),
+                // A prompt routine that names no backend runs on the configured skill harness, as a skill without
+                // one does (`docs/plans/harness-choice.md` D3).
+                routine
+                    .backend
+                    .as_deref()
+                    .unwrap_or_else(|| config.agents.skill_harness.as_str()),
                 config,
             )
             .await
