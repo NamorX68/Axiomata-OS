@@ -677,6 +677,25 @@ chat turn none of the owner's gates and only plain cards in plain open columns (
 shell actions through `core/kanbanAgentRules.ts`). Six security audits shaped this; what stays open is in the plan
 (Opencode's unattended shell can drop the mark; Claude Code reads its working folder without a rule).
 
+### Glut 2 (`docs/plans/glut-2.md`, built 2026-10-20)
+
+**Code mode** (`axiomata-harness/src/codemode.rs`): a `codemode` tool runs model-written JavaScript — an async function
+body — in QuickJS (`rquickjs`), without Node, network, files, timers **and without regular expressions** (an open
+quickjs-ng advisory, GHSA-rxpx-wj25-jhqq; bring them back with a fixed engine). `tools.<name>(args)` sends a request
+to the loop, which answers it on the path of a direct call (`run.rs` `perform`: hooks, gate, events `<call>.<n>`), so
+nothing a script calls escapes a rule. Only what the script prints or returns comes back; 256 MB, two scripts a
+process, the run's deadline and cancel interrupt it, a script waiting on nothing ends at once. **A chat turn keeps the
+MCP tools behind code** (45 tools → 15, 16.9k → 3.5k input tokens a step); **a skill that declares its tools keeps
+them direct** and gets `codemode` only when it names it — measured on the calendar digest, whose output *is* its
+data. `[agents.glut] codemode` switches it. **Old tool results shrink** (`history.rs`) once the conversation is over
+~80,000 characters, oldest first down to 60 %, the whole text behind `read_full_result` (ids carry the run's tag).
+**From Opencode**: `todo_write` (`Event::Todo`), `exit_plan` from Plan mode (the owner's answer switches the gate to the
+run's build mode; the app chat gets a **Plan/Build switch**, `ChatMode::Plan` on Glut, Claude Code and new Opencode
+sessions — a session whose switch no longer matches goes on in a new one), **snapshots** before every changing step in
+a shadow git store (`snapshot.rs`, `~/.axh/snapshots`, `axh undo`), and **the language server's errors** appended to an
+edit (`diagnostics.rs`, the editor's server table, only servers that never run the project's code — rust-analyzer
+without build scripts, proc macros or `cargo check`).
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
@@ -1427,6 +1446,9 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   `docs/plans/harness.md`, `docs/plans/glut-round.md`): web fetch and search in the core within the app's limits,
   only the allowed tools offered, cached tokens metered apart, the answer streamed with a stall limit, skills that name
   their rights, `todo-to-kanban` and `inbox-sort` running on Glut as on Opencode and Claude Code. §5 "Glut rund".
+- **Glut 2 built** (2026-10-20, `docs/plans/glut-2.md`): code mode in QuickJS with MCP behind code in the chat, old
+  tool results shrinking over a budget, `todo_write`, Plan/Build with `exit_plan` and the chat's switch, snapshots
+  with `axh undo`, the language server's errors after an edit. §5 "Glut 2".
 - **Editor ED3 — Vi mode: done** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
   ED3.1: the Vi machine in `src/editor/vi/` (pure TS, table-tested). ED3.2: wired to every
   editor surface (`fileapp/viKeys`, `viSurface`, `viScroll`, `viShared`), cursor shapes, the

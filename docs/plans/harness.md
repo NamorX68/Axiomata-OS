@@ -44,6 +44,7 @@ Backend, one checkpoint and commit each:
 | **HS7** ✅ | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) — B1–B4 below |
 | **HS8** ✅ | Subagents: a `task` tool starting a nested loop with its own prompt, tools and limits — B1–B3 below |
 | **Glut rund** ✅ | `web_fetch`/`web_search` in the core, only the allowed tools offered, cached tokens, streaming with a stall limit, identity, `access: read` — `docs/plans/glut-round.md` |
+| **Glut 2** ✅ | Code mode (QuickJS), MCP behind code in chat, old results shrink over a budget, `todo_write`, Plan/Build with `exit_plan`, snapshots + `axh undo`, LSP errors after edits — `docs/plans/glut-2.md` |
 
 Since then built: sessions over several turns (the Glut chat, `run_continuing`), streaming (`Event::TextDelta`, the
 stall limit — glut-round CP5), cost metering through the core (`spend.rs`, cached tokens apart). Still after the

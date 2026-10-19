@@ -124,19 +124,33 @@ search inside the script. A skill that declares MCP tools gets them through code
   on in a new session (the conversation's earlier turns stay in the app's transcript, not in the agent's context).
 - `exit_plan` names the mode it would switch to; a script cannot call it.
 
-## CP5 and CP6 — built (2026-10-20)
+## CP5 and CP6 — built (2026-10-20), hardened after their review and audit
 
-- **Snapshots** (`snapshot.rs`): before the first change of a step (an edit or a command) the folder goes into a
-  shadow git store under `~/.axh/snapshots/<hash>` — its own `--git-dir`, the folder's `.gitignore` plus `target/`
-  and `node_modules/`, no global/system git config, hooks, fsmonitor or signing. `axh undo [--cwd] [--run]
-  [--step N] [--list]` restores and removes what the run added. Records 7 days, gc at most once a day. Live: a run
-  changed `a.txt` and added `b.txt`, `axh undo` put both back. On for the app's Glut runs and `harness run`.
-- **LSP errors after an edit** (`diagnostics.rs`): the editor's server table (`axiomata_files::lsp::servers`, not the
-  app's override file); errors only, at most 10, within 4 s; the last word per file stands when a change brings
-  nothing new. **Only servers that never run the project's code** (an agent writes the files they read): rust-analyzer
-  with build scripts, proc macros and `cargo check` off — its own diagnostics, type errors included (experimental
-  on) — pyright, taplo, yaml, json, css, html, marksman. TypeScript (tsserver plugins), Svelte (`svelte.config.js`),
-  Swift, Lua, SQL and bash stay out. Live against rust-analyzer: `expected i32, found &'static str`.
+- **Snapshots** (`snapshot.rs`): before the first *changing* step of a turn — an edit, a command that is not one of a
+  short read-only list (`date` in every step records nothing), a `task` — the folder goes into a shadow git store
+  under `~/.axh/snapshots/<hash>` (0700): its own `--git-dir`, **one chain and one index per run**
+  (`refs/axh/<run>`, `write-tree`/`commit-tree`), a lock per store, the folder's `.gitignore` plus `target/`,
+  `node_modules/`, nested repositories and files over 2 MB left out; no snapshots of `$HOME`, a folder above it, `/`,
+  or more than 20,000 files. Git runs with a cleared environment, no owner config/attributes/excludes/hooks/fsmonitor/
+  signing, a 60 s limit; commit ids from a record are checked. `axh undo [--cwd] [--run] [--step N] [--list]`
+  restores and removes what the run added — the owner's own changes to those files during the run included. After 7
+  days a run's record and ref go, and `gc` frees what only it held. Subagents take none (their parent's snapshot
+  before `task` covers them). The run's end does not wait for a snapshot. Live: a run changed `a.txt` and added
+  `b.txt`; `axh undo` put both back.
+- **LSP errors after an edit** (`diagnostics.rs`): a language server reads files the agent wrote and may run programs
+  because of them (the audit: rust-analyzer's `cargo metadata` obeys a project's `.cargo/config.toml`; pyright runs the
+  interpreter a project's config names), so **a server is a command of the run**: it starts only at the top level,
+  only where the run has a sandbox — and runs in it, without network — and only when the gate allows its command line
+  as a shell command (judged once, at its start; headless and undeclared, it does not start). Programs by file name
+  (`rust-analyzer`, `pyright-langserver`, `basedpyright-langserver`, `taplo`, `yaml-language-server`, the three
+  `vscode-*-language-server`s, `marksman` — no `pylsp`); rust-analyzer without build scripts, proc macros or `cargo
+  check` (its own diagnostics, experimental on), json/yaml/taplo without schema downloads; a cleared environment, its
+  own process group killed at the end, a bounded message queue, given up after two silent edits. The editor's server
+  table, not the app's override file. Errors only, at most 10, within 4 s. Live in the sandbox against rust-analyzer:
+  `expected i32, found &'static str`.
+- **news-web measured** (two runs each): per step the context halved (#1717 without B ~40k, #1720/#1721 with it
+  ~19k/~18k; Glut rund's #1712 ~94k), but the model took 30–33 steps instead of 13, so the totals stayed about the same
+  (520k → 629k / 535k). Whether shrinking causes the extra steps or the model varies cannot be told from three runs.
 
 ## Checkpoints
 

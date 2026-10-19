@@ -30,7 +30,9 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   the board), permission asks answered in the app (#88, `docs/plans/permission-asks.md`), and the own harness `axiomata-harness` / `axh`
   (#37, `docs/plans/harness.md`; HS1–HS8 built), made one to keep a role on in "Glut rund" (2026-10-19,
   `docs/plans/glut-round.md`: web fetch/search, fewer tokens, cached tokens metered apart, streaming, skills that name
-  their rights). Deferred: further model-provider work.
+  their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat, results
+  shrinking over a budget, todo/plan-build/snapshots/LSP errors). Next: plans for Pi-Durable-like runs and LocalBrain.
+  Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
   new work and **update them** (not just this file) when a milestone or major feature lands.
@@ -258,6 +260,11 @@ from the code itself:
   directly, without a shell. Every app-harness command carries `AXIOMATA_HARNESS_RUN=skill|chat`: a skill run gets only a
   short CLI list (`main.rs` `skill_run_may`), a chat turn no owner gate and only plain cards (`board_flow::plain_*`).
   Widen either list only with the same care; on Opencode's unattended shell the mark is a second line, not a boundary.
+- **Glut's code mode has no regular expressions** (`axiomata-harness/src/codemode.rs` `Intrinsics`): the bundled
+  quickjs-ng has an open heap-write advisory in its regex compiler (GHSA-rxpx-wj25-jhqq) — do not add `RegExp` back
+  until rquickjs bundles a fixed engine; `cargo audit` cannot see GitHub advisories. A script's tool calls go through
+  `run.rs` `perform` like direct ones — never call the toolbox from `codemode.rs`. Language servers asked after an
+  edit (`diagnostics.rs` `SAFE_SERVERS`) must never run the project's code: an agent writes the files they read.
 - **Hooks veto, they never permit** (HS7, `docs/plans/harness-hs7.md`): the `hooks` of
   `~/.axh/settings.json` (Claude's shape) may only *block* a call or the answer — `allow`/`ask` parse and
   are no-ops (the gate stays the only decider), a crash/timeout/odd exit is a fail-open `Event::Hook` note,
