@@ -42,7 +42,9 @@ use axiomata_harness::{
     RunConfig, SharedSink,
 };
 
+use crate::agents::claude_code::{bash_rule, is_shell_rule};
 use crate::agents::opencode::{JSON_REPAIR_PROMPT, JSON_REPAIR_TIMEOUT, find_json_object};
+use crate::agents::opencode_instance::{READ_COMMANDS, READ_DENIED_COMMANDS};
 use crate::agents::{
     AgentRequest, AgentRunResult, BACKEND_AXH, ChatReply, ChatRequest, agent_slots,
 };
@@ -68,11 +70,16 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         .await
         .expect("agent_slots semaphore is never closed");
     let declared = declared_rules(request.name.as_deref(), request.allowed_tools.as_deref())?;
-    let rights = Rights {
-        name: request.name.as_deref(),
-        declared: &declared,
-        // A skill keeps the mode's own word for what it does not declare (B3).
-        mode: Mode::Default,
+    let rights = if request.read_only {
+        read_rights(request.name.as_deref(), &declared)?
+    } else {
+        Rights {
+            name: request.name.as_deref(),
+            declared: declared.clone(),
+            // A skill keeps the mode's own word for what it does not declare (B3).
+            mode: Mode::Default,
+            deny: Vec::new(),
+        }
     };
     let mut harness = Harness::prepare(&home, &request.cwd, &rights, request.timeout).await?;
     // No signal handlers: this process is the app, not `axh`, and nothing
@@ -180,8 +187,9 @@ pub(crate) async fn chat(
     let declared = declared_rules(None, request.allowed_tools.as_deref())?;
     let rights = Rights {
         name: None,
-        declared: &declared,
+        declared: declared.clone(),
         mode: chat_mode(&declared, request.auto_approve_tools),
+        deny: Vec::new(),
     };
     let mut harness = Harness::prepare(&home, &request.cwd, &rights, request.timeout).await?;
     harness.run_config.instructions = instructions;
@@ -235,6 +243,45 @@ pub(crate) async fn chat(
     })
 }
 
+/// The rights of an `access: read` skill on Glut (`docs/plans/glut-round.md` CP1), the same as on Opencode's read
+/// instance and on Claude Code: `Mode::Plan` (no edit, even where a rule would allow one; a command only by rule), all
+/// reads, the declared tools without their shell rules, and the shared read commands; the git commands that reach
+/// beyond the folder are refused. Stricter than the Opencode read instance on purpose: what the skill does not name —
+/// another MCP tool, a subagent — is refused, since the declaration always narrows a read run (it holds at least the
+/// reads).
+///
+/// # Errors
+///
+/// [`AxiomataError::InvalidSkill`] when a shared read command does not parse as a rule — a programming error, caught
+/// by the tests.
+fn read_rights<'a>(name: Option<&'a str>, declared: &[Rule]) -> Result<Rights<'a>, AxiomataError> {
+    let rule = |text: String| {
+        Rule::parse(&text).map_err(|reason| AxiomataError::InvalidSkill {
+            path: PathBuf::from(name.unwrap_or("the run")),
+            reason: format!("read rule {text:?}: {reason}"),
+        })
+    };
+    let mut allowed: Vec<Rule> = declared
+        .iter()
+        .filter(|rule| !is_shell_rule(rule.text()))
+        .cloned()
+        .collect();
+    allowed.push(rule("Read".to_owned())?);
+    for command in READ_COMMANDS {
+        allowed.push(rule(bash_rule(command))?);
+    }
+    let deny = READ_DENIED_COMMANDS
+        .iter()
+        .map(|command| rule(bash_rule(command)))
+        .collect::<Result<_, _>>()?;
+    Ok(Rights {
+        name,
+        declared: allowed,
+        mode: Mode::Plan,
+        deny,
+    })
+}
+
 /// The gate's mode for a chat turn: a declared list keeps the mode's own word for the rest (it narrows anyway);
 /// without one, pre-approved tools are the owner's auto mode — what no rule denies runs, an `ask` is refused
 /// since nobody answers — and otherwise only reads run.
@@ -249,8 +296,11 @@ fn chat_mode(declared: &[Rule], auto_approve: bool) -> Mode {
 /// What a run or a chat turn is allowed: the declared rules narrow it (B3), the mode speaks for the rest.
 struct Rights<'a> {
     name: Option<&'a str>,
-    declared: &'a [Rule],
+    declared: Vec<Rule>,
     mode: Mode,
+    /// Refusals of the run's own beside the owner's `~/.axh` ones — a read run's git commands that reach beyond the
+    /// folder.
+    deny: Vec<Rule>,
 }
 
 /// The harness as one run or chat turn uses it: the run's configuration, its tools behind the gate, and the notes
@@ -595,9 +645,9 @@ fn declared_rules(
 fn gate_for(rights: &Rights<'_>, settings: &RuleSet) -> Gate {
     let mut gate = Gate::new(
         RuleSet {
-            allow: rights.declared.to_vec(),
+            allow: rights.declared.clone(),
             ask: settings.ask.clone(),
-            deny: settings.deny.clone(),
+            deny: settings.deny.iter().chain(&rights.deny).cloned().collect(),
         },
         rights.mode,
         Arc::new(Nobody),
@@ -609,7 +659,7 @@ fn gate_for(rights: &Rights<'_>, settings: &RuleSet) -> Gate {
             Some(name) => format!("the skill {name}"),
             None => "this run's declaration".to_owned(),
         },
-        rights.declared.to_vec(),
+        rights.declared.clone(),
     );
     gate
 }
@@ -709,8 +759,9 @@ mod tests {
         gate_for(
             &Rights {
                 name,
-                declared,
+                declared: declared.to_vec(),
                 mode: Mode::Default,
+                deny: Vec::new(),
             },
             settings,
         )
@@ -783,6 +834,88 @@ mod tests {
         // No model on the request (nothing resolved) is an error, not a guess.
         assert!(endpoint(&ollama, ProviderRole::Skill, None).is_err());
         assert!(endpoint(&ollama, ProviderRole::Skill, Some("  ".into())).is_err());
+    }
+
+    /// `access: read` on Glut (glut-round CP1): reads, the shared read commands and the declared MCP tool run; edits,
+    /// other commands, a declared shell rule, an output redirect and git's `--output`/`--no-index` are refused.
+    #[tokio::test]
+    async fn a_read_skill_on_glut_only_reads() {
+        let declared = declared_rules(
+            Some("look"),
+            Some("mcp__apple-mail__search_emails Bash Edit"),
+        )
+        .unwrap();
+        let rights = read_rights(Some("look"), &declared).unwrap();
+        assert_eq!(rights.mode, Mode::Plan);
+        let gate = gate_for(&rights, &RuleSet::default());
+        let read = Access::Read {
+            path: "notes.md".into(),
+        };
+        assert!(gate.judge("read_file", &read).await.is_ok());
+        for allowed in ["git log --oneline", "git status", "ls", "pwd"] {
+            assert!(
+                gate.judge("bash", &bash(allowed)).await.is_ok(),
+                "{allowed}"
+            );
+        }
+        let mail = Access::Mcp {
+            server: "apple-mail".into(),
+            tool: "search_emails".into(),
+        };
+        assert!(
+            gate.judge("mcp__apple-mail__search_emails", &mail)
+                .await
+                .is_ok()
+        );
+        let edit = Access::Edit {
+            path: "notes.md".into(),
+        };
+        assert!(gate.judge("write_file", &edit).await.is_err());
+        for refused in [
+            "touch x",
+            "echo x > f",
+            "git log > f",
+            "git log --output=f",
+            "git diff --no-index a b",
+            "rm notes.md",
+        ] {
+            assert!(
+                gate.judge("bash", &bash(refused)).await.is_err(),
+                "{refused}"
+            );
+        }
+    }
+
+    /// A read skill that declares nothing still reads and runs the read commands — and nothing else, compound
+    /// commands included; a declared `Write` stays refused under Plan.
+    #[tokio::test]
+    async fn a_read_skill_without_a_declaration_reads_and_never_chains_a_write() {
+        let declared = declared_rules(Some("look"), Some("Write")).unwrap();
+        for rights in [
+            read_rights(Some("look"), &[]).unwrap(),
+            read_rights(Some("look"), &declared).unwrap(),
+        ] {
+            let gate = gate_for(&rights, &RuleSet::default());
+            assert!(gate.judge("bash", &bash("git status")).await.is_ok());
+            for refused in ["git log; touch x", "git log && rm f", "ls | tee f"] {
+                assert!(
+                    gate.judge("bash", &bash(refused)).await.is_err(),
+                    "{refused}"
+                );
+            }
+            let write = Access::Edit {
+                path: "x.md".into(),
+            };
+            assert!(gate.judge("write_file", &write).await.is_err());
+        }
+    }
+
+    /// A skill that does not only look keeps the gate it always had: mode default, no extra denies.
+    #[test]
+    fn a_skill_that_writes_keeps_its_gate() {
+        let gate = skill_gate(Some("w"), &[], &RuleSet::default());
+        assert_eq!(gate.mode_name(), "default");
+        assert!(gate.rules().deny.is_empty());
     }
 
     fn bash(command: &str) -> Access {
@@ -1255,8 +1388,9 @@ mod tests {
         };
         let rights = Rights {
             name: None,
-            declared: &[],
+            declared: Vec::new(),
             mode: chat_mode(&[], true),
+            deny: Vec::new(),
         };
         let gate = gate_for(&rights, &settings);
         assert!(gate.narrowed_by().is_empty());

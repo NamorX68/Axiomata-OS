@@ -264,6 +264,62 @@ impl ProviderSettings {
     }
 }
 
+/// Web search for Glut's `web_search` (`docs/plans/glut-round.md`, W2/W3/W5/W7): the providers' keys and the limits
+/// that keep a search from costing money. Exa answers without a key (rate limited); TinyFish and Tavily need one, and
+/// a provider without its key is skipped.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct WebSettings {
+    /// Optional: raises Exa's keyless rate limit.
+    #[serde(default)]
+    pub exa_api_key: Option<String>,
+    #[serde(default)]
+    pub tinyfish_api_key: Option<String>,
+    #[serde(default)]
+    pub tavily_api_key: Option<String>,
+    /// The most searches a day across every provider; `0` turns `web_search` off.
+    #[serde(default = "default_daily_search_limit")]
+    pub daily_search_limit: u32,
+    /// The most Tavily searches a month — its free credits (the account holds a card, W7); past it Tavily is skipped.
+    #[serde(default = "default_tavily_monthly_limit")]
+    pub tavily_monthly_limit: u32,
+}
+
+/// Searches a day before `web_search` refuses (W3).
+fn default_daily_search_limit() -> u32 {
+    50
+}
+
+/// Tavily's free credits a month; a basic search costs one (W7).
+fn default_tavily_monthly_limit() -> u32 {
+    1000
+}
+
+/// The keys show only as set or unset: a `{:?}` of a [`Config`] must not put them in a log.
+impl std::fmt::Debug for WebSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let set = |key: &Option<String>| if key.is_some() { "<set>" } else { "<unset>" };
+        f.debug_struct("WebSettings")
+            .field("exa_api_key", &set(&self.exa_api_key))
+            .field("tinyfish_api_key", &set(&self.tinyfish_api_key))
+            .field("tavily_api_key", &set(&self.tavily_api_key))
+            .field("daily_search_limit", &self.daily_search_limit)
+            .field("tavily_monthly_limit", &self.tavily_monthly_limit)
+            .finish()
+    }
+}
+
+impl Default for WebSettings {
+    fn default() -> Self {
+        Self {
+            exa_api_key: None,
+            tinyfish_api_key: None,
+            tavily_api_key: None,
+            daily_search_limit: default_daily_search_limit(),
+            tavily_monthly_limit: default_tavily_monthly_limit(),
+        }
+    }
+}
+
 /// First principles: the CLI's own `total_cost_usd` estimate is not usable
 /// for the daily cap when a run is routed to a non-Anthropic model — the CLI
 /// prices unknown model ids from its internal Anthropic price table, which
@@ -349,6 +405,10 @@ pub struct AgentDefaults {
     /// (`docs/plans/harness-choice.md` D3). See [`Self::harness_for`].
     #[serde(default)]
     pub skill_harness: HarnessId,
+
+    /// Web search for Glut (`[agents.web]`). See [`WebSettings`].
+    #[serde(default)]
+    pub web: WebSettings,
 
     /// Daily spend cap in USD, applied per paid (non-Anthropic) role provider.
     /// Checked before every redirected agent turn against the sum of today's
@@ -508,6 +568,7 @@ impl Default for AgentDefaults {
             skill_provider: ProviderId::default(),
             chat_harness: HarnessId::default(),
             skill_harness: HarnessId::default(),
+            web: WebSettings::default(),
             daily_usd_cap: default_daily_usd_cap(),
             costs: BTreeMap::new(),
             auto_approve_tools: default_auto_approve_tools(),
@@ -1374,6 +1435,29 @@ mod tests {
                 format!("h = \"{}\"\n", harness.as_str())
             );
         }
+    }
+
+    /// `[agents.web]` round-trips; a config without it gets the limits that keep searches free (W3, W7).
+    #[test]
+    fn web_settings_round_trip_and_default_to_the_free_limits() {
+        let old: Config = toml::from_str("owner = \"x\"\n").unwrap();
+        assert_eq!(old.agents.web, WebSettings::default());
+        assert_eq!(old.agents.web.daily_search_limit, 50);
+        assert_eq!(old.agents.web.tavily_monthly_limit, 1000);
+
+        let mut config = Config::default();
+        config.agents.web.tinyfish_api_key = Some("tf-key".into());
+        config.agents.web.daily_search_limit = 20;
+        let text = toml::to_string(&config).unwrap();
+        assert!(text.contains("[agents.web]"), "{text}");
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.agents.web, config.agents.web);
+        // A debug print of the config never carries the key.
+        let debug = format!("{:?}", back);
+        assert!(
+            !debug.contains("tf-key") && debug.contains("<set>"),
+            "{debug}"
+        );
     }
 
     /// Serialises one bare [`HarnessId`] so its token can be compared with [`HarnessId::as_str`].

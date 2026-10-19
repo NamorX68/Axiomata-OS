@@ -12,7 +12,7 @@ use axiomata_core::agents::{self, ChatMode, ChatReply};
 use axiomata_core::board;
 use axiomata_core::board_mirror;
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
-use axiomata_core::config::{Config, HarnessId, ProviderId, ProviderSettings};
+use axiomata_core::config::{Config, HarnessId, ProviderId, ProviderSettings, WebSettings};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::editor_settings::{self, LoadedEditorSettings};
 use axiomata_core::editor_vi;
@@ -85,6 +85,29 @@ pub struct ProviderSettingsView {
     pub skill_model: String,
 }
 
+/// `agents.web` as sent to the renderer: whether each key is stored, never its value.
+#[derive(Debug, Clone, Serialize)]
+pub struct WebSettingsView {
+    pub has_exa_key: bool,
+    pub has_tinyfish_key: bool,
+    pub has_tavily_key: bool,
+    pub daily_search_limit: u32,
+    pub tavily_monthly_limit: u32,
+}
+
+impl WebSettingsView {
+    fn from_settings(web: &WebSettings) -> Self {
+        let has = |key: &Option<String>| key.as_deref().is_some_and(|k| !k.trim().is_empty());
+        Self {
+            has_exa_key: has(&web.exa_api_key),
+            has_tinyfish_key: has(&web.tinyfish_api_key),
+            has_tavily_key: has(&web.tavily_api_key),
+            daily_search_limit: web.daily_search_limit,
+            tavily_monthly_limit: web.tavily_monthly_limit,
+        }
+    }
+}
+
 /// `agents` as sent to the renderer. Omits `claude_model` (migration-only)
 /// and the `claude_env` *values*.
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +121,8 @@ pub struct AgentDefaultsView {
     pub chat_harness: HarnessId,
     pub skill_harness: HarnessId,
     pub daily_usd_cap: Option<f64>,
+    /// Glut's web search: key presence and limits (`docs/plans/glut-round.md`, W5).
+    pub web: WebSettingsView,
     /// Names only of the `agents.claude_env` power-user overrides — their
     /// values can be Bedrock / proxy tokens, so they never cross the IPC line.
     pub claude_env_keys: Vec<String>,
@@ -141,6 +166,7 @@ impl ConfigView {
                 chat_harness: c.agents.chat_harness,
                 skill_harness: c.agents.skill_harness,
                 daily_usd_cap: c.agents.daily_usd_cap,
+                web: WebSettingsView::from_settings(&c.agents.web),
                 claude_env_keys: c.agents.claude_env.keys().cloned().collect(),
             },
         }
@@ -169,6 +195,25 @@ pub struct ProviderSettingsUpdate {
     pub skill_model: String,
 }
 
+/// `agents.web` coming back from the dialog: each key as a [`KeyUpdate`], the limits as values.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebSettingsUpdate {
+    pub exa_api_key: KeyUpdate,
+    pub tinyfish_api_key: KeyUpdate,
+    pub tavily_api_key: KeyUpdate,
+    pub daily_search_limit: u32,
+    pub tavily_monthly_limit: u32,
+}
+
+/// One stored key after a [`KeyUpdate`]; a blank value clears it, as the dialog means it.
+fn resolve_key(stored: &Option<String>, update: KeyUpdate) -> Option<String> {
+    match update {
+        KeyUpdate::Keep => stored.clone(),
+        KeyUpdate::Clear => None,
+        KeyUpdate::Set { value } => Some(value.trim().to_owned()).filter(|key| !key.is_empty()),
+    }
+}
+
 /// `agents` coming back from the dialog. No `claude_env` (no editor for it;
 /// preserved server-side) and no `claude_model`.
 #[derive(Debug, Clone, Deserialize)]
@@ -181,6 +226,7 @@ pub struct AgentDefaultsUpdate {
     pub chat_harness: HarnessId,
     pub skill_harness: HarnessId,
     pub daily_usd_cap: Option<f64>,
+    pub web: WebSettingsUpdate,
 }
 
 /// The payload `save_config` accepts. See the module note above.
@@ -206,6 +252,15 @@ fn merge_view_update(current: &Config, update: ConfigUpdate) -> Config {
     merged.agents.skill_provider = update.agents.skill_provider;
     merged.agents.chat_harness = update.agents.chat_harness;
     merged.agents.skill_harness = update.agents.skill_harness;
+    let web = update.agents.web;
+    let stored = &current.agents.web;
+    merged.agents.web = WebSettings {
+        exa_api_key: resolve_key(&stored.exa_api_key, web.exa_api_key),
+        tinyfish_api_key: resolve_key(&stored.tinyfish_api_key, web.tinyfish_api_key),
+        tavily_api_key: resolve_key(&stored.tavily_api_key, web.tavily_api_key),
+        daily_search_limit: web.daily_search_limit,
+        tavily_monthly_limit: web.tavily_monthly_limit,
+    };
     merged.agents.daily_usd_cap = update.agents.daily_usd_cap;
 
     let mut providers = BTreeMap::new();
@@ -215,11 +270,7 @@ fn merge_view_update(current: &Config, update: ConfigUpdate) -> Config {
             .providers
             .get(&id)
             .and_then(|s| s.api_key.clone());
-        let api_key = match u.api_key {
-            KeyUpdate::Keep => stored_key,
-            KeyUpdate::Clear => None,
-            KeyUpdate::Set { value } => Some(value),
-        };
+        let api_key = resolve_key(&stored_key, u.api_key);
         providers.insert(
             id,
             ProviderSettings {
@@ -345,6 +396,17 @@ fn apply_config_update(config: &RwLock<Config>, mut new_config: Config) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A dialog save that leaves every web key and the default limits as they are.
+    fn keep_web() -> WebSettingsUpdate {
+        WebSettingsUpdate {
+            exa_api_key: KeyUpdate::Keep,
+            tinyfish_api_key: KeyUpdate::Keep,
+            tavily_api_key: KeyUpdate::Keep,
+            daily_search_limit: 50,
+            tavily_monthly_limit: 1000,
+        }
+    }
     use axiomata_core::config::ProviderId;
     use axiomata_core::paths;
     use std::env;
@@ -450,6 +512,7 @@ mod tests {
                 chat_harness: HarnessId::Opencode,
                 skill_harness: HarnessId::Opencode,
                 daily_usd_cap: current.agents.daily_usd_cap,
+                web: keep_web(),
                 providers: BTreeMap::from([(
                     ProviderId::OpenRouter,
                     ProviderSettingsUpdate {
@@ -523,6 +586,7 @@ mod tests {
                 chat_harness: HarnessId::Opencode,
                 skill_harness: HarnessId::Opencode,
                 daily_usd_cap: Some(2.0),
+                web: keep_web(),
                 providers: BTreeMap::from([(
                     ProviderId::OpenRouter,
                     ProviderSettingsUpdate {
@@ -536,6 +600,62 @@ mod tests {
         };
         let merged = merge_view_update(&current, update);
         assert!(merged.validate_for_save().unwrap_err().contains("API key"));
+    }
+
+    /// The web keys (glut-round W5): kept, set or cleared as the dialog says, and the view tells only whether one is
+    /// stored — never its value.
+    #[test]
+    fn web_keys_are_kept_set_or_cleared_and_never_sent_back() {
+        let mut current = Config {
+            workspace_root: PathBuf::from("/ws"),
+            ..Config::default()
+        };
+        current.agents.web.tinyfish_api_key = Some("tf-secret".into());
+        current.agents.web.tavily_api_key = Some("tvly-secret".into());
+        let update = ConfigUpdate {
+            owner: String::new(),
+            workspace_root: "/ws".to_string(),
+            agents: AgentDefaultsUpdate {
+                ollama_model: "llama3.2".to_string(),
+                skill_timeout_secs: 300,
+                chat_provider: ProviderId::Anthropic,
+                skill_provider: ProviderId::Anthropic,
+                chat_harness: HarnessId::Opencode,
+                skill_harness: HarnessId::Opencode,
+                daily_usd_cap: Some(2.0),
+                web: WebSettingsUpdate {
+                    exa_api_key: KeyUpdate::Set {
+                        value: "exa-new".into(),
+                    },
+                    tinyfish_api_key: KeyUpdate::Keep,
+                    tavily_api_key: KeyUpdate::Clear,
+                    daily_search_limit: 20,
+                    tavily_monthly_limit: 900,
+                },
+                providers: BTreeMap::new(),
+            },
+        };
+        let merged = merge_view_update(&current, update);
+        assert_eq!(merged.agents.web.exa_api_key.as_deref(), Some("exa-new"));
+        assert_eq!(
+            merged.agents.web.tinyfish_api_key.as_deref(),
+            Some("tf-secret")
+        );
+        assert_eq!(merged.agents.web.tavily_api_key, None);
+        assert_eq!(merged.agents.web.daily_search_limit, 20);
+        assert_eq!(merged.agents.web.tavily_monthly_limit, 900);
+
+        let view = ConfigView::from_config(&merged);
+        assert!(
+            view.agents.web.has_exa_key
+                && view.agents.web.has_tinyfish_key
+                && !view.agents.web.has_tavily_key
+        );
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(
+            !json.contains("secret") && !json.contains("exa-new"),
+            "{json}"
+        );
     }
 
     /// The dialog edits the harness of each role (harness-choice CP5): a save takes them from the update.
@@ -556,6 +676,7 @@ mod tests {
                 chat_harness: HarnessId::ClaudeCode,
                 skill_harness: HarnessId::Opencode,
                 daily_usd_cap: Some(2.0),
+                web: keep_web(),
                 providers: BTreeMap::new(),
             },
         };

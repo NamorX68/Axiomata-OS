@@ -67,6 +67,8 @@ export interface AgentDefaultsView {
   skill_harness: HarnessId;
   /** Daily USD spend cap for a paid provider; `null` disables it. */
   daily_usd_cap: number | null;
+  /** Glut's web search: whether each key is stored (never its value), and the limits. */
+  web: WebSettingsView;
   /** Names only of the `agents.claude_env` overrides. */
   claude_env_keys: string[];
 }
@@ -98,6 +100,25 @@ export interface AgentDefaultsUpdate {
   chat_harness: HarnessId;
   skill_harness: HarnessId;
   daily_usd_cap: number | null;
+  web: WebSettingsUpdate;
+}
+
+/** Mirrors the Tauri `WebSettingsView` (`docs/plans/glut-round.md`, W5). */
+export interface WebSettingsView {
+  has_exa_key: boolean;
+  has_tinyfish_key: boolean;
+  has_tavily_key: boolean;
+  daily_search_limit: number;
+  tavily_monthly_limit: number;
+}
+
+/** What the dialog sends back for `agents.web`: each key as a `KeyUpdate`. */
+export interface WebSettingsUpdate {
+  exa_api_key: KeyUpdate;
+  tinyfish_api_key: KeyUpdate;
+  tavily_api_key: KeyUpdate;
+  daily_search_limit: number;
+  tavily_monthly_limit: number;
 }
 
 /** Mirrors `axiomata_core::agents::claude_auth::LoginStatus`: the app's own Claude Code sign-in. */

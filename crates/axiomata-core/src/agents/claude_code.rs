@@ -540,13 +540,13 @@ fn permissions(invocation: &Invocation) -> Permissions {
     }
 }
 
-fn is_shell_rule(rule: &str) -> bool {
+pub(crate) fn is_shell_rule(rule: &str) -> bool {
     rule == "Bash" || rule.starts_with("Bash(")
 }
 
 /// One shared shell pattern ([`READ_COMMANDS`]) in Claude's spelling: a trailing ` *` is its `:*` ("with any
 /// arguments"); a `*` elsewhere stays a wildcard, which Claude Code matches inside a command too (measured, CP2).
-fn bash_rule(command: &str) -> String {
+pub(crate) fn bash_rule(command: &str) -> String {
     match command.strip_suffix(" *") {
         Some(prefix) if !prefix.contains('*') => format!("Bash({prefix}:*)"),
         _ => format!("Bash({command})"),

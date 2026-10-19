@@ -79,6 +79,7 @@ let configState: {
     skill_harness: HarnessId;
     providers: Record<ProviderId, MockProvider>;
     daily_usd_cap: number | null;
+    web: { exa: string | null; tinyfish: string | null; tavily: string | null; daily: number; tavilyMonthly: number };
   };
 } = {
   owner: "Dev",
@@ -97,6 +98,7 @@ let configState: {
       ollama: { base_url: "http://localhost:11434", api_key: "ollama", chat_model: "", skill_model: "" },
     },
     daily_usd_cap: 2,
+    web: { exa: null, tinyfish: null, tavily: null, daily: 50, tavilyMonthly: 1000 },
   },
 };
 
@@ -124,6 +126,13 @@ function configView(): ConfigView {
       chat_harness: a.chat_harness,
       skill_harness: a.skill_harness,
       daily_usd_cap: a.daily_usd_cap,
+      web: {
+        has_exa_key: !!a.web.exa,
+        has_tinyfish_key: !!a.web.tinyfish,
+        has_tavily_key: !!a.web.tavily,
+        daily_search_limit: a.web.daily,
+        tavily_monthly_limit: a.web.tavilyMonthly,
+      },
       claude_env_keys: Object.keys(a.claude_env),
     },
   };
@@ -1353,6 +1362,15 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       a.chat_harness = next.agents.chat_harness;
       a.skill_harness = next.agents.skill_harness;
       a.daily_usd_cap = next.agents.daily_usd_cap;
+      const key = (stored: string | null, u: ConfigUpdate["agents"]["web"]["exa_api_key"]) =>
+        u.kind === "keep" ? stored : u.kind === "set" ? u.value : null;
+      a.web = {
+        exa: key(a.web.exa, next.agents.web.exa_api_key),
+        tinyfish: key(a.web.tinyfish, next.agents.web.tinyfish_api_key),
+        tavily: key(a.web.tavily, next.agents.web.tavily_api_key),
+        daily: next.agents.web.daily_search_limit,
+        tavilyMonthly: next.agents.web.tavily_monthly_limit,
+      };
       for (const [id, u] of Object.entries(next.agents.providers) as [ProviderId, ConfigUpdate["agents"]["providers"][ProviderId]][]) {
         const stored = a.providers[id]?.api_key ?? null;
         a.providers[id] = {

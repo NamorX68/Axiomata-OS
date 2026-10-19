@@ -20,6 +20,7 @@
     invokeBackend,
   } from "../core/backend";
   import { HARNESSES, providerAfterHarnessChange, providersFor, usesClaudeCode } from "../core/harness";
+  import { WEB_KEYS, type WebKeyId, webUpdate } from "../core/webSettings";
   import { brainView, SHINES, SPEED_MAX } from "../core/brainView";
   import { MOTION_LEVELS, isMotionLevel, motion, motionSetting, systemReducesMotion, turns } from "../core/motion";
   import { effects } from "../core/effects";
@@ -70,6 +71,8 @@
    *  key field was not touched → the backend keeps the stored key. Present
    *  with `""` → clear it; present with a value → set it. */
   let keyEdits = $state<Partial<Record<ProviderId, string>>>({});
+  /** Web-search key edits, as `keyEdits` for the providers: absent = keep, `""` = clear, a value = set. */
+  let webKeyEdits = $state<Partial<Record<WebKeyId, string>>>({});
   function setKeyEdit(id: ProviderId, value: string) {
     keyEdits = { ...keyEdits, [id]: value };
   }
@@ -159,6 +162,7 @@
         chat_harness: c.agents.chat_harness,
         skill_harness: c.agents.skill_harness,
         daily_usd_cap: c.agents.daily_usd_cap,
+        web: webUpdate(c.agents.web, webKeyEdits),
       },
     };
   }
@@ -311,6 +315,7 @@
       await persist();
       toast("Provider settings saved — they apply from the next agent call.", "info");
       keyEdits = {};
+      webKeyEdits = {};
       await loadConfig();
       await refreshSpend();
     } catch (e) {
@@ -728,8 +733,8 @@
             </div>
             {#if config.agents.skill_harness === "axh"}
               <p class="hint">
-                Glut has no web tool of its own: a skill that reads the web (<code>news-web</code>) needs a web MCP
-                server in <code>~/.axh/mcp.json</code> or a <code>backend:</code> of its own.
+                A skill that reads the web (<code>news-web</code>) uses Glut's web search — its keys and limits are in
+                the Web search block below.
               </p>
             {/if}
 
@@ -770,6 +775,43 @@
                 {/if}
               </div>
             {/if}
+
+            <div class="provider-form web-search">
+              <span class="title">Web search (Glut)</span>
+              <p class="hint">
+                Glut's <code>web_search</code> asks Exa first, then TinyFish, then Tavily — a provider without its key is
+                skipped. Keys are stored in <code>config.toml</code> and never shown again.
+              </p>
+              {#each WEB_KEYS as k (k.id)}
+                {@const stored = k.stored(config.agents.web)}
+                <label class="field">
+                  <span>{k.label} key</span>
+                  <input
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    value={webKeyEdits[k.id] ?? ""}
+                    oninput={(e) => (webKeyEdits = { ...webKeyEdits, [k.id]: e.currentTarget.value })}
+                    placeholder={stored ? "•••••• saved — leave empty to keep" : k.id === "exa" ? "optional" : "not set"}
+                  />
+                  <span class="hint">{k.hint}</span>
+                  {#if stored && (webKeyEdits[k.id] ?? "") === "" && k.id in webKeyEdits}
+                    <span class="hint">The key is deleted on save.</span>
+                  {/if}
+                </label>
+              {/each}
+              <div class="role-picks">
+                <label class="field">
+                  <span>Searches per day (all providers)</span>
+                  <input type="number" min="0" step="1" bind:value={config.agents.web.daily_search_limit} />
+                </label>
+                <label class="field">
+                  <span>Tavily searches per month</span>
+                  <input type="number" min="0" step="1" bind:value={config.agents.web.tavily_monthly_limit} />
+                </label>
+              </div>
+              <p class="hint">0 turns the search (or Tavily) off. 1,000 Tavily searches a month are its free credits.</p>
+            </div>
 
             <div class="provider-form spend-form">
               {#each spend as s (s.role)}
@@ -1041,6 +1083,7 @@
     display: flex;
     flex-direction: column;
   }
+  .web-search .title,
   .claude-login .title {
     display: block;
     margin-bottom: var(--ax-space-2);
