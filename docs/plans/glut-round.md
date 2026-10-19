@@ -1,6 +1,6 @@
 # Glut rund — web, fewer tokens, read access, streaming, identity
 
-Status: **approved 2026-10-19**, owner decisions W1–W6 taken, nothing built.
+Status: **approved 2026-10-19**, owner decisions W1–W7 taken, CP0 measured.
 
 ## Why
 
@@ -66,8 +66,31 @@ How the others do it (researched 2026-10-19):
 - **W5 — the web keys in the Settings dialog, first** (owner, 2026-10-19; was Q2): a "Web search" block under AI
   providers with the TinyFish and Tavily keys (and an optional Exa key) as the provider keys are — kept, redacted,
   re-enterable any time — and the daily limit. Built first, so the owner can enter the keys before the tools exist.
+- **W7 — Tavily is last, and capped at its free credits** (owner, 2026-10-19: the account needed a credit card): a
+  monthly Tavily count, at most 1,000 (its free credits); past it Tavily is skipped, never billed.
 - **W6 — the chat window does not stream in this plan** (was Q1): the harness streams for its stall limit and events;
   showing the answer grow in the dashboard is a later step across all three harnesses.
+
+## CP0 — measured (2026-10-19)
+
+- **Exa keyless MCP works:** `initialize` → `Mcp-Session-Id` header, `notifications/initialized`, `tools/call`
+  `web_search_exa {query, numResults}`; 3 results in 1.4 s, each with title, URL, date, author and "Highlights" — page
+  text ready for the model (7.6 KB for 3). Also offers `web_fetch_exa {urls, maxCharacters}`. Exa's own result for
+  the Opencode docs shows TinyFish's key as optional there.
+- **Where Glut's calendar tokens go** (`harness run --skill calendar-digest --json`, Ling via OpenRouter, the two
+  calendar tools allowed): 43 tools offered; **17.2k input tokens at turn 1** — nearly all of it the schemas of every
+  MCP tool (27 of `apple-mail`, 5 of `apple-reminders`), though the skill may use 2; the model first called `skill`
+  twice (list, then the calendar skill — its body already *is* the task); the events (~17.7k tokens) then ride along
+  in every later turn (35.8k → 37.6k). 7 turns, 180k input, 16k output.
+- **How the counts compare:** the app counts only Opencode's `tokens.input`, not `tokens.cache.read` — run #1703
+  had 54.3k fresh **plus 80.9k from the cache**, so ~135k processed. Glut counts every prompt token at the full price
+  (the OpenAI-compatible `usage.prompt_tokens_details.cached_tokens` is not read).
+- **So CP4 is, in this order:** (1) offer the model only the tools the run may use — with a declaration, exactly the
+  declared ones (core and MCP), as HS8 already does for `task`; (2) no `skill` tool in a skill run whose body is the
+  task (or the catalog without the running skill); (3) read cached tokens and meter them at the cached price;
+  (4) then, if still needed, shorten old tool results in the history. Estimate for the calendar: 70–80k instead of
+  180–230k. A chat turn (no declaration) still offers every tool — a tool search (load schemas on demand, like
+  Claude Code's deferred tools) is a later step.
 
 ## Checkpoints
 
