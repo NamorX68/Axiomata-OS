@@ -43,10 +43,13 @@ Backend, one checkpoint and commit each:
 | **HS6b** ✅ | `backend: axh` in the core: skill runs through the own harness, `runs` table, spend metering — B1–B4 below |
 | **HS7** ✅ | Hooks: SessionStart / PreToolUse / PostToolUse / Stop as shell hooks with JSON on stdin (Claude-compatible) — B1–B4 below |
 | **HS8** ✅ | Subagents: a `task` tool starting a nested loop with its own prompt, tools and limits — B1–B3 below |
+| **Glut rund** ✅ | `web_fetch`/`web_search` in the core, only the allowed tools offered, cached tokens, streaming with a stall limit, identity, `access: read` — `docs/plans/glut-round.md` |
 
-After the backend: sessions over several turns, streaming, the Anthropic client, cost metering (`studio_spend` /
-`spend.rs`), `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an **app** of its
-own, both on the event stream of H3.
+Since then built: sessions over several turns (the Glut chat, `run_continuing`), streaming (`Event::TextDelta`, the
+stall limit — glut-round CP5), cost metering through the core (`spend.rs`, cached tokens apart). Still after the
+backend: the Anthropic client, `axh` as an engine in the Studio, a settings page — and the front ends: a **TUI** and an
+**app** of its own, both on the event stream of H3 (the TUI is where a skill's undeclared call can be *asked* instead of
+refused, glut-round W8).
 
 ## Open — token cost ("cheap by default", owner note 2026-10-14)
 

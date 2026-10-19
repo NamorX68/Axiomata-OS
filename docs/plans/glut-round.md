@@ -249,5 +249,19 @@ a model that does not stream keeps the default and hands nothing over). The read
 pieces; `--json` has them. The chat window still shows the answer whole (W6). Live: todo-to-kanban on Glut via
 OpenRouter streamed, its usage read from the last piece.
 
-Next: CP6 (docs); the
+After the review: tool calls are put into slots by `index` **and** id (a provider that numbers every call `0`, or
+none, gets separate calls), a name repeated in each piece is not doubled, an empty id never replaces a real one;
+`"error": null` is no error (in one body either); a stream that just stops — no `[DONE]`, no `finish_reason` — is cut
+off, not an answer; 300 s of keep-alive comments without a piece fail the call (`PIECE_LIMIT`), reqwest's 10-minute
+limit says so; an empty `usage` at the end keeps the count before it; a stream under another content type (`text/plain`)
+is still read as one. Tests cut a stream at every byte (inside a line and inside `€`).
+
+## CP6 — docs and the live check (2026-10-19)
+
+`docs/architecture.md` §5 "Glut rund" and §7, `docs/plans/harness.md`'s road map, `AGENTS.md`. **news-web on Glut,
+live** (run #1712): it ran — 4 new items, the failing sites named — in 18 steps and 145 s, but on **1.7 M input
+tokens** (1.46 M from the cache, $0.012): every fetched page rides along in every later step. That is CP4's open
+point (4), now measured: shorten an old tool result in the history once the model has answered on it.
+
+Next: CP4 (4), shortening old tool results (measured in CP6); the
 Settings block could show today's count (`web_search::usage`).

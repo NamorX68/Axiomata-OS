@@ -649,6 +649,34 @@ Settings dialog (`agents/claude_auth.rs`, `src-tauri/src/claude_login.rs`); Glut
 `~/.axiomata/harness/sessions/` (`axh::chat`, `axiomata_harness::run_continuing`). All three ask once more for JSON when
 an `output: json` skill answered without it.
 
+### Glut rund (`docs/plans/glut-round.md`, built 2026-10-19)
+
+What made the own harness one to keep a role on. **Web in the core**: `web_fetch` (`axiomata-harness/src/tools/web.rs`
+— one page as Markdown, https only, no inward address after DNS, cross-host redirects handed back, 25,000 characters a
+call with `offset`) and `web_search` (`tools/search.rs` — Exa's keyless MCP endpoint, then TinyFish, then Tavily,
+keys in `[agents.web]`, edited in the Settings dialog). Every search is **reserved before its request**
+(`SearchBudget::reserve`, `axiomata-core/src/web_search.rs`, one `BEGIN IMMEDIATE` on the `web_searches` table):
+`daily_search_limit` per local day, Tavily within `tavily_monthly_limit`, 20 a run; a free Exa miss is given back.
+Page and search text reach the model through one `tools::as_data` (no control or invisible characters, no forged end
+mark). **Fewer tokens**: the toolbox offers only what the gate could allow (`Gate::offers`, `Tool::offered_as` — a
+declared skill sees its tools, not every MCP schema), a skill run has no `skill` tool; `input_tokens` counts every
+prompt token on all three harnesses and the cached part (`cached_input_tokens`, migration 34) is metered at
+`agents.costs.<model>.cached_input_per_m`. **Streaming** (`model.rs` `read_stream`): the answer arrives as server-sent
+chunks, a 120 s silence fails the call (`STALL_LIMIT`), an error inside the stream fails it at once, text pieces go
+out as `Event::TextDelta`. **Identity**: the system prompt names Glut and the model. **`access: read`**: `Mode::Plan`
+plus the shared read commands (`opencode_instance::READ_COMMANDS`).
+
+**Skills name their rights** (W8): the bundled ones declare `allowed_tools` in Claude's spelling, read alike by Glut
+and Claude Code — the news skills read and search only `News/` and write only their own file, `inbox-sort` moves
+through `axiomata-cli inbox move` (a note into an area, through folder handles, never overwriting, never an
+instruction file), `todo-to-kanban` lists and adds cards. Glut's sandbox hides `~/.axiomata`, so a command the
+declaration names exactly and that is one of the CLI's direct commands (`agent_entry::cli_direct_program`: `board
+list`, `board add`, `inbox move`) starts the CLI directly, outside the sandbox. Every command an app harness runs
+carries `AXIOMATA_HARNESS_RUN=skill|chat`: a skill run gets only the CLI's short list (`main.rs` `skill_run_may`), a
+chat turn none of the owner's gates and only plain cards in plain open columns (`board_flow::plain_*`, and the Kanban
+shell actions through `core/kanbanAgentRules.ts`). Six security audits shaped this; what stays open is in the plan
+(Opencode's unattended shell can drop the mark; Claude Code reads its working folder without a rule).
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
@@ -1368,6 +1396,10 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
   take-over (CP-A6b), limits per session (CP-A6c) — and the **planner with the Flow mode** (CP-A7a/b);
   CP-A8–CP-A10 followed with a self-running plan on an integration line, its spend ledger with plan and day
   limits, and the Flow's team pane and graph. Open: the Mac tests and the UI/UX polish rounds.
+- **Own harness Glut (`axiomata-harness`, `axh`): HS1–HS8 built, "Glut rund" built** (2026-10-13…19,
+  `docs/plans/harness.md`, `docs/plans/glut-round.md`): web fetch and search in the core within the app's limits,
+  only the allowed tools offered, cached tokens metered apart, the answer streamed with a stall limit, skills that name
+  their rights, `todo-to-kanban` and `inbox-sort` running on Glut as on Opencode and Claude Code. §5 "Glut rund".
 - **Editor ED3 — Vi mode: done** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
   ED3.1: the Vi machine in `src/editor/vi/` (pure TS, table-tested). ED3.2: wired to every
   editor surface (`fileapp/viKeys`, `viSurface`, `viScroll`, `viShared`), cursor shapes, the
