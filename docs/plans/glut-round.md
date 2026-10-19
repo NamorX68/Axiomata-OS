@@ -1,6 +1,6 @@
 # Glut rund — web, fewer tokens, read access, streaming, identity
 
-Status: **approved 2026-10-19**, owner decisions W1–W7 taken, CP0 measured, CP1–CP2 built.
+Status: **approved 2026-10-19**, owner decisions W1–W7 taken, CP0 measured, CP1–CP3 built.
 
 ## Why
 
@@ -68,6 +68,12 @@ How the others do it (researched 2026-10-19):
   re-enterable any time — and the daily limit. Built first, so the owner can enter the keys before the tools exist.
 - **W7 — Tavily is last, and capped at its free credits** (owner, 2026-10-19: the account needed a credit card): a
   monthly Tavily count, at most 1,000 (its free credits); past it Tavily is skipped, never billed.
+- **W8 — skills name their rights** (owner, 2026-10-19): a skill without `allowed_tools` may only read on Glut
+  (HS6b B3), while Opencode allows everything and Claude Code edits, shell, web and MCP. The bundled skills that write
+  or use the web (`news-rss`, `news-web`, `model-news`, `inbox-sort`, `todo-to-kanban`) get an explicit
+  `allowed_tools` so they run alike on all three harnesses; B3 stays. Nothing is closed off for a coming Glut TUI:
+  there the owner sits in front of the run, and what a skill does not name can be *asked* (the gate's default mode
+  with an asker other than `Nobody`) instead of refused.
 - **W6 — the chat window does not stream in this plan** (was Q1): the harness streams for its stall limit and events;
   showing the answer grow in the dashboard is a later step across all three harnesses.
 
@@ -126,3 +132,19 @@ framed as data with an end mark. Rules: `WebFetch` / `WebFetch(domain:…)` are 
 `web_fetch` alone — never about the shell's proxy — while `Network(…)` serves both. Read skills get **no** web unless
 they name it (security audit: reads + untrusted input + the network would be a way out), on Glut and Claude Code
 alike. Live: Ling fetched `opencode.ai/v2/docs/websearch` and answered from it in one call.
+
+## CP3 — built (2026-10-19)
+
+`web_search` (`axiomata-harness/src/tools/search.rs`): Exa through its hosted MCP endpoint (keyless, an optional key
+as `x-api-key`), then TinyFish (`X-API-Key`, measured: no key → 401), then Tavily (`Bearer`, basic = 1 credit); a
+provider without a key is skipped, a 429/error hands over, the answer names the provider and is framed as data with
+an end mark; 5 results by default, at most 10, 1,200 characters each. A `SearchBudget` from the caller holds the
+limits: the app's (`axiomata-core/src/web_search.rs`) counts in the new table `web_searches` (migration 33) — the
+local day's searches against `daily_search_limit` (closed for every provider), Tavily's of the local month against
+`tavily_monthly_limit` (Tavily skipped); a budget that cannot be read closes the search; a limit of 0 offers no tool.
+`axh` takes the keys from `EXA_API_KEY`/`TINYFISH_API_KEY`/`TAVILY_API_KEY` without limits. Rule `WebSearch` (Claude's
+spelling) names the tool. Live: Ling searched via Exa and answered "OpenCode 2 is v2.0.32" with its source; the search
+was counted.
+
+Next: W8 (explicit `allowed_tools` for the bundled skills), then CP4 (tokens), CP5 (streaming), CP6 (docs); the
+Settings block could show today's count (`web_search::usage`).

@@ -50,6 +50,7 @@ pub mod skills;
 pub mod spend;
 pub mod studio_spend;
 pub mod terminal_settings;
+pub mod web_search;
 pub mod workspace;
 
 pub use error::AxiomataError;

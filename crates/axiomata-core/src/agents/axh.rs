@@ -81,7 +81,8 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
             deny: Vec::new(),
         }
     };
-    let mut harness = Harness::prepare(&home, &request.cwd, &rights, request.timeout).await?;
+    let mut harness =
+        Harness::prepare(&home, &request.cwd, &rights, request.timeout, config).await?;
     // No signal handlers: this process is the app, not `axh`, and nothing
     // cancels a recorded run from here — the timeout ends it.
     let cancel = Cancel::new();
@@ -191,7 +192,8 @@ pub(crate) async fn chat(
         mode: chat_mode(&declared, request.auto_approve_tools),
         deny: Vec::new(),
     };
-    let mut harness = Harness::prepare(&home, &request.cwd, &rights, request.timeout).await?;
+    let mut harness =
+        Harness::prepare(&home, &request.cwd, &rights, request.timeout, config).await?;
     harness.run_config.instructions = instructions;
     let continuing = !earlier.is_empty();
     let started = Instant::now();
@@ -320,6 +322,7 @@ impl Harness {
         cwd: &std::path::Path,
         rights: &Rights<'_>,
         timeout: Duration,
+        config: &Config,
     ) -> Result<Self, AxiomataError> {
         // B3: a project's settings are never trusted in an unattended run; from
         // them only what makes the run stricter counts — the sandbox's read
@@ -366,7 +369,10 @@ impl Harness {
         let servers = mcp::approval::permitted(servers, home, cwd, false)?;
         // The sandbox the settings word on rides along with the shell (HS3b), so
         // commands run guarded even though nobody asks.
-        let tools = setup::toolbox(cwd, &catalog, gate, servers, sandbox, &mut sink).await?;
+        // CP3 of glut-round: the web search with the owner's keys and the app's limits.
+        let search = crate::web_search::web_search_tool(config);
+        let tools =
+            setup::toolbox(cwd, &catalog, gate, servers, sandbox, search, &mut sink).await?;
         Ok(Self {
             run_config,
             tools,

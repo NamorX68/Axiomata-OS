@@ -77,6 +77,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (31, axiomata_board::SCHEMA_SQL_V11),
     // The agents' permission requests the owner answers in the app (permission-asks.md, card #88).
     (32, include_str!("migrations/0011_permission_asks.sql")),
+    // Glut's web searches, counted for their daily and Tavily-monthly limits (glut-round.md, CP3).
+    (33, include_str!("migrations/0012_web_searches.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

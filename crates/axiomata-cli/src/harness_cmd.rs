@@ -175,7 +175,18 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // terminal, or left out with a note when there is none (M2).
     let servers = mcp::config::load(&home, &cwd)?;
     let servers = mcp::approval::permitted(servers, &home, &cwd, mcp::approval::interactive())?;
-    let tools = setup::toolbox(&cwd, &catalog, gate, servers, built.sandbox, &mut sink).await?;
+    // The web search with the owner's keys and the app's limits, as in the app's own runs (glut-round CP3).
+    let search = axiomata_core::web_search::web_search_tool(&config);
+    let tools = setup::toolbox(
+        &cwd,
+        &catalog,
+        gate,
+        servers,
+        built.sandbox,
+        search,
+        &mut sink,
+    )
+    .await?;
     // Ctrl-C, SIGTERM and SIGHUP end the run with its last line and every background job stopped.
     let cancel = Cancel::new();
     axiomata_harness::run::cancel_on_signals(&cancel);
