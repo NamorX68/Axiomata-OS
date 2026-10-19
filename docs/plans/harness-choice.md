@@ -1,6 +1,6 @@
 # Harness choice — Opencode, Claude Code or Glut, per role
 
-Status: **draft 2026-10-19**, owner decisions D1–D5 taken, Q1 open (proposal: not in this plan), nothing built.
+Status: **draft 2026-10-19**, owner decisions D1–D5 taken, Q1 open (proposal: not in this plan), CP0 measured, nothing built.
 
 ## Why
 
@@ -99,3 +99,33 @@ also checks that the owner's global `CLAUDE.md` stays out.
 
 After CP5: the owner's check "is everything in the harness backend" — harness.md's open list (sessions done by CP4;
 streaming, the Anthropic client, cost metering, token cost) against what the settings now promise.
+
+## CP0 — measured (Claude Code 2.1.303, 2026-10-19)
+
+- **Own `CLAUDE_CONFIG_DIR` = not logged in.** `claude -p` under an empty config folder answers `is_error: true`,
+  `"result": "Not logged in · Please run /login"` (`terminal_reason: api_error`, 39 ms, nothing billed). The
+  subscription login is per config folder.
+- **The owner's login with `--setting-sources "" --strict-mcp-config` works and keeps the owner's setup out:** the
+  global `CLAUDE.md` is not in the context (asked for its line-length / `cargo clippy` rule: unknown), no `mcp__`
+  tools, no plugin tools (`LSP` absent); reading `~/.claude/CLAUDE.md` by tool was refused (no allow rule). JSON
+  result carries `session_id`, `total_cost_usd`, `usage` (input/output/cache tokens), `num_turns`, `is_error`,
+  `permission_denials`.
+- **But it writes into `~/.claude`:** the session transcript (and an empty `memory/`) land in
+  `~/.claude/projects/<cwd-slug>/` — the vault's chats would show up in the owner's own `claude --resume` list.
+  `--no-session-persistence` stops that, but also stops `--resume`, which the chat needs.
+- Flags present: `--append-system-prompt[-file]`, `--resume <id>`, `--no-session-persistence`, `--strict-mcp-config`,
+  `--setting-sources`, `--settings`; `claude setup-token` makes a long-lived subscription token
+  (`CLAUDE_CODE_OAUTH_TOKEN`).
+- **D5 mechanism chosen (owner, 2026-10-19): own `CLAUDE_CONFIG_DIR=~/.axiomata/claude`, logged in once** by the owner
+  with `CLAUDE_CONFIG_DIR=~/.axiomata/claude claude auth login --claudeai` (works from a `!` line; the token lives in
+  the keychain under that folder, Claude Code refreshes it). The owner's own login stays as it was.
+- **Measured on that folder** (Haiku 5.5, cleared env, `--strict-mcp-config --mcp-config ~/.axh/mcp.json` — the file
+  is already Claude's `mcpServers` shape, usable as it is): an MCP tool named in `--allowedTools`
+  (`mcp__apple-reminders__reminders_lists`) ran without a prompt; the owner's global `CLAUDE.md` was not in the context;
+  `--resume <id>` continued the conversation under the **same** `session_id`; asked for "only a JSON object" the
+  `result` was exactly `{"codewort": "HEXGLUT"}` — so `output: json` skills can run on Claude Code (the runner still
+  validates and records a `Failed` otherwise). Transcripts go to `~/.axiomata/claude/projects/`, nothing into
+  `~/.claude`. Cost ~0.3 ct per Haiku turn (`total_cost_usd`, notional on the subscription).
+- Consequence for CP2: the app's runs set `CLAUDE_CONFIG_DIR`; a run whose folder is not logged in (`result` "Not
+  logged in") is a recorded `Failed` naming the login command above; Settings shows the login state
+  (`claude auth status`, JSON) next to the Claude Code harness.
