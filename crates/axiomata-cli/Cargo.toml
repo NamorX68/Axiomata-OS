@@ -18,3 +18,5 @@ clap.workspace = true
 # `signal`: `harness run` ends a run cleanly on Ctrl-C.
 tokio = { workspace = true, features = ["signal"] }
 tracing-subscriber.workspace = true
+# `inbox move` walks and links through folder handles (`openat`/`linkat`), so no folder can turn into a link midway.
+rustix.workspace = true

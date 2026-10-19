@@ -178,9 +178,11 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // The web search with the owner's keys and the app's limits, as in the app's own runs (glut-round CP3).
     let extras = setup::Extras {
         search: axiomata_core::web_search::web_search_tool(&config),
-        direct: axiomata_core::agent_entry::cli_direct_program()
-            .into_iter()
-            .collect(),
+        direct: axiomata_core::agent_entry::cli_direct_program(
+            axiomata_core::agent_entry::HARNESS_RUN_SKILL,
+        )
+        .into_iter()
+        .collect(),
     };
     let mut tools = setup::toolbox(
         &cwd,

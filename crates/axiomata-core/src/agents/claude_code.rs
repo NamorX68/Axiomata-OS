@@ -106,6 +106,7 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         &request.prompt,
         &request.cwd,
         request.timeout,
+        crate::agent_entry::HARNESS_RUN_SKILL,
     )
     .await?;
     let wants_repair =
@@ -124,6 +125,7 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
                 JSON_REPAIR_PROMPT,
                 &request.cwd,
                 JSON_REPAIR_TIMEOUT,
+                crate::agent_entry::HARNESS_RUN_SKILL,
             )
             .await
             {
@@ -204,7 +206,15 @@ async fn turn_or_start_anew(
     cwd: &Path,
     timeout: Duration,
 ) -> Result<Outcome, AxiomataError> {
-    let first = invoke(program, &arguments(&invocation), message, cwd, timeout).await?;
+    let first = invoke(
+        program,
+        &arguments(&invocation),
+        message,
+        cwd,
+        timeout,
+        crate::agent_entry::HARNESS_RUN_CHAT,
+    )
+    .await?;
     if invocation.resume.is_none() || !first.unknown_conversation {
         return Ok(first);
     }
@@ -213,7 +223,15 @@ async fn turn_or_start_anew(
         resume: None,
         ..invocation
     };
-    invoke(program, &arguments(&fresh), message, cwd, timeout).await
+    invoke(
+        program,
+        &arguments(&fresh),
+        message,
+        cwd,
+        timeout,
+        crate::agent_entry::HARNESS_RUN_CHAT,
+    )
+    .await
 }
 
 /// A chat turn's [`Outcome`] as the dashboard takes it: a failure or an empty answer is an error the owner sees.
@@ -599,13 +617,18 @@ fn arguments(invocation: &Invocation) -> Vec<String> {
 }
 
 /// `program` as every call of the app's Claude Code starts it: no ambient `ANTHROPIC_API_KEY` or `CLAUDE_CODE_*` may
-/// switch the billing or the login (provider hardening), and its config folder is the app's own (D5).
+/// switch the billing or the login (provider hardening), its config folder is the app's own (D5), and its shell
+/// commands carry the mark that an app harness runs them ([`crate::agent_entry::HARNESS_RUN_ENV`]).
 pub(crate) fn app_command(program: &Path) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(program);
     command
         .env_clear()
         .envs(agent_child_env())
-        .env("CLAUDE_CONFIG_DIR", paths::app_claude_dir());
+        .env("CLAUDE_CONFIG_DIR", paths::app_claude_dir())
+        .env(
+            crate::agent_entry::HARNESS_RUN_ENV,
+            crate::agent_entry::HARNESS_RUN_CHAT,
+        );
     command
 }
 
@@ -618,6 +641,7 @@ async fn invoke(
     prompt: &str,
     cwd: &Path,
     timeout: Duration,
+    kind: &str,
 ) -> Result<Outcome, AxiomataError> {
     let spawn_error = |source| AxiomataError::AgentSpawn {
         backend: BACKEND_CLAUDE_CODE,
@@ -626,6 +650,7 @@ async fn invoke(
     };
     let started = Instant::now();
     let mut child = app_command(program)
+        .env(crate::agent_entry::HARNESS_RUN_ENV, kind)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -884,6 +909,16 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+
+    /// glut-round W8 audit: `claude -p`'s commands carry the harness mark, as Opencode's sessions and Glut's do.
+    #[test]
+    fn every_claude_call_carries_the_harness_mark() {
+        let command = app_command(Path::new("/bin/true"));
+        assert!(command.as_std().get_envs().any(|(key, value)| {
+            key == crate::agent_entry::HARNESS_RUN_ENV
+                && value == Some(std::ffi::OsStr::new("chat"))
+        }));
+    }
 
     fn invocation<'a>(declared: &'a [String], servers: &'a [String]) -> Invocation<'a> {
         Invocation {
@@ -1254,9 +1289,16 @@ mod tests {
              printf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"%s\"}\\n' \"$n\"",
         );
         let prompt = "x".repeat(200_000);
-        let outcome = invoke(&program, &[], &prompt, &scratch.0, Duration::from_secs(20))
-            .await
-            .unwrap();
+        let outcome = invoke(
+            &program,
+            &[],
+            &prompt,
+            &scratch.0,
+            Duration::from_secs(20),
+            "skill",
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome.reply, "200000");
     }
 
@@ -1266,9 +1308,16 @@ mod tests {
         let scratch = Scratch::new("early");
         let program = scratch.script(&format!("echo '{RESULT_LINE}'"));
         let prompt = "x".repeat(1024 * 1024);
-        let outcome = invoke(&program, &[], &prompt, &scratch.0, Duration::from_secs(20))
-            .await
-            .unwrap();
+        let outcome = invoke(
+            &program,
+            &[],
+            &prompt,
+            &scratch.0,
+            Duration::from_secs(20),
+            "skill",
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome.reply, "done");
     }
 
@@ -1282,9 +1331,16 @@ mod tests {
             marker.display()
         ));
         let started = Instant::now();
-        let err = invoke(&program, &[], "", &scratch.0, Duration::from_millis(300))
-            .await
-            .unwrap_err();
+        let err = invoke(
+            &program,
+            &[],
+            "",
+            &scratch.0,
+            Duration::from_millis(300),
+            "skill",
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, AxiomataError::AgentTimeout { .. }));
         assert!(started.elapsed() < Duration::from_secs(5));
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -1300,16 +1356,30 @@ mod tests {
         let program = scratch.script(&format!(
             "echo '{notice}'\necho 'No conversation found with session ID: 1111'"
         ));
-        let outcome = invoke(&program, &[], "hi", &scratch.0, Duration::from_secs(20))
-            .await
-            .unwrap();
+        let outcome = invoke(
+            &program,
+            &[],
+            "hi",
+            &scratch.0,
+            Duration::from_secs(20),
+            "skill",
+        )
+        .await
+        .unwrap();
         assert!(outcome.unknown_conversation);
         // The failure text stays short, cut on a character boundary.
         assert!(outcome.failure.unwrap().len() < MAX_FAILURE_STDOUT + 200);
         let program = scratch.script("echo 'something else ü' >&2; exit 1");
-        let outcome = invoke(&program, &[], "hi", &scratch.0, Duration::from_secs(20))
-            .await
-            .unwrap();
+        let outcome = invoke(
+            &program,
+            &[],
+            "hi",
+            &scratch.0,
+            Duration::from_secs(20),
+            "skill",
+        )
+        .await
+        .unwrap();
         assert!(!outcome.unknown_conversation);
         assert!(outcome.failure.unwrap().contains("something else ü"));
     }

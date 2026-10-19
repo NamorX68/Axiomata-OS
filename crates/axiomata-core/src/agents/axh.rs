@@ -75,6 +75,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     } else {
         Rights {
             name: request.name.as_deref(),
+            run_kind: crate::agent_entry::HARNESS_RUN_SKILL,
             declared: declared.clone(),
             // A skill keeps the mode's own word for what it does not declare (B3).
             mode: Mode::Default,
@@ -189,6 +190,7 @@ pub(crate) async fn chat(
     let declared = declared_rules(None, request.allowed_tools.as_deref())?;
     let rights = Rights {
         name: None,
+        run_kind: crate::agent_entry::HARNESS_RUN_CHAT,
         declared: declared.clone(),
         mode: chat_mode(&declared, request.auto_approve_tools),
         deny: Vec::new(),
@@ -282,6 +284,7 @@ fn read_rights<'a>(name: Option<&'a str>, declared: &[Rule]) -> Result<Rights<'a
         .collect::<Result<_, _>>()?;
     Ok(Rights {
         name,
+        run_kind: crate::agent_entry::HARNESS_RUN_SKILL,
         declared: allowed,
         mode: Mode::Plan,
         deny,
@@ -302,6 +305,9 @@ fn chat_mode(declared: &[Rule], auto_approve: bool) -> Mode {
 /// What a run or a chat turn is allowed: the declared rules narrow it (B3), the mode speaks for the rest.
 struct Rights<'a> {
     name: Option<&'a str>,
+    /// The kind of run its direct CLI commands say they come from ([`crate::agent_entry::HARNESS_RUN_SKILL`] or
+    /// `_CHAT`), set by the entry point — never guessed from the name.
+    run_kind: &'static str,
     declared: Vec<Rule>,
     mode: Mode,
     /// Refusals of the run's own beside the owner's `~/.axh` ones — a read run's git commands that reach beyond the
@@ -375,7 +381,7 @@ impl Harness {
         let extras = setup::Extras {
             search: crate::web_search::web_search_tool(config),
             // W8: a declared `axiomata-cli …` command reaches the app's database, as on the other harnesses.
-            direct: crate::agent_entry::cli_direct_program()
+            direct: crate::agent_entry::cli_direct_program(rights.run_kind)
                 .into_iter()
                 .collect(),
         };
@@ -780,6 +786,7 @@ mod tests {
         gate_for(
             &Rights {
                 name,
+                run_kind: crate::agent_entry::HARNESS_RUN_SKILL,
                 declared: declared.to_vec(),
                 mode: Mode::Default,
                 deny: Vec::new(),
@@ -1577,6 +1584,7 @@ mod tests {
         };
         let rights = Rights {
             name: None,
+            run_kind: crate::agent_entry::HARNESS_RUN_CHAT,
             declared: Vec::new(),
             mode: chat_mode(&[], true),
             deny: Vec::new(),

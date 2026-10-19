@@ -362,6 +362,7 @@ dependencies = [
  "chrono",
  "clap",
  "rusqlite",
+ "rustix",
  "serde_json",
  "tokio",
  "tracing-subscriber",

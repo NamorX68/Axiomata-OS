@@ -788,7 +788,23 @@ impl Config {
         })?;
 
         let mut config: Config =
-            toml::from_str(&raw).map_err(|source| AxiomataError::ConfigParse { path, source })?;
+            toml::from_str(&raw).map_err(|source: toml::de::Error| AxiomataError::ConfigParse {
+                line: source.span().map_or(0, |span| {
+                    // Bytes, not a `&str` slice: a span inside a multi-byte character must not panic.
+                    let before = &raw.as_bytes()[..span.start.min(raw.len())];
+                    before.iter().filter(|byte| **byte == b'\n').count() + 1
+                }),
+                // A type or variant error quotes the value (`invalid type: string "sk-…"`): cut before the first
+                // quote, so a key pasted into the wrong field is not shown either.
+                message: source
+                    .message()
+                    .split(['"', '`', '\''])
+                    .next()
+                    .unwrap_or_default()
+                    .trim_end()
+                    .to_owned(),
+                path,
+            })?;
         config.agents.migrate_legacy_model_if_needed();
         config.agents.migrate_legacy_provider_if_needed();
         config.agents.reseed_blank_providers();
@@ -905,6 +921,53 @@ mod tests {
     use super::*;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
     use std::env;
+
+    /// A broken `config.toml` is named by line and the parser's message only — never with the line itself, which may
+    /// hold a key and reaches an agent's shell output (glut-round, security audit).
+    #[test]
+    fn a_parse_error_names_the_line_but_never_quotes_it() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let temp_home = unique_temp_dir("axiomata-test-config-broken");
+        fs::create_dir_all(&temp_home).unwrap();
+        fs::write(
+            temp_home.join("config.toml"),
+            "owner = \"Ada\"\n[agents.web]\ntavily_api_key = \"tvly-secret\" oops\n",
+        )
+        .unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &temp_home);
+        }
+        let err = Config::load().unwrap_err();
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&temp_home);
+        assert!(
+            matches!(err, AxiomataError::ConfigParse { line: 3, .. }),
+            "{err:?}"
+        );
+        let shown = format!("{err:#}");
+        assert!(!shown.contains("tvly-secret"), "{shown}");
+
+        // A key pasted into a field of another type is not quoted back either.
+        fs::create_dir_all(&temp_home).unwrap();
+        fs::write(
+            temp_home.join("config.toml"),
+            "[agents]\nskill_timeout_secs = \"sk-or-secret\"\n",
+        )
+        .unwrap();
+        unsafe {
+            env::set_var(paths::AXIOMATA_HOME_ENV, &temp_home);
+        }
+        let err = Config::load().unwrap_err();
+        unsafe {
+            env::remove_var(paths::AXIOMATA_HOME_ENV);
+        }
+        let _ = fs::remove_dir_all(&temp_home);
+        let shown = format!("{err:#}");
+        assert!(!shown.contains("sk-or-secret"), "{shown}");
+    }
 
     #[test]
     fn load_defaults_when_missing_then_round_trips_through_save() {

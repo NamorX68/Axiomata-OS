@@ -739,6 +739,15 @@ async fn main() -> Result<()> {
         Command::Inbox { action } => return inbox_cmd::run(action),
         command => command,
     };
+    // A skill run nobody watches gets the CLI's short list only (glut-round, fourth audit).
+    if board_flow::harness_run_kind() == Some(board_flow::HarnessRun::Skill)
+        && !skill_run_may(&command)
+    {
+        bail!(
+            "a skill run of the app may list skills, runs and boards and add a plain card, nothing else; \
+             the owner does the rest"
+        );
+    }
     let core = AxiomataCore::init().context("failed to initialize the Axiomata-OS core engine")?;
 
     match command {
@@ -1527,6 +1536,10 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             if flow.plan.is_some() || no_plan {
                 owner_only("putting a card into a plan or taking it out")?;
             }
+            if board_flow::harness_run() {
+                board_flow::plain_card_only(None, &flow, no_plan)?;
+                board_flow::plain_card_in_harness_run(&core.db_lock(), id)?;
+            }
             board_edit(
                 core,
                 id,
@@ -1548,6 +1561,7 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
         } => board_move(core, id, column, index, &resolve_actor(actor)?),
         BoardAction::Claim { id, actor } => {
             mcp_only("taking a card")?;
+            board_flow::no_agent_step_in_a_harness_run("taking a card")?;
             board_claim(core, id, &resolve_actor(actor)?)
         }
         BoardAction::Start {
@@ -1605,9 +1619,15 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             board_archive(core, id, !undo)
         }
         BoardAction::Plan { action } => board_plan(core, action).await,
-        BoardAction::Dep { action } => board_flow::dep_cmd(core, action),
+        BoardAction::Dep { action } => {
+            if !matches!(action, board_flow::DepAction::List { .. }) {
+                owner_only("changing what a card waits for")?;
+            }
+            board_flow::dep_cmd(core, action)
+        }
         BoardAction::Report { id, actor } => {
             mcp_only("reporting a card done")?;
+            board_flow::no_agent_step_in_a_harness_run("reporting a card done")?;
             board_flow::report(core, id, &resolve_actor(actor)?)
         }
         BoardAction::Verdict {
@@ -1618,10 +1638,12 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             note,
         } => {
             mcp_only("judging a card")?;
+            board_flow::no_agent_step_in_a_harness_run("judging a card")?;
             board_flow::verdict(core, id, &resolve_actor(actor)?, approve, &note)
         }
         BoardAction::Events { id, limit } => board_flow::events(core, id, limit),
         BoardAction::Note { id, text, actor } => {
+            board_flow::no_agent_step_in_a_harness_run("writing a card's history")?;
             board_flow::note(core, id, &resolve_actor(actor)?, &text)
         }
         BoardAction::Input {
@@ -1629,21 +1651,30 @@ async fn board_cmd(core: &AxiomataCore, action: BoardAction) -> Result<()> {
             ask,
             clear: _,
             actor,
-        } => board_flow::input(core, id, &resolve_actor(actor)?, ask.as_deref()),
-        BoardAction::Fail { id, reason, actor } => board_flow::mark(
-            core,
-            id,
-            &resolve_actor(actor)?,
-            board_flow::Mark::Fail,
-            &reason,
-        ),
-        BoardAction::Cancel { id, reason, actor } => board_flow::mark(
-            core,
-            id,
-            &resolve_actor(actor)?,
-            board_flow::Mark::Cancel,
-            &reason,
-        ),
+        } => {
+            board_flow::no_agent_step_in_a_harness_run("asking for input on a card")?;
+            board_flow::input(core, id, &resolve_actor(actor)?, ask.as_deref())
+        }
+        BoardAction::Fail { id, reason, actor } => {
+            board_flow::no_agent_step_in_a_harness_run("failing a card")?;
+            board_flow::mark(
+                core,
+                id,
+                &resolve_actor(actor)?,
+                board_flow::Mark::Fail,
+                &reason,
+            )
+        }
+        BoardAction::Cancel { id, reason, actor } => {
+            board_flow::no_agent_step_in_a_harness_run("calling a card off")?;
+            board_flow::mark(
+                core,
+                id,
+                &resolve_actor(actor)?,
+                board_flow::Mark::Cancel,
+                &reason,
+            )
+        }
         BoardAction::Reopen { id, actor } => {
             owner_only("reopening a card")?;
             board_flow::mark(
@@ -2642,10 +2673,11 @@ fn board_add(
         if target.and_then(|c| c.stage) != Some(board::ColumnStage::Proposal) {
             bail!("an agent adds cards to the proposal column only; the owner approves them");
         }
-    } else if std::env::var_os(axiomata_core::agent_entry::HARNESS_RUN_ENV).is_some() {
-        harness_run_add(
+    } else if board_flow::harness_run() {
+        board_flow::plain_card_only(
             board::store::get_column(&db, column)?.and_then(|c| c.stage),
             flow,
+            false,
         )?;
     }
     let mut fields = board::CardFields {
@@ -2668,17 +2700,20 @@ fn board_add(
     Ok(())
 }
 
-/// What a card a harness run adds may be (glut-round W8, security audit): a plain card in a plain column. Its words may
-/// come from untrusted text (a `ToDo.md`), so it joins no plan, names no role and sets no flow field — a card in a
-/// self-running plan would become an agent's prompt — and it goes into neither the proposal nor the review column.
-fn harness_run_add(stage: Option<board::ColumnStage>, flow: &board_flow::FlowFlags) -> Result<()> {
-    if !flow.is_empty() {
-        bail!("a skill's card gets no plan, role or flow field; the owner sets those on the board");
+/// Whether a skill run of the app may run `command` (glut-round, fourth audit): looking (status, skills, runs, the
+/// board) and adding a plain card — what the bundled skills need. `inbox move` is answered before this, and the rest
+/// (routines, the IDE, files, agents, other runs, imports, the board's other steps) is the owner's.
+fn skill_run_may(command: &Command) -> bool {
+    match command {
+        Command::Status
+        | Command::ListSkills
+        | Command::ListRuns { .. }
+        | Command::GetRun { .. } => true,
+        Command::Board { action } => {
+            matches!(action, BoardAction::List { .. } | BoardAction::Add { .. })
+        }
+        _ => false,
     }
-    if stage.is_some() {
-        bail!("a skill adds cards to a plain column, never to the proposal or the review column");
-    }
-    Ok(())
 }
 
 /// The fields a card has after `board edit`: what was passed replaces the old
@@ -2748,6 +2783,8 @@ fn board_edit(
 
 fn board_move(core: &AxiomataCore, id: i64, column: i64, index: usize, actor: &str) -> Result<()> {
     let mut db = core.db_lock();
+    board_flow::plain_card_in_harness_run(&db, id)?;
+    board_flow::plain_target_in_harness_run(&db, column)?;
     // `usize::MAX` is the "no --index given" sentinel; the store clamps an
     // out-of-range index to the end of the column on its own.
     if !board::store::move_card_as(&mut db, id, column, index, Some(actor))? {
@@ -3134,30 +3171,35 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    /// glut-round W8: a card a harness run adds is a plain card in a plain column — no plan, role or flow field, and
-    /// never the proposal or the review column.
+    /// Fourth audit: a skill run gets the CLI's short list — looking, and adding a plain card — and nothing else.
     #[test]
-    fn a_harness_runs_card_is_plain_and_lands_in_a_plain_column() {
-        let plain = board_flow::FlowFlags::default();
-        assert!(harness_run_add(None, &plain).is_ok());
-        for stage in [board::ColumnStage::Proposal, board::ColumnStage::Review] {
-            assert!(harness_run_add(Some(stage), &plain).is_err());
-        }
-        for flow in [
-            board_flow::FlowFlags {
-                plan: Some(3),
-                ..Default::default()
-            },
-            board_flow::FlowFlags {
-                agent: Some("builder".into()),
-                ..Default::default()
-            },
-            board_flow::FlowFlags {
-                acceptance: Some("run rm -rf".into()),
-                ..Default::default()
-            },
+    fn a_skill_run_may_look_and_add_a_card_and_nothing_else() {
+        let may = |args: &[&str]| {
+            let cli =
+                Cli::try_parse_from(std::iter::once("axiomata-cli").chain(args.iter().copied()))
+                    .unwrap();
+            skill_run_may(&cli.command.unwrap_or(Command::Status))
+        };
+        for allowed in [
+            &["board", "list"][..],
+            &["board", "add", "--column", "1", "t"],
+            &["list-skills"],
+            &["list-runs"],
+            &[],
         ] {
-            assert!(harness_run_add(None, &flow).is_err(), "{flow:?}");
+            assert!(may(allowed), "{allowed:?}");
+        }
+        for refused in [
+            &["board", "move", "1", "--column", "2"][..],
+            &["board", "edit", "1", "--title", "x"],
+            &["board", "delete", "1"],
+            &["routines", "list"],
+            &["run-skill", "x"],
+            &["files", "roots"],
+            &["skills", "reseed"],
+            &["modules"],
+        ] {
+            assert!(!may(refused), "{refused:?}");
         }
     }
 

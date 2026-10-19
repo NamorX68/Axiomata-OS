@@ -16,6 +16,7 @@ import { todayIso as calendarToday, weekRange } from "../core/monthGrid";
 import { loadLatestMailDigest, MAIL_SKILL_NAME, parseMailDigest } from "../core/mail";
 import { completeReminderTask, createReminderTask, deleteReminderTask, loadLatestReminderDigest, parseReminderDigest, REMINDERS_SKILL_NAME, tasksForList } from "../core/reminders";
 import { resolveSkillName } from "../core/skillRun";
+import { type BoardColumn, cardRefusal, type FlowCard, targetRefusal } from "../core/kanbanAgentRules";
 import type { ModuleAction, ModuleContext } from "../core/types";
 import {
   addTodo,
@@ -816,6 +817,8 @@ export function registerBuiltins(): void {
             ? columns.find((c) => c.name.toLowerCase() === p.column!.toLowerCase())
             : columns.find((c) => c.maps_to_status === "open" && c.stage === null);
           if (!target) return { error: p.column ? `no column named ${p.column}` : "the board has no open column" };
+          const refused = targetRefusal(target);
+          if (refused) return { error: refused };
           return ctx.invoke("create_card", {
             new: {
               column_id: target.id,
@@ -845,9 +848,16 @@ export function registerBuiltins(): void {
           const boards = await ctx.invoke<{ id: number }[]>("list_boards");
           const boardId = p.board_id ?? boards[0]?.id;
           if (boardId === undefined) return { error: "no boards yet" };
-          const columns = await ctx.invoke<{ id: number; name: string }[]>("list_board_columns", { boardId });
+          const [columns, cards] = await Promise.all([
+            ctx.invoke<BoardColumn[]>("list_board_columns", { boardId }),
+            ctx.invoke<FlowCard[]>("list_board_cards", { boardId, includeArchived: false }),
+          ]);
           const target = columns.find((c) => c.name.toLowerCase() === p.column.toLowerCase());
           if (!target) return { error: `no column named ${p.column}` };
+          const card = cards.find((c) => c.id === p.id);
+          if (!card) return { error: `no card #${p.id} on this board` };
+          const refused = cardRefusal(card, columns) ?? targetRefusal(target);
+          if (refused) return { error: refused };
           // A large index means "append"; the store clamps it.
           return ctx.invoke("move_card", { id: p.id, columnId: target.id, index: Number.MAX_SAFE_INTEGER });
         },

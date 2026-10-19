@@ -246,9 +246,20 @@ fn service_env_from(ambient: Vec<(String, String)>, places: &Places) -> Vec<(Str
 }
 
 /// The environment a session's shell commands run with: the app's allowlist, the owner's own folders included —
-/// what the owner's terminal would give them, not the instance's.
+/// what the owner's terminal would give them, not the instance's — and the mark that an app harness runs them
+/// ([`crate::agent_entry::HARNESS_RUN_ENV`]), so the CLI takes no owner's decision from them.
 pub(crate) fn session_env() -> BTreeMap<String, String> {
-    agent_child_env().into_iter().collect()
+    session_env_for(crate::agent_entry::HARNESS_RUN_CHAT)
+}
+
+/// [`session_env`] for a run of `kind` ([`crate::agent_entry::HARNESS_RUN_SKILL`] for a skill run).
+pub(crate) fn session_env_for(kind: &str) -> BTreeMap<String, String> {
+    let mut env: BTreeMap<String, String> = agent_child_env().into_iter().collect();
+    env.insert(
+        crate::agent_entry::HARNESS_RUN_ENV.to_owned(),
+        kind.to_owned(),
+    );
+    env
 }
 
 /// What goes in front of a pane's `opencode` command so its terminal UI attaches to `instance`'s service: the
@@ -777,6 +788,24 @@ fn io_error(path: &Path, source: std::io::Error) -> AxiomataError {
 mod tests {
     use super::*;
     use crate::config::ProviderSettings;
+
+    /// glut-round W8 audit: a session's shell commands carry the harness mark, so the CLI takes no owner's decision
+    /// from a skill or chat turn on Opencode either.
+    #[test]
+    fn a_sessions_commands_carry_the_harness_mark() {
+        assert_eq!(
+            session_env()
+                .get(crate::agent_entry::HARNESS_RUN_ENV)
+                .map(String::as_str),
+            Some(crate::agent_entry::HARNESS_RUN_CHAT)
+        );
+        assert_eq!(
+            session_env_for(crate::agent_entry::HARNESS_RUN_SKILL)
+                .get(crate::agent_entry::HARNESS_RUN_ENV)
+                .map(String::as_str),
+            Some("skill")
+        );
+    }
     use axiomata_harness::mcp::config::{Origin, ServerConfig, ServerEntry};
 
     fn temp_dir(label: &str) -> PathBuf {

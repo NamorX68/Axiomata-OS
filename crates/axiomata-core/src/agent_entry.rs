@@ -125,20 +125,28 @@ pub fn cli_path() -> Option<PathBuf> {
     )
 }
 
-/// Set in the environment of the CLI when a harness run starts it directly (glut-round W8): the CLI then takes no
-/// owner's decision from that call — `board add` sets no plan, role or flow field and uses no flow column — since the
-/// run's words may come from untrusted text, and no agent session's gates (`AXIOMATA_AGENT_ID`) apply to it.
+/// Set in the environment of every command an app harness runs — Glut's direct CLI, the app's Opencode sessions,
+/// `claude -p` (glut-round W8, audits) — with the kind of run as its value. The run's words may come from untrusted
+/// text and no agent session's gates (`AXIOMATA_AGENT_ID`) apply to it, so the CLI takes no owner's decision from it:
+/// a [`HARNESS_RUN_SKILL`] run (nobody watches) gets only a short list of commands, a [`HARNESS_RUN_CHAT`] turn (the
+/// owner asked) everything but the owner's gates and the flow's fields. Studio sessions on Opencode carry `chat` too
+/// (their connection is the chat's); their agent session's own gates (`AXIOMATA_AGENT_ID`) come first anyway. The
+/// owner's own terminal and master pane do not carry it. On Opencode's unattended shell a model could drop it: there it is a second line, not a boundary.
 pub const HARNESS_RUN_ENV: &str = "AXIOMATA_HARNESS_RUN";
+/// [`HARNESS_RUN_ENV`]'s value for a skill or routine run; any value but [`HARNESS_RUN_CHAT`] reads as this one.
+pub const HARNESS_RUN_SKILL: &str = "skill";
+/// [`HARNESS_RUN_ENV`]'s value for a chat turn.
+pub const HARNESS_RUN_CHAT: &str = "chat";
 
 /// The commands of the CLI a Glut run may start directly; every other one stays in the sandbox.
 const DIRECT_COMMANDS: [&[&str]; 3] = [&["board", "list"], &["board", "add"], &["inbox", "move"]];
 
 /// The app's CLI as a program a Glut run starts directly when its declaration names the exact command (glut-round
-/// W8): `axiomata-cli`, from [`cli_path`], for [`DIRECT_COMMANDS`] only, marked by [`HARNESS_RUN_ENV`], with the
+/// W8): `axiomata-cli`, from [`cli_path`], for [`DIRECT_COMMANDS`] only, marked by [`HARNESS_RUN_ENV`] as `kind`, with the
 /// app's `AXIOMATA_HOME` when one is set — the sandbox hides `~/.axiomata`, where the CLI's database is. `None` without
 /// a CLI.
-pub fn cli_direct_program() -> Option<axiomata_harness::tools::shell::DirectProgram> {
-    let mut env = vec![(HARNESS_RUN_ENV.into(), "1".into())];
+pub fn cli_direct_program(kind: &str) -> Option<axiomata_harness::tools::shell::DirectProgram> {
+    let mut env = vec![(HARNESS_RUN_ENV.into(), kind.into())];
     if let Some(home) = std::env::var_os(crate::paths::AXIOMATA_HOME_ENV) {
         env.push((crate::paths::AXIOMATA_HOME_ENV.into(), home));
     }

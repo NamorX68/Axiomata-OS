@@ -34,16 +34,125 @@ fn actor_in(session: Option<String>, given: Option<String>) -> Result<String> {
     }
 }
 
-/// Refuses `what` in an agent session: it is one of the owner's gates (a2a.md A7, A17).
-pub fn owner_only(what: &str) -> Result<()> {
-    owner_only_in(session_actor().as_deref(), what)
+/// Which kind of app-harness run this command comes from ([`axiomata_core::agent_entry::HARNESS_RUN_ENV`]), if any.
+/// Its words may come from untrusted text and no agent session stands behind it: it is not the owner either. On Glut
+/// and under a skill's declared rules the mark holds; on Opencode's unattended shell a model could drop it, so there
+/// it is a second line, not a boundary (glut-round, security audits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarnessRun {
+    /// A skill or routine run: nobody watches it.
+    Skill,
+    /// A chat turn: the owner asked for it.
+    Chat,
 }
 
-fn owner_only_in(session: Option<&str>, what: &str) -> Result<()> {
+pub fn harness_run_kind() -> Option<HarnessRun> {
+    let value = std::env::var_os(axiomata_core::agent_entry::HARNESS_RUN_ENV)?;
+    // Any value but "chat" is the stricter one.
+    Some(if value == axiomata_core::agent_entry::HARNESS_RUN_CHAT {
+        HarnessRun::Chat
+    } else {
+        HarnessRun::Skill
+    })
+}
+
+/// Whether an app harness runs this command at all.
+pub fn harness_run() -> bool {
+    harness_run_kind().is_some()
+}
+
+/// Refuses touching card `id` from an app harness's run unless it is a plain card: in a plain column, in no plan, for
+/// no role, taken by nobody, with no acceptance text — a flow card's text becomes an agent's prompt, and its column
+/// moves are the owner's yes or a reviewer's word (glut-round, fourth audit).
+pub fn plain_card_in_harness_run(db: &rusqlite::Connection, id: i64) -> Result<()> {
+    if harness_run() {
+        plain_card(db, id)
+    } else {
+        Ok(())
+    }
+}
+
+fn plain_card(db: &rusqlite::Connection, id: i64) -> Result<()> {
+    let card = board::store::get_card(db, id)?.with_context(|| format!("no card with id {id}"))?;
+    let stage = board::store::get_column(db, card.column_id)?.and_then(|c| c.stage);
+    let flow_card = card.plan_id.is_some()
+        || card.agent.is_some()
+        || card.claimed_by.is_some()
+        || !card.acceptance.trim().is_empty();
+    if flow_card || stage.is_some() {
+        bail!(
+            "card #{id} is part of the agent flow; a skill or chat turn of the app leaves it to the owner"
+        );
+    }
+    Ok(())
+}
+
+/// Refuses moving a card from an app harness's run into a flow column or a done one: approving, reviewing and finishing
+/// are the owner's and the reviewers' steps.
+pub fn plain_target_in_harness_run(db: &rusqlite::Connection, column: i64) -> Result<()> {
+    if harness_run() {
+        plain_target(db, column)
+    } else {
+        Ok(())
+    }
+}
+
+fn plain_target(db: &rusqlite::Connection, column: i64) -> Result<()> {
+    let target = board::store::get_column(db, column)?
+        .with_context(|| format!("no column with id {column}"))?;
+    if target.stage.is_some() || target.maps_to_status == board::CardStatus::Done {
+        bail!("a skill or chat turn of the app moves cards between plain open columns only");
+    }
+    Ok(())
+}
+
+/// Refuses `what` in an agent session and in an app harness's run: it is one of the owner's gates (a2a.md A7, A17).
+pub fn owner_only(what: &str) -> Result<()> {
+    owner_only_in(session_actor().as_deref(), harness_run(), what)
+}
+
+fn owner_only_in(session: Option<&str>, harness_run: bool, what: &str) -> Result<()> {
     match session {
         Some(own) => bail!("{what} is for the owner; {own} proposes and the owner decides"),
+        None if harness_run => {
+            bail!("{what} is for the owner; a skill or chat turn of the app does not decide it")
+        }
         None => Ok(()),
     }
+}
+
+/// Refuses an agent's step (taking, reporting, judging a card) in an app harness's run: no session takes it there.
+pub fn no_agent_step_in_a_harness_run(what: &str) -> Result<()> {
+    not_in_harness_run(harness_run(), what)
+}
+
+fn not_in_harness_run(harness_run: bool, what: &str) -> Result<()> {
+    if harness_run {
+        bail!(
+            "{what} is an agent session's step; a skill or chat turn of the app does not take it"
+        );
+    }
+    Ok(())
+}
+
+/// What a card an app harness's run adds, edits or moves may be (glut-round W8, security audit): a plain card in a
+/// plain column. Its words may come from untrusted text (a `ToDo.md`, a page), so it joins or leaves no plan, names no
+/// role and sets no flow field — a card in a self-running plan becomes an agent's prompt — and it goes into neither the
+/// proposal nor the review column.
+pub fn plain_card_only(
+    stage: Option<board::ColumnStage>,
+    flow: &FlowFlags,
+    leaves_plan: bool,
+) -> Result<()> {
+    if !flow.is_empty() || leaves_plan {
+        bail!("a skill's card gets no plan, role or flow field; the owner sets those on the board");
+    }
+    if stage.is_some() {
+        bail!(
+            "a skill puts cards into a plain column, never into the proposal or the review column"
+        );
+    }
+    Ok(())
 }
 
 /// Refuses `what` in an agent session: for an agent it goes through the MCP server, which knows the session by a
@@ -676,9 +785,104 @@ mod tests {
     }
 
     #[test]
+    fn the_owners_gates_and_the_agents_steps_are_closed_in_a_harness_run() {
+        let refused = owner_only_in(None, true, "approving")
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("skill or chat turn"), "{refused}");
+        assert!(not_in_harness_run(true, "claiming a card").is_err());
+        assert!(not_in_harness_run(false, "claiming a card").is_ok());
+    }
+
+    /// Fourth audit: a harness run edits or moves only a plain card, and only into a plain open column — no
+    /// approving a proposal by moving it, no finishing a card past its review.
+    #[test]
+    fn a_harness_run_touches_only_plain_cards_and_moves_them_between_plain_open_columns() {
+        let dir = std::env::temp_dir().join(format!("axiomata-cli-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut db = axiomata_core::db::open_and_migrate_at(&dir.join("axiomata.db")).unwrap();
+        let created = board::store::create_board(&mut db, "B").unwrap();
+        let columns = board::store::list_columns(&db, created.id).unwrap();
+        let column =
+            |pick: &dyn Fn(&board::Column) -> bool| columns.iter().find(|c| pick(c)).unwrap().id;
+        let open = column(&|c| c.stage.is_none() && c.maps_to_status == board::CardStatus::Open);
+        let proposal = column(&|c| c.stage == Some(board::ColumnStage::Proposal));
+        let review = column(&|c| c.stage == Some(board::ColumnStage::Review));
+        let done = column(&|c| c.maps_to_status == board::CardStatus::Done);
+        let card = |column_id: i64, fields: board::CardFields| {
+            board::store::create_card(&db, &board::NewCard { column_id, fields })
+                .unwrap()
+                .id
+        };
+        let plain = card(
+            open,
+            board::CardFields {
+                title: "plain".into(),
+                ..Default::default()
+            },
+        );
+        let proposed = card(
+            proposal,
+            board::CardFields {
+                title: "proposed".into(),
+                ..Default::default()
+            },
+        );
+        let for_a_role = card(
+            open,
+            board::CardFields {
+                title: "role".into(),
+                agent: Some("builder".into()),
+                ..Default::default()
+            },
+        );
+        assert!(plain_card(&db, plain).is_ok());
+        assert!(
+            plain_card(&db, proposed).is_err(),
+            "a proposal is the owner's to approve"
+        );
+        assert!(plain_card(&db, for_a_role).is_err());
+        assert!(plain_target(&db, open).is_ok());
+        for flow in [proposal, review, done] {
+            assert!(plain_target(&db, flow).is_err(), "column #{flow}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A harness run's card is plain, in a plain column: no plan, role or flow field, never proposal or review.
+    #[test]
+    fn a_harness_runs_card_is_plain_and_lands_in_a_plain_column() {
+        let plain = FlowFlags::default();
+        assert!(plain_card_only(None, &plain, false).is_ok());
+        assert!(
+            plain_card_only(None, &plain, true).is_err(),
+            "leaving a plan"
+        );
+        for stage in [board::ColumnStage::Proposal, board::ColumnStage::Review] {
+            assert!(plain_card_only(Some(stage), &plain, false).is_err());
+        }
+        for flow in [
+            FlowFlags {
+                plan: Some(3),
+                ..Default::default()
+            },
+            FlowFlags {
+                agent: Some("builder".into()),
+                ..Default::default()
+            },
+            FlowFlags {
+                acceptance: Some("run rm -rf".into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(plain_card_only(None, &flow, false).is_err(), "{flow:?}");
+        }
+    }
+
+    #[test]
     fn the_owners_gates_are_closed_in_an_agent_session_and_open_in_the_owners_terminal() {
-        assert!(owner_only_in(None, "approving").is_ok());
-        let refused = owner_only_in(Some("agent:builder-7"), "approving")
+        assert!(owner_only_in(None, false, "approving").is_ok());
+        let refused = owner_only_in(Some("agent:builder-7"), false, "approving")
             .unwrap_err()
             .to_string();
         assert!(

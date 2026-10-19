@@ -191,12 +191,34 @@ audit (of this path) found no way past the declaration but the CLI's reach: the 
 review column (a card in a self-running plan would have become an agent's prompt). `Bash(:*)` is no rule any more (it
 panicked the matcher).
 
-Open from the audits: the same `board add` reach on **Opencode and Claude Code**, which run the CLI without the
-marker (their skill runs inherit no agent session either); the CLI's config-parse error can quote a line of
-`config.toml` to the model;
-`web_search`'s provider error text reaches the model unframed (blanked keys, plain, cut). On
-**Claude Code** reads inside the working folder need no rule, so a news skill there can still read the vault and fetch
-any host — Glut is the stricter harness for the news skills.
+**The audits' last points, cleared (owner, 2026-10-19: "Beseitige die Audits")**: the harness mark rides on every
+command an app harness runs — Opencode's sessions (`session_env`) and `claude -p` (`app_command`) as well as Glut's
+direct CLI — so `board add` takes no plan, role or flow field from any skill or chat turn (the owner's terminal and
+master pane do not carry it; planner and card sessions add cards through MCP); a broken `config.toml` is reported by
+line and the parser's message, never the line itself; the providers' error words in `web_search` are framed as data;
+`inbox move` needs the vault's own router beside `Inbox/` and checks after linking that no folder on the way became
+a link and the note was not swapped, else it takes the new name back; the direct start stops with the run and keeps at
+most 256 KB of output; a few more invisible characters are dropped from page and search text. A fourth audit then: under the mark the owner's gates (`owner_only`: approving, starting, integrating, deleting,
+reseeding …) and the agents' steps (claim, report, verdict) are refused too, and `board edit`/`board move` keep a
+card plain like `board add`; `inbox move` walks, links and unlinks through folder handles (`openat` without following
+a link, `linkat`, `unlinkat`), takes back a new name that is not the checked note and leaves a swapped inbox file
+where it is; a config error is cut before the first quoted value. The chat carries the mark as skills do: approving
+belongs to the owner's own click, while routines, skills and module actions stay open to it. On Opencode's
+unattended shell a model could drop the mark (`env -u`) or open the database itself, so there it is a second line,
+not a boundary — a real one would need an owner's proof the model's shell cannot read. A fifth round, after the fourth audit found `board move` approving a proposal by moving it: the mark says the
+kind of run (`AXIOMATA_HARNESS_RUN=skill|chat`; anything but `chat` reads as `skill`). A **skill run** — nobody watches
+it — gets a short list from the CLI only: `status`, `list-skills`, `list-runs`, `get-run`, `board list`, `board add`
+(a plain card) and `inbox move`; everything else is refused before the core starts. A **chat turn** keeps the CLI but
+not the owner's gates, the agents' steps (claim, report, verdict, note, input, fail, cancel) or `board dep`; it edits
+and moves only plain cards (no plan, role, claim or acceptance, not in a flow column) and only between plain open
+columns (no proposal, review or done). Opencode's skill runs and `claude -p` runs carry `skill`, their chat turns
+`chat`; Glut's direct CLI the run's own. `inbox move` folds names as APFS does (`AGENTſ.md` is `AGENTS.md`). The Kanban
+shell actions behind `module-action` (the assistant's and the agents' channel; the board itself calls Tauri directly)
+keep to the same rule (`core/kanbanAgentRules.ts`): no card added to or moved into a flow or done column, no card of
+the flow moved. `board dep list` stays open; adding or removing a dependency is the owner's. What stays, by the
+harnesses' own design: on **Claude Code** reads inside the working folder need no rule (a news skill there can read
+the vault — Glut is the stricter harness for the news skills), and **Opencode** keeps its unattended allow, so a
+skill's `allowed_tools` bind Glut and Claude Code only.
 
 ## CP4 — first part built (2026-10-19)
 

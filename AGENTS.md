@@ -247,6 +247,12 @@ from the code itself:
   into both role fields on load, then `save()` drops it). Details: `docs/architecture.md` §5
   "Model providers"; `docs/plans/per-role-provider.md`;
   `docs/plans/settings-provider-overhaul.md`.
+- **A skill's declared `axiomata-cli` command runs outside Glut's sandbox** (glut-round W8): the sandbox hides
+  `~/.axiomata` from every command, so a command that every narrowing names by a pattern and that is one of the
+  CLI's direct commands (`board list`, `board add`, `inbox move` — `agent_entry::cli_direct_program`) starts the CLI
+  directly, without a shell. Every app-harness command carries `AXIOMATA_HARNESS_RUN=skill|chat`: a skill run gets only a
+  short CLI list (`main.rs` `skill_run_may`), a chat turn no owner gate and only plain cards (`board_flow::plain_*`).
+  Widen either list only with the same care; on Opencode's unattended shell the mark is a second line, not a boundary.
 - **Hooks veto, they never permit** (HS7, `docs/plans/harness-hs7.md`): the `hooks` of
   `~/.axh/settings.json` (Claude's shape) may only *block* a call or the answer — `allow`/`ask` parse and
   are no-ops (the gate stays the only decider), a crash/timeout/odd exit is a fail-open `Event::Hook` note,

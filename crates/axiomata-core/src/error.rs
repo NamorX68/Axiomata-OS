@@ -16,12 +16,14 @@ pub enum AxiomataError {
         source: std::io::Error,
     },
 
-    /// `~/.axiomata/config.toml` exists but could not be parsed as TOML.
-    #[error("failed to parse config at {path}: {source}")]
+    /// `~/.axiomata/config.toml` exists but could not be parsed as TOML. Only the parser's message and the line: the
+    /// TOML error's own text quotes the line, which may hold an API key, and this error reaches an agent's shell
+    /// output (glut-round, security audit).
+    #[error("failed to parse config at {path}, line {line}: {message}")]
     ConfigParse {
         path: PathBuf,
-        #[source]
-        source: toml::de::Error,
+        line: usize,
+        message: String,
     },
 
     /// The in-memory config could not be serialized back to TOML.

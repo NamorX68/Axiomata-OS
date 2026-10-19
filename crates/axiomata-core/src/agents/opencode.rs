@@ -408,7 +408,12 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         .acquire()
         .await
         .expect("agent_slots semaphore is never closed");
-    let service = connect(Instance::for_access(request.read_only)).await?;
+    // A skill run's commands carry the skill mark: the CLI gives them only its short list.
+    let service = connect(Instance::for_access(request.read_only))
+        .await?
+        .with_session_environment(opencode_instance::session_env_for(
+            crate::agent_entry::HARNESS_RUN_SKILL,
+        ));
     let permissions = skill_permissions(request.auto_approve_tools, request.read_only);
     let mut outcome = service
         .run_turn(TurnRequest {
