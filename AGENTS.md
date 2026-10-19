@@ -237,7 +237,9 @@ from the code itself:
   gates the paid roles, metering them from token counts × an owner-set per-model price table
   (`config.agents.costs` / `spend::metered_cost_usd`) rather than the CLI's own estimate —
   `runs.model` (migration 0007) records the model so `spend::reconcile_recorded_costs` can
-  re-meter already-recorded runs at startup. v1 providers: `Anthropic`
+  re-meter already-recorded runs at startup. `input_tokens` counts every prompt token processed on all three
+  harnesses (cache reads and writes included); the cached part (`cached_input_tokens`, migration 34) is metered at
+  the model's optional `cached_input_per_m` — unset, at the input price (glut-round CP4). v1 providers: `Anthropic`
   (default; no base URL/key, subscription-billed via the CLI login) | `OpenRouter` | `Ollama`
   — all `ProviderSettings` fields kept per provider even while unused. Anthropic's defaults
   are `claude-sonnet-5` (chat) / `claude-haiku-5-5` (skills). The old flat `agents.claude_model`

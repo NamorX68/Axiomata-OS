@@ -842,6 +842,7 @@ impl Outcome {
             (first, second) => Some(first.unwrap_or(0.0) + second.unwrap_or(0.0)),
         };
         self.input_tokens += repair.input_tokens;
+        self.cached_input_tokens += repair.cached_input_tokens;
         self.output_tokens += repair.output_tokens;
         self.turns += repair.turns;
         self.duration += repair.duration;
@@ -1220,6 +1221,7 @@ mod tests {
             usage: Some(Usage {
                 input_tokens: 10,
                 output_tokens: 2,
+                cache_read_input_tokens: 30,
                 ..Usage::default()
             }),
             permission_denials: Vec::new(),
@@ -1230,7 +1232,9 @@ mod tests {
             Duration::from_millis(1),
         ));
         assert_eq!(merged.reply, "{\"ok\":true}");
-        assert_eq!(merged.input_tokens, 20);
+        // Each call: 10 fresh + 30 read from the cache; the cached part is summed apart for its price.
+        assert_eq!(merged.input_tokens, 80);
+        assert_eq!(merged.cached_input_tokens, 60);
         assert!((merged.cost.unwrap() - 0.3).abs() < 1e-9);
 
         let first = Outcome::from_event(event("prose", 0.1), Duration::ZERO);

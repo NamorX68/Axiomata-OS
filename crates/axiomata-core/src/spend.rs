@@ -674,5 +674,51 @@ mod tests {
             (saved_chat - 5.0).abs() < 1e-9,
             "unlisted model left untouched"
         );
+        let stored_cached: Option<i64> = conn
+            .query_row("SELECT cached_input_tokens FROM chat_turns", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(stored_cached, None);
+
+        // glut-round CP4: with a cached price, a run that names its cached part is re-metered at it — once — and a row
+        // from before (NULL cached) keeps the full price.
+        conn.execute(
+            "INSERT INTO runs (skill_name, backend, status, exit_code, duration_ms, \
+                     stdout, stderr, error, started_at, finished_at, source, provider, \
+                     cost_usd, input_tokens, output_tokens, num_turns, model, cached_input_tokens) \
+                     VALUES ('skill', 'opencode', 'success', 0, 100, '', '', NULL, \
+                     '2026-10-19T11:00:00Z', '2026-10-19T11:01:00Z', 'manual', 'open_router', \
+                     NULL, 1_000_000, 1_000_000, 4, 'deepseek/deepseek-v4-flash-0731', 800000)",
+            [],
+        )
+        .unwrap();
+        config
+            .agents
+            .costs
+            .get_mut("deepseek/deepseek-v4-flash-0731")
+            .unwrap()
+            .cached_input_per_m = Some(0.0065);
+        assert_eq!(reconcile_recorded_costs(&conn, &config).unwrap(), 1);
+        assert_eq!(
+            reconcile_recorded_costs(&conn, &config).unwrap(),
+            0,
+            "a second pass changes nothing"
+        );
+        let costs: Vec<f64> = conn
+            .prepare("SELECT cost_usd FROM runs ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            (costs[0] - 0.245).abs() < 1e-9 && (costs[1] - 0.245).abs() < 1e-9,
+            "{costs:?}"
+        );
+        assert!(
+            (costs[2] - (0.013 + 0.0052 + 0.18)).abs() < 1e-9,
+            "{costs:?}"
+        );
     }
 }
