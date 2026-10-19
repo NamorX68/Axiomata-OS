@@ -124,6 +124,20 @@ search inside the script. A skill that declares MCP tools gets them through code
   on in a new session (the conversation's earlier turns stay in the app's transcript, not in the agent's context).
 - `exit_plan` names the mode it would switch to; a script cannot call it.
 
+## CP5 and CP6 — built (2026-10-20)
+
+- **Snapshots** (`snapshot.rs`): before the first change of a step (an edit or a command) the folder goes into a
+  shadow git store under `~/.axh/snapshots/<hash>` — its own `--git-dir`, the folder's `.gitignore` plus `target/`
+  and `node_modules/`, no global/system git config, hooks, fsmonitor or signing. `axh undo [--cwd] [--run]
+  [--step N] [--list]` restores and removes what the run added. Records 7 days, gc at most once a day. Live: a run
+  changed `a.txt` and added `b.txt`, `axh undo` put both back. On for the app's Glut runs and `harness run`.
+- **LSP errors after an edit** (`diagnostics.rs`): the editor's server table (`axiomata_files::lsp::servers`, not the
+  app's override file); errors only, at most 10, within 4 s; the last word per file stands when a change brings
+  nothing new. **Only servers that never run the project's code** (an agent writes the files they read): rust-analyzer
+  with build scripts, proc macros and `cargo check` off — its own diagnostics, type errors included (experimental
+  on) — pyright, taplo, yaml, json, css, html, marksman. TypeScript (tsserver plugins), Svelte (`svelte.config.js`),
+  Swift, Lua, SQL and bash stay out. Live against rust-analyzer: `expected i32, found &'static str`.
+
 ## Checkpoints
 
 | CP | What |
