@@ -37,6 +37,9 @@ export const busy = writable(false);
 export const panelOpen = writable(false);
 /** The actions of the turn in progress. */
 export const toolCalls = writable<ToolCall[]>([]);
+/** The chat's plan switch (Glut 2, G12): on, a chat turn reads and plans but changes nothing; the owner switches it
+ *  off to let the agent carry the plan out. Instructions are not affected. */
+export const planMode = writable(false);
 
 let nextId = 1;
 
@@ -67,10 +70,11 @@ export function newSession(): void {
   sessionId.set(null);
 }
 
-/** One turn against the agent. `chat` continues the panel's session;
+/** One turn against the agent. `chat` continues the panel's session — as `plan` while the plan switch is on;
  *  `instruct` is a one-shot instruction that also lands in the transcript. */
-export async function send(message: string, mode: ChatMode): Promise<ChatReply | null> {
+export async function send(message: string, asked: ChatMode): Promise<ChatReply | null> {
   if (get(busy)) return null;
+  const mode: ChatMode = asked === "chat" && get(planMode) ? "plan" : asked;
   busy.set(true);
   toolCalls.set([]);
   panelOpen.set(true);
@@ -81,7 +85,7 @@ export async function send(message: string, mode: ChatMode): Promise<ChatReply |
       sessionId: get(sessionId),
       mode,
     });
-    if (mode === "chat") sessionId.set(reply.session_id);
+    if (mode !== "instruct") sessionId.set(reply.session_id);
     push(
       reply.is_error ? "error" : mode === "instruct" ? "instruction" : "assistant",
       reply.reply_markdown || "(empty reply)",

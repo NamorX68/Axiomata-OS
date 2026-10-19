@@ -192,11 +192,18 @@ pub(crate) async fn chat(
         name: None,
         run_kind: crate::agent_entry::HARNESS_RUN_CHAT,
         declared: declared.clone(),
-        mode: chat_mode(&declared, request.auto_approve_tools),
+        mode: if request.mode == super::ChatMode::Plan {
+            Mode::Plan
+        } else {
+            chat_mode(&declared, request.auto_approve_tools)
+        },
         deny: Vec::new(),
     };
     let mut harness =
         Harness::prepare(&home, &request.cwd, &rights, request.timeout, config).await?;
+    // Glut 2 (D): an approved plan goes on in the mode the chat has without the switch. Nobody answers `exit_plan`
+    // in the app's chat, so there the model presents its plan and the owner flips the switch.
+    harness.run_config.build_mode = chat_mode(&declared, request.auto_approve_tools);
     harness.run_config.instructions = instructions;
     let continuing = !earlier.is_empty();
     let started = Instant::now();
@@ -358,6 +365,24 @@ impl Harness {
         // permission set above, so what is offered and what is allowed come from
         // one place; a run that declares nothing never even sees the tool.
         run_config.subagents = rights.declared.iter().any(|rule| rule.names_tool("task"));
+        // Glut 2 (G8): code mode as the owner set it, on unless `[agents.glut] codemode = false`.
+        // A declared skill gets `codemode` only when it names it, as `task` (HS8): measured on calendar-digest
+        // (2026-10-20), a digest's model reached for scripts it did not need — ~89k input tokens on average with
+        // the tool, ~57k without.
+        run_config.codemode = config.agents.glut.codemode
+            && (rights.declared.is_empty()
+                || rights
+                    .declared
+                    .iter()
+                    .any(|rule| rule.names_tool("codemode")));
+        // G7 (revised): a run that declares its tools keeps its MCP tools direct; codemode is there to filter beside.
+        run_config.mcp_behind_code = rights.declared.is_empty();
+        // Glut 2 (D): the task list for a chat turn, or a skill that names it — a declared skill's task is set.
+        run_config.todos = rights.declared.is_empty()
+            || rights
+                .declared
+                .iter()
+                .any(|rule| rule.names_tool("todo_write"));
         // HS7 (B4): the owner's hooks, and the sandbox their commands run in (D5).
         run_config.hooks = loaded.hooks;
         run_config.sandbox = Some(sandbox.clone());

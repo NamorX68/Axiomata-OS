@@ -1443,6 +1443,7 @@ pub async fn assistant_send(
     let mode = match mode.as_str() {
         "chat" => ChatMode::Chat,
         "instruct" => ChatMode::Instruct,
+        "plan" => ChatMode::Plan,
         other => return Err(format!("unknown assistant mode {other:?}")),
     };
     let config = read_config(&state.config);

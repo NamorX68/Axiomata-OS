@@ -320,6 +320,25 @@ impl Default for WebSettings {
     }
 }
 
+/// Glut's switches (`[agents.glut]`, `docs/plans/glut-2.md`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlutSettings {
+    /// Code mode (G8): the model reaches the MCP tools from a short script, and only what the script prints comes back.
+    /// Off: the MCP tools are offered directly, as before Glut 2.
+    #[serde(default = "default_true")]
+    pub codemode: bool,
+}
+
+impl Default for GlutSettings {
+    fn default() -> Self {
+        Self { codemode: true }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// First principles: the CLI's own `total_cost_usd` estimate is not usable
 /// for the daily cap when a run is routed to a non-Anthropic model — the CLI
 /// prices unknown model ids from its internal Anthropic price table, which
@@ -413,6 +432,10 @@ pub struct AgentDefaults {
     /// Web search for Glut (`[agents.web]`). See [`WebSettings`].
     #[serde(default)]
     pub web: WebSettings,
+
+    /// Glut's own switches (`[agents.glut]`). See [`GlutSettings`].
+    #[serde(default)]
+    pub glut: GlutSettings,
 
     /// Daily spend cap in USD, applied per paid (non-Anthropic) role provider.
     /// Checked before every redirected agent turn against the sum of today's
@@ -573,6 +596,7 @@ impl Default for AgentDefaults {
             chat_harness: HarnessId::default(),
             skill_harness: HarnessId::default(),
             web: WebSettings::default(),
+            glut: GlutSettings::default(),
             daily_usd_cap: default_daily_usd_cap(),
             costs: BTreeMap::new(),
             auto_approve_tools: default_auto_approve_tools(),

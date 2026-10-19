@@ -147,6 +147,10 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     // HS7: the owner's hooks (B1, the only ones that ever run), and the sandbox their commands run in (D5).
     run_config.hooks = built.hooks;
     run_config.sandbox = Some(built.sandbox.clone());
+    // Glut 2 (G8): code mode as the owner set it in `[agents.glut]`, as the app's runs have it.
+    run_config.codemode = config.agents.glut.codemode;
+    // G7 (revised), as the app: a skill's declared MCP tools stay direct.
+    run_config.mcp_behind_code = skill.is_none();
     let mut draft = Draft {
         config: run_config,
         endpoint,
@@ -429,6 +433,15 @@ fn render(event: &Event) -> Option<String> {
             "■ {reason:?} · {turns} turns · {} in / {} out tokens",
             usage.input_tokens, usage.output_tokens
         ),
+        // Glut 2, D: the run's task list, as the open items; and the run leaving Plan mode.
+        Event::Todo { items, .. } => {
+            let open = items
+                .iter()
+                .filter(|item| item.status != axiomata_harness::planning::TodoStatus::Done)
+                .count();
+            format!("☐ todo · {open} open of {}", items.len())
+        }
+        Event::ModeChanged { mode, .. } => format!("◆ plan approved · mode {}", plain(mode)),
         // The readable lines show the whole answer once; its pieces are for a `--json` reader.
         Event::Usage { .. } | Event::Error { .. } | Event::TextDelta { .. } => return None,
         // A subagent's events, indented by their depth (HS8, D8). Its own finished line reads `↳`, not

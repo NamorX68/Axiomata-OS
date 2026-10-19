@@ -87,8 +87,15 @@ search inside the script. A skill that declares MCP tools gets them through code
 
 - **G6 — B's threshold**: a result over 2,000 characters shrinks to its first 1,200 + a note + the path, once the model
   answered on it; the newest result stays whole.
-- **G7 — a skill's declared MCP tools go through code too**: the digests are where the outputs ride along. (The
-  declaration still decides what the gate allows inside the script.)
+- **G7 — revised 2026-10-20 after measuring: a skill's declared MCP tools stay direct**, `codemode` beside them to
+  filter; a chat turn keeps MCP behind code. Measured on `calendar-digest` (same path, same model): through code
+  151k input tokens in 7 steps, direct 46k in 4 — a digest's output *is* its data, so a script cannot filter it and
+  only adds steps. The chat turn: 45 tools → 15, 16.9k → 3.5k input tokens per step (−80 %). And a skill that
+  declares its tools gets `codemode` only when it names it (as `task`, HS8): three runs each, with the tool offered
+  ~89k input tokens on average (49.6k–126k — the model reached for scripts it did not need), without ~57k.
+- **G6 — revised 2026-10-20**: results shrink only while the conversation is over ~80,000 characters, oldest first —
+  shrinking as soon as the model answered sent a data-gathering task (the digest) fetching its results back until the
+  turn limit.
 - **G8 — code mode is on for every Glut run**: `[agents.glut] codemode = true`; off, the MCP tools are offered directly
   as today.
 - **G9 — Pi's limits**: 256 MB per script, no time or call limit of its own — the run's own limits (time, steps, spend)

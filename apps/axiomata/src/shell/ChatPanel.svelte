@@ -30,7 +30,7 @@
     };
   }
 
-  import { busy, newSession, panelOpen, sessionId, toolCalls, turns, type ToolCall } from "../core/chat";
+  import { busy, newSession, panelOpen, planMode, sessionId, toolCalls, turns, type ToolCall } from "../core/chat";
   import HexAvatar from "../ui/HexAvatar.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
   import { renderMarkdown } from "../core/markdown";
@@ -64,6 +64,18 @@
       style="width: 100%; height: 100%;"
     >
       {#snippet headerExtra()}
+        <button
+          type="button"
+          class="ax-btn plan-switch"
+          class:on={$planMode}
+          aria-pressed={$planMode}
+          title={$planMode
+            ? "Plan mode: the agent reads and plans, changes nothing — click to let it build"
+            : "Build mode: the agent may change things — click to only plan"}
+          onclick={() => planMode.update((on) => !on)}
+        >
+          {$planMode ? "Plan" : "Build"}
+        </button>
         <button type="button" class="ax-btn new-session" onclick={newSession} disabled={$busy || $turns.length === 0}>
           New session
         </button>
@@ -110,9 +122,15 @@
     z-index: var(--ax-z-assistant);
   }
 
-  .new-session {
+  .new-session,
+  .plan-switch {
     font-size: var(--ax-font-size-sm);
     padding: 1px var(--ax-space-2);
+  }
+
+  /* Selected, not alive: the switch is a setting, so it takes the selection tone, never the glow. */
+  .plan-switch.on {
+    background: var(--ax-selected-bg);
   }
 
   .turns {

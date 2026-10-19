@@ -591,7 +591,13 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
             directory: request.cwd.display().to_string(),
             title: Some(CHAT_SESSION_TITLE.to_string()),
             model: Some(model),
-            permissions: unattended_permissions(request.auto_approve_tools),
+            // The chat's plan switch (Glut 2, G12) — a session keeps the rules it was made with, so the switch
+            // applies to a conversation started with it.
+            permissions: if request.mode == super::ChatMode::Plan {
+                skill_permissions(request.auto_approve_tools, true)
+            } else {
+                unattended_permissions(request.auto_approve_tools)
+            },
             ..NewSession::default()
         }),
     };

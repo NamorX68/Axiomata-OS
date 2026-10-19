@@ -182,7 +182,8 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         servers: &setup.server_names,
         declared: &declared,
         auto_approve: request.auto_approve_tools,
-        read_only: false,
+        // The chat's plan switch (Glut 2, G12): reads only, as a read skill runs.
+        read_only: request.mode == super::ChatMode::Plan,
         context_file: setup.context_file.as_deref(),
         resume,
     };

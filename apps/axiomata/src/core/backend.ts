@@ -840,7 +840,8 @@ export interface WorkspaceGraph {
   generated_at: string;
 }
 
-export type ChatMode = "chat" | "instruct";
+/** `plan`: the chat's plan switch (Glut 2) — the turn reads and plans, changes nothing. */
+export type ChatMode = "chat" | "instruct" | "plan";
 
 export interface ChatReply {
   session_id: string;

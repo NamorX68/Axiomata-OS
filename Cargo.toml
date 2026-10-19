@@ -40,6 +40,9 @@ cron = "0.17"
 # OpenRouter) in its own manifest. No other features — bodies are read chunk by
 # chunk (`Response::chunk`), JSON goes through `serde_json`.
 reqwest = { version = "0.12", default-features = false }
+# Glut 2's code mode (docs/plans/glut-2.md, G2): QuickJS, compiled in. `futures` turns an async Rust function into a
+# JavaScript promise (a tool call from a script); `parallel` makes the runtime Send, so a run stays a Send future.
+rquickjs = { version = "0.14", default-features = false, features = ["std", "futures", "parallel"] }
 # HTML → Markdown for Glut's `web_fetch` (docs/plans/glut-round.md, W1): a turndown port, no JavaScript runtime.
 htmd = "0.5.6"
 # Only ever talks to a local Ollama daemon over plain HTTP, so the default

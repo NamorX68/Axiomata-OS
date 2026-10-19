@@ -292,6 +292,9 @@ impl AgentBackend {
 pub enum ChatMode {
     Chat,
     Instruct,
+    /// The chat's plan switch (Glut 2, D, G12): the turn reads and plans but changes nothing — Glut in Plan mode
+    /// (`exit_plan` asks to leave it), Claude Code and a new Opencode session with read rights only.
+    Plan,
 }
 
 impl ChatMode {
@@ -300,6 +303,7 @@ impl ChatMode {
         match self {
             ChatMode::Chat => "chat",
             ChatMode::Instruct => "instruct",
+            ChatMode::Plan => "plan",
         }
     }
 }
