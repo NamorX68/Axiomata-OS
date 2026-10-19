@@ -1,7 +1,8 @@
 //! The providers' model catalogs (board card #17): which models each provider offers, kept in
 //! `~/.axiomata/model-catalog.json`, so every place that names a model offers a list instead of a text field.
 //!
-//! OpenRouter's list is public and carries the prices, so a refresh also writes them into `agents.costs` for every
+//! OpenRouter's list carries the prices — with the app's key only the models the account allows (`/models/user`) —,
+//! so a refresh also writes them into `agents.costs` for every
 //! model the app uses (owner, 2026-10-19: always overwrite — the meter follows the provider's list price). Ollama
 //! lists what is pulled on this machine; Anthropic has no list the app could ask without an API key (the CLI login is
 //! a subscription), so its catalog is the fixed [`ANTHROPIC_MODELS`].
@@ -197,15 +198,34 @@ async fn fetch(
         .map(str::trim)
         .filter(|url| !url.is_empty())
         .ok_or("no base URL set")?;
-    let url = match id {
-        ProviderId::OpenRouter => format!("{}/v1/models", base.trim_end_matches('/')),
-        ProviderId::Ollama => format!("{}/api/tags", ollama_root(base)),
+    // With a key, OpenRouter answers `/models/user`: only the models the account allows (its "Only allow" list,
+    // provider preferences, guardrails — owner, 2026-10-19), priced alike. Without one, the public list. The key goes
+    // over https only.
+    let key = settings
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty() && base.starts_with("https://"));
+    let (url, key) = match id {
+        ProviderId::OpenRouter => {
+            let path = if key.is_some() {
+                "models/user"
+            } else {
+                "models"
+            };
+            (format!("{}/v1/{path}", base.trim_end_matches('/')), key)
+        }
+        // A local Ollama needs no key.
+        ProviderId::Ollama => (format!("{}/api/tags", ollama_root(base)), None),
         ProviderId::Anthropic => return Err("Anthropic has no model list to fetch".into()),
     };
-    // No key goes along: OpenRouter's list is public, a local Ollama needs none. Errors drop the URL: a base URL may
-    // carry credentials (`user:pass@host`), and the error is stored, logged and shown.
-    let mut response = client
-        .get(&url)
+    let mut request = client.get(&url);
+    if let Some(key) = key {
+        request = request.bearer_auth(key);
+    }
+    // Errors drop the URL: a base URL may carry credentials (`user:pass@host`), and the error is stored, logged and
+    // shown.
+    let mut response = request
         .send()
         .await
         .map_err(|err| err.without_url().to_string())?;

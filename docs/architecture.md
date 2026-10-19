@@ -729,8 +729,9 @@ selected per skill by `SKILL.md`'s `backend: ollama`.
   OpenRouter/Ollama skill provider. Every git call now runs with `core.fsmonitor=false` and
   `log.showSignature=false` (`axiomata-git` `run.rs`): a cloned repository's config must not start a
   program on a read.
-- **Model catalog (board card #17, 2026-10-19).** `model_catalog.rs` fetches OpenRouter's public
-  `/api/v1/models` (with list prices) and Ollama's `/api/tags`; Anthropic is a built-in list (no key to
+- **Model catalog (board card #17, 2026-10-19).** `model_catalog.rs` fetches OpenRouter's
+  `/api/v1/models/user` with the app's key — only the models the account allows, priced for its
+  provider preferences — or the public `/api/v1/models` without one and Ollama's `/api/tags`; Anthropic is a built-in list (no key to
   ask with). Stored in `~/.axiomata/model-catalog.json`, refreshed at app start and once a day
   (`src-tauri/model_watch.rs`, ten minutes after a failed fetch), by the ↻ in Settings and by
   `axiomata-cli models refresh`. Every refresh writes OpenRouter's list prices into `agents.costs` for
