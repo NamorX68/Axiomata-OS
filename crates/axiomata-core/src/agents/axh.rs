@@ -369,6 +369,8 @@ impl Harness {
         // A declared skill gets `codemode` only when it names it, as `task` (HS8): measured on calendar-digest
         // (2026-10-20), a digest's model reached for scripts it did not need — ~89k input tokens on average with
         // the tool, ~57k without.
+        // Glut 2 (D): snapshots before changes, in the harness's own store (`axh undo` puts a folder back).
+        run_config.snapshots = Some(home.join(".axh").join("snapshots"));
         run_config.codemode = config.agents.glut.codemode
             && (rights.declared.is_empty()
                 || rights

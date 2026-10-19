@@ -151,6 +151,8 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     run_config.codemode = config.agents.glut.codemode;
     // G7 (revised), as the app: a skill's declared MCP tools stay direct.
     run_config.mcp_behind_code = skill.is_none();
+    // Glut 2 (D): snapshots before changes, in the harness's own store, for `axh undo`.
+    run_config.snapshots = Some(home.join(".axh").join("snapshots"));
     let mut draft = Draft {
         config: run_config,
         endpoint,
@@ -442,6 +444,10 @@ fn render(event: &Event) -> Option<String> {
             format!("☐ todo · {open} open of {}", items.len())
         }
         Event::ModeChanged { mode, .. } => format!("◆ plan approved · mode {}", plain(mode)),
+        Event::Snapshot { turn, run, .. } => format!(
+            "⟲ snapshot before step {turn} · axh undo --run {}",
+            plain(run)
+        ),
         // The readable lines show the whole answer once; its pieces are for a `--json` reader.
         Event::Usage { .. } | Event::Error { .. } | Event::TextDelta { .. } => return None,
         // A subagent's events, indented by their depth (HS8, D8). Its own finished line reads `↳`, not

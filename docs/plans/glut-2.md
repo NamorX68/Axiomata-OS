@@ -107,6 +107,23 @@ search inside the script. A skill that declares MCP tools gets them through code
   a short limit, append the errors), the server table shared with the editor in one crate; **plan/build in the app
   chat by a switch**, and the model may ask to switch with `exit_plan` (an ask, as #88).
 
+## After the reviews (2026-10-20)
+
+- **No regular expressions in code mode**: the bundled quickjs-ng (rquickjs 0.14.0, an unreleased ~0.16.2 snapshot) has
+  an open advisory, GHSA-rxpx-wj25-jhqq — compiling a regex after an out-of-memory writes past its buffer, in the app's
+  process, from a script a prompt can steer; no fixed release yet. The script context is built without `RegExp` and
+  without the regex compiler (literals fail to compile); bring them back with an rquickjs that bundles a fixed engine.
+  `cargo audit` cannot see GitHub advisories — check quickjs-ng's and rquickjs's by hand when bumping.
+- Bounds a script cannot pass: buffered output (10× the output budget), 1 MB of arguments per call, a channel of 8
+  requests, `store()` keys counted (200 characters, 1,000 keys), the run's result store at 32 MB (oldest dropped).
+  A script waits for one of the two places before it starts (it no longer counts as stuck). G9 stands: no call limit
+  of its own — the run's time, steps and spend bound it.
+- B with hysteresis: once over the budget, results shrink until the conversation is at 60 % of it, so the cached
+  prefix breaks once per crossing, not every turn.
+- The plan switch on Opencode: a session keeps its rights, so a chat whose switch no longer matches its session goes
+  on in a new session (the conversation's earlier turns stay in the app's transcript, not in the agent's context).
+- `exit_plan` names the mode it would switch to; a script cannot call it.
+
 ## Checkpoints
 
 | CP | What |

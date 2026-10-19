@@ -574,7 +574,12 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
     let service = connect(Instance::Write).await?;
     // A conversation the service does not know (one held on the owner's service before the app had its own,
     // `docs/plans/agent-isolation.md` CP1, or one deleted since) goes on in a new session rather than failing.
+    let plan = request.mode == super::ChatMode::Plan;
     let session_id = match request.session_id {
+        // An Opencode session keeps the rights it was made with (Glut 2, G12): when the chat's plan switch differs
+        // from the session's, the conversation goes on in a new session — a plan session must not write, a build
+        // session must not stay read-only. A session this process did not make counts as a build session.
+        Some(id) if session_plan(&id) != plan => None,
         Some(id) => match service.session(&id).await {
             Ok(_) => Some(id),
             Err(OpencodeError::Http { status: 404, .. }) => None,
@@ -593,7 +598,7 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
             model: Some(model),
             // The chat's plan switch (Glut 2, G12) — a session keeps the rules it was made with, so the switch
             // applies to a conversation started with it.
-            permissions: if request.mode == super::ChatMode::Plan {
+            permissions: if plan {
                 skill_permissions(request.auto_approve_tools, true)
             } else {
                 unattended_permissions(request.auto_approve_tools)
@@ -609,7 +614,37 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         })
         .await
         .map_err(into_axiomata)?;
-    chat_reply(outcome)
+    let reply = chat_reply(outcome)?;
+    remember_session_plan(&reply.session_id, plan);
+    Ok(reply)
+}
+
+/// The chat sessions this process made in plan mode (Glut 2, G12): an Opencode session keeps its rights, so the plan
+/// switch decides whether a session can go on.
+static PLAN_SESSIONS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// Most plan sessions remembered; the oldest are forgotten (a forgotten one counts as a build session, and a turn
+/// with the switch on then starts a new one — never a write in plan mode).
+const MAX_PLAN_SESSIONS: usize = 64;
+
+fn session_plan(id: &str) -> bool {
+    PLAN_SESSIONS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .iter()
+        .any(|known| known == id)
+}
+
+fn remember_session_plan(id: &str, plan: bool) {
+    let mut known = PLAN_SESSIONS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    known.retain(|known| known != id);
+    if plan {
+        known.push(id.to_owned());
+        if known.len() > MAX_PLAN_SESSIONS {
+            known.remove(0);
+        }
+    }
 }
 
 /// The rules every IDE agent session gets on top of the user's own opencode
