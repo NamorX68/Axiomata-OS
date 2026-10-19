@@ -39,9 +39,11 @@ is configured.
 ### B — old tool results shrink (CP1)
 
 Once the model has answered after a tool result (the turn after it), a result longer than a threshold is replaced in
-the history by its head, a note how much was cut, and the path of the full text — written once into the run's own
-folder. Relocation, never loss: the model can read the file again (the run's folder is readable to it whatever the
-read rules say — it wrote it). Each message is shortened **once** and stays stable after, so the provider's prompt cache
+the history by its head, a note how much was cut, and an id. Relocation, never loss: the whole text stays in the run's
+memory and `read_full_result { id, offset }` gives it back in parts. **Built 2026-10-20 (`history.rs`) — memory, not a
+file** as first sketched: the file tools are confined to the work folder, and a run folder outside it would have needed
+an exception in that guard; the store needs none and serves code mode's over-long outputs too. An id carries the run's
+own tag, so a note left from an earlier chat turn answers "no longer available", never another run's text. Each message is shortened **once** and stays stable after, so the provider's prompt cache
 breaks once at that point, not on every turn. Measured before and after on `news-web` and `calendar-digest`.
 
 ### A — code mode (CP2, CP3)
