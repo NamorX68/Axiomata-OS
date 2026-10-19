@@ -996,6 +996,8 @@ mod tests {
                 .allowed
                 .contains(&"mcp__apple-mail__search_emails".to_owned())
         );
+        // The web only when declared (reads plus the network would be a way out for what the run read).
+        assert!(!rules.allowed.contains(&"WebFetch".to_owned()));
         // A declared shell rule would reach beyond the read commands: it is left out.
         assert!(!rules.allowed.contains(&"Bash".to_owned()));
         assert!(!rules.allowed.contains(&"Bash(*)".to_owned()));

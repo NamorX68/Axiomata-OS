@@ -266,6 +266,8 @@ fn read_rights<'a>(name: Option<&'a str>, declared: &[Rule]) -> Result<Rights<'a
         .filter(|rule| !is_shell_rule(rule.text()))
         .cloned()
         .collect();
+    // No web unless the skill names it (`WebFetch`): reads plus untrusted input plus the network would be a way out
+    // for what the run read (glut-round CP2, audit).
     allowed.push(rule("Read".to_owned())?);
     for command in READ_COMMANDS {
         allowed.push(rule(bash_rule(command))?);
@@ -867,6 +869,17 @@ mod tests {
                 .await
                 .is_ok()
         );
+        // The web only when declared: this skill names none, so a page is refused.
+        let page = Access::Network {
+            host: "docs.rs".into(),
+        };
+        assert!(gate.judge("web_fetch", &page).await.is_err());
+        let declared_web = declared_rules(Some("look"), Some("WebFetch(domain:docs.rs)")).unwrap();
+        let gate = gate_for(
+            &read_rights(Some("look"), &declared_web).unwrap(),
+            &RuleSet::default(),
+        );
+        assert!(gate.judge("web_fetch", &page).await.is_ok());
         let edit = Access::Edit {
             path: "notes.md".into(),
         };

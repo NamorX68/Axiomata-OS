@@ -1,6 +1,6 @@
 # Glut rund — web, fewer tokens, read access, streaming, identity
 
-Status: **approved 2026-10-19**, owner decisions W1–W7 taken, CP0 measured.
+Status: **approved 2026-10-19**, owner decisions W1–W7 taken, CP0 measured, CP1–CP2 built.
 
 ## Why
 
@@ -106,3 +106,23 @@ How the others do it (researched 2026-10-19):
 
 Work happens in a git worktree and reaches `main` only while no skill, routine or chat turn runs (a Rust edit rebuilds
 the owner's `cargo tauri dev` and cuts a running agent off — 2026-10-19).
+
+## CP1 — built (2026-10-19)
+
+`[agents.web]` (`WebSettings`: three keys, `daily_search_limit` 50, `tavily_monthly_limit` 1000; keys redacted in
+`Debug` and never sent to the webview, a blank key clears); the Settings block "Web search (Glut)"; the system prompt
+names Glut and the model; `access: read` on Glut = `Mode::Plan`, reads, the declared tools without shell rules and
+the shared read commands (stricter than Opencode's read instance: what the skill does not name is refused).
+
+## CP2 — built (2026-10-19)
+
+`web_fetch` (`axiomata-harness/src/tools/web.rs`, always in the toolbox): https only on 443/8443, no userinfo, no
+local, private, link-local, shared, documentation or reserved address — IPv4, IPv6 and every IPv4 inside IPv6
+(mapped, compatible, NAT64, 6to4) — checked after DNS; the connection is pinned to the checked addresses with the
+URL carrying the normalised host (a trailing dot would have missed the pin); no environment proxy; same-host
+redirects followed (5, each checked again), a cross-host one handed back as data; text types only, 5 MB, 45 s for the
+whole fetch; HTML → Markdown with `htmd` 0.5.6 (Apache-2.0); 25,000 characters a call, read on with `offset`; the page
+framed as data with an end mark. Rules: `WebFetch` / `WebFetch(domain:…)` are a kind of their own that speaks about
+`web_fetch` alone — never about the shell's proxy — while `Network(…)` serves both. Read skills get **no** web unless
+they name it (security audit: reads + untrusted input + the network would be a way out), on Glut and Claude Code
+alike. Live: Ling fetched `opencode.ai/v2/docs/websearch` and answered from it in one call.
