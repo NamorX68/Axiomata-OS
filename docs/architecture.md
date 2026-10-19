@@ -937,7 +937,14 @@ carrying its own config.
   showing only the **selected day … +7** — so `calendar-digest` fetches a wide window (this
   month + next) once and every day-click / month-page is a free client-side filter, not a
   new run. An **optional clock** (digital or analog, `config.showClock` / `clockStyle`) sits
-  beside the mini-month. `core/skillRun.ts`'s `loadLatestSkillRun` (find
+  beside the mini-month. **Repeating events** (card #77, 2026-10-19) are the one write that does
+  not take the instruct turn: the `calendar_events` MCP tool treats recurrence rules as
+  read-only, so the form's Repeat / Every N / until go to `calendar_create_recurring`
+  (`src-tauri/src/calendar.rs`, local time → instants) and `axiomata_macos::calendar`
+  (objc2 EventKit; full calendar access, asked once via `Info.plist`'s
+  `NSCalendarsFullAccessUsageDescription` — a grant the app's child processes share; a
+  calendar name two accounts share is refused, not guessed; dates 1970–2100; one request at a
+  time). Single events keep the instruct turn. `core/skillRun.ts`'s `loadLatestSkillRun` (find
   the most recent run of skill X) and its `stripCodeFence` (the model adds a ` ```json ` fence
   despite the SOP saying not to) are shared connector infrastructure. **Writes** (create /
   complete / delete) go through a fresh, silent one-shot **instruct turn**

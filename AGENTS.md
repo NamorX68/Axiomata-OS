@@ -138,7 +138,9 @@ from the code itself:
 - **A connector module (Calendar/Reminders/Mail-shaped) is "provider = skill, not code"**:
   an MCP-backed `*-digest` skill, no live poll (every refresh is a real agent turn), writes
   go through a silent one-shot instruct turn, not the skill. Follow this pattern for the next
-  integration rather than hand-rolling Tauri commands for it (`docs/architecture.md` §5).
+  integration rather than hand-rolling Tauri commands for it (`docs/architecture.md` §5). The one exception: a
+  **repeating** calendar event goes through EventKit (`axiomata_macos::calendar`, Tauri `calendar_create_recurring`,
+  card #77), because the MCP tool cannot set recurrence — only what the tool cannot do goes native.
   The digests run on the single agent harness — an Opencode session on whatever
   `skill_provider` routes to (`openrouter/deepseek/...`, `anthropic/claude-haiku-5-5`, or a
   local `ollama/<model>`), the same way opencode itself would run them; that harness is what

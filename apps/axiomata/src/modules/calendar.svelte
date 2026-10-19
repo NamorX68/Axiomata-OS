@@ -33,6 +33,7 @@
   import {
     CALENDAR_SKILL_NAME,
     createCalendarEvent,
+    createRecurringCalendarEvent,
     deleteCalendarEvent,
     EMPTY_DIGEST,
     eventTimeLabel,
@@ -170,7 +171,9 @@
     creating = true;
     createError = "";
     try {
-      const event = await createCalendarEvent(ctx.invoke, input);
+      const event = input.repeat
+        ? await createRecurringCalendarEvent(ctx.invoke, { ...input, repeat: input.repeat })
+        : await createCalendarEvent(ctx.invoke, input);
       digest = { ...digest, events: [...digest.events, event].sort((a, b) => a.start.localeCompare(b.start)) };
       showCreate = false;
     } catch (err) {

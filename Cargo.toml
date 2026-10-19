@@ -18,6 +18,12 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 home = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
+# EventKit for calendar writes the MCP tool cannot make (board card #77: recurring events). The objc2 family is
+# already in the tree through Tauri; only the EventKit bindings are new, and only the classes used are enabled.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSDate", "NSArray", "NSEnumerator", "NSError"] }
+objc2-event-kit = { version = "0.3", default-features = false, features = ["std", "block2", "EKEventStore", "EKEvent", "EKCalendarItem", "EKCalendar", "EKRecurrenceRule", "EKRecurrenceEnd", "EKTypes", "EKObject"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 gray_matter = "0.3"

@@ -1335,6 +1335,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "claude_sign_out":
       mockClaudeLogin = { logged_in: false, email: null, subscription: null };
       return { ...mockClaudeLogin } as T;
+    case "calendar_create_recurring":
+      return "mock-recurring-event" as T;
     case "get_model_catalog":
       return mockModelCatalog as T;
     case "refresh_model_catalog":

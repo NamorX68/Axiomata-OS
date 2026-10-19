@@ -11,6 +11,7 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 
 mod bootstrap;
+mod calendar;
 mod card_watch;
 mod claude_login;
 mod commands;
@@ -165,6 +166,7 @@ pub fn run() {
             claude_login::claude_sign_out,
             commands::get_spend_summary,
             commands::get_model_catalog,
+            calendar::calendar_create_recurring,
             commands::refresh_model_catalog,
             commands::get_dashboard_state,
             commands::save_dashboard_state,

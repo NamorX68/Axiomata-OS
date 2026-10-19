@@ -6,3 +6,9 @@ license.workspace = true
 
 [dependencies]
 thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+block2.workspace = true
+objc2-foundation.workspace = true
+objc2-event-kit.workspace = true

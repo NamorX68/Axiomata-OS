@@ -179,6 +179,18 @@ export interface NewCalendarEvent {
   startTime: string | null;
   endTime: string | null;
   location: string | null;
+  /** Set for a repeating event, which goes through EventKit instead of the MCP tool (board card #77). */
+  repeat?: EventRepeat | null;
+}
+
+export type RepeatFrequency = "daily" | "weekly" | "monthly" | "yearly";
+
+export interface EventRepeat {
+  frequency: RepeatFrequency;
+  /** Every `interval` days/weeks/months/years, 1–99. */
+  interval: number;
+  /** `YYYY-MM-DD`, the last day an occurrence may fall on; `null` repeats without end. */
+  until: string | null;
 }
 
 /** Resolves `NewCalendarEvent`'s date/time fields onto the `start`/`end`/
@@ -191,6 +203,14 @@ function resolveEventTimes(input: NewCalendarEvent): { start: string; end: strin
     end: `${input.date} ${input.endTime ?? input.startTime}:00`,
     allDay: false,
   };
+}
+
+/** `HH:MM` one hour after `time`, at most `23:59` — the end EventKit gets for a repeating event without one
+ *  (`src-tauri/src/calendar.rs`, `DEFAULT_DURATION`). */
+export function hourLater(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  const minutes = Math.min((h ?? 0) * 60 + (m ?? 0) + 60, 23 * 60 + 59);
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
 /**
@@ -218,6 +238,36 @@ export async function createCalendarEvent(invoke: Invoke, input: NewCalendarEven
   if (input.location) params.push(`location=${quoteForInstruction(input.location)}`);
   const instruction = buildToolCallInstruction("calendar_events", CALENDAR_WRITE_TOOL, params, { kind: "id" });
   const id = await runInstructWrite(invoke, instruction, CALENDAR_WRITE_TOOL);
+  return { id, title: input.title, start, end, calendar: input.calendar, location: input.location, allDay };
+}
+
+/**
+ * Creates a repeating event through EventKit (`calendar_create_recurring`, board card #77): the `calendar_events` MCP
+ * tool cannot set a recurrence rule. Returns the first occurrence, for the caller to show until the next ↻ brings the
+ * rest; the first call makes macOS ask for calendar access.
+ *
+ * Errors:
+ *   Throws the backend's message — no access, an unknown calendar, a field that does not fit.
+ */
+export async function createRecurringCalendarEvent(
+  invoke: Invoke,
+  input: NewCalendarEvent & { repeat: EventRepeat },
+): Promise<CalendarEvent> {
+  const id = await invoke<string>("calendar_create_recurring", {
+    input: {
+      title: input.title,
+      calendar: input.calendar,
+      date: input.date,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      location: input.location,
+      frequency: input.repeat.frequency,
+      interval: input.repeat.interval,
+      until: input.repeat.until,
+    },
+  });
+  const endTime = input.startTime !== null && input.endTime === null ? hourLater(input.startTime) : input.endTime;
+  const { start, end, allDay } = resolveEventTimes({ ...input, endTime });
   return { id, title: input.title, start, end, calendar: input.calendar, location: input.location, allDay };
 }
 

@@ -9,7 +9,15 @@
   instance and the `default*` props seed the fields once (never re-read).
 -->
 <script lang="ts">
-  import type { NewCalendarEvent } from "../core/calendar";
+  import type { NewCalendarEvent, RepeatFrequency } from "../core/calendar";
+
+  const REPEATS: { id: RepeatFrequency | ""; label: string; unit: string }[] = [
+    { id: "", label: "Does not repeat", unit: "" },
+    { id: "daily", label: "Daily", unit: "days" },
+    { id: "weekly", label: "Weekly", unit: "weeks" },
+    { id: "monthly", label: "Monthly", unit: "months" },
+    { id: "yearly", label: "Yearly", unit: "years" },
+  ];
 
   let {
     calendars,
@@ -41,8 +49,16 @@
   let startTime = $state("");
   let endTime = $state("");
   let location = $state("");
+  let repeat = $state<RepeatFrequency | "">("");
+  let interval = $state(1);
+  let until = $state("");
 
-  const canSubmit = $derived(!busy && title.trim() !== "" && calendar !== "" && date !== "");
+  const repeatUnit = $derived(REPEATS.find((r) => r.id === repeat)?.unit ?? "");
+  const intervalOk = $derived(Number.isInteger(interval) && interval >= 1 && interval <= 99);
+  const untilOk = $derived(until === "" || until >= date);
+  const canSubmit = $derived(
+    !busy && title.trim() !== "" && calendar !== "" && date !== "" && (repeat === "" || (intervalOk && untilOk)),
+  );
 
   function submit() {
     if (!canSubmit) return;
@@ -53,6 +69,7 @@
       startTime: allDay ? null : startTime || null,
       endTime: allDay ? null : endTime || null,
       location: location.trim() || null,
+      repeat: repeat === "" ? null : { frequency: repeat, interval, until: until || null },
     });
   }
 </script>
@@ -75,6 +92,25 @@
     </div>
   {/if}
   <input type="text" placeholder="Location (optional)…" bind:value={location} disabled={busy} />
+  <select bind:value={repeat} disabled={busy} aria-label="Repeat">
+    {#each REPEATS as r (r.id)}
+      <option value={r.id}>{r.label}</option>
+    {/each}
+  </select>
+  {#if repeat !== ""}
+    <div class="row repeat">
+      <label>
+        Every
+        <input type="number" min="1" max="99" bind:value={interval} disabled={busy} aria-label="Interval" />
+        {repeatUnit}
+      </label>
+      <label>
+        until
+        <input type="date" min={date} bind:value={until} disabled={busy} aria-label="Repeat until" />
+      </label>
+    </div>
+    {#if !untilOk}<p class="error">The repetition ends before the first event.</p>{/if}
+  {/if}
   {#if error}<p class="error">{error}</p>{/if}
   <div class="row">
     <button type="button" onclick={onCancel} disabled={busy}>Cancel</button>
@@ -100,6 +136,20 @@
   }
   .row > * {
     flex: 1 1 0;
+    min-width: 0;
+  }
+  .row.repeat label {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    font-size: var(--ax-font-size-sm);
+  }
+  .row.repeat input[type="number"] {
+    width: calc(56px * var(--ax-ui-scale));
+    flex: 0 0 auto;
+  }
+  .row.repeat input[type="date"] {
+    flex: 1 1 auto;
     min-width: 0;
   }
   .row.check {

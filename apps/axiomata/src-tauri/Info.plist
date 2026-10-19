@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Recurring calendar events through EventKit (board card #77); Tauri merges this into the bundle and embeds it
+	     in a dev build. -->
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Axiomata creates recurring events in the calendar you pick.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Axiomata creates recurring events in the calendar you pick.</string>
+</dict>
+</plist>

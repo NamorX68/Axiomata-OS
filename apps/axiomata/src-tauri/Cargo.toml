@@ -45,5 +45,7 @@ axiomata-tasks = { path = "../../../crates/axiomata-tasks" }
 axiomata-roster = { path = "../../../crates/axiomata-roster" }
 axiomata-dap = { path = "../../../crates/axiomata-dap" }
 axiomata-macos = { path = "../../../crates/axiomata-macos" }
+# The owner's local date and time of a recurring event, resolved to an instant for EventKit (board card #77).
+chrono.workspace = true
 rusqlite.workspace = true
 

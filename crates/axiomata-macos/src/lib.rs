@@ -1,4 +1,4 @@
-//! What Axiomata needs from macOS itself, without an extra dependency.
+//! What Axiomata needs from macOS itself, mostly without an extra dependency.
 //!
 //! Today the general pasteboard for the editor's Vi mode (`docs/plans/editor.md`,
 //! ED3, V3): `p` pastes what was last copied anywhere, `y` copies for every other
@@ -9,7 +9,11 @@
 //! And the installed fonts for the editor's and the terminal's font pickers
 //! (ED5, T10), straight from CoreText; and the displays with their real
 //! density, for the UI scale (`docs/plans/editor-look.md`, LK0, K9).
+//!
+//! And recurring calendar events through EventKit, which the calendar module's MCP tool cannot create (board card
+//! #77) — the one module that does take a dependency, the objc2 EventKit bindings.
 
+pub mod calendar;
 pub mod clipboard;
 pub mod display;
 pub mod fonts;

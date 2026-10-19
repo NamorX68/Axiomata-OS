@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RunRecord, RunSummary } from "./backend";
-import { createCalendarEvent, deleteCalendarEvent, eventTimeLabel, filterByCalendar, groupByDay, loadLatestCalendarDigest, parseCalendarDigest, type CalendarEvent } from "./calendar";
+import { createCalendarEvent, createRecurringCalendarEvent, deleteCalendarEvent, hourLater, eventTimeLabel, filterByCalendar, groupByDay, loadLatestCalendarDigest, parseCalendarDigest, type CalendarEvent } from "./calendar";
 
 const DIGEST_JSON = JSON.stringify({
   calendars: ["Arbeit", "Privat", "Familie"],
@@ -363,5 +363,59 @@ describe("createCalendarEvent / deleteCalendarEvent", () => {
   it("rejects a delete whose turn 'succeeded' but whose reply doesn't actually confirm it — a non-erroring turn isn't the same as a successful write", async () => {
     const { invoke } = fakeAssistant({ reply_markdown: "I couldn't find an event with that id." });
     await expect(deleteCalendarEvent(invoke, "evt-3")).rejects.toThrow(/didn't confirm the write/);
+  });
+});
+
+describe("hourLater", () => {
+  it("adds an hour and stops at the day's last minute", () => {
+    expect(hourLater("18:30")).toBe("19:30");
+    expect(hourLater("09:05")).toBe("10:05");
+    expect(hourLater("23:30")).toBe("23:59");
+  });
+});
+
+describe("createRecurringCalendarEvent", () => {
+  it("sends the repetition to the EventKit command and returns the first occurrence", async () => {
+    const calls: [string, Record<string, unknown> | undefined][] = [];
+    const invoke = (async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push([cmd, args]);
+      return "EK-1";
+    }) as Parameters<typeof createRecurringCalendarEvent>[0];
+    const event = await createRecurringCalendarEvent(invoke, {
+      title: "Training",
+      calendar: "Privat",
+      date: "2026-10-20",
+      startTime: "18:30",
+      endTime: "20:00",
+      location: null,
+      repeat: { frequency: "weekly", interval: 2, until: "2026-12-22" },
+    });
+    expect(calls).toEqual([
+      [
+        "calendar_create_recurring",
+        {
+          input: {
+            title: "Training",
+            calendar: "Privat",
+            date: "2026-10-20",
+            startTime: "18:30",
+            endTime: "20:00",
+            location: null,
+            frequency: "weekly",
+            interval: 2,
+            until: "2026-12-22",
+          },
+        },
+      ],
+    ]);
+    expect(event).toEqual({
+      id: "EK-1",
+      title: "Training",
+      start: "2026-10-20 18:30:00",
+      end: "2026-10-20 20:00:00",
+      calendar: "Privat",
+      location: null,
+      allDay: false,
+    });
   });
 });
