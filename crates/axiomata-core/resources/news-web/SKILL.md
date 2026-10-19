@@ -1,7 +1,6 @@
 ---
 name: news-web
 description: Visits the websites from the owner's AI source list that have no feed and adds what is new — a short German summary and the link to the original per article — to one running file, News/KI-News Web.md; skips what is already in it.
-backend: opencode
 prepend_files: ["KI/ai-llm-agents-quellenliste.md"]
 timeout_secs: 900
 ---

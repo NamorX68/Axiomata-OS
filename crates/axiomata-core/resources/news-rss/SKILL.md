@@ -1,7 +1,6 @@
 ---
 name: news-rss
 description: Reads the news feeds from the owner's AI source list (RSS or Atom) and adds what is new — a short German summary and the link to the original per article — to one running file, News/KI-News RSS.md; skips what is already in it.
-backend: opencode
 prepend_files: ["KI/ai-llm-agents-quellenliste.md"]
 timeout_secs: 900
 ---

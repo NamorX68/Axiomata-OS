@@ -42,6 +42,7 @@ use axiomata_harness::{
     RunConfig, SharedSink,
 };
 
+use crate::agents::opencode::{JSON_REPAIR_PROMPT, JSON_REPAIR_TIMEOUT, find_json_object};
 use crate::agents::{
     AgentRequest, AgentRunResult, BACKEND_AXH, ChatReply, ChatRequest, agent_slots,
 };
@@ -79,15 +80,47 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     let cancel = Cancel::new();
     let started = Instant::now();
     let model = OpenAiCompat::new(endpoint)?;
-    let outcome = axiomata_harness::run(
+    let (mut outcome, conversation) = axiomata_harness::run_continuing(
         &harness.run_config,
         &model,
         &harness.tools,
+        Vec::new(),
         &request.prompt,
         &mut harness.sink,
         &cancel,
     )
     .await;
+    // `output: json` (harness-choice CP5, lifting HS6b's D3): an answer without a JSON object is asked once more,
+    // in the same conversation, as on Opencode and Claude Code. Usage and turns count twice — both were paid.
+    let answer_lacks_json = outcome.reason == FinishReason::Answered
+        && outcome
+            .answer
+            .as_deref()
+            .is_none_or(|answer| find_json_object(answer).is_none());
+    if request.expects_json && answer_lacks_json {
+        tracing::warn!("the reply holds no JSON object; asking once more in the same conversation");
+        // Never longer than the skill's own limit, and no subagents: the repair only writes out what is known.
+        harness.run_config.timeout = request.timeout.min(JSON_REPAIR_TIMEOUT);
+        harness.run_config.subagents = false;
+        let (repair, _) = axiomata_harness::run_continuing(
+            &harness.run_config,
+            &model,
+            &harness.tools,
+            conversation,
+            JSON_REPAIR_PROMPT,
+            &mut harness.sink,
+            &cancel,
+        )
+        .await;
+        outcome.usage += repair.usage;
+        outcome.turns += repair.turns;
+        if let Some(answer) = repair
+            .answer
+            .filter(|answer| find_json_object(answer).is_some())
+        {
+            outcome.answer = Some(answer);
+        }
+    }
     let duration_ms = started.elapsed().as_millis() as u64;
     let input_tokens = (outcome.usage.input_tokens > 0).then_some(outcome.usage.input_tokens);
     let output_tokens = (outcome.usage.output_tokens > 0).then_some(outcome.usage.output_tokens);
@@ -1368,7 +1401,7 @@ mod tests {
         assert_eq!(stored_model, "test-model");
 
         // What the API saw: the bearer key, the bare model, the skill's body as
-        // the task — and exactly one call, since axh has no repair turn (D3).
+        // the task — and exactly one call: the skill asks for no JSON, so no repair turn follows.
         let seen = api.seen.lock().unwrap();
         assert_eq!(seen.len(), 1, "one model call, no repair turn");
         assert!(
@@ -1382,6 +1415,47 @@ mod tests {
         assert_eq!(seen[0].1["model"], "test-model");
         let messages = seen[0].1["messages"].to_string();
         assert!(messages.contains("Say the word ok."), "{messages}");
+    }
+
+    /// `output: json` on Glut (harness-choice CP5): a prose answer is asked once more in the same conversation, and
+    /// the JSON object of the second answer is what the run records — with both calls' tokens.
+    #[tokio::test]
+    async fn an_axh_json_skill_gets_one_repair_turn() {
+        let mut fx = Fixture::new("json-repair");
+        fx.write_skill(
+            "axh-json",
+            "---\nname: axh-json\ndescription: d\nbackend: axh\nallowed_tools: Read\noutput: json\n---\n\
+             Answer as JSON.\n",
+        );
+        let api = FakeApi::spawn_each(vec![
+            json!({"choices": [{"message": {"role": "assistant", "content": "Here is what I found."}}],
+                   "usage": {"prompt_tokens": 10, "completion_tokens": 2}}),
+            json!({"choices": [{"message": {"role": "assistant", "content": "{\"ok\": true}"}}],
+                   "usage": {"prompt_tokens": 12, "completion_tokens": 3}}),
+        ])
+        .await;
+        fx.config.agents.skill_provider = ProviderId::OpenRouter;
+        fx.config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some(api.base_url.clone()),
+                api_key: Some("sk-test".into()),
+                chat_model: "c".into(),
+                skill_model: "test-model".into(),
+            },
+        );
+        let record = runner::execute_and_record_skill("axh-json", &fx.config, &fx.db)
+            .await
+            .unwrap();
+        assert_eq!(record.status, RunStatus::Success, "err: {:?}", record.error);
+        assert_eq!(record.stdout, "{\"ok\": true}");
+        assert_eq!(record.input_tokens, Some(22));
+        assert_eq!(record.num_turns, Some(2));
+        let seen = api.seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        let repair = seen[1].1["messages"].to_string();
+        assert!(repair.contains("Here is what I found."), "{repair}");
+        assert!(repair.contains("no JSON object"), "{repair}");
     }
 
     /// HS8, B3 end to end: the model's tool list carries `task` only for a

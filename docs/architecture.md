@@ -636,6 +636,19 @@ the run's permissions for axh; see below).
   `task` sets `RunConfig.subagents`, so offering and allowing come from one reading of it —
   a skill that does not declare the tool never sees it.
 
+### Harness per role (`config.agents.chat_harness` / `skill_harness`)
+
+Beside the provider each role picks a **harness** (`docs/plans/harness-choice.md`, built 2026-10-19):
+`HarnessId { Opencode, ClaudeCode, Axh }` (`opencode` | `claude_code` | `axh`, the same token as a skill's `backend:`
+and `runs.backend`), default Opencode. The matrix (`HarnessId::serves`, mirrored by `core/harness.ts`): Opencode serves
+every provider, Claude Code Anthropic only, Glut (`axh`) all but Anthropic; `validate_for_save` refuses another pair.
+A skill without `backend:` (the bundled ones since CP5) follows `skill_harness`; the chat dispatches in `agents::chat`.
+Claude Code runs as `claude -p` on the app's own login folder `~/.axiomata/claude` (`agents/claude_code.rs`, reading no
+settings file at all — a folder's `.claude/settings.json` runs hooks/env even untrusted, measured), signed in from the
+Settings dialog (`agents/claude_auth.rs`, `src-tauri/src/claude_login.rs`); Glut keeps chat conversations as JSONL under
+`~/.axiomata/harness/sessions/` (`axh::chat`, `axiomata_harness::run_continuing`). All three ask once more for JSON when
+an `output: json` skill answered without it.
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the

@@ -1,7 +1,6 @@
 ---
 name: example-skill
 description: Built-in smoke-test skill. Reports the working directory and lists the top-level entries of the Second-Brain workspace, then stops.
-backend: claude-code
 ---
 
 # Example Skill

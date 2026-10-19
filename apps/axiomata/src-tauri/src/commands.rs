@@ -12,7 +12,7 @@ use axiomata_core::agents::{self, ChatMode, ChatReply};
 use axiomata_core::board;
 use axiomata_core::board_mirror;
 use axiomata_core::bridge::{self, ActionRequest, ActionResponse, ManifestEntry};
-use axiomata_core::config::{Config, ProviderId, ProviderSettings};
+use axiomata_core::config::{Config, HarnessId, ProviderId, ProviderSettings};
 use axiomata_core::dashboard::{self, LoadedState};
 use axiomata_core::editor_settings::{self, LoadedEditorSettings};
 use axiomata_core::editor_vi;
@@ -94,6 +94,9 @@ pub struct AgentDefaultsView {
     pub providers: BTreeMap<ProviderId, ProviderSettingsView>,
     pub chat_provider: ProviderId,
     pub skill_provider: ProviderId,
+    /// The harness of each role (`docs/plans/harness-choice.md`).
+    pub chat_harness: HarnessId,
+    pub skill_harness: HarnessId,
     pub daily_usd_cap: Option<f64>,
     /// Names only of the `agents.claude_env` power-user overrides — their
     /// values can be Bedrock / proxy tokens, so they never cross the IPC line.
@@ -135,6 +138,8 @@ impl ConfigView {
                 providers,
                 chat_provider: c.agents.chat_provider,
                 skill_provider: c.agents.skill_provider,
+                chat_harness: c.agents.chat_harness,
+                skill_harness: c.agents.skill_harness,
                 daily_usd_cap: c.agents.daily_usd_cap,
                 claude_env_keys: c.agents.claude_env.keys().cloned().collect(),
             },
@@ -173,6 +178,8 @@ pub struct AgentDefaultsUpdate {
     pub providers: BTreeMap<ProviderId, ProviderSettingsUpdate>,
     pub chat_provider: ProviderId,
     pub skill_provider: ProviderId,
+    pub chat_harness: HarnessId,
+    pub skill_harness: HarnessId,
     pub daily_usd_cap: Option<f64>,
 }
 
@@ -197,6 +204,8 @@ fn merge_view_update(current: &Config, update: ConfigUpdate) -> Config {
     merged.agents.skill_timeout_secs = update.agents.skill_timeout_secs;
     merged.agents.chat_provider = update.agents.chat_provider;
     merged.agents.skill_provider = update.agents.skill_provider;
+    merged.agents.chat_harness = update.agents.chat_harness;
+    merged.agents.skill_harness = update.agents.skill_harness;
     merged.agents.daily_usd_cap = update.agents.daily_usd_cap;
 
     let mut providers = BTreeMap::new();
@@ -336,7 +345,7 @@ fn apply_config_update(config: &RwLock<Config>, mut new_config: Config) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiomata_core::config::{HarnessId, ProviderId};
+    use axiomata_core::config::ProviderId;
     use axiomata_core::paths;
     use std::env;
     use std::path::PathBuf;
@@ -438,6 +447,8 @@ mod tests {
                 skill_timeout_secs: current.agents.skill_timeout_secs,
                 chat_provider: ProviderId::OpenRouter,
                 skill_provider: ProviderId::OpenRouter,
+                chat_harness: HarnessId::Opencode,
+                skill_harness: HarnessId::Opencode,
                 daily_usd_cap: current.agents.daily_usd_cap,
                 providers: BTreeMap::from([(
                     ProviderId::OpenRouter,
@@ -509,6 +520,8 @@ mod tests {
                 skill_timeout_secs: 300,
                 chat_provider: ProviderId::OpenRouter,
                 skill_provider: ProviderId::OpenRouter,
+                chat_harness: HarnessId::Opencode,
+                skill_harness: HarnessId::Opencode,
                 daily_usd_cap: Some(2.0),
                 providers: BTreeMap::from([(
                     ProviderId::OpenRouter,
@@ -525,15 +538,13 @@ mod tests {
         assert!(merged.validate_for_save().unwrap_err().contains("API key"));
     }
 
-    /// The dialog does not edit the harness fields yet (harness-choice CP5): a save keeps what is stored.
+    /// The dialog edits the harness of each role (harness-choice CP5): a save takes them from the update.
     #[test]
-    fn merge_view_update_keeps_the_harness_fields() {
-        let mut current = Config {
+    fn merge_view_update_takes_the_harness_fields() {
+        let current = Config {
             workspace_root: PathBuf::from("/ws"),
             ..Config::default()
         };
-        current.agents.chat_harness = HarnessId::ClaudeCode;
-        current.agents.skill_harness = HarnessId::Axh;
         let update = ConfigUpdate {
             owner: String::new(),
             workspace_root: "/ws".to_string(),
@@ -542,13 +553,19 @@ mod tests {
                 skill_timeout_secs: 300,
                 chat_provider: ProviderId::Anthropic,
                 skill_provider: ProviderId::Anthropic,
+                chat_harness: HarnessId::ClaudeCode,
+                skill_harness: HarnessId::Opencode,
                 daily_usd_cap: Some(2.0),
                 providers: BTreeMap::new(),
             },
         };
         let merged = merge_view_update(&current, update);
         assert_eq!(merged.agents.chat_harness, HarnessId::ClaudeCode);
-        assert_eq!(merged.agents.skill_harness, HarnessId::Axh);
+        assert_eq!(merged.agents.skill_harness, HarnessId::Opencode);
+        assert_eq!(
+            ConfigView::from_config(&merged).agents.chat_harness,
+            HarnessId::ClaudeCode
+        );
     }
 
     #[test]

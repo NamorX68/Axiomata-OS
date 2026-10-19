@@ -31,6 +31,8 @@ import type {
   MemoryStatus,
   NewRoutine,
   ProviderId,
+  HarnessId,
+  ClaudeLoginStatus,
   Routine,
   RunRecord,
   RunSummary,
@@ -73,6 +75,8 @@ let configState: {
     claude_env: Record<string, string>;
     chat_provider: ProviderId;
     skill_provider: ProviderId;
+    chat_harness: HarnessId;
+    skill_harness: HarnessId;
     providers: Record<ProviderId, MockProvider>;
     daily_usd_cap: number | null;
   };
@@ -85,6 +89,8 @@ let configState: {
     claude_env: {},
     chat_provider: "anthropic",
     skill_provider: "anthropic",
+    chat_harness: "opencode",
+    skill_harness: "opencode",
     providers: {
       anthropic: { base_url: null, api_key: null, chat_model: "claude-sonnet-5", skill_model: "claude-haiku-5-5" },
       open_router: { base_url: "https://openrouter.ai/api", api_key: null, chat_model: "", skill_model: "" },
@@ -93,6 +99,9 @@ let configState: {
     daily_usd_cap: 2,
   },
 };
+
+/** The mock's sign-in state of the app's own Claude Code. */
+let mockClaudeLogin: ClaudeLoginStatus = { logged_in: false, email: null, subscription: null };
 
 /** Redacted view of `configState`, mirroring `ConfigView::from_config`. */
 function configView(): ConfigView {
@@ -112,6 +121,8 @@ function configView(): ConfigView {
       providers,
       chat_provider: a.chat_provider,
       skill_provider: a.skill_provider,
+      chat_harness: a.chat_harness,
+      skill_harness: a.skill_harness,
       daily_usd_cap: a.daily_usd_cap,
       claude_env_keys: Object.keys(a.claude_env),
     },
@@ -1303,6 +1314,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       } satisfies AppInfo as T;
     case "get_config":
       return configView() as T;
+    // The app's own Claude Code sign-in (harness-choice D7): signed out until "Sign in" is pressed here.
+    case "claude_login_status":
+      return { ...mockClaudeLogin } as T;
+    case "claude_sign_in":
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      mockClaudeLogin = { logged_in: true, email: "dev@example.com", subscription: "max" };
+      return { ...mockClaudeLogin } as T;
+    case "claude_sign_in_code":
+      return undefined as T;
+    case "claude_sign_out":
+      mockClaudeLogin = { logged_in: false, email: null, subscription: null };
+      return { ...mockClaudeLogin } as T;
     case "get_spend_summary": {
       const { chat_provider: chat, skill_provider: skill } = configState.agents;
       const summaryFor = (p: ProviderId, role: string): SpendSummary => ({
@@ -1327,6 +1350,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       a.skill_timeout_secs = next.agents.skill_timeout_secs;
       a.chat_provider = next.agents.chat_provider;
       a.skill_provider = next.agents.skill_provider;
+      a.chat_harness = next.agents.chat_harness;
+      a.skill_harness = next.agents.skill_harness;
       a.daily_usd_cap = next.agents.daily_usd_cap;
       for (const [id, u] of Object.entries(next.agents.providers) as [ProviderId, ConfigUpdate["agents"]["providers"][ProviderId]][]) {
         const stored = a.providers[id]?.api_key ?? null;

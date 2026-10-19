@@ -1,7 +1,6 @@
 ---
 name: cleanup
 description: "General workspace-maintenance skill for tidying up files/entries the app itself doesn't manage the lifecycle of. Job 1 deletes Mail summary notes older than 3 days (by the email's date in the filename); Job 2 removes ToDo.md Done entries older than 3 days (by their completion-date stamp); Job 3 deletes Cleanup/ reports older than 3 days (by the date in the filename). Always writes a dated Markdown report of what it did, in addition to its reply. More jobs get their own numbered section as they're added; keep the name generic (cleanup), not tied to any one job."
-backend: claude-code
 allowed_tools: Bash(rm:*) Edit Write
 ---
 

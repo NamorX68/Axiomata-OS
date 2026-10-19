@@ -43,7 +43,7 @@ use crate::error::AxiomataError;
 use crate::paths;
 
 /// Name of the Claude Code binary; expected on `PATH` (the app adopts the login shell's, `login_path`).
-const CLAUDE_BIN: &str = "claude";
+pub(crate) const CLAUDE_BIN: &str = "claude";
 
 /// What Claude Code answers in `result` when its config folder has no login (CP0).
 const NOT_SIGNED_IN: &str = "Not logged in";
@@ -597,6 +597,17 @@ fn arguments(invocation: &Invocation) -> Vec<String> {
     args
 }
 
+/// `program` as every call of the app's Claude Code starts it: no ambient `ANTHROPIC_API_KEY` or `CLAUDE_CODE_*` may
+/// switch the billing or the login (provider hardening), and its config folder is the app's own (D5).
+pub(crate) fn app_command(program: &Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(program);
+    command
+        .env_clear()
+        .envs(agent_child_env())
+        .env("CLAUDE_CONFIG_DIR", paths::app_claude_dir());
+    command
+}
+
 /// Starts `program` with `args` in `cwd` as the leader of its own process group, feeds it `prompt` and reads its
 /// result — all within `timeout`. On the limit the whole group is killed, MCP servers and shell children included;
 /// after a normal end what is left of the group is swept up too.
@@ -613,13 +624,9 @@ async fn invoke(
         source,
     };
     let started = Instant::now();
-    let mut child = tokio::process::Command::new(program)
+    let mut child = app_command(program)
         .args(args)
         .current_dir(cwd)
-        // No ambient `ANTHROPIC_API_KEY` or `CLAUDE_CODE_*` may switch the billing or the login (provider hardening).
-        .env_clear()
-        .envs(agent_child_env())
-        .env("CLAUDE_CONFIG_DIR", paths::app_claude_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

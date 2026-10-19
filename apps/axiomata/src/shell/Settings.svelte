@@ -10,13 +10,16 @@
 
   import {
     type AppInfo,
+    type ClaudeLoginStatus,
     type ConfigUpdate,
     type ConfigView,
     type KeyUpdate,
+    type HarnessId,
     type ProviderId,
     type SpendSummary,
     invokeBackend,
   } from "../core/backend";
+  import { HARNESSES, providerAfterHarnessChange, providersFor, usesClaudeCode } from "../core/harness";
   import { brainView, SHINES, SPEED_MAX } from "../core/brainView";
   import { MOTION_LEVELS, isMotionLevel, motion, motionSetting, systemReducesMotion, turns } from "../core/motion";
   import { effects } from "../core/effects";
@@ -153,9 +156,79 @@
         providers,
         chat_provider: c.agents.chat_provider,
         skill_provider: c.agents.skill_provider,
+        chat_harness: c.agents.chat_harness,
+        skill_harness: c.agents.skill_harness,
         daily_usd_cap: c.agents.daily_usd_cap,
       },
     };
+  }
+
+  /** A role's harness changed: its provider follows when the new harness cannot serve it (the matrix of
+   *  `core/harness.ts`; Rust's `validate_for_save` refuses the pair otherwise). */
+  function setHarness(role: "chat" | "skill", harness: HarnessId) {
+    if (!config) return;
+    const order = PROVIDERS.map((p) => p.id);
+    if (role === "chat") {
+      config.agents.chat_harness = harness;
+      config.agents.chat_provider = providerAfterHarnessChange(harness, config.agents.chat_provider, order);
+    } else {
+      config.agents.skill_harness = harness;
+      config.agents.skill_provider = providerAfterHarnessChange(harness, config.agents.skill_provider, order);
+    }
+    if (harness === "claude_code" && !claudeLogin) void refreshClaudeLogin();
+  }
+
+  /** The sign-in of the app's own Claude Code (harness-choice D7): its state, a running sign-in, a code for it. */
+  let claudeLogin = $state<ClaudeLoginStatus | null>(null);
+  let claudeLoginError = $state<string | null>(null);
+  let signingIn = $state(false);
+  let signInCode = $state("");
+  const needsClaude = $derived(
+    config ? usesClaudeCode(config.agents.chat_harness, config.agents.skill_harness) : false,
+  );
+
+  async function refreshClaudeLogin() {
+    try {
+      claudeLogin = await invokeBackend<ClaudeLoginStatus>("claude_login_status");
+      claudeLoginError = null;
+    } catch (e) {
+      claudeLogin = null;
+      claudeLoginError = String(e);
+    }
+  }
+
+  async function signIn() {
+    signingIn = true;
+    signInCode = "";
+    try {
+      claudeLogin = await invokeBackend<ClaudeLoginStatus>("claude_sign_in");
+      claudeLoginError = null;
+      toast(claudeLogin.logged_in ? "Claude Code is signed in." : "The sign-in did not complete.", "info");
+    } catch (e) {
+      toast(`Sign-in failed: ${e}`, "warning");
+    } finally {
+      signingIn = false;
+    }
+  }
+
+  async function sendSignInCode() {
+    const code = signInCode.trim();
+    if (!code) return;
+    try {
+      await invokeBackend<void>("claude_sign_in_code", { code });
+      signInCode = "";
+    } catch (e) {
+      toast(`The code was not taken: ${e}`, "warning");
+    }
+  }
+
+  async function signOut() {
+    try {
+      claudeLogin = await invokeBackend<ClaudeLoginStatus>("claude_sign_out");
+      toast("Claude Code is signed out.", "info");
+    } catch (e) {
+      toast(`Sign-out failed: ${e}`, "warning");
+    }
   }
 
   /** `save_config` returns `true` when only a restart will pick up the new
@@ -270,6 +343,7 @@
     }
     await loadConfig();
     await refreshSpend();
+    if (needsClaude) await refreshClaudeLogin();
   });
 </script>
 
@@ -527,9 +601,8 @@
           <section>
             <h3>Edit providers</h3>
             <p class="lead">
-              The execution is always the Claude Code agent — the provider only picks the upstream endpoint
-              <code>claude</code> points to. Every provider is configured independently here;
-              which one is used for what is set in the next section.
+              A provider is where the model runs — its endpoint, key and models. Every provider is configured
+              independently here; which harness and provider serve the chat and the skills is set in the next section.
             </p>
             <ul class="providers">
               {#each PROVIDERS as p (p.id)}
@@ -618,31 +691,85 @@
           </section>
 
           <section>
-            <h3>Provider assignment</h3>
+            <h3>Harness &amp; provider assignment</h3>
             <p class="lead">
-              Which provider serves the interactive chat and which one the skills &amp; routines — they may
-              differ, e.g. Anthropic for the chat and a local Ollama for the digests.
+              The harness drives the agent — its tools, rights and loop; the provider serves the model. Each role picks
+              both, e.g. Claude Code for the chat and Glut with a local Ollama for the digests. A skill's own
+              <code>backend:</code> still wins over the harness set here.
             </p>
             <div class="role-picks">
-              <label class="field">
-                <span>Provider for chat</span>
-                <select bind:value={config.agents.chat_provider}>
-                  {#each PROVIDERS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
-                </select>
-              </label>
-              <label class="field">
-                <span>Provider for skills &amp; routines</span>
-                <select bind:value={config.agents.skill_provider}>
-                  {#each PROVIDERS as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
-                </select>
-                {#if config.agents.skill_provider === "ollama"}
-                  <p class="hint">
-                    Ollama → the connector digests (Calendar/Reminders/Mail) run locally through the
-                    tool-call agent — no cloud costs.
-                  </p>
-                {/if}
-              </label>
+              {#each [{ role: "chat", label: "chat" }, { role: "skill", label: "skills & routines" }] as r (r.role)}
+                {@const harness = r.role === "chat" ? config.agents.chat_harness : config.agents.skill_harness}
+                <div class="role-pick">
+                  <label class="field">
+                    <span>Harness for {r.label}</span>
+                    <select
+                      value={harness}
+                      onchange={(e) => setHarness(r.role as "chat" | "skill", e.currentTarget.value as HarnessId)}
+                    >
+                      {#each HARNESSES as h (h.id)}<option value={h.id}>{h.label}</option>{/each}
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Provider for {r.label}</span>
+                    {#if r.role === "chat"}
+                      <select bind:value={config.agents.chat_provider}>
+                        {#each providersFor(harness, PROVIDERS) as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
+                      </select>
+                    {:else}
+                      <select bind:value={config.agents.skill_provider}>
+                        {#each providersFor(harness, PROVIDERS) as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
+                      </select>
+                    {/if}
+                  </label>
+                  <p class="hint">{HARNESSES.find((h) => h.id === harness)?.blurb}</p>
+                </div>
+              {/each}
             </div>
+            {#if config.agents.skill_harness === "axh"}
+              <p class="hint">
+                Glut has no web tool of its own: a skill that reads the web (<code>news-web</code>) needs a web MCP
+                server in <code>~/.axh/mcp.json</code> or a <code>backend:</code> of its own.
+              </p>
+            {/if}
+
+            {#if needsClaude}
+              <div class="provider-form claude-login">
+                <span class="title">Claude Code sign-in</span>
+                {#if claudeLogin?.logged_in}
+                  <p class="status applied">
+                    Signed in as {claudeLogin.email ?? "unknown"}{#if claudeLogin.subscription}
+                      &nbsp;({claudeLogin.subscription}){/if} — the app's own login, apart from yours in
+                    <code>~/.claude</code>.
+                  </p>
+                  <div class="actions">
+                    <button type="button" onclick={signOut}>Sign out</button>
+                  </div>
+                {:else}
+                  <p class="status error">
+                    {#if claudeLoginError}
+                      Claude Code cannot be asked: {claudeLoginError}
+                    {:else}
+                      Not signed in — chat and skills on Claude Code fail until the app's Claude Code signs in.
+                    {/if}
+                  </p>
+                  <div class="actions">
+                    <button type="button" disabled={signingIn} onclick={signIn}>
+                      {signingIn ? "Waiting for the browser…" : "Sign in with Anthropic"}
+                    </button>
+                  </div>
+                  {#if signingIn}
+                    <label class="field">
+                      <span>Code (only if the browser page shows one)</span>
+                      <span class="code-row">
+                        <input type="text" spellcheck="false" autocomplete="off" bind:value={signInCode} />
+                        <button type="button" disabled={!signInCode.trim()} onclick={sendSignInCode}>Send</button>
+                      </span>
+                    </label>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
 
             <div class="provider-form spend-form">
               {#each spend as s (s.role)}
@@ -909,6 +1036,22 @@
     grid-template-columns: repeat(auto-fit, minmax(calc(200px * var(--ax-ui-scale)), 1fr));
     gap: var(--ax-space-2);
     margin-bottom: var(--ax-space-3);
+  }
+  .role-pick {
+    display: flex;
+    flex-direction: column;
+  }
+  .claude-login .title {
+    display: block;
+    margin-bottom: var(--ax-space-2);
+    font-weight: 600;
+  }
+  .code-row {
+    display: flex;
+    gap: var(--ax-space-2);
+  }
+  .code-row input {
+    flex: 1;
   }
   .role-badge {
     margin-left: var(--ax-space-1);

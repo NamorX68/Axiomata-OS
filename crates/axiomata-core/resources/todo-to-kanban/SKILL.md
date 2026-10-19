@@ -1,7 +1,6 @@
 ---
 name: todo-to-kanban
 description: Turns the open tasks of the ToDo tile (ToDo.md) into cards on the Kanban board, with labels and due dates where the task says so; skips tasks already on the board and asks about unclear ones.
-backend: opencode
 prepend_files: ["ToDo.md"]
 timeout_secs: 600
 ---

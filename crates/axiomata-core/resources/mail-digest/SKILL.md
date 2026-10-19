@@ -1,7 +1,6 @@
 ---
 name: mail-digest
 description: Reads recent mail via whichever mail tool is available (the apple-mail MCP server today), picks out messages the agent judges important plus ones matching the owner's configured topics, summarises each in a bit more depth (including any links the email contains), and reports them as one JSON object for the Mail dashboard module to read back from this skill's last run.
-backend: opencode
 prepend_files: ["Mail/.topics.md"]
 allowed_tools: mcp__apple-mail__search_emails mcp__apple-mail__get_needs_response mcp__apple-mail__get_email_source
 timeout_secs: 600

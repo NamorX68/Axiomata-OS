@@ -1,6 +1,6 @@
 # Harness choice — Opencode, Claude Code or Glut, per role
 
-Status: **in progress 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, CP1–CP4 built.
+Status: **in progress 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, CP1–CP5 built — the plan is through.
 
 ## Why
 
@@ -197,3 +197,17 @@ otherwise reads only. Glut with the Anthropic chat provider refuses (D6). The sk
 
 - Live (scratch `AXIOMATA_HOME`, `chat_harness = "axh"`, OpenRouter DeepSeek Flash): turn 1 named the vault's areas
   from `AGENTS.md` and noted a word; turn 2 with `--resume axh-…` answered it under the same id.
+
+## CP5 — built (2026-10-19)
+
+- Settings → AI providers: per role a **Harness** select above the provider; the provider list offers only what the
+  harness serves (`core/harness.ts`, the same matrix as Rust) and follows a harness change to the first provider it
+  serves. With a role on Claude Code, a **Claude Code sign-in** block shows the app login's state (email,
+  subscription) with *Sign in with Anthropic* (opens the browser; a code field while it waits) and *Sign out*.
+  Commands `claude_login_status`, `claude_sign_in`, `claude_sign_in_code`, `claude_sign_out` take no program, flag or
+  path; the command lines are fixed in `agents/claude_auth.rs`. At app start a warning toast names a missing sign-in
+  when a role runs on Claude Code. Checked in the browser against the mock backend.
+- Glut got the JSON repair turn of the other harnesses (lifting HS6b's D3), so `output: json` skills run on all three.
+- The bundled skills lost their `backend:` line and follow the skill harness. **An install keeps its old copies**
+  (seed-if-absent): `axiomata-cli skills reseed --force` brings them over — the owner's call, it overwrites the
+  bundled skills' installed copies. Glut has no web tool: `news-web` on Glut needs a web MCP server (the dialog says so).

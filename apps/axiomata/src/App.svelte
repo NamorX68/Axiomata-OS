@@ -4,7 +4,14 @@
   import { get } from "svelte/store";
 
   import Canvas from "./canvas/Canvas.svelte";
-  import { invokeBackend, listenBackend, type PlanRunEvent } from "./core/backend";
+  import {
+    type ClaudeLoginStatus,
+    type ConfigView,
+    invokeBackend,
+    listenBackend,
+    type PlanRunEvent,
+  } from "./core/backend";
+  import { claudeSignInNotice } from "./core/harness";
   import { AGENTS_WAITING, watchWaiting } from "./core/agentWaiting";
   import { brainActive } from "./core/brainView";
   import { closeTop } from "./core/closeStack";
@@ -92,6 +99,13 @@ import { emit, on } from "./core/bus";
   $effect(() => brainActive.set(brainOpen));
 
   onMount(() => {
+    // A role on Claude Code without its sign-in would fail every turn: say so once at start (harness-choice D7).
+    void claudeSignInNotice(
+      () => invokeBackend<ConfigView>("get_config"),
+      () => invokeBackend<ClaudeLoginStatus>("claude_login_status"),
+    ).then((notice) => {
+      if (notice) toast(notice, "warning");
+    });
     const offs = [
       on("shell:add-module", () => (pickerOpen = true)),
       // A file handed over by a module, the chat or the agent → staged viewer.

@@ -26,6 +26,7 @@ use crate::config::{Config, HarnessId, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 
 pub mod axh;
+pub mod claude_auth;
 pub mod claude_code;
 pub mod ollama;
 pub mod opencode;

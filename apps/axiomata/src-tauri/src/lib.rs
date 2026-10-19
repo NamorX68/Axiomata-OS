@@ -12,6 +12,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 mod bootstrap;
 mod card_watch;
+mod claude_login;
 mod commands;
 mod debug;
 mod files;
@@ -157,6 +158,10 @@ pub fn run() {
             commands::get_app_info,
             commands::get_config,
             commands::save_config,
+            claude_login::claude_login_status,
+            claude_login::claude_sign_in,
+            claude_login::claude_sign_in_code,
+            claude_login::claude_sign_out,
             commands::get_spend_summary,
             commands::get_dashboard_state,
             commands::save_dashboard_state,
@@ -368,6 +373,7 @@ pub fn run() {
             app.manage(files::Searches::default());
             app.manage(lsp::LspState::new());
             app.manage(debug::DebugState::default());
+            app.manage(claude_login::ClaudeSignIn::default());
             card_watch::start(app.handle());
             limit_watch::start(app.handle());
             vault_watch::start(app.handle());

@@ -21,6 +21,9 @@ export interface AppInfo {
  *  `rename_all = "snake_case"` variants of the Rust `ProviderId` enum. */
 export type ProviderId = "anthropic" | "open_router" | "ollama";
 
+/** Mirrors `axiomata_core::config::HarnessId` (its TOML/serde token); the matrix is `core/harness.ts`. */
+export type HarnessId = "opencode" | "claude_code" | "axh";
+
 /** Mirrors `axiomata_core::spend::SpendSummary`. `get_spend_summary` returns
  *  one entry per distinct provider across the chat and skill role selectors. */
 export interface SpendSummary {
@@ -58,6 +61,10 @@ export interface AgentDefaultsView {
   chat_provider: ProviderId;
   /** Provider serving unattended skill / routine runs. */
   skill_provider: ProviderId;
+  /** Harness driving chat turns (`docs/plans/harness-choice.md`). */
+  chat_harness: HarnessId;
+  /** Harness driving skill / routine runs that name none. */
+  skill_harness: HarnessId;
   /** Daily USD spend cap for a paid provider; `null` disables it. */
   daily_usd_cap: number | null;
   /** Names only of the `agents.claude_env` overrides. */
@@ -88,7 +95,16 @@ export interface AgentDefaultsUpdate {
   providers: Record<ProviderId, ProviderSettingsUpdate>;
   chat_provider: ProviderId;
   skill_provider: ProviderId;
+  chat_harness: HarnessId;
+  skill_harness: HarnessId;
   daily_usd_cap: number | null;
+}
+
+/** Mirrors `axiomata_core::agents::claude_auth::LoginStatus`: the app's own Claude Code sign-in. */
+export interface ClaudeLoginStatus {
+  logged_in: boolean;
+  email: string | null;
+  subscription: string | null;
 }
 
 /** The payload `save_config` takes — no `claude_env`, no `claude_model`. */

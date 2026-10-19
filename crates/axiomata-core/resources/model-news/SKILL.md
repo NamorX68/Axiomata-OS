@@ -1,7 +1,6 @@
 ---
 name: model-news
 description: Finds newly released AI models at the well-known providers — Hugging Face and OpenRouter first, then the makers themselves (OpenAI, Anthropic, Google, Meta, Mistral, xAI, DeepSeek, Qwen and the image/video houses) — and adds each new model with a short German note and the link to the model to one running file, News/KI-Modelle.md; skips what is already in it.
-backend: opencode
 timeout_secs: 900
 ---
 

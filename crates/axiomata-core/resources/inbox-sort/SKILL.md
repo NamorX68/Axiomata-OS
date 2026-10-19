@@ -1,7 +1,6 @@
 ---
 name: inbox-sort
 description: Sorts the notes in the workspace's Inbox/ into the area they belong to, using the areas' AGENTS.md routers; leaves anything unclear in the Inbox and asks about it.
-backend: opencode
 timeout_secs: 900
 ---
 
