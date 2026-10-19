@@ -26,7 +26,7 @@ use chrono::Utc;
 use rusqlite::Connection;
 
 use crate::agents::{AgentBackend, AgentRequest, AgentRunResult, opencode};
-use crate::config::{Config, ProviderRole};
+use crate::config::{Config, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 use crate::skills::model::{RunRecord, RunSource, RunStatus};
 use crate::skills::registry;
@@ -306,6 +306,22 @@ fn resolve_run_model(
     match backend {
         AgentBackend::Opencode => opencode::model_id(frontmatter_model, config).map(Some),
         AgentBackend::Ollama { .. } => Ok(None),
+        // Claude Code serves Anthropic only (harness-choice D2): the frontmatter's model, else Anthropic's skill
+        // model, whichever provider the skill role names; `claude_code::run` checks the id.
+        // Bare, as `runs.model` and the price table key it: Opencode's `anthropic/` spelling is dropped here.
+        AgentBackend::ClaudeCode => Ok(frontmatter_model
+            .map(str::trim)
+            .map(|m| m.strip_prefix("anthropic/").unwrap_or(m))
+            .filter(|m| !m.is_empty())
+            .map(str::to_owned)
+            .or_else(|| {
+                config
+                    .agents
+                    .providers
+                    .get(&ProviderId::Anthropic)
+                    .map(|settings| settings.skill_model.trim().to_owned())
+                    .filter(|model| !model.is_empty())
+            })),
         AgentBackend::Axh => match frontmatter_model.map(str::trim).filter(|m| !m.is_empty()) {
             Some(model) => Ok(Some(model.to_owned())),
             None => {
@@ -486,6 +502,7 @@ fn provider_label(backend: &AgentBackend, config: &Config) -> Option<String> {
                 .as_str()
                 .to_string(),
         ),
+        AgentBackend::ClaudeCode => Some(ProviderId::Anthropic.as_str().to_string()),
         AgentBackend::Ollama { .. } => None,
     }
 }
@@ -947,7 +964,7 @@ mod tests {
     #[test]
     fn provider_label_bills_axh_through_the_skill_provider_like_opencode() {
         let mut config = Config::default();
-        config.agents.skill_provider = crate::config::ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
         assert_eq!(
             provider_label(&AgentBackend::Axh, &config).as_deref(),
             Some("open_router")
@@ -955,6 +972,27 @@ mod tests {
         assert_eq!(
             provider_label(&AgentBackend::Opencode, &config).as_deref(),
             Some("open_router")
+        );
+        // Claude Code bills Anthropic whatever the skill role names (harness-choice D2).
+        assert_eq!(
+            provider_label(&AgentBackend::ClaudeCode, &config).as_deref(),
+            Some("anthropic")
+        );
+        assert_eq!(
+            resolve_run_model(&AgentBackend::ClaudeCode, None, &config)
+                .unwrap()
+                .as_deref(),
+            Some("claude-haiku-5-5")
+        );
+        assert_eq!(
+            resolve_run_model(
+                &AgentBackend::ClaudeCode,
+                Some("anthropic/claude-sonnet-5"),
+                &config
+            )
+            .unwrap()
+            .as_deref(),
+            Some("claude-sonnet-5")
         );
         assert_eq!(
             provider_label(
@@ -1134,7 +1172,7 @@ mod tests {
     }
 
     /// A skill without `backend:` runs on the configured skill harness (harness-choice D3) — shown on Claude Code,
-    /// whose runner is not built yet: the run is recorded as that harness's `Failed`, never run on Opencode instead.
+    /// which a unit test never starts: the run is recorded under that harness and Anthropic, never run on Opencode.
     #[tokio::test]
     async fn a_skill_without_a_backend_runs_on_the_configured_skill_harness() {
         let mut fx = Fixture::new("skill-harness");
@@ -1149,7 +1187,13 @@ mod tests {
             .unwrap();
         assert_eq!(record.status, RunStatus::Failed);
         assert_eq!(record.backend, "claude_code");
-        assert!(record.error.unwrap().contains("claude_code harness"));
+        assert_eq!(record.provider.as_deref(), Some("anthropic"));
+        assert!(
+            record
+                .error
+                .unwrap()
+                .contains("never reach the real Claude Code")
+        );
     }
 
     #[tokio::test]

@@ -26,6 +26,7 @@ use crate::config::{Config, HarnessId, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 
 pub mod axh;
+pub mod claude_code;
 pub mod ollama;
 pub mod opencode;
 mod opencode_instance;
@@ -187,6 +188,10 @@ pub enum AgentBackend {
     /// (`skills::runner::build_prompt_at`), as on opencode; the model id
     /// travels bare through [`AgentRequest::model`].
     Axh,
+    /// Claude Code as `claude -p` on the app's own login folder, Anthropic only
+    /// (`docs/plans/harness-choice.md`, CP2; [`claude_code`]). The model
+    /// travels bare (`claude-haiku-5-5`) through [`AgentRequest::model`].
+    ClaudeCode,
 }
 
 impl AgentBackend {
@@ -216,11 +221,7 @@ impl AgentBackend {
         match backend {
             BACKEND_OPENCODE => Ok(Self::Opencode),
             BACKEND_AXH => Ok(Self::Axh),
-            // Chosen in the settings already (harness-choice CP1); the runner arrives in CP2.
-            BACKEND_CLAUDE_CODE => Err(AxiomataError::HarnessUnavailable {
-                harness: BACKEND_CLAUDE_CODE.to_owned(),
-                reason: "running skills on Claude Code is not built yet".to_owned(),
-            }),
+            BACKEND_CLAUDE_CODE => Ok(Self::ClaudeCode),
             BACKEND_OLLAMA => {
                 let model = model_override
                     .map(str::to_owned)
@@ -254,6 +255,7 @@ impl AgentBackend {
             Self::Opencode => BACKEND_OPENCODE,
             Self::Ollama { .. } => BACKEND_OLLAMA,
             Self::Axh => BACKEND_AXH,
+            Self::ClaudeCode => BACKEND_CLAUDE_CODE,
         }
     }
 
@@ -275,6 +277,7 @@ impl AgentBackend {
             Self::Opencode => opencode::run(request).await,
             Self::Ollama { model } => ollama::run(request, model).await,
             Self::Axh => axh::run(request, config).await,
+            Self::ClaudeCode => claude_code::run(request).await,
         }
     }
 }
@@ -474,7 +477,8 @@ pub struct AgentRequest {
     /// The run only looks (`access: read` in the skill's frontmatter,
     /// `docs/plans/agent-isolation.md` D8): the opencode backend runs it on
     /// the read instance, which refuses every edit and every command but the
-    /// read-only ones. The other backends ignore it.
+    /// read-only ones; Claude Code adds the same read commands and denies every
+    /// edit tool. Ollama and `axh` ignore it.
     pub read_only: bool,
 }
 
@@ -669,18 +673,17 @@ mod tests {
     }
 
     #[test]
-    fn resolve_refuses_claude_code_until_its_runner_exists() {
+    fn resolve_maps_claude_code_and_a_retired_id_under_it() {
+        assert_eq!(
+            AgentBackend::resolve(BACKEND_CLAUDE_CODE, None, &Config::default()).unwrap(),
+            AgentBackend::ClaudeCode
+        );
         let mut config = Config::default();
         config.agents.skill_harness = HarnessId::ClaudeCode;
-        // A retired id follows the skill harness, so it meets the same refusal.
-        let err = AgentBackend::resolve("claude-code", None, &config).unwrap_err();
-        assert!(
-            matches!(err, AxiomataError::HarnessUnavailable { harness, .. } if harness == "claude_code")
-        );
-        let err = AgentBackend::resolve(BACKEND_CLAUDE_CODE, None, &Config::default()).unwrap_err();
-        assert!(
-            matches!(err, AxiomataError::HarnessUnavailable { harness, .. } if harness == "claude_code")
-        );
+        // A retired id follows the skill harness.
+        let backend = AgentBackend::resolve("claude-code", None, &config).unwrap();
+        assert_eq!(backend, AgentBackend::ClaudeCode);
+        assert_eq!(backend.id(), "claude_code");
     }
 
     #[test]

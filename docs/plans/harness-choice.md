@@ -1,6 +1,6 @@
 # Harness choice — Opencode, Claude Code or Glut, per role
 
-Status: **draft 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, nothing built.
+Status: **in progress 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, CP1–CP2 built.
 
 ## Why
 
@@ -138,3 +138,31 @@ streaming, the Anthropic client, cost metering, token cost) against what the set
 - Consequence for CP2: the app's runs set `CLAUDE_CONFIG_DIR`; a run whose folder is not logged in (`result` "Not
   logged in") is a recorded `Failed` naming the login command above; Settings shows the login state
   (`claude auth status`, JSON) next to the Claude Code harness.
+
+## CP2 — built and measured (2026-10-19)
+
+`agents/claude_code.rs`; `AgentBackend::ClaudeCode` resolves from `claude_code`; the runner records it under provider
+`anthropic` with Anthropic's skill model (or the frontmatter's), whatever the skill role's provider is.
+
+- Measured on the app's folder before writing the rights: with the default setting sources the folder's `CLAUDE.md`
+  is read and its `.claude/settings.json` **allow** rules are ignored with a notice on stdout ("this workspace has not
+  been trusted") — so the result is the last JSON line, not the whole stdout. `--setting-sources ""` drops `CLAUDE.md`
+  too; `--setting-sources project` keeps it. Unallowed shell, `Write` and an output redirect under
+  `Bash(git log:*)` were refused; `Bash(git * --no-i*)`-style denies with an inner `*` hold.
+- Live: a read probe (`access: read`) read `AGENTS.md`, ran `ls`, and was refused `Write` and `echo > f` — nothing
+  written (run #1697). The reminders digest with `backend: claude_code` called its MCP tool and answered one clean
+  JSON object (run #1698, Haiku 5.5, 33 s, 0.8 ct notional).
+- **Review finding, measured: a folder's `.claude/settings.json` runs its hooks and sets its `env` even untrusted.**
+  Under `--setting-sources project` a `SessionStart` hook of the folder ran and its `env.ANTHROPIC_BASE_URL` sent
+  the call elsewhere. So the runner now reads **no** settings file (`--setting-sources ""`, hooks and env measured
+  gone) and hands the folder's `AGENTS.md` (plus a caller's context) over itself as one
+  `--append-system-prompt-file` — only the last of several counts, measured. The MCP config goes as a 0600 file in a
+  0700 run folder under `~/.axiomata/claude/runs/`, removed after the run, never on the command line (`ps`). A part
+  of `allowed_tools` must start with a letter (a variadic flag's values: `--permission-mode` would read as a flag);
+  a read run drops declared shell rules; the child leads its own process group, killed at the limit and swept after
+  the end; a result must be `type: result` and a `subtype` other than `success` fails the run. Re-run live: #1699
+  (read probe, router known without reading, writes refused) and #1700 (reminders digest, MCP from the file).
+- Open, low: `execute_and_record_skill` guards the daily cap by the skill role's provider before the backend is
+  resolved, so a frontmatter `backend: claude_code` skill can be held by an OpenRouter cap it does not spend from.
+- Glut still ignores `access: read` (the gate is the skill's `allowed_tools` alone); for the owner's later check of
+  the harness backend.

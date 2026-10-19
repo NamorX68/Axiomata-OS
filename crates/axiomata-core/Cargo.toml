@@ -31,6 +31,8 @@ gray_matter.workspace = true
 ollama-rs.workspace = true
 ignore.workspace = true
 cron.workspace = true
+# Kills the process group of a `claude -p` run that outlives its limit, MCP servers and shell children included.
+rustix = { workspace = true, features = ["process"] }
 
 [dev-dependencies]
 # Only the workspace tests decode images now; encoding moved to axiomata-files.

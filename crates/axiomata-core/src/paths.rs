@@ -163,6 +163,13 @@ pub fn agent_events_dir() -> PathBuf {
     axiomata_home().join("agent-events")
 }
 
+/// The login and config folder of the app's own Claude Code (`~/.axiomata/claude`): skills and chat on the Claude
+/// Code harness run with it as `CLAUDE_CONFIG_DIR`, so nothing of the owner's `~/.claude` applies and nothing lands
+/// there (`docs/plans/harness-choice.md` D5). The owner signs in to it once.
+pub fn app_claude_dir() -> PathBuf {
+    axiomata_home().join("claude")
+}
+
 /// Claude Code's own home: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
 ///
 /// Not Axiomata's directory. The IDE reads two folders in it (below) and

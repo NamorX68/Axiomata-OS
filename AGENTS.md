@@ -211,7 +211,11 @@ from the code itself:
   anything measured in editor character cells. Script that reads a size token gets the unresolved
   `calc(…)`, not a number. UI icons: `ui/Icon.svelte`/`ui/IconButton.svelte` over the Lucide subset
   vendored by `scripts/vendor-icons.sh`.
-- **Backend ids + the one frontmatter bridge**: `backend:` is `opencode` (default) |
+- **Backend ids + the one frontmatter bridge**: `backend:` is optional — unset, a run takes `agents.skill_harness`
+  (`docs/plans/harness-choice.md`; the chat takes `agents.chat_harness`) — else `opencode` | `claude_code` (`claude -p`
+  on the app's own login folder `~/.axiomata/claude`, never `~/.claude`; Anthropic only; `--setting-sources ""` —
+  a folder's `.claude/settings.json` runs hooks/env even untrusted — with the folder's `AGENTS.md` handed over by the
+  app, `--strict-mcp-config` with `~/.axh/mcp.json` as a 0600 file; the skill's `allowed_tools` are its whole rights) |
   `ollama` | `axh` (the own harness, HS6b — needs a skill provider **with a `base_url`**
   (open_router/ollama), else the run records a clear `Failed`, never a silent hop to opencode;
   MCP servers come from `~/.axh/mcp.json` + `.mcp.json`, **never** `opencode.json`; the skill's

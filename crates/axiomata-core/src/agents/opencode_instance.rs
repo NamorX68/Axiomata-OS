@@ -135,10 +135,8 @@ pub(crate) fn read_rules() -> Vec<(&'static str, &'static str, &'static str)> {
             .iter()
             .map(|command| ("shell", *command, "allow")),
     );
-    // The read-only git commands that reach beyond the checkout: `--no-index` reads any file, `--output` writes one —
-    // matched in their shortest unambiguous forms, which git takes too (`--outp=f`).
     rules.extend(
-        ["git * --no-i*", "git * --ou*"]
+        READ_DENIED_COMMANDS
             .iter()
             .map(|pattern| ("shell", *pattern, "deny")),
     );
@@ -148,10 +146,16 @@ pub(crate) fn read_rules() -> Vec<(&'static str, &'static str, &'static str)> {
     rules
 }
 
+/// The read-only git commands that reach beyond the checkout: `--no-index` reads any file, `--output` writes one —
+/// matched in their shortest unambiguous forms, which git takes too (`--outp=f`). Denied after [`READ_COMMANDS`]
+/// allow them, on every harness (`docs/plans/harness-choice.md`, "Read access").
+pub(crate) const READ_DENIED_COMMANDS: [&str; 2] = ["git * --no-i*", "git * --ou*"];
+
 /// The commands a reader runs without asking: git's read-only ones and a look at the folder it is in. Nothing that
 /// takes a program or a path to write to as an argument (`find -exec`, `rg --pre`, a pager), which a pattern cannot
-/// tell apart, and `ls` without a path, so it does not list folders outside the checkout.
-const READ_COMMANDS: [&str; 13] = [
+/// tell apart, and `ls` without a path, so it does not list folders outside the checkout. Shared by every harness: a
+/// trailing ` *` means "with any arguments".
+pub(crate) const READ_COMMANDS: [&str; 13] = [
     "git status",
     "git status *",
     "git log",

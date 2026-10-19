@@ -39,13 +39,13 @@ const CHAT_SESSION_TITLE: &str = "Axiomata assistant";
 /// What a skill that promised one JSON object is told when its reply held none
 /// (a small model sometimes ends on prose about the JSON instead of the JSON).
 /// It goes to the same session, so the data the skill collected is still there.
-const JSON_REPAIR_PROMPT: &str = "Your last reply contained no JSON object. Do not call any tools \
+pub(crate) const JSON_REPAIR_PROMPT: &str = "Your last reply contained no JSON object. Do not call any tools \
     and do not explain anything: reply now with exactly the one JSON object the task asked for, \
     built from what you have already collected — nothing before it and nothing after it.";
 
 /// How long the repair turn may take. It only has to write out what is known,
 /// so it gets far less than a skill's own limit.
-const JSON_REPAIR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+pub(crate) const JSON_REPAIR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Name of the Opencode binary; expected on `PATH`.
 const OPENCODE_BIN: &str = "opencode";
@@ -479,7 +479,7 @@ fn merge_repair(mut first: TurnOutcome, repair: TurnOutcome) -> TurnOutcome {
 /// safe side: a reply that ends in an unterminated object is `None` here, so the
 /// repair runs, while the dashboard would hand back the prose braces and then
 /// reject them as JSON.
-fn find_json_object(text: &str) -> Option<&str> {
+pub(crate) fn find_json_object(text: &str) -> Option<&str> {
     let mut from = 0;
     while let Some(offset) = text[from..].find('{') {
         let start = from + offset;
