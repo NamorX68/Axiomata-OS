@@ -451,6 +451,11 @@ export class ViMachine {
     this.setCursor(at);
   }
 
+  /** The surface moved the cursor inside Insert mode itself (a snippet's ⇥, #36): the Insert no longer repeats. */
+  insertJumped(): void {
+    if (this.mode === "insert" || this.mode === "replace") this.insertMode.breakRepeat();
+  }
+
   /** A mouse drag from `anchor` to `head`: characterwise Visual mode over it. */
   selectVisual(anchor: Pos, head: Pos): void {
     this.pending = [];

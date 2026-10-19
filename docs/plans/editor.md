@@ -1283,7 +1283,13 @@ Wort ersetzt, Zusatz-Änderungen wie ein Auto-Import angewendet — vorher bis 4
 `rust-analyzer` den Import erst dort liefert); in Vi läuft er in der Insert-Sitzung, `.` wiederholt ihn ohne
 den Import. Nur mit einem Cursor. Logik des Menüs in `fileapp/completionMenu.ts`, Zeichnen in
 `CompletionPopup.svelte`. Live gegen `rust-analyzer`: Methoden nach `v.`, Auto-Import von `HashMap`.
-Offen: Wörter aus der Datei als zweite Quelle (blink hat sie) — bei Bedarf später.
+Offen: Wörter aus der Datei als zweite Quelle (blink hat sie) — bei Bedarf später. **Erledigt 2026-10-19
+(Karte #36):** Wörter aus der Datei als zweite Quelle (`fileapp/fileWords.ts`, vom Cursor nach außen gelesen, ab
+3 Zeichen, unter den Server-Einträgen gereiht), auch ohne Server — das Menü geht also in Markdown, Notizen und
+Konfigdateien auf; ⏎ auf einem Datei-Wort ist ein Zeilenumbruch, kein Übernehmen. Und das Tab-Springen aus L9:
+`expandSnippet` liefert die Stopps in Sprungreihenfolge, `complete` markiert den ersten Platzhalter,
+`editor/snippet.ts` führt sie über jede Änderung nach; ⇥/⇧⇥ springen — in Vi-Insert ebenso, solange ein Snippet
+läuft (Owner) —, Ende am letzten Stopp, bei Esc oder wenn der Cursor die Stopps verlässt.
 
 **ED6.6 umgesetzt (2026-09-28): Signaturhilfe** (in der nvim-Konfiguration des Owners bei blink.cmp an): nach den
 Trigger-Zeichen des Servers (`(`, `,`) und auf ⇧⌘Space erscheint über der Zeile die Signatur, der aktive Parameter

@@ -95,6 +95,14 @@ export class InsertMode {
   }
 
   /** Starts a session at `at` — Insert, or Replace when `replace` is set. */
+  /** The cursor moved inside the session by something other than a key it saw (a snippet's ⇥, #36): what was typed
+   *  no longer repeats as one text, so `.` and a count drop it — as after an arrow key. */
+  breakRepeat(): void {
+    if (!this.session) return;
+    this.session.broken = true;
+    this.session.keys = [];
+  }
+
   enter(at: Pos, count: number, replace: boolean): void {
     if (this.host.readOnly()) return this.host.bell();
     // The change that started the session may have opened the group already (`c`, `o`).

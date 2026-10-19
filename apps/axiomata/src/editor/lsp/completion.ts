@@ -8,8 +8,9 @@
  *   once where a word begins and narrowed as the word grows — unless the
  *   server says its list is incomplete, then it is asked again.
  * * **Snippets (L9)** are inserted as their text: every placeholder becomes
- *   its default, the cursor goes to the first tab stop (or `$0`, or the end).
- *   Jumping through the stops is for later.
+ *   its default, the first tab stop is selected (or `$0`, or the end), and the
+ *   stops are handed on in jump order for ⇥ / ⇧⇥ (board card #36,
+ *   `editor/snippet.ts`).
  * * **Taking an item** replaces the word being typed (or the range the server
  *   names on the cursor's line) and applies the item's additional edits (an
  *   auto-import) — all one undo step, as the `complete` command.
@@ -35,8 +36,14 @@ export interface CompletionItem {
   additionalEdits: Change[];
   documentation: string | null;
   preselect: boolean;
+  /** Where the item comes from when not from the server: `file` = a word of the open file (board card #36), which
+   *  ranks below a server item of the same match. */
+  source?: "file";
   raw: unknown;
 }
+
+/** How much a file word's match counts less than a server item's — about one character matched at a word start. */
+const FILE_WORD_PENALTY = 6;
 
 export interface CompletionAnswer {
   items: CompletionItem[];
@@ -217,7 +224,7 @@ export function filterItems(items: readonly CompletionItem[], query: string): Co
   const scored: { item: CompletionItem; score: number }[] = [];
   for (const item of items) {
     const score = matchScore(query, item.filterText);
-    if (score !== null) scored.push({ item, score });
+    if (score !== null) scored.push({ item, score: item.source === "file" ? score - FILE_WORD_PENALTY : score });
   }
   // With nothing typed yet (after `.`), the server's order is the order.
   if (query === "") return scored.map((s) => s.item).sort((a, b) => compareText(a.sortText, b.sortText));
@@ -230,14 +237,22 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** A tab stop in an expanded snippet: its placeholder text as offsets into the text (equal for an empty stop). */
+export interface SnippetStop {
+  start: number;
+  end: number;
+}
+
 /**
  * A snippet's text (L9): tab stops and placeholders become their default text
  * (`${1:name}` → `name`, `$1` → nothing, `${1|a,b|}` → `a`), variables their
  * default or nothing, `\` escapes are resolved. `cursor` is where the first tab
- * stop was (by number, `$0` last), or the end.
+ * stop was (by number, `$0` last), or the end. `stops` are the stops in jump
+ * order — `$1`, `$2`, … then `$0`, or the end when there is no `$0` — each at
+ * its first occurrence (a repeated `$1` is not mirrored).
  */
-export function expandSnippet(snippet: string): { text: string; cursor: number } {
-  const stops = new Map<number, number>();
+export function expandSnippet(snippet: string): { text: string; cursor: number; stops: SnippetStop[] } {
+  const stops = new Map<number, SnippetStop>();
   let i = 0;
   const parse = (stopAt: string | null): string => {
     let out = "";
@@ -257,7 +272,7 @@ export function expandSnippet(snippet: string): { text: string; cursor: number }
       const simple = /^\$(\d+|[A-Za-z_][A-Za-z0-9_]*)/.exec(snippet.slice(i));
       if (simple) {
         i += simple[0].length;
-        if (/^\d+$/.test(simple[1])) note(Number(simple[1]), outBase + out.length);
+        if (/^\d+$/.test(simple[1])) note(Number(simple[1]), outBase + out.length, outBase + out.length);
         continue;
       }
       const open = /^\$\{(\d+|[A-Za-z_][A-Za-z0-9_]*)/.exec(snippet.slice(i));
@@ -269,13 +284,15 @@ export function expandSnippet(snippet: string): { text: string; cursor: number }
       i += open[0].length;
       const isStop = /^\d+$/.test(open[1]);
       const at = outBase + out.length;
-      if (isStop) note(Number(open[1]), at);
+      // Noted before the placeholder's own text, so a stop nested in it (`${1:a ${2:b}}`) comes after its parent.
+      const stop = isStop ? note(Number(open[1]), at, at) : null;
       if (snippet[i] === "|") {
         // A choice: the first option.
         const end = snippet.indexOf("|}", i + 1);
         const options = snippet.slice(i + 1, end < 0 ? snippet.length : end);
         out += options.split(",")[0] ?? "";
         i = end < 0 ? snippet.length : end + 2;
+        if (stop) stop.end = outBase + out.length;
         continue;
       }
       if (snippet[i] === ":") {
@@ -284,6 +301,7 @@ export function expandSnippet(snippet: string): { text: string; cursor: number }
         outBase = at;
         out += parse("}");
         outBase = saved;
+        if (stop) stop.end = outBase + out.length;
       } else if (snippet[i] === "/") {
         // A transform: the variable's value would be rewritten; without values there is nothing.
         let depth = 0;
@@ -299,13 +317,19 @@ export function expandSnippet(snippet: string): { text: string; cursor: number }
     return out;
   };
   let outBase = 0;
-  const note = (n: number, at: number) => {
-    if (!stops.has(n)) stops.set(n, at);
+  /** The stop numbered `n` at `[start, end)` — `null` when `n` already had one (only the first occurrence counts). */
+  const note = (n: number, start: number, end: number): SnippetStop | null => {
+    if (stops.has(n)) return null;
+    const stop = { start, end };
+    stops.set(n, stop);
+    return stop;
   };
   const text = parse(null);
   const numbered = [...stops.keys()].filter((n) => n > 0).sort((a, b) => a - b);
-  const first = numbered.length > 0 ? stops.get(numbered[0]) : stops.get(0);
-  return { text, cursor: first ?? text.length };
+  const ordered = numbered.map((n) => stops.get(n) as SnippetStop);
+  const last = stops.get(0) ?? { start: text.length, end: text.length };
+  const all = ordered.length > 0 ? [...ordered, last] : stops.has(0) ? [last] : [];
+  return { text, cursor: all[0]?.start ?? text.length, stops: all };
 }
 
 /** What taking an item does, as the `complete` command carries it (see `commands.ts`). */
@@ -317,6 +341,8 @@ export interface CompletionEdit {
   text: string;
   /** Where the cursor goes, as an offset into `text`. */
   cursor: number;
+  /** A snippet's tab stops as offsets into `text`, in jump order; empty for plain text (board card #36). */
+  stops: SnippetStop[];
   /** Edits elsewhere (an auto-import), in the document's coordinates before this edit. */
   extra: Change[];
 }
@@ -332,14 +358,19 @@ export function completionEdit(item: CompletionItem, at: Pos, wordStart: number,
   const usable = r !== null && r.start.line === at.line && r.end.line === at.line && r.start.col <= at.col;
   const start = usable ? r.start.col : wordStart;
   const end = usable ? Math.max(r.end.col, at.col) : at.col;
-  const expanded = item.snippet ? expandSnippet(item.insertText) : { text: item.insertText, cursor: item.insertText.length };
+  const expanded = item.snippet
+    ? expandSnippet(item.insertText)
+    : { text: item.insertText, cursor: item.insertText.length, stops: [] };
   const indented = (s: string) => s.split("\n").join(`\n${indent}`);
   const text = indented(expanded.text);
-  const cursor = indented(expanded.text.slice(0, expanded.cursor)).length;
+  // An offset into the expanded text, moved by the indentation added before it.
+  const offset = (o: number) => indented(expanded.text.slice(0, o)).length;
+  const cursor = offset(expanded.cursor);
+  const stops = expanded.stops.map((s) => ({ start: offset(s.start), end: offset(s.end) }));
   // Additional edits must not touch the replaced range; ones that do are dropped.
   const replaced = range(pos(at.line, start), pos(at.line, end));
   const extra = item.additionalEdits.filter(
     (e) => comparePos(e.range.end, replaced.start) <= 0 || comparePos(e.range.start, replaced.end) >= 0,
   );
-  return { before: at.col - start, after: end - at.col, text, cursor, extra };
+  return { before: at.col - start, after: end - at.col, text, cursor, stops, extra };
 }

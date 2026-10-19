@@ -116,3 +116,17 @@ describe("undo after an Insert session an arrow key interrupted", () => {
     expect(show(doc)).toBe("|ab"); // and "1" (from before Ctrl-o) another again
   });
 });
+
+describe("a jump the surface makes inside Insert (#36)", () => {
+  it("breaks the repeat, as an arrow key does: `.` does not type both stops' text into one place", () => {
+    const { doc, m } = setup("|ab cd");
+    m.feedKeys("ix");
+    doc.setSelection({ anchor: { line: 0, col: 4 }, head: { line: 0, col: 4 } });
+    m.insertJumped();
+    m.feedKeys("y<Esc>");
+    expect(show(doc)).toBe("xab |ycd");
+    m.feedKeys("0.");
+    // Only what was typed after the jump repeats.
+    expect(show(doc)).toBe("|yxab ycd");
+  });
+});

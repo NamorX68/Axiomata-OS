@@ -46,7 +46,16 @@
   import { onMount, tick as nextTick, untrack } from "svelte";
   import type { Tree } from "web-tree-sitter";
 
-  import { commentPrefixFor, copyText, cut, paste, run, type ClipboardText, type Command } from "../editor/commands";
+  import {
+    commentPrefixFor,
+    completionTargets,
+    copyText,
+    cut,
+    paste,
+    run,
+    type ClipboardText,
+    type Command,
+  } from "../editor/commands";
   import { indentGuides, type LineDecoration, type LineDecorations } from "../editor/decorations";
   import type { EditorDocument } from "../editor/document";
   import { cursorCell, posAtCell, rowSlice, selectionRuns, uniqueByKey } from "../editor/geometry";
@@ -76,9 +85,11 @@
   import { rowSegments, type Span } from "../editor/syntax/paint";
   import { VisualLayout } from "../editor/visual";
   import type { FoldAction, ViEffect } from "../editor/vi/machine";
+  import { SnippetSession } from "../editor/snippet";
   import { CodeActionMenu, type CodeActionPort } from "./codeActionMenu";
   import CodeActionPopup from "./CodeActionPopup.svelte";
   import { CompletionMenu, type CompletionPort } from "./completionMenu";
+  import { fileWordSource, withFileWords } from "./fileWords";
   import { editorKeyInput } from "./editorKeys";
   import { docTouched } from "./workspaceEdit";
   import { SignatureHint, type SignaturePort } from "./signatureHint";
@@ -155,7 +166,7 @@
     hoverAt?: (at: Pos) => Promise<string | null>;
     /** ⌘-click (ED6.2, L7): go to the definition of the symbol there. */
     onDefinitionAt?: (at: Pos) => void;
-    /** The language server's completion (ED6.4); without it there is no menu. */
+    /** The language server's completion (ED6.4); without it the menu offers the file's words alone (#36). */
     completion?: CompletionPort | null;
     /** The language server's signature help (ED6.6); without it there is no hint. */
     signature?: SignaturePort | null;
@@ -927,7 +938,7 @@
       e.preventDefault();
       return;
     }
-    if (completionKey(e)) {
+    if (snippetKey(e) || completionKey(e)) {
       e.preventDefault();
       return;
     }
@@ -1132,8 +1143,20 @@
 
   /** Bumped when the menu changed, so what is drawn follows it. */
   let menuTick = $state(0);
-  /** The menu for this surface's server; replaced (and the old one closed) with the server. */
-  const menu = $derived(completion ? new CompletionMenu(completion, () => menuTick++) : null);
+  /** The file's words around a place, read once per state of the text (#36). */
+  const fileWords = $derived.by(() => {
+    const d = doc;
+    return fileWordSource({
+      get lineCount() {
+        return d.store.lineCount();
+      },
+      line: (n: number) => d.store.line(n),
+    });
+  });
+  /** The menu: the server's items and the file's words (#36); replaced (and the old one closed) with the server. */
+  const menu = $derived(
+    readOnly ? null : new CompletionMenu(withFileWords(completion, fileWords), () => menuTick++),
+  );
   $effect(() => {
     const current = menu;
     return () => current?.close();
@@ -1157,6 +1180,11 @@
     const item = menuView?.items[menuView.selected];
     const m = menu;
     if (!item || !m) return;
+    // A word of the file has nothing to explain; its row already says `file`.
+    if (item.source === "file") {
+      menuDoc = { detail: "", html: null };
+      return;
+    }
     menuDoc = { detail: item.detail, html: item.documentation ? renderMarkdown(item.documentation) : null };
     let stale = false;
     void m.details(item).then((full) => {
@@ -1182,7 +1210,8 @@
    * The menu's keys, before anything else (as blink.cmp's defaults in the
    * owner's Neovim): ⌃Space opens it; while open ↓/↑ and ⌃N/⌃P choose, ⌃Y
    * takes, ⌃E closes, Esc closes (in Vi it also leaves Insert). Without Vi
-   * ⏎ and ⇥ take too; in Vi they stay a new line and indentation.
+   * ⏎ and ⇥ take too — ⏎ not on a word of the file (#36); in Vi they stay a
+   * new line and indentation.
    */
   function completionKey(e: KeyboardEvent): boolean {
     // ⇧⌘Space: the signature of the call the cursor is in (ED6.6), as in VS Code.
@@ -1207,6 +1236,12 @@
       return true;
     }
     if (!m.isOpen) return false;
+    // ⏎ on a word of the file is a new line, not a pick: writing prose must not turn "the⏎" into "there" (#36).
+    const view = m.view;
+    if (plain && !vi && e.key === "Enter" && view?.items[view.selected]?.source === "file") {
+      m.close();
+      return false;
+    }
     if ((plain && e.key === "ArrowDown") || (ctrlOnly && e.key === "n")) m.move(1);
     else if ((plain && e.key === "ArrowUp") || (ctrlOnly && e.key === "p")) m.move(-1);
     else if ((ctrlOnly && e.key === "y") || (plain && !vi && (e.key === "Enter" || e.key === "Tab")))
@@ -1246,15 +1281,66 @@
     else hint?.close();
   }
 
-  /** Takes the chosen item: one step, through Vi's Insert session when Vi is on. */
+  /** Takes the chosen item: one step, through Vi's Insert session when Vi is on. A snippet with more than one stop
+   *  starts a session ⇥ walks through (#36). */
   async function takeCompletion(): Promise<void> {
     const m = menu;
     if (!m) return;
     const edit = await m.take(doc);
     if (!edit || menu !== m) return;
+    endSnippet();
+    const { stops } = completionTargets(doc, edit);
     const cmd: Command = { type: "complete", edit };
     if (vi) vi.command(cmd);
     else exec(cmd);
+    if (stops.length > 1) snippet = new SnippetSession(doc, stops);
+  }
+
+  // ---------------------------------------------------------------- snippet tab stops (#36)
+
+  /** The snippet ⇥ / ⇧⇥ walk through, while the cursor stays in it. */
+  let snippet: SnippetSession | null = null;
+
+  function endSnippet(): void {
+    snippet?.dispose();
+    snippet = null;
+  }
+
+  $effect(() => {
+    void doc;
+    return endSnippet;
+  });
+
+  /**
+   * ⇥ selects the next placeholder, ⇧⇥ the one before — in Vi's Insert too, as
+   * long as a snippet is being filled in (owner, 2026-10-19); afterwards ⇥ is
+   * indentation again. Without Vi an open menu takes ⇥ first. The session ends
+   * at the last stop, on Esc, or once the cursor left every stop.
+   */
+  function snippetKey(e: KeyboardEvent): boolean {
+    const s = snippet;
+    if (!s) return false;
+    if (!canComplete() || !s.holds(doc.selection)) {
+      endSnippet();
+      return false;
+    }
+    if (e.key === "Escape") {
+      endSnippet();
+      return false;
+    }
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return false;
+    // Without Vi an open menu takes ⇥ — a server's item; a word of the file yields to the jump, as on ⏎.
+    const view = menu?.view;
+    const chosen = view?.items[view.selected];
+    if (!e.shiftKey && !vi && chosen && chosen.source !== "file") return false;
+    menu?.close();
+    const target = e.shiftKey ? s.previous() : s.next();
+    if (!target) return true;
+    doc.setSelection({ anchor: target.start, head: target.end });
+    vi?.machine.insertJumped();
+    if (s.atLast) endSnippet();
+    changed();
+    return true;
   }
 
   function pickCompletion(index: number): void {

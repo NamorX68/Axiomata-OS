@@ -27,7 +27,17 @@ import {
 } from "./multicursor";
 import type { CompletionEdit } from "./lsp/completion";
 import { mapPosition } from "./textEdits";
-import { comparePos, cursor, isCursor, pos, range, selectionRange, type Pos, type Selection } from "./position";
+import {
+  comparePos,
+  cursor,
+  isCursor,
+  pos,
+  range,
+  selectionRange,
+  type Pos,
+  type Range,
+  type Selection,
+} from "./position";
 import {
   colForDisplayColumn,
   displayColumn,
@@ -386,6 +396,20 @@ function insert(doc: EditorDocument, text: string, kind: EditKind, ctx: CommandC
  * text to the first — so each is still in the coordinates it was given in.
  */
 function complete(doc: EditorDocument, edit: CompletionEdit, ctx: CommandContext): void {
+  const { changes, selection } = completionTargets(doc, edit);
+  doc.edit(changes, selection, "other", ctx.now);
+}
+
+/**
+ * What the `complete` command does to `doc` as it is now: the changes, the
+ * selection after them — a snippet's first placeholder selected, so typing
+ * replaces it — and where every tab stop will be (board card #36). Asked
+ * before running the command, so the caller can follow the stops.
+ */
+export function completionTargets(
+  doc: EditorDocument,
+  edit: CompletionEdit,
+): { changes: Change[]; selection: Selection; stops: Range[] } {
   const at = doc.selection.head;
   const lineLength = doc.store.line(at.line).length;
   const main: Change = {
@@ -393,11 +417,14 @@ function complete(doc: EditorDocument, edit: CompletionEdit, ctx: CommandContext
     text: edit.text,
   };
   const changes = [main, ...edit.extra].sort((a, b) => comparePos(b.range.start, a.range.start));
-  // Where the cursor lands inside the completion, moved by the edits before it (the caret is in the
-  // completion's own coordinates, so only edits wholly before the replaced word count).
+  // A place inside the completion, moved by the edits before it (it is in the completion's own
+  // coordinates, so only edits wholly before the replaced word count).
   const before = edit.extra.filter((e) => comparePos(e.range.end, main.range.start) <= 0);
-  const caret = mapPosition(endAfter(main.range.start, edit.text.slice(0, edit.cursor)), before);
-  doc.edit(changes, cursor(caret), "other", ctx.now);
+  const place = (offset: number) => mapPosition(endAfter(main.range.start, edit.text.slice(0, offset)), before);
+  const stops = edit.stops.map((s) => range(place(s.start), place(s.end)));
+  const first = stops[0];
+  const selection = first ? { anchor: first.start, head: first.end } : cursor(place(edit.cursor));
+  return { changes, selection, stops };
 }
 
 /** Applies `changes` last to first (so each is where it was given) and keeps the cursor in its text. */

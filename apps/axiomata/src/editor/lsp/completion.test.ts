@@ -86,13 +86,25 @@ describe("matching", () => {
 
 describe("snippets (L9)", () => {
   it("inserts placeholders as their text and puts the cursor on the first stop", () => {
-    expect(expandSnippet("push(${1:value})$0")).toEqual({ text: "push(value)", cursor: 5 });
-    expect(expandSnippet("fn ${1:name}(${2}) {\n\t$0\n}")).toEqual({ text: "fn name() {\n\t\n}", cursor: 3 });
-    expect(expandSnippet("if $0 {}")).toEqual({ text: "if  {}", cursor: 3 });
-    expect(expandSnippet("${1|a,b|} x")).toEqual({ text: "a x", cursor: 0 });
-    expect(expandSnippet("${1:outer ${2:inner}}")).toEqual({ text: "outer inner", cursor: 0 });
-    expect(expandSnippet("cost \\$5 ${TM_FILENAME:file}")).toEqual({ text: "cost $5 file", cursor: 12 });
-    expect(expandSnippet("plain")).toEqual({ text: "plain", cursor: 5 });
+    const s = (start: number, end = start) => ({ start, end });
+    expect(expandSnippet("push(${1:value})$0")).toEqual({ text: "push(value)", cursor: 5, stops: [s(5, 10), s(11)] });
+    expect(expandSnippet("fn ${1:name}(${2}) {\n\t$0\n}")).toEqual({
+      text: "fn name() {\n\t\n}",
+      cursor: 3,
+      stops: [s(3, 7), s(8), s(13)],
+    });
+    expect(expandSnippet("if $0 {}")).toEqual({ text: "if  {}", cursor: 3, stops: [s(3)] });
+    // Without `$0` the end of the snippet is the last stop.
+    expect(expandSnippet("${1|a,b|} x")).toEqual({ text: "a x", cursor: 0, stops: [s(0, 1), s(3)] });
+    expect(expandSnippet("${1:outer ${2:inner}}")).toEqual({
+      text: "outer inner",
+      cursor: 0,
+      stops: [s(0, 11), s(6, 11), s(11)],
+    });
+    // A repeated stop counts where it first appears.
+    expect(expandSnippet("${1:a} = $1;").stops).toEqual([s(0, 1), s(5)]);
+    expect(expandSnippet("cost \\$5 ${TM_FILENAME:file}")).toEqual({ text: "cost $5 file", cursor: 12, stops: [] });
+    expect(expandSnippet("plain")).toEqual({ text: "plain", cursor: 5, stops: [] });
   });
 });
 
@@ -128,6 +140,7 @@ describe("completionEdit and the complete command", () => {
       after: 0,
       text: "cat",
       cursor: 3,
+      stops: [],
       extra: [
         { range: range(pos(1, 0), pos(1, 1)), text: "x\ny" },
         { range: range(pos(0, 0), pos(0, 0)), text: "use z;\n" },
@@ -146,6 +159,17 @@ describe("completionEdit and the complete command", () => {
       additionalEdits: [{ range: range(pos(2, 5), pos(2, 6)), text: "!" }],
     });
     const edit = completionEdit(it, pos(2, 7), 7, "    ");
-    expect(edit).toEqual({ before: 3, after: 1, text: "match x {\n    \t\n    }", cursor: 6, extra: [] });
+    expect(edit).toEqual({
+      before: 3,
+      after: 1,
+      text: "match x {\n    \t\n    }",
+      cursor: 6,
+      // The `$0` on the indented line moves with the indentation added before it.
+      stops: [
+        { start: 6, end: 7 },
+        { start: 15, end: 15 },
+      ],
+      extra: [],
+    });
   });
 });

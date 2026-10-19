@@ -356,7 +356,8 @@ describe("modes and status", () => {
     const { doc, m } = setup("|x\ny");
     m.feedKeys("jAfo");
     const import_ = { range: range(pos(0, 0), pos(0, 0)), text: "use foo;\n" };
-    m.feed({ command: { type: "complete", edit: { before: 2, after: 0, text: "foobar", cursor: 6, extra: [import_] } } });
+    const edit = { before: 2, after: 0, text: "foobar", cursor: 6, stops: [], extra: [import_] };
+    m.feed({ command: { type: "complete", edit } });
     m.feedKeys("<Esc>");
     expect(show(doc)).toBe("use foo;\nx\nyfooba|r");
     m.feedKeys("k.");
