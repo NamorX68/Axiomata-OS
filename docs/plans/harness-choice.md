@@ -1,6 +1,6 @@
 # Harness choice — Opencode, Claude Code or Glut, per role
 
-Status: **draft 2026-10-19**, owner decisions D1–D5 taken, Q1 open (proposal: not in this plan), CP0 measured, nothing built.
+Status: **draft 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, nothing built.
 
 ## Why
 
@@ -31,7 +31,7 @@ Out of scope: the Studio's engines and roles (`ide engines`, `AGENT.md`) — car
 |---|---|---|---|---|---|
 | Opencode | ✓ | ✓ | ✓ | ✓ (today) | ✓ (today) |
 | Claude Code | ✓ (subscription) | — | — | CP3 | CP2 |
-| Glut (`axh`) | — (Q1) | ✓ | ✓ | CP4 | ✓ (HS6b) |
+| Glut (`axh`) | — (D6) | ✓ | ✓ | CP4 | ✓ (HS6b) |
 
 `AgentDefaults::validate_for_save` refuses a role whose provider its harness cannot serve, with a message naming both;
 the Settings dialog only offers the providers that fit the chosen harness. A config edited by hand into a bad pair is
@@ -69,11 +69,17 @@ not "fixed" on load — the run records a clear `Failed` (as HS6b's B1: never a 
   CP0 shows `--output-format json` gives a clean object — otherwise they keep `backend: opencode` explicitly.
 - `backend: ollama` (one completion, no tools) is not a harness and stays a frontmatter-only choice.
 
-## Open questions
+## Decided later (owner, 2026-10-19)
 
-- **Q1 — Glut with Anthropic?** Glut has no Anthropic client yet (harness.md H4, "second client behind the same
-  trait"). Proposal: not in this plan; the matrix shows `—` and the setting explains why.
-- ~~Q2~~ → **D5** below.
+- **D6 — Glut gets no Anthropic client in this plan** (owner, 2026-10-19): later, with the owner's check of the
+  harness backend. The matrix shows `—`, the setting says why.
+- **D7 — signing in to Anthropic from the app** (owner, 2026-10-19). Settings show the login state of the app's
+  Claude Code folder (`claude auth status`, JSON) beside the Claude Code harness, with a **Sign in** button that runs
+  `claude auth login --claudeai` under `CLAUDE_CONFIG_DIR=~/.axiomata/claude` (the browser opens; if the CLI asks for a
+  code, a field passes it to the process's stdin) and **Sign out** (`claude auth logout`). The command line is fixed in
+  Rust — the webview only says "sign in"/"sign out", never a command or a folder (`AGENTS.md`: nothing stored or sent
+  by the webview starts a process). At app start, when a role's harness is Claude Code and the folder is not logged
+  in, a notice offers the same sign-in. A full first-run setup (workspace, providers, keys) is not part of this plan.
 
 ## D5 — the app's Claude Code is apart from the owner's (owner, 2026-10-19)
 
@@ -95,7 +101,7 @@ also checks that the owner's global `CLAUDE.md` stays out.
 | **CP2** | Claude Code runner for skills and routines, read access from the shared list, `runs.backend = claude_code`. Tests: argument building (MCP file, allowed tools, read rules), stream-json parsing; one `#[ignore]`d live run. |
 | **CP3** | Chat on Claude Code: dispatch, `--resume`, module context, instruct mode. |
 | **CP4** | Glut chat: JSONL sessions, resume, dispatch. |
-| **CP5** | Settings: a "Harness" select per role above the provider, providers filtered by the matrix (`Settings.svelte`, `core/backend.ts`, `devmock.ts`); bundled skills without `backend: opencode` + reseed note; `docs/architecture.md` §5 "Model providers", `AGENTS.md` backend/provider traps. |
+| **CP5** | Settings: a "Harness" select per role above the provider, providers filtered by the matrix (`Settings.svelte`, `core/backend.ts`, `devmock.ts`); the Anthropic sign-in (D7: status, Sign in/out, the start notice; `security-auditor`, a new process-starting Tauri command); bundled skills without `backend: opencode` + reseed note; `docs/architecture.md` §5 "Model providers", `AGENTS.md` backend/provider traps. |
 
 After CP5: the owner's check "is everything in the harness backend" — harness.md's open list (sessions done by CP4;
 streaming, the Anthropic client, cost metering, token cost) against what the settings now promise.
