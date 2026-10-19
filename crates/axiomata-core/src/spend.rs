@@ -35,6 +35,9 @@ pub struct ChatTurnRecord {
     pub is_error: bool,
     pub cost_usd: Option<f64>,
     pub input_tokens: Option<u64>,
+    /// The part of the input tokens read from the provider's prompt cache, billed at its lower price (glut-round
+    /// CP4). `None` when the backend does not say.
+    pub cached_input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub num_turns: Option<u32>,
     pub duration_ms: u64,
@@ -50,8 +53,8 @@ pub fn record_chat_turn(db: &Connection, turn: &ChatTurnRecord) -> Result<(), Ax
     db.execute(
         "INSERT INTO chat_turns \
          (session_id, mode, provider, model, is_error, cost_usd, \
-          input_tokens, output_tokens, num_turns, duration_ms, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+          input_tokens, output_tokens, num_turns, duration_ms, created_at, cached_input_tokens) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             turn.session_id,
             turn.mode,
@@ -64,6 +67,7 @@ pub fn record_chat_turn(db: &Connection, turn: &ChatTurnRecord) -> Result<(), Ax
             turn.num_turns.map(|n| n as i64),
             turn.duration_ms as i64,
             Utc::now().to_rfc3339(),
+            turn.cached_input_tokens.map(|n| n as i64),
         ],
     )?;
     Ok(())
@@ -247,12 +251,17 @@ pub fn metered_cost_usd(
     config: &Config,
     model: Option<&str>,
     input_tokens: Option<u64>,
+    cached_input_tokens: Option<u64>,
     output_tokens: Option<u64>,
 ) -> Option<f64> {
     let model = model.map(str::trim).filter(|m| !m.is_empty())?;
     let price = config.agents.costs.get(model)?;
     let (input_tokens, output_tokens) = (input_tokens?, output_tokens?);
-    let cost = input_tokens as f64 / 1e6 * price.input_per_m
+    // The cached tokens are part of the input; a backend that does not say has none.
+    let cached = cached_input_tokens.unwrap_or(0).min(input_tokens);
+    let cached_price = price.cached_input_per_m.unwrap_or(price.input_per_m);
+    let cost = (input_tokens - cached) as f64 / 1e6 * price.input_per_m
+        + cached as f64 / 1e6 * cached_price
         + output_tokens as f64 / 1e6 * price.output_per_m;
     (cost > 0.0).then_some(cost)
 }
@@ -291,7 +300,7 @@ pub fn reconcile_recorded_costs(db: &Connection, config: &Config) -> Result<usiz
     let tx = db.unchecked_transaction()?;
     {
         let mut stmt = tx.prepare(
-            "SELECT id, model, cost_usd, input_tokens, output_tokens FROM runs \
+            "SELECT id, model, cost_usd, input_tokens, output_tokens, cached_input_tokens FROM runs \
              WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -301,14 +310,15 @@ pub fn reconcile_recorded_costs(db: &Connection, config: &Config) -> Result<usiz
                 row.get::<_, Option<f64>>(2)?,
                 row.get::<_, Option<i64>>(3)?.map(|n| n as u64),
                 row.get::<_, Option<i64>>(4)?.map(|n| n as u64),
+                row.get::<_, Option<i64>>(5)?.map(|n| n as u64),
             ))
         })?;
         for row in rows {
-            let (id, model, stored_cost, input, output) = row?;
+            let (id, model, stored_cost, input, output, cached) = row?;
             // A pre-0007 run has no stored model; assume the skill provider's
             // model (they were all skill runs). A *stored* model wins.
             let effective = model.as_deref().or(skill_model.as_deref());
-            let Some(cost) = metered_cost_usd(config, effective, input, output) else {
+            let Some(cost) = metered_cost_usd(config, effective, input, cached, output) else {
                 continue;
             };
             if stored_cost.is_some_and(|c| (c - cost).abs() < 1e-9) {
@@ -324,7 +334,7 @@ pub fn reconcile_recorded_costs(db: &Connection, config: &Config) -> Result<usiz
 
     {
         let mut stmt = tx.prepare(
-            "SELECT id, model, cost_usd, input_tokens, output_tokens FROM chat_turns \
+            "SELECT id, model, cost_usd, input_tokens, output_tokens, cached_input_tokens FROM chat_turns \
              WHERE model IS NOT NULL AND input_tokens IS NOT NULL AND output_tokens IS NOT NULL",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -334,11 +344,12 @@ pub fn reconcile_recorded_costs(db: &Connection, config: &Config) -> Result<usiz
                 row.get::<_, Option<f64>>(2)?,
                 row.get::<_, Option<i64>>(3)?.map(|n| n as u64),
                 row.get::<_, Option<i64>>(4)?.map(|n| n as u64),
+                row.get::<_, Option<i64>>(5)?.map(|n| n as u64),
             ))
         })?;
         for row in rows {
-            let (id, model, stored_cost, input, output) = row?;
-            let Some(cost) = metered_cost_usd(config, Some(&model), input, output) else {
+            let (id, model, stored_cost, input, output, cached) = row?;
+            let Some(cost) = metered_cost_usd(config, Some(&model), input, cached, output) else {
                 continue;
             };
             if stored_cost.is_some_and(|c| (c - cost).abs() < 1e-9) {
@@ -372,7 +383,7 @@ mod tests {
                                 provider TEXT, model TEXT, is_error INTEGER DEFAULT 0, \
                                 cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER, \
                                 num_turns INTEGER, duration_ms INTEGER DEFAULT 0, \
-                                created_at TEXT NOT NULL);",
+                                created_at TEXT NOT NULL, cached_input_tokens INTEGER);",
         )
         .unwrap();
         conn
@@ -404,6 +415,7 @@ mod tests {
                 is_error: false,
                 cost_usd: Some(0.25),
                 input_tokens: None,
+                cached_input_tokens: None,
                 output_tokens: None,
                 num_turns: None,
                 duration_ms: 10,
@@ -483,6 +495,7 @@ mod tests {
             "deepseek/deepseek-v4-flash-0731".into(),
             crate::config::ModelCost {
                 input_per_m: 0.065,
+                cached_input_per_m: None,
                 output_per_m: 0.18,
             },
         );
@@ -492,16 +505,54 @@ mod tests {
             &config,
             Some("deepseek/deepseek-v4-flash-0731"),
             Some(1_000_000),
+            None,
             Some(1_000_000),
         )
         .unwrap();
         assert!((cost - 0.245).abs() < 1e-9, "got {cost}");
 
+        // Cached input at its own price: 1.0M input of which 0.8M cached at 0.0065 -> 0.2*0.065 + 0.8*0.0065 + 0.18.
+        config
+            .agents
+            .costs
+            .get_mut("deepseek/deepseek-v4-flash-0731")
+            .unwrap()
+            .cached_input_per_m = Some(0.0065);
+        let cached = metered_cost_usd(
+            &config,
+            Some("deepseek/deepseek-v4-flash-0731"),
+            Some(1_000_000),
+            Some(800_000),
+            Some(1_000_000),
+        )
+        .unwrap();
+        assert!(
+            (cached - (0.013 + 0.0052 + 0.18)).abs() < 1e-9,
+            "got {cached}"
+        );
+        // More cached than input (a provider's odd count) never bills below zero for the fresh part.
+        let all = metered_cost_usd(
+            &config,
+            Some("deepseek/deepseek-v4-flash-0731"),
+            Some(1_000_000),
+            Some(5_000_000),
+            Some(0),
+        )
+        .unwrap();
+        assert!((all - 0.0065).abs() < 1e-9, "got {all}");
+        // Without a cached price the cached tokens cost the input price: the meter never counts lower than said.
+        config
+            .agents
+            .costs
+            .get_mut("deepseek/deepseek-v4-flash-0731")
+            .unwrap()
+            .cached_input_per_m = None;
+
         // An unlisted model has no metered cost -> falls back (None).
-        assert!(metered_cost_usd(&config, Some("other/model"), Some(1), Some(1)).is_none());
+        assert!(metered_cost_usd(&config, Some("other/model"), Some(1), None, Some(1)).is_none());
 
         // A missing model id (CLI default) metered via the config is None too.
-        assert!(metered_cost_usd(&config, None, Some(1), Some(1)).is_none());
+        assert!(metered_cost_usd(&config, None, Some(1), None, Some(1)).is_none());
 
         // Missing token counts cannot be metered.
         assert!(
@@ -509,6 +560,7 @@ mod tests {
                 &config,
                 Some("deepseek/deepseek-v4-flash-0731"),
                 Some(1),
+                None,
                 None
             )
             .is_none()
@@ -523,11 +575,13 @@ mod tests {
                      status TEXT, exit_code INTEGER, duration_ms INTEGER, stdout TEXT, \
                      stderr TEXT, error TEXT, started_at TEXT NOT NULL, finished_at TEXT, \
                      source TEXT, provider TEXT, cost_usd REAL, input_tokens INTEGER, \
-                     output_tokens INTEGER, num_turns INTEGER, model TEXT);
+                     output_tokens INTEGER, num_turns INTEGER, model TEXT, \
+                     cached_input_tokens INTEGER);
               CREATE TABLE chat_turns (id INTEGER PRIMARY KEY, session_id TEXT, mode TEXT, \
                      provider TEXT, model TEXT, is_error INTEGER DEFAULT 0, cost_usd REAL, \
                      input_tokens INTEGER, output_tokens INTEGER, num_turns INTEGER, \
-                     duration_ms INTEGER DEFAULT 0, created_at TEXT NOT NULL);",
+                     duration_ms INTEGER DEFAULT 0, created_at TEXT NOT NULL, \
+                     cached_input_tokens INTEGER);",
         )
         .unwrap();
 
@@ -536,6 +590,7 @@ mod tests {
             "deepseek/deepseek-v4-flash-0731".into(),
             crate::config::ModelCost {
                 input_per_m: 0.065,
+                cached_input_per_m: None,
                 output_per_m: 0.18,
             },
         );
@@ -585,6 +640,7 @@ mod tests {
                 is_error: false,
                 cost_usd: Some(5.0),
                 input_tokens: Some(1_000_000),
+                cached_input_tokens: None,
                 output_tokens: Some(1_000_000),
                 num_turns: None,
                 duration_ms: 10,

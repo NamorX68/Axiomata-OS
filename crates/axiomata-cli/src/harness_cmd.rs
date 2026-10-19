@@ -563,6 +563,7 @@ mod tests {
                 turns: 3,
                 usage: Usage {
                     input_tokens: 30,
+                    cached_input_tokens: 0,
                     output_tokens: 6,
                 },
             }),
@@ -576,6 +577,7 @@ mod tests {
             turns: 3,
             usage: Usage {
                 input_tokens: 30,
+                cached_input_tokens: 0,
                 output_tokens: 6,
             },
         };

@@ -79,6 +79,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (32, include_str!("migrations/0011_permission_asks.sql")),
     // Glut's web searches, counted for their daily and Tavily-monthly limits (glut-round.md, CP3).
     (33, include_str!("migrations/0012_web_searches.sql")),
+    // The cached part of the input tokens, metered at its own price (glut-round.md, CP4).
+    (34, include_str!("migrations/0013_cached_input_tokens.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

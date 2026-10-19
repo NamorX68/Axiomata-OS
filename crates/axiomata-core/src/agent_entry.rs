@@ -125,17 +125,31 @@ pub fn cli_path() -> Option<PathBuf> {
     )
 }
 
+/// Set in the environment of the CLI when a harness run starts it directly (glut-round W8): the CLI then takes no
+/// owner's decision from that call — `board add` sets no plan, role or flow field and uses no flow column — since the
+/// run's words may come from untrusted text, and no agent session's gates (`AXIOMATA_AGENT_ID`) apply to it.
+pub const HARNESS_RUN_ENV: &str = "AXIOMATA_HARNESS_RUN";
+
+/// The commands of the CLI a Glut run may start directly; every other one stays in the sandbox.
+const DIRECT_COMMANDS: [&[&str]; 3] = [&["board", "list"], &["board", "add"], &["inbox", "move"]];
+
 /// The app's CLI as a program a Glut run starts directly when its declaration names the exact command (glut-round
-/// W8): `axiomata-cli`, from [`cli_path`], with the app's `AXIOMATA_HOME` when one is set — the sandbox hides
-/// `~/.axiomata`, where the CLI's database is. `None` without a CLI.
+/// W8): `axiomata-cli`, from [`cli_path`], for [`DIRECT_COMMANDS`] only, marked by [`HARNESS_RUN_ENV`], with the
+/// app's `AXIOMATA_HOME` when one is set — the sandbox hides `~/.axiomata`, where the CLI's database is. `None` without
+/// a CLI.
 pub fn cli_direct_program() -> Option<axiomata_harness::tools::shell::DirectProgram> {
-    let env = std::env::var_os(crate::paths::AXIOMATA_HOME_ENV)
-        .map(|home| vec![(crate::paths::AXIOMATA_HOME_ENV.into(), home)])
-        .unwrap_or_default();
+    let mut env = vec![(HARNESS_RUN_ENV.into(), "1".into())];
+    if let Some(home) = std::env::var_os(crate::paths::AXIOMATA_HOME_ENV) {
+        env.push((crate::paths::AXIOMATA_HOME_ENV.into(), home));
+    }
     Some(axiomata_harness::tools::shell::DirectProgram {
         name: CLI_NAME.to_owned(),
         path: cli_path()?,
         env,
+        allowed: DIRECT_COMMANDS
+            .iter()
+            .map(|words| words.iter().map(|word| (*word).to_owned()).collect())
+            .collect(),
     })
 }
 

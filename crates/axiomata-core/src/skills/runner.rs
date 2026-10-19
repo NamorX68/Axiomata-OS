@@ -460,6 +460,7 @@ async fn run_on_backend(
                 config,
                 stored_model.as_deref(),
                 result.input_tokens,
+                result.cached_input_tokens,
                 result.output_tokens,
             )
             .or(result.cost_usd);
@@ -604,6 +605,7 @@ fn record_from_result(
         model,
         cost_usd: result.cost_usd,
         input_tokens: result.input_tokens,
+        cached_input_tokens: result.cached_input_tokens,
         output_tokens: result.output_tokens,
         num_turns: result.num_turns,
         // Neither this function nor its caller here knows whether a
@@ -666,6 +668,7 @@ fn failure_record(
         model: None,
         cost_usd: None,
         input_tokens: None,
+        cached_input_tokens: None,
         output_tokens: None,
         num_turns: None,
         // See the matching comment in `record_from_result`.

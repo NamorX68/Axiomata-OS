@@ -460,6 +460,7 @@ async fn ask_for_json(service: &Service, first: TurnOutcome) -> TurnOutcome {
 /// reply replaces the first one only when it succeeded and holds a JSON object.
 fn merge_repair(mut first: TurnOutcome, repair: TurnOutcome) -> TurnOutcome {
     first.input_tokens += repair.input_tokens;
+    first.cached_input_tokens += repair.cached_input_tokens;
     first.output_tokens += repair.output_tokens;
     first.cost += repair.cost;
     first.turns += repair.turns;
@@ -538,6 +539,7 @@ fn run_result(outcome: TurnOutcome) -> AgentRunResult {
         duration_ms: outcome.duration.as_millis() as u64,
         cost_usd: (outcome.cost > 0.0).then_some(outcome.cost),
         input_tokens: usage.then_some(outcome.input_tokens),
+        cached_input_tokens: usage.then_some(outcome.cached_input_tokens),
         output_tokens: usage.then_some(outcome.output_tokens),
         num_turns: (outcome.turns > 0).then_some(outcome.turns),
     }
@@ -1080,6 +1082,7 @@ fn chat_reply(outcome: TurnOutcome) -> Result<ChatReply, AxiomataError> {
             serde_json::json!({ "input_tokens": outcome.input_tokens, "output_tokens": outcome.output_tokens })
         }),
         input_tokens: usage.then_some(outcome.input_tokens),
+        cached_input_tokens: usage.then_some(outcome.cached_input_tokens),
         output_tokens: usage.then_some(outcome.output_tokens),
         num_turns: (outcome.turns > 0).then_some(outcome.turns),
         duration_ms: outcome.duration.as_millis() as u64,
@@ -1404,6 +1407,7 @@ mod tests {
             reply: reply.into(),
             failure: failure.map(str::to_owned),
             input_tokens: 30,
+            cached_input_tokens: 0,
             output_tokens: 5,
             cost: 0.003,
             turns: 2,
@@ -1675,6 +1679,7 @@ mod tests {
             reply: reply.to_string(),
             failure: failure.map(str::to_string),
             input_tokens: 10,
+            cached_input_tokens: 0,
             output_tokens: 5,
             cost: 0.5,
             turns: 2,

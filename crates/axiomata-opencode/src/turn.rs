@@ -66,7 +66,11 @@ pub struct TurnOutcome {
     pub reply: String,
     /// Why the turn failed; `None` when it succeeded.
     pub failure: Option<String>,
+    /// Every prompt token the answers processed: fresh, written to and read from the provider's cache — what the
+    /// turn used, counted as Glut and Claude Code count it (glut-round CP0: `tokens.input` alone left out ~60 %).
     pub input_tokens: u64,
+    /// The part of [`Self::input_tokens`] read from the cache (`tokens.cache.read`).
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
     /// The cost the service computed, in USD.
     pub cost: f64,
@@ -295,8 +299,11 @@ fn summarize(messages: &[Value]) -> TurnOutcome {
                 outcome.turns += 1;
                 if let Some(tokens) = message.get("tokens") {
                     outcome.has_usage = true;
-                    outcome.input_tokens +=
-                        tokens.get("input").and_then(Value::as_u64).unwrap_or(0);
+                    let count =
+                        |path: &str| tokens.pointer(path).and_then(Value::as_u64).unwrap_or(0);
+                    let cached = count("/cache/read");
+                    outcome.input_tokens += count("/input") + cached + count("/cache/write");
+                    outcome.cached_input_tokens += cached;
                     outcome.output_tokens +=
                         tokens.get("output").and_then(Value::as_u64).unwrap_or(0);
                 }
@@ -375,6 +382,20 @@ mod tests {
         assert!((outcome.cost - 0.004).abs() < 1e-12);
         assert_eq!(outcome.reply, "\n{\"ok\": true}");
         assert!(outcome.has_usage);
+    }
+
+    /// glut-round CP0/CP4: what the cache wrote and read is part of the input — run #1703 had 54k fresh and 81k
+    /// read from the cache — and the read part is kept apart for its price.
+    #[test]
+    fn cached_tokens_count_as_input_and_the_read_ones_stand_apart() {
+        let cached = json!({
+            "type": "assistant", "finish": "stop", "cost": 0.0,
+            "tokens": {"input": 100, "output": 5, "reasoning": 0, "cache": {"read": 900, "write": 20}},
+            "content": [{"type": "text", "text": "ok"}]
+        });
+        let outcome = summarize(&[cached.clone(), cached]);
+        assert_eq!(outcome.input_tokens, 2_040);
+        assert_eq!(outcome.cached_input_tokens, 1_800);
     }
 
     #[test]

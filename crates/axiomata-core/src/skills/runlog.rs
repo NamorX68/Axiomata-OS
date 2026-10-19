@@ -80,9 +80,10 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
         "INSERT INTO runs \
          (skill_name, backend, status, exit_code, duration_ms, \
           stdout, stderr, error, started_at, finished_at, source, \
-          provider, cost_usd, input_tokens, output_tokens, num_turns, model) \
+          provider, cost_usd, input_tokens, output_tokens, num_turns, model, \
+          cached_input_tokens) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
-                 ?12, ?13, ?14, ?15, ?16, ?17)",
+                 ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         rusqlite::params![
             record.skill_name,
             record.backend,
@@ -101,6 +102,7 @@ fn insert_row(db: &Connection, record: &RunRecord) -> Result<i64, AxiomataError>
             record.output_tokens,
             record.num_turns,
             record.model,
+            record.cached_input_tokens,
         ],
     )?;
     Ok(db.last_insert_rowid())
@@ -163,7 +165,8 @@ pub fn get_run(db: &Connection, id: i64) -> Result<Option<RunRecord>, AxiomataEr
     let mut stmt = db.prepare(
         "SELECT id, skill_name, backend, status, exit_code, \
          duration_ms, stdout, stderr, error, started_at, finished_at, source, \
-         provider, cost_usd, input_tokens, output_tokens, num_turns, model \
+         provider, cost_usd, input_tokens, output_tokens, num_turns, model, \
+         cached_input_tokens \
          FROM runs WHERE id = ?1",
     )?;
     match stmt.query_row([id], row_to_record) {
@@ -219,6 +222,7 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunRecord> {
         output_tokens: row.get::<_, Option<i64>>(15)?.map(|n| n as u64),
         num_turns: row.get::<_, Option<i64>>(16)?.map(|n| n as u32),
         model: row.get(17)?,
+        cached_input_tokens: row.get::<_, Option<i64>>(18)?.map(|n| n as u64),
     })
 }
 
@@ -265,6 +269,7 @@ mod tests {
             provider: None,
             cost_usd: None,
             input_tokens: None,
+            cached_input_tokens: None,
             output_tokens: None,
             num_turns: None,
             model: None,

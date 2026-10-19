@@ -314,6 +314,10 @@ pub struct ChatReply {
     pub usage: Option<serde_json::Value>,
     /// Input tokens across the turn's answers.
     pub input_tokens: Option<u64>,
+    /// The part of the input tokens read from the provider's prompt cache, billed at its lower price (glut-round
+    /// CP4). `None` when the backend does not say.
+    #[serde(default)]
+    pub cached_input_tokens: Option<u64>,
     /// Output tokens across the turn's answers.
     pub output_tokens: Option<u64>,
     /// How many assistant steps the turn took.
@@ -456,10 +460,12 @@ pub async fn chat_and_record(
                 config,
                 model.as_deref(),
                 reply.input_tokens,
+                reply.cached_input_tokens,
                 reply.output_tokens,
             )
             .or(reply.cost_usd),
             input_tokens: reply.input_tokens,
+            cached_input_tokens: reply.cached_input_tokens,
             output_tokens: reply.output_tokens,
             num_turns: reply.num_turns,
             duration_ms: reply.duration_ms,
@@ -579,6 +585,9 @@ pub struct AgentRunResult {
     pub cost_usd: Option<f64>,
     /// Input tokens across the turn's answers. `None` when none carried counts.
     pub input_tokens: Option<u64>,
+    /// The part of the input tokens read from the provider's prompt cache, billed at its lower price (glut-round
+    /// CP4). `None` when the backend does not say.
+    pub cached_input_tokens: Option<u64>,
     /// Output tokens across the turn's answers. `None` when none carried counts.
     pub output_tokens: Option<u64>,
     /// How many answering messages (model steps) the agent loop took.
@@ -601,6 +610,7 @@ impl AgentRunResult {
             duration_ms,
             cost_usd: None,
             input_tokens: None,
+            cached_input_tokens: None,
             output_tokens: None,
             num_turns: None,
         }

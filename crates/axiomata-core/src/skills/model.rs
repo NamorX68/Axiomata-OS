@@ -144,6 +144,10 @@ pub struct RunRecord {
     /// `usage.input_tokens` reported by the agent CLI; `None` when unavailable.
     #[serde(default)]
     pub input_tokens: Option<u64>,
+    /// The part of the input tokens read from the provider's prompt cache, billed at its lower price (glut-round
+    /// CP4). `None` when the backend does not say.
+    #[serde(default)]
+    pub cached_input_tokens: Option<u64>,
     /// `usage.output_tokens` reported by the agent CLI; `None` when unavailable.
     #[serde(default)]
     pub output_tokens: Option<u64>,

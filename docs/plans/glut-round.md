@@ -183,10 +183,17 @@ gate. An installed copy gets the new texts with `skills reseed --force`.
 `DirectProgram` of the caller's — the app's own `axiomata-cli` at its absolute path, with the app's `AXIOMATA_HOME` —
 directly, without shell or sandbox, its words as arguments, when the command is nothing but words (no assignment,
 redirection, second command or expansion) **and** every narrowing of the run names it by a pattern of its own
-(`Gate::declares_command`: `Bash(axiomata-cli board add:*)`, never a bare `Bash`). A chat turn declares nothing, so no
-command of it is trusted; anything else stays in the sandbox.
+(`Gate::declares_command`: `Bash(axiomata-cli board add:*)`, never a bare `Bash`) **and** it is one of the program's
+own direct commands (`board list`, `board add`, `inbox move` — a declaration as wide as `Bash(axiomata-cli:*)` reaches
+no other). A chat turn declares nothing, so no command of it is trusted; anything else stays in the sandbox. A third
+audit (of this path) found no way past the declaration but the CLI's reach: the direct process carries
+`AXIOMATA_HARNESS_RUN`, and `board add` then sets no plan, role or flow field and uses neither the proposal nor the
+review column (a card in a self-running plan would have become an agent's prompt). `Bash(:*)` is no rule any more (it
+panicked the matcher).
 
-Open from the audits: `board add:*` lets injected `ToDo.md` text pick `--plan`/`--agent`/`--column`;
+Open from the audits: the same `board add` reach on **Opencode and Claude Code**, which run the CLI without the
+marker (their skill runs inherit no agent session either); the CLI's config-parse error can quote a line of
+`config.toml` to the model;
 `web_search`'s provider error text reaches the model unframed (blanked keys, plain, cut). On
 **Claude Code** reads inside the working folder need no rule, so a news skill there can still read the vault and fetch
 any host — Glut is the stricter harness for the news skills.
@@ -196,9 +203,16 @@ any host — Glut is the stricter harness for the news skills.
 The toolbox offers the model only what the gate could allow (`Gate::offers`, `Tool::offered_as`): with a
 declaration, the tools some declared rule could name, patterns left aside (`Edit(News/**)` offers `edit_file`); no
 tool a pattern-less deny refuses whole; no edit tool in Plan mode; a call of a tool not offered is refused. A skill
-run gets no `skill` tool (its body is the task — CP0 saw the model load the running skill again). Still open: cached
-tokens (read `cached_tokens`/`cache.read`, meter them at a cached price — needs a column for them, or the start-up
-re-metering would bill them at the full price), then shortening old tool results if the measurement still asks.
+run gets no `skill` tool (its body is the task — CP0 saw the model load the running skill again). 
 
-Next: the rest of CP4 (cached tokens), CP5 (streaming), CP6 (docs); the
+**Cached tokens (owner, 2026-10-19: "bitte so umsetzen")**: `input_tokens` now counts every prompt token processed on
+all three harnesses (Opencode's `tokens.input + cache.read + cache.write`, as Claude Code and Glut already did), and
+the part read from the cache is kept apart (`cached_input_tokens`: Glut from `usage.prompt_tokens_details.cached_tokens`
+or DeepSeek's `prompt_cache_hit_tokens`, Opencode `cache.read`, Claude Code `cache_read_input_tokens`), stored in
+`runs` and `chat_turns` (migration 34) and metered at `agents.costs.<model>.cached_input_per_m` — unset, at the input
+price, so the meter never counts lower than the owner said; the start-up re-metering reads the column, so a row from
+before (NULL) is metered as before. Studio sessions keep A27 (cache reads left out of their limits). Still open:
+shortening old tool results, if a measurement still asks for it.
+
+Next: CP5 (streaming), CP6 (docs); the
 Settings block could show today's count (`web_search::usage`).

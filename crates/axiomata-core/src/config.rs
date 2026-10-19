@@ -331,6 +331,10 @@ impl Default for WebSettings {
 pub struct ModelCost {
     /// USD per million input tokens.
     pub input_per_m: f64,
+    /// USD per million input tokens read from the provider's prompt cache (glut-round CP4) — unset, they cost
+    /// `input_per_m` like the others: the meter never counts a token cheaper than the owner said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_per_m: Option<f64>,
     /// USD per million output tokens.
     pub output_per_m: f64,
 }
@@ -755,6 +759,7 @@ impl Config {
         for (model, cost) in &self.agents.costs {
             for (name, price) in [
                 ("input_per_m", cost.input_per_m),
+                ("cached_input_per_m", cost.cached_input_per_m.unwrap_or(0.0)),
                 ("output_per_m", cost.output_per_m),
             ] {
                 if !price.is_finite() || price < 0.0 {

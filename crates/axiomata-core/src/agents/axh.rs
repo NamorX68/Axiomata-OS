@@ -142,6 +142,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         // keyed by this bare model id) — no estimate of ours to record.
         cost_usd: None,
         input_tokens,
+        cached_input_tokens: input_tokens.map(|_| outcome.usage.cached_input_tokens),
         output_tokens,
         num_turns: Some(outcome.turns),
     })
@@ -239,6 +240,7 @@ pub(crate) async fn chat(
             serde_json::json!({ "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens })
         }),
         input_tokens,
+        cached_input_tokens: input_tokens.map(|_| usage.cached_input_tokens),
         output_tokens,
         num_turns: Some(outcome.turns),
         duration_ms: started.elapsed().as_millis() as u64,
@@ -1684,6 +1686,7 @@ mod tests {
             "test-model".into(),
             ModelCost {
                 input_per_m: 1.0,
+                cached_input_per_m: None,
                 output_per_m: 2.0,
             },
         );

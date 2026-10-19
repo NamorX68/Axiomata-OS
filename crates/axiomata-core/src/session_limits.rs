@@ -332,6 +332,8 @@ impl Meter {
                 config,
                 watched.model.as_deref(),
                 Some(usage.input_tokens),
+                // A studio session's input leaves cache reads out already (A27).
+                None,
                 Some(usage.output_tokens),
             )
         });
@@ -879,6 +881,7 @@ mod tests {
             "deepseek/flash".into(),
             crate::config::ModelCost {
                 input_per_m: 0.5,
+                cached_input_per_m: None,
                 output_per_m: 1.5,
             },
         );

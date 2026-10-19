@@ -89,6 +89,16 @@ pub struct FlowFlags {
 }
 
 impl FlowFlags {
+    /// Whether no flow field was passed.
+    pub fn is_empty(&self) -> bool {
+        self.kind.is_none()
+            && self.tier.is_none()
+            && self.agent.is_none()
+            && self.agent_reason.is_none()
+            && self.acceptance.is_none()
+            && self.plan.is_none()
+    }
+
     /// Lays what was passed over `fields`; whatever was not passed keeps its value.
     pub fn apply(&self, fields: &mut board::CardFields) -> Result<()> {
         if let Some(kind) = &self.kind {

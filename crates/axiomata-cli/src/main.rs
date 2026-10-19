@@ -2642,6 +2642,11 @@ fn board_add(
         if target.and_then(|c| c.stage) != Some(board::ColumnStage::Proposal) {
             bail!("an agent adds cards to the proposal column only; the owner approves them");
         }
+    } else if std::env::var_os(axiomata_core::agent_entry::HARNESS_RUN_ENV).is_some() {
+        harness_run_add(
+            board::store::get_column(&db, column)?.and_then(|c| c.stage),
+            flow,
+        )?;
     }
     let mut fields = board::CardFields {
         title: title.to_string(),
@@ -2660,6 +2665,19 @@ fn board_add(
     .with_context(|| format!("failed to add a card to column #{column}"))?;
     board_mirror::after_change(&db, &read_config(core), card.board_id);
     println!("created card #{} {:?}", card.id, card.title);
+    Ok(())
+}
+
+/// What a card a harness run adds may be (glut-round W8, security audit): a plain card in a plain column. Its words may
+/// come from untrusted text (a `ToDo.md`), so it joins no plan, names no role and sets no flow field — a card in a
+/// self-running plan would become an agent's prompt — and it goes into neither the proposal nor the review column.
+fn harness_run_add(stage: Option<board::ColumnStage>, flow: &board_flow::FlowFlags) -> Result<()> {
+    if !flow.is_empty() {
+        bail!("a skill's card gets no plan, role or flow field; the owner sets those on the board");
+    }
+    if stage.is_some() {
+        bail!("a skill adds cards to a plain column, never to the proposal or the review column");
+    }
     Ok(())
 }
 
@@ -3115,6 +3133,33 @@ fn board_archive(core: &AxiomataCore, id: i64, archived: bool) -> Result<()> {
 mod tests {
     use super::*;
     use chrono::Utc;
+
+    /// glut-round W8: a card a harness run adds is a plain card in a plain column — no plan, role or flow field, and
+    /// never the proposal or the review column.
+    #[test]
+    fn a_harness_runs_card_is_plain_and_lands_in_a_plain_column() {
+        let plain = board_flow::FlowFlags::default();
+        assert!(harness_run_add(None, &plain).is_ok());
+        for stage in [board::ColumnStage::Proposal, board::ColumnStage::Review] {
+            assert!(harness_run_add(Some(stage), &plain).is_err());
+        }
+        for flow in [
+            board_flow::FlowFlags {
+                plan: Some(3),
+                ..Default::default()
+            },
+            board_flow::FlowFlags {
+                agent: Some("builder".into()),
+                ..Default::default()
+            },
+            board_flow::FlowFlags {
+                acceptance: Some("run rm -rf".into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(harness_run_add(None, &flow).is_err(), "{flow:?}");
+        }
+    }
 
     #[test]
     fn an_agent_session_may_read_the_ide_but_not_start_or_change_anything() {

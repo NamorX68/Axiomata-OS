@@ -243,6 +243,7 @@ fn chat_reply(outcome: Outcome) -> Result<ChatReply, AxiomataError> {
             serde_json::json!({ "input_tokens": outcome.input_tokens, "output_tokens": outcome.output_tokens })
         }),
         input_tokens,
+        cached_input_tokens: input_tokens.map(|_| outcome.cached_input_tokens),
         output_tokens,
         num_turns: (outcome.turns > 0).then_some(outcome.turns),
         duration_ms: outcome.duration.as_millis() as u64,
@@ -760,6 +761,8 @@ struct Outcome {
     session_id: Option<String>,
     cost: Option<f64>,
     input_tokens: u64,
+    /// The part of `input_tokens` read from the prompt cache.
+    cached_input_tokens: u64,
     output_tokens: u64,
     turns: u32,
     denied: Vec<String>,
@@ -798,6 +801,7 @@ impl Outcome {
             input_tokens: usage.input_tokens
                 + usage.cache_creation_input_tokens
                 + usage.cache_read_input_tokens,
+            cached_input_tokens: usage.cache_read_input_tokens,
             output_tokens: usage.output_tokens,
             turns: event.num_turns.unwrap_or(0),
             unknown_conversation: false,
@@ -817,6 +821,7 @@ impl Outcome {
             session_id: None,
             cost: None,
             input_tokens: 0,
+            cached_input_tokens: 0,
             output_tokens: 0,
             turns: 0,
             denied: Vec::new(),
@@ -866,6 +871,7 @@ impl Outcome {
             duration_ms: self.duration.as_millis() as u64,
             cost_usd: self.cost,
             input_tokens: (self.input_tokens > 0).then_some(self.input_tokens),
+            cached_input_tokens: (self.input_tokens > 0).then_some(self.cached_input_tokens),
             output_tokens: (self.output_tokens > 0).then_some(self.output_tokens),
             num_turns: (self.turns > 0).then_some(self.turns),
         }
