@@ -76,3 +76,14 @@ export async function claudeSignInNotice(
     return null;
   }
 }
+
+/** A backend id as the dashboard names it: a harness's label (Glut for `axh`), any other id (`ollama`) as it is. */
+export function backendLabel(id: string): string {
+  return HARNESSES.find((h) => h.id === id)?.label ?? id;
+}
+
+/** Every backend a skill or routine may name, for pickers and filters: the three harnesses, then `ollama`. */
+export const BACKEND_CHOICES: readonly { id: string; label: string }[] = [
+  ...HARNESSES.map((h) => ({ id: h.id, label: h.label })),
+  { id: "ollama", label: "Ollama (no tools)" },
+];

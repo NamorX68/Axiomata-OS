@@ -1406,10 +1406,27 @@ pub async fn create_note(state: State<'_, CoreState>, content: String) -> Result
     .map_err(|err| err.to_string())
 }
 
+/// A skill as the dashboard lists it: with the harness a run takes — its own `backend:`, else the configured skill
+/// harness (`docs/plans/harness-choice.md` D3).
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillView {
+    #[serde(flatten)]
+    pub skill: Skill,
+    pub harness: String,
+}
+
 /// Lists every discovered skill (`~/.axiomata/skills/`).
 #[tauri::command]
-pub fn list_skills() -> Result<Vec<Skill>, String> {
-    skills::list_skills().map_err(|err| err.to_string())
+pub fn list_skills(state: State<'_, CoreState>) -> Result<Vec<SkillView>, String> {
+    let config = read_config(&state.config);
+    let skills = skills::list_skills().map_err(|err| err.to_string())?;
+    Ok(skills
+        .into_iter()
+        .map(|skill| SkillView {
+            harness: skill.effective_backend(&config).to_owned(),
+            skill,
+        })
+        .collect())
 }
 
 /// Lists every skill directory that was skipped during discovery, and why

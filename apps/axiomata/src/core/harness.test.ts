@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { ClaudeLoginStatus, ConfigView, HarnessId, ProviderId } from "./backend";
 import {
+  BACKEND_CHOICES,
   CLAUDE_SIGN_IN_NOTICE,
   HARNESSES,
+  backendLabel,
   claudeSignInNotice,
   providerAfterHarnessChange,
   providersFor,
@@ -74,5 +76,17 @@ describe("the start notice for Claude Code's sign-in", () => {
       throw new Error("no claude");
     };
     expect(await claudeSignInNotice(config("claude_code", "opencode"), failing)).toBeNull();
+  });
+});
+
+describe("backend names in the dashboard", () => {
+  it("shows a harness by its label and any other backend as it is", () => {
+    expect(backendLabel("axh")).toBe("Glut");
+    expect(backendLabel("claude_code")).toBe("Claude Code");
+    expect(backendLabel("ollama")).toBe("ollama");
+  });
+
+  it("offers the three harnesses and ollama as backends", () => {
+    expect(BACKEND_CHOICES.map((c) => c.id)).toEqual(["opencode", "claude_code", "axh", "ollama"]);
   });
 });

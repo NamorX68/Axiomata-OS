@@ -119,6 +119,8 @@ export interface Skill {
   description: string;
   /** The frontmatter's `backend:`; `null` when the skill follows the configured skill harness. */
   backend: string | null;
+  /** The harness a run takes: `backend`, else the configured skill harness (`list_skills` fills it). */
+  harness: string;
 }
 
 /** A skill directory `list_skills` could not turn into a `Skill` — a broken

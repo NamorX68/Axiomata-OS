@@ -12,6 +12,7 @@
 
   import type { RunSummary, Skill, SkippedSkill } from "../core/backend";
   import { relativeTime } from "../core/format";
+  import { backendLabel } from "../core/harness";
   import type { ModuleContext } from "../core/types";
   import { glow } from "../ui/glow";
   import StatusMark from "../ui/StatusMark.svelte";
@@ -41,7 +42,7 @@
   });
 
   const visible = $derived.by(() => {
-    const list = skills.filter((s) => filterBackend === "" || s.backend === filterBackend);
+    const list = skills.filter((s) => filterBackend === "" || s.harness === filterBackend);
     if (order === "recent") {
       const t = (s: Skill) => Date.parse(lastRun.get(s.name)?.started_at ?? "") || 0;
       return [...list].sort((a, b) => t(b) - t(a) || a.name.localeCompare(b.name));
@@ -108,7 +109,9 @@
           </span>
           <span class="name">/{s.name}</span>
           <span class="meta">
-            <span class="backend">{s.backend}</span>
+            <span class="backend" title={s.backend ? "set in the skill" : "the skill harness of the settings"}>
+              {backendLabel(s.harness)}
+            </span>
             {#if busy}
               <span class="running">running</span>
             {:else if last}

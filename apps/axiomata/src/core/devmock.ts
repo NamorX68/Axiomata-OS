@@ -185,7 +185,7 @@ let memory: MemoryStatus = {
   stale: true,
   tracked_files: 42,
 };
-const skills: Skill[] = [
+const skills: Omit<Skill, "harness">[] = [
   { name: "example-skill", description: "Bundled example skill.", backend: "opencode" },
   { name: "sprint-planning", description: "Draft the next sprint plan.", backend: "opencode" },
   { name: "newsletter", description: "Summarise the week into a newsletter.", backend: "ollama" },
@@ -1407,7 +1407,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return report as T;
     }
     case "list_skills":
-      return [...skills] as T;
+      return skills.map((s) => ({ ...s, harness: s.backend ?? configState.agents.skill_harness })) as T;
     case "list_skipped_skills":
       // The mock fixture never has a broken skill; keeps the Skills Deck's
       // warning row untriggered in dev-mock runs the same way it is in a

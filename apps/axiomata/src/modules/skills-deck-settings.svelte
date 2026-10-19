@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BACKEND_CHOICES } from "../core/harness";
   import type { ModuleContext } from "../core/types";
 
   let { ctx }: { ctx: ModuleContext } = $props();
@@ -17,8 +18,7 @@
     Backend
     <select value={typeof $config.filterBackend === "string" ? $config.filterBackend : ""} onchange={(e) => set("filterBackend", value(e))}>
       <option value="">all</option>
-      <option value="opencode">opencode</option>
-      <option value="ollama">ollama</option>
+      {#each BACKEND_CHOICES as c (c.id)}<option value={c.id}>{c.label}</option>{/each}
     </select>
   </label>
   <label>

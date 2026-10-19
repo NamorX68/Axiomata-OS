@@ -14,6 +14,7 @@
   hand-edit never loses what was already dialled in.
 -->
 <script lang="ts">
+  import { BACKEND_CHOICES } from "../core/harness";
   import { cronToInterval, defaultInterval, describeInterval, intervalToCron, WEEKDAY_NAMES, type RoutineInterval } from "../core/routineInterval";
 
   export interface RoutineFormFields {
@@ -150,9 +151,8 @@
   </div>
   <div class="pair">
     <select bind:value={backend}>
-      <option value="">default backend</option>
-      <option value="opencode">opencode</option>
-      <option value="ollama">ollama</option>
+      <option value="">default (skill harness)</option>
+      {#each BACKEND_CHOICES as c (c.id)}<option value={c.id}>{c.label}</option>{/each}
     </select>
     <button type="submit" disabled={busy}>{busy ? "…" : submitLabel}</button>
     {#if onCancel}

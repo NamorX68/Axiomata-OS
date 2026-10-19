@@ -102,6 +102,17 @@ pub struct Skill {
     pub body: String,
 }
 
+impl Skill {
+    /// The harness a run of this skill takes: its own `backend:`, else the configured skill harness — as the runner
+    /// resolves it, a retired id (`claude-code`, `ollama-agent`) included (`docs/plans/harness-choice.md` D3).
+    pub fn effective_backend<'a>(&'a self, config: &'a crate::config::Config) -> &'a str {
+        match self.backend.as_deref() {
+            None | Some("claude-code" | "ollama-agent") => config.agents.skill_harness.as_str(),
+            Some(backend) => backend,
+        }
+    }
+}
+
 /// Upper bound on the size of a `SKILL.md` we will read and parse, as a guard
 /// against a hostile or accidental huge file (and YAML anchor-expansion blow-up
 /// in the frontmatter). 256 KiB is far more than any real skill needs.
@@ -419,6 +430,29 @@ mod tests {
         let triage = skills.iter().find(|s| s.name == "triage").unwrap();
         assert_eq!(triage.backend.as_deref(), Some("ollama"));
         assert_eq!(triage.body.trim(), "Do the triage.");
+    }
+
+    #[test]
+    fn the_effective_backend_is_the_skills_own_else_the_skill_harness() {
+        let h = TestHome::new("effective-backend");
+        write_skill(
+            &h.skills_dir(),
+            "plain",
+            "---\nname: plain\ndescription: d\n---\nbody\n",
+        );
+        write_skill(&h.skills_dir(), "local", &skill_md("local", "ollama"));
+        write_skill(&h.skills_dir(), "old", &skill_md("old", "claude-code"));
+        let mut config = crate::config::Config::default();
+        config.agents.skill_harness = crate::config::HarnessId::Axh;
+        assert_eq!(
+            find_skill("plain").unwrap().effective_backend(&config),
+            "axh"
+        );
+        assert_eq!(
+            find_skill("local").unwrap().effective_backend(&config),
+            "ollama"
+        );
+        assert_eq!(find_skill("old").unwrap().effective_backend(&config), "axh");
     }
 
     #[test]
