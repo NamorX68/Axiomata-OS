@@ -355,30 +355,54 @@ pub async fn chat(
     mode: ChatMode,
     allowed_tools: Option<String>,
 ) -> Result<ChatReply, AxiomataError> {
-    // Chat on Claude Code and Glut arrives in harness-choice CP3/CP4; until then a chosen one refuses the turn rather
-    // than hopping back to Opencode.
     let harness = config.agents.chat_harness;
-    if harness != HarnessId::Opencode {
-        return Err(AxiomataError::HarnessUnavailable {
-            harness: harness.as_str().to_owned(),
-            reason: "chat on this harness is not built yet".to_owned(),
-        });
-    }
-    opencode::chat(ChatRequest {
+    let request = ChatRequest {
         message,
         session_id,
         mode,
         cwd: config.workspace_root.clone(),
         timeout: Duration::from_secs(config.agents.skill_timeout_secs),
         system_prompt_file: module_context_if_present(),
-        // The provider-specific reading happens inside `opencode::chat_model_id`;
-        // `None` fails the turn with a clear config error rather than silently
-        // hitting an opencode default model.
-        model: opencode::chat_model_id(config).ok(),
+        model: None,
         auto_approve_tools: config.agents.auto_approve_tools,
         allowed_tools,
-    })
-    .await
+    };
+    match harness {
+        HarnessId::Opencode => {
+            opencode::chat(ChatRequest {
+                // The provider-specific reading happens inside `opencode::chat_model_id`;
+                // `None` fails the turn with a clear config error rather than silently
+                // hitting an opencode default model.
+                model: opencode::chat_model_id(config).ok(),
+                ..request
+            })
+            .await
+        }
+        // Claude Code serves Anthropic only (harness-choice D2); a hand-edited config that pairs it with another
+        // provider refuses the turn rather than sending that provider's model to Anthropic.
+        HarnessId::ClaudeCode if config.agents.chat_provider != ProviderId::Anthropic => {
+            Err(AxiomataError::HarnessUnavailable {
+                harness: harness.as_str().to_owned(),
+                reason: format!(
+                    "Claude Code runs Anthropic only, the chat provider is {}",
+                    config.agents.chat_provider.as_str()
+                ),
+            })
+        }
+        HarnessId::ClaudeCode => {
+            claude_code::chat(ChatRequest {
+                model: default_chat_model(config),
+                ..request
+            })
+            .await
+        }
+        // Chat on Glut arrives in harness-choice CP4; until then it refuses the turn rather than hopping back to
+        // Opencode.
+        HarnessId::Axh => Err(AxiomataError::HarnessUnavailable {
+            harness: harness.as_str().to_owned(),
+            reason: "chat on this harness is not built yet".to_owned(),
+        }),
+    }
 }
 
 /// [`chat`] plus the spend guardrail and the `chat_turns` log entry, in one
@@ -629,20 +653,44 @@ mod tests {
         );
     }
 
-    /// A chat harness other than Opencode refuses the turn before anything starts, never hopping to Opencode.
+    /// Glut refuses a chat turn until its runner exists, and Claude Code refuses one paired with another provider than
+    /// Anthropic — neither hops to Opencode. Claude Code with Anthropic gets as far as the runner, which a unit test
+    /// never starts.
     #[tokio::test]
-    async fn chat_refuses_a_harness_without_a_chat_runner() {
-        for harness in [HarnessId::ClaudeCode, HarnessId::Axh] {
-            let mut config = Config::default();
-            config.agents.chat_harness = harness;
-            let err = chat(&config, "hi".to_owned(), None, ChatMode::Chat, None)
+    async fn chat_runs_on_the_chat_harness_and_never_hops_to_opencode() {
+        let turn = |config: Config| async move {
+            chat(&config, "hi".to_owned(), None, ChatMode::Chat, None)
                 .await
-                .unwrap_err();
-            assert!(
-                matches!(&err, AxiomataError::HarnessUnavailable { harness: h, .. } if h == harness.as_str()),
-                "{err:?}"
-            );
-        }
+                .unwrap_err()
+        };
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::Axh;
+        let err = turn(config).await;
+        assert!(
+            matches!(&err, AxiomataError::HarnessUnavailable { harness, .. } if harness == "axh"),
+            "{err:?}"
+        );
+
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::ClaudeCode;
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        let err = turn(config).await;
+        assert!(
+            matches!(&err, AxiomataError::HarnessUnavailable { reason, .. } if reason.contains("open_router")),
+            "{err:?}"
+        );
+
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::ClaudeCode;
+        let err = turn(config).await;
+        assert!(
+            matches!(
+                &err,
+                AxiomataError::AgentApi { backend, message }
+                    if *backend == BACKEND_CLAUDE_CODE && message.contains("never reach")
+            ),
+            "{err:?}"
+        );
     }
 
     #[test]

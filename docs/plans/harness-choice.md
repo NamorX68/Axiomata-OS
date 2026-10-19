@@ -1,6 +1,6 @@
 # Harness choice — Opencode, Claude Code or Glut, per role
 
-Status: **in progress 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, CP1–CP2 built.
+Status: **in progress 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, CP1–CP3 built.
 
 ## Why
 
@@ -166,3 +166,18 @@ streaming, the Anthropic client, cost metering, token cost) against what the set
   resolved, so a frontmatter `backend: claude_code` skill can be held by an OpenRouter cap it does not spend from.
 - Glut still ignores `access: read` (the gate is the skill's `allowed_tools` alone); for the owner's later check of
   the harness backend.
+
+## CP3 — built and measured (2026-10-19)
+
+`claude_code::chat`; `agents::chat` dispatches on `chat_harness` (Opencode as before; Claude Code only with the
+Anthropic chat provider, else a `HarnessUnavailable` naming the provider; Glut refuses until CP4). Chat and instruct
+turns run alike, unattended, with the undeclared-run rights of CP2 (or the turn's `allowed_tools`); the module
+manifest rides in the appended system prompt beside the vault's `AGENTS.md`, not in the message.
+
+- Measured: `--resume` of a conversation Claude Code does not have prints `No conversation found with session ID: …`
+  on stdout, no result event, exit 0 — the turn then starts a new conversation, as an id that is no plain UUID-like
+  token (an Opencode `ses_…` after a harness switch) does from the start.
+- Live (the CLI's `assistant`, `chat_harness = "claude_code"` set in `config.toml` for the test and restored; a
+  scratch `AXIOMATA_HOME` does not do — the login is bound to the folder's exact path, a link to it is "Not logged
+  in"): turn 1 named the vault's areas from `AGENTS.md`; `--resume` kept the same session and the remembered word;
+  `--resume ses_…` answered in a new session. Sonnet 5, 3–7 ct notional per turn.

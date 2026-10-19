@@ -36,8 +36,8 @@ use tokio::io::AsyncWriteExt;
 use crate::agents::opencode::{JSON_REPAIR_PROMPT, JSON_REPAIR_TIMEOUT, find_json_object};
 use crate::agents::opencode_instance::{READ_COMMANDS, READ_DENIED_COMMANDS};
 use crate::agents::{
-    AgentRequest, AgentRunResult, BACKEND_CLAUDE_CODE, MAX_RESPONSE_BYTES, agent_child_env,
-    agent_slots, truncate_utf8, valid_model_name,
+    AgentRequest, AgentRunResult, BACKEND_CLAUDE_CODE, ChatReply, ChatRequest, MAX_RESPONSE_BYTES,
+    agent_child_env, agent_slots, truncate_utf8, valid_model_name,
 };
 use crate::error::AxiomataError;
 use crate::paths;
@@ -47,6 +47,12 @@ const CLAUDE_BIN: &str = "claude";
 
 /// What Claude Code answers in `result` when its config folder has no login (CP0).
 const NOT_SIGNED_IN: &str = "Not logged in";
+
+/// What Claude Code prints, instead of a result, for a `--resume` of a conversation it does not have (CP3).
+const NO_CONVERSATION: &str = "No conversation found";
+
+/// How much of a call's stdout a failure without a result keeps: enough for Claude Code's one-line reasons.
+const MAX_FAILURE_STDOUT: usize = 500;
 
 /// What a run that met [`NOT_SIGNED_IN`] tells the owner to do.
 const SIGN_IN_HINT: &str = "the app's Claude Code is not signed in: sign in once with \
@@ -73,30 +79,24 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
     let model = run_model(request.model.as_deref())?;
     let declared = declared_tools(request.name.as_deref(), request.allowed_tools.as_deref())?;
     let servers = owner_servers()?;
-    let context = run_context(&request.cwd, request.system_prompt_file.as_deref())?;
     let _permit = agent_slots()
         .acquire()
         .await
         .expect("agent_slots semaphore is never closed");
     // Held to the end of the run, the repair call included; dropping it removes the files.
-    let files = RunFiles::create(&paths::app_claude_dir().join("runs"))?;
-    let mcp_config = match mcp_config_json(&servers)? {
-        Some(json) => Some(files.write("mcp.json", &json)?),
-        None => None,
-    };
-    let context_file = match context {
-        Some(text) => Some(files.write("context.md", &text)?),
-        None => None,
-    };
-    let names: Vec<String> = servers.iter().map(|entry| entry.name.clone()).collect();
+    let setup = Setup::prepare(
+        &servers,
+        &request.cwd,
+        request.system_prompt_file.as_deref(),
+    )?;
     let invocation = Invocation {
         model: &model,
-        mcp_config: mcp_config.as_deref(),
-        servers: &names,
+        mcp_config: setup.mcp_config.as_deref(),
+        servers: &setup.server_names,
         declared: &declared,
         auto_approve: request.auto_approve_tools,
         read_only: request.read_only,
-        context_file: context_file.as_deref(),
+        context_file: setup.context_file.as_deref(),
         resume: None,
     };
     let program = Path::new(CLAUDE_BIN);
@@ -137,6 +137,150 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         _ => first,
     };
     Ok(outcome.into_result())
+}
+
+/// One assistant-bar turn on Claude Code (harness-choice CP3): the conversation `session_id` names goes on with
+/// `--resume`, a new one starts otherwise. An id Claude Code does not know — an Opencode session's (`ses_…`) after a
+/// switch of the chat harness, or one whose transcript is gone — starts a new conversation rather than failing, as
+/// on Opencode. The module manifest rides in the appended system prompt beside the folder's `AGENTS.md`. Chat and
+/// instruct turns run alike, unattended ([`crate::agents::ChatMode`]). A turn that failed or answered nothing is an
+/// [`AxiomataError::AgentApi`].
+pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataError> {
+    refuse_in_tests()?;
+    if request
+        .model
+        .as_deref()
+        .is_none_or(|model| model.trim().is_empty())
+    {
+        return Err(AxiomataError::InvalidAgentModel {
+            reason:
+                "chat on claude_code has no model: set the chat model of anthropic in config.toml"
+                    .to_owned(),
+        });
+    }
+    let model = run_model(request.model.as_deref())?;
+    let declared = declared_tools(None, request.allowed_tools.as_deref())?;
+    let servers = owner_servers()?;
+    let _permit = agent_slots()
+        .acquire()
+        .await
+        .expect("agent_slots semaphore is never closed");
+    let setup = Setup::prepare(
+        &servers,
+        &request.cwd,
+        request.system_prompt_file.as_deref(),
+    )?;
+    let resume = request
+        .session_id
+        .as_deref()
+        .filter(|id| valid_session_id(id));
+    let invocation = Invocation {
+        model: &model,
+        mcp_config: setup.mcp_config.as_deref(),
+        servers: &setup.server_names,
+        declared: &declared,
+        auto_approve: request.auto_approve_tools,
+        read_only: false,
+        context_file: setup.context_file.as_deref(),
+        resume,
+    };
+    let outcome = turn_or_start_anew(
+        Path::new(CLAUDE_BIN),
+        invocation,
+        &request.message,
+        &request.cwd,
+        request.timeout,
+    )
+    .await?;
+    chat_reply(outcome)
+}
+
+/// One chat turn: the call as `invocation` says, and — only when it resumed a conversation Claude Code does not have —
+/// once more as a new conversation. Never a third call.
+async fn turn_or_start_anew(
+    program: &Path,
+    invocation: Invocation<'_>,
+    message: &str,
+    cwd: &Path,
+    timeout: Duration,
+) -> Result<Outcome, AxiomataError> {
+    let first = invoke(program, &arguments(&invocation), message, cwd, timeout).await?;
+    if invocation.resume.is_none() || !first.unknown_conversation {
+        return Ok(first);
+    }
+    tracing::info!("Claude Code does not know the chat's conversation; starting a new one");
+    let fresh = Invocation {
+        resume: None,
+        ..invocation
+    };
+    invoke(program, &arguments(&fresh), message, cwd, timeout).await
+}
+
+/// A chat turn's [`Outcome`] as the dashboard takes it: a failure or an empty answer is an error the owner sees.
+fn chat_reply(outcome: Outcome) -> Result<ChatReply, AxiomataError> {
+    let api_err = |message: String| AxiomataError::AgentApi {
+        backend: BACKEND_CLAUDE_CODE,
+        message,
+    };
+    if let Some(failure) = outcome.failure {
+        return Err(api_err(failure));
+    }
+    let reply_markdown = outcome.reply.trim().to_owned();
+    if reply_markdown.is_empty() {
+        return Err(api_err("Claude Code returned an empty reply".to_owned()));
+    }
+    let session_id = outcome
+        .session_id
+        .ok_or_else(|| api_err("Claude Code returned no session id".to_owned()))?;
+    let input_tokens = (outcome.input_tokens > 0).then_some(outcome.input_tokens);
+    let output_tokens = (outcome.output_tokens > 0).then_some(outcome.output_tokens);
+    Ok(ChatReply {
+        session_id,
+        reply_markdown,
+        is_error: false,
+        cost_usd: outcome.cost,
+        usage: (input_tokens.is_some() || output_tokens.is_some()).then(|| {
+            serde_json::json!({ "input_tokens": outcome.input_tokens, "output_tokens": outcome.output_tokens })
+        }),
+        input_tokens,
+        output_tokens,
+        num_turns: (outcome.turns > 0).then_some(outcome.turns),
+        duration_ms: outcome.duration.as_millis() as u64,
+    })
+}
+
+/// What a call hands Claude Code by path, prepared once per run or chat turn: the MCP file and the appended system
+/// prompt, in a [`RunFiles`] folder removed when this is dropped.
+struct Setup {
+    _files: RunFiles,
+    mcp_config: Option<PathBuf>,
+    context_file: Option<PathBuf>,
+    server_names: Vec<String>,
+}
+
+impl Setup {
+    fn prepare(
+        servers: &[axiomata_harness::mcp::config::ServerEntry],
+        cwd: &Path,
+        system_prompt_file: Option<&Path>,
+    ) -> Result<Self, AxiomataError> {
+        let context = run_context(cwd, system_prompt_file)?;
+        let files = RunFiles::create(&paths::app_claude_dir().join("runs"))?;
+        let mcp_config = match mcp_config_json(servers)? {
+            Some(json) => Some(files.write("mcp.json", &json)?),
+            None => None,
+        };
+        let context_file = match context {
+            Some(text) => Some(files.write("context.md", &text)?),
+            None => None,
+        };
+        Ok(Self {
+            _files: files,
+            mcp_config,
+            context_file,
+            server_names: servers.iter().map(|entry| entry.name.clone()).collect(),
+        })
+    }
 }
 
 /// A real Claude Code is never reached from a unit test.
@@ -246,7 +390,10 @@ fn run_context(
             parts.push(read_text(&instructions)?);
         }
         Ok(_) => {
-            tracing::warn!(path = %instructions.display(), "instruction file left out: a link, a special file or too big")
+            tracing::warn!(
+                path = %instructions.display(),
+                "instruction file left out: a link, a special file or too big"
+            )
         }
         Err(err) if err.kind() == ErrorKind::NotFound => {}
         Err(source) => {
@@ -525,14 +672,22 @@ async fn invoke(
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(match parse_result(&stdout) {
         Some(event) => Outcome::from_event(event, duration),
-        None => Outcome::failed(
-            format!(
-                "Claude Code gave no result ({}): {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
-            duration,
-        ),
+        None => {
+            // Claude Code says some reasons on stdout and others on stderr; both are kept, stdout cut short.
+            let said = truncate_utf8(stdout.trim().to_owned(), MAX_FAILURE_STDOUT);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let reason = [said.as_str(), stderr.trim()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" — ");
+            let mut outcome = Outcome::failed(
+                format!("Claude Code gave no result ({}): {reason}", output.status),
+                duration,
+            );
+            outcome.unknown_conversation = stdout.contains(NO_CONVERSATION);
+            outcome
+        }
     })
 }
 
@@ -602,6 +757,9 @@ struct Outcome {
     turns: u32,
     denied: Vec<String>,
     duration: Duration,
+    /// The call resumed a conversation Claude Code does not have: it printed [`NO_CONVERSATION`] instead of a
+    /// result (measured, CP3). Read from the whole stdout, not the shortened failure text.
+    unknown_conversation: bool,
 }
 
 impl Outcome {
@@ -635,6 +793,7 @@ impl Outcome {
                 + usage.cache_read_input_tokens,
             output_tokens: usage.output_tokens,
             turns: event.num_turns.unwrap_or(0),
+            unknown_conversation: false,
             denied: event
                 .permission_denials
                 .into_iter()
@@ -655,6 +814,7 @@ impl Outcome {
             turns: 0,
             denied: Vec::new(),
             duration,
+            unknown_conversation: false,
         }
     }
 
@@ -1110,6 +1270,136 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5));
         tokio::time::sleep(Duration::from_secs(3)).await;
         assert!(!marker.exists(), "a child of the run outlived the limit");
+    }
+
+    /// Measured (CP3): `--resume` of an unknown conversation prints a line instead of a result — found even behind a
+    /// notice longer than the shortened failure text.
+    #[tokio::test]
+    async fn an_unknown_conversation_is_told_apart_from_other_failures() {
+        let scratch = Scratch::new("unknown");
+        let notice = "n".repeat(MAX_FAILURE_STDOUT * 2);
+        let program = scratch.script(&format!(
+            "echo '{notice}'\necho 'No conversation found with session ID: 1111'"
+        ));
+        let outcome = invoke(&program, &[], "hi", &scratch.0, Duration::from_secs(20))
+            .await
+            .unwrap();
+        assert!(outcome.unknown_conversation);
+        // The failure text stays short, cut on a character boundary.
+        assert!(outcome.failure.unwrap().len() < MAX_FAILURE_STDOUT + 200);
+        let program = scratch.script("echo 'something else ü' >&2; exit 1");
+        let outcome = invoke(&program, &[], "hi", &scratch.0, Duration::from_secs(20))
+            .await
+            .unwrap();
+        assert!(!outcome.unknown_conversation);
+        assert!(outcome.failure.unwrap().contains("something else ü"));
+    }
+
+    /// A resumed conversation Claude Code does not have is retried once as a new one — and only that one is.
+    #[tokio::test]
+    async fn a_chat_turn_starts_anew_once_when_its_conversation_is_unknown() {
+        let scratch = Scratch::new("anew");
+        let calls = scratch.0.join("calls");
+        let program = scratch.script(&format!(
+            "echo \"$*\" >> '{calls}'\n\
+             case \"$*\" in *--resume*) echo 'No conversation found with session ID: x' ;; \
+             *) echo '{RESULT_LINE}' ;; esac",
+            calls = calls.display()
+        ));
+        let call = |resume| Invocation {
+            resume,
+            ..invocation(&[], &[])
+        };
+        let outcome = turn_or_start_anew(
+            &program,
+            call(Some("gone-1")),
+            "hi",
+            &scratch.0,
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.reply, "done");
+        let lines = std::fs::read_to_string(&calls).unwrap();
+        assert_eq!(lines.lines().count(), 2, "{lines}");
+        assert!(lines.lines().next().unwrap().contains("--resume gone-1"));
+        assert!(!lines.lines().nth(1).unwrap().contains("--resume"));
+
+        // A failure that is not an unknown conversation is not retried.
+        std::fs::remove_file(&calls).unwrap();
+        let program = scratch.script(&format!("echo x >> '{}'\nexit 1", calls.display()));
+        let outcome = turn_or_start_anew(
+            &program,
+            call(Some("s-1")),
+            "hi",
+            &scratch.0,
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+        assert!(outcome.failure.is_some());
+        assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 1);
+    }
+
+    /// The connector modules' instruct turns name one MCP tool (`calendar.ts`, `reminders.ts`): only that is allowed,
+    /// and the turn resumes its conversation.
+    #[test]
+    fn an_instruct_turn_with_a_declared_mcp_tool_allows_only_that_tool() {
+        let declared = declared_tools(None, Some("mcp__apple-reminders__reminders_tasks")).unwrap();
+        let servers = strings(&["apple-reminders", "apple-mail"]);
+        let call = Invocation {
+            resume: Some("s-1"),
+            ..invocation(&declared, &servers)
+        };
+        let args = arguments(&call);
+        let after = |flag: &str| args[args.iter().position(|arg| arg == flag).unwrap() + 1].clone();
+        assert_eq!(after("--resume"), "s-1");
+        assert_eq!(
+            after("--allowedTools"),
+            "mcp__apple-reminders__reminders_tasks"
+        );
+        assert_eq!(
+            args.last().unwrap(),
+            "mcp__apple-reminders__reminders_tasks"
+        );
+        assert!(!args.contains(&"--permission-mode".to_owned()));
+    }
+
+    #[test]
+    fn a_chat_reply_carries_the_session_and_refuses_failures_and_silence() {
+        let event = |result: &str| ResultEvent {
+            kind: "result".to_owned(),
+            subtype: None,
+            result: Some(result.to_owned()),
+            is_error: false,
+            session_id: Some("s-1".to_owned()),
+            total_cost_usd: Some(0.01),
+            num_turns: Some(2),
+            usage: Some(Usage {
+                input_tokens: 5,
+                output_tokens: 7,
+                ..Usage::default()
+            }),
+            permission_denials: Vec::new(),
+        };
+        let reply = chat_reply(Outcome::from_event(
+            event("  Hallo  "),
+            Duration::from_millis(3),
+        ))
+        .unwrap();
+        assert_eq!(reply.session_id, "s-1");
+        assert_eq!(reply.reply_markdown, "Hallo");
+        assert_eq!(reply.input_tokens, Some(5));
+        assert_eq!(reply.output_tokens, Some(7));
+        assert_eq!(reply.num_turns, Some(2));
+        assert!(matches!(
+            chat_reply(Outcome::from_event(event("   "), Duration::ZERO)),
+            Err(AxiomataError::AgentApi { .. })
+        ));
+        assert!(matches!(
+            chat_reply(Outcome::failed("boom".to_owned(), Duration::ZERO)),
+            Err(AxiomataError::AgentApi { message, .. }) if message == "boom"
+        ));
     }
 
     #[tokio::test]
