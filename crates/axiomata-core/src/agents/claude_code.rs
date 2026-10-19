@@ -379,7 +379,7 @@ fn mcp_config_json(
 /// The run's appended system prompt: the working folder's [`INSTRUCTIONS_FILE`], then the caller's context file (the
 /// chat's module manifest). A missing one is skipped; a link, a special file or an oversized instruction file is left
 /// out with a warning, as Opencode would not follow it either.
-fn run_context(
+pub(crate) fn run_context(
     cwd: &Path,
     system_prompt_file: Option<&Path>,
 ) -> Result<Option<String>, AxiomataError> {

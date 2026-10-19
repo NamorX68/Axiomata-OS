@@ -1,6 +1,6 @@
 # Harness choice — Opencode, Claude Code or Glut, per role
 
-Status: **in progress 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, CP1–CP3 built.
+Status: **in progress 2026-10-19**, owner decisions D1–D7 taken, CP0 measured, CP1–CP4 built.
 
 ## Why
 
@@ -181,3 +181,19 @@ manifest rides in the appended system prompt beside the vault's `AGENTS.md`, not
   scratch `AXIOMATA_HOME` does not do — the login is bound to the folder's exact path, a link to it is "Not logged
   in"): turn 1 named the vault's areas from `AGENTS.md`; `--resume` kept the same session and the remembered word;
   `--resume ses_…` answered in a new session. Sonnet 5, 3–7 ct notional per turn.
+
+## CP4 — built and measured (2026-10-19)
+
+The harness got `run_continuing(config, model, tools, earlier, prompt, …) -> (RunOutcome, Vec<Message>)`: the earlier
+conversation under a system prompt written anew (today's date, the instructions as they are now; a `SessionStart`
+context behind it kept), `SessionStart` for a new conversation only. `axh::chat` keeps a conversation as
+`~/.axiomata/harness/sessions/<id>.jsonl` (0600, replaced in one step, written only after an answer; ids `axh-…`,
+letters, digits and dashes, never a path); an id that names no Glut conversation (Opencode's `ses_…`, Claude Code's
+UUID, a removed file) starts a new one. Endpoint and model are the chat provider's; instructions are the vault's
+`AGENTS.md` plus the module manifest (the same reader as Claude Code). Rights: a declared `allowed_tools` narrows the
+turn; none with tools pre-approved is the owner's `Mode::Auto` (what `~/.axh` does not deny, an `ask` refused);
+otherwise reads only. Glut with the Anthropic chat provider refuses (D6). The skill path shares the setup
+(`Harness::prepare`) and is unchanged. No compaction: a failed turn in a long conversation says to start a new chat.
+
+- Live (scratch `AXIOMATA_HOME`, `chat_harness = "axh"`, OpenRouter DeepSeek Flash): turn 1 named the vault's areas
+  from `AGENTS.md` and noted a word; turn 2 with `--resume axh-…` answered it under the same id.

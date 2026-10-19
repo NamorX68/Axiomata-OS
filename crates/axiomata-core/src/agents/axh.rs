@@ -24,9 +24,13 @@
 //! the run with a message naming it, recorded as a `Failed` run under
 //! `backend: axh`. A run says `axh` in `runs.backend` or it did not run.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axiomata_harness::mcp;
 use axiomata_harness::permissions::settings;
@@ -34,12 +38,14 @@ use axiomata_harness::permissions::{Gate, Mode, Nobody, Rule, RuleSet};
 use axiomata_harness::setup;
 use axiomata_harness::skills;
 use axiomata_harness::{
-    Cancel, Event, EventSink, FinishReason, McpStatus, ModelEndpoint, OpenAiCompat, RunConfig,
-    SharedSink,
+    Cancel, Event, EventSink, FinishReason, McpStatus, Message, ModelEndpoint, OpenAiCompat,
+    RunConfig, SharedSink,
 };
 
-use crate::agents::{AgentRequest, AgentRunResult, BACKEND_AXH, agent_slots};
-use crate::config::{Config, ProviderId};
+use crate::agents::{
+    AgentRequest, AgentRunResult, BACKEND_AXH, ChatReply, ChatRequest, agent_slots,
+};
+use crate::config::{Config, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 use crate::paths::global_skills_dir;
 
@@ -50,7 +56,7 @@ use crate::paths::global_skills_dir;
 pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResult, AxiomataError> {
     // B1: the endpoint as the skill provider has it — before a single token
     // is spent, a provider without a base URL fails here.
-    let endpoint = endpoint(config, request.model.clone())?;
+    let endpoint = endpoint(config, ProviderRole::Skill, request.model.clone())?;
     // The harness's home (`~/.axh`, overridable as `AXH_HOME`): its settings,
     // approvals, MCP config and the owner's own `skills/` folder live there.
     let home = settings::home_dir()?;
@@ -60,66 +66,25 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         .acquire()
         .await
         .expect("agent_slots semaphore is never closed");
-    let cwd = request.cwd.clone();
     let declared = declared_rules(request.name.as_deref(), request.allowed_tools.as_deref())?;
-    // B3: a project's settings are never trusted in an unattended run; from
-    // them only what makes the run stricter counts — the sandbox's read
-    // secrets and the deny/ask rules. HS7 B4: the owner's hooks run here as
-    // they do in the CLI; a project's hooks are parsed and left out (B1), the
-    // run's `stderr` says so below.
-    let loaded = settings::load(&home, &cwd, false)?;
-    let gate = gate_for(request.name.as_deref(), &declared, &loaded.rules);
-    let sandbox = loaded.sandbox.clone();
-    let project_hooks_skipped = loaded.project_hooks_skipped;
-    // K2/K3: the app's `~/.axiomata/skills` beside the harness's own folders;
-    // a skill the catalog cannot use is a note, never an error.
-    let skill_dirs = [global_skills_dir()];
-    let (catalog, notes) = skills::Catalog::load(&home, &cwd, false, &skill_dirs);
-    for note in notes {
-        tracing::warn!(note, "skill left out of the harness catalog");
-    }
-    let catalog = Arc::new(catalog);
-    let model = OpenAiCompat::new(endpoint)?;
-    // D1: the prompt the core built is the run's user message; the harness's
-    // own short system prompt stays as it is.
-    let mut run_config = RunConfig::new(&cwd);
-    run_config.timeout = request.timeout;
-    run_config.skill_dirs = skill_dirs.to_vec();
-    // HS8 (B3): the `task` tool exists only for a skill that names it in its
-    // `allowed_tools` — the same declaration that is the gate's whole
-    // permission set above, so what is offered and what is allowed come from
-    // one place; a skill that declares nothing never even sees the tool.
-    run_config.subagents = declared.iter().any(|rule| rule.names_tool("task"));
-    // HS7 (B4): the owner's hooks, and the sandbox their commands run in (D5).
-    run_config.hooks = loaded.hooks;
-    run_config.sandbox = Some(sandbox.clone());
-    // D7: what the record needs, kept as the run reports it.
-    let notes = Notes::default();
-    if project_hooks_skipped {
-        notes.push(
-            "the project's own .axh/ hooks are not run: only the owner's \
-             ~/.axh/settings.json hooks run"
-                .to_owned(),
-        );
-    }
-    let mut sink = SharedSink::new(Box::new(notes.clone()));
-    // B2: the harness's own MCP config, never opencode's. A project's server
-    // is never asked about here (headless, M2): left out with a note.
-    let servers = mcp::config::load(&home, &cwd)?;
-    let servers = mcp::approval::permitted(servers, &home, &cwd, false)?;
-    // The sandbox the settings word on rides along with the shell (HS3b), so
-    // commands run guarded even though nobody asks.
-    let tools = setup::toolbox(&cwd, &catalog, gate, servers, sandbox, &mut sink).await?;
+    let rights = Rights {
+        name: request.name.as_deref(),
+        declared: &declared,
+        // A skill keeps the mode's own word for what it does not declare (B3).
+        mode: Mode::Default,
+    };
+    let mut harness = Harness::prepare(&home, &request.cwd, &rights, request.timeout).await?;
     // No signal handlers: this process is the app, not `axh`, and nothing
     // cancels a recorded run from here — the timeout ends it.
     let cancel = Cancel::new();
     let started = Instant::now();
+    let model = OpenAiCompat::new(endpoint)?;
     let outcome = axiomata_harness::run(
-        &run_config,
+        &harness.run_config,
         &model,
-        &tools,
+        &harness.tools,
         &request.prompt,
-        &mut sink,
+        &mut harness.sink,
         &cancel,
     )
     .await;
@@ -129,7 +94,7 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     let (exit_code, ended) = ending(outcome.reason, outcome.turns, request.timeout);
     Ok(AgentRunResult {
         stdout: outcome.answer.unwrap_or_default(),
-        stderr: notes.join(ended.as_deref()),
+        stderr: harness.notes.join(ended.as_deref()),
         exit_code,
         duration_ms,
         // Metered by the caller from the token counts (`spend::metered_cost_usd`,
@@ -139,6 +104,326 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
         output_tokens,
         num_turns: Some(outcome.turns),
     })
+}
+
+/// One assistant-bar turn on Glut (`docs/plans/harness-choice.md`, CP4): the chat provider's endpoint and chat
+/// model, the conversation `session_id` names read from its file and continued, the whole conversation written back
+/// after an answer. An id that names no conversation (an Opencode or Claude Code one after a harness switch, a
+/// removed file) starts a new one, as on the other harnesses. The vault's `AGENTS.md` and the module manifest are
+/// the run's instructions. The rights: the turn's declared `allowed_tools` (a connector's instruct turn), else — with
+/// tools pre-approved — everything the owner's `~/.axh` rules do not deny (Opencode's unattended `*` allow), else
+/// reads only. A turn that failed or answered nothing is an [`AxiomataError::AgentApi`].
+pub(crate) async fn chat(
+    request: ChatRequest,
+    config: &Config,
+) -> Result<ChatReply, AxiomataError> {
+    let endpoint = endpoint(config, ProviderRole::Chat, request.model.clone())?;
+    let home = settings::home_dir()?;
+    let sessions = sessions_dir();
+    let session_id = request
+        .session_id
+        .clone()
+        .filter(|id| valid_session_id(id))
+        .unwrap_or_else(new_session_id);
+    // One turn per conversation at a time, from reading it to writing it back: two overlapping turns would both
+    // build on the same history, and the later write would drop the other's.
+    let lock = session_lock(&session_id);
+    let _held = lock.lock().await;
+    let (session_id, earlier) = match load_session(&sessions, &session_id)? {
+        Loaded::Conversation(earlier) => (session_id, earlier),
+        Loaded::Missing => (session_id, Vec::new()),
+        // A file that no longer reads goes on as a new conversation rather than failing every later turn.
+        Loaded::Unreadable(reason) => {
+            tracing::warn!(%reason, session = %session_id, "a Glut conversation cannot be read; starting a new one");
+            (new_session_id(), Vec::new())
+        }
+    };
+    let instructions =
+        super::claude_code::run_context(&request.cwd, request.system_prompt_file.as_deref())?;
+    let _permit = agent_slots()
+        .acquire()
+        .await
+        .expect("agent_slots semaphore is never closed");
+    let declared = declared_rules(None, request.allowed_tools.as_deref())?;
+    let rights = Rights {
+        name: None,
+        declared: &declared,
+        mode: chat_mode(&declared, request.auto_approve_tools),
+    };
+    let mut harness = Harness::prepare(&home, &request.cwd, &rights, request.timeout).await?;
+    harness.run_config.instructions = instructions;
+    let continuing = !earlier.is_empty();
+    let started = Instant::now();
+    let model = OpenAiCompat::new(endpoint)?;
+    let (outcome, conversation) = axiomata_harness::run_continuing(
+        &harness.run_config,
+        &model,
+        &harness.tools,
+        earlier,
+        &request.message,
+        &mut harness.sink,
+        &Cancel::new(),
+    )
+    .await;
+    let api_err = |message: String| AxiomataError::AgentApi {
+        backend: BACKEND_AXH,
+        message,
+    };
+    let (_, ended) = ending(outcome.reason, outcome.turns, request.timeout);
+    if let Some(ended) = ended {
+        let mut message = harness.notes.join(Some(&ended));
+        if continuing && matches!(outcome.reason, FinishReason::Failed | FinishReason::Timeout) {
+            message.push_str(" — if a long conversation keeps failing, start a new chat");
+        }
+        return Err(api_err(message));
+    }
+    let reply_markdown = outcome.answer.unwrap_or_default().trim().to_owned();
+    if reply_markdown.is_empty() {
+        return Err(api_err("Glut returned an empty reply".to_owned()));
+    }
+    // Only an answered turn goes on record: a failed one leaves the conversation as it was.
+    save_session(&sessions, &session_id, &conversation)?;
+    let usage = outcome.usage;
+    let input_tokens = (usage.input_tokens > 0).then_some(usage.input_tokens);
+    let output_tokens = (usage.output_tokens > 0).then_some(usage.output_tokens);
+    Ok(ChatReply {
+        session_id,
+        reply_markdown,
+        is_error: false,
+        // Metered by `chat_and_record` from the token counts and the owner's price table.
+        cost_usd: None,
+        usage: (input_tokens.is_some() || output_tokens.is_some()).then(|| {
+            serde_json::json!({ "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens })
+        }),
+        input_tokens,
+        output_tokens,
+        num_turns: Some(outcome.turns),
+        duration_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+/// The gate's mode for a chat turn: a declared list keeps the mode's own word for the rest (it narrows anyway);
+/// without one, pre-approved tools are the owner's auto mode — what no rule denies runs, an `ask` is refused
+/// since nobody answers — and otherwise only reads run.
+fn chat_mode(declared: &[Rule], auto_approve: bool) -> Mode {
+    if declared.is_empty() && auto_approve {
+        Mode::Auto
+    } else {
+        Mode::Default
+    }
+}
+
+/// What a run or a chat turn is allowed: the declared rules narrow it (B3), the mode speaks for the rest.
+struct Rights<'a> {
+    name: Option<&'a str>,
+    declared: &'a [Rule],
+    mode: Mode,
+}
+
+/// The harness as one run or chat turn uses it: the run's configuration, its tools behind the gate, and the notes
+/// its events leave for the record (D7).
+struct Harness {
+    run_config: RunConfig,
+    tools: axiomata_harness::Toolbox,
+    notes: Notes,
+    sink: SharedSink,
+}
+
+impl Harness {
+    async fn prepare(
+        home: &std::path::Path,
+        cwd: &std::path::Path,
+        rights: &Rights<'_>,
+        timeout: Duration,
+    ) -> Result<Self, AxiomataError> {
+        // B3: a project's settings are never trusted in an unattended run; from
+        // them only what makes the run stricter counts — the sandbox's read
+        // secrets and the deny/ask rules. HS7 B4: the owner's hooks run here as
+        // they do in the CLI; a project's hooks are parsed and left out (B1), the
+        // run's `stderr` says so below.
+        let loaded = settings::load(home, cwd, false)?;
+        let gate = gate_for(rights, &loaded.rules);
+        let sandbox = loaded.sandbox.clone();
+        // K2/K3: the app's `~/.axiomata/skills` beside the harness's own folders;
+        // a skill the catalog cannot use is a note, never an error.
+        let skill_dirs = [global_skills_dir()];
+        let (catalog, skipped) = skills::Catalog::load(home, cwd, false, &skill_dirs);
+        for note in skipped {
+            tracing::warn!(note, "skill left out of the harness catalog");
+        }
+        let catalog = Arc::new(catalog);
+        // D1: the prompt the core built is the run's user message; the harness's
+        // own short system prompt stays as it is.
+        let mut run_config = RunConfig::new(cwd);
+        run_config.timeout = timeout;
+        run_config.skill_dirs = skill_dirs.to_vec();
+        // HS8 (B3): the `task` tool exists only for a run that names it in its
+        // `allowed_tools` — the same declaration that is the gate's whole
+        // permission set above, so what is offered and what is allowed come from
+        // one place; a run that declares nothing never even sees the tool.
+        run_config.subagents = rights.declared.iter().any(|rule| rule.names_tool("task"));
+        // HS7 (B4): the owner's hooks, and the sandbox their commands run in (D5).
+        run_config.hooks = loaded.hooks;
+        run_config.sandbox = Some(sandbox.clone());
+        // D7: what the record needs, kept as the run reports it.
+        let notes = Notes::default();
+        if loaded.project_hooks_skipped {
+            notes.push(
+                "the project's own .axh/ hooks are not run: only the owner's \
+                 ~/.axh/settings.json hooks run"
+                    .to_owned(),
+            );
+        }
+        let mut sink = SharedSink::new(Box::new(notes.clone()));
+        // B2: the harness's own MCP config, never opencode's. A project's server
+        // is never asked about here (headless, M2): left out with a note.
+        let servers = mcp::config::load(home, cwd)?;
+        let servers = mcp::approval::permitted(servers, home, cwd, false)?;
+        // The sandbox the settings word on rides along with the shell (HS3b), so
+        // commands run guarded even though nobody asks.
+        let tools = setup::toolbox(cwd, &catalog, gate, servers, sandbox, &mut sink).await?;
+        Ok(Self {
+            run_config,
+            tools,
+            notes,
+            sink,
+        })
+    }
+}
+
+/// Where Glut keeps its chat conversations, one JSON-lines file per conversation.
+fn sessions_dir() -> PathBuf {
+    crate::paths::axiomata_home()
+        .join("harness")
+        .join("sessions")
+}
+
+/// The prefix of a Glut conversation's id, so it is told apart from Opencode's and Claude Code's at a glance.
+const SESSION_PREFIX: &str = "axh-";
+
+/// The largest conversation file read back: beyond it the turn fails and asks for a new chat — no model window
+/// holds that much, and a file is never read without bound.
+const MAX_SESSION_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Unique names in this process: conversation ids and their partial files.
+static NEXT_NAME: AtomicU64 = AtomicU64::new(0);
+
+/// A new conversation id: the prefix, the time and a counter — unique in this process, and plain enough to be a
+/// file name.
+fn new_session_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    format!(
+        "{SESSION_PREFIX}{nanos:x}-{:x}-{}",
+        std::process::id(),
+        NEXT_NAME.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// Whether `id` can name a conversation file: Glut's prefix, then letters, digits and dashes only — never a path.
+fn valid_session_id(id: &str) -> bool {
+    id.len() <= 128
+        && id.starts_with(SESSION_PREFIX)
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// The lock of one conversation, shared by every turn on it in this process.
+fn session_lock(id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let mut locks = LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    // Locks nobody holds or waits for are dropped, so the map does not grow with every conversation ever held.
+    locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+    Arc::clone(locks.entry(id.to_owned()).or_default())
+}
+
+/// What reading a conversation found.
+#[derive(Debug)]
+enum Loaded {
+    Conversation(Vec<Message>),
+    Missing,
+    /// The file is there but does not read as a conversation; the reason, for the log.
+    Unreadable(String),
+}
+
+/// The conversation `id` names.
+///
+/// # Errors
+///
+/// [`AxiomataError::Io`] when the file cannot be read for another reason than its absence or its content;
+/// [`AxiomataError::AgentApi`] when it is over [`MAX_SESSION_BYTES`].
+fn load_session(dir: &Path, id: &str) -> Result<Loaded, AxiomataError> {
+    let path = dir.join(format!("{id}.jsonl"));
+    let size = match std::fs::metadata(&path) {
+        Ok(meta) => meta.len(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Loaded::Missing),
+        Err(source) => return Err(AxiomataError::Io { path, source }),
+    };
+    if size > MAX_SESSION_BYTES {
+        return Err(AxiomataError::AgentApi {
+            backend: BACKEND_AXH,
+            message: "this conversation has grown too long to go on; start a new chat".to_owned(),
+        });
+    }
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+            return Ok(Loaded::Unreadable(err.to_string()));
+        }
+        Err(source) => return Err(AxiomataError::Io { path, source }),
+    };
+    let messages = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(serde_json::from_str::<Message>)
+        .collect::<Result<Vec<_>, _>>();
+    Ok(match messages {
+        Ok(messages) => Loaded::Conversation(messages),
+        Err(err) => Loaded::Unreadable(err.to_string()),
+    })
+}
+
+/// Writes the whole conversation as `id`'s file, readable by the owner only, replacing the old one in one step.
+fn save_session(dir: &Path, id: &str, messages: &[Message]) -> Result<(), AxiomataError> {
+    let io = |path: &Path| {
+        let path = path.to_path_buf();
+        move |source| AxiomataError::Io { path, source }
+    };
+    std::fs::create_dir_all(dir).map_err(io(dir))?;
+    let mut text = String::new();
+    for message in messages {
+        let line = serde_json::to_string(message).map_err(|err| AxiomataError::AgentApi {
+            backend: BACKEND_AXH,
+            message: format!("the conversation cannot be written: {err}"),
+        })?;
+        text.push_str(&line);
+        text.push('\n');
+    }
+    let path = dir.join(format!("{id}.jsonl"));
+    // A name of its own per write, so no other write can meet it half done.
+    let partial = dir.join(format!(
+        "{id}.{}-{}.partial",
+        std::process::id(),
+        NEXT_NAME.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&partial)
+        .and_then(|mut file| {
+            file.write_all(text.as_bytes())?;
+            file.sync_all()
+        })
+        .map_err(io(&partial))
+        .and_then(|()| std::fs::rename(&partial, &path).map_err(io(&path)));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written
 }
 
 /// How a run that ran ended, for its record (D6/D7): the exit code and, for
@@ -170,8 +455,9 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
     }
 }
 
-/// The model endpoint of an `axh` run (B1): the skill provider's base URL and
-/// key, and the run's model — bare, as the API names it (D2).
+/// The model endpoint of an `axh` run (B1): the base URL and key of `role`'s
+/// provider (the skill provider for a run, the chat provider for a chat turn),
+/// and the run's model — bare, as the API names it (D2).
 ///
 /// # Errors
 ///
@@ -180,8 +466,12 @@ fn ending(reason: FinishReason, turns: u32, timeout: Duration) -> (i32, Option<S
 /// H4), has no key where one is needed (OpenRouter), or when the run carries
 /// no model — a config gap must fail loudly, never silently bill another
 /// endpoint.
-fn endpoint(config: &Config, model: Option<String>) -> Result<ModelEndpoint, AxiomataError> {
-    let id = config.agents.skill_provider;
+fn endpoint(
+    config: &Config,
+    role: ProviderRole,
+    model: Option<String>,
+) -> Result<ModelEndpoint, AxiomataError> {
+    let id = config.agents.provider_for(role);
     let gap = |reason: String| AxiomataError::InvalidAgentModel { reason };
     let settings = config.agents.providers.get(&id).ok_or_else(|| {
         gap(format!(
@@ -196,7 +486,11 @@ fn endpoint(config: &Config, model: Option<String>) -> Result<ModelEndpoint, Axi
         .ok_or_else(|| {
             gap(format!(
                 "backend axh needs a provider with a base URL (open_router or ollama); \
-                 the skill provider {} has none — set it in Settings → Providers",
+                 the {} provider {} has none — set it in Settings → Providers",
+                match role {
+                    ProviderRole::Skill => "skill",
+                    ProviderRole::Chat => "chat",
+                },
                 id.as_str()
             ))
         })?;
@@ -212,11 +506,19 @@ fn endpoint(config: &Config, model: Option<String>) -> Result<ModelEndpoint, Axi
     let model = model
         .filter(|model| !model.trim().is_empty())
         .ok_or_else(|| {
-            gap(format!(
-                "no model for an axh run: set `model:` in the skill's frontmatter \
-                 or the skill model of {}",
-                id.as_str()
-            ))
+            gap(match role {
+                ProviderRole::Skill => format!(
+                    "no model for an axh run: set `model:` in the skill's frontmatter \
+                     or the skill model of {}",
+                    id.as_str()
+                ),
+                ProviderRole::Chat => {
+                    format!(
+                        "no model for an axh chat: set the chat model of {}",
+                        id.as_str()
+                    )
+                }
+            })
         })?;
     Ok(ModelEndpoint {
         base_url,
@@ -257,22 +559,24 @@ fn declared_rules(
 /// declaration as they do everywhere else — a skill cannot declare its way
 /// past `deny: Bash(rm:*)`. Their `allow` rules are left out: they would
 /// widen a skill beyond what it declares.
-fn gate_for(name: Option<&str>, declared: &[Rule], settings: &RuleSet) -> Gate {
+fn gate_for(rights: &Rights<'_>, settings: &RuleSet) -> Gate {
     let mut gate = Gate::new(
         RuleSet {
-            allow: declared.to_vec(),
+            allow: rights.declared.to_vec(),
             ask: settings.ask.clone(),
             deny: settings.deny.clone(),
         },
-        Mode::Default,
+        rights.mode,
         Arc::new(Nobody),
     );
+    // An empty declaration narrows nothing: the mode speaks for the rest (a skill: reads only; a pre-approved chat
+    // turn: what no rule denies).
     gate.narrow(
-        match name {
+        match rights.name {
             Some(name) => format!("the skill {name}"),
             None => "this run's declaration".to_owned(),
         },
-        declared.to_vec(),
+        rights.declared.to_vec(),
     );
     gate
 }
@@ -354,6 +658,7 @@ impl Notes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::config::{ModelCost, ProviderSettings};
     use crate::skills::model::RunStatus;
     use crate::skills::runlog;
@@ -362,8 +667,21 @@ mod tests {
     use axiomata_harness::Access;
     use rusqlite::Connection;
     use serde_json::{Value, json};
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A skill's gate as `run` builds it: its declaration, the mode's own word for the rest.
+    fn skill_gate(name: Option<&str>, declared: &[Rule], settings: &RuleSet) -> Gate {
+        gate_for(
+            &Rights {
+                name,
+                declared,
+                mode: Mode::Default,
+            },
+            settings,
+        )
+    }
 
     fn config_with_provider(id: ProviderId, settings: ProviderSettings) -> Config {
         let mut config = Config::default();
@@ -385,13 +703,23 @@ mod tests {
     fn the_endpoint_is_the_skill_providers_own_and_needs_a_base_url() {
         // B1 on the default config: Anthropic, the skill provider Axiomata ships
         // with, has neither base URL nor key — no silent fallback to opencode.
-        let err = endpoint(&Config::default(), Some("claude-haiku-5-5".into())).unwrap_err();
+        let err = endpoint(
+            &Config::default(),
+            ProviderRole::Skill,
+            Some("claude-haiku-5-5".into()),
+        )
+        .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("base URL"), "{message}");
         assert!(message.contains("anthropic"), "{message}");
 
         let openrouter = config_with_provider(ProviderId::OpenRouter, openrouter_settings());
-        let resolved = endpoint(&openrouter, Some("deepseek/deepseek-chat".into())).unwrap();
+        let resolved = endpoint(
+            &openrouter,
+            ProviderRole::Skill,
+            Some("deepseek/deepseek-chat".into()),
+        )
+        .unwrap();
         assert_eq!(resolved.base_url, "https://openrouter.ai/api");
         assert_eq!(resolved.api_key.as_deref(), Some("sk-or"));
         assert_eq!(resolved.model, "deepseek/deepseek-chat");
@@ -400,7 +728,7 @@ mod tests {
         let mut keyless = openrouter_settings();
         keyless.api_key = None;
         let keyless = config_with_provider(ProviderId::OpenRouter, keyless);
-        assert!(endpoint(&keyless, Some("m".into())).is_err());
+        assert!(endpoint(&keyless, ProviderRole::Skill, Some("m".into())).is_err());
 
         // A local Ollama needs no key.
         let ollama = config_with_provider(
@@ -413,13 +741,15 @@ mod tests {
             },
         );
         assert_eq!(
-            endpoint(&ollama, Some("qwen3:8b".into())).unwrap().model,
+            endpoint(&ollama, ProviderRole::Skill, Some("qwen3:8b".into()))
+                .unwrap()
+                .model,
             "qwen3:8b"
         );
 
         // No model on the request (nothing resolved) is an error, not a guess.
-        assert!(endpoint(&ollama, None).is_err());
-        assert!(endpoint(&ollama, Some("  ".into())).is_err());
+        assert!(endpoint(&ollama, ProviderRole::Skill, None).is_err());
+        assert!(endpoint(&ollama, ProviderRole::Skill, Some("  ".into())).is_err());
     }
 
     fn bash(command: &str) -> Access {
@@ -438,7 +768,7 @@ mod tests {
             Some("Read mcp__apple-mail__search_emails"),
         )
         .unwrap();
-        let gate = gate_for(Some("mail-digest"), &declared, &RuleSet::default());
+        let gate = skill_gate(Some("mail-digest"), &declared, &RuleSet::default());
         assert_eq!(gate.narrowed_by(), ["the skill mail-digest"]);
         assert!(gate.mode_name() == "default");
         // A declared tool is allowed by its own rule …
@@ -484,7 +814,7 @@ mod tests {
         // A skill that declares only a command gets no free reads: its
         // declaration is the whole permission set — unlike declaring nothing,
         // where mode default keeps reads free.
-        let git_only = gate_for(
+        let git_only = skill_gate(
             Some("release-notes"),
             &declared_rules(Some("release-notes"), Some("Bash(git log:*)")).unwrap(),
             &RuleSet::default(),
@@ -506,7 +836,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_skill_that_declares_nothing_reads_freely_but_changes_nothing() {
-        let gate = gate_for(Some("summarize"), &[], &RuleSet::default());
+        let gate = skill_gate(Some("summarize"), &[], &RuleSet::default());
         assert!(gate.narrowed_by().is_empty());
         // Mode default: reads are free …
         assert!(
@@ -532,7 +862,7 @@ mod tests {
             ask: vec![Rule::parse("Bash(git push:*)").unwrap()],
             deny: vec![Rule::parse("Bash(rm:*)").unwrap()],
         };
-        let gate = gate_for(Some("cleanup"), &declared, &settings);
+        let gate = skill_gate(Some("cleanup"), &declared, &settings);
         // Declared, but the owner denies it.
         assert!(gate.judge("bash", &bash("rm -rf notes")).await.is_err());
         // Declared, but the owner wants to be asked — and nobody answers.
@@ -753,6 +1083,219 @@ mod tests {
             }
             (head, body)
         }
+    }
+
+    /// CP4 of harness-choice end to end: two chat turns on Glut against a fake endpoint — the second one sends
+    /// the first conversation along, under the same id, and the file holding it is the owner's alone. An id that
+    /// names no Glut conversation starts a new one.
+    #[tokio::test]
+    async fn a_glut_chat_goes_on_with_its_conversation() {
+        let mut fx = Fixture::new("chat");
+        std::fs::write(
+            fx.config.workspace_root.join("AGENTS.md"),
+            "The vault has the area Garten.",
+        )
+        .unwrap();
+        let api = FakeApi::spawn_each(vec![
+            json!({"choices": [{"message": {"role": "assistant", "content": "Noted: GLUTHEX."}}],
+                   "usage": {"prompt_tokens": 10, "completion_tokens": 3}}),
+            json!({"choices": [{"message": {"role": "assistant", "content": "GLUTHEX"}}],
+                   "usage": {"prompt_tokens": 20, "completion_tokens": 1}}),
+            json!({"choices": [{"message": {"role": "assistant", "content": "None."}}]}),
+        ])
+        .await;
+        fx.config.agents.chat_provider = ProviderId::OpenRouter;
+        fx.config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some(api.base_url.clone()),
+                api_key: Some("sk-test".into()),
+                chat_model: "chat-model".into(),
+                skill_model: "s".into(),
+            },
+        );
+        let request = |message: &str, session_id: Option<String>| ChatRequest {
+            message: message.to_owned(),
+            session_id,
+            mode: crate::agents::ChatMode::Chat,
+            cwd: fx.config.workspace_root.clone(),
+            timeout: Duration::from_secs(30),
+            system_prompt_file: None,
+            model: Some("chat-model".into()),
+            auto_approve_tools: true,
+            allowed_tools: None,
+        };
+
+        let first = chat(request("Remember GLUTHEX.", None), &fx.config)
+            .await
+            .unwrap();
+        assert!(
+            first.session_id.starts_with(SESSION_PREFIX),
+            "{}",
+            first.session_id
+        );
+        assert_eq!(first.reply_markdown, "Noted: GLUTHEX.");
+        assert_eq!(first.input_tokens, Some(10));
+        let file = sessions_dir().join(format!("{}.jsonl", first.session_id));
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let second = chat(
+            request("Which word?", Some(first.session_id.clone())),
+            &fx.config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(second.session_id, first.session_id);
+        assert_eq!(second.reply_markdown, "GLUTHEX");
+
+        // An Opencode id after a harness switch: a new conversation, not an error.
+        let third = chat(request("Which word?", Some("ses_abc".into())), &fx.config)
+            .await
+            .unwrap();
+        assert_ne!(third.session_id, first.session_id);
+
+        let seen = api.seen.lock().unwrap();
+        assert_eq!(seen[0].1["model"], "chat-model");
+        let opening = seen[0].1["messages"].to_string();
+        assert!(
+            opening.contains("The vault has the area Garten."),
+            "{opening}"
+        );
+        let messages = seen[1].1["messages"].as_array().unwrap().clone();
+        let texts: Vec<String> = messages.iter().map(|m| m["content"].to_string()).collect();
+        assert!(
+            texts.iter().any(|t| t.contains("Remember GLUTHEX.")),
+            "{texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("Noted: GLUTHEX.")),
+            "{texts:?}"
+        );
+        assert!(texts.last().unwrap().contains("Which word?"), "{texts:?}");
+        let fresh = seen[2].1["messages"].to_string();
+        assert!(!fresh.contains("GLUTHEX"), "{fresh}");
+    }
+
+    /// A turn whose model call fails is an error and leaves no conversation behind.
+    #[tokio::test]
+    async fn a_failed_glut_chat_turn_writes_no_conversation() {
+        let mut fx = Fixture::new("chat-failed");
+        let api = FakeApi::spawn(json!({"error": "nope"})).await;
+        fx.config.agents.chat_provider = ProviderId::OpenRouter;
+        fx.config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some(api.base_url.clone()),
+                api_key: Some("sk-test".into()),
+                chat_model: "chat-model".into(),
+                skill_model: "s".into(),
+            },
+        );
+        let request = ChatRequest {
+            message: "hi".to_owned(),
+            session_id: None,
+            mode: crate::agents::ChatMode::Chat,
+            cwd: fx.config.workspace_root.clone(),
+            timeout: Duration::from_secs(30),
+            system_prompt_file: None,
+            model: Some("chat-model".into()),
+            auto_approve_tools: true,
+            allowed_tools: None,
+        };
+        let err = chat(request, &fx.config).await.unwrap_err();
+        assert!(matches!(err, AxiomataError::AgentApi { .. }), "{err:?}");
+        let kept = std::fs::read_dir(sessions_dir()).map_or(0, |entries| entries.count());
+        assert_eq!(kept, 0);
+    }
+
+    /// A pre-approved chat turn runs in the owner's auto mode — but the owner's `~/.axh` deny rules still refuse,
+    /// and an ask is refused since nobody answers.
+    #[tokio::test]
+    async fn a_chat_turn_in_auto_mode_still_obeys_the_owners_deny_and_ask_rules() {
+        let settings = RuleSet {
+            allow: Vec::new(),
+            ask: vec![Rule::parse("Bash(git push:*)").unwrap()],
+            deny: vec![Rule::parse("Bash(rm:*)").unwrap()],
+        };
+        let rights = Rights {
+            name: None,
+            declared: &[],
+            mode: chat_mode(&[], true),
+        };
+        let gate = gate_for(&rights, &settings);
+        assert!(gate.narrowed_by().is_empty());
+        assert!(gate.judge("bash", &bash("ls -la")).await.is_ok());
+        assert!(gate.judge("bash", &bash("rm -rf x")).await.is_err());
+        assert!(
+            gate.judge("bash", &bash("git push origin main"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_conversation_reads_back_and_a_broken_or_huge_file_is_told_apart() {
+        let dir = unique_temp_dir("axiomata-test-axh-sessions");
+        assert!(matches!(
+            load_session(&dir, "axh-1").unwrap(),
+            Loaded::Missing
+        ));
+        let messages = vec![Message::system("s"), Message::user("hi")];
+        save_session(&dir, "axh-1", &messages).unwrap();
+        save_session(&dir, "axh-1", &messages).unwrap();
+        assert!(
+            matches!(load_session(&dir, "axh-1").unwrap(), Loaded::Conversation(read) if read == messages)
+        );
+        // No partial file is left behind.
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+
+        std::fs::write(dir.join("axh-2.jsonl"), "{not json\n").unwrap();
+        assert!(matches!(
+            load_session(&dir, "axh-2").unwrap(),
+            Loaded::Unreadable(_)
+        ));
+
+        let huge = std::fs::File::create(dir.join("axh-3.jsonl")).unwrap();
+        huge.set_len(MAX_SESSION_BYTES + 1).unwrap();
+        assert!(matches!(
+            load_session(&dir, "axh-3"),
+            Err(AxiomataError::AgentApi { .. })
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_lock_per_conversation_and_none_kept_for_conversations_nobody_holds() {
+        let first = session_lock("axh-lock-a");
+        let again = session_lock("axh-lock-a");
+        assert!(Arc::ptr_eq(&first, &again));
+        assert!(!Arc::ptr_eq(&first, &session_lock("axh-lock-b")));
+    }
+
+    #[test]
+    fn a_glut_session_id_is_never_a_path_and_a_chat_turn_is_auto_only_when_nothing_is_declared() {
+        assert!(valid_session_id(&new_session_id()));
+        assert_ne!(new_session_id(), new_session_id());
+        for bad in [
+            "ses_abc",
+            "axh-../x",
+            "axh-a/b",
+            "4b74f87c-27b3-4a24-88b4-2bc337107fbd",
+            "",
+        ] {
+            assert!(!valid_session_id(bad), "{bad}");
+        }
+        let declared = declared_rules(None, Some("mcp__apple-reminders__reminders_tasks")).unwrap();
+        assert_eq!(chat_mode(&declared, true), Mode::Default);
+        assert_eq!(chat_mode(&[], true), Mode::Auto);
+        assert_eq!(chat_mode(&[], false), Mode::Default);
     }
 
     /// The whole path HS6b exists for: a `SKILL.md` with `backend: axh` runs

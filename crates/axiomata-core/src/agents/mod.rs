@@ -339,8 +339,9 @@ pub struct ChatRequest {
     /// tool-using turn fail on unapproved calls instead of executing them —
     /// the prompt-injection guard for prompts that embed untrusted content.
     pub auto_approve_tools: bool,
-    /// Ignored by opencode (MCP servers come from its own config); kept on
-    /// the request for API stability.
+    /// The turn's tools as `allowed_tools` names them (a connector's instruct
+    /// turn: its one MCP tool). Ignored by opencode (its rules are the
+    /// session's); Claude Code and Glut take them as the turn's whole rights.
     pub allowed_tools: Option<String>,
 }
 
@@ -396,12 +397,25 @@ pub async fn chat(
             })
             .await
         }
-        // Chat on Glut arrives in harness-choice CP4; until then it refuses the turn rather than hopping back to
-        // Opencode.
-        HarnessId::Axh => Err(AxiomataError::HarnessUnavailable {
-            harness: harness.as_str().to_owned(),
-            reason: "chat on this harness is not built yet".to_owned(),
-        }),
+        // Glut has no Anthropic client yet (harness-choice D6): a hand-edited config pairing the two refuses the
+        // turn rather than reaching for another provider.
+        HarnessId::Axh if config.agents.chat_provider == ProviderId::Anthropic => {
+            Err(AxiomataError::HarnessUnavailable {
+                harness: harness.as_str().to_owned(),
+                reason: "Glut has no Anthropic client yet; choose open_router or ollama as the chat provider"
+                    .to_owned(),
+            })
+        }
+        HarnessId::Axh => {
+            axh::chat(
+                ChatRequest {
+                    model: default_chat_model(config),
+                    ..request
+                },
+                config,
+            )
+            .await
+        }
     }
 }
 
@@ -653,7 +667,7 @@ mod tests {
         );
     }
 
-    /// Glut refuses a chat turn until its runner exists, and Claude Code refuses one paired with another provider than
+    /// Glut refuses a chat turn paired with Anthropic, and Claude Code one paired with another provider than
     /// Anthropic — neither hops to Opencode. Claude Code with Anthropic gets as far as the runner, which a unit test
     /// never starts.
     #[tokio::test]
@@ -663,6 +677,7 @@ mod tests {
                 .await
                 .unwrap_err()
         };
+        // Glut with the default (Anthropic) chat provider: no client for it yet (D6).
         let mut config = Config::default();
         config.agents.chat_harness = HarnessId::Axh;
         let err = turn(config).await;
