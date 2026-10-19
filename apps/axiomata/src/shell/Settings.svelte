@@ -26,6 +26,8 @@
   import { effects } from "../core/effects";
   import { CUE_LABELS, CUE_ORDER } from "../core/sounds";
   import Icon from "../ui/Icon.svelte";
+  import ModelPicker from "../ui/ModelPicker.svelte";
+  import { loadModelCatalog, modelCatalog, providerOptions, refreshModelCatalog } from "../core/modelCatalog";
   import { playCue, unlockAudio } from "./soundPlayer";
   import { UI_FONTS, uiFont } from "../core/uiFont";
   import { customTheme, loadCustomTheme } from "../core/custom-theme";
@@ -325,6 +327,32 @@
     }
   }
 
+  /** The provider whose model list is being fetched again, if any. */
+  let refreshingModels = $state<ProviderId | null>(null);
+
+  /** The line under a provider's model fields: where its list comes from and how fresh it is. */
+  function catalogStatus(id: ProviderId): string {
+    if (id === "anthropic") return "Built-in list — Anthropic has no model list to ask without an API key.";
+    const entry = $modelCatalog?.providers[id];
+    if (!entry) return "No model list yet.";
+    if (entry.error) return `The last fetch failed: ${entry.error}`;
+    const when = entry.fetched_at ? new Date(entry.fetched_at).toLocaleString() : "never";
+    return `${entry.models.length} models, fetched ${when}; refreshed at start and once a day.`;
+  }
+
+  async function refreshModels(id: ProviderId) {
+    refreshingModels = id;
+    try {
+      const outcome = await refreshModelCatalog(id);
+      if (outcome.price_error) toast(`The prices could not be saved: ${outcome.price_error}`, "danger");
+      else if (outcome.repriced.length > 0) toast(`Prices updated: ${outcome.repriced.join(", ")}`, "info");
+    } catch (err) {
+      toast(`Could not fetch the model list: ${String(err)}`, "danger");
+    } finally {
+      refreshingModels = null;
+    }
+  }
+
   async function loadConfig() {
     try {
       const loaded = await invokeBackend<ConfigView>("get_config");
@@ -347,6 +375,7 @@
       info = null;
     }
     await loadConfig();
+    void loadModelCatalog().catch(() => modelCatalog.set(null));
     await refreshSpend();
     if (needsClaude) await refreshClaudeLogin();
   });
@@ -671,14 +700,27 @@
                     {/if}
                   </label>
                 {/if}
-                <label class="field">
+                <div class="field">
                   <span>Chat model</span>
-                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].chat_model} placeholder="e.g. claude-sonnet-5" />
-                </label>
-                <label class="field">
+                  <ModelPicker
+                    label="Chat model"
+                    bind:value={config.agents.providers[pid].chat_model}
+                    options={providerOptions($modelCatalog, pid)}
+                    placeholder="e.g. claude-sonnet-5"
+                  />
+                </div>
+                <div class="field">
                   <span>Skills/routines model</span>
-                  <input type="text" spellcheck="false" bind:value={config.agents.providers[pid].skill_model} placeholder="e.g. claude-haiku-5-5" />
-                </label>
+                  <ModelPicker
+                    label="Skills/routines model"
+                    bind:value={config.agents.providers[pid].skill_model}
+                    options={providerOptions($modelCatalog, pid)}
+                    placeholder="e.g. claude-haiku-5-5"
+                    onRefresh={pid === "anthropic" ? undefined : () => void refreshModels(pid)}
+                    refreshing={refreshingModels === pid}
+                    status={catalogStatus(pid)}
+                  />
+                </div>
                 <p class="hint">Ein <code>model:</code> in the SKILL.md frontmatter still overrides the skills model.</p>
               </div>
             {:else}

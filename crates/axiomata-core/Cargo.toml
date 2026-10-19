@@ -29,6 +29,8 @@ chrono.workspace = true
 tracing.workspace = true
 gray_matter.workspace = true
 ollama-rs.workspace = true
+# The providers' model catalogs (board card #17): OpenRouter's public list over HTTPS, Ollama's on the loopback.
+reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 ignore.workspace = true
 cron.workspace = true
 # Kills the process group of a `claude -p` run that outlives its limit, MCP servers and shell children included.

@@ -23,6 +23,7 @@ mod login_path;
 mod lsp;
 #[cfg(target_os = "macos")]
 mod menu;
+mod model_watch;
 mod plan_watch;
 mod tasks;
 mod terminal;
@@ -163,6 +164,8 @@ pub fn run() {
             claude_login::claude_sign_in_code,
             claude_login::claude_sign_out,
             commands::get_spend_summary,
+            commands::get_model_catalog,
+            commands::refresh_model_catalog,
             commands::get_dashboard_state,
             commands::save_dashboard_state,
             commands::get_terminal_settings,
@@ -379,6 +382,7 @@ pub fn run() {
             vault_watch::start(app.handle());
             plan_watch::start(app.handle());
             waiting_watch::start(app.handle());
+            model_watch::start(app.handle());
             #[cfg(target_os = "macos")]
             app.set_menu(menu::app_menu(app.handle())?)?;
             Ok(())

@@ -846,6 +846,20 @@ impl Config {
     }
 }
 
+/// Serialises every read-modify-write of the file config that is not a Settings save in this process — the engine
+/// catalog (`roster`) and the refreshed prices (`model_catalog`): read the file config, apply one change, write it,
+/// and (for engine assignments) write the rows that depend on it — all before the next change starts. Without it two
+/// concurrent changes could each write a config the other had not seen, losing an engine a row already points at.
+/// Other processes (the CLI beside the app) can still interleave, but every change re-reads the file first and
+/// applies only its own, so the window is the length of one write.
+static FILE_EDIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) fn file_edit_lock() -> std::sync::MutexGuard<'static, ()> {
+    FILE_EDIT_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
 /// Writes `bytes` to `path`, truncating any existing file. On Unix the file is
 /// created `0o600` up front (not created-then-`chmod`); a `set_permissions`
 /// fallback for an already-existing temp file is best-effort and only

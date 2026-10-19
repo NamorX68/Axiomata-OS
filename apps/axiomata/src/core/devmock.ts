@@ -1335,6 +1335,10 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "claude_sign_out":
       mockClaudeLogin = { logged_in: false, email: null, subscription: null };
       return { ...mockClaudeLogin } as T;
+    case "get_model_catalog":
+      return mockModelCatalog as T;
+    case "refresh_model_catalog":
+      return { catalog: mockModelCatalog, repriced: [], price_error: null } as T;
     case "get_spend_summary": {
       const { chat_provider: chat, skill_provider: skill } = configState.agents;
       const summaryFor = (p: ProviderId, role: string): SpendSummary => ({
@@ -2881,3 +2885,32 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       throw new Error(`devmock: no fixture for "${cmd}"`);
   }
 }
+
+/** A small model catalog for the pickers (board card #17). */
+const mockModelCatalog = {
+  version: 1,
+  providers: {
+    anthropic: {
+      models: [
+        { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+        { id: "claude-haiku-5-5", name: "Claude Haiku 5.5" },
+      ],
+      fetched_at: null,
+      error: null,
+    },
+    open_router: {
+      models: [
+        {
+          id: "deepseek/deepseek-v4.1-flash",
+          name: "DeepSeek V4.1 Flash",
+          context_length: 131072,
+          price: { input_per_m: 0.0304, output_per_m: 0.08 },
+        },
+        { id: "z-ai/glm-5.3-flash", name: "GLM 5.3 Flash", price: { input_per_m: 0.048, output_per_m: 0.16 } },
+      ],
+      fetched_at: "2026-10-19T18:00:00Z",
+      error: null,
+    },
+    ollama: { models: [{ id: "gemma4:12b-mlx", name: "gemma4:12b-mlx" }], fetched_at: null, error: "connection refused" },
+  },
+};

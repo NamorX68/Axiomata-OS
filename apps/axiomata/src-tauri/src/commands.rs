@@ -318,6 +318,25 @@ pub fn get_spend_summary(state: State<'_, CoreState>) -> Result<Vec<spend::Spend
     spend::role_spend_summaries_now(&db, &config).map_err(|err| err.to_string())
 }
 
+/// The stored model catalog of every provider (board card #17) — what the model pickers offer.
+#[tauri::command]
+pub fn get_model_catalog() -> axiomata_core::model_catalog::ModelCatalog {
+    axiomata_core::model_catalog::load()
+}
+
+/// Refreshes one provider's catalog (every provider when `provider` is `None`) and writes the new prices: the ↻ of
+/// the Settings' provider form.
+#[tauri::command]
+pub async fn refresh_model_catalog(
+    app: tauri::AppHandle,
+    state: State<'_, CoreState>,
+    provider: Option<axiomata_core::config::ProviderId>,
+) -> Result<axiomata_core::model_catalog::RefreshOutcome, String> {
+    let outcome = axiomata_core::model_catalog::refresh_and_price(&state.config, provider).await;
+    crate::model_watch::announce(&app, &outcome);
+    Ok(outcome)
+}
+
 /// Validates and saves `new_config`: writes the full config to
 /// `config.toml` (via `Config::save`, which also fixes up its `0o600`
 /// permissions) and updates the live in-memory config other commands read.

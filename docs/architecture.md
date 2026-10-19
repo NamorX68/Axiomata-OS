@@ -721,6 +721,17 @@ selected per skill by `SKILL.md`'s `backend: ollama`.
   column on `runs` (migration 0007) records which model a run used, and
   `spend::reconcile_recorded_costs` re-meters already-recorded runs/chat turns against the
   price table on every startup (best-effort; a failure is warned about, never fatal).
+- **Model catalog (board card #17, 2026-10-19).** `model_catalog.rs` fetches OpenRouter's public
+  `/api/v1/models` (with list prices) and Ollama's `/api/tags`; Anthropic is a built-in list (no key to
+  ask with). Stored in `~/.axiomata/model-catalog.json`, refreshed at app start and once a day
+  (`src-tauri/model_watch.rs`, ten minutes after a failed fetch), by the ↻ in Settings and by
+  `axiomata-cli models refresh`. Every refresh writes OpenRouter's list prices into `agents.costs` for
+  each model in use (priced keys, the OpenRouter provider's models, `openrouter/…` engines) — owner
+  decision: the list price wins — except that a paid price is never replaced by a free one (it would
+  leave the cap) and a known cache price stays when the list gives none. Written into the file config
+  under `config::file_edit_lock` (shared with the engine catalog), validated like a Settings save.
+  Model fields in Settings and the Studio's engine editor are a `ui/ModelPicker.svelte` over it, with
+  free entry kept.
 - **Runtime mutation.** The settings dialog is the first thing that writes `Config` at
   runtime, so `AxiomataCore.config` is `Arc<RwLock<Config>>` (many reads, rare writes). Every
   read site clones the `Config` out from under the lock in its own statement (`read_config()`

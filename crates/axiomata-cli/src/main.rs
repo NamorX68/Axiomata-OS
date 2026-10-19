@@ -6,6 +6,7 @@
 mod files_cmd;
 mod harness_cmd;
 mod inbox_cmd;
+mod models_cmd;
 
 use std::path::{Path, PathBuf};
 
@@ -72,6 +73,11 @@ enum Command {
     Skills {
         #[command(subcommand)]
         action: SkillsAction,
+    },
+    /// The providers' model catalogs and their prices: refresh | list.
+    Models {
+        #[command(subcommand)]
+        action: models_cmd::ModelsAction,
     },
     /// Scheduled routines: list, create, enable/disable, or run one poll pass.
     Routines {
@@ -766,6 +772,7 @@ async fn main() -> Result<()> {
                 skills_reseed(force)?
             }
         },
+        Command::Models { action } => return models_cmd::run(&core, action).await,
         Command::Routines { action } => return routines_cmd(&core, action).await,
         Command::Board { action } => return board_cmd(&core, action).await,
         Command::Files { action } => files_cmd::run(&core, action)?,

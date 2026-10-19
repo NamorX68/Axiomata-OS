@@ -48,6 +48,7 @@ cargo test -p axiomata-core                # run just the core engine's tests
 cargo run -p axiomata-cli                  # headless: init the core, print status, exit
 cargo run -p axiomata-cli -- --help        # every subcommand; each has its own --help. The groups:
 #   list-skills | run-skill <name> | list-runs | get-run <id> | skills reseed [--force]
+#   models refresh|list [--provider p]      (provider model catalogs; refresh also writes OpenRouter's prices into agents.costs)
 #   memory sync|status                       (the workspace router blocks)
 #   routines list|add|edit|delete|tick       (cron is 6–7 fields, seconds first)
 #   board list|new|rename|delete|add|edit|move|claim|done|verify|archive   (Kanban; claim is a CAS)

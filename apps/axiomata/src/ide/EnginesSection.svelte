@@ -24,6 +24,8 @@
   import { engineLine, refreshEngines } from "./rosterStore";
   import Icon from "../ui/Icon.svelte";
   import IconButton from "../ui/IconButton.svelte";
+  import ModelPicker from "../ui/ModelPicker.svelte";
+  import { engineOptions, loadModelCatalog, modelCatalog } from "../core/modelCatalog";
 
   /** Called after the catalog changed, so a sibling (the roles' engine picker) can reload. */
   let { onChange = () => {} }: { onChange?: () => void } = $props();
@@ -110,7 +112,10 @@
     }
   }
 
-  onMount(reload);
+  onMount(() => {
+    void reload();
+    void loadModelCatalog().catch(() => modelCatalog.set(null));
+  });
 </script>
 
 <section class="split" class:has-form={form !== null}>
@@ -175,16 +180,16 @@
           </select>
         </label>
       </div>
-      <label class="field">
+      <div class="field">
         <span>Model</span>
-        <input
-          type="text"
-          spellcheck="false"
+        <ModelPicker
+          label="Model"
           value={form.model ?? ""}
-          oninput={(e) => form && (form.model = e.currentTarget.value)}
+          options={engineOptions($modelCatalog, form.harness)}
+          onchange={(value) => form && (form.model = value)}
           placeholder="empty = the harness picks; Opencode: provider/model"
         />
-      </label>
+      </div>
       <details class="advanced" open={advancedProblem}>
         <summary>Advanced</summary>
         <label class="field">

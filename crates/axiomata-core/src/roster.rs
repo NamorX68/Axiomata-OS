@@ -6,7 +6,7 @@
 //! something still uses, and the paths under `~/.axiomata`.
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, MutexGuard, RwLock};
+use std::sync::RwLock;
 
 use axiomata_roster::{
     Billing, Engine, Harness, Loaded, MAX_IDENT_LEN, MAX_LABEL_CHARS, Role, RosterError, Source,
@@ -86,19 +86,6 @@ fn fresh_id(engines: &BTreeMap<String, Engine>, agent: &Agent) -> String {
     id
 }
 
-/// Serialises every change of the engine catalog in this process: read the file config, apply one change, write it,
-/// and (for assignments) write the rows that depend on it — all before the next change starts. Without it a
-/// concurrent save and derivation could each write a map the other had not seen, losing an engine that a row
-/// already points at. Other processes (the CLI beside the app) can still interleave, but every change re-reads the
-/// file first and applies only its own, so the window is the length of one write.
-static ENGINES_LOCK: Mutex<()> = Mutex::new(());
-
-fn engines_lock() -> MutexGuard<'static, ()> {
-    ENGINES_LOCK
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-}
-
 /// The file config, freshly read: the base every engine change is applied to.
 ///
 /// Engines are written into **this** and never by saving the live config: that one still holds the workspace root
@@ -176,7 +163,7 @@ pub fn sync_agents(db: &Connection, config: &mut Config) -> Result<usize> {
     if agents.is_empty() {
         return Ok(0);
     }
-    let _guard = engines_lock();
+    let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
     let mut engines = disk.agents.engines.clone();
     let assignments = derive_engines(&agents, &mut engines);
@@ -253,7 +240,7 @@ pub fn engine_overview(db: &Connection, config: &Config) -> Result<Vec<EngineEnt
 /// [`RosterError::Invalid`] if the engine is not valid; a failing read or save (then `config` is unchanged).
 pub fn save_engine(config: &mut Config, engine: Engine) -> Result<()> {
     engine.validate()?;
-    let _guard = engines_lock();
+    let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
     disk.agents.engines.insert(engine.id.clone(), engine);
     disk.save()?;
@@ -474,7 +461,7 @@ pub fn update_agent_on_engine(
 ///
 /// [`RosterError::Invalid`] while a session or a role still uses it; a failing read or save.
 pub fn delete_engine(db: &Connection, config: &mut Config, id: &str) -> Result<bool> {
-    let _guard = engines_lock();
+    let _guard = crate::config::file_edit_lock();
     let mut disk = disk_config()?;
     if !disk.agents.engines.contains_key(id) {
         config.agents.engines = disk.agents.engines;

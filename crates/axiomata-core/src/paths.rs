@@ -110,6 +110,12 @@ pub fn custom_theme_path() -> PathBuf {
     axiomata_home().join("theme.css")
 }
 
+/// Path to the providers' model catalog (`~/.axiomata/model-catalog.json`), a cache of what each provider offers
+/// (board card #17, `crate::model_catalog`).
+pub fn model_catalog_path() -> PathBuf {
+    axiomata_home().join("model-catalog.json")
+}
+
 /// Path to the Terminal module's global preferences file
 /// (`~/.axiomata/terminal-settings.json`) — Checkpoint 5d of
 /// `docs/plans/terminal.md`. Deliberately its own file, not a section of
