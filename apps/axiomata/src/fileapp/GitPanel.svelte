@@ -303,19 +303,6 @@
         {#if status.behind > 0}<span class="count" title="Commits on the upstream you do not have">↓ {status.behind}</span>{/if}
         {#if branchMenu}
           <div class="branch-menu" role="menu">
-            {#each branchList as branch (branch.name)}
-              <button
-                type="button"
-                role="menuitem"
-                class:current={branch.current}
-                disabled={branch.current}
-                onclick={() => void switchTo(branch.name)}
-              >
-                <span class="check" aria-hidden="true">{#if branch.current}<Icon name="check" size="sm" />{/if}</span>
-                <span class="name">{branch.name}</span>
-                {#if branch.upstream}<small>{branch.upstream}</small>{/if}
-              </button>
-            {/each}
             <div class="new-branch">
               <Icon name="plus" size="sm" />
               <input
@@ -329,6 +316,19 @@
               />
               <button type="button" class="ax-btn" disabled={!newBranch.trim()} onclick={() => void makeBranch()}>Create</button>
             </div>
+            {#each branchList as branch (branch.name)}
+              <button
+                type="button"
+                role="menuitem"
+                class:current={branch.current}
+                disabled={branch.current}
+                onclick={() => void switchTo(branch.name)}
+              >
+                <span class="check" aria-hidden="true">{#if branch.current}<Icon name="check" size="sm" />{/if}</span>
+                <span class="name">{branch.name}</span>
+                {#if branch.upstream}<small>{branch.upstream}</small>{/if}
+              </button>
+            {/each}
           </div>
         {/if}
       </span>
@@ -595,13 +595,18 @@
     color: var(--ax-success);
   }
 
+  /* Creating a branch leads the menu and stays in view while a long list scrolls under it. */
   .new-branch {
+    position: sticky;
+    top: calc(-1 * var(--ax-space-1));
+    z-index: 1;
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    margin-top: var(--ax-space-1);
-    padding: var(--ax-space-2) var(--ax-space-2) var(--ax-space-1);
-    border-top: 1px solid var(--ax-border);
+    margin: calc(-1 * var(--ax-space-1)) calc(-1 * var(--ax-space-1)) var(--ax-space-1);
+    padding: var(--ax-space-2);
+    border-bottom: 1px solid var(--ax-border);
+    background: var(--ax-elev-3);
     color: var(--ax-text-muted);
   }
 
