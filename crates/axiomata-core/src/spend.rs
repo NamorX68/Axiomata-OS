@@ -95,15 +95,14 @@ pub fn spent_usd_since(
 
 /// Midnight (local time) opening `date`, as a UTC instant.
 fn local_midnight_utc(date: chrono::NaiveDate, fallback: DateTime<Utc>) -> DateTime<Utc> {
-    let midnight = date
-        .and_hms_opt(0, 0, 0)
-        .expect("00:00:00 is always a valid time");
-    Local
-        .from_local_datetime(&midnight)
-        .earliest()
+    // A DST "spring forward" gap at local midnight (some zones shift at
+    // 00:00) is no real instant: the day then begins at the first hour that
+    // exists. Falling back to `now` would open a fresh budget for the rest of
+    // that day — the limits must not fail open.
+    (0..=3)
+        .filter_map(|hour| date.and_hms_opt(hour, 0, 0))
+        .find_map(|start| Local.from_local_datetime(&start).earliest())
         .map(|dt| dt.with_timezone(&Utc))
-        // A DST "spring forward" gap at local midnight is not a real-world
-        // instant; fall back rather than panic.
         .unwrap_or(fallback)
 }
 

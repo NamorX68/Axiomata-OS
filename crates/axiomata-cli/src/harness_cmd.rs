@@ -176,17 +176,26 @@ pub async fn run(core: &AxiomataCore, action: HarnessAction) -> Result<()> {
     let servers = mcp::config::load(&home, &cwd)?;
     let servers = mcp::approval::permitted(servers, &home, &cwd, mcp::approval::interactive())?;
     // The web search with the owner's keys and the app's limits, as in the app's own runs (glut-round CP3).
-    let search = axiomata_core::web_search::web_search_tool(&config);
-    let tools = setup::toolbox(
+    let extras = setup::Extras {
+        search: axiomata_core::web_search::web_search_tool(&config),
+        direct: axiomata_core::agent_entry::cli_direct_program()
+            .into_iter()
+            .collect(),
+    };
+    let mut tools = setup::toolbox(
         &cwd,
         &catalog,
         gate,
         servers,
         built.sandbox,
-        search,
+        extras,
         &mut sink,
     )
     .await?;
+    // A skill run's task is the skill's body already: loading skills would only cost a turn (glut-round CP4).
+    if skill.is_some() {
+        tools.withdraw(axiomata_harness::skills::tool::NAME);
+    }
     // Ctrl-C, SIGTERM and SIGHUP end the run with its last line and every background job stopped.
     let cancel = Cancel::new();
     axiomata_harness::run::cancel_on_signals(&cancel);

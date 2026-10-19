@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axiomata_harness::tools::search::{
-    BudgetVerdict, Provider, SearchBudget, SearchKeys, WebSearch,
+    BudgetVerdict, Provider, SearchBudget, SearchKeys, Ticket, WebSearch,
 };
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::config::Config;
 use crate::paths;
@@ -55,49 +55,79 @@ impl DbBudget {
 }
 
 impl SearchBudget for DbBudget {
-    fn allow(&self, provider: Provider) -> BudgetVerdict {
-        // A budget that cannot be read closes the search: the limits exist so no search costs unmeant money.
-        let verdict = self
-            .open()
-            .and_then(|conn| verdict(&conn, provider, self.daily, self.tavily_monthly, Utc::now()));
+    fn reserve(&self, provider: Provider) -> BudgetVerdict {
+        // A budget that cannot be read or written closes the search: the limits exist so no search costs unmeant
+        // money, and a search that could not be counted would be a free one.
+        let verdict = self.open().and_then(|mut conn| {
+            reserve(
+                &mut conn,
+                provider,
+                self.daily,
+                self.tavily_monthly,
+                Utc::now(),
+            )
+        });
         verdict.unwrap_or_else(|err| {
             BudgetVerdict::Closed(format!("the search limits cannot be read: {err}"))
         })
     }
 
-    fn record(&self, provider: Provider) {
-        if let Err(err) = self
-            .open()
-            .and_then(|conn| record(&conn, provider, Utc::now()))
-        {
-            tracing::warn!(%err, provider = provider.as_str(), "a web search could not be counted");
+    fn release(&self, ticket: Ticket) {
+        if let Err(err) = self.open().and_then(|conn| release(&conn, ticket)) {
+            // Left counted: a search too many in the count is the safe side.
+            tracing::warn!(%err, "a free web search could not be given back");
         }
     }
 }
 
-/// What the limits say about `provider` at `now`.
-fn verdict(
-    conn: &Connection,
+/// [`refusal`] and, when there is none, the search, its row — in one immediate transaction, so two runs cannot both see
+/// the day's last search free.
+fn reserve(
+    conn: &mut Connection,
     provider: Provider,
     daily: u32,
     tavily_monthly: u32,
     now: DateTime<Utc>,
 ) -> rusqlite::Result<BudgetVerdict> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let verdict = match refusal(&tx, provider, daily, tavily_monthly, now)? {
+        Some(refused) => refused,
+        None => BudgetVerdict::Allow(Ticket(record(&tx, provider, now)?)),
+    };
+    tx.commit()?;
+    Ok(verdict)
+}
+
+/// Removes the search `ticket` counted.
+fn release(conn: &Connection, ticket: Ticket) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM web_searches WHERE id = ?1", params![ticket.0])
+        .map(|_| ())
+}
+
+/// Why the limits refuse a search with `provider` at `now` ([`BudgetVerdict::Closed`] or [`BudgetVerdict::Skip`]), or
+/// `None` when they allow it.
+fn refusal(
+    conn: &Connection,
+    provider: Provider,
+    daily: u32,
+    tavily_monthly: u32,
+    now: DateTime<Utc>,
+) -> rusqlite::Result<Option<BudgetVerdict>> {
     let today = count_since(conn, None, start_of_local_day(now))?;
     if today >= u64::from(daily) {
-        return Ok(BudgetVerdict::Closed(format!(
+        return Ok(Some(BudgetVerdict::Closed(format!(
             "the daily web search limit ({daily}) is reached; it opens again tomorrow"
-        )));
+        ))));
     }
     if provider == Provider::Tavily {
         let month = count_since(conn, Some(provider), start_of_local_month(now))?;
         if month >= u64::from(tavily_monthly) {
-            return Ok(BudgetVerdict::Skip(format!(
+            return Ok(Some(BudgetVerdict::Skip(format!(
                 "its monthly limit ({tavily_monthly}) is reached"
-            )));
+            ))));
         }
     }
-    Ok(BudgetVerdict::Allow)
+    Ok(None)
 }
 
 fn count_since(
@@ -120,17 +150,19 @@ fn count_since(
     }
 }
 
-fn record(conn: &Connection, provider: Provider, now: DateTime<Utc>) -> rusqlite::Result<()> {
+/// Counts one search; its row's id.
+fn record(conn: &Connection, provider: Provider, now: DateTime<Utc>) -> rusqlite::Result<i64> {
     conn.execute(
         "INSERT INTO web_searches (provider, searched_at) VALUES (?1, ?2)",
         params![provider.as_str(), now.to_rfc3339()],
-    )
-    .map(|_| ())
+    )?;
+    Ok(conn.last_insert_rowid())
 }
 
 /// Today's searches and Tavily's of this month, for the Settings dialog.
 pub fn usage(db: &Path) -> rusqlite::Result<(u64, u64)> {
     let conn = Connection::open(db)?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
     let now = Utc::now();
     Ok((
         count_since(&conn, None, start_of_local_day(now))?,
@@ -157,55 +189,71 @@ mod tests {
     fn the_daily_limit_closes_every_provider_and_tavilys_month_skips_only_tavily() {
         let (_path, conn) = db();
         let now = Utc::now();
-        assert_eq!(
-            verdict(&conn, Provider::Exa, 2, 1, now).unwrap(),
-            BudgetVerdict::Allow
-        );
+        assert_eq!(refusal(&conn, Provider::Exa, 2, 1, now).unwrap(), None);
         record(&conn, Provider::Tavily, now).unwrap();
         // One Tavily search this month: Tavily is used up, the others are not.
         assert!(matches!(
-            verdict(&conn, Provider::Tavily, 2, 1, now).unwrap(),
-            BudgetVerdict::Skip(_)
+            refusal(&conn, Provider::Tavily, 2, 1, now).unwrap(),
+            Some(BudgetVerdict::Skip(_))
         ));
-        assert_eq!(
-            verdict(&conn, Provider::TinyFish, 2, 1, now).unwrap(),
-            BudgetVerdict::Allow
-        );
+        assert_eq!(refusal(&conn, Provider::TinyFish, 2, 1, now).unwrap(), None);
         record(&conn, Provider::Exa, now).unwrap();
         // Two searches today: the day is closed for every provider.
-        let closed = verdict(&conn, Provider::Exa, 2, 1, now).unwrap();
+        let closed = refusal(&conn, Provider::Exa, 2, 1, now).unwrap();
         assert!(
-            matches!(&closed, BudgetVerdict::Closed(reason) if reason.contains("(2)")),
+            matches!(&closed, Some(BudgetVerdict::Closed(reason)) if reason.contains("(2)")),
             "{closed:?}"
         );
     }
 
+    /// The day and the month start at local midnight: a search a second before belongs to the one before.
     #[test]
-    fn yesterdays_searches_do_not_count_today() {
+    fn the_day_and_the_month_begin_at_local_midnight() {
         let (_path, conn) = db();
         let now = Utc::now();
-        record(&conn, Provider::Exa, now - Duration::days(2)).unwrap();
+        let day = start_of_local_day(now);
+        record(&conn, Provider::Exa, day - Duration::seconds(1)).unwrap();
+        assert_eq!(count_since(&conn, None, day).unwrap(), 0);
+        record(&conn, Provider::Exa, day).unwrap();
+        assert_eq!(count_since(&conn, None, day).unwrap(), 1);
+
+        let month = start_of_local_month(now);
+        record(&conn, Provider::Tavily, month - Duration::seconds(1)).unwrap();
+        // Last month's Tavily search and today's Exa ones leave Tavily's month at 0.
         assert_eq!(
-            verdict(&conn, Provider::Exa, 1, 1000, now).unwrap(),
-            BudgetVerdict::Allow
+            count_since(&conn, Some(Provider::Tavily), month).unwrap(),
+            0
         );
+        assert_eq!(refusal(&conn, Provider::Tavily, 50, 1, now).unwrap(), None);
+        record(&conn, Provider::Tavily, month).unwrap();
+        assert!(matches!(
+            refusal(&conn, Provider::Tavily, 50, 1, now).unwrap(),
+            Some(BudgetVerdict::Skip(_))
+        ));
     }
 
     #[test]
-    fn the_budget_counts_through_its_own_connection() {
+    fn the_budget_counts_when_it_allows_and_gives_back_a_ticket() {
         let (path, _conn) = db();
         let budget = DbBudget {
             db: path.clone(),
             daily: 1,
             tavily_monthly: 1000,
         };
-        assert_eq!(budget.allow(Provider::Exa), BudgetVerdict::Allow);
-        budget.record(Provider::Exa);
+        let BudgetVerdict::Allow(ticket) = budget.reserve(Provider::Exa) else {
+            panic!("the first search is allowed");
+        };
+        assert_eq!(usage(&path).unwrap(), (1, 0));
         assert!(matches!(
-            budget.allow(Provider::TinyFish),
+            budget.reserve(Provider::TinyFish),
             BudgetVerdict::Closed(_)
         ));
-        assert_eq!(usage(&path).unwrap(), (1, 0));
+        budget.release(ticket);
+        assert_eq!(usage(&path).unwrap(), (0, 0));
+        assert!(matches!(
+            budget.reserve(Provider::TinyFish),
+            BudgetVerdict::Allow(_)
+        ));
     }
 
     #[test]
@@ -216,7 +264,7 @@ mod tests {
             tavily_monthly: 1000,
         };
         assert!(matches!(
-            budget.allow(Provider::Exa),
+            budget.reserve(Provider::Exa),
             BudgetVerdict::Closed(_)
         ));
     }

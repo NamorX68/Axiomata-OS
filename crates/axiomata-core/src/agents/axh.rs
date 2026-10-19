@@ -370,9 +370,20 @@ impl Harness {
         // The sandbox the settings word on rides along with the shell (HS3b), so
         // commands run guarded even though nobody asks.
         // CP3 of glut-round: the web search with the owner's keys and the app's limits.
-        let search = crate::web_search::web_search_tool(config);
-        let tools =
-            setup::toolbox(cwd, &catalog, gate, servers, sandbox, search, &mut sink).await?;
+        let extras = setup::Extras {
+            search: crate::web_search::web_search_tool(config),
+            // W8: a declared `axiomata-cli …` command reaches the app's database, as on the other harnesses.
+            direct: crate::agent_entry::cli_direct_program()
+                .into_iter()
+                .collect(),
+        };
+        let mut tools =
+            setup::toolbox(cwd, &catalog, gate, servers, sandbox, extras, &mut sink).await?;
+        // A skill run's task is the skill's body already: loading skills would only cost a turn (glut-round CP4,
+        // measured in CP0: the model loaded the running skill again).
+        if rights.name.is_some() {
+            tools.withdraw(skills::tool::NAME);
+        }
         Ok(Self {
             run_config,
             tools,
@@ -922,46 +933,97 @@ mod tests {
     /// web and write their `News/` file, inbox-sort moves without overwriting, todo-to-kanban lists and adds cards.
     #[tokio::test]
     async fn the_bundled_skills_declare_what_they_do_and_no_more() {
-        let news = bundled_rights(
-            "news-rss",
-            include_str!("../../resources/news-rss/SKILL.md"),
-        );
-        for allowed in [
-            "grep -rl -F \"https://example.org/a\" News/",
-            "date '+%Y-%m-%d %H:%M'",
-            "mkdir -p News",
-        ] {
-            assert!(
-                news.judge("bash", &bash(allowed)).await.is_ok(),
-                "{allowed}"
-            );
-        }
         let page = Access::Network {
             host: "huggingface.co".into(),
         };
-        assert!(news.judge("web_fetch", &page).await.is_ok());
-        let own_file = Access::Edit {
-            path: "News/KI-News RSS.md".into(),
-        };
-        assert!(news.judge("edit_file", &own_file).await.is_ok());
-        for elsewhere in ["AGENTS.md", "Inbox/note.md"] {
-            let edit = Access::Edit {
-                path: elsewhere.into(),
-            };
-            assert!(
-                news.judge("write_file", &edit).await.is_err(),
-                "{elsewhere}"
-            );
-        }
-        for refused in [
-            "rm News/KI-News RSS.md",
-            "curl https://example.org",
-            "mkdir -p Other",
+        for (name, skill_md, own_file) in [
+            (
+                "news-rss",
+                include_str!("../../resources/news-rss/SKILL.md"),
+                "News/KI-News RSS.md",
+            ),
+            (
+                "news-web",
+                include_str!("../../resources/news-web/SKILL.md"),
+                "News/KI-News Web.md",
+            ),
+            (
+                "model-news",
+                include_str!("../../resources/model-news/SKILL.md"),
+                "News/KI-Modelle.md",
+            ),
         ] {
+            let news = bundled_rights(name, skill_md);
+            for allowed in ["date '+%Y-%m-%d %H:%M'", "mkdir -p News"] {
+                assert!(
+                    news.judge("bash", &bash(allowed)).await.is_ok(),
+                    "{name}: {allowed}"
+                );
+            }
+            assert!(news.judge("web_fetch", &page).await.is_ok(), "{name}");
+            // `News/` read and searched, its own file written — nothing else of the vault or beyond it: untrusted
+            // pages plus the web would otherwise be a way out for what the skill can read, or in for what others read.
             assert!(
-                news.judge("bash", &bash(refused)).await.is_err(),
-                "{refused}"
+                news.judge(
+                    "read_file",
+                    &Access::Read {
+                        path: own_file.into()
+                    }
+                )
+                .await
+                .is_ok()
             );
+            assert!(
+                news.judge(
+                    "grep",
+                    &Access::Read {
+                        path: "News/".into()
+                    }
+                )
+                .await
+                .is_ok()
+            );
+            assert!(
+                news.judge(
+                    "edit_file",
+                    &Access::Edit {
+                        path: own_file.into()
+                    }
+                )
+                .await
+                .is_ok()
+            );
+            let other = Access::Edit {
+                path: "News/AGENTS.md".into(),
+            };
+            assert!(news.judge("write_file", &other).await.is_err(), "{name}");
+            for elsewhere in ["AGENTS.md", "Inbox/note.md", "."] {
+                let read = Access::Read {
+                    path: elsewhere.into(),
+                };
+                assert!(
+                    news.judge("read_file", &read).await.is_err(),
+                    "{name}: {elsewhere}"
+                );
+                let edit = Access::Edit {
+                    path: elsewhere.into(),
+                };
+                assert!(
+                    news.judge("write_file", &edit).await.is_err(),
+                    "{name}: {elsewhere}"
+                );
+            }
+            for refused in [
+                "grep -rl -F \"https://example.org/a\" News/",
+                "rm News/KI-News RSS.md",
+                "curl https://example.org",
+                "mkdir -p Other",
+            ] {
+                assert!(
+                    news.judge("bash", &bash(refused)).await.is_err(),
+                    "{name}: {refused}"
+                );
+            }
         }
 
         let inbox = bundled_rights(
@@ -970,11 +1032,18 @@ mod tests {
         );
         assert!(
             inbox
-                .judge("bash", &bash("mv -n \"Inbox/a.md\" \"Arbeit/a.md\""))
+                .judge(
+                    "bash",
+                    &bash("axiomata-cli inbox move \"a.md\" \"Arbeit/Rust\"")
+                )
                 .await
                 .is_ok()
         );
-        for refused in ["mv \"Inbox/a.md\" \"Arbeit/a.md\"", "rm Inbox/a.md"] {
+        for refused in [
+            "mv -n -f \"Inbox/a.md\" AGENTS.md",
+            "mv \"Inbox/a.md\" x",
+            "rm Inbox/a.md",
+        ] {
             assert!(
                 inbox.judge("bash", &bash(refused)).await.is_err(),
                 "{refused}"

@@ -5,6 +5,7 @@
 
 mod files_cmd;
 mod harness_cmd;
+mod inbox_cmd;
 
 use std::path::{Path, PathBuf};
 
@@ -118,6 +119,11 @@ enum Command {
     /// Serve the MCP tools (mailbox, board steps) for one agent session on stdin/stdout. Started by the studio for a
     /// session, with `AXIOMATA_AGENT_ID` in the environment; not meant to be run by hand.
     McpServe,
+    /// The vault's inbox: move a note into an existing folder, never overwriting (the `inbox-sort` skill's one move).
+    Inbox {
+        #[command(subcommand)]
+        action: inbox_cmd::InboxAction,
+    },
     /// The `PermissionRequest` hook of a studio session's Claude Code (`docs/plans/permission-asks.md`): stores the
     /// request from stdin, waits for the owner's answer in the app and prints it for Claude Code — or nothing, and
     /// Claude Code asks in its pane. Started by the hook; not meant to be run by hand.
@@ -728,9 +734,14 @@ fn init_tracing() {
 async fn main() -> Result<()> {
     init_tracing();
     let cli = Cli::parse();
+    // Before the core: a skill runs it in Glut's sandbox, which hides `~/.axiomata`, and it needs nothing from there.
+    let command = match cli.command.unwrap_or(Command::Status) {
+        Command::Inbox { action } => return inbox_cmd::run(action),
+        command => command,
+    };
     let core = AxiomataCore::init().context("failed to initialize the Axiomata-OS core engine")?;
 
-    match cli.command.unwrap_or(Command::Status) {
+    match command {
         Command::Status => print_status(&core),
         Command::ListSkills => list_skills()?,
         Command::RunSkill { name } => return run_skill(&core, &name).await,
@@ -765,6 +776,7 @@ async fn main() -> Result<()> {
                 },
         } => return import_obsidian(&core, &path, dry_run, !skip_secrets).await,
         Command::McpServe => return mcp_serve(&core),
+        Command::Inbox { .. } => unreachable!("answered before the core starts"),
         Command::PermissionHook { agent } => return permission_hook(&core, agent),
         Command::Graph => graph_summary(&core)?,
         Command::Harness { action } => return harness_cmd::run(&core, action).await,

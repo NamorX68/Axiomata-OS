@@ -37,7 +37,8 @@ use crate::paths::AXIOMATA_HOME_ENV;
 pub const SERVER_NAME: &str = "axiomata";
 /// Overrides where the studio looks for the CLI the server is started from (A28); a bundled app puts it beside itself.
 pub const CLI_OVERRIDE_ENV: &str = "AXIOMATA_CLI";
-const CLI_NAME: &str = "axiomata-cli";
+/// The CLI's file name, beside the app in a bundle and in a dev build alike.
+pub const CLI_NAME: &str = "axiomata-cli";
 /// The MCP configuration file of Claude Code in the channel directory.
 const CLAUDE_CONFIG_FILE: &str = "mcp.json";
 /// Variables the server needs to find the same data as the studio when the owner moved either of them.
@@ -122,6 +123,20 @@ pub fn cli_path() -> Option<PathBuf> {
         std::env::var_os(CLI_OVERRIDE_ENV),
         std::env::current_exe().ok(),
     )
+}
+
+/// The app's CLI as a program a Glut run starts directly when its declaration names the exact command (glut-round
+/// W8): `axiomata-cli`, from [`cli_path`], with the app's `AXIOMATA_HOME` when one is set — the sandbox hides
+/// `~/.axiomata`, where the CLI's database is. `None` without a CLI.
+pub fn cli_direct_program() -> Option<axiomata_harness::tools::shell::DirectProgram> {
+    let env = std::env::var_os(crate::paths::AXIOMATA_HOME_ENV)
+        .map(|home| vec![(crate::paths::AXIOMATA_HOME_ENV.into(), home)])
+        .unwrap_or_default();
+    Some(axiomata_harness::tools::shell::DirectProgram {
+        name: CLI_NAME.to_owned(),
+        path: cli_path()?,
+        env,
+    })
 }
 
 fn cli_path_from(override_path: Option<OsString>, exe: Option<PathBuf>) -> Option<PathBuf> {

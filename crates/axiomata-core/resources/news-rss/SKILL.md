@@ -3,7 +3,7 @@ name: news-rss
 description: Reads the news feeds from the owner's AI source list (RSS or Atom) and adds what is new — a short German summary and the link to the original per article — to one running file, News/KI-News RSS.md; skips what is already in it.
 prepend_files: ["KI/ai-llm-agents-quellenliste.md"]
 timeout_secs: 900
-allowed_tools: "Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)"
+allowed_tools: "Read(News/**) WebFetch Edit(News/KI-News RSS.md) Bash(mkdir -p News) Bash(date:*)"
 ---
 
 # News from the feeds
@@ -26,8 +26,9 @@ Steps:
 3. Take the items of the **last 2 days** (publication date in the feed), newest first, at most **3 per
    source**. The arXiv feeds and Hugging Face carry hundreds of items a day: of those take at most **3 in
    total per feed**, the ones most clearly about LLMs, agents, coding agents or evaluation.
-4. Skip an item whose link is already known: run `grep -rl -F "<link>" News/` before writing (the folder
-   may not exist yet — then nothing is known). Same article, same link, never twice.
+4. Skip an item whose link is already known: search `News/` for it with the search
+   tool before writing (`grep` over `News/**` only — you may read nothing else; the folder may not exist
+   yet — then nothing is known). Same article, same link, never twice.
 5. Write the new items into **one file: `News/KI-News RSS.md`** — not one file per article. At most
    **20** new items in this run; the priority sources come first.
    - If the file does not exist, create it (`mkdir -p News`) with exactly this start; the marker line stays

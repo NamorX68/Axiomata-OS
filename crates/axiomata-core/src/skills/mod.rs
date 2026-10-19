@@ -329,7 +329,7 @@ mod tests {
             let rules = axiomata_harness::skills::rules_of(declared)
                 .unwrap_or_else(|reason| panic!("{name}: {reason}"));
             assert!(
-                rules.iter().any(|rule| rule.text() == "Read"),
+                rules.iter().any(|rule| rule.text().starts_with("Read")),
                 "{name} cannot read"
             );
         }

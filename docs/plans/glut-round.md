@@ -1,6 +1,6 @@
 # Glut rund — web, fewer tokens, read access, streaming, identity
 
-Status: **approved 2026-10-19**, owner decisions W1–W8 taken, CP0 measured, CP1–CP3 and W8 built.
+Status: **approved 2026-10-19**, owner decisions W1–W8 taken, CP0 measured, CP1–CP3 and W8 built, reviewed and audited; CP4 in part.
 
 ## Why
 
@@ -149,14 +149,56 @@ was counted.
 ## W8 — built (2026-10-19)
 
 The five bundled skills name their rights in Claude's spelling, read alike by Glut and Claude Code (Opencode keeps
-its unattended allow): the news skills `Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)`,
-`inbox-sort` `Read Bash(mv -n:*)` (it now moves with `-n`, so nothing is overwritten), `todo-to-kanban`
-`Read Bash(axiomata-cli board list:*) Bash(axiomata-cli board add:*)`. Their texts say "the web fetch tool" instead
-of Opencode's `webfetch`. A rule can name only a literal command — Glut's gate refuses `$AXIOMATA_CLI …` as an
-expansion — so the app puts its own CLI's folder first on its `PATH` (`login_path::adopt`), which every harness's
-shell inherits; a skill calls `axiomata-cli` by name. A test sends each skill's real commands through Glut's gate
-(`the_bundled_skills_declare_what_they_do_and_no_more`). An installed copy gets the new texts with
-`skills reseed --force`.
+its unattended allow): the news skills `Read(News/**) WebFetch Edit(News/<their file>.md) Bash(mkdir -p News) Bash(date:*)` —
+they read and search only `News/` and write only their own file, so untrusted pages plus the web are no way out for
+the rest of the vault, nor a way in for what other skills read; `inbox-sort` `Read Bash(axiomata-cli inbox move:*)`; `todo-to-kanban`
+`Read Bash(axiomata-cli board list:*) Bash(axiomata-cli board add:*)`. Their texts name tools generically ("the web
+fetch tool"). A rule can name only a literal command — Glut's gate refuses `$AXIOMATA_CLI …` as an expansion — so the
+app puts the folder of the `axiomata-cli` beside it (never an `AXIOMATA_CLI` override's) first on its `PATH`
+(`login_path::adopt`); a skill calls `axiomata-cli` by name. Tests send each skill's real commands through Glut's
+gate. An installed copy gets the new texts with `skills reseed --force`.
 
-Next: CP4 (tokens), CP5 (streaming), CP6 (docs); the
+**Review and security audit of CP3 + W8 (2026-10-19), what changed:**
+- `Bash(mv -n:*)` let `mv -n -f a b` and any destination through (measured by the audit): `inbox-sort` now has
+  `axiomata-cli inbox move <file> <folder>` — a note (`md`, `txt`, `pdf`, `canvas`, images) of `Inbox/` into an
+  existing folder of an area (a top-level folder with its `AGENTS.md`, not `Inbox`/`Kanban`/`News`/`Mail`), no link
+  on the way, never a file the agents read as instructions (`AGENTS.md`, `CLAUDE.md`, `AGENT.md`, … without case),
+  never overwriting (a hard link fails on an existing target, then the inbox name goes); it runs before the core
+  starts, so Glut's sandbox (which hides `~/.axiomata`) does not stop it. A second audit of the fixes added the case,
+  the note types and the area check.
+- A search (`grep`, `glob`) is judged as a read of its glob's fixed folder (`News/**` → `News/`), so `Read(News/**)`
+  allows searching `News/` and nothing wider; the shell's `grep` is no longer declared.
+- `web_search`: `SearchBudget::reserve` checks and counts in one `BEGIN IMMEDIATE` transaction *before* the request
+  (a billed failure counts; two runs cannot both take the last search), `release` gives a keyless Exa search back
+  when it did not answer, a budget that cannot count closes the search; 20 searches a run, queries ≤ 400 characters,
+  20 s per provider in all, no redirects, no environment proxy, answers ≤ 2 MB, key headers sensitive, provider
+  errors with the keys blanked and cut; an answer without a `results` list hands over instead of "No results"
+  (TinyFish's shape measured: `results[].title/url/snippet`); "generate" no longer reads as a rate limit.
+- Page and search text reach the model through one `as_data`: no control or invisible characters, no copy of the
+  frame's end mark.
+- A day or month starting in a DST gap begins at its first real hour, no longer at "now" (the limits failed open).
+
+**`todo-to-kanban` on Glut** (owner, 2026-10-19: "Glut soll diesen Skill ausführen können"): the sandbox hides
+`~/.axiomata`, where the CLI's database is, from every command (the owner's keys live there too). So the shell starts a
+`DirectProgram` of the caller's — the app's own `axiomata-cli` at its absolute path, with the app's `AXIOMATA_HOME` —
+directly, without shell or sandbox, its words as arguments, when the command is nothing but words (no assignment,
+redirection, second command or expansion) **and** every narrowing of the run names it by a pattern of its own
+(`Gate::declares_command`: `Bash(axiomata-cli board add:*)`, never a bare `Bash`). A chat turn declares nothing, so no
+command of it is trusted; anything else stays in the sandbox.
+
+Open from the audits: `board add:*` lets injected `ToDo.md` text pick `--plan`/`--agent`/`--column`;
+`web_search`'s provider error text reaches the model unframed (blanked keys, plain, cut). On
+**Claude Code** reads inside the working folder need no rule, so a news skill there can still read the vault and fetch
+any host — Glut is the stricter harness for the news skills.
+
+## CP4 — first part built (2026-10-19)
+
+The toolbox offers the model only what the gate could allow (`Gate::offers`, `Tool::offered_as`): with a
+declaration, the tools some declared rule could name, patterns left aside (`Edit(News/**)` offers `edit_file`); no
+tool a pattern-less deny refuses whole; no edit tool in Plan mode; a call of a tool not offered is refused. A skill
+run gets no `skill` tool (its body is the task — CP0 saw the model load the running skill again). Still open: cached
+tokens (read `cached_tokens`/`cache.read`, meter them at a cached price — needs a column for them, or the start-up
+re-metering would bill them at the full price), then shortening old tool results if the measurement still asks.
+
+Next: the rest of CP4 (cached tokens), CP5 (streaming), CP6 (docs); the
 Settings block could show today's count (`web_search::usage`).

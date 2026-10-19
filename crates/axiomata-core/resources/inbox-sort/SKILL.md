@@ -2,7 +2,7 @@
 name: inbox-sort
 description: Sorts the notes in the workspace's Inbox/ into the area they belong to, using the areas' AGENTS.md routers; leaves anything unclear in the Inbox and asks about it.
 timeout_secs: 900
-allowed_tools: "Read Bash(mv -n:*)"
+allowed_tools: "Read Bash(axiomata-cli inbox move:*)"
 ---
 
 # Inbox sort
@@ -15,9 +15,10 @@ You sort the owner's vault inbox. Your working directory is the vault.
 3. For each file, read it and decide which area it belongs to — and, if the area has subfolders that
    fit, which subfolder. Decide only when it is **clear**: the topic plainly matches one area. A file that
    could go to two areas, fits none, or whose content you cannot read, stays where it is.
-4. Move each clear file with `mv -n "Inbox/<file>" "<Area>/<optional subfolder>/<file>"`. Never
-   overwrite (`-n` keeps an existing file): if a file of that name exists there, leave the file in the
-   Inbox and ask about it. Never rename, edit or delete a file, and never create a new area.
+4. Move each clear file with `axiomata-cli inbox move "<file>" "<Area>/<optional subfolder>"` — the
+   app's one command for it; the folder must exist. It never overwrites: when it answers that a file of
+   that name exists there, leave the file in the Inbox and ask about it. Never rename, edit or delete a
+   file, and never create a new area.
 5. Do not touch the `AGENTS.md` routers; the app regenerates them.
 
 Finish with a short report in German, exactly these two parts:

@@ -28,8 +28,7 @@ pub fn adopt() {
         eprintln!("axiomata: could not read the login shell's PATH; keeping the process's own");
         current.clone()
     });
-    let cli_folder =
-        axiomata_core::agent_entry::cli_path().and_then(|cli| cli.parent().map(PathBuf::from));
+    let cli_folder = own_cli_folder();
     let merged = merge(&with_folder_first(cli_folder, &login), &current);
     // SAFETY: called first thing in `run`, before tracing, Tauri or any other thread exists, so nothing can read the
     // environment while it changes — the condition `set_var`'s safety contract asks for.
@@ -77,6 +76,17 @@ fn extract(output: &str) -> Option<&str> {
     let end = start + output[start..].find(MARK)?;
     let path = &output[start..end];
     (!path.is_empty()).then_some(path)
+}
+
+/// The folder of the `axiomata-cli` that ships beside this program (the bundle's sidecar, a dev build's
+/// `target/debug`), when it holds one. Never the folder of an `AXIOMATA_CLI` override: that may be any folder, and
+/// going first on the `PATH` it would shadow every other program the app starts (security audit, W8).
+fn own_cli_folder() -> Option<PathBuf> {
+    let folder = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    folder
+        .join(axiomata_core::agent_entry::CLI_NAME)
+        .is_file()
+        .then_some(folder)
 }
 
 /// `path` with `folder` in front of it, or `path` itself without one.

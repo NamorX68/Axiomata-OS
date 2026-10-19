@@ -3,7 +3,7 @@ name: news-web
 description: Visits the websites from the owner's AI source list that have no feed and adds what is new — a short German summary and the link to the original per article — to one running file, News/KI-News Web.md; skips what is already in it.
 prepend_files: ["KI/ai-llm-agents-quellenliste.md"]
 timeout_secs: 900
-allowed_tools: "Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)"
+allowed_tools: "Read(News/**) WebFetch Edit(News/KI-News Web.md) Bash(mkdir -p News) Bash(date:*)"
 ---
 
 # News from websites without a feed
@@ -31,8 +31,9 @@ Steps:
    the 3 newest tools, and write what the tool does. To summarise, you may fetch the article page itself, at
    most **8 article pages in the whole run**; where a page cannot be read, write the entry only from what the
    listing says, and say less rather than guess.
-4. Skip an item whose link is already known: run `grep -rl -F "<link>" News/` before writing (the folder
-   may not exist yet — then nothing is known). Same article, same link, never twice.
+4. Skip an item whose link is already known: search `News/` for it with the search
+   tool before writing (`grep` over `News/**` only — you may read nothing else; the folder may not exist
+   yet — then nothing is known). Same article, same link, never twice.
 5. Write the new items into **one file: `News/KI-News Web.md`** — not one file per article. At most
    **12** new items in this run; sources with several new items do not crowd out the others.
    - If the file does not exist, create it (`mkdir -p News`) with exactly this start; the marker line stays

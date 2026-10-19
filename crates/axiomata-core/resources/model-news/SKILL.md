@@ -2,7 +2,7 @@
 name: model-news
 description: Finds newly released AI models at the well-known providers — Hugging Face and OpenRouter first, then the makers themselves (OpenAI, Anthropic, Google, Meta, Mistral, xAI, DeepSeek, Qwen and the image/video houses) — and adds each new model with a short German note and the link to the model to one running file, News/KI-Modelle.md; skips what is already in it.
 timeout_secs: 900
-allowed_tools: "Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)"
+allowed_tools: "Read(News/**) WebFetch Edit(News/KI-Modelle.md) Bash(mkdir -p News) Bash(date:*)"
 ---
 
 # New AI models
@@ -45,8 +45,9 @@ Steps:
    `trendingScore`) — the newest sort is full of throwaway uploads. Mark each model **LLM**, **Bild** or
    **Video** by what it is for (`pipeline_tag`/modality: text or text-image-to-text → LLM, text-to-image →
    Bild, text-to-video/image-to-video → Video).
-3. Skip a model whose link is already known: run `grep -rl -F "<link>" News/` before writing (the folder
-   may not exist yet — then nothing is known). Same model, same link, never twice.
+3. Skip a model whose link is already known: search `News/` for it with the search
+   tool before writing (`grep` over `News/**` only — you may read nothing else; the folder may not exist
+   yet — then nothing is known). Same model, same link, never twice.
 4. Build the link to each model: Hugging Face → `https://huggingface.co/<id>`; OpenRouter →
    `https://openrouter.ai/<id>`; a maker's page → the link the page itself gives. Never invent a link.
 5. Write the new models into **one file: `News/KI-Modelle.md`** — not one file per model. At most **25**
