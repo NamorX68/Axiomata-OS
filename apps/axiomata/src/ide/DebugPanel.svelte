@@ -16,6 +16,8 @@
   import IconButton from "../ui/IconButton.svelte";
   import SectionHead from "../ui/SectionHead.svelte";
   import Notice from "../ui/Notice.svelte";
+  import StatusMark from "../ui/StatusMark.svelte";
+  import type { StatusTone } from "../ui/status";
   import BreakpointEditor from "./BreakpointEditor.svelte";
   import { breakpointInfo, breakpoints, clearBreakpoints, infoOf } from "./breakpoints";
   import { debug, debugProblem, editDebugBreakpoint, loadWatches, saveWatches, startDebugging, toggleDebugBreakpoint } from "./debug";
@@ -188,6 +190,12 @@
   });
 
   const busy = $derived($ds.phase === "starting" || $ds.phase === "running" || $ds.phase === "stopped");
+  /** The session's mark: alive while it runs, waiting on the owner while paused, still once it ended. */
+  const sessionTone = $derived.by((): StatusTone => {
+    if ($ds.phase === "starting" || $ds.phase === "running") return "live";
+    if ($ds.phase === "stopped") return "warn";
+    return $ds.exitCode === null || $ds.exitCode === 0 ? "ok" : "bad";
+  });
   async function start(): Promise<void> {
     if (!root || !folder || !choice) return;
     const label = choices.find((c) => c.value === choice)?.label ?? choice;
@@ -249,7 +257,9 @@
         title={v.type_name ? `${v.name}: ${v.type_name}` : v.name}
         onclick={() => void toggleNode(v)}
       >
-        <span class="caret" aria-hidden="true">{v.variables_reference > 0 ? (open[v.variables_reference] ? "▾" : "▸") : ""}</span>
+        <span class="caret" aria-hidden="true">
+          {#if v.variables_reference > 0}<Icon name={open[v.variables_reference] ? "chevron-down" : "chevron-right"} size="sm" />{/if}
+        </span>
         <span class="vname">{v.name}</span>
         <span class="vvalue">{v.value}</span>
       </button>
@@ -300,34 +310,51 @@
       {/if}
 
       {#if !busy}
-        <div class="start">
-          <select bind:value={choice} onchange={() => (picked = true)} aria-label="What to debug" disabled={choices.length === 0}>
-            {#each choices as c (c.value)}<option value={c.value} disabled={c.disabled}>{c.label}</option>{/each}
-          </select>
-          <button type="button" class="ax-btn primary go" disabled={!choice || !folder} onclick={() => void start()}>
-            <Icon name="bug" size="sm" /> Debug
-          </button>
-        </div>
-        <input
-          class="args"
-          type="text"
-          value={argsByChoice[choice] ?? ""}
-          oninput={(e) => (argsByChoice[choice] = e.currentTarget.value)}
-          placeholder={argsPlaceholder}
-          aria-label="Arguments"
-          spellcheck="false"
-          autocomplete="off"
-        />
-        <label class="terminal">
-          <input type="checkbox" bind:checked={inTerminal} />
-          Run in a terminal <small>for a TUI or a program that reads the keyboard</small>
-        </label>
-        {#if chosen && !chosen.detected && !locked(chosen)}
-          <span class="own">
-            <IconButton icon="pencil" label="Edit {chosen.name}" size="sm" onclick={() => startEdit(chosen)} />
-            <IconButton icon="trash-2" label="Remove {chosen.name}" size="sm" onclick={() => void remove(chosen)} />
-          </span>
-        {/if}
+        <section class="plate g-start">
+          <h3>
+            <span class="swatch" aria-hidden="true"></span>Start
+            {#if chosen && !chosen.detected && !locked(chosen)}
+              <span class="head-actions">
+                <IconButton icon="pencil" label="Edit {chosen.name}" size="sm" onclick={() => startEdit(chosen)} />
+                <IconButton icon="trash-2" label="Remove {chosen.name}" size="sm" onclick={() => void remove(chosen)} />
+              </span>
+            {/if}
+          </h3>
+          <div class="launch">
+            <div class="start">
+              <span class="picker">
+                <select bind:value={choice} onchange={() => (picked = true)} aria-label="What to debug" disabled={choices.length === 0}>
+                  {#each choices as c (c.value)}<option value={c.value} disabled={c.disabled}>{c.label}</option>{/each}
+                </select>
+                <span class="picker-caret" aria-hidden="true"><Icon name="chevron-down" size="sm" /></span>
+              </span>
+              <button type="button" class="ax-btn primary go" disabled={!choice || !folder} onclick={() => void start()}>
+                <Icon name="bug" size="sm" /> Debug
+              </button>
+            </div>
+            {#if chosen}<p class="what">{describe(chosen) || chosen.name}</p>{/if}
+            <label class="field">
+              Arguments
+              <input
+                class="mono"
+                type="text"
+                value={argsByChoice[choice] ?? ""}
+                oninput={(e) => (argsByChoice[choice] = e.currentTarget.value)}
+                placeholder={argsPlaceholder}
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </label>
+            <label class="toggle" class:on={inTerminal}>
+              <input type="checkbox" bind:checked={inTerminal} />
+              <span class="toggle-text">
+                Run in a terminal
+                <small>For a TUI or a program that reads the keyboard</small>
+              </span>
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+          </div>
+        </section>
         {#if choices.length === 0 && editing === null}
           <p class="note">Nothing to debug found. Say what to start with “New configuration…”.</p>
         {/if}
@@ -342,15 +369,22 @@
             }}
           >
             <p class="form-title">{editing === "" ? "New configuration" : "Edit configuration"}</p>
-            <input type="text" bind:value={form.name} placeholder="Name, e.g. OChaT app" spellcheck="false" />
-            <input
-              type="text"
-              bind:value={form.target}
-              placeholder="File or module, e.g. src/ocht/main.py or ocht.cli"
-              spellcheck="false"
-            />
-            <input type="text" bind:value={form.args} placeholder="Arguments (optional)" spellcheck="false" />
-            <input type="text" bind:value={form.cwd} placeholder="Folder inside the project (optional)" spellcheck="false" />
+            <label class="field">
+              Name
+              <input type="text" bind:value={form.name} placeholder="e.g. OChaT app" spellcheck="false" />
+            </label>
+            <label class="field">
+              File or module
+              <input class="mono" type="text" bind:value={form.target} placeholder="src/ocht/main.py or ocht.cli" spellcheck="false" />
+            </label>
+            <label class="field">
+              Arguments <small>optional</small>
+              <input class="mono" type="text" bind:value={form.args} spellcheck="false" />
+            </label>
+            <label class="field">
+              Working folder <small>inside the project, optional</small>
+              <input class="mono" type="text" bind:value={form.cwd} spellcheck="false" />
+            </label>
             <p class="hint">Kept in <code>.axiomata/debug.json</code> of this project.</p>
             <div class="actions">
               <button type="submit" class="ax-btn primary" disabled={saving || !form.name.trim() || !form.target.trim()}>Save</button>
@@ -359,134 +393,162 @@
           </form>
         {/if}
         {#each listed?.problems ?? [] as problem (problem)}<p class="problem">{problem}</p>{/each}
-      {:else}
-        <div class="toolbar" role="toolbar" aria-label="Debugger">
-          {#if $ds.phase === "stopped"}
-            <IconButton icon="play" label="Continue ({KEY_LABEL.continue})" size="sm" onclick={() => void debug.control("continue")} />
-          {:else}
-            <IconButton icon="pause" label="Pause" size="sm" disabled={$ds.phase !== "running"} onclick={() => void debug.control("pause")} />
-          {/if}
-          <IconButton icon="step-forward" label="Step over ({KEY_LABEL.next})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("next")} />
-          <IconButton icon="arrow-down-to-line" label="Step into ({KEY_LABEL.step_in})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_in")} />
-          <IconButton icon="arrow-up-from-line" label="Step out ({KEY_LABEL.step_out})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_out")} />
-          <IconButton icon="square" label="Stop" size="sm" onclick={() => void debug.stop()} />
-        </div>
       {/if}
 
-      <p class="status" class:stopped={$ds.phase === "stopped"}>
-        {#if $ds.phase === "starting"}Starting {$ds.configName}…
-        {:else if $ds.phase === "running"}Running {$ds.configName}
-        {:else if $ds.phase === "stopped"}Paused{$ds.stop ? ` — ${$ds.stop.reason}${$ds.stop.text ? `: ${$ds.stop.text}` : ""}` : ""}
-        {:else if $ds.phase === "ended"}Ended{$ds.exitCode !== null ? ` — exit code ${$ds.exitCode}` : ""}
-        {/if}
-      </p>
+      {#if $ds.phase !== "idle"}
+        <section class="plate session">
+          <div class="session-head">
+            <StatusMark tone={sessionTone} />
+            <span class="session-text">
+              {#if $ds.phase === "starting"}Starting <b>{$ds.configName}</b>…
+              {:else if $ds.phase === "running"}Running <b>{$ds.configName}</b>
+              {:else if $ds.phase === "stopped"}Paused{$ds.stop ? ` — ${$ds.stop.reason}${$ds.stop.text ? `: ${$ds.stop.text}` : ""}` : ""}
+              {:else if $ds.phase === "ended"}Ended{$ds.exitCode !== null ? ` — exit code ${$ds.exitCode}` : ""}
+              {/if}
+            </span>
+          </div>
+          {#if busy}
+            <div class="toolbar" role="toolbar" aria-label="Debugger">
+              {#if $ds.phase === "stopped"}
+                <IconButton icon="play" label="Continue ({KEY_LABEL.continue})" size="sm" onclick={() => void debug.control("continue")} />
+              {:else}
+                <IconButton icon="pause" label="Pause" size="sm" disabled={$ds.phase !== "running"} onclick={() => void debug.control("pause")} />
+              {/if}
+              <span class="sep" aria-hidden="true"></span>
+              <IconButton icon="step-forward" label="Step over ({KEY_LABEL.next})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("next")} />
+              <IconButton icon="arrow-down-to-line" label="Step into ({KEY_LABEL.step_in})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_in")} />
+              <IconButton icon="arrow-up-from-line" label="Step out ({KEY_LABEL.step_out})" size="sm" disabled={$ds.phase !== "stopped"} onclick={() => void debug.control("step_out")} />
+              <span class="sep" aria-hidden="true"></span>
+              <IconButton icon="square" label="Stop" size="sm" onclick={() => void debug.stop()} />
+            </div>
+          {/if}
+        </section>
+      {/if}
       {#if $ds.error}<p class="problem">{$ds.error}</p>{/if}
       {#if $debugProblem && $debugProblem !== $ds.error}<p class="problem">{$debugProblem}</p>{/if}
 
       {#if $ds.phase === "stopped"}
-        <h3>Call stack</h3>
-        <ul class="frames">
-          {#each $ds.frames as f (f.id)}
-            <li>
-              <button
-                type="button"
-                class="frame"
-                class:on={f.id === $ds.frameId}
-                class:outside={!folder || absoluteInside(f.path, folder) === null}
-                title={f.path ?? "No source file"}
-                onclick={() => void debug.selectFrame(f.id)}
-              >
-                <span class="fname">{f.name}</span>
-                <span class="floc">{leaf(f.path)}:{f.line}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-        <h3>Variables</h3>
-        {#each $ds.scopes as s (s.scope.variables_reference)}
-          {@const ref = s.scope.variables_reference}
-          <button type="button" class="scope" onclick={() => void toggleScope(ref, s.scope.expensive)}>
-            <span class="caret" aria-hidden="true">{(open[ref] ?? !s.scope.expensive) ? "▾" : "▸"}</span>{s.scope.name}
-          </button>
-          {#if (open[ref] ?? !s.scope.expensive) && s.variables}
-            <ul>{@render nodes(s.variables, 0)}</ul>
-          {/if}
-        {/each}
-      {/if}
-
-      <h3>Watch<span class="n">{$ds.watches.length}</span></h3>
-      {#if $ds.watches.length > 0}
-        <ul class="watches">
-          {#each $ds.watches as w, i (w.expr)}
-            <li class="watch">
-              <span class="wexpr">{w.expr}</span>
-              <span class="wvalue" class:error={w.error !== null}>
-                {w.error !== null ? w.error : (w.value ?? ($ds.phase === "stopped" ? "…" : ""))}
-              </span>
-              <IconButton icon="x" label="Remove {w.expr}" size="sm" onclick={() => removeWatch(i)} />
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      <form
-        class="watch-form"
-        onsubmit={(e) => {
-          e.preventDefault();
-          addWatch(watchInput);
-          watchInput = "";
-        }}
-      >
-        <input type="text" bind:value={watchInput} placeholder="Add a watch expression…" spellcheck="false" autocomplete="off" />
-      </form>
-
-      <h3>
-        Breakpoints<span class="n">{total}</span>
-        {#if total > 0 && root}
-          <IconButton icon="trash-2" label="Remove all breakpoints" size="sm" onclick={() => clearBreakpoints(root)} />
-        {/if}
-      </h3>
-      {#if total === 0}
-        <p class="note">Click a line number in a Python or Rust file to set one.</p>
-      {:else}
-        <ul class="bps">
-          {#each files as [rel, lines] (rel)}
-            {#each lines as line (line)}
-              <li class="bp-row">
-                <div class="bp">
-                  <button type="button" class="bp-open" onclick={() => onOpen(rel, line)} title={rel}>
-                    <span class="dot" class:plain={!infoOf($breakpointInfo, root ?? "", rel, line)} aria-hidden="true"></span>{leaf(rel)}:{line}
-                  </button>
-                  <IconButton
-                    icon="pencil"
-                    label="Condition, hit count, log message"
-                    size="sm"
-                    onclick={() => (editingBp = editingBp?.rel === rel && editingBp.line === line ? null : { rel, line })}
-                  />
-                  <IconButton icon="x" label="Remove" size="sm" onclick={() => root && toggleDebugBreakpoint(root, rel, line)} />
-                </div>
-                {#if infoOf($breakpointInfo, root ?? "", rel, line)}
-                  {@const extra = infoOf($breakpointInfo, root ?? "", rel, line)}
-                  <p class="bp-extra">
-                    {#if extra?.condition}when <code>{extra.condition}</code>{/if}
-                    {#if extra?.hit}hit <code>{extra.hit}</code>{/if}
-                    {#if extra?.log}logs <code>{extra.log}</code>{/if}
-                  </p>
-                {/if}
-                {#if editingBp?.rel === rel && editingBp.line === line && root}
-                  <div class="bp-form">
-                    <BreakpointEditor
-                      info={infoOf($breakpointInfo, root, rel, line)}
-                      label="{leaf(rel)}:{line}"
-                      onSave={(info) => editDebugBreakpoint(root, rel, line, info)}
-                      onClose={() => (editingBp = null)}
-                    />
-                  </div>
-                {/if}
+        <section class="plate">
+          <h3><span class="swatch" aria-hidden="true"></span>Call stack<span class="n">{$ds.frames.length}</span></h3>
+          <ul class="rows">
+            {#each $ds.frames as f (f.id)}
+              <li>
+                <button
+                  type="button"
+                  class="frame"
+                  class:on={f.id === $ds.frameId}
+                  class:outside={!folder || absoluteInside(f.path, folder) === null}
+                  title={f.path ?? "No source file"}
+                  onclick={() => void debug.selectFrame(f.id)}
+                >
+                  <span class="fname">{f.name}</span>
+                  <span class="floc">{leaf(f.path)}:{f.line}</span>
+                </button>
               </li>
             {/each}
-          {/each}
-        </ul>
+          </ul>
+        </section>
+        <section class="plate">
+          <h3><span class="swatch" aria-hidden="true"></span>Variables</h3>
+          <div class="vars">
+            {#each $ds.scopes as s (s.scope.variables_reference)}
+              {@const ref = s.scope.variables_reference}
+              <button type="button" class="scope" onclick={() => void toggleScope(ref, s.scope.expensive)}>
+                <span class="caret" aria-hidden="true">
+                  <Icon name={(open[ref] ?? !s.scope.expensive) ? "chevron-down" : "chevron-right"} size="sm" />
+                </span>{s.scope.name}
+              </button>
+              {#if (open[ref] ?? !s.scope.expensive) && s.variables}
+                <ul>{@render nodes(s.variables, 0)}</ul>
+              {/if}
+            {/each}
+          </div>
+        </section>
       {/if}
+
+      <section class="plate g-watch">
+        <h3><span class="swatch" aria-hidden="true"></span>Watch<span class="n">{$ds.watches.length}</span></h3>
+        {#if $ds.watches.length > 0}
+          <ul class="rows">
+            {#each $ds.watches as w, i (w.expr)}
+              <li class="watch">
+                <span class="wexpr">{w.expr}</span>
+                <span class="wvalue" class:error={w.error !== null}>
+                  {w.error !== null ? w.error : (w.value ?? ($ds.phase === "stopped" ? "…" : ""))}
+                </span>
+                <span class="row-actions">
+                  <IconButton icon="x" label="Remove {w.expr}" size="sm" onclick={() => removeWatch(i)} />
+                </span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <form
+          class="inline-form"
+          onsubmit={(e) => {
+            e.preventDefault();
+            addWatch(watchInput);
+            watchInput = "";
+          }}
+        >
+          <Icon name="plus" size="sm" />
+          <input type="text" bind:value={watchInput} placeholder="Add a watch expression…" spellcheck="false" autocomplete="off" />
+        </form>
+      </section>
+
+      <section class="plate g-bp">
+        <h3>
+          <span class="swatch" aria-hidden="true"></span>Breakpoints<span class="n">{total}</span>
+          {#if total > 0 && root}
+            <IconButton icon="trash-2" label="Remove all breakpoints" size="sm" onclick={() => clearBreakpoints(root)} />
+          {/if}
+        </h3>
+        {#if total === 0}
+          <p class="plate-note">Click a line number in a Python or Rust file to set one.</p>
+        {:else}
+          <ul class="rows">
+            {#each files as [rel, lines] (rel)}
+              {#each lines as line (line)}
+                <li class="bp-row">
+                  <div class="bp">
+                    <button type="button" class="bp-open" onclick={() => onOpen(rel, line)} title={rel}>
+                      <span class="dot" class:plain={!infoOf($breakpointInfo, root ?? "", rel, line)} aria-hidden="true"></span>
+                      <span class="bp-file">{leaf(rel)}</span><span class="bp-line">{line}</span>
+                    </button>
+                    <span class="row-actions">
+                      <IconButton
+                        icon="pencil"
+                        label="Condition, hit count, log message"
+                        size="sm"
+                        onclick={() => (editingBp = editingBp?.rel === rel && editingBp.line === line ? null : { rel, line })}
+                      />
+                      <IconButton icon="x" label="Remove" size="sm" onclick={() => root && toggleDebugBreakpoint(root, rel, line)} />
+                    </span>
+                  </div>
+                  {#if infoOf($breakpointInfo, root ?? "", rel, line)}
+                    {@const extra = infoOf($breakpointInfo, root ?? "", rel, line)}
+                    <p class="bp-extra">
+                      {#if extra?.condition}when <code>{extra.condition}</code>{/if}
+                      {#if extra?.hit}hit <code>{extra.hit}</code>{/if}
+                      {#if extra?.log}logs <code>{extra.log}</code>{/if}
+                    </p>
+                  {/if}
+                  {#if editingBp?.rel === rel && editingBp.line === line && root}
+                    <div class="bp-form">
+                      <BreakpointEditor
+                        info={infoOf($breakpointInfo, root, rel, line)}
+                        label="{leaf(rel)}:{line}"
+                        onSave={(info) => editDebugBreakpoint(root, rel, line, info)}
+                        onClose={() => (editingBp = null)}
+                      />
+                    </div>
+                  {/if}
+                </li>
+              {/each}
+            {/each}
+          </ul>
+        {/if}
+      </section>
 
       {#if $ds.tui}
         <p class="problem">
@@ -495,21 +557,25 @@
         </p>
       {/if}
       {#if busy || $ds.output.length > 0}
-        <h3>Console</h3>
-        <div class="console" bind:this={consoleEl}>
-          {#each $ds.output as line, i (i)}<span class="out {line.category}">{line.text}</span>{/each}
-        </div>
-        {#if $ds.phase === "stopped"}
-          <form
-            onsubmit={(e) => {
-              e.preventDefault();
-              void debug.evaluate(expression);
-              expression = "";
-            }}
-          >
-            <input type="text" bind:value={expression} placeholder="Evaluate in this frame…" spellcheck="false" autocomplete="off" />
-          </form>
-        {/if}
+        <section class="plate">
+          <h3><span class="swatch" aria-hidden="true"></span>Console</h3>
+          <div class="console" bind:this={consoleEl}>
+            {#each $ds.output as line, i (i)}<span class="out {line.category}">{line.text}</span>{/each}
+          </div>
+          {#if $ds.phase === "stopped"}
+            <form
+              class="inline-form"
+              onsubmit={(e) => {
+                e.preventDefault();
+                void debug.evaluate(expression);
+                expression = "";
+              }}
+            >
+              <Icon name="chevron-right" size="sm" />
+              <input type="text" bind:value={expression} placeholder="Evaluate in this frame…" spellcheck="false" autocomplete="off" />
+            </form>
+          {/if}
+        </section>
       {/if}
     {/if}
   </div>
@@ -530,21 +596,69 @@
     padding: var(--ax-space-3);
   }
 
+  /* Every part of the view is a plate with a head, as in Run and Git; the tone marks the kind of thing on it. */
+  .plate {
+    --tone: var(--ax-text-muted);
+    margin-bottom: var(--ax-space-3);
+    overflow: hidden;
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-2);
+    box-shadow: var(--ax-shadow-raised);
+  }
+
+  .g-start {
+    --tone: var(--ax-text);
+  }
+
+  .g-watch {
+    --tone: var(--ax-harness-opencode);
+  }
+
+  .g-bp {
+    --tone: var(--ax-danger);
+  }
+
   h3 {
     display: flex;
     align-items: center;
     gap: var(--ax-space-2);
-    margin: var(--ax-space-4) 0 var(--ax-space-1);
+    min-height: calc(30px * var(--ax-ui-scale));
+    margin: 0;
+    padding: var(--ax-space-1) var(--ax-space-2) var(--ax-space-1) var(--ax-space-3);
+    border-bottom: 1px solid var(--ax-border);
+    background: color-mix(in srgb, var(--tone) 5%, var(--ax-elev-3));
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
     font-weight: 600;
     letter-spacing: var(--ax-tracking-wide);
     text-transform: uppercase;
+    box-sizing: border-box;
+  }
+
+  .swatch {
+    flex: none;
+    width: calc(8px * var(--ax-ui-scale));
+    height: calc(8px * var(--ax-ui-scale));
+    clip-path: var(--ax-hex-clip);
+    background: var(--tone);
   }
 
   .n {
     margin-left: auto;
+    padding: 0 var(--ax-space-2);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
     font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  .head-actions {
+    display: flex;
+    gap: var(--ax-space-1);
+    margin-left: auto;
+    letter-spacing: 0;
+    text-transform: none;
   }
 
   ul {
@@ -553,26 +667,101 @@
     list-style: none;
   }
 
+  .rows > li + li {
+    border-top: 1px solid color-mix(in srgb, var(--ax-border) 60%, transparent);
+  }
+
+  /* ---- start ---- */
+
+  .launch {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-3);
+    padding: var(--ax-space-3);
+  }
+
   .start {
     display: flex;
     gap: var(--ax-space-2);
+  }
+
+  .picker {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+  }
+
+  .picker select {
+    flex: 1;
+    min-width: 0;
+    padding: var(--ax-space-2) calc(var(--ax-space-2) * 2 + 14px * var(--ax-ui-scale)) var(--ax-space-2) var(--ax-space-3);
+    appearance: none;
+    background: var(--ax-bg);
+    border: 1px solid var(--ax-border-strong);
+    border-radius: var(--ax-radius-md);
+    color: var(--ax-text);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .picker select:hover:not(:disabled) {
+    background: var(--ax-elev-3);
+  }
+
+  .picker-caret {
+    position: absolute;
+    top: 50%;
+    right: var(--ax-space-2);
+    display: flex;
+    transform: translateY(-50%);
+    color: var(--ax-text-muted);
+    pointer-events: none;
   }
 
   .go {
     display: inline-flex;
     align-items: center;
     gap: var(--ax-space-1);
+    white-space: nowrap;
   }
 
-  select,
+  .what {
+    margin: calc(-1 * var(--ax-space-2)) 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-1);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .field small {
+    opacity: 0.8;
+  }
+
   input[type="text"] {
-    flex: 1;
     min-width: 0;
-    padding: var(--ax-space-1) var(--ax-space-2);
+    padding: var(--ax-space-2);
     background: var(--ax-bg);
     border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-sm);
     color: var(--ax-text);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  input.mono {
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
   }
@@ -582,22 +771,167 @@
     outline: var(--ax-focus-ring);
   }
 
-  .toolbar {
+  /* "Run in a terminal" is a tile with a switch: a choice about how the program runs, not a footnote. */
+  .toggle {
     display: flex;
-    gap: var(--ax-space-1);
-    padding: var(--ax-space-1);
-    background: var(--ax-surface-2);
+    align-items: center;
+    gap: var(--ax-space-3);
+    padding: var(--ax-space-2) var(--ax-space-3);
+    border: 1px solid var(--ax-border);
     border-radius: var(--ax-radius-md);
+    color: var(--ax-text);
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
   }
 
-  .status {
-    margin: var(--ax-space-2) 0 0;
+  .toggle:hover {
+    background: var(--ax-elev-3);
+  }
+
+  .toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .toggle:focus-within {
+    outline: var(--ax-focus-ring);
+  }
+
+  .toggle.on {
+    border-color: var(--ax-border-strong);
+    background: var(--ax-elev-3);
+    color: var(--ax-text);
+  }
+
+  .toggle-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: calc(2px * var(--ax-ui-scale));
+  }
+
+  .toggle-text small {
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-xs);
   }
 
-  .status.stopped {
-    color: var(--ax-warning);
+  .switch {
+    position: relative;
+    flex: none;
+    width: calc(28px * var(--ax-ui-scale));
+    height: calc(16px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
+    box-shadow: inset 0 0 0 1px var(--ax-border-strong);
+    transition: background var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: calc(2px * var(--ax-ui-scale));
+    left: calc(2px * var(--ax-ui-scale));
+    width: calc(12px * var(--ax-ui-scale));
+    height: calc(12px * var(--ax-ui-scale));
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-text-muted);
+    transition:
+      transform var(--ax-dur-fast) var(--ax-ease),
+      background var(--ax-dur-fast) var(--ax-ease);
+  }
+
+  /* On is a setting, not something alive: the text colour, never the accent. */
+  .toggle.on .switch {
+    background: color-mix(in srgb, var(--ax-text) 25%, transparent);
+  }
+
+  .toggle.on .switch::after {
+    background: var(--ax-text);
+    transform: translateX(calc(12px * var(--ax-ui-scale)));
+  }
+
+  .add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ax-space-2);
+    width: 100%;
+    margin-bottom: var(--ax-space-3);
+    padding: var(--ax-space-2);
+    background: none;
+    border: 1px dashed var(--ax-border-strong);
+    border-radius: var(--ax-radius-md);
+    color: var(--ax-text-muted);
+    font-family: var(--ax-font-sans);
+    font-size: var(--ax-font-size-sm);
+    cursor: pointer;
+  }
+
+  .add:hover,
+  .add:focus-visible {
+    border-style: solid;
+    background: var(--ax-elev-2);
+    color: var(--ax-text);
+  }
+
+  form.config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ax-space-3);
+    margin-bottom: var(--ax-space-3);
+    padding: var(--ax-space-3);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-elev-2);
+    box-shadow: var(--ax-shadow-raised);
+  }
+
+  .form-title {
+    margin: 0;
+    color: var(--ax-text);
+    font-size: var(--ax-font-size-sm);
+    font-weight: 600;
+  }
+
+  .hint {
+    margin: 0;
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  /* ---- the session ---- */
+
+  .session-head {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-3);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  .session-text {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--ax-text);
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-1);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border-top: 1px solid var(--ax-border);
+    background: var(--ax-elev-3);
+  }
+
+  .sep {
+    width: 1px;
+    height: calc(16px * var(--ax-ui-scale));
+    margin: 0 var(--ax-space-1);
+    background: var(--ax-border);
   }
 
   .frame,
@@ -608,10 +942,9 @@
     align-items: baseline;
     gap: var(--ax-space-2);
     width: 100%;
-    padding: 2px var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-3);
     background: none;
     border: none;
-    border-radius: var(--ax-radius-sm);
     color: var(--ax-text);
     font-family: var(--ax-font-sans);
     font-size: var(--ax-font-size-sm);
@@ -623,7 +956,7 @@
   .var:hover,
   .scope:hover,
   .bp-open:hover {
-    background: var(--ax-surface-2);
+    background: var(--ax-elev-3);
   }
 
   /* Code outside the project (the standard library, generated files): shown, but not one to open. */
@@ -633,7 +966,7 @@
   }
 
   .frame.on {
-    background: var(--ax-surface-3);
+    background: var(--ax-selected-bg);
   }
 
   .fname {
@@ -650,24 +983,33 @@
     font-size: var(--ax-font-size-xs);
   }
 
+  .vars {
+    padding: var(--ax-space-1) 0;
+  }
+
   .scope {
+    align-items: center;
+    gap: var(--ax-space-1);
+    padding-left: var(--ax-space-2);
     font-weight: 600;
   }
 
   .caret {
     flex: 0 0 auto;
+    display: inline-flex;
     width: 1em;
     color: var(--ax-text-muted);
   }
 
   .var {
+    align-items: center;
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
   }
 
   .vname {
     flex: 0 0 auto;
-    color: var(--ax-accent);
+    color: var(--ax-harness-opencode);
   }
 
   .vvalue {
@@ -679,36 +1021,183 @@
     color: var(--ax-text);
   }
 
+  /* ---- watch ---- */
+
+  .watch {
+    position: relative;
+    display: flex;
+    align-items: baseline;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-3);
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .wexpr {
+    flex: 0 0 auto;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--tone);
+  }
+
+  .wvalue {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wvalue.error {
+    color: var(--ax-warning);
+  }
+
+  /* A row's own buttons appear on hover, over its right end. */
+  .row-actions {
+    position: absolute;
+    top: 50%;
+    right: var(--ax-space-2);
+    display: flex;
+    gap: var(--ax-space-1);
+    transform: translateY(-50%);
+    opacity: 0;
+    background: var(--ax-surface-3);
+    border-radius: var(--ax-radius-md);
+  }
+
+  li:hover .row-actions,
+  li:focus-within .row-actions {
+    opacity: 1;
+  }
+
+  /* An input at the foot of a plate: a row of the plate, not a box of its own. */
+  .inline-form {
+    display: flex;
+    align-items: center;
+    gap: var(--ax-space-2);
+    padding: 0 var(--ax-space-3);
+    border-top: 1px solid color-mix(in srgb, var(--ax-border) 60%, transparent);
+    color: var(--ax-text-muted);
+  }
+
+  .plate > h3 + .inline-form {
+    border-top: none;
+  }
+
+  .inline-form input[type="text"] {
+    flex: 1;
+    padding: var(--ax-space-2) 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    font-family: var(--ax-font-mono);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .inline-form input[type="text"]:focus-visible {
+    outline: none;
+  }
+
+  .inline-form:focus-within {
+    background: var(--ax-elev-3);
+    color: var(--ax-text);
+  }
+
+  /* ---- breakpoints ---- */
+
+  .plate-note {
+    margin: 0;
+    padding: var(--ax-space-3);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
+
+  .bp-row {
+    display: flex;
+    flex-direction: column;
+  }
+
   .bp {
+    position: relative;
     display: flex;
     align-items: center;
   }
 
-  .dot {
-    flex: 0 0 auto;
-    width: calc(8px * var(--ax-ui-scale));
-    height: calc(8px * var(--ax-ui-scale));
-    border-radius: var(--ax-radius-pill);
-    background: var(--ax-danger);
-  }
-
   .bp-open {
+    flex: 1;
+    min-width: 0;
     align-items: center;
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
   }
 
+  .bp-file {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bp-line {
+    flex: none;
+    padding: 0 var(--ax-space-2);
+    border-radius: var(--ax-radius-pill);
+    background: var(--ax-surface-3);
+    color: var(--ax-text-muted);
+  }
+
+  .dot {
+    flex: 0 0 auto;
+    width: calc(9px * var(--ax-ui-scale));
+    height: calc(9px * var(--ax-ui-scale));
+    clip-path: var(--ax-hex-clip);
+    background: var(--ax-danger);
+  }
+
+  /* A breakpoint with a condition, hit count or log message: the hexagon's ring only. */
+  .dot:not(.plain) {
+    background: transparent;
+    box-shadow: inset 0 0 0 calc(2px * var(--ax-ui-scale)) var(--ax-danger);
+    clip-path: none;
+    border-radius: var(--ax-radius-pill);
+  }
+
+  .bp-extra {
+    margin: 0 var(--ax-space-3) var(--ax-space-2) calc(9px * var(--ax-ui-scale) + var(--ax-space-3) + var(--ax-space-2));
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-xs);
+  }
+
+  .bp-extra code {
+    font-family: var(--ax-font-mono);
+    color: var(--ax-text);
+  }
+
+  .bp-form {
+    padding: var(--ax-space-2);
+    margin: 0 var(--ax-space-2) var(--ax-space-2);
+    background: var(--ax-elev-3);
+    border-radius: var(--ax-radius-md);
+  }
+
+  /* ---- console ---- */
+
   .console {
     max-height: calc(220px * var(--ax-ui-scale));
     overflow-y: auto;
-    padding: var(--ax-space-2);
+    padding: var(--ax-space-2) var(--ax-space-3);
     background: var(--ax-bg);
-    border: 1px solid var(--ax-border);
-    border-radius: var(--ax-radius-sm);
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  .console:empty {
+    display: none;
   }
 
   .out.stderr {
@@ -716,72 +1205,18 @@
   }
 
   .out.repl {
-    color: var(--ax-accent);
+    color: var(--ax-harness-opencode);
   }
 
   .out.console {
     color: var(--ax-text-muted);
   }
 
-  form {
-    display: flex;
-    margin-top: var(--ax-space-2);
-  }
-
-  form.config {
-    flex-direction: column;
-    gap: var(--ax-space-2);
-    padding-top: var(--ax-space-3);
-    border-top: 1px solid var(--ax-border);
-  }
-
-  .form-title,
-  .hint {
-    margin: 0;
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .terminal {
-    display: block;
-    margin-top: var(--ax-space-2);
-    font-size: var(--ax-font-size-sm);
-  }
-
-  .terminal small {
-    display: block;
-    margin-left: calc(1.4em);
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .own {
-    display: flex;
-    gap: var(--ax-space-1);
-    margin-top: var(--ax-space-1);
-  }
-
-  .add {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ax-space-2);
-    margin-top: var(--ax-space-2);
-    padding: var(--ax-space-1) var(--ax-space-2);
-    background: none;
-    border: none;
-    color: var(--ax-text-muted);
-    font-family: var(--ax-font-sans);
-    font-size: var(--ax-font-size-sm);
-    cursor: pointer;
-  }
-
-  .add:hover {
-    color: var(--ax-text);
-  }
+  /* ---- loose text ---- */
 
   .note,
   .problem {
-    margin: var(--ax-space-3) 0 0;
+    margin: 0 0 var(--ax-space-3);
     color: var(--ax-text-muted);
     font-size: var(--ax-font-size-sm);
   }
@@ -801,86 +1236,8 @@
     gap: var(--ax-space-2);
   }
 
-  .args {
-    width: 100%;
-    margin-top: var(--ax-space-2);
-    box-sizing: border-box;
-  }
-
-  .bp-row {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .bp {
-    display: flex;
-    align-items: center;
-  }
-
-  .bp .bp-open {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .dot.plain {
-    background: var(--ax-danger);
-  }
-
-  .dot:not(.plain) {
-    background: transparent;
-    box-shadow: inset 0 0 0 2px var(--ax-danger);
-  }
-
-  .bp-extra {
-    margin: 0 0 var(--ax-space-1) calc(8px * var(--ax-ui-scale) + var(--ax-space-4));
-    color: var(--ax-text-muted);
-    font-size: var(--ax-font-size-xs);
-  }
-
-  .bp-extra code {
-    font-family: var(--ax-font-mono);
-    color: var(--ax-text);
-  }
-
-  .bp-form {
-    padding: var(--ax-space-2);
-    margin: var(--ax-space-1) 0 var(--ax-space-2);
-    background: var(--ax-surface-2);
-    border-radius: var(--ax-radius-md);
-  }
-
-  .watch {
-    display: flex;
-    align-items: baseline;
-    gap: var(--ax-space-2);
-    padding: 2px var(--ax-space-2);
+  code {
     font-family: var(--ax-font-mono);
     font-size: var(--ax-font-size-xs);
-  }
-
-  .wexpr {
-    flex: 0 0 auto;
-    max-width: 45%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--ax-accent);
-  }
-
-  .wvalue {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .wvalue.error {
-    color: var(--ax-warning);
-  }
-
-  .watch-form {
-    display: flex;
-    margin-top: var(--ax-space-1);
   }
 </style>
