@@ -3,6 +3,7 @@ name: todo-to-kanban
 description: Turns the open tasks of the ToDo tile (ToDo.md) into cards on the Kanban board, with labels and due dates where the task says so; skips tasks already on the board and asks about unclear ones.
 prepend_files: ["ToDo.md"]
 timeout_secs: 600
+allowed_tools: "Read Bash(axiomata-cli board list:*) Bash(axiomata-cli board add:*)"
 ---
 
 # ToDo to Kanban
@@ -10,7 +11,7 @@ timeout_secs: 600
 The owner's ToDo list is inlined above (`ToDo.md`: open tasks as `- [ ] …`, done ones under a Done
 heading). Turn every **open** task into a card on the Kanban board.
 
-Use the app's command line — `$AXIOMATA_CLI` if that variable is set, else `axiomata-cli`:
+Use the app's command line, `axiomata-cli`, by that name (the app puts it on the `PATH`):
 
 - `axiomata-cli board list` — the boards; `axiomata-cli board list --board <id>` — one board's columns
   (with ids) and cards.

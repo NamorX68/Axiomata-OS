@@ -2,6 +2,7 @@
 name: model-news
 description: Finds newly released AI models at the well-known providers — Hugging Face and OpenRouter first, then the makers themselves (OpenAI, Anthropic, Google, Meta, Mistral, xAI, DeepSeek, Qwen and the image/video houses) — and adds each new model with a short German note and the link to the model to one running file, News/KI-Modelle.md; skips what is already in it.
 timeout_secs: 900
+allowed_tools: "Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)"
 ---
 
 # New AI models
@@ -17,7 +18,7 @@ delete or change anything that is already in it.
 
 Steps:
 
-1. Fetch the two aggregators first (the `webfetch` tool, **one call per URL**):
+1. Fetch the two aggregators first (the web fetch tool, **one call per URL**):
    - Hugging Face, the newest models and what the community picks up:
      `https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=40` and
      `https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=20`

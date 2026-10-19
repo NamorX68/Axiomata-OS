@@ -3,6 +3,7 @@ name: news-rss
 description: Reads the news feeds from the owner's AI source list (RSS or Atom) and adds what is new — a short German summary and the link to the original per article — to one running file, News/KI-News RSS.md; skips what is already in it.
 prepend_files: ["KI/ai-llm-agents-quellenliste.md"]
 timeout_secs: 900
+allowed_tools: "Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)"
 ---
 
 # News from the feeds
@@ -20,7 +21,7 @@ Steps:
 
 1. From the list, take every source with a feed URL (for a cell with two URLs, the first). The list's own
    "Empfehlung / Priorisierung" says which ones weigh most: work through those first.
-2. Fetch each feed (the `webfetch` tool, one call per feed). A feed that fails or is empty is **skipped,
+2. Fetch each feed (the web fetch tool, one call per feed). A feed that fails or is empty is **skipped,
    not retried**; note it for the report. Keep the run tight: no other tool calls for the feeds themselves.
 3. Take the items of the **last 2 days** (publication date in the feed), newest first, at most **3 per
    source**. The arXiv feeds and Hugging Face carry hundreds of items a day: of those take at most **3 in

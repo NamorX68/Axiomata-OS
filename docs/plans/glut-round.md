@@ -1,6 +1,6 @@
 # Glut rund — web, fewer tokens, read access, streaming, identity
 
-Status: **approved 2026-10-19**, owner decisions W1–W7 taken, CP0 measured, CP1–CP3 built.
+Status: **approved 2026-10-19**, owner decisions W1–W8 taken, CP0 measured, CP1–CP3 and W8 built.
 
 ## Why
 
@@ -146,5 +146,17 @@ local day's searches against `daily_search_limit` (closed for every provider), T
 spelling) names the tool. Live: Ling searched via Exa and answered "OpenCode 2 is v2.0.32" with its source; the search
 was counted.
 
-Next: W8 (explicit `allowed_tools` for the bundled skills), then CP4 (tokens), CP5 (streaming), CP6 (docs); the
+## W8 — built (2026-10-19)
+
+The five bundled skills name their rights in Claude's spelling, read alike by Glut and Claude Code (Opencode keeps
+its unattended allow): the news skills `Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)`,
+`inbox-sort` `Read Bash(mv -n:*)` (it now moves with `-n`, so nothing is overwritten), `todo-to-kanban`
+`Read Bash(axiomata-cli board list:*) Bash(axiomata-cli board add:*)`. Their texts say "the web fetch tool" instead
+of Opencode's `webfetch`. A rule can name only a literal command — Glut's gate refuses `$AXIOMATA_CLI …` as an
+expansion — so the app puts its own CLI's folder first on its `PATH` (`login_path::adopt`), which every harness's
+shell inherits; a skill calls `axiomata-cli` by name. A test sends each skill's real commands through Glut's gate
+(`the_bundled_skills_declare_what_they_do_and_no_more`). An installed copy gets the new texts with
+`skills reseed --force`.
+
+Next: CP4 (tokens), CP5 (streaming), CP6 (docs); the
 Settings block could show today's count (`web_search::usage`).

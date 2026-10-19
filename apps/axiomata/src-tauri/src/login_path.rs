@@ -3,7 +3,9 @@
 //! The Finder and the Dock start an app with `/usr/bin:/bin:/usr/sbin:/sbin`, which has neither `opencode`, `claude`
 //! nor `git` from Homebrew, `cargo` nor `rust-analyzer`. Everything that starts a program by name (the Opencode
 //! service, the agents' commands, the language servers) would then fail only in the installed app. The terminal panes
-//! already run a login shell; this gives the app's own process the same `PATH`.
+//! already run a login shell; this gives the app's own process the same `PATH`. The folder of the app's own
+//! `axiomata-cli` goes in front of it: a skill names the CLI as `axiomata-cli`, and a permission rule
+//! (`Bash(axiomata-cli board add:*)`) can only name a literal command, never `$AXIOMATA_CLI` (glut-round W8).
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -16,17 +18,19 @@ const MARK: &str = "__AXIOMATA_PATH__";
 /// An interactive shell may run a slow `.zshrc`; the app must not wait on it for ever and falls back to its own `PATH`.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Makes the process's `PATH` the login shell's, followed by what it had besides.
+/// Makes the process's `PATH` the app's CLI folder, then the login shell's, followed by what it had besides.
 ///
 /// Must run first thing in `run`, while no other thread exists: it changes the environment.
 pub fn adopt() {
-    let Some(login) = login_shell_path() else {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let login = login_shell_path().unwrap_or_else(|| {
         // Tracing is not up yet at this point, so stderr is the only place to say it.
         eprintln!("axiomata: could not read the login shell's PATH; keeping the process's own");
-        return;
-    };
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    let merged = merge(&login, &current);
+        current.clone()
+    });
+    let cli_folder =
+        axiomata_core::agent_entry::cli_path().and_then(|cli| cli.parent().map(PathBuf::from));
+    let merged = merge(&with_folder_first(cli_folder, &login), &current);
     // SAFETY: called first thing in `run`, before tracing, Tauri or any other thread exists, so nothing can read the
     // environment while it changes — the condition `set_var`'s safety contract asks for.
     unsafe { std::env::set_var("PATH", merged) };
@@ -75,6 +79,15 @@ fn extract(output: &str) -> Option<&str> {
     (!path.is_empty()).then_some(path)
 }
 
+/// `path` with `folder` in front of it, or `path` itself without one.
+fn with_folder_first(folder: Option<PathBuf>, path: &OsString) -> OsString {
+    let Some(folder) = folder else {
+        return path.clone();
+    };
+    let dirs = std::iter::once(folder).chain(std::env::split_paths(path));
+    std::env::join_paths(dirs).unwrap_or_else(|_| path.clone())
+}
+
 /// The login `PATH`'s directories first, then the ones only `current` has; each directory once.
 fn merge(login: &OsString, current: &OsString) -> OsString {
     let mut seen = Vec::<PathBuf>::new();
@@ -110,6 +123,17 @@ mod tests {
             &"/usr/bin:/bin:/usr/bin".into(),
         );
         assert_eq!(merged, OsString::from("/opt/homebrew/bin:/usr/bin:/bin"));
+    }
+
+    #[test]
+    fn the_cli_folder_comes_first_and_only_once() {
+        let login = OsString::from("/opt/homebrew/bin:/app/MacOS");
+        let first = with_folder_first(Some(PathBuf::from("/app/MacOS")), &login);
+        assert_eq!(
+            merge(&first, &"/usr/bin".into()),
+            OsString::from("/app/MacOS:/opt/homebrew/bin:/usr/bin")
+        );
+        assert_eq!(with_folder_first(None, &login), login);
     }
 
     #[test]

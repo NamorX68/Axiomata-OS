@@ -905,6 +905,105 @@ mod tests {
         }
     }
 
+    /// The bundled skill's declared rights, read from its frontmatter as shipped.
+    fn bundled_rights(name: &str, skill_md: &str) -> Gate {
+        let declared = skill_md
+            .lines()
+            .find_map(|line| line.strip_prefix("allowed_tools: "))
+            .map(|value| value.trim_matches('"'));
+        skill_gate(
+            Some(name),
+            &declared_rules(Some(name), declared).unwrap(),
+            &RuleSet::default(),
+        )
+    }
+
+    /// W8 (glut-round): what the bundled skills do on Glut is exactly what they declare — the news skills read the
+    /// web and write their `News/` file, inbox-sort moves without overwriting, todo-to-kanban lists and adds cards.
+    #[tokio::test]
+    async fn the_bundled_skills_declare_what_they_do_and_no_more() {
+        let news = bundled_rights(
+            "news-rss",
+            include_str!("../../resources/news-rss/SKILL.md"),
+        );
+        for allowed in [
+            "grep -rl -F \"https://example.org/a\" News/",
+            "date '+%Y-%m-%d %H:%M'",
+            "mkdir -p News",
+        ] {
+            assert!(
+                news.judge("bash", &bash(allowed)).await.is_ok(),
+                "{allowed}"
+            );
+        }
+        let page = Access::Network {
+            host: "huggingface.co".into(),
+        };
+        assert!(news.judge("web_fetch", &page).await.is_ok());
+        let own_file = Access::Edit {
+            path: "News/KI-News RSS.md".into(),
+        };
+        assert!(news.judge("edit_file", &own_file).await.is_ok());
+        for elsewhere in ["AGENTS.md", "Inbox/note.md"] {
+            let edit = Access::Edit {
+                path: elsewhere.into(),
+            };
+            assert!(
+                news.judge("write_file", &edit).await.is_err(),
+                "{elsewhere}"
+            );
+        }
+        for refused in [
+            "rm News/KI-News RSS.md",
+            "curl https://example.org",
+            "mkdir -p Other",
+        ] {
+            assert!(
+                news.judge("bash", &bash(refused)).await.is_err(),
+                "{refused}"
+            );
+        }
+
+        let inbox = bundled_rights(
+            "inbox-sort",
+            include_str!("../../resources/inbox-sort/SKILL.md"),
+        );
+        assert!(
+            inbox
+                .judge("bash", &bash("mv -n \"Inbox/a.md\" \"Arbeit/a.md\""))
+                .await
+                .is_ok()
+        );
+        for refused in ["mv \"Inbox/a.md\" \"Arbeit/a.md\"", "rm Inbox/a.md"] {
+            assert!(
+                inbox.judge("bash", &bash(refused)).await.is_err(),
+                "{refused}"
+            );
+        }
+        assert!(inbox.judge("web_fetch", &page).await.is_err());
+
+        let board = bundled_rights(
+            "todo-to-kanban",
+            include_str!("../../resources/todo-to-kanban/SKILL.md"),
+        );
+        for allowed in [
+            "axiomata-cli board list",
+            "axiomata-cli board list --board 1",
+            "axiomata-cli board add --column 3 \"Steuer machen\" --label steuer",
+        ] {
+            assert!(
+                board.judge("bash", &bash(allowed)).await.is_ok(),
+                "{allowed}"
+            );
+        }
+        for refused in ["axiomata-cli board delete 1", "$AXIOMATA_CLI board list"] {
+            assert!(
+                board.judge("bash", &bash(refused)).await.is_err(),
+                "{refused}"
+            );
+        }
+    }
+
     /// A read skill that declares nothing still reads and runs the read commands — and nothing else, compound
     /// commands included; a declared `Write` stays refused under Plan.
     #[tokio::test]

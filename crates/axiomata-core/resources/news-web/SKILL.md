@@ -3,6 +3,7 @@ name: news-web
 description: Visits the websites from the owner's AI source list that have no feed and adds what is new — a short German summary and the link to the original per article — to one running file, News/KI-News Web.md; skips what is already in it.
 prepend_files: ["KI/ai-llm-agents-quellenliste.md"]
 timeout_secs: 900
+allowed_tools: "Read WebFetch Edit(News/**) Bash(grep:*) Bash(mkdir -p News) Bash(date:*)"
 ---
 
 # News from websites without a feed
@@ -21,7 +22,7 @@ Steps:
 1. From the list, take every source whose RSS cell is `–`, with its website URL. A source that is mainly
    a video channel (such as intheworldofai.com) is read through its website; if that gives no usable list
    of recent items, skip it.
-2. Fetch each website's page that lists the newest posts (the `webfetch` tool, **one call per source**).
+2. Fetch each website's page that lists the newest posts (the web fetch tool, **one call per source**).
    A page that fails, needs a login, or shows no articles is **skipped, not retried**; note it for the
    report.
 3. From each page take the articles that are clearly **new** — a date within the last 3 days where the page

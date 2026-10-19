@@ -311,6 +311,28 @@ mod tests {
                 "{digest} lost its `output: json` (json skills: {json_skills:?})"
             );
         }
+        // Glut lets a skill without `allowed_tools` only read (glut-round W8): every bundled skill that writes, runs a
+        // command or reaches the web names its rights, and each one is a rule the harness reads.
+        let skills = registry::list_skills().unwrap();
+        for name in [
+            "news-rss",
+            "news-web",
+            "model-news",
+            "inbox-sort",
+            "todo-to-kanban",
+        ] {
+            let skill = skills.iter().find(|s| s.name == name).unwrap();
+            let declared = skill
+                .allowed_tools
+                .as_deref()
+                .unwrap_or_else(|| panic!("{name} declares no `allowed_tools`"));
+            let rules = axiomata_harness::skills::rules_of(declared)
+                .unwrap_or_else(|reason| panic!("{name}: {reason}"));
+            assert!(
+                rules.iter().any(|rule| rule.text() == "Read"),
+                "{name} cannot read"
+            );
+        }
 
         unsafe {
             env::remove_var(paths::AXIOMATA_HOME_ENV);
