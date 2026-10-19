@@ -429,7 +429,8 @@ fn render(event: &Event) -> Option<String> {
             "■ {reason:?} · {turns} turns · {} in / {} out tokens",
             usage.input_tokens, usage.output_tokens
         ),
-        Event::Usage { .. } | Event::Error { .. } => return None,
+        // The readable lines show the whole answer once; its pieces are for a `--json` reader.
+        Event::Usage { .. } | Event::Error { .. } | Event::TextDelta { .. } => return None,
         // A subagent's events, indented by their depth (HS8, D8). Its own finished line reads `↳`, not
         // `■`: two run-looking finished lines would have a reader count the run's end twice.
         Event::Sub { depth, event } => {

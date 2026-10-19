@@ -1,6 +1,6 @@
 # Glut rund — web, fewer tokens, read access, streaming, identity
 
-Status: **approved 2026-10-19**, owner decisions W1–W8 taken, CP0 measured, CP1–CP3 and W8 built, reviewed and audited; CP4 in part.
+Status: **approved 2026-10-19**, owner decisions W1–W8 taken, CP0 measured, CP1–CP3 and W8 built, reviewed and audited; CP4 and CP5 built.
 
 ## Why
 
@@ -236,5 +236,18 @@ price, so the meter never counts lower than the owner said; the start-up re-mete
 before (NULL) is metered as before. Studio sessions keep A27 (cache reads left out of their limits). Still open:
 shortening old tool results, if a measurement still asks for it.
 
-Next: CP5 (streaming), CP6 (docs); the
+## CP5 — built (2026-10-19)
+
+The OpenAI-compatible client asks for `stream: true` with `stream_options.include_usage` and reads the server-sent
+chunks into the same `Reply`: text pieces, tool calls whose id, name and arguments arrive in parts (by their `index`;
+one without an id gets `call_<index>`), the usage of the last piece. A provider that ignores `stream` answers in one
+JSON body, read as before. The **stall limit**: 120 s without a byte — a provider's keep-alive comment counts —
+fails the call with "the model sent nothing for 120 s"; an `error` inside the stream (DeepInfra's 400 over its context
+length) fails it at once; a stream without any choice is no answer. Each text piece goes to the sinks as
+`Event::TextDelta { turn, text }` while it arrives, the whole text after it as before (`ChatModel::complete_streaming`;
+a model that does not stream keeps the default and hands nothing over). The readable `harness run` lines skip the
+pieces; `--json` has them. The chat window still shows the answer whole (W6). Live: todo-to-kanban on Glut via
+OpenRouter streamed, its usage read from the last piece.
+
+Next: CP6 (docs); the
 Settings block could show today's count (`web_search::usage`).
