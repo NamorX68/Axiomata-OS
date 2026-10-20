@@ -33,7 +33,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat, results
   shrinking over a budget — off by default, todo/plan-build/snapshots/LSP errors), and slash commands in the chat
   (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
-  (`docs/plans/durable.md`: a journal per run, resume on click). Next: the LocalBrain plan.
+  (`docs/plans/durable.md`: a journal per run, resume on click). LocalBrain was built, measured and not taken over
+  (`docs/plans/localbrain.md`, "Outcome").
   Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial

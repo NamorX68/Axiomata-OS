@@ -1,7 +1,9 @@
 # LocalBrain — Glut's context kept small by a local model (owner's point 4)
 
-Status: grilled 2026-10-20 (L1–L12), **CP0 done** (Qwen3.5-4B, 27/32 summaries pass, 67 % saved), CP1 next on the
-owner's go. Builds on the decisions of 2026-10-14 in
+Status: **closed, not taken over** (owner, 2026-10-20). Grilled (L1–L13), CP0–CP4 built and measured on the branch
+`localbrain` (kept locally as an archive, `b27f104`; never merged): the end-to-end measurement found no clear saving
+at the same quality, and the owner does not want code that only sits behind a switch that stays off. See
+"Outcome" below. Builds on the decisions of 2026-10-14 in
 `docs/plans/harness.md` (context diet (a)–(e)) and replaces the shrinking Glut 2 turned off (`glut-2.md`, G6).
 
 ## What it is for
@@ -132,6 +134,47 @@ stretched to the size itself). With round 4 the model handles structured tool ou
 so the design becomes: **rules pick what must stay, the model writes around it** (L5's extraction feeds the prompt
 and checks the result); the rule-based extract is the fallback when a summary fails the guard, and the full text
 stays when both would lose something. Fine-tuning stays the later rung (L12) — not needed for a start.
+
+## Outcome (2026-10-20)
+
+**Built on `localbrain`, not merged:** the contract (must-keep list, check, rule extract), the context diet (swap
+after the first look, compaction of the older steps), the `axh-brain` helper (llama.cpp via `llama-cpp-2`, Qwen3.5-4B,
+pinned download), `[agents.glut] localbrain`, `axh --local-brain`, loading the model at the app's start; hardened after
+a combined review, a security audit and a dependency audit.
+
+**CP4 — measured.** Each run in its own `AXIOMATA_HOME` with a copy of the config and of the vault files (or a git
+worktree for the code sessions), so every arm started from the same state. A: off, B: LocalBrain, C: rule extract only.
+Skills on Ling 3.0 Flash, the chat on DeepSeek V4.1 Flash, metered with the cached price. About $0.30 in all.
+
+| Task | A (off) | B (LocalBrain) | C (rules only) |
+|---|---|---|---|
+| news-web, $ per run | 0.0117 / 0.0125 / 0.0120 | 0.0105 / 0.0099 / **0.0303** / 0.0057 / 0.0124 / 0.0104 | 0.0130 / 0.0053 / 0.0100 |
+| news-web, steps | 18 / 21 / 16 | 10 / 11 / **40** / 10 / 14 / 10 | 16 / 8 / 12 |
+| news-web, new entries | 3 / 0 / 4 | 4 / 3 / **0** / 9 / 10 / 6 | 11 / 6 / 6 |
+| calendar-digest, $ | 0.0020 / 0.0040 | 0.0017 / 0.0017 | — |
+| chat, read 3 files + answer, $ | 0.0049 / 0.0034 | 0.0022 / 0.0035 | — |
+| code session, 7 turns, $ | 0.0231 / 0.0096 / 0.0102 | 0.0128 / 0.0091 / 0.0122 | — |
+| code session, steps | 55 / 37 / 36 | 60 / 57 / 69 | — |
+
+- The runs' own scatter (8–40 steps, 0–11 entries in every arm) is larger than the effect; C, which leaves web pages
+  whole, did as well as B on news-web.
+- Calendar and the short chat are not touched: their results are short, or the model answers at once.
+- The code sessions (`axiomata-tasks`: a justfile detection with tests, clippy, edge cases) ended equally well in
+  every run; LocalBrain saved 45 % once and took far more steps twice (likely the compaction's note: the model then
+  worked out again what it had done — not proven).
+- Found on the way: a compaction rewrote a tiny older part for nothing (fixed on the branch); Glut repeats a refused
+  call up to the turn limit (card #112, independent of LocalBrain).
+
+**Why it was not taken over:** with the providers in use, old context is already nearly free — cached input costs
+3 % (DeepSeek) to 20 % (Ling) of the input price — so what saves money is a *stable* conversation start, and every
+swap breaks part of it. What a summary would really buy is room under the context limit in long code sessions, and the
+usual way for that needs no second model: Glut's own model compacts, only shortly before the limit (`/compact` exists;
+card #111 "Kürzen dreifach"). Against that stood a native build dependency (cmake, llama.cpp), a sidecar, ~3 GB of
+memory, a 2.7 GB download and the upkeep of every llama.cpp update — for a switch that stays off.
+
+**Kept for later:** the branch; the idea of a fine-tuned 1.5–2B model for machines with less memory (L12's ladder), if
+a case for a second model ever appears; L12's decision model is unaffected and remains its own plan. The model, the
+CP0 candidates in Ollama and cmake were removed from the machine (owner, 2026-10-20).
 
 ## Checkpoints
 
