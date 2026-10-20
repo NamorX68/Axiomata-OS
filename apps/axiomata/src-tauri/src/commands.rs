@@ -1432,6 +1432,11 @@ pub fn complete_module_action(response: ActionResponse) -> Result<(), String> {
 /// plain assistant-bar turn. Runs the agent with no lock held. The turn is
 /// checked against the daily spend cap first and logged to `chat_turns`
 /// afterwards (`agents::chat_and_record`).
+///
+/// Slash commands (#108, `docs/plans/slash-commands.md`): `model` runs the turn on that model of the chat provider
+/// instead of its chat model (this conversation only); `command` makes the turn one of the chat harness's commands
+/// (`{"kind": "run", "name": …}`, `message` its arguments) or a compaction (`{"kind": "compact"}`). Names are checked
+/// in the core; nothing here starts a process of its own.
 #[tauri::command]
 pub async fn assistant_send(
     state: State<'_, CoreState>,
@@ -1439,6 +1444,8 @@ pub async fn assistant_send(
     session_id: Option<String>,
     mode: String,
     allowed_tools: Option<String>,
+    model: Option<String>,
+    command: Option<ChatCommandArg>,
 ) -> Result<ChatReply, String> {
     let mode = match mode.as_str() {
         "chat" => ChatMode::Chat,
@@ -1446,8 +1453,61 @@ pub async fn assistant_send(
         "plan" => ChatMode::Plan,
         other => return Err(format!("unknown assistant mode {other:?}")),
     };
+    let extras = agents::ChatExtras {
+        model,
+        command: command.map(|command| match command {
+            ChatCommandArg::Run { name } => agents::ChatCommand::Run { name },
+            ChatCommandArg::Compact => agents::ChatCommand::Compact,
+        }),
+    };
     let config = read_config(&state.config);
-    agents::chat_and_record(&config, &state.db, message, session_id, mode, allowed_tools)
+    agents::chat_and_record_with(
+        &config,
+        &state.db,
+        message,
+        session_id,
+        mode,
+        allowed_tools,
+        extras,
+    )
+    .await
+    .map_err(|err| err.to_string())
+}
+
+/// The `command` of [`assistant_send`], as the webview sends it.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChatCommandArg {
+    Run { name: String },
+    Compact,
+}
+
+/// The chat's earlier conversations on its harness, newest first (#108, `/resume`).
+#[tauri::command]
+pub async fn chat_sessions(
+    state: State<'_, CoreState>,
+) -> Result<Vec<agents::ChatSession>, String> {
+    let config = read_config(&state.config);
+    agents::chat_sessions(&config, &state.db).map_err(|err| err.to_string())
+}
+
+/// `/undo` (#108): the file changes of the conversation's latest turn undone, as its harness can.
+#[tauri::command]
+pub async fn chat_undo(state: State<'_, CoreState>, session_id: String) -> Result<String, String> {
+    let config = read_config(&state.config);
+    agents::chat_undo(&config, &state.db, &session_id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// The commands the chat's harness offers (#108, S7), for the bar's suggestion list and `/help`. Claude Code's list
+/// arrives with the first chat turn; before it the list is empty.
+#[tauri::command]
+pub async fn chat_commands(
+    state: State<'_, CoreState>,
+) -> Result<Vec<agents::EngineCommand>, String> {
+    let config = read_config(&state.config);
+    agents::chat_commands(&config)
         .await
         .map_err(|err| err.to_string())
 }

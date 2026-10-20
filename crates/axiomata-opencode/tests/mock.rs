@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axiomata_opencode::{
-    ModelRef, NewSession, OpencodeError, Service, TurnRequest, TurnSession, unattended_permissions,
+    ModelRef, NewSession, OpencodeError, Service, TurnInput, TurnRequest, TurnSession,
+    unattended_permissions,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -33,6 +34,8 @@ struct Scenario {
 #[derive(Default)]
 struct Seen {
     requests: Vec<(String, String, String)>,
+    /// What started the session's latest turn other than a prompt: `"command"` or `"compact"` (#108).
+    started_by: Option<&'static str>,
 }
 
 struct Mock {
@@ -226,6 +229,73 @@ async fn serve(
                 "session.execution.interrupted",
                 json!({"sessionID": sid, "reason": "shutdown"}),
             ));
+        }
+        // A command answers before its user message exists (measured, 2.0.23); here it is there at once.
+        ("POST", "/api/session/ses_mock1/command") => {
+            seen.lock().unwrap().started_by = Some("command");
+            let _ = stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
+                .await;
+            let _ = events.send(event(
+                "session.execution.succeeded",
+                json!({"sessionID": sid}),
+            ));
+        }
+        ("POST", "/api/session/ses_mock1/compact") => {
+            seen.lock().unwrap().started_by = Some("compact");
+            respond(
+                &mut stream,
+                "200 OK",
+                &json!({"data": {"id": "msg_compact", "type": "compaction"}}),
+            )
+            .await;
+            let _ = events.send(event(
+                "session.execution.succeeded",
+                json!({"sessionID": sid}),
+            ));
+        }
+        ("GET", "/api/session/ses_mock1/message?order=desc&limit=10") => {
+            let newest = if seen.lock().unwrap().started_by == Some("command") {
+                "msg_cmd"
+            } else {
+                "msg_user"
+            };
+            let page = json!({"data": [assistant("stop", "x", 1, 1, 0.0), {"id": newest, "type": "user"}]});
+            respond(&mut stream, "200 OK", &page).await
+        }
+        ("GET", "/api/command") => {
+            let list = json!({"location": {"directory": "/d"}, "data": [
+                {"name": "review", "description": "review changes"}, {"name": "init"}]});
+            respond(&mut stream, "200 OK", &list).await
+        }
+        ("POST", "/api/session/ses_mock1/revert/stage") => {
+            respond(
+                &mut stream,
+                "200 OK",
+                &json!({"data": {"messageID": "msg_user", "files": []}}),
+            )
+            .await
+        }
+        ("POST", "/api/session/ses_mock1/revert/commit") => {
+            let _ = stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
+                .await;
+        }
+        ("GET", "/api/session/ses_mock1/message?order=desc&limit=50")
+            if seen.lock().unwrap().started_by.is_some() =>
+        {
+            let page = match seen.lock().unwrap().started_by {
+                Some("command") => {
+                    json!({"data": [{"id": "msg_idle", "type": "idle", "outcome": "succeeded"},
+                                                   assistant("stop", "reviewed", 4, 2, 0.0),
+                                                   {"id": "msg_cmd", "type": "user"}],
+                                          "cursor": {"next": null}})
+                }
+                _ => json!({"data": [{"id": "msg_idle", "type": "idle", "outcome": "succeeded"},
+                                     {"id": "msg_compact", "type": "compaction"}],
+                            "cursor": {"next": null}}),
+            };
+            respond(&mut stream, "200 OK", &page).await
         }
         ("GET", "/api/session/ses_mock1/message?order=desc&limit=50") => {
             // Newest first; the second page is behind a cursor that needs encoding.
@@ -659,4 +729,92 @@ async fn a_registered_server_is_awaited_until_it_connects_or_fails() {
         .await_mcp("/d", "slow", 2, pause)
         .await
         .expect("pending is fine");
+}
+
+/// #108: a command and a compaction run like a prompt — the turn's messages are those after the entry they made.
+#[tokio::test]
+async fn a_command_and_a_compaction_run_as_turns() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("command");
+    let bin = fake_opencode(&dir);
+    write_discovery(&dir, &discovery(mock.port, "pw"));
+    let service = Service::connect(&bin, &env()).await.expect("connect");
+    let existing = || TurnSession::Existing {
+        id: "ses_mock1".into(),
+        model: None,
+    };
+
+    let ran = service
+        .run_input(
+            existing(),
+            TurnInput::Command {
+                name: "review".into(),
+                arguments: "the branch".into(),
+            },
+            Duration::from_secs(10),
+        )
+        .await
+        .expect("command turn");
+    assert!(ran.succeeded(), "{:?}", ran.failure);
+    assert_eq!(ran.reply, "reviewed");
+    let requests = mock.requests();
+    let (_, _, body) = requests
+        .iter()
+        .find(|(_, p, _)| p.ends_with("/command"))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(body).unwrap(),
+        json!({"name": "review", "text": "the branch"})
+    );
+
+    let compacted = service
+        .run_input(existing(), TurnInput::Compact, Duration::from_secs(10))
+        .await
+        .expect("compaction turn");
+    assert!(compacted.succeeded(), "{:?}", compacted.failure);
+    assert_eq!(compacted.reply, "");
+
+    let listed = service.commands().await.expect("commands");
+    assert_eq!(listed[0].name, "review");
+    assert_eq!(listed[1].description, None);
+}
+
+/// #108 `/undo`: the newest user message is found however far back it is (here on the second page), and the revert
+/// is staged on it, then committed.
+#[tokio::test]
+async fn undo_reverts_to_the_newest_user_message_across_pages() {
+    let mock = Mock::start(Scenario {
+        version: "2.0.18",
+        asks_permission: false,
+    })
+    .await;
+    let dir = scratch("revert");
+    let bin = fake_opencode(&dir);
+    write_discovery(&dir, &discovery(mock.port, "pw"));
+    let service = Service::connect(&bin, &env()).await.expect("connect");
+
+    let newest = service.last_user_message("ses_mock1").await.unwrap();
+    assert_eq!(newest.as_deref(), Some("msg_user"));
+    service
+        .revert_to("ses_mock1", "msg_user")
+        .await
+        .expect("revert");
+    let requests = mock.requests();
+    let stage = requests
+        .iter()
+        .position(|(_, p, _)| p.ends_with("/revert/stage"))
+        .unwrap();
+    let commit = requests
+        .iter()
+        .position(|(_, p, _)| p.ends_with("/revert/commit"))
+        .unwrap();
+    assert!(stage < commit);
+    assert_eq!(
+        serde_json::from_str::<Value>(&requests[stage].2).unwrap(),
+        json!({"messageID": "msg_user", "files": true})
+    );
 }

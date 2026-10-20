@@ -31,7 +31,9 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   (#37, `docs/plans/harness.md`; HS1–HS8 built), made one to keep a role on in "Glut rund" (2026-10-19,
   `docs/plans/glut-round.md`: web fetch/search, fewer tokens, cached tokens metered apart, streaming, skills that name
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat, results
-  shrinking over a budget — off by default, todo/plan-build/snapshots/LSP errors). Next: plans for Pi-Durable-like runs and LocalBrain.
+  shrinking over a budget — off by default, todo/plan-build/snapshots/LSP errors), and slash commands in the chat
+  (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands). Next: plans for Pi-Durable-like
+  runs and LocalBrain.
   Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
@@ -187,6 +189,10 @@ from the code itself:
   any caller (`human:` actor for the owner's steps; an `agent:` actor never moves a card freely). `board claim|report|verdict|add` are closed in an agent shell too
   (`mcp_only`): the MCP server (`axiomata-cli mcp-serve`) is the door for them, and it only starts with the secret issued at the session's latest start
   (`axiomata-ide::session_token`, kept out of the harness environment). Not a sandbox — see a2a.md A39 and "CP-A5 im Detail".
+- **The bar's `/` has three levels** (`core/commands.ts`, #108): the conversation commands, app control (module
+  actions are `/tile <type> <action>`, no longer `/<type>`), the chat harness's own commands. An unknown `/x` is
+  refused, never sent: the one-shot instruction is `/do <text>`. A command name or `/model` id reaches an engine's
+  argument list or prompt line — the core checks both (`agents::valid_chat_name`); keep that check when adding one.
 - **Kanban has no tile** — it is the ring entry `view:kanban` that opens a large panel. The agent bridge's manifest lists only
   *mounted instances*, so anything an agent must reach without an open window (the Kanban actions) is a **shell action**
   (`registerShellAction`, prefixed `kanban_`), never a module action.

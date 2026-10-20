@@ -1,47 +1,127 @@
 <!--
-  The permanent bottom input line. Enter routes the text (core/commands):
-  a registered `/command` runs locally, other `/text` is a one-shot agent
-  instruction, plain text is a chat turn. ↑/↓ walk the input history.
+  The permanent bottom input line. Enter routes the text (core/commands, #108): an app command runs locally, an
+  engine command and plain text go to the chat, `/do <text>` is a one-shot agent instruction, an unknown `/x` is
+  refused with the nearest names. While the first word after `/` is typed, a list of matching commands opens above
+  the bar: ↑/↓ move in it, Tab takes one, Enter takes it unless the line already names a command, Esc closes it.
+  Otherwise ↑/↓ walk the input history.
 -->
 <script lang="ts">
   import { busy, panelOpen, pushInstruction, send, turns } from "../core/chat";
-  import { route, runCommand } from "../core/commands";
+  import {
+    type CommandEntry,
+    commandEntries,
+    engineCommands,
+    refreshEngineCommands,
+    route,
+    runCommand,
+    suggestions,
+  } from "../core/commands";
   import { toast } from "../core/toast";
   import StatusMark from "../ui/StatusMark.svelte";
+
+  /** How old the engine's list may get before typing `/` reads it again. */
+  const REFRESH_AFTER_MS = 30_000;
 
   let input = $state("");
   let history = $state<string[]>([]);
   let cursor = $state(-1);
+  let picked = $state(0);
+  let dismissed = $state(false);
+  let refreshedAt = 0;
 
   const placeholder = $derived(
     $busy ? "Agent is working…" : "Ask the agent, or /help for commands",
   );
+  const shown = $derived<CommandEntry[]>(dismissed ? [] : suggestions(input, $engineCommands));
+  const listOpen = $derived(shown.length > 0);
+
+  // Read when first needed, not at start: on Opencode it connects to the service, which would start it with the app.
+  function refresh(): void {
+    refreshedAt = Date.now();
+    void refreshEngineCommands();
+  }
+
+  function oninput(): void {
+    dismissed = false;
+    picked = 0;
+    if (input.startsWith("/") && Date.now() - refreshedAt > REFRESH_AFTER_MS) refresh();
+  }
+
+  function take(entry: CommandEntry): void {
+    input = `/${entry.name} `;
+    dismissed = true;
+  }
+
+  /** Whether the line's first word already names a command, so Enter sends it rather than taking a suggestion. */
+  function namesCommand(line: string): boolean {
+    const typed = line.slice(1).toLowerCase();
+    return commandEntries($engineCommands).some((c) => c.name.toLowerCase() === typed);
+  }
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
+    if (listOpen && !namesCommand(input)) {
+      const entry = shown[picked];
+      if (entry) take(entry);
+      return;
+    }
     const routed = route(input);
     if (!routed) return;
     history = [input, ...history.filter((h) => h !== input)].slice(0, 50);
     cursor = -1;
     input = "";
+    dismissed = false;
 
-    if (routed.kind === "command") {
-      const result = await runCommand(routed.name, routed.args);
-      toast(result.message, result.ok ? "info" : "warning");
-      if (result.detail) pushInstruction(result.detail);
-      return;
+    switch (routed.kind) {
+      case "command": {
+        const result = await runCommand(routed.name, routed.args);
+        toast(result.message, result.ok ? "info" : "warning");
+        if (result.detail) pushInstruction(result.detail);
+        return;
+      }
+      case "unknown":
+        toast(routed.message, "warning");
+        return;
+      case "engine":
+        await send(routed.args, "chat", { kind: "run", name: routed.name });
+        break;
+      default:
+        await send(routed.message, routed.kind);
     }
-    await send(routed.message, routed.kind);
+    // Claude Code lists its commands with each turn, and a turn may add a command file: read the list again.
+    refresh();
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (listOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        picked = (picked + step + shown.length) % shown.length;
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Tab") {
+        const entry = shown[picked];
+        if (entry) take(entry);
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Escape") {
+        dismissed = true;
+        e.preventDefault();
+        return;
+      }
+    }
+    // A recalled `/help` must not open the list: it would take the next arrow key from the history.
     if (e.key === "ArrowUp" && history.length > 0) {
       cursor = Math.min(cursor + 1, history.length - 1);
-      input = history[cursor];
+      input = history[cursor] ?? "";
+      dismissed = true;
       e.preventDefault();
     } else if (e.key === "ArrowDown") {
       cursor = Math.max(cursor - 1, -1);
-      input = cursor === -1 ? "" : history[cursor];
+      input = cursor === -1 ? "" : (history[cursor] ?? "");
+      dismissed = true;
       e.preventDefault();
     }
   }
@@ -51,14 +131,39 @@
 
 <div class="dock">
 <form class="bar" class:thinking={$busy} onsubmit={submit}>
+  {#if listOpen}
+    <ul id="assistant-commands" class="suggestions" role="listbox" aria-label="Commands">
+      {#each shown as entry, index (`${entry.source}:${entry.name}`)}
+        <li
+          role="option"
+          aria-selected={index === picked}
+          class:picked={index === picked}
+          onmousedown={(e) => {
+            e.preventDefault();
+            take(entry);
+          }}
+        >
+          <span class="name">/{entry.name}</span>
+          {#if entry.hint}<span class="hint">{entry.hint}</span>{/if}
+          <span class="description">{entry.description}</span>
+          <span class="source">{entry.source}</span>
+        </li>
+      {/each}
+    </ul>
+  {/if}
   <span class="prompt" aria-hidden="true">›</span>
   <input
     bind:value={input}
     type="text"
     {placeholder}
     aria-label="Assistant input"
+    role="combobox"
+    aria-autocomplete="list"
+    aria-controls="assistant-commands"
+    aria-expanded={listOpen}
     autocomplete="off"
     spellcheck="false"
+    oninput={oninput}
     onkeydown={onKeydown}
   />
   {#if $busy}
@@ -88,6 +193,7 @@
   /* While the agent works an ember runs round the bar ("Glut + Hex", UX3): a conic gradient in the border box under
      the bar's own fill, turned by `--ax-anim-orbit` (still at Calm and Off — the ember then simply stands). */
   .bar {
+    position: relative;
     width: min(var(--ax-assistant-width), 100%);
     display: flex;
     align-items: center;
@@ -169,5 +275,57 @@
     color: var(--ax-text);
     font-size: 0.85em;
     font-weight: 600;
+  }
+  /* The command list stands on the bar, as wide as it, and scrolls when long. */
+  .suggestions {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + var(--ax-space-2));
+    max-height: calc(320px * var(--ax-ui-scale));
+    overflow-y: auto;
+    margin: 0;
+    padding: var(--ax-space-1);
+    list-style: none;
+    border: 1px solid var(--ax-border-strong);
+    border-radius: var(--ax-radius-md);
+    background: var(--ax-surface-1);
+    box-shadow: var(--ax-shadow-pop);
+    z-index: var(--ax-z-popover);
+  }
+  .suggestions li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ax-space-2);
+    padding: var(--ax-space-1) var(--ax-space-2);
+    border-radius: var(--ax-radius-sm);
+    cursor: pointer;
+    font-size: var(--ax-font-size-sm);
+  }
+  .suggestions li.picked {
+    background: var(--ax-selected-bg);
+  }
+  .name {
+    font-family: var(--ax-font-mono);
+    color: var(--ax-text);
+    white-space: nowrap;
+  }
+  .hint {
+    font-family: var(--ax-font-mono);
+    color: var(--ax-text-muted);
+    white-space: nowrap;
+  }
+  .description {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ax-text-muted);
+  }
+  .source {
+    color: var(--ax-text-muted);
+    font-size: 0.85em;
+    text-transform: uppercase;
   }
 </style>

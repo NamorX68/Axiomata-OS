@@ -18,15 +18,15 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use axiomata_opencode::{
-    ModelRef, NewSession, OpencodeError, PermissionRule, Service, TurnOutcome, TurnRequest,
-    TurnSession, unattended_permissions,
+    ModelRef, NewSession, OpencodeError, PermissionRule, Service, TurnInput, TurnOutcome,
+    TurnRequest, TurnSession, unattended_permissions,
 };
 
 use super::opencode_instance;
 pub use super::opencode_instance::Instance;
 use super::{
-    AgentRequest, AgentRunResult, BACKEND_OPENCODE, ChatReply, ChatRequest, MAX_RESPONSE_BYTES,
-    agent_slots, truncate_utf8, valid_model_name,
+    AgentRequest, AgentRunResult, BACKEND_OPENCODE, ChatCommand, ChatReply, ChatRequest,
+    MAX_RESPONSE_BYTES, agent_slots, truncate_utf8, valid_model_name,
 };
 use crate::config::{Config, ProviderRole};
 use crate::error::AxiomataError;
@@ -137,6 +137,42 @@ pub(crate) fn chat_model_id(config: &Config) -> Result<String, AxiomataError> {
         provider_prefix(ProviderRole::Chat, config),
         bare
     ))
+}
+
+/// The commands the chat's Opencode offers (#108, S7): those of the app's write instance, which the chat runs on.
+///
+/// # Errors
+///
+/// The service cannot be reached or answers against the protocol.
+pub(crate) async fn chat_commands() -> Result<Vec<axiomata_opencode::CommandInfo>, AxiomataError> {
+    connect(Instance::Write)
+        .await?
+        .commands()
+        .await
+        .map_err(into_axiomata)
+}
+
+/// `/undo` on Opencode (#108, S9): the session back to before its newest user message — that turn's file changes
+/// undone and its messages gone.
+///
+/// # Errors
+///
+/// The session has no turn, or the service cannot be reached or refuses the revert.
+pub(crate) async fn undo_last(session_id: &str) -> Result<String, AxiomataError> {
+    let service = connect(Instance::Write).await?;
+    let message = service
+        .last_user_message(session_id)
+        .await
+        .map_err(into_axiomata)?
+        .ok_or_else(|| AxiomataError::AgentApi {
+            backend: BACKEND_OPENCODE,
+            message: "nothing to undo: the conversation has no turn".to_owned(),
+        })?;
+    service
+        .revert_to(session_id, &message)
+        .await
+        .map_err(into_axiomata)?;
+    Ok("Undid the last turn: its file changes, and its messages in the conversation.".to_owned())
 }
 
 /// Connects to the app's own Opencode service (`docs/plans/agent-isolation.md`, CP1), starting it if needed —
@@ -566,7 +602,18 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         });
     }
     check_cwd(&request.cwd)?;
-    let text = with_module_context(request.system_prompt_file.as_ref(), request.message);
+    // A command's line is its arguments, not a message: the manifest rides with prompts only.
+    let input = match request.command.clone() {
+        None => TurnInput::Prompt(with_module_context(
+            request.system_prompt_file.as_ref(),
+            request.message,
+        )),
+        Some(ChatCommand::Run { name }) => TurnInput::Command {
+            name,
+            arguments: request.message,
+        },
+        Some(ChatCommand::Compact) => TurnInput::Compact,
+    };
     let _permit = agent_slots()
         .acquire()
         .await
@@ -575,6 +622,7 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
     // A conversation the service does not know (one held on the owner's service before the app had its own,
     // `docs/plans/agent-isolation.md` CP1, or one deleted since) goes on in a new session rather than failing.
     let plan = request.mode == super::ChatMode::Plan;
+    let continued = request.session_id.is_some();
     let session_id = match request.session_id {
         // An Opencode session keeps the rights it was made with (Glut 2, G12): when the chat's plan switch differs
         // from the session's, the conversation goes on in a new session — a plan session must not write, a build
@@ -587,6 +635,18 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         },
         None => None,
     };
+    if input == TurnInput::Compact && session_id.is_none() {
+        // A conversation the switch moved on from: compacting it would compact a session the chat no longer uses.
+        if continued {
+            return Err(AxiomataError::AgentApi {
+                backend: BACKEND_OPENCODE,
+                message: "the Plan/Build switch changed since this conversation began, and an Opencode session keeps \
+                          the rights it began with: send a message first, then compact"
+                    .to_owned(),
+            });
+        }
+        return Err(super::nothing_to_compact(BACKEND_OPENCODE));
+    }
     let session = match session_id {
         Some(id) => TurnSession::Existing {
             id,
@@ -607,14 +667,10 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         }),
     };
     let outcome = service
-        .run_turn(TurnRequest {
-            session,
-            text,
-            timeout: request.timeout,
-        })
+        .run_input(session, input, request.timeout)
         .await
         .map_err(into_axiomata)?;
-    let reply = chat_reply(outcome)?;
+    let reply = chat_reply(outcome, request.command.as_ref())?;
     remember_session_plan(&reply.session_id, plan);
     Ok(reply)
 }
@@ -1106,7 +1162,10 @@ fn with_module_context(path: Option<&PathBuf>, message: String) -> String {
 }
 
 /// A finished chat turn as the assistant bar shows it.
-fn chat_reply(outcome: TurnOutcome) -> Result<ChatReply, AxiomataError> {
+fn chat_reply(
+    outcome: TurnOutcome,
+    command: Option<&ChatCommand>,
+) -> Result<ChatReply, AxiomataError> {
     let api_err = |message: String| AxiomataError::AgentApi {
         backend: BACKEND_OPENCODE,
         message,
@@ -1114,9 +1173,12 @@ fn chat_reply(outcome: TurnOutcome) -> Result<ChatReply, AxiomataError> {
     if let Some(failure) = outcome.failure {
         return Err(api_err(failure));
     }
-    let reply_markdown = outcome.reply.trim().to_string();
+    let mut reply_markdown = outcome.reply.trim().to_string();
     if reply_markdown.is_empty() {
-        return Err(api_err("opencode returned an empty reply".to_string()));
+        match command {
+            Some(command) => reply_markdown = command.silent_reply(),
+            None => return Err(api_err("opencode returned an empty reply".to_string())),
+        }
     }
     let usage = outcome.has_usage;
     Ok(ChatReply {
@@ -1498,18 +1560,29 @@ mod tests {
 
     #[test]
     fn a_chat_turn_needs_success_and_a_reply() {
-        let reply = chat_reply(outcome("  Hello!  ", None)).unwrap();
+        let reply = chat_reply(outcome("  Hello!  ", None), None).unwrap();
         assert_eq!(reply.reply_markdown, "Hello!");
         assert_eq!(reply.session_id, "ses_abc");
         assert_eq!(reply.input_tokens, Some(30));
         assert!(matches!(
-            chat_reply(outcome("x", Some("the turn ended failed"))),
+            chat_reply(outcome("x", Some("the turn ended failed")), None),
             Err(AxiomataError::AgentApi { message, .. }) if message == "the turn ended failed"
         ));
         assert!(matches!(
-            chat_reply(outcome("   ", None)),
+            chat_reply(outcome("   ", None), None),
             Err(AxiomataError::AgentApi { .. })
         ));
+        // A command may answer nothing (a compaction never answers): that is its done, not a failure.
+        let compacted = chat_reply(outcome("", None), Some(&ChatCommand::Compact)).unwrap();
+        assert_eq!(compacted.reply_markdown, "Conversation compacted.");
+        let ran = chat_reply(
+            outcome("", None),
+            Some(&ChatCommand::Run {
+                name: "init".into(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(ran.reply_markdown, "`/init` done.");
     }
 
     #[test]

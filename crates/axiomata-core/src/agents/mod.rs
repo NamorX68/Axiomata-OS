@@ -352,6 +352,295 @@ pub struct ChatRequest {
     /// turn: its one MCP tool). Ignored by opencode (its rules are the
     /// session's); Claude Code and Glut take them as the turn's whole rights.
     pub allowed_tools: Option<String>,
+    /// A slash command instead of a prompt (#108): one of the harness's own commands, `message` its arguments, or a
+    /// compaction of the conversation.
+    pub command: Option<ChatCommand>,
+}
+
+/// A chat turn that is a command rather than a prompt (`docs/plans/slash-commands.md`, S8/S9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatCommand {
+    /// One of the chat harness's own commands ([`chat_commands`]), by its name; the turn's message is its arguments.
+    Run { name: String },
+    /// Summarise the conversation so far to free its context; the turn's message is unused.
+    Compact,
+}
+
+impl ChatCommand {
+    /// What the chat shows for a command that answered nothing — a compaction answers nothing on every harness.
+    pub(crate) fn silent_reply(&self) -> String {
+        match self {
+            ChatCommand::Run { name } => format!("`/{name}` done."),
+            ChatCommand::Compact => "Conversation compacted.".to_owned(),
+        }
+    }
+}
+
+/// The error of a compaction asked for before the conversation has a turn.
+pub(crate) fn nothing_to_compact(backend: &'static str) -> AxiomataError {
+    AxiomataError::AgentApi {
+        backend,
+        message: "nothing to compact yet: the conversation has no turn".to_owned(),
+    }
+}
+
+/// What a chat turn carries besides its text (#108): a model for this conversation only, a command.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChatExtras {
+    /// The chat provider's model id this turn runs on instead of its `chat_model` (S5) — the provider's own
+    /// spelling, as the model catalog lists it; each harness prefixes it as it does `chat_model`.
+    pub model: Option<String>,
+    pub command: Option<ChatCommand>,
+}
+
+/// Which harness offers a chat command: the source chip of the bar's list (S10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandSource {
+    Glut,
+    Oc,
+    Cc,
+}
+
+/// One command the chat's harness offers (#108, S7) — data the bar shows as text and sends back by name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct EngineCommand {
+    pub name: String,
+    pub source: CommandSource,
+    pub hint: Option<String>,
+    pub description: String,
+}
+
+/// The commands of the configured chat harness: Glut's from the owner's command files, Opencode's from its service,
+/// Claude Code's from the last chat turn (none before the first). Names a turn would refuse are left out.
+///
+/// # Errors
+///
+/// A Glut command folder that cannot be used, or an Opencode service that cannot be reached.
+pub async fn chat_commands(config: &Config) -> Result<Vec<EngineCommand>, AxiomataError> {
+    let commands = match config.agents.chat_harness {
+        HarnessId::Axh => axh::chat_commands(&config.workspace_root)?
+            .into_iter()
+            .map(|command| EngineCommand {
+                name: command.name,
+                source: CommandSource::Glut,
+                hint: command.argument_hint,
+                description: command
+                    .description
+                    .unwrap_or_else(|| "command file".to_owned()),
+            })
+            .collect(),
+        HarnessId::Opencode => opencode::chat_commands()
+            .await?
+            .into_iter()
+            .map(|command| EngineCommand {
+                name: command.name,
+                source: CommandSource::Oc,
+                hint: None,
+                description: command.description.unwrap_or_default(),
+            })
+            .collect(),
+        HarnessId::ClaudeCode => claude_code::known_commands()
+            .into_iter()
+            .map(|command| EngineCommand {
+                name: command.name,
+                source: CommandSource::Cc,
+                hint: None,
+                description: if command.skill { "skill" } else { "command" }.to_owned(),
+            })
+            .collect::<Vec<_>>(),
+    };
+    Ok(commands
+        .into_iter()
+        .filter(|command: &EngineCommand| valid_command_name(&command.name))
+        .collect())
+}
+
+/// One earlier conversation `/resume` lists (#108).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ChatSession {
+    pub id: String,
+    /// The first words of its first message; empty where the harness keeps none the app can read (Opencode).
+    pub title: String,
+    /// Its latest turn, as `chat_turns` recorded it (RFC 3339).
+    pub updated_at: String,
+    pub turns: u32,
+}
+
+/// How many earlier conversations `/resume` lists.
+const MAX_LISTED_SESSIONS: usize = 20;
+/// How many lines, and bytes, of a conversation file a title is looked for in: a file may hold a huge line (an image).
+const MAX_TITLE_LINES: usize = 200;
+const MAX_TITLE_BYTES: u64 = 256 * 1024;
+/// How much of a conversation's first message its title shows, in characters.
+const TITLE_CHARS: usize = 80;
+
+/// A message's first line, cut to [`TITLE_CHARS`].
+fn title_of(text: &str) -> String {
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    match line.char_indices().nth(TITLE_CHARS) {
+        Some((at, _)) => format!("{}…", &line[..at]),
+        None => line.to_owned(),
+    }
+}
+
+/// Whether `id` is a conversation of `harness`: each spells its ids its own way.
+fn session_of(harness: HarnessId, id: &str) -> bool {
+    match harness {
+        HarnessId::Axh => id.starts_with("axh-"),
+        HarnessId::Opencode => id.starts_with("ses_"),
+        HarnessId::ClaudeCode => {
+            id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+        }
+    }
+}
+
+/// The chat's earlier conversations on its harness, newest first (#108, `/resume`): the ones `chat_turns` recorded —
+/// so a skill run in the same folder is never one — whose harness still holds them.
+///
+/// # Errors
+///
+/// The database cannot be read.
+pub fn chat_sessions(
+    config: &Config,
+    db: &std::sync::Mutex<rusqlite::Connection>,
+) -> Result<Vec<ChatSession>, AxiomataError> {
+    let harness = config.agents.chat_harness;
+    let recorded: Vec<(String, String, u32)> = {
+        let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut statement = conn.prepare(
+            "SELECT session_id, MAX(created_at), COUNT(*) FROM chat_turns \
+             WHERE mode IN ('chat', 'plan') AND is_error = 0 AND session_id != '' \
+             GROUP BY session_id ORDER BY MAX(created_at) DESC LIMIT 200",
+        )?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    Ok(recorded
+        .into_iter()
+        .filter(|(id, _, _)| session_of(harness, id) && valid_session_id(id))
+        .filter_map(|(id, updated_at, turns)| {
+            let title = match harness {
+                HarnessId::Axh => axh::session_title(&id)?,
+                HarnessId::ClaudeCode => claude_code::session_title(&config.workspace_root, &id)?,
+                HarnessId::Opencode => String::new(),
+            };
+            Some(ChatSession {
+                id,
+                title,
+                updated_at,
+                turns,
+            })
+        })
+        .take(MAX_LISTED_SESSIONS)
+        .collect())
+}
+
+/// `/undo` (#108, S9): the file changes of the conversation's latest turn undone, as its harness can — Glut from its
+/// snapshots, Opencode by its revert; Claude Code has no rewind in `-p` and says so.
+///
+/// # Errors
+///
+/// Nothing to undo, the harness cannot, or the undo itself failed.
+pub async fn chat_undo(
+    config: &Config,
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    session_id: &str,
+) -> Result<String, AxiomataError> {
+    // Only a chat conversation: the services also hold card and agent sessions, which `/undo` must never revert.
+    let recorded = valid_session_id(session_id)
+        && {
+            let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
+            conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM chat_turns WHERE session_id = ?1 AND mode IN ('chat', 'plan'))",
+            [session_id],
+            |row| row.get::<_, bool>(0),
+        )?
+        };
+    if !recorded {
+        return Err(AxiomataError::AgentApi {
+            backend: "chat",
+            message: "nothing to undo: not a conversation of this chat".to_owned(),
+        });
+    }
+    match config.agents.chat_harness {
+        HarnessId::Axh => axh::undo_last(session_id, &config.workspace_root).await,
+        HarnessId::Opencode => opencode::undo_last(session_id).await,
+        HarnessId::ClaudeCode => Err(AxiomataError::AgentApi {
+            backend: BACKEND_CLAUDE_CODE,
+            message: "Claude Code cannot undo in the app's chat: it has no rewind outside its own terminal".to_owned(),
+        }),
+    }
+}
+
+/// The longest model id or command name a chat turn takes.
+const MAX_CHAT_NAME: usize = 200;
+
+/// Whether `name` can be a model id or a command name: printable ASCII without spaces, quotes or a leading `-` — it
+/// ends up in an argument list or a prompt's first line, where nothing may read it as a flag or a second line.
+fn valid_chat_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_CHAT_NAME
+        && !name.starts_with('-')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._:/@+-".contains(&b))
+}
+
+/// The config a turn with `extras` runs on: the chat provider's `chat_model` replaced by the turn's own model.
+fn with_turn_model(config: &Config, extras: &ChatExtras) -> Result<Option<Config>, AxiomataError> {
+    let Some(model) = extras.model.as_deref() else {
+        return Ok(None);
+    };
+    if !valid_chat_name(model) {
+        return Err(AxiomataError::InvalidAgentModel {
+            reason: format!("{model:?} is not a model id"),
+        });
+    }
+    // On a metered provider a model without a price would be recorded at no cost and slip past the daily cap: the
+    // turn takes only a priced model (the catalog writes OpenRouter's prices, #17) or the configured one.
+    let provider = config.agents.chat_provider;
+    let configured = default_chat_model(config);
+    if provider.is_redirected()
+        && !config.agents.costs.contains_key(model)
+        && configured.as_deref() != Some(model)
+    {
+        return Err(AxiomataError::InvalidAgentModel {
+            reason: format!(
+                "{model} has no price in agents.costs; refresh the model list or set its price"
+            ),
+        });
+    }
+    let mut config = config.clone();
+    let settings = config.agents.providers.get_mut(&provider).ok_or_else(|| {
+        AxiomataError::InvalidAgentModel {
+            reason: format!("the chat provider {} has no settings", provider.as_str()),
+        }
+    })?;
+    settings.chat_model = model.to_owned();
+    Ok(Some(config))
+}
+
+/// Whether `name` can be a command name: [`valid_chat_name`] without the characters only a model id needs (`/`, `@`,
+/// `+`) and without `..` — a name is never a path.
+fn valid_command_name(name: &str) -> bool {
+    valid_chat_name(name) && !name.contains("..") && !name.contains(['/', '@', '+'])
+}
+
+fn check_command(command: Option<&ChatCommand>) -> Result<(), AxiomataError> {
+    match command {
+        Some(ChatCommand::Run { name }) if !valid_command_name(name) => {
+            Err(AxiomataError::AgentApi {
+                backend: "chat",
+                message: format!("{name:?} is not a command name"),
+            })
+        }
+        _ => Ok(()),
+    }
 }
 
 /// One dashboard-assistant turn on the opencode backend, built from the
@@ -364,7 +653,11 @@ pub async fn chat(
     session_id: Option<String>,
     mode: ChatMode,
     allowed_tools: Option<String>,
+    extras: ChatExtras,
 ) -> Result<ChatReply, AxiomataError> {
+    check_command(extras.command.as_ref())?;
+    let turn_config = with_turn_model(config, &extras)?;
+    let config = turn_config.as_ref().unwrap_or(config);
     let harness = config.agents.chat_harness;
     let request = ChatRequest {
         message,
@@ -376,6 +669,7 @@ pub async fn chat(
         model: None,
         auto_approve_tools: config.agents.auto_approve_tools,
         allowed_tools,
+        command: extras.command,
     };
     match harness {
         HarnessId::Opencode => {
@@ -444,12 +738,36 @@ pub async fn chat_and_record(
     mode: ChatMode,
     allowed_tools: Option<String>,
 ) -> Result<ChatReply, AxiomataError> {
+    chat_and_record_with(
+        config,
+        db,
+        message,
+        session_id,
+        mode,
+        allowed_tools,
+        ChatExtras::default(),
+    )
+    .await
+}
+
+/// [`chat_and_record`] with a turn model or a command (#108); the turn is metered at the model it ran on.
+pub async fn chat_and_record_with(
+    config: &Config,
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    message: String,
+    session_id: Option<String>,
+    mode: ChatMode,
+    allowed_tools: Option<String>,
+    extras: ChatExtras,
+) -> Result<ChatReply, AxiomataError> {
     {
         let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
         crate::spend::guard_redirected_turn(&conn, config, ProviderRole::Chat)?;
     }
-    let model = default_chat_model(config);
-    let reply = chat(config, message, session_id, mode, allowed_tools).await?;
+    let model = with_turn_model(config, &extras)?
+        .as_ref()
+        .map_or_else(|| default_chat_model(config), default_chat_model);
+    let reply = chat(config, message, session_id, mode, allowed_tools, extras).await?;
     {
         let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
         let turn = crate::spend::ChatTurnRecord {
@@ -682,15 +1000,166 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resume_lists_the_chat_turns_of_the_chat_harness_only() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE chat_turns (id INTEGER PRIMARY KEY, session_id TEXT, mode TEXT, provider TEXT, model TEXT, \
+             is_error INTEGER DEFAULT 0, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER, \
+             num_turns INTEGER, duration_ms INTEGER DEFAULT 0, created_at TEXT NOT NULL, cached_input_tokens INTEGER);
+             INSERT INTO chat_turns (session_id, mode, created_at) VALUES
+               ('ses_a', 'chat', '2026-10-20T08:00:00Z'), ('ses_a', 'plan', '2026-10-20T09:00:00Z'),
+               ('ses_b', 'chat', '2026-10-20T10:00:00Z'), ('ses_c', 'instruct', '2026-10-20T11:00:00Z'),
+               ('ses_d', 'commit_message', '2026-10-20T11:30:00Z'), ('axh-gone', 'chat', '2026-10-20T12:00:00Z');
+             INSERT INTO chat_turns (session_id, mode, is_error, created_at) VALUES ('ses_e', 'chat', 1, 'z');",
+        )
+        .unwrap();
+        let db = std::sync::Mutex::new(conn);
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::Opencode;
+        let listed = chat_sessions(&config, &db).unwrap();
+        let ids: Vec<(&str, u32)> = listed.iter().map(|s| (s.id.as_str(), s.turns)).collect();
+        assert_eq!(ids, [("ses_b", 1), ("ses_a", 2)]);
+        assert_eq!(listed[1].updated_at, "2026-10-20T09:00:00Z");
+        // Glut's conversation lists only while its file is there.
+        config.agents.chat_harness = HarnessId::Axh;
+        assert!(chat_sessions(&config, &db).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn undo_reaches_only_a_conversation_the_chat_recorded() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE chat_turns (id INTEGER PRIMARY KEY, session_id TEXT, mode TEXT, created_at TEXT NOT NULL);
+             INSERT INTO chat_turns (session_id, mode, created_at) VALUES ('ses_card', 'instruct', 'x');",
+        )
+        .unwrap();
+        let db = std::sync::Mutex::new(conn);
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::Opencode;
+        for id in ["ses_card", "ses_never", "../x"] {
+            let err = chat_undo(&config, &db, id).await.unwrap_err();
+            assert!(
+                err.to_string().contains("not a conversation of this chat"),
+                "{id}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_title_is_the_first_line_cut_short() {
+        assert_eq!(title_of("\n  fix the tests\nand more"), "fix the tests");
+        assert_eq!(
+            title_of(&"x".repeat(TITLE_CHARS + 5)),
+            format!("{}…", "x".repeat(TITLE_CHARS))
+        );
+        assert!(session_of(
+            HarnessId::ClaudeCode,
+            "8d6a44a7-1f5f-4938-86bd-51e771359397"
+        ));
+        assert!(!session_of(HarnessId::ClaudeCode, "ses_abc"));
+        assert!(session_of(HarnessId::Axh, "axh-123"));
+    }
+
+    #[test]
+    fn a_turn_model_or_command_name_is_one_plain_word() {
+        for good in [
+            "deepseek/deepseek-v4-flash",
+            "claude-haiku-5-5",
+            "qwen3.8:27b",
+            "apple-reminders:weekly",
+        ] {
+            assert!(valid_chat_name(good), "{good}");
+        }
+        for bad in [
+            "",
+            "-p",
+            "a b",
+            "a\nb",
+            "a\"b",
+            &"x".repeat(MAX_CHAT_NAME + 1),
+        ] {
+            assert!(!valid_chat_name(bad), "{bad:?}");
+        }
+        assert!(check_command(Some(&ChatCommand::Run { name: "x y".into() })).is_err());
+        for path_like in ["../x", "a/b", "a@b"] {
+            assert!(
+                check_command(Some(&ChatCommand::Run {
+                    name: path_like.into()
+                }))
+                .is_err(),
+                "{path_like}"
+            );
+        }
+        assert!(
+            check_command(Some(&ChatCommand::Run {
+                name: "apple-reminders:weekly".into()
+            }))
+            .is_ok()
+        );
+        assert!(check_command(Some(&ChatCommand::Compact)).is_ok());
+    }
+
+    #[test]
+    fn a_turn_model_replaces_the_chat_model_of_the_chat_provider_only() {
+        let mut config = Config::default();
+        config.agents.chat_provider = ProviderId::OpenRouter;
+        config.agents.skill_provider = ProviderId::OpenRouter;
+        config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            crate::config::ProviderSettings {
+                base_url: None,
+                api_key: None,
+                chat_model: "configured".into(),
+                skill_model: "skill".into(),
+            },
+        );
+        assert!(
+            with_turn_model(&config, &ChatExtras::default())
+                .unwrap()
+                .is_none()
+        );
+        let extras = ChatExtras {
+            model: Some("picked/model".into()),
+            command: None,
+        };
+        // OpenRouter is metered: an unpriced model is refused, a priced one taken.
+        assert!(with_turn_model(&config, &extras).is_err());
+        config.agents.costs.insert(
+            "picked/model".into(),
+            crate::config::ModelCost {
+                input_per_m: 0.1,
+                cached_input_per_m: None,
+                output_per_m: 0.2,
+            },
+        );
+        let turned = with_turn_model(&config, &extras).unwrap().unwrap();
+        assert_eq!(default_chat_model(&turned).as_deref(), Some("picked/model"));
+        assert_eq!(default_skill_model(&turned).as_deref(), Some("skill"));
+        assert_eq!(default_chat_model(&config).as_deref(), Some("configured"));
+        let flag = ChatExtras {
+            model: Some("--dangerously".into()),
+            command: None,
+        };
+        assert!(with_turn_model(&config, &flag).is_err());
+    }
+
     /// Glut refuses a chat turn paired with Anthropic, and Claude Code one paired with another provider than
     /// Anthropic — neither hops to Opencode. Claude Code with Anthropic gets as far as the runner, which a unit test
     /// never starts.
     #[tokio::test]
     async fn chat_runs_on_the_chat_harness_and_never_hops_to_opencode() {
         let turn = |config: Config| async move {
-            chat(&config, "hi".to_owned(), None, ChatMode::Chat, None)
-                .await
-                .unwrap_err()
+            chat(
+                &config,
+                "hi".to_owned(),
+                None,
+                ChatMode::Chat,
+                None,
+                ChatExtras::default(),
+            )
+            .await
+            .unwrap_err()
         };
         // Glut with the default (Anthropic) chat provider: no client for it yet (D6).
         let mut config = Config::default();

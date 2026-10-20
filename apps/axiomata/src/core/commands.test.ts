@@ -2,7 +2,19 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 
 import { registerBuiltins } from "../modules";
-import { helpText, isCommand, route, runCommand } from "./commands";
+import {
+  type EngineCommand,
+  commandEntries,
+  engineCommands,
+  helpText,
+  nearest,
+  refreshEngineCommands,
+  route,
+  runCommand,
+  suggestions,
+} from "./commands";
+import { busy, planMode, sessionId, turnModel, turns } from "./chat";
+import { modelCatalog } from "./modelCatalog";
 import { activeTheme, instances, loadInstances } from "./stores";
 import { staged } from "./staging";
 
@@ -10,28 +22,109 @@ beforeAll(() => registerBuiltins());
 beforeEach(() => {
   loadInstances([]);
   staged.set([]);
+  turns.set([]);
+  planMode.set(false);
 });
 
+const ENGINE: EngineCommand[] = [
+  { name: "review", source: "oc", description: "review changes" },
+  { name: "init", source: "oc", description: "guided AGENTS.md setup" },
+  { name: "help", source: "oc", description: "the engine's help" },
+  { name: "apple-reminders:weekly-planning-workflow", source: "oc", description: "a prompt" },
+];
+
 describe("route", () => {
-  it("classifies chat, instruct and registered commands", () => {
+  it("sends plain text to the chat and /do to a one-shot instruction", () => {
     expect(route("   ")).toBeNull();
     expect(route("hello there")).toEqual({ kind: "chat", message: "hello there" });
-    expect(route("/schreib Milch auf die Liste")).toEqual({
+    expect(route("/do schreib Milch auf die Liste")).toEqual({
       kind: "instruct",
       message: "schreib Milch auf die Liste",
     });
+    expect(route("/do")).toMatchObject({ kind: "unknown", message: "usage: /do <text>" });
+  });
+
+  it("knows the app's two levels, case-insensitively", () => {
     expect(route("/THEME ocean")).toEqual({ kind: "command", name: "theme", args: ["ocean"] });
-    expect(route("/memory-status status")).toEqual({
+    expect(route("/tile memory-status status")).toEqual({
       kind: "command",
-      name: "memory-status",
-      args: ["status"],
+      name: "tile",
+      args: ["memory-status", "status"],
+    });
+    expect(route("/clear")).toEqual({ kind: "command", name: "clear", args: [] });
+  });
+
+  it("refuses an unknown /x instead of spending a turn on it, naming the nearest commands", () => {
+    const typo = route("/thme ocean");
+    expect(typo).toMatchObject({ kind: "unknown", name: "thme" });
+    expect(typo?.kind === "unknown" && typo.message).toMatch(/did you mean \/theme/);
+    const nothing = route("/schreib Milch auf die Liste");
+    expect(nothing?.kind === "unknown" && nothing.message).toMatch(/\/do <text>/);
+  });
+
+  it("points the old spellings at their new place", () => {
+    const hint = (input: string): string => {
+      const r = route(input);
+      return r?.kind === "unknown" ? r.message : "";
+    };
+    expect(hint("/add todo")).toBe("/add is now /tile add");
+    expect(hint("/skill run news-web")).toBe("/skill is now /skills run");
+    expect(hint("/memory-status sync")).toBe("/memory-status is now /tile memory-status");
+  });
+
+  it("routes an engine's command under its own name and keeps the rest of the line as typed", () => {
+    expect(route("/review  the branch  now", ENGINE)).toEqual({
+      kind: "engine",
+      name: "review",
+      source: "oc",
+      args: "the branch  now",
+    });
+    expect(route("/apple-reminders:weekly-planning-workflow", ENGINE)).toMatchObject({
+      kind: "engine",
+      name: "apple-reminders:weekly-planning-workflow",
     });
   });
 
-  it("knows shell commands and module types", () => {
-    expect(isCommand("help")).toBe(true);
-    expect(isCommand("skills-deck")).toBe(true);
-    expect(isCommand("nope")).toBe(false);
+  it("gives a clash to the app and the engine's command a prefix", () => {
+    expect(route("/help", ENGINE)).toEqual({ kind: "command", name: "help", args: [] });
+    expect(route("/oc:help", ENGINE)).toMatchObject({ kind: "engine", name: "help", source: "oc" });
+    expect(route("/oc:init", ENGINE)).toMatchObject({ kind: "engine", name: "init" });
+    // A prefix names one engine: another's prefix does not reach it.
+    expect(route("/cc:review", ENGINE)).toMatchObject({ kind: "unknown" });
+  });
+});
+
+describe("the command list", () => {
+  it("lists the app's commands first and prefixes only the clashing engine names", () => {
+    const names = commandEntries(ENGINE).map((c) => c.name);
+    expect(names.slice(0, 2)).toEqual(["help", "clear"]);
+    expect(names).toContain("review");
+    expect(names).toContain("oc:help");
+    expect(names).not.toContain("add");
+  });
+
+  it("suggests while the first word is typed, and stops at the first space", () => {
+    expect(suggestions("/c", ENGINE).map((c) => c.name)).toEqual(["clear", "compact", "cost"]);
+    expect(suggestions("/oc:", ENGINE).map((c) => c.name)).toEqual(["oc:help"]);
+    expect(suggestions("/", ENGINE).length).toBe(commandEntries(ENGINE).length);
+    expect(suggestions("/theme ", ENGINE)).toEqual([]);
+    expect(suggestions("theme", ENGINE)).toEqual([]);
+  });
+
+  it("finds near names by prefix first, then by a small edit distance", () => {
+    expect(nearest("co", ["clear", "compact", "cost"])).toEqual(["compact", "cost"]);
+    expect(nearest("modle", ["model", "mode-x", "theme"])).toEqual(["model"]);
+    expect(nearest("zzzzzz", ["model"])).toEqual([]);
+  });
+
+  it("/help shows the three levels and the placeable tile types, read when asked", () => {
+    const text = helpText(ENGINE);
+    expect(text).toContain("**Conversation**");
+    expect(text).toContain("`/tile add|remove <type>");
+    expect(text).toContain("`memory-status`");
+    expect(text).not.toContain("`file`");
+    expect(text).toContain("`/oc:help` — the engine's help *(oc)*");
+    expect(helpText([])).toContain("its commands appear once the chat knows them");
   });
 });
 
@@ -39,18 +132,58 @@ describe("runCommand", () => {
   it("/help returns the command list as detail", async () => {
     const r = await runCommand("help", []);
     expect(r.ok).toBe(true);
-    expect(r.detail).toContain("/add <type>");
+    expect(r.detail).toContain("/tile");
   });
 
-  it("/add and /remove manage tiles", async () => {
-    expect((await runCommand("add", ["memory-status"])).ok).toBe(true);
+  it("/clear starts a new conversation, /plan and /build flip the switch", async () => {
+    sessionId.set("s-1");
+    turns.set([{ id: 1, role: "user", text: "hi", at: 0 }]);
+    await runCommand("clear", []);
+    expect(get(sessionId)).toBeNull();
+    expect(get(turns)).toEqual([]);
+    await runCommand("plan", []);
+    expect(get(planMode)).toBe(true);
+    await runCommand("build", []);
+    expect(get(planMode)).toBe(false);
+  });
+
+  it("/cost adds the replies' prices and says when some had none", async () => {
+    expect((await runCommand("cost", [])).message).toMatch(/No turns/);
+    turns.set([
+      { id: 1, role: "user", text: "a", at: 0 },
+      { id: 2, role: "assistant", text: "b", at: 0, costUsd: 0.0125 },
+      { id: 3, role: "assistant", text: "c", at: 0, costUsd: null },
+    ]);
+    expect((await runCommand("cost", [])).message).toBe("2 turns · $0.0125 (1 without a price)");
+  });
+
+  it("/skills lists the skills, /skills run runs one", async () => {
+    const backend = await import("./backend");
+    const spy = vi.spyOn(backend, "invokeBackend");
+    spy.mockResolvedValueOnce([{ name: "news-web", description: "the news", backend: null, harness: "axh" }]);
+    const list = await runCommand("skills", []);
+    expect(list.detail).toContain("`news-web` — the news *(axh)*");
+    spy.mockResolvedValueOnce({ status: "success", duration_ms: 12 });
+    expect(await runCommand("skills", ["run", "news-web"])).toMatchObject({
+      ok: true,
+      message: "/news-web: success (12 ms)",
+    });
+    expect(spy).toHaveBeenLastCalledWith("run_skill", { name: "news-web" });
+    expect((await runCommand("skills", ["run"])).ok).toBe(false);
+    expect((await runCommand("skills", ["nope"])).ok).toBe(false);
+    spy.mockRestore();
+  });
+
+  it("/tile add and /tile remove manage tiles", async () => {
+    expect((await runCommand("tile", ["add", "memory-status"])).ok).toBe(true);
     expect(get(instances)).toHaveLength(1);
-    const bad = await runCommand("add", ["nope"]);
+    const bad = await runCommand("tile", ["add", "nope"]);
     expect(bad.ok).toBe(false);
     expect(bad.message).toMatch(/unknown module type/);
-    expect((await runCommand("remove", ["memory-status"])).ok).toBe(true);
+    expect((await runCommand("tile", ["remove", "memory-status"])).ok).toBe(true);
     expect(get(instances)).toHaveLength(0);
-    expect((await runCommand("remove", ["memory-status"])).ok).toBe(false);
+    expect((await runCommand("tile", ["remove", "memory-status"])).ok).toBe(false);
+    expect((await runCommand("tile", [])).message).toMatch(/usage: \/tile/);
   });
 
   it("/theme switches known themes only", async () => {
@@ -85,32 +218,150 @@ describe("runCommand", () => {
     spy.mockRestore();
   });
 
-  it("/help's /add <type> list names every placeable module type, read when asked", () => {
-    // Built when `/help` runs, not when the module loads — the builtins register after it is imported.
-    expect(helpText()).toContain("`memory-status`");
-    expect(helpText()).not.toContain("`file`");
-  });
-
-  it("module actions need a mounted instance and valid JSON params", async () => {
-    const none = await runCommand("memory-status", ["status"]);
+  it("/tile <type> <action> needs a mounted instance and valid JSON params", async () => {
+    const none = await runCommand("tile", ["memory-status", "status"]);
     expect(none.ok).toBe(false);
-    expect(none.message).toMatch(/\/add memory-status/);
-    await runCommand("add", ["memory-status"]);
-    const usage = await runCommand("memory-status", []);
+    expect(none.message).toMatch(/\/tile add memory-status/);
+    await runCommand("tile", ["add", "memory-status"]);
+    const usage = await runCommand("tile", ["memory-status"]);
     expect(usage.ok).toBe(false);
     expect(usage.message).toMatch(/actions: `sync`, `status`/);
-    const badJson = await runCommand("memory-status", ["status", "{nope"]);
+    const badJson = await runCommand("tile", ["memory-status", "status", "{nope"]);
     expect(badJson.ok).toBe(false);
-    const ok = await runCommand("memory-status", ["status"]);
+    const ok = await runCommand("tile", ["memory-status", "status"]);
     expect(ok.ok).toBe(true);
     expect(ok.detail).toContain("tracked_files");
-    const unknown = await runCommand("memory-status", ["explode"]);
+    const unknown = await runCommand("tile", ["memory-status", "explode"]);
     expect(unknown.ok).toBe(false);
     expect(unknown.message).toMatch(/no action "explode"/);
+    expect((await runCommand("tile", ["frobnicate", "x"])).message).toMatch(/unknown tile type/);
   });
 
   it("unknown commands are reported", async () => {
     const r = await runCommand("frobnicate", []);
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("the conversation commands that reach the backend (#108)", () => {
+  const config = {
+    owner: "o",
+    workspace_root: "/w",
+    agents: {
+      chat_provider: "open_router",
+      providers: { open_router: { base_url: null, has_key: true, chat_model: "configured/model", skill_model: "s" } },
+    },
+  };
+
+  beforeEach(() => {
+    sessionId.set(null);
+    turnModel.set(null);
+    busy.set(false);
+    modelCatalog.set({
+      providers: {
+        open_router: {
+          models: [
+            { id: "allowed/one", name: "One", context_length: 128000 },
+            { id: "allowed/two", name: "allowed/two" },
+          ],
+        },
+      },
+    } as never);
+  });
+
+  async function backend() {
+    const module = await import("./backend");
+    return vi.spyOn(module, "invokeBackend");
+  }
+
+  it("/model shows the models, switches this conversation to an allowed one and goes back", async () => {
+    const spy = await backend();
+    spy.mockResolvedValue(config);
+    const shown = await runCommand("model", []);
+    expect(shown.detail).toContain("`configured/model`, the configured chat model of open_router");
+    expect(shown.detail).toContain("- `allowed/one` — 128k ctx");
+    expect((await runCommand("model", ["not/listed"])).message).toMatch(/not among open_router's models/);
+    expect((await runCommand("model", ["-p"])).ok).toBe(false);
+    expect((await runCommand("model", ["allowed/two"])).ok).toBe(true);
+    expect(get(turnModel)).toBe("allowed/two");
+    expect((await runCommand("model", [])).detail).toContain("`allowed/two` for this conversation");
+    await runCommand("model", ["default"]);
+    expect(get(turnModel)).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("/compact, /resume and /undo wait while the agent works", async () => {
+    busy.set(true);
+    sessionId.set("ses_1");
+    for (const name of ["compact", "resume", "undo", "clear"]) {
+      expect((await runCommand(name, [])).message).toMatch(/agent is working/);
+    }
+    expect(get(sessionId)).toBe("ses_1");
+    busy.set(false);
+  });
+
+  it("an engine command is matched without case and keeps the engine's spelling", () => {
+    const engine: EngineCommand[] = [{ name: "Review", source: "cc", description: "command" }];
+    expect(route("/review now", engine)).toMatchObject({ kind: "engine", name: "Review", args: "now" });
+    expect(route("/CC:REVIEW", engine)).toMatchObject({ kind: "engine", name: "Review" });
+  });
+
+  it("/resume shows a harness's title as plain text", async () => {
+    const spy = await backend();
+    const title = "[click](http://x) `code`";
+    spy.mockResolvedValue([{ id: "ses_x", title, updated_at: "2026-10-20T08:00:00Z", turns: 1 }]);
+    expect((await runCommand("resume", [])).detail).toContain("— click(http://x) code ·");
+    spy.mockRestore();
+  });
+
+  it("/compact needs a conversation and sends a compaction turn", async () => {
+    const spy = await backend();
+    expect((await runCommand("compact", [])).message).toMatch(/Nothing to compact/);
+    sessionId.set("ses_1");
+    const compacted = { session_id: "ses_1", reply_markdown: "Conversation compacted.", is_error: false };
+    spy.mockResolvedValue({ ...compacted, cost_usd: null });
+    expect((await runCommand("compact", [])).ok).toBe(true);
+    expect(spy).toHaveBeenCalledWith("assistant_send", expect.objectContaining({ command: { kind: "compact" } }));
+    spy.mockRestore();
+  });
+
+  it("/resume lists the earlier conversations and goes on with a listed one only", async () => {
+    const spy = await backend();
+    spy.mockResolvedValue([{ id: "ses_old", title: "fix the tests", updated_at: "2026-10-20T08:12:00Z", turns: 3 }]);
+    const listed = await runCommand("resume", []);
+    expect(listed.detail).toContain("`/resume ses_old` — fix the tests · 2026-10-20 08:12 · 3 turns");
+    expect((await runCommand("resume", ["ses_other"])).ok).toBe(false);
+    turns.set([{ id: 1, role: "user", text: "now", at: 0 }]);
+    expect((await runCommand("resume", ["ses_old"])).ok).toBe(true);
+    expect(get(sessionId)).toBe("ses_old");
+    expect(get(turns)).toEqual([]);
+    spy.mockRestore();
+  });
+
+  it("/undo needs a conversation and says what its harness did", async () => {
+    const spy = await backend();
+    expect((await runCommand("undo", [])).ok).toBe(false);
+    sessionId.set("axh-1");
+    spy.mockResolvedValueOnce("Undid the file changes of the last turn.");
+    expect(await runCommand("undo", [])).toMatchObject({
+      ok: true,
+      detail: "Undid the file changes of the last turn.",
+    });
+    expect(spy).toHaveBeenLastCalledWith("chat_undo", { sessionId: "axh-1" });
+    spy.mockRejectedValueOnce("Claude Code cannot undo");
+    expect((await runCommand("undo", [])).ok).toBe(false);
+    spy.mockRestore();
+  });
+
+  it("reads the engine's commands, and keeps the last list when the harness cannot answer", async () => {
+    const spy = await backend();
+    spy.mockResolvedValueOnce([{ name: "review", source: "oc", hint: null, description: "review changes" }]);
+    await refreshEngineCommands();
+    expect(get(engineCommands)).toEqual([{ name: "review", source: "oc", description: "review changes" }]);
+    spy.mockRejectedValueOnce(new Error("not up"));
+    await refreshEngineCommands();
+    expect(get(engineCommands)).toHaveLength(1);
+    engineCommands.set([]);
+    spy.mockRestore();
   });
 });

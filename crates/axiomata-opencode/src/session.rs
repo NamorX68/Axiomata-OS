@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::error::OpencodeError;
@@ -84,6 +84,18 @@ pub struct NewSession {
     pub agent: Option<String>,
     /// Rules layered over the configured ones for this session.
     pub permissions: Vec<PermissionRule>,
+}
+
+/// How many of a session's newest messages [`Service::newest_user_message`] looks through: a command's user message
+/// is followed at once by the agent's, so it is among the last few.
+const NEWEST_USER_LOOKBACK: u32 = 10;
+
+/// One command of the service, as `GET /api/command` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CommandInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// The user message a prompt created.
@@ -241,6 +253,109 @@ impl Service {
         self.post(&path, &json!({ "decision": decision }))
             .await
             .map(|_| ())
+    }
+
+    /// Runs one of the service's commands (`GET /api/command`) in the session with the rest of the line; the agent
+    /// loop starts on the user message the command makes. The service answers before that message exists.
+    pub async fn command(
+        &self,
+        session_id: &str,
+        name: &str,
+        arguments: &str,
+    ) -> Result<(), OpencodeError> {
+        let path = session_path(session_id, "/command")?;
+        self.post(&path, &json!({ "name": name, "text": arguments }))
+            .await
+            .map(|_| ())
+    }
+
+    /// Asks the session to summarise what it holds so far; returns the id of the compaction entry, after which the
+    /// summary and the `idle` entry follow.
+    pub async fn compact(&self, session_id: &str) -> Result<String, OpencodeError> {
+        let path = session_path(session_id, "/compact")?;
+        let entry = data(self.post(&path, &json!({})).await?, "compact")?;
+        entry
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| OpencodeError::Protocol("compact answer has no id".into()))
+    }
+
+    /// The commands the service offers (its own, the owner's command files, the MCP servers' prompts).
+    pub async fn commands(&self) -> Result<Vec<CommandInfo>, OpencodeError> {
+        let list = data(self.get("/api/command").await?, "list commands")?;
+        serde_json::from_value(list)
+            .map_err(|err| OpencodeError::Protocol(format!("command list: {err}")))
+    }
+
+    /// The newest `limit` top-level sessions in `directory`, newest first, as the service lists them.
+    pub async fn sessions(&self, directory: &str, limit: u32) -> Result<Vec<Value>, OpencodeError> {
+        let path = format!(
+            "/api/session?limit={limit}&order=desc&directory={}",
+            percent_encode(directory)
+        );
+        let page = self.get(&path).await?;
+        Ok(page
+            .get("data")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Puts the session back to before `message_id` — its file changes undone, that message and the later ones gone.
+    pub async fn revert_to(&self, session_id: &str, message_id: &str) -> Result<(), OpencodeError> {
+        let stage = session_path(session_id, "/revert/stage")?;
+        self.post(&stage, &json!({ "messageID": message_id, "files": true }))
+            .await?;
+        let commit = session_path(session_id, "/revert/commit")?;
+        self.post(&commit, &json!({})).await.map(|_| ())
+    }
+
+    /// The id of the session's newest user message, however far back — a turn with many tool steps puts it far
+    /// behind its last message.
+    pub async fn last_user_message(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<String>, OpencodeError> {
+        let base = session_path(session_id, "/message")?;
+        let mut cursor: Option<String> = None;
+        // Pages come newest first: the first user message met is the newest.
+        for _ in 0..MAX_PAGES {
+            let page = self.get(&page_path(&base, cursor.as_deref())).await?;
+            let items = page
+                .get("data")
+                .and_then(Value::as_array)
+                .ok_or_else(|| OpencodeError::Protocol("message list has no data".into()))?;
+            if let Some(id) = items
+                .iter()
+                .find(|m| m.get("type").and_then(Value::as_str) == Some("user"))
+                .and_then(|m| m.get("id").and_then(Value::as_str))
+            {
+                return Ok(Some(id.to_owned()));
+            }
+            cursor = page
+                .pointer("/cursor/next")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if cursor.is_none() || items.is_empty() {
+                break;
+            }
+        }
+        Ok(None)
+    }
+
+    /// The id of the session's newest user message among its last few, if any.
+    pub async fn newest_user_message(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<String>, OpencodeError> {
+        Ok(self
+            .recent_messages(session_id, NEWEST_USER_LOOKBACK)
+            .await?
+            .iter()
+            .find(|m| m.get("type").and_then(Value::as_str) == Some("user"))
+            .and_then(|m| m.get("id").and_then(Value::as_str))
+            .map(str::to_owned))
     }
 
     /// Deletes a session and its child sessions.

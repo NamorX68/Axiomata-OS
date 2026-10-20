@@ -2407,8 +2407,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       // buildToolCallInstruction) always ends in one of these two exact
       // phrases — answer them the way the real agent would, so the browser
       // mock can exercise a whole create/complete/delete round trip.
-      const reply =
-        mode !== "instruct"
+      const command = args.command as { kind: string; name?: string } | null | undefined;
+      const reply = command
+        ? command.kind === "compact"
+          ? "Conversation compacted (mock)."
+          : `Ran \`/${command.name}\` (mock) with: ${message || "no arguments"}`
+        : mode !== "instruct"
           ? `You said: **${message}**\n\nThis is a mocked reply in session \`${session_id}\`.\n\n- markdown renders\n- \`code\` too`
           : message.endsWith("reply with exactly the created item's id and nothing else.")
             ? `mock-${Date.now()}`
@@ -2424,6 +2428,20 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         duration_ms: 900,
       } satisfies ChatReply as T;
     }
+    case "chat_commands":
+      // #108: what the chat's harness offers — Opencode's shape, one name clashing with an app command.
+      return [
+        { name: "review", source: "oc", hint: null, description: "review changes [commit|branch|pr]" },
+        { name: "init", source: "oc", hint: null, description: "guided AGENTS.md setup" },
+        { name: "help", source: "oc", hint: null, description: "Opencode's own help" },
+      ] as T;
+    case "chat_sessions":
+      return [
+        { id: "ses_mock_1", title: "", updated_at: "2026-10-20T08:12:00Z", turns: 3 },
+        { id: "ses_mock_2", title: "", updated_at: "2026-10-19T17:40:00Z", turns: 1 },
+      ] as T;
+    case "chat_undo":
+      return "Undid the last turn (mock): no files were touched in the browser mock." as T;
     case "get_workspace_graph":
       return mockGraph() as T;
     case "load_custom_css":

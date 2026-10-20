@@ -697,6 +697,27 @@ a shadow git store (`snapshot.rs`, `~/.axh/snapshots`, `axh undo`), and **the la
 edit (`diagnostics.rs`, the editor's server table, only servers that never run the project's code — rust-analyzer
 without build scripts, proc macros or `cargo check`).
 
+### Slash commands in the chat (`docs/plans/slash-commands.md`, #108, built 2026-10-20)
+
+The assistant bar routes `/` in three levels (`core/commands.ts`): **conversation commands** the same on every chat
+harness (`/help /clear /compact /model /plan /build /skills /cost /resume /undo /do`), **app control** (`/tile` for
+tiles and their actions — the module names no longer sit at the top — `/theme /open /newfile /brain`), and **the chat
+harness's own commands** under their own name, or `/glut:` `/oc:` `/cc:` + name where an app name took it. An unknown
+`/x` is refused with the nearest names; the one-shot instruction is `/do <text>` only (it used to be any unknown
+`/text` — a typo cost a turn). Typing `/` opens a list of matches above the bar. The lists come from `chat_commands`:
+Glut's from the owner's `~/.axh/commands/` (never a project's — nothing is trusted in a chat turn), Opencode's from
+`GET /api/command` of the write instance, Claude Code's from the `init` event of the last chat turn — the chat on
+Claude Code runs `stream-json` for that, and shows only the skills, command files and the built-ins measured to work
+in `-p` (`context`, `usage`, `init`). A command turn is `assistant_send` with `command` (`agents::ChatCommand`):
+Glut expands the file into the prompt, Opencode `POST …/command`, Claude Code sends `/name args` as the prompt.
+`/compact`: Glut's own (`axiomata_harness::compact` — the model summarises a transcript, the session file keeps the
+summary), Opencode's `…/compact`, Claude Code's `/compact`. `/model <id>` holds for the conversation
+(`ChatExtras.model`, checked against the chat provider's catalog, metered at that model). `/resume` lists the
+conversations `chat_turns` recorded (never a skill run in the same folder). `/undo`: Glut puts the workspace back
+from the snapshot of the conversation's latest turn that changed it — the folder before the undo is kept as a run of
+its own (`axh undo --run undo-…`), since the restore takes back later changes too; Opencode reverts its last message
+(`…/revert/stage` + `commit`); Claude Code has no rewind in `-p` and says so.
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
@@ -1450,6 +1471,9 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **Glut 2 built** (2026-10-20, `docs/plans/glut-2.md`): code mode in QuickJS with MCP behind code in the chat, old
   tool results shrinking over a budget, `todo_write`, Plan/Build with `exit_plan` and the chat's switch, snapshots
   with `axh undo`, the language server's errors after an edit. §5 "Glut 2".
+- **Slash commands in the chat built** (2026-10-20, #108, `docs/plans/slash-commands.md`): three levels, `/tile`,
+  `/do`, unknown `/x` refused, the engines' own commands listed and run, `/compact` `/model` `/resume` `/undo` on all
+  three harnesses as far as each can, a suggestion list above the bar. §5 "Slash commands in the chat".
 - **Editor ED3 — Vi mode: done** (2026-09-25, V1–V12 in `docs/plans/editor.md`).
   ED3.1: the Vi machine in `src/editor/vi/` (pure TS, table-tested). ED3.2: wired to every
   editor surface (`fileapp/viKeys`, `viSurface`, `viScroll`, `viShared`), cursor shapes, the

@@ -1,6 +1,8 @@
 # Slash commands in the app chat (card #108)
 
-Status: grilled 2026-10-20 (S1–S12), waiting for the owner's go.
+Status: grilled 2026-10-20 (S1–S12), **built 2026-10-20** (CP0–CP6). Deviations from the plan: S13 below; Glut's
+built-ins `/clear`, `/model`, `/compact` in the terminal stay as they were (`axh` runs one turn, there is no
+conversation to clear or compact there).
 
 ## Where we stand
 
@@ -59,8 +61,34 @@ Status: grilled 2026-10-20 (S1–S12), waiting for the owner's go.
   argument hint, description), filtered by prefix; ↑/↓ move in it while it is open (history otherwise), Tab/Enter
   takes, Esc closes. `ui/` family and tokens, no new look.
 - **S11 — only the chat bar.** Card sessions and terminal panes keep the engines' own TUIs.
+- **S13 — added while building**: `/undo` on Glut puts the whole workspace back to the snapshot before the turn, which
+  also takes back later changes of the owner's or a skill's; the folder before the undo is therefore kept as a run of
+  its own first (`axh undo --run undo-<run>` brings it back). The undo stack lives in the app's memory: a turn of an
+  earlier app session is undone with `axh undo`. `/resume` reads the conversations from `chat_turns`, not the harness's
+  folders — Claude Code's and Glut's folders also hold skill runs. `/cost` adds the transcript's turn prices.
+- **S14 — from the reviews (2026-10-20)**: a compaction fences tool results as untrusted data and stores the summary
+  as notes, never as the owner's instructions, with the old conversation kept beside it (`<id>.pre-compact.jsonl`);
+  `/undo` reaches only a conversation `chat_turns` recorded as a chat (the services also hold card sessions), waits for
+  the conversation's lock, and keeps its entry when it fails; a turn model on a metered provider must have a price
+  (else it would slip past the daily cap); Claude Code runs only a command its list shows; a command file's
+  `allowed-tools` become the Glut turn's whole rights; a command name is no path (`..`, `/` refused).
 - **S12 — nothing a list says starts a process**: names and descriptions from an engine are data (shown, never
   `{@html}`); running one goes through the same chat path and gate as a typed message.
+
+## CP0 — measured 2026-10-20
+
+- **Claude Code** (2.1.303, app login `~/.axiomata/claude`, `--setting-sources "" --strict-mcp-config`): the `init` event
+  lists 55 `slash_commands` (19 of them `skills`) and a separate `terminal_slash_commands` (`doctor`, `color`, `focus`,
+  `reload-plugins` — interactive only). Sent as the prompt of a `--resume`d `-p` turn: `/context` answers a Markdown
+  table (0 model turns), `/compact` compacts the same session (empty result), `/usage` answers the plan's usage,
+  `/clear` answers with a **new** session id. The app's chat runs `--output-format json`, which has no `init` event —
+  CP2 switches the chat (only the chat) to `stream-json` and reads `init` + the final `result` (the same object).
+  Shown (S6): the skills, command files, and the measured built-ins `context`, `usage`, `init`; `compact`/`clear` are
+  level 1; everything else (config-changing `fast`, `effort`, `model`, `config`, `output-style`, the terminal ones,
+  billing pages) is filtered out.
+- **Opencode** (OpenAPI of the `write` instance): `GET /api/command?location=` → `{data: [Command.Info]}`;
+  `POST /api/session/{id}/command {name, text}` runs one like a prompt; `POST …/compact {}`; undo is
+  `POST …/revert/stage {messageID, files: true}` then `…/revert/commit`; `GET /api/session` lists sessions.
 
 ## Checkpoints
 

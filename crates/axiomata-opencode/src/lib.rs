@@ -34,8 +34,8 @@ pub mod turn;
 pub use error::OpencodeError;
 pub use events::{Event, EventStream};
 pub use service::Service;
-pub use session::{ModelRef, NewSession, PermissionRule};
+pub use session::{CommandInfo, ModelRef, NewSession, PermissionRule};
 pub use status::{
     PermissionRequest, PlanAnswer, SessionSnapshot, SessionState, SessionStatus, Tracker,
 };
-pub use turn::{TurnOutcome, TurnRequest, TurnSession, unattended_permissions};
+pub use turn::{TurnInput, TurnOutcome, TurnRequest, TurnSession, unattended_permissions};

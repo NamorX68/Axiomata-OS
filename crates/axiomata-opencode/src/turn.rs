@@ -49,6 +49,22 @@ enum Ended {
     Interrupted(String),
 }
 
+/// What a turn starts with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnInput {
+    /// A prompt, as typed.
+    Prompt(String),
+    /// One of the service's commands (`GET /api/command`) with the rest of the line.
+    Command { name: String, arguments: String },
+    /// Summarise the session so far (`POST …/compact`).
+    Compact,
+}
+
+/// How often, and how far apart, a command's user message is looked for: the service answers the command before it
+/// has made the message (measured: ~0.1 s).
+const COMMAND_MESSAGE_LOOKS: u32 = 20;
+const COMMAND_MESSAGE_PAUSE: Duration = Duration::from_millis(100);
+
 /// What to run.
 #[derive(Debug, Clone)]
 pub struct TurnRequest {
@@ -111,10 +127,29 @@ impl Service {
     ///     turn that ran but failed is an `Ok` whose
     ///     [`TurnOutcome::failure`] says why.
     pub async fn run_turn(&self, request: TurnRequest) -> Result<TurnOutcome, OpencodeError> {
+        self.run_input(
+            request.session,
+            TurnInput::Prompt(request.text),
+            request.timeout,
+        )
+        .await
+    }
+
+    /// Runs one unattended turn that starts with `input` — a prompt, a command or a compaction — as
+    /// [`Self::run_turn`] does.
+    ///
+    /// Errors:
+    ///     as [`Self::run_turn`]; a command whose user message never appears is an [`OpencodeError::Protocol`].
+    pub async fn run_input(
+        &self,
+        session: TurnSession,
+        input: TurnInput,
+        timeout: Duration,
+    ) -> Result<TurnOutcome, OpencodeError> {
         let started = Instant::now();
-        let deadline = tokio::time::Instant::now() + request.timeout;
+        let deadline = tokio::time::Instant::now() + timeout;
         let mut events = EventStream::open(self).await?;
-        let session_id = match request.session {
+        let session_id = match session {
             TurnSession::New(new) => {
                 // A location's MCP server that died stays dead (`mcp.rs`): bring it back first,
                 // or a connector skill finds no tool and answers empty. Best effort.
@@ -149,7 +184,14 @@ impl Service {
                 id
             }
         };
-        let prompted = self.prompt(&session_id, &request.text).await?;
+        let start_id = match self.start(&session_id, input).await {
+            Ok(id) => id,
+            Err(err) => {
+                // A command the service took but whose message never showed runs on unattended: stop it.
+                let _ = self.interrupt(&session_id).await;
+                return Err(err);
+            }
+        };
 
         let mut rejected = Vec::new();
         let waited = tokio::time::timeout_at(
@@ -160,24 +202,23 @@ impl Service {
         drop(events);
         let mut interrupted = None;
         let messages = match waited {
-            Err(_) => return Err(self.give_up(&session_id, request.timeout).await),
+            Err(_) => return Err(self.give_up(&session_id, timeout).await),
             Ok(Ok(Ended::Interrupted(reason))) => {
                 interrupted = Some(reason);
-                self.messages_after(&session_id, &prompted.message_id)
-                    .await?
+                self.messages_after(&session_id, &start_id).await?
             }
             Ok(Ok(Ended::Settled)) => {
                 let settle_by = deadline.min(tokio::time::Instant::now() + SETTLE_TIMEOUT);
-                self.read_until_idle(&session_id, &prompted.message_id, settle_by, SETTLE_POLL)
+                self.read_until_idle(&session_id, &start_id, settle_by, SETTLE_POLL)
                     .await?
             }
             Ok(Err(err)) => {
                 tracing::warn!(%err, session_id, "opencode: event stream broke mid-turn, polling");
                 let messages = self
-                    .read_until_idle(&session_id, &prompted.message_id, deadline, FALLBACK_POLL)
+                    .read_until_idle(&session_id, &start_id, deadline, FALLBACK_POLL)
                     .await?;
                 if !has_idle(&messages) {
-                    return Err(self.give_up(&session_id, request.timeout).await);
+                    return Err(self.give_up(&session_id, timeout).await);
                 }
                 messages
             }
@@ -200,6 +241,28 @@ impl Service {
         outcome.session_id = session_id;
         outcome.duration = started.elapsed();
         Ok(outcome)
+    }
+
+    /// Sends `input` and returns the id of the entry the turn's messages follow.
+    async fn start(&self, session_id: &str, input: TurnInput) -> Result<String, OpencodeError> {
+        match input {
+            TurnInput::Prompt(text) => Ok(self.prompt(session_id, &text).await?.message_id),
+            TurnInput::Compact => self.compact(session_id).await,
+            TurnInput::Command { name, arguments } => {
+                let before = self.newest_user_message(session_id).await?;
+                self.command(session_id, &name, &arguments).await?;
+                for _ in 0..COMMAND_MESSAGE_LOOKS {
+                    let newest = self.newest_user_message(session_id).await?;
+                    if let Some(id) = newest.filter(|id| Some(id) != before.as_ref()) {
+                        return Ok(id);
+                    }
+                    tokio::time::sleep(COMMAND_MESSAGE_PAUSE).await;
+                }
+                Err(OpencodeError::Protocol(format!(
+                    "the command /{name} made no message"
+                )))
+            }
+        }
     }
 
     /// Follows the stream until the session's execution ends, rejecting every

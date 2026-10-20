@@ -1,7 +1,7 @@
 /**
  * Instance lifecycle: the one place that turns a module *type* into a placed
  * instance (default size, cascaded position, singleton guard) and removes
- * one again. Used by the module picker, the `/add` command (step 11) and
+ * one again. Used by the module picker, the `/tile add` command (step 11) and
  * the agent bridge (step 12). Mount/teardown of the Svelte component itself
  * is a consequence of the keyed `{#each}` in Canvas.svelte.
  */
@@ -48,7 +48,7 @@ export function createInstance(
   // `computeDefaultSize` (if the module declares one — see its own doc
   // comment in `core/types.ts`) wins over the static `defaultSize`; either
   // way an explicit `overrides.w`/`h` (the module picker's own size
-  // controls, a `/add` command argument, …) wins over both. `types.ts`
+  // controls, a `/tile add` command argument, …) wins over both. `types.ts`
   // documents `defaultSize` as the fallback "if this throws" — `??` alone
   // doesn't catch a thrown error (only a `null`/`undefined` return), so
   // that promise needs an actual `try`/`catch` here, not just optional

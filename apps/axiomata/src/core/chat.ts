@@ -40,6 +40,12 @@ export const toolCalls = writable<ToolCall[]>([]);
 /** The chat's plan switch (Glut 2, G12): on, a chat turn reads and plans but changes nothing; the owner switches it
  *  off to let the agent carry the plan out. Instructions are not affected. */
 export const planMode = writable(false);
+/** `/model <id>` (#108, S5): the chat provider's model this conversation runs on instead of its chat model; `null`
+ *  is the configured one. A new conversation goes back to it. */
+export const turnModel = writable<string | null>(null);
+
+/** A turn that is a command of the chat's harness, or a compaction (`assistant_send`'s `command`). */
+export type ChatCommand = { kind: "run"; name: string } | { kind: "compact" };
 
 let nextId = 1;
 
@@ -68,22 +74,33 @@ export function pushInstruction(markdown: string): void {
 export function newSession(): void {
   turns.set([]);
   sessionId.set(null);
+  turnModel.set(null);
+}
+
+/** What the transcript shows for the owner's line. */
+function typedLine(message: string, mode: ChatMode, command?: ChatCommand): string {
+  if (command?.kind === "compact") return "/compact";
+  if (command?.kind === "run") return `/${command.name}${message ? ` ${message}` : ""}`;
+  return mode === "instruct" ? `/do ${message}` : message;
 }
 
 /** One turn against the agent. `chat` continues the panel's session — as `plan` while the plan switch is on;
- *  `instruct` is a one-shot instruction that also lands in the transcript. */
-export async function send(message: string, asked: ChatMode): Promise<ChatReply | null> {
+ *  `instruct` is a one-shot instruction that also lands in the transcript. A `command` makes the chat turn one of
+ *  the harness's commands (`message` its arguments) or a compaction; `/model`'s choice rides along. */
+export async function send(message: string, asked: ChatMode, command?: ChatCommand): Promise<ChatReply | null> {
   if (get(busy)) return null;
   const mode: ChatMode = asked === "chat" && get(planMode) ? "plan" : asked;
   busy.set(true);
   toolCalls.set([]);
   panelOpen.set(true);
-  push("user", mode === "instruct" ? `/${message}` : message);
+  push("user", typedLine(message, mode, command));
   try {
     const reply = await invokeBackend<ChatReply>("assistant_send", {
       message,
       sessionId: get(sessionId),
       mode,
+      model: get(turnModel),
+      command: command ?? null,
     });
     if (mode !== "instruct") sessionId.set(reply.session_id);
     push(

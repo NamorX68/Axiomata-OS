@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invokeBackend = vi.fn();
 vi.mock("./backend", () => ({ invokeBackend: (...args: unknown[]) => invokeBackend(...args) }));
 
-const { busy, newSession, noteToolCall, planMode, send, sessionId, toolCalls, turns } = await import("./chat");
+const { busy, newSession, noteToolCall, planMode, send, sessionId, toolCalls, turnModel, turns } =
+  await import("./chat");
 type ChatTurn = import("./chat").ChatTurn;
 
 function lastTurn(): ChatTurn | undefined {
@@ -59,7 +60,13 @@ describe("the plan switch", () => {
   it("sends a chat turn as plan while it is on, and keeps the session", async () => {
     planMode.set(true);
     await send("what would you change?", "chat");
-    expect(invokeBackend).toHaveBeenCalledWith("assistant_send", { message: "what would you change?", sessionId: null, mode: "plan" });
+    expect(invokeBackend).toHaveBeenCalledWith("assistant_send", {
+      message: "what would you change?",
+      sessionId: null,
+      mode: "plan",
+      model: null,
+      command: null,
+    });
     expect(get(sessionId)).toBe("s9");
   });
 
@@ -73,5 +80,37 @@ describe("the plan switch", () => {
   it("sends chat when it is off", async () => {
     await send("hi", "chat");
     expect(invokeBackend.mock.calls[0][1].mode).toBe("chat");
+  });
+});
+
+describe("slash commands on the chat (#108)", () => {
+  beforeEach(() => {
+    newSession();
+    busy.set(false);
+    planMode.set(false);
+    invokeBackend.mockReset();
+    invokeBackend.mockResolvedValue({ session_id: "s7", reply_markdown: "ok", is_error: false, cost_usd: null });
+  });
+
+  it("sends an engine command with its arguments and shows the line as typed", async () => {
+    await send("the branch", "chat", { kind: "run", name: "review" });
+    expect(invokeBackend.mock.calls[0][1]).toMatchObject({
+      message: "the branch",
+      mode: "chat",
+      command: { kind: "run", name: "review" },
+    });
+    expect(get(turns)[0]?.text).toBe("/review the branch");
+    await send("", "chat", { kind: "compact" });
+    expect(get(turns)[2]?.text).toBe("/compact");
+    await send("note it", "instruct");
+    expect(get(turns)[4]?.text).toBe("/do note it");
+  });
+
+  it("carries the conversation's model until a new conversation", async () => {
+    turnModel.set("deepseek/deepseek-v4-flash");
+    await send("hi", "chat");
+    expect(invokeBackend.mock.calls[0][1].model).toBe("deepseek/deepseek-v4-flash");
+    newSession();
+    expect(get(turnModel)).toBeNull();
   });
 });

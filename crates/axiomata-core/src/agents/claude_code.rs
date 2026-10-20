@@ -36,8 +36,8 @@ use tokio::io::AsyncWriteExt;
 use crate::agents::opencode::{JSON_REPAIR_PROMPT, JSON_REPAIR_TIMEOUT, find_json_object};
 use crate::agents::opencode_instance::{READ_COMMANDS, READ_DENIED_COMMANDS};
 use crate::agents::{
-    AgentRequest, AgentRunResult, BACKEND_CLAUDE_CODE, ChatReply, ChatRequest, MAX_RESPONSE_BYTES,
-    agent_child_env, agent_slots, truncate_utf8, valid_model_name,
+    AgentRequest, AgentRunResult, BACKEND_CLAUDE_CODE, ChatCommand, ChatReply, ChatRequest,
+    MAX_RESPONSE_BYTES, agent_child_env, agent_slots, truncate_utf8, valid_model_name,
 };
 use crate::error::AxiomataError;
 use crate::paths;
@@ -98,6 +98,7 @@ pub async fn run(request: AgentRequest) -> Result<AgentRunResult, AxiomataError>
         read_only: request.read_only,
         context_file: setup.context_file.as_deref(),
         resume: None,
+        stream: false,
     };
     let program = Path::new(CLAUDE_BIN);
     let first = invoke(
@@ -176,6 +177,26 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         .session_id
         .as_deref()
         .filter(|id| valid_session_id(id));
+    // A command goes as the prompt's only line (measured, slash-commands CP0): `/name args`, `/compact`.
+    let prompt = match &request.command {
+        None => request.message.clone(),
+        // Only a command the chat shows: the hidden built-ins (`HIDDEN_BUILTINS`) stay hidden here too.
+        Some(ChatCommand::Run { name })
+            if !known_commands().iter().any(|known| &known.name == name) =>
+        {
+            return Err(AxiomataError::AgentApi {
+                backend: BACKEND_CLAUDE_CODE,
+                message: format!("/{name} is not a command the chat offers on Claude Code"),
+            });
+        }
+        Some(ChatCommand::Run { name }) => format!("/{name} {}", one_line(&request.message))
+            .trim_end()
+            .to_owned(),
+        Some(ChatCommand::Compact) if resume.is_none() => {
+            return Err(super::nothing_to_compact(BACKEND_CLAUDE_CODE));
+        }
+        Some(ChatCommand::Compact) => "/compact".to_owned(),
+    };
     let invocation = Invocation {
         model: &model,
         mcp_config: setup.mcp_config.as_deref(),
@@ -186,16 +207,175 @@ pub(crate) async fn chat(request: ChatRequest) -> Result<ChatReply, AxiomataErro
         read_only: request.mode == super::ChatMode::Plan,
         context_file: setup.context_file.as_deref(),
         resume,
+        stream: true,
     };
     let outcome = turn_or_start_anew(
         Path::new(CLAUDE_BIN),
         invocation,
-        &request.message,
+        &prompt,
         &request.cwd,
         request.timeout,
     )
     .await?;
-    chat_reply(outcome)
+    if let Some(listed) = &outcome.listed {
+        remember_commands(shown_commands(listed));
+    }
+    chat_reply(outcome, request.command.as_ref())
+}
+
+/// A command's arguments on one line: a line break would end the command and start a prompt of its own.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The built-ins of Claude Code a chat shows (S6): measured to answer in `-p` (CP0). `compact` and `clear` are the
+/// app's own `/compact` and `/clear`.
+const SHOWN_BUILTINS: [&str; 3] = ["context", "usage", "init"];
+
+/// The built-ins of Claude Code 2.1.303 that are not shown: interactive, setting-changing, the app's own, or billing
+/// pages (CP0). A name in neither list is a command file or a newer built-in, and is shown.
+const HIDDEN_BUILTINS: [&str; 33] = [
+    "advisor",
+    "agents",
+    "auto-mode-setup",
+    "autocompact",
+    "clear",
+    "color",
+    "compact",
+    "config",
+    "output-style",
+    "effort",
+    "fast",
+    "focus",
+    "heapdump",
+    "mcp",
+    "import",
+    "model",
+    "__remote-workflow",
+    "workflow-launch-exec",
+    "reload-plugins",
+    "reload-skills",
+    "rename",
+    "ultrareview",
+    "security-review",
+    "usage-credits",
+    "extra-usage",
+    "insights",
+    "recap",
+    "skill-doctor",
+    "goal",
+    "design-consent",
+    "design-revoke",
+    "list-agents",
+    "team-onboarding",
+];
+
+/// The command lists of a chat turn's `init` event.
+#[derive(Debug, Default, Deserialize)]
+struct Listed {
+    #[serde(default)]
+    slash_commands: Vec<String>,
+    #[serde(default)]
+    terminal_slash_commands: Vec<String>,
+    #[serde(default)]
+    skills: Vec<String>,
+}
+
+/// One command the chat offers on Claude Code, and whether it is a skill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeCommand {
+    pub name: String,
+    pub skill: bool,
+}
+
+/// What of `listed` the chat shows: skills, command files and the [`SHOWN_BUILTINS`]; never a terminal-only one.
+fn shown_commands(listed: &Listed) -> Vec<ClaudeCommand> {
+    listed
+        .slash_commands
+        .iter()
+        .filter(|name| !listed.terminal_slash_commands.contains(name))
+        .filter(|name| super::valid_chat_name(name))
+        .filter_map(|name| {
+            let skill = listed.skills.contains(name);
+            let shown = skill
+                || SHOWN_BUILTINS.contains(&name.as_str())
+                || !HIDDEN_BUILTINS.contains(&name.as_str());
+            shown.then(|| ClaudeCommand {
+                name: name.clone(),
+                skill,
+            })
+        })
+        .collect()
+}
+
+/// The commands the last chat turn's `init` listed — the app's login folder is one, so one list (S7).
+static KNOWN_COMMANDS: std::sync::Mutex<Vec<ClaudeCommand>> = std::sync::Mutex::new(Vec::new());
+
+fn remember_commands(commands: Vec<ClaudeCommand>) {
+    *KNOWN_COMMANDS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner()) = commands;
+}
+
+/// The commands the chat offers on Claude Code, as its last turn listed them; empty before the first turn.
+pub fn known_commands() -> Vec<ClaudeCommand> {
+    KNOWN_COMMANDS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone()
+}
+
+/// The first user message of the app login's conversation `id` in `cwd`, cut to a title; `None` when its file is
+/// gone. Claude Code keeps a folder's conversations under `projects/<the folder, every other character a dash>/`.
+pub(crate) fn session_title(cwd: &Path, id: &str) -> Option<String> {
+    use std::io::BufRead;
+    if !valid_session_id(id) {
+        return None;
+    }
+    let folder: String = cwd
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let path = paths::app_claude_dir()
+        .join("projects")
+        .join(folder)
+        .join(format!("{id}.jsonl"));
+    let file = std::fs::File::open(path).ok()?;
+    Some(
+        std::io::BufReader::new(std::io::Read::take(file, super::MAX_TITLE_BYTES))
+            .lines()
+            .take(super::MAX_TITLE_LINES)
+            .map_while(Result::ok)
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+            .filter(|entry| entry["type"] == "user")
+            .find_map(|entry| {
+                entry
+                    .pointer("/message/content")?
+                    .as_str()
+                    .map(super::title_of)
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// The `init` event of a `stream-json` stdout: the first line that parses as `system`/`init`.
+fn parse_listed(stdout: &str) -> Option<Listed> {
+    #[derive(Deserialize)]
+    struct Event {
+        #[serde(rename = "type", default)]
+        kind: String,
+        #[serde(default)]
+        subtype: String,
+        #[serde(flatten)]
+        listed: Listed,
+    }
+    stdout
+        .lines()
+        .filter(|line| line.trim_start().starts_with('{'))
+        .filter_map(|line| serde_json::from_str::<Event>(line).ok())
+        .find(|event| event.kind == "system" && event.subtype == "init")
+        .map(|event| event.listed)
 }
 
 /// One chat turn: the call as `invocation` says, and — only when it resumed a conversation Claude Code does not have —
@@ -235,8 +415,9 @@ async fn turn_or_start_anew(
     .await
 }
 
-/// A chat turn's [`Outcome`] as the dashboard takes it: a failure or an empty answer is an error the owner sees.
-fn chat_reply(outcome: Outcome) -> Result<ChatReply, AxiomataError> {
+/// A chat turn's [`Outcome`] as the dashboard takes it: a failure or an empty answer is an error the owner sees — but
+/// a command may answer nothing (`/compact` never answers).
+fn chat_reply(outcome: Outcome, command: Option<&ChatCommand>) -> Result<ChatReply, AxiomataError> {
     let api_err = |message: String| AxiomataError::AgentApi {
         backend: BACKEND_CLAUDE_CODE,
         message,
@@ -244,9 +425,12 @@ fn chat_reply(outcome: Outcome) -> Result<ChatReply, AxiomataError> {
     if let Some(failure) = outcome.failure {
         return Err(api_err(failure));
     }
-    let reply_markdown = outcome.reply.trim().to_owned();
+    let mut reply_markdown = outcome.reply.trim().to_owned();
     if reply_markdown.is_empty() {
-        return Err(api_err("Claude Code returned an empty reply".to_owned()));
+        match command {
+            Some(command) => reply_markdown = command.silent_reply(),
+            None => return Err(api_err("Claude Code returned an empty reply".to_owned())),
+        }
     }
     let session_id = outcome
         .session_id
@@ -500,6 +684,9 @@ struct Invocation<'a> {
     read_only: bool,
     context_file: Option<&'a Path>,
     resume: Option<&'a str>,
+    /// `stream-json` instead of `json` (#108, the chat only): its first event lists the commands, its last is the
+    /// same `result` [`parse_result`] reads.
+    stream: bool,
 }
 
 /// The permission mode and the allow and deny lists of a run — see the module doc.
@@ -578,7 +765,11 @@ fn arguments(invocation: &Invocation) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
         "--output-format",
-        "json",
+        if invocation.stream {
+            "stream-json"
+        } else {
+            "json"
+        },
         "--model",
         invocation.model,
         "--setting-sources",
@@ -588,6 +779,10 @@ fn arguments(invocation: &Invocation) -> Vec<String> {
     .into_iter()
     .map(str::to_owned)
     .collect();
+    // `-p` prints its stream only with `--verbose`.
+    if invocation.stream {
+        args.push("--verbose".to_owned());
+    }
     if let Some(file) = invocation.mcp_config {
         args.extend(["--mcp-config".to_owned(), file.display().to_string()]);
     }
@@ -704,11 +899,20 @@ async fn invoke(
     };
     let duration = started.elapsed();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(match parse_result(&stdout) {
+    let listed = parse_listed(&stdout);
+    let mut outcome = match parse_result(&stdout) {
         Some(event) => Outcome::from_event(event, duration),
         None => {
-            // Claude Code says some reasons on stdout and others on stderr; both are kept, stdout cut short.
-            let said = truncate_utf8(stdout.trim().to_owned(), MAX_FAILURE_STDOUT);
+            // Claude Code says some reasons on stdout and others on stderr; both are kept, stdout cut short — without
+            // a stream's `init` event, which says nothing about the failure and would fill the space.
+            let said: String = stdout
+                .lines()
+                .filter(|line| {
+                    !(line.contains(r#""type":"system""#) && line.contains(r#""subtype":"init""#))
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let said = truncate_utf8(said.trim().to_owned(), MAX_FAILURE_STDOUT);
             let stderr = String::from_utf8_lossy(&output.stderr);
             let reason = [said.as_str(), stderr.trim()]
                 .into_iter()
@@ -722,7 +926,9 @@ async fn invoke(
             outcome.unknown_conversation = stdout.contains(NO_CONVERSATION);
             outcome
         }
-    })
+    };
+    outcome.listed = listed;
+    Ok(outcome)
 }
 
 /// The `result` event of `--output-format json`: the last line that parses as an event of type `result`. Claude Code
@@ -796,6 +1002,8 @@ struct Outcome {
     /// The call resumed a conversation Claude Code does not have: it printed [`NO_CONVERSATION`] instead of a
     /// result (measured, CP3). Read from the whole stdout, not the shortened failure text.
     unknown_conversation: bool,
+    /// The command lists of a `stream-json` call's `init` event.
+    listed: Option<Listed>,
 }
 
 impl Outcome {
@@ -831,6 +1039,7 @@ impl Outcome {
             output_tokens: usage.output_tokens,
             turns: event.num_turns.unwrap_or(0),
             unknown_conversation: false,
+            listed: None,
             denied: event
                 .permission_denials
                 .into_iter()
@@ -853,6 +1062,7 @@ impl Outcome {
             denied: Vec::new(),
             duration,
             unknown_conversation: false,
+            listed: None,
         }
     }
 
@@ -931,6 +1141,7 @@ mod tests {
             read_only: false,
             context_file: None,
             resume: None,
+            stream: false,
         }
     }
 
@@ -1431,6 +1642,69 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&calls).unwrap().lines().count(), 1);
     }
 
+    #[test]
+    fn the_chat_shows_skills_command_files_and_the_checked_built_ins_only() {
+        let stdout = [
+            concat!(
+                r#"{"type":"system","subtype":"init","session_id":"s","#,
+                r#""slash_commands":["simplify","context","fast","color","my-fix","compact","#,
+                r#""__remote-workflow","bad name"],"terminal_slash_commands":["color"],"skills":["simplify"]}"#
+            ),
+            r#"{"type":"assistant","message":{}}"#,
+            RESULT_LINE,
+        ]
+        .join("\n");
+        let listed = parse_listed(&stdout).unwrap();
+        let shown: Vec<(String, bool)> = shown_commands(&listed)
+            .into_iter()
+            .map(|c| (c.name, c.skill))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("simplify".to_owned(), true),
+                ("context".to_owned(), false),
+                ("my-fix".to_owned(), false)
+            ]
+        );
+        // The stream's last line is the same result `json` gives.
+        assert_eq!(
+            parse_result(&stdout).unwrap().result.as_deref(),
+            Some("done")
+        );
+        assert!(parse_listed(RESULT_LINE).is_none());
+    }
+
+    #[test]
+    fn the_chat_streams_and_a_command_is_one_line() {
+        let call = Invocation {
+            stream: true,
+            ..invocation(&[], &[])
+        };
+        let args = arguments(&call);
+        let after = |flag: &str| args[args.iter().position(|arg| arg == flag).unwrap() + 1].clone();
+        assert_eq!(after("--output-format"), "stream-json");
+        assert!(args.contains(&"--verbose".to_owned()));
+        assert_eq!(arguments(&invocation(&[], &[]))[2], "json");
+        assert_eq!(one_line("the\nbranch  now\n"), "the branch now");
+    }
+
+    #[test]
+    fn a_command_may_answer_nothing() {
+        let quiet = || Outcome {
+            session_id: Some("s-1".into()),
+            failure: None,
+            ..Outcome::failed(String::new(), Duration::ZERO)
+        };
+        assert!(chat_reply(quiet(), None).is_err());
+        assert_eq!(
+            chat_reply(quiet(), Some(&ChatCommand::Compact))
+                .unwrap()
+                .reply_markdown,
+            "Conversation compacted."
+        );
+    }
+
     /// The connector modules' instruct turns name one MCP tool (`calendar.ts`, `reminders.ts`): only that is allowed,
     /// and the turn resumes its conversation.
     #[test]
@@ -1472,10 +1746,10 @@ mod tests {
             }),
             permission_denials: Vec::new(),
         };
-        let reply = chat_reply(Outcome::from_event(
-            event("  Hallo  "),
-            Duration::from_millis(3),
-        ))
+        let reply = chat_reply(
+            Outcome::from_event(event("  Hallo  "), Duration::from_millis(3)),
+            None,
+        )
         .unwrap();
         assert_eq!(reply.session_id, "s-1");
         assert_eq!(reply.reply_markdown, "Hallo");
@@ -1483,11 +1757,11 @@ mod tests {
         assert_eq!(reply.output_tokens, Some(7));
         assert_eq!(reply.num_turns, Some(2));
         assert!(matches!(
-            chat_reply(Outcome::from_event(event("   "), Duration::ZERO)),
+            chat_reply(Outcome::from_event(event("   "), Duration::ZERO), None),
             Err(AxiomataError::AgentApi { .. })
         ));
         assert!(matches!(
-            chat_reply(Outcome::failed("boom".to_owned(), Duration::ZERO)),
+            chat_reply(Outcome::failed("boom".to_owned(), Duration::ZERO), None),
             Err(AxiomataError::AgentApi { message, .. }) if message == "boom"
         ));
     }

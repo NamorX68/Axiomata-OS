@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use axiomata_harness::commands::{Expanded, Registry, Source};
 use axiomata_harness::mcp;
 use axiomata_harness::permissions::settings;
 use axiomata_harness::permissions::{Gate, Mode, Nobody, Rule, RuleSet};
@@ -46,7 +47,7 @@ use crate::agents::claude_code::{bash_rule, is_shell_rule};
 use crate::agents::opencode::{JSON_REPAIR_PROMPT, JSON_REPAIR_TIMEOUT, find_json_object};
 use crate::agents::opencode_instance::{READ_COMMANDS, READ_DENIED_COMMANDS};
 use crate::agents::{
-    AgentRequest, AgentRunResult, BACKEND_AXH, ChatReply, ChatRequest, agent_slots,
+    AgentRequest, AgentRunResult, BACKEND_AXH, ChatCommand, ChatReply, ChatRequest, agent_slots,
 };
 use crate::config::{Config, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
@@ -181,13 +182,37 @@ pub(crate) async fn chat(
             (new_session_id(), Vec::new())
         }
     };
+    // A command file's `allowed-tools` narrow the turn (C3) as a skill's do: they become its whole rights. Its
+    // `model:` is not followed — the chat's model is `/model`'s (S5).
+    let (message, command_rules) = match &request.command {
+        Some(ChatCommand::Compact) => {
+            return compact_session(endpoint, &sessions, session_id, &earlier, request.timeout)
+                .await;
+        }
+        Some(ChatCommand::Run { name }) => {
+            match expand_command(&home, &request.cwd, name, &request.message)? {
+                Expanded::Prompt {
+                    prompt,
+                    allowed_tools,
+                    ..
+                } => (prompt, allowed_tools),
+                // A built-in answers without a model and leaves the conversation as it is.
+                Expanded::Builtin { text, .. } => return Ok(text_reply(session_id, text)),
+            }
+        }
+        None => (request.message.clone(), Vec::new()),
+    };
     let instructions =
         super::claude_code::run_context(&request.cwd, request.system_prompt_file.as_deref())?;
     let _permit = agent_slots()
         .acquire()
         .await
         .expect("agent_slots semaphore is never closed");
-    let declared = declared_rules(None, request.allowed_tools.as_deref())?;
+    let declared = if command_rules.is_empty() {
+        declared_rules(None, request.allowed_tools.as_deref())?
+    } else {
+        command_rules
+    };
     let rights = Rights {
         name: None,
         run_kind: crate::agent_entry::HARNESS_RUN_CHAT,
@@ -213,11 +238,15 @@ pub(crate) async fn chat(
         &model,
         &harness.tools,
         earlier,
-        &request.message,
+        &message,
         &mut harness.sink,
         &Cancel::new(),
     )
     .await;
+    // A turn that changed files and then failed is undoable too: its snapshot is there either way.
+    for run in harness.notes.snapshot_runs() {
+        remember_undo(&session_id, run);
+    }
     let api_err = |message: String| AxiomataError::AgentApi {
         backend: BACKEND_AXH,
         message,
@@ -253,6 +282,229 @@ pub(crate) async fn chat(
         output_tokens,
         num_turns: Some(outcome.turns),
         duration_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+/// The runs of each chat conversation that took a snapshot, newest last: what `/undo` puts back, one turn at a time
+/// (#108, S9). Kept for this process only — a turn of an earlier app session is undone with `axh undo`.
+static UNDO_RUNS: Mutex<Vec<(String, Vec<String>)>> = Mutex::new(Vec::new());
+/// Most conversations, and most turns of one, `/undo` remembers; the oldest are forgotten.
+const MAX_UNDO_SESSIONS: usize = 32;
+const MAX_UNDO_TURNS: usize = 32;
+
+fn remember_undo(session_id: &str, run: String) {
+    let mut all = UNDO_RUNS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let index = match all.iter().position(|(id, _)| id == session_id) {
+        Some(index) => index,
+        None => {
+            if all.len() >= MAX_UNDO_SESSIONS {
+                all.remove(0);
+            }
+            all.push((session_id.to_owned(), Vec::new()));
+            all.len() - 1
+        }
+    };
+    let runs = &mut all[index].1;
+    runs.push(run);
+    if runs.len() > MAX_UNDO_TURNS {
+        runs.remove(0);
+    }
+}
+
+/// The conversation's latest undoable run, left on the stack: [`forget_undo`] drops it once the undo succeeded, so a
+/// failed one can be tried again.
+fn latest_undo(session_id: &str) -> Option<String> {
+    UNDO_RUNS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .iter()
+        .find(|(id, _)| id == session_id)
+        .and_then(|(_, runs)| runs.last().cloned())
+}
+
+fn forget_undo(session_id: &str, run: &str) {
+    if let Some((_, runs)) = UNDO_RUNS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .iter_mut()
+        .find(|(id, _)| id == session_id)
+        && runs.last().is_some_and(|last| last == run)
+    {
+        runs.pop();
+    }
+}
+
+/// `/undo` on Glut: the folder as it was before the conversation's latest turn that changed it; each call goes one
+/// turn further back. The conversation itself stays as it is.
+///
+/// # Errors
+///
+/// Nothing to undo in this conversation, or the snapshot cannot be put back.
+pub(crate) async fn undo_last(session_id: &str, cwd: &Path) -> Result<String, AxiomataError> {
+    let api_err = |message: String| AxiomataError::AgentApi {
+        backend: BACKEND_AXH,
+        message,
+    };
+    // Not under a turn of the same conversation: the folder would change beneath it.
+    let lock = session_lock(session_id);
+    let _held = lock.lock().await;
+    let run = latest_undo(session_id).ok_or_else(|| {
+        api_err(
+            "nothing to undo: no turn of this conversation changed a file since the app started"
+                .to_owned(),
+        )
+    })?;
+    let root = settings::home_dir()?.join(".axh").join("snapshots");
+    let cwd = cwd.to_owned();
+    let restored_run = run.clone();
+    // The folder goes back as a whole, so whatever changed in it after the turn goes too: it is kept first, as a run
+    // of its own, and `axh undo --run <that>` brings it back.
+    let kept = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let kept = format!("undo-{restored_run}");
+        let mut before = axiomata_harness::snapshot::Snapshots::open(&root, &cwd, &kept)?;
+        before.take(0)?;
+        axiomata_harness::snapshot::restore(&root, &cwd, &restored_run, None)?;
+        Ok(kept)
+    })
+    .await
+    .map_err(|err| api_err(format!("undo stopped: {err}")))?
+    .map_err(api_err)?;
+    forget_undo(session_id, &run);
+    Ok(format!(
+        "Undid the file changes of the last turn. The folder as it was before this undo is kept: \
+         `axh undo --run {kept}` brings it back."
+    ))
+}
+
+/// The first user message of the Glut conversation `id`, cut to a title; `None` when its file is gone. Read line by
+/// line, never the whole file.
+pub(crate) fn session_title(id: &str) -> Option<String> {
+    use std::io::BufRead;
+    if !valid_session_id(id) {
+        return None;
+    }
+    let file = std::fs::File::open(sessions_dir().join(format!("{id}.jsonl"))).ok()?;
+    Some(
+        std::io::BufReader::new(std::io::Read::take(file, super::MAX_TITLE_BYTES))
+            .lines()
+            .take(super::MAX_TITLE_LINES)
+            .map_while(Result::ok)
+            .filter_map(|line| serde_json::from_str::<Message>(&line).ok())
+            .find(|message| message.role == axiomata_harness::model::Role::User)
+            .and_then(|message| message.content)
+            .map(|text| super::title_of(&text))
+            .unwrap_or_default(),
+    )
+}
+
+/// The owner's command files a chat on Glut offers (#108, S7): `~/.axh/commands/` only — a project's own files count
+/// only where its folder is trusted, and nothing is trusted in an unattended turn (B3). The built-ins are the app's
+/// own `/help`, `/clear`, `/model`, `/compact` there, so they are left out.
+///
+/// # Errors
+///
+/// A command folder or file that cannot be used, as [`Registry::load`] says.
+pub fn chat_commands(
+    cwd: &Path,
+) -> Result<Vec<axiomata_harness::commands::Command>, AxiomataError> {
+    let home = settings::home_dir()?;
+    Ok(Registry::load(&home, cwd, false)?
+        .commands()
+        .iter()
+        .filter(|command| command.source != Source::Builtin)
+        .cloned()
+        .collect())
+}
+
+/// `/name arguments` through the owner's command files (HS4): the prompt the chat turn runs with.
+fn expand_command(
+    home: &Path,
+    cwd: &Path,
+    name: &str,
+    arguments: &str,
+) -> Result<Expanded, AxiomataError> {
+    let registry = Registry::load(home, cwd, false)?;
+    let line = format!("/{name} {arguments}");
+    registry
+        .expand(line.trim_end())
+        .unwrap_or_else(|| Err(format!("/{name} is no command line")))
+        .map_err(|reason| AxiomataError::AgentApi {
+            backend: BACKEND_AXH,
+            message: reason,
+        })
+}
+
+/// A reply that is text of the app's, not a model turn.
+fn text_reply(session_id: String, text: String) -> ChatReply {
+    ChatReply {
+        session_id,
+        reply_markdown: text,
+        is_error: false,
+        cost_usd: None,
+        usage: None,
+        input_tokens: None,
+        cached_input_tokens: None,
+        output_tokens: None,
+        num_turns: None,
+        duration_ms: 0,
+    }
+}
+
+/// `/compact` on Glut (S9): the model summarises the conversation, and the session file keeps only the summary.
+async fn compact_session(
+    endpoint: ModelEndpoint,
+    sessions: &Path,
+    session_id: String,
+    earlier: &[Message],
+    timeout: Duration,
+) -> Result<ChatReply, AxiomataError> {
+    if earlier.is_empty() {
+        return Err(super::nothing_to_compact(BACKEND_AXH));
+    }
+    let _permit = agent_slots()
+        .acquire()
+        .await
+        .expect("agent_slots semaphore is never closed");
+    let started = Instant::now();
+    let model = OpenAiCompat::new(endpoint)?;
+    let compacted =
+        tokio::time::timeout(timeout, axiomata_harness::compact::compact(&model, earlier))
+            .await
+            .map_err(|_| AxiomataError::AgentTimeout {
+                backend: BACKEND_AXH,
+                timeout,
+            })?
+            .map_err(|err| AxiomataError::AgentApi {
+                backend: BACKEND_AXH,
+                message: format!("the conversation could not be compacted: {err}"),
+            })?;
+    // The conversation as it was stays beside it: a poor summary must not cost the history. Its name is no session id
+    // (the dot), so `/resume` never lists it.
+    let backup = sessions.join(format!("{session_id}.pre-compact.jsonl"));
+    std::fs::copy(sessions.join(format!("{session_id}.jsonl")), &backup).map_err(|source| {
+        AxiomataError::Io {
+            path: backup,
+            source,
+        }
+    })?;
+    save_session(sessions, &session_id, &compacted.conversation)?;
+    let usage = compacted.usage;
+    Ok(ChatReply {
+        reply_markdown: format!(
+            "Conversation compacted: {} messages became a summary.",
+            compacted.replaced
+        ),
+        input_tokens: Some(usage.input_tokens),
+        cached_input_tokens: Some(usage.cached_input_tokens),
+        output_tokens: Some(usage.output_tokens),
+        usage: Some(
+            serde_json::json!({ "input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens }),
+        ),
+        num_turns: Some(1),
+        duration_ms: started.elapsed().as_millis() as u64,
+        ..text_reply(session_id, String::new())
     })
 }
 
@@ -724,12 +976,25 @@ fn gate_for(rights: &Rights<'_>, settings: &RuleSet) -> Gate {
 /// dashboard shows *why* a run failed or did less than it should, without an
 /// events table of its own.
 #[derive(Clone, Default)]
-struct Notes(Arc<Mutex<Vec<String>>>);
+struct Notes {
+    lines: Arc<Mutex<Vec<String>>>,
+    /// The runs that took a snapshot (Glut 2, D) — what the chat's `/undo` puts back (#108).
+    snapshot_runs: Arc<Mutex<Vec<String>>>,
+}
 
 impl EventSink for Notes {
     fn emit(&mut self, event: Event) {
+        if let Event::Snapshot { run, .. } = &event {
+            let mut runs = self
+                .snapshot_runs
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if !runs.contains(run) {
+                runs.push(run.clone());
+            }
+        }
         if let Some(line) = note_of(event) {
-            self.0
+            self.lines
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner())
                 .push(line);
@@ -773,7 +1038,7 @@ impl Notes {
     /// A line for the record that no event brought (the project's hooks
     /// left out, B1).
     fn push(&self, line: String) {
-        self.0
+        self.lines
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .push(line);
@@ -783,12 +1048,20 @@ impl Notes {
     /// one per line; nothing at all when neither has anything to say.
     fn join(&self, why: Option<&str>) -> String {
         let mut lines = self
-            .0
+            .lines
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .clone();
         lines.extend(why.map(str::to_owned));
         lines.join("\n")
+    }
+
+    /// The runs that took a snapshot, in the order they did.
+    fn snapshot_runs(&self) -> Vec<String> {
+        self.snapshot_runs
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
     }
 }
 
@@ -1513,6 +1786,7 @@ mod tests {
             model: Some("chat-model".into()),
             auto_approve_tools: true,
             allowed_tools: None,
+            command: None,
         };
 
         let first = chat(request("Remember GLUTHEX.", None), &fx.config)
@@ -1568,6 +1842,130 @@ mod tests {
         assert!(!fresh.contains("GLUTHEX"), "{fresh}");
     }
 
+    /// #108 on Glut: a command file's prompt is what the turn sends, and `/compact` leaves the summary alone in the
+    /// session — the next turn builds on it, not on the old messages. Nothing to compact is an error, not a call.
+    #[tokio::test]
+    async fn a_glut_chat_runs_a_command_file_and_compacts() {
+        let mut fx = Fixture::new("chat-commands");
+        let commands = fx.axh_home.join(".axh").join("commands");
+        std::fs::create_dir_all(&commands).unwrap();
+        std::fs::write(commands.join("greet.md"), "Say hello to $ARGUMENTS.\n").unwrap();
+        let api = FakeApi::spawn_each(vec![
+            json!({"choices": [{"message": {"role": "assistant", "content": "Hello, Ada."}}],
+                   "usage": {"prompt_tokens": 10, "completion_tokens": 3}}),
+            json!({"choices": [{"message": {"role": "assistant", "content": "Ada was greeted."}}],
+                   "usage": {"prompt_tokens": 30, "completion_tokens": 4}}),
+            json!({"choices": [{"message": {"role": "assistant", "content": "Yes."}}]}),
+        ])
+        .await;
+        fx.config.agents.chat_provider = ProviderId::OpenRouter;
+        fx.config.agents.providers.insert(
+            ProviderId::OpenRouter,
+            ProviderSettings {
+                base_url: Some(api.base_url.clone()),
+                api_key: Some("sk-test".into()),
+                chat_model: "chat-model".into(),
+                skill_model: "s".into(),
+            },
+        );
+        let request =
+            |message: &str, session_id: Option<String>, command: Option<ChatCommand>| ChatRequest {
+                message: message.to_owned(),
+                session_id,
+                mode: crate::agents::ChatMode::Chat,
+                cwd: fx.config.workspace_root.clone(),
+                timeout: Duration::from_secs(30),
+                system_prompt_file: None,
+                model: Some("chat-model".into()),
+                auto_approve_tools: true,
+                allowed_tools: None,
+                command,
+            };
+        let names: Vec<String> = chat_commands(&fx.config.workspace_root)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names, ["greet"]);
+
+        let compact = || Some(ChatCommand::Compact);
+        assert!(matches!(
+            chat(request("", None, compact()), &fx.config).await,
+            Err(AxiomataError::AgentApi { message, .. }) if message.contains("nothing to compact")
+        ));
+        let greet = Some(ChatCommand::Run {
+            name: "greet".into(),
+        });
+        let first = chat(request("Ada", None, greet), &fx.config).await.unwrap();
+        assert_eq!(first.reply_markdown, "Hello, Ada.");
+        let compacted = chat(
+            request("", Some(first.session_id.clone()), compact()),
+            &fx.config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(compacted.session_id, first.session_id);
+        assert!(
+            compacted
+                .reply_markdown
+                .starts_with("Conversation compacted"),
+            "{}",
+            compacted.reply_markdown
+        );
+        assert_eq!(compacted.input_tokens, Some(30));
+        let backup = sessions_dir().join(format!("{}.pre-compact.jsonl", first.session_id));
+        assert!(
+            std::fs::read_to_string(backup)
+                .unwrap()
+                .contains("Say hello to Ada.")
+        );
+        chat(
+            request("Greeted?", Some(first.session_id.clone()), None),
+            &fx.config,
+        )
+        .await
+        .unwrap();
+        let unknown = Some(ChatCommand::Run {
+            name: "nope".into(),
+        });
+        assert!(chat(request("", None, unknown), &fx.config).await.is_err());
+
+        let seen = api.seen.lock().unwrap();
+        assert!(
+            seen[0].1["messages"]
+                .to_string()
+                .contains("Say hello to Ada.")
+        );
+        let summary_call = seen[1].1["messages"].to_string();
+        assert!(summary_call.contains("Say hello to Ada."), "{summary_call}");
+        assert!(
+            seen[1]
+                .1
+                .get("tools")
+                .is_none_or(|t| t.as_array().is_none_or(Vec::is_empty))
+        );
+        let after = seen[2].1["messages"].to_string();
+        assert!(after.contains("Ada was greeted."), "{after}");
+        assert!(!after.contains("Say hello to Ada."), "{after}");
+    }
+
+    #[test]
+    fn undo_goes_back_one_turn_at_a_time_per_conversation() {
+        remember_undo("axh-undo-a", "run-1".into());
+        remember_undo("axh-undo-a", "run-2".into());
+        remember_undo("axh-undo-b", "run-3".into());
+        // A failed undo forgets nothing: the run stays until it was put back.
+        assert_eq!(latest_undo("axh-undo-a").as_deref(), Some("run-2"));
+        assert_eq!(latest_undo("axh-undo-a").as_deref(), Some("run-2"));
+        forget_undo("axh-undo-a", "run-2");
+        assert_eq!(latest_undo("axh-undo-a").as_deref(), Some("run-1"));
+        forget_undo("axh-undo-a", "run-2");
+        assert_eq!(latest_undo("axh-undo-a").as_deref(), Some("run-1"));
+        forget_undo("axh-undo-a", "run-1");
+        assert_eq!(latest_undo("axh-undo-a"), None);
+        assert_eq!(latest_undo("axh-undo-b").as_deref(), Some("run-3"));
+    }
+
     /// A turn whose model call fails is an error and leaves no conversation behind.
     #[tokio::test]
     async fn a_failed_glut_chat_turn_writes_no_conversation() {
@@ -1593,6 +1991,7 @@ mod tests {
             model: Some("chat-model".into()),
             auto_approve_tools: true,
             allowed_tools: None,
+            command: None,
         };
         let err = chat(request, &fx.config).await.unwrap_err();
         assert!(matches!(err, AxiomataError::AgentApi { .. }), "{err:?}");
