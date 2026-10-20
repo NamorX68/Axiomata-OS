@@ -1,6 +1,7 @@
 # LocalBrain — Glut's context kept small by a local model (owner's point 4)
 
-Status: grilled 2026-10-20 (L1–L12), waiting for the owner's go. Builds on the decisions of 2026-10-14 in
+Status: grilled 2026-10-20 (L1–L12), **CP0 done** (Qwen3.5-4B, 27/32 summaries pass, 67 % saved), CP1 next on the
+owner's go. Builds on the decisions of 2026-10-14 in
 `docs/plans/harness.md` (context diet (a)–(e)) and replaces the shrinking Glut 2 turned off (`glut-2.md`, G6).
 
 ## What it is for
@@ -104,10 +105,25 @@ Findings:
   inventing; the checker itself still over-counts there (a summed test count reads as "invented").
 - Speed is no problem: 1–7 s per item, prefill 2–10k tok/s, generation 90–215 tok/s, off the critical path (L8).
 
+| 4 (+ size target, must-keep list, language — applied for real) | **Qwen3.5-4B** | **0.89** | **0.88** | **0.21** | 2/32 | **5/5** | 3.5 s | **27** (67 % of the characters saved) |
+| | Phi-4-mini | 0.61 | 0.48 | 0.31 | 1/32 | 4/5 | 4.8 s | 12 (24 %) |
+| | Qwen3.5-2B | 0.81 | 0.69 | 0.42 | 4/32 | 2/5 | 5.1 s | 11 (18 %) |
+
+(Rounds 2 and 3 never sent the size target — a silent no-op in the bench script; their differences come from the
+system prompt alone. Round 4 sends it.)
+
+**What made the difference (round 4):** the closing instruction carries (1) the size target in characters, (2) the
+items the rules find — error codes, paths, code names, numbers of error lines — as "must appear exactly as written",
+(3) "Schreibe die Zusammenfassung auf Deutsch." when the text is German. The model no longer has to find what matters,
+only to write around it. Read by hand: the compiler, source-read and German summaries are sound; one invented count
+("13 distinct error locations") shows the guard must also catch numbers in a sentence. The news list scores low only
+because the checker reads model ids (`org/name`) as paths.
+
 **Decision after CP0 (owner, 2026-10-20): Qwen3.5-4B** (Apache-2.0, 262K context, GGUF Q4 ~3 GB; the 4B limit
-stretched to the size itself). Hybrid kept: structured tool output (tests, compiler, grep, shell, git) goes through
-a rule-based extract, the model takes prose, file contents and auto-compaction; the L5 guard decides every time.
-Next in CP0: a prompt round for Qwen3.5-4B on German and code, the extract and the checker refined.
+stretched to the size itself). With round 4 the model handles structured tool output too,
+so the design becomes: **rules pick what must stay, the model writes around it** (L5's extraction feeds the prompt
+and checks the result); the rule-based extract is the fallback when a summary fails the guard, and the full text
+stays when both would lose something. Fine-tuning stays the later rung (L12) — not needed for a start.
 
 ## Checkpoints
 
