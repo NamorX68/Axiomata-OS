@@ -1,7 +1,7 @@
 # Glut lean — less goes to the model, nothing is cut away
 
-Status: grilled 2026-10-20 (N1–N6, owner's answers below); **CP1–CP4 built** (2026-10-20, branch `glut-lean`), CP5
-(the measurement) next.
+Status: grilled 2026-10-20 (N1–N6, owner's answers below); **CP1–CP5 done** (2026-10-20, branch `glut-lean`); see
+"CP5 — measured".
 
 ## Why
 
@@ -72,6 +72,28 @@ the todo reminder rides in `todo_write`'s answer, not in the system prompt.
 - **CP3 — N4**: the re-read check (file path + range + content hash per conversation).
 - **CP4 — N5**: the outline, with tests per language from real files of this repo.
 - **CP5 — N6**: measure; the plan records the numbers.
+
+## CP5 — measured 2026-10-20
+
+The chat on DeepSeek V4.1 Flash, each session in its own `AXIOMATA_HOME` and git worktree; A = `main` before this
+plan, B = Glut lean. Money with the cached price.
+
+| Task | A $ | B $ | A steps | B steps | B: compacted / unchanged / relocated / outline |
+|---|---|---|---|---|---|
+| 7-turn code session on `axiomata-tasks` (×3) | 0.0067 / 0.0082 / 0.0360¹ | 0.0073 / 0.0208 / 0.0123 | 36 / 38 / 56 | 39 / 73 / 58 | 1 / 0 / 0 / 0 in all three |
+| 4-turn questions on `run.rs` (3,400 lines), `shell.rs`, `permissions` (×2) | 0.0084² / 0.0078 | 0.0111 / 0.0093 | 33 / 30 | 25 / 30 | 0 / 0 / 1 / 4 |
+
+¹ two of seven turns timed out at 300 s; ² two of four turns failed (a 300 s time-out, a refused command) — both in A,
+neither caused by this plan. Every code session ended with the tests green and clippy clean.
+
+- **The mechanisms seldom fire with this model**: DeepSeek already filters its own commands (`cargo test 2>&1 |
+  tail`, `cargo fmt && cargo test`), and N3 leaves pipes and chains alone by design; it re-reads files after editing
+  them (so never word for word); the outline is used on large files (4 times on `run.rs`), not on 250-line ones.
+- **The costs differ within the runs' own scatter** (36–73 steps for the same task): no measurable saving, no harm.
+- **What it is worth anyway**: N1/N2 mean nothing is lost any more — no result is cut, `bash` keeps the end of a long
+  output, and a chat's later turns read relocated texts back. N3–N5 pay where a model does not filter itself (skills
+  on Ling, a role with another model) and in larger repositories; they cost nothing where they do not fire.
+- **Next, if wanted**: N3 for a chain of commands of one family (`cargo fmt && cargo test`), the commonest form here.
 
 ## What building it taught (2026-10-20)
 
