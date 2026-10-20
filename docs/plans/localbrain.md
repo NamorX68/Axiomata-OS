@@ -55,9 +55,17 @@ the interface is shaped for it from the start.
   the harness; until it is there Glut works as today (no summaries) and says so once. No model in the app bundle.
 - **L10 — the harness owns it**: the trait and the helper live in `axiomata-harness`, configured by `RunConfig`
   (default off in the library, H2); `axh` and the app switch it on when the model is there.
-- **L11 — success = fewer tokens, same quality**: A/B on real runs (news-web, calendar-digest, a chat with tools):
-  clearly fewer tokens in total *and* the same results. Only then is it on by default; otherwise it stays a switch
+- **L11 — success = less money and fewer tokens in total, same quality**: A/B on real runs (news-web,
+  calendar-digest, a chat with tools): clearly less spent in total — metered with the cached price (L13), the steps
+  counted — *and* the same results. Only then is it on by default; otherwise it stays a switch
   and the plan records why.
+- **L13 — kind to the provider's prompt cache** (owner's question, 2026-10-20): a swap is a change, and the cache
+  holds only an unchanged prefix — everything after the first changed message is read at full price again.
+  Measured: 67 % of Glut's input tokens on Ling came from the cache, at 20 % of the input price. So: swap only at the
+  conversation's end (L2's "after the first look" keeps the swapped result among the newest messages — the prefix
+  before it stays cached); never touch a summary again (the prefix stays stable); a minimum size (~2,000 characters —
+  below it the broken cache costs more than the summary saves); auto-compaction rarely, down well under its budget
+  (hysteresis), since it rewrites the start and breaks the whole cache once. Break-even of a swap: about one step.
 - **L12 — later, its own plan**: the decision model choosing the model for a task (and `models.classify()` in code
   mode), Jev-shaped (`choice/noul/score` over a state), first answered by the same small model (grammar-forced
   choice, probability from the logits), a real decision model behind the same interface if it pays. Also later: the
