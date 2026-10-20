@@ -84,8 +84,15 @@ invented — what the L5 guard would let through.
 | | Phi-4-mini | 0.39 | 0.36 | 0.30 | 2/32 | 4/5 | 4.2 s | 4 |
 | | SmolLM3-3B | 0.45 | 0.33 | 0.52 | 1/32 | 4/5 | 6.1 s | 0 |
 
+| 3, at 4B (owner asked) | Qwen3.5-4B | 0.42 | 0.25 | 0.14 | 3/32 | 2/5 | 2.4 s | 5 |
+| | Gemma-4-E4B (MLX) | 0.44 | 0.18 | 0.19 | 3/32 | 1/5 | 2.6 s | 7 |
+
+No newer small Qwen exists (checked 2026-10-20): Qwen3.6 is 27B and 35B-A3B, there is no Qwen3.7, Qwen3.8 is 27B and
+larger; Qwen3.5 (0.8–9B) is still the smallest family.
+
 Findings:
-- **No sub-4B model keeps the L5 contract on structured tool output.** A model either compresses and drops paths,
+- **No model up to 4B keeps the L5 contract on structured tool output** — size is not the bottleneck: the 4B ones
+  compress harder and lose more paths and code. A model either compresses and drops paths,
   errors and numbers (Phi-4-mini, Gemma) or keeps them and hardly compresses (Qwen3.5-2B: recall 0.75 at 71 %
   length). At most 5 of 32 summaries would pass the guard, saving 1–7 % of the characters.
 - **Small models copy the prompt's example values** (`src/run.rs:412` turned up in Gemma's summaries 20 times):
