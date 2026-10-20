@@ -36,13 +36,14 @@ the interface is shaped for it from the start.
   turns stay verbatim. `/compact` uses the local model too. The summary is framed as notes, never as the owner's
   words, and tool output in it as untrusted data (as `compact.rs` does since #108).
 - **L4 — the model's own long answers** from earlier turns are summarised too.
-- **L5 — the summary's contract**: paths, errors, numbers, names and commands verbatim; German stays German; a
+- **L5 — the summary's contract**: paths, errors, numbers, names, commands and **source code** verbatim — a code
+  block, a signature, a diff hunk the run works with is copied, never paraphrased; German stays German; a
   success-only output compresses to its gist ("tests passed: 412"). It is machine-checkable — the same checker is
   the CP0 measure, the guard at run time (a summary that drops a path of the original is not used), and later the
   fine-tuning filter.
 - **L6 — the model is chosen by measurement (CP0)**: candidates under 4B as GGUF — Qwen3.5-2B, Gemma-4-E2B,
   Phi-4-mini (3.8B), SmolLM3-3B — on real Glut transcripts, tool results, mails and news, by the L5 checker
-  (recall of paths/errors/numbers, invented ones, compression, German), plus speed on the Mac. Licence must allow
+  (recall of paths/errors/numbers/code, invented ones, compression, German), plus speed on the Mac. Licence must allow
   shipping (Apache-2.0/MIT). Ollama serves only as this bench, never in production (2026-10-14).
 - **L7 — the runtime** (decided 2026-10-14, confirmed): llama.cpp through `llama-cpp-2` (pinned) in a small helper
   binary of the harness (`axh-brain`), JSON lines over stdio, the model resident, KV cache reused; the run never
