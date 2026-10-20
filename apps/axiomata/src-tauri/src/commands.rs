@@ -1438,6 +1438,7 @@ pub fn complete_module_action(response: ActionResponse) -> Result<(), String> {
 /// (`{"kind": "run", "name": …}`, `message` its arguments) or a compaction (`{"kind": "compact"}`). Names are checked
 /// in the core; nothing here starts a process of its own.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Each is a named field of the webview's call; a struct would only rename them.
 pub async fn assistant_send(
     state: State<'_, CoreState>,
     message: String,
@@ -1446,6 +1447,7 @@ pub async fn assistant_send(
     allowed_tools: Option<String>,
     model: Option<String>,
     command: Option<ChatCommandArg>,
+    resume: Option<String>,
 ) -> Result<ChatReply, String> {
     let mode = match mode.as_str() {
         "chat" => ChatMode::Chat,
@@ -1459,6 +1461,7 @@ pub async fn assistant_send(
             ChatCommandArg::Run { name } => agents::ChatCommand::Run { name },
             ChatCommandArg::Compact => agents::ChatCommand::Compact,
         }),
+        resume,
     };
     let config = read_config(&state.config);
     agents::chat_and_record_with(
@@ -1480,6 +1483,33 @@ pub async fn assistant_send(
 pub enum ChatCommandArg {
     Run { name: String },
     Compact,
+}
+
+/// Goes on with an interrupted Glut skill run from its journal (durable runs, D3) — only on the owner's click.
+#[tauri::command]
+pub async fn resume_run(state: State<'_, CoreState>, id: i64) -> Result<RunRecord, String> {
+    let config = read_config(&state.config);
+    axiomata_core::durable::resume_run(&state.db, &config, id)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Gives an interrupted run up: its journal goes, the row stays `interrupted`.
+#[tauri::command]
+pub fn discard_run(state: State<'_, CoreState>, id: i64) -> Result<(), String> {
+    axiomata_core::durable::discard(&state.db, id).map_err(|err| err.to_string())
+}
+
+/// The Glut chat turns the app lost before they answered (durable runs, CP4).
+#[tauri::command]
+pub fn interrupted_chat_turns() -> Vec<agents::axh::InterruptedTurn> {
+    agents::axh::interrupted_chat_turns()
+}
+
+/// Gives an interrupted chat turn up.
+#[tauri::command]
+pub fn discard_chat_turn(run: String) -> Result<(), String> {
+    agents::axh::discard_chat_turn(&run).map_err(|err| err.to_string())
 }
 
 /// The chat's earlier conversations on its harness, newest first (#108, `/resume`).

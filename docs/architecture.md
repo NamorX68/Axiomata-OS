@@ -718,6 +718,19 @@ from the snapshot of the conversation's latest turn that changed it — the fold
 its own (`axh undo --run undo-…`), since the restore takes back later changes too; Opencode reverts its last message
 (`…/revert/stage` + `commit`); Claude Code has no rewind in `-p` and says so.
 
+### Durable Glut runs (`docs/plans/durable.md`, built 2026-10-20)
+
+After Pi Durable: a Glut run journals each step (`axiomata_harness::journal`, one synced JSON line per step,
+`<run>.jsonl`, locked while the run writes it, deleted when it ends), and a run the process lost goes on from its last
+step with `axiomata_harness::resume` — the conversation as saved, steps and tokens counted on, the time limit afresh. A
+tool call under way when it stopped runs again only when it only reads (`Tool::replay_safe`: a read or a fetch, a web
+search, an MCP tool whose server says `readOnlyHint`); any other gets "interrupted — check the state" and the model
+decides. In the app (`durable.rs`): every skill/routine run's row is written as `running` at its start (`pid`,
+`journal` columns, migration 35) and completed at its end; at start a `running` row whose process is gone becomes
+`interrupted`, resumable when its journal is there (`list_runs`' `resumable`). Resume is the owner's click — the Skills
+Deck's "resume / drop", the chat panel's note for a lost Glut chat turn — never by itself. `axh` journals its own runs
+in `~/.axh/runs` (`axh resume`). Journals of runs never resumed are swept after 7 days.
+
 ### Model providers (`config.agents.providers`)
 
 Orthogonal to the `AgentBackend` `enum` above: a **provider** selects *which upstream* the
@@ -1471,6 +1484,9 @@ pasteboard (`clipboard`, §3), for the editor's Vi registers.
 - **Glut 2 built** (2026-10-20, `docs/plans/glut-2.md`): code mode in QuickJS with MCP behind code in the chat, old
   tool results shrinking over a budget, `todo_write`, Plan/Build with `exit_plan` and the chat's switch, snapshots
   with `axh undo`, the language server's errors after an edit. §5 "Glut 2".
+- **Durable Glut runs built** (2026-10-20, `docs/plans/durable.md`): a journal per Glut run, resume on the owner's
+  click (skills, routines' skills, chat turns, `axh resume`), replay only of what reads, every run's row from its start
+  and `interrupted` after a lost process. §5 "Durable Glut runs".
 - **Slash commands in the chat built** (2026-10-20, #108, `docs/plans/slash-commands.md`): three levels, `/tile`,
   `/do`, unknown `/x` refused, the engines' own commands listed and run, `/compact` `/model` `/resume` `/undo` on all
   three harnesses as far as each can, a suggestion list above the bar. §5 "Slash commands in the chat".

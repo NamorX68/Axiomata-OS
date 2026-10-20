@@ -85,21 +85,49 @@ pub async fn run(request: AgentRequest, config: &Config) -> Result<AgentRunResul
     };
     let mut harness =
         Harness::prepare(&home, &request.cwd, &rights, request.timeout, config).await?;
+    // Durable runs (D5): the run journals its steps; a resumed one goes on from them (D3).
+    if let Some(journal) = &request.journal {
+        harness.run_config.journal = Some(axiomata_harness::journal::JournalSpec {
+            dir: crate::durable::journal_dir(),
+            run: journal.id.clone(),
+            meta: serde_json::json!({ "kind": "skill", "name": request.name }),
+        });
+    }
     // No signal handlers: this process is the app, not `axh`, and nothing
     // cancels a recorded run from here — the timeout ends it.
     let cancel = Cancel::new();
     let started = Instant::now();
     let model = OpenAiCompat::new(endpoint)?;
-    let (mut outcome, conversation) = axiomata_harness::run_continuing(
-        &harness.run_config,
-        &model,
-        &harness.tools,
-        Vec::new(),
-        &request.prompt,
-        &mut harness.sink,
-        &cancel,
-    )
-    .await;
+    let (mut outcome, conversation) =
+        match request.journal.as_ref().filter(|journal| journal.resume) {
+            Some(journal) => axiomata_harness::resume(
+                &harness.run_config,
+                &model,
+                &harness.tools,
+                &journal.id,
+                &mut harness.sink,
+                &cancel,
+            )
+            .await
+            .map_err(|message| AxiomataError::AgentApi {
+                backend: BACKEND_AXH,
+                message,
+            })?,
+            None => {
+                axiomata_harness::run_continuing(
+                    &harness.run_config,
+                    &model,
+                    &harness.tools,
+                    Vec::new(),
+                    &request.prompt,
+                    &mut harness.sink,
+                    &cancel,
+                )
+                .await
+            }
+        };
+    // The run's journal is closed; the JSON repair below is a short step of its own, not journaled.
+    harness.run_config.journal = None;
     // `output: json` (harness-choice CP5, lifting HS6b's D3): an answer without a JSON object is asked once more,
     // in the same conversation, as on Opencode and Claude Code. Usage and turns count twice — both were paid.
     let answer_lacks_json = outcome.reason == FinishReason::Answered
@@ -182,6 +210,26 @@ pub(crate) async fn chat(
             (new_session_id(), Vec::new())
         }
     };
+    // A turn to finish must be one this conversation lost — the journal names its conversation — and only while the
+    // conversation is as the turn found it: one that went on since would lose its later turns.
+    if let Some(run) = &request.resume {
+        let turn = interrupted_chat_turns()
+            .into_iter()
+            .find(|turn| &turn.run == run && turn.session_id == session_id);
+        let Some(turn) = turn else {
+            return Err(AxiomataError::AgentApi {
+                backend: BACKEND_AXH,
+                message: format!("no interrupted turn {run} in this conversation"),
+            });
+        };
+        if turn.earlier != earlier.len() {
+            return Err(AxiomataError::AgentApi {
+                backend: BACKEND_AXH,
+                message: "the conversation went on after this turn was lost: drop the turn instead"
+                    .to_owned(),
+            });
+        }
+    }
     // A command file's `allowed-tools` narrow the turn (C3) as a skill's do: they become its whole rights. Its
     // `model:` is not followed — the chat's model is `/model`'s (S5).
     let (message, command_rules) = match &request.command {
@@ -230,19 +278,51 @@ pub(crate) async fn chat(
     // in the app's chat, so there the model presents its plan and the owner flips the switch.
     harness.run_config.build_mode = chat_mode(&declared, request.auto_approve_tools);
     harness.run_config.instructions = instructions;
+    // Durable runs: the turn journals its steps; one the app lost is finished from them on the owner's click.
+    let journal = request
+        .resume
+        .clone()
+        .unwrap_or_else(crate::durable::new_journal_id);
+    harness.run_config.journal = Some(axiomata_harness::journal::JournalSpec {
+        dir: crate::durable::journal_dir(),
+        run: journal.clone(),
+        meta: serde_json::json!({
+            "kind": CHAT_JOURNAL,
+            "session": session_id,
+            "title": super::title_of(&request.message),
+            "earlier": earlier.len(),
+        }),
+    });
     let continuing = !earlier.is_empty();
     let started = Instant::now();
     let model = OpenAiCompat::new(endpoint)?;
-    let (outcome, conversation) = axiomata_harness::run_continuing(
-        &harness.run_config,
-        &model,
-        &harness.tools,
-        earlier,
-        &message,
-        &mut harness.sink,
-        &Cancel::new(),
-    )
-    .await;
+    let (outcome, conversation) = match &request.resume {
+        Some(run) => axiomata_harness::resume(
+            &harness.run_config,
+            &model,
+            &harness.tools,
+            run,
+            &mut harness.sink,
+            &Cancel::new(),
+        )
+        .await
+        .map_err(|message| AxiomataError::AgentApi {
+            backend: BACKEND_AXH,
+            message,
+        })?,
+        None => {
+            axiomata_harness::run_continuing(
+                &harness.run_config,
+                &model,
+                &harness.tools,
+                earlier,
+                &message,
+                &mut harness.sink,
+                &Cancel::new(),
+            )
+            .await
+        }
+    };
     // A turn that changed files and then failed is undoable too: its snapshot is there either way.
     for run in harness.notes.snapshot_runs() {
         remember_undo(&session_id, run);
@@ -282,6 +362,70 @@ pub(crate) async fn chat(
         output_tokens,
         num_turns: Some(outcome.turns),
         duration_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+/// The `kind` a chat turn's journal names in its `meta`.
+const CHAT_JOURNAL: &str = "chat";
+
+/// A Glut chat turn the app lost before it answered (durable runs, CP4).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct InterruptedTurn {
+    /// The journal to finish it from.
+    pub run: String,
+    /// The conversation it belongs to.
+    pub session_id: String,
+    /// The first words of its message.
+    pub title: String,
+    pub started_at: String,
+    /// How many messages the conversation held before the turn.
+    #[serde(skip)]
+    pub earlier: usize,
+}
+
+/// The chat turns on Glut that the app lost before they answered, newest first — none still going.
+pub fn interrupted_chat_turns() -> Vec<InterruptedTurn> {
+    axiomata_harness::journal::list(&crate::durable::journal_dir())
+        .into_iter()
+        .filter(|unfinished| !unfinished.running && unfinished.meta["kind"] == CHAT_JOURNAL)
+        .filter_map(|unfinished| {
+            Some(InterruptedTurn {
+                session_id: unfinished.meta["session"]
+                    .as_str()
+                    .filter(|id| valid_session_id(id))?
+                    .to_owned(),
+                title: unfinished.meta["title"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                earlier: unfinished.meta["earlier"]
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .unwrap_or(usize::MAX),
+                run: unfinished.run,
+                started_at: unfinished.started_at,
+            })
+        })
+        .collect()
+}
+
+/// Gives an interrupted chat turn up: its journal is deleted, the conversation stays as it was before the turn.
+///
+/// # Errors
+///
+/// No such turn, or it is still going.
+pub fn discard_chat_turn(run: &str) -> Result<(), AxiomataError> {
+    if !interrupted_chat_turns().iter().any(|turn| turn.run == run) {
+        return Err(AxiomataError::AgentApi {
+            backend: BACKEND_AXH,
+            message: format!("no interrupted chat turn {run}"),
+        });
+    }
+    axiomata_harness::journal::discard(&crate::durable::journal_dir(), run).map_err(|message| {
+        AxiomataError::AgentApi {
+            backend: BACKEND_AXH,
+            message,
+        }
     })
 }
 
@@ -1787,6 +1931,7 @@ mod tests {
             auto_approve_tools: true,
             allowed_tools: None,
             command: None,
+            resume: None,
         };
 
         let first = chat(request("Remember GLUTHEX.", None), &fx.config)
@@ -1880,6 +2025,7 @@ mod tests {
                 auto_approve_tools: true,
                 allowed_tools: None,
                 command,
+                resume: None,
             };
         let names: Vec<String> = chat_commands(&fx.config.workspace_root)
             .unwrap()
@@ -1949,6 +2095,41 @@ mod tests {
         assert!(!after.contains("Say hello to Ada."), "{after}");
     }
 
+    /// Durable runs (CP4): a chat turn the app lost is listed with its conversation and first words, can be given
+    /// up, and only a journal of a chat turn counts — a skill run's is not one.
+    #[test]
+    fn a_lost_chat_turn_is_listed_and_can_be_given_up() {
+        let _fx = Fixture::new("chat-lost");
+        let dir = crate::durable::journal_dir();
+        let write = |run: &str, meta: Value| {
+            let spec = axiomata_harness::journal::JournalSpec {
+                dir: dir.clone(),
+                run: run.to_owned(),
+                meta,
+            };
+            drop(axiomata_harness::journal::Journal::create(&spec, Path::new("/w"), "m").unwrap());
+        };
+        write(
+            "run-chat-1",
+            json!({"kind": "chat", "session": "axh-abc", "title": "plan my week"}),
+        );
+        write("run-skill-1", json!({"kind": "skill", "name": "news-web"}));
+        write("run-chat-bad", json!({"kind": "chat", "session": "../etc"}));
+        let turns = interrupted_chat_turns();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(
+            (
+                turns[0].run.as_str(),
+                turns[0].session_id.as_str(),
+                turns[0].title.as_str()
+            ),
+            ("run-chat-1", "axh-abc", "plan my week")
+        );
+        assert!(discard_chat_turn("run-skill-1").is_err());
+        discard_chat_turn("run-chat-1").unwrap();
+        assert!(interrupted_chat_turns().is_empty());
+    }
+
     #[test]
     fn undo_goes_back_one_turn_at_a_time_per_conversation() {
         remember_undo("axh-undo-a", "run-1".into());
@@ -1992,6 +2173,7 @@ mod tests {
             auto_approve_tools: true,
             allowed_tools: None,
             command: None,
+            resume: None,
         };
         let err = chat(request, &fx.config).await.unwrap_err();
         assert!(matches!(err, AxiomataError::AgentApi { .. }), "{err:?}");

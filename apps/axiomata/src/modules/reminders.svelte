@@ -29,7 +29,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { RunRecord, RunSummary } from "../core/backend";
+  import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
   import { runUnlessAutoRefreshDisabled } from "../core/devFlags";
   import { relativeTime } from "../core/format";
   import {
@@ -161,7 +161,7 @@
    *  an older run's data, so the badge falls back to whichever run the
    *  re-resolved digest actually came from. */
   async function applyFreshRun(run: RunRecord) {
-    if (run.status === "failed") {
+    if (runFailed(run.status)) {
       error = run.error ?? "Last run failed.";
       await loadLatest();
       return;

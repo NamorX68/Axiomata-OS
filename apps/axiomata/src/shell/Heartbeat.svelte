@@ -420,6 +420,7 @@
   }
 
   .status.failed,
+  .status.interrupted,
   .error {
     color: var(--ax-danger);
   }

@@ -29,7 +29,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { RunRecord, RunSummary } from "../core/backend";
+  import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
   import { runUnlessAutoRefreshDisabled } from "../core/devFlags";
   import { relativeTime } from "../core/format";
   import { EMPTY_MAIL_DIGEST, loadLatestMailDigest, mailMix, MAIL_SKILL_NAME, openMailSummary, parseMailDigest, summaryPreview, writeAllMailSummaries, type MailDigest, type MailItem } from "../core/mail";
@@ -69,7 +69,7 @@
    *  an older run's data, so the badge falls back to whichever run the
    *  re-resolved digest actually came from. */
   async function applyFreshRun(run: RunRecord) {
-    if (run.status === "failed") {
+    if (runFailed(run.status)) {
       error = run.error ?? "Last run failed.";
       await loadLatest();
       return;

@@ -28,7 +28,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { RunRecord, RunSummary } from "../core/backend";
+  import { type RunRecord, type RunSummary, runFailed } from "../core/backend";
   import { runUnlessAutoRefreshDisabled } from "../core/devFlags";
   import {
     CALENDAR_SKILL_NAME,
@@ -217,7 +217,7 @@
    *  a fresh run contributes nothing, the badge falls back to whichever run
    *  the re-resolved digest actually came from. */
   async function applyFreshRun(run: RunRecord) {
-    if (run.status === "failed") {
+    if (runFailed(run.status)) {
       error = run.error ?? "Last run failed.";
       await loadLatest();
       return;

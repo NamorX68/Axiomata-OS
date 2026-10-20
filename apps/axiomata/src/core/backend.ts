@@ -151,7 +151,14 @@ export interface SkippedSkill {
   reason: string;
 }
 
-export type RunStatus = "success" | "failed";
+/** `running` while it works (its row is written at the start), `interrupted` when the process running it stopped
+ *  first — a Glut run that kept its journal can be resumed (`docs/plans/durable.md`). */
+export type RunStatus = "success" | "failed" | "running" | "interrupted";
+
+/** Whether a run ended without a result: it failed, or it was interrupted. */
+export function runFailed(status: RunStatus): boolean {
+  return status === "failed" || status === "interrupted";
+}
 
 /** Who/what triggered a run — a person, or a routine firing unattended. */
 export type RunSource = "manual" | "routine";
@@ -166,6 +173,8 @@ export interface RunSummary {
   error: string | null;
   started_at: string;
   source: RunSource;
+  /** An interrupted Glut run that kept its journal: `resume_run` goes on with it (durable runs). */
+  resumable?: boolean;
 }
 
 /** The full record `run_skill` / `get_run` return — `RunSummary` plus the

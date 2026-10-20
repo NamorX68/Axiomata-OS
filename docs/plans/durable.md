@@ -1,6 +1,8 @@
 # Durable Glut runs (after Pi Durable)
 
-Status: grilled 2026-10-20 (D1–D8), waiting for the owner's go. Follows `docs/plans/glut-2.md` (G5: Pi Durable is a plan
+Status: grilled 2026-10-20 (D1–D8), **built 2026-10-20** (CP1–CP6). Live: an `axh run` on Ollama killed with
+`kill -9` after two tool calls went on with `axh resume` — the read under way ran again, the steps counted on (2 → 6),
+the journal was gone afterwards. Deviations while building: D9 below. Follows `docs/plans/glut-2.md` (G5: Pi Durable is a plan
 of its own).
 
 ## Where we stand
@@ -39,6 +41,24 @@ of its own).
   (the MCP tool annotations); everything else is interrupted as in D4.
 - **D8 — retention**: a finished run deletes its journal (its result is in `runs` or the chat's session file); an
   interrupted one stays resumable for 7 days, then the sweep removes it — as the snapshots.
+
+- **D9 — found while building**: card sessions never run on Glut (they are Opencode and Claude Code panes), so there is
+  none to resume. A prompt routine's run is recorded from its start like a skill's, but only a skill's run resumes
+  (it is rebuilt from its `SKILL.md`). `axh` keeps its own journals in `~/.axh/runs` and resumes only its own runs
+  (`axh resume [run] [--list] [--discard]`, its flags kept in the journal); the app's are in `~/.axiomata/harness/runs`.
+  A run's row is `running` from its start for every harness; the start-up sweep checks the row's process id, so a
+  CLI run going on beside the app is not marked. A chat turn the app lost is offered in the chat panel (Resume / Drop)
+  and said once by a toast at start. The connector tiles pass a `running` row by and hear its end (their watch keys
+  on id and status).
+
+- **D10 — from the reviews (2026-10-20)**: the journal is written in one write and one sync per step (a chat turn
+  opens with its whole earlier conversation), after the SessionStart context; a torn tail is cut off before a resume
+  appends; a journal is only a regular file of the owner's, opened without following a link and read to a bound; a
+  journal of another run, or one lost before its task was saved, is not resumed. Only a skill run on Glut gets a
+  journal; a run whose journal is gone is no longer offered (start-up tidy); a resume claims its row once (a second
+  click goes no further) and checks the journal is that skill's. A chat turn resumes only on Glut, not as a command,
+  and only while its conversation is as the turn found it. `axh resume` needs the run named, prints the flags it goes
+  on with, and `--base-url` may hold no user or password (the journal keeps it).
 
 ## Design
 

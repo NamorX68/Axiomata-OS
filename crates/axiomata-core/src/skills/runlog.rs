@@ -59,6 +59,159 @@ fn record_run_with_retention(
     Ok(record)
 }
 
+/// Writes the row of a run that is starting (durable runs, CP3): status `running`, this process's id, and the id of
+/// the journal a Glut run keeps. [`finish_run`] completes it; [`discard_run`] takes it back when the run never started.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the insert fails.
+pub fn begin_run(
+    db: &Connection,
+    skill_name: &str,
+    source: RunSource,
+    journal: Option<&str>,
+) -> Result<i64, AxiomataError> {
+    let now = Utc::now().to_rfc3339();
+    db.execute(
+        "INSERT INTO runs (skill_name, backend, status, started_at, finished_at, source, pid, journal) \
+         VALUES (?1, '', 'running', ?2, ?2, ?3, ?4, ?5)",
+        rusqlite::params![skill_name, now, source.as_str(), std::process::id(), journal],
+    )?;
+    let id = db.last_insert_rowid();
+    prune_runs(db, RUNS_RETENTION_LIMIT)?;
+    Ok(id)
+}
+
+/// Completes the row [`begin_run`] wrote with the run's outcome, and appends it to the log. The journal column is
+/// cleared: a finished run has none to resume.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the update fails; [`AxiomataError::Io`] if the log cannot be appended to.
+pub fn finish_run(
+    db: &Connection,
+    id: i64,
+    mut record: RunRecord,
+) -> Result<RunRecord, AxiomataError> {
+    db.execute(
+        "UPDATE runs SET skill_name = ?2, backend = ?3, status = ?4, exit_code = ?5, duration_ms = ?6, \
+         stdout = ?7, stderr = ?8, error = ?9, started_at = ?10, finished_at = ?11, source = ?12, provider = ?13, \
+         cost_usd = ?14, input_tokens = ?15, output_tokens = ?16, num_turns = ?17, model = ?18, \
+         cached_input_tokens = ?19, journal = NULL WHERE id = ?1",
+        rusqlite::params![
+            id,
+            record.skill_name,
+            record.backend,
+            record.status.as_str(),
+            record.exit_code,
+            record.duration_ms,
+            record.stdout,
+            record.stderr,
+            record.error,
+            record.started_at.to_rfc3339(),
+            record.finished_at.to_rfc3339(),
+            record.source.as_str(),
+            record.provider,
+            record.cost_usd,
+            record.input_tokens,
+            record.output_tokens,
+            record.num_turns,
+            record.model,
+            record.cached_input_tokens,
+        ],
+    )?;
+    record.id = Some(id);
+    append_jsonl(&record)?;
+    Ok(record)
+}
+
+/// Removes the row of a run that never started (it was refused as already running).
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the delete fails.
+pub fn discard_run(db: &Connection, id: i64) -> Result<(), AxiomataError> {
+    db.execute(
+        "DELETE FROM runs WHERE id = ?1 AND status = 'running'",
+        [id],
+    )?;
+    Ok(())
+}
+
+/// Marks every `running` row whose process is gone as `interrupted` (at the app's start): a run the app or the CLI
+/// lost is never gone without a trace. Returns how many it marked.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the query or an update fails.
+pub fn mark_interrupted(db: &Connection) -> Result<usize, AxiomataError> {
+    let running: Vec<(i64, Option<i64>)> = {
+        let mut statement = db.prepare("SELECT id, pid FROM runs WHERE status = 'running'")?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut marked = 0;
+    for (id, pid) in running {
+        if pid.is_some_and(process_alive) {
+            continue;
+        }
+        marked += db.execute(
+            "UPDATE runs SET status = 'interrupted', \
+             error = 'the run stopped before it ended: its process was gone (an app quit, a crash, a rebuild)' \
+             WHERE id = ?1 AND status = 'running'",
+            [id],
+        )?;
+    }
+    Ok(marked)
+}
+
+/// Whether the process `pid` still lives (signal 0 reaches it). This process counts as alive. Only a positive id is
+/// one: a negative one would name a process group.
+fn process_alive(pid: i64) -> bool {
+    let Some(pid) = i32::try_from(pid)
+        .ok()
+        .filter(|pid| *pid > 0)
+        .and_then(rustix::process::Pid::from_raw)
+    else {
+        return false;
+    };
+    rustix::process::test_kill_process(pid).is_ok()
+}
+
+/// Clears the journal of every interrupted run whose journal is not among `kept` (the unfinished journals there are):
+/// such a run is no longer offered for a resume.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the query or an update fails.
+pub fn forget_lost_journals(db: &Connection, kept: &[String]) -> Result<usize, AxiomataError> {
+    let interrupted: Vec<(i64, String)> = {
+        let mut statement = db.prepare(
+            "SELECT id, journal FROM runs WHERE status = 'interrupted' AND journal IS NOT NULL",
+        )?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut forgotten = 0;
+    for (id, journal) in interrupted {
+        if !kept.contains(&journal) {
+            forgotten += db.execute("UPDATE runs SET journal = NULL WHERE id = ?1", [id])?;
+        }
+    }
+    Ok(forgotten)
+}
+
+/// The journal id of an interrupted run, if it kept one.
+///
+/// Errors:
+///     [`AxiomataError::Database`] if the query fails.
+pub fn interrupted_journal(db: &Connection, id: i64) -> Result<Option<String>, AxiomataError> {
+    match db.query_row(
+        "SELECT journal FROM runs WHERE id = ?1 AND status = 'interrupted'",
+        [id],
+        |row| row.get::<_, Option<String>>(0),
+    ) {
+        Ok(journal) => Ok(journal),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
 /// Deletes every `runs` row except the `keep` most recent (by `started_at`,
 /// ties broken by `id`). A no-op once the table is at or under `keep` rows —
 /// the common case once retention has kicked in once.
@@ -145,7 +298,7 @@ pub fn list_runs(db: &Connection, limit: usize) -> Result<Vec<RunSummary>, Axiom
     let limit = limit.min(MAX_RUN_LIMIT);
     let mut stmt = db.prepare(
         "SELECT id, skill_name, backend, status, exit_code, duration_ms, error, started_at, source, \
-                provider, cost_usd \
+                provider, cost_usd, (status = 'interrupted' AND journal IS NOT NULL) \
          FROM runs ORDER BY started_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit as i64], row_to_summary)?;
@@ -193,6 +346,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<RunSummary> {
         source: RunSource::from_db_str(&source, 8)?,
         provider: row.get(9)?,
         cost_usd: row.get(10)?,
+        resumable: row.get(11)?,
     })
 }
 
@@ -275,6 +429,60 @@ mod tests {
             model: None,
             source: RunSource::Manual,
         }
+    }
+
+    /// Durable runs (CP3): a row from the start, completed at the end; a row whose process is gone becomes
+    /// `interrupted`, one of a living process stays `running`; a run that never started leaves no row.
+    #[test]
+    fn a_run_is_recorded_from_its_start_and_a_lost_one_is_marked_interrupted() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let home = unique_temp_dir("axiomata-test-runlog-durable");
+        fs::create_dir_all(home.join("logs")).unwrap();
+        // SAFETY: serialized by `_guard`, see `paths::tests`.
+        unsafe {
+            env::set_var(crate::paths::AXIOMATA_HOME_ENV, &home);
+        }
+        let db = crate::db::open_and_migrate_at(&home.join("axiomata.db")).unwrap();
+
+        let finished = begin_run(&db, "news-web", RunSource::Routine, Some("run-1")).unwrap();
+        assert_eq!(list_runs(&db, 10).unwrap()[0].status, RunStatus::Running);
+        let stored = finish_run(&db, finished, sample_record("news-web")).unwrap();
+        assert_eq!(stored.id, Some(finished));
+        let row = get_run(&db, finished).unwrap().unwrap();
+        assert_eq!(
+            (row.status, row.stdout.as_str()),
+            (RunStatus::Success, "done")
+        );
+        assert_eq!(interrupted_journal(&db, finished).unwrap(), None);
+
+        let lost = begin_run(&db, "cleanup", RunSource::Manual, Some("run-2")).unwrap();
+        let alive = begin_run(&db, "triage", RunSource::Manual, None).unwrap();
+        let refused = begin_run(&db, "racer", RunSource::Manual, None).unwrap();
+        discard_run(&db, refused).unwrap();
+        // The lost run's process is gone (no process has pid 0 to signal); this process is alive.
+        db.execute("UPDATE runs SET pid = 999999999 WHERE id = ?1", [lost])
+            .unwrap();
+        assert_eq!(mark_interrupted(&db).unwrap(), 1);
+        assert_eq!(
+            get_run(&db, lost).unwrap().unwrap().status,
+            RunStatus::Interrupted
+        );
+        assert_eq!(
+            get_run(&db, alive).unwrap().unwrap().status,
+            RunStatus::Running
+        );
+        assert_eq!(
+            interrupted_journal(&db, lost).unwrap().as_deref(),
+            Some("run-2")
+        );
+        let listed = list_runs(&db, 10).unwrap();
+        let resumable: Vec<bool> = listed.iter().map(|run| run.resumable).collect();
+        assert_eq!(
+            resumable.iter().filter(|r| **r).count(),
+            1,
+            "only the lost run with a journal"
+        );
+        assert!(get_run(&db, refused).unwrap().is_none());
     }
 
     #[test]

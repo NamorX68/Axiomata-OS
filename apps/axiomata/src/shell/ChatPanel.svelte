@@ -30,7 +30,19 @@
     };
   }
 
-  import { busy, newSession, panelOpen, planMode, sessionId, toolCalls, turns, type ToolCall } from "../core/chat";
+  import {
+    busy,
+    dropTurn,
+    interruptedTurns,
+    newSession,
+    panelOpen,
+    planMode,
+    resumeTurn,
+    sessionId,
+    toolCalls,
+    turns,
+    type ToolCall,
+  } from "../core/chat";
   import HexAvatar from "../ui/HexAvatar.svelte";
   import StatusMark from "../ui/StatusMark.svelte";
   import { renderMarkdown } from "../core/markdown";
@@ -81,6 +93,13 @@
         </button>
       {/snippet}
       <div class="turns" bind:this={list}>
+        {#each $interruptedTurns as lost (lost.run)}
+          <p class="interrupted">
+            A turn stopped when the app did: <strong>{lost.title || "(no text)"}</strong>
+            <button type="button" class="ax-btn" disabled={$busy} onclick={() => void resumeTurn(lost)}>Resume</button>
+            <button type="button" class="ax-btn" disabled={$busy} onclick={() => void dropTurn(lost)}>Drop</button>
+          </p>
+        {/each}
         {#each $turns as t (t.id)}
           {#if t.role === "user"}
             <article class="turn user"><p>{t.text}</p></article>
@@ -110,6 +129,19 @@
 {/if}
 
 <style>
+  /* A turn the app lost (durable runs): a note above the conversation, the owner decides. */
+  .interrupted {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ax-space-2);
+    margin: 0 0 var(--ax-space-3);
+    padding: var(--ax-space-2) var(--ax-space-3);
+    border: 1px solid var(--ax-border);
+    border-radius: var(--ax-radius-md);
+    color: var(--ax-text-muted);
+    font-size: var(--ax-font-size-sm);
+  }
   .chat-wrap {
     position: fixed;
     left: 50%;

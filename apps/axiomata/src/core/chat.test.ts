@@ -4,8 +4,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invokeBackend = vi.fn();
 vi.mock("./backend", () => ({ invokeBackend: (...args: unknown[]) => invokeBackend(...args) }));
 
-const { busy, newSession, noteToolCall, planMode, send, sessionId, toolCalls, turnModel, turns } =
-  await import("./chat");
+const {
+  busy,
+  dropTurn,
+  interruptedTurns,
+  newSession,
+  noteToolCall,
+  planMode,
+  resumeTurn,
+  send,
+  sessionId,
+  toolCalls,
+  turnModel,
+  turns,
+} = await import("./chat");
 type ChatTurn = import("./chat").ChatTurn;
 
 function lastTurn(): ChatTurn | undefined {
@@ -66,6 +78,7 @@ describe("the plan switch", () => {
       mode: "plan",
       model: null,
       command: null,
+      resume: null,
     });
     expect(get(sessionId)).toBe("s9");
   });
@@ -112,5 +125,41 @@ describe("slash commands on the chat (#108)", () => {
     expect(invokeBackend.mock.calls[0][1].model).toBe("deepseek/deepseek-v4-flash");
     newSession();
     expect(get(turnModel)).toBeNull();
+  });
+});
+
+describe("a chat turn the app lost (durable runs)", () => {
+  const lost = { run: "run-1", session_id: "axh-7", title: "plan my week", started_at: "2026-10-20T08:00:00Z" };
+
+  beforeEach(() => {
+    newSession();
+    busy.set(false);
+    invokeBackend.mockReset();
+    interruptedTurns.set([lost]);
+  });
+
+  it("is finished in its own conversation from its journal", async () => {
+    invokeBackend.mockResolvedValue({ session_id: "axh-7", reply_markdown: "Done.", is_error: false, cost_usd: null });
+    await resumeTurn(lost);
+    expect(invokeBackend.mock.calls[0][1]).toMatchObject({ message: "", sessionId: "axh-7", resume: "run-1" });
+    expect(get(turns).map((t) => t.text)).toEqual(["plan my week (resumed after the app stopped)", "Done."]);
+    expect(get(interruptedTurns)).toEqual([]);
+  });
+
+  it("keeps the note and the conversation on screen when the resume fails", async () => {
+    sessionId.set("axh-other");
+    turns.set([{ id: 1, role: "user", text: "earlier", at: 0 }]);
+    invokeBackend.mockRejectedValue("the conversation went on");
+    await resumeTurn(lost);
+    expect(get(sessionId)).toBe("axh-other");
+    expect(get(turns).map((t) => t.text)).toEqual(["earlier", "the conversation went on"]);
+    expect(get(interruptedTurns)).toEqual([lost]);
+  });
+
+  it("can be given up", async () => {
+    invokeBackend.mockResolvedValue(undefined);
+    await dropTurn(lost);
+    expect(invokeBackend).toHaveBeenCalledWith("discard_chat_turn", { run: "run-1" });
+    expect(get(interruptedTurns)).toEqual([]);
   });
 });

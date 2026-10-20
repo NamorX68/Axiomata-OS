@@ -32,8 +32,8 @@ design has since diverged, `docs/architecture.md` §1 explains how).
   `docs/plans/glut-round.md`: web fetch/search, fewer tokens, cached tokens metered apart, streaming, skills that name
   their rights), and "Glut 2" (2026-10-20, `docs/plans/glut-2.md`: code mode, MCP behind code in the chat, results
   shrinking over a budget — off by default, todo/plan-build/snapshots/LSP errors), and slash commands in the chat
-  (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands). Next: plans for Pi-Durable-like
-  runs and LocalBrain.
+  (#108, `docs/plans/slash-commands.md`: `/tile`, `/do`, the engines' own commands), and durable Glut runs
+  (`docs/plans/durable.md`: a journal per run, resume on click). Next: the LocalBrain plan.
   Deferred: further model-provider work.
 - **Where the detail lives:** `docs/architecture.md` §5 (what exists), §7 (milestones) and its "Status log"
   (the full status paragraph, 2026-10-04 snapshot at the end); plans in `docs/plans/`. Read them before substantial
@@ -189,6 +189,10 @@ from the code itself:
   any caller (`human:` actor for the owner's steps; an `agent:` actor never moves a card freely). `board claim|report|verdict|add` are closed in an agent shell too
   (`mcp_only`): the MCP server (`axiomata-cli mcp-serve`) is the door for them, and it only starts with the secret issued at the session's latest start
   (`axiomata-ide::session_token`, kept out of the harness environment). Not a sandbox — see a2a.md A39 and "CP-A5 im Detail".
+- **A run's row exists from its start** (durable runs): `runs.status` is also `running` and `interrupted`, so code
+  reading "the latest run" must pass a `running` one by (`core/skillRun.ts`) and treat `interrupted` as failed
+  (`runFailed`). Write a run through `durable::recorded`, never `runlog::record_run` after the fact, or a lost run
+  leaves no trace. A tool that only reads but whose `access` is no read or fetch says so with `Tool::replay_safe`.
 - **The bar's `/` has three levels** (`core/commands.ts`, #108): the conversation commands, app control (module
   actions are `/tile <type> <action>`, no longer `/<type>`), the chat harness's own commands. An unknown `/x` is
   refused, never sent: the one-shot instruction is `/do <text>`. A command name or `/model` id reaches an engine's

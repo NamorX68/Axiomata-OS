@@ -10,7 +10,7 @@ import { get } from "svelte/store";
 
 import { registerModule, registerShellAction } from "../core/registry";
 import { FILE_PANEL, openFilePanel } from "../core/staging";
-import type { Routine, RunRecord, WorkspaceFile } from "../core/backend";
+import { type Routine, type RunRecord, type WorkspaceFile, runFailed } from "../core/backend";
 import { CALENDAR_SKILL_NAME, createCalendarEvent, deleteCalendarEvent, filterByCalendar, loadLatestCalendarDigest, parseCalendarDigest } from "../core/calendar";
 import { todayIso as calendarToday, weekRange } from "../core/monthGrid";
 import { loadLatestMailDigest, MAIL_SKILL_NAME, parseMailDigest } from "../core/mail";
@@ -470,7 +470,7 @@ export function registerBuiltins(): void {
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
           const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), CALENDAR_SKILL_NAME) });
-          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          if (runFailed(run.status)) return { ok: false, error: run.error ?? "run failed" };
           const digest = parseCalendarDigest(run.stdout);
           return { ok: true, calendars: digest.calendars, events: digest.events.length };
         },
@@ -561,7 +561,7 @@ export function registerBuiltins(): void {
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
           const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), REMINDERS_SKILL_NAME) });
-          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          if (runFailed(run.status)) return { ok: false, error: run.error ?? "run failed" };
           const digest = parseReminderDigest(run.stdout);
           return { ok: true, lists: digest.lists, tasks: digest.tasks.length };
         },
@@ -649,7 +649,7 @@ export function registerBuiltins(): void {
         params: { type: "object", properties: {} },
         run: async (_params, ctx) => {
           const run = await ctx.invoke<RunRecord>("run_skill", { name: resolveSkillName(get(ctx.config), MAIL_SKILL_NAME) });
-          if (run.status === "failed") return { ok: false, error: run.error ?? "run failed" };
+          if (runFailed(run.status)) return { ok: false, error: run.error ?? "run failed" };
           const digest = parseMailDigest(run.stdout);
           return { ok: true, emails: digest.emails.length };
         },

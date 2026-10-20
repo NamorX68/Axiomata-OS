@@ -10,7 +10,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  import type { RunSummary, Skill, SkippedSkill } from "../core/backend";
+  import { type RunSummary, type Skill, type SkippedSkill, runFailed } from "../core/backend";
   import { relativeTime } from "../core/format";
   import { backendLabel } from "../core/harness";
   import type { ModuleContext } from "../core/types";
@@ -76,6 +76,30 @@
     }
   }
 
+  /** Goes on with an interrupted Glut run from its journal — only on the owner's click (durable runs, D3). */
+  async function resume(name: string, id: number) {
+    if (running.includes(name)) return;
+    running = [...running, name];
+    try {
+      await ctx.invoke<RunSummary>("resume_run", { id });
+    } catch (err) {
+      error = `resume ${name}: ${String(err)}`;
+    } finally {
+      running = running.filter((n) => n !== name);
+      await refresh();
+    }
+  }
+
+  /** Gives an interrupted run up: its journal goes, the run stays interrupted. */
+  async function discard(name: string, id: number) {
+    try {
+      await ctx.invoke("discard_run", { id });
+    } catch (err) {
+      error = `drop ${name}: ${String(err)}`;
+    }
+    await refresh();
+  }
+
   onMount(() => {
     void refresh();
     const id = setInterval(() => void refresh(), POLL_MS);
@@ -116,10 +140,24 @@
               <span class="running">running</span>
             {:else if last}
               <StatusMark
-                tone={last.status === "failed" ? "bad" : "ok"}
+                tone={last.status === "running" ? "live" : runFailed(last.status) ? "bad" : "ok"}
                 label={last.status}
                 title="{last.status} · {relativeTime(last.started_at)}"
               />
+              {#if last.resumable}
+                <button
+                  type="button"
+                  class="link"
+                  title="Go on from where the run stopped"
+                  onclick={() => resume(s.name, last.id)}>resume</button
+                >
+                <button
+                  type="button"
+                  class="link"
+                  title="Give the interrupted run up"
+                  onclick={() => discard(s.name, last.id)}>drop</button
+                >
+              {/if}
             {/if}
           </span>
           <button
@@ -221,6 +259,19 @@
     border-color: var(--ax-border-strong);
     color: var(--ax-text-muted);
     background: transparent;
+  }
+  /* Resume / drop of an interrupted run: words in the meta line, not a second button beside Run. */
+  .link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--ax-text-muted);
+    font-size: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .link:hover {
+    color: var(--ax-text);
   }
   .run:hover:not(:disabled) {
     background: var(--ax-selected-bg);

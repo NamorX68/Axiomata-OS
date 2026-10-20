@@ -56,6 +56,9 @@ pub fn bootstrap() -> Services {
     // `Config` value clone) — the scheduler loop re-reads it on every tick,
     // so a live Settings-dialog provider/model change reaches scheduled
     // routine firings too, not just manual runs.
+    // Durable runs (CP3): a run the app lost before this start is `interrupted`, never left `running` — before the
+    // scheduler fires anything that would be `running` itself.
+    axiomata_core::durable::on_start(&core.db);
     let scheduler = SchedulerHandle::new();
     let stop_rx = scheduler.subscribe();
     tauri::async_runtime::spawn(routines::serve(

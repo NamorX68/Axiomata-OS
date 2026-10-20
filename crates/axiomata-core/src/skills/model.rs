@@ -16,6 +16,11 @@ pub enum RunStatus {
     Success,
     /// The agent reported a non-zero exit code, or could not be run at all.
     Failed,
+    /// The run is going (durable runs, CP3): its row is written when it starts.
+    Running,
+    /// The process running it stopped before it ended — an app quit, a crash, a rebuild. A Glut run whose journal
+    /// is still there can be resumed.
+    Interrupted,
 }
 
 impl RunStatus {
@@ -24,6 +29,8 @@ impl RunStatus {
         match self {
             Self::Success => "success",
             Self::Failed => "failed",
+            Self::Running => "running",
+            Self::Interrupted => "interrupted",
         }
     }
 
@@ -45,6 +52,8 @@ impl RunStatus {
         match raw {
             "success" => Ok(Self::Success),
             "failed" => Ok(Self::Failed),
+            "running" => Ok(Self::Running),
+            "interrupted" => Ok(Self::Interrupted),
             other => Err(rusqlite::Error::FromSqlConversionFailure(
                 column,
                 rusqlite::types::Type::Text,
@@ -193,4 +202,7 @@ pub struct RunSummary {
     pub cost_usd: Option<f64>,
     /// Who/what triggered this run — see [`RunRecord::source`].
     pub source: RunSource,
+    /// An interrupted Glut run that kept its journal: the owner can resume it (durable runs, D3).
+    #[serde(default)]
+    pub resumable: bool,
 }

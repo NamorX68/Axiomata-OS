@@ -22,6 +22,7 @@ pub mod commit_message;
 pub mod config;
 pub mod dashboard;
 pub mod db;
+pub mod durable;
 pub mod editor_recovery;
 pub mod editor_settings;
 pub mod editor_vi;

@@ -44,6 +44,52 @@ export const planMode = writable(false);
  *  is the configured one. A new conversation goes back to it. */
 export const turnModel = writable<string | null>(null);
 
+/** A Glut chat turn the app lost before it answered (durable runs): finished on the owner's click. */
+export interface InterruptedTurn {
+  run: string;
+  session_id: string;
+  title: string;
+  started_at: string;
+}
+
+export const interruptedTurns = writable<InterruptedTurn[]>([]);
+
+/** Reads the chat turns the app lost; a failure leaves the list as it was. */
+export async function loadInterruptedTurns(): Promise<void> {
+  try {
+    interruptedTurns.set(await invokeBackend<InterruptedTurn[]>("interrupted_chat_turns"));
+  } catch {
+    // Nothing to offer then; the journals stay for the next look.
+  }
+}
+
+/** Finishes a lost turn in its own conversation: the panel goes on with that conversation. */
+export async function resumeTurn(turn: InterruptedTurn): Promise<ChatReply | null> {
+  if (get(busy)) return null;
+  // The conversation on screen comes back when the resume fails; the note stays until one succeeds.
+  const shown = { turns: get(turns), session: get(sessionId) };
+  turns.set([]);
+  sessionId.set(turn.session_id);
+  const reply = await send(turn.title, "chat", undefined, turn.run);
+  if (reply && !reply.is_error) {
+    interruptedTurns.update((list) => list.filter((t) => t.run !== turn.run));
+  } else {
+    const failed = get(turns).filter((t) => t.role === "error");
+    turns.set([...shown.turns, ...failed]);
+    sessionId.set(shown.session);
+  }
+  return reply;
+}
+
+/** Gives a lost turn up: its conversation stays as it was before the turn. */
+export async function dropTurn(turn: InterruptedTurn): Promise<void> {
+  try {
+    await invokeBackend("discard_chat_turn", { run: turn.run });
+  } finally {
+    interruptedTurns.update((list) => list.filter((t) => t.run !== turn.run));
+  }
+}
+
 /** A turn that is a command of the chat's harness, or a compaction (`assistant_send`'s `command`). */
 export type ChatCommand = { kind: "run"; name: string } | { kind: "compact" };
 
@@ -78,7 +124,8 @@ export function newSession(): void {
 }
 
 /** What the transcript shows for the owner's line. */
-function typedLine(message: string, mode: ChatMode, command?: ChatCommand): string {
+function typedLine(message: string, mode: ChatMode, command?: ChatCommand, resume?: string): string {
+  if (resume) return `${message} (resumed after the app stopped)`;
   if (command?.kind === "compact") return "/compact";
   if (command?.kind === "run") return `/${command.name}${message ? ` ${message}` : ""}`;
   return mode === "instruct" ? `/do ${message}` : message;
@@ -87,20 +134,26 @@ function typedLine(message: string, mode: ChatMode, command?: ChatCommand): stri
 /** One turn against the agent. `chat` continues the panel's session — as `plan` while the plan switch is on;
  *  `instruct` is a one-shot instruction that also lands in the transcript. A `command` makes the chat turn one of
  *  the harness's commands (`message` its arguments) or a compaction; `/model`'s choice rides along. */
-export async function send(message: string, asked: ChatMode, command?: ChatCommand): Promise<ChatReply | null> {
+export async function send(
+  message: string,
+  asked: ChatMode,
+  command?: ChatCommand,
+  resume?: string,
+): Promise<ChatReply | null> {
   if (get(busy)) return null;
   const mode: ChatMode = asked === "chat" && get(planMode) ? "plan" : asked;
   busy.set(true);
   toolCalls.set([]);
   panelOpen.set(true);
-  push("user", typedLine(message, mode, command));
+  push("user", typedLine(message, mode, command, resume));
   try {
     const reply = await invokeBackend<ChatReply>("assistant_send", {
-      message,
+      message: resume ? "" : message,
       sessionId: get(sessionId),
       mode,
       model: get(turnModel),
       command: command ?? null,
+      resume: resume ?? null,
     });
     if (mode !== "instruct") sessionId.set(reply.session_id);
     push(

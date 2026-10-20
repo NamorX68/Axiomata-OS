@@ -81,6 +81,8 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (33, include_str!("migrations/0012_web_searches.sql")),
     // The cached part of the input tokens, metered at its own price (glut-round.md, CP4).
     (34, include_str!("migrations/0013_cached_input_tokens.sql")),
+    // A run's row from its start, `running` → `interrupted` when its process is gone (durable.md, CP3).
+    (35, include_str!("migrations/0014_durable_runs.sql")),
 ];
 
 /// Opens (creating if necessary) the SQLite database at

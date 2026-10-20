@@ -30,7 +30,6 @@ use crate::config::{Config, ProviderId, ProviderRole};
 use crate::error::AxiomataError;
 use crate::skills::model::{RunRecord, RunSource, RunStatus};
 use crate::skills::registry;
-use crate::skills::runlog;
 
 /// Runs the skill named `name`, returning an unpersisted [`RunRecord`].
 ///
@@ -434,7 +433,11 @@ async fn run_on_backend(
     let _guard = RunningGuard(name.to_string());
 
     let provider = provider_label(backend, config);
-    let request = request_for(name, prompt, config, model.clone(), options);
+    let mut request = request_for(name, prompt, config, model.clone(), options);
+    // Only Glut keeps a journal; another harness's lost run is recorded `interrupted`, not offered for a resume.
+    if !matches!(backend, AgentBackend::Axh) {
+        request.journal = None;
+    }
     Ok(match backend.run(request, config).await {
         Ok(result) => {
             let mut result = result;
@@ -564,7 +567,14 @@ fn agent_request(
         allowed_tools,
         expects_json: false,
         read_only: false,
+        journal: RUN_JOURNAL.try_with(Clone::clone).ok(),
     }
+}
+
+tokio::task_local! {
+    /// The journal of the run [`durable`](crate::durable) records (durable runs, CP4): set around a skill run by its
+    /// caller, read when the request is built — so `execute_skill` and the scheduler keep their signatures.
+    pub(crate) static RUN_JOURNAL: crate::agents::RunJournal;
 }
 
 /// Maps a successful backend invocation onto an unpersisted [`RunRecord`]
@@ -637,9 +647,15 @@ pub async fn execute_and_record_skill(
         let conn = db.lock().unwrap_or_else(|poison| poison.into_inner());
         crate::spend::guard_redirected_turn(&conn, config, ProviderRole::Skill)?;
     }
-    let record = execute_skill(name, config).await?;
-    let db = db.lock().unwrap_or_else(|poison| poison.into_inner());
-    runlog::record_run(&db, record)
+    // Its row from the start, and a journal a lost Glut run goes on from (durable runs, CP3/CP4).
+    crate::durable::recorded(
+        db,
+        name,
+        RunSource::Manual,
+        true,
+        execute_skill(name, config),
+    )
+    .await
 }
 
 /// Builds an unpersisted `Failed` [`RunRecord`] for a run that produced no
@@ -680,6 +696,7 @@ fn failure_record(
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::skills::runlog;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
     use chrono::TimeZone as _;
     use std::env;

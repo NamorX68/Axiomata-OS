@@ -6,7 +6,10 @@
   Otherwise ↑/↓ walk the input history.
 -->
 <script lang="ts">
-  import { busy, panelOpen, pushInstruction, send, turns } from "../core/chat";
+  import { onMount } from "svelte";
+  import { get } from "svelte/store";
+
+  import { busy, interruptedTurns, loadInterruptedTurns, panelOpen, pushInstruction, send, turns } from "../core/chat";
   import {
     type CommandEntry,
     commandEntries,
@@ -34,6 +37,14 @@
   );
   const shown = $derived<CommandEntry[]>(dismissed ? [] : suggestions(input, $engineCommands));
   const listOpen = $derived(shown.length > 0);
+
+  // A chat turn the app lost is said once at start; the chat panel offers to finish it (durable runs).
+  onMount(() => {
+    void loadInterruptedTurns().then(() => {
+      if (get(interruptedTurns).length === 0) return;
+      toast("A chat turn stopped when the app did — open the chat to resume it.", "warning");
+    });
+  });
 
   // Read when first needed, not at start: on Opencode it connects to the service, which would start it with the app.
   function refresh(): void {

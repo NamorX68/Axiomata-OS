@@ -44,7 +44,7 @@ use crate::error::AxiomataError;
 use crate::routines::model::{Routine, RoutineRunStatus, RoutineTarget};
 use crate::routines::store::{self, Advance, NewRoutineRun};
 use crate::skills::model::{RunRecord, RunSource, RunStatus};
-use crate::skills::{runlog, runner};
+use crate::skills::runner;
 
 /// How often the loop wakes to check for due routines. A routine fires within
 /// this long of its scheduled instant.
@@ -186,27 +186,33 @@ async fn fire_one(
         crate::spend::guard_redirected_turn(&conn, config, ProviderRole::Skill)
     };
     let outcome = match cap_check {
-        // The agent call: no lock held (it awaits, possibly for the whole timeout).
-        Ok(()) => execute_target(routine, config).await,
+        // The agent call: no lock held (it awaits, possibly for the whole timeout). The run's row is written when it
+        // starts and completed after (durable runs, CP3) — `execute_target` has no notion of "fired by a routine",
+        // so the source is stamped there.
+        Ok(()) => {
+            // Only a skill's run can be resumed (it is rebuilt from its `SKILL.md`), so only it keeps a journal.
+            let journaled = matches!(routine.target, RoutineTarget::Skill(_));
+            crate::durable::recorded(
+                db,
+                &target_name(routine),
+                RunSource::Routine,
+                journaled,
+                execute_target(routine, config),
+            )
+            .await
+        }
         Err(capped) => Err(capped),
     };
 
     let conn = lock(db);
     let (status, detail, run_id) = match outcome {
-        Ok(mut record) => {
-            let status = if record.status == RunStatus::Success {
+        Ok(stored) => {
+            let status = if stored.status == RunStatus::Success {
                 RoutineRunStatus::Success
             } else {
                 RoutineRunStatus::Failed
             };
-            let detail = record.error.clone();
-            // `execute_target` (and everything it calls) has no notion of
-            // "fired by a routine" — it's the same runner path a manual run
-            // uses. Stamp it here, the one place that does know.
-            record.source = RunSource::Routine;
-            // Move the record in — it can carry up to ~2 MiB of captured output.
-            let stored = runlog::record_run(&conn, record)?;
-            (status, detail, stored.id)
+            (status, stored.error.clone(), stored.id)
         }
         Err(err) => (RoutineRunStatus::Failed, Some(err.to_string()), None),
     };
@@ -223,6 +229,14 @@ async fn fire_one(
         },
     )?;
     Ok(status)
+}
+
+/// The name a routine's run is recorded under: the skill it fires, else the routine's own name (a prompt target).
+fn target_name(routine: &Routine) -> String {
+    match &routine.target {
+        RoutineTarget::Skill(name) => name.clone(),
+        RoutineTarget::Prompt(_) => routine.name.clone(),
+    }
 }
 
 /// Dispatches to the skill runner or the raw-prompt runner.
@@ -489,6 +503,7 @@ fn lock(db: &Arc<Mutex<Connection>>) -> std::sync::MutexGuard<'_, Connection> {
 mod tests {
     use super::*;
     use crate::routines::model::{NewRoutine, RoutineState};
+    use crate::skills::runlog;
     use crate::test_support::{ENV_MUTEX, unique_temp_dir};
     use std::env;
     use std::fs;

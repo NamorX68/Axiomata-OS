@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { RunSummary } from "./backend";
-import { firstJsonObject, staleDigestNote } from "./skillRun";
+import type { RunRecord, RunSummary } from "./backend";
+import { firstJsonObject, loadLatestSkillRun, staleDigestNote, watchSkillRuns } from "./skillRun";
 
 describe("staleDigestNote", () => {
   const now = Date.parse("2026-09-29T12:00:00Z");
@@ -45,5 +45,34 @@ describe("firstJsonObject", () => {
 
   it("hands back a lone balanced-but-invalid object, so callers keep their own parse error", () => {
     expect(firstJsonObject('{"a": 1,}')).toBe('{"a": 1,}');
+  });
+});
+
+describe("durable runs in the connector tiles", () => {
+  const summary = (id: number, status: RunSummary["status"]) =>
+    ({ id, skill_name: "calendar-digest", status, started_at: "2026-10-20T08:00:00Z" }) as RunSummary;
+
+  it("passes a run still going by without calling it unusable, and an interrupted one like a failed one", async () => {
+    const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "list_runs") return [summary(3, "running"), summary(2, "interrupted"), summary(1, "success")];
+      return { id: args?.id, stdout: '{"events": []}' } as unknown as RunRecord;
+    }) as never;
+    const latest = await loadLatestSkillRun(invoke, "calendar-digest");
+    expect(latest.run?.id).toBe(1);
+    expect(latest.skipped?.run.id).toBe(2);
+  });
+
+  it("hears a run's end, not only its start", async () => {
+    vi.useFakeTimers();
+    let status: RunSummary["status"] = "running";
+    const invoke = vi.fn(async () => [summary(7, status)]) as never;
+    const onNew = vi.fn();
+    const stop = watchSkillRuns(invoke, () => "calendar-digest", onNew, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    status = "success";
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onNew).toHaveBeenCalledTimes(1);
+    stop();
+    vi.useRealTimers();
   });
 });

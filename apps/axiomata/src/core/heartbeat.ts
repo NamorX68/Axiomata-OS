@@ -7,7 +7,7 @@
  * fetches and draws. The tank beside it (G15) is {@link fuel}.
  */
 
-import type { BoardCard, RunSummary, SpendSummary } from "./backend";
+import { type BoardCard, type RunSummary, type SpendSummary, runFailed } from "./backend";
 import type { StatusTone } from "../ui/status";
 
 /** One spark on the strip. */
@@ -55,7 +55,7 @@ export function beatsFromRuns(runs: readonly RunSummary[], now: number): Beat[] 
       label: run.source === "routine" ? `${run.skill_name} (routine)` : run.skill_name,
       start,
       end: start + Math.max(0, run.duration_ms),
-      tone: run.status === "failed" ? "bad" : "ok",
+      tone: run.status === "running" ? "live" : runFailed(run.status) ? "bad" : "ok",
     });
   }
   return beats;

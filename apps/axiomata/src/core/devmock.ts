@@ -2440,6 +2440,13 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
         { id: "ses_mock_1", title: "", updated_at: "2026-10-20T08:12:00Z", turns: 3 },
         { id: "ses_mock_2", title: "", updated_at: "2026-10-19T17:40:00Z", turns: 1 },
       ] as T;
+    case "interrupted_chat_turns":
+      return [] as T;
+    case "discard_chat_turn":
+    case "discard_run":
+      return undefined as T;
+    case "resume_run":
+      throw new Error("resume_run: no interrupted runs in the browser mock");
     case "chat_undo":
       return "Undid the last turn (mock): no files were touched in the browser mock." as T;
     case "get_workspace_graph":

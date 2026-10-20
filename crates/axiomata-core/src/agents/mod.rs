@@ -355,6 +355,8 @@ pub struct ChatRequest {
     /// A slash command instead of a prompt (#108): one of the harness's own commands, `message` its arguments, or a
     /// compaction of the conversation.
     pub command: Option<ChatCommand>,
+    /// Durable runs: the journal of an interrupted Glut chat turn this turn finishes, instead of a new message.
+    pub resume: Option<String>,
 }
 
 /// A chat turn that is a command rather than a prompt (`docs/plans/slash-commands.md`, S8/S9).
@@ -391,6 +393,8 @@ pub struct ChatExtras {
     /// spelling, as the model catalog lists it; each harness prefixes it as it does `chat_model`.
     pub model: Option<String>,
     pub command: Option<ChatCommand>,
+    /// Finish the interrupted Glut chat turn of this journal ([`interrupted_chat_turns`]).
+    pub resume: Option<String>,
 }
 
 /// Which harness offers a chat command: the source chip of the bar's list (S10).
@@ -656,6 +660,15 @@ pub async fn chat(
     extras: ChatExtras,
 ) -> Result<ChatReply, AxiomataError> {
     check_command(extras.command.as_ref())?;
+    // Only Glut keeps a chat turn's journal; a resume elsewhere would be an empty, billed turn.
+    if extras.resume.is_some()
+        && (config.agents.chat_harness != HarnessId::Axh || extras.command.is_some())
+    {
+        return Err(AxiomataError::AgentApi {
+            backend: "chat",
+            message: "only a Glut chat turn can be resumed, and not as a command".to_owned(),
+        });
+    }
     let turn_config = with_turn_model(config, &extras)?;
     let config = turn_config.as_ref().unwrap_or(config);
     let harness = config.agents.chat_harness;
@@ -670,6 +683,7 @@ pub async fn chat(
         auto_approve_tools: config.agents.auto_approve_tools,
         allowed_tools,
         command: extras.command,
+        resume: extras.resume,
     };
     match harness {
         HarnessId::Opencode => {
@@ -847,6 +861,16 @@ pub struct AgentRequest {
     /// read-only ones; Claude Code adds the same read commands and denies every
     /// edit tool. Ollama and `axh` ignore it.
     pub read_only: bool,
+    /// The run's journal (durable runs, `docs/plans/durable.md`): only `axh` keeps one, so a run the app lost goes
+    /// on from its last step; with `resume` the run goes on from it instead of starting. Other backends ignore it.
+    pub journal: Option<RunJournal>,
+}
+
+/// A run's journal id, and whether the run goes on from it (`resume`) or starts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunJournal {
+    pub id: String,
+    pub resume: bool,
 }
 
 /// The chat provider's `chat_model`, for interactive dashboard-assistant
@@ -1046,6 +1070,41 @@ mod tests {
         }
     }
 
+    /// Durable runs: a resume is Glut's, and never a command — elsewhere it would be an empty, billed turn.
+    #[tokio::test]
+    async fn only_a_glut_chat_turn_is_resumed() {
+        let mut config = Config::default();
+        config.agents.chat_harness = HarnessId::Opencode;
+        let resume = |command: Option<ChatCommand>| ChatExtras {
+            resume: Some("run-1".into()),
+            command,
+            ..ChatExtras::default()
+        };
+        let err = chat(
+            &config,
+            String::new(),
+            None,
+            ChatMode::Chat,
+            None,
+            resume(None),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("only a Glut chat turn"), "{err}");
+        config.agents.chat_harness = HarnessId::Axh;
+        let err = chat(
+            &config,
+            String::new(),
+            None,
+            ChatMode::Chat,
+            None,
+            resume(Some(ChatCommand::Compact)),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("only a Glut chat turn"), "{err}");
+    }
+
     #[test]
     fn a_title_is_the_first_line_cut_short() {
         assert_eq!(title_of("\n  fix the tests\nand more"), "fix the tests");
@@ -1121,7 +1180,7 @@ mod tests {
         );
         let extras = ChatExtras {
             model: Some("picked/model".into()),
-            command: None,
+            ..ChatExtras::default()
         };
         // OpenRouter is metered: an unpriced model is refused, a priced one taken.
         assert!(with_turn_model(&config, &extras).is_err());
@@ -1139,7 +1198,7 @@ mod tests {
         assert_eq!(default_chat_model(&config).as_deref(), Some("configured"));
         let flag = ChatExtras {
             model: Some("--dangerously".into()),
-            command: None,
+            ..ChatExtras::default()
         };
         assert!(with_turn_model(&config, &flag).is_err());
     }

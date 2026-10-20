@@ -16,7 +16,7 @@
  * before a third connector repeats it a third time.
  */
 
-import type { RunRecord, RunSummary } from "./backend";
+import { type RunRecord, type RunSummary, runFailed } from "./backend";
 import { relativeTime } from "./format";
 
 /** The subset of `ModuleContext["invoke"]` this needs — spelled out by hand
@@ -85,7 +85,9 @@ export async function loadLatestSkillRun(invoke: Invoke, skillName: string): Pro
   let skipped: SkippedRun | null = null;
   for (const run of runs) {
     if (run.skill_name !== skillName) continue;
-    if (run.status === "failed") {
+    // A run still going has nothing to show yet: the tile keeps its digest until the run ends.
+    if (run.status === "running") continue;
+    if (runFailed(run.status)) {
       newestFailed ??= run;
       skipped ??= { run, reason: run.error ?? "the run failed" };
       continue;
@@ -271,14 +273,16 @@ export function watchSkillRuns(
   onNew: () => void,
   everyMs: number = WATCH_MS,
 ): () => void {
-  let seen: number | null | undefined;
+  let seen: string | null | undefined;
   let busy = false;
   const look = async () => {
     if (busy) return;
     busy = true;
     try {
       const runs = await invoke<RunSummary[]>("list_runs", { limit: RUN_LOOKUP_LIMIT });
-      const newest = runs.find((run) => run.skill_name === skillName())?.id ?? null;
+      // The id and the status: a run's row is there from its start, and its end is news too (durable runs, CP3).
+      const run = runs.find((candidate) => candidate.skill_name === skillName());
+      const newest = run ? `${run.id}:${run.status}` : null;
       if (seen !== undefined && newest !== seen) onNew();
       seen = newest;
     } catch {
