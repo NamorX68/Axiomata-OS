@@ -62,6 +62,41 @@ the interface is shaped for it from the start.
   choice, probability from the logits), a real decision model behind the same interface if it pays. Also later: the
   fine-tuning ladder (L5's checker as filter, synthetic + real pairs, LoRA).
 
+## CP0 — measured 2026-10-20
+
+Eval set: 32 real items (test runs, compiler errors, source reads, grep/shell/git output, web pages, Glut tool
+results, mails, news, long German answers) — kept outside the repo. Ollama 0.40.6, GGUF Q4, an M-series Mac. The
+checker (prototype in Python): recall of the paths, error codes, numbers of error lines and code names; invented
+paths/numbers; length ratio; German in → German out. "Usable" = recall ≥ 0.8, at most half the length, nothing
+invented — what the L5 guard would let through.
+
+| Round / prompt | Model | recall | code | length | invented | German | time | usable |
+|---|---|---|---|---|---|---|---|---|
+| 1 (plain rules) | Qwen3.5-2B | 0.55 | 0.66 | 0.48 | 4/32 | 3/5 | 5.2 s | 2 |
+| | Gemma-4-E2B (7.5 GB) | 0.51 | 0.31 | 0.32 | 9/32 | 1/5 | 2.1 s | 5 |
+| | Phi-4-mini 3.8B | 0.31 | 0.27 | 0.26 | 2/32 | 5/5 | 3.5 s | 5 |
+| | SmolLM3-3B | 0.47 | 0.46 | 0.60 | 3/32 | 4/5 | 6.8 s | 2 |
+| 2 (+ size target, examples) | Qwen3.5-2B | 0.51 | 0.33 | 0.36 | 11/32 | 4/5 | 3.0 s | 1 |
+| | Gemma-4-E2B | 0.26 | 0.09 | 0.09 | 20/32 | 2/5 | 0.9 s | 5 |
+| | Phi-4-mini | 0.38 | 0.31 | 0.23 | 5/32 | 3/5 | 3.5 s | 3 |
+| | SmolLM3-3B | 0.54 | 0.44 | 0.83 | 7/32 | 5/5 | 8.6 s | 0 |
+| 3 (no example values) | Qwen3.5-2B | 0.75 | 0.68 | 0.71 | 4/32 | 2/5 | 6.9 s | 0 |
+| | Phi-4-mini | 0.39 | 0.36 | 0.30 | 2/32 | 4/5 | 4.2 s | 4 |
+| | SmolLM3-3B | 0.45 | 0.33 | 0.52 | 1/32 | 4/5 | 6.1 s | 0 |
+
+Findings:
+- **No sub-4B model keeps the L5 contract on structured tool output.** A model either compresses and drops paths,
+  errors and numbers (Phi-4-mini, Gemma) or keeps them and hardly compresses (Qwen3.5-2B: recall 0.75 at 71 %
+  length). At most 5 of 32 summaries would pass the guard, saving 1–7 % of the characters.
+- **Small models copy the prompt's example values** (`src/run.rs:412` turned up in Gemma's summaries 20 times):
+  the template must hold no concrete paths or numbers.
+- They do best on **prose** (mails, news, web pages, answers); worst on grep/shell/git listings, whose content *is*
+  the paths.
+- A **rule-based extract** without a model (error lines and the lines they point at, paths, test counts, noise
+  dropped) passed 4 of 18 structured items in a first draft and saved 27 % on them — deterministic, instant, never
+  inventing; the checker itself still over-counts there (a summed test count reads as "invented").
+- Speed is no problem: 1–7 s per item, prefill 2–10k tok/s, generation 90–215 tok/s, off the critical path (L8).
+
 ## Checkpoints
 
 - **CP0 — bench** (no product code): the prompt template for L5, the checker (Rust, reused at run time), an eval set
