@@ -245,7 +245,9 @@ mod tests {
 
     impl Fixture {
         fn new(tag: &str) -> Self {
-            let guard = ENV_MUTEX.lock().unwrap_or_else(|poison| poison.into_inner());
+            let guard = ENV_MUTEX
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             let home = unique_temp_dir(&format!("axiomata-test-durable-{tag}"));
             std::fs::create_dir_all(home.join("logs")).unwrap();
             // SAFETY: serialized by `guard`, see `paths::tests`.
