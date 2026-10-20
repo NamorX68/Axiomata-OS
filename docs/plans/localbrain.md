@@ -41,7 +41,7 @@ the interface is shaped for it from the start.
   success-only output compresses to its gist ("tests passed: 412"). It is machine-checkable — the same checker is
   the CP0 measure, the guard at run time (a summary that drops a path of the original is not used), and later the
   fine-tuning filter.
-- **L6 — the model is chosen by measurement (CP0)**: candidates under 4B as GGUF — Qwen3.5-2B, Gemma-4-E2B,
+- **L6 — the model is chosen by measurement (CP0)** → Qwen3.5-4B (see CP0): candidates under 4B as GGUF — Qwen3.5-2B, Gemma-4-E2B,
   Phi-4-mini (3.8B), SmolLM3-3B — on real Glut transcripts, tool results, mails and news, by the L5 checker
   (recall of paths/errors/numbers/code, invented ones, compression, German), plus speed on the Mac. Licence must allow
   shipping (Apache-2.0/MIT). Ollama serves only as this bench, never in production (2026-10-14).
@@ -103,6 +103,11 @@ Findings:
   dropped) passed 4 of 18 structured items in a first draft and saved 27 % on them — deterministic, instant, never
   inventing; the checker itself still over-counts there (a summed test count reads as "invented").
 - Speed is no problem: 1–7 s per item, prefill 2–10k tok/s, generation 90–215 tok/s, off the critical path (L8).
+
+**Decision after CP0 (owner, 2026-10-20): Qwen3.5-4B** (Apache-2.0, 262K context, GGUF Q4 ~3 GB; the 4B limit
+stretched to the size itself). Hybrid kept: structured tool output (tests, compiler, grep, shell, git) goes through
+a rule-based extract, the model takes prose, file contents and auto-compaction; the L5 guard decides every time.
+Next in CP0: a prompt round for Qwen3.5-4B on German and code, the extract and the checker refined.
 
 ## Checkpoints
 
